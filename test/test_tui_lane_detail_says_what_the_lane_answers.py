@@ -32,7 +32,7 @@ def run(executable: str) -> None:
     fixtures[h.STANDALONE_LANES_PATH] = h.standalone_lanes_response()
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"cluster-a", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
         h.wait_for_output(process, fd, output, KEPT[0], start=0, timeout=10)
         h.read_available(fd, output)

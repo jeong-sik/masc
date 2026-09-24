@@ -1395,10 +1395,12 @@ let listing_rows_below_the_body = 3
    is there. Only the label -- the columns a full list carries do not fit
    thirty cells, and a truncated author reads as a different author.
 
-   [selected] indexes [labels]; the pane scrolls to keep that row drawn.
+   [selection] indexes [labels]; the pane scrolls to keep that row drawn.
+   [None] draws no row as selected.
    [focused] says whether the arrow keys are pointed here, which is a
    different question from which row is open. *)
-let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
+let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~labels
+    ~selection =
   framed_top buf cols;
   (* Focus wears a caret, not a key list: which keys work is the footer's
      sentence; which pane hears them is this one glyph. *)
@@ -1410,7 +1412,10 @@ let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
   framed_divider buf cols;
   let content_height = max 0 (rows - framed_chrome_rows) in
   let first =
-    if selected < content_height then 0 else selected - content_height + 1
+    match selection with
+    | Some selected when selected >= content_height ->
+        selected - content_height + 1
+    | Some _ | None -> 0
   in
   let labels_window = Rows.of_list ~first:first ~height:content_height labels in
   for i = 0 to content_height - 1 do
@@ -1421,7 +1426,7 @@ let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
          included. *)
       let drawn = Terminal_text.single_line label in
       framed_line buf cols
-        (if first + i = selected then
+        (if Option.equal Int.equal selection (Some (first + i)) then
            if focused then
              Theme.selection ^ " " ^ drawn
              ^ String.make
@@ -1433,6 +1438,10 @@ let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
     | None -> framed_empty buf cols
   done;
   framed_bottom buf cols
+
+let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
+  write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~labels
+    ~selection:(Some selected)
 
 
 (* The row a surface draws when its load failed. Six copies wrote the sentence
@@ -2064,66 +2073,35 @@ let planning_rollup_row ~cols (rollup : planning_rollup) =
               if value = 0 then None else Some (counter phase glyph name value))
        |> String.concat "  ")
 
-(* The transport tail of the Overview's cluster row.
-
-   It named the path carrying the traffic in the wire's words --
-   "websocket", "grpc_subscribe", "streamable_http" -- two fields before
-   naming those same paths in the row's own ("ws", "grpc"), so one path wore
-   two spellings on one row: the guide's own example reads
-   "websocket/steady  sse 3  ws 1  grpc :8936". With SSE carrying the traffic
-   the word "sse" appeared twice, two cells apart, meaning "this is the path"
-   and then "one session".
-
-   The mark that says which of a strip of places is the current one goes on
-   the entry that path already has, so the row spends one cell instead of a
-   repeated name and loses the underscored wire tokens. Streamable HTTP has
-   no session count in the reading, so it earns an entry only while it is the
-   path in use -- otherwise the row would carry a name with nothing to say. *)
-let transport_summary (transport : Tui_decode.transport_health) =
-  let open Masc.Transport_metrics in
-  (* Two cells before every entry, the way the surface strip spaces its names,
-     and the mark takes the second of them -- so the names sit on one column
-     whether or not the path is the one in use. *)
-  let entry kind text =
-    (if transport.th_primary_path = kind then " " ^ Masc_tui_theme.Glyph.current_entry
-     else "  ")
-    ^ text
+(* The transport's own readings are on Metrics. The Overview keeps one item
+   while the outbound queue is under pressure, since that delays what every
+   other row there reports; a steady queue, or no reading, says nothing. *)
+let transport_attention_item (transport : Tui_decode.transport_health option) =
+  let item severity word : Masc_tui_types.attention_item =
+    { ai_kind = "transport_queue_pressure"
+    ; ai_severity = severity
+    ; ai_summary =
+        Printf.sprintf "transport queue pressure %s (m: Metrics)" word
+    ; ai_target =
+        Masc_tui_types.Attention_other
+          { target_type = "transport"; target_id = None }
+    ; ai_blocker_summary = None
+    ; ai_evidence_ts = None
+    }
   in
-  let websocket =
-    match transport.th_websocket_sessions with
-    | Some sessions -> Printf.sprintf "ws %d" sessions
-    | None -> "ws off"
-  in
-  let grpc =
-    match transport.th_grpc_port with
-    | Some port -> Printf.sprintf "grpc :%d" port
-    | None -> "grpc off"
-  in
-  (* No wildcard: a path added to the reading has to decide here whether the
-     row can name it. *)
-  let streamable_http =
-    match transport.th_primary_path with
-    | Streamable_http -> [ entry Streamable_http "http" ]
-    | Grpc_subscribe | Websocket | Sse -> []
-  in
-  let paths =
-    String.concat ""
-      ([ entry Sse (Printf.sprintf "sse %d" transport.th_sse_sessions)
-       ; entry Websocket websocket
-       ; entry Grpc_subscribe grpc
-       ]
-      @ streamable_http)
-  in
-  let dropped =
-    if transport.th_events_dropped = 0 then ""
-    else Printf.sprintf "  dropped %d" transport.th_events_dropped
-  in
-  (* Queue pressure and the dropped count are two readings of the same queue,
-     so they sit together at the tail rather than one of them riding a path
-     name at the head. *)
-  Printf.sprintf "%s  %s%s" paths
-    (queue_pressure_kind_to_string transport.th_queue_pressure)
-    dropped
+  match transport with
+  | None -> None
+  | Some transport -> (
+      let word =
+        Masc.Transport_metrics.queue_pressure_kind_to_string
+          transport.th_queue_pressure
+      in
+      match transport.th_queue_pressure with
+      | Masc.Transport_metrics.Steady -> None
+      | Masc.Transport_metrics.Watch ->
+          Some (item Masc_tui_types.Attention_warning word)
+      | Masc.Transport_metrics.High ->
+          Some (item Masc_tui_types.Attention_bad word))
 
 (* The Backlog counts, each with the mark its Task rows wear. Claimed had no
    mark here while a claimed Task row draws the half circle, so the one count a
@@ -3421,6 +3399,9 @@ let context_composition_lines ~cols ~turn_back
         ; Option.map
             (fun n -> "output " ^ Inspector.format_tokens n)
             record.usage.output_tokens
+        ; Option.map
+            (fun n -> "turn output " ^ Inspector.format_tokens n)
+            record.turn_output_tokens
         ]
     in
     let label =
@@ -3728,9 +3709,12 @@ let context_composition_lines ~cols ~turn_back
                (match recent.cache_read with
                  | Some tokens -> Inspector.format_tokens tokens
                  | None -> "-")
-               (match recent.output_tokens with
-                 | Some tokens -> Inspector.format_tokens tokens
-                 | None -> "-"))
+               (* The request's own output when reported; otherwise the
+                  client turn's, marked so it is not read as one request's. *)
+               (match recent.output_tokens, recent.turn_output_tokens with
+                 | Some tokens, _ -> Inspector.format_tokens tokens
+                 | None, Some tokens -> "turn " ^ Inspector.format_tokens tokens
+                 | None, None -> "-"))
       | _, None ->
           [ (if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " ")
             ^ Ansi.dim
@@ -4029,6 +4013,9 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
                 [ Option.map
                     (fun tokens -> "output " ^ Inspector.format_tokens tokens)
                     record.usage.output_tokens
+                ; Option.map
+                    (fun tokens -> "turn output " ^ Inspector.format_tokens tokens)
+                    record.turn_output_tokens
                 ; Option.map
                     (fun reason ->
                        "finish "

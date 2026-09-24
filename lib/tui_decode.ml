@@ -75,16 +75,15 @@ let keeper_phase_is_running : keeper_phase -> bool = function
   | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting ->
       false
 
-type keeper_phase_band = Phase_stuck | Phase_alive | Phase_parked
+type keeper_phase_band = Phase_stuck | Phase_alive | Phase_paused | Phase_stopped
 
 let keeper_phase_band : keeper_phase -> keeper_phase_band = function
   | Keeper_state_machine.Failing | Keeper_state_machine.Crashed -> Phase_stuck
   | Keeper_state_machine.Running | Keeper_state_machine.Draining
   | Keeper_state_machine.Restarting ->
       Phase_alive
-  | Keeper_state_machine.Paused | Keeper_state_machine.Stopped
-  | Keeper_state_machine.Offline ->
-      Phase_parked
+  | Keeper_state_machine.Paused -> Phase_paused
+  | Keeper_state_machine.Stopped | Keeper_state_machine.Offline -> Phase_stopped
 
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
 
@@ -620,6 +619,10 @@ type fleet_safety = {
   fs_active_task_owner_scan_error_count : int;
 }
 
+type fleet_safety_reading =
+  | Fleet_measured of fleet_safety
+  | Fleet_not_measured of { status : string }
+
 type log_kind =
   | Log_turn
   | Log_heartbeat
@@ -894,6 +897,10 @@ let is_invisible_codepoint code =
   || (code >= 0x202A && code <= 0x202E)
   || (code >= 0x2066 && code <= 0x2069)
   || code = 0xFEFF
+  (* #38501: the tag block copies ASCII into characters a terminal draws as
+     nothing (U+E0061 is a tag "a"), so a sentence can be spelled twice --
+     once for the reader and once for the bytes the approval hash covers. *)
+  || (code >= 0xE0000 && code <= 0xE007F)
 ;;
 
 let zero_width_joiner = 0x200D
@@ -930,6 +937,66 @@ let opens_pictograph text index =
   | Some scalar -> Uucp.Emoji.is_extended_pictographic scalar
   | None -> false
 
+(* The tags that are not hiding anything: the ones spelling a subregion flag.
+   U+1F3F4 opens the sequence, a subdivision code follows, and U+E007F closes
+   it: U+1F3F4 U+E0067 U+E0062 U+E0073 U+E0063 U+E0074 U+E007F is Scotland.
+   [Masc_tui_message_layout] counts that block as part of one emoji cluster,
+   and the exemption here is deliberately narrower than that block: only the
+   shape UTS #51 gives a subdivision, three to seven tag characters drawn
+   from lowercase letters and digits. The wider grammar would carry a
+   sentence -- tag space and tag punctuation spell one -- and a reader would
+   see a single flag where the hash covers words. The sequence is admitted
+   whole or not at all: a run that never reaches the terminator, or one
+   shaped like anything but a subdivision, is loose text spelled in invisible
+   characters, and the flag in front of it stays visible. *)
+let tag_small_letter_first = 0xE0061
+let tag_small_letter_last = 0xE007A
+let tag_digit_first = 0xE0030
+let tag_digit_last = 0xE0039
+let tag_spec_min = 3
+let tag_spec_max = 7
+let cancel_tag = 0xE007F
+let waving_black_flag = 0x1F3F4
+
+let is_tag_spec code =
+  (code >= tag_small_letter_first && code <= tag_small_letter_last)
+  || (code >= tag_digit_first && code <= tag_digit_last)
+
+(* Bytes of a complete subdivision sequence starting at [index] -- the
+   position just past the flag -- not counting the flag itself. [None] when
+   the run is too short or too long for a subdivision, meets a tag character
+   outside the lowercase-and-digit shape, or ends without the terminator. *)
+let tag_sequence_bytes text index =
+  let length = String.length text in
+  let rec scan position ~spec_count =
+    if position >= length
+    then None
+    else (
+      let decoded = String.get_utf_8_uchar text position in
+      if not (Uchar.utf_decode_is_valid decoded)
+      then None
+      else (
+        let step = Uchar.utf_decode_length decoded in
+        let code = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
+        if code = cancel_tag
+        then (
+          if spec_count >= tag_spec_min && spec_count <= tag_spec_max
+          then Some (position + step - index)
+          else None)
+        else if is_tag_spec code && spec_count < tag_spec_max
+        then scan (position + step) ~spec_count:(spec_count + 1)
+        else None))
+  in
+  scan index ~spec_count:0
+
+(* [\uXXXX] has room for the basic plane only and the tag block needs five
+   digits (U+E0061), so a wider fixed-width form of the same family carries
+   them: the reader can still see where one escape ends and the next begins. *)
+let escape_text code =
+  if code <= 0xFFFF
+  then Printf.sprintf "\\u%04X" code
+  else Printf.sprintf "\\U%08X" code
+
 let escape_invisible text =
   let output = Buffer.create (String.length text) in
   let length = String.length text in
@@ -941,28 +1008,39 @@ let escape_invisible text =
       let scalar = Uchar.utf_decode_uchar decoded in
       let valid = Uchar.utf_decode_is_valid decoded in
       let code = Uchar.to_int scalar in
-      let joins_two_pictographs =
-        valid
-        && code = zero_width_joiner
-        && after_pictograph
-        && opens_pictograph text (index + step)
+      let flag_tags =
+        if valid && code = waving_black_flag
+        then tag_sequence_bytes text (index + step)
+        else None
       in
-      if valid && is_invisible_codepoint code && not joins_two_pictographs
-      then Buffer.add_string output (Printf.sprintf "\\u%04X" code)
-      else Buffer.add_substring output text index step;
-      let after_pictograph =
-        if not valid
-        then false
-        else if Uucp.Emoji.is_extended_pictographic scalar
-        then true
-        (* Only a joiner that actually joined carries the state: an escaped
-           one has been written out as text, so what follows it no longer sits
-           inside an emoji and a second joiner cannot ride through on it. *)
-        else if continues_pictograph scalar || joins_two_pictographs
-        then after_pictograph
-        else false
-      in
-      walk (index + step) ~after_pictograph)
+      match flag_tags with
+      | Some tail ->
+        Buffer.add_substring output text index (step + tail);
+        walk (index + step + tail) ~after_pictograph:true
+      | None ->
+        let joins_two_pictographs =
+          valid
+          && code = zero_width_joiner
+          && after_pictograph
+          && opens_pictograph text (index + step)
+        in
+        if valid && is_invisible_codepoint code && not joins_two_pictographs
+        then Buffer.add_string output (escape_text code)
+        else Buffer.add_substring output text index step;
+        let after_pictograph =
+          if not valid
+          then false
+          else if Uucp.Emoji.is_extended_pictographic scalar
+          then true
+          (* Only a joiner that actually joined carries the state: an escaped
+             one has been written out as text, so what follows it no longer
+             sits inside an emoji and a second joiner cannot ride through on
+             it. *)
+          else if continues_pictograph scalar || joins_two_pictographs
+          then after_pictograph
+          else false
+        in
+        walk (index + step) ~after_pictograph)
   in
   walk 0 ~after_pictograph:false;
   Buffer.contents output
@@ -1049,6 +1127,16 @@ let sanitize_terminal_text text =
   in
   append 0;
   escape_invisible (Buffer.contents output)
+;;
+
+(* A text whose line breaks are its own shape, read whole rather than as one
+   row: each LF stays a break and every line goes through the same escape
+   table as a single row, so a tab, a carriage return or an ESC is drawn as
+   its visible [\xNN] and never reaches the terminal as a control byte. *)
+let sanitize_terminal_lines text =
+  String.split_on_char '\n' text
+  |> List.map sanitize_terminal_text
+  |> String.concat "\n"
 ;;
 
 (* One row of a text that has rows. The terminal boundary escapes control
@@ -2265,10 +2353,23 @@ type inventory_freshness =
   | Warming
   | Settled
 
+type effective_tool_origin =
+  | Descriptor_origin
+  | Instruction_skill_origin
+  | Composition_skill_origin of { skill_source_id : string option }
+  | Composition_control_origin
+  | Unrecognised_origin of string
+
+let effective_tool_origin_kind = function
+  | Descriptor_origin -> "descriptor"
+  | Instruction_skill_origin -> "instruction_skill"
+  | Composition_skill_origin _ -> "composition_skill"
+  | Composition_control_origin -> "composition_control"
+  | Unrecognised_origin kind -> kind
+
 type effective_tool = {
   et_name : string;
-  et_origin : string;
-  et_skill_source_id : string option;
+  et_origin : effective_tool_origin;
 }
 
 type effective_tool_delivery =
@@ -2322,11 +2423,11 @@ type effective_skill_profile = {
    hold. It is not a read failure -- the document may not exist at all -- so it
    is a different fact from [ets_skills_left_out] and the producer sends it as
    its own list. [csn_reason] is the producer's word for why
-   (`not_in_turn_skill_catalog`), kept optional because a reader that invents
-   one would be speaking for a producer that said nothing. *)
+   (`not_in_turn_skill_catalog`); every entry carries one
+   (Keeper_skill_catalog.configured_name_unavailable_to_yojson). *)
 type configured_skill_name_unavailable = {
   csn_name : string;
-  csn_reason : string option;
+  csn_reason : string;
 }
 
 type effective_tool_surface =
@@ -3005,29 +3106,37 @@ let decode_tool_entry json =
 let decode_effective_tool json =
   let* et_name = required_string_field json "name" in
   let* origin = required_object_field json "origin" in
-  let* et_origin = required_string_field origin "kind" in
+  let* kind = required_string_field origin "kind" in
   (* Which configured skill source supplied this tool.
-     Keeper_effective_tool_surface.origin_to_yojson carries it as
-     origin.skill_provenance.identity.source_id, and only for composition
-     skills: for every other origin the key is absent, and for a composition
-     skill whose provenance is unknown it is null. Both mean "no source to
-     name", not a malformed payload, so each step is optional.
-
-     This used to read origin.group and origin.skill_source. No producer has
-     emitted either since the surface moved to skill_provenance, so the
-     Tools screen printed a bare "composition_skill" for every skill tool
-     and never said which skill it came from. *)
-  let* provenance = optional_object_field origin "skill_provenance" in
-  let* et_skill_source_id =
-    match provenance with
-    | None -> Ok None
-    | Some provenance ->
-      let* identity = optional_object_field provenance "identity" in
-      (match identity with
-       | None -> Ok None
-       | Some identity -> optional_string_field identity "source_id")
+     Keeper_effective_tool_surface.origin_to_yojson sends
+     origin.skill_provenance for a composition skill and for no other kind:
+     an object when the provenance resolved, null when it did not, and the
+     object always holds identity.source_id. So the key is required for that
+     kind and not read for the others. Without the key the Tools screen would
+     draw a bare "composition_skill" and never say which source it came
+     from. *)
+  let* et_origin =
+    match kind with
+    | "descriptor" -> Ok Descriptor_origin
+    | "instruction_skill" -> Ok Instruction_skill_origin
+    | "composition_control" -> Ok Composition_control_origin
+    | "composition_skill" ->
+      let* skill_source_id =
+        match Json_util.assoc_member_opt "skill_provenance" origin with
+        | None -> missing_field "skill_provenance"
+        | Some `Null -> Ok None
+        | Some (`Assoc _ as provenance) ->
+          let* identity = required_object_field provenance "identity" in
+          let* source_id = required_string_field identity "source_id" in
+          Ok (Some source_id)
+        | Some bad -> field_type_error "skill_provenance" "an object or null" bad
+      in
+      Ok (Composition_skill_origin { skill_source_id })
+    (* A kind a newer server adds is kept as the word it sent: the Tools
+       column still draws it, and the rest of the surface still loads. *)
+    | unrecognised -> Ok (Unrecognised_origin unrecognised)
   in
-  Ok { et_name; et_origin; et_skill_source_id }
+  Ok { et_name; et_origin }
 
 let decode_skill_reference_list json field =
   let* values = required_list_field json field in
@@ -3177,13 +3286,13 @@ let decode_effective_tool_surface json =
         decode_string_name_list json "skills_left_out"
       in
       let* unavailable_skill_names_json =
-        optional_list_field json "unavailable_skill_names"
+        required_list_field json "unavailable_skill_names"
       in
       let* ets_unavailable_skill_names =
         decode_list "effective_keeper_surface.unavailable_skill_names"
           (fun entry ->
             let* csn_name = required_string_field entry "name" in
-            let* csn_reason = optional_string_field entry "reason" in
+            let* csn_reason = required_string_field entry "reason" in
             Ok { csn_name; csn_reason })
           unavailable_skill_names_json
       in
@@ -3357,12 +3466,18 @@ type skill_usage_coverage = {
   suc_unavailable : string list;
 }
 
+type skill_catalog_shadow = {
+  scsh_winner : Skill_reference.identity;
+  scsh_shadowed : Skill_reference.identity;
+}
+
 type skills_catalog =
   { sc_state : skills_catalog_state
   ; sc_config : skill_catalog_config option
   ; sc_sources : skill_catalog_source list
   ; sc_surfaces : skills_catalog_surface list
   ; sc_rejections : skill_catalog_rejection list
+  ; sc_shadows : skill_catalog_shadow list
   ; sc_usage_coverage : skill_usage_coverage option
   }
 
@@ -3695,7 +3810,36 @@ let decode_skill_catalog_rejection json =
     ; scr_reason
     }
 
-let decode_skill_snapshot_rejections json =
+let decode_skill_catalog_shadow json =
+  let* () =
+    validate_closed_object
+      ~label:"skill snapshot shadow"
+      ~allowed:[ "winner"; "shadowed" ]
+      json
+  in
+  let identity field =
+    let* value = required_object_field json field in
+    Skill_reference.identity_of_yojson value
+    |> Result.map_error (fun _ ->
+      Printf.sprintf "skill snapshot shadow %s is not an exact identity" field)
+  in
+  let* scsh_winner = identity "winner" in
+  let* scsh_shadowed = identity "shadowed" in
+  (* The snapshot pairs two entries that declare one name
+     (Skill_catalog_snapshot.effective_projection). A pair with two names, or
+     one identity twice, is not a shadow. *)
+  if not (String.equal scsh_winner.Skill_reference.name scsh_shadowed.Skill_reference.name)
+  then
+    Error
+      (Printf.sprintf "skill snapshot shadow pairs two names, %S and %S"
+         scsh_winner.Skill_reference.name scsh_shadowed.Skill_reference.name)
+  else if Skill_reference.equal_identity scsh_winner scsh_shadowed
+  then Error "skill snapshot shadow names one identity as both winner and shadowed"
+  else Ok { scsh_winner; scsh_shadowed }
+
+(* Shadows and rejections are the two ways a declared Skill stays out of what
+   Keeper turns see, and both are read from the same closed snapshot object. *)
+let decode_skill_snapshot_shadows_and_rejections json =
   let* () =
     validate_closed_object
       ~label:"skills snapshot"
@@ -3721,12 +3865,18 @@ let decode_skill_snapshot_rejections json =
   let* _sources = required_list_field json "sources" in
   let* _skills = required_list_field json "skills" in
   let* _effective_skills = required_list_field json "effective_skills" in
-  let* _shadows = required_list_field json "shadows" in
+  let* shadows_json = required_list_field json "shadows" in
   let* rejections_json = required_list_field json "rejections" in
-  decode_list
-    "snapshot.rejections"
-    decode_skill_catalog_rejection
-    rejections_json
+  let* shadows =
+    decode_list "snapshot.shadows" decode_skill_catalog_shadow shadows_json
+  in
+  let* rejections =
+    decode_list
+      "snapshot.rejections"
+      decode_skill_catalog_rejection
+      rejections_json
+  in
+  Ok (shadows, rejections)
 
 (* One discovery source, as [/api/v1/skills] publishes it. The endpoint that
    the Skill editor calls answers a different question -- it filters to the
@@ -3845,7 +3995,9 @@ let decode_skills_catalog json =
       in
       let* coverage = decode_skill_usage_coverage json in
       let* snapshot = required_object_field json "snapshot" in
-      let* sc_rejections = decode_skill_snapshot_rejections snapshot in
+      let* sc_shadows, sc_rejections =
+        decode_skill_snapshot_shadows_and_rejections snapshot
+      in
       let* config_json = required_object_field snapshot "config" in
       let* config = decode_skill_catalog_config config_json in
       let* sources_json = optional_list_field snapshot "sources" in
@@ -3862,6 +4014,7 @@ let decode_skills_catalog json =
         ; sc_sources
         ; sc_surfaces
         ; sc_rejections
+        ; sc_shadows
         ; sc_usage_coverage = Some coverage
         }
     | "not_registered" ->
@@ -3877,6 +4030,7 @@ let decode_skills_catalog json =
         ; sc_sources = []
         ; sc_surfaces = []
         ; sc_rejections = []
+        ; sc_shadows = []
         ; sc_usage_coverage = None
         }
     | "uninitialized" ->
@@ -3892,6 +4046,7 @@ let decode_skills_catalog json =
         ; sc_sources = []
         ; sc_surfaces = []
         ; sc_rejections = []
+        ; sc_shadows = []
         ; sc_usage_coverage = None
         }
     | "invalid_workspace" ->
@@ -3918,6 +4073,7 @@ let decode_skills_catalog json =
           ; sc_sources = []
           ; sc_surfaces = []
           ; sc_rejections = []
+          ; sc_shadows = []
           ; sc_usage_coverage = None
           }
     | unknown ->
@@ -4847,6 +5003,132 @@ let decode_runtime_resolved_snapshot json =
     ; rrs_runtimes
     ; rrs_lanes
     }
+
+(* The provider usage windows of [GET /api/v1/runtime/resolved]: what each
+   provider account said about its own usage windows, as the server recorded
+   it. Every word is closed here. A [state], window [kind] or [unit] this build
+   cannot name fails the whole reading; it never becomes a neighbour's meaning. *)
+type provider_usage_window_kind =
+  | Window_five_hour
+  | Window_seven_day
+  | Window_duration_minutes of int
+  | Window_provider_label of string
+
+type provider_usage_utilization =
+  | Utilization_fraction of float
+  | Utilization_percent of int
+
+type provider_usage_window = {
+  puw_limit_id : string option;
+  puw_kind : provider_usage_window_kind;
+  puw_utilization : provider_usage_utilization;
+  puw_resets_at : float option;
+  puw_observed_at : float;
+}
+
+type provider_usage_state =
+  | Account_not_reported_since_start
+  | Account_reported of provider_usage_window * provider_usage_window list
+
+type provider_usage_account = {
+  pua_scope : string;
+  pua_providers : string list;
+  pua_state : provider_usage_state;
+}
+
+type provider_usage_windows = {
+  puws_since : float;
+  puws_accounts : provider_usage_account list;
+}
+
+let required_number_field json key =
+  match member key json with
+  | `Float value -> Ok value
+  | `Int value -> Ok (Float.of_int value)
+  | `Null -> missing_field key
+  | bad -> field_type_error key "a number" bad
+
+let decode_provider_usage_window_kind json =
+  let* kind = required_string_field json "kind" in
+  match kind with
+  | "five_hour" -> Ok Window_five_hour
+  | "seven_day" -> Ok Window_seven_day
+  | "duration_minutes" ->
+      let* minutes = required_int_field json "minutes" in
+      Ok (Window_duration_minutes minutes)
+  | "provider_label" ->
+      let* label = required_string_field json "label" in
+      Ok (Window_provider_label label)
+  | other -> Error (Printf.sprintf "unknown usage window kind %S" other)
+
+let decode_provider_usage_utilization json =
+  let* unit_word = required_string_field json "unit" in
+  match unit_word with
+  | "fraction" ->
+      let* value = required_number_field json "value" in
+      Ok (Utilization_fraction value)
+  | "percent" ->
+      let* value = required_int_field json "value" in
+      Ok (Utilization_percent value)
+  | other -> Error (Printf.sprintf "unknown usage unit %S" other)
+
+let decode_provider_usage_window json =
+  let* limit_id = required_member json "limit_id" in
+  let* puw_limit_id =
+    match limit_id with
+    | `Null -> Ok None
+    | `String id -> Ok (Some id)
+    | bad -> field_type_error "limit_id" "a string or null" bad
+  in
+  let* kind = required_object_field json "window" in
+  let* puw_kind = decode_provider_usage_window_kind kind in
+  let* utilization = required_object_field json "utilization" in
+  let* puw_utilization = decode_provider_usage_utilization utilization in
+  let* resets_at = required_member json "resets_at" in
+  let* puw_resets_at =
+    match resets_at with
+    | `Null -> Ok None
+    | `Int at -> Ok (Some (Float.of_int at))
+    | `Float at -> Ok (Some at)
+    | bad -> field_type_error "resets_at" "a number or null" bad
+  in
+  let* puw_observed_at = required_number_field json "observed_at" in
+  Ok { puw_limit_id; puw_kind; puw_utilization; puw_resets_at; puw_observed_at }
+
+let decode_provider_usage_account json =
+  let* pua_scope = required_string_field json "scope" in
+  let* provider_items = required_list_field json "providers" in
+  let* pua_providers =
+    decode_list "providers"
+      (function
+        | `String provider -> Ok provider
+        | bad -> field_type_error "providers" "a string" bad)
+      provider_items
+  in
+  let* state = required_string_field json "state" in
+  let* window_items = required_list_field json "windows" in
+  let* windows = decode_list "windows" decode_provider_usage_window window_items in
+  let* pua_state =
+    match (state, windows) with
+    | "reported", first :: rest -> Ok (Account_reported (first, rest))
+    | "reported", [] ->
+        Error (Printf.sprintf "account %S is reported with no window" pua_scope)
+    | "not_reported_since_start", [] -> Ok Account_not_reported_since_start
+    | "not_reported_since_start", _ :: _ ->
+        Error
+          (Printf.sprintf "account %S carries windows but is not reported"
+             pua_scope)
+    | other, _ -> Error (Printf.sprintf "unknown usage state %S" other)
+  in
+  Ok { pua_scope; pua_providers; pua_state }
+
+let decode_provider_usage_windows json =
+  let* puws_since = required_number_field json "provider_usage_windows_since" in
+  let* items = required_list_field json "provider_usage_windows" in
+  let* puws_accounts =
+    decode_list "provider_usage_windows" decode_provider_usage_account items
+  in
+  Ok { puws_since; puws_accounts }
 
 let join_runtime_surface ~probe ~probe_error ~resolved =
   let probe_rows =
@@ -5939,12 +6221,15 @@ let decode_verification_request json =
   let* vr_task_id = required_string_field json "task_id" in
   let* vr_task_title = required_string_field json "task_title" in
   let* vr_submitted_by = required_string_field json "submitted_by" in
-  (* [null] is a row the backlog join found nothing for. A word outside the
-     pair is kept as itself rather than folded into either intent, so a
-     vocabulary this build does not know reaches the screen as that word. *)
+  (* [null] is a history-view row: that view joins no backlog, so nothing
+     names the verdict the row waits on. The awaiting view joins it and every
+     row carries a word (Dashboard_verification.filter_by_view). A word
+     outside the pair is kept as itself rather than folded into either intent,
+     so a vocabulary this build does not know reaches the screen as that
+     word. *)
   let* vr_ask =
-    let* intent = optional_string_field json "intent" in
-    let* reason = optional_string_field json "cancellation_reason" in
+    let* intent = required_nullable_string_field json "intent" in
+    let* reason = required_nullable_string_field json "cancellation_reason" in
     match intent with
     | None -> Ok Ask_unstated
     | Some word -> (
@@ -6002,19 +6287,27 @@ let decode_verification_snapshot json =
   let* vs_view = decode_verification_view json in
   let* vs_offset = required_int_field json "offset" in
   let* vs_truncated = required_bool_field json "truncated" in
-  let* vs_awaiting_unresolved =
-    decode_string_name_list json "awaiting_unresolved"
-  in
-  let* vs_awaiting_unresolved_total =
+  let* ( vs_awaiting_unresolved
+       , vs_awaiting_unresolved_total
+       , vs_backlog_error
+       , vs_backlog_recovery ) =
     match vs_view with
-    | Awaiting_queue -> required_int_field json "awaiting_unresolved_total"
+    | Awaiting_queue ->
+      (* Dashboard_verification.awaiting_fields sends all four on every arm
+         of this view, the unreadable backlog included, so a missing one is
+         a broken payload rather than an empty queue. *)
+      let* unresolved = require_string_list json "awaiting_unresolved" in
+      let* unresolved_total = required_int_field json "awaiting_unresolved_total" in
+      let* backlog_error = required_nullable_string_field json "backlog_error" in
+      let* backlog_recovery =
+        required_nullable_string_field json "backlog_recovery"
+      in
+      Ok (unresolved, unresolved_total, backlog_error, backlog_recovery)
     | Full_history ->
-      (* The history view does not join the backlog, so it sends neither the
-         unresolved list nor its count; there is nothing it failed to find. *)
-      Ok 0
+      (* The history view does not join the backlog, so it sends none of the
+         four; there is nothing it failed to find. *)
+      Ok ([], 0, None, None)
   in
-  let* vs_backlog_error = optional_string_field json "backlog_error" in
-  let* vs_backlog_recovery = optional_string_field json "backlog_recovery" in
   Ok
     { vs_requests
     ; vs_total
@@ -6316,6 +6609,116 @@ let decode_planning_snapshot json =
   in
   let* pl_generated_at = required_string_field json "generated_at" in
   Ok { pl_goals; pl_rollup; pl_backlog; pl_goal_history; pl_generated_at }
+
+type overview_goal = {
+  og_id : string;
+  og_title : string;
+  og_phase : Goal_phase.t;
+  og_priority : int;
+  og_due_date : string option;
+  og_task_count : int;
+  og_task_done_count : int;
+  og_stagnation_seconds : int option;
+  og_task_ids : string list;
+}
+
+type overview_goals_error =
+  | Overview_goal_phase_unknown of { goal_id : string; phase : string }
+  | Overview_goals_source_unavailable of string
+  | Overview_goals_malformed of string
+
+let overview_goals_error_to_string = function
+  | Overview_goal_phase_unknown { goal_id; phase } ->
+      Printf.sprintf "goal %s has a phase this build does not know: %S" goal_id
+        phase
+  | Overview_goals_source_unavailable reason -> reason
+  | Overview_goals_malformed detail -> detail
+
+let decode_overview_goal_items decode items =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest -> (
+        match decode item with
+        | Ok decoded -> loop (decoded :: acc) rest
+        | Error _ as error -> error)
+  in
+  loop [] items
+
+(* One tree node and every goal under it, parent first. A child goal is a goal
+   in its own right, so the Overview reads the forest flat. *)
+let rec decode_overview_goal_node json =
+  let malformed result =
+    Result.map_error (fun detail -> Overview_goals_malformed detail) result
+  in
+  let* og_id = malformed (required_string_field json "id") in
+  let* og_title = malformed (required_string_field json "title") in
+  let* raw_phase = malformed (required_string_field json "phase") in
+  let* og_phase =
+    match Goal_phase.parse raw_phase with
+    | Some phase -> Ok phase
+    | None ->
+        Error (Overview_goal_phase_unknown { goal_id = og_id; phase = raw_phase })
+  in
+  let* og_priority = malformed (required_int_field json "priority") in
+  let* og_due_date = malformed (optional_string_field json "due_date") in
+  let* og_task_count = malformed (required_int_field json "task_count") in
+  let* og_task_done_count =
+    malformed (required_int_field json "task_done_count")
+  in
+  let* og_stagnation_seconds =
+    malformed (required_nullable_int_field json "stagnation_seconds")
+  in
+  let* tasks_json = malformed (required_list_field json "tasks") in
+  let* og_task_ids =
+    decode_overview_goal_items
+      (fun task -> malformed (required_string_field task "id"))
+      tasks_json
+  in
+  let* children_json = malformed (required_list_field json "children") in
+  let* children =
+    decode_overview_goal_items decode_overview_goal_node children_json
+  in
+  Ok
+    ({ og_id
+     ; og_title
+     ; og_phase
+     ; og_priority
+     ; og_due_date
+     ; og_task_count
+     ; og_task_done_count
+     ; og_stagnation_seconds
+     ; og_task_ids
+     }
+    :: List.concat children)
+
+let decode_overview_goals json =
+  let* () =
+    match decode_goal_source_failure json with
+    | Ok (Some failure) ->
+        Error
+          (Overview_goals_source_unavailable
+             (goal_source_failure_to_string failure))
+    | Ok None -> Ok ()
+    | Error detail -> Error (Overview_goals_malformed detail)
+  in
+  let* tree_json =
+    match Json_util.assoc_member_opt "tree" json with
+    | None -> Error (Overview_goals_malformed "missing required field 'tree'")
+    (* The server nulls the tree when it cannot read the approval queue it
+       joins onto each goal, and says why in [approval_queue_state]. *)
+    | Some `Null ->
+        Error
+          (Overview_goals_source_unavailable
+             ("the server sent no goal tree: approval_queue_state="
+             ^ Yojson.Safe.to_string (member "approval_queue_state" json)))
+    | Some (`List items) -> Ok items
+    | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _) ->
+        Result.map_error
+          (fun detail -> Overview_goals_malformed detail)
+          (required_list_field json "tree")
+  in
+  let* nodes = decode_overview_goal_items decode_overview_goal_node tree_json in
+  Ok (List.concat nodes)
 
 let decode_keeper_runtime json =
   let* kr_name = required_string_field json "name" in
@@ -7324,7 +7727,7 @@ let decode_fusion_seat_attempt json =
 let decode_fusion_seat_route json =
   let* fsr_seat = decode_fusion_seat json in
   let* fsr_route = required_string_field json "route" in
-  let* fsr_answered_by = optional_string_field json "answered_by" in
+  let* fsr_answered_by = required_nullable_string_field json "answered_by" in
   let* attempts = required_list_field json "failed_attempts" in
   let* fsr_failed_attempts =
     decode_list "failed_attempts" decode_fusion_seat_attempt attempts
@@ -7795,45 +8198,14 @@ let gate_input_preview ~operation ~server_preview envelope =
    the row; absent legacy fields remain queued rather than gaining invented
    success. *)
 let gate_pending_phase_of_json json =
-  let summary = member "summary_status" json in
-  let disposition = member "summary_attempt_disposition" json in
-  let disposition_code =
-    match member "code" disposition with
-    | `String value -> value
-    | _ -> ""
-  in
-  let pre_worker_reason =
-    match member "reason_code" disposition with
-    | `String value -> value
-    | _ -> ""
-  in
-  let summary_status =
-    match summary with
-    | `String value -> value
-    | `Assoc _ ->
-      (match member "status" summary with
-       | `String value -> value
-       | _ -> "")
-    | _ -> ""
-  in
-  let judgment =
-    match member "summary" summary |> member "judgment" with
-    | `String value -> value
-    | _ -> ""
-  in
-  match disposition_code, pre_worker_reason, summary_status, judgment with
-  | ("identity_unbound" | "persistence_uncertain"), _, _, _ -> Gate_blocked
-  (* A start reservation is a pre-worker state like its siblings: the worker is
-     not judging yet. Rendering it as judging hid reservations that a restart
-     stranded (now recovered by [release_orphaned_start_reservation]) behind a
-     healthy-looking in-progress row. Blocked surfaces a lingering one; a healthy
-     reservation clears within a poll. *)
-  | "pre_worker_unavailable", _, _, _ -> Gate_blocked
-  | _, _, "failed", _ -> Gate_blocked
-  | _, _, "available", "require_human" -> Gate_human_required
-  | "in_flight", _, _, _ | _, _, "pending", _ -> Gate_judging
-  | "settled", _, "available", ("approve" | "deny") -> Gate_judging
-  | _ -> Gate_queued
+  let* raw = required_string_field json "phase" in
+  match raw with
+  | "queued" -> Ok Gate_queued
+  | "judging" -> Ok Gate_judging
+  | "human_required" -> Ok Gate_human_required
+  | "blocked" -> Ok Gate_blocked
+  | other ->
+    Error (Printf.sprintf "unknown gate pending phase: %S" other)
 
 let gate_auto_judge_detail_of_json json =
   let summary = member "summary_status" json in
@@ -7886,6 +8258,7 @@ let decode_gate_pending json =
     | `Assoc _ as input -> Some input
     | _ -> None
   in
+  let* gp_phase = gate_pending_phase_of_json json in
   Ok
     {
       gp_id;
@@ -7902,7 +8275,7 @@ let decode_gate_pending json =
       gp_execution_sandbox =
         snd (gate_execution_site ~operation:gp_operation input);
       gp_waiting_s;
-      gp_phase = gate_pending_phase_of_json json;
+      gp_phase;
       gp_auto_judge_detail = gate_auto_judge_detail_of_json json;
       gp_retry_request = gate_retry_request_of_json ~id:gp_id json;
     }
@@ -9589,8 +9962,9 @@ let decode_lane_run_detail json =
     }
 ;;
 
-let decode_fleet_safety json =
-  let* section = required_object_field json "keeper_fleet_safety" in
+(* Every field is read as required: the full reading writes all of them, so a
+   missing count is a broken payload, not an idle fleet. *)
+let decode_fleet_safety_reading section =
   let* fs_status = required_string_field section "status" in
   let* fs_blocker =
     Result.map
@@ -9598,29 +9972,26 @@ let decode_fleet_safety json =
            match Keeper_fleet_blocker.of_wire_name name with
            | Some blocker -> Blocker blocker
            | None -> Unrecognised_blocker name))
-      (optional_string_field section "blocker")
+      (required_nullable_string_field section "blocker")
   in
   let* fs_operator_action_required =
-    match member "operator_action_required" section with
-    | `Bool value -> Ok value
-    | `Null -> Ok false
-    | bad -> field_type_error "operator_action_required" "a bool or null" bad
+    required_bool_field section "operator_action_required"
   in
-  let* fs_bootable_count = int_field_or section "bootable_keeper_count" ~default:0 in
-  let* fs_running_count = int_field_or section "running_keeper_fiber_count" ~default:0 in
+  let* fs_bootable_count = required_int_field section "bootable_keeper_count" in
+  let* fs_running_count = required_int_field section "running_keeper_fiber_count" in
   let* fs_executable_count =
-    int_field_or section "executable_keeper_fiber_count" ~default:0
+    required_int_field section "executable_keeper_fiber_count"
   in
-  let* fs_failing_count = int_field_or section "failing_keeper_fiber_count" ~default:0 in
+  let* fs_failing_count = required_int_field section "failing_keeper_fiber_count" in
   let* fs_recovering_count =
-    int_field_or section "recovering_keeper_fiber_count" ~default:0
+    required_int_field section "recovering_keeper_fiber_count"
   in
   (* The unscoped count: every Failing keeper whose reason is a turn
      configuration error, autoboot target or not. The configuration_blocked_*
      fields answer an autoboot question instead and skip keepers outside the
      autoboot set, so they cannot partition the failing count. *)
   let* fs_turn_configuration_error_count =
-    int_field_or section "turn_configuration_error_keeper_count" ~default:0
+    required_int_field section "turn_configuration_error_keeper_count"
   in
   let* fs_official_client_recovery_required_count =
     required_int_field section "official_client_recovery_required_keeper_count"
@@ -9628,34 +9999,34 @@ let decode_fleet_safety json =
   let* fs_official_client_recovery_required_names =
     require_string_list section "official_client_recovery_required_keeper_names"
   in
-  let* fs_paused_count = int_field_or section "paused_keeper_count" ~default:0 in
+  let* fs_paused_count = required_int_field section "paused_keeper_count" in
   let* fs_target_reaction_capacity =
-    int_field_or section "target_reaction_capacity_count" ~default:0
+    required_int_field section "target_reaction_capacity_count"
   in
   let* fs_reaction_capacity_shortfall =
-    int_field_or section "reaction_capacity_shortfall_count" ~default:0
+    required_int_field section "reaction_capacity_shortfall_count"
   in
-  let* fs_bootable_names = decode_string_name_list section "bootable_keeper_names" in
-  let* fs_running_names = decode_string_name_list section "running_keeper_names" in
+  let* fs_bootable_names = require_string_list section "bootable_keeper_names" in
+  let* fs_running_names = require_string_list section "running_keeper_names" in
   let* fs_executable_names =
-    decode_string_name_list section "executable_keeper_names"
+    require_string_list section "executable_keeper_names"
   in
   let* fs_turn_configuration_error_names =
-    decode_string_name_list section "turn_configuration_error_keeper_names"
+    require_string_list section "turn_configuration_error_keeper_names"
   in
   let* fs_active_task_owner_without_fiber_count =
-    int_field_or section "active_task_owner_without_executable_fiber_count" ~default:0
+    required_int_field section "active_task_owner_without_executable_fiber_count"
   in
   let* fs_completion_authority_pending_count =
-    int_field_or section "completion_authority_pending_task_count" ~default:0
+    required_int_field section "completion_authority_pending_task_count"
   in
   (* Sources the task-owner scan could not read -- the backlog, or a Keeper
      whose profile did not load. Their tasks are left out of the count above,
      and only a backlog failure moves [status] off "ok", so a Keeper that
      could not be read leaves the count short with nothing on the row saying
-     so. Absent reads as none, the way every count in this section does. *)
+     so. *)
   let* fs_active_task_owner_scan_error_count =
-    int_field_or section "active_task_owner_scan_error_count" ~default:0
+    required_int_field section "active_task_owner_scan_error_count"
   in
   Ok
     { fs_status
@@ -9680,6 +10051,42 @@ let decode_fleet_safety json =
     ; fs_completion_authority_pending_count
     ; fs_active_task_owner_scan_error_count
     }
+
+(* Server_routes_http_runtime.full_health_component_placeholder: what the
+   section holds when the health snapshot has no fleet reading. It carries no
+   counts, and [error] only when something failed. Without [error] the
+   snapshot is being rebuilt -- "warming" at boot and again after a change
+   invalidates it -- and nothing failed. With [error] the refresh timed out or
+   the scan raised, which is a failure the operator should see as one, with
+   the server's reason. *)
+let decode_fleet_placeholder section =
+  let* status = required_string_field section "status" in
+  let* timed_out = required_bool_field section "component_timed_out" in
+  let* error = optional_string_field section "error" in
+  match error with
+  | None -> Ok (Fleet_not_measured { status })
+  | Some error ->
+    Error
+      (Printf.sprintf "the server could not measure the fleet (%s%s): %s" status
+         (if timed_out then ", refresh timed out" else "")
+         error)
+
+let decode_fleet_safety json =
+  let* section = required_object_field json "keeper_fleet_safety" in
+  match Json_util.assoc_member_opt "schema" section with
+  | Some (`String schema) when String.equal schema Keeper_fleet_blocker.reading_schema ->
+    Result.map (fun fleet -> Fleet_measured fleet) (decode_fleet_safety_reading section)
+  | Some (`String schema) ->
+    Error
+      (Printf.sprintf "keeper_fleet_safety schema %S is not %S" schema
+         Keeper_fleet_blocker.reading_schema)
+  | Some other -> field_type_error "keeper_fleet_safety.schema" "a string" other
+  | None ->
+    Result.map_error
+      (fun detail ->
+         "keeper_fleet_safety has no schema and is not the health placeholder: "
+         ^ detail)
+      (decode_fleet_placeholder section)
 
 let bounded_parent_depth ?(max_depth = 64) ~(id_of : 'a -> string)
     ~(parent_id_of : 'a -> string option) (items : 'a list) (item : 'a) : int =

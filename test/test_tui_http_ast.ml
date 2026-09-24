@@ -482,8 +482,7 @@ let test_http_client_does_not_own_tui_env_contract () =
 (* The Overview's Attention panel writes two cells of indent ahead of every
    row it draws. Its empty and unread notes stand in for rows, and they are
    written for a body that indents them itself -- pasted in whole, a note sat
-   two cells right of the rows it replaces and of the title above them, while
-   the Events panel beside it put its title and its rows on one column. *)
+   two cells right of the rows it replaces and of the title above them. *)
 let test_the_attention_note_starts_where_its_rows_do () =
   check int "the note carries no indent of its own" 0
     (Ast_grep.count_exact_string_literals_in_value_binding
@@ -1682,33 +1681,6 @@ let test_planning_refresh_reconciles_navigation_identity () =
        ~callees:[ "planning_visible_goals" ] ~fields:[ "pl_goals" ])
 ;;
 
-let test_overview_events_use_scroll_projection () =
-  check int "overview renders one bounded event window" 1
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_overview"
-       ~callee:"Render_schedule.project_overview_event_window");
-  check int "event prepend preserves one manual anchor" 1
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_loader.ml"
-       ~binding_name:"add_event"
-       ~callee:"Render_schedule.overview_event_offset_after_prepend");
-  check int "overview older input is bounded once" 1
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"main"
-       ~callee:"Render_schedule.scroll_overview_events_older");
-  check int "overview newer input is bounded once" 1
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"main"
-       ~callee:"Render_schedule.scroll_overview_events_newer");
-  check int "both overview input directions use current layout" 2
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"main" ~callee:"overview_layout")
-;;
-
 let test_render_loop_uses_monotonic_dirty_schedule () =
   let main_path = "bin/masc_tui.ml" in
   check bool "main loop reads a monotonic clock" true
@@ -2397,6 +2369,12 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
          it). It reads the stamp rather than drawing it, which is why it is a
          wrapper and not a [Terminal_text] call. *)
     ; "Masc_tui_wire_age.text"
+      (* Also a boundary: every label and value it is handed goes through
+         [Keeper_chat.terminal_safe_text] before a row is built, and its row
+         type is private, so nothing else can make one
+         (masc_tui_approval_detail.mli). Naming it exempts its whole argument,
+         which is what it sanitises. *)
+    ; "Approval_detail.of_fields"
     ]
   in
   let fixture_path = "test/fixtures/tui_terminal_text_ast_fixture.ml" in
@@ -2498,17 +2476,13 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields "render_overview"
     [ "workspace"
     ; "overview_error"
-    ; "ov_cluster"
-    ; "ov_project"
     ; "ai_summary"
-    ; "content"
-      (* [th_primary_path] and [th_queue_pressure] left this list because they
-         left the category. Both are closed variants now, rendered through
-         [Transport_metrics.*_kind_to_string], so the renderer has no arbitrary
-         text to sanitize -- the type removed what the sanitizer was for. Asking
-         for the call here would ask the renderer to sanitize a constructor. *)
     ];
   check_fields "overview_layout" [ "tasks_error" ];
+  (* The TUI session block prints event text this process wrote from
+     server answers and editor output. *)
+  check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
+    "render_section_fleet" [ "content" ];
   (* The Team block prints Keeper names and task text that producers wrote. *)
   (* pr_tag_of_keeper looks the name up; it does not draw it. *)
   check_fields ~non_rendering_calls:[ "pr_tag_of_keeper" ] "overview_team_lines"
@@ -2521,6 +2495,28 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      summary both moved into [approval_detail_line], and the guard follows
      the field rather than the surface's name. *)
   check_fields "approval_detail_line" [ "ap_summary" ];
+  (* The whole-ask screen draws what the list row cuts, and none of it was on
+     this list: a model's command reached the terminal through [kta_question]
+     with its escapes intact. Every field goes through [of_fields] now. *)
+  check_fields "approval_detail_pane"
+    [ "kta_keeper"
+    ; "kta_tool"
+    ; "kta_tool_call_id"
+    ; "kta_question"
+    ; "kta_args"
+    ; "gp_keeper"
+    ; "gp_display_tool"
+    ; "gp_operation"
+    ; "gp_auto_judge_detail"
+    ; "gp_id"
+    ; "gp_execution_sandbox"
+    ; "gp_execution_cwd"
+    ; "gp_input_rows"
+    ; "ap_actor"
+    ; "ap_action_type"
+    ; "ap_target_type"
+    ; "ap_summary"
+    ];
   (* The same move again, for the same reason: the two rows under the queue
      became [approval_metadata_lines] so the row could be measured against the
      frame and could say how tall it is (#36333). The four fields it draws
@@ -2556,6 +2552,22 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   (* [Link.scan] reads the body without drawing it, but what it returns is
      drawn -- and [Link.parse] percent-decodes, so an id can carry the escape
      bytes the body could not. Sanitize where it lands. *)
+  (* The metrics pane draws four wire words and escaped none of them: the
+     scheduler's probe word beside this pane's own prose, a Keeper id fitted
+     to sixteen cells (fitting is not escaping), and the tool name each
+     pending gate call and held approval is counted under, which the bar
+     chart draws as a label. The pane already escapes the YOLO Keeper names
+     beside them, so the invariant was understood here and these four were
+     missed. *)
+  check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
+    ~non_rendering_calls:[ "scheduler_probe_text" ] "render_kpi_cards"
+    [ "ssch_probe" ];
+  check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
+    ~non_rendering_calls:[ "scheduler_probe_text" ] "render_section_fleet"
+    [ "ssch_probe" ];
+  check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
+    "render_section_tools"
+    [ "mkh_keeper_id"; "gp_display_tool"; "kta_tool" ];
   check_identifiers ~module_path:render_path ~binding:"board_read_pane"
     ~callees:sanitizer_calls [ "id" ];
   (* Every split surface hands its list through one sidebar, so this is the
@@ -2564,7 +2576,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   (* The list sidebar is drawn beside more than one surface, so it sits with
      the shared primitives. *)
   check_identifiers ~module_path:"bin/masc_tui_render_prim.ml"
-    ~binding:"write_list_sidebar" ~callees:sanitizer_calls [ "label" ];
+    ~binding:"write_list_sidebar_selection" ~callees:sanitizer_calls [ "label" ];
   check_fields "render_planning_list"
     [ "planning_error"; "pg_due_date"; "pg_title" ];
   (* The drawing moved into [planning_detail_pane] when the goal list came to
@@ -3097,10 +3109,6 @@ let () =
           "scoped surface refresh preserves connection status"
           `Quick
           test_scoped_surface_refresh_does_not_own_connection_status;
-        test_case
-          "overview events use bounded scroll projection"
-          `Quick
-          test_overview_events_use_scroll_projection;
         test_case
           "render loop uses monotonic dirty scheduling"
           `Quick

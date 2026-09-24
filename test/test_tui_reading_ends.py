@@ -39,7 +39,7 @@ def run(executable: str) -> None:
         200, {"post": post, "comments": comments})
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"cluster-a", start=0, timeout=15)
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=15)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
         # The reading opens on the post body, so the first comment is what is
         # on screen and the last one is not.
@@ -86,7 +86,7 @@ def run_list_pane(executable: str) -> None:
             200, {"post": post, "comments": []})
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"cluster-a", start=0, timeout=15)
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=15)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
         # Enter opens the first post with the detail focused.
         h.send_and_wait(process, fd, output, b"\r", b"Body of post 00")

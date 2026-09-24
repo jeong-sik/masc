@@ -140,7 +140,7 @@ let test_only_current_turn_rows_count_as_cost_samples () =
     ]);
   let aggregate =
     Dashboard_http_keeper.keeper_cost_aggregates_json
-      ~config ~keepers:[ meta ] ~window_minutes:60
+      ~config ~keepers:[ meta ] ~window_minutes:60 ~now_ts:(Unix.gettimeofday ())
     |> keeper_item
   in
   check int "only current turns counted" 2 (int_field "sample_count" aggregate);
@@ -187,6 +187,7 @@ let run_keeper_aggregate ~prefix ~keeper_name rows =
   List.iter (append_metric config keeper_name) rows;
   Dashboard_http_keeper.keeper_cost_aggregates_json
     ~config ~keepers:[ make_meta keeper_name ] ~window_minutes:60
+    ~now_ts:(Unix.gettimeofday ())
   |> keeper_item
 
 (* Subscription runtimes write [cost_usd: null]. Those turns still count as
@@ -382,11 +383,186 @@ let test_unreadable_usage_is_unread () =
   check (float 0.0001) "its cost still adds up" 0.5
     (float_field "total_cost_usd" aggregate)
 
+(* #38364: the window is read by day file, not as the last N lines. *)
+
+let window_minutes = 24 * 60
+
+(* Write [rows] straight into the day file their own [ts_unix] names, so a
+   row can land in yesterday's file as the writer would have put it. *)
+let write_dated_rows config keeper_name rows =
+  let base_dir =
+    Dated_jsonl.base_dir (Keeper_types_support.keeper_metrics_store config keeper_name)
+  in
+  List.iter
+    (fun (ts, fields) ->
+      let dated = Jsonl_writer.dated_path ~base_dir ~ts in
+      let month_dir = Filename.concat base_dir dated.month_dir in
+      let rec mkdir_p dir =
+        if not (Sys.file_exists dir) then (
+          mkdir_p (Filename.dirname dir);
+          Unix.mkdir dir 0o755)
+      in
+      mkdir_p month_dir;
+      let out = open_out_gen [ Open_append; Open_creat ] 0o644 dated.path in
+      output_string out fields;
+      output_char out '\n';
+      close_out out)
+    rows
+
+let aggregate_of_workspace ?(now_ts = Unix.gettimeofday ()) ~prefix ~keeper_name write =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_test_deps.init_eio_clock env;
+  let config = Workspace.default_config (temp_dir prefix) in
+  ignore (Workspace.init config ~agent_name:None);
+  write config;
+  Dashboard_http_keeper.keeper_cost_aggregates_json
+    ~config ~keepers:[ make_meta keeper_name ] ~window_minutes ~now_ts
+  |> keeper_item
+
+let metrics_read aggregate =
+  match Yojson.Safe.Util.member "metrics_read" aggregate with
+  | `Assoc _ as read -> read
+  | other -> fail ("metrics_read is not an object: " ^ Yojson.Safe.to_string other)
+
+let string_field key json =
+  match Yojson.Safe.Util.member key json with
+  | `String value -> value
+  | other -> fail (Printf.sprintf "field %s is not a string: %s" key (Yojson.Safe.to_string other))
+
+let turn_json ~ts ~tokens =
+  Yojson.Safe.to_string
+    (`Assoc (turn_row ~ts ~cost:(`Float 0.01) ~latency_ms:100 ~total_tokens:tokens))
+
+(* 600 turns in the window: the old reader kept the last 500 lines and
+   dropped the rest without saying so. *)
+let test_a_busy_window_counts_every_turn () =
+  let turns = 600 in
+  let now = Unix.gettimeofday () in
+  let aggregate =
+    aggregate_of_workspace ~prefix:"keeper_cost_busy" ~keeper_name:"busy"
+      (fun config ->
+        write_dated_rows config "busy"
+          (List.init turns (fun _ -> (now -. 1.0, turn_json ~ts:(now -. 1.0) ~tokens:10))))
+  in
+  check int "every turn in the window is a sample" turns (int_field "sample_count" aggregate);
+  check int "every token adds up" (turns * 10) (int_field "total_tokens" aggregate);
+  check string "the whole window was read" "read" (string_field "state" (metrics_read aggregate))
+
+let seconds_per_day = 86_400.0
+
+(* Noon UTC, so the window start is noon of the day before and every row
+   below lands in the day file its timestamp names, whatever the clock. *)
+let fixed_now = 1_789_992_000.0
+
+let start_of_window now = now -. (float_of_int window_minutes *. 60.0)
+
+let () =
+  assert (Float.rem fixed_now seconds_per_day = seconds_per_day /. 2.0)
+
+(* The window is [start, now]: a turn at exactly the start counts, one a
+   millisecond before it does not. The start sits in yesterday's day file,
+   which the reader must open. *)
+let test_the_window_start_day_file_is_read () =
+  let now = fixed_now in
+  let start = start_of_window now in
+  let before = start -. 0.001 and inside = start +. 60.0 in
+  let aggregate =
+    aggregate_of_workspace ~now_ts:now ~prefix:"keeper_cost_edge" ~keeper_name:"edge"
+      (fun config ->
+        write_dated_rows config "edge"
+          [ (before, turn_json ~ts:before ~tokens:1)
+          ; (start, turn_json ~ts:start ~tokens:1000)
+          ; (inside, turn_json ~ts:inside ~tokens:10)
+          ; (now -. 1.0, turn_json ~ts:(now -. 1.0) ~tokens:100)
+          ])
+  in
+  check int "the start, the edge turn and today's turn count" 3
+    (int_field "sample_count" aggregate);
+  check int "the turn before the start does not" 1110 (int_field "total_tokens" aggregate)
+
+(* A row that is not JSON may have been a turn; the count says the sums
+   beside it are a floor. *)
+let test_malformed_rows_are_counted () =
+  let now = Unix.gettimeofday () in
+  let aggregate =
+    aggregate_of_workspace ~prefix:"keeper_cost_malformed" ~keeper_name:"torn"
+      (fun config ->
+        write_dated_rows config "torn"
+          [ (now -. 1.0, turn_json ~ts:(now -. 1.0) ~tokens:10); (now -. 1.0, "{\"ts_unix\":") ])
+  in
+  let read = metrics_read aggregate in
+  check string "the window was read" "read" (string_field "state" read);
+  check int "the torn row is counted" 1 (int_field "malformed_rows" read);
+  check int "the whole turn still counts" 1 (int_field "sample_count" aggregate)
+
+(* A store that cannot be read says so, and its sums say nothing: they are
+   not the fragment read before the failure. *)
+let test_an_unreadable_store_is_a_failure () =
+  let now = fixed_now in
+  let today_starts = now -. Float.rem now seconds_per_day in
+  let aggregate =
+    aggregate_of_workspace ~now_ts:now ~prefix:"keeper_cost_unreadable"
+      ~keeper_name:"broken" (fun config ->
+        (* Yesterday's last second is inside the window and in a file that
+           reads first and is fine; today's file fails after it. *)
+        let yesterday = today_starts -. 1.0 in
+        write_dated_rows config "broken" [ (yesterday, turn_json ~ts:yesterday ~tokens:10) ];
+        let base_dir =
+          Dated_jsonl.base_dir (Keeper_types_support.keeper_metrics_store config "broken")
+        in
+        (* Today's file is a directory: a path the store cannot read. *)
+        let dated = Jsonl_writer.dated_path ~base_dir ~ts:now in
+        if not (Sys.file_exists (Filename.dirname dated.path)) then
+          Unix.mkdir (Filename.dirname dated.path) 0o755;
+        Unix.mkdir dated.path 0o755)
+  in
+  let read = metrics_read aggregate in
+  check string "the read failed" "failed" (string_field "state" read);
+  check bool "the failure says why" true (String.length (string_field "reason" read) > 0);
+  check int "no fragment is counted" 0 (int_field "sample_count" aggregate);
+  List.iter
+    (fun key -> check int (key ^ " is empty") 0 (int_field key aggregate))
+    [ "cost_reported_samples"; "cost_unreported_samples"; "cost_unread_samples"
+    ; "tokens_reported_samples"; "tokens_unreported_samples"; "tokens_unread_samples"
+    ];
+  List.iter
+    (fun key -> null_field key aggregate)
+    [ "total_cost_usd"; "total_tokens"; "p50_latency_ms"; "p95_latency_ms" ]
+
+module Feeds = Dashboard_http_keeper_feeds
+
+let window_result = result int string
+
+(* The route refuses a window outside [1, max] rather than clamping it or
+   reading every day file the store has. *)
+let test_window_bounds () =
+  let max = Feeds.keeper_costs_max_window_minutes in
+  check window_result "absent is the default" (Ok max) (Feeds.keeper_costs_window_of_query None);
+  check window_result "one minute is the least" (Ok 1)
+    (Feeds.keeper_costs_window_of_query (Some "1"));
+  check window_result "the maximum is accepted" (Ok max)
+    (Feeds.keeper_costs_window_of_query (Some (string_of_int max)));
+  List.iter
+    (fun raw ->
+      match Feeds.keeper_costs_window_of_query (Some raw) with
+      | Error _ -> ()
+      | Ok minutes -> failf "window %S was accepted as %d" raw minutes)
+    [ "0"; "-1"; string_of_int (max + 1); string_of_int max_int; "1e12"; "abc"; "" ]
+
 let () =
   run "dashboard_keeper_cost_aggregates"
     [
       ( "keeper cost aggregates",
         [
+          test_case "a busy window counts every turn" `Quick
+            test_a_busy_window_counts_every_turn;
+          test_case "the window start's day file is read" `Quick
+            test_the_window_start_day_file_is_read;
+          test_case "malformed rows are counted" `Quick test_malformed_rows_are_counted;
+          test_case "an unreadable store is a failure" `Quick
+            test_an_unreadable_store_is_a_failure;
+          test_case "window bounds" `Quick test_window_bounds;
           test_case "accepts only current turn rows" `Quick
             test_only_current_turn_rows_count_as_cost_samples;
           test_case "unreported cost is counted, not summed as zero" `Quick

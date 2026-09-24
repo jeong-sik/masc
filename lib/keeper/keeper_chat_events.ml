@@ -357,6 +357,12 @@ let delta_usage_to_json (usage : Agent_core.Types.delta_usage) =
     @ json_opt "cache_read_input_tokens"
         (Option.map (fun v -> `Int v) usage.cache_read_input_tokens))
 
+(* One owner for the stop-reason word. The journal and the AGUI projection
+   both write [Agent_core.Types.stop_reason_to_string]; re-exporting it here
+   lets a reader that cannot link agent_core read back exactly what was
+   written instead of keeping a second spelling. *)
+let stop_reason_to_string = Agent_core.Types.stop_reason_to_string
+
 let stream_protocol_error_kind_to_string = function
   | Tool_start_duplicate_index -> "tool_start_duplicate_index"
   | Tool_start_missing_identity -> "tool_start_missing_identity"

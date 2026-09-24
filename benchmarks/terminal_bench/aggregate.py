@@ -33,7 +33,22 @@ COLUMNS = [
     # 멈췄는지. masc_state 만으로는 "시간 초과로 끊긴 Running" 과 다른 이유의
     # Running 이 구분되지 않는다.
     "interrupted", "keepers_stopped",
+    # 어느 arm 이었고 어떤 후보 순서를 선언했는지, 그중 누가 실제로 답했는지.
+    # arm l 만 후보가 둘 이상이다. answered_by 는 답한 turn 을, failed_on 은
+    # 실패한 turn 을 마지막으로 보낸 후보별로 "runtime=turn 수" 로 ; 로 잇는다.
+    # turns_unanswered 는 어느 후보에도 보내지 못하고 실패한 turn 수다.
+    # turns_unanswered 가 빈 칸이면 측정되지 않은 것이다(0 이 아니다).
+    "arm", "candidates", "answered_by", "failed_on", "turns_unanswered",
+    # 도구 호출 중 실패한 수와, 실패가 있었던 도구별 "도구=실패 수" 를 ; 로 이은 것.
+    # 벤치 점수가 낮을 때 모델 탓인지 도구 결함(경로 거절 등) 탓인지 가르는 칸이다.
+    # failed_tool_calls 가 빈 칸이면 측정되지 않은 것이다(0 이 아니다).
+    # failed_by_tool 은 실패한 호출이 없어도 빈 칸이라, 측정 여부는 failed_tool_calls 로 본다.
+    "failed_tool_calls", "failed_by_tool",
 ]
+
+# 후보 순서를 한 칸에 적을 때의 구분자. 순서가 곧 의미라 정렬하지 않는다.
+CANDIDATE_SEPARATOR = " > "
+ANSWER_SEPARATOR = ";"
 
 
 def iter_trials(jobs: Path):
@@ -59,6 +74,28 @@ def cell(value) -> str:
     return "" if value is None else str(value)
 
 
+def candidates_cell(candidates) -> str:
+    return "" if candidates is None else CANDIDATE_SEPARATOR.join(candidates)
+
+
+def turns_by_runtime_cell(turns_by_runtime) -> str:
+    """해당 turn 이 없을 때({})와 미측정(None)은 둘 다 빈 칸이다. 둘은
+    turns_unanswered 칸으로 가른다: 측정했으면 숫자, 안 했으면 빈 칸이다."""
+    if turns_by_runtime is None:
+        return ""
+    return ANSWER_SEPARATOR.join(
+        f"{runtime}={turns}" for runtime, turns in sorted(turns_by_runtime.items()))
+
+
+def failed_by_tool_cell(outcomes) -> str:
+    """"도구=실패 수" 를 실패가 많은 순서로. 실패가 없는 도구는 뺀다."""
+    if not isinstance(outcomes, list):
+        return ""
+    return ANSWER_SEPARATOR.join(
+        f"{row['tool']}={row['failed']}" for row in outcomes
+        if isinstance(row, dict) and row.get("failed"))
+
+
 def main() -> None:
     jobs = Path(sys.argv[1])
     # csv.writer 로 쓴다. task_name 이나 masc_state 에 쉼표가 들어가면 수동
@@ -74,6 +111,8 @@ def main() -> None:
                 trial_dir.parent.name, trial_dir.name.split("__")[0],
                 trial_dir.name, "", "", "", "", "", "", "", "",
                 read_error or "unreadable", "", "", "",
+                "", "", "", "", "",
+                "", "",
             ])
             continue
         verifier = data.get("verifier_result") or {}
@@ -95,6 +134,13 @@ def main() -> None:
             cell((meta.get("keeper_usage") or {}).get("cost_rows_unreported")),
             cell(meta.get("interrupted")),
             cell(meta.get("keepers_stopped")),
+            cell(meta.get("arm")),
+            candidates_cell(meta.get("candidates")),
+            turns_by_runtime_cell(meta.get("answered_by")),
+            turns_by_runtime_cell(meta.get("failed_on")),
+            cell(meta.get("turns_unanswered")),
+            cell(meta.get("failed_tool_calls")),
+            failed_by_tool_cell(meta.get("tool_outcomes")),
         ])
 
 

@@ -132,6 +132,12 @@ let base_messages = Agent_input.base_messages
 let trace_prompt_of_blocks = Agent_input.trace_prompt_of_blocks
 let validate_user_input_blocks = Agent_input.validate_user_input_blocks
 let append_user_input = Agent_input.append_user_input
+let validate_user_input_metadata = Agent_input.validate_user_input_metadata
+
+let validate_user_input ~input_metadata user_blocks =
+  Result.bind (validate_user_input_blocks user_blocks) (fun () ->
+    validate_user_input_metadata input_metadata)
+;;
 let resume_user_input = Agent_input.resume_user_input
 
 (** Per-turn timing observability helper. Emits one structured record
@@ -264,6 +270,7 @@ let run_loop_detailed
       ?on_yield
       ?on_resume
       ?execution_store
+      ~input_metadata
       agent
       user_blocks
   =
@@ -277,7 +284,7 @@ let run_loop_detailed
     if resuming
     then
       resume_user_input agent user_blocks |> Result.map_error detailed_error_of_core_error
-    else Ok (append_user_input agent user_blocks)
+    else Ok (append_user_input agent ~metadata:input_metadata user_blocks)
   in
   let trace_prompt = trace_prompt_of_blocks user_blocks in
   with_raw_trace_run_result
@@ -387,10 +394,18 @@ let with_run_lifecycle_events agent f =
     f
 ;;
 
-let run_blocks_detailed ~sw ?clock ?on_yield ?on_resume ?execution_store agent user_blocks
+let run_blocks_detailed
+      ~sw
+      ?clock
+      ?on_yield
+      ?on_resume
+      ?execution_store
+      ?(input_metadata = [])
+      agent
+      user_blocks
   =
   with_run_lifecycle_events agent (fun () ->
-    match validate_user_input_blocks user_blocks with
+    match validate_user_input ~input_metadata user_blocks with
     | Error error -> Error (detailed_error_of_core_error error)
     | Ok () ->
       (match Agent_lifecycle_events.validate_run_callbacks ~on_yield ~on_resume with
@@ -404,12 +419,15 @@ let run_blocks_detailed ~sw ?clock ?on_yield ?on_resume ?execution_store agent u
              ?on_yield
              ?on_resume
              ?execution_store
+             ~input_metadata
              agent
              user_blocks)))
 ;;
 
-let run_blocks ~sw ?clock ?on_yield ?on_resume ?execution_store agent user_blocks =
-  run_blocks_detailed ~sw ?clock ?on_yield ?on_resume ?execution_store agent user_blocks
+let run_blocks ~sw ?clock ?on_yield ?on_resume ?execution_store ?input_metadata agent
+  user_blocks =
+  run_blocks_detailed ~sw ?clock ?on_yield ?on_resume ?execution_store ?input_metadata
+    agent user_blocks
   |> project_detailed_error
 ;;
 
@@ -436,11 +454,12 @@ let run_stream_blocks_detailed
       ?on_yield
       ?on_resume
       ?execution_store
+      ?(input_metadata = [])
       agent
       user_blocks
   =
   with_run_lifecycle_events agent (fun () ->
-    match validate_user_input_blocks user_blocks with
+    match validate_user_input ~input_metadata user_blocks with
     | Error error -> Error (detailed_error_of_core_error error)
     | Ok () ->
       (match Agent_lifecycle_events.validate_run_callbacks ~on_yield ~on_resume with
@@ -459,6 +478,7 @@ let run_stream_blocks_detailed
              ?on_yield
              ?on_resume
              ?execution_store
+             ~input_metadata
              agent
              user_blocks)))
 ;;
@@ -470,6 +490,7 @@ let run_stream_blocks
       ?on_yield
       ?on_resume
       ?execution_store
+      ?input_metadata
       agent
       user_blocks
   =
@@ -480,6 +501,7 @@ let run_stream_blocks
     ?on_yield
     ?on_resume
     ?execution_store
+    ?input_metadata
     agent
     user_blocks
   |> project_detailed_error
@@ -868,6 +890,7 @@ module Advanced = struct
         ?on_resume
         ?execution_store
         ~on_tool_boundary
+        ~input_metadata
         agent
         user_blocks
     =
@@ -882,7 +905,7 @@ module Advanced = struct
       then
         resume_user_input agent user_blocks
         |> Result.map_error detailed_error_of_core_error
-      else Ok (append_user_input agent user_blocks)
+      else Ok (append_user_input agent ~metadata:input_metadata user_blocks)
     in
     let trace_prompt = trace_prompt_of_blocks user_blocks in
     with_raw_trace_run_classified_result
@@ -912,6 +935,7 @@ module Advanced = struct
         ?on_yield
         ?on_resume
         ?execution_store
+        ?(input_metadata = [])
         ~api_strategy
         ~on_tool_boundary
         agent
@@ -925,7 +949,7 @@ module Advanced = struct
         | Terminal_tool_completed { receipt; _ } ->
           Agent_lifecycle_events.Completed receipt.response)
     @@ fun () ->
-      match validate_user_input_blocks user_blocks with
+      match validate_user_input ~input_metadata user_blocks with
       | Error error -> Error (detailed_error_of_core_error error)
       | Ok () ->
         (match Agent_lifecycle_events.validate_run_callbacks ~on_yield ~on_resume with
@@ -940,6 +964,7 @@ module Advanced = struct
                ?on_resume
                ?execution_store
                ~on_tool_boundary
+               ~input_metadata
                agent
                user_blocks))
   ;;
@@ -950,6 +975,7 @@ module Advanced = struct
         ?on_yield
         ?on_resume
         ?execution_store
+        ?input_metadata
         ~api_strategy
         ~on_tool_boundary
         agent
@@ -961,6 +987,7 @@ module Advanced = struct
       ?on_yield
       ?on_resume
       ?execution_store
+      ?input_metadata
       ~api_strategy
       ~on_tool_boundary
       agent

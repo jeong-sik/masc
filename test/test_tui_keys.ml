@@ -765,20 +765,17 @@ let test_lanes_run_detail_footer_appends_the_scroll_position () =
 let test_overview_footer_projects_by_focus () =
   (* The retired literal said "j/k:events  t:tasks  q:quit  r:refresh
      Tab:next  2:keepers" (and "j/k:tasks  Enter:detail  esc:events …").
-     The projection keeps every pair, relabels j/k by focus, and drops the
-     keys that are dead in the other mode: t only leaves the event list,
-     Right/Enter and Left/Esc only act on a focused task. h/l stays visible
-     because it selects either pane directly. *)
-  check str "events mode keeps t and drops the task keys"
-    ("j/k:events  h/l:pane  m:telemetry  Home/End:top/bottom  t:tasks"
-     ^ "  2:keepers  r:refresh  Tab:next  q:quit")
+     The projection keeps every pair and drops the keys that are dead in the
+     other mode: t only selects the task list, and j/k, Home/End, Right/Enter
+     and Left/Esc only act on it once it is selected. *)
+  check str "unselected keeps t and drops the task keys"
+    ("m:telemetry  t:tasks  2:keepers  r:refresh  Tab:next  q:quit")
     (Masc_tui_keys.footer_hints_overview ~task_focus:false);
-  (* Both columns and an open task's detail answer Home and End: the events
-     column and the detail as readings the frame clamps, the task column as a
-     row list whose window follows its cursor. So the key is named in both
-     modes rather than in one. *)
+  (* The task column and an open task's detail both answer Home and End: the
+     detail as a reading the frame clamps, the task column as a row list
+     whose window follows its cursor. *)
   check str "tasks mode keeps arrow/Enter/Esc and drops t"
-    ("j/k:tasks  h/l:pane  m:telemetry  Home/End:top/bottom"
+    ("j/k:move  m:telemetry  Home/End:top/bottom"
      ^ "  Right / Enter:open  Left / Esc:back  2:keepers  r:refresh"
      ^ "  Tab:next  q:quit")
     (Masc_tui_keys.footer_hints_overview ~task_focus:true)
@@ -1450,6 +1447,29 @@ let test_the_question_count_counts_questions () =
           ]
       };
   Alcotest.(check int) "only the open ask's questions" 2
+    (approvals_open_question_count state)
+
+(* The question count reads 0 both when no question is open and when the
+   questions were never read, so the title needs to know which. *)
+let test_the_questions_reading_tells_unread_from_none_open () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let reading () =
+    match approvals_questions_reading state with
+    | Questions_current -> "current"
+    | Questions_unread -> "unread"
+    | Questions_stale -> "stale"
+  in
+  Alcotest.(check string) "before the first poll answers" "unread" (reading ());
+  state.asks_error <- Some "connection refused";
+  Alcotest.(check string) "a first poll that failed" "unread" (reading ());
+  state.asks_snapshot <-
+    Some { Tui_decode.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
+  Alcotest.(check string) "rows kept from before a failed poll" "stale"
+    (reading ());
+  state.asks_error <- None;
+  Alcotest.(check string) "an answered poll with no question" "current"
+    (reading ());
+  Alcotest.(check int) "which counts the same 0 as unread" 0
     (approvals_open_question_count state)
 
 let test_visible_surface_ring_open_ask () =
@@ -2230,6 +2250,7 @@ let planning_goal_row id title =
   ; pg_metric = None
   ; pg_target_value = None
   ; pg_proof = Tui_decode.Proof_idle
+  ; pg_verifier_unreconciled = None
   ; pg_last_review_note = None
   ; pg_last_review_at = None
   ; pg_created_at = None
@@ -3013,6 +3034,8 @@ let () =
             test_visible_surface_ring_open_ask
         ; Alcotest.test_case "the question count counts questions" `Quick
             test_the_question_count_counts_questions
+        ; Alcotest.test_case "the questions reading tells unread from none open"
+            `Quick test_the_questions_reading_tells_unread_from_none_open
         ; Alcotest.test_case "braille sparkline renders levels" `Quick
             test_braille_sparkline
         ; Alcotest.test_case "fleet total cost sums correctly" `Quick

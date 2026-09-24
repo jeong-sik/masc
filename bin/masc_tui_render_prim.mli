@@ -229,7 +229,31 @@ val write_list_sidebar :
   Buffer.t ->
   rows:int ->
   cols:int ->
-  title:string -> focused:bool -> labels:string list -> selected:int -> unit
+  title:string ->
+  focused:bool ->
+  holding:int option ->
+  labels:string list ->
+  selected:int ->
+  unit
+(** An index beside a detail pane. [holding] is what the surface holds when
+    that is more than [labels] was given -- the Board's page of fifty out of a
+    board of a hundred and ninety-eight -- and the row spells the pair the way
+    the surface's own header does. A list that is filtered rather than paged
+    passes [None]; it is asked of every caller so that a list with nothing
+    more to hold says so. *)
+
+val write_list_sidebar_selection :
+  Buffer.t ->
+  rows:int ->
+  cols:int ->
+  title:string ->
+  focused:bool ->
+  holding:int option ->
+  labels:string list ->
+  selection:int option ->
+  unit
+(** {!write_list_sidebar} for a list the open item may not be in: [None]
+    highlights no row and leaves the list at its top. *)
 
 val data_unreliable_row : cols:int -> string -> string
 
@@ -281,10 +305,11 @@ val bracketed : max_cells:int -> string -> string
 (** [\[text\]], with [text] folded in the middle only when it runs past
     [max_cells]. Never padded inside the brackets. *)
 
-val board_list_count_text : loaded:int -> holding:int option -> string
-(** [(loaded of holding)] when the board holds more than the listing page
-    carries, and [(loaded)] otherwise. [holding] is the census count for the
-    whole board, or for the hearth being read when one is narrowed. *)
+val list_count_text : loaded:int -> holding:int option -> string
+(** [(loaded of holding)] when the surface holds more than the page an index
+    carries, and [(loaded)] otherwise. [holding] is the Board census, the
+    Schedules request count, the Task Review page total -- whatever the
+    surface's own header counts. *)
 
 val board_read_title :
   screen:string -> id:string -> hearth:string option -> votes:int -> replies:int ->
@@ -315,10 +340,13 @@ val planning_phase_column : int
 
 val planning_phase_color : Goal_phase.t -> string
 
-val transport_summary : Masc.Tui_decode.transport_health -> string
-(** The transport tail of the Overview's cluster row: one entry per path, the
-    mark on the path carrying the traffic, then the queue's pressure and its
-    dropped count. *)
+val transport_attention_item :
+  Masc.Tui_decode.transport_health option ->
+  Masc_tui_types.attention_item option
+(** The one Overview Attention item about the transport: a warning while the
+    outbound queue's pressure is [Watch], bad while it is [High], and nothing
+    when it is [Steady] or unread. The readings themselves are on Metrics. *)
+
 
 val planning_rollup_row : cols:int -> Masc_tui_types.planning_rollup -> string
 (** The goal count; with any goals, also the completed share and a counter per

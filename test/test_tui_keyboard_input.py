@@ -14452,6 +14452,56 @@ def unread_keeper_counted_interaction() -> Interaction:
     return interact
 
 
+def paused_and_stopped_briefing() -> HttpResponse:
+    # One Keeper the operator paused (the flag, whatever the phase), one
+    # paused by phase, one stopped, one with no phase and one running.
+    return (
+        200,
+        {
+            "summary": {
+                "workspace_health": "ok",
+                "cluster": "cluster-a",
+                "project": "project-a",
+            },
+            "generated_at": "2026-09-23T00:00:00Z",
+            "incidents": [],
+            "attention_queue": [],
+            "attention_items": [],
+            "agent_briefs": [],
+            "keeper_briefs": [
+                {"name": "k-flagged", "phase": None, "paused": True},
+                {"name": "k-halted", "phase": "paused", "paused": False},
+                {"name": "k-stopped", "phase": "stopped", "paused": False},
+                {"name": "k-unknown", "phase": None, "paused": False},
+                {"name": "k-running", "phase": "running", "last_turn_ago_s": 30},
+            ],
+            "keepers_unread": [],
+        },
+    )
+
+
+def paused_apart_from_stopped_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # Each count in the Team title is the Keepers on the line it names.
+        for needle in (
+            b"1 idle \xc2\xb7 1 no phase \xc2\xb7 2 paused \xc2\xb7 1 stopped",
+            b"? no phase: k-unknown",
+            b"paused: k-flagged, k-halted",
+            b"stopped: k-stopped",
+        ):
+            wait_for_output(process, master_fd, output, needle, start=0, timeout=10.0)
+        # The harness confirms the exit that this first press arms.
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def attention_drawn_once_interaction() -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -15045,6 +15095,14 @@ def run_keyboard_regression(executable: str) -> None:
         interact=unread_keeper_counted_interaction(),
         http_fixtures={
             "/api/v1/dashboard/briefing": unread_keeper_briefing(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Paused apart from stopped",
+        interact=paused_apart_from_stopped_interaction(),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": paused_and_stopped_briefing(),
         },
     )
     composer_requests: HttpRequests = []

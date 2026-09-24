@@ -2093,7 +2093,9 @@ let run_turn
           already a fragment and its tools may already have acted, but no round
           reads them (RFC librarian-lifecycle §10-3, I3). An Agent-Core turn
           needs no line here -- its stage saves hold its atoms and the next end
-          line covers them. *)
+          line covers them. With no dispatched candidate there is no owner to
+          name the line's kind; such a turn reached no model and ran no tool,
+          and its input fragment is left unnamed (#38827). *)
        (match turn_result, !last_dispatched_checkpoint_owner with
         | Error _, Some Runtime_execution.Official_client ->
           Keeper_agent_run_finalize_response.record_errored_official_turn_boundary

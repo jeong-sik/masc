@@ -1019,6 +1019,24 @@ let test_both_task_history_panes_say_when_each_row_was_sent () =
        ~binding_name:"render_harness_detail" ~field_name:"hv_at")
 ;;
 
+(* The Tasks pane beside the detail drew a row's title and nothing else. The
+   label itself is tested in test_tui_sidebar_index_fold; this says the pane
+   reaches it, and that the id it passes is the row's own. *)
+let test_the_tasks_list_pane_says_which_task_each_row_is () =
+  Alcotest.(check int) "the pane builds its labels through the shared one" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_task_detail"
+       ~callee:"Render_schedule.task_list_sidebar_label");
+  (* Off [task], which is the one the detail beside this pane is open on: a
+     label built from that id would give every row the same one. The pane
+     also reads [task.id] to find which row to highlight, and that read is
+     what this excludes rather than counts. *)
+  Alcotest.(check int) "and passes the row's own id, not the open task's" 1
+    (Ast_grep.count_field_accesses_off_other_records_in_value_binding
+       ~module_path:render ~binding_name:"render_task_detail" ~record:"task"
+       ~fields:[ "id" ])
+;;
+
 let test_the_board_age_column_reads_the_sort_once () =
   let asks ~callee =
     Ast_grep.count_calls_in_value_binding ~module_path:render
@@ -1193,6 +1211,9 @@ let () =
         ; Alcotest.test_case
             "both task history panes say when each row was sent" `Quick
             test_both_task_history_panes_say_when_each_row_was_sent
+        ; Alcotest.test_case
+            "the Tasks list pane says which task each row is" `Quick
+            test_the_tasks_list_pane_says_which_task_each_row_is
         ; Alcotest.test_case "every Fusion run list reads one clock" `Quick
             test_every_fusion_run_list_reads_one_clock
         ] )

@@ -2990,18 +2990,18 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
+type memory_fact_retrieval =
+  | Never_retrieved
+  | Retrieved of { count : int; distinct_days : int; last_at : float }
+
 type memory_fact_events = {
-  mfe_retrieved_count : int;
-  mfe_retrieved_distinct_days : int;
-  mfe_last_retrieved_at : float option;
+  mfe_retrieval : memory_fact_retrieval;
   mfe_retracted_count : int;
   mfe_revised_from : string list;
 }
 
 let no_memory_fact_events =
-  { mfe_retrieved_count = 0
-  ; mfe_retrieved_distinct_days = 0
-  ; mfe_last_retrieved_at = None
+  { mfe_retrieval = Never_retrieved
   ; mfe_retracted_count = 0
   ; mfe_revised_from = []
   }
@@ -6137,18 +6137,32 @@ let decode_memory_health_snapshot json =
 (* The server computes these from the keeper's memory-events sidecar and
    never stores them (RFC-0418). This side shows the record as it is. *)
 let decode_memory_fact_events json =
-  let* mfe_retrieved_count = required_int_field json "retrieved_count" in
-  let* mfe_retrieved_distinct_days = required_int_field json "retrieved_distinct_days" in
-  let* mfe_last_retrieved_at = optional_float_field json "last_retrieved_at" in
+  let* retrieved_count = required_int_field json "retrieved_count" in
+  let* retrieved_distinct_days = required_int_field json "retrieved_distinct_days" in
+  let* last_retrieved_at = optional_float_field json "last_retrieved_at" in
+  (* The server derives all three from one list of retrieval times
+     ([Keeper_memory_os_events.summary_for]): an empty list gives 0, 0 and
+     null, and a non-empty one gives a positive count, at least one day and
+     a clock. Any other combination is not a record this decoder knows, so it
+     is rejected here once instead of every reader drawing it. *)
+  let* mfe_retrieval =
+    match retrieved_count, retrieved_distinct_days, last_retrieved_at with
+    | 0, 0, None -> Ok Never_retrieved
+    | count, distinct_days, Some last_at when count > 0 && distinct_days > 0 ->
+        Ok (Retrieved { count; distinct_days; last_at })
+    | count, distinct_days, (None | Some _) ->
+        Error
+          (Printf.sprintf
+             "memory fact events disagree: retrieved_count %d, \
+              retrieved_distinct_days %d, last_retrieved_at %s"
+             count distinct_days
+             (match last_retrieved_at with
+              | None -> "null"
+              | Some at -> Float.to_string at))
+  in
   let* mfe_retracted_count = required_int_field json "retracted_count" in
   let* mfe_revised_from = require_string_list json "revised_from" in
-  Ok
-    { mfe_retrieved_count
-    ; mfe_retrieved_distinct_days
-    ; mfe_last_retrieved_at
-    ; mfe_retracted_count
-    ; mfe_revised_from
-    }
+  Ok { mfe_retrieval; mfe_retracted_count; mfe_revised_from }
 
 let decode_memory_fact json =
   let* mf_claim = required_string_field json "claim" in

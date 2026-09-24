@@ -84,6 +84,14 @@ def full_queue(process, master_fd, _slave_fd, output, _base_path):
     if b"stop for specific test-0" in frame:
         raise AssertionError("the full queue opened an arbitrary detail")
     capture_screen("full_queue", output)
+    for _ in range(6):
+        h.send_and_wait(process, master_fd, output, b"j", b"Task Review")
+    h.send_and_wait(process, master_fd, output, b"\r", b"stop for specific test-6")
+    detail = h.screen_text(bytes(output))
+    for needle in (b"task-stop-6", b"vr-stop-6", b"stop for specific test-6"):
+        if needle not in detail:
+            raise AssertionError(f"the seventh queue row opened a different request: {detail!r}")
+    capture_screen("seventh_detail", output)
     os.write(master_fd, b"q")
 
 

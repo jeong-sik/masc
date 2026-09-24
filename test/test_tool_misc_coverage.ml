@@ -671,7 +671,7 @@ let () = test "dispatch_web_search_include_content_keeps_result_on_fetch_error" 
       Tool_misc.with_web_fetch_http_get_for_test
         (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url_arg ->
            assert (url_arg = url);
-           Error "network unavailable")
+           Error (Masc.Tool_local_runtime_http.Curl_exited 6))
         (fun () ->
           let args =
             `Assoc
@@ -698,6 +698,10 @@ let () = test "dispatch_web_search_include_content_keeps_result_on_fetch_error" 
               assert (str_contains content_text ("URL: " ^ url));
               assert (str_contains content_text "Content status: error");
               assert (str_contains content_text "_Failed to retrieve page content:");
+              (* The model reads curl's cause, not the word "curl". *)
+              assert
+                (str_contains content_text
+                   "fetch failed: curl exit 6 (could not resolve host)");
               assert (str_contains content_text ("Source: " ^ url));
               (* Failure detail also rides only in content_text. *)
               assert (hit |> member "page_content" = `Null);

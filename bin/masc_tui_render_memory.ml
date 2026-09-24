@@ -368,9 +368,9 @@ let memory_context_lines ~cols (k : memory_keeper_health) =
       @ (vision_line :: read_error_lines)
       @ List.concat_map (fun sentence -> clause_rows ~cols [ sentence ]) alert_lines
   ; stalled_row =
-      Option.map
-        (fun row -> 3 + List.length librarian_rows, row)
-        (List.hd_opt librarian_stalled_lines)
+      (match librarian_stalled_lines with
+       | row :: _ -> Some (3 + List.length librarian_rows, row)
+       | [] -> None)
   }
 
 type memory_state = Masc_tui_types.memory_state =

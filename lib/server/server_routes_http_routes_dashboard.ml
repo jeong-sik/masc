@@ -3220,14 +3220,11 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/goals" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let cache_key =
-           Printf.sprintf "goals_tree:%s"
-             (Mcp_server.workspace_config state).base_path
-         in
+         (* Keeper tool writes can update the measurement ledger outside this
+            HTTP router. Read the current ledger on each request. *)
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_goals_tree_http_json ~config:(Mcp_server.workspace_config state)))
+           Domain_pool_ref.submit_io_or_inline (fun () ->
+             dashboard_goals_tree_http_json ~config:(Mcp_server.workspace_config state))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -3274,15 +3271,10 @@ let add_routes ~sw ~clock router =
            respond_public_read_json_value ~status:`Bad_request req reqd
              (dashboard_error_json ~ok:false "goal_id query param is required")
          else
-           let cache_key =
-             Printf.sprintf "goal_detail:%s:%s"
-               (Mcp_server.workspace_config state).base_path goal_id
-           in
            let json =
-             Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
-               Domain_pool_ref.submit_io_or_inline (fun () ->
-                 dashboard_goal_detail_http_json
-                   ~config:(Mcp_server.workspace_config state) ~goal_id))
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               dashboard_goal_detail_http_json
+                 ~config:(Mcp_server.workspace_config state) ~goal_id)
            in
            Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

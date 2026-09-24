@@ -28,6 +28,10 @@ val latest_for_goal :
   Workspace_utils.config -> goal:Goal_store.goal -> (t option, string) result
 (** Only the current success-criterion revision is eligible. *)
 
+val projection :
+  (t list, string) result -> Goal_store.goal -> Yojson.Safe.t
+(** Explicit reported, not_recorded, or unavailable state for a Goal. *)
+
 val record :
   Workspace_utils.config ->
   goal_id:string ->

@@ -284,6 +284,7 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
        never the pre-verification default, which would disguise corruption as
        "not verified yet". *)
     let records = Goal_verification.load_records_authoritative ctx.config in
+    let measurements = Goal_measurement.load ctx.config in
     let goal_json (goal : Goal_store.goal) =
       let verification =
         match records with
@@ -300,7 +301,9 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
           |> Goal_verification.record_to_yojson_for_goal ~goal
       in
       match Goal_store.goal_to_yojson goal with
-      | `Assoc fields -> `Assoc (fields @ [ "verification", verification ])
+      | `Assoc fields ->
+          `Assoc (fields @ [ "verification", verification
+                           ; "measurement", Goal_measurement.projection measurements goal ])
       | json -> json
     in
     ok_result

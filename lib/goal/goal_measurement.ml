@@ -63,14 +63,28 @@ let path config =
 
 let mirror_path config = path config ^ ".last-good"
 
+let read_optional config file =
+  match Workspace_utils.key_of_path config file with
+  | None -> Error "goal_measurement: store path is outside workspace"
+  | Some key ->
+      (match Workspace_utils.backend_get config ~key with
+       | Error _ -> Error "goal_measurement: store read failed"
+       | Ok None -> Ok None
+       | Ok (Some bytes) ->
+           (try Ok (Some (Yojson.Safe.from_string bytes))
+            with Yojson.Json_error detail ->
+              Error ("goal_measurement: invalid JSON: " ^ detail)))
+
 let load config =
   let primary = path config in
-  if not (Workspace_utils.path_exists config primary) then
-    if Workspace_utils.path_exists config (mirror_path config) then
-      Error "goal_measurement: primary missing after initialization"
-    else Ok []
-  else
-    let* json = Workspace_utils.read_json_result config primary in
+  let* primary_json = read_optional config primary in
+  match primary_json with
+  | None ->
+      let* mirror_json = read_optional config (mirror_path config) in
+      (match mirror_json with
+       | None -> Ok []
+       | Some _ -> Error "goal_measurement: primary missing after initialization")
+  | Some json ->
     let* json = fields "goal_measurements" [ "version"; "measurements" ] json in
     let* () =
       match Json_util.assoc_member_opt "version" json with
@@ -96,6 +110,20 @@ let latest_for_goal config ~(goal : Goal_store.goal) =
           && String.equal row.criterion_revision goal.criterion_revision)
        rows)
 
+let projection records (goal : Goal_store.goal) =
+  match records with
+  | Error reason ->
+      `Assoc [ "state", `String "unavailable"; "reason", `String reason ]
+  | Ok rows ->
+      (match List.find_opt
+               (fun row -> String.equal row.goal_id goal.id
+                           && String.equal row.criterion_revision goal.criterion_revision)
+               rows with
+       | None -> `Assoc [ "state", `String "not_recorded" ]
+       | Some row ->
+           `Assoc [ "state", `String "reported"
+                  ; "record", to_yojson row ])
+
 let write config items =
   let json =
     `Assoc
@@ -103,7 +131,11 @@ let write config items =
       ; "measurements", `List (List.map to_yojson items)
       ]
   in
-  let* () = Workspace_utils.write_json_result config (path config) json in
+  let* committed = Workspace_utils.write_json_commit_result config (path config) json in
+  (match committed.mirror_error with
+   | None -> ()
+   | Some detail ->
+       Log.Misc.warn "goal_measurement: local mirror write failed after commit: %s" detail);
   (match Workspace_utils.write_json_result config (mirror_path config) json with
    | Ok () -> ()
    | Error detail ->

@@ -248,25 +248,7 @@ let verification_projection ~config =
         Goal_verification.record_to_yojson_for_goal ~goal record
 
 let measurement_projection ~config =
-  match Goal_measurement.load config with
-  | Error reason ->
-      fun (_ : Goal_store.goal) ->
-        `Assoc [ "state", `String "unavailable"; "reason", `String reason ]
-  | Ok rows ->
-      fun (goal : Goal_store.goal) ->
-        match
-          List.find_opt
-            (fun (row : Goal_measurement.t) ->
-               String.equal row.goal_id goal.id
-               && String.equal row.criterion_revision goal.criterion_revision)
-            rows
-        with
-        | None -> `Assoc [ "state", `String "not_recorded" ]
-        | Some row ->
-            `Assoc
-              [ "state", `String "reported"
-              ; "record", Goal_measurement.to_yojson row
-              ]
+  Goal_measurement.projection (Goal_measurement.load config)
 
 let rec tree_node_to_json ?(events_for_goal = fun _ -> [])
     ?(verification_for_goal = fun _ -> Goal_verification.ledger_error_to_yojson "proof source not loaded")

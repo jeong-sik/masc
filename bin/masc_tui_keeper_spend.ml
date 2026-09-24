@@ -29,10 +29,11 @@ let decode_count json key =
 
 (* One of the aggregate's sums and the three counts that partition its turns.
    The server writes [null] exactly when no turn reported the value; any
-   other pairing is a row this build cannot vouch for. [malformed_rows] are
-   rows of the window that were not JSON: any of them may have been a turn,
-   so they make a known sum a floor. *)
-let decode_sum json ~samples ~malformed_rows ~total_key ~prefix ~sum_of_json =
+   other pairing is a row this build cannot vouch for. [rows_maybe_turns]
+   are rows of the window that may have been turns but did not read (not
+   JSON, or a turn row the server could not place): they make a known sum a
+   floor. *)
+let decode_sum json ~samples ~rows_maybe_turns ~total_key ~prefix ~sum_of_json =
   let* reported = decode_count json (prefix ^ "_reported_samples") in
   let* unreported = decode_count json (prefix ^ "_unreported_samples") in
   let* unread = decode_count json (prefix ^ "_unread_samples") in
@@ -45,7 +46,7 @@ let decode_sum json ~samples ~malformed_rows ~total_key ~prefix ~sum_of_json =
     | _, 0 -> Error (total_key ^ " is set although no turn reported it")
     | value, _ ->
         let* sum = sum_of_json value in
-        Ok (Spend_sum { sum; floor = unreported + unread + malformed_rows > 0 })
+        Ok (Spend_sum { sum; floor = unreported + unread + rows_maybe_turns > 0 })
 
 let cost_of_json = function
   | `Float usd when Float.is_finite usd && usd >= 0.0 -> Ok usd
@@ -56,20 +57,22 @@ let tokens_of_json = function
   | `Int tokens when tokens >= 0 -> Ok tokens
   | _ -> Error "total_tokens is not a non-negative integer"
 
-let decode_turns json ~malformed_rows =
+let decode_turns json ~rows_maybe_turns =
   let* samples = decode_count json "sample_count" in
   let* cost_usd =
-    decode_sum json ~samples ~malformed_rows ~total_key:"total_cost_usd"
+    decode_sum json ~samples ~rows_maybe_turns ~total_key:"total_cost_usd"
       ~prefix:"cost" ~sum_of_json:cost_of_json
   in
   let* tokens =
-    decode_sum json ~samples ~malformed_rows ~total_key:"total_tokens"
+    decode_sum json ~samples ~rows_maybe_turns ~total_key:"total_tokens"
       ~prefix:"tokens" ~sum_of_json:tokens_of_json
   in
-  (* No turn was read, but a row that was not JSON may have been one. *)
   Ok
-    (if samples = 0 && malformed_rows = 0 then Spend_no_turns
-     else Spend_turns { cost_usd; tokens })
+    (match samples, rows_maybe_turns with
+     | 0, 0 -> Spend_no_turns
+     (* No turn was read, but a row that did not read may have been one. *)
+     | 0, rows -> Spend_rows_unread { rows }
+     | _, _ -> Spend_turns { cost_usd; tokens })
 
 let decode_keeper json =
   let* name = required_string_field json "keeper_name" in
@@ -78,8 +81,12 @@ let decode_keeper json =
   let* spend =
     match read_state with
     | "read" ->
+        (* Rows that were not JSON and turn rows the server could not read
+           the time or latency of (#38728) are the same fact here: a row of
+           the window that may have been a turn, so a known sum is a floor. *)
         let* malformed_rows = decode_count metrics_read "malformed_rows" in
-        decode_turns json ~malformed_rows
+        let* unread_turn_rows = decode_count metrics_read "unread_turn_rows" in
+        decode_turns json ~rows_maybe_turns:(malformed_rows + unread_turn_rows)
     | "failed" ->
         let* reason = required_string_field metrics_read "reason" in
         Ok (Spend_unread reason)
@@ -89,6 +96,10 @@ let decode_keeper json =
 
 let decode_rows json ~freshness =
   let* window_minutes = required_int_field json "window_minutes" in
+  (* [keepers_unread] is not read here: a Keeper the server could not read
+     meta for has no row, so a Team row asking for it finds none and draws
+     unknown, which already makes the total a floor, and the Team row itself
+     draws why its meta did not read. *)
   let* rows = required_list_field json "keepers" in
   (* Row by row: a row this build cannot read leaves that Keeper unknown
      instead of blanking every other Keeper's tag. *)
@@ -175,7 +186,7 @@ let turns_text ~cost_usd ~tokens =
    by the server, or its row unreadable -- is unknown, as is one whose store
    the server could not read. *)
 let spend_text = function
-  | None | Some (Spend_unread _) -> unknown_tokens_text
+  | None | Some (Spend_unread _) | Some (Spend_rows_unread _) -> unknown_tokens_text
   | Some Spend_no_turns -> Ansi.dim ^ "no turns" ^ Ansi.reset
   | Some (Spend_turns { cost_usd; tokens }) -> turns_text ~cost_usd ~tokens
 
@@ -248,7 +259,8 @@ let team_total (reading : overview_spend_reading) names =
             List.filter_map
               (fun name ->
                 match List.assoc_opt name keepers with
-                | None | Some (Spend_unread _) -> Some (Spend_unknown, Spend_unknown)
+                | None | Some (Spend_unread _) | Some (Spend_rows_unread _) ->
+                    Some (Spend_unknown, Spend_unknown)
                 | Some Spend_no_turns -> None
                 | Some (Spend_turns { cost_usd; tokens }) -> Some (cost_usd, tokens))
               names
@@ -312,7 +324,7 @@ let lines (reading : overview_spend_reading) =
           (fun (_, spend) ->
             match spend with
             | Spend_unread reason -> Some reason
-            | Spend_no_turns | Spend_turns _ -> None)
+            | Spend_no_turns | Spend_turns _ | Spend_rows_unread _ -> None)
           keepers
       in
       let stores =
@@ -326,6 +338,27 @@ let lines (reading : overview_spend_reading) =
                    (Terminal_text.single_line reason))
             ]
       in
+      let rows_unread =
+        List.filter_map
+          (fun (_, spend) ->
+            match spend with
+            | Spend_rows_unread { rows } -> Some rows
+            | Spend_no_turns | Spend_turns _ | Spend_unread _ -> None)
+          keepers
+      in
+      let rows_unread_line =
+        match rows_unread with
+        | [] -> []
+        | counts ->
+            let keepers = List.length counts in
+            [ warn
+                (Printf.sprintf "$ spend unknown for %d Keeper%s: its %d row%s did not read"
+                   keepers
+                   (if keepers = 1 then "" else "s")
+                   (List.fold_left ( + ) 0 counts)
+                   (if List.fold_left ( + ) 0 counts = 1 then "" else "s"))
+            ]
+      in
       let rows =
         if undecodable = 0 then []
         else
@@ -335,4 +368,4 @@ let lines (reading : overview_spend_reading) =
                  (if undecodable = 1 then "" else "s"))
           ]
       in
-      stale @ stores @ rows
+      stale @ stores @ rows_unread_line @ rows

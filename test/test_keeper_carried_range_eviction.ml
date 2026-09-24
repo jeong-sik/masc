@@ -474,7 +474,7 @@ let test_a_ledger_the_history_does_not_hold_does_not_steer_the_retries () =
         let composed =
           Try_provider.For_testing.compose_carried_model_input
             ~measure_message_bytes:(fun _ -> 1)
-            ~front
+            ~accepted:None ~front
             ~history_digest_at:digest_at
             ~current_turn_results:Try_provider.Current_turn_verbatim
             ~base_path:""
@@ -571,7 +571,7 @@ let test_an_unattributed_refusal_leaves_the_next_turn_its_whole_range () =
         in
         let composed =
           Try_provider.For_testing.compose_carried_model_input
-            ~measure_message_bytes:(fun _ -> 1) ~front
+            ~measure_message_bytes:(fun _ -> 1) ~accepted:None ~front
             ~history_digest_at:digest_at ~current_turn_results:Try_provider.Current_turn_verbatim
             ~base_path:"" ~demote_before:0 ~turn_boundary:(Front.Turn_boundary { end_atom = 0 })
             history
@@ -649,7 +649,7 @@ let test_a_refused_front_survives_candidate_changes ?(fallback_atoms = 16) ~bloc
           in
           let composed =
             Try_provider.For_testing.compose_carried_model_input
-              ~measure_message_bytes:(fun _ -> 1) ~front
+              ~measure_message_bytes:(fun _ -> 1) ~accepted:None ~front
               ~history_digest_at:digest_at ~current_turn_results:Try_provider.Current_turn_verbatim
               ~base_path:"" ~demote_before:0 ~turn_boundary:(Front.Turn_boundary { end_atom = 0 }) history
           in
@@ -790,7 +790,7 @@ let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
     let working = ref (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id) in
     let last = ref None and sent = ref [] and resent = ref 0 in
     let outcome =
-      Try_provider.seed_refusal_sequence
+      Try_provider.turn_boundary_resend_sequence
         ~same_run_retry_authorized:(fun () -> true)
         ~refused_range:(fun () -> !last)
         ~turn_start_front:(fun () ->
@@ -809,7 +809,7 @@ let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
           in
           let composed =
             Try_provider.For_testing.compose_carried_model_input
-              ?continuity ~measure_message_bytes:(fun _ -> 1) ~front
+              ?continuity ~measure_message_bytes:(fun _ -> 1) ~accepted:None ~front
               ~history_digest_at:digest_at ~current_turn_results:Try_provider.Current_turn_verbatim ~base_path:""
               ~demote_before:boundary
               ~turn_boundary:(Front.Turn_boundary { end_atom = boundary })
@@ -900,6 +900,153 @@ let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
   Ledger.Table.For_testing.reset ()
 ;;
 
+(* RFC librarian-lifecycle §4.10: a Librarian point that stands behind lets
+   the request grow every turn until the provider refuses it. The driver's
+   own pieces run here: [turn_boundary_resend_sequence] answers the refusal,
+   and [compose_carried_model_input] composes every request with the turn's
+   held front or, without one, the accepted start the turn record keeps.
+   [trace_id] and the Librarian's read position name atom [point] of the
+   history; the provider accepts at most [limit] atoms. *)
+let librarian_trace = "librarian-behind"
+
+let absorbed_at ~point history =
+  let digest_at = Window.atom_opening_digest history in
+  let progress : Masc.Keeper_librarian_progress.t =
+    { position =
+        { trace_id = librarian_trace
+        ; end_atom = point
+        ; last_atom_digest = Option.get (digest_at (point - 1))
+        }
+    ; boundary_lines_seen = 1
+    }
+  in
+  match Try_provider.absorbed_history ~trace_id:librarian_trace ~messages:history progress with
+  | Some (_, continuity) -> continuity
+  | None -> fail "the read position does not name an atom of this history"
+;;
+
+let librarian_turn ?(refusal = overflow) ?(refuses = fun ~atoms:_ -> false)
+      ~point ~accepted ~limit ~boundary history =
+  let continuity = absorbed_at ~point history in
+  let digest_at = Window.atom_opening_digest history in
+  let atom_count = List.length history in
+  let held = ref None and last = ref None and sent = ref [] in
+  let outcome =
+    Try_provider.turn_boundary_resend_sequence
+      ~same_run_retry_authorized:(fun () -> true)
+      ~refused_range:(fun () -> !last)
+      ~turn_start_front:(fun () ->
+        let first_atom = Front.clamp ~atom_count boundary in
+        Option.map
+          (fun front_digest ->
+             { Front.first_atom; front_digest; source = Front.Turn_start_after_librarian_refusal })
+          (digest_at first_atom))
+      ~hold_front:(fun seed -> held := Some seed)
+      ~on_turn_start:(fun _ _ -> ())
+      ~attempt:(fun () ->
+        let composed =
+          Try_provider.For_testing.compose_carried_model_input
+            ~continuity ~measure_message_bytes:(fun _ -> 1) ~front:None
+            ~accepted:(match !held with Some _ as held -> held | None -> accepted)
+            ~history_digest_at:digest_at ~current_turn_results:Try_provider.Current_turn_verbatim
+            ~base_path:"" ~demote_before:boundary
+            ~turn_boundary:(Front.Turn_boundary { end_atom = boundary })
+            history
+        in
+        let first_atom = composed.Try_provider.projection.Window.dropped_atoms in
+        last := Some (composed.Try_provider.origin, first_atom);
+        sent := first_atom :: !sent;
+        let atoms = atom_count - first_atom in
+        if atoms > limit || refuses ~atoms then Error refusal else Ok first_atom)
+      ()
+  in
+  (* What the turn record keeps of an accepted request: its first atom, named
+     by the message that opens it ([Keeper_carried_front.of_records]). *)
+  let recorded =
+    Result.to_option outcome
+    |> Option.map (fun first_atom ->
+      { Front.first_atom
+      ; front_digest = Option.get (digest_at first_atom)
+      ; source = Front.Turn_record { turn = 1 }
+      })
+  in
+  outcome, List.rev !sent, recorded, !last
+;;
+
+let opened_past_the_point = function
+  | Some (Front.Past_librarian_point { librarian_end_atom; _ }, _) -> Some librarian_end_atom
+  | Some
+      ( ( Front.Carried _ | Front.Librarian_snapshot _ | Front.Librarian_progress _
+        | Front.Turn_start _ | Front.Turn_start_unknown _ )
+      , _ )
+  | None -> None
+;;
+
+(* Tick 1: the Librarian stands at atom 2 of 14 and the provider takes 8
+   atoms. The request from the point is refused, the turn boundary 8 is
+   held, and the resend from it is accepted. Tick 2: the history is 16
+   atoms and the Librarian has not moved. The turn opens at the accepted
+   start 8, not at the point, and the provider takes it on the first
+   request instead of refusing the grown range again. *)
+let test_a_librarian_behind_turn_resends_from_the_boundary () =
+  let first, first_sent, recorded, first_last =
+    librarian_turn ~point:2 ~accepted:None ~limit:8 ~boundary:8 (exchanges ~from:0 7)
+  in
+  check (result int reject) "the boundary resend is accepted" (Ok 8) first;
+  check (list int) "the point, then the turn boundary" [ 2; 8 ] first_sent;
+  check (option int) "the resend opened past the Librarian point" (Some 2)
+    (opened_past_the_point first_last);
+  let second, second_sent, _, second_last =
+    librarian_turn ~point:2 ~accepted:recorded ~limit:8 ~boundary:14 (exchanges ~from:0 8)
+  in
+  check (result int reject) "the next turn is accepted at once" (Ok 8) second;
+  check (list int) "one request, from the accepted start" [ 8 ] second_sent;
+  check (option int) "the gap still opens at the point" (Some 2)
+    (opened_past_the_point second_last)
+;;
+
+(* Live size refusals arrive as [Unknown_invalid_request]: a 400 whose
+   only size signal is its sentence, with no typed code (RFC
+   librarian-lifecycle §4.10 lists the measured wires). The boundary resend
+   answers them with its own set ([boundary_resend_on]), not with
+   [refusal_evicts], so the resend still runs once the cutting ladders
+   answer only a typed size refusal (#38286). *)
+let test_an_unattributed_size_refusal_resends_from_the_boundary () =
+  let outcome, sent, recorded, _ =
+    librarian_turn ~refusal:unattributed_refusal ~point:2 ~accepted:None ~limit:8 ~boundary:8
+      (exchanges ~from:0 7)
+  in
+  check (result int reject) "the boundary resend is accepted" (Ok 8) outcome;
+  check (list int) "the point, then the turn boundary" [ 2; 8 ] sent;
+  check (option int) "the accepted start is recorded" (Some 8)
+    (Option.map (fun (seed : Front.seed) -> seed.first_atom) recorded)
+;;
+
+(* A 400 that was not about size draws the same refusal from the boundary:
+   one more request, no accepted start, and the turn ends on that refusal. *)
+let test_a_refusal_not_about_size_ends_the_turn_after_one_resend () =
+  let outcome, sent, recorded, _ =
+    librarian_turn ~refusal:unattributed_refusal ~refuses:(fun ~atoms:_ -> true)
+      ~point:2 ~accepted:None ~limit:100 ~boundary:8 (exchanges ~from:0 7)
+  in
+  check bool "the refusal is the turn's error" true (outcome = Error unattributed_refusal);
+  check (list int) "one resend from the boundary, and nothing after" [ 2; 8 ] sent;
+  check bool "no accepted start is recorded" true (Option.is_none recorded)
+;;
+
+(* Rules 6 and 7: the resend carries this turn's input and never less. When
+   the pinned part and this turn alone outgrow the provider, the resend is
+   refused too and that refusal ends the sequence; no third request narrows
+   into the turn. *)
+let test_a_refused_boundary_resend_ends_the_turn () =
+  let outcome, sent, recorded, _ =
+    librarian_turn ~point:2 ~accepted:None ~limit:3 ~boundary:8 (exchanges ~from:0 7)
+  in
+  check bool "the refusal is the turn's error" true (outcome = Error overflow);
+  check (list int) "the point, then the turn boundary, and nothing after" [ 2; 8 ] sent;
+  check bool "no accepted start is recorded" true (Option.is_none recorded)
+;;
+
 (* The pair table sits behind an Eio mutex. *)
 let () =
   Eio_main.run
@@ -949,6 +1096,14 @@ let () =
             (test_a_refused_front_survives_candidate_changes ~blocks:true ~warm_fallback:true)
         ; test_case "a refused seed moves the turn's front to the turn boundary" `Quick
             test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary
+        ; test_case "a Librarian-behind turn resends from the turn boundary" `Quick
+            test_a_librarian_behind_turn_resends_from_the_boundary
+        ; test_case "a refused boundary resend ends the turn" `Quick
+            test_a_refused_boundary_resend_ends_the_turn
+        ; test_case "an unattributed size refusal resends from the boundary" `Quick
+            test_an_unattributed_size_refusal_resends_from_the_boundary
+        ; test_case "a refusal not about size ends the turn after one resend" `Quick
+            test_a_refusal_not_about_size_ends_the_turn_after_one_resend
         ; test_case "the actual request can advance beyond the fallback ledger" `Quick
             (test_a_refused_front_survives_candidate_changes
                ~fallback_atoms:8 ~blocks:true ~warm_fallback:true)

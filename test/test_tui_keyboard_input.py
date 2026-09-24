@@ -2667,9 +2667,9 @@ def keeper_detail_overscroll_interaction(
         completed = False
         try:
             wait_for_output(
-                process, master_fd, output, b"cluster-a", start=0, timeout=10.0
+                process, master_fd, output, b"Health: ", start=0, timeout=10.0
             )
-            cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+            cluster_end = output.find(b"Health: ") + len(b"Health: ")
             wait_for_output(
                 process,
                 master_fd,
@@ -2794,8 +2794,8 @@ def keeper_selection_identity_interaction(
     output: bytearray,
     base_path: str,
 ) -> None:
-    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
-    cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+    wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
+    cluster_end = output.find(b"Health: ") + len(b"Health: ")
     wait_for_output(
         process,
         master_fd,
@@ -2900,7 +2900,7 @@ def cli_base_path_overrides_environment_interaction(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+    wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
     frame = send_and_wait(
         process,
         master_fd,
@@ -2930,15 +2930,16 @@ def ctrl_y_reaches_the_tui_interaction(
     has no VDSUSP, so there the check on the key is skipped and the press is
     the whole test.
     """
-    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+    wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
     if hasattr(termios, "VDSUSP"):
         cc = termios.tcgetattr(slave_fd)[6][termios.VDSUSP]
         dsusp = cc if isinstance(cc, int) else cc[0]
         if dsusp != os.fpathconf(slave_fd, "PC_VDISABLE"):
             raise AssertionError("raw mode did not reclaim Ctrl-Y from VDSUSP")
     # Overview has no conversation, so the key's answer there is the link
-    # preview's notice in the events pane -- a sentence the TUI can only draw
-    # if it read the byte. The pane cuts it at 100 columns.
+    # preview's notice on the footer -- a sentence the TUI can only draw if
+    # it read the byte. The needle stops short of the end in case the footer
+    # cuts it.
     send_and_wait(
         process,
         master_fd,
@@ -2964,13 +2965,15 @@ def first_install_waits_for_its_workspace_interaction(
     this pins what the operator actually sees. The harness seeds no
     ``.masc/auth`` and this scenario omits ``MASC_TOKEN``, so the boot decision
     is the one a fresh install takes -- no workspace to mint into yet. The
-    Overview events pane draws that notice, and the ``masc login`` command the
-    old single-constructor line handed over is not on the screen. The pane
-    trims a long row at the panel width, so the needle is the notice's opening.
+    TUI session block on Metrics draws that notice, and the ``masc login``
+    command the old single-constructor line handed over is not on the screen.
+    The block trims a long row at the frame width, so the needle is the
+    notice's opening.
     """
     wait_for_output(
         process, master_fd, output, b"MASC Overview", start=0, timeout=30.0
     )
+    send_and_wait(process, master_fd, output, b"m", b"TUI session")
     drain_until_quiet(process, master_fd, output)
     screen = screen_text(bytes(output))
     if b"no operator token yet" not in screen:
@@ -3010,16 +3013,17 @@ def failed_mint_is_marked_as_an_error_interaction(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    """A mint that failed reads as an error on the Overview events pane.
+    """A mint that failed reads as an error in the TUI session block on Metrics.
 
     Its row carries the chat pane's failure glyph after the clock, which a
     pending workspace's row does not; the mark is a shape, so it holds under
-    NO_COLOR as well. The pane trims the sentence at its width, so the needle
-    is the mark and the notice's opening.
+    NO_COLOR as well. The block trims the sentence at the frame width, so the
+    needle is the mark and the notice's opening.
     """
     wait_for_output(
         process, master_fd, output, b"MASC Overview", start=0, timeout=30.0
     )
+    send_and_wait(process, master_fd, output, b"m", b"TUI session")
     drain_until_quiet(process, master_fd, output)
     screen = screen_text(bytes(output))
     if b"\xe2\x9c\x97 no operator token, and" not in screen:
@@ -3507,10 +3511,15 @@ def assert_row_budgeted_surfaces(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    for expected in (b"attention-1", b"attention-2", b"task-1", b"q:quit"):
+    # At 16 rows the Attention panel holds three of the six items. The
+    # smallest surface the TUI draws is 15 rows, where it drops the composer
+    # and keeps the same three, so three is the tightest this panel gets. The
+    # budget checked here is that the panel stops where its rows stop: the
+    # third item is the last one drawn and the fourth is not.
+    for expected in (b"attention-1", b"attention-3", b"task-1", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
-    if b"attention-3" in overview:
+    if b"attention-4" in overview:
         raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
 
     resize_and_wait(
@@ -3557,372 +3566,6 @@ def assert_row_budgeted_surfaces(
     # thread is still reachable.
     for comment in (b"comment-3", b"comment-4", b"comment-5"):
         send_and_wait(process, master_fd, output, b"j", comment)
-    os.write(master_fd, b"q")
-
-
-EVENT_RANGE_RE = re.compile(rb"TUI Session Events (\d+)-(\d+)/(\d+)")
-
-
-def manual_refresh_run(drawn: bytes, where: str) -> int:
-    """How many manual refreshes the newest event row stands for.
-
-    The panel folds a run of identical events into one row and writes the
-    length as a ×N tail; a run of one carries no tail at all.
-    """
-    match = re.search(rb"Manual refresh (?:\xc3\x97(\d+))?", screen_text(drawn))
-    if match is None:
-        raise AssertionError(f"{where} drew no manual refresh row: {drawn!r}")
-    return int(match.group(1)) if match.group(1) else 1
-
-
-def event_total(frame: bytes, where: str) -> int:
-    """How many events the pane says it holds, read from the screen.
-
-    The count is not fixed by the fixture: it includes events the TUI raises
-    itself, and a runner that surfaces one more load error than a laptop reads
-    a different number. Every range below is built from this so the scenario
-    asserts scroll positions -- which is its subject -- rather than a list
-    length it does not control.
-    """
-    match = EVENT_RANGE_RE.search(frame)
-    if match is None:
-        raise AssertionError(f"{where} drew no event range: {frame!r}")
-    return int(match.group(3))
-
-
-def event_range(first: int, last: int, total: int) -> bytes:
-    return f"TUI Session Events {first}-{last}/{total}".encode()
-
-
-def newest_window(height: int, total: int) -> bytes:
-    """The window resting against the newest event."""
-    return event_range(1, min(height, total), total)
-
-
-def oldest_window(height: int, total: int) -> bytes:
-    """The window resting against the oldest event."""
-    return event_range(max(1, total - height + 1), total, total)
-
-
-# Rows the Overview's event panel may take, mirroring
-# Render_schedule.overview_panel_row_cap.
-OVERVIEW_PANEL_ROW_CAP = 6
-
-
-def event_range_span(frame: bytes, where: str) -> int:
-    """How many event rows the panel is drawing, read off its own range line."""
-    match = EVENT_RANGE_RE.search(frame)
-    if match is None:
-        raise AssertionError(f"{where} drew no event range: {frame!r}")
-    first, last, _total = (int(g) for g in match.groups())
-    return last - first + 1
-
-
-def clamped_window(visible: int, scroll: int, total: int) -> bytes:
-    """The range the panel draws for [scroll], mirroring
-    Render_schedule.project_overview_event_window.
-
-    The offset is clamped to total - visible, so a scroll made in a short
-    viewport survives into a tall one only as far as the taller panel allows.
-    Where the list is no longer than the panel that clamp is 0 and every
-    window is the newest one -- which is why pinning "1-2" here held while
-    the TUI raised exactly six events and stopped when it raised more.
-    """
-    offset = max(0, min(scroll, total - visible))
-    return event_range(offset + 1, offset + min(visible, total - offset), total)
-
-
-def assert_event_window_at_newest(frame: bytes, where: str) -> None:
-    """The event window sits at the newest end of the list.
-
-    This is what growing the viewport is supposed to restore, and it is the
-    first number that says so. The total is deliberately unread: it counts
-    events the TUI raises itself, so a runner that surfaces one more load
-    error than this laptop reads a different number for reasons the scenario
-    is not about. Pinning the literal "1-6/6" failed on CI at "1-6/7" -- the
-    window was exactly where it belonged.
-    """
-    match = EVENT_RANGE_RE.search(frame)
-    if match is None:
-        raise AssertionError(f"{where} drew no event range: {frame!r}")
-    first, last, total = (int(g) for g in match.groups())
-    if first != 1:
-        raise AssertionError(
-            f"{where} did not return to the newest event: "
-            f"range {first}-{last}/{total}: {frame!r}"
-        )
-    if not 1 <= last <= total:
-        raise AssertionError(
-            f"{where} drew an impossible range {first}-{last}/{total}: {frame!r}"
-        )
-
-
-def assert_overview_event_rows(
-    process: subprocess.Popen[bytes],
-    master_fd: int,
-    slave_fd: int,
-    output: bytearray,
-    _base_path: str,
-) -> None:
-    def scroll_to_oldest(total: int, window: int = 2, start_offset: int = 0) -> None:
-        """Press j until the window rests against the oldest event.
-
-        How many presses that takes follows the event total, which the TUI
-        raises itself. Four presses against a literal "/6" held only while
-        the startup event count happened to equal the panel.
-
-        [start_offset] is the offset the panel already rests at. The second
-        walk of the scenario starts where the 22-row surface expansion clamped
-        the offset -- with more events than the panel that is not the newest
-        window, so counting from 0 would wait for labels the TUI has
-        already scrolled past.
-        """
-        for first in range(start_offset + 2, total - window + 2):
-            send_and_wait(
-                process,
-                master_fd,
-                output,
-                b"j",
-                event_range(first, first + window - 1, total),
-            )
-
-    def scroll_to_newest(total: int, window: int = 2) -> None:
-        """Press k until the window rests against the newest event.
-
-        That is where the collapsed run of manual refreshes is drawn; the
-        oldest window this scenario pins does not carry it.
-        """
-        for first in range(total - window, 0, -1):
-            send_and_wait(
-                process,
-                master_fd,
-                output,
-                b"k",
-                event_range(first, first + window - 1, total),
-            )
-
-    wait_for_output(process, master_fd, output, b"TUI started", start=0, timeout=10.0)
-    wait_for_output(process, master_fd, output, b"task-5", start=0, timeout=3.0)
-    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=3.0)
-    cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
-    wait_for_output(
-        process,
-        master_fd,
-        output,
-        FRAME_END,
-        start=cluster_end,
-        timeout=3.0,
-    )
-
-    send_and_wait(process, master_fd, output, b"rrrrr2", b"MASC Keepers")
-    tab_until(process, master_fd, output, b"MASC Overview")
-
-    # The smallest viewport that still fits the whole Overview budget. It grew
-    # by two terminal rows when the surface strip and composer took their
-    # fixed lines, so this is 24 rather than 22; the assertions below are the
-    # same surface budget, not a larger one.
-    overview = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=24,
-        columns=100,
-        needle=b"MASC Overview",
-        controls=(FULL_REDRAW,),
-        final_cursor=b"\x1b[?25l",
-    )
-    # "Manual refresh" and not "TUI started": nothing has scrolled yet, so the
-    # panel rests on the newest events and the oldest one need not be drawn.
-    # That it was drawn held only while the total equalled the panel's rows.
-    for expected in (b"Manual refresh", b"task-1", b"task-5", b"q:quit"):
-        if expected not in overview:
-            raise AssertionError(f"24-row terminal Overview omitted {expected!r}: {overview!r}")
-    assert_event_window_at_newest(overview, "24-row terminal Overview")
-    span = event_range_span(overview, "24-row terminal Overview")
-    # The cap is a ceiling, not a quota: the panel draws every event it has up
-    # to six. The total is read off the screen for the reason event_total()
-    # gives -- it counts events the TUI raises itself, so it is not the
-    # fixture's to fix -- and this line asserted a literal 6 against it, which
-    # held only while startup happened to raise at least six.
-    expected_span = min(OVERVIEW_PANEL_ROW_CAP, event_total(overview, "24-row terminal Overview"))
-    if span != expected_span:
-        raise AssertionError(
-            f"24-row terminal Overview drew {span} event rows, not the "
-            f"{expected_span} it has room for: {overview!r}"
-        )
-
-    overview = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=16,
-        columns=100,
-        needle=b"MASC Overview",
-        controls=(FULL_REDRAW,),
-        final_cursor=b"\x1b[?25l",
-    )
-    for expected in (b"Manual refresh", b"task-1", b"q:quit"):
-        if expected not in overview:
-            raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
-    total = event_total(overview, "14-row Overview")
-    if newest_window(2, total) not in overview:
-        raise AssertionError(f"14-row Overview omitted its event range: {overview!r}")
-    span = event_range_span(overview, "14-row Overview")
-    if span != 2:
-        raise AssertionError(
-            f"14-row Overview drew {span} event rows, not the two it has room "
-            f"for: {overview!r}"
-        )
-    if b"TUI started" in overview or b"task-2" in overview:
-        raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
-
-    scroll_to_oldest(total)
-    oldest = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=16,
-        columns=99,
-        needle=oldest_window(2, total),
-        controls=(FULL_REDRAW,),
-        final_cursor=b"\x1b[?25l",
-    )
-    if b"TUI started" not in oldest:
-        raise AssertionError(f"Overview could not reach its oldest event: {oldest!r}")
-
-    send_and_wait(process, master_fd, output, b"jk", event_range(total - 2, total - 1, total))
-    send_and_wait(process, master_fd, output, b"j", oldest_window(2, total))
-
-    tab_until(process, master_fd, output, b"MASC Keepers")
-    tab_until(process, master_fd, output, oldest_window(2, total))
-    resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=8,
-        columns=99,
-        needle=b"terminal too small",
-        controls=(FULL_REDRAW,),
-        final_cursor=b"\x1b[?25l",
-    )
-    os.write(master_fd, b"jk")
-    wait_for_terminal_input_consumed(slave_fd)
-    resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=8,
-        columns=98,
-        needle=b"terminal too small",
-        controls=(FULL_REDRAW,),
-        final_cursor=b"\x1b[?25l",
-    )
-    restored = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=16,
-        columns=100,
-        needle=oldest_window(2, total),
-        controls=(FULL_REDRAW,),
-        final_cursor=b"\x1b[?25l",
-    )
-    if b"TUI started" not in restored:
-        raise AssertionError(
-            f"compact viewport changed the hidden event offset: {restored!r}"
-        )
-
-    expanded = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=24,
-        columns=100,
-        needle=clamped_window(OVERVIEW_PANEL_ROW_CAP, total, total),
-        controls=(FULL_REDRAW,),
-        final_cursor=b"\x1b[?25l",
-    )
-    if b"TUI started" not in expanded:
-        raise AssertionError(f"Overview resize lost a retained event: {expanded!r}")
-
-    resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=16,
-        columns=100,
-        needle=clamped_window(2, max(0, total - OVERVIEW_PANEL_ROW_CAP), total),
-        controls=(FULL_REDRAW,),
-        final_cursor=b"\x1b[?25l",
-    )
-    scroll_to_oldest(total, start_offset=max(0, total - OVERVIEW_PANEL_ROW_CAP))
-    # A manual refresh while the newest row is already a manual refresh does
-    # not add a row. The panel collapses a run of identical events into one
-    # with a ×N tail, keyed on event type and content alone
-    # (Masc_tui_types.overview_event_collapse_key), so the count beside the
-    # title stays where it is and the run grows instead. Asserting the count
-    # went up waited on a row the panel had folded away.
-    scroll_to_newest(total)
-    before_run = manual_refresh_run(
-        bytes(output), "Overview before the refresh"
-    )
-    scroll_to_oldest(total)
-    # Written rather than waited on: the fold leaves every row of the oldest
-    # window exactly as it was, and a differential redraw sends nothing for a
-    # row that did not change.
-    os.write(master_fd, b"r")
-    drain_until_quiet(process, master_fd, output)
-    anchored = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=16,
-        columns=99,
-        needle=b"MASC Overview",
-        controls=(FULL_REDRAW,),
-        final_cursor=b"\x1b[?25l",
-    )
-    after_r_total = event_total(anchored, "99-column Overview")
-    if after_r_total != total:
-        raise AssertionError(
-            f"the folded refresh changed the row count ({total} -> "
-            f"{after_r_total}): {anchored!r}"
-        )
-    if oldest_window(2, after_r_total) not in anchored:
-        raise AssertionError(f"the added event broke the oldest pin: {anchored!r}")
-    # The oldest event on screen is the whole claim: the pin held while the
-    # event arrived. Which younger event shares the two-row window depends on
-    # how many feed events the runtime logged, which is not this test's claim.
-    if b"TUI started" not in anchored:
-        raise AssertionError(f"the added event changed the manual anchor: {anchored!r}")
-    scroll_to_newest(total)
-    after_run = manual_refresh_run(bytes(output), "Overview after the refresh")
-    if after_run <= before_run:
-        raise AssertionError(
-            f"the refresh did not reach the event log ({before_run} -> {after_run})"
-        )
-    scroll_to_oldest(total)
-
-    send_and_wait(
-        process,
-        master_fd,
-        output,
-        b"k",
-        event_range(after_r_total - 2, after_r_total - 1, after_r_total),
-    )
-    newer = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=16,
-        columns=100,
-        needle=event_range(after_r_total - 2, after_r_total - 1, after_r_total),
-        controls=(FULL_REDRAW,),
-        final_cursor=b"\x1b[?25l",
-    )
-    if b"TUI started" in newer:
-        raise AssertionError(f"one k did not move toward newer events: {newer!r}")
-
     os.write(master_fd, b"q")
 
 
@@ -3988,8 +3631,8 @@ def keeper_ask_answer_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
-        cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+        wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
+        cluster_end = output.find(b"Health: ") + len(b"Health: ")
         wait_for_output(
             process, master_fd, output, FRAME_END, start=cluster_end, timeout=3.0
         )
@@ -4178,6 +3821,14 @@ def gate_mode_picker_interaction(requests: HttpRequests) -> Interaction:
 BLOCKED_GATE_REASON_PREFIX = b"Auto Judge exact attempt quarantined after provider"
 BLOCKED_GATE_REASON_TAIL = b"operator must retain this terminal explanation"
 
+# ESC [ 8 m is the conceal: a terminal honouring it stops drawing what comes
+# after, so the first words stand for the whole ask. The three constants name
+# the three things the screen owes the operator - the body's opening, the part
+# the escape would have hidden, and the escape itself.
+CONCEAL_ATTACK_CONTENT = "공유합니다 \x1b[8m @everyone https://evil.example/x \x1b[0m"
+CONCEAL_ATTACK_VISIBLE = "공유합니다".encode("utf-8")
+CONCEAL_ATTACK_TAIL = b"evil.example/x"
+
 
 def blocked_gate_detail_http_fixtures() -> HttpFixtures:
     fixtures = overview_event_http_fixtures()
@@ -4260,6 +3911,80 @@ def blocked_gate_detail_interaction() -> Interaction:
     return interact
 
 
+# The whole-input pane is the same screen a concealing escape aims at: a
+# value carrying ESC [ 8 m would hide the ask behind its first words and
+# show only what the attacker wants shown. The pane draws input values
+# through terminal_safe_text, which keeps newline (0x0A) and replaces the
+# rest of C0/C1 with spaces, so the escape must arrive as visible text,
+# never as its byte.
+def concealed_input_http_fixtures() -> HttpFixtures:
+    fixtures = blocked_gate_detail_http_fixtures()
+    row = fixtures["/api/v1/dashboard/gate"][1]["approval_queue"][0]
+    row["input"] = {
+        "connector": "discord",
+        "content": CONCEAL_ATTACK_CONTENT,
+    }
+    row["tool_name"] = "connector_post"
+    row["input_preview"] = '{"connector":"discord","content'
+    return fixtures
+
+
+def concealed_input_detail_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=40,
+            columns=100,
+            needle=b"MASC Overview",
+        )
+        tab_until(process, master_fd, output, b"MASC Approvals")
+        # The row names the operation the producer sent, verbatim: the decoder
+        # passes [tool_name] through for every operation but identity_call.
+        wait_for_output(
+            process, master_fd, output, b"connector_post", start=0, timeout=5.0
+        )
+        # The queue row's preview stops before the body, so these bytes can
+        # only come from the detail pane this scenario is about.
+        detail = send_and_wait(
+            process, master_fd, output, b"\r", CONCEAL_ATTACK_VISIBLE
+        )
+        frame = frame_containing(detail, CONCEAL_ATTACK_VISIBLE)
+        plain = CSI_RE.sub(b"", frame)
+        # The pane labels the value it drew, key by key.
+        if b"content" not in plain:
+            raise AssertionError(f"conceal input key missing from detail: {frame!r}")
+        # The body rides whole: the ask's first words are on the screen.
+        if CONCEAL_ATTACK_VISIBLE not in plain:
+            raise AssertionError(
+                f"conceal input body missing from detail: {frame!r}"
+            )
+        # ...and so does the part the escape was placed to hide.
+        if CONCEAL_ATTACK_TAIL not in plain:
+            raise AssertionError(
+                f"conceal input tail missing from detail: {frame!r}"
+            )
+        # Asked of the raw frame, not of [plain]: CSI_RE strips exactly the
+        # sequence under test, so this assertion could never fail if it read
+        # the stripped copy. No renderer here emits SGR 8 (grep: 0 hits), so
+        # any occurrence came from the value.
+        if b"\x1b[8m" in frame:
+            raise AssertionError(
+                "the detail pane drew a raw ESC: the input value reached the"
+                f" terminal unsanitized: {frame!r}"
+            )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def approval_selection_identity_interaction(
     fixtures: HttpFixtures,
     initial_items: list[dict[str, object]],
@@ -4272,8 +3997,8 @@ def approval_selection_identity_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
-        cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+        wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
+        cluster_end = output.find(b"Health: ") + len(b"Health: ")
         wait_for_output(
             process,
             master_fd,
@@ -4773,8 +4498,8 @@ def board_reference_interaction(fixtures: HttpFixtures) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
-        cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+        wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
+        cluster_end = output.find(b"Health: ") + len(b"Health: ")
         wait_for_output(
             process, master_fd, output, FRAME_END, start=cluster_end, timeout=3.0
         )
@@ -4838,7 +4563,7 @@ def board_json_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+        wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
         tab_until(process, master_fd, output, b"MASC Keepers")
         tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (2)"))
         resize_and_wait(
@@ -4902,8 +4627,8 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
-        cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+        wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
+        cluster_end = output.find(b"Health: ") + len(b"Health: ")
         wait_for_output(
             process,
             master_fd,
@@ -5037,8 +4762,8 @@ def open_loaded_board(
     *,
     post_count: int,
 ) -> None:
-    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
-    cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+    wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
+    cluster_end = output.find(b"Health: ") + len(b"Health: ")
     wait_for_output(
         process,
         master_fd,
@@ -5133,10 +4858,18 @@ def board_detail_authority_interaction(
         try:
             open_loaded_board(process, master_fd, output, post_count=2)
             fixtures["/api/v1/board?sort_by=hot"] = late_list
-            fixtures["/api/v1/dashboard/briefing"] = (
-                200,
-                overview_event_briefing("late-list-applied"),
-            )
+            # The Overview draws the new briefing's attention item, which is
+            # how the walk below knows the refresh reached it.
+            late_briefing = overview_event_briefing()
+            late_briefing["attention_queue"] = [
+                {
+                    "kind": "fixture_marker",
+                    "severity": "info",
+                    "summary": "late-list-applied",
+                    "target_type": "board",
+                }
+            ]
+            fixtures["/api/v1/dashboard/briefing"] = (200, late_briefing)
 
             read_available(master_fd, output)
             os.write(master_fd, b"r")
@@ -6206,11 +5939,12 @@ class AtomicChatFixture:
             sequence = len(self.submitted)
             operation = {
                 "operation_id": request["request_id"], "sequence": str(sequence),
-                "source": {"schema": "masc.keeper_chat_operation.source.v1", "submitted_by": "masc-tui",
+                "source": {"schema": "masc.keeper_chat_operation.source.v2", "submitted_by": "masc-tui",
                     "thread_id": "keeper:alpha", "continuation_channel": {"kind": "dashboard", "thread_id": "keeper:alpha"},
                     "surface": {"kind": "dashboard"}, "channel": "", "channel_user_id": "", "channel_user_name": "",
                     "channel_workspace_id": "", "conversation_id": None, "external_message_id": None,
-                    "workspace_id": None, "extra_mentions": [], "user_row_origin": "needs_append"},
+                    "workspace_id": None, "extra_mentions": [], "sender_keeper": None,
+                    "user_row_origin": "needs_append"},
                 # The server keeps the input as submitted, so a later /queue edit
                 # reads the staged media and attachments back from here.
                 "input": {"schema": "masc.keeper_chat_operation.input.v1", "message": request["message"],
@@ -9987,10 +9721,10 @@ def repository_add_interaction(requests: HttpRequests) -> Interaction:
     key was pressed on says what happened.
 
     Every outcome of this action -- the registration, a refused declaration,
-    an editor that never started -- went to the event log, and the event log
-    is drawn by Overview alone. So the operator who pressed the key stood on
-    the one surface that could not answer them, and a repository that was
-    registered looked exactly like nothing at all."""
+    an editor that never started -- went only to the session log, which
+    another surface draws. So the operator who pressed the key stood on a
+    surface that could not answer them, and a repository that was registered
+    looked exactly like nothing at all."""
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -10435,9 +10169,21 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
             "reason": "needs a repro",
         }:
             raise AssertionError(f"reject body: {reject_payload!r}")
-        # The verdict events live on the Overview's TUI Session Events pane, so
-        # the visible trace is asserted there, not on the Verification frame.
+        # The verdict events live in the TUI session block on Metrics, so the
+        # visible trace is asserted there, not on the Verification frame. The
+        # block lists the newest line last; a tall frame keeps every retained
+        # line on screen, and the resize redraws the whole frame.
         tab_until(process, master_fd, output, b"MASC Overview")
+        send_and_wait(process, master_fd, output, b"m", b"TUI session")
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=50,
+            columns=100,
+            needle=b"TUI session",
+            controls=(FULL_REDRAW,),
+        )
         wait_for_output(
             process,
             master_fd,
@@ -10446,8 +10192,8 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
             start=reject_start,
             timeout=3.0,
         )
-        # The events pane trims long rows, so the completion needle stops
-        # before the width does.
+        # The block trims long rows, so the completion needle stops before
+        # the width does.
         wait_for_output(
             process,
             master_fd,
@@ -13857,17 +13603,8 @@ def run_observer_reconnect_regression(executable: str) -> None:
     def interact(process, master_fd, _slave_fd, output, _base_path):
         try:
             resize_and_wait(process, master_fd, output, rows=38, columns=150, needle=b"MASC Overview")
-            wait_for_output(process, master_fd, output, b"feed: live 1", start=0, timeout=10)
-            # The cluster and project names sit two cells apart, not in
-            # 24- and 20-cell columns: the live names are "default" and
-            # "me", and the blank padding cut the transport tail to
-            # "ws …" beside the roster pane.
-            summary = screen_text(bytes(output))
-            if b"Cluster: cluster-a  Project: project-a  " not in summary:
-                raise AssertionError(
-                    f"the Overview pads its cluster and project names: {summary!r}"
-                )
             send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
+            wait_for_output(process, master_fd, output, b"feed: live 1", start=0, timeout=10)
             send_and_wait(process, master_fd, output, b"f", b"scope actions")
             send_and_wait(process, master_fd, output, b"\r", b"Tool use ID: before-disconnect")
             releases[0].set()
@@ -13986,8 +13723,8 @@ def run_acting_call_evidence_regression(executable: str) -> None:
     def interact(process, master_fd, _slave_fd, output, _base_path):
         try:
             resize_and_wait(process, master_fd, output, rows=35, columns=140, needle=b"MASC Overview")
-            wait_for_output(process, master_fd, output, b"feed: live 2", start=0, timeout=10)
             send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
+            wait_for_output(process, master_fd, output, b"feed: live 2", start=0, timeout=10)
             # A folded turn is never silently opened as one of its calls.
             aggregate_start = len(output)
             os.write(master_fd, b"\r")
@@ -14067,7 +13804,10 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         # Spelling the number here made a wording change to the row a change
         # to this file, and editing this file puts the whole walk inside the
         # gate's twelve-minute step alongside every other suite the change
-        # selects.
+        # selects. The row is on Activity's status line.
+        read_available(master_fd, output)
+        activity_start = len(output)
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
         wait_for_output(
             process, master_fd, output, b"feed: closed", start=0, timeout=10.0
         )
@@ -14083,7 +13823,16 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         # the observation is held but hidden. The default view folds the call
         # into a turn chunk: the running turn names its in-flight call under
         # the keeper's number.
-        acting = send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
+        # The walk is already on Activity; another Tab would leave it.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            "(1 row \u00b7 2 events held)".encode(),
+            start=activity_start,
+            timeout=10.0,
+        )
+        acting = bytes(output[activity_start:])
         for needle, what in (
             ("(1 row \u00b7 2 events held)".encode(), "the shown rows and held events"),
             (b"alpha", "the keeper that acted"),
@@ -14162,9 +13911,13 @@ def task_dispatch_interaction(requests: HttpRequests) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        # The closed feed row says the MCP session was opened; it is on
+        # Activity's status line, and the composer is read on the Overview.
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
         wait_for_output(
             process, master_fd, output, b"feed: closed", start=0, timeout=10.0
         )
+        tab_until(process, master_fd, output, b"MASC Overview")
         send_and_wait(process, master_fd, output, b"i", b"\xe2\x80\xba to alpha")
         send_and_wait(process, master_fd, output, b"/task Lanes surface", b"/task Lanes surface")
         os.write(master_fd, b"\r")
@@ -14363,6 +14116,56 @@ def unread_keeper_counted_interaction() -> Interaction:
             start=0,
             timeout=10.0,
         )
+        # The harness confirms the exit that this first press arms.
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def paused_and_stopped_briefing() -> HttpResponse:
+    # One Keeper the operator paused (the flag, whatever the phase), one
+    # paused by phase, one stopped, one with no phase and one running.
+    return (
+        200,
+        {
+            "summary": {
+                "workspace_health": "ok",
+                "cluster": "cluster-a",
+                "project": "project-a",
+            },
+            "generated_at": "2026-09-23T00:00:00Z",
+            "incidents": [],
+            "attention_queue": [],
+            "attention_items": [],
+            "agent_briefs": [],
+            "keeper_briefs": [
+                {"name": "k-flagged", "phase": None, "paused": True},
+                {"name": "k-halted", "phase": "paused", "paused": False},
+                {"name": "k-stopped", "phase": "stopped", "paused": False},
+                {"name": "k-unknown", "phase": None, "paused": False},
+                {"name": "k-running", "phase": "running", "last_turn_ago_s": 30},
+            ],
+            "keepers_unread": [],
+        },
+    )
+
+
+def paused_apart_from_stopped_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # Each count in the Team title is the Keepers on the line it names.
+        for needle in (
+            b"1 idle \xc2\xb7 1 no phase \xc2\xb7 2 paused \xc2\xb7 1 stopped",
+            b"? no phase: k-unknown",
+            b"paused: k-flagged, k-halted",
+            b"stopped: k-stopped",
+        ):
+            wait_for_output(process, master_fd, output, needle, start=0, timeout=10.0)
         # The harness confirms the exit that this first press arms.
         os.write(master_fd, b"q")
 
@@ -14964,6 +14767,14 @@ def run_keyboard_regression(executable: str) -> None:
             "/api/v1/dashboard/briefing": unread_keeper_briefing(),
         },
     )
+    run_terminal_scenario(
+        executable,
+        description="Paused apart from stopped",
+        interact=paused_apart_from_stopped_interaction(),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": paused_and_stopped_briefing(),
+        },
+    )
     composer_requests: HttpRequests = []
     run_terminal_scenario(
         executable,
@@ -15022,13 +14833,6 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
-        description="event-budgeted Overview",
-        interact=assert_overview_event_rows,
-        http_fixtures=keeper_runtime_http_fixtures(),
-        prepare_workspace=seed_row_budget_workspace,
-    )
-    run_terminal_scenario(
-        executable,
         description="approval selection identity",
         interact=approval_selection_identity_interaction(
             approval_fixtures,
@@ -15077,6 +14881,12 @@ def run_keyboard_regression(executable: str) -> None:
         description="Blocked Gate reason remains whole in approval detail",
         interact=blocked_gate_detail_interaction(),
         http_fixtures=blocked_gate_detail_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="A concealing escape in the input draws as text in approval detail",
+        interact=concealed_input_detail_interaction(),
+        http_fixtures=concealed_input_http_fixtures(),
     )
     run_terminal_scenario(
         executable,
@@ -15386,7 +15196,7 @@ def run_first_install_credential_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
-        description="a mint that failed is marked as an error on the events pane",
+        description="a mint that failed is marked as an error in the TUI session block",
         interact=failed_mint_is_marked_as_an_error_interaction,
         http_fixtures=overview_event_http_fixtures(),
         prepare_workspace=seed_a_workspace_that_refuses_a_credential,

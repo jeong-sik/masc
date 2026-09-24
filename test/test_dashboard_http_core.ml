@@ -5683,6 +5683,11 @@ let test_direct_assignment_intervening_write_fences_keeper_config_post () =
 let test_direct_assignment_route_surfaces_runtime_lock_release_warning () =
   with_direct_assignment_model_catalog @@ fun () ->
   with_test_env @@ fun ~env:_ ~sw ~config ->
+  (* A known registry state: none published, so the commit response has one
+     right answer for its exact-output row. *)
+  (match Runtime_exact_output_registry.unpublish () with
+   | Ok () -> ()
+   | Error error -> fail (Runtime_exact_output_registry.publication_error_to_string error));
   let name = "direct-assignment-release-warning" in
   prepare_config_sync_keeper ~sw config name;
   let runtime_path =
@@ -5727,6 +5732,14 @@ let test_direct_assignment_route_surfaces_runtime_lock_release_warning () =
     "runtime_config_lock_release_unconfirmed"
     (json |> member "commit" |> member "warnings" |> index 0
      |> member "code" |> to_string);
+  (* Every commit response says what happened to the exact-output registry,
+     apart from routing: routing always applies, the registry only when one is
+     published (#38779). *)
+  let exact = json |> member "application" |> member "exact_output_registry" in
+  check string "a commit with no published registry reports it unpublished" "unpublished"
+    (exact |> member "status" |> to_string);
+  check bool "an unpublished registry is reported as needing a restart" true
+    (exact |> member "requires_restart" |> to_bool);
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)

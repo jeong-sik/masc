@@ -38,6 +38,15 @@ type keeper_overlay_status =
   | Keeper_preempted_by_env
   | Keeper_mixed
 
+type exact_output_targets =
+  | Targets_runtime_bindings
+  | Targets_replacement_catalog
+
+type exact_output_registry_status =
+  | Exact_output_registry_applied of exact_output_targets
+  | Exact_output_registry_unpublished
+  | Exact_output_registry_kept of { reason : string }
+
 type applied_at =
   | Not_applied
   | Applied_at_string of string
@@ -57,12 +66,19 @@ type application =
   ; keeper_applied_keys : string list
   ; keeper_preempted_keys : string list
   ; skills : skill_application
+  ; exact_output_registry : exact_output_registry_status
+  }
+
+type lock_warning =
+  { code : string
+  ; detail : string
   }
 
 type t =
   { source_revision : string
   ; order : string
   ; durability : durability
+  ; lock_warnings : lock_warning list
   ; application : application
   }
 
@@ -208,10 +224,66 @@ let keeper_status_of_string = function
   | _ -> Error "invalid Keeper overlay application status"
 ;;
 
+let decode_exact_output_registry = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let* status = string_field "status" fields in
+    let* requires_restart = bool_field "requires_restart" fields in
+    (match status, requires_restart with
+     | "applied", false ->
+       let* () = exact_fields [ "status"; "requires_restart"; "targets" ] fields in
+       (match string_field "targets" fields with
+        | Ok "runtime_bindings" -> Ok (Exact_output_registry_applied Targets_runtime_bindings)
+        | Ok "replacement_catalog" ->
+          Ok (Exact_output_registry_applied Targets_replacement_catalog)
+        | Ok _ | Error _ -> Error "invalid exact-output registry targets")
+     | "unpublished", true ->
+       let* () = exact_fields [ "status"; "requires_restart" ] fields in
+       Ok Exact_output_registry_unpublished
+     | "kept", false ->
+       let* () =
+         exact_fields
+           [ "status"; "requires_restart"; "next_boot_publishes"; "reason" ]
+           fields
+       in
+       let* next_boot_publishes = bool_field "next_boot_publishes" fields in
+       let* reason = string_field "reason" fields in
+       if next_boot_publishes
+       then Error "a kept exact-output registry cannot be published at the next boot"
+       else Ok (Exact_output_registry_kept { reason })
+     | ("applied" | "unpublished" | "kept"), _ ->
+       Error "exact-output registry status disagrees with requires_restart"
+     | _ -> Error "invalid exact-output registry application status")
+  | _ -> Error "exact-output registry application receipt must be an object"
+;;
+
+let decode_lock_warnings json =
+  let open Result.Syntax in
+  match json with
+  | `List warnings ->
+    let rec decode acc = function
+      | [] -> Ok (List.rev acc)
+      | `Assoc fields :: rest ->
+        let* () = exact_fields [ "code"; "detail" ] fields in
+        let* code = string_field "code" fields in
+        let* detail = string_field "detail" fields in
+        decode ({ code; detail } :: acc) rest
+      | _ :: _ -> Error "runtime config lock warning must be an object"
+    in
+    decode [] warnings
+  | _ -> Error "runtime config lock warnings must be a list"
+;;
+
 let decode_application ~source_revision ~order = function
   | `Assoc fields ->
     let open Result.Syntax in
-    let* () = exact_fields [ "operation"; "routing"; "keeper_overlay"; "skills" ] fields in
+    let* () =
+      exact_fields
+        [ "operation"; "routing"; "keeper_overlay"; "skills"; "exact_output_registry" ]
+        fields
+    in
+    let* exact_output_registry_json = field "exact_output_registry" fields in
+    let* exact_output_registry = decode_exact_output_registry exact_output_registry_json in
     let* operation = string_field "operation" fields in
     let* routing = field "routing" fields in
     let* keeper = field "keeper_overlay" fields in
@@ -280,6 +352,7 @@ let decode_application ~source_revision ~order = function
       ; keeper_applied_keys
       ; keeper_preempted_keys
       ; skills
+      ; exact_output_registry
       }
   | _ -> Error "runtime config application receipt must be an object"
 ;;
@@ -298,7 +371,11 @@ let decode = function
       let* application = field "application" fields in
       (match commit with
        | `Assoc commit_fields ->
-         let* () = exact_fields [ "source_revision"; "order"; "durability" ] commit_fields in
+         let* () =
+           exact_fields [ "source_revision"; "order"; "durability"; "warnings" ] commit_fields
+         in
+         let* lock_warnings = field "warnings" commit_fields in
+         let* lock_warnings = decode_lock_warnings lock_warnings in
          let* source_revision = string_field "source_revision" commit_fields in
          let* order = string_field "order" commit_fields in
          let* durability =
@@ -308,7 +385,7 @@ let decode = function
            | Ok _ | Error _ -> Error "runtime config durability is invalid"
          in
          let* application = decode_application ~source_revision ~order application in
-         Ok { source_revision; order; durability; application }
+         Ok { source_revision; order; durability; lock_warnings; application }
        | _ -> Error "runtime config commit receipt is missing")
   | _ -> Error "runtime config commit response must be an object"
 ;;
@@ -349,11 +426,29 @@ let summary receipt =
     | Skill_workspace_retired _ -> "skills-workspace-retired"
     | Skill_invalid_workspace -> "skills-invalid-workspace"
   in
+  let lock_warnings =
+    match receipt.lock_warnings with
+    | [] -> ""
+    | warnings ->
+      Printf.sprintf
+        " lock-warnings=%s"
+        (String.concat "," (List.map (fun warning -> warning.code) warnings))
+  in
+  let exact_output_registry =
+    match receipt.application.exact_output_registry with
+    | Exact_output_registry_applied Targets_runtime_bindings -> "exact-registry-applied"
+    | Exact_output_registry_applied Targets_replacement_catalog ->
+      "exact-registry-applied/replacement-catalog"
+    | Exact_output_registry_unpublished -> "exact-registry-unpublished"
+    | Exact_output_registry_kept _ -> "exact-registry-kept/next-boot-unpublished"
+  in
   Printf.sprintf
-    "commit=%s %s %s %s %s"
+    "commit=%s %s %s %s %s%s %s"
     receipt.order
     durability
     routing
     keeper
     skills
+    lock_warnings
+    exact_output_registry
 ;;

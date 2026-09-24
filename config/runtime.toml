@@ -189,10 +189,14 @@ connect-timeout-s = 600.0
 # bound the body. Without this key such a slot is left out of its lane at
 # boot and named in the startup report, and a save that adds one is refused,
 # naming lane, slot and provider (#38779).
-# Bootstrap applies it to AGENT_CORE targets derived from these bindings.
-# The deployment operator owns the value in the resolved runtime.toml's
-# [providers.<id>] table. Saving that file does not rebuild existing Exact
-# targets: the value takes effect when server bootstrap rebuilds the registry.
+# Boot and every save through the server apply it to the AGENT_CORE targets
+# derived from these bindings. The deployment operator owns the value in the
+# resolved runtime.toml's [providers.<id>] table. A save rebuilds the Exact
+# registry with the write, and its response says what happened under
+# application.exact_output_registry: "applied" (rebuilt now), "unpublished"
+# (no registry is running; the next boot publishes one), or "kept" (neither the
+# saved text nor the file it replaced rebuilds one; the old registry keeps
+# serving, and the next boot will not publish one until the file is fixed).
 # Each visited Exact candidate retains its own deadline. Their HTTP wait can
 # accumulate across sequential candidates; this is not a deadline for the
 # whole Librarian pass, its CLI tail, or Memory processing.

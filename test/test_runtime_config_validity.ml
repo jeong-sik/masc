@@ -820,7 +820,7 @@ let declared_targets_of_config_path ?(environment = []) ~label path =
   | Error detail -> failf "%s: runtime bindings should initialize: %s" label detail
   (* Loading the bindings is what makes them targets, so a binding this config
      disables has no slot here -- the same answer the server gives. *)
-  | Ok () -> Server_runtime_bootstrap.For_testing.exact_output_targets_of_runtimes ()
+  | Ok () -> Runtime.exact_output_targets (Runtime.get_runtimes ())
 ;;
 
 let snapshot_of_config ?environment ~io ~label path =
@@ -3733,6 +3733,7 @@ let gaps_after_boot_load content =
     ( Runtime.exact_slot_body_deadline_gaps ()
     , Runtime.startup_degradation_to_yojson
         ~exact_slots:(Runtime.exact_slot_degradation ())
+        ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
         (Runtime.startup_degradation ()) ))
 ;;
 
@@ -3902,7 +3903,7 @@ let test_catalog_and_gap_degradation_name_both_reasons () =
     ; emptied_lane_ids = [ "librarian_exact" ]
     }
   in
-  let json = Runtime.startup_degradation_to_yojson ~exact_slots (Some degradation) in
+  let json = Runtime.startup_degradation_to_yojson ~exact_slots ~exact_registry_stale:None (Some degradation) in
   let open Yojson.Safe.Util in
   check string "terminal_reason keeps the catalog" "missing_agent_core_catalog_models"
     (json |> member "terminal_reason" |> to_string);
@@ -4636,6 +4637,7 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          let json =
            Runtime.startup_degradation_to_yojson
          ~exact_slots:(Runtime.exact_slot_degradation ())
+         ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
          (Runtime.startup_degradation ())
          in
          let rendered = Yojson.Safe.to_string json in
@@ -4867,14 +4869,29 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
   let catalog_row id = Printf.sprintf
     "[[models]]\nid_prefix = %S\nprovider_name = \"local\"\nbase = \"ollama\"\nmax_context_tokens = 1024\n" id in
   with_model_catalog_content (catalog_row "chat" ^ catalog_row "libr") @@ fun () ->
+  let targets : Exact_output_fixture.target_fixture list =
+    [ { id = "slot-a"; base_url = "http://127.0.0.1:9" }
+    ; { id = "slot-b"; base_url = "http://127.0.0.1:10" }
+    ; { id = "local.chat"; base_url = "http://127.0.0.1:11" }
+    ; { id = "local.libr"; base_url = "http://127.0.0.1:12" }
+    ]
+  in
+  (* The slots are catalog targets, not runtime.toml bindings. A config commit
+     rebuilds the registry from the catalog the process reads, so the
+     targets must live in the replacement catalog [AGENT_CORE_MODEL_CATALOG]
+     names; a snapshot published by hand would be forgotten by the first
+     commit (#38779). *)
+  let catalog_path = Filename.temp_file "exact-raw-save-catalog-" ".toml" in
+  Fun.protect ~finally:(fun () -> Sys.remove catalog_path) @@ fun () ->
+  Exact_output_fixture.replacement_catalog_file ~path:catalog_path targets;
+  Masc_test_deps.with_process_env
+    Runtime.agent_core_model_catalog_env_var_name
+    (Some catalog_path)
+  @@ fun () ->
   let snapshot =
     Exact_output_fixture.resolver_snapshot
       ~source:"runtime raw-save exact replacement"
-      [ { id = "slot-a"; base_url = "http://127.0.0.1:9" }
-      ; { id = "slot-b"; base_url = "http://127.0.0.1:10" }
-      ; { id = "local.chat"; base_url = "http://127.0.0.1:11" }
-      ; { id = "local.libr"; base_url = "http://127.0.0.1:12" }
-      ]
+      targets
   in
   ignore
     (Exact_output_fixture.publish_registry

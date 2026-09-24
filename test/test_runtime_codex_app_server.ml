@@ -4613,8 +4613,31 @@ let test_production_keeper_reports_codex_token_usage () =
                | Some observation ->
                  check bool "observation scope" true
                    (observation.Runtime_observation.usage_scope
-                    = Runtime_usage_scope.Per_request)
-               | None -> fail "production turn recorded no runtime observation")))
+                    = Runtime_usage_scope.Per_request);
+                 (match observation.request_context with
+                  | Some context ->
+                    check int "newest request input" 1200 context.input_tokens;
+                    check int "newest request cache read" 1000
+                      context.cache_read_input_tokens;
+                    check int "newest request cache write" 0
+                      context.cache_creation_input_tokens
+                  | None -> fail "Codex did not record the request context")
+               | None -> fail "production turn recorded no runtime observation");
+              let records =
+                Keeper_types_support.keeper_turn_record_store
+                  (Workspace.default_config base_path) "codex-production-fixture"
+                |> fun store -> Dated_jsonl.read_recent store 1
+              in
+              (match records with
+               | [ row ] ->
+                 (match Turn_record.of_json row with
+                  | Ok record ->
+                    check (option int) "TurnRecord context input" (Some 1200)
+                      record.usage.input_tokens;
+                    check bool "TurnRecord context scope" true
+                      (record.usage.scope = Runtime_usage_scope.Per_request)
+                  | Error detail -> fail detail)
+               | _ -> fail "Codex production turn has no TurnRecord")))
 ;;
 
 let test_production_keeper_resumes_across_trace_rotation () =

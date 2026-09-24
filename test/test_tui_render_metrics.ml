@@ -230,7 +230,7 @@ let test_retained_task_outcomes () =
       task "invalid" "invalid timestamp" Todo;
       task "future" "2026-09-08T10:00:00Z" Todo ]
   in
-  let flow = Masc_tui_task_flow.of_tasks ~now tasks in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:[] tasks in
   check int "new registrations in the window" 3 flow.recent.created;
   check int "completion is independent of creation time" 1 flow.recent.completed;
   check int "cancellation is separate" 1 flow.recent.cancelled;
@@ -265,7 +265,7 @@ let test_a_span_reads_the_one_ladder () =
      either minute boundary, so the clock moving while the test runs cannot
      change the figure. *)
   let observed_at = Unix.gettimeofday () -. 3700. in
-  let flow = Masc_tui_task_flow.of_tasks ~now:observed_at [] in
+  let flow = Masc_tui_task_flow.of_tasks ~now:observed_at ~archived:[] [] in
   let state = make_state () in
   state.task_flow <- Some flow;
   let output =
@@ -297,7 +297,7 @@ let test_assignee_work_and_daily_flow () =
         (Cancelled { cancelled_by = "polisher"; cancelled_at = "2026-09-11T05:00:00Z";
           reason = None }) ]
   in
-  let flow = Masc_tui_task_flow.of_tasks ~now tasks in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:[] tasks in
   let rows = flow.by_assignee in
   check int "only states that carry an assignee open a row" 2 (List.length rows);
   let row name =
@@ -344,6 +344,31 @@ let test_assignee_work_and_daily_flow () =
   check bool "lead time is not presented as work time" false (contains output "work time")
 ;;
 
+(* [masc_gc] moves finished tasks into the archive. Their days still
+   happened, so the day bars count them; the board counts and the assignee
+   rows describe what is live, so they do not. A task restored to the
+   backlog but still in the archive is counted once (#38542). *)
+let test_archived_tasks_count_in_the_day_bars_only () =
+  let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-12T00:00:00Z") in
+  let task id created_at status = domain_task ~id ~created_at ~status in
+  let done_by who at = Masc_domain.Done { assignee = who; completed_at = at; notes = None } in
+  let live = [ task "live" "2026-09-11T00:00:00Z" (done_by "matrix-reader" "2026-09-11T02:00:00Z") ] in
+  let archived =
+    [ task "gone" "2026-09-02T00:00:00Z" (done_by "matrix-reader" "2026-09-03T00:00:00Z");
+      (* Restored to the backlog, still in the archive: counted once. *)
+      task "live" "2026-09-11T00:00:00Z" (done_by "matrix-reader" "2026-09-11T02:00:00Z") ]
+  in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived live in
+  let completed_in_span =
+    List.fold_left (fun n (d : Masc_tui_task_flow.day) -> n + d.d_completed) 0 flow.daily
+  in
+  check int "the archived completion lands on its day, the restored one once" 2
+    completed_in_span;
+  check int "the board count is the backlog's" 1 flow.current.completed;
+  check int "the assignee row is the backlog's" 1
+    (List.hd flow.by_assignee).af_done
+;;
+
 let test_assignee_rows_capped () =
   let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-12T00:00:00Z") in
   let task id created_at status = domain_task ~id ~created_at ~status in
@@ -353,7 +378,7 @@ let test_assignee_rows_capped () =
       task (Printf.sprintf "t%02d" index) "2026-09-11T00:00:00Z"
         (Masc_domain.Claimed { assignee = who; claimed_at = "2026-09-11T01:00:00Z" }))
   in
-  let flow = Masc_tui_task_flow.of_tasks ~now tasks in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:[] tasks in
   check int "every assignee is retained in the snapshot" 13 (List.length flow.by_assignee);
   let state = make_state () in
   state.task_flow <- Some flow;
@@ -844,6 +869,8 @@ let () =
         ; test_case "retained task outcomes and observation scope" `Quick test_retained_task_outcomes
         ; test_case "assignee work and daily flow" `Quick test_assignee_work_and_daily_flow
         ; test_case "assignee rows capped" `Quick test_assignee_rows_capped
+        ; test_case "archived tasks count in the day bars only" `Quick
+            test_archived_tasks_count_in_the_day_bars_only
         ] )
     ; ( "overview_pulse"
       , [ test_case "overview_pulse_line" `Quick test_overview_pulse_line

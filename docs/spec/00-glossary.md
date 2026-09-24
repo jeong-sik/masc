@@ -360,6 +360,19 @@ status: reference
   → [Keeper_execution_receipt](../../lib/keeper/keeper_execution_receipt.mli),
   [Keeper_terminal_reason](../../lib/keeper_runtime/keeper_terminal_reason.mli)
 
+**Stop Reason (제공자 발화 중단 사유)**
+: 모델 제공자(LLM Provider)가 wire 스트림(`KEEPER_STREAM_MESSAGE_DELTA`)에 통보한 발화 중단 사유.
+  MASC가 턴 전체를 어떻게 처리했는지를 분류하는 **Keeper Turn Outcome**(가시적 응답·체크포인트·게이트 대기 등)이나
+  영수증 필드인 **Terminal Reason**과 다른 층위의 개념이다(#37723·#38508).
+  - **Outcome과의 비일치**: 제공자의 12개 중단 사유 중 6개(`max_tokens`, `refusal`, `content_filter`,
+    `repetition_truncation`, `model_context_window_exceeded`, `unmatched_tool_calls`)는 대응하는 Turn Outcome이 없다.
+    예컨대 `max_tokens`로 출력이 잘려나간 응답도 MASC 관점에서는 정상적인 가시적 응답 턴(`Reply`)이므로,
+    Turn Outcome만으로는 제공자가 토큰 한도에 부딪혀 답변을 다 쓰지 못했는지 알 수 없다.
+  - **표면 투영**: TUI 채팅 헤더는 실시간 스트리밍 중 제공자가 작성을 멈춘 이유를 `stopped: <reason>`(예: `stopped: max_tokens`)으로
+    명시해 완성된 응답으로 오인되는 것을 방지하며, 행 폭이 좁으면 줄임표 대신 통째로 생략한다. 대시보드는 세션 트레이스 엔트리의
+    `종료:` 필드에 이를 그린다. wire 이벤트 하나가 토큰 사용량(`usage`)과 중단 사유(`stop_reason`)를 함께 나른다(`Stream_details`).
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli), [TUI Guide](../TUI-GUIDE.md)
+
 **Keeper Chat Operation**
 : Keeper 대화에 접수한 메시지 실행의 durable 기록. `operation_id`로 식별하며
   `state`가 대기·실행·성공·실패·취소를 구분한다. Board 맥락 추론이나 다른 Keeper(`masc_keeper_msg`·
@@ -648,6 +661,27 @@ status: reference
   exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
   런타임 후보 순서와 별개 축이다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
+
+**Attempt Dispatch (시도 파견 여부)**
+: Keeper turn 실행 중 후보 순서(`Runtime Candidate Order`)의 각 런타임 후보를 시도할 때,
+  해당 시도가 실제 제공자 또는 클라이언트로 파견되어 실행되었는지를 구분하는 닫힌 두 값
+  (`Keeper_attempt_dispatch.t` = `Runtime_attempt_dispatch.t`: `Dispatched` ·
+  `Rejected_before_dispatch`). 로그 및 이벤트 wire 문자열은 각각 `"dispatched"`,
+  `"rejected_before_dispatch"`다.
+  - `Dispatched`: 후보 런타임의 공급자(provider) 또는 클라이언트가 실제로 호출됨.
+    발생한 오류나 반환값은 해당 런타임 후보가 직접 낸 응답이다.
+  - `Rejected_before_dispatch`: 파이프라인이 런타임을 호출하지 않고 사전에 거절함.
+    요청을 어떤 공급자도 본 적이 없으므로 해당 런타임의 실행 실패가 아니다.
+  - **파견 판단 및 실행 런타임 귀속 불변식 (#38562)**: 런타임 후보 시도 중 어떤 요청도
+    실제 provider로 직렬화되어 전송(`request_serialized = true`)되지 않고 agent_core
+    파이프라인의 사전 검증 단계(`Attempt_rejected`, `InputCapacity`, `ContextOverflow`,
+    `InvalidConfig`)에서 거절된 경우, 해당 런타임은 요청을 본 적이 없으므로
+    `Rejected_before_dispatch`로 기록되며 '실행한 런타임(the one that ran)'으로
+    귀속되지 않는다. 반면, 한 시도 내에서 선행 요청이 provider에 도달한 후 후속 요청이
+    사전 거절된 경우에는 이미 해당 런타임이 파견되어 실행된 것이므로 `Dispatched`로
+    유지된다.
+  → [Keeper_attempt_dispatch](../../lib/keeper/keeper_attempt_dispatch.mli),
+  [keeper_turn_driver](../../lib/keeper/keeper_turn_driver.mli)
 
 **Standalone Lane**
 : TUI의 `MASC Lanes · Standalone` 표가 그리는 읽기 전용 LLM lane 관찰. 기존
@@ -1036,6 +1070,30 @@ status: reference
   `hitl resolution redelivered approval=… occasion=…` 로그를 남길 뿐 행을 적지 않는다.
   채팅의 결정 행은 wake 가 살아 있는 Keeper 에게 닿을 때 한 번만 적힌다.
   → [Keeper_approval_queue.delivery_occasion](../../lib/keeper/keeper_approval_queue.ml)
+
+**Approval Queue Phase (승인 큐 진행 단계)**
+: Human-in-the-Loop (HITL) 승인 큐에서 각 승인 요청 항목이 거치고 있는 진행 단계를
+  서버가 단일 wire 문자열로 투영한 닫힌 네 값(`approval_queue_phase`: `Phase_queued` ·
+  `Phase_judging` · `Phase_human_required` · `Phase_blocked`). TUI와 웹 대시보드가
+  개별적으로 수행하던 취약하고 중복된 4문자열 휴리스틱 매칭을 대체하고, 서버
+  SSE/REST 엔드포인트(`pending_entry`, `hitl_rows`)가 직접 방출한다(#38404). wire 값은
+  각각 `"queued"` · `"judging"` · `"human_required"` · `"blocked"`다.
+  - `blocked`: 준비 단계 워커 부재(`Summary_attempt_pre_worker_unavailable`),
+    식별자 언바운드(`Summary_attempt_identity_unbound`), 지속성 불확실
+    (`Summary_attempt_persistence_uncertain`), 심판 실행 실패(`Summary_failed`)인 경우.
+    특히 `Summary_pre_worker_start_reserved` 상태는 초기 폴링 중 대시보드와 서버가
+    `judging`이 아닌 `blocked`로 투영하여 불필요한 대기 혼선을 막는다.
+  - `judging`: 자동 심판 워커가 실행 중(`Summary_attempt_in_flight`)이거나 요약 대기
+    (`Summary_pending`)인 경우.
+  - `human_required`: 모델 심판 결과 명시적인 사람 개입이 필요하다고 판정된 경우
+    (`advisory_judgment = Require_human`).
+  - `queued`: 심판 전 대기 중(`Summary_attempt_ready`)이며 아직 심판이 요청되지
+    않았거나(`Summary_not_requested`) 모델 판정(`Approve` | `Deny`)이 대기 중인 경우.
+  - **비영속 투영 경계**: 승인 큐의 durable 저널 직렬화(`pending_entry_to_yojson` /
+    `pending_entry_of_yojson`)에는 파생값인 `phase` 필드를 저장하지 않고, 오직
+    클라이언트 관측을 위한 wire 프로젝션에서만 유지한다.
+  → [keeper_approval_queue_rules_types](../../lib/keeper_contract/keeper_approval_queue_rules_types.mli),
+  [Keeper_approval_queue](../../lib/keeper/keeper_approval_queue.mli)
 
 ## Task Lifecycle
 
@@ -1840,6 +1898,13 @@ status: reference
   철회한 것이다. 철회 뒤 같은 claim을 다시 저장하면 같은 Memory ID에 과거 기록이
   붙는다. TUI의 `History: Retracted`는 그 철회 횟수이며, 현재 Fact의 신뢰도나
   강화 정도를 뜻하지 않는다.
+  - **교체된 흡수 기억 연쇄 추적**: `keeper_memory_search`는 흡수된(`absorbs`) 기억의
+    대상 claim이 이후 `keeper_memory_write ~supersedes`로 대체된 경우, 버려진(dropped)
+    claim에서 멈춰 `into_current=false`로 보고하지 않고 원장의 `Revised` 이벤트(`superseded_by`)를
+    따라 현재 살아 있는 claim까지 연쇄 추적하여 `into_current=true`로 연결한다.
+    매 검색마다 이벤트 사이드카를 읽는 부하를 막기 위해 평소에는 흡수 원장(`memory-absorbed.jsonl`)만으로
+    해결하고, 체인의 끝이 non-current일 때만 사이드카(`.memory-events.jsonl`)를 읽는다. 손상된
+    이벤트 줄은 `event_unreadable_lines`로 분리 보고된다(#38543·#38552).
 
 **Library**
 : `masc_library_add`로 수동 추가한 Markdown 문서를 읽는 지식 라이브러리.

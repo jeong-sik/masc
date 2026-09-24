@@ -3937,6 +3937,9 @@ def blocked_gate_detail_http_fixtures() -> HttpFixtures:
                     },
                     "summary_status": {"status": "failed", "reason": reason},
                     "summary_attempt_disposition": {"code": "settled"},
+                    # What the server derives from a settled attempt whose
+                    # summary failed (phase_of_disposition_and_summary).
+                    "phase": "blocked",
                 }
             ],
             "approval_queue_state": {"state": "ready"},

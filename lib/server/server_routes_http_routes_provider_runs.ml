@@ -207,15 +207,24 @@ let add_routes ~sw router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-costs" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let window = int_query_param req "window" ~default:1440 in
+         match
+           Dashboard_http_keeper_feeds.keeper_costs_window_of_query
+             (query_param req "window")
+         with
+         | Error message ->
+             Http.Response.json_value ~status:`Bad_request ~request:req
+               (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
+               reqd
+         | Ok window ->
          let config = (Mcp_server.workspace_config state) in
          let key = cache_key [ config.base_path; string_of_int window ] in
          let json =
            cached_dashboard_json ~sw ~sync_first:false
              ~cache:dashboard_keeper_costs_cache ~key
              ~placeholder:
+               (* NDT-OK: request-time clock for a cost window; a dashboard read endpoint, not durable output. *)
                (Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-                  ~keepers:[] ~window_minutes:window)
+                  ~keepers:[] ~window_minutes:window ~now_ts:(Unix.gettimeofday ()))
              ~compute:(fun () ->
                let keeper_names = Keeper_meta_store.keeper_names config in
                let keepers =
@@ -225,8 +234,9 @@ let add_routes ~sw router =
                    | _ -> None
                  ) keeper_names
                in
+               (* NDT-OK: request-time clock for a cost window; a dashboard read endpoint, not durable output. *)
                Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-                 ~keepers ~window_minutes:window)
+                 ~keepers ~window_minutes:window ~now_ts:(Unix.gettimeofday ()))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

@@ -27,7 +27,8 @@ let is_valid_sha256 value = Result.is_ok (Tool_blob_store.validate_sha256 value)
 let artifact_read_permission = Masc_domain.CanAdmin
 
 let artifact_bytes ~base_path ~sha256 =
-  Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256
+  Eio_unix.run_in_systhread (fun () ->
+    Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256)
 ;;
 
 let blob_response ~base_path ~sha256 =

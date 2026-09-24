@@ -44,7 +44,7 @@ val artifact_bytes :
   sha256:string ->
   (string option, Tool_blob_store.fetch_error) result
 (** Exact validated bytes shared by the HTTP/1 and HTTP/2 authenticated raw
-    download routes. *)
+    download routes. The blocking file read runs in an Eio system thread. *)
 
 val add_routes :
   Http_server_eio.Router.t ->

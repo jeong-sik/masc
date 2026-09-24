@@ -311,6 +311,31 @@ let keeper_decisions_json
           | `Float value when Float.is_finite value -> Some (int_of_float value)
           | _ -> None
         in
+        (* Usage, stop reason and error category are written inside the turn
+           row's [telemetry] object (Keeper_unified_metrics_decision), not at
+           the top level. Reading them at the top level left every row null
+           (#31729). Rows without a [telemetry] object carry none of them. *)
+        let telemetry =
+          match m "telemetry" json with
+          | `Assoc _ as telemetry -> telemetry
+          | _ -> `Null
+        in
+        let telemetry_float_or_null key =
+          match m key telemetry with
+          | `Float f -> `Float f
+          | `Int i -> `Float (float_of_int i)
+          | _ -> `Null
+        in
+        let telemetry_int_or_null key =
+          match m key telemetry with
+          | `Int i -> `Int i
+          | _ -> `Null
+        in
+        let telemetry_string_or_null key =
+          match string_member_opt key telemetry with
+          | Some value -> `String value
+          | None -> `Null
+        in
         let first_string_or_null keys =
           match List.find_map (fun key -> string_member_opt key json) keys with
           | Some value -> `String value
@@ -371,11 +396,11 @@ let keeper_decisions_json
           ; "reason", first_string_or_null [ "reason"; "rationale"; "why" ]
           ; "context", context_json
           ; "latency_ms", float_or_null "latency_ms"
-          ; "cost_usd", float_or_null "cost_usd"
-          ; "input_tokens", int_or_null "input_tokens"
-          ; "output_tokens", int_or_null "output_tokens"
-          ; "stop_reason", string_or_null "stop_reason"
-          ; "error_category", string_or_null "error_category"
+          ; "cost_usd", telemetry_float_or_null "cost_usd"
+          ; "input_tokens", telemetry_int_or_null "input_tokens"
+          ; "output_tokens", telemetry_int_or_null "output_tokens"
+          ; "stop_reason", telemetry_string_or_null "stop_reason"
+          ; "error_category", telemetry_string_or_null "error_category"
           ; "tool", string_or_null "tool"
           ; "duration_ms", duration_ms
           ; "match_count", int_or_null "match_count"

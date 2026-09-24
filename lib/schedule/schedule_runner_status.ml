@@ -176,7 +176,10 @@ let record_tick_ok
     ; last_duration_sec = Some (duration ~started_at ~finished_at)
     ; last_counts = Some counts
     ; totals = add_counts current.totals counts
-    ; held = result.Schedule_runner.held
+    ; held =
+        List.map
+          (fun (hold : Schedule_runner.held) -> hold.signal)
+          result.Schedule_runner.held
     })
 ;;
 

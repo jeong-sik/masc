@@ -356,7 +356,7 @@ type worker_start_result =
   | Worker_already_active
   | Worker_start_rejected of worker_start_error
 
-let start_worker ~config ~entry (operation : Keeper_shutdown_types.t) =
+let fork_claimed ~config ~run (operation : Keeper_shutdown_types.t) =
   match Keeper_process_switch.get () with
   | None -> Worker_start_rejected Worker_supervisor_unavailable
   | Some sw ->
@@ -377,7 +377,7 @@ let start_worker ~config ~entry (operation : Keeper_shutdown_types.t) =
                        and our claim. Never replay its stale cleanup snapshot. *)
                     (match Keeper_shutdown_store.load ~config
                        ~keeper_name:operation.keeper_name operation.operation_id with
-                     | Ok current -> run_worker ~config ~entry current
+                     | Ok current -> run current
                      | Error error -> Log.Keeper.error
                          "shutdown worker could not reload operation %s: %s"
                          (worker_key operation) (Keeper_shutdown_store.error_to_string error))
@@ -407,6 +407,10 @@ let start_worker ~config ~entry (operation : Keeper_shutdown_types.t) =
          | exn ->
            release_worker operation;
            Worker_start_rejected (Worker_fork_failed exn)))
+;;
+
+let start_worker ~config ~entry operation =
+  fork_claimed ~config ~run:(run_worker ~config ~entry) operation
 ;;
 
 let start_or_error ~config ~entry (operation : Keeper_shutdown_types.t) =
@@ -648,7 +652,7 @@ let reclaim_settled_record ~config (recovered : Keeper_shutdown_types.t) =
       (Keeper_shutdown_store.error_to_string error)
 ;;
 
-let recover_operation_with_corrupt_owner_fence
+let recover_claimed
     ~config
     ~corrupt_owner_fence
     operation
@@ -738,6 +742,106 @@ let recover_operation_with_corrupt_owner_fence
                    (Operation_id.to_string operation.operation_id)
                    (Operation_id.to_string existing)))
          else Error (Keeper_owner_registry.command_error_to_string error))
+;;
+
+(* Boot recovery and an in-process re-drive walk the same operation through
+   the same path. Holding the worker claim keeps them, and a live submit
+   worker, from finalizing one operation twice at once. *)
+let recover_operation_with_corrupt_owner_fence
+    ~config
+    ~corrupt_owner_fence
+    (operation : Keeper_shutdown_types.t)
+  =
+  if not (claim_worker operation)
+  then
+    Error
+      (Printf.sprintf
+         "shutdown operation is being finalized by a live worker in this process: keeper=%s operation=%s"
+         operation.keeper_name
+         (worker_key operation))
+  else
+    Fun.protect
+      ~finally:(fun () -> release_worker operation)
+      (fun () -> recover_claimed ~config ~corrupt_owner_fence operation)
+;;
+
+(* Which phases a running process may walk again without the registry entry
+   the original worker held. A registered-lane operation that stopped before
+   [Finalized] would unregister nothing with [entry = None], so it waits for
+   boot recovery, where the process that held the lane has ended. *)
+let redrivable_in_process (operation : Keeper_shutdown_types.t) =
+  match operation.phase, operation.lane_ownership with
+  | Finalized _, (Dormant_meta | Registered_lane _) -> true
+  | (Joined_idle | Finalizing_tasks _ | Cleanup_ready _), Dormant_meta -> true
+  | (Joined_idle | Finalizing_tasks _ | Cleanup_ready _), Registered_lane _ -> false
+  | ( ( Prepared
+      | Joining_lanes
+      | Reconciliation_required _
+      | Blocked _
+      | Owner_absent _
+      | Operator_absence_acknowledged _
+      | Superseded _ )
+    , (Dormant_meta | Registered_lane _) ) -> false
+;;
+
+let redrive_claimed ~config (operation : Keeper_shutdown_types.t) =
+  if redrivable_in_process operation
+  then (
+    match
+      Keeper_shutdown_store.corrupt_operation_id_for_keeper
+        ~config
+        ~keeper_name:operation.keeper_name
+    with
+    | Error error ->
+      Log.Keeper.error
+        "re-driven shutdown finalization could not read corrupt siblings: keeper=%s operation=%s error=%s"
+        operation.keeper_name
+        (worker_key operation)
+        (Keeper_shutdown_store.error_to_string error)
+    | Ok corrupt_operation_id ->
+      let corrupt_owner_fence =
+        Option.map
+          (fun operation_id -> { keeper_name = operation.keeper_name; operation_id })
+          corrupt_operation_id
+      in
+      (match recover_claimed ~config ~corrupt_owner_fence operation with
+       | Ok settled ->
+         Log.Keeper.info
+           "re-driven shutdown finalization settled: keeper=%s operation=%s phase=%s"
+           settled.keeper_name
+           (worker_key settled)
+           (phase_to_string settled.phase)
+       | Error detail ->
+         Log.Keeper.error
+           "re-driven shutdown finalization stopped: keeper=%s operation=%s error=%s"
+           operation.keeper_name
+           (worker_key operation)
+           detail))
+;;
+
+type redrive_error =
+  | Redrive_load_failed of Keeper_shutdown_store.error
+  | Redrive_start_rejected of worker_start_error
+
+let redrive_error_to_string = function
+  | Redrive_load_failed error -> Keeper_shutdown_store.error_to_string error
+  | Redrive_start_rejected error ->
+    submit_error_to_string (Worker_start_error error)
+;;
+
+let rec redrive_finalization ~config ~keeper_name ~operation_id =
+  if not (Eio_context.root_switch_on_current_domain ())
+     && Option.is_some (Eio_context.get_root_switch_opt ())
+  then
+    Eio_context.run_on_owner_domain (fun () ->
+      redrive_finalization ~config ~keeper_name ~operation_id)
+  else
+    match Keeper_shutdown_store.load ~config ~keeper_name operation_id with
+    | Error error -> Error (Redrive_load_failed error)
+    | Ok operation ->
+      (match fork_claimed ~config ~run:(redrive_claimed ~config) operation with
+       | Worker_started | Worker_already_active -> Ok ()
+       | Worker_start_rejected error -> Error (Redrive_start_rejected error))
 ;;
 
 let recover_at_boot ~config =

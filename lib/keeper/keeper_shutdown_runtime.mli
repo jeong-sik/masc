@@ -88,6 +88,26 @@ val recover_operation_with_corrupt_owner_fence :
   Keeper_shutdown_types.t ->
   (Keeper_shutdown_types.t, string) result
 
+type redrive_error =
+  | Redrive_load_failed of Keeper_shutdown_store.error
+  | Redrive_start_rejected of worker_start_error
+
+val redrive_error_to_string : redrive_error -> string
+
+(** Walk a stopped operation again inside the running process (#34642).
+    Called when intake is observed refused by this operation's fence, so a
+    finalization that stopped on something since repaired settles without a
+    restart. Runs on the process switch under the same claim as the submit
+    worker and boot recovery; [Ok ()] also covers a walk already in progress.
+    Only phases that need no registry entry are walked; the rest are left
+    for their operator action or boot recovery. A walk that fails again
+    leaves the operation in the phase it was in. *)
+val redrive_finalization :
+  config:Workspace.config ->
+  keeper_name:string ->
+  operation_id:Keeper_shutdown_types.Operation_id.t ->
+  (unit, redrive_error) result
+
 module For_testing : sig
   val persist_unhandled_failure :
     now:(unit -> string) ->

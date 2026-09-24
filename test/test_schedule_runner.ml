@@ -147,7 +147,7 @@ let accepting_consumer
             (fun acceptance_commit ->
                Work_accepted { detail; acceptance_commit })
             (commit_acceptance detail))
-  ; defer_wake = (fun _config ~occurrence_id:_ _request -> false)
+  ; defer_wake = (fun _config ~occurrence_id:_ _request -> None)
   }
 ;;
 
@@ -324,7 +324,7 @@ let test_tick_prune_keeps_a_key_the_schedule_can_still_produce () =
                (fun acceptance_commit ->
                   Work_accepted { detail = accepted_detail; acceptance_commit })
                (commit_acceptance accepted_detail))
-    ; defer_wake = (fun _config ~occurrence_id:_ _request -> false)
+    ; defer_wake = (fun _config ~occurrence_id:_ _request -> None)
     }
   in
   let retry_key = occurrence_key retry_request ~due_at:200.0 in
@@ -814,7 +814,7 @@ let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
            else (
              incr healthy_calls;
              accept (`Assoc [ "healthy", `Bool true ])))
-    ; defer_wake = (fun _config ~occurrence_id:_ _request -> false)
+    ; defer_wake = (fun _config ~occurrence_id:_ _request -> None)
     }
   in
   let first = tick_ok config ~now:201.0 ~consumer in
@@ -946,7 +946,7 @@ let test_runner_status_snapshot_tracks_liveness () =
   Schedule_runner_status.record_tick_ok ~started_at:1.5 ~finished_at:1.75
     (* A hold-only tick: zero counts, so the totals checked below are the
        other ticks' sums. *)
-    { ok_result with due_changed = 0; rescheduled = 0; dispatches = []; held = [ held_signal ] };
+    { ok_result with due_changed = 0; rescheduled = 0; dispatches = []; held = [ { signal = held_signal; reason = Previous_occurrence_unconsumed } ] };
   let held_ids () =
     match json_field "held" (render ~now:2.0 ()) with
     | Some (`List held) ->
@@ -1114,7 +1114,7 @@ let test_tick_defers_held_wake_without_advancing () =
            Result.map
              (fun acceptance_commit -> Work_accepted { detail = `Assoc []; acceptance_commit })
              (commit_acceptance (`Assoc [])))
-    ; defer_wake = (fun _config ~occurrence_id:_ _request -> true)
+    ; defer_wake = (fun _config ~occurrence_id:_ _request -> Some Schedule_runner.Previous_occurrence_unconsumed)
     }
   in
   let result = tick_ok config ~now:201.0 ~consumer in
@@ -1122,14 +1122,14 @@ let test_tick_defers_held_wake_without_advancing () =
   check int "held wake emits no signal" 0 (List.length result.emitted);
   check int "a held wake is not a dispatch" 0 (List.length result.dispatches);
   check (list string) "held wake is reported as held once" [ request.schedule_id ]
-    (List.map (fun (signal : wake_signal) -> signal.schedule_id) result.held);
+    (List.map (fun ({ signal; _ } : held) -> signal.schedule_id) result.held);
   let again = tick_ok config ~now:216.0 ~consumer in
   check (list string) "the same occurrence is held on the next tick"
     (List.map
-       (fun (signal : wake_signal) -> Schedule_occurrence_id.to_string signal.occurrence_id)
+       (fun ({ signal; _ } : held) -> Schedule_occurrence_id.to_string signal.occurrence_id)
        result.held)
     (List.map
-       (fun (signal : wake_signal) -> Schedule_occurrence_id.to_string signal.occurrence_id)
+       (fun ({ signal; _ } : held) -> Schedule_occurrence_id.to_string signal.occurrence_id)
        again.held);
   check int "a hold that continues is not newly held" 0
     (List.length (Schedule_runner.newly_held ~previous:result.held again.held));

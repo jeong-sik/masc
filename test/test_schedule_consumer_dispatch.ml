@@ -1381,24 +1381,204 @@ let test_shutdown_fence_rejects_schedule_intake_before_enqueue () =
     (fun () ->
        let request = create_keeper_wake_schedule config in
        let result = tick_ok config ~now:201.0 in
-       (match result.dispatches with
-        | [ { status = Schedule_runner.Dispatch_failed; error = Some detail; _ } ] ->
-          check string
-            "dispatch reports exact shutdown fence"
-            (Printf.sprintf
-               "retryable schedule dispatch failure: scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
-               keeper_name
-               (Keeper_shutdown_types.Operation_id.to_string operation_id))
-            detail
-        | _ -> fail "shutdown-fenced dispatch did not remain retryable");
+       check int "a fenced target is not dispatched" 0 (List.length result.dispatches);
+       (match result.held with
+        | [ { reason = Schedule_runner.Target_intake_fenced { target; fence_owner }; _ } ] ->
+          check string "hold names the fenced keeper" keeper_name target;
+          check string "hold names the exact fence owner"
+            (Keeper_shutdown_types.Operation_id.to_string operation_id)
+            fence_owner
+        | _ -> fail "shutdown-fenced schedule was not held on its fence");
        check int "shutdown-fenced dispatch writes no queue entry" 0
          (Keeper_registry_event_queue.snapshot ~base_path keeper_name
           |> Keeper_event_queue.length);
        match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
        | Some stored ->
-         check string "shutdown-fenced schedule remains due" "due"
+         check string "shutdown-fenced schedule stays due, not running" "due"
            (Schedule_domain.schedule_status_to_string stored.status)
        | None -> fail "shutdown-fenced schedule disappeared")
+;;
+
+(* 2026-09-22 (#34642): a Dashboard purge finished its cleanup, then its
+   completion failed to withdraw the Keeper's scheduled wakes because the event
+   queue snapshot did not decode. The purge stayed [Finalized] with a failed
+   completion and kept its intake fence. The snapshot was repaired outside the
+   process a minute later, yet nothing in the process walked the purge again
+   until a restart 28 minutes after that. This replays the sequence tick by
+   tick and requires the first tick after the repair to settle the purge. *)
+let rec files_named root name =
+  if Sys.is_directory root
+  then
+    Sys.readdir root
+    |> Array.to_list
+    |> List.concat_map (fun entry -> files_named (Filename.concat root entry) name)
+  else if String.equal (Filename.basename root) name
+  then [ root ]
+  else []
+;;
+
+let fenced_purge_operation config ~keeper_name meta =
+  let trace_id =
+    match Keeper_id.Trace_id.of_string ("trace-" ^ keeper_name) with
+    | Ok trace_id -> trace_id
+    | Error detail -> fail detail
+  in
+  let evidence : Keeper_shutdown_types.finalization_evidence =
+    { cleanup =
+        { settled_task_ids = []
+        ; pending_confirms_removed = 0
+        ; meta_snapshot_digest = Keeper_meta_json.Snapshot_digest.of_meta meta
+        }
+    ; meta_removed = true
+    ; session_removed = true
+    ; registry_unregistered = true
+    ; accumulator_dropped = true
+    ; completion = Completion_pending Dashboard_keeper_purged
+    }
+  in
+  let operation : Keeper_shutdown_types.t =
+    { schema_version = Keeper_shutdown_types.schema_version
+    ; revision = 1
+    ; operation_id = Keeper_shutdown_types.Operation_id.generate ()
+    ; keeper_name
+    ; lane_ownership = Dormant_meta
+    ; trace_id
+    ; actor = "operator"
+    ; cleanup_intent =
+        { reason = Dashboard_keeper_purge { requested_name = keeper_name }
+        ; remove_session = true
+        }
+    ; turn_disposition = No_inflight_turn
+    ; expected_backlog_version = 0
+    ; owned_task_ids = []
+    ; join_evidence = None
+    ; phase = Finalized evidence
+    ; created_at = Masc_domain.now_iso ()
+    ; updated_at = Masc_domain.now_iso ()
+    }
+  in
+  (match Keeper_shutdown_store.persist_new ~config operation with
+   | Ok () -> ()
+   | Error error -> fail (Keeper_shutdown_store.error_to_string error));
+  operation
+;;
+
+let test_fenced_purge_settles_on_the_first_tick_after_its_blocker_is_repaired () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "purged-under-bad-queue" in
+  let base_path = config.Workspace_utils.base_path in
+  let meta = (register_keeper config keeper_name).Keeper_registry_types.meta in
+  let request =
+    create_named_keeper_wake_schedule
+      config
+      ~schedule_id:"purge-fenced-interval"
+      ~keeper_name
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+  in
+  (* One wake is enqueued before the purge, as on 2026-09-22, so the
+     completion has a pending wake to withdraw. *)
+  let first = tick_ok config ~now:201.0 in
+  check string "the wake before the purge is delivered" "succeeded"
+    (Schedule_runner.dispatch_status_to_string (List.hd first.dispatches).status);
+  let snapshot_path =
+    match
+      files_named base_path Keeper_event_queue_persistence.snapshot_filename
+      |> List.filter (fun path -> String_util.contains_substring path keeper_name)
+    with
+    | [ path ] -> path
+    | paths -> failf "expected one queue snapshot, found %d" (List.length paths)
+  in
+  let readable_snapshot = read_file snapshot_path in
+  let operation = fenced_purge_operation config ~keeper_name meta in
+  let operation_label =
+    Keeper_shutdown_types.Operation_id.to_string operation.operation_id
+  in
+  (match
+     Keeper_owner_registry.begin_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id:operation.operation_id
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+  let completion_attempts = ref 0 in
+  Keeper_shutdown_finalize.register_completion_handler
+    (fun config operation _action ->
+       incr completion_attempts;
+       Server_schedule_consumers.cancel_keeper_schedules
+         config
+         ~keeper_name:operation.Keeper_shutdown_types.keeper_name
+       |> Result.map_error Schedule_store.store_error_to_string);
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_shutdown_finalize.For_testing.reset_completion_handler ();
+      Keeper_process_switch.For_testing.clear ())
+    (fun () ->
+       (* Each tick runs under its own process switch so the finalization it
+          asks for has finished before the tick is judged. *)
+       let tick now =
+         Eio.Switch.run (fun sw ->
+           Keeper_process_switch.set sw;
+           tick_ok config ~now)
+       in
+       let fence () =
+         Keeper_shutdown_intake_fence.shutdown_operation_id ~base_path ~keeper_name
+         |> Option.map Keeper_shutdown_types.Operation_id.to_string
+       in
+       let stored_phase () =
+         match
+           Keeper_shutdown_store.load ~config ~keeper_name operation.operation_id
+         with
+         | Ok stored -> stored.phase
+         | Error error -> fail (Keeper_shutdown_store.error_to_string error)
+       in
+       write_file snapshot_path "{\"schema\":\"keeper.event_queue.state.v18\"}";
+       let blocked_ticks = [ 261.0; 262.0; 263.0 ] in
+       List.iteri
+         (fun index now ->
+            let result = tick now in
+            let label = Printf.sprintf "blocked tick %d" (index + 1) in
+            check int (label ^ ": nothing is dispatched into the fence") 0
+              (List.length result.dispatches);
+            (match result.held with
+             | [ { reason = Schedule_runner.Target_intake_fenced { fence_owner; _ }; _ } ] ->
+               check string (label ^ ": held on the purge's fence") operation_label
+                 fence_owner
+             | _ -> fail (label ^ ": schedule was not held on the fence"));
+            check int (label ^ ": the fence owner is asked once per tick")
+              (index + 1) !completion_attempts;
+            check (option string) (label ^ ": the fence stays") (Some operation_label)
+              (fence ());
+            (match stored_phase () with
+             | Finalized { completion = Completion_delivery_failed _; _ } -> ()
+             | phase ->
+               failf "%s: a failed walk changed the phase to %s" label
+                 (Keeper_shutdown_types.phase_to_string phase));
+            match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+            | Some stored ->
+              check string (label ^ ": the held schedule stays due") "due"
+                (Schedule_domain.schedule_status_to_string stored.status)
+            | None -> fail (label ^ ": schedule disappeared"))
+         blocked_ticks;
+       (* The repair happens outside the process; nothing tells the process. *)
+       write_file snapshot_path readable_snapshot;
+       let repaired = tick 264.0 in
+       check int "repaired tick: nothing is dispatched" 0
+         (List.length repaired.dispatches);
+       check int "repaired tick: the purge is walked once more"
+         (List.length blocked_ticks + 1) !completion_attempts;
+       check (option string) "repaired tick: the fence is released" None (fence ());
+       (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+        | Some stored ->
+          check string "repaired tick: the purge cancelled the schedule" "cancelled"
+            (Schedule_domain.schedule_status_to_string stored.status)
+        | None -> fail "cancelled schedule disappeared");
+       let after = tick 265.0 in
+       check int "after: nothing is held" 0 (List.length after.held);
+       check int "after: nothing is dispatched" 0 (List.length after.dispatches);
+       check int "after: the settled purge is not walked again"
+         (List.length blocked_ticks + 1) !completion_attempts)
 ;;
 
 let test_shutdown_fence_covers_direct_durable_queue_producers () =
@@ -2649,7 +2829,7 @@ let test_dashboard_row_names_the_occurrence_the_runner_holds () =
   record next;
   let held_id =
     match next.held with
-    | [ signal ] -> Schedule_occurrence_id.to_string signal.occurrence_id
+    | [ { Schedule_runner.signal; _ } ] -> Schedule_occurrence_id.to_string signal.occurrence_id
     | signals -> failf "expected one held occurrence, got %d" (List.length signals)
   in
   let open Yojson.Safe.Util in
@@ -3166,6 +3346,9 @@ let () =
             test_owner_absent_pending_demand_is_drained_not_retained
         ; test_case "shutdown fence rejects schedule intake before enqueue" `Quick
             test_shutdown_fence_rejects_schedule_intake_before_enqueue
+        ; test_case "fenced purge settles on the first tick after its blocker is repaired"
+            `Quick
+            test_fenced_purge_settles_on_the_first_tick_after_its_blocker_is_repaired
         ; test_case "shutdown fence covers direct durable queue producers" `Quick
             test_shutdown_fence_covers_direct_durable_queue_producers
         ; test_case "transferred retry uses resolved owner shutdown fence" `Quick

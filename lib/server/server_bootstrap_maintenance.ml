@@ -58,12 +58,22 @@ let log_schedule_dispatch (dispatch : Schedule_runner.dispatch_result) =
       error
 ;;
 
-let log_schedule_hold_started (signal : Schedule_runner.wake_signal) =
-  Log.Server.info
-    "schedule_runner: occurrence=%s schedule_id=%s held: its target has not \
-     consumed the previous occurrence yet"
-    (Schedule_occurrence_id.to_string signal.occurrence_id)
-    signal.schedule_id
+let log_schedule_hold_started ({ signal; reason } : Schedule_runner.held) =
+  match reason with
+  | Schedule_runner.Previous_occurrence_unconsumed ->
+    Log.Server.info
+      "schedule_runner: occurrence=%s schedule_id=%s held: its target has not \
+       consumed the previous occurrence yet"
+      (Schedule_occurrence_id.to_string signal.occurrence_id)
+      signal.schedule_id
+  | Schedule_runner.Target_intake_fenced { target; fence_owner } ->
+    Log.Server.info
+      "schedule_runner: occurrence=%s schedule_id=%s held: target keeper=%s \
+       refuses intake while operation=%s holds its shutdown fence"
+      (Schedule_occurrence_id.to_string signal.occurrence_id)
+      signal.schedule_id
+      target
+      fence_owner
 ;;
 
 let wake_enqueue_counts_of_dispatches dispatches =

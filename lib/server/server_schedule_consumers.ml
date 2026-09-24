@@ -1463,7 +1463,7 @@ let cancel_keeper_schedules config ~keeper_name =
    signal), so it does not depend on the reaction-ledger ack transition. A queue
    read failure is fail-open (fire as before) so a transient read never starves
    the schedule. *)
-let defer_wake config ~occurrence_id (request : Schedule_domain.schedule_request) =
+let self_clock_holds config ~occurrence_id (request : Schedule_domain.schedule_request) =
   match request.Schedule_domain.recurrence with
   | Schedule_domain.Interval _ ->
     (match Schedule_payload_projection.result_delivery request with
@@ -1504,6 +1504,59 @@ let defer_wake config ~occurrence_id (request : Schedule_domain.schedule_request
                (Keeper_event_queue.to_list queue)))
      | Ok (Some _) | Error _ -> false)
   | Schedule_domain.One_shot | Schedule_domain.Daily _ | Schedule_domain.Cron _ -> false
+;;
+
+(* A shutdown fence refuses every intake for its Keeper until the operation
+   that holds it settles. Dispatching into it would mark the schedule
+   [Running] only to be refused, and a purge's own completion cannot cancel a
+   [Running] schedule — so on 2026-09-22 five purges stayed fenced for 28
+   minutes after the queue they had failed on became readable again, and
+   nothing but a restart walked them. The hold keeps the schedule [Due], and
+   asking the fence owner to walk its finalization again lets the first tick
+   after the repair settle it. The ask rides on the tick that already
+   evaluates this hold, so it adds no clock of its own (RFC-0433) (#34642).
+
+   The fence checked here is the requested Keeper's. A wake transferred to
+   another Keeper is still refused at dispatch by its resolved owner's
+   fence. *)
+let target_intake_fence_hold config (request : Schedule_domain.schedule_request) =
+  match Schedule_payload_projection.wake_keeper_name request with
+  | None -> None
+  | Some keeper_name ->
+    (match
+       Keeper_shutdown_intake_fence.shutdown_operation_id
+         ~base_path:config.Workspace_utils.base_path
+         ~keeper_name
+     with
+     | None -> None
+     | Some operation_id ->
+       (match
+          Keeper_shutdown_runtime.redrive_finalization
+            ~config
+            ~keeper_name
+            ~operation_id
+        with
+        | Ok () -> ()
+        | Error error ->
+          Log.Keeper.warn
+            "held schedule could not ask its fence owner to resume: keeper=%s operation=%s error=%s"
+            keeper_name
+            (Keeper_shutdown_types.Operation_id.to_string operation_id)
+            (Keeper_shutdown_runtime.redrive_error_to_string error));
+       Some
+         (Schedule_runner.Target_intake_fenced
+            { target = keeper_name
+            ; fence_owner = Keeper_shutdown_types.Operation_id.to_string operation_id
+            }))
+;;
+
+let defer_wake config ~occurrence_id request =
+  match target_intake_fence_hold config request with
+  | Some _ as fenced -> fenced
+  | None ->
+    if self_clock_holds config ~occurrence_id request
+    then Some Schedule_runner.Previous_occurrence_unconsumed
+    else None
 ;;
 
 let consumer : Schedule_runner.consumer = { accepts; dispatch; defer_wake }

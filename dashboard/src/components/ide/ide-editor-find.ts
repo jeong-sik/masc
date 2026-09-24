@@ -3,6 +3,7 @@ import { signal } from '@preact/signals'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type { CodeDocumentLine } from './code-document-store'
 import { escapeRegExp } from '../../lib/format-string'
+import { isImeComposing } from './ide-keyboard'
 
 export interface FindOptions {
   readonly caseSensitive: boolean
@@ -279,15 +280,6 @@ export function IdeFindPanel({
         : null}
     </div>
   `
-}
-
-/**
- * The Enter (or Escape) that confirms or cancels an IME composition belongs
- * to the IME. Safari reports that keydown with isComposing false and the
- * legacy keyCode 229, so both are read.
- */
-export function isImeComposing(event: KeyboardEvent): boolean {
-  return event.isComposing || event.keyCode === 229
 }
 
 function ToggleButton({

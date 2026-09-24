@@ -55,7 +55,7 @@ let call fake request =
        Ok (`Assoc [ "page", `Assoc [ "page_id", `String page_id; "url", `String url ]; "response", `Null ])
      | Wire.Act _ | Wire.Observe _ | Wire.Extract _ ->
        Ok (`Assoc [ "data", `Assoc [ "success", `Bool true ]; "metadata", `Assoc [ "cache", `Assoc [] ] ])
-     | Wire.Init _ | Wire.Close -> failf "the executor sent %s" (Wire.method_name request))
+     | Wire.Close -> failf "the executor sent %s" (Wire.method_name request))
 ;;
 
 let blank = { page_id = "P1"; url = "about:blank"; title = "" }

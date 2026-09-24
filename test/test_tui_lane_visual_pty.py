@@ -107,7 +107,7 @@ def main(executable: str, captures: Path | None) -> None:
         if addon_writes:
             raise AssertionError(f"browsing or hidden detach sent mutation: {addon_writes!r}")
         key(b"q", b"MASC Lanes")
-        key(b"\x1b", b"MASC Overview")
+        key(b"\x1b", b"MASC Dashboard")
         os.write(master, b"q")
 
     terminal.run_terminal_scenario(executable, description="Lane visual workspace",

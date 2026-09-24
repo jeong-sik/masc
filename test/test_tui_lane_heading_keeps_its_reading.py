@@ -65,7 +65,7 @@ def run(executable: str) -> None:
             # footer, so this reads everything the pane has written.
             if columns == 110 and b"A:Lane Add-ons" not in bytes(output):
                 raise AssertionError("the footer stopped naming the Add-ons key")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable,

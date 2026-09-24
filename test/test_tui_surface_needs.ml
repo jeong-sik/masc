@@ -170,17 +170,18 @@ let test_authoritative_refresh_waits_for_both_owners_then_runs_once () =
     (cadence = Types.No_scoped_followup)
 ;;
 
-(* The goal tree is read for the Overview's GOALS section and nowhere else;
-   Planning reads its own planning payload. *)
+(* Dashboard and Work both show the exact Goal measurement. Work joins it to
+   the selected Goal only after the criterion revisions agree. *)
 let test_only_the_overview_asks_for_the_goal_tree () =
-  check bool "the overview asks for it" true
+  check bool "Dashboard asks for it" true
     (needs Types.Overview).Types.needs_overview_goals;
+  check bool "Work asks for it" true
+    (needs Types.Planning).Types.needs_overview_goals;
   List.iter
     (fun (label, surface) ->
       check bool (label ^ " does not") false
         (needs surface).Types.needs_overview_goals)
-    [ ("planning", Types.Planning)
-    ; ("board", Types.Board)
+    [ ("board", Types.Board)
     ; ("metrics", Types.Metrics)
     ; ("the keeper list", Types.Keepers Types.Keeper_list)
     ]

@@ -21567,7 +21567,19 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages System_logs
         | Some ("m" | "M") when state.view = Overview ->
             goto_surface state ~mailbox:async_messages Metrics
-        | Some ("w" | "W") when state.view = Metrics ->
+        | Some ("p" | "P") when state.view = Metrics ->
+            state.usage_telemetry_open <- not state.usage_telemetry_open;
+            state.metrics_scroll <- 0
+        | Some ("1" | "2" | "3") as section
+          when state.view = Metrics && state.usage_telemetry_open ->
+            state.metrics_section <-
+              (match section with
+               | Some "1" -> Section_fleet
+               | Some "2" -> Section_resources
+               | Some "3" | None | Some _ -> Section_tools);
+            state.metrics_scroll <- 0
+        | Some ("w" | "W")
+          when state.view = Metrics && not state.usage_telemetry_open ->
             state.provider_history_days <-
               (match state.provider_history_days with
                | 1 -> 7
@@ -22891,7 +22903,7 @@ and is loaded on demand through keeper_skill.
                   state.approval_detail_open <- false;
                   state.approval_detail_scroll <- 0
                 end
-                else state.view <- Overview
+                else goto_surface state ~mailbox:async_messages Planning
             | Changes ->
                 (* Esc closes the open diff and leaves the list where it was,
                    so the row an operator was reading is still under the

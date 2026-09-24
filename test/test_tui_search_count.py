@@ -99,7 +99,7 @@ def run(executable: str) -> None:
         http_fixtures=fixtures)
 
     def memory_interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC Memory")
+        h.palette_go(process, fd, output, b"go Memory", b"MASC Memory")
         h.wait_for_output(process, fd, output, b"Total 3 facts", start=0, timeout=5)
         h.send_and_wait(process, fd, output, b"\r", b"\xe2\x96\xb8 alpha")
         h.wait_for_output(
@@ -133,7 +133,7 @@ def run(executable: str) -> None:
                     origin=f"authored-{prefix}")
 
     def memory_phrase_interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC Memory")
+        h.palette_go(process, fd, output, b"go Memory", b"MASC Memory")
         h.wait_for_output(process, fd, output, b"Total 3 facts", start=0, timeout=5)
         h.send_and_wait(process, fd, output, b"\r", b"\xe2\x96\xb8 alpha")
         h.wait_for_output(process, fd, output, b"first deploy", start=0, timeout=5)

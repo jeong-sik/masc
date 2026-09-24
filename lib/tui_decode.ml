@@ -504,6 +504,7 @@ type verifier_unreconciled = {
 
 type planning_goal = {
   pg_id : string;
+  pg_criterion_revision : string option;
   pg_title : string;
   pg_phase : Goal_phase.t;
   pg_priority : int;
@@ -2112,6 +2113,7 @@ let decode_verifier_unreconciled json =
 
 let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
+  let* pg_criterion_revision = optional_string_field json "criterion_revision" in
   let* pg_title = required_string_field json "title" in
   let* raw_phase = required_string_field json "phase" in
   let* pg_phase =
@@ -2132,6 +2134,7 @@ let decode_planning_goal json =
   Ok
     {
       pg_id;
+      pg_criterion_revision;
       pg_title;
       pg_phase;
       pg_priority;

@@ -3719,7 +3719,7 @@ def keeper_ask_answer_interaction(
             final_cursor=b"\x1b[?25l",
         )
         tab_until(process, master_fd, output, b"MASC Keepers")
-        tab_until(process, master_fd, output, b"Questions waiting on you")
+        palette_go(process, master_fd, output, b"go Approvals", b"Questions waiting on you")
 
         # Open an approval's detail. The answer flow is drawn by the list, so
         # this is where [a] used to set the mode and change nothing on screen.
@@ -3786,7 +3786,7 @@ def question_reader_interaction(requests: HttpRequests) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"Questions waiting on you")
+        palette_go(process, master_fd, output, b"go Approvals", b"Questions waiting on you")
         send_and_wait(process, master_fd, output, b"a", b"Question 1/2")
         send_and_wait(process, master_fd, output, b"\x1b[C", b"Question 2/2")
         resized = resize_and_wait(
@@ -3961,7 +3961,7 @@ def blocked_gate_detail_interaction() -> Interaction:
             columns=100,
             needle=b"MASC Dashboard",
         )
-        tab_until(process, master_fd, output, b"MASC Approvals")
+        palette_go(process, master_fd, output, b"go Approvals", b"MASC Approvals")
         wait_for_output(
             process, master_fd, output, b"AUTO JUDGE BLOCKED", start=0, timeout=5.0
         )
@@ -4021,7 +4021,7 @@ def concealed_input_detail_interaction() -> Interaction:
             columns=100,
             needle=b"MASC Dashboard",
         )
-        tab_until(process, master_fd, output, b"MASC Approvals")
+        palette_go(process, master_fd, output, b"go Approvals", b"MASC Approvals")
         # The row names the operation the producer sent, verbatim: the decoder
         # passes [tool_name] through for every operation but identity_call.
         wait_for_output(
@@ -4114,7 +4114,7 @@ def escaped_question_detail_interaction() -> Interaction:
             columns=100,
             needle=b"MASC Dashboard",
         )
-        tab_until(process, master_fd, output, b"MASC Approvals")
+        palette_go(process, master_fd, output, b"go Approvals", b"MASC Approvals")
         wait_for_output(
             process, master_fd, output, b"tool-escaped-question", start=0, timeout=5.0
         )
@@ -4168,12 +4168,7 @@ def approval_selection_identity_interaction(
             timeout=3.0,
         )
         tab_until(process, master_fd, output, b"MASC Keepers")
-        landed = tab_until(
-            process,
-            master_fd,
-            output,
-            approvals_header(3),
-        )
+        landed = palette_go(process, master_fd, output, b"go Approvals", approvals_header(3))
         # Three operator entries, no held call, no Gate row: the title names
         # the one kind that has rows and says no zero for the two that do not.
         landed_plain = CSI_RE.sub(b"", frame_containing(landed, approvals_header(3)))
@@ -4252,7 +4247,7 @@ def open_loaded_planning(
     output: bytearray,
 ) -> None:
     # Navigate by named surface so Planning tests do not depend on tab order.
-    palette_go(process, master_fd, output, b"go Planning", b"plan-alpha-29424")
+    palette_go(process, master_fd, output, b"go Work", b"plan-alpha-29424")
 
 
 def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction:
@@ -6906,7 +6901,7 @@ def memory_facts_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Memory")
+        palette_go(process, master_fd, output, b"go Memory", b"MASC Memory")
         # Enter is a no-op until the health snapshot lands. The fixture has
         # two ordinary facts and one source fact, shown in the overview total.
         wait_for_output(
@@ -9802,10 +9797,8 @@ def planning_review_hierarchy_interaction() -> Interaction:
                 f"Goals did not retain the Task Review sibling: {goals_again!r}"
             )
         # The children are [v] stops, not the next top-level Tab destination.
-        # From Planning, the ring's next stop is Fusion (surface_ring:
-        # ... Planning; Fusion; Workspace/Repositories; ...), so one Tab
-        # lands on Fusion's boxed title, not on Workspace two stops later.
-        send_and_wait(process, master_fd, output, b"\t", b"MASC Fusion")
+        # Work is one Tab stop; the next top-level destination is Keepers.
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
         os.write(master_fd, b"q")
 
     return interact
@@ -13671,7 +13664,7 @@ def fusion_live_reload_interaction(
             # HttpRequests records POST bodies; this list is fetched by GET.
             return run_list.served
 
-        landed = tab_until(process, master_fd, output, b"fusion-alpha")
+        landed = palette_go(process, master_fd, output, b"go Fusion", b"fusion-alpha")
         if list_loads() != 1:
             raise AssertionError(
                 f"surface entry alone should load the list once, saw {list_loads()}"
@@ -18304,7 +18297,10 @@ def dashboard_usage_interaction(
     if b"Goals" not in dashboard or b"Work" not in dashboard or b"linked tasks 0/1 done" not in dashboard:
         raise AssertionError(f"Dashboard summary missing: {dashboard!r}")
     print("DASHBOARD_PTY_SCREEN=" + json.dumps(dashboard.decode("utf-8", errors="replace")), flush=True)
-    send_and_wait(process, master_fd, output, b"\t", b"MASC Work")
+    send_and_wait(process, master_fd, output, b"\t", b"Fixture Goal")
+    send_and_wait(process, master_fd, output, b"\r", b"Actual: 3 (reported)")
+    wait_for_output(process, master_fd, output, b"artifact:fixture-checks", start=0, timeout=5.0)
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Work")
     send_and_wait(process, master_fd, output, b"t", b"MASC Work / Tasks")
     usage = tab_until(process, master_fd, output, b"MASC Usage")
     if b"MASC Usage" not in usage:
@@ -18316,6 +18312,9 @@ def dashboard_usage_interaction(
     if b"UTC days reported" not in plain or b"Keeper usage" not in plain:
         raise AssertionError(f"Usage evidence and coverage missing: {plain!r}")
     print("USAGE_PTY_SCREEN=" + json.dumps(plain.decode("utf-8", errors="replace")), flush=True)
+    send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
+    send_and_wait(process, master_fd, output, b"3", b"Memory & Gate Safety")
+    send_and_wait(process, master_fd, output, b"p", b"MASC Usage")
     send_and_wait(process, master_fd, output, b"w", b"7 UTC days")
     system = tab_until(process, master_fd, output, b"MASC System")
     if b"MASC System" not in system:
@@ -18347,6 +18346,10 @@ def run_dashboard_usage_regression(executable: str) -> None:
             ],
         }
     ]
+    planning = planning_goal("goal-fixture", "Fixture Goal")
+    planning["criterion_revision"] = "r1"
+    planning["metric"] = "accepted checks"
+    planning["target_value"] = "5"
     run_terminal_scenario(
         executable,
         description="Dashboard, Work, Usage and System navigation",
@@ -18354,6 +18357,7 @@ def run_dashboard_usage_regression(executable: str) -> None:
         refresh=1.0,
         http_fixtures={
             "/api/v1/dashboard/briefing": (200, overview_event_briefing()),
+            PLANNING_PATH: planning_snapshot([planning]),
             DASHBOARD_GOALS_PATH: (
                 200,
                 {

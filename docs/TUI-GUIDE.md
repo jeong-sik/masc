@@ -324,8 +324,10 @@ window. A failed read is labeled unavailable rather than drawn as zero.
 
 Keeper rows show recorded 24-hour token and cost totals with the number of
 turns that reported each value and the number missing it. Transport delivery
-and the TUI session are also here. Activity and the server log are reached
-from System when a detailed event timeline is needed.
+is also here. `p` opens Telemetry, retaining the engine, work outcome, and
+memory/Gate safety readings (`1`/`2`/`3` select those sections); `p` returns
+to quota and Keeper usage. Activity and the server log are reached from
+System when a detailed event timeline is needed.
 
 ### Activity
 

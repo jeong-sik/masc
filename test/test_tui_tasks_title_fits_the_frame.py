@@ -30,7 +30,7 @@ def cells(row: bytes) -> int:
 
 def run(executable: str) -> None:
     def interact(process, fd, _slave, output, _base_path):
-        h.wait_for_output(process, fd, output, b"MASC Overview", start=0, timeout=15)
+        h.wait_for_output(process, fd, output, b"MASC Dashboard", start=0, timeout=15)
         # Five todo tasks and none held; the title draws
         # " Tasks (0 in progress . 0 awaiting . 0 claimed . 0 done 24h)",
         # which is 60 cells.

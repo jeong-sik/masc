@@ -63,7 +63,7 @@ def run(executable: str) -> None:
         # And the reading the dot used to introduce is still there.
         if b"rows" not in row:
             raise AssertionError(f"at 66 columns the title lost its reading: {row!r}")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable,

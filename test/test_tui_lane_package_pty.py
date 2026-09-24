@@ -109,7 +109,7 @@ def main(executable: str) -> None:
             key(b"5", b"No observations.")
             key(b"3", b"No Add-ons installed.")
             key(b"q", b"MASC Lanes")
-            key(b"\x1b", b"MASC Overview")
+            key(b"\x1b", b"MASC Dashboard")
             key(b":go lane add-ons\r", b"MASC Lane Add-ons")
             key(b"D", b"TOML installations")
             key(b"n", b"New TOML filename:")
@@ -136,7 +136,7 @@ def main(executable: str) -> None:
             key(b"E", b"Draft edited; s saves")
             key(b"s", b"Malformed candidate")
             # Leaving/reopening keeps the invalid draft, not just the old file.
-            key(b"q", b"MASC Overview")
+            key(b"q", b"MASC Dashboard")
             reopened = key(b":go lane add-ons\r", b"TOML draft terminal.toml")
             if b"id = [" not in terminal.CSI_RE.sub(b"", reopened):
                 raise AssertionError("closing the pane discarded rejected TOML")
@@ -154,7 +154,7 @@ def main(executable: str) -> None:
             key(b"n", b"New TOML filename:")
             edit_text.write_text("# second draft retained")
             key(b"second.toml\r", b"TOML draft second.toml")
-            key(b"q", b"MASC Overview")
+            key(b"q", b"MASC Dashboard")
             # The save is still gated here, so this reopen is refused with the
             # pending note instead of fetching: the pane comes up from the
             # cached view. That note is the only observable handle on the
@@ -189,14 +189,14 @@ def main(executable: str) -> None:
                 raise AssertionError("refresh fixture did not complete")
             fixtures["/api/v1/lane-addons"] = inspect
             # Close the whole pane, revisit, then return to the regular TUI.
-            key(b"q", b"MASC Overview")
+            key(b"q", b"MASC Dashboard")
             reopened = key(b":go lane add-ons\r", b"TOML draft second.toml")
             if b"# second draft retained" not in terminal.CSI_RE.sub(b"", reopened):
                 raise AssertionError("late save or refresh discarded the second draft")
             key(b"\x1b", b"TOML installations")
             key(b":act " + json.dumps(action_request).encode() + b"\r", b"state queued")
             key(b"t", b"state confirmed")
-            key(b"q", b"MASC Overview")
+            key(b"q", b"MASC Dashboard")
             os.write(master_fd, b"q")
             deadline = terminal.time.monotonic() + 3
             while len([path for path, _ in requests if path == "/api/v1/lane-addons/declaration"]) < 5:

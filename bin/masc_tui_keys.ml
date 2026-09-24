@@ -356,8 +356,12 @@ let for_surface = function
       ]
   | Metrics ->
       [ b Navigate "j/k" "scroll"
+      ; b Navigate "p" "Usage / Telemetry"
+          ~help:"switch between quota and Keeper usage, and engine telemetry"
       ; b Navigate "w" "1d / 7d / 14d"
-          ~help:"cycle the exact UTC day window for provider report history"
+          ~help:"on Usage: cycle the exact UTC day window for provider report history"
+      ; b Navigate "1 / 2 / 3" "telemetry section"
+          ~help:"on Telemetry: Engine, Work, or Tools"
       ; b Act "Esc" "Dashboard"
       ; b Meta "r" "refresh"
       ; b Meta "Tab" "next"
@@ -904,6 +908,13 @@ let has_detail_scoped_keys surface =
       | Either -> false
       | List_only | Detail_only -> true)
     (for_surface surface)
+
+let footer_hints_metrics ~telemetry =
+  for_surface Metrics
+  |> List.filter (fun binding ->
+         if telemetry then not (String.equal binding.key "w")
+         else not (String.equal binding.key "1 / 2 / 3"))
+  |> hints_of_bindings
 
 (* The keys an open approval answers to. Its footer was written out in the
    renderer, which is how it came to spell the decision keys apart from the

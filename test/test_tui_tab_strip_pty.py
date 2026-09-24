@@ -26,7 +26,7 @@ CUT = b"\xe2\x80\xa6"
 def run(executable: str) -> None:
     def interact(process, master_fd, _slave_fd, output, _base_path):
         h.resize_and_wait(process, master_fd, output, rows=38, columns=150,
-                          needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
+                          needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
         h.drain_until_quiet(process, master_fd, output)
         # Keeper detail: [ from Info wraps to Runs, the last of nine tabs. The
         # strip must cut its far end rather than the entry it marks.
@@ -45,7 +45,7 @@ def run(executable: str) -> None:
         # Config: p walks the panes, and every pane name must arrive whole.
         # "prompts" and "presets" are eight cells, one more than the six-cell
         # names before them, so a strip budget short by a cell shows here.
-        h.tab_until(process, master_fd, output, b"MASC Config")
+        h.tab_until(process, master_fd, output, b"MASC System")
         for pane in (b"models", b"params", b"prompts", b"presets", b"themes",
                      b"voice"):
             h.send_and_wait(process, master_fd, output, b"p", CURRENT + pane)

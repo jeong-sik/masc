@@ -256,13 +256,13 @@ def run(executable: str) -> None:
     requests: h.HttpRequests = []
 
     def interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC Config")
+        h.tab_until(process, fd, output, b"MASC System")
         # 131 columns, as the Runtime scenario in test_tui_keyboard_input.py
         # uses: wide enough for the prompt rows, narrow enough to keep the
         # acting pane off the screen.
         h.resize_and_wait(
             process, fd, output, rows=30, columns=131,
-            needle=b"MASC Config", controls=(h.FULL_REDRAW,),
+            needle=b"MASC System", controls=(h.FULL_REDRAW,),
         )
         h.send_and_wait(process, fd, output, b"9", b"Lanes (3 lanes, 4 slots)")
 

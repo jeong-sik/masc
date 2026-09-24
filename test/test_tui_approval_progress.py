@@ -20,7 +20,7 @@ import test_tui_keyboard_input as h
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs
 # a suite when a pull request changes a path the suite names, so without
 # this a change to the drawn text below reaches main with no scenario run.
-# Both surfaces this crosses ("MASC Overview", "MASC Keepers") are titled
+# Both surfaces this crosses ("MASC Dashboard", "MASC Keepers") are titled
 # in masc_tui_render.ml.
 SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
@@ -72,9 +72,9 @@ def scenario(binary: str, columns: int) -> None:
     def interact(process, master, _slave, output, _base):
         try:
             h.resize_and_wait(process, master, output, rows=30, columns=columns - 1,
-                              needle=b"MASC Overview")
+                              needle=b"MASC Dashboard")
             h.resize_and_wait(process, master, output, rows=30, columns=columns,
-                              needle=b"MASC Overview")
+                              needle=b"MASC Dashboard")
             h.send_and_wait(process, master, output, b"2", b"MASC Keepers")
             h.select_keeper_row(process, master, output, b"alpha")
             h.send_and_wait(process, master, output, b"c",

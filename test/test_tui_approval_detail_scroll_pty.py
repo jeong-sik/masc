@@ -35,9 +35,9 @@ def approval_with_body(body: str) -> h.HttpFixtures:
 
 def open_detail(process, master_fd, output, opening: bytes) -> None:
     h.resize_and_wait(
-        process, master_fd, output, rows=40, columns=100, needle=b"MASC Overview"
+        process, master_fd, output, rows=40, columns=100, needle=b"MASC Dashboard"
     )
-    h.tab_until(process, master_fd, output, b"MASC Approvals")
+    h.palette_go(process, master_fd, output, b"go Approvals", b"MASC Approvals")
     # The row names the operation the producer sent, verbatim.
     h.wait_for_output(process, master_fd, output, b"connector_post", start=0, timeout=5.0)
     # The queue row's preview stops before the body, so these bytes can only

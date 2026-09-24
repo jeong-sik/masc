@@ -64,7 +64,7 @@ def run(executable: str) -> None:
 
     def interact(process, master, _slave, output, _base_path):
         h.resize_and_wait(process, master, output, rows=30, columns=150,
-                          needle=b"MASC Overview")
+                          needle=b"MASC Dashboard")
         h.palette_go(process, master, output, b"go lanes", b"Verifier")
         h.send_and_wait(process, master, output, b"/Verifier",
                         re.compile(rb"\x1b\[7m[^\x1b\n]*Verifier"))

@@ -2969,7 +2969,8 @@ and surface_needs_of_surface : surface -> surface_needs = function
       ; needs_keeper_chat = true
       }
   | Board -> { nothing with needs_board = true }
-  | Planning -> { nothing with needs_planning = true }
+  | Planning ->
+      { nothing with needs_planning = true; needs_overview_goals = true }
   | System_logs -> { nothing with needs_system_logs = true }
   (* Approvals is where a human answers things, so the questions Keepers put
      to one belong on the same surface: an operator should not have to know
@@ -5207,6 +5208,7 @@ let lane_name_entry_with_draft entry draft =
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
+  mutable usage_telemetry_open: bool;
   mutable agents: agent list;
   mutable tasks: task list;
   (* The full domain rows the Overview list is projected from, kept so the
@@ -7628,6 +7630,7 @@ let create_state
   {
   metrics_scroll = 0;
   metrics_section = Section_fleet;
+  usage_telemetry_open = false;
   agents = [];
   tasks = [];
   tasks_domain = [];
@@ -11197,7 +11200,10 @@ let palette_entries (state : state) =
   @ [ "go MSX", Palette_msx ]
   @ [ "go Lane Add-ons", Palette_lane_addons ]
   @ [ "go Logs", Palette_goto System_logs ]
-  @ [ "go Metrics", Palette_goto Metrics ]
+  @ [ "go Activity", Palette_goto Acting ]
+  @ [ "go Approvals", Palette_goto Approvals ]
+  @ [ "go Memory", Palette_goto Memory ]
+  @ [ "go Fusion", Palette_goto Fusion ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring

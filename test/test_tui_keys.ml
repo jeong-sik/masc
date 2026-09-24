@@ -2243,6 +2243,7 @@ let test_board_without_posts_offers_nothing_to_search () =
 
 let planning_goal_row id title =
   { pg_id = id
+  ; pg_criterion_revision = None
   ; pg_title = title
   ; pg_phase = Goal_phase.Executing
   ; pg_priority = 1

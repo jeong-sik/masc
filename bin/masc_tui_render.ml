@@ -50,6 +50,7 @@ module Span = Masc_tui_span
 module Diff = Masc_tui_diff
 module Chart = Masc_tui_chart
 module Render_memory = Masc_tui_render_memory
+module Metrics_page = Masc_tui_render_metrics
 
 type memory_state = Render_memory.memory_state =
   | Memory_ordinary
@@ -3146,6 +3147,49 @@ let render_planning_list (state : state) =
    next-step sentence is a row of its own. Counted here, drawn below. *)
 let planning_detail_fixed_rows = 12
 
+let planning_measurement_lines (state : state) (goal : planning_goal) =
+  let line tone text = { Planning_detail.tone; text } in
+  let unavailable reason =
+    [ line Planning_detail.Unreadable
+        ("Actual measurement unavailable: " ^ Terminal_text.single_line reason) ]
+  in
+  if Option.is_none goal.pg_criterion_revision then []
+  else match state.overview_goals with
+  | Goals_unread -> [ line Planning_detail.Waiting "Actual measurement not observed" ]
+  | Goals_failed reason -> unavailable reason
+  | Goals_read goals ->
+      (match List.find_opt
+               (fun (row : Tui_decode.overview_goal) ->
+                 String.equal row.og_id goal.pg_id) goals with
+       | None -> unavailable "Goal missing from the current measurement tree"
+       | Some row ->
+           if not (Option.equal String.equal goal.pg_criterion_revision
+                        row.og_criterion_revision)
+              || not (Option.equal String.equal goal.pg_metric row.og_metric)
+              || not (Option.equal String.equal goal.pg_target_value
+                        row.og_target_value)
+           then unavailable "criterion revision or target differs between Work and the Goal tree"
+           else
+             let tasks =
+               line Planning_detail.Quiet
+                 (Printf.sprintf "Linked Tasks: %d/%d done (separate from the measurement)"
+                    row.og_task_done_count row.og_task_count)
+             in
+             (match row.og_measurement with
+              | Goal_measurement_unread ->
+                  [ line Planning_detail.Waiting "Actual measurement not observed"; tasks ]
+              | Goal_measurement_not_recorded ->
+                  [ line Planning_detail.Quiet "Actual measurement not recorded"; tasks ]
+              | Goal_measurement_unavailable reason -> unavailable reason @ [ tasks ]
+              | Goal_measurement_reported { value; evidence; actor; recorded_at } ->
+                  [ line Planning_detail.Proven
+                      ("Actual: " ^ Terminal_text.single_line value ^ " (reported)")
+                  ; line Planning_detail.Note
+                      ("Evidence: " ^ Terminal_text.single_line evidence
+                       ^ " · " ^ Terminal_text.single_line actor
+                       ^ " · " ^ Terminal_text.single_line recorded_at)
+                  ; tasks ]))
+
 let planning_detail_pane (state : state)
     ~(armed : Goal_phase.Public_action.t option) ~confirmation ~rows ~cols
     (goal : planning_goal) buf =
@@ -3277,7 +3321,8 @@ let planning_detail_pane (state : state)
      less than the row it was opened from. They wrap, so this is what the
      surface's scroll moves through. *)
   let body =
-    (match confirmation with
+    planning_measurement_lines state goal
+    @ (match confirmation with
      | `Submitting -> [{ Planning_detail.tone = Waiting; text = "Sending proof confirmation..." }]
      | `Inspect (Masc_tui_fetched.Ready confirmation) -> Planning_detail.confirmation_lines ~width:(cols - 6) confirmation
      | `Inspect Loading -> [{ Planning_detail.tone = Waiting; text = "Reading the proof to confirm..." }]
@@ -3421,7 +3466,7 @@ let render_planning_detail (state : state)
       in
       (* The goal filter narrows to a phase; the goals it leaves out are on
          the other side of a filter, not behind a page boundary. *)
-      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Planning"
+      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Work"
         ~holding:None
         ~focused:false
         ~labels:(List.map format_sidebar_goal goals)
@@ -12789,7 +12834,9 @@ let render_metrics (state : state) =
      title does not name it a second time. *)
   let title =
     Printf.sprintf "%s  %s  %s"
-      (screen_title " MASC Usage")
+      (screen_title
+         (if state.usage_telemetry_open then " MASC Usage / Telemetry"
+          else " MASC Usage"))
       timestamp (connection_badge state)
   in
   (* The section's lines are formatted by the drawing, so the row it could
@@ -12799,21 +12846,31 @@ let render_metrics (state : state) =
   surface_chrome
     ~clamped:(fun () -> Some (Metrics_scroll !drawn_metrics_scroll))
     state ~terminal_rows ~cols ~surface_key:"metrics"
-    ~title ~hints:(Masc_tui_keys.footer_hints state.view)
+    ~title
+    ~hints:(Masc_tui_keys.footer_hints_metrics
+              ~telemetry:state.usage_telemetry_open)
     ~body:(fun ~budget c ->
-      let lines = usage_lines ~cols state in
-      let height = max 0 (budget - 1) in
-      let max_scroll = max 0 (List.length lines - height) in
-      let scroll = min max_scroll (max 0 state.metrics_scroll) in
-      drawn_metrics_scroll := scroll;
-      List.iteri
-        (fun index line ->
-          if index >= scroll && index < scroll + height then c.push line)
-        lines;
-      if List.length lines > height then
-        c.push (Printf.sprintf " [rows %s · j/k to scroll]"
-                  (Masc_tui_scroll.window_text ~scroll ~height
-                     (List.length lines))))
+      if state.usage_telemetry_open then
+        Metrics_page.render_metrics_body ~cols ~budget state
+          ~report_scroll:(fun scroll -> drawn_metrics_scroll := scroll)
+          ~push:c.push ~push_styled:c.push_styled
+          ~push_selected:c.push_selected ~push_divider:c.push_divider
+          ~push_empty:c.push_empty
+      else begin
+        let lines = usage_lines ~cols state in
+        let height = max 0 (budget - 1) in
+        let max_scroll = max 0 (List.length lines - height) in
+        let scroll = min max_scroll (max 0 state.metrics_scroll) in
+        drawn_metrics_scroll := scroll;
+        List.iteri
+          (fun index line ->
+            if index >= scroll && index < scroll + height then c.push line)
+          lines;
+        if List.length lines > height then
+          c.push (Printf.sprintf " [rows %s · j/k to scroll]"
+                    (Masc_tui_scroll.window_text ~scroll ~height
+                       (List.length lines)))
+      end)
 
 (** Render the runtime picker: the dispatchable catalogue, with the keeper it
     is choosing for and where that keeper points today in the header. *)

@@ -69,8 +69,8 @@ def run_case(
         output: bytearray,
         _base: str,
     ) -> None:
-        h.tab_until(process, fd, output, b"MASC Config")
-        h.send_and_wait(process, fd, output, b"t", b"MASC Config / Tools")
+        h.tab_until(process, fd, output, b"MASC System")
+        h.send_and_wait(process, fd, output, b"t", b"MASC System / Tools")
         key = b"C" if composition else b"c"
         if diagnostic is None:
             start = len(output)

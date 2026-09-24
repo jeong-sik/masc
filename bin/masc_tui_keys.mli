@@ -102,6 +102,10 @@ val footer_hints : ?detail_open:bool -> Masc_tui_types.surface -> string
     behaviour from before this argument existed, and the one
     {!has_detail_scoped_keys} exists to catch. *)
 
+val footer_hints_metrics : telemetry:bool -> string
+(** Usage footer, showing only the keys for the visible Usage or Telemetry
+    reading. *)
+
 val has_detail_scoped_keys : Masc_tui_types.surface -> bool
 (** Whether this surface's table scopes any binding to one of the two states,
     and so owes [footer_hints] a [~detail_open] from both of its renderers.

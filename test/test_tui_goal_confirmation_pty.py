@@ -103,7 +103,7 @@ def run(executable: str, *, replace_proof: bool) -> None:
             output,
             rows=50,
             columns=160,
-            needle=b"MASC Overview",
+            needle=b"MASC Dashboard",
             final_cursor=b"\x1b[?25l",
         )
         h.open_loaded_planning(process, master_fd, output)

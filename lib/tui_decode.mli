@@ -138,6 +138,7 @@ type verifier_unreconciled = {
 
 type planning_goal = {
   pg_id : string;
+  pg_criterion_revision : string option;
   pg_title : string;
   pg_phase : Goal_phase.t;
   pg_priority : int;

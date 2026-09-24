@@ -377,7 +377,7 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         if scenario == "overlay-palette":
             # Returning to the same surface need not repaint its title.
             h.palette_go(process, master, output, b"go lanes", b"j/k:move")
-            h.send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
+            h.send_and_wait(process, master, output, b"\x1b", b"MASC Dashboard")
         if scenario == "theme-preview":
             h.palette_go(process, master, output, b"go Config / themes", b"MASC Themes")
             h.wait_for_output(

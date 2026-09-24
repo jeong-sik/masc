@@ -42,7 +42,7 @@ async function loadNotifications() {
 }
 
 function baseEvent(overrides: Partial<SSEEvent>): SSEEvent {
-  return { type: 'keeper_handoff', ...overrides } as SSEEvent
+  return { type: 'approval:pending', ...overrides } as SSEEvent
 }
 
 beforeEach(() => {
@@ -66,11 +66,11 @@ describe('notify rules (persisted, per-event-kind opt-in)', () => {
   it('setNotifyRuleEnabled flips the rule and persists to localStorage', async () => {
     uninstallNotification()
     const notif = await loadNotifications()
-    notif.setNotifyRuleEnabled('keeper_handoff', false)
-    expect(notif.isNotifyRuleEnabled('keeper_handoff')).toBe(false)
-    expect(notif.isNotifyRuleEnabled('approval:pending')).toBe(true)
+    notif.setNotifyRuleEnabled('approval:pending', false)
+    expect(notif.isNotifyRuleEnabled('approval:pending')).toBe(false)
+    expect(notif.isNotifyRuleEnabled('agent_core:agent_failed')).toBe(true)
     const stored = JSON.parse(localStorage.getItem('dashboard:notify:rules-v1') ?? '{}')
-    expect(stored.keeper_handoff).toBe(false)
+    expect(stored['approval:pending']).toBe(false)
   })
 
   it('round-trips a disabled rule across a fresh module load', async () => {
@@ -80,19 +80,17 @@ describe('notify rules (persisted, per-event-kind opt-in)', () => {
 
     const second = await loadNotifications()
     expect(second.isNotifyRuleEnabled('agent_core:agent_failed')).toBe(false)
-    expect(second.isNotifyRuleEnabled('keeper_handoff')).toBe(true)
+    expect(second.isNotifyRuleEnabled('approval:pending')).toBe(true)
   })
 
   it('decodes each stored rule as a boolean and defaults invalid fields', async () => {
     localStorage.setItem('dashboard:notify:rules-v1', JSON.stringify({
-      keeper_handoff: false,
-      'approval:pending': 0,
-      'agent_core:agent_failed': true,
+      'approval:pending': false,
+      'agent_core:agent_failed': 0,
       unknown_kind: false,
     }))
     const notif = await loadNotifications()
-    expect(notif.isNotifyRuleEnabled('keeper_handoff')).toBe(false)
-    expect(notif.isNotifyRuleEnabled('approval:pending')).toBe(true)
+    expect(notif.isNotifyRuleEnabled('approval:pending')).toBe(false)
     expect(notif.isNotifyRuleEnabled('agent_core:agent_failed')).toBe(true)
   })
 })
@@ -220,24 +218,13 @@ describe('event -> notification delivery (exhaustive over NotifyEventKind)', () 
     unsub()
   })
 
-  it('normalizes masc/-prefixed aliases to the same notify kind', async () => {
-    const notif = await loadGrantedWithAllRulesOn()
-    const unsub = notif.initNotificationDelivery()
-    const sse = await import('./sse')
-
-    sse.lastEvent.value = baseEvent({ type: 'masc/keeper_handoff', name: 'atlas' })
-    expect(MockNotification.instances).toHaveLength(1)
-    expect(MockNotification.instances[0]?.title).toBe(notif.NOTIFY_EVENT_LABELS.keeper_handoff)
-    unsub()
-  })
-
   it('does not deliver when the operator disabled that event kind', async () => {
     const notif = await loadGrantedWithAllRulesOn()
-    notif.setNotifyRuleEnabled('keeper_handoff', false)
+    notif.setNotifyRuleEnabled('approval:pending', false)
     const unsub = notif.initNotificationDelivery()
     const sse = await import('./sse')
 
-    sse.lastEvent.value = baseEvent({ type: 'keeper_handoff', name: 'atlas' })
+    sse.lastEvent.value = baseEvent({ type: 'approval:pending' })
     expect(MockNotification.instances).toHaveLength(0)
     unsub()
   })
@@ -248,7 +235,7 @@ describe('event -> notification delivery (exhaustive over NotifyEventKind)', () 
     const sse = await import('./sse')
 
     MockNotification.permission = 'denied'
-    sse.lastEvent.value = baseEvent({ type: 'keeper_handoff', name: 'atlas' })
+    sse.lastEvent.value = baseEvent({ type: 'approval:pending' })
 
     expect(MockNotification.instances).toHaveLength(0)
     expect(notif.notificationPermission.value).toBe('denied')
@@ -278,7 +265,7 @@ describe('event -> notification delivery (exhaustive over NotifyEventKind)', () 
     const sse = await import('./sse')
 
     unsub()
-    sse.lastEvent.value = baseEvent({ type: 'keeper_handoff', name: 'atlas' })
+    sse.lastEvent.value = baseEvent({ type: 'approval:pending' })
     expect(MockNotification.instances).toHaveLength(0)
   })
 })

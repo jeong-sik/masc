@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import {
   decodeScheduledAutomationLookup,
@@ -119,7 +121,41 @@ describe('normalizeScheduledAutomation', () => {
   })
 })
 
+// The server's found answer. test_dashboard_http_core.ml pins every key at
+// every depth, and the kind of every value, to what
+// Server_dashboard_schedule_projection writes, so a key the server adds
+// fails there before it fails here.
+const serverFoundAnswer = JSON.parse(
+  readFileSync(resolve(__dirname, 'fixtures/scheduled-automation-lookup-found.json'), 'utf8'),
+) as Record<string, unknown>
+
+const fixtureScheduleId = String(serverFoundAnswer.schedule_id)
+
+// The wake history of a schedule that has not woken yet, under the server's
+// retention ceiling.
+const NO_WAKES = {
+  wakes: [],
+  wake_count: 0,
+  wake_retention_per_schedule: serverFoundAnswer.wake_retention_per_schedule,
+}
+
 describe('decodeScheduledAutomationLookup', () => {
+  it('accepts the found answer the server writes, wake history included', () => {
+    const decoded = decodeScheduledAutomationLookup(serverFoundAnswer, fixtureScheduleId)
+
+    expect(decoded.status).toBe('found')
+    expect(decoded.scheduleId).toBe(fixtureScheduleId)
+    if (decoded.status !== 'found') throw new Error('unreachable')
+    expect(decoded.request.schedule_id).toBe(fixtureScheduleId)
+  })
+
+  it('still refuses a key the envelope does not name', () => {
+    expect(() => decodeScheduledAutomationLookup(
+      { ...serverFoundAnswer, surprise: true },
+      fixtureScheduleId,
+    )).toThrow('envelope fields mismatch (missing=[], unknown=[surprise])')
+  })
+
   it('accepts the owner envelope and keeps the exact request identity', () => {
     const decoded = decodeScheduledAutomationLookup({
       schema: 'masc.dashboard.scheduled_automation.lookup.v1',
@@ -133,6 +169,7 @@ describe('decodeScheduledAutomationLookup', () => {
         source: 'operator_request',
         payload_kind: 'keeper.review',
       },
+      ...NO_WAKES,
     }, 'sched-exact')
 
     expect(decoded).toEqual({
@@ -159,6 +196,7 @@ describe('decodeScheduledAutomationLookup', () => {
         status: 'due',
         source: 'operator_request',
       },
+      ...NO_WAKES,
     }, 'sched-exact')).toThrow('request identity mismatch')
   })
 

@@ -1372,8 +1372,130 @@ max-concurrent = 1
   check
     "same-conversation counter regression is not guessed to be a reset"
     (regressed.status = Masc.Keeper_usage_resolution.Counter_regressed
-     && Option.is_none regressed.delta
-     && retained_cursor = cumulative.runtime.usage_cursor);
+     && Option.is_none regressed.delta);
+  check
+    "a counter regression re-baselines the cursor on the observed value"
+    (retained_cursor
+     = Some
+         { Masc.Keeper_usage_resolution.runtime_id = "antigravity"
+         ; conversation_id = "conversation-1"
+         ; cumulative = regressed_usage
+         });
+  (* #32463: after a regression the counter climbs again from the lower
+     value. The next round stays below the old peak (9_000), so against a
+     cursor kept on that peak it was Counter_regressed again and the totals
+     stayed stopped until the counter passed 9_000. Only the regressed turn
+     may be lost. *)
+  let dropped_usage =
+    { cumulative_usage with input_tokens = 4_000; output_tokens = 400 }
+  in
+  let dropped =
+    reactive_success
+      ~prior:cumulative
+      ~usage:dropped_usage
+      ~usage_scope:Runtime_usage_scope.Conversation_cumulative
+      ~usage_basis:
+        (Masc.Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity"
+           ; conversation_id = "conversation-1"
+           ; position = Masc.Keeper_usage_resolution.Resumed
+           })
+      ~last_outcome:KMC.Proactive_unknown
+      ~last_reason:"regressed cumulative usage"
+      ()
+  in
+  check
+    "the regressed turn adds nothing to the totals"
+    (dropped.runtime.usage.total_input_tokens = 9_100
+     && dropped.runtime.usage.total_output_tokens = 920
+     && Float.equal dropped.runtime.usage.total_cost_usd 13.5);
+  check
+    "the regressed turn is recorded as a counter regression"
+    (match dropped.runtime.last_usage_resolution with
+     | Some resolution ->
+       resolution.status = Masc.Keeper_usage_resolution.Counter_regressed
+       && Option.is_none resolution.delta
+     | None -> false);
+  let climbing_usage =
+    { cumulative_usage with
+      input_tokens = 4_500
+    ; output_tokens = 450
+    ; cost_usd = Some 12.3
+    }
+  in
+  let climbing_sample =
+    Masc.Keeper_usage_resolution.sample_of_api_usage climbing_usage
+  in
+  let stalled, _ =
+    Masc.Keeper_usage_resolution.resolve
+      ~cursor:cumulative.runtime.usage_cursor
+      ~basis:
+        (Masc.Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity"
+           ; conversation_id = "conversation-1"
+           ; position = Masc.Keeper_usage_resolution.Resumed
+           })
+      ~observation:(Some climbing_sample)
+      ~observed_at:44.25
+  in
+  check
+    "against the old peak the next round is the stall #32463 reports"
+    (stalled.status = Masc.Keeper_usage_resolution.Counter_regressed
+     && Option.is_none stalled.delta);
+  let climbing =
+    reactive_success
+      ~prior:dropped
+      ~usage:climbing_usage
+      ~usage_scope:Runtime_usage_scope.Conversation_cumulative
+      ~usage_basis:
+        (Masc.Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity"
+           ; conversation_id = "conversation-1"
+           ; position = Masc.Keeper_usage_resolution.Resumed
+           })
+      ~last_outcome:KMC.Proactive_unknown
+      ~last_reason:"cumulative usage after a regression"
+      ()
+  in
+  check
+    "the round after a regression adds only its exact delta"
+    (climbing.runtime.usage.total_input_tokens = 9_600
+     && climbing.runtime.usage.total_output_tokens = 970
+     && Float.abs (climbing.runtime.usage.total_cost_usd -. 13.8) < 0.000_001);
+  check
+    "the round after a regression is exact again"
+    (match climbing.runtime.last_usage_resolution with
+     | Some resolution ->
+       resolution.status = Masc.Keeper_usage_resolution.Exact
+       && Option.is_some resolution.delta
+     | None -> false);
+  (* The trade the re-baseline makes, pinned so it reads as a choice and not
+     a bug: if the lower value had been a transient frame, the next turn
+     that climbs past the old peak is charged from the lower cursor. Here
+     4_500 -> 9_500 adds +5_000, once, where keeping the old peak would have
+     counted nothing until 9_000 was passed. *)
+  let past_peak_usage =
+    { climbing_usage with input_tokens = 9_500; output_tokens = 950 }
+  in
+  let past_peak =
+    reactive_success
+      ~prior:climbing
+      ~usage:past_peak_usage
+      ~usage_scope:Runtime_usage_scope.Conversation_cumulative
+      ~usage_basis:
+        (Masc.Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity"
+           ; conversation_id = "conversation-1"
+           ; position = Masc.Keeper_usage_resolution.Resumed
+           })
+      ~last_outcome:KMC.Proactive_unknown
+      ~last_reason:"cumulative usage past the old peak"
+      ()
+  in
+  check
+    "climbing past the old peak is charged from the re-baselined cursor"
+    (past_peak.runtime.usage.total_input_tokens = 14_600
+     && past_peak.runtime.usage.total_output_tokens = 1_470);
   let cost_regressed_usage =
     { resumed_usage with cost_usd = Some 11.0 }
     |> Masc.Keeper_usage_resolution.sample_of_api_usage

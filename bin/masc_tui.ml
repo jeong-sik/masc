@@ -1837,8 +1837,12 @@ type http_scoped_surface_results = {
      last Keepers refresh observed rather than dropping it. *)
   http_keeper_roster:
     (Keeper_control.roster, Keeper_control.roster_failure) result option;
-  (* [None] off the Overview, the one surface that draws the quota windows. *)
-  http_runtime_quota: (Tui_decode.runtime_option list, string) result option;
+  (* [None] off the Overview, the one surface that draws the provider usage
+     windows. One fetch, two readings: the runtime rows and the windows. *)
+  http_runtime_quota:
+    ((Tui_decode.runtime_option list, string) result
+    * (Tui_decode.provider_usage_windows, string) result)
+    option;
   http_repository_pulls:
     (overview_pulls_reading, string) result
     option;
@@ -10565,11 +10569,15 @@ let apply_fleet_safety_load state = function
         ~set_error:(fun value -> state.fleet_safety_error <- value)
         err
 
-(* A failed read replaces the last good one: a window drawn as shut after the
-   reading that said so stopped arriving would name a stop nobody observed. *)
-let apply_runtime_quota_load state = function
-  | Ok options -> state.overview_quota <- Quota_read options
-  | Error err -> state.overview_quota <- Quota_failed err
+(* A failed read replaces the last good one: a window drawn after the reading
+   that said so stopped arriving would name a report nobody heard again. *)
+let apply_runtime_quota_load state (runtimes, providers) =
+  (match runtimes with
+   | Ok options -> state.overview_quota <- Quota_read options
+   | Error err -> state.overview_quota <- Quota_failed err);
+  match providers with
+  | Ok windows -> state.overview_providers <- Providers_read windows
+  | Error err -> state.overview_providers <- Providers_failed err
 
 let apply_repository_pulls_load state = function
   | Ok reading -> state.overview_pulls <- reading
@@ -10815,11 +10823,12 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
         (* A raise here would fail the whole scoped refresh and drop the
            transport and ask readings it carries; the picker's loader maps
            the same raise to [Error] for the same reason. *)
-        match Masc_tui_loader.load_runtime_resolved ~host ~port with
-        | result ->
-            Result.map (fun (options, _lanes, _assignments) -> options) result
+        match Masc_tui_loader.load_overview_runtime_resolved ~host ~port with
+        | readings -> readings
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-        | exception exn -> Error (Printexc.to_string exn))
+        | exception exn ->
+            let reason = Printexc.to_string exn in
+            (Error reason, Error reason))
   in
   let http_repository_pulls =
     when_needed needs.needs_repository_pulls (fun () ->

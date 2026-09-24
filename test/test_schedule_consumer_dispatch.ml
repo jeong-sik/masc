@@ -155,7 +155,7 @@ let declare_keeper_profile config keeper_name =
   if not (Sys.file_exists path)
   then (
     mkdir_p (Filename.dirname path);
-    write_file path "[keeper]\ninstructions = \"test keeper\"\nsandbox_profile = \"docker\"\n")
+    write_file path "[keeper]\ninstructions = \"test keeper\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n")
 ;;
 
 let persist_keeper_meta ?proactive_enabled config keeper_name =

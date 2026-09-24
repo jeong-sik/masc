@@ -2526,6 +2526,11 @@ let pending_entry_json_fields
       ; ( "summary_attempt_disposition"
         , summary_attempt_disposition_to_yojson
             entry.summary_attempt_disposition )
+      ; ( "phase"
+        , approval_queue_phase_to_yojson
+            (phase_of_disposition_and_summary
+               ~disposition:entry.summary_attempt_disposition
+               ~summary_status:entry.summary_status) )
       ]
 ;;
 

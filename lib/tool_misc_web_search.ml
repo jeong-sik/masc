@@ -286,10 +286,10 @@ let take_results limit hits =
   loop limit [] hits
 
 (* A snippet is the preview a caller picks results by. Ollama sends page
-   text in the field read as the snippet: 8,257 bytes at the median and up
-   to 988,998 across 1,865 hits, while SearXNG's own snippets never passed
-   812 bytes across 316 (measured 2026-09-24). The bound counts bytes, marker
-   included, so a CJK snippet is cut at about a third as many characters.
+   text in the field read as the snippet. The bound sits above the longest
+   snippet an engine writes itself, so those pass whole and only page text
+   is cut. It counts bytes, marker included, so a CJK snippet is cut at
+   about a third as many characters.
    Page text is what [includeContent] fetches, capped by [contentMaxChars]. *)
 let snippet_max_bytes = 1024
 let snippet_cut_marker = "…"

@@ -553,8 +553,15 @@ let test_fresh_versions_stay_within_cache_limit () =
   done;
   let entries = Yojson.Safe.Util.(member "entries" (Dashboard_cache.stats ()) |> to_int) in
   Alcotest.(check bool) "fresh versions respect max_entries" true (entries <= max_entries);
-  Alcotest.(check (option string)) "oldest fresh version was evicted" None
-    (Option.map Yojson.Safe.to_string (Dashboard_cache.peek "goal-version:0000"))
+  (* Eviction chooses the nearest expiry, and the per-key TTL jitter means
+     insertion order does not predict which fresh version expires first. *)
+  let evicted =
+    List.init (max_entries + 5) (fun i -> Printf.sprintf "goal-version:%04d" i)
+    |> List.filter (fun key -> Option.is_none (Dashboard_cache.peek key))
+  in
+  Alcotest.(check int) "five fresh versions were evicted" 5 (List.length evicted);
+  Alcotest.(check bool) "newest fresh version remains" true
+    (Option.is_some (Dashboard_cache.peek (Printf.sprintf "goal-version:%04d" (max_entries + 4))))
 
 (* Phase 1 Action 2 — verify the extended stats surface that the
    /api/v1/dashboard/cache-stats endpoint exposes.  This protects:

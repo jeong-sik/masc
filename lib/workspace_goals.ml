@@ -3,51 +3,15 @@
 open Workspace_types
 open Tool_args
 
-(* Local helpers: build typed [Tool_result.result] from response helpers.
-   ~tool_name and ~start_time are threaded through from dispatch.
-
-   RFC-0189 PR-1b.8: handlers return [Tool_result.result]. Failure class is
-   [Workflow_rejection] for caller-input rejections (typed codes
-   [Validation_error] / [Not_found] / [Conflict], or
-   [validation_error_response] from [Tool_args]) and for [Internal_error].
-   A goal store this build cannot read is not a caller mistake: it answers
-   through [Goal_unavailable_envelope] (RFC-0444 PR-2) with class
-   [Dependency_unavailable] and the typed [Unavailable] code. The plain
-   [error_result] helper was dead (0 callers) and removed. *)
+(* Handlers return [Tool_result.result] (RFC-0189 PR-1b.8). A failure is
+   built by [Tool_args.error_result_typed] or [Tool_args.validation_error_result],
+   which take the class from the error code. A goal store this build cannot
+   read answers through [Goal_unavailable_envelope] (RFC-0444 PR-2). *)
 let ok_result ~tool_name ~start_time fields : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data:(ok_assoc fields) ()
 ;;
 
-let error_result_typed ~tool_name ~start_time ~code msg : Tool_result.result =
-  let data =
-    error_assoc
-      [ "error_code", `String (error_code_to_string code)
-      ; "message", `String msg
-      ]
-  in
-  Tool_result.make_err
-    ~tool_name
-    ~class_:Tool_result.Workflow_rejection
-    ~start_time
-    ~data
-    (Yojson.Safe.to_string data)
-;;
-
 let unavailable_result = Goal_unavailable_envelope.tool_result
-
-let validation_error_result
-      ~tool_name
-      ~start_time
-      (errors : field_error list)
-  : Tool_result.result
-  =
-  let data = validation_error_assoc errors in
-  Tool_result.make_err
-    ~tool_name
-    ~class_:Tool_result.Workflow_rejection
-    ~start_time
-    ~data
-    (Yojson.Safe.to_string data)
 ;;
 
 (* RFC-0089: derive the accepted-value sets from the Goal_phase ADT (the goal
@@ -826,7 +790,8 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
          (match goal.Goal_store.phase with
           | Goal_phase.Executing | Goal_phase.Verifying -> false
           | Goal_phase.Awaiting_confirmation | Goal_phase.Completed | Goal_phase.Dropped -> true) ->
-       error_result_typed ~tool_name ~start_time ~code:Validation_error
+       (* The phase decides this, not the arguments. *)
+       error_result_typed ~tool_name ~start_time ~code:Precondition_failed
          "this Goal has no active proof request that can accept evidence_refs"
      | Goal_store.Goal_found goal ->
        (match Goal_phase.decide_transition ~phase:goal.phase ~action with

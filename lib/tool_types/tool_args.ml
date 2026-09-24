@@ -73,6 +73,14 @@ let error_code_to_string = function
   | Precondition_failed -> "precondition_failed"
   | Unavailable -> "goal_store_unavailable"
 
+let failure_class_of_error_code : error_code -> Tool_result.tool_failure_class =
+  function
+  | Validation_error | Not_found | Auth_required | Permission_denied ->
+    Tool_result.Policy_rejection
+  | Conflict | Precondition_failed -> Tool_result.Workflow_rejection
+  | Rate_limited | Timeout | Unavailable -> Tool_result.Dependency_unavailable
+  | Internal_error | Not_implemented -> Tool_result.Runtime_failure
+
 (** {1 Raw JSON String Builders}
 
     These produce plain JSON strings without [Tool_result.result] wrapping.
@@ -127,13 +135,12 @@ let ok_assoc fields : Yojson.Safe.t =
     Handlers should use these directly — the dispatch boundary no longer
     needs [wrap_result] conversion. *)
 
-(** [Tool_result.result] error with machine-readable error code. The caller
-    names [~failure_class]: whether the caller can correct the call is a
-    fact only the producer holds (#27742). *)
+(** [Tool_result.result] error with machine-readable error code. The class
+    is {!failure_class_of_error_code}[ code], so the code and the class the
+    envelope carries cannot disagree (#27742). *)
 let error_result_typed
       ?tool_name
       ?start_time
-      ~failure_class
       ~code
       msg
   =
@@ -147,7 +154,7 @@ let error_result_typed
   let start_time = Option.value ~default:(Time_compat.now ()) start_time in
   Tool_result.make_err
     ~tool_name
-    ~class_:failure_class
+    ~class_:(failure_class_of_error_code code)
     ~start_time
     ~data
     (Yojson.Safe.to_string data)
@@ -231,13 +238,24 @@ let validation_error_assoc (errors : field_error list) : Yojson.Safe.t =
   let field_errors = List.map field_error_to_yojson errors in
   error_assoc
     [
-      ("error_code", `String "validation_error");
+      ("error_code", `String (error_code_to_string Validation_error));
       ("field_errors", `List field_errors);
       ("message", `String (Printf.sprintf "%d field error(s)" (List.length errors)));
     ]
 
 let validation_error_response errors =
   validation_error_assoc errors |> Yojson.Safe.to_string
+
+let validation_error_result ?tool_name ?start_time errors =
+  let data = validation_error_assoc errors in
+  let tool_name = Option.value ~default:"" tool_name in
+  let start_time = Option.value ~default:(Time_compat.now ()) start_time in
+  Tool_result.make_err
+    ~tool_name
+    ~class_:(failure_class_of_error_code Validation_error)
+    ~start_time
+    ~data
+    (Yojson.Safe.to_string data)
 
 (** {2 Field Validators}
 

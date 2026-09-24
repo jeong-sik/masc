@@ -75,6 +75,55 @@ let test_ok_assoc_drops_caller_status () =
       (Yojson.Safe.Util.(`Assoc fields |> member "status" |> to_string))
   | _ -> fail "expected assoc"
 
+(* Every code has one class. The table is the whole type, so a code added
+   later fails here until someone decides whose move it is. *)
+let test_failure_class_of_every_error_code () =
+  let expected : (Tool_args.error_code * string) list =
+    [ Tool_args.Validation_error, "policy_rejection"
+    ; Tool_args.Not_found, "policy_rejection"
+    ; Tool_args.Auth_required, "policy_rejection"
+    ; Tool_args.Permission_denied, "policy_rejection"
+    ; Tool_args.Conflict, "workflow_rejection"
+    ; Tool_args.Precondition_failed, "workflow_rejection"
+    ; Tool_args.Rate_limited, "dependency_unavailable"
+    ; Tool_args.Timeout, "dependency_unavailable"
+    ; Tool_args.Unavailable, "dependency_unavailable"
+    ; Tool_args.Internal_error, "runtime_failure"
+    ; Tool_args.Not_implemented, "runtime_failure"
+    ]
+  in
+  List.iter
+    (fun (code, class_) ->
+      check string
+        (Tool_args.error_code_to_string code)
+        class_
+        (Tool_result.tool_failure_class_to_string
+           (Tool_args.failure_class_of_error_code code)))
+    expected
+
+(* The envelope's error_code and the result's class come from one value. *)
+let test_typed_results_take_the_class_of_their_code () =
+  let class_of result =
+    Option.map Tool_result.tool_failure_class_to_string (Tool_result.failure_class result)
+  in
+  check (option string) "a validation error is the caller's to fix"
+    (Some "policy_rejection")
+    (class_of (Tool_args.error_result_typed ~code:Tool_args.Validation_error "bad"));
+  check (option string) "a conflict is the state's"
+    (Some "workflow_rejection")
+    (class_of (Tool_args.error_result_typed ~code:Tool_args.Conflict "moved"));
+  check (option string) "field errors are the caller's to fix"
+    (Some "policy_rejection")
+    (class_of
+       (Tool_args.validation_error_result
+          [ { Tool_args.field = "action"
+            ; constraint_violated = Tool_args.Required
+            ; message = "action is required"
+            ; expected = Some "string"
+            ; received = None
+            }
+          ]))
+
 let () =
   run "Tool_args_envelope"
     [
@@ -92,5 +141,12 @@ let () =
             test_error_response_with_drops_caller_status;
           test_case "caller status cannot override ok envelope" `Quick
             test_ok_assoc_drops_caller_status;
+        ] );
+      ( "failure_class",
+        [
+          test_case "every error code has one class" `Quick
+            test_failure_class_of_every_error_code;
+          test_case "typed results take the class of their code" `Quick
+            test_typed_results_take_the_class_of_their_code;
         ] );
     ]

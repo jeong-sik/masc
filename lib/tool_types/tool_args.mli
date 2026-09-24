@@ -64,6 +64,23 @@ type error_code =
 
 val error_code_to_string : error_code -> string
 
+val failure_class_of_error_code : error_code -> Tool_result.tool_failure_class
+(** Whose move a failure is, read off its code. The code is the fact the
+    producer holds; every envelope that carries a code takes its class from
+    here, so the two cannot disagree.
+
+    - [Validation_error], [Not_found]: the caller named an input or a
+      resource that is not acceptable, and a corrected argument can succeed
+      → [Policy_rejection].
+    - [Auth_required], [Permission_denied]: an authority boundary
+      → [Policy_rejection], whose guidance says a missing permission does
+      not change with other arguments.
+    - [Conflict], [Precondition_failed]: the current state does not admit
+      the call → [Workflow_rejection].
+    - [Rate_limited], [Timeout], [Unavailable]: something the call depends on
+      did not answer → [Dependency_unavailable].
+    - [Internal_error], [Not_implemented]: masc failed → [Runtime_failure]. *)
+
 (** {1 Raw JSON String Builders}
 
     These produce plain JSON strings without [Tool_result.result] wrapping.
@@ -108,10 +125,10 @@ val ok_assoc : (string * Yojson.Safe.t) list -> Yojson.Safe.t
 val error_result_typed :
   ?tool_name:string ->
   ?start_time:float ->
-  failure_class:Tool_result.tool_failure_class ->
   code:error_code ->
   string ->
   Tool_result.result
+(** Class: {!failure_class_of_error_code}[ code]. *)
 
 val ok_result :
   ?tool_name:string -> ?start_time:float -> (string * Yojson.Safe.t) list -> Tool_result.result
@@ -160,6 +177,11 @@ val validation_error_assoc : field_error list -> Yojson.Safe.t
 (** [{"status":"error","error_code":"validation_error",
     "field_errors":[…],"message":"N field error(s)"}] *)
 val validation_error_response : field_error list -> string
+
+val validation_error_result :
+  ?tool_name:string -> ?start_time:float -> field_error list -> Tool_result.result
+(** {!validation_error_assoc} as a failed result. Class:
+    {!failure_class_of_error_code}[ Validation_error]. *)
 
 (** {1 Field validators}
 

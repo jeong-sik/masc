@@ -434,6 +434,23 @@ type resolution_failure =
   ; runtime_count : int
   }
 
+(* One exact-output lane slot whose HTTP provider declares no
+   [exact-body-timeout-s] (rule 3 of RFC-runtime-two-layers, #38779). *)
+type exact_slot_body_deadline_gap =
+  { lane_id : string
+  ; slot_id : string
+  ; provider_id : string
+  }
+
+(* What rule 3 left out of a loaded file: every gap, and the exact lanes
+   those gaps emptied -- a lane whose every slot is a gap and that declares
+   no cli_slots. Such a lane is unavailable on its own; the other lanes
+   still publish. *)
+type exact_slot_degradation =
+  { gaps : exact_slot_body_deadline_gap list
+  ; emptied_lane_ids : string list
+  }
+
 (* The ways loading runtime.toml fails, closed so a consumer decides per case
    instead of matching rendered text — the contract [drop_reason] already keeps
    one level down. [Toml_unparsable] is the single case whose text comes from
@@ -458,6 +475,7 @@ type load_failure =
       ; execution_model : string
       ; declared_model : string
       }
+  | Exact_slot_body_deadlines_absent of exact_slot_body_deadline_gap list
   | Context_marks_exceed_max_context of
       { runtime_id : string
       ; high_water_tokens : int
@@ -496,6 +514,30 @@ let resolution_suffix (resolution : resolution_failure) : string =
       ": binding is defined but could not be materialized as a runtime — %s"
       (string_of_drop_reason reason)
   | None -> Printf.sprintf " not found among %d runtimes" resolution.runtime_count
+;;
+
+(* One line per slot: the lane table, the slot, the provider and the key to
+   add where it goes. The save refusal lists these, and so do the boot WARN
+   and the startup degradation report. *)
+let exact_slot_body_deadline_gap_to_string (gap : exact_slot_body_deadline_gap) =
+  Printf.sprintf
+    "[runtime.exact_output_lanes.%s] slot %S runs on provider %S; add %s to \
+     [providers.%s]"
+    gap.lane_id
+    gap.slot_id
+    gap.provider_id
+    Runtime_schema.exact_body_timeout_s_key
+    gap.provider_id
+;;
+
+let exact_slot_body_deadline_gap_to_yojson (gap : exact_slot_body_deadline_gap) =
+  `Assoc
+    [ "lane_id", `String gap.lane_id
+    ; "slot_id", `String gap.slot_id
+    ; "provider_id", `String gap.provider_id
+    ; "missing_key", `String Runtime_schema.exact_body_timeout_s_key
+    ; "message", `String (exact_slot_body_deadline_gap_to_string gap)
+    ]
 ;;
 
 let to_diagnostic_text ~(config_path : string) : load_failure -> string = function
@@ -573,6 +615,19 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       runtime_id
       high_water_tokens
       max_context
+  | Exact_slot_body_deadlines_absent gaps ->
+    Printf.sprintf
+      "%s: this change adds %d exact-output slot(s) on a provider that declares \
+       no %s. %s ends when the response headers arrive and does not bound the \
+       response body, so %s is the only deadline on the whole request:\n%s"
+      config_path
+      (List.length gaps)
+      Runtime_schema.exact_body_timeout_s_key
+      Runtime_schema.connect_timeout_s_key
+      Runtime_schema.exact_body_timeout_s_key
+      (gaps
+       |> List.map (fun gap -> "  " ^ exact_slot_body_deadline_gap_to_string gap)
+       |> String.concat "\n")
 ;;
 
 (* The same account, minus the one part this repository did not write. A parse
@@ -595,7 +650,8 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Reference_unresolved _
   | Lane_candidate_unresolved _
   | Max_context_absent _
-  | Context_marks_exceed_max_context _ -> to_diagnostic_text ~config_path failure
+  | Context_marks_exceed_max_context _
+  | Exact_slot_body_deadlines_absent _ -> to_diagnostic_text ~config_path failure
 ;;
 
 (* The list is carried out whole rather than counted here: the caller decides
@@ -801,43 +857,115 @@ let missing_catalog_model_to_yojson (entry : missing_catalog_model) =
     ]
 ;;
 
-let startup_degradation_to_yojson = function
-  | None ->
+(* Rule 2 (catalog-missing bindings) and rule 3 (exact slots without a body
+   deadline) both leave the server running with less than the file declared,
+   so both are said here, the one report health, the runtime inventory and
+   the dashboard already read. The key set is the same in every case so a
+   reader never has to guess which shape it got. [status_reasons] and
+   [operator_action_reasons] name every cause present, so the health rollup
+   says both when both happen; [terminal_reason] keeps naming the catalog
+   when it is one of them. *)
+let catalog_degradation_reason = "missing_agent_core_catalog_models"
+let exact_slot_degradation_reason = "exact_slot_body_deadline_absent"
+
+let startup_degradation_to_yojson
+    ~(exact_slots : exact_slot_degradation)
+    (degradation : startup_degradation option)
+  =
+  let gaps_json =
+    [ ( "exact_slot_body_deadline_gaps"
+      , `List (List.map exact_slot_body_deadline_gap_to_yojson exact_slots.gaps) )
+    ; ( "exact_lanes_emptied_by_body_deadline_gaps"
+      , `List (List.map (fun id -> `String id) exact_slots.emptied_lane_ids) )
+    ]
+  in
+  let gaps_message =
+    let slots = List.map exact_slot_body_deadline_gap_to_string exact_slots.gaps in
+    let lanes =
+      List.map
+        (Printf.sprintf
+           "exact-output lane %S is unavailable: every slot is left out and it \
+            declares no cli_slots")
+        exact_slots.emptied_lane_ids
+    in
+    String.concat "; " (slots @ lanes)
+  in
+  let gaps_next_action =
+    Printf.sprintf
+      "Add %s to each named provider. Until then those exact-output slots are \
+       left out of their lanes; a lane with nothing left walks its cli_slots, \
+       and a lane with no cli_slots is unavailable."
+      Runtime_schema.exact_body_timeout_s_key
+  in
+  let reasons_json reasons =
+    let json = `List (List.map (fun reason -> `String reason) reasons) in
+    [ "status_reasons", json; "operator_action_reasons", json ]
+  in
+  match degradation, exact_slots.gaps with
+  | None, [] ->
     `Assoc
-      [ "schema", `String "masc.runtime_startup_degradation.v1"
-      ; "status", `String "ok"
-      ; "degraded", `Bool false
-      ; "operator_action_required", `Bool false
-      ; "terminal_reason", `String "none"
-      ; "missing_catalog_model_count", `Int 0
-      ; "disabled_runtime_ids", `List []
-      ]
-  | Some degradation ->
+      ([ "schema", `String "masc.runtime_startup_degradation.v1"
+       ; "status", `String "ok"
+       ; "degraded", `Bool false
+       ; "operator_action_required", `Bool false
+       ; "terminal_reason", `String "none"
+       ; "missing_catalog_model_count", `Int 0
+       ; "disabled_runtime_ids", `List []
+       ]
+       @ reasons_json []
+       @ gaps_json)
+  | None, _ :: _ ->
     `Assoc
-      [ "schema", `String "masc.runtime_startup_degradation.v1"
-      ; "status", `String "degraded"
-      ; "degraded", `Bool true
-      ; "operator_action_required", `Bool true
-      ; "terminal_reason", `String "missing_agent_core_catalog_models"
-      ; "message", `String (startup_degradation_to_string degradation)
-      ; "config_path", `String degradation.report.config_path
-      ; "configured_default_runtime_id"
-        , `String degradation.configured_default_runtime_id
-      ; "missing_catalog_model_count", `Int (List.length degradation.report.missing_models)
-      ; ( "missing_catalog_models"
-        , `List (List.map missing_catalog_model_to_yojson degradation.report.missing_models)
-        )
-      ; ( "disabled_runtime_ids"
-        , `List (List.map (fun id -> `String id) degradation.disabled_runtime_ids)
-        )
-      ; ( "unavailable_assignments"
-        , `List (List.map unavailable_assignment_to_yojson degradation.unavailable_assignments)
-        )
-      ; ( "next_action"
-        , `String
-            "Inspect the unavailable configured runtime IDs and their capability catalog entries. \
-             Explicit Keeper assignments remain unchanged and unavailable assignments cannot dispatch." )
-      ]
+      ([ "schema", `String "masc.runtime_startup_degradation.v1"
+       ; "status", `String "degraded"
+       ; "degraded", `Bool true
+       ; "operator_action_required", `Bool true
+       ; "terminal_reason", `String exact_slot_degradation_reason
+       ; "message", `String gaps_message
+       ; "missing_catalog_model_count", `Int 0
+       ; "disabled_runtime_ids", `List []
+       ]
+       @ reasons_json [ exact_slot_degradation_reason ]
+       @ gaps_json
+       @ [ "next_action", `String gaps_next_action ])
+  | Some degradation, gaps ->
+    let catalog_message = startup_degradation_to_string degradation in
+    let catalog_next_action =
+      "Inspect the unavailable configured runtime IDs and their capability catalog entries. \
+       Explicit Keeper assignments remain unchanged and unavailable assignments cannot dispatch."
+    in
+    let message, next_action, reasons =
+      match gaps with
+      | [] -> catalog_message, catalog_next_action, [ catalog_degradation_reason ]
+      | _ :: _ ->
+        ( catalog_message ^ "; " ^ gaps_message
+        , catalog_next_action ^ " " ^ gaps_next_action
+        , [ catalog_degradation_reason; exact_slot_degradation_reason ] )
+    in
+    `Assoc
+      ([ "schema", `String "masc.runtime_startup_degradation.v1"
+       ; "status", `String "degraded"
+       ; "degraded", `Bool true
+       ; "operator_action_required", `Bool true
+       ; "terminal_reason", `String catalog_degradation_reason
+       ; "message", `String message
+       ; "config_path", `String degradation.report.config_path
+       ; "configured_default_runtime_id"
+         , `String degradation.configured_default_runtime_id
+       ; "missing_catalog_model_count", `Int (List.length degradation.report.missing_models)
+       ; ( "missing_catalog_models"
+         , `List (List.map missing_catalog_model_to_yojson degradation.report.missing_models)
+         )
+       ; ( "disabled_runtime_ids"
+         , `List (List.map (fun id -> `String id) degradation.disabled_runtime_ids)
+         )
+       ; ( "unavailable_assignments"
+         , `List (List.map unavailable_assignment_to_yojson degradation.unavailable_assignments)
+         )
+       ]
+       @ reasons_json reasons
+       @ gaps_json
+       @ [ "next_action", `String next_action ])
 ;;
 
 let capabilities_for_runtime (rt : t) =
@@ -995,6 +1123,106 @@ let verifier_exact_slot_references
   | None -> []
   | Some lane ->
     references "slots" lane.slot_ids @ references "cli_slots" lane.cli_slot_ids
+;;
+
+(* Where the exact-output registry reads its targets. The server builds them
+   from this file's HTTP bindings, unless [AGENT_CORE_MODEL_CATALOG] names a
+   full replacement catalog, whose [[targets]] rows are then the whole set and
+   carry their own [body_timeout_s] ([Server_runtime_bootstrap]
+   [configure_exact_output_registry] reads this same answer). An empty or
+   blank value names no file, as it always has for this variable. *)
+type exact_output_target_source =
+  | Runtime_binding_targets
+  | Replacement_catalog_targets of { path : string }
+
+let agent_core_model_catalog_env_var_name = "AGENT_CORE_MODEL_CATALOG"
+
+let exact_output_target_source ?(env = Env_config_core.raw_value_opt) () =
+  match Env_config_core.trim_opt (env agent_core_model_catalog_env_var_name) with
+  | None -> Runtime_binding_targets
+  | Some path -> Replacement_catalog_targets { path }
+;;
+
+(* Rule 3 of RFC-runtime-two-layers. An HTTP slot of an exact-output lane is
+   built from its binding, and its whole-request deadline is the provider's
+   [exact-body-timeout-s]. Without it plan admission refuses every request on
+   that slot ([Missing_deadline]) and the lane falls to its cli_slots with one
+   WARN line per request, while this file loaded as valid: 1,002 such
+   refusals in one restart log on 2026-09-24 (#38779). The provider's
+   [connect-timeout-s] does not stand in for it, because that deadline ends
+   at the response headers.
+
+   Only a slot that names a configured HTTP runtime carries the rule. A slot
+   naming no runtime is a catalog id: the registry resolves or drops it, and
+   [verifier_exact_slot_references] already refuses one on the verifier lane.
+   An official-client runtime is not an HTTP target (cli_slots are not read
+   here at all). Under a replacement catalog the bindings are not the
+   targets, so this file's providers say nothing about the deadline.
+
+   Every offending slot is returned, not the first: an operator fixing one
+   provider per save or per restart is the round trip this report exists to
+   remove. A save refuses the gaps it adds, all of them
+   ([validate_exact_slot_body_deadline_change]); a boot keeps every gap as
+   degraded state ([set_loaded]) and the exact-output registry leaves those
+   slots out. *)
+let exact_slot_body_deadline_gaps_of
+    ~(target_source : exact_output_target_source)
+    (runtimes : t list)
+    (decls : Runtime_schema.exact_output_lane_decl list)
+  : exact_slot_body_deadline_gap list
+  =
+  let gap_of (lane : Runtime_schema.exact_output_lane_decl) slot_id =
+    match List.find_opt (fun (r : t) -> String.equal r.id slot_id) runtimes with
+    | None -> None
+    | Some r ->
+      (match r.execution, r.provider.Runtime_schema.exact_body_timeout_s with
+       | Runtime_execution.Agent_core _, None ->
+         Some
+           ({ lane_id = lane.id; slot_id; provider_id = r.provider.Runtime_schema.id }
+            : exact_slot_body_deadline_gap)
+       | Runtime_execution.Agent_core _, Some (_ : float) -> None
+       | ( Runtime_execution.Codex_app_server _
+         | Runtime_execution.Claude_code _
+         | Runtime_execution.Antigravity_cli _ ), (Some _ | None) -> None)
+  in
+  match target_source with
+  | Replacement_catalog_targets { path = _ } -> []
+  | Runtime_binding_targets ->
+    List.concat_map
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         List.filter_map (gap_of lane) lane.slot_ids)
+      decls
+;;
+
+let same_exact_slot_body_deadline_gap
+    (left : exact_slot_body_deadline_gap)
+    (right : exact_slot_body_deadline_gap)
+  =
+  String.equal left.lane_id right.lane_id
+  && String.equal left.slot_id right.slot_id
+  && String.equal left.provider_id right.provider_id
+;;
+
+(* A lane the gaps empty: it declares slots, every one of them is a gap, and
+   it declares no cli_slots to walk instead. The registry would have nothing
+   to admit for it, so boot publishes without requiring it and the startup
+   report names it, while every other lane keeps working. *)
+let exact_lanes_emptied_by_gaps
+    (decls : Runtime_schema.exact_output_lane_decl list)
+    (gaps : exact_slot_body_deadline_gap list)
+  =
+  let is_gap (lane : Runtime_schema.exact_output_lane_decl) slot_id =
+    List.exists
+      (fun (gap : exact_slot_body_deadline_gap) ->
+         String.equal gap.lane_id lane.id && String.equal gap.slot_id slot_id)
+      gaps
+  in
+  List.filter_map
+    (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+       match lane.slot_ids, lane.cli_slot_ids with
+       | _ :: _, [] when List.for_all (is_gap lane) lane.slot_ids -> Some lane.id
+       | _ :: _, [] | [], _ | _ :: _, _ :: _ -> None)
+    decls
 ;;
 
 (* Every runtime binding's provider/model pair must be known to the AGENT_CORE
@@ -1423,6 +1651,11 @@ type loaded_state =
   ; lsp_servers : (string * (string * string list)) list
   ; config_path : string option
   ; startup_degradation : startup_degradation option
+  ; exact_slots : exact_slot_degradation
+        (* Exact slots this file declares on a provider without
+           [exact-body-timeout-s], and the lanes they empty. Boot keeps them
+           here instead of refusing the file; the exact-output registry
+           leaves them out and the startup report names them. *)
   }
 
 let empty_loaded_state =
@@ -1436,6 +1669,7 @@ let empty_loaded_state =
   ; lsp_servers = []
   ; config_path = None
   ; startup_degradation = None
+  ; exact_slots = { gaps = []; emptied_lane_ids = [] }
   }
 
 let loaded_state_ref : loaded_state Atomic.t = Atomic.make empty_loaded_state
@@ -1451,6 +1685,7 @@ let set_loaded
     ?startup_degradation
     ?declared_media_failover
     ~config_path
+    ~(exact_output_lane_decls : Runtime_schema.exact_output_lane_decl list)
     ( runtimes
     , rt
     , default_route
@@ -1493,16 +1728,24 @@ let set_loaded
     ; lsp_servers
     ; config_path = Some config_path
     ; startup_degradation
+    ; exact_slots =
+        (let gaps =
+           exact_slot_body_deadline_gaps_of
+             ~target_source:(exact_output_target_source ())
+             runtimes
+             exact_output_lane_decls
+         in
+         { gaps; emptied_lane_ids = exact_lanes_emptied_by_gaps exact_output_lane_decls gaps })
     };
   Runtime_typesafeai_policy.publish typesafeai;
   Runtime_startup_state.note_runtime_loaded ()
 
 let init_default ~config_path =
-  let* loaded, _exact_output_lane_decls =
+  let* loaded, exact_output_lane_decls =
     load_list_internal ~config_path ~validate_max_context:true
     |> Result.map_error (to_diagnostic_text ~config_path)
   in
-  set_loaded ~config_path loaded;
+  set_loaded ~config_path ~exact_output_lane_decls loaded;
   Ok ()
 
 let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
@@ -1525,11 +1768,11 @@ let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error failure -> Error (Runtime_config_error (to_diagnostic_text ~config_path failure))
-  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
-       set_loaded ~config_path loaded;
+       set_loaded ~config_path ~exact_output_lane_decls loaded;
        Ok ())
 
 let init_default_strict ~config_path =
@@ -1570,7 +1813,7 @@ let initialize_degraded_loaded ~config_path parsed =
       (fun failure -> Runtime_config_error (to_diagnostic_text ~config_path failure))
       parsed
   in
-  let* loaded, _, startup_degradation, declared_media_failover =
+  let* loaded, exact_output_lane_decls, startup_degradation, declared_media_failover =
     prepare_degraded_loaded ~config_path parsed
     |> Result.map_error (fun msg -> Runtime_config_error msg)
   in
@@ -1578,6 +1821,7 @@ let initialize_degraded_loaded ~config_path parsed =
     ?startup_degradation
     ~declared_media_failover
     ~config_path
+    ~exact_output_lane_decls
     loaded;
   Ok (match startup_degradation with
     | None -> Initialized
@@ -1604,6 +1848,8 @@ let get_runtimes () = (runtime_state ()).runtimes
 let get_runtime_ids () = runtime_ids (runtime_state ()).runtimes
 let startup_degradation () = (runtime_state ()).startup_degradation
 let startup_degraded () = Option.is_some (startup_degradation ())
+let exact_slot_degradation () = (runtime_state ()).exact_slots
+let exact_slot_body_deadline_gaps () = (exact_slot_degradation ()).gaps
 
 let default_runtime_id_or_fail () =
   match (runtime_state ()).default_runtime with
@@ -2900,8 +3146,49 @@ let validate_fusion_seats ~config_path ~validated content =
    enforces. Boot does not come through here: it loads through
    [load_list_internal], and a broken [fusion] must not stop every Keeper turn
    with it; Fusion reports its own section per call. *)
+let exact_slot_body_deadline_gaps_of_validated
+    ((runtimes, _, _, _, _, _, _, _), exact_output_lane_decls, _, _)
+  =
+  exact_slot_body_deadline_gaps_of
+    ~target_source:(exact_output_target_source ())
+    runtimes
+    exact_output_lane_decls
+;;
+
+(* Rule 3 at save judges the change, as [validate_fusion_change] does: a gap
+   the file on disk already has does not block a keeper assignment, a
+   default-runtime change or a setup commit, because boot already keeps it as
+   degraded and says so. Only a gap this text adds -- a (lane, slot,
+   provider) the on-disk text does not have -- is refused, so an operator
+   editing lanes is told before the write rather than after the next
+   restart. A file on disk that cannot be read or does not validate offers
+   nothing to compare against, so every gap in the new text counts as added,
+   the same way [validate_fusion_change] judges a fusion table whose
+   previous text it cannot read. *)
+let validate_exact_slot_body_deadline_change ~config_path ~validated =
+  let on_disk_gaps =
+    match load_file_result config_path with
+    | Error _ -> []
+    | Ok text ->
+      (match parse_and_validate_config_text ~config_path text with
+       | Ok previous -> exact_slot_body_deadline_gaps_of_validated previous
+       | Error _ -> [])
+  in
+  match
+    List.filter
+      (fun gap -> not (List.exists (same_exact_slot_body_deadline_gap gap) on_disk_gaps))
+      (exact_slot_body_deadline_gaps_of_validated validated)
+  with
+  | [] -> Ok ()
+  | added -> Error (Exact_slot_body_deadlines_absent added)
+;;
+
 let validate_save_text ~config_path content =
   let* validated = parse_and_validate_config_text ~config_path content in
+  let* () =
+    validate_exact_slot_body_deadline_change ~config_path ~validated
+    |> Result.map_error (to_diagnostic_text ~config_path)
+  in
   let* () = validate_fusion_change ~config_path content in
   let* () = validate_fusion_seats ~config_path ~validated content in
   Ok validated
@@ -2926,6 +3213,7 @@ let commit_runtime_config_text
          ?startup_degradation
          ~declared_media_failover
          ~config_path:path
+         ~exact_output_lane_decls:exact_output_lanes
          loaded;
        Ok (committed_receipt ~observation ~durability:Durable)
      | Error (failure : Fs_compat.atomic_replace_failure) ->
@@ -2940,6 +3228,7 @@ let commit_runtime_config_text
             ?startup_degradation
             ~declared_media_failover
             ~config_path:path
+            ~exact_output_lane_decls:exact_output_lanes
             loaded;
           runtime_config_atomic_failure
             ~replacement_visible:true
@@ -2961,6 +3250,7 @@ let commit_runtime_config_text
                   ?startup_degradation
                   ~declared_media_failover
                   ~config_path:path
+                  ~exact_output_lane_decls:exact_output_lanes
                   loaded)
               ~path
               content)
@@ -3389,18 +3679,20 @@ let set_runtime_default ?runtime_config_path ~runtime_id () =
    quotes. Either spelling names the same table to [Toml_line_editor.is_table],
    which compares the key path the grammar reads, so the choice is only what
    the operator sees in the file. *)
-let lane_table_path lane_id =
+let table_path_under prefix id =
   let bare =
     String.for_all
       (function 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '-' -> true | _ -> false)
-      lane_id
+      id
   in
-  if bare && not (String.equal lane_id "")
-  then Printf.sprintf "runtime.lanes.%s" lane_id
+  if bare && not (String.equal id "")
+  then Printf.sprintf "%s.%s" prefix id
   else
     (* [escape_string] escapes the contents; the quotes are the caller's. *)
-    Printf.sprintf "runtime.lanes.\"%s\"" (Toml_line_editor.escape_string lane_id)
+    Printf.sprintf "%s.\"%s\"" prefix (Toml_line_editor.escape_string id)
 ;;
+
+let lane_table_path lane_id = table_path_under "runtime.lanes" lane_id
 
 let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bind_imp = false) ~runtime_id () =
   let runtime_id = String.trim runtime_id in
@@ -3443,6 +3735,29 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           | Runtime_execution.Antigravity_cli _ -> [], [ runtime_id ]
         in
         let next = update_runtime_scalar_text content ~key:"default" ~runtime_id:(Some runtime_id) in
+        (* The HTTP runtime chosen here becomes an exact-output slot below, and
+           a slot whose provider declares no [exact-body-timeout-s] cannot be
+           saved (rule 3, #38779). A connection an older setup wrote has none,
+           and rendering it again yields the same id, so the batch keeps the
+           old table as it is. Setup is what points the lanes at it, so setup
+           writes the key, with the value it writes on a new connection. *)
+        let next =
+          match
+            runtime.execution,
+            runtime.provider.Runtime_schema.exact_body_timeout_s,
+            exact_output_target_source ()
+          with
+          | Runtime_execution.Agent_core _, None, Runtime_binding_targets ->
+            Toml_line_editor.edit_table_float next
+              ~path:(table_path_under "providers" runtime.provider.Runtime_schema.id)
+              ~key:Runtime_schema.exact_body_timeout_s_key
+              ~value:Runtime_setup_spec.setup_exact_body_timeout_s
+          | Runtime_execution.Agent_core _, Some (_ : float), (Runtime_binding_targets | Replacement_catalog_targets _)
+          | Runtime_execution.Agent_core _, None, Replacement_catalog_targets _
+          | ( Runtime_execution.Codex_app_server _
+            | Runtime_execution.Claude_code _
+            | Runtime_execution.Antigravity_cli _ ), (Some _ | None), (Runtime_binding_targets | Replacement_catalog_targets _) -> next
+        in
         let next =
           Toml_line_editor.edit_table_multiline_array next
             ~path:(lane_table_path runtime_id) ~key:"candidates" ~values:candidate_ids

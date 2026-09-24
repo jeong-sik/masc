@@ -133,7 +133,9 @@ let run ~config_path ~scenario_path ~runtime_ids =
                 ; "scenario_source_sha256", `String Digestif.SHA256.(to_hex (digest_string scenario_source))
                 ; "schema_version", `Int 1
                 ; "config_revision", `String (Runtime.config_source_revision_to_string observation.source_revision)
-                ; "startup_degradation", Runtime.startup_degradation_to_yojson degradation
+                ; "startup_degradation", Runtime.startup_degradation_to_yojson
+                    ~exact_slots:(Runtime.exact_slot_degradation ())
+                    degradation
                 ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
                 ; "system_prompt", `String scenario.system_prompt
                 ; "prompts", `List (List.map (fun prompt -> `String prompt) scenario.prompts)

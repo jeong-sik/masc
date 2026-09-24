@@ -354,15 +354,33 @@ let test_saved_body_deadline_reaches_published_target () =
   boot (runtime_toml ~connect:None ~body:(Some 91.5) ());
   check (option (float 0.0)) "boot publishes the declared body deadline" (Some 91.5)
     (EO.body_timeout_s (ready (published_target ())));
-  (match save (runtime_toml ~connect:None ~body:(Some 55.5) ()) with
-   | Ok receipt ->
-     (match receipt.Runtime.exact_output_registry with
-      | Registry.Registry_replaced -> ()
-      | Registry.Registry_unpublished ->
-        fail "a save over a published registry reported it unpublished")
-   | Error detail -> failf "save refused: %s" detail);
+  let saved = runtime_toml ~connect:None ~body:(Some 55.5) () in
+  let save_replacing label =
+    match save saved with
+    | Ok receipt ->
+      (match receipt.Runtime.exact_output_registry with
+       | Runtime.Exact_output_registry_replaced
+           { origin = Runtime.Runtime_binding_targets } -> ()
+       | Runtime.Exact_output_registry_replaced
+           { origin = Runtime.Replacement_catalog_targets _ }
+       | Runtime.Exact_output_registry_unpublished
+       | Runtime.Exact_output_registry_kept _ ->
+         failf "%s: the receipt does not name a registry rebuilt from the bindings" label)
+    | Error detail -> failf "%s: save refused: %s" label detail
+  in
+  save_replacing "first save";
   check (option (float 0.0)) "the saved body deadline reaches the published target"
-    (Some 55.5) (EO.body_timeout_s (ready (published_target ())))
+    (Some 55.5) (EO.body_timeout_s (ready (published_target ())));
+  (* Saving the same text again rebuilds the registry from the same catalog,
+     so its generation does not move. *)
+  let fingerprint () =
+    Registry.current ()
+    |> require_ok "published registry"
+    |> Registry.catalog_generation_fingerprint
+  in
+  let first = fingerprint () in
+  save_replacing "second save of the same text";
+  check string "the same text keeps the catalog generation" first (fingerprint ())
 
 (* A save whose text the registry cannot be rebuilt from is refused before the
    write. Keeping the published registry after the write would run requests on
@@ -389,7 +407,48 @@ let test_save_that_breaks_the_registry_is_refused () =
    | Error _ -> ());
   check string "the refused save leaves the file as it was" booted (Fs_compat.load_file path);
   let after = Registry.current () |> require_ok "registry after the refused save" in
-  check bool "the refused save leaves the published registry in place" true (before == after)
+  check bool "the refused save leaves the published registry in place" true (before == after);
+  (* The preview runs the commit's registry decision, so it refuses too. *)
+  match
+    Runtime.validate_config_text
+      ~runtime_config_path:path
+      (runtime_toml ~bindings:[ "other" ] ~default:"other" ~connect:None ~body:(Some 91.5) ())
+  with
+  | Ok () -> fail "the preview promised a save the commit refuses"
+  | Error _ -> ()
+
+(* When the file on disk does not rebuild the registry either, the fault is
+   not the new text's: the save goes through, the published registry stays,
+   and the receipt says it was kept. Refusing would block every keeper
+   assignment until someone edits the file by hand. *)
+let test_save_over_a_file_that_already_breaks_the_registry_keeps_it () =
+  with_runtime_fixture @@ fun ~path ~boot ~save ->
+  boot (runtime_toml ~bindings:[ "probe"; "other" ] ~connect:None ~body:(Some 91.5) ());
+  let before = Registry.current () |> require_ok "published registry" in
+  let broken body =
+    runtime_toml ~bindings:[ "other" ] ~default:"other" ~connect:None ~body:(Some body) ()
+  in
+  (* Written behind the server's back, as a hand edit would be. *)
+  Fs_compat.save_file path (broken 91.5);
+  let next = broken 55.5 in
+  (match Runtime.validate_config_text ~runtime_config_path:path next with
+   | Ok () -> ()
+   | Error detail -> failf "the preview refused a save the commit accepts: %s" detail);
+  (match save next with
+   | Ok receipt ->
+     (match receipt.Runtime.exact_output_registry with
+      | Runtime.Exact_output_registry_kept
+          { reason = Registry.Required_lane_unavailable _ } -> ()
+      | Runtime.Exact_output_registry_kept { reason } ->
+        failf "kept for an unexpected reason: %s"
+          (Registry.publication_error_to_string reason)
+      | Runtime.Exact_output_registry_replaced _
+      | Runtime.Exact_output_registry_unpublished ->
+        fail "the receipt claims a registry the text does not rebuild")
+   | Error detail -> failf "a save over an already broken file was refused: %s" detail);
+  check string "the save reaches the file" next (Fs_compat.load_file path);
+  let after = Registry.current () |> require_ok "registry after the save" in
+  check bool "the published registry is kept" true (before == after)
 
 let () =
   Eio_main.run @@ fun env ->
@@ -411,4 +470,6 @@ let () =
         test_case "a saved body deadline reaches the published target" `Quick
           test_saved_body_deadline_reaches_published_target;
         test_case "a save that breaks the registry is refused before the write" `Quick
-          test_save_that_breaks_the_registry_is_refused ] ]
+          test_save_that_breaks_the_registry_is_refused;
+        test_case "a save over a file that already breaks the registry keeps it" `Quick
+          test_save_over_a_file_that_already_breaks_the_registry_keeps_it ] ]

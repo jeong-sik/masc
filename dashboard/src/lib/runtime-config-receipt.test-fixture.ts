@@ -82,7 +82,7 @@ export function committedRuntimeTomlConfigFixture(
       keeper_overlay: options.keeperOverlay ?? defaultKeeperOverlay,
       skills,
       exact_output_registry: options.exactOutputRegistry
-        ?? { status: 'applied', requires_restart: false },
+        ?? { status: 'applied', requires_restart: false, targets: 'runtime_bindings' },
     },
   }
 }

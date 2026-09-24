@@ -358,14 +358,29 @@ let runtime_config_commit_json (receipt : Runtime.config_commit_receipt) =
    commit made while no registry is published leaves exact lanes unavailable
    although routing applied (#38779). *)
 let exact_output_registry_application_json
-      (outcome : Runtime_exact_output_registry.replacement_outcome)
+      (application : Runtime.exact_output_registry_application)
   =
-  let status, requires_restart =
-    match outcome with
-    | Runtime_exact_output_registry.Registry_replaced -> "applied", false
-    | Runtime_exact_output_registry.Registry_unpublished -> "unpublished", true
-  in
-  `Assoc [ "status", `String status; "requires_restart", `Bool requires_restart ]
+  match application with
+  | Runtime.Exact_output_registry_replaced { origin } ->
+    `Assoc
+      [ "status", `String "applied"
+      ; "requires_restart", `Bool false
+      ; ( "targets"
+        , `String
+            (match origin with
+             | Runtime.Runtime_binding_targets -> "runtime_bindings"
+             | Runtime.Replacement_catalog_targets _ -> "replacement_catalog") )
+      ]
+  | Runtime.Exact_output_registry_unpublished ->
+    `Assoc [ "status", `String "unpublished"; "requires_restart", `Bool true ]
+  | Runtime.Exact_output_registry_kept { reason } ->
+    (* A restart would not help: boot rebuilds from the same file. *)
+    `Assoc
+      [ "status", `String "kept"
+      ; "requires_restart", `Bool false
+      ; ( "reason"
+        , `String (Runtime_exact_output_registry.publication_error_to_string reason) )
+      ]
 ;;
 
 let runtime_config_application_json
@@ -1017,7 +1032,11 @@ let audit_runtime_config_write
               ]
             @ (match receipt with
                | None -> []
-               | Some commit -> [ "commit", runtime_config_commit_json commit ])
+               | Some (commit : Runtime.config_commit_receipt) ->
+                 [ "commit", runtime_config_commit_json commit
+                 ; ( "exact_output_registry"
+                   , exact_output_registry_application_json commit.exact_output_registry )
+                 ])
             @ (match skill_application with
                | None -> []
                | Some application ->

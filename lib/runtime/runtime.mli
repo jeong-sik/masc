@@ -64,16 +64,39 @@ type config_durability =
   | Durable
   | Durability_unconfirmed of { detail : string }
 
+(** Where the exact-output registry's targets come from. *)
+type exact_output_target_source =
+  | Runtime_binding_targets
+      (** The exact-output registry builds its targets from this file's HTTP
+          bindings, so a slot's deadline is its provider's
+          [exact-body-timeout-s]. *)
+  | Replacement_catalog_targets of { path : string }
+      (** [AGENT_CORE_MODEL_CATALOG] names a full replacement catalog; its
+          [[targets]] rows are the whole target set and carry their own
+          [body_timeout_s]. Binding fields in runtime.toml,
+          [exact-body-timeout-s] among them, do not reach those targets. *)
+
+(** What a config commit did to the exact-output registry. *)
+type exact_output_registry_application =
+  | Exact_output_registry_replaced of { origin : exact_output_target_source }
+      (** A registry rebuilt from the committed text was published with the
+          write. *)
+  | Exact_output_registry_unpublished
+      (** No registry was published, and a commit does not publish the first
+          one: exact lanes stay unavailable until a restart publishes one. *)
+  | Exact_output_registry_kept of
+      { reason : Runtime_exact_output_registry.publication_error }
+      (** The committed text does not rebuild the registry and neither did
+          the file it replaced, so the fault predates the commit. The
+          published registry stays as it was and no longer describes the
+          file. *)
+
 type config_commit_receipt = private
   { observation : config_observation
   ; durability : config_durability
   ; order : config_commit_order
   ; lock_warnings : config_lock_warning list
-  ; exact_output_registry : Runtime_exact_output_registry.replacement_outcome
-      (** Whether the commit published an exact-output registry rebuilt from
-          the committed text. A commit whose text the registry could not be
-          rebuilt from is refused before the write, so no receipt names a
-          registry that disagrees with the file. *)
+  ; exact_output_registry : exact_output_registry_application
   }
 
 and config_lock_warning =
@@ -291,16 +314,6 @@ type load_failure =
           whose text comes from the parser and can quote operator input; the
           rest name ids and config keys this repository authored. *)
 
-type exact_output_target_source =
-  | Runtime_binding_targets
-      (** The exact-output registry builds its targets from this file's HTTP
-          bindings, so a slot's deadline is its provider's
-          [exact-body-timeout-s]. *)
-  | Replacement_catalog_targets of { path : string }
-      (** [AGENT_CORE_MODEL_CATALOG] names a full replacement catalog; its
-          [[targets]] rows are the whole target set and carry their own
-          [body_timeout_s]. *)
-
 val agent_core_model_catalog_env_var_name : string
 
 val exact_output_target_source :
@@ -426,16 +439,36 @@ val exact_output_targets : t list -> Agent_core.Exact_output.declared_target lis
     its resolved credential and its [exact-body-timeout-s]. Official-client
     runtimes do no exact output and are left out. *)
 
+type exact_output_catalog =
+  { catalog_input : Agent_core.Exact_output.resolver_catalog_input
+  ; catalog_origin : exact_output_target_source
+  ; catalog_description : string  (** A phrase naming it for the publication log. *)
+  }
+
 val exact_output_resolver_catalog :
   exact_output_lane_decls:Runtime_schema.exact_output_lane_decl list ->
   t list ->
-  Agent_core.Exact_output.resolver_catalog_input * string
-(** The catalog an exact-output resolver snapshot for [runtimes] is built from,
-    with a sentence naming it for the publication log. {!exact_output_target_source}
-    decides: the full replacement [AGENT_CORE_MODEL_CATALOG] names, or the
-    embedded catalog with {!exact_output_targets} as its targets, less every
-    slot rule 3 leaves out for [exact_output_lane_decls]. Boot and every
-    config commit read this one derivation. *)
+  exact_output_catalog
+(** The catalog an exact-output resolver snapshot for [runtimes] is built from.
+    {!exact_output_target_source} decides: the full replacement
+    [AGENT_CORE_MODEL_CATALOG] names, or the embedded catalog with
+    {!exact_output_targets} as its targets, less every slot rule 3 leaves out
+    for [exact_output_lane_decls]. Boot and every config commit read this one
+    derivation. *)
+
+val report_exact_output_registry : Runtime_exact_output_registry.t -> unit
+(** Log what [registry] left out: targets whose binding has no catalog row,
+    rejected lane slots (a slot rule 3 left out is counted, not diagnosed
+    again), [verifier_exact] slots that cannot judge, and the optional lanes
+    with nothing admitted. Boot runs it after publishing and every config
+    commit runs it after replacing. The rule-3 slots themselves are named by
+    {!warn_exact_slot_body_deadline_gaps}. *)
+
+val warn_exact_slot_body_deadline_gaps : exact_slot_body_deadline_gap list -> unit
+(** One WARN per exact slot rule 3 leaves out. Boot logs it before publishing,
+    so it is said even when the registry cannot be published. A config commit
+    has none to log: a save with a gap is refused before the registry is
+    rebuilt. *)
 
 val load_exact_output_resolver_snapshot :
   Agent_core.Exact_output.resolver_catalog_input ->
@@ -913,11 +946,17 @@ val remove_egress_allow_text : string -> keeper_name:string -> string
 val save_config_text :
   ?runtime_config_path:string -> string -> (config_commit_receipt, string) result
 (** Validate raw runtime.toml and prepare its exact-output replacement without
-    changing the active registry: a resolver snapshot built from the bindings
-    this text loads, with every lane admitted against it, so a changed binding
-    field such as [exact-body-timeout-s] is what the replacement carries. A
-    text the registry cannot be rebuilt from is refused before the write. The
-    writer then reserves that exact base and atomically replaces the file. A failure
+    changing the active registry: a resolver snapshot built from the catalog
+    {!exact_output_resolver_catalog} names for the runtimes this text loads,
+    with every lane admitted against it. When the targets are the runtime
+    bindings, a changed binding field such as [exact-body-timeout-s] is what
+    the replacement carries; under a full replacement catalog it is not, and
+    the receipt says so ([Replacement_catalog_targets]). A text the
+    registry cannot be rebuilt from is refused before the write when the file
+    it replaces rebuilds; when that file does not either, the write goes
+    through, the published registry is kept, and the receipt carries
+    [Exact_output_registry_kept]. The writer then reserves that exact base and
+    atomically replaces the file. A failure
     before rename leaves the published registry and runtime cache unchanged.
     Once rename is visible, the prepared immutable registry and runtime cache
     are synchronously converged even when parent-directory fsync fails; that
@@ -951,7 +990,8 @@ val validate_config_text :
   ?runtime_config_path:string -> string -> (unit, string) result
 (** Run the raw runtime.toml save precondition — TOML parse, ordered Skill
     source validation, config materialization, dispatch-cap validation, the
-    [\[fusion\]] section, and the Fusion seats {!save_config_text} judges —
+    [\[fusion\]] section, the Fusion seats {!save_config_text} judges, and
+    the exact-output registry replacement it prepares —
     without writing or mutating the active
     registry. Preview endpoints call
     this so [can_save] reflects the same rejection {!save_config_text}

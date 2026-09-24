@@ -40,8 +40,15 @@ let superseded ?(commit_order = "7") () =
     ]
 ;;
 
-let exact_output_registry ?(status = "applied") ?(requires_restart = false) () =
-  `Assoc [ "status", `String status; "requires_restart", `Bool requires_restart ]
+let exact_output_registry ?(status = "applied") ?(requires_restart = false) ?extra () =
+  let extra =
+    match extra, status with
+    | Some extra, _ -> extra
+    | None, "applied" -> [ "targets", `String "runtime_bindings" ]
+    | None, "kept" -> [ "reason", `String "catalog read failed" ]
+    | None, _ -> []
+  in
+  `Assoc ([ "status", `String status; "requires_restart", `Bool requires_restart ] @ extra)
 ;;
 
 let receipt
@@ -137,13 +144,23 @@ let test_exact_output_registry_and_lock_warnings () =
   in
   let applied = decoded (receipt ~warnings:(`List [ lock_warning ]) ()) in
   (match applied.application.exact_output_registry with
-   | Receipt.Exact_output_registry_applied -> ()
-   | Receipt.Exact_output_registry_unpublished -> fail "applied registry changed variant");
+   | Receipt.Exact_output_registry_applied Receipt.Targets_runtime_bindings -> ()
+   | Receipt.Exact_output_registry_applied Receipt.Targets_replacement_catalog
+   | Receipt.Exact_output_registry_unpublished
+   | Receipt.Exact_output_registry_kept _ -> fail "applied registry changed variant");
   check (list string) "lock warning codes"
     [ "runtime_config_lock_release_unconfirmed" ]
     (List.map (fun (warning : Receipt.lock_warning) -> warning.code) applied.lock_warnings);
   check bool "summary names the applied registry" true
     (String.ends_with ~suffix:"exact-registry-applied" (Receipt.summary applied));
+  check bool "summary names the lock warning" true
+    (let summary = Receipt.summary applied in
+     let needle = "lock-warnings=runtime_config_lock_release_unconfirmed" in
+     let rec find i =
+       i + String.length needle <= String.length summary
+       && (String.equal (String.sub summary i (String.length needle)) needle || find (i + 1))
+     in
+     find 0);
   let unpublished =
     decoded
       (receipt
@@ -152,7 +169,23 @@ let test_exact_output_registry_and_lock_warnings () =
   in
   (match unpublished.application.exact_output_registry with
    | Receipt.Exact_output_registry_unpublished -> ()
-   | Receipt.Exact_output_registry_applied -> fail "unpublished registry read as applied");
+   | Receipt.Exact_output_registry_applied _ | Receipt.Exact_output_registry_kept _ ->
+     fail "unpublished registry read as applied");
+  let kept =
+    decoded (receipt ~exact:(exact_output_registry ~status:"kept" ()) ())
+  in
+  (match kept.application.exact_output_registry with
+   | Receipt.Exact_output_registry_kept { reason } ->
+     check string "kept reason" "catalog read failed" reason
+   | Receipt.Exact_output_registry_applied _ | Receipt.Exact_output_registry_unpublished ->
+     fail "kept registry changed variant");
+  check bool "summary names the kept registry" true
+    (String.ends_with ~suffix:"exact-registry-kept" (Receipt.summary kept));
+  rejected (receipt ~exact:(exact_output_registry ~status:"kept" ~extra:[] ()) ());
+  rejected
+    (receipt
+       ~exact:(exact_output_registry ~extra:[ "targets", `String "future" ] ())
+       ());
   rejected
     (receipt ~exact:(exact_output_registry ~status:"unpublished" ~requires_restart:false ()) ());
   rejected

@@ -1065,12 +1065,21 @@ export interface CommittedRuntimeConfigKeeperOverlayApplication
   status: RuntimeConfigKeeperOverlayStatus
 }
 
-// Whether the commit published an exact-output registry rebuilt from the
-// committed text. `unpublished` means no registry was published when the text
-// was committed, so exact lanes stay unavailable until a restart.
+// What the commit did to the exact-output registry.
+// - `applied`: rebuilt from the committed text. `targets` says where the
+//   targets came from; under `replacement_catalog` binding fields such as
+//   exact-body-timeout-s do not reach them.
+// - `unpublished`: none was published, so exact lanes wait for a restart.
+// - `kept`: neither the committed text nor the file it replaced rebuilds the
+//   registry, so the published one stays; `reason` says why.
 export type CommittedRuntimeExactOutputRegistryApplication =
-  | { status: 'applied'; requires_restart: false }
+  | {
+      status: 'applied'
+      requires_restart: false
+      targets: 'runtime_bindings' | 'replacement_catalog'
+    }
   | { status: 'unpublished'; requires_restart: true }
+  | { status: 'kept'; requires_restart: false; reason: string }
 
 export interface CommittedRuntimeConfigApplication extends RuntimeConfigApplication {
   operation: string
@@ -1953,12 +1962,28 @@ function decodeCommittedRuntimeKeeperOverlay(
 function decodeCommittedRuntimeExactOutputRegistry(
   raw: unknown,
 ): CommittedRuntimeExactOutputRegistryApplication | undefined {
-  if (!hasExactKeys(raw, ['status', 'requires_restart'])) return undefined
-  if (raw.status === 'applied' && raw.requires_restart === false) {
-    return { status: 'applied', requires_restart: false }
+  if (
+    hasExactKeys(raw, ['status', 'requires_restart', 'targets'])
+    && raw.status === 'applied'
+    && raw.requires_restart === false
+    && (raw.targets === 'runtime_bindings' || raw.targets === 'replacement_catalog')
+  ) {
+    return { status: 'applied', requires_restart: false, targets: raw.targets }
   }
-  if (raw.status === 'unpublished' && raw.requires_restart === true) {
+  if (
+    hasExactKeys(raw, ['status', 'requires_restart'])
+    && raw.status === 'unpublished'
+    && raw.requires_restart === true
+  ) {
     return { status: 'unpublished', requires_restart: true }
+  }
+  if (
+    hasExactKeys(raw, ['status', 'requires_restart', 'reason'])
+    && raw.status === 'kept'
+    && raw.requires_restart === false
+  ) {
+    const reason = asString(raw.reason)
+    return reason ? { status: 'kept', requires_restart: false, reason } : undefined
   }
   return undefined
 }

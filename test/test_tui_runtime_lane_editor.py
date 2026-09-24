@@ -65,7 +65,11 @@ def commit_receipt() -> dict[str, object]:
                 "catalog_revision": "catalog-7",
                 "config_state": "configured",
             },
-            "exact_output_registry": {"status": "applied", "requires_restart": False},
+            "exact_output_registry": {
+                "status": "applied",
+                "requires_restart": False,
+                "targets": "runtime_bindings",
+            },
         },
     }
 

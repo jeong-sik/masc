@@ -820,7 +820,7 @@ let declared_targets_of_config_path ?(environment = []) ~label path =
   | Error detail -> failf "%s: runtime bindings should initialize: %s" label detail
   (* Loading the bindings is what makes them targets, so a binding this config
      disables has no slot here -- the same answer the server gives. *)
-  | Ok () -> Server_runtime_bootstrap.For_testing.exact_output_targets_of_runtimes ()
+  | Ok () -> Runtime.exact_output_targets (Runtime.get_runtimes ())
 ;;
 
 let snapshot_of_config ?environment ~io ~label path =

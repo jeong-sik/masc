@@ -38,9 +38,14 @@ type keeper_overlay_status =
   | Keeper_preempted_by_env
   | Keeper_mixed
 
+type exact_output_targets =
+  | Targets_runtime_bindings
+  | Targets_replacement_catalog
+
 type exact_output_registry_status =
-  | Exact_output_registry_applied
+  | Exact_output_registry_applied of exact_output_targets
   | Exact_output_registry_unpublished
+  | Exact_output_registry_kept of { reason : string }
 
 type applied_at =
   | Not_applied

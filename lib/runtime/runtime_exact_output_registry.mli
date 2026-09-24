@@ -130,6 +130,13 @@ val prepare_replacement
     reaches the candidate. This performs no global mutation or publication
     fence. When no registry exists, only an empty lane set can be prepared. *)
 
+val prepare_retention : unit -> prepared_replacement option
+(** A candidate that is the published registry itself. Committing it keeps
+    that registry, under the same reservation a replacement takes, for a
+    config commit whose text the registry cannot be rebuilt from when the
+    file on disk could not be rebuilt either. [None] when nothing is
+    published. *)
+
 val replacement_outcome : prepared_replacement -> replacement_outcome
 
 val transact_replacement
@@ -151,6 +158,12 @@ val current : unit -> (t, publication_error) result
     [Registry_not_published] before bootstrap has published one. *)
 
 val rejected_slots : t -> rejected_slot list
+
+val rejected_target_bindings
+  :  t
+  -> Agent_core.Exact_output.rejected_target_binding list
+(** Declared targets the resolver snapshot of [t] excluded because their
+    provider or model has no catalog row. *)
 
 val declared_lane
   :  t

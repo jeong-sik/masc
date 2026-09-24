@@ -4033,7 +4033,7 @@ describe('runtime.toml raw config API', () => {
           applied_keys: [],
           preempted_keys: [],
         },
-        exact_output_registry: { status: 'applied', requires_restart: false },
+        exact_output_registry: { status: 'applied', requires_restart: false, targets: 'runtime_bindings' },
         ...application,
         skills: {
           state: 'published',
@@ -4228,7 +4228,11 @@ describe('runtime.toml raw config API', () => {
 
   it.each([
     [{ status: 'unpublished', requires_restart: true }, 'unpublished'],
-    [{ status: 'applied', requires_restart: true }, undefined],
+    [{ status: 'kept', requires_restart: false, reason: 'catalog read failed' }, 'kept'],
+    [{ status: 'applied', requires_restart: false, targets: 'replacement_catalog' }, 'applied'],
+    [{ status: 'applied', requires_restart: false }, undefined],
+    [{ status: 'kept', requires_restart: false }, undefined],
+    [{ status: 'applied', requires_restart: true, targets: 'runtime_bindings' }, undefined],
     [{ status: 'unpublished', requires_restart: false }, undefined],
     [{ status: 'future', requires_restart: false }, undefined],
   ] as const)(

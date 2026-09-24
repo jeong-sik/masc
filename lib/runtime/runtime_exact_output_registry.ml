@@ -326,6 +326,12 @@ let prepare_replacement ~lanes ~load_resolver_snapshot =
       }
 ;;
 
+let prepare_retention () =
+  match Atomic.get published with
+  | None -> None
+  | Some _ as base -> Some { base; candidate = base }
+;;
+
 let replacement_outcome (prepared : prepared_replacement) =
   match prepared.candidate with
   | Some _ -> Registry_replaced
@@ -407,6 +413,10 @@ let abort_replacement reservation =
   | Some _ | None -> Error Reservation_inactive
 ;;
 let rejected_slots registry = registry.rejected_slots
+
+let rejected_target_bindings registry =
+  Exact_output.resolver_rejected_target_bindings registry.resolver_snapshot
+;;
 
 let declared_lane registry ~lane_id =
   List.find_opt

@@ -38,9 +38,14 @@ type keeper_overlay_status =
   | Keeper_preempted_by_env
   | Keeper_mixed
 
+type exact_output_targets =
+  | Targets_runtime_bindings
+  | Targets_replacement_catalog
+
 type exact_output_registry_status =
-  | Exact_output_registry_applied
+  | Exact_output_registry_applied of exact_output_targets
   | Exact_output_registry_unpublished
+  | Exact_output_registry_kept of { reason : string }
 
 type applied_at =
   | Not_applied
@@ -222,13 +227,24 @@ let keeper_status_of_string = function
 let decode_exact_output_registry = function
   | `Assoc fields ->
     let open Result.Syntax in
-    let* () = exact_fields [ "status"; "requires_restart" ] fields in
     let* status = string_field "status" fields in
     let* requires_restart = bool_field "requires_restart" fields in
     (match status, requires_restart with
-     | "applied", false -> Ok Exact_output_registry_applied
-     | "unpublished", true -> Ok Exact_output_registry_unpublished
-     | ("applied" | "unpublished"), _ ->
+     | "applied", false ->
+       let* () = exact_fields [ "status"; "requires_restart"; "targets" ] fields in
+       (match string_field "targets" fields with
+        | Ok "runtime_bindings" -> Ok (Exact_output_registry_applied Targets_runtime_bindings)
+        | Ok "replacement_catalog" ->
+          Ok (Exact_output_registry_applied Targets_replacement_catalog)
+        | Ok _ | Error _ -> Error "invalid exact-output registry targets")
+     | "unpublished", true ->
+       let* () = exact_fields [ "status"; "requires_restart" ] fields in
+       Ok Exact_output_registry_unpublished
+     | "kept", false ->
+       let* () = exact_fields [ "status"; "requires_restart"; "reason" ] fields in
+       let* reason = string_field "reason" fields in
+       Ok (Exact_output_registry_kept { reason })
+     | ("applied" | "unpublished" | "kept"), _ ->
        Error "exact-output registry status disagrees with requires_restart"
      | _ -> Error "invalid exact-output registry application status")
   | _ -> Error "exact-output registry application receipt must be an object"
@@ -403,17 +419,29 @@ let summary receipt =
     | Skill_workspace_retired _ -> "skills-workspace-retired"
     | Skill_invalid_workspace -> "skills-invalid-workspace"
   in
+  let lock_warnings =
+    match receipt.lock_warnings with
+    | [] -> ""
+    | warnings ->
+      Printf.sprintf
+        " lock-warnings=%s"
+        (String.concat "," (List.map (fun warning -> warning.code) warnings))
+  in
   let exact_output_registry =
     match receipt.application.exact_output_registry with
-    | Exact_output_registry_applied -> "exact-registry-applied"
+    | Exact_output_registry_applied Targets_runtime_bindings -> "exact-registry-applied"
+    | Exact_output_registry_applied Targets_replacement_catalog ->
+      "exact-registry-applied/replacement-catalog"
     | Exact_output_registry_unpublished -> "exact-registry-unpublished"
+    | Exact_output_registry_kept _ -> "exact-registry-kept"
   in
   Printf.sprintf
-    "commit=%s %s %s %s %s %s"
+    "commit=%s %s %s %s %s%s %s"
     receipt.order
     durability
     routing
     keeper
     skills
+    lock_warnings
     exact_output_registry
 ;;

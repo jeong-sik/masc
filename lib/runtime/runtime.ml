@@ -120,12 +120,28 @@ type config_durability =
   | Durable
   | Durability_unconfirmed of { detail : string }
 
+(* Where the exact-output registry reads its targets. The server builds them
+   from this file's HTTP bindings, unless [AGENT_CORE_MODEL_CATALOG] names a
+   full replacement catalog, whose [[targets]] rows are then the whole set and
+   carry their own [body_timeout_s] ([Server_runtime_bootstrap]
+   [configure_exact_output_registry] reads this same answer). An empty or
+   blank value names no file, as it always has for this variable. *)
+type exact_output_target_source =
+  | Runtime_binding_targets
+  | Replacement_catalog_targets of { path : string }
+
+type exact_output_registry_application =
+  | Exact_output_registry_replaced of { origin : exact_output_target_source }
+  | Exact_output_registry_unpublished
+  | Exact_output_registry_kept of
+      { reason : Runtime_exact_output_registry.publication_error }
+
 type config_commit_receipt =
   { observation : config_observation
   ; durability : config_durability
   ; order : config_commit_order
   ; lock_warnings : config_lock_warning list
-  ; exact_output_registry : Runtime_exact_output_registry.replacement_outcome
+  ; exact_output_registry : exact_output_registry_application
   }
 
 and config_lock_warning =
@@ -1126,16 +1142,6 @@ let verifier_exact_slot_references
     references "slots" lane.slot_ids @ references "cli_slots" lane.cli_slot_ids
 ;;
 
-(* Where the exact-output registry reads its targets. The server builds them
-   from this file's HTTP bindings, unless [AGENT_CORE_MODEL_CATALOG] names a
-   full replacement catalog, whose [[targets]] rows are then the whole set and
-   carry their own [body_timeout_s] ([Server_runtime_bootstrap]
-   [configure_exact_output_registry] reads this same answer). An empty or
-   blank value names no file, as it always has for this variable. *)
-type exact_output_target_source =
-  | Runtime_binding_targets
-  | Replacement_catalog_targets of { path : string }
-
 let agent_core_model_catalog_env_var_name = "AGENT_CORE_MODEL_CATALOG"
 
 let exact_output_target_source ?(env = Env_config_core.raw_value_opt) () =
@@ -1807,6 +1813,12 @@ let exact_output_targets runtimes =
     runtimes
 ;;
 
+type exact_output_catalog =
+  { catalog_input : Agent_core.Exact_output.resolver_catalog_input
+  ; catalog_origin : exact_output_target_source
+  ; catalog_description : string
+  }
+
 (* Where the exact-output targets come from, read once per build: boot and
    every config commit call this with the runtimes and lanes they are about
    to publish. Under the runtime bindings, a slot left out by rule 3 (its
@@ -1815,8 +1827,11 @@ let exact_output_targets runtimes =
    and its cli_slots. *)
 let exact_output_resolver_catalog ~exact_output_lane_decls runtimes =
   match exact_output_target_source () with
-  | Replacement_catalog_targets { path } ->
-    Agent_core.Exact_output.Full_replacement_file path, " from full replacement " ^ path
+  | Replacement_catalog_targets { path } as catalog_origin ->
+    { catalog_input = Agent_core.Exact_output.Full_replacement_file path
+    ; catalog_origin
+    ; catalog_description = " from full replacement " ^ path
+    }
   | Runtime_binding_targets ->
     let gaps =
       exact_slot_body_deadline_gaps_of
@@ -1833,10 +1848,13 @@ let exact_output_resolver_catalog ~exact_output_lane_decls runtimes =
                 String.equal gap.slot_id target.target_ref)
              gaps))
     in
-    ( Agent_core.Exact_output.Embedded_with_targets targets
-    , Printf.sprintf
-        " from AGENT_CORE embedded catalog with %d runtime binding(s) as targets"
-        (List.length targets) )
+    { catalog_input = Agent_core.Exact_output.Embedded_with_targets targets
+    ; catalog_origin = Runtime_binding_targets
+    ; catalog_description =
+        Printf.sprintf
+          " from AGENT_CORE embedded catalog with %d runtime binding(s) as targets"
+          (List.length targets)
+    }
 ;;
 
 let load_exact_output_resolver_snapshot catalog =
@@ -3303,6 +3321,307 @@ let validate_save_text ~config_path content =
   Ok validated
 ;;
 
+(* Rule 3 (#38779) at boot: the server starts, and each exact slot whose HTTP
+   provider declares no [exact-body-timeout-s] is left out of its lane, with
+   one line per slot naming the lane, slot, provider and the key to add. The
+   same list is in the startup degradation report. Logged before the registry
+   is published, so it is said even when leaving the slots out empties a
+   mandatory lane and publication fails. *)
+let warn_exact_slot_body_deadline_gaps gaps =
+  List.iter
+    (fun gap ->
+       Log.Server.warn
+         "exact_output: slot left out until its provider declares a whole-request deadline: %s (connect-timeout-s ends at the response headers and does not bound the body)"
+         (exact_slot_body_deadline_gap_to_string gap))
+    gaps
+;;
+
+let warn_rejected_exact_output_slots registry =
+  (* A slot left out for rule 3 is rejected here too, because its target was
+     never handed to the resolver. Its cause is already named, one WARN per
+     slot, by [warn_exact_slot_body_deadline_gaps]; diagnosing it again would
+     call it a subscription CLI or a typo. It is counted in the summary. *)
+  let gaps = exact_slot_body_deadline_gaps () in
+  let left_out_for_deadline (slot : Runtime_exact_output_registry.rejected_slot) =
+    List.exists
+      (fun (gap : exact_slot_body_deadline_gap) ->
+         String.equal gap.lane_id slot.lane_id && String.equal gap.slot_id slot.slot_id)
+      gaps
+  in
+  let all_rejected = Runtime_exact_output_registry.rejected_slots registry in
+  let deadline_rejected = List.filter left_out_for_deadline all_rejected in
+  let rejected =
+    List.filter (fun slot -> not (left_out_for_deadline slot)) all_rejected
+  in
+  let configured_runtime slot_id =
+    Option.map
+      (fun (rt : t) ->
+         rt.provider.Runtime_schema.id, rt.model.Runtime_schema.api_name)
+      (get_runtime_by_id slot_id)
+  in
+  let diagnoses =
+    List.map
+      (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
+         ( slot
+         , Runtime_exact_output_registry.diagnose_rejected_slot
+             registry
+             slot
+             ~configured_runtime ))
+      rejected
+  in
+  List.iter
+    (fun ((slot : Runtime_exact_output_registry.rejected_slot), diagnosis) ->
+       match diagnosis with
+       | Runtime_exact_output_registry.Declared_target_binding_rejected ->
+         Log.Server.warn
+           "exact_output: lane %S slot %d (%S) ignored because the binding it names resolved to no AGENT_CORE catalog row (see the target binding report above); an endpoint the install wizard created can never match one, so point the slot at a binding the catalog knows or add the row"
+           slot.lane_id
+           slot.position
+           slot.slot_id
+       | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name }
+         when String.equal slot.lane_id (Standalone_lane.to_id Standalone_lane.Verifier) ->
+         (* verifier_exact admits slots here, and judgement then admits each
+            id as a configured direct runtime
+            (verifier_exact_slot_admission) and dispatches that id
+            alone, so its ids must exist in both registries; #32653 measured
+            the catalog-id form failing at dispatch 27 times on 2026-08-29. *)
+         Log.Server.warn
+           "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; this lane dispatches by runtime id, so a slot must resolve as both a runtime and a target, and a subscription CLI resolves only as a runtime; give the lane an HTTP binding for model %S"
+           slot.lane_id
+           slot.position
+           slot.slot_id
+           provider_id
+           api_name
+           api_name
+       | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name } ->
+         Log.Server.warn
+           "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; this lane dispatches by admitted target, and a subscription CLI has no endpoint to resolve against the catalog, so name an HTTP binding for model %S"
+           slot.lane_id
+           slot.position
+           slot.slot_id
+           provider_id
+           api_name
+           api_name
+       | Runtime_exact_output_registry.Unknown_to_both_registries ->
+         Log.Server.warn
+           "exact_output: lane %S slot %d (%S) ignored because no enabled binding carries that id; the binding is disabled, it was removed, or the id is mistyped"
+           slot.lane_id
+           slot.position
+           slot.slot_id)
+    diagnoses;
+  (* One consolidated line at ERROR, because per-slot WARNs read as
+     tolerable degradation and get discounted: four lanes carried retired
+     targets for days on 2026-08-28 while the warnings repeated unread. The
+     count per cause and the lane list make the standing config debt visible
+     once per publish. *)
+  (match all_rejected with
+   | [] -> ()
+   | all_rejected ->
+     let lanes =
+       all_rejected
+       |> List.map (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
+              slot.lane_id)
+       |> List.sort_uniq String.compare
+     in
+     let count predicate =
+       List.length (List.filter (fun (_, diagnosis) -> predicate diagnosis) diagnoses)
+     in
+     Log.Server.error
+       "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d naming no enabled binding, %d naming a binding that does no exact output, %d whose binding resolved to no catalog row, %d whose provider declares no %s — fix runtime.toml"
+       (List.length all_rejected)
+       (List.length lanes)
+       (String.concat ", " lanes)
+       (count (function
+          | Runtime_exact_output_registry.Unknown_to_both_registries -> true
+          | Runtime_exact_output_registry.Configured_runtime_only _
+          | Runtime_exact_output_registry.Declared_target_binding_rejected -> false))
+       (count (function
+          | Runtime_exact_output_registry.Configured_runtime_only _ -> true
+          | Runtime_exact_output_registry.Unknown_to_both_registries
+          | Runtime_exact_output_registry.Declared_target_binding_rejected -> false))
+       (count (function
+          | Runtime_exact_output_registry.Declared_target_binding_rejected -> true
+          | Runtime_exact_output_registry.Unknown_to_both_registries
+          | Runtime_exact_output_registry.Configured_runtime_only _ -> false))
+       (List.length deadline_rejected)
+       Runtime_schema.exact_body_timeout_s_key)
+;;
+
+(* Publication carries [verifier_exact] cli ids verbatim, because only
+   [Runtime] holds the runtime table that answers whether an official client
+   can judge. A slot that cannot leaves the lane shorter than its declaration
+   instead of failing it (#37179), so the boot report has to name it or the
+   lane reads as configured. *)
+let report_verifier_exact_lane_admission () =
+  match verifier_exact_lane_resolution () with
+  | Error detail ->
+    (* [verifier_exact] is not a mandatory lane, so an unconfigured one is a
+       supported shape; completion review reports the same sentence when it
+       refuses admission. *)
+    Log.Server.info
+      "exact_output: lane %S cannot judge: %s"
+      (Standalone_lane.to_id Standalone_lane.Verifier)
+      detail
+  | Ok (lane : verifier_exact_lane_slots) ->
+    List.iter
+      (fun (rejection : verifier_slot_rejection) ->
+         Log.Server.warn
+           "exact_output: lane %S %s; the lane runs its remaining slots without it"
+           (Standalone_lane.to_id Standalone_lane.Verifier)
+           (verifier_slot_rejection_to_string rejection))
+      lane.slot_rejections;
+    (match lane.admitted_catalog_slot_ids, lane.admitted_cli_slot_ids with
+     | [], [] ->
+       Log.Server.error
+         "exact_output: lane %S can judge through none of its %d declared slot(s); completion review refuses admission until runtime.toml names a slot it can judge"
+         (Standalone_lane.to_id Standalone_lane.Verifier)
+         (List.length lane.slot_rejections)
+     | [], _ :: _ | _ :: _, _ -> ())
+;;
+
+let warn_rejected_exact_output_bindings registry =
+  List.iter
+    (fun (binding : Agent_core.Exact_output.rejected_target_binding) ->
+       Log.Server.warn
+         "exact_output: target %S excluded from the frozen resolver because its %s binding is missing; lane admission will decide whether required targets remain"
+         binding.target_ref
+         (Runtime_exact_output_registry.binding_component_to_string binding.component))
+    (Runtime_exact_output_registry.rejected_target_bindings registry)
+;;
+
+let warn_optional_exact_output_lane registry ~(lane : exact_lane) ~feature =
+  let lane_id = Standalone_lane.to_id lane in
+  match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+  | Ok { selected_slots = _ :: _; _ } -> ()
+  | Ok { cli_slots = _ :: _; _ } when exact_lane_supports_cli_tail lane -> ()
+  | Ok { selected_slots = []; _ }
+  | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) ->
+    Log.Server.warn
+      "exact_output: %s is degraded because lane %S has no admitted target in the frozen catalog"
+      feature
+      lane_id
+  | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
+    Log.Server.warn
+      "exact_output: %s is degraded until [runtime.exact_output_lanes.%s] is configured with AGENT_CORE target refs"
+      feature
+      lane_id
+;;
+
+(* What boot logs after it publishes a registry, logged again after every
+   config commit that replaces it, so a saved slot the new registry drops is
+   named where an operator reads the boot report. *)
+let report_exact_output_registry registry =
+  warn_rejected_exact_output_bindings registry;
+  warn_rejected_exact_output_slots registry;
+  report_verifier_exact_lane_admission ();
+  warn_optional_exact_output_lane registry ~lane:Librarian ~feature:"librarian";
+  warn_optional_exact_output_lane registry ~lane:Verifier ~feature:"completion authority"
+;;
+
+(* How a config commit meets the exact-output registry. *)
+type exact_output_commit_plan =
+  | Commit_without_registry
+  | Commit_with_registry of
+      Runtime_exact_output_registry.prepared_replacement
+      * exact_output_registry_application
+
+let prepare_exact_output_replacement ~runtimes ~lanes =
+  let catalog = exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes in
+  Runtime_exact_output_registry.prepare_replacement
+    ~lanes
+    ~load_resolver_snapshot:(fun () ->
+      load_exact_output_resolver_snapshot catalog.catalog_input)
+  |> Result.map (fun prepared -> prepared, catalog.catalog_origin)
+;;
+
+(* Whether the text on disk -- the one this commit replaces -- rebuilds the
+   registry. A file that cannot be read or does not load rebuilds nothing. *)
+let on_disk_text_rebuilds_exact_output_registry ~config_path =
+  match load_file_result config_path with
+  | Error (_ : string) -> false
+  | Ok text ->
+    (match parse_and_validate_config_text ~config_path text with
+     | Error (_ : string) -> false
+     | Ok (loaded, lanes, _, _) ->
+       let runtimes, _, _, _, _, _, _, _ = loaded in
+       Result.is_ok (prepare_exact_output_replacement ~runtimes ~lanes))
+;;
+
+(* The registry is rebuilt from the runtimes the committed text loads, the
+   same derivation boot publishes from, so a saved binding reaches exact
+   requests with the write rather than at the next restart (#38779).
+
+   A text the registry cannot be rebuilt from is refused only when the text it
+   replaces can be: then the fault is this text's. When the file on disk
+   cannot be rebuilt either -- the replacement catalog moved, a hand-edited
+   binding the resolver refuses -- the fault predates this commit, and
+   refusing would stop every keeper assignment and credential save until
+   someone edits the file by hand, the way [validate_fusion_change] leaves a
+   broken [fusion] alone. That commit goes through and keeps the published
+   registry, and the receipt says it was kept and why. Pure: the preview runs
+   it as well. *)
+let plan_exact_output_commit ~config_path ~runtimes ~lanes =
+  match prepare_exact_output_replacement ~runtimes ~lanes with
+  | Error Runtime_exact_output_registry.Registry_not_published ->
+    Ok Commit_without_registry
+  | Ok (prepared, origin) ->
+    (match Runtime_exact_output_registry.replacement_outcome prepared with
+     | Runtime_exact_output_registry.Registry_replaced ->
+       Ok (Commit_with_registry (prepared, Exact_output_registry_replaced { origin }))
+     | Runtime_exact_output_registry.Registry_unpublished ->
+       Ok (Commit_with_registry (prepared, Exact_output_registry_unpublished)))
+  | Error reason ->
+    if on_disk_text_rebuilds_exact_output_registry ~config_path
+    then
+      Error
+        ("exact-output registry replacement rejected: "
+         ^ Runtime_exact_output_registry.publication_error_to_string reason)
+    else (
+      match Runtime_exact_output_registry.prepare_retention () with
+      | None -> Ok Commit_without_registry
+      | Some prepared ->
+        Ok (Commit_with_registry (prepared, Exact_output_registry_kept { reason })))
+;;
+
+let exact_output_registry_application_to_string = function
+  | Exact_output_registry_replaced { origin = Runtime_binding_targets } ->
+    "replaced; targets are the runtime bindings"
+  | Exact_output_registry_replaced { origin = Replacement_catalog_targets { path } } ->
+    Printf.sprintf
+      "replaced; targets come from the full replacement catalog %s, so binding \
+       fields such as exact-body-timeout-s do not reach them"
+      path
+  | Exact_output_registry_unpublished ->
+    "unpublished; exact lanes stay unavailable until a restart publishes one"
+  | Exact_output_registry_kept { reason } ->
+    "kept as published; neither this text nor the file it replaced rebuilds it: "
+    ^ Runtime_exact_output_registry.publication_error_to_string reason
+;;
+
+let report_exact_output_commit ~path application =
+  match application with
+  | Exact_output_registry_replaced _ ->
+    (match Runtime_exact_output_registry.current () with
+     | Ok registry -> report_exact_output_registry registry
+     | Error error ->
+       Log.Misc.warn
+         "exact_output: registry committed with %s cannot be reported: %s"
+         path
+         (Runtime_exact_output_registry.publication_error_to_string error))
+  | Exact_output_registry_unpublished ->
+    (* Boot already warned that no registry is published; a commit does not
+       change that, and processes that never publish one (the TUI) commit too. *)
+    Log.Misc.info
+      "exact_output: %s committed; registry %s"
+      path
+      (exact_output_registry_application_to_string application)
+  | Exact_output_registry_kept _ ->
+    Log.Misc.warn
+      "exact_output: %s committed; registry %s"
+      path
+      (exact_output_registry_application_to_string application)
+;;
+
 let commit_runtime_config_text
     ?(replace_file = Fs_compat.save_file_atomic_strict_staged)
     ~path
@@ -3320,26 +3639,23 @@ let commit_runtime_config_text
       ~exact_output_lane_decls:exact_output_lanes
       loaded
   in
-  (* The registry is rebuilt from the runtimes this text loads, the same
-     derivation boot publishes from, so a saved binding reaches exact requests
-     with the write rather than at the next restart (#38779). *)
-  let load_resolver_snapshot () =
-    let runtimes, _, _, _, _, _, _, _ = loaded in
-    exact_output_resolver_catalog ~exact_output_lane_decls:exact_output_lanes runtimes
-    |> fst
-    |> load_exact_output_resolver_snapshot
+  let runtimes, _, _, _, _, _, _, _ = loaded in
+  let* plan =
+    plan_exact_output_commit ~config_path:path ~runtimes ~lanes:exact_output_lanes
   in
-  match
-    Runtime_exact_output_registry.prepare_replacement
-      ~lanes:exact_output_lanes
-      ~load_resolver_snapshot
-  with
-  | Error Runtime_exact_output_registry.Registry_not_published ->
-    let exact_output_registry = Runtime_exact_output_registry.Registry_unpublished in
+  match plan with
+  | Commit_without_registry ->
+    let exact_output_registry = Exact_output_registry_unpublished in
+    let committed receipt =
+      report_exact_output_commit ~path exact_output_registry;
+      receipt
+    in
     (match replace_file path content with
      | Ok () ->
        publish_runtimes ();
-       Ok (committed_receipt ~observation ~durability:Durable ~exact_output_registry)
+       Ok
+         (committed
+            (committed_receipt ~observation ~durability:Durable ~exact_output_registry))
      | Error (failure : Fs_compat.atomic_replace_failure) ->
        (match failure.stage with
         | Fs_compat.Before_rename ->
@@ -3354,16 +3670,12 @@ let commit_runtime_config_text
             ~replacement_visible:true
             ~observation
             ~exact_output_registry
-            failure))
-  | Error error ->
-    (* Refused before the write: the file and the published registry both
-       stay as they were, so neither describes a config the other does not. *)
-    Error
-      ("exact-output registry replacement rejected: "
-       ^ Runtime_exact_output_registry.publication_error_to_string error)
-  | Ok prepared_replacement ->
-    let exact_output_registry =
-      Runtime_exact_output_registry.replacement_outcome prepared_replacement
+            failure
+          |> Result.map committed))
+  | Commit_with_registry (prepared_replacement, exact_output_registry) ->
+    let committed receipt =
+      report_exact_output_commit ~path exact_output_registry;
+      receipt
     in
     (match
        Runtime_exact_output_registry.transact_replacement
@@ -3386,7 +3698,9 @@ let commit_runtime_config_text
          ~exact_output_registry
          failure
      | Ok (Runtime_exact_output_registry.Committed `Durable) ->
-       Ok (committed_receipt ~observation ~durability:Durable ~exact_output_registry)
+       Ok
+         (committed
+            (committed_receipt ~observation ~durability:Durable ~exact_output_registry))
      | Ok
          (Runtime_exact_output_registry.Committed
            (`Durability_unconfirmed failure)) ->
@@ -3394,7 +3708,8 @@ let commit_runtime_config_text
          ~replacement_visible:true
          ~observation
          ~exact_output_registry
-         failure)
+         failure
+       |> Result.map committed)
 ;;
 
 let save_config_text_with_replace_file
@@ -3438,8 +3753,14 @@ let edit_config_text ?runtime_config_path edit =
 
 let validate_config_text ?runtime_config_path content =
   let* path = runtime_config_path_result ?runtime_config_path () in
-  let* _loaded, _exact_output_lanes, _degradation, _declared_media_failover =
+  let* loaded, exact_output_lanes, _degradation, _declared_media_failover =
     validate_save_text ~config_path:path content
+  in
+  let runtimes, _, _, _, _, _, _, _ = loaded in
+  (* The commit's registry decision, without the write, so a preview cannot
+     promise a save the commit then refuses. *)
+  let* (_ : exact_output_commit_plan) =
+    plan_exact_output_commit ~config_path:path ~runtimes ~lanes:exact_output_lanes
   in
   Ok ()
 ;;

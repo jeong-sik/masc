@@ -130,7 +130,7 @@ function committedBody(): Record<string, unknown> {
         catalog_revision: 'skill-catalog-revision',
         config_state: 'configured',
       },
-      exact_output_registry: { status: 'applied', requires_restart: false },
+      exact_output_registry: { status: 'applied', requires_restart: false, targets: 'runtime_bindings' },
     },
   }
 }

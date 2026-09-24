@@ -62,9 +62,16 @@ describe('runtimeConfigCommitReceiptNotice', () => {
       }),
     )
 
+    const kept = runtimeConfigCommitReceiptNotice(
+      committedRuntimeTomlConfigFixture(baseConfig, {
+        exactOutputRegistry: { status: 'kept', requires_restart: false, reason: 'catalog read failed' },
+      }),
+    )
+
     expect(applied).toContain('Exact registry 적용됨')
     expect(unpublished).toContain('Exact registry 미게시 · 재시작 필요')
     expect(unpublished).not.toContain('Exact registry 적용됨')
+    expect(kept).toContain('Exact registry 이전 상태 유지 (catalog read failed)')
   })
 
   it('shows unconfirmed durability without claiming durable storage', () => {

@@ -121,6 +121,63 @@ let get_action request reqd =
       dispatch state Runtime.Action_status args in
     respond request reqd result) request reqd
 
+(* The source kinds [live] can watch: the ones with a machine screen behind
+   them. Another machine is one more constructor here and one arm in
+   [live_json]. *)
+type screen_source = Msx_screen
+
+let screen_source_kind = function Msx_screen -> "msx_capture"
+
+let decode_live_query fields =
+  let names = List.map fst fields in
+  if List.length names <> List.length (List.sort_uniq String.compare names)
+  then Error "duplicate query field"
+  else
+    match List.find_opt (fun name -> not (List.mem name ["source_kind"; "since"])) names with
+    | Some name -> Error ("unknown live parameter: " ^ name)
+    | None ->
+        let* source = match List.assoc_opt "source_kind" fields with
+          | Some "msx_capture" -> Ok Msx_screen
+          | Some ("snapshot_file" | "lane_output" | "browser_document" as kind) ->
+              Error (kind ^ " has no screen to watch; live accepts msx_capture")
+          | Some kind -> Error ("unknown source_kind: " ^ kind)
+          | None -> Error "live requires source_kind" in
+        let* since = match List.assoc_opt "since" fields with
+          | None -> Ok None
+          | Some value ->
+              (match int_of_string_opt value with
+               | Some count when count >= 0 -> Ok (Some count)
+               | Some _ | None -> Error "since must be a nonnegative integer") in
+        Ok (source, since)
+
+(* Reads the machine and encodes the pixels. It takes the machine's stdlib
+   mutex, so the caller runs it off the request fiber. It writes nothing. *)
+let live_json source ~since : Yojson.Safe.t =
+  let kind = "source_kind", `String (screen_source_kind source) in
+  let marked state (mark : Msx_lane.change_mark) =
+    [kind; "state", `String state; "change_count", `Int mark.Msx_lane.count;
+     "incarnation", `String mark.Msx_lane.incarnation] in
+  match source with
+  | Msx_screen ->
+      (match Msx_lane.live ~since with
+       | Msx_lane.Nothing_loaded -> `Assoc [kind; "state", `String "no_machine"]
+       | Msx_lane.Unchanged mark -> `Assoc (marked "unchanged" mark)
+       | Msx_lane.Changed (mark, frame) ->
+           `Assoc (marked "changed" mark @
+             ["frame_number", `Int frame.Msx_lane.number;
+              "screen", `Assoc ["format", `String "rgb8"; "width", `Int frame.Msx_lane.width;
+                "height", `Int frame.Msx_lane.height;
+                "rgb_base64", `String (Base64.encode_string frame.Msx_lane.rgb)]]))
+
+let get_live request reqd =
+  with_read_auth (fun _state _request reqd ->
+    match decode_live_query (query_fields request) with
+    | Error detail -> respond request reqd (Error detail)
+    | Ok (source, since) ->
+        let json = Eio_unix.run_in_systhread (fun () -> live_json source ~since) in
+        Http.Response.json_value_on_cpu ~compress:true ~request
+          ~extra_headers:(cors_headers (get_origin request)) json reqd) request reqd
+
 let post ~operation ~tool_name request reqd =
   with_tool_actor_auth ~tool_name (fun state caller _request reqd ->
     Http.Request.read_body_async reqd (fun body ->
@@ -188,6 +245,7 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/lane-addons" get_inspect
   |> Http.Router.get "/api/v1/lane-addons/slice" get_slice
   |> Http.Router.get "/api/v1/lane-addons/actions" get_action
+  |> Http.Router.get "/api/v1/lane-addons/live" get_live
   |> Http.Router.post "/api/v1/lane-addons/actions" (post ~operation:Runtime.Act ~tool_name:"masc_lane_act")
   |> Http.Router.post "/api/v1/lane-addons/attach" (post ~operation:Runtime.Attach ~tool_name:"masc_lane_attach")
   |> Http.Router.post "/api/v1/lane-addons/observe" (post ~operation:Runtime.Observe ~tool_name:"masc_lane_observe")

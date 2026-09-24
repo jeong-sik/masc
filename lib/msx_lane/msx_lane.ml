@@ -118,6 +118,14 @@ type machine = {
 let state : machine option ref = ref None
 let lock = Mutex.create ()
 let locked f = Mutex.protect lock f
+
+(* The machine change counter a spectator compares against. Process-wide and
+   written only while holding [lock]. Nothing resets it: an eject and the
+   next load keep counting, so one value never names two different screens
+   while the server runs. A call marks before it touches the machine, so a
+   call that raises after running frames has already moved it. *)
+let change_count = ref 0
+let mark_change () = incr change_count
 (* Used only while holding [lock]. An incarnation names a newly installed
    history, including a restore of the exact same checkpoint. *)
 let fresh_incarnation () = Random_id.uuid_v7 ()
@@ -400,6 +408,7 @@ let load ~ledger_dir ~(roms_dir : string option) ~cart_path ~disk_path =
           ; input_count = 0
           }
         in
+        mark_change ();
         state := Some st;
         Ok { observation = observe st
            ; transition = { before; after = medium_of (Some st) } })
@@ -410,6 +419,7 @@ let eject () =
     match !state with
     | None -> Error No_machine
     | Some _ ->
+      mark_change ();
       state := None;
       Ok ())
 ;;
@@ -436,6 +446,7 @@ let step ~frames =
     match check_frames ~what:"frames" frames with
     | Error e -> Error e
     | Ok () ->
+      mark_change ();
       advance st frames;
       Ok (observe st))
 ;;
@@ -458,6 +469,7 @@ let step_until_change ~max_frames =
     match check_frames ~what:"frames" max_frames with
     | Error e -> Error e
     | Ok () ->
+      mark_change ();
       let cfg = Screen_change.default in
       let start = observe st in
       let base = start.screen_view in
@@ -542,6 +554,7 @@ let press ~who ~keys ~hold_frames ~step_frames ~sequence =
         match press_all st keys with
         | Error e -> Error e
         | Ok () when sequence ->
+          mark_change ();
           (* [press_all] left the keys down with no frame advanced; release them
              and tap each in turn, so ["down"; "return"] is a menu sequence, not
              a chord held together. *)
@@ -551,6 +564,7 @@ let press ~who ~keys ~hold_frames ~step_frames ~sequence =
             List.iter (tap_one st ~who ~hold_frames ~step_frames) keys;
             Ok (observe st))
         | Ok () ->
+          mark_change ();
           releasing_on_raise st keys (fun () ->
             List.iter
               (fun k ->
@@ -606,6 +620,7 @@ let step_frame ~frames =
     match check_frames ~what:"frames" frames with
     | Error _ as error -> error
     | Ok () ->
+        mark_change ();
         advance st frames;
         Ok (frame_of st, List.rev st.entries))
 ;;
@@ -626,6 +641,27 @@ let capture_with_identity () =
     Ok { incarnation = st.incarnation; observation = observe st;
          frame = frame_of st; input_count = st.input_count;
          input_ledger = st.entries })
+;;
+
+type change_mark = { count : int; incarnation : string }
+
+type live =
+  | Nothing_loaded
+  | Unchanged of change_mark
+  | Changed of change_mark * frame
+
+(* Compare and copy under one lock hold, so the count, the incarnation and the
+   pixels always describe the same machine state. An unchanged answer renders
+   nothing. *)
+let live ~since =
+  locked (fun () ->
+    match !state with
+    | None -> Nothing_loaded
+    | Some st ->
+      let mark = { count = !change_count; incarnation = st.incarnation } in
+      (match since with
+       | Some seen when seen = mark.count -> Unchanged mark
+       | Some _ | None -> Changed (mark, frame_of st)))
 ;;
 
 (* --- RAM 인트로스펙션 — 상태 센서 ---------------------------------------
@@ -812,6 +848,7 @@ let restore ~path ~ledger_dir =
         let st = {m; incarnation = fresh_incarnation (); pixels = None; frame;
                   cart; disk; disk_id; media; ledger_path; entries = List.rev entries;
                   input_count = List.length entries} in
+        mark_change ();
         state := Some st;
         Ok (observe st)
       with Sys_error message -> Error (Unreadable message))
@@ -835,6 +872,7 @@ let change_disk ~path ~backup_path =
           | Ok () ->
             atomic_write backup_path (Yojson.Safe.to_string (checkpoint_json st));
             let next = {st with m; pixels = None; disk = Some (Filename.basename path); disk_id = Some target_id; media = List.remove_assoc target_id media} in
+            mark_change ();
             state := Some next;
             Ok (observe next)))
       | _ -> Error (Invalid_request "load a disk game before changing disks"))

@@ -236,6 +236,34 @@ val capture_with_identity : unit -> (identified_capture, error) result
     identity, input cursor and ledger. Never steps, peeks, or changes a RAM
     baseline. The immutable list is shared without traversal or copying. *)
 
+(** {b Spectating} — one read a watcher can repeat cheaply. *)
+
+type change_mark = {
+  count : int;
+      (** The machine change counter. It rises before any call touches the
+          machine: step, step_until_change, press, step_frame, load, eject,
+          restore, change_disk. A call that raises after running frames has
+          already raised it. A call refused as an {!error} before it touches
+          the machine leaves it. Nothing resets it -- eject and the next load
+          keep counting -- so a value never names two screens while the server
+          runs. A restarted server counts from 0 again, under a fresh
+          incarnation; a watcher pairs the two. *)
+  incarnation : string;  (** as in {!identified_capture} *)
+}
+
+type live =
+  | Nothing_loaded  (** no machine: nothing to watch *)
+  | Unchanged of change_mark  (** [since] names the current count *)
+  | Changed of change_mark * frame
+      (** [since] was absent or names an older count *)
+
+val live : since:int option -> live
+(** Reads the count, the incarnation and, when they differ from [since], the
+    pixels under one hold of the machine lock, the same lock a call that
+    advances the machine holds. Never steps or writes anything. The lock is a
+    stdlib mutex that a step can hold for a whole call, so an Eio caller runs
+    this in [Eio_unix.run_in_systhread]. *)
+
 (** {b RAM introspection} — the state sensor. The screen is the expensive
     detour a human eye needs; the game's truth is in memory, and the core
     already holds all of it. *)

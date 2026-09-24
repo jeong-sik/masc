@@ -28,6 +28,11 @@ if [ -z "$base_path" ]; then
   exit 2
 fi
 
+if ! command -v npm >/dev/null || ! command -v openssl >/dev/null; then
+  echo "install-stagehand-extension: npm and openssl are required" >&2
+  exit 2
+fi
+
 base_path="$(cd "$base_path" && pwd -P)"
 target="$base_path/.masc/browser-lane/stagehand-extension/$version"
 work="$(mktemp -d)"

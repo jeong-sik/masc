@@ -10,6 +10,7 @@ import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 import socket
 import shutil
@@ -380,7 +381,8 @@ def run(args):
     try:
         docker_host = None
         if args.backend == 'docker':
-            command(['docker', 'image', 'inspect', args.image], docker_env)
+            image_digest = command(['docker', 'image', 'inspect', '--format', '{{.Id}}', args.image],
+                                   docker_env).strip()
             docker_host = docker_env.get('DOCKER_HOST')
             if not docker_host:
                 contexts = json.loads(command(['docker', 'context', 'inspect'], docker_env))
@@ -393,6 +395,7 @@ def run(args):
             images = json.loads(command(['nerdctl', 'image', 'inspect', '--mode', 'native', args.image], docker_env))
             if not images:
                 raise SmokeError('general image was not loaded into the configured nerdctl store')
+            image_digest = images[0].get('Image', {}).get('Target', {}).get('digest', '')
             (output / 'kata-image-native.json').write_text(json.dumps(images, indent=2))
         # Desktop/Colima share the user's home by default, while macOS's
         # /private/var temporary tree need not be visible to the Docker VM.
@@ -406,9 +409,15 @@ def run(args):
             env.pop('DOCKER_CONFIG', None)
             if docker_host:
                 env['DOCKER_HOST'] = docker_host
-            env.update(HOME=str(home), MASC_BASE_PATH=str(base), MASC_KEEPER_AUTONOMOUS_ENABLED='true',
-                       MASC_KEEPER_SANDBOX_DOCKER_IMAGE=args.image)
+            env.update(HOME=str(home), MASC_BASE_PATH=str(base), MASC_KEEPER_AUTONOMOUS_ENABLED='true')
             command([binary, 'init', '--base-path', str(base)], env)
+            # A Keeper names a catalog image; this host's catalog makes the
+            # image under test the build `base` starts from.
+            if not re.fullmatch(r'sha256:[0-9a-f]{64}', image_digest):
+                raise SmokeError(f'the image store reported no sha256 digest for {args.image}: {image_digest!r}')
+            store = 'docker' if args.backend == 'docker' else 'nerdctl_kata'
+            (base / '.masc' / 'config' / 'sandbox-images.toml').write_text(
+                f'[images.base.{store}]\nreference = "{args.image}"\ndigest = "{image_digest}"\n')
             if args.backend == 'nerdctl_kata':
                 source = Path(args.guest_shim).resolve(strict=True)
                 actual = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -466,7 +475,7 @@ def run(args):
                     try:
                         creation = command([binary, 'keeper-create', '--base-path', str(base),
                             '--host', '127.0.0.1', '--port', str(port), '--agent', 'first-turn-admin',
-                            '--name', keeper, '--sandbox-profile', profile, '--sandbox-image', args.image,
+                            '--name', keeper, '--sandbox-profile', profile, '--sandbox-image', 'base',
                             '--network-mode', 'none',
                             *(['--microvm-backend', 'nerdctl_kata'] if args.backend == 'nerdctl_kata' else []),
                             '--no-skills', '--activation-mode', 'manual', '--instructions',
@@ -476,7 +485,7 @@ def run(args):
                         # into a passing acceptance by silently bypassing it.
                         try:
                             direct = request(url + '/api/v1/keepers/' + keeper + '/up', token,
-                                {'name': keeper, 'sandbox_profile': profile, 'sandbox_image': args.image,
+                                {'name': keeper, 'sandbox_profile': profile, 'sandbox_image': 'base',
                                  'network_mode': 'none',
                                  **({'microvm_backend': 'nerdctl_kata'} if args.backend == 'nerdctl_kata' else {}),
                                  'skills': {'names': []}, 'activation_mode': 'manual', 'instructions': 'Isolated first-turn proof.'}, timeout=15)

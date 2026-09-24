@@ -434,14 +434,15 @@ masc sandbox-image --runtime nerdctl_kata
 ```
 
 Each build gets its own tag, `masc-sandbox-base:<UTC minute>-<input hash>`,
-and the command prints it; name that tag in the Keeper TOML's
-`sandbox_image`. A tag already in the store is refused rather than rebuilt,
-so an image a Keeper runs on never changes under the same name. The
-shipped Keepers name `masc-sandbox:general`: `masc setup` builds it when the
-store lacks it and leaves it alone when it is there, and
-`masc sandbox-image --tag masc-sandbox:general` builds it by hand. On Apple
-Container the runtime also builds that one tag on a Keeper's first boot;
-Docker and nerdctl do not. Recipes other than `base` live under
+and the command prints it. A tag already in the store is refused rather than
+rebuilt, so a build never changes under a tag. A Keeper does not name the tag:
+its `sandbox_image` is a name in the host's image catalog,
+`<base-path>/.masc/config/sandbox-images.toml` (`base`, `ocaml`).
+`masc sandbox-image promote <name> <tag>`, with the same `--runtime`, makes a
+build the one that name starts from on the next turn, and
+`masc sandbox-image rollback <name>` returns to the build before it.
+`masc setup` builds `base` and promotes it when the catalog has no `base`
+build for the store it sets up. Recipes other than `base` live under
 `sandbox-images/` in a checkout: `masc sandbox-image --recipe ocaml --source .`.
 
 On Linux, create the Keeper with the same base path as the running server.
@@ -489,11 +490,12 @@ requires checking the host's virtualization requirements. Microsandbox's
 current MASC integration is constrained on the required isolation conditions
 and is not offered as a verified alternative.
 
-`masc-sandbox:general` contains bash, CA certificates, curl, findutils, gh,
+`base` contains bash, CA certificates, curl, findutils, gh,
 git, less, procps, Python 3, and ripgrep. **Node, pnpm, OCaml, compilers, an
 SSH client, and model CLIs are not included.** To build and test a project,
-prepare an image with the toolchain it needs and name it in the Keeper's
-`sandbox_image`. The repository's `sandbox-images/ocaml/Dockerfile` is a separate
+build an image with the toolchain it needs, promote it under a catalog name,
+and name that in the Keeper's `sandbox_image`. The repository's
+`sandbox-images/ocaml/Dockerfile` is a separate
 image for MASC development, not part of a regular install.
 
 ## Initial prompts, skills, and Keepers

@@ -28,19 +28,19 @@ let failure ~class_ ~code ~message fields =
         @ fields))
 ;;
 
-(* The verdict names the exact bytes it judged by digest, never by a normalized
-   artifact reference. A normalized reference anywhere in a result makes
-   [Tool_bridge.project_result] require a durable result manifest, and a
-   manifest projection would replace this inline verdict with a blob marker
-   whose preview is empty. Without the manifest every call failed as "tool
-   output artifact storage failed" (#37493). The caller already holds the
-   artifact it passed; the digest binds the verdict to those bytes. *)
-let source_identity (artifact : Keeper_peer_artifact_ref.t) =
-  let blob = artifact.Keeper_peer_artifact_ref.blob in
+(* The verdict names the exact bytes it judged by a digest computed here from
+   the bytes [Keeper_peer_artifact.fetch] returned, never by the caller's
+   reference metadata and never as a normalized artifact reference. A
+   normalized reference anywhere in a result makes [Tool_bridge.project_result]
+   require a durable result manifest, and a manifest projection would replace
+   this inline verdict with a blob marker whose preview is empty. Without the
+   manifest every call failed as "tool output artifact storage failed"
+   (#37493). *)
+let source_identity ~filename source_text =
   `Assoc
-    [ "sha256", `String blob.Tool_output.sha256
-    ; "bytes", `Int blob.Tool_output.bytes
-    ; "filename", `String artifact.Keeper_peer_artifact_ref.filename
+    [ "sha256", `String Digestif.SHA256.(digest_string source_text |> to_hex)
+    ; "bytes", `Int (String.length source_text)
+    ; "filename", `String filename
     ]
 ;;
 
@@ -56,7 +56,10 @@ let handle ~config ~args =
      | Ok source_text ->
        let directory = Skill_reference.package_id_to_string package_id in
        let identity =
-         [ "source", source_identity artifact
+         [ "source"
+           , source_identity
+               ~filename:artifact.Keeper_peer_artifact_ref.filename
+               source_text
          ; "package_id", `String directory
          ; "validation", `String "static"
          ]

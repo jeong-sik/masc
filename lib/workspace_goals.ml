@@ -537,7 +537,8 @@ let announce_proof_deferred config ~(goal : Goal_store.goal) ~reason =
     Printf.sprintf
       "[goal_review_deferred] %s — %s\nreason: %s\n\
        The Goal stays verifying. It is reviewed again on the next verifier \
-       scan; request_complete on this Goal starts one."
+       scan; request_complete on this Goal starts one. While the reason \
+       above holds, that review is deferred the same way."
       goal.Goal_store.id
       goal.Goal_store.title
       reason

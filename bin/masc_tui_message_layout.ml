@@ -257,6 +257,31 @@ let ansi_csi_end text offset =
     in
     scan (offset + 2)
 
+let printable_ascii byte = byte >= ' ' && byte <= '~'
+
+(* ASCII columns and padding have one cell per byte. A CSI is the same
+   zero-cell piece [display_pieces] recognises. Any other byte needs the
+   Unicode path, including an ASCII base followed by a combining mark or
+   emoji selector: deciding the whole string first keeps that cluster whole. *)
+let ascii_display_width text =
+  let length = String.length text in
+  let rec scan offset cells =
+    if offset >= length then Some cells
+    else if printable_ascii text.[offset] then scan (offset + 1) (cells + 1)
+    else
+      match ansi_csi_end text offset with
+      | Some next -> scan next cells
+      | None -> None
+  in
+  scan 0 0
+
+let printable_ascii_range text start_offset end_offset =
+  let rec scan offset =
+    offset >= end_offset
+    || (printable_ascii text.[offset] && scan (offset + 1))
+  in
+  scan start_offset
+
 let scalar_cell_width scalar =
   let code = Uchar.to_int scalar in
   if code >= 0x20 && code <= 0x7E then 1
@@ -348,6 +373,8 @@ let valid_utf_8_range text start_offset end_offset =
    cluster, run as the scalars arrive. *)
 let grapheme_pieces text start_offset end_offset reversed =
   if start_offset >= end_offset then reversed
+  else if printable_ascii_range text start_offset end_offset then
+    scalar_pieces text start_offset end_offset reversed
   else if not (valid_utf_8_range text start_offset end_offset) then
     scalar_pieces text start_offset end_offset reversed
   else begin
@@ -502,7 +529,10 @@ let cell_suffix_of_pieces text pieces max_cells =
   let start = drop_detached_zero_width pieces in
   String.sub text start (String.length text - start)
 
-let display_width text = pieces_width (display_pieces text)
+let display_width text =
+  match ascii_display_width text with
+  | Some cells -> cells
+  | None -> pieces_width (display_pieces text)
 
 let cell_prefix text max_cells =
   cell_prefix_of_pieces text (display_pieces text) max_cells
@@ -614,16 +644,19 @@ let cut_mark_cells = display_width cut_mark
 let fit_width text width =
   if width <= 0 then ""
   else
-    let pieces = display_pieces text in
-    let cells = pieces_width pieces in
-    if cells > width then
-      let room = max 0 (width - cut_mark_cells) in
-      let prefix, prefix_cells, saw_ansi =
-        cell_prefix_of_pieces text pieces room
-      in
-      let reset = if saw_ansi then "\x1B[0m" else "" in
-      prefix ^ reset ^ String.make (room - prefix_cells) ' ' ^ cut_mark
-    else text ^ String.make (width - cells) ' '
+    match ascii_display_width text with
+    | Some cells when cells <= width -> text ^ String.make (width - cells) ' '
+    | Some _ | None ->
+        let pieces = display_pieces text in
+        let cells = pieces_width pieces in
+        if cells > width then
+          let room = max 0 (width - cut_mark_cells) in
+          let prefix, prefix_cells, saw_ansi =
+            cell_prefix_of_pieces text pieces room
+          in
+          let reset = if saw_ansi then "\x1B[0m" else "" in
+          prefix ^ reset ^ String.make (room - prefix_cells) ' ' ^ cut_mark
+        else text ^ String.make (width - cells) ' '
 
 (* Where a bare URL begins and where it stops. Two readers ask -- the one that
    underlines them and the one that names what they point at -- and they get

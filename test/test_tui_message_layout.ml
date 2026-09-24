@@ -44,6 +44,74 @@ let twelve_o_clock : Layout.timeline_bucket =
 
 let notice_room_at_eighty_columns = 55
 
+let test_ascii_columns_keep_unicode_boundaries () =
+  let ascii = String.init 95 (fun i -> Char.chr (i + 0x20)) in
+  let styled = "\027[38;2;90;120;180m" ^ ascii ^ "\027[0m" in
+  List.iter
+    (fun text ->
+      check int "every printable ASCII byte is one cell" 95
+        (Layout.display_width text);
+      check string "a fitting column preserves its styles and padding"
+        (text ^ "   ") (Layout.fit_width text 98);
+      check string "an exact column preserves all bytes" text
+        (Layout.fit_width text 95))
+    [ ascii; styled ];
+  check string "cutting a styled column resets before the cut mark"
+    "\027[31mabc\027[0m…" (Layout.fit_width "\027[31mabcdef\027[0m" 4);
+  List.iter
+    (fun (text, cells, prefix) ->
+      check int "mixed column width" cells (Layout.display_width text);
+      check string "a cut keeps the ASCII base with its Unicode continuation"
+        prefix (Layout.take_cells text (cells - 1));
+      check int "mixed columns still fit" (cells + 2)
+        (Layout.display_width (Layout.fit_width text (cells + 2))))
+    [ "Ae\xcc\x81Z", 3, "Ae\xcc\x81"
+    ; "A1\xef\xb8\x8f\xe2\x83\xa3Z", 4, "A1\xef\xb8\x8f\xe2\x83\xa3"
+    ; "A한Z", 4, "A한"
+    ; "A\r\nZ", 2, "A\r\n"
+    ; "A\xffZ", 3, "A\xff"
+    ];
+  check int "an unfinished CSI is not swallowed" 4
+    (Layout.display_width "a\027[31")
+
+(* Observe equal-cell rows, including the fallback after a long ASCII prefix.
+   These are batch CPU/allocation readings with harness overhead, not terminal
+   response latency or a comparison against an earlier implementation. Keep
+   correctness assertions outside the measured loop and impose no time gate. *)
+let test_column_layout_observations () =
+  let ascii = String.init 120 (fun i -> Char.chr (Char.code 'a' + i mod 26)) in
+  let iterations = 2_000 in
+  let observe case operation text apply =
+    ignore (Sys.opaque_identity (apply (Sys.opaque_identity text)));
+    let allocated_before = Gc.allocated_bytes () in
+    let started = Sys.time () in
+    for _ = 1 to iterations do
+      ignore (Sys.opaque_identity (apply (Sys.opaque_identity text)))
+    done;
+    let elapsed = Sys.time () -. started in
+    let allocated = Gc.allocated_bytes () -. allocated_before in
+    Printf.printf
+      "layout observation case=%s operation=%s iterations=%d input_bytes=%d cpu_us/op=%.3f allocated_bytes/op=%.1f (includes harness)\n%!"
+      case operation iterations (String.length text)
+      (elapsed *. 1_000_000. /. float_of_int iterations)
+      (allocated /. float_of_int iterations)
+  in
+  List.iter
+    (fun (case, text) ->
+      check int (case ^ ": fixture occupies 120 cells") 120
+        (Layout.display_width text);
+      check int (case ^ ": padded row occupies 128 cells") 128
+        (Layout.display_width (Layout.fit_width text 128));
+      check int (case ^ ": clipped row occupies 80 cells") 80
+        (Layout.display_width (Layout.fit_width text 80));
+      observe case "display_width" text Layout.display_width;
+      observe case "fit_padded" text (fun row -> Layout.fit_width row 128);
+      observe case "fit_clipped" text (fun row -> Layout.fit_width row 80))
+    [ "ascii", ascii
+    ; "ansi", "\027[38;2;90;120;180m" ^ ascii ^ "\027[0m"
+    ; "late_unicode", String.sub ascii 0 118 ^ "한"
+    ]
+
 let test_a_load_failure_keeps_its_address_at_eighty_columns () =
   let err =
     "overview load failed: (http://127.0.0.1:8935/api/overview GET failed: connect backoff)"
@@ -2716,6 +2784,10 @@ let () =
             `Quick test_a_load_failure_keeps_its_address_at_eighty_columns
         ; test_case "terminal cell width and UTF-8 fit" `Quick
             test_terminal_cell_width_and_fit
+        ; test_case "ASCII columns preserve Unicode and ANSI boundaries" `Quick
+            test_ascii_columns_keep_unicode_boundaries
+        ; test_case "column CPU and allocation observations" `Quick
+            test_column_layout_observations
         ; test_case "an emoji cluster with VS16, ZWJ, or a skin tone is two cells"
             `Quick test_emoji_cluster_is_two_cells
         ; test_case "the scroll hint says how far back" `Quick

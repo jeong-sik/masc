@@ -103,8 +103,10 @@ let test_counter_moves_on_every_change () =
     ok "reload" (Lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None);
     let c = rises "eject and a new load (the count is never reused)" c in
     (* A press that raises: the ledger file is now a directory, so recording
-       the first edge raises. The count moved before the press touched the
-       machine, so a raise after frames ran has moved it as well. *)
+       the first edge raises, before any frame runs. No test can make a later
+       edge fail, so this pins the order instead: the count moves before the
+       press touches the machine, so a raise after frames ran finds it moved
+       too. *)
     let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
     Sys.remove ledger_path;
     Sys.mkdir ledger_path 0o755;

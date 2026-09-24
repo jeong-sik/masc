@@ -303,6 +303,7 @@ type events_error =
       ; message : string
       }
   | Events_refused of string
+  | Events_denied of string
   | Events_undecodable of string
   | Events_transport of string
 
@@ -322,6 +323,7 @@ let events_error_to_string = function
       (cursor_refusal_to_string refusal)
       message
   | Events_refused detail -> "events request refused: " ^ detail
+  | Events_denied detail -> "events request denied: " ^ detail
   | Events_undecodable detail -> "events body unreadable: " ^ detail
   | Events_transport detail -> "events request failed: " ^ detail
 ;;
@@ -329,16 +331,35 @@ let events_error_to_string = function
 (* The error envelope is [masc.keeper_chat_operation.error.v1]:
    [{schema; error = <code>; message}]. The code is the typed fact; the
    message is what the server said, kept only where the code alone does not
-   tell the pane what to do. A 401/403 is about this client's credential, not
-   about the journal, and is said the way every other refused request is. *)
+   tell the pane what to do. A 401/403 that names an auth code is about this
+   client's credential, not about the journal, and is said the way every other
+   refused request is; one without a code is the handler's own answer and
+   goes on to be read like any other. *)
 let decode_events_error ~status ~credential_sent body =
   let rejected detail = Events_undecodable (Printf.sprintf "%d %s" status detail) in
-  if status = 401 || status = 403
-  then
-    Events_refused
-      (Masc_tui_credential.refusal ~credential_sent
-         (Masc_tui_credential.server_reason_of_body body))
-  else
+  let credential_refusal =
+    if status = 401 || status = 403
+    then Masc_tui_credential.server_reason_of_body body
+    else None
+  in
+  match credential_refusal with
+  | Some reason ->
+    Events_refused (Masc_tui_credential.refusal ~credential_sent reason)
+  | None when status = 401 || status = 403 ->
+    (* The handler refused this read and said why. It is not a body this
+       build cannot read, and not the credential: the server's own sentence
+       is what the operator needs. *)
+    let said =
+      match Yojson.Safe.from_string body with
+      | `Assoc fields -> (
+        match List.assoc_opt "message" fields, List.assoc_opt "error" fields with
+        | Some (`String message), _ | None, Some (`String message) -> message
+        | (Some _ | None), _ -> body)
+      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> body
+      | exception Yojson.Json_error _ -> body
+    in
+    Events_denied (Printf.sprintf "%d %s" status said)
+  | None ->
   match Yojson.Safe.from_string body with
   | `Assoc fields ->
     let message =

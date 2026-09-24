@@ -15,10 +15,13 @@ let covered = [msg T.User "Build the patch."; msg T.Assistant "The build passed.
 let working_state = "Build passed. Publication requires approval."
 let pending = "Inspect the patch without publishing."
 
+let overflow_reply =
+  {|{"id":"overflow","model":"continuity-model","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"model_context_window_exceeded"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}|}
+
 (* Two OpenAI-compatible peers on one lane: the first refuses every request
-   as a context overflow, the second answers. The body gets the workspace,
-   the Eio net, and both peers. *)
-let with_dispatch_fixture body =
+   as a context overflow unless [refused_behavior] says otherwise, the second
+   answers. The body gets the workspace, the Eio net, and both peers. *)
+let with_dispatch_fixture ?(refused_behavior = Fixture.Reply overflow_reply) body =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   Eio_main.run @@ fun env ->
@@ -35,8 +38,7 @@ let with_dispatch_fixture body =
      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
     Config_dir_resolver.reset ();
     Fs_compat.remove_tree base_path);
-  let refused = Fixture.start_server ~sw ~net:env#net ~clock:env#clock
-    (Fixture.Reply {|{"id":"overflow","model":"continuity-model","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"model_context_window_exceeded"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}|}) in
+  let refused = Fixture.start_server ~sw ~net:env#net ~clock:env#clock refused_behavior in
   let accepted = Fixture.start_server ~sw ~net:env#net ~clock:env#clock
     (Fixture.Reply (Fixture.openai_response (`Assoc ["answer", `String "Await approval."]))) in
   let catalog_path = Filename.concat base_path "models.toml" in
@@ -84,11 +86,12 @@ let record_completed_turn ~config =
 
 (* Runs one turn whose history is [covered] plus this turn's input, and
    returns the attempt errors the lane reported, newest first. *)
-let dispatch ~sw ~net ~base_path =
+let dispatch ?carried_front_seed ?(initial_messages = covered @ [msg T.User pending])
+    ~sw ~net ~base_path () =
   let errors = ref [] in
   (match Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk ~system_prompt:"Continuity dispatch fixture."
       ~runtime_id:"continuity" ~keeper_name ~base_path ~session_id:trace_id
-      ~initial_messages:(covered @ [msg T.User pending]) ~agent_core_tools:[]
+      ?carried_front_seed ~initial_messages ~agent_core_tools:[]
       ~goal:"Report progress."
       ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ ~dispatch:_ error ->
         errors := (runtime_id, error) :: !errors)
@@ -112,7 +115,7 @@ let test_real_dispatch_preserves_pair_across_refusal () =
   let path = Keeper_librarian_continuity.path ~config ~keeper_name in
   S.save ~path snapshot |> require_snapshot;
   let saved_before = Fs_compat.load_file path in
-  (match dispatch ~sw ~net ~base_path with
+  (match dispatch ~sw ~net ~base_path () with
    | ("refused.sample", Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)) :: _ -> ()
    | _ -> fail "first peer did not produce typed context overflow");
   check int "no truncated retry to refused peer" 1 (Fixture.post_count refused);
@@ -164,7 +167,7 @@ let test_unreadable_snapshot_dispatches_from_the_turn_start () =
   with_dispatch_fixture @@ fun ~sw ~net ~config ~base_path ~refused:_ ~accepted ->
   let (_ : B.record) = record_completed_turn ~config in
   write (Keeper_librarian_continuity.path ~config ~keeper_name) {|{"trace_id": 7}|};
-  let (_ : (string * Agent_core.Error.t) list) = dispatch ~sw ~net ~base_path in
+  let (_ : (string * Agent_core.Error.t) list) = dispatch ~sw ~net ~base_path () in
   check_dispatched_from_the_turn_start ~config ~accepted
 ;;
 
@@ -180,8 +183,63 @@ let test_changed_prefix_dispatches_from_the_turn_start () =
   let altered = Yojson.Safe.from_file path |> U.to_assoc |> List.map (fun (key, value) ->
     if String.equal key "prefix_sha256" then key, `String (String.make 64 'f') else key, value) in
   write path (Yojson.Safe.to_string (`Assoc altered));
-  let (_ : (string * Agent_core.Error.t) list) = dispatch ~sw ~net ~base_path in
+  let (_ : (string * Agent_core.Error.t) list) = dispatch ~sw ~net ~base_path () in
   check_dispatched_from_the_turn_start ~config ~accepted
+;;
+
+(* RFC librarian-lifecycle §4.10, rule 1, through the driver's own attempt
+   and lane answer: a Librarian read position at atom 2 of a six-atom
+   history whose last completed turn ended at atom 6, and a turn record
+   whose accepted start is atom 4. The first request opens at that accepted
+   start and the peer refuses it as a context overflow; the lane resends
+   once to the same peer from the turn boundary, not from the recorded
+   start, and the peer answers. *)
+let test_a_librarian_behind_refusal_resends_from_the_boundary () =
+  with_dispatch_fixture
+    ~refused_behavior:
+      (Fixture.Replies
+         [ overflow_reply
+         ; Fixture.openai_response (`Assoc [ "answer", `String "Resent from the boundary." ])
+         ])
+  @@ fun ~sw ~net ~config ~base_path ~refused ~accepted ->
+  let completed =
+    [ msg T.User "ask 0"; msg T.Assistant "answer 0"
+    ; msg T.User "ask 1"; msg T.Assistant "answer 1"
+    ; msg T.User "ask 2"; msg T.Assistant "answer 2" ]
+  in
+  let initial_messages = completed @ [ msg T.User pending ] in
+  let keepers_dir = Workspace.keepers_runtime_dir config in
+  let position = match B.position_of_messages completed with
+    | Ok position -> position | Error detail -> fail detail in
+  (match B.append ~keepers_dir ~keeper_id:keeper_name
+     {recorded_at = 1.; event = B.Turn_ended
+        {turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+         history_at_start = B.Fresh_history; position}} with
+   | Ok () -> () | Error error -> fail (B.append_error_to_string error));
+  let digest_at = Runtime_model_input_tail_window.atom_opening_digest initial_messages in
+  (match
+     Keeper_librarian_progress.write ~keepers_dir ~keeper_id:keeper_name
+       { position = { trace_id; end_atom = 2; last_atom_digest = Option.get (digest_at 1) }
+       ; boundary_lines_seen = 1 }
+   with
+   | Ok () -> () | Error error -> fail (Keeper_librarian_progress.write_error_to_string error));
+  let recorded : Keeper_carried_front.seed =
+    { first_atom = 4; front_digest = Option.get (digest_at 4)
+    ; source = Keeper_carried_front.Turn_record { turn = 1 } } in
+  let carried_front_seed () =
+    { Keeper_carried_front.seed = Some recorded; unreadable = None; boundary_error = None } in
+  let (_ : (string * Agent_core.Error.t) list) =
+    dispatch ~carried_front_seed ~initial_messages ~sw ~net ~base_path () in
+  check int "the refused peer is asked twice" 2 (Fixture.post_count refused);
+  check int "the next peer is not reached" 0 (Fixture.post_count accepted);
+  let sent n = Fixture.request_bodies refused |> Fun.flip List.nth n
+    |> Yojson.Safe.from_string |> U.member "messages" |> U.to_list in
+  let first = sent 0 and resent = sent 1 in
+  check bool "the first request opens at the recorded start" true (has_content first "ask 2");
+  check bool "and not at the Librarian point" false (has_content first "ask 1");
+  check bool "the resend carries this turn's input" true (has_content resent pending);
+  check bool "the resend opens at the turn boundary, not the recorded start" false
+    (has_content resent "ask 2")
 ;;
 
 let () = run "continuity HTTP dispatch"
@@ -191,4 +249,7 @@ let () = run "continuity HTTP dispatch"
     test_case "an unreadable snapshot file dispatches from the turn start" `Quick
       test_unreadable_snapshot_dispatches_from_the_turn_start;
     test_case "a snapshot whose covered prefix changed dispatches from the turn start" `Quick
-      test_changed_prefix_dispatches_from_the_turn_start]]
+      test_changed_prefix_dispatches_from_the_turn_start];
+   "Librarian behind", [
+    test_case "a size refusal resends from the turn boundary" `Quick
+      test_a_librarian_behind_refusal_resends_from_the_boundary]]

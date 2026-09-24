@@ -120,7 +120,7 @@ type walk_rest =
     [Fleet_keeper_turn recorder]: a fleet Keeper's turn. It comes back every
     cycle, so a failure it sees names it as the recorder.
     [One_shot_walk]: a walk no cycle repeats, such as a completion review. It
-    records no failed-attempt mark (timeout, 5xx, network): a mark naming it
+    records no failed-attempt mark (timeout, 5xx, 529, network): a mark naming it
     would have no one to retry it, and would hold the candidate behind for
     every Keeper until something else dispatched it and got an answer. Its
     429 and 402 evidence is recorded as any walk's. An answer it receives
@@ -176,17 +176,9 @@ val assignment_walk_order :
     orders it: {!assignment_walk_order}'s head and its rest. *)
 val assignment_walk_rest : now:float -> string -> walk_rest
 
-(** Whether a wakeup may end a failure wait: a capacity release is MASC's own
-    envelope and may; a path release is a provider's rest and may not
-    (#34653). *)
-type failure_wait =
-  | Capacity_release
-  | Path_release
-
 (** The next dispatch after a failed turn (RFC-provider-path-rest §3.1),
     shared by the heartbeat cycle and the chat lane's deferred retry.
-    Capacity backpressure waits for its own rest. A deferred suffix dispatches
-    now when its walk head serves, else waits as {!deferred_lane_rest} says.
+    A deferred suffix dispatches now when its walk head serves, else waits as {!deferred_lane_rest} says.
     Without a suffix a rate limit or quota waits for the later of the failed
     path's rest and {!assignment_walk_rest}; [waiting_on] then names the
     assignment or the resting head. Every other failure without a suffix is
@@ -196,7 +188,6 @@ type next_dispatch =
   | Wait_until of
       { release_at : float
       ; waiting_on : string
-      ; wait : failure_wait
       }
 
 val next_dispatch_after_failure :

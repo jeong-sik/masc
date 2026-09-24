@@ -2683,9 +2683,8 @@ candidates = ["projection.http", "codex.codex"]
                                 ~base_dir:(Filename.concat base_path "keeper-sessions")
                                 ~max_context:400_000
                                 ~build_turn_prompt:
-                                  (fun ~base_system_prompt ~messages:_ ->
-                                    { Keeper_agent_run.system_prompt = base_system_prompt
-                                    ; dynamic_context_for_tools
+                                  (fun ~base_system_prompt:_ ~messages:_ ->
+                                    { Keeper_agent_run.dynamic_context_for_tools
                                     ; dynamic_context =
                                         (match turn_instructions with
                                          | None -> ""

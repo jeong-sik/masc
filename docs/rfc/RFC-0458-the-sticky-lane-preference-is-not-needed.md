@@ -165,12 +165,12 @@ Keeper 가 제한 시간 전체를 기다린다. §5 의 `Rotate_now` 헛호출�
    - `Rate_limited` → 지금처럼 후보 칸의 429 증거
    - `Hard_quota` → 지금처럼 quota 창
    - `Server_error`·`Network_transient`·`Provider_timeout` → 후보 칸의 실패 증거. 다만 경로는
-     MASC 자신의 입장 단계(허가 대기열 `Queue`, 로컬 용량 `Capacity_backpressure`)에서 끝난
+     MASC 자신의 입장 단계(허가 대기열 `Queue`, 로컬 용량 phase `Capacity_backpressure`)에서 끝난
      타임아웃도 `Provider_timeout` 이라 부른다. 아무것도 보내지 않은 실패라 후보의 사실이
      아니므로, 그 두 phase 는 증거로 남기지 않는다. 경로가 이 둘을 가르지 못하는 문제는 따로
      고친다.
-   - `Capacity_backpressure` → 남기지 않는다. MASC 자신의 슬롯과 클라이언트 봉투라 후보의
-     사실이 아니다.
+   - `Provider_capacity`(HTTP 529, provider 의 `CapacityExhausted`) → 후보 칸의 실패 증거.
+     503 과 같은 사실이다. 그 provider 가 답하지 않았다.
    - `Rotate_now`·`Exhausted_visible_alive` → 남기지 않는다(§5).
    wildcard 없이 전부 나열한다. 새 class 가 생기면 컴파일러가 이 자리를 가리킨다.
 2. **한 칸에 두 증거를 나란히 둔다.** 후보 칸은 `{ rate_limit; failed_attempt }` 다. 429 는
@@ -209,7 +209,7 @@ Keeper 가 제한 시간 전체를 기다린다. §5 의 `Rotate_now` 헛호출�
    다른 Keeper 의 턴에서 앞선 후보가 모두 실패하거나, 그 후보를 직접 부르는 다음 검토가 답을
    받거나, 프로세스가 재시작해야 풀린다. 그래서 `run_named` 를 부르는 쪽이
    `Fleet_keeper_turn` 과 `One_shot_walk` 중 하나를 밝힌다. 이름의 모양으로 가르지 않는다.
-   `One_shot_walk` 는 답하지 못한 실패의 증거(타임아웃·5xx·네트워크)를 남기지 않는다. 그런
+   `One_shot_walk` 는 답하지 못한 실패의 증거(타임아웃·5xx·529·네트워크)를 남기지 않는다. 그런
    실패로 이미 있는 증거와 그 기록자를 바꾸지도 않는다. 429 와 402(HardQuota) 증거는 fleet
    턴과 똑같이 남긴다. 그 증거는 기록자 없이 provider 가 말한 쉼이나 후보의 답으로 풀리기
    때문이다. 실패 증거를 남기되 기록자를 비워 두는 길도 있었다. 하지만 그 증거는 다시 시험할
@@ -271,11 +271,12 @@ Keeper 가 제한 시간 전체를 기다린다. §5 의 `Rotate_now` 헛호출�
 - 실패를 기록한 Keeper 의 다음 새 걸음은 선언 순서다. 다른 Keeper 와 실패한 턴의 재시도는
   그 후보를 뒤로 보낸다. 다시 실패하면 증거가 새로 적히고, 답하면 모두에게서 지워진다.
 - `run_named` 를 거친 턴과 다음 요청 예측도 같은 순서를 낸다(텍스트 턴, 이미지 재배치).
-- `One_shot_walk` 의 타임아웃·5xx·네트워크 실패는 증거를 남기지 않고, 이미 있는 증거의
+- `One_shot_walk` 의 타임아웃·5xx·529·네트워크 실패는 증거를 남기지 않고, 이미 있는 증거의
   기록자를 바꾸지 않는다. 429·402 증거는 fleet 턴과 같이 남긴다. 그 걸음이 받은 답은 다른
   Keeper 가 적은 증거도 지운다.
 - `Runtime_connection_closed` 도 같은 증거를 남긴다(경로 분류 하나).
-- `Capacity_backpressure`·`Rotate_now`·`Exhausted_visible_alive` 는 증거를 남기지 않는다.
+- 529 로 실패한 후보는 503 처럼 뒤로 간다.
+- `Rotate_now`·`Exhausted_visible_alive` 는 증거를 남기지 않는다.
 - 첫 토큰 전에 양보한 시도는 기존 429 증거와 quota 관측을 지우지 않는다.
 - 예측·밴드·대시보드·TUI 에 preferred 필드가 없다.
 

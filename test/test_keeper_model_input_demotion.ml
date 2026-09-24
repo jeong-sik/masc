@@ -706,7 +706,7 @@ let compose ~base_path ~front ~current_turn_results ~demote_before messages =
   in
   Try_provider.For_testing.compose_carried_model_input
     ~measure_message_bytes
-    ~front:
+    ~accepted:None ~front:
       (Some
          { Masc.Keeper_carried_front.first_atom = front
          ; front_digest
@@ -1026,7 +1026,7 @@ let only_the_current_turn_is_demoted () =
     Try_provider.For_testing.compose_carried_model_input
       ~input_policy:Masc.Keeper_input_policy.Wide
       ~measure_message_bytes
-      ~front:
+      ~accepted:None ~front:
         (Some
            { Masc.Keeper_carried_front.first_atom = 0
            ; front_digest = Option.get (Window.atom_opening_digest messages 0)
@@ -1101,7 +1101,7 @@ let a_front_the_history_shrank_under_starts_over () =
   let composed =
     Try_provider.For_testing.compose_carried_model_input
       ~measure_message_bytes
-      ~front:
+      ~accepted:None ~front:
         (Some
            { Masc.Keeper_carried_front.first_atom = 3_100
            ; front_digest = String.make 64 'f'
@@ -1131,7 +1131,7 @@ let a_front_that_opens_with_another_message_starts_over () =
   let composed =
     Try_provider.For_testing.compose_carried_model_input
       ~measure_message_bytes
-      ~front:
+      ~accepted:None ~front:
         (Some
            { Masc.Keeper_carried_front.first_atom = 1
            ; front_digest = String.make 64 'f'

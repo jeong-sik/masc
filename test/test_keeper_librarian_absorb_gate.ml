@@ -330,6 +330,7 @@ let run_runtime_evidence ?fixture_dir () =
     let input : Librarian.input =
       { turn_ref = Ids.Turn_ref.make ~trace_id:"fixture" ~absolute_turn:1
       ; goal_context = Librarian.No_task
+      ; keeper_id = Masc_test_deps.keeper_id_fixture keeper_id
       ; keeper_instructions = "Keep the service deployment instructions."
       ; current = Some { Librarian.facts = seeded.facts }
       ; working_context = Masc.Keeper_librarian_context.empty
@@ -1725,6 +1726,7 @@ let test_the_runtime_does_not_save_a_copy () =
   let input : Librarian.input =
     { turn_ref = Ids.Turn_ref.make ~trace_id:"fixture" ~absolute_turn:1
     ; goal_context = Librarian.No_task
+    ; keeper_id = Masc_test_deps.keeper_id_fixture keeper_id
     ; keeper_instructions = "Keep the service deployment instructions."
     ; current = Some { Librarian.facts = seeded.facts }
     ; working_context = Masc.Keeper_librarian_context.empty

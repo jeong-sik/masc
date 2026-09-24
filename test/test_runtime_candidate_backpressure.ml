@@ -52,7 +52,7 @@ let test_failed_attempt_has_no_expiry () =
   match (State.observe ~now:1e12 noted).State.failed_attempt with
   | Some (State.Failed_attempt { noted_at; failure = State.Provider_timeout; recorded_by = _ }) ->
       Alcotest.(check (float 0.)) "original observation retained" 10. noted_at
-  | Some (State.Failed_attempt { failure = State.Server_error | State.Network_transient; _ })
+  | Some (State.Failed_attempt { failure = State.Server_error | State.Provider_capacity | State.Network_transient; _ })
   | None ->
       Alcotest.fail "a failed attempt was ended or rewritten by the clock"
 ;;
@@ -71,7 +71,7 @@ let test_failed_attempt_delayed_observation_keeps_newer () =
       Alcotest.(check (float 0.)) "newer observation kept" 20. noted_at;
       Alcotest.(check bool) "an older failure does not take over the recorder" true
         (State.same_recorder recorded_by keeper_a)
-  | Some (State.Failed_attempt { failure = State.Server_error | State.Provider_timeout; _ })
+  | Some (State.Failed_attempt { failure = State.Server_error | State.Provider_capacity | State.Provider_timeout; _ })
   | None ->
       Alcotest.fail "an older failure replaced a newer one"
 ;;

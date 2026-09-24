@@ -12,7 +12,7 @@ import {
 import { ApiRequestError } from '../api/core'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import type { DashboardRuntimeProviderSnapshot, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
-import type { KeeperConfig, KeeperHookSlot, KeeperInputPolicy } from '../types'
+import type { KeeperConfig, KeeperHookSlot, KeeperInputPolicy, KeeperSystemPromptPreview } from '../types'
 import { SANDBOX_PROFILE_OPTIONS, UNKNOWN_SANDBOX_PROFILE, isGuestSandboxProfile, toSandboxProfile } from '../types'
 import { formatTokens } from '../lib/format-number'
 import {
@@ -1518,6 +1518,26 @@ function RuntimeList({ runtimes }: { runtimes: string[] }) {
   `
 }
 
+// Exhaustive over the preview union: a new state is a type error here, not a
+// blank pane (#38354).
+function renderSystemPromptPreview(preview: KeeperSystemPromptPreview) {
+  switch (preview.state) {
+    case 'available':
+      return html`<${LongText} text=${preview.assembled} truncateAt=${null} />`
+    case 'unavailable':
+      return html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-system-prompt-unavailable">
+        헌법 원장을 읽지 못해서 시스템 프롬프트를 만들 수 없어요. 원장이 다시 읽힐 때까지 턴도 돌지 않아요.
+        <div class="font-mono mt-1">${preview.path}</div>
+        <div class="font-mono">${preview.detail}</div>
+      </div>`
+    case 'decode_failed':
+      return html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-system-prompt-decode-failed">
+        시스템 프롬프트 응답을 해석하지 못했어요.
+        <div class="font-mono mt-1">${preview.detail}</div>
+      </div>`
+  }
+}
+
 function LongText({ text, truncateAt = 200 }: { text: string; truncateAt?: number | null }) {
   if (!text || text.trim() === '') return html`<span class="text-2xs text-text-muted italic">--</span>`
   const truncated =
@@ -2178,7 +2198,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           <${PromptBlock} title="공유 시스템" block=${c.prompt.system_prompt_blocks.system} />
         `
       : promptPreviewTab.value === 'system'
-        ? html`<${LongText} text=${c.prompt.assembled_system_prompt || c.prompt.effective_system_prompt} truncateAt=${null} />`
+        ? renderSystemPromptPreview(c.prompt.system_prompt)
         : html`<${LongText} text=${c.prompt.unified_user_message_preview} truncateAt=${null} />`}
   `
 

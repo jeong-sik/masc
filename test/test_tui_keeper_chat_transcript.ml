@@ -1512,7 +1512,28 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
     [ Live.Runtime_attempt_started
         { runtime_id = Some "gpt-4o"; attempt_index = Some 1 }
     ];
-  check (option string) "a new attempt starts from no counters" None (usage (Some t))
+  check (option string) "a new attempt starts from no counters" None (usage (Some t));
+  (* The reason belongs to the attempt as much as the counters do: carrying it
+     over would blame the new runtime for how the old runtime's answer ended.
+     The reason has to be on the header when the attempt changes or this
+     asserts nothing -- the request reset above has already cleared it. *)
+  feed t
+    [ counters ~stop_reason:"max_tokens"
+        { input_tokens = Some 40
+        ; output_tokens = Some 20
+        ; cache_read_input_tokens = None
+        ; cache_creation_input_tokens = None
+        }
+    ];
+  check (option string) "the reason is on the header before the failover"
+    (Some "tokens: in 40 \xc2\xb7 out 20 \xc2\xb7 stopped: max_tokens")
+    (usage (Some t));
+  feed t
+    [ Live.Runtime_attempt_started
+        { runtime_id = Some "gpt-4o-mini"; attempt_index = Some 2 }
+    ];
+  check (option string) "a new attempt starts from no reason either" None
+    (usage (Some t))
 
 (* The stop reason arrived after the counters were already on the header, so a
    frame that had room for the counters and not for both must keep drawing the

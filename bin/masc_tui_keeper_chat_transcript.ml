@@ -240,11 +240,17 @@ type t =
            when the next request starts ([Stream_model_started]) and per
            attempt with the runtime. *)
   ; mutable observed_stop_reason : string option
-        (* Why the provider last said it stopped writing this turn, in the
-           provider's own word ([end_turn], [max_tokens], [refusal], …). This
-           is a different fact from [Keeper_turn_outcome.t], which says what
-           masc did with the turn: a reply cut off at [max_tokens] is still a
-           visible reply. Reset per attempt with the runtime. *)
+        (* Why the provider said the request it last answered stopped, in the
+           provider's own word ([end_turn], [max_tokens], [refusal], …). It
+           belongs to that request, so it is cleared when the next one starts
+           ([Stream_model_started]) and again per attempt with the runtime.
+           It is what the stream reported while writing -- an OpenAI-compatible
+           stream maps [finish_reason] through
+           [Stop_reason_wire.provisional_of_string]
+           (packages/agent_core/lib/llm_provider/streaming.ml:1420) -- not a
+           verdict masc settled afterwards. And it is a different fact from
+           [Keeper_turn_outcome.t], which says what masc did with the turn: a
+           reply cut off at [max_tokens] is still a visible reply. *)
   ; mutable model_signal : model_signal option
         (* The last thing the model side sent in this attempt, and when.
            Tool calls carry their own pending state; this covers the stretches

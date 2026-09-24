@@ -130,7 +130,17 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
       Option.bind usage (fun usage ->
         Live.stream_usage_of_usage_json (E.delta_usage_to_json usage))
     in
-    let stop_reason = Option.map E.stop_reason_to_string stop_reason in
+    (* The live arm drops a blank reason rather than drawing [stopped: ] with
+       nothing after it, so this arm drops it too: a reason that is only
+       whitespace is not a reason, and the two entrances have to agree about
+       that as much as about the bytes. [Unknown ""] reaches here from a
+       provider that failed without a message. *)
+    let stop_reason =
+      Option.bind stop_reason (fun reason ->
+        match String.trim (E.stop_reason_to_string reason) with
+        | "" -> None
+        | reason -> Some reason)
+    in
     if usage = None && stop_reason = None
     then None
     else Some (Live.Stream_details { usage; stop_reason })

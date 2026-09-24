@@ -672,6 +672,7 @@ let test_board_http_typed_attachments () =
       ~router
       ~token
       ~path:"/api/v1/tools/masc_board_post"
+      ~extra_headers:[]
       ~body:
         (Yojson.Safe.to_string
            (`Assoc

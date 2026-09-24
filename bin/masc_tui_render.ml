@@ -3976,19 +3976,6 @@ let schedule_status_word_cells =
     (fun widest word -> max widest (Message_layout.display_width word))
     0 Schedule_contract_values.schedule_status_strings
 
-(* A recurrence summary has no vocabulary to measure -- "cron 0 */2 * * * UTC"
-   is as long as its expression -- so the column is measured over the rows the
-   frame draws, the way the status column is measured over the contract's
-   words, and this is the ceiling that measurement cannot pass. Measured on
-   the live fleet's 676 requests, two reach past it: geek-scout's
-   "daily 09:25:00 +09:00" at 21 cells and polisher's "cron 0 */2 * * * UTC"
-   at 20.
-
-   Both of those carry their meaning at the tail. A summary past the ceiling
-   is folded in the middle rather than cut at the end: "daily 09:25:00 +0"
-   drops the zone, and 09:25 with no zone is nine hours away from 09:25 with
-   one -- a wrong reading where the fold gives an incomplete one. *)
-let schedule_recurrence_ceiling_cells = 18
 
 (* What became of the wake, for a list row that has one line to say it in.
 
@@ -7854,7 +7841,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
              and a page with one long summary folds that one rather than
              reserving cells the rest of the rows leave blank. *)
           let recurrence_cells =
-            min schedule_recurrence_ceiling_cells
+            min Layout.schedule_recurrence_ceiling_cells
               (List.fold_left
                  (fun widest (row : schedule_row) ->
                     max widest

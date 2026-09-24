@@ -1121,17 +1121,43 @@ let has_substring haystack needle =
   let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
   n = 0 || scan 0
 
-(* The two summaries that reach past the column both carry their meaning at
-   the tail: "daily 09:25:00 +09:00" and "cron 0 */2 * * * UTC". Cut at the
-   end they lose the zone, and 09:25 with no zone is nine hours from 09:25
-   with one -- a wrong reading where the fold gives an incomplete one.
+(* The summaries the live fleet holds, longest first: of 676 schedule
+   requests these two are the only ones past eighteen cells. *)
+let longest_live_recurrences =
+  [ "daily 09:25:00 +09:00"; "cron 0 */2 * * * UTC" ]
 
-   Swept over the widths the column can be measured to rather than pinned at
-   today's ceiling: the ceiling is a layout choice and this property is not.*)
+(* The ceiling is set to the longest of them, so neither is folded. The fold
+   keeps a third of the room at the head, which at eighteen cells drew
+   "daily\xe2\x80\xa625:00 +09:00" -- the zone survives and the hour does
+   not, and a clock missing either one is a wrong reading. Lowering the
+   ceiling brings that back, and this case is what says so. *)
+let test_the_ceiling_draws_the_longest_live_recurrence_whole () =
+  List.iter
+    (fun summary ->
+       let drawn =
+         Masc_tui_message_layout.fit_middle
+           Masc_tui_layout.schedule_recurrence_ceiling_cells summary
+       in
+       Alcotest.(check bool)
+         (Printf.sprintf "%s is drawn whole" summary)
+         true
+         (has_substring drawn summary);
+       (* Named so a ceiling that keeps the ends but drops the middle cannot
+          pass by carrying the tail alone. *)
+       Alcotest.(check bool)
+         (Printf.sprintf "%s keeps its hour" summary)
+         true
+         (not (has_substring drawn "\xe2\x80\xa6")))
+    longest_live_recurrences
+;;
+
+(* And the fold itself keeps the tail, at every width the column can be
+   measured to under the ceiling. A page of short summaries measures narrow,
+   and one long summary on such a page is folded rather than cut. *)
 let test_a_folded_recurrence_keeps_its_zone () =
   List.iter
     (fun (summary, tail) ->
-       for column = 10 to 20 do
+       for column = 10 to Masc_tui_layout.schedule_recurrence_ceiling_cells - 1 do
          let drawn = Masc_tui_message_layout.fit_middle column summary in
          Alcotest.(check bool)
            (Printf.sprintf "%s at %d cells keeps %s" summary column tail)
@@ -1254,6 +1280,8 @@ let () =
             `Quick test_an_automation_row_says_when_it_was_asked_for
         ; Alcotest.test_case "the automation row cuts the columns it draws"
             `Quick test_the_automation_row_cuts_the_columns_it_draws
+        ; Alcotest.test_case "the ceiling draws the longest live recurrence whole"
+            `Quick test_the_ceiling_draws_the_longest_live_recurrence_whole
         ; Alcotest.test_case "a folded recurrence keeps its zone" `Quick
             test_a_folded_recurrence_keeps_its_zone
         ; Alcotest.test_case "every Fusion run list reads one clock" `Quick

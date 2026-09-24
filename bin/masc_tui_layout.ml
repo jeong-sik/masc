@@ -66,6 +66,22 @@ let project_board_read_scroll ~body_line_count ~body_rows ~comment_count
   in
   { normalized_scroll; body_offset; comment_offset }
 
+(* The Keeper detail's Automation rows draw a recurrence summary in a column
+   measured over the page. This is the width that measurement cannot pass.
+
+   A summary has no vocabulary to measure -- "cron 0 */2 * * * UTC" is as long
+   as its expression -- so the ceiling is a layout choice, and it is set to
+   the widest summary the live fleet holds: of 676 schedule requests the two
+   longest are geek-scout's "daily 09:25:00 +09:00" at 21 cells and
+   polisher's "cron 0 */2 * * * UTC" at 20.
+
+   Set there rather than lower because a summary past the ceiling is folded
+   in the middle, and the middle fold keeps a third of the room at the head:
+   at 18 cells "daily 09:25:00 +09:00" draws "daily…25:00 +09:00" and loses
+   the hour. The zone survives the fold and the hour does not, and a clock
+   missing either one is a wrong reading. *)
+let schedule_recurrence_ceiling_cells = 21
+
 let board_read_side_body_minimum_cols = 78
 let board_read_side_comment_cols = 40
 let board_read_side_gutter_cols = 2

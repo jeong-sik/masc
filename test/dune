@@ -235,6 +235,11 @@
  (libraries alcotest masc_tui_keeper_config yojson str))
 
 (test
+ (name test_tui_github_identity)
+ (modules test_tui_github_identity)
+ (libraries alcotest masc_tui_github_identity yojson))
+
+(test
  (name test_tui_keeper_sandbox)
  (modules test_tui_keeper_sandbox)
  ; masc.config for Env_config_sandbox.Runtime.image_source_strings: the
@@ -1287,6 +1292,14 @@
   %{workspace_root}/lib/keeper/keeper_turn.ml)
  (libraries alcotest ast_grep masc_test_deps))
 
+; #38500: the turn hands the prompt builder a briefing budget sized over the
+; candidates its walk may dispatch.
+(test
+ (name test_keeper_briefing_budget_wiring)
+ (modules test_keeper_briefing_budget_wiring)
+ (deps %{workspace_root}/lib/keeper/keeper_unified_turn.ml)
+ (libraries alcotest ast_grep))
+
 ; masc#28983: what a finished process's status means for the answer, asked
 ; without starting one. The dispatch-site half needs the source, hence ast_grep.
 
@@ -1943,6 +1956,8 @@
   masc.embedded_config
   masc.skill_config
   masc.skill_reference
+  ; test_tui_decode names the schedule runner status the TUI decodes into
+  masc.masc_schedule
   bigstringaf
   ; test_terminal_size reads the tty size through the ioctl stub
   terminal_size
@@ -3612,6 +3627,13 @@
  (libraries alcotest yojson masc_tui_types))
 
 (test
+ (name test_tui_no_value_mark)
+ (modules test_tui_no_value_mark)
+ (libraries alcotest ast_grep masc_tui_theme tui_source)
+ (deps
+  (source_tree ../bin)))
+
+(test
  (name test_tui_ask_selection_wiring)
  (modules test_tui_ask_selection_wiring)
  (libraries alcotest ast_grep)
@@ -3963,6 +3985,13 @@
   unix))
 
 (test
+ (name test_tui_duration_spelling)
+ (modules test_tui_duration_spelling)
+ (libraries alcotest ast_grep masc_tui_message_layout)
+ (deps
+  (source_tree ../bin)))
+
+(test
  (name test_tui_message_layout)
  (modules test_tui_message_layout)
  (libraries
@@ -4245,6 +4274,7 @@
   masc_types
   masc_tui_types
   masc_tui_overview_goals
+  masc_tui_overview_tasks
   unix
   yojson))
 
@@ -5416,6 +5446,8 @@
  (modules test_tui_fleet_line)
  (libraries alcotest masc masc_tui_fleet_line))
 
+(include stanzas/test_tui_fleet_reading_says_when_it_was_measured.inc)
+
 (test
  (name test_tui_client_rows)
  (modules test_tui_client_rows)
@@ -5571,11 +5603,14 @@
 (include stanzas/test_prompt_templates_render.inc)
 (include stanzas/test_tui_send_disposition.inc)
 (include stanzas/test_tui_scroll.inc)
+(include stanzas/test_tui_schedules_hold_says_when_it_was_checked.inc)
 (include stanzas/test_tui_rows.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
 (include stanzas/test_tui_title_counts.inc)
 (include stanzas/test_tui_data_unreliable_row.inc)
 (include stanzas/test_tui_tab_strip.inc)
+
+(include stanzas/test_tui_row_with_field.inc)
 (include stanzas/test_tui_burn_hud.inc)
 (include stanzas/test_tui_context_tokens.inc)
 (include stanzas/test_tui_next_request_band.inc)
@@ -5584,6 +5619,8 @@
 (include stanzas/test_tui_planning_summary_rows.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
+
+(include stanzas/test_tui_overlay_window_reading.inc)
 (include stanzas/test_tui_approvals_footer_matches_the_sheet.inc)
 (include stanzas/test_tui_sheet_names_every_palette_destination.inc)
 (include stanzas/test_tui_keeper_detail_key_help_names_the_tabs.inc)
@@ -5594,6 +5631,7 @@
 (include stanzas/test_tui_overview_transport_item.inc)
 (include stanzas/test_tui_schedules_empty_row_names_its_key.inc)
 (include stanzas/test_tui_activity_title_dot_belongs_to_the_strip.inc)
+(include stanzas/test_tui_keeper_roster_window.inc)
 (include stanzas/test_tui_feed_row_counts_events.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_runtime_lane_editor.inc)
@@ -5694,6 +5732,7 @@
  (modules test_skill_catalog_snapshot)
  (libraries
   alcotest
+  masc
   masc.skill_snapshot
   masc.skill_reference
   masc.skill_config
@@ -6116,6 +6155,8 @@
 (include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)
+
+(include stanzas/test_browser_lane_name.inc)
 
 (include stanzas/test_execute_file_artifact.inc)
 
@@ -6680,7 +6721,7 @@
 (test
  (name test_lane_addon_sources)
  (modules test_lane_addon_sources)
- (libraries masc_test_deps masc.browser_lane masc.msx_lane masc.tool_schemas eio eio_main yojson unix))
+ (libraries masc_test_deps masc.browser_lane masc.msx_lane masc.dos_lane masc.tool_schemas eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_surface)
@@ -6974,3 +7015,15 @@
 (include stanzas/test_keeper_librarian_capacity_callback.inc)
 
 (include stanzas/test_deployment_store_directories.inc)
+
+(test
+ (name test_tui_fusion_summary_rows)
+ (modules test_tui_fusion_summary_rows)
+ ; The Fusion list is drawn in the executable, which no test can link, so the
+ ; two wiring assertions are read through Ast_grep. The source is a dep:
+ ; without it the test reads a cached verdict and stays green while the wiring
+ ; it asserts is gone.
+ (deps %{workspace_root}/bin/masc_tui_render.ml)
+ (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
+
+(include stanzas/test_tui_sidebar_index_fold.inc)

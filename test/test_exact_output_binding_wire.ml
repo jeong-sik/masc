@@ -31,6 +31,11 @@ let require_ok label = function
 (* The live shape of the binding this defect was found on: the Librarian's
    cheap HTTP slot. [stance] is how its model row answers a wire that turns
    reasoning on by itself — the two answers such a wire accepts. *)
+(* Plan admission refuses an Exact target without a body deadline
+   (Missing_deadline), so the fixture provider declares one. No request
+   leaves the process, so the value only has to be positive and finite. *)
+let exact_body_timeout_s = 180.0
+
 let runtime_toml ~protocol ~endpoint ~stance =
   Printf.sprintf
     {|[runtime]
@@ -40,6 +45,7 @@ default = "ollama_cloud.deepseek-flash"
 protocol = %S
 endpoint = %S
 connect-timeout-s = 180.0
+exact-body-timeout-s = %.1f
 [providers.ollama_cloud.credentials]
 type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
@@ -62,6 +68,7 @@ thinking-support = true
              (lane_id :: Server_runtime_bootstrap.mandatory_exact_output_lane_ids))))
     protocol
     endpoint
+    exact_body_timeout_s
     stance
 ;;
 
@@ -137,15 +144,15 @@ let with_runtime f =
 
 (* The frozen exact target for this binding, read through the resolver's own
    types so the wire and the typed preflight verdict are both visible. The
-   slot declaration is the one the server builds at boot
-   ([Server_runtime_bootstrap.exact_output_targets_of_runtimes]): the binding,
+   slot declaration is the one the server builds at boot and on every config
+   commit ([Runtime.exact_output_targets]): the binding,
    carrying the thinking support its model row declares. *)
 let exact_view (keeper : PC.t) =
   let declared : Resolver.declared_target =
     { target_ref = "ollama_cloud.deepseek-flash"
     ; binding = { keeper with PC.enable_thinking = Some true }
     ; credential = Resolver.Credential_resolved keeper.PC.api_key
-    ; body_timeout_s = None
+    ; body_timeout_s = Some exact_body_timeout_s
     }
   in
   let snapshot =

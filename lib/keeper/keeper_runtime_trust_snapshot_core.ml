@@ -6,7 +6,8 @@ type raw =
   { approval_queue : approval_queue
   ; runtime_blocker_class :
       (Keeper_meta_contract.blocker_class, string) result option
-  ; receipt_operator_disposition : (string * string) option
+  ; receipt_operator_disposition :
+      (Keeper_execution_receipt.operator_disposition_kind * string) option
   ; attention_needs_attention : bool
   ; attention_reason : string option
   ; attention_next_human_action : string option
@@ -16,8 +17,8 @@ type raw =
 type t =
   { disposition : string
   ; disposition_reason : string
-  ; operator_disposition : string
-  ; operator_disposition_reason : string
+  ; receipt_operator_disposition :
+      (Keeper_execution_receipt.operator_disposition_kind * string) option
   ; needs_attention : bool
   ; attention_reason : string option
   ; next_human_action : string option
@@ -37,44 +38,34 @@ let fallback_disposition raw =
      | None -> "Pass", "healthy")
 ;;
 
-let operator_disposition_of_display ~disposition ~disposition_reason =
-  match disposition with
-  | "Pass" -> "pass", disposition_reason
-  | "Blocked" | "Pause" -> "fail_open_next_runtime", disposition_reason
-  | "Alert" | _ -> "unknown", disposition_reason
-;;
-
 let display_disposition_requires_attention = function
   | "Blocked" | "Pause" | "Alert" -> true
   | _ -> false
 ;;
 
+(* Only a shown receipt has an operator disposition to relay. The snapshot's
+   own verdict comes from the approval queue or a runtime blocker, and nothing
+   classifies those into an operator disposition: the same [turn_failures]
+   blocker follows a fenced turn and a soft failure the Keeper retries. Any
+   kind picked here would be a guess, so the fallback reports none. *)
 let effective_disposition raw ~fallback_disposition ~fallback_reason =
   match raw.approval_queue, raw.receipt_operator_disposition with
-  | Approval_queue_available 0, Some (operator_disposition, operator_reason) ->
+  | ( Approval_queue_available 0
+    , (Some (operator_disposition, operator_reason) as receipt_operator_disposition) )
+    ->
     let disposition, disposition_reason =
-      Keeper_operator_disposition_display.of_wire
-        ~operator_disposition
+      Keeper_operator_disposition_display.of_kind
         ~operator_disposition_reason:operator_reason
+        operator_disposition
     in
-    disposition, disposition_reason, operator_disposition, operator_reason
+    disposition, disposition_reason, receipt_operator_disposition
   | Approval_queue_unavailable, _
-  | Approval_queue_available _, _ ->
-    let operator_disposition, operator_disposition_reason =
-      operator_disposition_of_display
-        ~disposition:fallback_disposition
-        ~disposition_reason:fallback_reason
-    in
-    ( fallback_disposition
-    , fallback_reason
-    , operator_disposition
-    , operator_disposition_reason )
+  | Approval_queue_available _, _ -> fallback_disposition, fallback_reason, None
 ;;
 
 let decide raw =
   let fallback_disposition, fallback_reason = fallback_disposition raw in
-  let disposition, disposition_reason, operator_disposition,
-      operator_disposition_reason =
+  let disposition, disposition_reason, receipt_operator_disposition =
     effective_disposition raw ~fallback_disposition ~fallback_reason
   in
   let needs_attention =
@@ -95,8 +86,7 @@ let decide raw =
   in
   { disposition
   ; disposition_reason
-  ; operator_disposition
-  ; operator_disposition_reason
+  ; receipt_operator_disposition
   ; needs_attention
   ; attention_reason
   ; next_human_action

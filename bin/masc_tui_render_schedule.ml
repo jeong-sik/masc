@@ -753,7 +753,26 @@ let verification_row ~submitter_width ~title_width values =
    carries the timezone. *)
 let schedule_status_width = 12
 let schedule_due_width = 19
-let schedule_delivery_width = 12
+(* What the delivery column drew before it was measured. It never goes under
+   this, so a page of short words keeps the table it had. *)
+let schedule_minimum_delivery_width = 12
+
+(* And never past this, so one long word cannot take the recurrence's room. *)
+let schedule_maximum_delivery_width = 20
+
+(* The delivery column, measured from the words on the page.
+
+   It was a literal 12. The projection's own words run past that --
+   [turn_finished] is thirteen cells and drew as "tur...finished" on the live
+   fleet, [terminal_cancelled] is eighteen and
+   [conflicting_terminal_evidence] twenty-nine -- and unlike the wake column
+   beside it there is no contract list to measure once and be done (#38350),
+   so the page is what it has to fit. *)
+let schedule_delivery_width words =
+  List.fold_left
+    (fun widest word -> max widest (Masc_tui_message_layout.display_width word))
+    schedule_minimum_delivery_width words
+  |> min schedule_maximum_delivery_width
 let schedule_minimum_recurrence_width = 12
 
 type schedule_row_values = {
@@ -775,37 +794,39 @@ let schedule_no_values =
   }
 
 let schedule_cells ?(status_style = "") ?(wake_style = "")
-      ?(recurrence_style = "") ~target_width ~wake_width ~recurrence_width
-      values =
+      ?(recurrence_style = "") ~target_width ~wake_width ~delivery_width
+      ~recurrence_width values =
   [ Table.cell ~style:status_style ~header:"STATUS" ~width:schedule_status_width
       values.srow_status
   ; Table.cell ~header:"DUE" ~width:schedule_due_width values.srow_due
   ; Table.cell ~header:"TARGET" ~width:target_width values.srow_target
   ; Table.cell ~style:wake_style ~header:"WAKE" ~width:wake_width
       values.srow_wake
-  ; Table.cell ~header:"DELIVERY" ~width:schedule_delivery_width
-      values.srow_delivery
+  ; Table.cell ~header:"DELIVERY" ~width:delivery_width values.srow_delivery
   ; Table.cell ~style:recurrence_style ~header:"RECURRENCE"
       ~width:recurrence_width values.srow_recurrence
   ]
 
-let schedule_recurrence_width ~inner_width ~target_width ~wake_width =
+let schedule_recurrence_width ~inner_width ~target_width ~wake_width
+      ~delivery_width =
   let named =
     Table.used_width
-      (schedule_cells ~target_width ~wake_width ~recurrence_width:0
-         schedule_no_values)
+      (schedule_cells ~target_width ~wake_width ~delivery_width
+         ~recurrence_width:0 schedule_no_values)
   in
   max schedule_minimum_recurrence_width (inner_width - named)
 
-let schedule_header_row ~target_width ~wake_width ~recurrence_width =
+let schedule_header_row ~target_width ~wake_width ~delivery_width
+      ~recurrence_width =
   Table.header_row
-    (schedule_cells ~target_width ~wake_width ~recurrence_width
+    (schedule_cells ~target_width ~wake_width ~delivery_width ~recurrence_width
        schedule_no_values)
 
 let schedule_row ?status_style ?wake_style ?recurrence_style ~target_width
-      ~wake_width ~recurrence_width values =
+      ~wake_width ~delivery_width ~recurrence_width values =
   Table.row
     (schedule_cells ?status_style ?wake_style ?recurrence_style ~target_width
+       ~delivery_width
        ~wake_width ~recurrence_width values)
 
 (* Lane run columns.
@@ -1006,6 +1027,22 @@ let allocate_fusion_columns ~inner_width ~keeper_width =
   let fcol_keeper = min keeper_width (max 6 (inner_width - named - fusion_minimum_run_width)) in
   let fcol_run = max 3 (inner_width - named - fcol_keeper) in
   { fcol_keeper; fcol_run; fcol_show_preset }
+
+(* The Tasks list pane beside the detail drew a row's title and nothing else,
+   and the frame folds a label from the middle, keeping its opening and its
+   ending. Titles that share both and differ only in between all draw the same
+   row.
+
+   Measured on the live backlog 2026-09-24, 694 open tasks folded to the
+   pane's room: titles alone left 30 rows in four groups that read alike, 18
+   of them "[triage]...(jeong-sik/masc)". With the task id after the title all
+   694 read differently; with it in front, 31 rows still read alike, because
+   the fold takes the middle out either way and the ids of a group share their
+   opening. So the id goes last, where the fold keeps it.
+
+   The full-width list row already spells the id; only the pane beside the
+   detail dropped it. *)
+let task_list_sidebar_label ~title ~task_id = title ^ "  " ^ task_id
 
 let fusion_header_row columns =
   Table.header_row
@@ -1323,7 +1360,7 @@ let board_cells ?(styles = board_no_styles) ~age_header ~title_width values =
    to this cell. *)
 let board_age_text ~now = function
   | Some at -> Masc_tui_message_layout.span_text (now -. at)
-  | None -> "\xe2\x80\x94"
+  | None -> Masc_tui_theme.Glyph.no_value
 
 let board_title_width ~inner_width =
   (* The header word does not move the column: [board_age_width] is fixed and
@@ -1466,3 +1503,13 @@ let schedule_hold_tag ~due = "held since " ^ due
 
 let schedule_hold_reading ~due =
   schedule_hold_tag ~due ^ ": the keeper has not taken the previous wake yet"
+
+(* The same hold when the runner has not read its list again since (#38411).
+   A tick that fails keeps the list without looking, so the hold is drawn at
+   the time it was [checked], not as the present. The due column beside the
+   row still says when the held occurrence came due. *)
+let schedule_hold_as_of_tag ~checked = "held as of " ^ checked
+
+let schedule_hold_as_of_reading ~checked =
+  schedule_hold_as_of_tag ~checked
+  ^ ": the keeper had not taken the previous wake by then"

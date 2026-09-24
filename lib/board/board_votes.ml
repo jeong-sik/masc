@@ -658,6 +658,10 @@ let remark_all_comments_dirty store =
 ;;
 
 let delete_post store ~post_id : (unit, board_error) Result.t =
+  (* Deleting rewrites every snapshot below after the post has left memory, so
+     each file it rewrites must have loaded fully first (#38595). *)
+  let* () = require_persisted_snapshot_readable store.posts_load_result in
+  let* () = require_persisted_snapshot_readable store.comments_load_result in
   let* () = require_persisted_snapshot_readable store.votes_load_result in
   let* () = require_persisted_snapshot_readable store.reactions_load_result in
   match Post_id.of_string post_id with
@@ -730,14 +734,8 @@ let delete_post store ~post_id : (unit, board_error) Result.t =
      | Error _ as e -> e
      | Ok (posts_jsonl, comments_jsonl, votes_jsonl, reactions_jsonl) ->
        let posts_result, comments_result, votes_result =
-           let posts_result =
-             save_jsonl_snapshot_result ~where:"rewrite_posts" ~path:(persist_path ())
-               posts_jsonl
-           in
-           let comments_result =
-             save_jsonl_snapshot_result ~where:"rewrite_comments"
-               ~path:(comments_path ()) comments_jsonl
-           in
+           let posts_result = save_posts_snapshot store posts_jsonl in
+           let comments_result = save_comments_snapshot store comments_jsonl in
            let votes_result = save_vote_log_jsonl votes_jsonl in
            (* Reactions have no dirty cycle of their own; this path records
               rewrite errors through the existing persistence observer. *)
@@ -843,17 +841,13 @@ let flush_dirty store =
   in
     Option.iter
       (fun content ->
-         match
-           save_jsonl_snapshot_result ~where:"flush_posts" ~path:(persist_path ()) content
-         with
+         match save_posts_snapshot store content with
          | Ok () -> ()
          | Error _ -> remark_posts ())
       posts_jsonl;
     Option.iter
       (fun content ->
-         match
-           save_jsonl_snapshot_result ~where:"flush_comments" ~path:(comments_path ()) content
-         with
+         match save_comments_snapshot store content with
          | Ok () -> ()
          | Error _ -> remark_comments ())
       comments_jsonl;

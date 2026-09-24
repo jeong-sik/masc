@@ -25,7 +25,7 @@ val classify_request
   -> input:Yojson.Safe.t
   -> classification
 (** Classify a [tool_execute] envelope or a [network_read] capability.
-    Commands are decoded from argv, script, or an argv shell costume using
+    Commands are decoded from argv, command, or an argv shell costume using
     the dispatcher's Shell IR parser. Reasons survive each layer of that
     projection. A static command still requires a disposable-guest profile
     before the whole request is statically observational; envelope sandbox

@@ -29,11 +29,14 @@ let persist ~keeper_name json =
         | Some value ->
           let* viewport = Browser_lane.Pointer.viewport_of_json value in
           Ok ["viewport", Browser_lane.Pointer.viewport_to_json viewport] in
+      let invalid_source = "invalid screenshot source" in
       let* source_fields = match List.assoc_opt "source" fields with
         | None -> Ok []
-        | Some (`String ("live" | "automation" as source)) ->
-          Ok ["source", `String source]
-        | Some _ -> Error "invalid screenshot source" in
+        | Some (`String raw) ->
+          (match Browser_lane.Lane_name.of_wire raw with
+           | Some lane -> Ok ["source", `String (Browser_lane.Lane_name.to_wire lane)]
+           | None -> Error invalid_source)
+        | Some _ -> Error invalid_source in
       Ok (source_fields @ viewport_fields)
     | _ -> Error "screenshot must be an object" in
   let max_bytes = Keeper_vision_tool.max_image_bytes () in

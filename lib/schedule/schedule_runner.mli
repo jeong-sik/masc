@@ -29,6 +29,11 @@ type tick_result =
           no signal was appended and nothing was dispatched, so they are not
           dispatch results. A held occurrence keeps its identity from tick to
           tick until its target consumes the previous one (#37912). *)
+  ; held_at : float
+      (** When this tick decided [held]: the clock right after it asked every
+          due candidate whether to hold, before it emitted or dispatched
+          anything. Dispatch can take seconds, so this is earlier than the
+          tick's finish (#38411). *)
   }
 
 and dispatch_status =

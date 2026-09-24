@@ -68,7 +68,9 @@ val run :
     request's range did ([carried_front_seed]), at the turn's Librarian
     position ([librarian_front]) when that is later, else at [turn_start].
     [on_carried_front] reports the front each composition cut, before the
-    write, as on the Claude Code lane.
+    write, as on the Claude Code lane. When an overflow retry reaches the
+    zero-history floor, no carried front is reported because no conversation
+    atom is transmitted.
 
     [on_transmitted_model_input] fires once per attempt, after context injection
     is acknowledged and the complete turn/start input is written. Required

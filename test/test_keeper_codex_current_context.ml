@@ -92,6 +92,7 @@ default = "codex.context"
     | Some _ | None -> fail "fixture runtime missing" in
   let reports = ref [] in
   let run ?official_task_reference ?model_input_projection
+      ?carried_front_seed
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"]) ?official_client_continuation ?official_client_original_turn ?(goal="Continue from current World State.") ~instructions ~world () =
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
@@ -101,6 +102,7 @@ default = "codex.context"
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
           ~runtime:(Runtime.get_runtime_by_id "codex.context" |> Option.get)) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
       ~turn_start
+      ?carried_front_seed
       ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_task_reference ?official_client_continuation ?official_client_original_turn
       ~goal_blocks:None ~system_prompt:instructions ~tools:[]
       ~initial_messages
@@ -439,33 +441,6 @@ let snapshot_carries kept index =
          (Printf.sprintf "\"%d:xxxx" index))
     kept
 
-let test_resume_after_start_carries_the_range () =
-  (* The turn after a bounded Start is a Resume, and it puts its history on
-     the wire too, as the canonical snapshot in [developerInstructions]. It
-     carries the same range a Start does: nothing is declared, the last
-     completed turn ended at atom 60, so the snapshot holds atoms 60..63 and
-     nothing before. *)
-  with_fixture @@ fun ~run ~capture ~reports:_ ->
-  let attempt, rows = resume_large_history ~capture
-    ~start:(fun () -> run ~instructions:"Keeper instructions" ~world:"world" ())
-    ~resume:(fun checkpoint -> run ~initial_messages:large_history
-      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 60 })
-      ~official_client_continuation:checkpoint ~official_client_original_turn:checkpoint
-      ~instructions:"Keeper instructions" ~world:"world" ()) in
-  successful attempt;
-  match params_of "thread/resume" rows with
-  | [resume] ->
-    let kept =
-      resume |> member "developerInstructions" |> text |> snapshot_of_instructions
-      |> member "messages" |> items
-    in
-    check (list bool) "atoms 60..63 are in the snapshot" [ true; true; true; true ]
-      (List.map (snapshot_carries kept) [ 60; 61; 62; 63 ]);
-    check bool "nothing before the range is in the snapshot" false
-      (snapshot_carries kept 59 || snapshot_carries kept 0);
-    check int "only the range goes" 4 (List.length kept)
-  | rows -> fail (Printf.sprintf "expected one Resume, saw %d" (List.length rows))
-
 (* The composition both modes share, driven directly. *)
 let carried_indices messages =
   List.filter_map
@@ -499,6 +474,39 @@ let seed_at first_atom () =
   ; boundary_error = None
   }
 
+let test_resume_after_start_carries_the_range () =
+  (* Both requests hold the same 64-message checkpoint. Start takes the
+     turn's boundary; Resume gets the carried front reported by that first
+     request, even when its own turn boundary cannot be read. *)
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  let first = run ~initial_messages:large_history
+    ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 60 })
+    ~instructions:"Keeper instructions" ~world:"world" () in
+  successful first;
+  let before = List.length (read_requests capture) in
+  successful (run ~initial_messages:large_history
+    ~carried_front_seed:(seed_at 60)
+    ~turn_start:(Keeper_carried_front.Turn_boundary_unknown { reason = "fixture" })
+    ~instructions:"Keeper instructions" ~world:"world" ());
+  let first_rows = read_requests capture |> List.filteri (fun index _ -> index < before) in
+  let resumed_rows = read_requests capture |> List.filteri (fun index _ -> index >= before) in
+  let start_messages = match params_of "thread/inject_items" first_rows with
+    | [params] -> params |> member "items" |> items
+    | rows -> fail (Printf.sprintf "expected one Start injection, saw %d" (List.length rows)) in
+  let resume_messages = match params_of "thread/resume" resumed_rows with
+    | [params] -> params |> member "developerInstructions" |> text
+      |> snapshot_of_instructions |> member "messages" |> items
+    | rows -> fail (Printf.sprintf "expected one Resume, saw %d" (List.length rows)) in
+  let start_carries index = snapshot_carries start_messages index in
+  List.iter (fun (label, carries, messages) ->
+    check (list bool) (label ^ " carries atoms 60..63") [ true; true; true; true ]
+      (List.map carries [ 60; 61; 62; 63 ]);
+    check bool (label ^ " excludes earlier atoms") false
+      (carries 59 || carries 0);
+    check int (label ^ " sends only the range") 4 (List.length messages))
+    [ "Start", start_carries, start_messages;
+      "Resume", snapshot_carries resume_messages, resume_messages ]
+
 let from index = List.init (64 - index) (fun offset -> index + offset)
 
 let test_the_seed_decides_the_range () =
@@ -530,6 +538,25 @@ let test_a_declared_limit_cuts_inside_the_range () =
   in
   check (list int) "the ceiling keeps the newest two" [ 62; 63 ]
     (carried ~capacity_bytes
+       (Keeper_carried_front.Turn_boundary { end_atom = 60 }))
+
+let test_the_overflow_floor_does_not_restore_the_newest_atom () =
+  (* A typed overflow can narrow past the last atom. Reapplying the carried
+     start after this cut would resend exactly the atom the client refused. *)
+  let measure message =
+    String.length (Keeper_official_client_host.encode_history_message message)
+  in
+  let floor =
+    match
+      Runtime_model_input_tail_window.minimum_capacity_bytes
+        ~measure_message_bytes:measure
+        large_history
+    with
+    | Some bytes -> bytes
+    | None -> fail "the rejected history must have a smaller floor"
+  in
+  check (list int) "the floor carries no conversation atom" []
+    (carried ~capacity_bytes:floor
        (Keeper_carried_front.Turn_boundary { end_atom = 60 }))
 
 let test_an_unknown_turn_start_carries_the_newest_atom () =
@@ -579,6 +606,7 @@ let () = run "Keeper current Codex context" ["native requests",[
   test_case "the seed decides the range" `Quick test_the_seed_decides_the_range;
   test_case "a later Librarian position decides the range" `Quick test_a_later_librarian_position_decides_the_range;
   test_case "a declared limit cuts inside the range" `Quick test_a_declared_limit_cuts_inside_the_range;
+  test_case "an overflow floor never restores the last atom" `Quick test_the_overflow_floor_does_not_restore_the_newest_atom;
   test_case "an unknown turn start carries the newest atom" `Quick test_an_unknown_turn_start_carries_the_newest_atom;
   test_case "a turn without a session trace opens on the newest atom" `Quick test_a_turn_without_a_session_trace_opens_on_the_newest_atom;
   test_case "no declared prompt limit sends the whole history" `Quick test_undeclared_limit_sends_whole_history;

@@ -182,6 +182,7 @@ let record_next_shrink_capacity
       Option.map
         (fun history_bytes -> history_bytes + reserved_bytes)
         (Runtime_model_input_tail_window.next_shrink_capacity_bytes
+           ~allow_empty_history:true
            ~measure_message_bytes
            ~target_capacity_bytes
            windowed))
@@ -216,6 +217,31 @@ let carried_model_input_projection
     ~runtime_id
     source_projection
     messages =
+  let _, history_atom_count =
+    Runtime_model_input_tail_window.annotate messages
+  in
+  let observe_window projection =
+    Option.iter
+      (fun observe ->
+         Option.iter
+           observe
+           (Runtime_model_input_tail_window.observe
+              ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
+              ~history_atom_count
+              projection))
+      on_model_input_window_observation
+  in
+  let finish sent =
+    record_next_shrink_capacity
+      ~measure_message_bytes
+      ~capacity_bytes
+      ~reserved_bytes
+      ~observed_next_shrink_capacity_bytes
+      sent;
+    match source_projection with
+    | None -> Ok sent
+    | Some project -> project sent
+  in
   let* capacity_cut =
     if capacity_bytes = unbounded_model_input_capacity_bytes
     then Ok None
@@ -223,6 +249,7 @@ let carried_model_input_projection
       Domain_pool_ref.submit_cpu_or_inline (fun () ->
         match
           Runtime_model_input_tail_window.project_with_drop
+            ~allow_empty_history:true
             ~measure_message_bytes
             ~capacity_bytes
             ~reserved_bytes
@@ -233,6 +260,15 @@ let carried_model_input_projection
           Error
             (Runtime_model_input_tail_window.budget_error_to_core_error error))
   in
+  match capacity_cut with
+  | Some projection
+    when projection.Runtime_model_input_tail_window.dropped_atoms >= history_atom_count ->
+    (* The shrink ladder reached the zero-history floor. Reapplying the
+       carried front would put the newest atom back into an input the
+       provider just refused. *)
+    observe_window projection;
+    finish projection.Runtime_model_input_tail_window.messages
+  | Some _ | None ->
   let own_first_atom =
     match capacity_cut with
     | Some projection -> projection.Runtime_model_input_tail_window.dropped_atoms
@@ -269,15 +305,7 @@ let carried_model_input_projection
     Host.compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front
   in
   let sent = windowed.Host.sent in
-  Option.iter
-    (fun observe ->
-       Option.iter
-         observe
-         (Runtime_model_input_tail_window.observe
-            ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
-            ~history_atom_count:windowed.Host.carried.Host.history_atom_count
-            (Host.windowed_projection windowed)))
-    on_model_input_window_observation;
+  observe_window (Host.windowed_projection windowed);
   Option.iter
     (fun observe ->
        observe
@@ -288,15 +316,7 @@ let carried_model_input_projection
               0
               sent))
     on_carried_front;
-  record_next_shrink_capacity
-    ~measure_message_bytes
-    ~capacity_bytes
-    ~reserved_bytes
-    ~observed_next_shrink_capacity_bytes
-    sent;
-  match source_projection with
-  | None -> Ok sent
-  | Some project -> project sent
+  finish sent
 ;;
 
 let codex_dynamic_tool ~observe_effect_attempted ~observe_successful_tool_completion

@@ -316,6 +316,19 @@ let refusal_to_rpc_error refusal : Wire.rpc_error =
   { code = Wire.host_refused; message = refusal_to_string refusal }
 ;;
 
+(* The extension gets the detailed refusal. The server records a bounded,
+   closed cause without copying extension-supplied tool names or provider text
+   into its log. *)
+let refusal_kind = function
+  | Params_malformed _ -> "params_malformed"
+  | Generation_not_served _ -> "generation_not_served"
+  | Content_not_served _ -> "content_not_served"
+  | Lane_unavailable _ -> "lane_unavailable"
+  | Lane_refused _ -> "lane_refused"
+  | Flow_not_started _ -> "flow_not_started"
+  | Generation_failed _ -> "generation_failed"
+;;
+
 (* ---- Answer --------------------------------------------------------------- *)
 
 let usage_json (usage : Agent_core.Types.api_usage) =
@@ -453,5 +466,10 @@ let serve ~net ~clock ~resolve_lane params =
 ;;
 
 let create ~net ~clock ~resolve_lane : Browser_stagehand_session.model =
-  fun params -> serve ~net ~clock ~resolve_lane params |> Result.map_error refusal_to_rpc_error
+  fun params ->
+    match serve ~net ~clock ~resolve_lane params with
+    | Ok answer -> Ok answer
+    | Error refusal ->
+      Log.Server.warn "browser_stagehand: llm.generate refused (%s)" (refusal_kind refusal);
+      Error (refusal_to_rpc_error refusal)
 ;;

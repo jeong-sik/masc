@@ -192,16 +192,22 @@ let test_answer_carries_reported_usage () =
 
 let test_unreported_usage_is_left_out () =
   let extract, _, _ = Lazy.force recorded_params in
-  with_provider (F.Reply (openai_body ~usage:""))
-  @@ fun ~net ~clock server ->
-  let resolved = resolved_lane ~base_url:server.base_url ~system_prompt:true () in
-  match generate ~net ~clock resolved extract with
-  | Error { Browser_stagehand_wire.message; _ } ->
-    Alcotest.failf "the extract request was refused: %s" message
-  | Ok (`Assoc fields) ->
-    Alcotest.(check bool) "no usage key" false (List.mem_assoc "usage" fields);
-    Alcotest.(check bool) "an answer" true (List.mem_assoc "structured_content" fields)
-  | Ok _ -> Alcotest.fail "the answer is not an object"
+  List.iter
+    (fun (name, usage) ->
+       with_provider (F.Reply (openai_body ~usage))
+       @@ fun ~net ~clock server ->
+       let resolved = resolved_lane ~base_url:server.base_url ~system_prompt:true () in
+       match generate ~net ~clock resolved extract with
+       | Error { Browser_stagehand_wire.message; _ } ->
+         Alcotest.failf "%s: the extract request was refused: %s" name message
+       | Ok (`Assoc fields) ->
+         Alcotest.(check bool) (name ^ ": no usage key") false (List.mem_assoc "usage" fields);
+         Alcotest.(check bool) (name ^ ": an answer") true (List.mem_assoc "structured_content" fields)
+       | Ok _ -> Alcotest.failf "%s: the answer is not an object" name)
+    [ "absent", ""
+    ; "empty object", {|,"usage":{}|}
+    ; "missing output count", {|,"usage":{"prompt_tokens":12}|}
+    ]
 ;;
 
 let contains ~affix text =

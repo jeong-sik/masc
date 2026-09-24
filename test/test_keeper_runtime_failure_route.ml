@@ -195,6 +195,16 @@ let test_provider_quota_family_threads_hint () =
     (Agent_core.Error.Provider
        (Llm_provider.Error.HardQuota
           { provider = "glm"; retry_after = Some 3600.0; detail = "balance 0" }));
+  (* [keeper_runtime_attempt] folds RateLimit and HardQuota into one transport
+     value for the walk. The route reads the provider error before that fold,
+     so a rate limit stays this candidate's backpressure and never becomes
+     the whole scope's quota window. *)
+  check_route
+    "provider RateLimit stays the candidate's rate limit"
+    (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = Some 30.0 })
+    (Agent_core.Error.Provider
+       (Llm_provider.Error.RateLimit
+          { provider = "codex"; retry_after = Some 30.0; detail = "slow down" }));
   check_route
     "provider CapacityExhausted is the provider's capacity"
     (KFR.Retry_after_observed

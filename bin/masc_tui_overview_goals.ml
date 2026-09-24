@@ -195,15 +195,18 @@ let lines ~now ~localtime ~inner_width ~rows ~tasks (reading : Types.overview_go
               goal_count Ansi.reset
           else ""
         in
-        (* The backlog is read apart from the goals; a failed read is said,
-           not counted as no active task. *)
+        (* The backlog is read apart from the goals; a read not made yet or
+           failed is said, not counted as no active task. *)
         let headline =
           match tasks with
-          | Ok tasks ->
+          | Masc_tui_overview_tasks.Rows_unread ->
+              Printf.sprintf "%s   %sactive work unread%s%s" title Ansi.dim
+                Ansi.reset cut
+          | Masc_tui_overview_tasks.Rows_read tasks ->
               let { active; toward_goal } = progress ~goals:drawn ~tasks in
               Printf.sprintf "%s   active work toward a goal: %d of %d tasks%s"
                 title toward_goal active cut
-          | Error reason ->
+          | Masc_tui_overview_tasks.Rows_unavailable reason ->
               Printf.sprintf "%s   %sactive work unread: %s%s%s" title
                 (Theme.warn ()) (Terminal_text.single_line reason) Ansi.reset cut
         in

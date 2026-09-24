@@ -200,6 +200,17 @@ let test_record_by_model_bucket () =
        ~runtime_profile:"tool_use_strict"
        ~bucket:"over_1200s")
 
+(* #38452: the runtime_profile label names the runtime that answered. A turn
+   with no runtime observation gets the unobserved label, not the Keeper's
+   assigned lane, which is a different concept. *)
+let test_runtime_profile_names_the_answering_runtime () =
+  Alcotest.(check string) "an observed turn names its runtime"
+    "glm-coding.glm-5.3-flash"
+    (Masc.Keeper_unified_metrics_snapshot.latency_runtime_profile
+       (Some "glm-coding.glm-5.3-flash"));
+  Alcotest.(check string) "an unobserved turn says so" "unobserved"
+    (Masc.Keeper_unified_metrics_snapshot.latency_runtime_profile None)
+
 let () =
   Alcotest.run "keeper_long_turn_9943"
     [
@@ -228,5 +239,7 @@ let () =
         [
           Alcotest.test_case "records by model/runtime bucket" `Quick
             test_record_by_model_bucket;
+          Alcotest.test_case "runtime_profile names the answering runtime" `Quick
+            test_runtime_profile_names_the_answering_runtime;
         ] );
     ]

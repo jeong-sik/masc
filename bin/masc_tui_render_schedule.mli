@@ -19,23 +19,9 @@ val normalize_keeper_detail_scroll :
 
 val collapse_consecutive : key:('a -> string) -> 'a list -> ('a * int) list
 (** Fold consecutive runs with the same key into (newest element, run length),
-    preserving order. The Overview event log draws a burst of identical lines
-    (six manual refreshes, a broadcast fan-out) as one row with a [×N] tail
-    instead of spending its whole panel repeating itself. *)
-
-type overview_event_window = {
-  oew_offset : int;
-  oew_first_position : int;
-  oew_last_position : int;
-}
-
-val project_overview_event_window :
-  event_count:int -> visible_rows:int -> int -> overview_event_window
-val scroll_overview_events_older :
-  event_count:int -> visible_rows:int -> int -> int
-val scroll_overview_events_newer :
-  event_count:int -> visible_rows:int -> int -> int
-val overview_event_offset_after_prepend : retained_count:int -> int -> int
+    preserving order. The TUI session block on Metrics draws a burst of
+    identical lines (six manual refreshes, a broadcast fan-out) as one row with
+    a [×N] tail instead of spending its rows repeating itself. *)
 
 module Input_wait : sig
   type 'a poll_result =
@@ -61,9 +47,16 @@ end
 
 type overview_allocation = {
   attention_rows : int;
+  goal_rows : int;
+      (** Rows of the GOALS block, its headline included. The divider under
+          it is one more row, drawn only when this is positive. *)
   team_rows : int;
       (** Keeper rows in the Team block. The block's title and its closing
           divider are two more rows, drawn only when this is positive. *)
+  providers_rows : int;
+      (** Rows of the Providers section. Its title and closing divider are
+          {!overview_providers_chrome_rows} more, drawn only when this is
+          positive. *)
   task_error_rows : int;
   task_rows : int;
   filler_rows : int;
@@ -77,6 +70,14 @@ val overview_team_chrome_rows : int
 (** The Team block's title row and the divider under it, drawn only when
     [team_rows] is positive. *)
 
+val overview_goal_chrome_rows : int
+(** The divider under the GOALS block, drawn only when [goal_rows] is
+    positive. *)
+
+val overview_providers_chrome_rows : int
+(** The Providers section's title row and the divider under it, drawn only
+    when [providers_rows] is positive. *)
+
 val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allocation
 (** Adds up to [extra] Team rows out of [filler_rows] only: rows nothing else
     on the Overview wanted. A Team block not yet drawn also pays its
@@ -85,13 +86,17 @@ val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allo
 
 val allocate_overview :
   terminal_rows:int ->
-  has_cluster:bool ->
   attention_count:int ->
-  event_count:int ->
+  goal_count:int ->
   team_count:int ->
+  providers_count:int ->
   task_count:int ->
   has_task_error:bool ->
   overview_allocation
+(** The Providers section is sized after GOALS and before the Team block: it
+    takes up to [providers_count] rows of what is left once the one task row
+    held back is kept. With no room for one row besides its chrome it is not
+    drawn at all. *)
 
 (** {1 Keeper roster columns} *)
 

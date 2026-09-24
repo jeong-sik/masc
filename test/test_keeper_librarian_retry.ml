@@ -797,7 +797,14 @@ let test_a_restated_memory_retracted_during_the_pass_stays_retracted_and_keeps_i
    with [keeper_facts] and record [keeper_events], then commit the answer and
    write its Revised events the way the runtime does, from the revisions the
    commit carried out. *)
-let librarian_round ~name ~answer ?keeper_facts ?(keeper_events = []) () =
+let librarian_round
+      ~name
+      ~answer
+      ?keeper_facts
+      ?(keeper_events = [])
+      ?(inspect = fun ~keepers_dir:_ ~keeper_id:_ -> ())
+      ()
+  =
   let keepers_dir = Filename.temp_dir ("librarian-" ^ name ^ "-") "" in
   Fun.protect ~finally:(fun () -> rm_rf keepers_dir) (fun () ->
     let keeper_id = name in
@@ -861,7 +868,25 @@ let librarian_round ~name ~answer ?keeper_facts ?(keeper_events = []) () =
       | Error detail -> fail detail
       | Ok lines -> List.length lines
     in
+    inspect ~keepers_dir ~keeper_id;
     selection, disposition, events, absorbed_rows)
+;;
+
+(* The drops the newest journal line names, which must be a committed
+   Librarian pass that states its drops. *)
+let journaled_drop_ids ~keepers_dir ~keeper_id =
+  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
+  | [ Ok
+        (Current.Journal_committed
+           { source = { kind = Current.Librarian; _ }; dropped = Some statements; _ })
+    ] ->
+    List.map (fun (statement : Memory.dropped_statement) -> statement.memory_id) statements
+  | [ Ok (Current.Journal_committed _) ] ->
+    fail "the newest journal line is not a Librarian pass that states its drops"
+  | [ Ok (Current.Journal_failed _ | Current.Journal_quarantined _) ] ->
+    fail "the newest journal line is not a committed pass"
+  | [ Error detail ] -> fail ("the newest journal line does not decode: " ^ detail)
+  | [] | _ :: _ :: _ -> fail "expected exactly one journal line"
 ;;
 
 let successors_of identity (events : Events.event list) =
@@ -894,7 +919,11 @@ let superseding_b = selection_json ~new_claims:[ superseding_claim (`String "m2"
    is stored and B gets that one Revised event. *)
 let test_a_supersede_of_a_memory_still_current_is_stored () =
   let selection, disposition, events, _ =
-    librarian_round ~name:"supersede-kept" ~answer:superseding_b ()
+    librarian_round ~name:"supersede-kept" ~answer:superseding_b
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal names B, which the commit dropped"
+          [ current_b_id ] (journaled_drop_ids ~keepers_dir ~keeper_id))
+      ()
   in
   let successor = the_one_new_claim selection in
   check (list string) "A stays and B's successor is stored"
@@ -921,6 +950,9 @@ let test_a_supersede_of_a_memory_the_keeper_superseded_during_the_pass_is_not_st
           ; kind = Events.Revised { superseded_by = keeper_successor_id }
           }
         ]
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal leaves B to the keeper's own revision" []
+          (journaled_drop_ids ~keepers_dir ~keeper_id))
       ()
   in
   let successor = the_one_new_claim selection in
@@ -948,6 +980,9 @@ let test_a_supersede_of_a_memory_the_keeper_retracted_during_the_pass_is_not_sto
           ; kind = Events.Retracted
           }
         ]
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal leaves B to the keeper's retraction" []
+          (journaled_drop_ids ~keepers_dir ~keeper_id))
       ()
   in
   let successor = the_one_new_claim selection in
@@ -997,6 +1032,9 @@ let test_a_memory_whose_only_successor_is_not_stored_stays_current () =
              ]
            ())
       ~keeper_facts:[ current_a ]
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal does not say A was dropped" []
+          (journaled_drop_ids ~keepers_dir ~keeper_id))
       ()
   in
   let successor = the_one_new_claim selection in
@@ -1015,6 +1053,9 @@ let test_a_memory_superseded_by_a_restatement_the_keeper_retracted_stays_current
     librarian_round ~name:"restated-successor-retracted"
       ~answer:(selection_json ~new_claims:[ superseding_claim ~claim:"keep A" (`String "m2") () ] ())
       ~keeper_facts:[ current_b ]
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal does not say B was dropped" []
+          (journaled_drop_ids ~keepers_dir ~keeper_id))
       ()
   in
   check (list string) "the answer did supersede B with A"
@@ -1041,6 +1082,83 @@ let test_a_selection_without_the_dropped_field_rejects () =
       "wrong missing-dropped-field error: %s"
       (Librarian.parse_error_to_string error)
   | Ok _ -> fail "selection without dropped field accepted"
+;;
+
+(* The pending-input organization is judged apart from the Memory decision
+   (#38422): an answer that leaves it out or gets it wrong keeps its drop, and
+   only the organization is set aside. *)
+let test_a_working_context_slip_keeps_the_memory_decision () =
+  let memory_answer working_contexts =
+    `Assoc
+      (working_contexts
+       @ [ Librarian.wire_field_new_claims, `List []
+         ; Librarian.wire_field_dropped, `List [ dropped_json "m2" ]
+         ])
+  in
+  let organization label working_contexts =
+    match parse (memory_answer working_contexts) with
+    | Error error ->
+      failf "%s: the Memory answer was refused: %s" label
+        (Librarian.parse_error_to_string error)
+    | Ok selection ->
+      check (list string) (label ^ ": the drop of B stands") [ current_b_id ]
+        (List.map (fun (d : Memory.dropped_statement) -> d.memory_id) selection.dropped);
+      selection.working_contexts
+  in
+  (match organization "empty" [ "working_contexts", `List [] ] with
+   | Librarian.Working_contexts_organized [] -> ()
+   | Librarian.Working_contexts_organized _ -> fail "an empty organization gained pockets"
+   | Librarian.Working_contexts_missing | Librarian.Working_contexts_invalid _ ->
+     fail "a valid empty organization was not taken");
+  (match organization "invalid" [ "working_contexts", `String "not a list" ] with
+   | Librarian.Working_contexts_invalid detail ->
+     check string "the selector's reason" "working context requires an array" detail
+   | Librarian.Working_contexts_organized _ | Librarian.Working_contexts_missing ->
+     fail "an invalid organization was not reported as invalid");
+  match organization "missing" [] with
+  | Librarian.Working_contexts_missing -> ()
+  | Librarian.Working_contexts_organized _ | Librarian.Working_contexts_invalid _ ->
+    fail "an absent organization was not reported as missing"
+;;
+
+(* The working state belongs to a continuity pass. A Memory answer's parse
+   does not read it, so a blank or non-text value cannot refuse the Memory
+   decision; the continuity reader alone requires nonblank text. *)
+let test_only_a_continuity_pass_reads_the_working_state () =
+  let memory_answer working_state =
+    `Assoc
+      [ "working_contexts", `List []
+      ; Librarian.wire_field_new_claims, `List []
+      ; Librarian.wire_field_dropped, `List [ dropped_json "m2" ]
+      ; Librarian.wire_field_working_state, working_state
+      ]
+  in
+  List.iter
+    (fun (label, working_state) ->
+       match parse (memory_answer working_state) with
+       | Ok selection ->
+         check (list string) (label ^ ": the drop of B stands") [ current_b_id ]
+           (List.map (fun (d : Memory.dropped_statement) -> d.memory_id) selection.dropped)
+       | Error error ->
+         failf "%s: the Memory answer was refused: %s" label
+           (Librarian.parse_error_to_string error))
+    [ "blank", `String ""; "non-text", `Int 5; "null", `Null ];
+  List.iter
+    (fun (label, answer) ->
+       match Librarian.continuity_working_state_of_json_result answer with
+       | Error (Librarian.Working_state_invalid _) -> ()
+       | Error error ->
+         failf "%s: wrong continuity refusal: %s" label
+           (Librarian.parse_error_to_string error)
+       | Ok text -> failf "%s: continuity accepted %S" label text)
+    [ "blank", memory_answer (`String " ")
+    ; "null", memory_answer `Null
+    ; "missing", `Assoc [ Librarian.wire_field_new_claims, `List [] ]
+    ];
+  match Librarian.continuity_working_state_of_json_result (memory_answer (`String "s")) with
+  | Ok text -> check string "a continuity pass keeps its state" "s" text
+  | Error error ->
+    failf "a nonblank working state was refused: %s" (Librarian.parse_error_to_string error)
 ;;
 
 let test_dropped_statements_validate () =
@@ -2082,6 +2200,10 @@ let () =
             test_a_memory_superseded_by_a_restatement_the_keeper_retracted_stays_current
         ; test_case "selection without dropped field rejects" `Quick
             test_a_selection_without_the_dropped_field_rejects
+        ; test_case "a working-context slip keeps the Memory decision" `Quick
+            test_a_working_context_slip_keeps_the_memory_decision
+        ; test_case "only a continuity pass reads the working state" `Quick
+            test_only_a_continuity_pass_reads_the_working_state
         ; test_case "dropped statements validate" `Quick
             test_dropped_statements_validate
         ; test_case "strict JSON boundary" `Quick test_strict_json_boundary

@@ -27,7 +27,7 @@ def run(executable: str) -> None:
     fixtures[detail_path] = (200, {"post": post, "comments": comments})
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"cluster-a", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
         h.send_and_wait(process, fd, output, b"\r", b"Comment 000")
         h.read_available(fd, output)
@@ -102,7 +102,7 @@ def run_side_by_side(executable: str) -> None:
         return row, rows[row]
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"cluster-a", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
         h.send_and_wait(process, fd, output, b"\r", b"Comment 000")
         h.read_available(fd, output)

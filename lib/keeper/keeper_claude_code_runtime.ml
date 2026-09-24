@@ -234,9 +234,33 @@ let model_input_projection_for_capacity
   | Some project -> project windowed
 ;;
 
-let claude_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_action on_event =
+(* A provider's report about its own usage windows, kept for the operator
+   projection ([Runtime_provider_usage_window]). Nothing that routes, orders,
+   admits or retries reads it. A runtime id with no configured quota scope
+   has no account to key the report by, so it is logged and dropped. *)
+let record_usage_windows ~keeper_name ~runtime_id report =
+  match Runtime.quota_scope_of_runtime_id runtime_id with
+  | Some scope ->
+    Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report
+  | None ->
+    Log.Keeper.warn
+      ~keeper_name
+      "Claude Code usage windows not recorded: runtime %s has no quota scope"
+      runtime_id
+;;
+
+(* Always installed so usage-window reports are recorded. A turn nobody
+   streams, traces or observes gets only that; its other events are ignored as
+   before. *)
+let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action on_event =
   match on_event, raw_trace_run, on_native_action with
-  | None, None, None -> None
+  | None, None, None ->
+    Some
+      (function
+        | Runtime_claude_code.Usage_windows_reported report ->
+          record_usage_windows ~keeper_name ~runtime_id report
+        | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+        | Native_tool_started _ | Native_tool_finished _ | Turn_finished _ -> ())
   | _ ->
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
@@ -318,6 +342,8 @@ let claude_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_ac
                     emit (Agent_core.Types.ContentBlockStop { index }))
                  (Hashtbl.find_opt native_tool_indexes identity))
             observation.identity
+        | Runtime_claude_code.Usage_windows_reported report ->
+          record_usage_windows ~keeper_name ~runtime_id report
         | Runtime_claude_code.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text
@@ -474,6 +500,18 @@ let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
     ~cache_read_input_tokens:usage.cache_read_input_tokens
 ;;
 
+(* Same inclusive convention as [api_usage_of_turn_usage], for the input side
+   of the newest request only: the context it occupied. *)
+let request_context_of_request_input (input : Runtime_claude_code.request_input)
+  : Runtime_observation.request_context
+  =
+  { input_tokens =
+      input.input_tokens + input.cache_creation_input_tokens + input.cache_read_input_tokens
+  ; cache_creation_input_tokens = input.cache_creation_input_tokens
+  ; cache_read_input_tokens = input.cache_read_input_tokens
+  }
+;;
+
 module For_testing = struct
   let claude_error_to_core_error = claude_error_to_core_error
 
@@ -481,6 +519,7 @@ module For_testing = struct
     match
       claude_stream_callback
         ~keeper_name:"test"
+        ~runtime_id:"test"
         ~raw_trace_run:None
         ~turn_count
         ~on_native_action:(Some observe)
@@ -558,6 +597,19 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id 
      | Ok _ -> ()
      | Error _ -> ())
   | Ok _ -> ()
+;;
+
+(* The client reaches MASC tools through this handler, so entering it is the
+   observed fact that an effect was attempted. Record it before the call: the
+   handler may commit and then raise or be cancelled, and observing only its
+   return would reopen a duplicate-effect window. *)
+let recording_effect_attempt ~effect_disposition (tool : Host.dynamic_tool) =
+  { tool with
+    Host.call =
+      (fun ~call_id input ->
+        Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted;
+        tool.call ~call_id input)
+  }
 ;;
 
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
@@ -806,7 +858,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
-    let dynamic_tools = host_dynamic_tools in
+    let dynamic_tools =
+      List.map (recording_effect_attempt ~effect_disposition) host_dynamic_tools
+    in
     let* () =
       match
         Runtime_claude_code.validate_turn
@@ -900,7 +954,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
-    let dynamic_tools = host_dynamic_tools in
+    let dynamic_tools =
+      List.map (recording_effect_attempt ~effect_disposition) host_dynamic_tools
+    in
     let* claimed_session =
       match
         Session_store.claim_with_context_frontier
@@ -996,7 +1052,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       (List.length dynamic_tools)
       (Runtime_claude_code.dynamic_tool_bytes dynamic_tools);
     let started_at = Time_compat.now () in
-    let settle_host_stop ~usage stop =
+    let settle_host_stop ~latest_request_input stop =
       match (!session_state).Session_store.phase with
       | Turn_inflight { session_id; turn_id; _ } ->
         let turn_id =
@@ -1051,7 +1107,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             ~turns_used:turn_count
             ~latency_ms:
               (Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
-            ~usage:(Option.map api_usage_of_turn_usage usage)
+            ~request_context:
+              (Option.map request_context_of_request_input latest_request_input)
             stop
         in
         let* () =
@@ -1090,7 +1147,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     in
     let turn_result =
       let on_stream_event =
-        claude_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_action on_event
+        claude_stream_callback
+          ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action on_event
       in
       try
         let client_result =
@@ -1139,13 +1197,14 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
              ~images
         in
         (match client_result with
-         | Error (Runtime_claude_code.Stopped_by_host { stop; usage }) ->
+         | Error (Runtime_claude_code.Stopped_by_host { stop; latest_request_input }) ->
            recovery_failure := Session_store.Host_hook_failed;
            (match stop, !terminal_error with
             | Host.Terminal_tool_boundary _, _
-          when Option.is_some on_official_client_tool_boundary -> settle_host_stop ~usage stop
+          when Option.is_some on_official_client_tool_boundary ->
+              settle_host_stop ~latest_request_input stop
             | _, Some detail -> Error (internal_error detail)
-            | _, None -> settle_host_stop ~usage stop)
+            | _, None -> settle_host_stop ~latest_request_input stop)
          | Error error ->
            (* A resumed session is refused on the vendor's own conversation,
               which a smaller masc range does not change: the resume prompt is
@@ -1178,7 +1237,19 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
               Atomic.set
                 effect_disposition
                 Keeper_provider_attempt_effect.No_effect_observed
-            | _ -> ());
+            | Runtime_claude_code.Turn_failed_with_observation _
+            | Runtime_claude_code.Quota_blocked _
+            | Runtime_claude_code.Context_window_exceeded _
+            | Runtime_claude_code.Turn_transport_interrupted _
+            | Runtime_claude_code.Invalid_config _
+            | Runtime_claude_code.Spawn_failed _
+            | Runtime_claude_code.Protocol_error _
+            | Runtime_claude_code.Subscription_required _
+            | Runtime_claude_code.Unsupported_control_request _
+            | Runtime_claude_code.Turn_failed _
+            | Runtime_claude_code.Stopped_by_host _
+            | Runtime_claude_code.Process_exited _
+            | Runtime_claude_code.Timeout _ -> ());
            if not !state_persistence_failed
            then
              recovery_failure :=
@@ -1211,13 +1282,17 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
            let latency_ms =
              Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)
            in
+           (* The response usage is what the turn spent, from the result
+              frame; the newest request's input rides apart as the context it
+              occupied. *)
            let usage, usage_scope =
-             match turn.usage with
-             | Some (Runtime_claude_code.Latest_request usage) ->
-               Some (api_usage_of_turn_usage usage), Runtime_usage_scope.Per_request
-             | Some (Runtime_claude_code.Turn_total usage) ->
-               Some (api_usage_of_turn_usage usage), Runtime_usage_scope.Turn_total
+             match turn.usage.turn_total with
+             | Some total ->
+               Some (api_usage_of_turn_usage total), Runtime_usage_scope.Turn_total
              | None -> None, Runtime_usage_scope.Usage_scope_unavailable
+           in
+           let request_context =
+             Option.map request_context_of_request_input turn.usage.latest_request_input
            in
            let response =
              { Agent_core.Types.id = turn.turn_id
@@ -1277,6 +1352,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                ~attempt_details_source:"claude_code"
                ~agent_core_internal_runtime_allowed:false
                ~usage_scope
+               ?request_context
                ()
            in
            Ok

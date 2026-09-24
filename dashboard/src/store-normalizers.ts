@@ -293,7 +293,6 @@ export function normalizeExecutionContinuityBrief(raw: unknown): DashboardExecut
     note,
     focus,
     last_signal_at: asString(raw.last_signal_at) ?? null,
-    generation: asNumber(raw.generation),
     turn_count: asNumber(raw.turn_count),
     context_ratio: asNumber(raw.context_ratio) ?? null,
     continuity: asString(raw.continuity) ?? null,

@@ -1672,6 +1672,9 @@ let run_named
 	     range in the canonical encoding, which is what these lanes measure;
 	     the Agent Core record holds its serialized body. *)
 	  let record_official_client_continuity ~runtime_id front ~transmitted_bytes =
+	    (* Reached only for a range the lane sent: a Claude Code resume reports
+	       no front, and composing a range logs nothing. *)
+	    Keeper_official_client_host.warn_if_sent_on_unknown_start ~keeper_name front;
 	    match session_id with
 	    | None -> ()
 	    | Some trace_id ->
@@ -2634,6 +2637,7 @@ let run_named
                    | None -> Keeper_carried_front.no_seed_read)
             ; carried_front_after_refusal = (fun () -> !refused_carried_front)
             ; hold_carried_front = (fun seed -> refused_carried_front := Some seed)
+            ; restore_carried_front = (fun prior -> refused_carried_front := prior)
             ; base_path
             ; keeper_name
             ; name

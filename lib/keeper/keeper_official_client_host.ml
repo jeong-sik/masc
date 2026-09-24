@@ -324,7 +324,14 @@ let effective_reasoning_effort
   effective
 ;;
 
-let host_stop_result ~runtime_id ~model ~session_id ~turn_id ~turns_used ~latency_ms ~usage
+let host_stop_result
+      ~runtime_id
+      ~model
+      ~session_id
+      ~turn_id
+      ~turns_used
+      ~latency_ms
+      ~request_context
     stop =
   match stop with
   | Terminal_tool_boundary
@@ -346,7 +353,7 @@ let host_stop_result ~runtime_id ~model ~session_id ~turn_id ~turns_used ~latenc
       ; model
       ; stop_reason = Agent_core.Types.EndTurn
       ; content = []
-      ; usage
+      ; usage = None
       ; telemetry =
           Some
             { Agent_core.Types.default_inference_telemetry with
@@ -386,10 +393,8 @@ let host_stop_result ~runtime_id ~model ~session_id ~turn_id ~turns_used ~latenc
         ~capture
         ~attempt_details_source:"official_client_host_stop"
         ~agent_core_internal_runtime_allowed:false
-        ~usage_scope:
-          (match usage with
-           | Some _ -> Runtime_usage_scope.Per_request
-           | None -> Runtime_usage_scope.Usage_scope_unavailable)
+        ~usage_scope:Runtime_usage_scope.Usage_scope_unavailable
+        ?request_context
         ()
     in
     Ok
@@ -489,6 +494,13 @@ let carried_start_front_to_string = function
      ([Keeper_carried_front.origin_to_string]), so one search finds both. *)
   | Librarian_snapshot _ -> "librarian_snapshot"
   | Librarian_progress _ -> "librarian_progress"
+;;
+
+let warn_if_sent_on_unknown_start ~keeper_name = function
+  | Turn_start_unknown { reason } ->
+    Keeper_carried_front.warn_range_opens_on_newest_atom ~keeper_name ~reason
+  | Carried_seed _ | Lane_cut | Turn_start | Librarian_snapshot _ | Librarian_progress _ ->
+    ()
 ;;
 
 let continuity_observation_input ~trace_id ~continuity front =

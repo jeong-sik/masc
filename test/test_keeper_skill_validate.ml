@@ -55,6 +55,48 @@ value = {}
 |} tool
 ;;
 
+(* #37493: the Keeper model reads a tool result only after
+   [Tool_bridge.to_agent_core_typed_result] projects it with the workspace
+   base_path. Calling the runtime handler alone never reached that projection,
+   so a result the projection refused still passed here. Every call below now
+   crosses it: success must stay an inline verdict and a rejection must reach
+   the model as its own error code, never as a storage failure. *)
+let model_sees_verdict ~base_path (result : Keeper_tool_execution.t) data =
+  let tool_name = "keeper_skill_validate" in
+  let start_time = Unix.gettimeofday () in
+  let typed =
+    match result.Keeper_tool_execution.disposition with
+    | Tool_result.Completed () -> Tool_result.make_ok ~tool_name ~start_time ~data ()
+    | Tool_result.Failed class_ ->
+      Tool_result.make_err ~tool_name ~class_ ~start_time ~data
+        ~effect_disposition:result.Keeper_tool_execution.failure_effect_disposition
+        result.Keeper_tool_execution.raw_output
+    | Tool_result.Deferred () -> fail "static validation never defers"
+  in
+  let storage_failure = "tool output artifact storage failed" in
+  let contains text needle =
+    let n = String.length needle and t = String.length text in
+    let rec go i = i + n <= t && (String.sub text i n = needle || go (i + 1)) in
+    go 0
+  in
+  match
+    Tool_bridge.to_agent_core_typed_result ~base_path typed,
+    result.Keeper_tool_execution.disposition
+  with
+  | Ok { content; _ }, Tool_result.Completed () ->
+    check bool "verdict is not replaced by a blob marker" false (Tool_output.is_marker content);
+    check bool "model reads ok=true inline" true (contains content {|"ok":true|})
+  | Ok _, (Tool_result.Failed _ | Tool_result.Deferred ()) ->
+    fail "a failed validation projected as success"
+  | Error { message; _ }, Tool_result.Completed () ->
+    check string "a completed validation reaches the model" "" message
+  | Error { message; _ }, (Tool_result.Failed _ | Tool_result.Deferred ()) ->
+    check bool "a rejection is not reported as a storage failure" false
+      (String.equal message storage_failure);
+    let code = Yojson.Safe.Util.(member "error" data |> to_string) in
+    check bool "model reads the rejection code" true (contains message code)
+;;
+
 let with_fixture f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -125,6 +167,7 @@ let with_fixture f =
         let data = match result.data with Some data -> data | None -> fail "missing typed result" in
         check bool "no published reference is fabricated" true
           (Yojson.Safe.Util.member "reference" data = `Null);
+        model_sees_verdict ~base_path result data;
         result, data
       in
       f artifact call)
@@ -146,7 +189,16 @@ let failed code (result, data) =
 let valid kind artifact (result, data) =
   check bool "completed static validation" true
     (result.Keeper_tool_execution.disposition = Tool_result.Completed ());
-  check bool "exact verified artifact" true (Yojson.Safe.Util.member "artifact" data = artifact);
+  let blob = Yojson.Safe.Util.(artifact |> member "blob" |> member "_blob") in
+  let source = Yojson.Safe.Util.member "source" data in
+  check string "verdict names the exact source digest"
+    Yojson.Safe.Util.(member "sha256" blob |> to_string)
+    Yojson.Safe.Util.(member "sha256" source |> to_string);
+  check int "verdict names the exact source size"
+    Yojson.Safe.Util.(member "bytes" blob |> to_int)
+    Yojson.Safe.Util.(member "bytes" source |> to_int);
+  check bool "no artifact reference is echoed" true
+    (Yojson.Safe.Util.member "artifact" data = `Null);
   check string "static only" "static" (string_field "validation" data);
   check string "kind" kind (string_field "kind" data);
   check string "package identity" "proposed" (string_field "package_id" data);

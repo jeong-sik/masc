@@ -8,7 +8,6 @@ import {
   createKeeperPresenceStore,
   disconnectedSnapshot,
   globalPresenceSnapshot,
-  LOADING_SNAPSHOT,
   normalizeKeeperPresenceSnapshot,
   type KeeperPresenceEntry,
   type KeeperPresenceSnapshot,
@@ -130,18 +129,44 @@ function presenceHeader(snap: KeeperPresenceSnapshot) {
   `
 }
 
-export function IdePresenceStrip({ compact = false }: { readonly compact?: boolean } = {}) {
-  const presenceStore = useMemo(() => createKeeperPresenceStore(LOADING_SNAPSHOT), [])
+/** How often the strip re-reads presence when the shell gives no cadence. */
+const DEFAULT_PRESENCE_POLL_MS = 10_000
+
+/**
+ * The strip is mounted unconditionally in the IDE shell header, so it owns
+ * the presence fetch for the whole IDE: every read lands in
+ * {@link globalPresenceSnapshot}, which the interject pill, the activity
+ * lens, the conversation rail, the persistence map and the editor read.
+ * A snapshot kept only in this component's store left all of those on
+ * `loading` for the life of the page.
+ */
+export function IdePresenceStrip({
+  compact = false,
+  pollMs = DEFAULT_PRESENCE_POLL_MS,
+}: { readonly compact?: boolean; readonly pollMs?: number } = {}) {
+  const presenceStore = useMemo(() => createKeeperPresenceStore(globalPresenceSnapshot.value), [])
 
   useEffect(() => {
     let cancelled = false
-    fetchPresence().then(snapshot => {
-      if (!cancelled) {
-        presenceStore.seed(snapshot)
+    let inFlight = false
+    const refresh = async () => {
+      // A slow server must not stack reads; the next tick picks it up.
+      if (inFlight) return
+      inFlight = true
+      try {
+        const snapshot = await fetchPresence()
+        if (!cancelled) globalPresenceSnapshot.value = snapshot
+      } finally {
+        inFlight = false
       }
-    })
-    return () => { cancelled = true }
-  }, [presenceStore])
+    }
+    void refresh()
+    const timer = window.setInterval(() => { void refresh() }, pollMs)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [pollMs])
 
   useEffect(() => {
     const unsub = globalPresenceSnapshot.subscribe(() => {

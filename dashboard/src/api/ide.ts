@@ -36,7 +36,8 @@ export interface IdeToolEvent extends IdeBridgeEventBase {
   readonly outcome: string
   readonly typed_outcome: string
   readonly latency_ms: number
-  readonly summary: string
+  /** Leading bytes of the tool's output; null when the tool produced none. */
+  readonly summary: string | null
   readonly file_path: string | null
 }
 
@@ -148,8 +149,12 @@ function parseIdeBridgeEvent(raw: unknown): IdeBridgeEvent | null {
     const outcome = stringField(raw, 'outcome')
     const typedOutcome = stringField(raw, 'typed_outcome')
     const latencyMs = numberField(raw, 'latency_ms')
+    // The server writes the tool's output head verbatim, so a tool that
+    // printed nothing arrives as "". That is a fact about the call, not a
+    // malformed row; only a missing or non-string field is.
+    if (typeof raw.summary !== 'string') return null
     const summary = stringField(raw, 'summary')
-    if (!toolName || !outcome || !typedOutcome || latencyMs === null || !summary) return null
+    if (!toolName || !outcome || !typedOutcome || latencyMs === null) return null
     return {
       type,
       keeper_id: keeperId,

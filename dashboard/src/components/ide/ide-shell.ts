@@ -1083,7 +1083,7 @@ export function IdeShell() {
             />
           </div>
         </details>
-        <${IdePresenceStrip} compact=${true} />
+        <${IdePresenceStrip} compact=${true} pollMs=${IDE_ACTIVITY_POLL_MS} />
         <button
           type="button"
           class="ide-v2-action ide-v2-rail-toggle"

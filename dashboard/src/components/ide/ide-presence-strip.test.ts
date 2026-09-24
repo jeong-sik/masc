@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { h, render } from 'preact'
+import { waitFor } from '@testing-library/preact'
+import { globalPresenceSnapshot, LOADING_SNAPSHOT } from './keeper-presence-store'
 import {
+  IdePresenceStrip,
   agentsToPresence,
   prLabel,
   unwrapEnvelope,
@@ -109,5 +113,80 @@ describe('prLabel', () => {
 
   it('falls back to plain "#N" when state is null', () => {
     expect(prLabel(7, null)).toBe('#7')
+  })
+})
+
+describe('IdePresenceStrip', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    globalPresenceSnapshot.value = LOADING_SNAPSHOT
+  })
+
+  function presencePayload(status: 'active' | 'idle') {
+    return {
+      ok: true,
+      data: {
+        runtime_id: 'masc-local',
+        branch: 'main',
+        entries: [{
+          keeper_id: 'sangsu',
+          workspace_label: 'masc',
+          role: 'keeper',
+          status,
+          last_seen_ms: 1_000,
+        }],
+      },
+    }
+  }
+
+  // The interject pill, activity lens, conversation rail, persistence map
+  // and editor all read globalPresenceSnapshot. The strip is the one
+  // always-mounted reader of /api/v1/ide/presence, so if it keeps what it
+  // read to itself every one of those surfaces stays on `loading`.
+  it('publishes the presence it reads and re-reads it on the poll cadence', async () => {
+    vi.useFakeTimers()
+    const statuses: Array<'active' | 'idle'> = ['active', 'idle']
+    let call = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/v1/ide/presence')) {
+        const status = statuses[Math.min(call, statuses.length - 1)]!
+        call += 1
+        return new Response(JSON.stringify(presencePayload(status)), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ ok: true, data: {} }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const container = document.createElement('div')
+    render(h(IdePresenceStrip, { compact: true, pollMs: 1_000 }), container)
+
+    await vi.waitFor(() => {
+      const snap = globalPresenceSnapshot.value
+      expect(snap.kind).toBe('live')
+      if (snap.kind === 'live') expect(snap.entries[0]?.status).toBe('active')
+    })
+    await waitFor(() => {
+      expect(container.querySelector('[data-state="live"]')).not.toBeNull()
+    })
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => {
+      const snap = globalPresenceSnapshot.value
+      if (snap.kind !== 'live') throw new Error('presence is not live')
+      expect(snap.entries[0]?.status).toBe('idle')
+    })
+
+    render(null, container)
+    const callsAtUnmount = call
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(call).toBe(callsAtUnmount)
   })
 })

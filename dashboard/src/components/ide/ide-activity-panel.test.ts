@@ -471,7 +471,7 @@ describe('IdeActivityPanel', () => {
       file_path: 'lib/runtime.ml',
       surface: 'Log',
       keeper_id: 'sangsu',
-      source_id: 'ide-tool-turn-bridge-500-0',
+      source_id: 'ide-tool-sangsu-turn-bridge-500-execute-lib/runtime.ml',
     })
   })
 

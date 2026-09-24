@@ -14,8 +14,9 @@ masc TUI 는 색 스킴 53개를 함께 배포한다. 전부 `config/themes/` �
 값이 아니라 클래식 UI(노턴 커맨더, MSX, PC Tools/Turbo Vision, CGA)의 디자인을
 masc 가 직접 base16 으로 옮긴 것이라 다른 사람의 라이선스 조항이 붙지 않는다.
 번들 전에 `test_tui_theme_contrast` 의 가독성 계약을 독립 계측(python3 이식판,
-상수는 masc_tui_color.ml 에서 그대로)으로 통과시켰고, 계측 원문은
-`artifacts/evidence/task-1343-contrast-receipts.json` 에 남는다.
+상수는 masc_tui_color.ml 에서 그대로)으로 통과시켰다. 계측 원문은 git 이 무시하는
+`artifacts/` 아래 실행 산출물이라 저장소에는 남지 않고, 지속하는 증거는 계약
+테스트 쪽이다.
 
 `LICENSE-AUDIT-2026-04.md` 가 "의존성 license 인벤토리 | 미점검" 으로 남겨둔 항목 중
 색 스킴 부분에 해당한다.

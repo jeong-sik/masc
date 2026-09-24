@@ -633,6 +633,11 @@ let test_checkpoint_load_error_projection_is_total () =
     ~kind:"parse_error"
     ~detail:(Some "invalid checkpoint");
   check_checkpoint_error_projection
+    (Store.Newer_version { expected = 2; got = 3 })
+    ~status:"unavailable"
+    ~kind:"parse_error"
+    ~detail:(Some "version mismatch: expected 2, got 3");
+  check_checkpoint_error_projection
     (Store.Io_error "permission denied")
     ~status:"unavailable"
     ~kind:"io_error"
@@ -662,6 +667,7 @@ let test_checkpoint_load_error_projection_is_always_an_object () =
     [ Store.Not_found;
       Store.Store_error "store unavailable";
       Store.Parse_error "invalid checkpoint";
+      Store.Newer_version { expected = 2; got = 3 };
       Store.Io_error "permission denied";
       Store.Agent_core_error "agent core failure";
     ]

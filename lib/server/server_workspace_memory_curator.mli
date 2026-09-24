@@ -9,7 +9,6 @@ type refresh = Queued | No_owner | Unavailable of string
 
 val request : base_path:string -> refresh
 
-val lane_id : string
 val output_schema : Yojson.Safe.t
 
 module For_testing : sig

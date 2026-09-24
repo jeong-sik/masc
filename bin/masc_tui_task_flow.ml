@@ -93,7 +93,13 @@ let finalize_days ~today_index days =
       d_completed = raw.rd_completed;
       d_cancelled = raw.rd_cancelled })
 
-let of_tasks ~now tasks =
+module StringSet = Set.Make (String)
+
+type source =
+  | Live
+  | Archived
+
+let of_tasks ~now ~archived tasks =
   let window_started_at = now -. (24. *. 60. *. 60.) in
   let empty =
     { observed_at = now; window_started_at;
@@ -120,9 +126,26 @@ let of_tasks ~now tasks =
     if index < oldest_index || index > today_index then days
     else bump index quiet_day days f
   in
+  (* [masc_gc] moves finished tasks out of the backlog into the archive. They
+     still happened on the days they happened, so the windows count them.
+     The current counts and the assignee rows stay the backlog's: they
+     describe what is on the board now. A task the GC put back into the
+     backlog but left in the archive is counted once, as live. *)
+  let live_ids =
+    List.fold_left
+      (fun ids (task : Masc_domain.task) -> StringSet.add task.id ids)
+      StringSet.empty tasks
+  in
+  let sourced =
+    List.map (fun task -> Live, task) tasks
+    @ List.filter_map
+        (fun (task : Masc_domain.task) ->
+          if StringSet.mem task.id live_ids then None else Some (Archived, task))
+        archived
+  in
   let state, assignees, days =
     List.fold_left
-      (fun (state, assignees, days) (task : Masc_domain.task) ->
+      (fun (state, assignees, days) (source, (task : Masc_domain.task)) ->
         let state, created_at = parse state task.created_at in
         let state =
           if recent created_at then
@@ -153,7 +176,11 @@ let of_tasks ~now tasks =
             { state.current with cancelled = state.current.cancelled + 1 },
             Some (`Cancelled, cancelled_at), None
         in
-        let state = { state with current = count } in
+        let state, who =
+          match source with
+          | Live -> { state with current = count }, who
+          | Archived -> state, None
+        in
         let state, terminal_at =
           match terminal with
           | Some (_, text) -> parse state text
@@ -206,7 +233,7 @@ let of_tasks ~now tasks =
             { state with oldest_open_created_at = oldest }
         in
         state, assignees, days)
-      (empty, [], []) tasks
+      (empty, [], []) sourced
   in
   { state with
     by_assignee = finalize_assignees assignees;

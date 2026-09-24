@@ -624,7 +624,12 @@ let test_tick_stamps_wakes_from_clock_and_anchors_recurrence_on_now () =
     tick_ok config ~now:201.0 ~clock ~consumer:(accepting_consumer calls)
   in
   check int "one dispatch" 1 (List.length result.dispatches);
-  check int "clock read once to start and once to finish" 2 !readings;
+  (* #38411: the tick reads the clock once when it has decided what to hold,
+     before any dispatch, and each attempt reads it to start and to finish. *)
+  check int "clock read for the hold decision, then to start and to finish" 3
+    !readings;
+  check (float 0.001) "the hold decision is its own reading, before the dispatch"
+    300.5 result.held_at;
   (match Schedule_store.get_schedule config ~schedule_id:accepted.schedule_id with
    | None -> fail "schedule missing after dispatch"
    | Some stored ->
@@ -638,9 +643,9 @@ let test_tick_stamps_wakes_from_clock_and_anchors_recurrence_on_now () =
    with
    | None -> fail "missing wake record"
    | Some wake ->
-     check (float 0.001) "wake started when the attempt began" 300.5 wake.started_at;
+     check (float 0.001) "wake started when the attempt began" 301.0 wake.started_at;
      check (option (float 0.001)) "wake finished when the acceptance landed"
-       (Some 301.0) wake.finished_at);
+       (Some 301.5) wake.finished_at);
   (* A terminal rejection and a retryable failure stamp their failed wake the
      same way: the clock, not the tick. *)
   let rejected =
@@ -663,9 +668,9 @@ let test_tick_stamps_wakes_from_clock_and_anchors_recurrence_on_now () =
    | Some wake ->
      check string "rejected wake failed" "failed"
        (Schedule_domain.wake_status_to_string wake.status);
-     check (float 0.001) "rejected wake started from the clock" 300.5 wake.started_at;
+     check (float 0.001) "rejected wake started from the clock" 301.0 wake.started_at;
      check (option (float 0.001)) "rejected wake finished from the clock"
-       (Some 301.0) wake.finished_at);
+       (Some 301.5) wake.finished_at);
   let retried =
     create_ok ~schedule_id:"clock-retried" config
   in
@@ -686,10 +691,11 @@ let test_tick_stamps_wakes_from_clock_and_anchors_recurrence_on_now () =
    | Some wake ->
      check string "retried wake failed" "failed"
        (Schedule_domain.wake_status_to_string wake.status);
-     check (float 0.001) "retried wake started from the clock" 300.5 wake.started_at;
+     check (float 0.001) "retried wake started from the clock" 301.0 wake.started_at;
      check (option (float 0.001)) "retried wake finished from the clock"
-       (Some 301.0) wake.finished_at);
-  check int "retry reads the clock to start and to finish" 2 !readings;
+       (Some 301.5) wake.finished_at);
+  check int "retry reads the clock for the hold decision, then to start and to finish"
+    3 !readings;
   (match Schedule_store.get_schedule config ~schedule_id:retried.schedule_id with
    | None -> fail "retried schedule missing"
    | Some stored ->
@@ -709,8 +715,8 @@ let test_tick_stamps_wakes_from_clock_and_anchors_recurrence_on_now () =
      the tick's readings against a literal 1 asserted that only one schedule
      was ever due, which is a fact about the fixtures rather than about the
      clock. *)
-  check int "a refused payload reads the clock once per attempt"
-    (List.length refused_tick.dispatches) !readings;
+  check int "a refused payload reads the clock once per attempt, after the hold decision"
+    (1 + List.length refused_tick.dispatches) !readings;
   (match
      Schedule_store.last_wake_for_schedule_instance
        (Schedule_store.read_state config)
@@ -719,9 +725,9 @@ let test_tick_stamps_wakes_from_clock_and_anchors_recurrence_on_now () =
    with
    | None -> fail "missing refused wake record"
    | Some wake ->
-     check (float 0.001) "refused wake started from the clock" 300.5 wake.started_at;
+     check (float 0.001) "refused wake started from the clock" 301.0 wake.started_at;
      check (option (float 0.001)) "refused wake finished at the same instant"
-       (Some 300.5) wake.finished_at)
+       (Some 301.0) wake.finished_at)
 ;;
 
 let test_tick_dispatches_every_recurring_occurrence () =
@@ -897,6 +903,7 @@ let test_runner_status_snapshot_tracks_liveness () =
     ; emitted = []
     ; rescheduled = 2
     ; held = []
+    ; held_at = 1.0
     ; dispatches =
         [ { occurrence_id = test_occurrence_id "status-1"
           ; schedule_id = "status-1"
@@ -965,6 +972,7 @@ let test_runner_status_snapshot_tracks_liveness () =
     ; emitted = []
     ; rescheduled = 0
     ; held = []
+    ; held_at = 2.0
     ; dispatches =
         [ { occurrence_id = test_occurrence_id "status-dispatch-failed"
           ; schedule_id = "status-dispatch-failed"

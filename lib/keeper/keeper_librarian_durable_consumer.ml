@@ -222,17 +222,19 @@ let traces_started_after ~trace_id ~current_trace_id lines =
 
    Only the version this build supersedes is that error: the file holds turns
    this build will not read, and for a retired trace no newer file replaces
-   it. The others are not passed. A parse error is an older binary reading a
-   newer workspace as often as it is damage, a store or IO failure can be a
-   disk that comes back, and an agent-core failure is neither classified here;
+   it. The others are not passed. A later version's file reads once that
+   version is deployed, a parse error can be damage an operator repairs, a
+   store or IO failure can be a disk that comes back, and an agent-core failure is neither classified here;
    a deploy or an operator makes those readable, so the pass keeps saying what
    it cannot read instead of walking past turns it could have read. *)
 let retired_checkpoint_never_becomes_readable = function
   | Keeper_checkpoint_store.Superseded_version _ -> true
   | Keeper_checkpoint_store.Not_found
+  | Keeper_checkpoint_store.Newer_version _
   | Keeper_checkpoint_store.Store_error _
   | Keeper_checkpoint_store.Parse_error _
   | Keeper_checkpoint_store.Io_error _
+  | Keeper_checkpoint_store.Read_failed _
   | Keeper_checkpoint_store.Agent_core_error _ -> false
 ;;
 

@@ -72,13 +72,18 @@ per_suite_timeout=300
 # The list is a literal, so reading it answers "what has a custom bound".
 # --self-test needs one entry it can point at a stand-in: a fixture that
 # cannot enter the custom-bound phase proves nothing about that phase. The
-# hook names one suite by its exact path and only --self-test sets it, so
-# with the variable unset this function is the production one.
+# hook names one suite by its exact path, and this function obeys it only
+# under --self-test. The mode flag is the gate, not an emptied environment:
+# the hook is read here and nowhere else, so an inherited value is ignored
+# at the one place that could act on it and no call site has to remember to
+# scrub it. A second suite holding the custom bound would double what a
+# hung suite costs, which is what the bound is for (#36343).
 suite_timeout() {
   case "$1" in
     */test_tui_keyboard_input.py) echo 600 ;;
     *)
-      if [ -n "${MASC_SELFTEST_CUSTOM_BOUND_SUITE:-}" ] \
+      if [ "${self_test_only}" = true ] \
+        && [ -n "${MASC_SELFTEST_CUSTOM_BOUND_SUITE:-}" ] \
         && [ "$1" = "${MASC_SELFTEST_CUSTOM_BOUND_SUITE}" ]; then
         echo "${MASC_SELFTEST_CUSTOM_BOUND_SECONDS:-600}"
       else
@@ -1483,6 +1488,35 @@ FAKE
   else
     echo "FAIL the custom-bound list is the walk alone when the hook is unset"
     echo "     got:  slow_py=$(suite_timeout test/test_slow_py.py) walk=$(suite_timeout test/test_tui_keyboard_input.py)"
+    failures=$((failures + 1))
+  fi
+
+  # ...and an inherited value is ignored on the pull-request path, because
+  # the one function that reads the hook obeys it only under --self-test.
+  # The first half is the splitting input: it shows the environment really
+  # does reach suite_timeout, so the second half is the mode gate doing the
+  # work and not the variable never having arrived. Both halves ask the
+  # production function with the variable set, so dropping the gate from it
+  # turns the second half red -- there is no separate call this case could
+  # pass without.
+  hook_kept=$(
+    export MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py"
+    suite_timeout test/test_slow_py.py
+  )
+  hook_ignored=$(
+    export MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py"
+    export MASC_SELFTEST_CUSTOM_BOUND_SECONDS=600
+    self_test_only=false
+    printf '%s %s' "$(suite_timeout test/test_slow_py.py)" \
+      "$(suite_timeout test/test_tui_keyboard_input.py)"
+  )
+  if [ "${hook_kept}" = "600" ] \
+    && [ "${hook_ignored}" = "${per_suite_timeout} 600" ]; then
+    echo "ok   the pull-request path ignores an inherited custom-bound hook"
+  else
+    echo "FAIL the pull-request path ignores an inherited custom-bound hook"
+    echo "     want: kept=600 ignored=\"${per_suite_timeout} 600\""
+    echo "     got:  kept=${hook_kept} ignored=\"${hook_ignored}\""
     failures=$((failures + 1))
   fi
   # Count the call instead of inferring one call from whether two-second

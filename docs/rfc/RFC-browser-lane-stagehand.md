@@ -109,10 +109,14 @@ variant 에 생성자를 더하면 컴파일러가 match 하는 곳을 짚는다
 도구 TOML 의 `lane` enum 은 테스트가 `Lane_name.of_wire` 로 읽어 본다.
 이 단계는 동작을 바꾸지 않는다.
 
-lane 값이 둘 이상이 되는 7번에서 도구 입력을 바꾼다.
-`BrowserAct` 의 `lane` 은 지금 값이 하나라 TOML 에 `default = "automation"` 이 있다. 7번에서 기본값을 없애고 필수로 한다.
-`handle_session`·`handle_goto` 는 `issue_automation` 을 직접 부른다 (`tool_misc_browser_lane.ml:141-173`).
-7번에서 두 도구에 `lane` 을 넣고 `resolve_target` 을 거친다.
+7번에서 도구 입력을 바꾼다.
+- 도구의 `lane` enum 에는 그 lane 의 backend 가 도구의 기본 동사를 받을 때만 이름을 넣는다.
+  `test_browser_lane_name` 이 `Browser_lane.verb_allowed` 로 이것을 확인한다.
+  그래서 stagehand 는 `BrowserTabs`·`BrowserSession`·`BrowserGoto` 에만 있고, `BrowserRead`·`BrowserInteract` 에는 없다.
+- `BrowserAct` 는 automation 만 받는다. 코드가 `lane` 없는 입력에 쓰는 기본값도 스키마의 기본값(automation)과 같다.
+- `BrowserSession`·`BrowserGoto` 는 `lane`(automation·stagehand, 기본 automation)을 받는다.
+  서버가 가진 lane 만 따로 읽어서 `lane:"live"` 는 입력 오류로 거절한다. live 선택 오류가 생길 길이 없다.
+- 실행기가 없을 때(`Lane_absent`) 문구는 lane 마다 필요한 설정을 말한다.
 
 ### 3.2 동사
 
@@ -166,25 +170,33 @@ ws-direct 는 조각난 메시지를 다시 합치고, `max_message` 를 호출�
 - CDP 봉투는 닫힌 타입으로 읽는다: `Reply of { id; session; result }`, `Event of { method_; session; params }`.
 - CDP 명령마다 deadline 을 둔다. 브라우저가 명령에 답하지 않는 것은 자원 경계라서다.
   deadline 이 지나면 BiDi 와 같이 연결을 끝낸다. 답을 모르는 명령 뒤에 다른 명령을 쓰지 않는다.
-- websocket 이 끊기면 기다리던 명령과 RPC 를 모두 `Runtime_lost` 로 끝낸다.
+- websocket 이 끊기면 기다리던 CDP 명령은 `Connection_lost`, 기다리던 RPC 는 `Lost` 로 끝낸다.
 
 `Stagehand_rpc` 는 그 연결 위에서 service worker 를 붙잡고 JSON-RPC 를 주고받는다.
 순서는 Go SDK 와 같다: `Extensions.loadUnpacked` → 실행 전에 계산한 id 와 비교 →
-service worker target 대기 → `Target.attachToTarget {flatten: true}` → `Runtime.enable` →
+service worker 찾기 → `Target.attachToTarget {flatten: true}` → `Runtime.enable` →
 `Runtime.addBinding` → 준비 표식 확인 → `stagehand.init`.
+
+- service worker 는 로드한 뒤 `Target.getTargets` 를 0.1초마다 불러 찾는다. 확장 origin
+  (`chrome-extension://<id>`, `Uri` 의 scheme·host 로 비교)에서 뜬 service worker 만 받는다.
+  `targetCreated` 를 기다리면 이전 로드의 worker 를 잡을 수 있어서다. 기다리는 시간은 `worker_wait_s` 로 끝이 있다.
+- `init` 이 답하기 전(`Initialising`)에는 `init` 말고 다른 호출을 받지 않는다.
+- attach 가 어느 단계에서 실패하든 세션은 끝난다. 확장이 이미 올라갔거나 `init` 을 보냈을 수 있어서 다시 attach 하지 않는다.
 
 ```ocaml
 type extension_request =
-  | Llm_generate of { id : Jsonrpc_id.t; params : Yojson.Safe.t }
-  | Unsupported of { id : Jsonrpc_id.t; method_ : string }
+  | Llm_generate of { id : id; params : Yojson.Safe.t }
+  | Unsupported_request of { id : id; method_ : string }
 
 type extension_notification =
-  | Log of Stagehand_log.t
-  | Page_event of Yojson.Safe.t
+  | Log of Yojson.Safe.t option
+  | Page_event of Yojson.Safe.t option
+  | Unsupported_notification of { method_ : string }
 ```
 
 - `Llm_generate.params` 는 이 단계에서 JSON 으로 두고, §3.6 에서 경계를 넘을 때 타입으로 읽는다.
-- `Unsupported` 는 JSON-RPC `-32601` 로 답하고 로그를 남긴다. 조용히 넘기지 않는다.
+- `Unsupported_request` 는 JSON-RPC `-32601` 로 답하고 로그를 남긴다. 조용히 넘기지 않는다.
+- 알림의 `params` 가 없으면 없다고 둔다. `llm.generate` 에 `params` 가 없으면 잘못된 메시지다.
 - 준비 표식의 `protocolVersion` major 가 클라이언트가 구현한 major 와 다르면
   `Runtime_incompatible { found; supported }` 로 세션 열기를 실패시킨다.
   이 major 는 코드가 구현한 프로토콜이라 코드에 둔다. 설치 버전과는 다른 값이다.
@@ -192,10 +204,8 @@ type extension_notification =
   허용한 origin 이 틀리면 `init` 이 뒤에서 알 수 없는 이유로 실패하기 때문이다.
 
 MV3 service worker 는 멈췄다 다시 뜰 수 있다.
-service worker target 이 떨어지면 다시 붙고, 준비 표식을 확인하고, `stagehand.init` 을 다시 부른다.
-확장 안의 상태는 사라지지만 page 는 브라우저에 남으므로 `page_id` 표는 그대로 쓴다.
-그 사이 기다리던 RPC 는 `Runtime_lost` 로 끝난다.
-Go SDK 의 wake page(`wake-service-worker.html`) 처리도 같이 옮긴다.
+service worker 가 떨어지면 나가 있던 호출은 `Lost` 로 끝나고, 세션은 뒤의 호출을 `Detached` 로 거절한다.
+backend 의 status 가 그 이유를 보여준다. 세션을 닫고 다시 열면 새 브라우저와 새 tab 번호로 시작한다.
 
 ### 3.4 동시성과 수명
 
@@ -214,6 +224,10 @@ Go SDK 의 wake page(`wake-service-worker.html`) 처리도 같이 옮긴다.
   - `Abandoned` 동안 온 `llm.generate` 는 거절한다. 도구가 이미 실패를 알린 뒤에 클릭이 일어나지 않게 하려는 것이다.
     버려진 호출의 응답이 오면 `Idle` 로 돌아간다. 그전의 새 호출은 `Rejected_before_effect` 다.
   - `Idle` 에서 온 `llm.generate` 는 주인이 없으므로 거절하고 로그를 남긴다.
+- 세션은 backend 가 가진다 (`Browser_stagehand_backend`). 도구는 요청을 stream 에 넣고 답을 기다린다.
+  요청은 backend switch 의 fiber 에서 처리되므로, 도구가 어느 fiber·domain 에서 돌든 세션 상태는 한 domain 에서만 바뀐다.
+  도구가 떠나면 그 도구가 부탁한 page 동사만 취소되고, 세션은 그 호출을 `Abandoned` 로 든다.
+  open 과 close 는 도구가 떠나도 끝까지 한다. close 는 `stagehand.close` 답을 5초까지만 기다리고 브라우저를 멈춘다.
 - `llm.generate` 처리기는 호출 순서를 지키는 잠금을 잡지 않는다. 상태만 읽는다.
   잡으면 `act` 가 자기 LLM 답을 기다리며 서로 막힌다.
   `extract` 는 `llm.generate` 두 개를 동시에 보내므로 요청마다 fiber 를 따로 띄운다.
@@ -306,11 +320,12 @@ slot 목록과 failover 는 기존 lane 과 같이 운영자가 정한다.
 
 ### 3.8 Keeper 도구
 
-- 기존 `BrowserTabs`·`BrowserRead`·`BrowserInteract`·`BrowserAct` 의 `lane` enum 에 `stagehand` 를 더한다.
-  `BrowserSession`·`BrowserGoto` 에는 `lane` 을 새로 넣는다 (§3.1).
+- `lane` enum 은 §3.1 의 규칙을 따른다.
 - 새 도구 `BrowserInstruct` (`config/tools/masc_browser_instruct.toml`) 를 더한다.
-  입력은 `action = act | observe | extract`, `instruction`, `schema`(extract), `tab` 이다. lane 은 stagehand 로 고정이다.
-  결과는 Stagehand 의 `data` 와 `metadata`(usage, cache 상태, 내부 LLM 호출 수, 걸린 시간)다.
+  입력은 `action = act | observe | extract`, `instruction`, `tabId`, `schema`(extract) 다. lane 은 stagehand 로 고정이다.
+  `schema` 는 JSON Schema **문자열**로 받는다. 모양이 정해지지 않은 object 매개변수는 provider 마다 strict 스키마에서 거절될 수 있어서다.
+  결과는 Stagehand 의 `data` 와 `metadata`(usage, cache 상태 등)와 `tabId` 다.
+  실패한 act 는 이미 동작했을 수 있어 결과 모름으로, observe·extract 는 읽기라 효과 전으로 답한다.
 
 `BrowserAct` 에 넣지 않는 이유가 있다. `BrowserAct` 의 action 은 모두 구조화된 동작이다.
 문장과 스키마를 받는 입력을 섞으면 그 enum 의 뜻이 흐려진다.
@@ -360,7 +375,7 @@ TUI 브라우저 패널은 source 에 `stagehand` 를 그린다.
 - `llm.generate` 연결은 테스트 안에서 만든 exact-output 응답기로 돈다. 이 응답기는 `test/` 에만 있다.
   `Runtime.exact_lane` 에 stub 생성자를 두지 않으므로 운영 설정이 그것을 고를 수 없다.
 - 확인할 것: provider 실패와 JSON 문법 실패가 typed 오류로 오는지,
-  `Abandoned` 동안 온 `llm.generate` 가 거절되는지, service worker 가 떨어졌을 때 `Runtime_lost` 와 재연결이 되는지,
+  `Abandoned` 동안 온 `llm.generate` 가 거절되는지, service worker 가 떨어졌을 때 나가 있던 호출이 `Lost` 이고 뒤 호출이 `Detached` 인지,
   받지 않는 동사가 target 마다 `Rejected_before_effect` 로 오는지.
 
 ### 6.2 실제 브라우저 증명
@@ -395,12 +410,16 @@ Firefox 와 Chromium 은 로그인 세션을 나눠 쓸 수 없다.
 1. 이 RFC 와 실측 증거.
 2. lane 이름을 읽는 곳을 `Browser_lane.Lane_name` 하나로 모은다. 동작은 바꾸지 않는다.
 3. AGENT_CORE: `Exact_output.success` 에 typed usage 를 담는다.
-4. `Browser_cdp`, `Stagehand_rpc` (`ws-direct`, 닫힌 봉투·메시지 타입, `call_state`, 가짜 transport 테스트).
-5. `Browser_configuration` 변경, `[browser.stagehand]`, 확장 설치 스크립트, `server_browser_stagehand` 실행과 정리.
-6. `Runtime.exact_lane.Browser_stagehand`, lane 선언, system prompt admission, `llm.generate` 연결.
-7. `Browser_lane.Stagehand` target, 기존 동사 연결, surface·TUI source,
-   `BrowserSession`·`BrowserGoto` 의 `lane`, `BrowserAct` 기본값 제거, `BrowserInstruct` 도구, 문서
-   (`docs-site` browser-lanes 가이드, `skills/browser-lanes`).
+4. `Browser_cdp`(#38668), Stagehand 세션(#38676): `ws-direct`, 닫힌 봉투·메시지 타입, `call_state`, 가짜 transport 테스트.
+5. `Browser_configuration` 변경과 확장 설치 스크립트(#38684), `server_browser_stagehand` 실행과 정리(#38686).
+6. `Runtime.exact_lane.Browser_stagehand`, lane 선언, system prompt admission, `llm.generate` 연결(#38708).
+7. 나눠서 쌓는다.
+   - `Browser_lane.Stagehand` target, 동사, surface·TUI source, `BrowserSession`·`BrowserGoto` 의 `lane`(#38697)
+   - 동사를 Stagehand 호출로 바꾸는 실행기와 tab 번호 표(#38720)
+   - 세션을 가지는 backend(#38736), 서버가 뜰 때 설치(#38739)
+   - `BrowserInstruct` 도구(#38747), 문서(#38752)
+   - TUI 에서 stagehand 로 바꾸는 키
+   - `Page_read`·`Page_scene`·`Page_elements`·`Page_interact` 를 `page.evaluate` 등으로 연결하고 `BrowserRead`·`BrowserInteract` 에 stagehand 를 연다
 8. CI 실제 브라우저 증명, §6.3 비교 실험 증거.
 
 ## 8. 열린 질문
@@ -409,3 +428,4 @@ Firefox 와 Chromium 은 로그인 세션을 나눠 쓸 수 없다.
 - branded Chrome 이 `Extensions.loadUnpacked` 를 앞으로도 받을지.
   branded Chrome 은 137 부터 `--load-extension` 을 막았다. 설정은 어떤 Chrome 경로든 받고, CI 는 Chrome for Testing 을 쓴다.
 - Docker·microVM Keeper 에서 이 포트에 닿는지 (§4).
+- MV3 service worker 가 실제 사용 중 얼마나 자주 멈추는지. 자주 멈추면 세션을 닫지 않고 다시 붙는 처리가 필요하다.

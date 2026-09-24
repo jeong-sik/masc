@@ -151,7 +151,7 @@ let make_meta name : KMC.keeper_meta =
 
    Both HTTP providers declare [exact-body-timeout-s]: the first-run and
    exact-lane writers below put their runtimes in exact-output slots, and a
-   slot whose provider declares none does not load (#38779). *)
+   save adding a slot whose provider declares none is refused (#38779). *)
 let runtime_config =
   {|
 [runtime]
@@ -1036,8 +1036,8 @@ let test_first_run_writes_the_exact_deadline_on_a_provider_without_one () =
      with
      | None -> Alcotest.fail "setup dropped the provider"
      | Some provider ->
-       Alcotest.(check bool) "setup declared the exact body deadline" true
-         (Option.is_some provider.exact_body_timeout_s))
+       Alcotest.(check (option (float 0.0))) "setup declared the value a new connection gets"
+         (Some 1200.0) provider.exact_body_timeout_s)
 ;;
 
 let test_first_run_cli_runtime_binds_supporting_lanes () =

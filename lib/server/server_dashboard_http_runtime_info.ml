@@ -2135,7 +2135,7 @@ let runtime_inventory_json () =
     ; "config_path", Json_util.string_opt_to_json (Runtime.config_path ())
     ; ( "startup_degradation"
       , Runtime.startup_degradation_to_yojson
-         ~exact_slot_body_deadline_gaps:(Runtime.exact_slot_body_deadline_gaps ())
+         ~exact_slots:(Runtime.exact_slot_degradation ())
          (Runtime.startup_degradation ()) )
     ; ( "summary"
       , `Assoc

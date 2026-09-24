@@ -240,6 +240,13 @@ type exact_slot_body_deadline_gap =
     HTTP runtime whose provider declares no [exact-body-timeout-s] (rule 3,
     #38779). Not collected under {!Replacement_catalog_targets}. *)
 
+type exact_slot_degradation =
+  { gaps : exact_slot_body_deadline_gap list
+  ; emptied_lane_ids : string list
+        (** Lanes whose every slot is a gap and that declare no cli_slots.
+            Each is unavailable on its own; the other lanes still publish. *)
+  }
+
 val exact_slot_body_deadline_gap_to_string : exact_slot_body_deadline_gap -> string
 (** One line naming the lane table, the slot, the provider and the key to add. *)
 
@@ -263,10 +270,11 @@ type load_failure =
       ; declared_model : string
       }
   | Exact_slot_body_deadlines_absent of exact_slot_body_deadline_gap list
-      (** Every exact-output slot whose HTTP provider declares no
-          [exact-body-timeout-s]. Only a save refuses with it; a load keeps
-          the same list as degraded state ({!exact_slot_body_deadline_gaps})
-          and the exact-output registry leaves those slots out. *)
+      (** The exact-output slots a save would add on an HTTP provider that
+          declares no [exact-body-timeout-s], compared with the file on disk.
+          A gap the file already has does not refuse the save; a load keeps
+          every gap as degraded state ({!exact_slot_degradation}) and the
+          exact-output registry leaves those slots out. *)
   | Context_marks_exceed_max_context of
       { runtime_id : string
       ; high_water_tokens : int
@@ -365,13 +373,14 @@ type strict_init_error =
 val strict_init_error_to_string : strict_init_error -> string
 val startup_degradation_to_string : startup_degradation -> string
 val startup_degradation_to_yojson :
-  exact_slot_body_deadline_gaps:exact_slot_body_deadline_gap list ->
+  exact_slots:exact_slot_degradation ->
   startup_degradation option ->
   Yojson.Safe.t
 (** The one startup report health, the runtime inventory and the dashboard
     read. Catalog-missing bindings and exact slots without a body deadline
-    both make it [degraded]; [exact_slot_body_deadline_gaps] is listed in
-    every shape. *)
+    both make it [degraded]; the gaps and the lanes they empty are listed in
+    every shape, and [status_reasons]/[operator_action_reasons] name every
+    cause present. *)
 
 val load_list :
   config_path:string
@@ -468,6 +477,9 @@ val get_runtimes : unit -> t list
 val get_runtime_ids : unit -> string list
 val startup_degradation : unit -> startup_degradation option
 val startup_degraded : unit -> bool
+
+val exact_slot_degradation : unit -> exact_slot_degradation
+(** The gaps of the loaded file and the lanes they empty. *)
 
 val exact_slot_body_deadline_gaps : unit -> exact_slot_body_deadline_gap list
 (** The exact slots the loaded file declares on a provider without

@@ -174,14 +174,22 @@ let contains ~needle haystack =
   in
   n = 0 || scan 0
 
+let expected_lane_ids =
+  List.sort_uniq String.compare
+    (lane_id :: Server_runtime_bootstrap.mandatory_exact_output_lane_ids)
+
+let lane_unavailable registry lane =
+  match Registry.resolve_lane registry ~lane_id:lane with
+  | Error (Registry.No_admitted_lane_slots _) -> true
+  | Error (Registry.Exact_lane_unconfigured _) | Ok _ -> false
+
 (* A connect deadline ends at the response headers, so a provider that
    declares only [connect-timeout-s] would read the Exact body with no
    deadline (#36979). Boot loads the file anyway and records the slot as left
-   out, naming it and its provider (#38779). Every lane here names only that
-   slot, so leaving it out empties the mandatory lanes, and the registry is
-   not published: the rule the server already has for a mandatory lane with
-   no usable slot ([Runtime_exact_output_registry.validate_required_lanes],
-   caught at boot as "Exact-output authority unavailable"). *)
+   out of every lane, naming it and its provider (#38779). Every lane here
+   names only that slot and no cli_slots, so each is emptied: each is
+   unavailable on its own, and the registry still publishes because an
+   emptied mandatory lane is not required at publication. *)
 let test_connect_only_declaration_is_left_out_at_boot () =
   with_runtime_root @@ fun ~root _load ->
   let path = Filename.concat root "runtime.toml" in
@@ -189,25 +197,109 @@ let test_connect_only_declaration_is_left_out_at_boot () =
   (match Runtime.init_default ~config_path:path with
    | Ok () -> ()
    | Error detail -> failf "boot must not refuse a connect-only provider: %s" detail);
-  let gaps = Runtime.exact_slot_body_deadline_gaps () in
-  check bool "every lane's slot is recorded as left out" true (gaps <> []);
+  let degradation = Runtime.exact_slot_degradation () in
+  check (list string) "one gap per lane"
+    expected_lane_ids
+    (List.sort String.compare
+       (List.map (fun (gap : Runtime.exact_slot_body_deadline_gap) -> gap.lane_id)
+          degradation.gaps));
   List.iter
     (fun (gap : Runtime.exact_slot_body_deadline_gap) ->
        check string "the record names the slot" "openai-responses.probe" gap.slot_id;
        check string "the record names the provider" "openai-responses" gap.provider_id)
-    gaps;
-  (match
-     Server_runtime_bootstrap.For_testing.configure_exact_output_registry
-       ~config_root:(Filename.dirname path)
-       ()
-   with
-   | () -> fail "mandatory lanes emptied by rule 3 were published"
-   | exception Env_config_core.Config_error detail ->
-     check bool "publication stops at a mandatory lane with no admitted target" true
-       (contains ~needle:"has no admitted target" detail));
-  match Registry.current () with
-  | Error Registry.Registry_not_published -> ()
-  | Error _ | Ok _ -> fail "the registry must stay unpublished"
+    degradation.gaps;
+  check (list string) "every lane is emptied" expected_lane_ids
+    (List.sort String.compare degradation.emptied_lane_ids);
+  Server_runtime_bootstrap.For_testing.configure_exact_output_registry ~config_root:root ();
+  let registry = Registry.current () |> require_ok "the registry still publishes" in
+  List.iter
+    (fun lane ->
+       check bool (lane ^ " is unavailable on its own") true (lane_unavailable registry lane))
+    expected_lane_ids
+
+(* One mandatory lane is all gaps with no cli_slots, the other mandatory lane
+   has a keyed slot, and the Librarian lane has one of each. The registry
+   publishes; the keyed lane works; the emptied lane alone is unavailable and
+   reported; the mixed lane admits the keyed slot and drops the gap slot. *)
+let mixed_runtime_toml ~emptied ~keyed =
+  Printf.sprintf {|[runtime]
+default = "openai-responses.probe"
+
+[runtime.exact_output_lanes.%s]
+slots = ["nodeadline.other"]
+max_output_tokens = 4096
+
+[runtime.exact_output_lanes.%s]
+slots = ["openai-responses.probe"]
+max_output_tokens = 4096
+
+[runtime.exact_output_lanes.%s]
+slots = ["nodeadline.other", "openai-responses.probe"]
+max_output_tokens = 4096
+
+[providers.openai-responses]
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.com"
+%s = 91.5
+[providers.openai-responses.credentials]
+type = "env"
+key = "OPENAI_API_KEY"
+[models.probe]
+api-name = "gpt-5.6-luna"
+[openai-responses.probe]
+
+[providers.nodeadline]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9/v1"
+[models.other]
+api-name = "no-deadline-model"
+max-context = 8192
+[nodeadline.other]
+|}
+    emptied
+    keyed
+    lane_id
+    Runtime_schema.exact_body_timeout_s_key
+
+let test_a_lane_emptied_by_gaps_is_unavailable_alone () =
+  with_runtime_root @@ fun ~root _load ->
+  let emptied, keyed =
+    match Server_runtime_bootstrap.mandatory_exact_output_lane_ids with
+    | [ emptied; keyed ] -> emptied, keyed
+    | _ -> fail "this case is written for two mandatory lanes"
+  in
+  let path = Filename.concat root "runtime.toml" in
+  Fs_compat.save_file path (mixed_runtime_toml ~emptied ~keyed);
+  (match Runtime.init_default ~config_path:path with
+   | Ok () -> ()
+   | Error detail -> failf "boot must not refuse the file: %s" detail);
+  let degradation = Runtime.exact_slot_degradation () in
+  check (list string) "the emptied lane is reported"
+    [ emptied ] degradation.emptied_lane_ids;
+  check (list string) "both gap slots are recorded"
+    (List.sort String.compare [ emptied; lane_id ])
+    (List.sort String.compare
+       (List.map (fun (gap : Runtime.exact_slot_body_deadline_gap) -> gap.lane_id)
+          degradation.gaps));
+  Server_runtime_bootstrap.For_testing.configure_exact_output_registry ~config_root:root ();
+  let registry = Registry.current () |> require_ok "the other lanes publish" in
+  check bool "the emptied mandatory lane is unavailable" true
+    (lane_unavailable registry emptied);
+  let selected lane =
+    match Registry.resolve_lane registry ~lane_id:lane with
+    | Ok { selected_slots; _ } ->
+      List.map (fun (slot : Registry.selected_slot) -> slot.slot_id) selected_slots
+    | Error _ -> failf "lane %s must resolve" lane
+  in
+  check (list string) "the keyed mandatory lane works" [ "openai-responses.probe" ]
+    (selected keyed);
+  check (list string) "the mixed lane admits the keyed slot" [ "openai-responses.probe" ]
+    (selected lane_id);
+  check (list string) "and drops the gap slot" [ "nodeadline.other" ]
+    (List.filter_map
+       (fun (slot : Registry.rejected_slot) ->
+          if String.equal slot.lane_id lane_id then Some slot.slot_id else None)
+       (Registry.rejected_slots registry))
 
 (* Plan admission still refuses a target that reaches it without a body
    deadline -- through a replacement catalog row, or a binding built outside
@@ -249,5 +341,7 @@ let () =
           test_deadlines_are_independent_and_frozen;
         test_case "connect-only declaration is left out at boot" `Quick
           test_connect_only_declaration_is_left_out_at_boot;
+        test_case "a lane emptied by gaps is unavailable alone" `Quick
+          test_a_lane_emptied_by_gaps_is_unavailable_alone;
         test_case "missing body deadline refusal names provider and key" `Quick
           test_missing_body_deadline_refusal_names_provider_and_key ] ]

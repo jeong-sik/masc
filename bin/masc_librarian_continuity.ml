@@ -85,7 +85,7 @@ let prepare_runtime options =
    | Runtime.Initialized_degraded degradation ->
        Log.Runtime.warn "librarian-continuity startup degradation: %s"
          (Yojson.Safe.to_string (Runtime.startup_degradation_to_yojson
-              ~exact_slot_body_deadline_gaps:(Runtime.exact_slot_body_deadline_gaps ())
+              ~exact_slots:(Runtime.exact_slot_degradation ())
               (Some degradation))));
   let* provider_cfg =
     match Runtime.get_runtime_by_id options.runtime_id with

@@ -3732,7 +3732,7 @@ let gaps_after_boot_load content =
      | Error detail -> failf "boot must not refuse the file for rule 3: %s" detail);
     ( Runtime.exact_slot_body_deadline_gaps ()
     , Runtime.startup_degradation_to_yojson
-        ~exact_slot_body_deadline_gaps:(Runtime.exact_slot_body_deadline_gaps ())
+        ~exact_slots:(Runtime.exact_slot_degradation ())
         (Runtime.startup_degradation ()) ))
 ;;
 
@@ -3840,6 +3840,92 @@ let test_saving_an_exact_slot_without_body_deadline_is_refused () =
          (String_util.contains_substring detail Runtime_schema.exact_body_timeout_s_key));
     check string "the refused save leaves the file as it was" baseline
       (Fs_compat.load_file path))
+;;
+
+(* Owner rule: never a hard gate on keeper actions. A file that already
+   carries a gap on disk keeps saving for unrelated edits -- a keeper
+   assignment here -- because boot already keeps that gap as degraded. *)
+let save_over_on_disk ~on_disk text =
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) @@ fun () ->
+  with_temp_runtime_toml on_disk (fun path ->
+    let result = Runtime.save_config_text ~runtime_config_path:path text in
+    result, Fs_compat.load_file path)
+;;
+
+let gap_on_disk = exact_deadline_runtime_toml ~body_timeout:None ~lane:http_slot_lane
+
+let test_an_existing_gap_does_not_block_an_unrelated_save () =
+  with_runtime_binding_targets @@ fun () ->
+  with_config_save_model_catalog @@ fun () ->
+  let assigned = gap_on_disk ^ "\n[runtime.assignments]\nkeeper_a = \"local.sample\"\n" in
+  match save_over_on_disk ~on_disk:gap_on_disk assigned with
+  | Ok _receipt, written -> check string "the assignment is written" assigned written
+  | Error detail, _ -> failf "a gap already on disk must not block this save: %s" detail
+;;
+
+let test_a_save_adding_a_gap_names_only_the_added_one () =
+  with_runtime_binding_targets @@ fun () ->
+  with_config_save_model_catalog @@ fun () ->
+  let added = exact_deadline_runtime_toml ~body_timeout:None ~lane:two_http_slot_lanes in
+  match save_over_on_disk ~on_disk:gap_on_disk added with
+  | Ok _, _ -> fail "a save adding a gap must be refused"
+  | Error detail, written ->
+    check bool "the added lane is named" true
+      (String_util.contains_substring detail "[runtime.exact_output_lanes.hitl_auto_judge]");
+    check bool "the gap already on disk is not" false
+      (String_util.contains_substring detail "[runtime.exact_output_lanes.librarian_exact]");
+    check string "nothing is written" gap_on_disk written
+;;
+
+(* F5: catalog degradation and gaps together. terminal_reason keeps naming
+   the catalog, and the reasons the health rollup reads name both. *)
+let test_catalog_and_gap_degradation_name_both_reasons () =
+  let degradation : Runtime.startup_degradation =
+    { report =
+        { config_path = "runtime.toml"
+        ; missing_models =
+            [ { runtime_id = "local.missing"
+              ; provider_id = "local"
+              ; provider_label = "local"
+              ; model_id = "missing"
+              }
+            ]
+        }
+    ; configured_default_runtime_id = "local.sample"
+    ; disabled_runtime_ids = [ "local.missing" ]
+    ; unavailable_assignments = []
+    }
+  in
+  let exact_slots : Runtime.exact_slot_degradation =
+    { gaps = [ { lane_id = "librarian_exact"; slot_id = "local.sample"; provider_id = "local" } ]
+    ; emptied_lane_ids = [ "librarian_exact" ]
+    }
+  in
+  let json = Runtime.startup_degradation_to_yojson ~exact_slots (Some degradation) in
+  let open Yojson.Safe.Util in
+  check string "terminal_reason keeps the catalog" "missing_agent_core_catalog_models"
+    (json |> member "terminal_reason" |> to_string);
+  check (list string) "the reasons name both causes"
+    [ "missing_agent_core_catalog_models"; "exact_slot_body_deadline_absent" ]
+    (json |> member "operator_action_reasons" |> to_list |> List.map to_string);
+  check (list string) "the emptied lane is listed" [ "librarian_exact" ]
+    (json |> member "exact_lanes_emptied_by_body_deadline_gaps" |> to_list
+     |> List.map to_string);
+  let rollup =
+    Server_health_rollup.operator_summary
+      ~sections:[]
+      ~runtime_startup_degradation:json
+      ~keeper_config_schema_status:"ok"
+      ~keeper_config_schema_blocking:false
+      ~keeper_config_schema_terminal_reason:""
+      ~keeper_config_operator_action_required:false
+      ~lazy_task_boot_guard_fires_total:0
+  in
+  check bool "the health rollup names the gaps" true
+    (List.mem
+       "runtime_startup_degradation:exact_slot_body_deadline_absent"
+       rollup.Server_health_rollup.operator_action_reasons)
 ;;
 
 (* masc#28403. The runtime this declares — [local.typo] — cannot exist, because
@@ -4549,7 +4635,7 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
            (Runtime.startup_degraded ());
          let json =
            Runtime.startup_degradation_to_yojson
-         ~exact_slot_body_deadline_gaps:(Runtime.exact_slot_body_deadline_gaps ())
+         ~exact_slots:(Runtime.exact_slot_degradation ())
          (Runtime.startup_degradation ())
          in
          let rendered = Yojson.Safe.to_string json in
@@ -5936,6 +6022,12 @@ let () =
             test_replacement_catalog_targets_skip_the_body_deadline_rule;
           test_case "saving an exact slot without a body deadline is refused" `Quick
             test_saving_an_exact_slot_without_body_deadline_is_refused;
+          test_case "an existing gap does not block an unrelated save" `Quick
+            test_an_existing_gap_does_not_block_an_unrelated_save;
+          test_case "a save adding a gap names only the added one" `Quick
+            test_a_save_adding_a_gap_names_only_the_added_one;
+          test_case "catalog and gap degradation name both reasons" `Quick
+            test_catalog_and_gap_degradation_name_both_reasons;
           test_case "unreferenced binding naming an undeclared model fails the load"
             `Quick test_binding_naming_an_undeclared_model_fails_the_load;
           test_case "non-provider top-level namespaces are not bindings" `Quick

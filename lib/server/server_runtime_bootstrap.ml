@@ -529,9 +529,28 @@ let configure_exact_output_registry ?config_root () =
           ^ exact_output_snapshot_error_to_string error))
   | Ok resolver_snapshot ->
     warn_rejected_exact_output_bindings resolver_snapshot;
+    (* A mandatory lane rule 3 emptied -- every slot a gap, no cli_slots --
+       is not required at publication, so it alone is unavailable and every
+       other lane still publishes. It stays named in the startup report
+       ([Runtime.exact_slot_degradation]) and here. A mandatory lane empty
+       for any other reason is still required and still stops publication. *)
+    let emptied_lane_ids = (Runtime.exact_slot_degradation ()).emptied_lane_ids in
+    let required_lane_ids =
+      List.filter
+        (fun lane_id ->
+           if List.exists (String.equal lane_id) emptied_lane_ids
+           then (
+             Log.Server.warn
+               "exact_output: mandatory lane %S is unavailable: every slot is left out because its provider declares no %s, and the lane declares no cli_slots"
+               lane_id
+               Runtime_schema.exact_body_timeout_s_key;
+             false)
+           else true)
+        mandatory_exact_output_lane_ids
+    in
     (match
        Runtime.publish_exact_output_registry
-         ~required_lane_ids:mandatory_exact_output_lane_ids
+         ~required_lane_ids
          ~lanes
          resolver_snapshot
      with

@@ -298,7 +298,7 @@ let make_health_probe_fields ?timing ?(listener = "http/1.1") ?full_health_url
       ("schedule_runner", schedule_runner_status_json ());
       ("runtime_startup_degradation",
        Runtime.startup_degradation_to_yojson
-         ~exact_slot_body_deadline_gaps:(Runtime.exact_slot_body_deadline_gaps ())
+         ~exact_slots:(Runtime.exact_slot_degradation ())
          (Runtime.startup_degradation ()));
       ("dashboard_surface",
        measure_health_phase timing Server_timing.Health_dashboard_surface
@@ -522,7 +522,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   in
   let runtime_startup_degradation_json =
     Runtime.startup_degradation_to_yojson
-         ~exact_slot_body_deadline_gaps:(Runtime.exact_slot_body_deadline_gaps ())
+         ~exact_slots:(Runtime.exact_slot_degradation ())
          (Runtime.startup_degradation ())
   in
   let keeper_config_operator_action_required = keeper_config_schema_blocking in

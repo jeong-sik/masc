@@ -323,6 +323,17 @@ type success =
   ; output : Yojson.Safe.t
   ; provenance : plan_provenance
   ; raw_response : raw_response
+  ; usage : Types.api_usage option
+      (** The token usage this response body reported, read by the wire's own
+          response parser in the same parse of the body that [output] comes
+          from. Its meaning is {!Types.api_usage}'s: [input_tokens] is the
+          inclusive prompt total on every wire, the Anthropic exclusive count
+          already normalized. [None] means that parser found no usage report
+          in the body; it is not a zero count, and a caller that needs a
+          number for it has none to use. A [success] exists only for an HTTP
+          exact execution: an executor outside AGENT_CORE, such as an
+          official-client CLI slot, never produces one, so no usage reaches a
+          caller through this record for such a slot. *)
   }
 
 (** Provider-neutral identity for one caller-labelled candidate in a frozen

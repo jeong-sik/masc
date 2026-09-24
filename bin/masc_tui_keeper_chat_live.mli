@@ -48,6 +48,23 @@ type tool_occurrence =
   }
 (** Server-owned live row identity plus optional provider correlations. *)
 
+type stream_usage =
+  { input_tokens : int option
+  ; output_tokens : int option
+  ; cache_read_input_tokens : int option
+  ; cache_creation_input_tokens : int option
+  }
+(** Token counters a provider request reported mid-stream. They are cumulative
+    inside that one request, not across the turn. A field the provider
+    did not report stays [None]: the screen has to be able to say "not
+    reported" rather than draw a zero it was never told. *)
+
+val stream_usage_of_usage_json : Yojson.Safe.t -> stream_usage option
+(** Read one [usage] object, in the shape
+    [Keeper_chat_events.delta_usage_to_json] writes on both the live wire and
+    the journal. [None] when it is not an object or reports no counter at all,
+    so an empty delta becomes no row rather than a row of blanks. *)
+
 (** One thing that happened in the turn, as far as the live view is concerned. *)
 type delta =
   | Run_started
@@ -59,6 +76,16 @@ type delta =
       (** New resolved-runtime attempt: discard unfinished text/thinking from
           the prior attempt while retaining tool evidence. *)
   | Stream_model_started of { model : string }
+  | Stream_details of
+      { usage : stream_usage option
+      ; stop_reason : string option
+      }
+      (** What the provider said about the message in flight: the counters so
+          far, and why it stopped writing ([end_turn], [max_tokens],
+          [refusal], …). One wire event carries both and the dashboard keeps
+          them as one record ([dashboard/src/keeper-stream.ts]
+          KEEPER_STREAM_MESSAGE_DELTA), so they arrive together here too. At
+          least one of the two is present. *)
   | Text of string  (** Assistant text to append. *)
   | Thinking of string  (** Reasoning text to append. *)
   | Tool_started of

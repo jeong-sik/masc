@@ -44,7 +44,7 @@ function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
     case 'error':
       return isErrorJournalEntry(entry)
     case 'lifecycle':
-      return et === 'keeper_handoff' || et === 'keeper_phase_changed' || et === 'agent_core_event'
+      return et === 'keeper_phase_changed' || et === 'agent_core_event'
     default:
       return true
   }
@@ -62,8 +62,6 @@ function eventKindBadgeTone(entry: JournalEntry): EventBadgeTone {
       return 'warn'
     case 'agent_core_event':
       return 'info'
-    case 'keeper_handoff':
-      return 'info'
     case 'broadcast':
       return 'info'
     case 'board_post':
@@ -80,7 +78,6 @@ function eventKindLabel(eventType: JournalEventType | undefined): string {
     case 'agent_core_turn': return 'TURN'
     case 'agent_core_tool': return 'TOOL'
     case 'agent_core_event': return 'Agent Core'
-    case 'keeper_handoff': return 'HAND'
     case 'broadcast': return 'CAST'
     case 'board_post': return 'POST'
     case 'board_comment': return 'CMNT'

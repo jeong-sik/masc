@@ -136,21 +136,19 @@ type event = {
    about the key the operator just pressed. *)
 let last_action_window_s = 12.0
 
-(* The one key the Overview event panel folds identical neighbours by; the
-   renderer and both scroll handlers must count the same folded rows or the
-   scroll range and the drawn range drift apart. *)
-let overview_event_collapse_key event =
+(* The key the TUI session block folds identical neighbours by. *)
+let session_event_collapse_key event =
   event.event_type ^ "\x00" ^ event.content
 ;;
 
-(* What an Overview event row says about its level, beside its clock. The
-   level was recorded on every event and read only by the fold key above, so
-   a failed mint and a first install waiting for its workspace drew the same
-   row: the operator could tell them apart only by reading the sentence.
-   Only an error is marked, with the glyph the chat pane draws for one, so
-   the ordinary rows keep every cell of the panel for their text. A shape and
-   not a colour alone: under NO_COLOR the mark is still there. *)
-let overview_event_mark event =
+(* What a TUI session row says about its level, beside its clock. The level
+   was recorded on every event and read only by the fold key above, so a
+   failed mint and a first install waiting for its workspace drew the same
+   row: the reader could tell them apart only by reading the sentence. Only
+   an error is marked, with the glyph the chat pane draws for one, so the
+   ordinary rows keep every cell for their text. A shape and not a colour
+   alone: under NO_COLOR the mark is still there. *)
+let session_event_mark event =
   if String.equal event.event_type "error" then Some "\xe2\x9c\x97" else None
 ;;
 
@@ -1549,6 +1547,12 @@ type schedule_snapshot = {
       [scs_request_count = None] carries. *)
   scs_counts: (Schedule_domain.schedule_status * int) list option;
   scs_rows: schedule_row list;
+  scs_runner_status: Tui_decode.schedule_runner_status;
+  (** The schedule runner's status word, sent once beside the rows. A row's
+      [sch_runner_hold] is what the runner's newest successful tick decided,
+      at its [srh_observed_at]; only [Runner_ok] says that tick is recent and
+      the runner is healthy, so only then is the hold drawn as the present
+      (#38411). *)
 }
 
 (** One recorded wake attempt of a schedule instance. The list surface carries
@@ -1977,6 +1981,22 @@ type overview_quota_reading =
   | Quota_read of Tui_decode.runtime_option list
   | Quota_failed of string
 
+(** The Overview's reading of [GET /api/v1/dashboard/goals]. A failed read and
+    one not made yet are each drawn as what they are, never as an empty
+    section. *)
+type overview_goals_reading =
+  | Goals_unread
+  | Goals_read of Tui_decode.overview_goal list
+  | Goals_failed of string
+
+(** The Overview's reading of the provider usage windows on the same
+    [/api/v1/runtime/resolved] document. Decoded apart from the runtime rows,
+    so a row this build cannot read does not hide what the providers said. *)
+type overview_providers_reading =
+  | Providers_unread
+  | Providers_read of Tui_decode.provider_usage_windows
+  | Providers_failed of string
+
 (** One open pull request as [GET /api/v1/repositories/pulls] reports it
     (RFC-0465). The check and review words are parsed at decode; a word this
     build cannot name makes the row undecodable rather than a default. *)
@@ -1986,8 +2006,6 @@ type pull_mergeable = Pull_mergeable | Pull_conflicting | Pull_mergeable_unknown
 
 type open_pull = {
   op_number: int;
-  op_title: string;
-  op_head_branch: string;
   op_draft: bool;
   op_checks: pull_checks;
   op_review: pull_review;
@@ -2057,8 +2075,6 @@ type overview_keeper = {
 
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
-  ov_cluster: string;
-  ov_project: string;
   ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
   ov_keeper_liveness: keeper_liveness_counts;
   ov_keeper_rows: overview_keeper list;
@@ -2083,6 +2099,7 @@ type planning_goal = Tui_decode.planning_goal
   pg_metric: string option;
   pg_target_value: string option;
   pg_proof: Tui_decode.goal_proof;
+  pg_verifier_unreconciled: Tui_decode.verifier_unreconciled option;
   pg_last_review_note: string option;
   pg_last_review_at: string option;
   pg_created_at: string option;
@@ -2887,6 +2904,7 @@ type surface_needs = {
   needs_asks : bool;
   needs_runtime_quota : bool;
   needs_repository_pulls : bool;
+  needs_overview_goals : bool;
 }
 
 let nothing =
@@ -2901,6 +2919,7 @@ let nothing =
     needs_asks = false;
     needs_runtime_quota = false;
     needs_repository_pulls = false;
+    needs_overview_goals = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -2921,14 +2940,15 @@ let rec surface_needs ~keeper_pane_drawn surface =
   else needs
 
 and surface_needs_of_surface : surface -> surface_needs = function
-  (* The Team block names the quota windows that are shut. The catalogue is
-     43 KB and answers in under two milliseconds on the live runtime, and
-     only this surface draws the windows beside the Keepers they stop. *)
+  (* The Providers section draws each account's usage windows from the
+     runtime catalogue. Only this surface draws them. The goal tree is read
+     only here too: the GOALS section is its reader. *)
   | Overview ->
       { nothing with
         needs_transport = true
       ; needs_runtime_quota = true
       ; needs_repository_pulls = true
+      ; needs_overview_goals = true
       }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
@@ -2958,8 +2978,14 @@ and surface_needs_of_surface : surface -> surface_needs = function
      different machinery. *)
   | Approvals ->
       { nothing with needs_operator_approvals = true; needs_asks = true }
+  (* The Transport delivery block reads the transport health itself, so it
+     is not whatever an Overview refresh happened to leave behind. *)
   | Metrics ->
-      { nothing with needs_keeper_roster = true; needs_fleet_safety = true }
+      { nothing with
+        needs_keeper_roster = true
+      ; needs_fleet_safety = true
+      ; needs_transport = true
+      }
   | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
   | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
   | Tools ->
@@ -2985,6 +3011,8 @@ let surface_needs_delta ~previous ~next =
       next.needs_runtime_quota && not previous.needs_runtime_quota
   ; needs_repository_pulls =
       next.needs_repository_pulls && not previous.needs_repository_pulls
+  ; needs_overview_goals =
+      next.needs_overview_goals && not previous.needs_overview_goals
   }
 
 let surface_needs_any needs = needs <> nothing
@@ -3048,6 +3076,23 @@ type scrolled = {
 let listing_chrome ~error = if Option.is_some error then 9 else 7
 let lanes_listing_chrome ~load_error ~action_error =
   listing_chrome ~error:load_error + if Option.is_some action_error then 2 else 0
+
+(* A listing draws a reading of the selected row under its list, and both are
+   paid for out of the same frame. The reading was given exactly one row and
+   cut there, while a list shorter than the frame drew blank rows under its
+   last entry -- nineteen of them, above a ruling cut mid-sentence (#38434).
+
+   The reading takes those blank rows and no others. [body_rows] is what the
+   frame leaves for the list and the reading together, [entries] is how many
+   rows the list has something to draw on, and [wanted] is how many rows the
+   reading packs into at this width. The answer never drops below one row, so
+   a list that fills the frame draws what it drew before, and it never rises
+   past the spare, so [body_rows - answer >= entries]: no entry loses its row
+   to a longer reading. *)
+let listing_note_rows ~body_rows ~entries ~wanted =
+  let body_rows = max 2 body_rows in
+  let spare = max 0 (body_rows - 1 - max 0 entries) in
+  min (max 1 wanted) (1 + spare)
 
 (* [authority_rows] is how many rows the line naming the SSOT and the last
    probe took at this width. It wraps at clause marks
@@ -3122,6 +3167,7 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   | Masc_tui_keeper_chat_live.Run_finished
   | Masc_tui_keeper_chat_live.Runtime_attempt_started _
   | Masc_tui_keeper_chat_live.Stream_model_started _
+  | Masc_tui_keeper_chat_live.Stream_details _
   | Masc_tui_keeper_chat_live.Undecodable _ ->
       if Masc_tui_keeper_chat_log.add turn_log.tl_log ~seq delta
       then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
@@ -3943,7 +3989,7 @@ type palette_mode =
    belongs to this view instance, so late browser replies cannot replace a
    different source or tab after the operator moves. *)
 module Browser_lane_view = struct
-  type source = Live | Automation
+  type source = Browser_lane.Lane_name.t = Live | Automation
   type browser = Firefox | Zen
   type client = { client_id : string; browser : browser }
   type discovery = Read_after_discovery | Choose_client
@@ -4033,7 +4079,7 @@ module Browser_lane_view = struct
     read_continuation : read_continuation;
   }
 
-  let source_name = function Live -> "live" | Automation -> "automation"
+  let source_name = Browser_lane.Lane_name.to_wire
   let browser_name = function Firefox -> "Firefox" | Zen -> "Zen"
   let client_id t = match t.source, t.selected_client with
     | Live, Some client -> Some client.client_id
@@ -4173,9 +4219,9 @@ module Browser_lane_view = struct
   let string = function `String s -> Ok s | _ -> Error "expected string"
   let integer = function `Int n when n >= 0 -> Ok n | _ -> Error "expected nonnegative integer"
   let boolean = function `Bool b -> Ok b | _ -> Error "expected boolean"
-  let parse_source = function
-    | `String "live" -> Ok Live | `String "automation" -> Ok Automation
-    | _ -> Error "unknown browser source"
+  let parse_source json =
+    let lane = match json with `String raw -> Browser_lane.Lane_name.of_wire raw | _ -> None in
+    Option.to_result ~none:"unknown browser source" lane
   let get parse name json = let* value = field name json in parse value
   let parse_client json =
     let* client_id = get string "clientId" json in
@@ -4206,7 +4252,7 @@ module Browser_lane_view = struct
     match source, value with
     | Live, `String id when String.trim id <> "" -> Ok (Some id)
     | Automation, `Null -> Ok None
-    | _ -> Error "browser client ID does not match source"
+    | Live, _ | Automation, _ -> Error "browser client ID does not match source"
   let parse_tab json =
     let* id = get integer "id" json in
     let* title = get string "title" json in
@@ -4807,9 +4853,7 @@ module Browser_history = struct
     match observation t with
     | None -> view
     | Some observation ->
-      let source = match observation.source with
-        | Masc.Browser_surface.Live -> Browser_lane_view.Live
-        | Automation -> Browser_lane_view.Automation in
+      let source = observation.source in
       let client_id = Option.map Browser_lane.client_id_to_string observation.client_id in
       {view with source;selected_tab=Some observation.tab_id;scroll=t.scroll;
        scene=Some {source;client_id;tab_id=observation.tab_id;content=observation.scene;elapsed_ms=0.}}
@@ -5540,12 +5584,13 @@ type state = {
      until it is sent, and cleared with the form -- a field left filled is a
      credential sitting in the process for as long as the pane is up. *)
   mutable identity_app_form: identity_app_form option;
-  mutable task_cursor: int;
+  mutable task_selected_id: string option;
+      (* The Overview task row the operator chose, by id. An index into the
+         rows would name another task after a poll drops a finished one. *)
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
   mutable tasks_error: string option;
   mutable events: event list;
-  mutable overview_event_scroll: int;
   mutable keepers: keeper list;
   mutable keepers_error: string option;
   (* The live roster reading, separate from the durable one above: it answers
@@ -5595,18 +5640,18 @@ type state = {
      unrelated input clears it; a second [q] exits. *)
   mutable quit_armed: bool;
   (* What the last key the operator pressed actually did, and the clock
-     reading it was set at. These outcomes go to [add_event], and the event
-     log is drawn by Overview alone -- so the operator who pressed [a] on
-     Workspace stood on the one surface that could not answer them, and a
-     registration that succeeded looked the same as an editor that never
-     started. The footer every surface draws answers instead, and only for
-     [last_action_window_s]: an outcome that stayed would go on claiming a
-     keypress the operator has since forgotten making. *)
+     reading it was set at. The session log is drawn by Metrics alone, so the
+     operator who pressed [a] on Workspace could not read there whether the
+     registration landed. The footer every surface draws answers instead,
+     until the next input or for [last_action_window_s], whichever comes
+     first: an outcome that stayed would go on claiming a keypress the
+     operator has moved past. *)
   mutable last_action: (string * float) option;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
-     fleet's own reading of what is missing. *)
-  mutable fleet_safety: fleet_safety option;
+     fleet's own reading of what is missing, or the server's word that its
+     health snapshot is being rebuilt. *)
+  mutable fleet_safety: Tui_decode.fleet_safety_reading option;
   mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
   mutable local_workspace: local_workspace_reading;
@@ -5632,7 +5677,9 @@ type state = {
      picker's [runtime_catalog] so a refresh behind the Overview never moves
      the rows under an open picker's cursor. *)
   mutable overview_quota: overview_quota_reading;
+  mutable overview_providers: overview_providers_reading;
   mutable overview_pulls: overview_pulls_reading;
+  mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
   mutable runtime_catalog_error: string option;
@@ -7735,12 +7782,11 @@ let create_state
   identity_filter = None;
   identity_app_form = None;
   github_identity_view_error = None;
-  task_cursor = 0;
+  task_selected_id = None;
   task_detail_id = None;
   task_detail_scroll = 0;
   tasks_error = None;
   events = [];
-  overview_event_scroll = 0;
   keepers = [];
   keepers_error = None;
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
@@ -7767,7 +7813,9 @@ let create_state
   runtime_pick_cursor = 0;
   runtime_catalog = [];
   overview_quota = Quota_unread;
+  overview_providers = Providers_unread;
   overview_pulls = Overview_pulls_unread;
+  overview_goals = Goals_unread;
   runtime_lanes = [];
   runtime_assignments = [];
   runtime_catalog_error = None;
@@ -8246,6 +8294,25 @@ let title_missing_reading ~error =
 let field_missing_reading ~error =
   if Option.is_some error then field_failed else field_unread
 
+(* The Activity feed's title reading. A count is a reading only once the feed
+   has answered. With no server on the port the feed never opens, and a title
+   reading "(0 rows \xc2\xb7 0 events held)" there states a measurement of
+   nothing while the row under it reads "the feed is not open"; every other
+   surface's title in that frame, and the Logs tab of this very surface, reads
+   "(load failed)" or "(not loaded)".
+
+   Held frames outlive the stream that delivered them, so a closed feed, or one
+   switched back off, with frames in hand still has a reading to report. Only
+   the state before any answer, with nothing held, has none. *)
+let activity_title_reading ~observer ~shown ~held =
+  match observer, held with
+  | (Observer_off | Observer_opening), 0 -> title_missing_reading ~error:None
+  | (Observer_off | Observer_opening | Observer_live _ | Observer_closed _), _
+    ->
+    Printf.sprintf "(%s \xc2\xb7 %s held)"
+      (Masc_tui_message_layout.count_noun shown "row")
+      (Masc_tui_message_layout.count_noun held "event")
+
 (* The same answer for a pane whose reading is a [Masc_tui_fetched] view: the
    count once it has answered, and otherwise which of the two it is. Asked and
    still waiting reads as not loaded, the way a title before any request does. *)
@@ -8485,7 +8552,6 @@ let composer_extra_rows (state : state) =
     drawing reaching back into the state it is drawing from: the drawing is a
     function of the state again, and every write lives on one side of it. *)
 type clamped_scroll =
-  | Overview_events of int
   | Task_detail of int
   | Board_read of int
   | Message_scroll of int
@@ -8569,7 +8635,6 @@ let scroll_down_from scroll ~by =
   if scroll > max_int - by then max_int else scroll + by
 
 let apply_clamped_scroll (state : state) = function
-  | Overview_events value -> state.overview_event_scroll <- value
   | Task_detail value -> state.task_detail_scroll <- value
   | Board_read value -> state.board_scroll <- value
   | Message_scroll value -> set_msg_scroll state value
@@ -10219,6 +10284,21 @@ let approvals_open_question_count (state : state) =
           total + List.length row.Tui_decode.ar_questions)
         0 rows
   | None -> 0
+
+(* Whether the rows behind [approvals_open_question_count] are the server's
+   current answer. Before the first poll answers there are no rows, so the
+   count holds no question because none was read; a failed poll keeps the
+   previous rows, as [apply_asks_load] replaces them only on [Ok]. *)
+type questions_reading =
+  | Questions_current
+  | Questions_unread
+  | Questions_stale
+
+let approvals_questions_reading (state : state) =
+  match (state.asks_snapshot, state.asks_error) with
+  | None, _ -> Questions_unread
+  | Some _, Some _ -> Questions_stale
+  | Some _, None -> Questions_current
 
 let approvals_surface_pending (state : state) =
   List.length (approval_items state) + approvals_open_question_count state

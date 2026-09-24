@@ -98,10 +98,29 @@ let parse_judge_spec (tbl : Otoml.t) : Fusion_policy.judge_spec =
   ; jtimeout_s = find_timeout_s tbl [ "timeout_s" ]
   }
 
-let parse_min_answered _name tbl =
-  match Otoml.find_opt tbl Otoml.get_integer [ "min_answered" ] with
-  | None -> Ok Fusion_policy.default_min_answered
-  | Some v -> Ok v
+(* preset table 에서 값을 읽기만 한다. 검증은 하지 않는다. [finish_preset] 은 이것을
+   검증하고, [seat_routes_of_toml] 은 여기서 자리만 센다. min_answered 미설정 시
+   [default_min_answered] = 기존 동작(>= 1 응답이면 심판 실행). 허용 범위(1 이상 패널
+   모델 총합 이하)의 검증 SSOT는 Validated_preset.of_preset. *)
+let read_preset name tbl (panels : Fusion_policy.panel_group list) : Fusion_policy.preset =
+  (* 프롬프트는 행동을 정의하므로 코드 default로 채우지 않는다. 누락 시 ""로 읽혀
+     Validated_preset.of_preset 검증에서 Missing_prompt로 fail-fast된다. *)
+  { name
+  ; panels
+  ; judge = Otoml.find_or ~default:"" tbl Otoml.get_string [ "judge" ]
+  ; judge_system_prompt =
+      Otoml.find_or ~default:"" tbl Otoml.get_string [ "judge_system_prompt" ]
+  ; judge_max_output_tokens =
+      Otoml.find_opt tbl Otoml.get_integer [ "judge_max_output_tokens" ]
+  ; judge_timeout_s = find_timeout_s tbl [ "judge_timeout_s" ]
+  ; judges =
+      (match Otoml.find_opt tbl (Otoml.get_array Otoml.get_value) [ "judges" ] with
+       | Some entries -> List.map parse_judge_spec entries
+       | None -> [])
+  ; min_answered =
+      Otoml.find_or ~default:Fusion_policy.default_min_answered tbl Otoml.get_integer
+        [ "min_answered" ]
+  }
 
 (* 패널 그룹을 확정한 뒤 preset 완성 + 검증. judge_* 는 preset table에서 직접 읽는다
    (단일 심판 = simple/refine/conditional 심판이자 JOJ meta). [[...judges]] sub-table이
@@ -109,59 +128,31 @@ let parse_min_answered _name tbl =
    심판모델 → 패널 정체성 중복 → 1차 심판 prompt/정체성 → min_answered. *)
 let finish_preset name tbl (panels : Fusion_policy.panel_group list)
   : (Fusion_policy.Validated_preset.t, config_error) result =
-  let judge = Otoml.find_or ~default:"" tbl Otoml.get_string [ "judge" ] in
-  (* 프롬프트는 행동을 정의하므로 코드 default로 채우지 않는다. 누락 시 ""로 읽혀
-     Validated_preset.of_preset 검증에서 Missing_prompt로 fail-fast된다. *)
-  let judge_system_prompt =
-    Otoml.find_or ~default:"" tbl Otoml.get_string [ "judge_system_prompt" ]
-  in
-  let judge_max_output_tokens =
-    Otoml.find_opt tbl Otoml.get_integer [ "judge_max_output_tokens" ]
-  in
-  let judge_timeout_s = find_timeout_s tbl [ "judge_timeout_s" ] in
-  let judges =
-    match Otoml.find_opt tbl (Otoml.get_array Otoml.get_value) [ "judges" ] with
-    | Some entries -> List.map parse_judge_spec entries
-    | None -> []
-  in
-  (* 런타임 quorum. 미설정 시 [default_min_answered] = 기존 동작(>= 1 응답이면 심판 실행).
-     허용 범위는 1 이상 패널 모델 총합 이하; 검증 SSOT는 Validated_preset.of_preset. *)
-  Result.bind (parse_min_answered name tbl) (fun min_answered ->
-    let p : Fusion_policy.preset =
-      { name
-      ; panels
-      ; judge
-      ; judge_system_prompt
-      ; judge_max_output_tokens
-      ; judge_timeout_s
-      ; judges
-      ; min_answered
-      }
-    in
-    (* 검증 SSOT는 Validated_preset.of_preset (RFC-0280). config는 그 [invalid]에 preset
-     이름을 붙여 자기 [config_error]로 매핑만 한다 (운영자에게 어느 preset인지 알림).
-     [open] 안 함 — invalid와 config_error가 Missing_prompt 등 동명 변형을 가져 LHS만
-     full-qualify해 shadow를 피한다. *)
-    match Fusion_policy.Validated_preset.of_preset p with
-    | Ok vp -> Ok vp
-    | Error invalid ->
-      Error
-        (match invalid with
-         | Fusion_policy.Validated_preset.No_panel_models -> No_panel_models name
-         | Fusion_policy.Validated_preset.Missing_prompt -> Missing_prompt name
-         | Fusion_policy.Validated_preset.Missing_judge_model -> Missing_judge_model name
-         | Fusion_policy.Validated_preset.Duplicate_panelist id ->
-           Duplicate_panelist (name, id)
-         | Fusion_policy.Validated_preset.Bad_max_output_tokens v ->
-           Invalid_max_output_tokens (name, v)
-         | Fusion_policy.Validated_preset.Bad_timeout_s v -> Invalid_timeout_s (name, v)
-         | Fusion_policy.Validated_preset.Judge_panel_prompt_missing ->
-           Judge_panel_prompt_missing name
-         | Fusion_policy.Validated_preset.Duplicate_judge id ->
-           Duplicate_judge (name, id)
-         | Fusion_policy.Validated_preset.Min_answered_below_min v
-         | Fusion_policy.Validated_preset.Min_answered_above_max v ->
-           Invalid_min_answered (name, v)))
+  let p = read_preset name tbl panels in
+  (* 검증 SSOT는 Validated_preset.of_preset (RFC-0280). config는 그 [invalid]에 preset
+   이름을 붙여 자기 [config_error]로 매핑만 한다 (운영자에게 어느 preset인지 알림).
+   [open] 안 함 — invalid와 config_error가 Missing_prompt 등 동명 변형을 가져 LHS만
+   full-qualify해 shadow를 피한다. *)
+  match Fusion_policy.Validated_preset.of_preset p with
+  | Ok vp -> Ok vp
+  | Error invalid ->
+    Error
+      (match invalid with
+       | Fusion_policy.Validated_preset.No_panel_models -> No_panel_models name
+       | Fusion_policy.Validated_preset.Missing_prompt -> Missing_prompt name
+       | Fusion_policy.Validated_preset.Missing_judge_model -> Missing_judge_model name
+       | Fusion_policy.Validated_preset.Duplicate_panelist id ->
+         Duplicate_panelist (name, id)
+       | Fusion_policy.Validated_preset.Bad_max_output_tokens v ->
+         Invalid_max_output_tokens (name, v)
+       | Fusion_policy.Validated_preset.Bad_timeout_s v -> Invalid_timeout_s (name, v)
+       | Fusion_policy.Validated_preset.Judge_panel_prompt_missing ->
+         Judge_panel_prompt_missing name
+       | Fusion_policy.Validated_preset.Duplicate_judge id ->
+         Duplicate_judge (name, id)
+       | Fusion_policy.Validated_preset.Min_answered_below_min v
+       | Fusion_policy.Validated_preset.Min_answered_above_max v ->
+         Invalid_min_answered (name, v))
 
 (* preset 한 명 파싱. 두 문법 분기:
    - 새 문법 [[fusion.presets.NAME.panels]] (array-of-tables) → 그룹별 파싱.
@@ -243,3 +234,33 @@ let of_toml (toml : Otoml.t) : (Fusion_policy.t, config_error list) result =
     (match parse_enabled toml with
      | result -> result
      | exception Otoml.Type_error msg -> Error [ Toml_type_error msg ])
+
+(* 자리만 읽는다. 값은 [of_toml] 과 같은 함수(parse_group·parse_judge_spec·
+   read_preset)로 읽고, 자리는 [Fusion_policy.preset_seat_routes] 가 센다. 검증은
+   하지 않는다: 다른 preset 의 min_answered 가 틀려도 어느 자리가 어느 경로를
+   적었는지는 그대로 읽힌다. 두 panel 문법이 같이 있으면(of_toml 은 거절) 둘 다
+   자리로 센다 -- 이름이 적힌 곳은 전부 이름이 적힌 곳이다. TOML 타입이 틀리면
+   값을 읽을 수 없으니 [Error]. *)
+let preset_seats (name, tbl) =
+  let panels =
+    match Otoml.find_opt tbl (Otoml.get_array Otoml.get_value) [ "panels" ] with
+    | None -> [ parse_group tbl ]
+    | Some groups ->
+      List.map parse_group groups
+      @
+      (match Otoml.find_opt tbl Otoml.get_value [ "panel" ] with
+       | Some _ -> [ parse_group tbl ]
+       | None -> [])
+  in
+  List.map
+    (fun (seat, route) -> name, seat, route)
+    (Fusion_policy.preset_seat_routes (read_preset name tbl panels))
+
+let seat_routes_of_toml (toml : Otoml.t) =
+  match
+    match Otoml.find_opt toml Otoml.get_table [ "fusion"; "presets" ] with
+    | None -> []
+    | Some entries -> List.concat_map preset_seats entries
+  with
+  | seats -> Ok seats
+  | exception Otoml.Type_error msg -> Error (Toml_type_error msg)

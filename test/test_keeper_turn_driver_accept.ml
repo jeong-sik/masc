@@ -1491,35 +1491,6 @@ let test_no_candidates_exhaustion_classifies_as_no_providers_available () =
     Alcotest.failf "expected typed keeper error, got %s"
       (Agent_core.Error.to_string mapped)
 
-let test_capacity_failure_exhaustion_classifies_as_capacity_exhausted () =
-  let mapped =
-    Keeper_internal_error.core_error_of_masc_internal_error
-      (Keeper_internal_error.Runtime_exhausted
-         { runtime_id = "runtime.capacity-test"
-         ; reason = Keeper_internal_error.Capacity_exhausted
-         })
-  in
-  match Keeper_internal_error.classify_masc_internal_error mapped with
-  | Some (Keeper_internal_error.Runtime_exhausted { reason; _ }) ->
-    Alcotest.(check bool)
-      "reason is Capacity_exhausted"
-      true
-      (reason = Keeper_internal_error.Capacity_exhausted);
-    Alcotest.(check bool)
-      "Capacity_exhausted is policy-retryable"
-      true
-      (Keeper_internal_error.runtime_exhaustion_reason_retryable reason);
-    Alcotest.(check bool)
-      "capacity exhaustion is auto-recoverable"
-      true
-      (Masc.Keeper_error_classify.is_auto_recoverable_turn_error mapped)
-  | Some other ->
-    Alcotest.failf "expected Runtime_exhausted, got %s"
-      (Keeper_internal_error.kind_of_masc_internal_error other)
-  | None ->
-    Alcotest.failf "expected typed keeper error, got %s"
-      (Agent_core.Error.to_string mapped)
-
 let test_session_conflict_exhaustion_preserves_typed_terminal_reason () =
   let mapped =
     Keeper_internal_error.core_error_of_masc_internal_error
@@ -1686,10 +1657,6 @@ let () =
             "no-candidates exhaustion classifies as No_providers_available"
             `Quick
             test_no_candidates_exhaustion_classifies_as_no_providers_available;
-          Alcotest.test_case
-            "capacity exhaustion classifies as retryable Runtime_exhausted"
-            `Quick
-            test_capacity_failure_exhaustion_classifies_as_capacity_exhausted;
           Alcotest.test_case
             "session conflict preserves typed terminal exhaustion"
             `Quick

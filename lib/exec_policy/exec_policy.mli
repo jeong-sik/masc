@@ -43,6 +43,7 @@ val existing_sibling_dirs_hint : ?workdir:string -> string -> string option
 val validate_shell_ir_paths :
   ?requires_existing_dir:bool ->
   ?workdir:string ->
+  extra_roots:string list ->
   Masc_exec.Shell_ir.t ->
   (unit, string) result
 (** Validate the filesystem destinations a Shell IR can name: typed [cwd]
@@ -56,6 +57,9 @@ val validate_shell_ir_paths :
     application data and is never classified from command names, flag
     strings, or token shapes; unnameable operands (variables, globs,
     substitutions) are left to the box's existing authority.
+    [extra_roots] widens the boundary for every destination named above by
+    roots declared for the machine the command runs on (an ssh endpoint's
+    [allowed_paths], compared lexically); pass [[]] for the default boundary.
     Runtime sandbox containment remains authoritative for the process itself. *)
 
 (** Flatten all literal stage words from a parsed shell IR.

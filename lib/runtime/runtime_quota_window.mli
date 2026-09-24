@@ -75,6 +75,9 @@ val demote_order :
     row or credential the exhaustion belongs to. *)
 val scope_to_string : scope -> string
 
+val scope_equal : scope -> scope -> bool
+(** Whether two scopes name the same quota owner. *)
+
 val scope_of_credential :
   provider_id:string -> Runtime_schema.credential option -> scope
 (** Non-secret quota-scope identity for a provider row.  Provider hard quota

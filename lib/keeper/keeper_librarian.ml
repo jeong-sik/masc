@@ -78,6 +78,11 @@ let kept_fields_from_to_string = function
   | First_claim -> "first_claim"
 ;;
 
+type working_contexts_answer =
+  | Working_contexts_organized of Keeper_librarian_context.pocket list
+  | Working_contexts_missing
+  | Working_contexts_invalid of string
+
 type selection =
   { new_claims : fact list
   ; restated : fact list
@@ -86,8 +91,7 @@ type selection =
   ; absorbed : Keeper_memory_os_types.absorbed_statement list
   ; facts : fact list
   ; revisions : revision list
-  ; working_state : string option
-  ; working_contexts : Keeper_librarian_context.pocket list
+  ; working_contexts : working_contexts_answer
   }
 
 let wire_field_new_claims = "new_claims"
@@ -147,10 +151,24 @@ let text_of_content block =
       | Agent_core.Types.Audio _ -> Some "[audio omitted]"))
 ;;
 
+(* RFC-0468 §3.2: the speaker comes from the metadata the host stamped when it
+   created the message, never from the text. Only a User message has a
+   speaker; a message without one says [unknown]. *)
+let speaker_header_field (m : Agent_core.Types.message) =
+  match m.role with
+  | Agent_core.Types.User ->
+    Printf.sprintf
+      " speaker=%s"
+      (Keeper_input_speaker.header_value (Keeper_input_speaker.classify m.metadata))
+  | Agent_core.Types.Assistant | Agent_core.Types.System | Agent_core.Types.Tool -> ""
+;;
+
 let message_to_text ~turn (m : Agent_core.Types.message) : string =
   let parts = List.filter_map text_of_content m.content in
   let body = String.concat "\n" parts |> String.trim in
-  let header = Printf.sprintf "turn=%d role=%s" turn (role_to_string m.role) in
+  let header =
+    Printf.sprintf "turn=%d role=%s%s" turn (role_to_string m.role) (speaker_header_field m)
+  in
   if String.equal body ""
   then Printf.sprintf "[%s] (empty)" header
   else Printf.sprintf "[%s] %s" header body
@@ -822,12 +840,25 @@ let single_field_of_json_result ~field json =
     Error Top_level_not_object
 ;;
 
+let nonblank_working_state = function
+  | `String text when String.trim text <> "" -> Ok text
+  | `String _ | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null ->
+    Error (Working_state_invalid "working_state must be nonblank text")
+;;
+
 let working_state_of_json_result json =
-  Result.bind (single_field_of_json_result ~field:wire_field_working_state json)
-    (function
-      | `String text when String.trim text <> "" -> Ok text
-      | `String _ | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null ->
-        Error (Working_state_invalid "working_state must be nonblank text"))
+  Result.bind
+    (single_field_of_json_result ~field:wire_field_working_state json)
+    nonblank_working_state
+;;
+
+let continuity_working_state_of_json_result = function
+  | `Assoc fields ->
+    (match List.assoc_opt wire_field_working_state fields with
+     | None -> Error (Working_state_invalid "continuity requires a nonblank working_state")
+     | Some value -> nonblank_working_state value)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    Error Top_level_not_object
 ;;
 
 let working_contexts_of_json_result (inp : input) json =
@@ -852,14 +883,17 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
      | Some (Duplicate_object_field field) -> Error (Duplicate_field field)
      | None ->
        let open Result.Syntax in
-       let* working_state = match List.assoc_opt wire_field_working_state fields with
-         | None | Some `Null -> Ok None
-         | Some (`String text) when String.trim text <> "" -> Ok (Some text)
-         | Some _ -> Error (Working_state_invalid "working_state must be nonblank text or null") in
-       let* working_contexts =
+       (* The organization is judged apart from the Memory decision: a slip
+          in it costs this pass's organization, not the memory it decided.
+          [working_state] is not read here: only a continuity pass needs it,
+          through [continuity_working_state_of_json_result]. *)
+       let working_contexts =
          match List.assoc_opt wire_field_working_contexts fields with
-         | None -> Error Missing_required_fields
-         | Some json -> working_contexts_of_json inp json
+         | None -> Working_contexts_missing
+         | Some json ->
+           (match Keeper_librarian_context.select inp.working_context json with
+            | Ok pockets -> Working_contexts_organized pockets
+            | Error detail -> Working_contexts_invalid detail)
        in
        (match
           List.assoc_opt wire_field_new_claims fields
@@ -916,7 +950,6 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                    ; absorbed
                    ; facts = materialized.facts_after
                    ; revisions
-                   ; working_state
                    ; working_contexts
                    }
                  | Some _, None -> Error Dropped_schema_mismatch

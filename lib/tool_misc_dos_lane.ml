@@ -35,6 +35,7 @@ let observation_fields (o : Dos_lane.observation) =
   ; ("frame_nonblack", `Int o.frame_nonblack)
   ; ("frame_ascii", `String o.frame_ascii)
   ; ("program", match o.program with Some p -> `String p | None -> `Null)
+  ; ("controller", match o.controller with Some c -> `String c | None -> `Null)
   ; ("files", `List (List.map (fun f -> `String f) o.files))
   ]
 ;;
@@ -44,6 +45,7 @@ let ran_fields (r : Dos_lane.ran) =
   ; ("settled", `Bool r.Dos_lane.settled)
   ; ("input_requests", `Int r.Dos_lane.input_requests)
   ; ("keys_pressed", `Int r.Dos_lane.keys_pressed)
+  ; ("unsaved", `List (List.map (fun u -> `String u) r.Dos_lane.unsaved))
   ]
 ;;
 
@@ -54,9 +56,9 @@ let of_lane ?(extra = []) ~tool_name ~start_time
     Tool_result.make_ok ~tool_name ~start_time
       ~data:(`Assoc (observation_fields o @ extra))
       ()
-  | Error ((Dos_lane.No_machine | Dos_lane.Invalid_request _) as e) ->
+  | Error ((Dos_lane.No_machine | Dos_lane.Invalid_request _ | Dos_lane.Held_by _) as e) ->
     reject ~tool_name ~start_time (Dos_lane.error_to_string e)
-  | Error (Dos_lane.Unreadable _ as e) ->
+  | Error ((Dos_lane.Unreadable _ | Dos_lane.Guest_fault _) as e) ->
     Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
       (Dos_lane.error_to_string e)
 ;;
@@ -76,6 +78,11 @@ let of_lane_run ~tool_name ~start_time
 let dos_dir ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos"
 let programs_dir ~base_path = Filename.concat (dos_dir ~base_path) "programs"
 
+(* What a program wrote on earlier machines, one directory per inventory
+   name. Keyed by the inventory name, not the executable: two games may both
+   boot a MAIN.EXE. *)
+let saves_dir ~base_path name = Filename.concat (Filename.concat (dos_dir ~base_path) "saves") name
+
 let entries_of dir =
   if Sys.file_exists dir && Sys.is_directory dir then
     Sys.readdir dir
@@ -93,29 +100,45 @@ let is_program_name name =
   Filename.check_suffix lower ".exe" || Filename.check_suffix lower ".com"
 ;;
 
-(* Inside a directory the executable is the one named after the directory, or
-   the only .exe/.com there. Two candidates and no name match is a question
-   for the caller, not a guess: DOS game directories carry installers and
-   setup programs beside the game. Returns the executable and the rest of the
+(* Inside a directory the executable is the one the caller named with
+   [boot], else the one named after the directory, else the only .exe/.com
+   there. Two candidates and no name match is a question for the caller, not
+   a guess: DOS game directories carry installers and setup programs beside
+   the game, and a loader chain such as 삼국지3's KOEI.COM -> MAIN.EXE shares
+   its directory with both. Returns the executable and the rest of the
    directory beside it, so its caller reads each file exactly once. *)
-let executable_in dir =
+let executable_in ?boot dir =
   let files =
     List.filter (fun f -> not (Sys.is_directory (Filename.concat dir f))) (entries_of dir)
   in
-  let programs = List.filter is_program_name files in
-  let stem = String.lowercase_ascii (Filename.basename dir) in
-  let named =
-    List.filter (fun f -> String.equal (String.lowercase_ascii (Filename.remove_extension f)) stem) programs
-  in
-  match (named, programs) with
-  | [ one ], _ | [], [ one ] ->
-    Ok (one, List.filter (fun f -> not (String.equal f one)) files)
-  | [], [] -> Error (Printf.sprintf "%s holds no .exe or .com" (Filename.basename dir))
-  | _, many ->
-    Error
-      (Printf.sprintf "%s holds several programs (%s); name the one to boot"
-         (Filename.basename dir)
-         (String.concat ", " many))
+  let beside one = List.filter (fun f -> not (String.equal f one)) files in
+  let folded = String.lowercase_ascii in
+  match boot with
+  | Some wanted ->
+    (* DOS folds case, so BOOT and boot name one file; [files] cannot hold
+       both, because the load refuses a directory where two names fold
+       together. *)
+    (match List.filter (fun f -> String.equal (folded f) (folded wanted)) files with
+     | one :: _ when is_program_name one -> Ok (one, beside one)
+     | one :: _ ->
+       Error (Printf.sprintf "%s is not a .exe or .com: boot names the program to run" one)
+     | [] ->
+       Error
+         (Printf.sprintf "%s holds no file named %s" (Filename.basename dir) wanted))
+  | None ->
+    let programs = List.filter is_program_name files in
+    let stem = folded (Filename.basename dir) in
+    let named =
+      List.filter (fun f -> String.equal (folded (Filename.remove_extension f)) stem) programs
+    in
+    (match (named, programs) with
+     | [ one ], _ | [], [ one ] -> Ok (one, beside one)
+     | [], [] -> Error (Printf.sprintf "%s holds no .exe or .com" (Filename.basename dir))
+     | _, many ->
+       Error
+         (Printf.sprintf "%s holds several programs (%s); name the one to boot with boot"
+            (Filename.basename dir)
+            (String.concat ", " many)))
 ;;
 
 (* A program is a name in programs/, never a host path. The machine reads the
@@ -126,12 +149,7 @@ let executable_in dir =
    The name may be a file (boots alone) or a directory (boots with its data
    files mounted). It cannot climb out: a separator or a dot segment is
    refused before it reaches the filesystem. *)
-let escapes name =
-  String.contains name '/'
-  || String.contains name '\\'
-  || String.equal name ".."
-  || String.starts_with ~prefix:"." name
-;;
+let escapes = Dos_lane.escapes
 
 (* Spelling the name safely is not the whole boundary. Sys.file_exists and
    open both follow symbolic links, so an entry linked at a file outside
@@ -155,9 +173,13 @@ let left_inventory ~root shown =
     shown root
 ;;
 
-let resolve_program ~base_path name =
+let resolve_program ?boot ~base_path name =
   let root = programs_dir ~base_path in
   let trimmed = String.trim name in
+  match boot with
+  | Some b when escapes b ->
+    Error (Printf.sprintf "boot %S is a file name inside the directory: no paths, and no dots" b)
+  | Some _ | None ->
   if trimmed = "" then Error "name a program"
   else if escapes trimmed then
     Error
@@ -186,7 +208,7 @@ let resolve_program ~base_path name =
              | Error e -> Error e
              | Ok pair -> gather (pair :: acc) rest)
         in
-        (match executable_in path with
+        (match executable_in ?boot path with
          | Error e -> Error e
          | Ok (exe, others) ->
            (match read_one exe with
@@ -202,6 +224,10 @@ let resolve_program ~base_path name =
                       (fun (a, _) (b, _) -> String.compare a b)
                       ((exe, exe_bytes) :: mounted) ))
                 (gather [] others)))
+      else if Option.is_some boot then
+        Error
+          (Printf.sprintf "%s is one file, not a directory: boot names a file inside a game directory"
+             trimmed)
       else begin
         (* One file boots alone, and is mounted under its own name too — a
            program that opens itself (overlays, self-reading installers)
@@ -213,11 +239,7 @@ let resolve_program ~base_path name =
 
 (* The board hears what happens on the shared machine, the way the MSX lane
    announces its arcade. A refused post does not fail the tool — the machine
-   moved either way.
-
-   This runs as Dos_lane's [announce], under the machine's lock. Posting after
-   the lock was released let a second load or eject finish and post first, so
-   the board told the arcade's history in the wrong order. *)
+   moved either way. *)
 let relay_to_board ~author content =
   try
     let result =
@@ -239,6 +261,89 @@ let relay_to_board ~author content =
       (Printexc.to_string e)
 ;;
 
+(* Announcements leave in the order the machine changed, without posting
+   under the machine's lock. That lock is a stdlib Mutex and a board post can
+   suspend its fiber (Eio mutexes, streams); another fiber on the same thread
+   reaching Dos_lane then finds the lock held by its own thread, which raises.
+   So [announce] -- which Dos_lane runs under its lock, in machine order --
+   only queues the line, and [flush_announcements] posts the queue after the
+   call returns. One Eio mutex lets one fiber drain at a time, so the queue's
+   order is the board's order. A line left behind by a failed drain goes out
+   with the next one. *)
+let announcements : (string * string) Queue.t = Queue.create ()
+let announcements_lock = Mutex.create ()
+let posting = Eio.Mutex.create ()
+
+let announce ~author content () =
+  Mutex.protect announcements_lock (fun () -> Queue.push (author, content) announcements)
+;;
+
+let flush_announcements () =
+  let next () = Mutex.protect announcements_lock (fun () -> Queue.take_opt announcements) in
+  try
+    Eio.Mutex.use_rw ~protect:false posting (fun () ->
+      let rec drain () =
+        match next () with
+        | None -> ()
+        | Some (author, content) ->
+          relay_to_board ~author content;
+          drain ()
+      in
+      drain ())
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | e ->
+    Log.DosLog.warn "arcade relay: announcements wait for the next call: %s"
+      (Printexc.to_string e)
+;;
+
+let after_announcing result =
+  flush_announcements ();
+  result
+;;
+
+(* A call runs up to [Dos_lane.max_steps_per_call] instructions under the
+   lane's stdlib lock, a noticeable fraction of a second. On a system thread
+   the server's other fibers keep running meanwhile; a fiber that reaches
+   the lock waits on its own thread too, since every lane call goes through
+   here. Only the lane call moves: the announcements it queues are posted
+   afterwards, on the fiber, because posting takes an Eio lock. *)
+let off_domain f = Eio_guard.run_in_systhread ~label:"dos-lane" f
+
+(* A game can run for hours, and the Keeper holding the controller can stop
+   in that time. It will never pass, and every other caller would be refused
+   until a restart. [holder_left] says whether a holder can no longer act;
+   the Keeper boundary supplies it from Keeper state, which this tool surface
+   does not read (RFC-0194). Called before a call that needs the controller,
+   it frees a stopped holder's controller and tells the board.
+
+   The holder's state is read between two lane calls, not under the lane's
+   lock, so a holder resumed in those milliseconds still loses it and must
+   wait for a pass like any other player. And the name is
+   the caller's own: an MCP client named like a stopped Keeper is let go as
+   that Keeper would be. *)
+let free_left_controller ~holder_left ~who =
+  match off_domain Dos_lane.screen with
+  | Ok { Dos_lane.controller = Some holder; _ }
+    when (not (String.equal holder who)) && holder_left holder ->
+    (match
+       off_domain (fun () ->
+         Dos_lane.release_left ~holder
+           ~announce:
+             (announce ~author:who
+                (Printf.sprintf
+                   "%s 님의 Keeper 가 멈춰서 DOS 조종권이 풀렸어요" holder)))
+     with
+     (* Posted now: the call that follows may be refused before it reaches
+        the lane, and would not post it. *)
+     | Ok true -> flush_announcements ()
+     (* A hand-off that landed after the read above: that pass stands. *)
+     | Ok false -> ()
+     (* The machine went away; the call that follows reports it. *)
+     | Error _ -> ())
+  | Ok _ | Error _ -> ()
+;;
+
 let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
   match get_string_opt args "program" with
   | None | Some "" ->
@@ -252,56 +357,107 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
           ])
       ()
   | Some name ->
-    (match resolve_program ~base_path name with
+    let boot =
+      match get_string_opt args "boot" with
+      | None -> None
+      | Some b when String.trim b = "" -> None
+      | Some b -> Some (String.trim b)
+    in
+    (match resolve_program ?boot ~base_path name with
      | Error message -> reject ~tool_name ~start_time message
      | Ok (program_name, program_bytes, files) ->
        let loaded =
-         Dos_lane.load ~ledger_dir:(dos_dir ~base_path) ~program_name ~program_bytes
-           ~files
-           ~announce:(fun () ->
-             relay_to_board ~author:agent_name
-               (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name))
+         off_domain (fun () ->
+           Dos_lane.load ~who:agent_name ~ledger_dir:(dos_dir ~base_path)
+             ~saves_dir:(saves_dir ~base_path (String.trim name)) ~program_name ~program_bytes
+             ~files
+             ~announce:
+               (announce ~author:agent_name
+                  (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name)))
        in
-       of_lane_run ~tool_name ~start_time loaded)
+       after_announcing (of_lane_run ~tool_name ~start_time loaded))
 ;;
 
 let handle_eject ~tool_name ~start_time ~agent_name _args =
-  match
-    Dos_lane.eject
-      ~announce:(fun () ->
-        relay_to_board ~author:agent_name
-          (Printf.sprintf "%s 님이 기계를 껐습니다" agent_name))
-      ()
-  with
-  | Ok () ->
-    Tool_result.make_ok ~tool_name ~start_time
-      ~data:(`Assoc [ ("ejected", `Bool true) ]) ()
-  | Error e -> reject ~tool_name ~start_time (Dos_lane.error_to_string e)
+  after_announcing
+    (match
+       off_domain
+         (Dos_lane.eject ~who:agent_name
+            ~announce:
+              (announce ~author:agent_name (Printf.sprintf "%s 님이 기계를 껐습니다" agent_name)))
+     with
+     | Ok () ->
+       Tool_result.make_ok ~tool_name ~start_time
+         ~data:(`Assoc [ ("ejected", `Bool true) ]) ()
+     | Error e -> reject ~tool_name ~start_time (Dos_lane.error_to_string e))
+;;
+
+(* The hand-off is also the wake-up: the board post names the next holder
+   with @, which the board delivers to that Keeper as an explicit mention, so
+   the player whose turn it is does not have to poll the machine to find out.
+   A post is a message in their queue, not an obligation to answer. *)
+(* [to] is parsed with the board's own agent-id rule, so a name that could
+   never be mentioned -- "@liu-bei", "liu bei", "유비" -- is refused here. The
+   controller would otherwise go to a name no caller has, nobody could move or
+   eject the machine again, and the post meant to wake the next player would
+   address no one. *)
+let handle_pass ~tool_name ~start_time ~agent_name args =
+  let to_ =
+    match get_string_opt args "to" with
+    | None -> Ok None
+    | Some t when String.trim t = "" -> Ok None
+    | Some t ->
+      (match Board_types.Agent_id.parse (String.trim t) with
+       | Ok id -> Ok (Some (Board_types.Agent_id.to_string id))
+       | Error _ ->
+         Error
+           (Printf.sprintf
+              "to %S is not a Keeper name: give the name alone, without @ or spaces" t))
+  in
+  match to_ with
+  | Error message -> reject ~tool_name ~start_time message
+  | Ok to_ ->
+    let content =
+      match to_ with
+      | Some next -> Printf.sprintf "@%s 님 차례예요. %s 님이 DOS 조종권을 넘겼습니다" next agent_name
+      | None -> Printf.sprintf "%s 님이 DOS 조종권을 내려놓았습니다" agent_name
+    in
+    after_announcing
+      (of_lane ~tool_name ~start_time
+         (off_domain (fun () ->
+            Dos_lane.pass ~who:agent_name ~to_ ~announce:(announce ~author:agent_name content))))
 ;;
 
 let handle_screen ~tool_name ~start_time _args =
-  of_lane ~tool_name ~start_time (Dos_lane.screen ())
+  of_lane ~tool_name ~start_time (off_domain Dos_lane.screen)
 ;;
 
-let default_steps = 1_000_000
+(* The whole per-call ceiling: a call that settles stops early, so a large
+   default costs a quick program nothing, while a game whose screen change
+   takes a few million instructions (삼국지3's transitions take 3-4 million)
+   settles in one call instead of coming back busy. *)
+let default_steps = Dos_lane.max_steps_per_call
 
-let handle_step ~tool_name ~start_time args =
+let handle_step ~tool_name ~start_time ~who args =
+  after_announcing @@
   of_lane_run ~tool_name ~start_time
-    (Dos_lane.step
+    (off_domain @@ fun () -> Dos_lane.step ~who
        ~steps:(get_int args "steps" default_steps)
        ~until_ready:(get_bool args "until_ready" true))
 ;;
 
 let handle_press ~tool_name ~start_time ~who args =
+  after_announcing @@
   of_lane_run ~tool_name ~start_time
-    (Dos_lane.press ~who
+    (off_domain @@ fun () -> Dos_lane.press ~who
        ~keys:(get_string_list args "keys")
        ~steps:(get_int args "steps" default_steps))
 ;;
 
 let handle_click ~tool_name ~start_time ~who args =
+  after_announcing @@
   of_lane_run ~tool_name ~start_time
-    (Dos_lane.click ~who
+    (off_domain @@ fun () -> Dos_lane.click ~who
        ~x:(get_int args "x" 0)
        ~y:(get_int args "y" 0)
        ~buttons:(get_int args "buttons" 1)
@@ -309,8 +465,9 @@ let handle_click ~tool_name ~start_time ~who args =
 ;;
 
 let handle_type ~tool_name ~start_time ~who args =
+  after_announcing @@
   of_lane_run ~tool_name ~start_time
-    (Dos_lane.type_text ~who ~text:(get_string args "text" "")
+    (off_domain @@ fun () -> Dos_lane.type_text ~who ~text:(get_string args "text" "")
        ~steps:(get_int args "steps" default_steps))
 ;;
 
@@ -330,7 +487,7 @@ let handle_peek ~tool_name ~start_time args =
     | Some a -> a
     | None -> -1
   in
-  match Dos_lane.peek ~address ~length:(get_int args "length" 16) with
+  match off_domain (fun () -> Dos_lane.peek ~address ~length:(get_int args "length" 16)) with
   | Ok hex ->
     Tool_result.make_ok ~tool_name ~start_time
       ~data:

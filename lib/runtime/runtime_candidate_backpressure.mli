@@ -4,7 +4,7 @@
     is held by the attempted runtime alone and read as ordering evidence by
     the lane walk (RFC-0370 §3.3, RFC-0433): a candidate under backpressure
     is demoted behind its lane siblings, never excluded. A server error,
-    network failure or timeout is held the same way until the candidate
+    provider capacity refusal, network failure or timeout is held the same way until the candidate
     answers (RFC-0458 §3.4). The observation cell lives on the materialized
     runtime; frozen attempts retain the same cell, and the runtime catalog
     owns its lifetime. *)
@@ -14,6 +14,7 @@ type rate_limit = Runtime_candidate_backpressure_state.rate_limit =
 
 type attempt_failure = Runtime_candidate_backpressure_state.attempt_failure =
   | Server_error
+  | Provider_capacity
   | Network_transient
   | Provider_timeout
 

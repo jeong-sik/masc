@@ -116,7 +116,6 @@ describe('normalizeMission', () => {
             phase: 'paused',
             pipeline_stage: 'paused',
             paused: true,
-            generation: 5,
           },
         ],
       },

@@ -94,7 +94,7 @@ let write_keeper_toml ~base_path name =
     (fun oc ->
       output_string
         oc
-        "[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"keeper list fixture\"\n")
+        "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\ninstructions = \"keeper list fixture\"\n")
 ;;
 
 let seed_keepers config names =

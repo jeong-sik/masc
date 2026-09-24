@@ -50,6 +50,7 @@ let record ?(tokens = Some 18_000) ~wire ~scope () : Turn_record.t =
       ; cache_read_input_tokens = None
       ; scope
       }
+  ; turn_output_tokens = None
   ; ts = 1781200000.5
   }
 

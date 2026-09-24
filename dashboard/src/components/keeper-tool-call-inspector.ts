@@ -701,7 +701,6 @@ function ToolCallEvidenceSection({ entry }: { entry: ToolCallEntry }) {
         title="runtime contract"
         pairs=${[
           ['keeper', contract?.keeper_name],
-          ['generation', contract?.generation !== undefined ? String(contract.generation) : undefined],
           ['sandbox root', contract?.sandbox_root],
           ['sandbox roots', joinedOrAbsent(contract?.sandbox_roots)],
           ['network mode', contract?.network_mode],

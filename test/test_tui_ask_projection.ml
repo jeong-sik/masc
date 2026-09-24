@@ -88,7 +88,7 @@ let test_multi_emptied_is_unanswered () =
     (Ask.response_for d ~question:multi = None)
 
 let test_free_text_slot_for_choices_only () =
-  let slot = Ask.free_text_slot single in
+  let slot = Ask.free_text_slot ~ask_id:"a1" single in
   Alcotest.(check (option string)) "no author hint needed" None (Ask.free_text_hint slot);
   let draft = Ask.set_text (Ask.empty_draft ~ask_id:"a1") ~slot ~text:"another route" in
   match Ask.response_for draft ~question:single with
@@ -98,7 +98,7 @@ let test_free_text_slot_for_choices_only () =
 let test_free_text_slot_carries_hint () =
   let q = question ~free_text:(Decode.Ask_free_text_allowed { aft_hint = Some "one line" }) "q1" in
   Alcotest.(check (option string)) "hint reaches the editor" (Some "one line")
-    (Ask.free_text_hint (Ask.free_text_slot q))
+    (Ask.free_text_hint (Ask.free_text_slot ~ask_id:"a1" q))
 
 let test_alternative_shortcut () =
   List.iter (fun (count, expected) ->
@@ -112,7 +112,7 @@ let text_question_named id =
 
 let text_question = text_question_named "q1"
 
-let slot_of = Ask.free_text_slot
+let slot_of = Ask.free_text_slot ~ask_id:"a1"
 
 (* The panel draws the caret on a row, and the editor holds a slot rather than
    a row index; without a way back to the question id the surface would have to
@@ -120,6 +120,20 @@ let slot_of = Ask.free_text_slot
 let test_free_text_slot_names_its_question () =
   Alcotest.(check string) "the slot names the question it writes to" "q7"
     (Ask.free_text_question_id (slot_of (text_question_named "q7")))
+
+(* masc_ask numbers every ask's questions from q1, so two open asks both have
+   a q1. Text typed for one must not land in the other's draft when a
+   snapshot moves the cursor while the operator types. *)
+let test_free_text_slot_writes_only_its_own_ask () =
+  let slot = Ask.free_text_slot ~ask_id:"a1" text_question in
+  Alcotest.(check string) "the slot names its ask" "a1" (Ask.free_text_ask_id slot);
+  let other = Ask.set_text (Ask.empty_draft ~ask_id:"a2") ~slot ~text:"meant for a1" in
+  Alcotest.(check bool) "another ask's q1 stays unanswered" true
+    (Ask.response_for other ~question:text_question = None);
+  match Ask.response_for (Ask.set_text (Ask.empty_draft ~ask_id:"a1") ~slot ~text:"meant for a1")
+          ~question:text_question with
+  | Some (Ask.Draft_wrote "meant for a1") -> ()
+  | _ -> Alcotest.fail "the slot's own ask did not get the text"
 
 let test_set_text_records () =
   let d = Ask.set_text (Ask.empty_draft ~ask_id:"a1") ~slot:(slot_of text_question) ~text:"ship it" in
@@ -384,6 +398,8 @@ let () =
           Alcotest.test_case "carries the hint" `Quick test_free_text_slot_carries_hint;
           Alcotest.test_case "names its question" `Quick
             test_free_text_slot_names_its_question;
+          Alcotest.test_case "writes only its own ask" `Quick
+            test_free_text_slot_writes_only_its_own_ask;
           Alcotest.test_case "records text" `Quick test_set_text_records;
           Alcotest.test_case "blank clears" `Quick test_blank_text_clears;
         ] );

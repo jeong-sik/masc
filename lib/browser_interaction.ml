@@ -98,7 +98,7 @@ let perform request =
       expected_url=request.expected_url; action=request.action})
     ~timeout_sec:20.
     |> Result.map_error Browser_lane.selection_error_code in
-  Browser_surface.decode_answer answer
+  Browser_surface.decode_answer ~lane:(Browser_lane.target_lane target) answer
 
 let script = {js|function interactInPage(args) {
   let effectStarted = false;

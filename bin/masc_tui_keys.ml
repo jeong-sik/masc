@@ -734,7 +734,7 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Connectors ->
       [ b Navigate "B" "Browser Lane"
-          ~help:"read browser tabs and page text; select live / automation inside Browser"
+          ~help:"read browser tabs and page text; select live / automation / stagehand inside Browser"
       ; b Act "Ctrl-O" "Browser screenshot"
           ~help:"inside Browser Lane: preview the selected tab; any key returns"
       ; b Navigate "j/k" "scroll"
@@ -1492,7 +1492,7 @@ let help_sections ?current () =
 let footer_hints_browser_lane =
   hints_of_bindings
     [ b Navigate "b" "browser"
-    ; b Navigate "l / a" "live / automation"
+    ; b Navigate "l / a / c" "live / automation / stagehand"
     ; b Navigate "[ / ]" "tab"
     ; b Navigate "j/k" "text"
     ; b Act "Ctrl-O" "screenshot"

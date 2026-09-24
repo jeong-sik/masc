@@ -282,6 +282,19 @@ let route_lane_name = function
   | Stagehand_route -> Lane_name.Stagehand
 ;;
 
+(* What an absent backend means on each lane, and where the operator looks. *)
+let lane_absent_message = function
+  | Lane_name.Live ->
+    "no browser lane connected: the live lane needs the operator's browser \
+     running with the browser-lane extension and host (connectors/browser)"
+  | Lane_name.Automation ->
+    "the automation lane has no WebDriver: configure browser.geckodriver, or \
+     read the server log for why it did not start"
+  | Lane_name.Stagehand ->
+    "the stagehand lane has no browser: configure [browser.stagehand], or \
+     read the server log for why it did not start"
+;;
+
 (* Why a live request names no browser to send its command to. Each case has
    a different next step: a browser has to connect, or the caller has to
    choose one of several. No command is dispatched in any of them. *)

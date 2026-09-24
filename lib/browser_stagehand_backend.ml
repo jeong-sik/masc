@@ -211,7 +211,11 @@ let create ~sw ~clock ~open_session ~call ~pid ~log =
   Eio.Fiber.fork_daemon ~sw (fun () ->
     let rec next () =
       let request = Eio.Stream.take t.requests in
-      Eio.Fiber.fork ~sw (fun () -> serve t request);
+      (* A request waiting on a call that never answers must not hold the
+         switch open either; the session it waits on ends with the switch. *)
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+        serve t request;
+        `Stop_daemon);
       next ()
     in
     next ());

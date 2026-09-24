@@ -177,9 +177,11 @@ val set_pinned :
 val delete_post :
   store -> post_id:string -> (unit, board_error) Result.t
 (** Removes the post and every comment under it from the
-    in-memory store.  The JSONL log keeps the original
-    rows; the rewriter on next flush overwrites the file
-    without them. *)
+    in-memory store, then rewrites the posts, comments, vote
+    and reaction snapshots without them.  Refused with
+    [Io_error], before anything changes, while any of those
+    four stores did not load fully: the rewrite would delete
+    the rows memory never held (#38595). *)
 
 (** {1 Global store + lifecycle} *)
 

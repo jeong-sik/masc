@@ -4,6 +4,10 @@
 
 type t
 
+(** Frontend HTTP wait for a Stagehand open, derived from the port, CDP, and
+    attach waits plus one command window for process/transport overhead. *)
+val open_http_timeout_s : float
+
 (** [open_ ~sw ~env ~masc_root ~config ~headless ~model ~log] starts
     Chromium with the configured extension, connects, attaches and calls
     [stagehand.init], whose result it returns with the session.

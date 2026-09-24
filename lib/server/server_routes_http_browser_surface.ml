@@ -15,7 +15,11 @@ let read_body request reqd f =
 let server_lane fields =
   let refused = "lane must be " ^ Browser_lane.server_lanes_expected in
   match List.assoc_opt "lane" fields with
-  | Some (`String raw) -> Option.to_result ~none:refused (Browser_lane.server_lane_of_wire raw)
+  | Some (`String raw) ->
+    (match Browser_lane.Lane_name.of_wire raw with
+     | Some Browser_lane.Lane_name.Live -> Error ("the live browser belongs to the operator; " ^ refused)
+     | Some (Browser_lane.Lane_name.Automation | Browser_lane.Lane_name.Stagehand) | None ->
+       Option.to_result ~none:refused (Browser_lane.server_lane_of_wire raw))
   | Some _ | None -> Error refused
 let session = function
   | `Assoc fields ->

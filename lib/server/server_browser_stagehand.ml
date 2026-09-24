@@ -29,6 +29,12 @@ let init_answer_s = 30.
    longest CDP command (the readiness wait), and the init answer. *)
 let attach_deadline_s = service_worker_wait_s +. cdp_command_deadline_s +. init_answer_s
 
+(* The HTTP client gives one additional CDP command window to process startup
+   and response transport after the bounded port, connect, and attach steps.
+   The server does not abandon an in-flight open at this frontend deadline. *)
+let open_http_timeout_s =
+  devtools_port_timeout_s +. cdp_command_deadline_s +. attach_deadline_s +. cdp_command_deadline_s
+
 (* ws-direct's own default. A screenshot of a long page is the largest
    frame the connection carries. *)
 let max_message_bytes = 64 * 1024 * 1024

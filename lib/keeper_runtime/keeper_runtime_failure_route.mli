@@ -28,8 +28,11 @@
 type retry_class =
   | Rate_limited  (** soft 429 throttle; declared runtimes remain eligible *)
   | Hard_quota  (** account-level quota/balance exhaustion (402 family) *)
-  | Capacity_backpressure
-      (** typed provider overload / capacity-exhausted pools *)
+  | Provider_capacity
+      (** the provider refused for its own capacity: an HTTP 529 overload,
+          a provider [CapacityExhausted] pool, or the MASC envelope that
+          carries one. A fact about the attempted candidate, like a server
+          error. *)
   | Empty_completion of { stop_reason : Llm_provider.Types.stop_reason }
       (** provider completed the request with no thinking, text, or tool calls;
           the typed stop reason remains available to scheduling policy and
@@ -193,9 +196,6 @@ val route_of_error : boundary:error_boundary -> Agent_core.Error.t -> route
     crosses the live AGENT_CORE tool boundary and is therefore decoded at either
     boundary. No arm returns "no route". *)
 
-val retry_after_of_route : route -> float option
-(** [Some hint] only for [Retry_after_observed] carrying a provider hint. *)
-
 val usable_retry_after : float option -> float option
 (** The provider hint that names a wait: present, finite, above zero. A
     hint that is absent, zero, negative, infinite or NaN names none, and every
@@ -252,7 +252,7 @@ val route_resumes_on_same_path : route -> bool
     operation whose last candidate failed after saving tool results continues
     on that same path (RFC last-path-resumes-after-progress §3.3).
 
-    [true]: [Rate_limited], [Capacity_backpressure], [Empty_completion] with
+    [true]: [Rate_limited], [Provider_capacity], [Empty_completion] with
     [EndTurn], [MaxTokens], or [StopSequence], [Server_error],
     [Network_transient], [Provider_timeout], and [Hard_quota] with a usable
     reset hint (positive, not NaN). The empty-completion reasons resume a

@@ -1249,6 +1249,26 @@ let test_text_history_uses_the_single_envelope () =
     (encoded_message_json message |> Yojson.Safe.to_string)
 ;;
 
+(* RFC-0468 §3.2: the input speaker is Librarian attribution. The official
+   client reads this envelope as prompt text and its snapshot hashes cover it,
+   so a stamped message encodes to the same bytes as an unstamped one. *)
+let test_input_speaker_stays_out_of_the_envelope () =
+  let plain =
+    { (msg Agent_core.Types.User [ text "hello" ]) with
+      metadata = [ "scope", `String "dashboard" ] }
+  in
+  let stamped =
+    { plain with
+      metadata =
+        plain.metadata
+        @ Keeper_input_speaker.metadata (Keeper_input_speaker.Person Keeper_input_speaker.Owner)
+    }
+  in
+  check string "same envelope bytes"
+    (Host.encode_history_message plain)
+    (Host.encode_history_message stamped)
+;;
+
 let test_tool_message_is_preserved_as_canonical_json () =
   let message =
     Agent_core.Types.tool_result_msg
@@ -2644,6 +2664,10 @@ let () =
             "text history uses the single envelope"
             `Quick
             test_text_history_uses_the_single_envelope
+        ; test_case
+            "input speaker stays out of the envelope"
+            `Quick
+            test_input_speaker_stays_out_of_the_envelope
         ; test_case
             "tool messages preserve canonical JSON"
             `Quick

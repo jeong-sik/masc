@@ -107,6 +107,42 @@ let test_lost_ends_every_command () =
   | _ -> fail "the end is announced once and nothing follows it"
 ;;
 
+let test_failed_send_ends_every_command () =
+  Eio_mock.Backend.run
+  @@ fun () ->
+  let clock = Eio_mock.Clock.make () in
+  let sends = ref 0 and closes = ref 0 and events = ref [] in
+  let t =
+    Cdp.create
+      ~send:(fun _ ->
+        incr sends;
+        if !sends = 2 then failwith "socket closed while sending")
+      ~close:(fun () -> incr closes)
+      ~clock ~command_deadline_s:deadline_s
+      ~on_event:(fun event -> events := event :: !events)
+  in
+  Eio.Switch.run @@ fun sw ->
+  let waiting = Eio.Fiber.fork_promise ~sw (fun () -> Cdp.command t "Browser.getVersion" (`Assoc [])) in
+  let failed = Cdp.command t "Target.getTargets" (`Assoc []) in
+  let reason =
+    match failed with
+    | Error (Cdp.Connection_lost reason) -> reason
+    | _ -> fail "send failure did not return Connection_lost"
+  in
+  check bool "the send failure is reported" true
+    (String.starts_with ~prefix:"CDP command send failed:" reason);
+  check reply "an earlier command also ends" (Error (Cdp.Connection_lost reason))
+    (Eio.Promise.await_exn waiting);
+  check reply "a later command does not write" (Error (Cdp.Connection_lost reason))
+    (Cdp.command t "Runtime.enable" (`Assoc []));
+  check int "only the first two commands tried to write" 2 !sends;
+  check int "the transport is let go once" 1 !closes;
+  match !events with
+  | [ Cdp.Connection_ended { reason = event_reason } ] ->
+    check string "the event keeps the same cause" reason event_reason
+  | _ -> fail "the send failure was not announced once"
+;;
+
 let test_deadline_ends_the_connection () =
   with_connection @@ fun ~sw ~clock ~t ~sent:_ ~events:_ ~closes:_ ->
   let waiting = Eio.Fiber.fork_promise ~sw (fun () -> Cdp.command t "Runtime.evaluate" (`Assoc [])) in
@@ -164,6 +200,7 @@ let () =
     "connection", [
       test_case "replies reach their commands" `Quick test_replies_reach_their_commands;
       test_case "an ended connection ends every command" `Quick test_lost_ends_every_command;
+      test_case "a failed send ends every command" `Quick test_failed_send_ends_every_command;
       test_case "a missed deadline ends the connection" `Quick test_deadline_ends_the_connection;
       test_case "a reply at the deadline keeps it" `Quick test_a_reply_at_the_deadline_keeps_the_connection;
       test_case "a cancelled caller ends it" `Quick test_a_cancelled_caller_ends_the_connection;

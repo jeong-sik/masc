@@ -1,0 +1,97 @@
+name: Stagehand Browser Proof
+
+on:
+  pull_request:
+    paths:
+      - 'lib/browser_cdp.*'
+      - 'lib/browser_stagehand_*'
+      - 'lib/browser_chromium_process.*'
+      - 'lib/browser_configuration.*'
+      - 'lib/browser_surface.*'
+      - 'lib/browser_scene_script.ml'
+      - 'lib/browser_lane/**'
+      - 'lib/server/server_browser_stagehand.*'
+      - 'lib/tool_misc_browser_lane.ml'
+      - 'connectors/browser/install-stagehand-extension.sh'
+      - 'scripts/probe-stagehand.py'
+      - 'test/stagehand_browser_probe.ml'
+      - 'test/stanzas/stagehand_browser_probe.inc'
+      - '.github/workflows/browser-stagehand-proof.yml'
+  workflow_dispatch:
+  # Keep a main-scoped macOS opam cache available for pull requests.
+  schedule:
+    - cron: '29 18 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-stagehand-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-stagehand:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup OCaml
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Install native dependencies
+        run: |
+          brew install flock gmp libpq openssl@3 zstd ripgrep
+          libpq_prefix="$(brew --prefix libpq)"
+          openssl_prefix="$(brew --prefix openssl@3)"
+          {
+            echo "$libpq_prefix/bin"
+            echo "$openssl_prefix/bin"
+          } >> "$GITHUB_PATH"
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
+
+      - name: Pin dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+        with:
+          pin-flags: --with-compact-protocol --with-bisect
+
+      - name: Install OCaml dependencies
+        run: opam install . --deps-only --with-test -y
+
+      - name: Build the Stagehand lane probe
+        run: opam exec -- dune build --release test/stagehand_browser_probe.exe
+
+      # Chrome for Testing, not branded Chrome: branded builds refuse
+      # --load-extension from 137, and 154 is the build the CDP extension load
+      # was checked on (docs/evidence/browser-stagehand-cdp-20260924).
+      - name: Install Chrome for Testing
+        run: |
+          npx --yes @puppeteer/browsers@3.2.3 install chrome@154.0.8037.57 --path "$RUNNER_TEMP/chrome-for-testing" > "$RUNNER_TEMP/chrome-for-testing.txt"
+          echo "CHROME_FOR_TESTING=$(tail -1 "$RUNNER_TEMP/chrome-for-testing.txt" | sed 's/^[^ ]* //')" >> "$GITHUB_ENV"
+
+      - name: Exercise the Stagehand lane in a real Chromium
+        run: |
+          mkdir -p proof/stagehand
+          git rev-parse HEAD > proof/stagehand/SOURCE_COMMIT
+          shasum -a 256 _build/default/test/stagehand_browser_probe.exe > proof/stagehand/SHA256SUMS
+          python3 scripts/probe-stagehand.py \
+            --chrome "$CHROME_FOR_TESTING" \
+            --probe _build/default/test/stagehand_browser_probe.exe \
+            --base-path "$RUNNER_TEMP/stagehand-workspace" \
+            --out proof/stagehand
+
+      - name: Upload Stagehand proof
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: masc-stagehand-browser-proof-macos-arm64-${{ github.event.pull_request.head.sha || github.sha }}
+          path: proof/stagehand/
+          if-no-files-found: ignore

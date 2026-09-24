@@ -3967,7 +3967,7 @@ type palette_mode =
    belongs to this view instance, so late browser replies cannot replace a
    different source or tab after the operator moves. *)
 module Browser_lane_view = struct
-  type source = Live | Automation
+  type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
   type browser = Firefox | Zen
   type client = { client_id : string; browser : browser }
   type discovery = Read_after_discovery | Choose_client
@@ -4057,16 +4057,17 @@ module Browser_lane_view = struct
     read_continuation : read_continuation;
   }
 
-  let source_name = function Live -> "live" | Automation -> "automation"
+  let source_name = Browser_lane.Lane_name.to_wire
   let browser_name = function Firefox -> "Firefox" | Zen -> "Zen"
   let client_id t = match t.source, t.selected_client with
     | Live, Some client -> Some client.client_id
-    | Live, None | Automation, _ -> None
+    | Live, None | Automation, _ | Stagehand, _ -> None
   (* The browser a read goes to, when there is one. Live with none chosen has
      no browser to name; this used to answer "choose browser", and every row
      that put a name there read as nonsense ("choose browser page reader"). *)
   let browser_label t = match t.source, t.selected_client with
     | Automation, _ -> Some "browser"
+    | Stagehand, _ -> Some "Chromium"
     | Live, Some client -> Some (browser_name client.browser)
     | Live, None -> None
   let create () =
@@ -4128,7 +4129,7 @@ module Browser_lane_view = struct
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
             @ (match t.selected_tab with None -> [] | Some id -> ["tabId", `Int id]))
   let selected_client_available t = match t.source, t.selected_client with
-    | Automation, _ -> true
+    | (Automation | Stagehand), _ -> true
     | Live, None -> false
     | Live, Some selected -> List.exists (fun (client : client) -> client = selected) (listed_clients t)
   let cadence_operation ?(viewport : screenshot option) t =
@@ -4197,9 +4198,9 @@ module Browser_lane_view = struct
   let string = function `String s -> Ok s | _ -> Error "expected string"
   let integer = function `Int n when n >= 0 -> Ok n | _ -> Error "expected nonnegative integer"
   let boolean = function `Bool b -> Ok b | _ -> Error "expected boolean"
-  let parse_source = function
-    | `String "live" -> Ok Live | `String "automation" -> Ok Automation
-    | _ -> Error "unknown browser source"
+  let parse_source json =
+    let lane = match json with `String raw -> Browser_lane.Lane_name.of_wire raw | _ -> None in
+    Option.to_result ~none:"unknown browser source" lane
   let get parse name json = let* value = field name json in parse value
   let parse_client json =
     let* client_id = get string "clientId" json in
@@ -4229,8 +4230,8 @@ module Browser_lane_view = struct
     let* value = field "clientId" json in
     match source, value with
     | Live, `String id when String.trim id <> "" -> Ok (Some id)
-    | Automation, `Null -> Ok None
-    | _ -> Error "browser client ID does not match source"
+    | (Automation | Stagehand), `Null -> Ok None
+    | Live, _ | Automation, _ | Stagehand, _ -> Error "browser client ID does not match source"
   let parse_tab json =
     let* id = get integer "id" json in
     let* title = get string "title" json in
@@ -4831,9 +4832,7 @@ module Browser_history = struct
     match observation t with
     | None -> view
     | Some observation ->
-      let source = match observation.source with
-        | Masc.Browser_surface.Live -> Browser_lane_view.Live
-        | Automation -> Browser_lane_view.Automation in
+      let source = observation.source in
       let client_id = Option.map Browser_lane.client_id_to_string observation.client_id in
       {view with source;selected_tab=Some observation.tab_id;scroll=t.scroll;
        scene=Some {source;client_id;tab_id=observation.tab_id;content=observation.scene;elapsed_ms=0.}}

@@ -1,6 +1,6 @@
 name = "masc_browser_goto"
 description = """
-Navigate an isolated automation tab to HTTP(S); returns landing URL/title. Read afterwards. Live navigation is refused; use BrowserInteract for live-tab actions."""
+Navigate a tab of a server-owned browser (lane automation or stagehand) to HTTP(S); returns landing URL/title. Live navigation is refused; use BrowserInteract for live-tab actions."""
 additional_properties = false
 
 [[params]]
@@ -8,6 +8,12 @@ name = "url"
 type = "string"
 required = true
 description = "HTTP(S) URL."
+
+[[params]]
+name = "lane"
+type = "string"
+enum = ["automation", "stagehand"]
+default = "automation"
 
 [[params]]
 name = "tabId"

@@ -341,7 +341,7 @@ let test_ask_answer_input_ownership () =
   in
   state.Tui_types.view <- Tui_types.Approvals;
   state.Tui_types.ask_text_entry <- Some
-    { ate_slot = Masc_tui_ask_projection.free_text_slot question; ate_text = "draft" };
+    { ate_slot = Masc_tui_ask_projection.free_text_slot ~ask_id:"ask-1" question; ate_text = "draft" };
   check target "answer owns typing and paste" (Some Tui_types.Text_ask_answer) (resolved state);
   check target "compact frame hides answer editor" None (resolved ~compact_viewport:true state);
   state.Tui_types.context_inspector_open <- true;

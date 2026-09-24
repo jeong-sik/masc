@@ -5906,7 +5906,8 @@ let test_config_post_materializes_missing_toml () =
       let raw, json =
         post_config ~sw ~clock:(Eio.Stdenv.clock env)
           ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-          ~name {|{"activation_mode":"autonomous","sandbox_profile":"docker"}|}
+          ~name
+          {|{"activation_mode":"autonomous","sandbox_profile":"docker","sandbox_image":"masc-sandbox:general"}|}
       in
       expect_http_status "HTTP 200" 200 raw;
       let open Yojson.Safe.Util in
@@ -5928,6 +5929,9 @@ let test_config_post_materializes_missing_toml () =
       | Ok doc ->
         check (option string) "materialized sandbox profile" (Some "docker")
           (Keeper_toml_loader.toml_string_opt doc "keeper.sandbox_profile");
+        check (option string) "materialized sandbox image"
+          (Some "masc-sandbox:general")
+          (Keeper_toml_loader.toml_string_opt doc "keeper.sandbox_image");
         check (option string) "materialized activation mode" (Some "autonomous")
           (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"))
 

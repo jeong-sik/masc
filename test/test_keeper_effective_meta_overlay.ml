@@ -166,9 +166,10 @@ let write_keeper_toml_with_backend ~keepers_dir ~name ~sandbox_profile
     (Printf.sprintf
        {|[keeper]
 sandbox_profile = "%s"
-%sinstructions = %S
+%s%sinstructions = %S
 |}
        sandbox_profile
+       (if String.equal sandbox_profile "remote_ssh" then "" else "sandbox_image = \"masc-sandbox:general\"\n")
        (match microvm_backend with
         | None -> ""
         | Some backend -> Printf.sprintf "microvm_backend = %S\n" backend)

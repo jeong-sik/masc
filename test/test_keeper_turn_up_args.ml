@@ -1825,6 +1825,7 @@ let test_actor_publication_starts_after_config_commit () =
       (`Assoc ["name", `String name; "instructions", `String "committed"]) with
     | Ok parsed -> parsed
     | Error error -> fail (Keeper_types_profile.tool_result_body error) in
+  let meta = { meta with sandbox_image = parsed.profile_defaults.sandbox_image } in
   let journal_path = Keeper_config_journal.journal_path_for_base_path
       ~base_path:ctx.config.base_path in
   let published = ref false in
@@ -2640,7 +2641,8 @@ let test_sandbox_image_persistence () =
     | Ok meta -> { meta with sandbox_profile = Keeper_types_profile_sandbox.Docker }
     | Error error -> fail error in
   let apply fields =
-    let parsed = match parse_stating_a_profile ctx (`Assoc (("name", `String name) :: fields)) with
+    let parsed = match parse_stating_a_profile ctx
+        (`Assoc (("name", `String name) :: ("sandbox_profile", `String "docker") :: fields)) with
       | Ok parsed -> parsed
       | Error result -> fail (Keeper_types_profile.tool_result_body result) in
     let instructions = match parsed.instructions_opt with

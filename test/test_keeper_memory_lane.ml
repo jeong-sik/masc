@@ -627,7 +627,7 @@ let test_durable_drain_publishes_scoped_health () =
       Fs_compat.mkdir_p keepers_dir;
       Out_channel.with_open_bin (Filename.concat keepers_dir (keeper_name ^ ".toml"))
         (fun oc -> Printf.fprintf oc
-          "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\n"
+          "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\nsandbox_image = \"masc-sandbox:general\"\n"
           keeper_name "test durable health" "docker");
       Masc.Keeper_types_profile.invalidate_keeper_profile_defaults_cache keeper_name;
       (match Masc.Keeper_meta_store.replace_snapshot config (make_meta keeper_name) with

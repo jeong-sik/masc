@@ -2502,8 +2502,9 @@ let write_keeper_profile ~base_path ~keeper_name ~sandbox_profile =
   Fs_compat.save_file
     path
     (Printf.sprintf
-       "[keeper]\ninstructions = \"verification test producer\"\nsandbox_profile = %S\n%s"
-       sandbox_profile backend_line)
+       "[keeper]\ninstructions = \"verification test producer\"\nsandbox_profile = %S\n%s%s"
+       sandbox_profile backend_line
+       (if String.equal sandbox_profile "remote_ssh" then "" else "sandbox_image = \"masc-sandbox:general\"\n"))
 
 let create_protocol_evidence_request ~sandbox_profile
     ~base_path ~request_id ~evidence_refs =

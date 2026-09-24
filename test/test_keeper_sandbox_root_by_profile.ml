@@ -34,7 +34,8 @@ let with_workspace declare f =
       Fun.protect
         ~finally:(fun () -> close_out_noerr channel)
         (fun () ->
-          Printf.fprintf channel "[keeper]\nsandbox_profile = %S\n" profile))
+          Printf.fprintf channel "[keeper]\nsandbox_profile = %S\n%s" profile
+            (if String.equal profile "remote_ssh" then "" else "sandbox_image = \"masc-sandbox:general\"\n")))
     declare;
   Fun.protect ~finally:(fun () -> ()) (fun () -> f base)
 ;;

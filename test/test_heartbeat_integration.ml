@@ -2193,6 +2193,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some live_meta.sandbox_profile
+        ; sandbox_image = Some "masc-sandbox:general"
         }
       in
       let parsed : Turn_up_args.parsed_args =
@@ -2483,6 +2484,7 @@ let test_update_keeper_defers_lane_swap_while_turn_in_flight () =
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some meta.sandbox_profile
+        ; sandbox_image = Some "masc-sandbox:general"
         }
       in
       let parsed : Turn_up_args.parsed_args =
@@ -2673,6 +2675,7 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some meta.sandbox_profile
+        ; sandbox_image = Some "masc-sandbox:general"
         }
       in
       let parsed : Turn_up_args.parsed_args =

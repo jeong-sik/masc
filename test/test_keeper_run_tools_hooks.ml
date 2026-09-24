@@ -1401,6 +1401,7 @@ let drift_defaults sandbox =
   { Masc.Keeper_types_profile.empty_keeper_profile_defaults with
     manifest_path = Some "keepers/drift.toml"
   ; sandbox_profile = sandbox
+  ; sandbox_image = Some "masc-sandbox:general"
   ; microvm_backend =
       (match sandbox with
        | Some Keeper_types_profile_sandbox.Micro_vm ->

@@ -277,6 +277,7 @@ let test_the_profile_overlay_carries_the_size_to_a_microvm_keeper_only () =
     { Masc.Keeper_types_profile.empty_keeper_profile_defaults with
       manifest_path = Some ".masc/config/keepers/sized.toml"
     ; sandbox_profile = Some profile
+    ; sandbox_image = Some "masc-sandbox:general"
     ; microvm_backend =
         (match profile with
          | Profile.Micro_vm -> Some Masc.Keeper_microvm_backend.Apple_container

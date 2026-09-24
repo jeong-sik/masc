@@ -37,7 +37,7 @@ let test_cancelled_memory_commit_resumes_without_reapplication () =
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   Fs_compat.mkdir_p keepers_dir;
   Out_channel.with_open_bin (Filename.concat keepers_dir (keeper_name ^ ".toml")) (fun oc ->
-    Printf.fprintf oc "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\n"
+    Printf.fprintf oc "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\nsandbox_image = \"masc-sandbox:general\"\n"
       keeper_name "Preserve project facts and pending requests." "docker");
   Masc.Keeper_types_profile.invalidate_keeper_profile_defaults_cache keeper_name;
   let meta=Masc_test_deps.meta_of_json_fixture

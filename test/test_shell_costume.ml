@@ -1,6 +1,6 @@
 (** RFC execute-subset-dispositions, step 1.
 
-    [argv:["sh";"-c";S]] and [script:S] are the same text, but only the second
+    [argv:["sh";"-c";S]] and [command:S] are the same text, but only the second
     crosses the gate.  These tests pin what the recogniser accepts and what the
     classifier calls the text underneath, because the distribution of those
     tags over live traffic is what decides which constructs the subset resolves

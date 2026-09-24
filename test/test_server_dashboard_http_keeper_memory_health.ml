@@ -959,6 +959,171 @@ let test_the_continuity_lag_is_measured_or_says_it_cannot_be () =
   Alcotest.(check int) "a position level with the snapshot is caught up" 0 (lag_atoms ())
 ;;
 
+(* RFC librarian-lifecycle §4.10: the Librarian_stalled alarm on the health
+   payload, from files alone. Nothing here runs a drain, so the in-memory
+   measurement stays absent the whole time, as on a server that just
+   started. The choice itself -- a position that does not fit, a Librarian
+   that catches up -- is tested with Keeper_next_request_forecast.librarian_gap;
+   this checks that the payload carries it. *)
+let test_the_librarian_stalled_alarm_is_read_from_files () =
+  let module P = Masc.Keeper_librarian_progress in
+  let module B = Masc.Keeper_turn_boundaries in
+  Eio_main.run @@ fun env ->
+  let previous_fs = Fs_compat.get_fs_opt () in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base = fresh_dir "masc-librarian-stalled" in
+  let config = Masc.Workspace.default_config base in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let meta =
+    Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String "librarian-stalled" ]) |> get
+  in
+  let keeper_name = meta.name in
+  let store = Masc.Keeper_types_support.keeper_turn_record_store config keeper_name in
+  Fun.protect
+    ~finally:(fun () ->
+      Dated_jsonl.prepare_for_directory_removal store;
+      Fs_compat.remove_tree base;
+      match previous_fs with
+      | Some fs -> Fs_compat.set_fs fs
+      | None -> Fs_compat.clear_fs ())
+  @@ fun () ->
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
+  Masc.Keeper_meta_store.replace_snapshot config meta |> get;
+  let librarian () =
+    member "librarian"
+      (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base))
+  in
+  let gap () =
+    match member "stalled" (librarian ()) with
+    | `Null -> None
+    | stalled ->
+      Alcotest.(check string) "a gap is tagged as one" "gap" (string_field "kind" stalled);
+      Some (int_field "gap_start_atom" stalled, int_field "gap_end_atom" stalled)
+  in
+  Alcotest.(check (option (pair int int))) "no files, no alarm" None (gap ());
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let persisted =
+    List.concat_map
+      (fun i ->
+         [ Agent_core.Types.make_message ~role:Agent_core.Types.User
+             [ Agent_core.Types.Text (Printf.sprintf "ask %d" i) ]
+         ; Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
+             [ Agent_core.Types.Text (Printf.sprintf "answer %d" i) ]
+         ])
+      (List.init 5 Fun.id)
+  in
+  let checkpoint : Agent_core.Checkpoint.t =
+    { version = Agent_core.Checkpoint.checkpoint_version
+    ; session_id = trace_id
+    ; agent_name = keeper_name
+    ; model = "librarian-stalled-model"
+    ; system_prompt = None
+    ; messages = persisted
+    ; usage = Agent_core.Types.empty_usage
+    ; turn_count = 1
+    ; created_at = 0.
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = None
+    ; top_p = None
+    ; top_k = None
+    ; min_p = None
+    ; reasoning_effort = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_core.Types.Off
+    ; cache_system_prompt = false
+    ; context = Agent_core.Context.create_sync ()
+    ; mcp_sessions = []
+    ; working_context = None
+    }
+  in
+  let (_ : _) =
+    Masc.Keeper_checkpoint_store.save_agent_core_classified
+      ~session_dir:(Masc.Keeper_types_support.keeper_session_dir config trace_id)
+      ~history_retained:0 checkpoint
+    |> get
+  in
+  let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir config in
+  let position = B.position_of_messages persisted |> get in
+  B.append ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+    { B.recorded_at = test_now
+    ; event =
+        B.Turn_ended
+          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
+          ; history_at_start = B.Fresh_history
+          ; position
+          }
+    }
+  |> Result.map_error B.append_error_to_string |> get;
+  let digest_at = Runtime_model_input_tail_window.atom_opening_digest persisted in
+  P.write ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+    { P.position = { trace_id; end_atom = 2; last_atom_digest = Option.get (digest_at 1) }
+    ; boundary_lines_seen = 1
+    }
+  |> Result.map_error P.write_error_to_string |> get;
+  let _, total_atoms = Runtime_model_input_tail_window.annotate persisted in
+  let record ~turn ~observed first_atom =
+    let window : Turn_record.model_input_window =
+      { transmitted_atoms = total_atoms - first_atom
+      ; total_atoms
+      ; measurement = Turn_record.Wire_shape
+      ; front_atom_digest = Option.get (digest_at first_atom)
+      }
+    in
+    Masc.Keeper_turn_record_writer.write
+      ~config ~keeper_name ~agent_name:keeper_name ~turn_kind:Turn_record.Direct
+      ~trace_id ~absolute_turn:turn ~runtime_profile:"glm"
+      ~selected_model:None ~finish_reason:None ~context_window:None
+      ~price_input_per_million:None ~price_output_per_million:None
+      ~request_latency_ms:None ~ttfrc_ms:None ~request_wire_observation:None
+      ~model_input_window:(Some window)
+      ~response_observed_model_input:
+        (if observed then Some { Turn_record.runtime_profile = "glm"; window } else None)
+      ~raw_trace_run_ref:None
+      ~sampling:{ temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
+      ~usage:
+        { input_tokens = None
+        ; output_tokens = None
+        ; cache_creation_input_tokens = None
+        ; cache_read_input_tokens = None
+        ; scope = Runtime_usage_scope.Usage_scope_unavailable
+        }
+      ~turn_output_tokens:None
+      ~execution_ids:[] ~blocks:[] ~input_components:None ~tool_surface_ref:None ()
+  in
+  record ~turn:1 ~observed:true 2;
+  Alcotest.(check (option (pair int int))) "a request from the Librarian point is no gap" None
+    (gap ());
+  (* The pinned part and this turn alone outgrew the provider: the turn
+     ended on the refusal and recorded no accepted start. *)
+  record ~turn:2 ~observed:false 8;
+  Alcotest.(check (option (pair int int))) "a refused turn raises no alarm" None (gap ());
+  record ~turn:3 ~observed:true 8;
+  Alcotest.(check (option (pair int int))) "an accepted start past the point is the gap"
+    (Some (2, 8)) (gap ());
+  Alcotest.(check bool) "with no drain measured in this process" true
+    (is_null (member "measured_at" (librarian ())));
+  (* A read position that does not read is neither no gap nor the gap: the
+     payload says which file, so the row is not silent the moment a read
+     breaks, and does not name atoms as missing that it could not weigh. *)
+  let progress_path =
+    P.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+  in
+  let output = open_out progress_path in
+  Fun.protect ~finally:(fun () -> close_out_noerr output) (fun () ->
+    output_string output "{not-json");
+  let stalled = member "stalled" (librarian ()) in
+  Alcotest.(check bool) "an unreadable read position is not null" false (is_null stalled);
+  Alcotest.(check string) "it is tagged unmeasured" "unmeasured" (string_field "kind" stalled);
+  Alcotest.(check string) "and names the file that did not read" "read_position_unreadable"
+    (string_field "cause" stalled);
+  Alcotest.(check bool) "with the reader's message" true
+    (String.length (string_field "detail" stalled) > 0)
+;;
+
 let () =
   Alcotest.run
     "server_dashboard_http_keeper_memory_health"
@@ -967,6 +1132,8 @@ let () =
             test_context_cycle_separates_saved_and_prepared
         ; Alcotest.test_case "the Librarian position is read beside the cut" `Quick
             test_context_cycle_reads_the_librarian_position_beside_the_cut
+        ; Alcotest.test_case "the Librarian_stalled alarm is read from files" `Quick
+            test_the_librarian_stalled_alarm_is_read_from_files
         ; Alcotest.test_case "continuity lag measured or unknown" `Quick
             test_the_continuity_lag_is_measured_or_says_it_cannot_be
         ; Alcotest.test_case "curator canonical owners and malformed config" `Quick

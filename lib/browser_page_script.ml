@@ -9,6 +9,14 @@ let text =
 (* What a text read returns when it names no cap, and the most it returns. *)
 let default_text_chars = 50_000
 let max_text_chars = 100_000
+
+let text_cap requested =
+  let cap = match requested with Some cap -> cap | None -> default_text_chars in
+  if cap < 1 || cap > max_text_chars then
+    Error (Printf.sprintf "maxChars must be between 1 and %d" max_text_chars)
+  else Ok cap
+;;
+
 let elements = {|
 const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]'));
 function selector(el) {

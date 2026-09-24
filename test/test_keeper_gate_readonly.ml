@@ -39,10 +39,10 @@ let gate_input ?(profile = "docker") ?(target = "docker:masc-keeper-sandbox:loca
     ]
 ;;
 
-let script_gate_input ?(profile = "docker") ?(target = "docker:masc-keeper-sandbox:local") script =
+let command_gate_input ?(profile = "docker") ?(target = "docker:masc-keeper-sandbox:local") script =
   `Assoc
     [ "schema", `String "masc.keeper_gate.request.v1"
-    ; "input", `Assoc [ "cwd", `String "/home/keeper/playground"; "script", `String script ]
+    ; "input", `Assoc [ "cwd", `String "/home/keeper/playground"; "command", `String script ]
     ; "cwd", `String "/home/keeper/playground"
     ; "sandbox_profile", `String profile
     ; "sandbox_target", `String target
@@ -187,8 +187,8 @@ let test_write_shapes_require_observation () =
   requires_observation "git remote add" [ "git"; "remote"; "add"; "origin"; "x" ];
   requires_observation "git remote remove" [ "git"; "remote"; "remove"; "origin" ];
   requires_observation "git with no subcommand" [ "git" ];
-  (* Script-form inert prefixes are stripped; the argv form has no script
-     to be equivalent to, so argv[0] stays unregistered. *)
+  (* Command-form inert prefixes are stripped; the argv form has no command
+     line to be equivalent to, so argv[0] stays unregistered. *)
   requires_observation "env assignment as argv form" [ "NO_COLOR=1"; "gh"; "pr"; "list" ];
   (* Read-only graphql queries ride a field flag, which flips the method
      to POST; the query text itself is never parsed for read-ness. *)
@@ -205,14 +205,14 @@ let executes_script ~operation ~sandbox_profile script =
   observation_only_request
     ~operation
     ~sandbox_profile
-    ~input:(script_gate_input script)
+    ~input:(command_gate_input script)
 ;;
 
-let script_gate_request ?profile ?target ~sandbox_profile base_path script =
+let command_gate_request ?profile ?target ~sandbox_profile base_path script =
   { Keeper_gate.keeper_name = "alpha"
   ; operation = "tool_execute"
   ; call_summary = None
-  ; input = script_gate_input ?profile ?target script
+  ; input = command_gate_input ?profile ?target script
   ; base_path
   ; sandbox_profile
   ; causal_context = None
@@ -292,16 +292,16 @@ let test_git_reasons_survive_the_request_projection () =
     diff (Readonly.classify_script script);
   List.iter
     (fun input ->
-      check classification "argv/script/shell costume retain the Git reason"
+      check classification "argv/command/shell costume retain the Git reason"
         diff (Readonly.classify_request ~operation:"tool_execute"
                 ~sandbox_profile:microvm ~input))
     [ gate_input [ "git"; "diff"; "--output=changes.patch" ]
-    ; script_gate_input script
+    ; command_gate_input script
     ; gate_input [ "sh"; "-c"; script ]
     ];
   check classification "unsupported profile does not erase the command reason"
     diff (Readonly.classify_request ~operation:"tool_execute"
-            ~sandbox_profile:remote_ssh ~input:(script_gate_input script));
+            ~sandbox_profile:remote_ssh ~input:(command_gate_input script));
   check classification "configuration reason survives Shell IR"
     (Readonly.Needs_observation Git_configuration_override)
     (Readonly.classify_script "git -c core.fsmonitor=helper status && pwd");
@@ -648,7 +648,7 @@ let test_auto_judge_allows_script_observation_without_queueing () =
   match
     Keeper_gate.decide
       ~keeper_always_allow:false
-      (script_gate_request ~sandbox_profile:docker base_path "ls -la /home/keeper/playground")
+      (command_gate_request ~sandbox_profile:docker base_path "ls -la /home/keeper/playground")
   with
   | Keeper_gate.Allow { source = Readonly_sandbox; _ } -> ()
   | Keeper_gate.Allow { source; _ } ->
@@ -861,7 +861,7 @@ let test_git_refusal_reaches_the_judge_with_the_original_status () =
           ; stderr
           ; refusal_kind = Keeper_gate.Unattributed
           })
-      (script_gate_request ~sandbox_profile:microvm base_path
+      (command_gate_request ~sandbox_profile:microvm base_path
          "git diff --output=changes.patch")
   in
   deferred_to_the_judge "refused Git observation" decision;

@@ -286,26 +286,12 @@ open Alcotest
    keeper_skill_publish tool lets a Keeper publish a Skill package it wrote
    (RFC keeper-self-authored-skills); main's surface had shrunk below the
    entry above, so the total still falls. No headroom. *)
-(* 2026-09-24: 122,378 across 138 tools, measured by CI at 532fc1f237
-   (the stagehand lane, #38697), less 31 bytes from BrowserSession's
-   description rewritten after that run (JSON-escaped length, not a CI
-   reading). BrowserSession and BrowserGoto take lane (automation or
-   stagehand), BrowserSession says what each lane needs configured, and
-   BrowserTabs says a stagehand tab has no clientId, so a Keeper can open and
-   drive the Stagehand browser (RFC-browser-lane-stagehand §3.8). No
-   headroom. *)
-(* 2026-09-24: +739 rendered bytes for BrowserInstruct, the production
-   renderer's rules replayed on config/tools/masc_browser_instruct.toml under
-   its public name (the replay gives 561/1,102/779 for the three tools the CI
-   run logs, as that run measured them; not a CI reading of this tool). A
-   Keeper tells the Stagehand browser in one sentence what to act on, observe
-   or extract, instead of choosing selectors (RFC-browser-lane-stagehand
-   §3.8). No headroom. *)
-(* 2026-09-24: +12 rendered bytes (the renderer replay, not a CI reading):
-   BrowserRead's lane enum names stagehand, whose backend now serves text,
-   element and scene reads with the automation lane's page scripts. No
-   headroom. *)
-let ceiling_bytes = 123_098
+(* 2026-09-25: the Stagehand tool changes on the merged parent project to
+   122,394 bytes. BrowserInstruct adds 739 rendered bytes by the production
+   renderer's rules replayed on config/tools/masc_browser_instruct.toml.
+   BrowserRead's stagehand lane enum adds 12 rendered bytes. The combined
+   ceiling is projected until exact-head CI measures it. No headroom. *)
+let ceiling_bytes = 123_145
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -470,6 +456,7 @@ let all_surface_golden_names =
   ; "masc_dos_click"
   ; "masc_dos_eject"
   ; "masc_dos_load"
+  ; "masc_dos_pass"
   ; "masc_dos_peek"
   ; "masc_dos_press"
   ; "masc_dos_screen"

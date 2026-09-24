@@ -1,0 +1,17 @@
+name = "masc_dos_pass"
+description = """
+Hand the DOS machine's controller to another player, or free it.
+
+Only the holder moves the machine (load, eject, step, press, click, type); \
+others are refused and can watch with masc_dos_screen. A free controller \
+goes to the next mover, and so does a stopped Keeper's. Pass when your \
+hotseat turn ends; the board post @mentions the next player. Turn-taking, \
+not access control."""
+additional_properties = false
+
+defer_loading = true
+
+[[params]]
+name = "to"
+type = "string"
+description = "Keeper who takes the controller. Omit to free it."

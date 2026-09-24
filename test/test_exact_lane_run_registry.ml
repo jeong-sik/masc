@@ -567,11 +567,15 @@ let test_a_busy_lane_cannot_evict_a_quiet_lanes_history () =
     (count R.Librarian)
 ;;
 
+(* The lanes this registry records, written out apart from the registry: every
+   lane but the Verifier, whose reviews have registries of their own. *)
+let recorded_lanes = [ R.Librarian; R.Hitl_auto_judge; R.Board_attention; R.Workspace_curator ]
+
 let test_exact_history_is_not_pruned_across_lanes () =
   let path = fresh_log_path "exact-lane-runs-all-" in
   remove_if_exists path;
   let registry = R.create ~path () in
-  let lanes = Array.of_list R.all_lanes in
+  let lanes = Array.of_list recorded_lanes in
   List.init 80 Fun.id
   |> List.iter (fun index ->
     let run_id = Printf.sprintf "run-%02d" index in
@@ -596,9 +600,11 @@ let test_exact_history_is_not_pruned_across_lanes () =
   check
     (list string)
     "every registered lane survives replay"
-    (R.all_lanes |> List.map R.lane_key |> List.sort String.compare)
+    (recorded_lanes
+     |> List.map (fun lane -> Standalone_lane.to_id (R.standalone_lane lane))
+     |> List.sort String.compare)
     (R.list_runs replayed
-     |> List.map (fun (run : R.run) -> R.lane_key run.lane)
+     |> List.map (fun (run : R.run) -> Standalone_lane.to_id (R.standalone_lane run.lane))
      |> List.sort_uniq String.compare);
   let permissions = (Unix.stat path).Unix.st_perm land 0o777 in
   check int "durable registry is private" 0o600 permissions;
@@ -631,19 +637,66 @@ let test_replay_removes_payload_files_no_row_names () =
   remove_if_exists path
 ;;
 
-let test_all_lanes_matches_the_independent_constructor_oracle () =
-  let expected =
-    [ R.Librarian
-    ; R.Hitl_auto_judge
-    ; R.Board_attention
-    ; R.Workspace_curator
-    ]
+(* Rows, the projection and the TUI all read a lane id back through
+   [Standalone_lane.of_id]. The match here is the independent oracle: a lane
+   added to the type does not compile here until it has a place, and a lane
+   left out of [all] fails the first check. *)
+let test_every_lane_is_listed_once_and_its_id_reads_back () =
+  let place : Standalone_lane.t -> int = function
+    | Standalone_lane.Librarian -> 0
+    | Standalone_lane.Hitl_auto_judge -> 1
+    | Standalone_lane.Board_attention -> 2
+    | Standalone_lane.Workspace_curator -> 3
+    | Standalone_lane.Verifier -> 4
+    | Standalone_lane.Browser_stagehand -> 5
   in
-  check
-    (list string)
-    "all_lanes is the complete ordered constructor enumeration"
-    (List.map R.lane_key expected)
-    (List.map R.lane_key R.all_lanes)
+  check (list int) "all lists the six lanes once, in declaration order"
+    [ 0; 1; 2; 3; 4; 5 ]
+    (List.map place Standalone_lane.all);
+  List.iter
+    (fun lane ->
+      let id = Standalone_lane.to_id lane in
+      check (option int) (id ^ " reads back as its own lane") (Some (place lane))
+        (Option.map place (Standalone_lane.of_id id)))
+    Standalone_lane.all;
+  check (option int) "an id no lane has reads as no lane" None
+    (Option.map place (Standalone_lane.of_id "verifer_exact"))
+;;
+
+(* A registration row of this store version, naming [lane]. *)
+let registration_row lane =
+  Printf.sprintf
+    {|{"event":"register","id":"exact-lane-pin","started_at":30.0,"registration":{"lane":%S,"actor":"keeper-a","input":{"kind":"file","bytes":20,"sha256":"4f8c3b7d2a1e9f6c5b0a8d7e6f5c4b3a2918273645546372819a0b1c2d3e4f50"}}}|}
+    (Standalone_lane.to_id lane)
+;;
+
+(* Verifier reviews have their own registries and Stagehand requests have no
+   retained run registry yet. Rows naming either lane are refused on replay. *)
+let test_the_registry_refuses_unrecorded_lanes () =
+  check bool "the Verifier lane has no registry lane" true
+    (Option.is_none (R.lane_of_standalone Standalone_lane.Verifier));
+  check bool "the Browser Stagehand lane has no registry lane" true
+    (Option.is_none (R.lane_of_standalone Standalone_lane.Browser_stagehand));
+  List.iter
+    (fun lane ->
+       check bool (Standalone_lane.to_id lane ^ " converts back to itself") true
+         (match R.lane_of_standalone lane with
+          | Some recorded -> R.standalone_lane recorded = lane
+          | None -> lane = Standalone_lane.Verifier || lane = Standalone_lane.Browser_stagehand))
+    Standalone_lane.all;
+  let read_and_refused lane =
+    let path = fresh_log_path "exact-lane-verifier-row-" in
+    Fs_compat.save_file path (registration_row lane ^ "\n");
+    let report = R.cut_replay_log ~execute:false path in
+    remove_if_exists path;
+    report.Run_registry_core.lines_read, report.Run_registry_core.malformed_lines
+  in
+  check (pair int int) "a Board row is read and kept" (1, 0)
+    (read_and_refused Standalone_lane.Board_attention);
+  check (pair int int) "a Verifier row is read and refused" (1, 1)
+    (read_and_refused Standalone_lane.Verifier);
+  check (pair int int) "a Stagehand row is read and refused" (1, 1)
+    (read_and_refused Standalone_lane.Browser_stagehand)
 ;;
 
 let test_failed_durable_registration_is_not_published_in_memory () =
@@ -1226,8 +1279,10 @@ let () =
             "a busy lane cannot evict a quiet lane's history"
             `Quick
             test_a_busy_lane_cannot_evict_a_quiet_lanes_history
-        ; test_case "all lanes matches independent constructor oracle" `Quick
-            test_all_lanes_matches_the_independent_constructor_oracle
+        ; test_case "every lane is listed once and its id reads back" `Quick
+            test_every_lane_is_listed_once_and_its_id_reads_back
+        ; test_case "the registry refuses lanes without retained runs" `Quick
+            test_the_registry_refuses_unrecorded_lanes
         ; test_case "retention is derived from the monitor page size" `Quick
             test_retention_is_derived_from_the_monitor_page_size
         ; test_case "completed runs are bounded" `Quick

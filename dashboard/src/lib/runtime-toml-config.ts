@@ -635,11 +635,12 @@ export function cascadeDeleteProvider(sourceText: string, providerId: string): s
   const canDeleteBindingNamespace = !isReservedRuntimeTomlId(providerId)
   const sectionsToDelete = document.sections
     .map(s => s.name)
-    .filter(name =>
-      name === prefix ||
-      name.startsWith(prefixDot) ||
-      (canDeleteBindingNamespace && name.startsWith(bindingPrefixDot)),
-    )
+    .filter(name => {
+      const logicalName = providerSectionName(name)
+      return logicalName === prefix ||
+        logicalName.startsWith(prefixDot) ||
+        (canDeleteBindingNamespace && name.startsWith(bindingPrefixDot))
+    })
   
   let next = sourceText
   for (const sec of sectionsToDelete) {

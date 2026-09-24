@@ -244,6 +244,27 @@ curl() {{
                 self.assertFalse((base / '.masc/evil').exists())
                 self.assertEqual(sorted(p.name for p in (base / '.masc/config').iterdir()), [])
 
+    def test_team_manifest_path_through_a_symlink_is_refused(self):
+        # A clean manifest path must not follow an existing link under the
+        # config directory out of it.
+        for link in ('keepers', 'keepers/a.toml', 'keepers/a.toml.partial'):
+            with self.subTest(link=link), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                config = base / '.masc/config'
+                outside = base / 'outside'
+                outside.mkdir()
+                (config / 'keepers').mkdir(parents=True)
+                if link == 'keepers':
+                    (config / 'keepers').rmdir()
+                    (config / 'keepers').symlink_to(outside)
+                else:
+                    (config / link).symlink_to(outside / 'a.toml')
+                result = self.run_seed_team(
+                    base, "keepers/a.toml", "presets/classic/manifest.txt presets/classic/keepers/a.toml")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('path crosses a symlink', result.stderr)
+                self.assertEqual(list(outside.iterdir()), [])
+
     def test_team_manifest_verified_then_files_seeded(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)

@@ -1752,6 +1752,17 @@ seed_team() {
       /*|..|../*|*/..|*/../*|*//*) die "team preset '$preset' manifest has an unsafe path: $rel" ;;
       *[!A-Za-z0-9_./-]*) die "team preset '$preset' manifest has an unsafe path: $rel" ;;
     esac
+    # A clean string is not a clean destination: an existing symlink under the
+    # config directory (keepers -> elsewhere) would carry mkdir, the partial
+    # download and the final mv outside it. Refuse any link on the way down.
+    local part="" rest="$rel" component
+    while [ -n "$rest" ]; do
+      component="${rest%%/*}"
+      case "$rest" in */*) rest="${rest#*/}" ;; *) rest="" ;; esac
+      part="${part:+$part/}$component"
+      [ ! -L "$cfg/$part" ] || die "team preset '$preset' path crosses a symlink in $cfg: $part"
+    done
+    [ ! -L "$cfg/$rel.partial" ] || die "team preset '$preset' path crosses a symlink in $cfg: $rel.partial"
     dest="$cfg/$rel"
     if [ -e "$dest" ] && [ "$RESET_CONFIG" -eq 0 ]; then
       log "team file present: $rel, skipping"

@@ -465,17 +465,27 @@ val path_from_root : root:string -> string -> string
 val config_pane_strip :
   cols:int -> before:string -> after:string -> Masc_tui_types.state -> string
 
+val config_pane_title_head :
+  room:int -> name:string -> reading:string -> string
+(** The head of a Config pane's title row in [room] cells: the pane's name and
+    the reading beside it, each followed by the gap that holds the next part
+    off it. The reading is cut with a mark; the name is drawn whole or not at
+    all, and when it does not fit the head is [""]. *)
+
 val config_pane_title :
   cols:int ->
-  before:string ->
+  name:string ->
+  ?reading:string ->
   ?note:string ->
   ?clock:string ->
   Masc_tui_types.state ->
   string
 (** The whole title row a Config pane draws: its name, the strip, and the badge,
     with the file it is reading and the clock between them where the pane has
-    those. Ten panes spelled this row and nine of them spelled it identically,
-    which is also why none could tell the strip to leave room for the badge. *)
+    those. [reading] is whatever the pane adds beside its name -- a count, a
+    warning -- and is the part that gives way. Ten panes spelled this row and
+    nine of them spelled it identically, which is also why none could tell the
+    strip to leave room for the badge. *)
 
 val config_metadata_summary :
   Masc_tui_types.state -> (Masc_tui_runtime_config_view.tone * string) list

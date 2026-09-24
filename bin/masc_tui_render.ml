@@ -14308,9 +14308,8 @@ let render_runtime_params (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
-  let before = screen_title " MASC Config" ^ tab_strip_gap in
   box_line buf cols
-    (config_pane_title ~cols ~before state);
+    (config_pane_title ~cols ~name:(screen_title " MASC Config") state);
   (* Where the overrides live leads, because it is the only thing on this row
      the reader cannot get anywhere else, and it was what the row cut first:
      at eighty columns it read "overrides persist in .masc/run\xe2\x80\xa6" and at
@@ -14574,9 +14573,8 @@ let render_prompt_registry (state : state) =
         Printf.sprintf "%d/%d개" total all_prompt_count)
   in
   box_top buf cols;
-  let before =
-    Printf.sprintf "%s  %s%s · %s%s%s  "
-      (screen_title " MASC 프롬프트")
+  let reading =
+    Printf.sprintf "%s%s · %s%s%s"
       Ansi.dim count_text
       (if state.prompts_show_fragments then "내부 조각 포함" else "주 프롬프트")
       Ansi.reset
@@ -14587,7 +14585,7 @@ let render_prompt_registry (state : state) =
            (List.length entries) Ansi.reset)
   in
   box_line buf cols
-    (config_pane_title ~cols ~before state);
+    (config_pane_title ~cols ~name:(screen_title " MASC 프롬프트") ~reading state);
   box_divider buf cols;
   (* One row that says where the catalog is. An empty list used to mean both
      "still reading" and "nothing here". *)
@@ -14781,13 +14779,12 @@ let render_runtime_prompt_assets (state : state) =
     title_count_of_view prompts ~count:(fun _ -> Printf.sprintf "%d개" total)
   in
   box_top buf cols;
-  let before =
-    Printf.sprintf "%s  %s%s · 읽기 전용%s  "
-      (screen_title " MASC 런타임 프롬프트 자산")
-      Ansi.dim count_text Ansi.reset
+  let reading =
+    Printf.sprintf "%s%s · 읽기 전용%s" Ansi.dim count_text Ansi.reset
   in
   box_line buf cols
-    (config_pane_title ~cols ~before state);
+    (config_pane_title ~cols
+       ~name:(screen_title " MASC 런타임 프롬프트 자산") ~reading state);
   box_line_styled buf cols ~style:(Theme.recede ())
     "  배포된 .txt 지시문 · registry override 대상이 아님";
   box_divider buf cols;
@@ -14920,12 +14917,10 @@ let render_presets (state : state) =
     | None -> title_missing_reading ~error:state.presets_error
   in
   box_top buf cols;
-  let before =
-    Printf.sprintf "%s  %s%s%s  " (screen_title " MASC 프리셋") Ansi.dim count_text
-      Ansi.reset
-  in
+  let reading = Printf.sprintf "%s%s%s" Ansi.dim count_text Ansi.reset in
   box_line buf cols
-    (config_pane_title ~cols ~before state);
+    (config_pane_title ~cols ~name:(screen_title " MASC 프리셋") ~reading
+       state);
   box_divider buf cols;
   let error_rows = if Option.is_some state.presets_error then 1 else 0 in
   let entry_rows = if Option.is_some state.preset_save_draft then 1 else 0 in
@@ -15054,14 +15049,12 @@ let render_themes (state : state) =
   let lift_on = Masc_tui_theme.lift_is_enabled () in
   let name_width = theme_name_width ~cols in
   box_top buf cols;
-  let before =
-    screen_title
-      (Printf.sprintf " MASC Themes · %d themes · %d native-pass"
-         (List.length entries) native_count)
-    ^ tab_strip_gap
-  in
   box_line buf cols
-    (config_pane_title ~cols ~before state);
+    (config_pane_title ~cols ~name:(screen_title " MASC Themes")
+       ~reading:
+         (Printf.sprintf "%s%d themes · %d native-pass%s" Ansi.dim
+            (List.length entries) native_count Ansi.reset)
+       state);
   box_divider buf cols;
   box_line_styled buf cols ~style:Ansi.dim
     ("  " ^ fit_width "theme" (name_width + 2) ^ " "
@@ -15188,9 +15181,9 @@ let render_config_models (state : state) =
   let buf = Buffer.create 4096 in
   box_top buf cols;
   let path_note = config_path_note state in
-  let before = screen_title " MASC Models" ^ tab_strip_gap in
   box_line buf cols
-    (config_pane_title ~cols ~before ~note:path_note state);
+    (config_pane_title ~cols ~name:(screen_title " MASC Models") ~note:path_note
+       state);
   box_divider buf cols;
   let content_height = max 1 (rows_avail - 5) in
   (match state.runtime_config_view_error, state.runtime_config_view with
@@ -15381,9 +15374,8 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
     | None -> "?"
   in
   box_top head cols;
-  let before = screen_title " MASC Voice · setup" ^ tab_strip_gap in
   box_line head cols
-    (config_pane_title ~cols ~before state);
+    (config_pane_title ~cols ~name:(screen_title " MASC Voice · setup") state);
   box_line buf cols "";
   box_line buf cols
     (Printf.sprintf "  %sstep %s%s  %s" Ansi.dim position Ansi.reset
@@ -15495,9 +15487,8 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
         (Printf.sprintf "    %s%d of %d%s" Ansi.dim (cursor + 1) count Ansi.reset))
   in
   box_top head cols;
-  let before = screen_title " MASC Voice \xc2\xb7 keeper voices" ^ tab_strip_gap in
   box_line head cols
-    (config_pane_title ~cols ~before state);
+    (config_pane_title ~cols ~name:(screen_title " MASC Voice \xc2\xb7 keeper voices") state);
   box_line buf cols "";
   list_block "keeper  (j/k)" session.vas_agents session.vas_agent_cursor (fun agent ->
     Terminal_text.single_line agent);
@@ -15591,9 +15582,8 @@ let render_voice (state : state) =
     | lines -> List.iter (fun line -> box_line buf cols line) lines
   in
   box_top head cols;
-  let before = screen_title " MASC Voice" ^ tab_strip_gap in
   box_line head cols
-    (config_pane_title ~cols ~before state);
+    (config_pane_title ~cols ~name:(screen_title " MASC Voice") state);
   box_line buf cols "";
   (* Two independent reads feed this pane: the public config says what loaded,
      and the setup read says which endpoints are declared. They used to share
@@ -15678,9 +15668,8 @@ let render_config (state : state) =
   if state.runtime_config_status_open then render_runtime_config_status state else
   let terminal_rows, cols = get_terminal_size () in
   let path_note = config_path_note state in
-  let before = screen_title " MASC Config" ^ tab_strip_gap in
   let title =
-    config_pane_title ~cols ~before ~note:path_note
+    config_pane_title ~cols ~name:(screen_title " MASC Config") ~note:path_note
       ~clock:
         (Printf.sprintf "%s%s%s" Ansi.dim
            (let now = Unix.localtime (Unix.gettimeofday ()) in

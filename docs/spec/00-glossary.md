@@ -1226,6 +1226,25 @@ status: reference
   → [Skill_source_config](../../lib/skill_config/skill_source_config.mli),
   [Server_skill_editor](../../lib/server/server_skill_editor.mli)
 
+**Skill Deletion (Skill 삭제)**
+: 선언된 소스에서 Skill 패키지를 제거하고 복구 격리소로 이동하는 절차(`Server_skill_editor.delete`).
+  단순 파일 삭제가 아니라 격리 검증·패키지 폴더 처분·스냅샷 갱신(`delete_outcome`)의 세 단계를
+  거치며, 발행 여부에 따라 `Deleted_and_published`와 `Deleted_but_unpublished`로 나뉜다.
+  - **SKILL.md 격리 (`recovery_id`)**: 원본 `SKILL.md`는 삭제되지 않고 고유 복구 식별자(`recovery_id`)가
+    부여된 격리 디렉터리로 이동(`recovery_disposition`)되어 비상 복구 가능성을 보존한다.
+  - **패키지 폴더 처분 (`package_directory`)**: `SKILL.md` 이동 후 남겨진 패키지 폴더를 닫힌 네 가지
+    상태로 판정하여 처리한다(#38594·#38616). 과거에는 빈 폴더를 방치하여 동일한 패키지 ID로
+    재생성할 때 영구히 `Package_already_exists` 거절을 받는 결함이 있었다.
+    1. `Package_directory_removed` (wire: `{"kind": "removed"}`): 빈 패키지 폴더가 `rmdir`로 완전히
+       제거되어 동일한 ID로 새 Skill 생성이 즉시 가능함.
+    2. `Package_directory_kept_non_empty` (wire: `{"kind": "kept_non_empty"}`): 폴더 내에 부속
+       파일(예: `references/`, `scripts/` 등)이 남아 있어 패키지 폴더를 그대로 보존함.
+    3. `Package_directory_removed_unsynced of string` (wire: `{"kind": "removed_unsynced", "detail": "..."}`):
+       폴더는 지웠으나 상위 디렉터리 동기화(`fsync`)에 실패하여 비정상 종료 시 폴더가 복원될 수 있음.
+    4. `Package_directory_remove_failed of string` (wire: `{"kind": "remove_failed", "detail": "..."}`):
+       폴더 삭제(`rmdir`) 작업 자체가 시스템 오류로 실패함.
+  → [Server_skill_editor](../../lib/server/server_skill_editor.mli)
+
 **Instruction Skill**
 : Keeper가 `keeper_skill`로 본문과 참조 파일을 읽고 적용할 방법을 판단하는 Skill.
   본문을 읽었다는 사실은 그 절차를 실행했거나 성공했다는 증거가 아니다.

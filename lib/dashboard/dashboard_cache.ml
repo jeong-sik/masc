@@ -113,10 +113,13 @@ let max_entries =
   | Some s -> (match int_of_string_opt (String.trim s) with Some v -> max 16 (min 512 v) | None -> 256)
   | None -> 256
 
-(** Evict one expired or stale entry when table exceeds max_entries.
+(** Make room before an absent [incoming_key] would exceed [max_entries], or
+    shrink an already overfull table. Prefer expired or stale entries, then
+    the fresh entry closest to expiry. Active computations stay owned.
     Must be called inside the mutex-guarded section. *)
-let maybe_evict map =
-  if SMap.cardinal map > max_entries then begin
+let maybe_evict ~incoming_key map =
+  let size = SMap.cardinal map in
+  if size > max_entries || (size = max_entries && not (SMap.mem incoming_key map)) then begin
     let now_ts = Time_compat.now () in
     let victim = ref None in
     let oldest_fresh = ref None in
@@ -398,7 +401,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
   let stale_grace = ttl *. stale_factor in
   let rec try_get ~waited ~watching_token =
     let action = atomic_update table (fun map ->
-      let map = maybe_evict map in
+      let map = maybe_evict ~incoming_key:key map in
       match SMap.find_opt key map with
       | Some (Ready entry) when entry.expires_at > now () ->
         (`Hit entry, map)
@@ -696,7 +699,7 @@ let get_or_compute_simple key ~ttl compute =
   let ts = now () in
   let stale_grace = ttl *. stale_factor in
   match atomic_update table (fun map ->
-    let map = maybe_evict map in
+    let map = maybe_evict ~incoming_key:key map in
     match SMap.find_opt key map with
     | Some (Ready entry) when entry.stale_until > ts ->
       (`Hit entry, map)

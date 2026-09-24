@@ -7,6 +7,6 @@ uses synthetic runtime IDs and endpoints. It shows the HTTP/CLI groups and the
 capture; this is local rendering evidence, not a deployed Dashboard receipt.
 
 Validation alongside the screenshot: `pnpm typecheck`, targeted Vitest for
-`runtime-toml-config` and `runtime-toml-editor` (99 tests), and ESLint passed.
+`runtime-toml-config` and `runtime-toml-editor` (100 tests), and ESLint passed.
 TUI and OCaml behavior is pending repository CI because this checkout does
 not build the TUI locally.

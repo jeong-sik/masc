@@ -588,14 +588,15 @@ export function parseRuntimeTomlExactLanes(sourceText: string): RuntimeTomlExact
     const match = section.name.match(/^runtime\.exact_output_lanes\.([^.]+)$/)
     if (!match?.[1]) return []
     const values = sectionValues(document, section.name)
-    try {
-      return [{ id: match[1], slots: sectionStringArray(document, section.name, 'slots'),
-        cliSlots: sectionStringArray(document, section.name, 'cli_slots'),
-        maxOutputTokens: asNumber(values.max_output_tokens), error: null }]
-    } catch (error) {
-      return [{ id: match[1], slots: [], cliSlots: [], maxOutputTokens: asNumber(values.max_output_tokens),
-        error: error instanceof Error ? error.message : String(error) }]
+    const read = (key: 'slots' | 'cli_slots') => {
+      try { return { slots: sectionStringArray(document, section.name, key), error: null } }
+      catch (error) { return { slots: [] as string[], error: error instanceof Error ? error.message : String(error) } }
     }
+    const http = read('slots')
+    const cli = read('cli_slots')
+    return [{ id: match[1], slots: http.slots, cliSlots: cli.slots,
+      maxOutputTokens: asNumber(values.max_output_tokens),
+      error: [http.error, cli.error].filter(Boolean).join('; ') || null }]
   })
 }
 

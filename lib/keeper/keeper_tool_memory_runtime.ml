@@ -562,6 +562,19 @@ let record_memory_events ~keepers_dir ~(meta : keeper_meta) ~now ~kind memory_id
 
 (* --- Unified keeper_memory_search dispatch --- *)
 
+(* How one search ended, counted per source so the share of searches that
+   found nothing is visible without reading the decision logs. *)
+type memory_search_outcome =
+  | Matched
+  | No_match
+  | Store_unavailable
+
+let memory_search_outcome_to_string = function
+  | Matched -> "matched"
+  | No_match -> "no_match"
+  | Store_unavailable -> "store_unavailable"
+;;
+
 let keeper_memory_search_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -697,6 +710,7 @@ let keeper_memory_search_with_outcome
                  ~read_errors:false
                  ~read_error_fields:[]
              , List.length fact_matches
+             , Some fact_total
              , List.filter_map
                  (fun (matched : fact_match) ->
                     match matched.identity with
@@ -771,6 +785,7 @@ let keeper_memory_search_with_outcome
                    (absorbed_fields ~absorbed ~unavailable
                     @ history_read_error_fields history)
              , List.length selected
+             , Some (fact_total + absorbed.candidates)
              , List.filter_map ordinary_memory_id_of_all_match selected ))
     in
     let result =
@@ -790,6 +805,7 @@ let keeper_memory_search_with_outcome
                @ (if no_match then [ "no_match", `Bool true ] else [])
                @ history_read_error_fields history)
           , List.length matches
+          , None
           , [] )
       | All -> all_stores ()
       | Absorbed ->
@@ -818,11 +834,20 @@ let keeper_memory_search_with_outcome
                     ~read_errors:(absorbed.unreadable <> [] || absorbed.unreadable_events <> [])
                     ~read_error_fields:(absorbed_fields ~absorbed ~unavailable:None)
                 , List.length absorbed.matches
+                , Some absorbed.candidates
                 , [] )))
       | Current -> current_stores ()
     in
+    let record_search_outcome outcome =
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string MemorySearch)
+        ~labels:
+          [ "source", source_label; "outcome", memory_search_outcome_to_string outcome ]
+        ()
+    in
     match result with
     | Error error ->
+      record_search_outcome Store_unavailable;
       Keeper_tool_execution.failure
         ~class_:Tool_result.Dependency_unavailable
         ~effect_disposition:Tool_result.Proven_pre_effect
@@ -833,7 +858,8 @@ let keeper_memory_search_with_outcome
              ; "detail", `String (durable_search_error_detail error)
              ]
            "keeper_memory_search could not read the durable memory store")
-    | Ok (result, match_count, matched_memory_ids) ->
+    | Ok (result, match_count, total_candidates, matched_memory_ids) ->
+    record_search_outcome (if match_count > 0 then Matched else No_match);
     (* Each ordinary fact the model was shown is a retrieval (RFC-0418): the
        event is what later says this memory was used. A sidecar that cannot be
        written does not take the results away from the model; it is said in
@@ -848,14 +874,19 @@ let keeper_memory_search_with_outcome
     (try
        let log_entry =
          `Assoc
-           [ "ts_unix", `Float (Time_compat.now ())
-           ; "event", `String "memory_search"
-           ; "query", `String query
-           ; "source", `String source_label
-           ; "match_count", `Int match_count
-           ; ( "matched_memory_ids"
-             , `List (List.map (fun id -> `String id) matched_memory_ids) )
-           ]
+           ([ "ts_unix", `Float (Time_compat.now ())
+            ; "event", `String "memory_search"
+            ; "query", `String query
+            ; "source", `String source_label
+            ; "match_count", `Int match_count
+            ; ( "matched_memory_ids"
+              , `List (List.map (fun id -> `String id) matched_memory_ids) )
+            ]
+            @
+            (* History reads messages, not a store with a candidate count. *)
+            match total_candidates with
+            | Some total -> [ "total_candidates", `Int total ]
+            | None -> [])
        in
        Keeper_types_support.append_jsonl_line
          (Keeper_types_support.keeper_decision_log_path config meta.name)

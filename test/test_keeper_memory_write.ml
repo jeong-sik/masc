@@ -2718,7 +2718,8 @@ let string_list_field key json =
 
 (* RFC-0418: every ordinary fact a search returns is a retrieval of that fact,
    recorded with the query and the turn. A miss records nothing. The
-   decision-log line names the same ids, so the two records agree. *)
+   decision-log line names the same ids, so the two records agree, and counts
+   the facts searched, so a miss can be told from an empty store. *)
 let test_search_records_a_retrieval_per_ordinary_match () =
   with_temp_dir
   @@ fun base_path ->
@@ -2779,7 +2780,13 @@ let test_search_records_a_retrieval_per_ordinary_match () =
     Alcotest.(check (list string))
       "the miss line names none"
       []
-      (string_list_field "matched_memory_ids" miss_line)
+      (string_list_field "matched_memory_ids" miss_line);
+    Alcotest.(check int) "the miss line counts no match" 0
+      (int_field "match_count" miss_line);
+    Alcotest.(check (list int))
+      "both lines count the current facts searched"
+      [ 3; 3 ]
+      [ int_field "total_candidates" hit_line; int_field "total_candidates" miss_line ]
   | _ -> Alcotest.fail "expected one decision-log line per search"
 ;;
 

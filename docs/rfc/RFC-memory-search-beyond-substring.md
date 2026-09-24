@@ -54,8 +54,10 @@ Keeper 가 기억을 찾는 유일한 도구는 `keeper_memory_search` 다
 
 - 회수 사건은 기록된다: 반환된 `memory_id` 마다 query 를 담은 `Retrieved { query }` 사건(RFC-0418,
   `record_memory_events`).
-- 기록되지 않는 것: **아무것도 못 찾은 query**(반환 id 가 없으니 사건도 없다. 도구 출력으로 trace 에만 남는다),
-  `no_match` 비율, "찾았어야 했는데 못 찾은" 사례. 개선 효과를 재려면 이것부터 있어야 한다(§3.0).
+- 검색마다 결정 로그(`<keeper>.decisions.jsonl`)에 `event = "memory_search"` 한 줄이 남는다: query, source,
+  `match_count`, `matched_memory_ids`. 0건 query 도 여기 남는다.
+- 없는 것: 후보 수(`total_candidates`)가 로그에 없고, 검색 결과를 세는 OTel 카운터가 없고, 로그를 모아
+  0건 비율과 "0건 뒤 다른 말로 다시 찾은" 사례를 뽑는 도구가 없다. 개선 효과를 재려면 이것부터 있어야 한다(§3.0).
 
 ## 2. absorb gate 의 상수와 휴리스틱
 
@@ -92,11 +94,13 @@ claim 하나로 묶을 때, 원문 문장마다 판정 모델(TypeSafe Jev)에�
 
 ### 3.0 단계 0 — 먼저 잰다 (권장 첫 PR)
 
-- `keeper_memory_search` 호출마다 source, `total_candidates`, `match_count`, `no_match` 를 OTel 카운터로
-  세고, 0건 query 도 사건으로 남긴다(지금은 `Retrieved` 가 있는 경우만 query 가 남는다). 기억 본문은 이미
-  private run evidence 로 남는 범위를 넘지 않는다.
-- 운영 trace 에서 "`no_match` 직후 Keeper 가 같은 내용을 새로 조사하거나 `keeper_memory_write` 로 다시 적은"
-  사례를 모아 **재생 세트**를 만든다. 이게 이후 단계의 합격선이다(단계별로 같은 세트에서 회수율 비교).
+- 결정 로그의 `memory_search` 줄에 `total_candidates` 를 더하고, 검색마다
+  `masc_keeper_memory_search_total{source, outcome}` 카운터를 올린다(outcome: `matched` | `no_match` |
+  `store_unavailable`).
+- `scripts/memory-search-miss-report.py`: 결정 로그를 읽어 Keeper·source 별 0건 비율을 내고, 0건 query 와
+  "같은 Keeper 가 0건 뒤 다른 query 로 다시 찾아 맞힌" 쌍을 JSONL **재생 세트**로 뽑는다. 재검색 쌍은 "찾았어야
+  했는데 첫 표현으로 못 찾은" 사례의 가장 값싼 증거다. 이 세트가 이후 단계의 합격선이다(단계별로 같은 세트에서
+  회수율 비교).
 - 비용: 코드 변경 작음, 행동 변화 없음.
 
 ### 3.1 단계 1 — 순위 있는 lexical 후보 생성 (SQLite FTS5 + BM25)

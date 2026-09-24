@@ -227,6 +227,28 @@ let load_selected_live_context (state : state) (base_path : string)
 let load_live_context state base_path keeper =
   load_selected_live_context state base_path (Some keeper)
 
+(** Add an event to the TUI session log, which Metrics draws. *)
+let add_event (state : state) event_type content =
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp = Printf.sprintf "%02d:%02d:%02d"
+    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
+  let ev = { timestamp; event_type; content } in
+  state.events <- ev :: List.filteri (fun i _ -> i < 10) state.events
+
+(* An outcome the operator pressed a key for, rather than something that
+   happened on its own. It goes to the session log like any other event, and
+   to the footer, because the log is drawn by Metrics alone: the operator who
+   pressed [a] on Workspace reads on Workspace whether the registration
+   landed, the declaration was refused, or the editor never started. Every
+   call site that answers a key or a command, or finishes the request one
+   started, uses this; [add_event] alone is for what happened on its own --
+   the feed, a failed poll, the server's lifecycle. The footer copy is one
+   line: a server's reason can carry newlines. *)
+let report_action (state : state) event_type content =
+  add_event state event_type content;
+  state.last_action <-
+    Some (Masc_tui_ansi.Terminal_text.single_line content, Unix.gettimeofday ())
+
 (** Load state from .masc directory *)
 let load_from_masc_dir (state : state) (base_path : string) =
   let masc_dir = Filename.concat base_path Common.masc_dirname in
@@ -266,6 +288,18 @@ let load_from_masc_dir (state : state) (base_path : string) =
   state.tasks_domain <- tasks_domain;
   state.tasks <- tasks;
   state.tasks_error <- tasks_error;
+  (* A chosen task that left the held rows (finished, or back to Todo) is
+     dropped here, where the rows change, and said once: a highlight that
+     vanished while Enter and Ctrl-] still named the task was the defect. *)
+  (let focus, left =
+     Masc_tui_overview_tasks.reconcile tasks state.task_focus
+   in
+   state.task_focus <- focus;
+   Option.iter
+     (fun task_id ->
+       report_action state "system"
+         (Printf.sprintf "%s left the held tasks; nothing is chosen" task_id))
+     left);
   state.task_flow <- task_flow;
   state.operator_stalled <- operator_stalled;
 
@@ -395,6 +429,7 @@ let clear_local_workspace (state : state) =
   state.agents <- [];
   state.tasks <- [];
   state.tasks_domain <- [];
+  state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
   state.task_flow <- None;
   state.operator_stalled <- None;
   state.tasks_error <- None;
@@ -407,28 +442,6 @@ let clear_local_workspace (state : state) =
   state.live_context <- Context_state.empty;
   state.local_workspace <- Local_workspace_unread
 ;;
-
-(** Add an event to the TUI session log, which Metrics draws. *)
-let add_event (state : state) event_type content =
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let ev = { timestamp; event_type; content } in
-  state.events <- ev :: List.filteri (fun i _ -> i < 10) state.events
-
-(* An outcome the operator pressed a key for, rather than something that
-   happened on its own. It goes to the session log like any other event, and
-   to the footer, because the log is drawn by Metrics alone: the operator who
-   pressed [a] on Workspace reads on Workspace whether the registration
-   landed, the declaration was refused, or the editor never started. Every
-   call site that answers a key or a command, or finishes the request one
-   started, uses this; [add_event] alone is for what happened on its own --
-   the feed, a failed poll, the server's lifecycle. The footer copy is one
-   line: a server's reason can carry newlines. *)
-let report_action (state : state) event_type content =
-  add_event state event_type content;
-  state.last_action <-
-    Some (Masc_tui_ansi.Terminal_text.single_line content, Unix.gettimeofday ())
 
 (** HTTP JSON decoding helpers. These intentionally fail closed for the TUI
     dashboard surfaces: an empty list means the API really returned an empty

@@ -34,19 +34,27 @@ val wanted_rows : Masc_tui_types.overview_goals_reading -> int
     reading not made yet or failed wants its one explaining line; a reading
     with no drawn goal wants only the headline, which says so. *)
 
+type tasks_reading =
+  | Tasks_unread
+      (** The backlog has not been read yet: before the first load, and after
+          the workspace changed under the TUI. An empty list here would be a
+          count of nothing. *)
+  | Tasks_failed of string  (** The read answered with this error. *)
+  | Tasks_read of Tui_decode.task list
+
 val lines :
   now:float ->
   localtime:(float -> Unix.tm) ->
   inner_width:int ->
   rows:int ->
-  tasks:(Tui_decode.task list, string) result ->
+  tasks:tasks_reading ->
   Masc_tui_types.overview_goals_reading ->
   string list
 (** At most [rows] lines, headline first. Goals past the budget are cut from
     the bottom and the headline says how many are drawn. [now] is the Unix
     time the due-date countdown counts from; [localtime] puts it on the
     operator's calendar, since a due date carries no zone. [tasks] is the
-    backlog the headline counts; its read error replaces the count. *)
+    backlog the headline counts; unread or failed, it replaces the count. *)
 
 val draw :
   Buffer.t ->
@@ -54,7 +62,7 @@ val draw :
   rows:int ->
   now:float ->
   localtime:(float -> Unix.tm) ->
-  tasks:(Tui_decode.task list, string) result ->
+  tasks:tasks_reading ->
   Masc_tui_types.overview_goals_reading ->
   unit
 (** The {!lines} as framed rows and the divider under them. Nothing when

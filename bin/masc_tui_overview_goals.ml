@@ -171,6 +171,11 @@ let title = Ansi.bold ^ "GOALS" ^ Ansi.reset
 
 let take rows items = List.filteri (fun index _ -> index < rows) items
 
+type tasks_reading =
+  | Tasks_unread
+  | Tasks_failed of string
+  | Tasks_read of Tui_decode.task list
+
 let lines ~now ~localtime ~inner_width ~rows ~tasks (reading : Types.overview_goals_reading)
     =
   let rows = max 0 rows in
@@ -195,15 +200,18 @@ let lines ~now ~localtime ~inner_width ~rows ~tasks (reading : Types.overview_go
               goal_count Ansi.reset
           else ""
         in
-        (* The backlog is read apart from the goals; a failed read is said,
-           not counted as no active task. *)
+        (* The backlog is read apart from the goals; a read not made yet or
+           failed is said, not counted as no active task. *)
         let headline =
           match tasks with
-          | Ok tasks ->
+          | Tasks_unread ->
+              Printf.sprintf "%s   %sactive work unread%s%s" title Ansi.dim
+                Ansi.reset cut
+          | Tasks_read tasks ->
               let { active; toward_goal } = progress ~goals:drawn ~tasks in
               Printf.sprintf "%s   active work toward a goal: %d of %d tasks%s"
                 title toward_goal active cut
-          | Error reason ->
+          | Tasks_failed reason ->
               Printf.sprintf "%s   %sactive work unread: %s%s%s" title
                 (Theme.warn ()) (Terminal_text.single_line reason) Ansi.reset cut
         in

@@ -735,9 +735,19 @@ let render_overview (state : state) =
   let attention_items, tasks_error, row_budget =
     overview_layout state ~terminal_rows:rows
   in
+  (* The same reading the Tasks section below decides "unread" from
+     ([local_rows_page]): an error first, then whether the workspace was read.
+     Before the first read [state.tasks] is [] with no error, and counting it
+     would draw "0 of 0" over a section that says it has not loaded. *)
+  let goal_tasks =
+    match tasks_error, state.local_workspace with
+    | Some reason, (Local_workspace_unread | Local_workspace_read) ->
+        Overview_goals.Tasks_failed reason
+    | None, Local_workspace_unread -> Overview_goals.Tasks_unread
+    | None, Local_workspace_read -> Overview_goals.Tasks_read state.tasks
+  in
   Overview_goals.draw buf ~cols ~rows:row_budget.goal_rows
-    ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime
-    ~tasks:(Option.fold ~none:(Ok state.tasks) ~some:Result.error tasks_error)
+    ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime ~tasks:goal_tasks
     state.overview_goals;
   (* The panel spans the band the rest of the screen's rows cover: one cell of
      margin on each side of the frame. *)
@@ -946,7 +956,7 @@ let render_overview (state : state) =
     let now = Unix.gettimeofday () in
     let selected =
       Overview_tasks.selected_index state.tasks
-        ~selected:state.task_selected_id
+        ~selected:(Overview_tasks.selection state.task_focus)
     in
     (* An unread or failed backlog has said so above; "no task in progress"
        would be a reading it never made. *)
@@ -987,7 +997,7 @@ let render_overview (state : state) =
                 (task_line task)
             in
             if
-              state.task_focus = Right_pane
+              Overview_tasks.is_focused state.task_focus
               && Option.equal Int.equal selected (Some index)
             then
               box_line_selected buf cols (Masc_tui_theme.strip_sgr ("> " ^ row))
@@ -1015,7 +1025,7 @@ let render_overview (state : state) =
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
        ~hints:
          (Masc_tui_keys.footer_hints_overview
-            ~task_focus:(state.task_focus = Right_pane)));
+            ~task_focus:(Overview_tasks.is_focused state.task_focus)));
 
   finish_surface state ~surface_key:"overview" ~rows:terminal_rows ~cols buf
 

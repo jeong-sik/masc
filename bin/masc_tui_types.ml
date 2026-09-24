@@ -5186,7 +5186,10 @@ type state = {
      the first load answers: an empty list is a fact about the workspace and
      "not looked yet" is not. *)
   mutable operator_stalled: Masc_tui_agenda.stalled list option;
-  mutable task_focus: pane_focus;
+  (* Whether the Overview task list owns j/k and which task it has chosen,
+     by id. An index into the rows would name another task after a poll
+     drops a finished one. *)
+  mutable task_focus: Masc_tui_overview_tasks.focus;
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
@@ -5557,9 +5560,6 @@ type state = {
      until it is sent, and cleared with the form -- a field left filled is a
      credential sitting in the process for as long as the pane is up. *)
   mutable identity_app_form: identity_app_form option;
-  mutable task_selected_id: string option;
-      (* The Overview task row the operator chose, by id. An index into the
-         rows would name another task after a poll drops a finished one. *)
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
   mutable tasks_error: string option;
@@ -7595,7 +7595,7 @@ let create_state
   tasks_domain = [];
   task_flow = None;
   operator_stalled = None;
-  task_focus = Left_pane;
+  task_focus = Masc_tui_overview_tasks.No_task_focus;
   help_open = false;
   keeper_deletions_open = false;
   keeper_deletions_loading = false;
@@ -7753,7 +7753,6 @@ let create_state
   identity_filter = None;
   identity_app_form = None;
   github_identity_view_error = None;
-  task_selected_id = None;
   task_detail_id = None;
   task_detail_scroll = 0;
   tasks_error = None;

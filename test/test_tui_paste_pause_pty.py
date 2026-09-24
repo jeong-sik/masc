@@ -112,9 +112,19 @@ def run(executable: str) -> None:
         h.send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         h.send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
 
+        # The action notice shares one footer row with pinned chat keys. At
+        # the harness's default 100 columns the footer intentionally omits
+        # this long notice, even when the CSI parser retains the partial
+        # marker. Use a frame that can display the state this case asserts.
+        h.resize_and_wait(
+            process, master_fd, output, rows=30, columns=160,
+            needle=b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
+
+        start = len(output)
         os.write(master_fd, b"\x1b[200")
         h.wait_for_output(process, master_fd, output,
-                          b"Terminal sequence incomplete", start=0, timeout=5.0)
+                          b"Terminal sequence incomplete", start=start, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03",
                         b"Incomplete terminal sequence cancelled")
         h.send_and_wait(process, master_fd, output, b"recovered",

@@ -4256,6 +4256,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("continuity_unread_atoms", `Int 0)
             ; ("last_success_at", `Null)
             ; ("last_failure_kind", `Null)
+            ; ("stalled", `Null)
             ] )
       ; ("librarian_failures", `Int failures)
       ; ("vision_ingest_errors", `Int (if id = "healthy" then 3 else 0))
@@ -4533,6 +4534,48 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   Alcotest.(check bool) "a negative continuity lag is refused" true
     (memory_health_rejects (
        (with_continuity_totals ~behind:(-1) ~unmeasured:0 (with_continuity (`Int (-1))))));
+  (* RFC librarian-lifecycle §4.10: the Librarian_stalled gap is the row's
+     own reading, from the Librarian point to the accepted start. A gap that
+     does not end after it starts is no gap and is refused. *)
+  let with_stalled value =
+    map_keeper 0 (fun keeper -> match keeper with
+      | `Assoc fields -> `Assoc (List.map (fun (key, current) -> key,
+          if key = "librarian" then replace_field "stalled" value current else current) fields)
+      | _ -> keeper) json in
+  let gap start_atom end_atom =
+    `Assoc
+      [ "kind", `String "gap"; "gap_start_atom", `Int start_atom; "gap_end_atom", `Int end_atom ]
+  in
+  let stalled_of payload =
+    match Tui_decode.decode_memory_health_snapshot (with_stalled payload) with
+    | Ok snapshot -> (List.hd snapshot.mhs_keepers).mkh_librarian.mlh_stalled
+    | Error detail -> Alcotest.fail detail
+  in
+  (match stalled_of (gap 2 8) with
+   | Some (Tui_decode.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 }) -> ()
+   | _ -> Alcotest.fail "the gap (2, 8) must decode as that gap");
+  Alcotest.(check bool) "an empty gap is refused" true
+    (memory_health_rejects (with_stalled (gap 8 8)));
+  Alcotest.(check bool) "a gap with a field this build does not know is refused" true
+    (memory_health_rejects
+       (with_stalled
+          (`Assoc
+             [ "kind", `String "gap"; "gap_start_atom", `Int 2; "gap_end_atom", `Int 8
+             ; "bytes", `Int 1 ])));
+  (* A file the gap is read from that did not read decodes as its own state,
+     not as no gap. *)
+  let unmeasured cause =
+    `Assoc [ "kind", `String "unmeasured"; "cause", `String cause; "detail", `String "bad" ]
+  in
+  (match stalled_of (unmeasured "turn_records_unreadable") with
+   | Some
+       (Tui_decode.Stalled_unmeasured
+          { mls_cause = Tui_decode.Stall_turn_records_unreadable; mls_detail = "bad" }) -> ()
+   | _ -> Alcotest.fail "an unreadable turn record must decode as unmeasured, not as no gap");
+  Alcotest.(check bool) "a cause this build does not know is refused" true
+    (memory_health_rejects (with_stalled (unmeasured "disk_on_fire")));
+  Alcotest.(check bool) "a kind this build does not know is refused" true
+    (memory_health_rejects (with_stalled (`Assoc [ "kind", `String "maybe" ])));
   let mismatched_totals =
     match json with
     | `Assoc fields ->
@@ -4559,6 +4602,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("continuity_unread_atoms", `Int 0)
             ; ("last_success_at", `Null)
             ; ("last_failure_kind", `Null)
+            ; ("stalled", `Null)
             ]))
       json
   in
@@ -4576,6 +4620,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("continuity_unread_atoms", `Int 0)
             ; ("last_success_at", `Null)
             ; ("last_failure_kind", `Null)
+            ; ("stalled", `Null)
             ]))
       json
   in
@@ -4745,6 +4790,7 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
                     ; ("continuity_unread_atoms", `Int 0)
                     ; ("last_success_at", `Null)
                     ; ("last_failure_kind", `Null)
+                    ; ("stalled", `Null)
                     ] )
               ; ("librarian_failures", `Int 4)
               ; ("vision_ingest_errors", `Int 0)
@@ -4876,6 +4922,7 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
                       ; ("continuity_unread_atoms", `Int 0)
                       ; ("last_success_at", `Null)
                       ; ("last_failure_kind", `Null)
+                      ; ("stalled", `Null)
                       ] )
                 ; ("librarian_failures", `Int 0)
                 ; ("vision_ingest_errors", `Int 0)

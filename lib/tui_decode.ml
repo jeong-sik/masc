@@ -2840,6 +2840,28 @@ type memory_librarian_failure_kind =
   | Failure_lane_cancelled
   | Failure_unhandled_exception
 
+(* RFC librarian-lifecycle §4.10: the atoms the Keeper's requests skip
+   because the Librarian stands behind the start the provider last
+   accepted. [mls_gap_end_atom] is that start; the gap ends just before it.
+   [Stalled_unmeasured] is a file the gap is read from that did not read:
+   neither "no gap" nor a gap. *)
+type memory_librarian_stall_cause =
+  | Stall_meta_unreadable
+  | Stall_turn_records_unreadable
+  | Stall_turn_boundary_refused
+  | Stall_snapshot_unreadable
+  | Stall_read_position_unreadable
+
+type memory_librarian_stalled =
+  | Stalled_gap of {
+      mls_gap_start_atom : int;
+      mls_gap_end_atom : int;
+    }
+  | Stalled_unmeasured of {
+      mls_cause : memory_librarian_stall_cause;
+      mls_detail : string;
+    }
+
 (* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
    standing, and what its last pass and its journal say. [None] in a field is
    "not measured", which the header prints as such; it is not zero. *)
@@ -2851,6 +2873,7 @@ type memory_librarian_health = {
   mlh_continuity_unread_atoms : int option;
   mlh_last_success_at : float option;
   mlh_last_failure_kind : memory_librarian_failure_kind option;
+  mlh_stalled : memory_librarian_stalled option;
 }
 
 type memory_context_frontier = {
@@ -5435,6 +5458,7 @@ let decode_memory_librarian_health keeper_json =
       ; "continuity_unread_atoms"
       ; "last_success_at"
       ; "last_failure_kind"
+      ; "stalled"
       ]
       json
   in
@@ -5456,6 +5480,41 @@ let decode_memory_librarian_health keeper_json =
   let* mlh_last_failure_kind =
     required_nullable_string_field json "last_failure_kind"
     |> Fun.flip Result.bind decode_memory_librarian_failure_kind
+  in
+  let* mlh_stalled =
+    match member "stalled" json with
+    | `Null -> Ok None
+    | stalled ->
+      let* kind = required_string_field stalled "kind" in
+      (match kind with
+       | "gap" ->
+         let* () =
+           require_exact_object_fields
+             "librarian stalled gap" [ "kind"; "gap_start_atom"; "gap_end_atom" ] stalled
+         in
+         let* mls_gap_start_atom = required_int_field stalled "gap_start_atom" in
+         let* mls_gap_end_atom = required_int_field stalled "gap_end_atom" in
+         if mls_gap_start_atom >= 0 && mls_gap_end_atom > mls_gap_start_atom
+         then Ok (Some (Stalled_gap { mls_gap_start_atom; mls_gap_end_atom }))
+         else Error "librarian stalled gap must end after it starts"
+       | "unmeasured" ->
+         let* () =
+           require_exact_object_fields
+             "librarian stalled unmeasured" [ "kind"; "cause"; "detail" ] stalled
+         in
+         let* cause = required_string_field stalled "cause" in
+         let* mls_cause =
+           match cause with
+           | "meta_unreadable" -> Ok Stall_meta_unreadable
+           | "turn_records_unreadable" -> Ok Stall_turn_records_unreadable
+           | "turn_boundary_refused" -> Ok Stall_turn_boundary_refused
+           | "snapshot_unreadable" -> Ok Stall_snapshot_unreadable
+           | "read_position_unreadable" -> Ok Stall_read_position_unreadable
+           | other -> Error ("unknown librarian stalled cause: " ^ other)
+         in
+         let* mls_detail = required_string_field stalled "detail" in
+         Ok (Some (Stalled_unmeasured { mls_cause; mls_detail }))
+       | other -> Error ("unknown librarian stalled kind: " ^ other))
   in
   let* () =
     if List.for_all
@@ -5481,6 +5540,7 @@ let decode_memory_librarian_health keeper_json =
     ; mlh_continuity_unread_atoms
     ; mlh_last_success_at
     ; mlh_last_failure_kind
+    ; mlh_stalled
     }
 
 let decode_memory_alert json =

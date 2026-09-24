@@ -5746,10 +5746,10 @@ let render_lanes_overview (state : state) =
          (match state.standalone_lanes_error with
           | None -> Ansi.dim ^ "  loading standalone lane observations…" ^ Ansi.reset
           | Some detail ->
-              (* The loader already names the subject and the verdict --
+              (* The lane-read boundary already names the subject and verdict --
                  "standalone lanes load failed: <reason>" -- so the sentence
                  that stood here said "standalone lane" a second time and
-                 put an unavailable verdict beside the loader's own, and
+                 put an unavailable verdict beside the read error's own, and
                  pushed the reason
                  twenty-two cells right, past the pane edge. Fourteen other
                  surfaces draw the loader's message and nothing in front of

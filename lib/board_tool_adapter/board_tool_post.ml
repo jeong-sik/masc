@@ -21,9 +21,24 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
   in
   match attachment_result with
   | Error error ->
+    let class_ =
+      match error with
+      | Board_tool_attachment.Artifact_read_failed _ -> Tool_result.Runtime_failure
+      | Board_tool_attachment.Raw_meta_attachments
+      | Board_tool_attachment.Attachments_not_array
+      | Board_tool_attachment.Duplicate_attachments
+      | Board_tool_attachment.Entry_not_object _
+      | Board_tool_attachment.Invalid_entry_fields _
+      | Board_tool_attachment.Invalid_kind _
+      | Board_tool_attachment.Invalid_url _
+      | Board_tool_attachment.Invalid_sha256 _
+      | Board_tool_attachment.Missing_artifact _
+      | Board_tool_attachment.Invalid_artifact_reference _ ->
+        Tool_result.Workflow_rejection
+    in
     Tool_result.make_err
       ~tool_name
-      ~class_:Tool_result.Workflow_rejection
+      ~class_
       ~start_time
       (Board_tool_attachment.error_to_string error)
   | Ok attachments ->

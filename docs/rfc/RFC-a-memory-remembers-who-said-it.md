@@ -1,5 +1,5 @@
 ---
-rfc: "0469"
+rfc: "a-memory-remembers-who-said-it"
 title: "기억은 누구에게서 들었는지 남긴다 — 발화자를 문장이 아니라 출처 칸에"
 status: Draft
 created: 2026-09-24
@@ -11,7 +11,7 @@ related: ["0468-a-librarian-sees-the-world-through-its-own-keeper", "0456-librar
 implementation_prs: []
 ---
 
-# RFC-0469 — 기억은 누구에게서 들었는지 남긴다
+# 기억은 누구에게서 들었는지 남긴다
 
 ## 1. 원칙
 
@@ -78,16 +78,15 @@ Keeper 가 보낸 메시지 10건 × 받은 Keeper = 70쌍을 원문으로 판�
 
 ### 3.3 저장: 들은 곳
 
-```ocaml
-type observation =
-  | Transcript                    (* 자기 턴 기록. 누구에게서 들은 게 아니다 *)
-  | Heard of Keeper_input_speaker.t   (* 이 발화자에게서 들었다 *)
-  | Board of board_ref
-```
+`observation` 에 "이 사람에게서 들었다"를 담는 갈래를 하나 더한다. 이 문서에서는 그 갈래를
+`Heard` 라고 부른다. 생성자 모양과 인자 타입은 §8 조건 1(누락과 자기 턴을 다른 값으로)과
+조건 4(메시지 metadata 타입이 아니라 Memory OS 가 가진 좁은 타입)를 풀고 정한다. 이 절은 그
+갈래가 지킬 뜻만 적는다.
 
-- `Heard` 는 직접 들은 사람만 담는다. 리더가 "운영자 결정"을 전했으면 `Heard (Keeper leader)`다.
+- `Heard` 는 직접 들은 사람만 담는다. 리더가 "운영자 결정"을 전했으면 출처는 리더다.
   "운영자가 정했다"는 내용은 문장에 남는다. 그래서 전달 사슬의 첫 고리가 구조로 남는다.
-- 호스트 문구(자율 턴 깨우기)에서 읽은 claim 은 `Heard (Host_prompt …)`다.
+- 자율 턴 깨우기 메시지에서 읽은 claim 의 출처는 §8 조건 3 에서 정한다. 호스트 문구로 두면
+  Ask 에 답한 사람을 가린다.
 - 이 RFC 이전의 기억은 `Transcript` 로 남는다. `Transcript` 는 계속 유효한 생성자라 호환 reader 가
   아니다.
 
@@ -122,6 +121,9 @@ type observation =
   (`librarian.md` "묶는다는 이유만으로 출처를 물려주지 마세요")과 같은 방향이다.
 - **여러 발화에서 읽은 claim.** 참조를 하나만 받을지, 목록을 받을지. 목록이면 "여러 사람이 말했다"를
   확신의 근거로 세는 문제(RFC-0468 조사에서 본 7벌 복사)를 다시 봐야 한다.
+  참고할 선례: Zep 의 Graphiti 는 사실 하나(`EntityEdge`)마다 그 사실을 언급한 episode id 목록
+  (`episodes: list[str]`)을 들고 다니고, 그 클래스에 확신도 칸은 없다(`graphiti_core/edges.py`,
+  2026-09-24 main 에서 확인). 출처는 목록으로 두고 확신은 따로 두는 방향이다.
 - **공식 클라이언트 레인.** 대화에 사람 쪽 줄이 없어서 `o…` 참조만 쓸 수 있다(#38548 항목 1).
 - **Codex 같은 에이전트 세션.** 지금 `Owner` 로 들어온다(#38548 항목 2). `Heard Owner` 로 남으면
   운영자에게서 들은 것처럼 보인다.
@@ -158,6 +160,10 @@ type observation =
 5. **병합 규칙.** `merge_observation`(`keeper_memory_os_current.ml:1172`)은 출처 하나만 남긴다.
    여러 Keeper 에게서 들은 claim 은 처음 출처만 남는다. 이걸 의도로 적을지 정한다. 반복을 확신으로
    세지 않는다는 장점이 있다.
+   `Heard` 와 `Board` 가 만날 때도 정해야 한다. 지금은 `Board _, Transcript -> existing`,
+   `Transcript, Board _ -> incoming` 이라 보드가 이긴다. 같은 claim 을 보드에서도 읽고 리더에게서도
+   들었을 때 보드가 이기면 "리더가 전했다"가 사라진다. 이 match 에는 `_ ->` 가 없어서 갈래를 더하면
+   컴파일러가 이 자리를 짚는다. 그때 즉석으로 정하지 않도록 여기서 먼저 정한다.
 6. **어느 회차가 참조를 싣나.** counterpart 는 기억 회차만 받는다. continuity·working_context 회차와
    `previous_working_state`(문장)에서 온 claim 은 참조가 없다.
 7. **먼저 확인할 것.** 커밋 저널 항목은 trace 를 갖고(`keeper_librarian.ml:461-464` 의

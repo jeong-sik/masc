@@ -6,7 +6,7 @@ on:
     paths:
       - '.github/workflows/sandbox-image.yml'
       - 'lib/keeper_sandbox_image/**'
-      - 'sandbox-images/**'
+      - 'sandbox-images/base/**'
       - 'scripts/verify-sandbox-creative-tools.py'
       - 'scripts/verify-sandbox-image-archive.py'
       - 'scripts/tests/test_sandbox_image_archive.py'

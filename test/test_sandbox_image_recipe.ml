@@ -75,6 +75,28 @@ let test_recipe_needs_no_build_context () =
   check bool "no COPY" false (contains Keeper_sandbox_image.dockerfile "\nCOPY ");
   check bool "no ADD" false (contains Keeper_sandbox_image.dockerfile "\nADD ")
 
+(* sandbox-images/base/Dockerfile is the recipe's only source, and the dune
+   rule in lib/keeper_sandbox_image copies it into the binary. CI builds the
+   image from the file while the binary and test.yml use the embedded string,
+   so the two have to be the same bytes. Dune runs this from its build
+   directory, where the stanza's dep puts the file a few levels up. *)
+let recipe_file = "sandbox-images/base/Dockerfile"
+
+let rec find_upwards dir hops =
+  let candidate = Filename.concat dir recipe_file in
+  if Sys.file_exists candidate then Some candidate
+  else if hops = 0 then None
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None else find_upwards parent (hops - 1)
+
+let test_binary_embeds_the_recipe_file () =
+  match find_upwards (Sys.getcwd ()) 8 with
+  | None -> fail (Printf.sprintf "%s not found above %s" recipe_file (Sys.getcwd ()))
+  | Some path ->
+    let on_disk = In_channel.with_open_bin path In_channel.input_all in
+    check string "embedded recipe = file" on_disk Keeper_sandbox_image.dockerfile
+
 let test_build_argv_reads_the_recipe_from_stdin () =
   check
     (list string)
@@ -162,6 +184,8 @@ let () =
         ; test_case "gives an arbitrary uid a home" `Quick
             test_recipe_gives_an_arbitrary_uid_a_home
         ; test_case "needs no build context" `Quick test_recipe_needs_no_build_context
+        ; test_case "the binary embeds the recipe file" `Quick
+            test_binary_embeds_the_recipe_file
         ] )
     ; ( "build_argv"
       , [ test_case "reads the recipe from stdin" `Quick

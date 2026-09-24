@@ -46,7 +46,6 @@ worktree_cleanup_is_runtime_referenced() {
 }
 
 # Lock guard: skip worktrees held by a live process.
-# Sourced from scripts/lib/worktree-lock.sh.
 worktree_cleanup_is_locked() {
   local wt_path="$1"
   local lock_file="$wt_path/.masc-lock"

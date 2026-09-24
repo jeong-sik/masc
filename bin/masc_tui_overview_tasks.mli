@@ -84,6 +84,63 @@ val step :
     a selected row, its neighbour, stopping at either end. [None] only when
     there are no rows. *)
 
+(** Whether the task list owns j/k, and which row it has chosen. One value
+    rather than a focus flag beside an id: a selection only exists while the
+    list is focused, so what Enter opens, what Ctrl-] follows and the row
+    drawn highlighted cannot disagree. *)
+type focus =
+  | No_task_focus  (** j/k belong to the rest of the Overview. *)
+  | Task_focus of { selected : string option }
+      (** [None] when the list has no row, or when the chosen task left
+          {!rows}. *)
+
+val selection : focus -> string option
+(** The chosen id; [None] without task focus. *)
+
+val is_focused : focus -> bool
+
+val focus_list : Masc.Tui_decode.task list -> focus
+(** Task focus on the first row, or on nothing when no task is held. *)
+
+val toggle : Masc.Tui_decode.task list -> focus -> focus
+(** The [t] key: {!focus_list} from no focus, no focus from task focus. *)
+
+val land_on : Masc.Tui_decode.task list -> task_id:string -> focus
+(** A landing from the palette, the agenda or a followed link. Task focus
+    on the task when it has a row; no focus when it does not -- a [Todo],
+    [Done] or [Cancelled] task could never be highlighted. *)
+
+val move : Masc.Tui_decode.task list -> focus -> step -> focus
+(** j/k under task focus ({!step}); no focus stays no focus. *)
+
+val reconcile : Masc.Tui_decode.task list -> focus -> focus * string option
+(** After a poll. A chosen task that left {!rows} is dropped from the focus
+    and its id returned, once, so the caller can say so; the focus stays on
+    the list. [None] when nothing changed. *)
+
+(** What the last backlog read said about the rows. A failed read is not
+    an empty list: the rows it would have held are unknown, not gone. *)
+type rows_reading =
+  | Rows_unread  (** No read yet, or the workspace changed under the TUI. *)
+  | Rows_read of Masc.Tui_decode.task list
+      (** The active rows. A read recovered from a backup, or one whose goal
+          links could not be read, still read its rows. *)
+  | Rows_unavailable of string  (** The backlog could not be read. *)
+
+val after_read : rows_reading -> focus -> focus * string option
+(** {!reconcile} against rows that were read. An unread or unavailable
+    reading keeps the focus and its choice as they are and says nothing: the
+    chosen task did not leave, the read did not look. *)
+
+type opening =
+  | Open of Masc.Tui_decode.task
+  | No_held_task  (** The list has no row. *)
+  | No_selection  (** Rows exist and none is chosen. *)
+
+val opening : Masc.Tui_decode.task list -> focus -> opening option
+(** What Enter does under task focus. [None] without task focus: the key is
+    not the list's then. *)
+
 val age_text : age_text:(int -> string) -> now:float -> float option -> string
 (** [age_text] applied to the seconds from the given instant to [now]; ["?"]
     when there is no instant to measure from. *)

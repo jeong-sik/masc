@@ -11,6 +11,11 @@ let requirement = EO.make_output_requirement
 
 let require_ok label = function Ok x -> x | Error _ -> fail label
 
+(* Plan admission refuses an Exact target without a body deadline
+   (Missing_deadline), so the fixture provider declares one. No request
+   leaves the process, so the value only has to be positive and finite. *)
+let exact_body_timeout_s = 180.0
+
 let openrouter_binding ?reasoning_effort () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.OpenAI_compat
@@ -28,7 +33,7 @@ let test_missing_effort_has_typed_request_rejection () =
     { target_ref = "openrouter.probe"
     ; binding = openrouter_binding ()
     ; credential = Resolver.Credential_not_declared
-    ; body_timeout_s = None } in
+    ; body_timeout_s = Some exact_body_timeout_s } in
   let snapshot = Resolver.load_resolver_snapshot
       ~io:{ getenv = (fun _ -> Ok None) }
       ~catalog:(Resolver.Embedded_with_targets [ target ]) ()
@@ -63,6 +68,7 @@ max_output_tokens = 4096
 protocol = "openai-compatible-http"
 endpoint = "https://openrouter.ai/api/v1"
 connect-timeout-s = 180.0
+exact-body-timeout-s = %.1f
 [providers.openrouter.credentials]
 type = "env"
 key = "OPENROUTER_API_KEY"
@@ -73,7 +79,7 @@ thinking-support = true
 max-output-tokens = 384000
 reasoning-effort = %S
 [openrouter.probe]
-|} effort
+|} exact_body_timeout_s effort
 
 let with_runtime f =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
@@ -156,7 +162,7 @@ let test_explicit_effort_reaches_serialized_request () =
       ; binding = openrouter_binding ~reasoning_effort:effort ()
       ; credential =
           Resolver.Credential_resolved (Llm_provider.Secret.of_string "synthetic-no-network")
-      ; body_timeout_s = None } in
+      ; body_timeout_s = Some exact_body_timeout_s } in
     let snapshot = Resolver.load_resolver_snapshot
         ~io:{ getenv = (fun _ -> Ok (Some "synthetic-no-network")) }
         ~catalog:(Resolver.Embedded_with_targets [ target ]) ()

@@ -2296,10 +2296,10 @@ let test_artifact_failures_are_classified () =
 let test_generated_sandbox_image_reaches_vision () =
   with_temp_runtime_toml image_capable_vision_runtime_toml (fun () ->
     with_temp_base (fun base ->
-      Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ "test", "alpine:test" ];
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ "base", "alpine:test" ];
       let meta = { (make_meta "generated-image") with
         sandbox_profile = Keeper_types_profile_sandbox.Docker;
-        sandbox_image = Some "test" } in
+        sandbox_image = Some "base" } in
       let config = Masc.Workspace.default_config base in
       let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
       let rec mkdir path =

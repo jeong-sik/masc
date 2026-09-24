@@ -9477,9 +9477,9 @@ let test_edit_manifest_through_model_projection () =
 let test_peer_artifact_materializes_exact_binary () =
   with_exec_fixture ~process:true "peer-artifact" (fun ~config ~meta ~publication_recovery ~ctx_work ->
     Masc_test_deps.write_sandbox_image_catalog ~base_path:config.Masc.Workspace.base_path
-      [ "peer-fixture", "alpine:peer-fixture" ];
+      [ "base", "alpine:peer-fixture" ];
     let sender = { meta with sandbox_profile = Keeper_types_profile_sandbox.Docker;
-      sandbox_image = Some "peer-fixture" } in
+      sandbox_image = Some "base" } in
     let peer = { sender with name = "receiving-peer" } in
     (* The materialize write lands in the peer's own playground bind, which the
        sandbox creates when the peer registers; this fixture builds the peer

@@ -143,7 +143,7 @@ sys.exit(0)
             self.assertIn('[images.base.apple_container]', text)
             self.assertIn('reference = "masc-sandbox:general"', text)
             self.assertIn(digest_a, text)
-            self.assertIn('[images.ocaml]', text, 'the shipped names are kept')
+            self.assertNotIn('[images.ocaml]', text, 'host file contains builds only')
 
             second = self.run_cli(root, base, 'promote', 'base', 'masc-sandbox-base:20260925T0900Z-11112222',
                                   '--runtime', 'apple_container', inspect_output=inspect(digest_b))

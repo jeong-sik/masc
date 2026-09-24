@@ -10,6 +10,15 @@
  (action (run python3 %{dep:test_dashboard_observation_quota.py} --binary %{dep:../bin/main_eio.exe})))
 
 (rule
+ (alias runtest-test_sandbox_image_cli)
+ (deps test_sandbox_image_cli.py ../bin/main_eio.exe)
+ (action (run python3 %{dep:test_sandbox_image_cli.py} %{dep:../bin/main_eio.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_sandbox_image_cli)))
+
+(rule
  (alias runtest-tool-call-sequence-miner)
  (deps test_tool_call_sequence_miner.py ../scripts/tool-call-sequence-miner.py)
  (action (run python3 %{dep:test_tool_call_sequence_miner.py})))

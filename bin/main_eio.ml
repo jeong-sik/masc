@@ -3303,11 +3303,15 @@ let sandbox_image_config_root base_path =
 let sandbox_image_change_catalog ~base_path change =
   let ( let* ) = Result.bind in
   let config_root = sandbox_image_config_root base_path in
+  let* shipped =
+    match Embedded_config.read Keeper_sandbox_image_catalog.file_name with
+    | Some shipped -> Ok shipped
+    | None -> Error "sandbox-image: embedded image name catalog is unavailable"
+  in
   let* catalog, expected =
     Result.map_error
       (fun error -> "sandbox-image: " ^ Keeper_sandbox_image_catalog.load_error_to_string error)
-      (Keeper_sandbox_image_catalog.load_for_change ~config_root
-         ~shipped:(Embedded_config.read Keeper_sandbox_image_catalog.file_name))
+      (Keeper_sandbox_image_catalog.load_for_change ~config_root ~shipped)
   in
   let* next =
     Result.map_error
@@ -3364,10 +3368,9 @@ let sandbox_image_promote_exit base_path runtime name reference =
    catalog has no [base] build for the chosen store, it builds one under a new
    tag and promotes it. A promoted build is left alone. One the catalog names
    and the store no longer has is not rebuilt behind the operator's back:
-   the catalog would then name a build nobody promoted. A catalog with no
-   [base] name at all is refused rather than built for: promote only adds
-   builds to names the catalog has, and a catalog started from the shipped
-   one always has [base], so that one was edited by hand. *)
+   the catalog would then name a build nobody promoted. Names come from the
+   catalog this binary ships, so [base] is always one; a host that has not
+   promoted anything yet has no builds, which is the first case. *)
 let sandbox_image_ensure_exit ~base_path runtime =
   let ( let* ) = Result.bind in
   let recipe = Keeper_sandbox_image_version.base_embedded in
@@ -3424,16 +3427,12 @@ let sandbox_image_ensure_exit ~base_path runtime =
             (Printf.sprintf
                "sandbox-image: could not ask the image store whether %s is there (%s)."
                reference detail))
-     | Error
-         ( Keeper_sandbox_image_resolver.Not_built_on_host _
-         | Keeper_sandbox_image_resolver.Catalog_unreadable (Keeper_sandbox_image_catalog.Missing _) )
-       -> build_and_promote ()
+     | Error (Keeper_sandbox_image_resolver.Not_built_on_host _) -> build_and_promote ()
      | Error
          (( Keeper_sandbox_image_resolver.Not_declared
           | Keeper_sandbox_image_resolver.Unknown_image _
           | Keeper_sandbox_image_resolver.No_image_store _
-          | Keeper_sandbox_image_resolver.Catalog_unreadable
-              (Keeper_sandbox_image_catalog.Unreadable _ | Keeper_sandbox_image_catalog.Invalid _) )
+          | Keeper_sandbox_image_resolver.Catalog_unreadable _ )
           as error) ->
        Error ("sandbox-image: " ^ Keeper_sandbox_image_resolver.error_to_string error))
 

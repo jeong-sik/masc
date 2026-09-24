@@ -1,11 +1,11 @@
 import { html } from 'htm/preact'
 import { render, cleanup, fireEvent, waitFor, act } from '@testing-library/preact'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { get, post } from '../../api/core'
 import { DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
 import { route } from '../../router'
 import { OverviewRuntimeStats } from './runtime-stats'
-import { runtimeCatalogState } from '../../lib/runtime-catalog-resource'
+import { reloadRuntimeCatalog, runtimeCatalogState } from '../../lib/runtime-catalog-resource'
 vi.mock('../../api/core', () => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../../api/dev-token', () => ({ ensureDevToken: vi.fn(async () => {}) }))
 vi.mock('../../lib/runtime-catalog-resource', () => ({
@@ -14,6 +14,7 @@ vi.mock('../../lib/runtime-catalog-resource', () => ({
   reloadRuntimeCatalog: vi.fn(async () => {}),
 }))
 afterEach(() => { cleanup(); runtimeCatalogState.value = { status: 'idle' }; vi.useRealTimers(); vi.restoreAllMocks(); vi.resetAllMocks() })
+beforeEach(() => { vi.mocked(reloadRuntimeCatalog).mockResolvedValue(undefined) })
 const response = { window_minutes: 60,
   cost_ledger_read: { state: 'available', malformed_rows: 0, schema_violation_rows: 2, identity_conflict_rows: 1 },
   models: [{ model_id: 'runtime_lane_example', success_count: 8, error_count: 2,

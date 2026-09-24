@@ -96,8 +96,6 @@ let append_turns config name turns =
         (`Assoc (turn_row ~cost ~tokens)))
     turns
 
-(* The server's own answer for [keepers], wrapped with the cache object the
-   route appends. *)
 (* The TUI sends no [window]; the route answers over the window an absent
    query parses to. *)
 let server_default_window =
@@ -105,6 +103,8 @@ let server_default_window =
   | Ok minutes -> minutes
   | Error err -> failwith ("the route refused an absent window: " ^ err)
 
+(* The server's own answer for [keepers], wrapped with the cache object the
+   route appends. *)
 let server_answer ?(state = Route.Cache_fresh) ?age_s ?error config names =
   let body =
     Dashboard_http_keeper.keeper_cost_aggregates_json ~config

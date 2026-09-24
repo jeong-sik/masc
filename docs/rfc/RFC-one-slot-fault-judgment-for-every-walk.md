@@ -115,9 +115,9 @@ val of_transport_error : Http_client.http_error -> dispatch:dispatch -> t
 |---|---|---|
 | `Binding _` | 넘김 | 넘김. 다시 보내도 되는지는 지금처럼 `allow_retry` 가 effect fence 로 정한다 |
 | `Input` | 멈춤 | 멈춤 |
-| `Unknown_after_dispatch` | 멈춤. 지금 규칙 그대로다 (§5) | `allow_retry` (checkpoint·effect 규칙) |
+| `Unknown_after_dispatch` | 멈춤. 지금 규칙 그대로다 | `allow_retry` (checkpoint·effect 규칙). 지금 규칙 그대로다 |
 
-두 걸음의 차이는 "보냈는데 결과를 모름"을 어떻게 다루는지 하나만 남는다. 이건 오류 분류가 아니라 걸음의 효과 규칙이다.
+두 걸음의 차이는 "보냈는데 결과를 모름"을 어떻게 다루는지 하나만 남는다. 이건 오류 분류가 아니라 걸음의 효과 규칙이라, 이 RFC 는 어느 쪽도 바꾸지 않는다.
 
 `Keeper_runtime_failure_route` 의 rotate·retry 분류도 `binding_fact` 에서 나오게 해서, 손으로 맞추는 곳을 없앤다.
 
@@ -136,6 +136,8 @@ val of_transport_error : Http_client.http_error -> dispatch:dispatch -> t
 
 1. agent_core 에 `Candidate_fault` 와 표 테스트를 둔다. `Retry.api_error` 의 모든 생성자와 전송 오류마다 기대 판정을 적는다.
    흐름은 바꾸지 않는다.
+   - `of_api_error` 는 `Retry.api_error` 를 `_` 없이 match 한다. 생성자가 늘면 컴파일이 멈춘다.
+   - 표 테스트는 기대 판정을 자기 `match` 로 따로 적는다 (`_` 없음). 그래서 생성자가 늘면 테스트도 컴파일에서 멈추고, 새 생성자의 기대값을 테스트 쪽에서 정하고 리뷰한다.
 2. exact `execution_failure_may_advance` 가 이 판정을 읽는다. 지금 테스트는 그대로 통과해야 한다.
    §3 결정으로 바뀌는 칸만 기대값이 바뀐다.
 3. Keeper `lane_should_retry` 의 접근·창·거절 predicate 를 이 판정으로 바꾼다.
@@ -151,4 +153,3 @@ val of_transport_error : Http_client.http_error -> dispatch:dispatch -> t
 
 - 재시도 지연, 쿼터 창, 후보 순서 선호는 다루지 않는다 (RFC-0440, RFC-0458).
 - 새 Gate 를 만들지 않는다. 판정은 관찰이고, 넘길지는 지금처럼 각 걸음이 정한다.
-- "보낸 뒤 모름"을 다시 보내도 되는지는 이 RFC 가 바꾸지 않는다. 걸음마다 지금 규칙을 그대로 쓴다.

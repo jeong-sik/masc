@@ -2183,16 +2183,12 @@ let test_an_absent_date_does_not_move_the_age () =
     (Masc_tui_message_layout.display_width with_both)
     (Masc_tui_message_layout.display_width without_date)
 
-(* A post with no time has no age. Read as the epoch, it drew twenty thousand
-   days folded into the column as "2…d09h". *)
 (* A list pane's index: what the row is about, then what parts it from its
    neighbours. The Approvals index drew the tool alone, and a queue holds one
-   row per held call -- on 2026-09-23 an operator cleared eighteen of them
-   through this TUI in seven seconds and seventeen were [tool_execute], from
-   seven different Keepers.
+   row per held call, so calls from different Keepers can share a tool name.
 
    The parting reading goes last because the pane folds from the middle and
-   keeps the tail: with the asker in front, the seventeen rows would share
+   keeps the tail: with the asker in front, such rows would share
    their opening and fold alike again. *)
 let test_rows_alike_but_for_the_asker_are_parted_by_it () =
   let room =
@@ -2209,6 +2205,8 @@ let test_rows_alike_but_for_the_asker_are_parted_by_it () =
   check string "an unnamed asker leaves the label as it was" "tool_execute"
     (Schedule.sidebar_row_label ~about:"tool_execute" ~apart:"")
 
+(* A post with no time has no age. Read as the epoch, it drew twenty thousand
+   days folded into the column as "2…d09h". *)
 let test_a_board_post_without_a_time_has_no_age () =
   check string "a known time is a span" "1h00m"
     (Schedule.board_age_text ~now:7200. (Some 3600.));

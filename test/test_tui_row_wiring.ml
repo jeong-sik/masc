@@ -995,6 +995,24 @@ let test_both_doors_into_the_runtime_detail_ask_the_same_lane_list () =
    "newest post first" a post replied to a minute ago sat sixth reading "25s".
    The sort is read once for the whole list: the header word and every row's
    number name the same time only while one reading feeds both. *)
+(* The Tasks pane beside the detail drew a row's title and nothing else. The
+   label itself is tested in test_tui_sidebar_index_fold; this says the pane
+   reaches it, and that the id it passes is the row's own. *)
+let test_the_tasks_list_pane_says_which_task_each_row_is () =
+  Alcotest.(check int) "the pane builds its labels through the shared one" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_task_detail"
+       ~callee:"Render_schedule.sidebar_row_label");
+  (* Off [task], which is the one the detail beside this pane is open on: a
+     label built from that id would give every row the same one. The pane
+     also reads [task.id] to find which row to highlight, and that read is
+     what this excludes rather than counts. *)
+  Alcotest.(check int) "and passes the row's own id, not the open task's" 1
+    (Ast_grep.count_field_accesses_off_other_records_in_value_binding
+       ~module_path:render ~binding_name:"render_task_detail" ~record:"task"
+       ~fields:[ "id" ])
+;;
+
 let test_the_board_age_column_reads_the_sort_once () =
   let asks ~callee =
     Ast_grep.count_calls_in_value_binding ~module_path:render
@@ -1005,6 +1023,24 @@ let test_the_board_age_column_reads_the_sort_once () =
   Alcotest.(check int) "and names that time over the column once" 1
     (asks ~callee:"board_age_header")
 
+
+(* The Approvals index drew the tool alone. A queue holds one row per held
+   call, and different Keepers can wait on the same tool. The label itself is
+   tested in test_tui_render_schedule; this says the pane reaches it, and
+   that each of the three row kinds hands over its own asker. *)
+let test_an_approval_row_says_who_asked () =
+  Alcotest.(check int) "the label is built through the shared one" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"approval_sidebar_label"
+       ~callee:"Render_schedule.sidebar_row_label");
+  List.iter
+    (fun field_name ->
+      Alcotest.(check int)
+        (field_name ^ " reaches the label") 1
+        (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+           ~binding_name:"approval_sidebar_label" ~field_name))
+    [ "kta_keeper"; "gp_keeper"; "ap_actor" ]
+;;
 
 (* Six values the loader read and no screen drew.
 
@@ -1023,25 +1059,6 @@ let test_the_board_age_column_reads_the_sort_once () =
    Each binding is checked twice: the key it no longer opens, and a key it
    still does, so a renamed binding cannot make this pass by matching
    nothing. *)
-(* The Approvals index drew the tool alone. A queue holds one row per held
-   call: on 2026-09-23 an operator cleared eighteen through this TUI in seven
-   seconds and seventeen were [tool_execute], from seven Keepers. The label
-   itself is tested in test_tui_render_schedule; this says the pane reaches
-   it, and that each of the three row kinds hands over its own asker. *)
-let test_an_approval_row_says_who_asked () =
-  Alcotest.(check int) "the label is built through the shared one" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"approval_sidebar_label"
-       ~callee:"Render_schedule.sidebar_row_label");
-  List.iter
-    (fun field_name ->
-      Alcotest.(check int)
-        (field_name ^ " reaches the label") 1
-        (Ast_grep.count_field_reads_in_value_binding ~module_path:render
-           ~binding_name:"approval_sidebar_label" ~field_name))
-    [ "kta_keeper"; "gp_keeper"; "ap_actor" ]
-;;
-
 let test_the_loader_stops_opening_keys_no_screen_draws () =
   let decode = "lib/tui_decode.ml" in
   let dropped =
@@ -1187,6 +1204,9 @@ let () =
             test_both_doors_into_the_runtime_detail_ask_the_same_lane_list
         ; Alcotest.test_case "the Board age column reads the sort once" `Quick
             test_the_board_age_column_reads_the_sort_once
+        ; Alcotest.test_case
+            "the Tasks list pane says which task each row is" `Quick
+            test_the_tasks_list_pane_says_which_task_each_row_is
         ; Alcotest.test_case "every Fusion run list reads one clock" `Quick
             test_every_fusion_run_list_reads_one_clock
         ] )

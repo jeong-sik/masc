@@ -1434,9 +1434,17 @@ status: reference
     링크를 해석하지 않고 순수 어휘(lexical prefix)로만 비교한다. 그래서 추가 루트 아래에서
     밖을 가리키는 심볼릭 링크는 이 검사가 막지 못한다. 엔드포인트가 이 머신이면 추가 루트는 링크를
     풀어 보는 작업 디렉터리(`workdir`)보다 느슨하고, 실제 경계는 엔드포인트 계정의 권한이다. 기본값은 빈 목록(`[]`)이다.
+  - **읽기 확장**: #38631 부터 `Read`와 읽기 전용 검색은 이 선언 루트를 Execute 가 이름 짓는
+    방식과 같이 엔드포인트 자기 경로로 읽는다(`Keeper_sandbox_remote_lane.declared_endpoint_path`).
+    판정 순서는 **자기 트리 먼저** — Keeper 작업 디렉터리 안 경로는 그 뜻을 그대로 두고, 그 밖에서
+    거절된 절대 경로만 선언 루트와 대조한다. Docker·MicroVM Keeper는 루트를 선언하지 않으므로
+    언제나 `None`이다. 엔드포인트 경로인데 원격 레인이 필요할 때는
+    `declared_endpoint_path_needs_remote_lane`으로 거절한다. 쓰기는 여전히 Keeper 의
+    playground 안에만 머문다.
   → [Sandbox_target](../../lib/exec/sandbox_target.mli),
   [Exec_policy_paths](../../lib/exec_policy/exec_policy_paths.mli),
-  [Exec_ssh_endpoint](../../lib/runtime/exec_ssh_endpoint.mli)
+  [Exec_ssh_endpoint](../../lib/runtime/exec_ssh_endpoint.mli),
+  [Keeper_sandbox_remote_lane](../../lib/keeper/keeper_sandbox_remote_lane.mli)
 
 **Worktree**
 : 한 repository 안에서 branch 작업을 격리하는 Git worktree.

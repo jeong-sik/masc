@@ -135,7 +135,7 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
   let read_request ?(expect_version = false) () =
-    output_string output "IFS= read -r request\n";
+    output_string output "IFS= read -r request || exit 0\n";
     if expect_version
     then
       output_string output
@@ -268,13 +268,21 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
-let run_fixture ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
+let run_fixture ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
     ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?wall_clock_ceiling_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
     ?on_prompt_sent ?(prompt = "Return the fixture marker")
     ?(images = []) ?(native = Runtime_native_tools.codex_default) path =
-  Eio_main.run (fun env ->
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let previous_pool = Domain_pool_ref.get () in
+    Eio.Switch.on_release sw (fun () ->
+      match previous_pool with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some pool -> Domain_pool_ref.set pool);
+    if worker_pool then
+      Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 env#domain_mgr)
+    else Domain_pool_ref.clear_for_tests ();
     let clock = Eio.Stdenv.clock env in
     let config =
       { (Runtime_codex_app_server.default_config ()) with
@@ -315,7 +323,7 @@ let run_fixture ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = []
       ?on_prompt_sent
       config
       ~prompt
-      ~images)
+      ~images))
 ;;
 
 let test_dispatch_validation_is_process_free () =
@@ -347,7 +355,8 @@ let native_command_completed =
   {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":2,"item":{"type":"commandExecution","id":"native-command-1","command":"pwd","commandActions":[],"cwd":"/tmp","status":"completed","aggregatedOutput":"/tmp"}}}|}
 ;;
 
-let test_dynamic_tool_callback () =
+let test_dynamic_tool_callback ?(worker_pool = false) () =
+  let owner = Domain.self () in
   let call_id = ref None in
   let arguments = ref `Null in
   let stream_events = ref [] in
@@ -362,6 +371,8 @@ let test_dynamic_tool_callback () =
           ]
     ; call =
         (fun ~call_id:id input ->
+          check bool "tool callback remains on the protocol owner" true
+            (Domain.self () = owner);
           call_id := Some id;
           arguments := input;
           { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
@@ -380,6 +391,7 @@ let test_dynamic_tool_callback () =
     (fun path ->
        match
          run_fixture
+           ~worker_pool
            ~dynamic_tools:[ tool ]
            ~on_stream_event:(fun event -> stream_events := event :: !stream_events)
            path
@@ -877,9 +889,15 @@ let test_truncated_token_usage_of_this_turn_fails_closed () =
       | Ok _ -> fail "a half-read breakdown was admitted")
 ;;
 
-let test_prompt_transmission_boundary () =
+let test_prompt_transmission_boundary ?(worker_pool = false) () =
+  let run_fixture = run_fixture ~worker_pool in
+  let owner = Domain.self () in
   let sent = ref 0 in
-  let report () = incr sent in
+  let report () =
+    check bool "transmission callback remains on the protocol owner" true
+      (Domain.self () = owner);
+    incr sent
+  in
   let missing = Filename.temp_file "missing-codex-" ".sh" in
   Sys.remove missing;
   check bool "missing client fails" true
@@ -897,9 +915,12 @@ let test_prompt_transmission_boundary () =
      | Ok _ -> fail "incomplete turn input completed");
     check int "incomplete write emits no input" 0 !sent);
   let captured = Filename.temp_file "codex-transmitted-input-" ".jsonl" in
+  (* Exercise escaping and multibyte text across a pipe-sized request; the
+     child capture must decode to these exact bytes. *)
+  let transmitted_prompt = String.make 65_536 '"' ^ "한글 👩‍💻\n\\marker" in
   Fun.protect ~finally:(fun () -> Sys.remove captured) (fun () ->
     with_fixture ~capture_path:captured lines (fun path ->
-      let result = run_fixture ~prompt:"transmission-marker" ~on_prompt_sent:report path in
+      let result = run_fixture ~prompt:transmitted_prompt ~on_prompt_sent:report path in
       check bool "complete turn succeeds" true (Result.is_ok result);
       check int "complete write emits once" 1 !sent;
       let open Yojson.Safe.Util in
@@ -910,7 +931,7 @@ let test_prompt_transmission_boundary () =
         |> List.find (fun json -> json |> member "method" = `String "turn/start") in
       let text = request |> member "params" |> member "input" |> to_list
         |> List.hd |> member "text" |> to_string in
-      check string "client received exact turn input" "transmission-marker" text));
+      check string "client received exact turn input" transmitted_prompt text));
   with_fixture [ init_result; account_chatgpt; thread_result; turn_result; turn_failed ]
     (fun path ->
       (match run_fixture ~on_prompt_sent:report path with
@@ -1983,6 +2004,94 @@ let test_wall_clock_ceiling_bounds_a_tool_item_that_never_completes () =
            (seconds > tool_item_idle_window_s && seconds <= tool_item_ceiling_s)
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "an item that never completes let the turn finish")
+;;
+
+let test_worker_encoding_wait_is_bounded () =
+  let captured = Filename.temp_file "codex-worker-wait-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove captured) (fun () ->
+    with_fixture ~capture_path:captured
+      [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
+      (fun path ->
+        Eio_main.run @@ fun env ->
+        Eio.Switch.run @@ fun sw ->
+        let clock = Eio.Stdenv.clock env in
+        let previous_pool = Domain_pool_ref.get () in
+        Eio.Switch.on_release sw (fun () ->
+          match previous_pool with
+          | None -> Domain_pool_ref.clear_for_tests ()
+          | Some pool -> Domain_pool_ref.set pool);
+        let pool = Domain_pool.create ~sw ~domain_count:1 env#domain_mgr in
+        Domain_pool_ref.set pool;
+        let started, announce_started = Eio.Promise.create () in
+        let release, release_worker = Eio.Promise.create () in
+        let held = Domain_pool.submit_cpu_async ~sw pool (fun () ->
+          Eio.Promise.resolve announce_started ();
+          Eio.Promise.await release) in
+        (* Release before the switch joins the held job, including on a
+           failed assertion or cancellation. The outer test watchdog detects
+           an unbounded queue wait; it is longer than both admission windows
+           and the two process cleanup grace periods. *)
+        Fun.protect ~finally:(fun () -> Eio.Promise.resolve release_worker ())
+          (fun () -> Eio.Time.with_timeout_exn clock 10.0 (fun () ->
+            Eio.Promise.await started;
+            List.iter
+              (fun (name, admission_timeout_s, wall_clock_ceiling_s) ->
+                let sent = ref 0 in
+                let config =
+                  { (Runtime_codex_app_server.default_config ()) with
+                    cli_path = path; admission_timeout_s; wall_clock_ceiling_s;
+                    timeout_s = None }
+                in
+                let outcome = Runtime_codex_app_server.run_turn
+                    ~mgr:(Eio.Stdenv.process_mgr env) ~clock
+                    ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+                    ~on_prompt_sent:(fun () -> incr sent)
+                    config ~prompt:"fixture" ~images:[] in
+                (match outcome with
+                 | Error (Runtime_codex_app_server.Timeout
+                            { seconds; turn_accepted = false }) ->
+                   (match wall_clock_ceiling_s with
+                    | None ->
+                      check (float 0.001) (name ^ ": admission bound")
+                        admission_timeout_s seconds
+                    | Some ceiling ->
+                      check bool (name ^ ": wall-clock cap bounds the wait")
+                        true (seconds > 0.0 && seconds <= ceiling))
+                 | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+                 | Ok _ -> fail (name ^ ": occupied worker admitted a turn"));
+                check int (name ^ ": no prompt transmission callback") 0 !sent;
+                check string (name ^ ": no request reached the child") ""
+                  (In_channel.with_open_bin captured In_channel.input_all))
+              [ "admission", 0.3, None; "wall-clock", 2.0, Some 0.3 ]));
+        Eio.Promise.await_exn held))
+;;
+
+let test_worker_rejects_invalid_developer_instructions () =
+  let captured = Filename.temp_file "codex-invalid-worker-input-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove captured) (fun () ->
+    with_fixture ~capture_path:captured
+      [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
+      (fun path ->
+        let sent = ref 0 in
+        (match run_fixture ~worker_pool:true
+                 ~developer_instructions:"invalid-\xff"
+                 ~on_prompt_sent:(fun () -> incr sent) path with
+         | Error (Runtime_codex_app_server.Spawn_failed detail) ->
+           check string "worker exception keeps the offending field"
+             (Printexc.to_string (Failure
+                "codex app-server stdin: refusing invalid UTF-8 payload (field params.developerInstructions)"))
+             detail
+         | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+         | Ok _ -> fail "invalid UTF-8 was sent to the client");
+        check int "rejected encoding has no transmission callback" 0 !sent;
+        let methods =
+          In_channel.with_open_bin captured In_channel.input_lines
+          |> List.map (fun line ->
+            Yojson.Safe.from_string line
+            |> Yojson.Safe.Util.member "method" |> Yojson.Safe.Util.to_string)
+        in
+        check (list string) "the invalid thread request was never written"
+          [ "initialize"; "initialized"; "account/read" ] methods))
 ;;
 
 let test_no_deadline_keeps_handshake_bounded () =
@@ -5345,7 +5454,10 @@ let () =
         ] )
     ; ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
-        ; test_case "prompt transmission boundary" `Quick test_prompt_transmission_boundary
+        ; test_case "prompt transmission boundary" `Quick
+            (fun () -> test_prompt_transmission_boundary ())
+        ; test_case "worker encoded prompt transmission boundary" `Quick
+            (fun () -> test_prompt_transmission_boundary ~worker_pool:true ())
         ; test_case
             "probe stops before thread"
             `Quick
@@ -5448,6 +5560,14 @@ let () =
             `Quick
             test_wall_clock_ceiling_bounds_a_tool_item_that_never_completes
         ; test_case
+            "worker encoding wait shares dispatch bounds"
+            `Quick
+            test_worker_encoding_wait_is_bounded
+        ; test_case
+            "worker rejects invalid developer instructions before writing"
+            `Quick
+            test_worker_rejects_invalid_developer_instructions
+        ; test_case
             "no deadline keeps handshake bounded"
             `Quick
             test_no_deadline_keeps_handshake_bounded
@@ -5503,7 +5623,10 @@ let () =
             "dispatch validation is process-free"
             `Quick
             test_dispatch_validation_is_process_free
-        ; test_case "dynamic tool callback" `Quick test_dynamic_tool_callback
+        ; test_case "dynamic tool callback" `Quick
+            (fun () -> test_dynamic_tool_callback ())
+        ; test_case "worker encoded dynamic tool callback" `Quick
+            (fun () -> test_dynamic_tool_callback ~worker_pool:true ())
         ; test_case
             "token usage of this turn reaches the result"
             `Quick

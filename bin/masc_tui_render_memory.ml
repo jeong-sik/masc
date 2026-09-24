@@ -536,8 +536,7 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
         (* The retrieval count, its day count and its last clock are one
            reading: the server derives all three from the same list of
            retrieval times, and the decoder keeps them as one value. A fact
-           nobody has read says so once instead of "Retrieved 0 · 0 days ·
-           last never" (#38165).
+           nobody has read draws the single phrase "Never retrieved".
 
            [Retracted] and [Revised from] keep their zeros. Both are measured
            counts the server always sends, and hiding a measured zero makes it

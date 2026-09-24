@@ -110,9 +110,9 @@ let test_detail_names_the_use_record () =
       (contains "Retracted 1 · Revised from 1" line)
 ;;
 
-(* A fact nobody has read said so three times: "Retrieved 0", "0 days" and
-   "last never". The second two are computed from the first (#38165), so it
-   says it once.
+(* A fact nobody has read draws "Never retrieved" once, with no count, day
+   count or clock beside it: the day count and the clock are computed from
+   the count, so a zero count has nothing more to say.
 
    The two counts after it keep their zeros: they are measured, and a hidden
    measured zero reads as "not measured". *)

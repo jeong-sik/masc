@@ -51,8 +51,8 @@ python_suite_is_runnable() {
 # step's continue-on-error says.
 per_suite_timeout=300
 
-# WORKAROUND: production-blocking. One suite is a single walk of 74 PTY
-# scenarios and legitimately takes longer than the bound above. It measures
+# WORKAROUND: production-blocking. One suite is a single walk of PTY
+# scenarios and legitimately takes longer than the bound above. It measured
 # 261s locally and CI killed it at exactly 300.0s on two separate runs
 # (14:19:05->14:24:05 and 14:38:55->14:43:55, #36343), so every pull request
 # that edits that file is killed whatever it changed. #36349 is one: it
@@ -62,14 +62,29 @@ per_suite_timeout=300
 # The bound stays 300s for every other suite. Raising it everywhere would
 # double what a genuinely hung suite costs, which is what that bound is for.
 #
-# Removal target: #36343's split. Once enough of that walk's 69 inline
-# scenarios live in focused suites of their own, the walk fits 300s again and
-# this case goes with it. Nothing else belongs in this list -- a second entry
-# means the split stopped being the plan.
+# Removal target: #36343's split. Measured 2026-09-24: the walk holds 73
+# inline scenarios and takes 340s of this step's 612s (run 35953309482), so
+# the bound keeps 260s of headroom. Once enough of those scenarios live in
+# focused suites of their own, the walk fits 300s again and this case goes
+# with it, and so do the phase below and its self-test fixture. Nothing else
+# belongs in this list -- a second entry means the split stopped being the
+# plan.
+# The list is a literal, so reading it answers "what has a custom bound".
+# --self-test needs one entry it can point at a stand-in: a fixture that
+# cannot enter the custom-bound phase proves nothing about that phase. The
+# hook names one suite by its exact path and only --self-test sets it, so
+# with the variable unset this function is the production one.
 suite_timeout() {
   case "$1" in
     */test_tui_keyboard_input.py) echo 600 ;;
-    *) echo "${per_suite_timeout}" ;;
+    *)
+      if [ -n "${MASC_SELFTEST_CUSTOM_BOUND_SUITE:-}" ] \
+        && [ "$1" = "${MASC_SELFTEST_CUSTOM_BOUND_SUITE}" ]; then
+        echo "${MASC_SELFTEST_CUSTOM_BOUND_SECONDS:-600}"
+      else
+        echo "${per_suite_timeout}"
+      fi
+      ;;
   esac
 }
 
@@ -1327,6 +1342,18 @@ for target in "$@"; do
     *failing*) body='exit 1' ;;
     *) body='exit 0' ;;
   esac
+  case "${target}" in
+    @*)
+      # Real dune builds and runs an alias in one command, so the suite's own
+      # time lands here. Writing an executable that nothing on this path runs
+      # made a "slow" alias cost nothing, which is how the walk fixture below
+      # used to pass without the walk ever costing a second.
+      case "${name}" in
+        *slow*) sleep "${FAKE_DUNE_SUITE_SECONDS:-60}" ;;
+      esac
+      continue
+      ;;
+  esac
   mkdir -p "_build/default/$(dirname "${target}")"
   printf '#!/bin/sh\n%s\n' "${body}" > "_build/default/${target}"
   chmod +x "_build/default/${target}"
@@ -1431,12 +1458,32 @@ FAKE
   # that also carries linked suites used to reach it with the remainder only
   # (202s/221s in run 35685267067) and its bound shrank to that. It must run
   # first, at its own bound, with everything else fitted into what is left.
-  # The stand-in walk (slow_py) sleeps past any small budget, so a pass here
-  # means it was handed its own bound, not the remainder.
-  RUNNER_DIRECT_SOURCES="test/test_slow_py.py" \
-    runner_check "a custom-bound walk runs first and whole, before linked suites" \
-      "" \
-      0 4 test_ok test_ok_too test/test_slow_py.py
+  #
+  # The phase does not make a selection cheaper, it decides who is starved
+  # when the budget cannot hold all of it, so what this pins is that pair:
+  # the walk finishes whole and the suite after it is the one the budget
+  # names. Disable the phase and this fixture fails -- nothing is named,
+  # because the walk then spends the budget the other suite was going to use.
+  # MASC_SELFTEST_CUSTOM_BOUND_SUITE is what puts the stand-in on the
+  # custom-bound list; without it the walk never enters the phase and any
+  # ordering passes. When #36343 removes the custom bound, the phase, the
+  # hook and this fixture go together.
+  MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py" \
+  FAKE_DUNE_SUITE_SECONDS=2 \
+    runner_check "a custom-bound walk runs first and whole, and the budget names what follows" \
+      "test/test_slow_one (not built: the step budget ran out);" \
+      1 4 test_slow_one test/test_slow_py.py
+
+  # Production is untouched by the hook: with the variable unset a plain
+  # Python suite keeps the default bound and only the walk has its own.
+  if [ "$(suite_timeout test/test_slow_py.py)" = "${per_suite_timeout}" ] \
+    && [ "$(suite_timeout test/test_tui_keyboard_input.py)" = "600" ]; then
+    echo "ok   the custom-bound list is the walk alone when the hook is unset"
+  else
+    echo "FAIL the custom-bound list is the walk alone when the hook is unset"
+    echo "     got:  slow_py=$(suite_timeout test/test_slow_py.py) walk=$(suite_timeout test/test_tui_keyboard_input.py)"
+    failures=$((failures + 1))
+  fi
   # Count the call instead of inferring one call from whether two-second
   # stand-in builds fit inside a three-second wall-clock budget. On a loaded
   # runner the setup could consume that one-second margin before dune began.

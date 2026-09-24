@@ -254,7 +254,7 @@ val media_candidates_of :
   runtimes:Runtime.t list ->
   media_failover:string list ->
   Runtime.t list
-(** The vision read fleet, pure over its inputs: [media_failover] resolved
+(** The vision read runtimes, pure over their inputs: [media_failover] resolved
     against [runtimes] in declared order (ids that resolve to nothing are
     skipped). Ids are unique; the first occurrence wins. No capability or
     execution filter: callers admit by [caps_admit_required_modalities] over

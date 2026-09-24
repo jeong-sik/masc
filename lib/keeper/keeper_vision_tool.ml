@@ -3,7 +3,7 @@ module Store = Multimodal.Vision_artifact_store
 
 type complete_fn = Keeper_provider_subcall.complete_fn
 
-(* The media_failover vision fleet is entirely /v1 "none" thinking-control
+(* The media_failover vision runtimes are entirely /v1 "none" thinking-control
    lanes — reasoning-capable models with no wire field to disable thinking.
    Requesting enable_thinking=false there is fail-closed by the agent_core
    guard (Disable_not_encodable), which broke all image analysis (2026-08).

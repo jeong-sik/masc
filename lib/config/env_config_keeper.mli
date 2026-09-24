@@ -111,7 +111,7 @@ module KeeperVision : sig
   val max_image_bytes : unit -> int
 
   (** Output-token budget for [keeper_analyze_image], shared by the reasoning phase and
-      the answer on the /v1 vision fleet, clamped to [4096, 131072]. Default
+      the answer on the /v1 vision runtimes, clamped to [4096, 131072]. Default
       65536. *)
   val max_output_tokens : unit -> int
 

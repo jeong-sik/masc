@@ -765,7 +765,7 @@ let runtime_accepts_image_input ~(runtime : Runtime.t) =
   (input_capabilities_of_runtime runtime).Llm_provider.Capabilities.supports_image_input
 ;;
 
-(* The vision read fleet: [runtime.media_failover] resolved against the
+(* The vision read runtimes: [runtime.media_failover] resolved against the
    configured runtimes in declared order. Ids are unique, first occurrence
    wins; an id that resolves to nothing is skipped. The vision tool and the
    image readings made for a runtime that cannot take the image call these.

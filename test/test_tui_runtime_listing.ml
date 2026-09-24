@@ -777,7 +777,7 @@ let test_the_route_editor_writes_the_whole_order () =
   Alcotest.(check string) "a drop sends what is left"
     "[runtime].media_failover order [b] a, cursor stays"
     (slot_plan_text (plan_slot_edit state Drop_slot));
-  (* An empty route is a configuration, not a broken one: no vision fleet. The
+  (* An empty route is a configuration, not a broken one: no vision runtimes. The
      exact-lane editor refuses its last slot; this one does not. *)
   let state = media_failover_state ~declared:[ "only" ] ~admitted:[ "only" ] () in
   Alcotest.(check string) "the last entry may go"

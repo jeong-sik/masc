@@ -340,7 +340,7 @@ module KeeperVision = struct
   let max_output_tokens_ceiling = 128 * 1024
 
   (** Maximum output tokens for the one-shot vision sub-call. On the
-      OpenAI-compatible /v1 endpoint the vision fleet uses, this single budget is
+      OpenAI-compatible /v1 endpoint the vision runtimes use, this single budget is
       shared by the model's reasoning phase and the visible answer, so a cap that
       only fits the answer lets reasoning drain it and truncate the reply
       mid-JSON (2026-08-27 MiniMax M3 finding). Default 65536 clears OpenAI's

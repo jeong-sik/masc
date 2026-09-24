@@ -305,6 +305,54 @@ def test_run_populates_context(tmp_path):
     assert ctx.metadata["duplicate_tool_calls"] == 2
 
 
+LEDGER = "/opt/masc-bench/base/.masc/tool_calls"
+LEDGER_ROW = '{"record_kind":"tool_call","tool":"Read","input":{"path":"/app/a.py"}}\n'
+
+
+def run_in(tmp_path, env):
+    from harbor.models.agent.context import AgentContext
+
+    logs = tmp_path / "agent"
+    ctx = AgentContext()
+    asyncio.run(make_agent(logs).run("do the task", env, ctx))
+    return logs, ctx
+
+
+def test_run_keeps_the_tool_call_ledger(tmp_path):
+    remote = tmp_path / "remote-ledger"
+    (remote / "2026-09").mkdir(parents=True)
+    (remote / "2026-09" / "24.jsonl").write_text(LEDGER_ROW)
+
+    logs, ctx = run_in(tmp_path, FakeEnv(remote_dirs={LEDGER: remote}))
+
+    assert (logs / "masc" / "tool_calls" / "2026-09" / "24.jsonl").read_text() == LEDGER_ROW
+    assert ctx.metadata["masc_state"] == "Succeeded"
+
+
+def test_an_episode_without_a_ledger_copies_nothing(tmp_path):
+    env = FakeEnv()
+
+    logs, ctx = run_in(tmp_path, env)
+
+    assert env.downloads == []
+    assert not (logs / "masc").exists()
+    assert ctx.metadata["masc_state"] == "Succeeded"
+
+
+class LedgerCopyFails(FakeEnv):
+    async def download_dir(self, src, dst):
+        raise OSError("container already removed")
+
+
+def test_a_failed_ledger_copy_leaves_the_result_in_place(tmp_path):
+    env = LedgerCopyFails(remote_dirs={LEDGER: tmp_path})
+
+    logs, ctx = run_in(tmp_path, env)
+
+    assert ctx.metadata["masc_state"] == "Succeeded"
+    assert (logs / "result.json").exists()
+
+
 def test_claude_code_lane_env_uses_oauth_token(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")

@@ -50,6 +50,12 @@ REMOTE = "/opt/masc-bench"
 # remains is counting the tool-call store and the trace dumps.
 RESULT_RECOVERY_TIMEOUT_SEC = 600
 
+# The episode's tool-call ledger: every call's input and output, in order.
+# result.json keeps only counts, and the container is removed with the trial,
+# so without a copy a failed episode cannot say what the keeper read, changed
+# or ran. Same store collect_result.sh counts ($MASC_BASE_PATH/.masc/tool_calls).
+TOOL_CALL_LEDGER = f"{REMOTE}/base/.masc/tool_calls"
+
 
 def _runtime_id_of_model(model: str) -> str:
     """`provider/model` as harbor names it -> `provider.model`."""
@@ -216,6 +222,17 @@ class MascAgent(BaseInstalledAgent):
                 self.populate_context_post_run(context)
             except Exception:  # noqa: BLE001 - see above
                 self.logger.exception("recovering the episode result failed")
+            try:
+                await asyncio.wait_for(self._keep_tool_call_ledger(environment),
+                                       RESULT_RECOVERY_TIMEOUT_SEC)
+            except Exception:  # noqa: BLE001 - see above
+                self.logger.exception("copying the tool-call ledger failed")
+
+    async def _keep_tool_call_ledger(self, environment: BaseEnvironment) -> None:
+        """Copy the ledger into the trial's agent logs; no ledger, no copy."""
+        if await environment.is_dir(TOOL_CALL_LEDGER):
+            await environment.download_dir(
+                TOOL_CALL_LEDGER, Path(self.logs_dir) / "masc" / "tool_calls")
 
     def _cost_usd(self, usage) -> float | None:
         """What this episode cost, from the four token counts and litellm.

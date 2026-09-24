@@ -99,6 +99,33 @@ let state : machine option ref = ref None
 let lock = Mutex.create ()
 let locked f = Mutex.protect lock f
 
+type change_mark = { count : int; incarnation : string }
+
+(* The machine change counter a spectator compares against, one per process,
+   written only while holding [lock]. It is not [steps]: a guest fault raises
+   out of the core before [steps] moves, so a faulting run can leave [steps]
+   where it was while the attempt still happened. Every run attempt marks
+   before it touches the machine -- a key in the ring, the mouse, the core --
+   so a run that faults at its first instruction still moves the count. A
+   call refused before that point leaves it. A load marks right after
+   installing the new machine, an eject right after dropping it, and nothing
+   resets it, so one value never names two screens while the server runs.
+
+   [published] is the same count with the incarnation of [!state], or [None]
+   with no machine. It is set only here, under [lock], every time either
+   half changes, so a spectator whose [since] still matches is answered
+   without waiting for a run that holds the lock. *)
+let change_count = ref 0
+let published : change_mark option Atomic.t = Atomic.make None
+
+let mark_change () =
+  incr change_count;
+  Atomic.set published
+    (Option.map (fun (st : machine) -> { count = !change_count; incarnation = st.incarnation }) !state)
+;;
+
+let current_mark () = Atomic.get published
+
 let with_machine f =
   locked (fun () ->
     match !state with
@@ -460,6 +487,7 @@ let load ~who ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announ
           ; controller = Some who; incarnation = Random_id.uuid_v7 () }
         in
         state := Some st;
+        mark_change ();
         let booted =
           running (fun () ->
             let ran = advance st ~budget:boot_steps ~until_ready:true in
@@ -482,6 +510,7 @@ let eject ~who ~announce () =
        | Error e -> Error e
        | Ok () ->
          state := None;
+         mark_change ();
          announce ();
          Ok ()))
 ;;
@@ -540,11 +569,34 @@ let capture_with_identity () =
       })
 ;;
 
+type live =
+  | Nothing_loaded
+  | Unchanged of change_mark
+  | Changed of change_mark * frame
+
+(* Compare and copy under one lock hold, so the count, the incarnation and the
+   pixels always describe the same machine state. An unchanged answer renders
+   nothing. *)
+let live ~since =
+  locked (fun () ->
+    match !state with
+    | None -> Nothing_loaded
+    | Some st ->
+      let mark = { count = !change_count; incarnation = st.incarnation } in
+      (match since with
+       | Some seen when seen.count = mark.count
+                        && String.equal seen.incarnation mark.incarnation -> Unchanged mark
+       | Some _ | None ->
+         let width, height = Dos_machine.frame_dims st.m in
+         Changed (mark, { width; height; rgb = Dos_machine.frame_rgb st.m })))
+;;
+
 let step ~who ~steps ~until_ready =
   with_control ~who (fun st ->
     match clamp_steps steps with
     | Error e -> Error e
     | Ok budget ->
+      mark_change ();
       let ran = advance st ~budget ~until_ready in
       ran_then_kept st ran)
 ;;
@@ -575,6 +627,8 @@ let resolve_keys names =
    rest; the keys not pressed are not in the ledger and never reached the
    ring. *)
 let press_resolved st ~who ~keys ~budget =
+  (* Called with at least one key, so the first key always goes in. *)
+  mark_change ();
   let total = ref 0 and requests = ref 0 and pressed = ref 0 in
   let last_settled = ref false in
   List.iter
@@ -650,6 +704,7 @@ let click ~who ~x ~y ~buttons ~steps =
       match clamp_steps steps with
       | Error e -> Error e
       | Ok budget ->
+        mark_change ();
         append_entry st
           { at_step = st.steps; who; key_name = Printf.sprintf "mouse(%d,%d,%d)" x y buttons };
         Dos_machine.set_mouse st.m ~x ~y ~buttons;

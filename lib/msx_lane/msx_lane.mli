@@ -252,6 +252,16 @@ type change_mark = {
   incarnation : string;  (** as in {!identified_capture} *)
 }
 
+val current_mark : unit -> change_mark option
+(** The current count and incarnation, [None] with no machine, read without
+    the machine lock and without blocking: every call that moves either half
+    publishes the new mark before it lets go of the lock. A spectator whose
+    [since] equals this has nothing new to read and needs neither the lock
+    nor a systhread. A call that runs the machine publishes its new mark
+    before it touches the machine, so this never matches a [since] whose
+    pixels a running call is changing; reading those pixels then waits for
+    the call in {!live}. *)
+
 type live =
   | Nothing_loaded  (** no machine: nothing to watch *)
   | Unchanged of change_mark
@@ -262,9 +272,11 @@ type live =
 val live : since:change_mark option -> live
 (** Reads the count, the incarnation and, when either differs from [since], the
     pixels under one hold of the machine lock, the same lock a call that
-    advances the machine holds. Never steps or writes anything. The lock is a
-    stdlib mutex that a step can hold for a whole call, so an Eio caller runs
-    this in [Eio_unix.run_in_systhread]. *)
+    advances the machine holds, so a [Changed] mark always names its pixels.
+    Never steps or writes anything. The lock is a stdlib mutex that a step can
+    hold for a whole call, so an Eio caller compares [since] with
+    {!current_mark} first and runs this, in [Eio_unix.run_in_systhread], only
+    when they differ. *)
 
 (** {b RAM introspection} — the state sensor. The screen is the expensive
     detour a human eye needs; the game's truth is in memory, and the core

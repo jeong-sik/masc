@@ -1,7 +1,8 @@
 (* GET /api/v1/lane-addons/live, stage 1 of RFC
-   machine-spectating-goes-through-lanes (§2.1, §5): the MSX machine change
-   counter and the read route over it. Drives the real Msx_lane with no ROM
-   (the bus reads 0xFF) and the real lane-addon router. *)
+   machine-spectating-goes-through-lanes (§2.1, §5): the MSX and DOS machine
+   change counters and the read route over them. Drives the real Msx_lane
+   with no ROM (the bus reads 0xFF), the real Dos_lane with hand-assembled
+   COM programs, and the real lane-addon router. *)
 
 open Alcotest
 module Lane = Msx_lane
@@ -46,9 +47,16 @@ let mark () =
 
 let count () = (mark ()).Lane.count
 
+(* The lock-free mark must be the one a locked read reports. *)
+let published_matches what =
+  let m = mark () in
+  check bool (what ^ ": the published mark is the locked one") true
+    (Lane.current_mark () = Some m)
+
 let rises what before =
   let after = count () in
   check bool (what ^ " raises the change count") true (after > before);
+  published_matches what;
   after
 
 let stays what before = check int (what ^ " leaves the change count") before (count ())
@@ -97,6 +105,7 @@ let test_counter_moves_on_every_change () =
       (not (String.equal incarnation (mark ()).Lane.incarnation));
     let before_eject = mark () in
     ok "eject" (Lane.eject ());
+    check bool "an ejected machine publishes no mark" true (Lane.current_mark () = None);
     check bool "an ejected machine reads as nothing loaded" true
       (match Lane.live ~since:(Some { before_eject with Lane.count = c }) with
        | Lane.Nothing_loaded -> true
@@ -155,7 +164,10 @@ let test_decode_live_query () =
     (decode ["source_kind", "msx_capture"] = Ok (Routes.Msx_screen, None));
   check bool "msx_capture with a since" true
     (decode ["since", "7"; "incarnation", "inc-a"; "source_kind", "msx_capture"]
-     = Ok (Routes.Msx_screen, Some { Lane.count = 7; incarnation = "inc-a" }));
+     = Ok (Routes.Msx_screen, Some { Routes.count = 7; incarnation = "inc-a" }));
+  check bool "dos_capture decodes to the DOS screen" true
+    (decode ["source_kind", "dos_capture"; "since", "0"; "incarnation", "inc-b"]
+     = Ok (Routes.Dos_screen, Some { Routes.count = 0; incarnation = "inc-b" }));
   let refused what fields expected =
     match decode fields with
     | Ok _ -> fail (what ^ " must be refused")
@@ -164,7 +176,7 @@ let test_decode_live_query () =
           (contains ~sub:expected message)
   in
   List.iter
-    (fun kind -> refused kind ["source_kind", kind] "has no screen")
+    (fun kind -> refused kind ["source_kind", kind] "live accepts msx_capture and dos_capture")
     ["snapshot_file"; "lane_output"; "browser_document"];
   refused "an unknown kind" ["source_kind", "vcr_capture"] "unknown source_kind";
   refused "a missing kind" [] "requires source_kind";
@@ -179,6 +191,156 @@ let test_decode_live_query () =
   refused "a repeated kind" ["source_kind", "msx_capture"; "source_kind", "msx_capture"]
     "duplicate";
   refused "an unknown parameter" ["source_kind", "msx_capture"; "until", "3"] "unknown live parameter"
+
+(* ---- DOS ------------------------------------------------------------------ *)
+
+(* Prints HI, waits for a key, exits. The same bytes as test_dos_tools's.
+
+   org 0x100: mov ah,9 / mov dx,msg / int 21h
+              wait: mov ah,0 / int 16h / or ax,ax / jz wait
+              int 20h / "HI$" *)
+let hello_com =
+  "\xb4\x09\xba\x11\x01\xcd\x21\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20HI$"
+
+(* lea ax, ax: an instruction the core does not implement, so every run faults
+   at its first instruction and [steps] never moves. *)
+let fault_com = "\x8d\xc0"
+
+let who = "live-test"
+let dos_ok what = function
+  | Ok _ -> ()
+  | Error e -> fail (what ^ ": " ^ Dos_lane.error_to_string e)
+
+let dos_eject_if_loaded () =
+  match Dos_lane.eject ~who ~announce:ignore () with
+  | Ok () | Error Dos_lane.No_machine -> ()
+  | Error e -> fail (Dos_lane.error_to_string e)
+
+let dos_load ~dir program_bytes =
+  Dos_lane.load ~who ~ledger_dir:(Filename.concat dir "ledger")
+    ~saves_dir:(Filename.concat dir "saves") ~program_name:"game.com" ~program_bytes
+    ~files:[] ~announce:ignore
+
+let with_dos f =
+  with_dir "dos-live-" (fun dir ->
+    Fun.protect ~finally:dos_eject_if_loaded (fun () -> f ~dir))
+
+let dos_mark () =
+  match Dos_lane.live ~since:None with
+  | Dos_lane.Changed (mark, _) -> mark
+  | Dos_lane.Unchanged _ -> fail "a read without since answered unchanged"
+  | Dos_lane.Nothing_loaded -> fail "no DOS machine is loaded"
+
+let dos_count () =
+  let m = dos_mark () in
+  check bool "the published DOS mark is the locked one" true
+    (Dos_lane.current_mark () = Some m);
+  m.Dos_lane.count
+
+let dos_steps () =
+  match Dos_lane.screen () with
+  | Ok o -> o.Dos_lane.steps
+  | Error e -> fail (Dos_lane.error_to_string e)
+
+let dos_rises what before =
+  let after = dos_count () in
+  check bool (what ^ " raises the DOS change count") true (after > before);
+  after
+
+let dos_stays what before =
+  check int (what ^ " leaves the DOS change count") before (dos_count ())
+
+(* The mouse is not driven here: #38726 makes a click on a program that never
+   asked for a mouse a refusal, so a click case would pin today's accepting
+   shape. [click] marks through the same call as [step]. *)
+let test_dos_counter_moves_on_every_run () =
+  dos_eject_if_loaded ();
+  check bool "no DOS machine publishes no mark" true (Dos_lane.current_mark () = None);
+  check bool "no DOS machine reads as nothing loaded" true
+    (match Dos_lane.live ~since:None with
+     | Dos_lane.Nothing_loaded -> true
+     | Dos_lane.Unchanged _ | Dos_lane.Changed _ -> false);
+  with_dos (fun ~dir ->
+    dos_ok "load" (dos_load ~dir hello_com);
+    let c = dos_count () in
+    dos_ok "step" (Dos_lane.step ~who ~steps:1000 ~until_ready:true);
+    let c = dos_rises "step" c in
+    (* Reads and refusals leave it. *)
+    dos_ok "screen" (Dos_lane.screen ());
+    dos_ok "capture_with_identity" (Dos_lane.capture_with_identity ());
+    dos_ok "pass" (Dos_lane.pass ~who ~to_:(Some who) ~announce:ignore);
+    dos_stays "reads and a pass" c;
+    check bool "an empty press is refused" true
+      (Result.is_error (Dos_lane.press ~who ~keys:[] ~steps:1000));
+    check bool "an unknown key is refused" true
+      (Result.is_error (Dos_lane.press ~who ~keys:["hyperspace"] ~steps:1000));
+    check bool "another caller is refused" true
+      (Result.is_error (Dos_lane.step ~who:"someone-else" ~steps:1000 ~until_ready:true));
+    dos_stays "a refusal" c;
+    dos_ok "press" (Dos_lane.press ~who ~keys:["x"] ~steps:100_000);
+    let c = dos_rises "press" c in
+    (* The program took its key and exited; typing still runs the core (for
+       no instructions) and still counts as an attempt. *)
+    dos_ok "type_text" (Dos_lane.type_text ~who ~text:"y" ~steps:100_000);
+    let c = dos_rises "type_text" c in
+    dos_ok "eject" (Dos_lane.eject ~who ~announce:ignore ());
+    check bool "an ejected DOS machine publishes no mark" true
+      (Dos_lane.current_mark () = None);
+    (* A program that faults at its first instruction: the boot and every
+       step after it run zero instructions, so [steps] stays at 0, and the
+       count still rises on each attempt. *)
+    check bool "the faulting load reports the fault" true
+      (match dos_load ~dir fault_com with
+       | Error (Dos_lane.Guest_fault _) -> true
+       | Ok _ | Error _ -> false);
+    let c = dos_rises "a load after an eject (the count is never reused)" c in
+    let steps = dos_steps () in
+    check bool "the faulting step reports the fault" true
+      (match Dos_lane.step ~who ~steps:1000 ~until_ready:false with
+       | Error (Dos_lane.Guest_fault _) -> true
+       | Ok _ | Error _ -> false);
+    check int "a zero-step fault leaves steps" steps (dos_steps ());
+    ignore (dos_rises "a run that faulted at its first instruction" c : int))
+
+(* The same program loaded twice boots the same way and can reach the same
+   steps; a spectator holding the first machine's mark must still get the
+   second machine's frame. *)
+let test_dos_reload_is_not_unchanged () =
+  with_dos (fun ~dir ->
+    dos_ok "first load" (dos_load ~dir hello_com);
+    let first = dos_mark () in
+    let first_steps = dos_steps () in
+    dos_ok "second load" (dos_load ~dir hello_com);
+    let second = dos_mark () in
+    check int "the same program boots to the same steps" first_steps (dos_steps ());
+    check bool "each load names its own incarnation" false
+      (String.equal first.Dos_lane.incarnation second.Dos_lane.incarnation);
+    (match Dos_lane.live ~since:(Some first) with
+     | Dos_lane.Changed (now, frame) ->
+         check int "the reload's count comes back" second.Dos_lane.count now.Dos_lane.count;
+         check int "the frame is width*height*3 RGB bytes"
+           (frame.Dos_lane.width * frame.Dos_lane.height * 3) (String.length frame.Dos_lane.rgb)
+     | Dos_lane.Unchanged _ | Dos_lane.Nothing_loaded ->
+         fail "the first load's mark must not answer unchanged");
+    (match Dos_lane.live ~since:(Some { second with Dos_lane.incarnation = first.Dos_lane.incarnation }) with
+     | Dos_lane.Changed _ -> ()
+     | Dos_lane.Unchanged _ | Dos_lane.Nothing_loaded ->
+         fail "the current count under the old incarnation must get the frame");
+    match Dos_lane.live ~since:(Some second) with
+    | Dos_lane.Unchanged _ -> ()
+    | Dos_lane.Changed _ | Dos_lane.Nothing_loaded -> fail "the current mark must answer unchanged")
+
+(* [pass] runs [announce] while it holds the machine lock. The lane's mutex is
+   an OCaml 5 error-checking mutex, so a read that took the lock here would
+   raise Sys_error instead of answering. *)
+let test_dos_mark_reads_while_the_lock_is_held () =
+  with_dos (fun ~dir ->
+    dos_ok "load" (dos_load ~dir hello_com);
+    let before = dos_mark () in
+    let seen = ref None in
+    dos_ok "pass"
+      (Dos_lane.pass ~who ~to_:(Some who) ~announce:(fun () -> seen := Dos_lane.current_mark ()));
+    check bool "the mark read under a held lock is the current one" true (!seen = Some before))
 
 (* ---- the route, through the real router and auth -------------------------- *)
 
@@ -328,7 +490,41 @@ let test_live_route () =
             ; live ^ "&since=soon&incarnation=" ^ incarnation, "a text since is a 400"
             ; live ^ "&since=" ^ string_of_int n, "a since without its incarnation is a 400" ];
           check (list string) "live reads write no file under the workspace" files_before
-            (tree base_path)))))
+            (tree base_path));
+        let dos_live = "/api/v1/lane-addons/live?source_kind=dos_capture" in
+        dos_eject_if_loaded ();
+        check string "no DOS machine is a typed answer" "no_machine"
+          (string_member "state" (body_json (get dos_live)));
+        with_dos (fun ~dir ->
+          dos_ok "load" (dos_load ~dir hello_com);
+          let json = body_json (get dos_live) in
+          check string "no since gets the DOS frame" "changed" (string_member "state" json);
+          check string "the answer names dos_capture" "dos_capture"
+            (string_member "source_kind" json);
+          let screen = match member "screen" json with Some s -> s | None -> fail "no screen" in
+          check int "the DOS pixels are width*height*3 bytes"
+            (int_member "width" screen * int_member "height" screen * 3)
+            (String.length (Base64.decode_exn (string_member "rgb_base64" screen)));
+          let since =
+            "&since=" ^ string_of_int (int_member "change_count" json)
+            ^ "&incarnation=" ^ string_member "incarnation" json in
+          (* Asked while [pass] holds the machine lock: an unchanged answer
+             must come from the published mark. Taking the lock on this
+             thread would raise; waiting for it in a systhread would never
+             return. *)
+          let held = ref None in
+          dos_ok "pass"
+            (Dos_lane.pass ~who ~to_:(Some who)
+               ~announce:(fun () -> held := Some (get (dos_live ^ since))));
+          (match !held with
+           | Some response ->
+               check int "unchanged under a held lock is a 200" 200 (status_of_response response);
+               check string "unchanged under a held lock" "unchanged"
+                 (string_member "state" (body_json response))
+           | None -> fail "announce did not run");
+          dos_ok "press" (Dos_lane.press ~who ~keys:["x"] ~steps:100_000);
+          check string "a press makes the old DOS since stale" "changed"
+            (string_member "state" (body_json (get (dos_live ^ since))))))))
 
 let () =
   run "lane addon live route"
@@ -337,7 +533,14 @@ let () =
             test_counter_moves_on_every_change
         ; test_case "since at the current count answers unchanged" `Quick
             test_since_answers_unchanged ] )
+    ; ( "dos change counter"
+      , [ test_case "every run attempt raises it, a zero-step fault too" `Quick
+            test_dos_counter_moves_on_every_run
+        ; test_case "the same program loaded twice is not unchanged" `Quick
+            test_dos_reload_is_not_unchanged
+        ; test_case "the published mark reads while the lock is held" `Quick
+            test_dos_mark_reads_while_the_lock_is_held ] )
     ; ( "route"
       , [ test_case "the query decodes into a typed source" `Quick test_decode_live_query
-        ; test_case "auth, unchanged, frame, 400 and no store writes" `Quick test_live_route ] )
+        ; test_case "auth, unchanged, frame, 400, DOS, and no store writes" `Quick test_live_route ] )
     ]

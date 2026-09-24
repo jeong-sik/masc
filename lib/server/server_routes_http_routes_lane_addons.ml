@@ -124,9 +124,13 @@ let get_action request reqd =
 (* The source kinds [live] can watch: the ones with a machine screen behind
    them. Another machine is one more constructor here and one arm in
    [live_json]. *)
-type screen_source = Msx_screen
+type screen_source = Msx_screen | Dos_screen
 
-let screen_source_kind = function Msx_screen -> "msx_capture"
+let screen_source_kind = function
+  | Msx_screen -> "msx_capture"
+  | Dos_screen -> "dos_capture"
+
+type since = { count : int; incarnation : string }
 
 let decode_live_query fields =
   let names = List.map fst fields in
@@ -138,8 +142,9 @@ let decode_live_query fields =
     | None ->
         let* source = match List.assoc_opt "source_kind" fields with
           | Some "msx_capture" -> Ok Msx_screen
+          | Some "dos_capture" -> Ok Dos_screen
           | Some ("snapshot_file" | "lane_output" | "browser_document" as kind) ->
-              Error (kind ^ " has no screen to watch; live accepts msx_capture")
+              Error (kind ^ " has no screen to watch; live accepts msx_capture and dos_capture")
           | Some kind -> Error ("unknown source_kind: " ^ kind)
           | None -> Error "live requires source_kind" in
         (* Decimal digits only: int_of_string_opt also reads 0x10 and 1_000. *)
@@ -150,39 +155,82 @@ let decode_live_query fields =
           | None, None -> Ok None
           | Some value, Some incarnation when incarnation <> "" ->
               (match count_of value with
-               | Some count -> Ok (Some { Msx_lane.count; incarnation })
+               | Some count -> Ok (Some { count; incarnation })
                | None -> Error "since must be a nonnegative decimal integer")
           | Some _, (Some _ | None) | None, Some _ ->
               Error "since and incarnation come together: a count alone can repeat after a server restart" in
         Ok (source, since)
 
-(* Reads the machine and encodes the pixels. It takes the machine's stdlib
-   mutex, so the caller runs it off the request fiber. It writes nothing. *)
+let marked_json source state ~count ~incarnation =
+  [ "source_kind", `String (screen_source_kind source); "state", `String state
+  ; "change_count", `Int count; "incarnation", `String incarnation ]
+
+let no_machine_json source =
+  `Assoc [ "source_kind", `String (screen_source_kind source); "state", `String "no_machine" ]
+
+let screen_json ~width ~height ~rgb =
+  "screen", `Assoc [ "format", `String "rgb8"; "width", `Int width; "height", `Int height
+                   ; "rgb_base64", `String (Base64.encode_string rgb) ]
+
+(* The lock-free half of a live read. [current] is the machine's published
+   mark, read without its lock. No machine and a [since] that still names it
+   are answered here, on the request fiber, with no systhread; only a mark
+   that moved goes to [read], which takes the machine lock and so runs in a
+   systhread. *)
+let answer_live source ~since ~current ~read =
+  match current, since with
+  | None, (Some _ | None) -> no_machine_json source
+  | Some (count, incarnation), Some seen
+    when seen.count = count && String.equal seen.incarnation incarnation ->
+      `Assoc (marked_json source "unchanged" ~count ~incarnation)
+  | Some _, (Some _ | None) -> Eio_unix.run_in_systhread read
+
+(* The locked half: the lane compares again and copies under one hold, so a
+   Changed mark always names its pixels. It writes nothing. *)
+let msx_live source ~since () : Yojson.Safe.t =
+  let since = Option.map (fun { count; incarnation } -> { Msx_lane.count; incarnation }) since in
+  match Msx_lane.live ~since with
+  | Msx_lane.Nothing_loaded -> no_machine_json source
+  | Msx_lane.Unchanged { count; incarnation } ->
+      `Assoc (marked_json source "unchanged" ~count ~incarnation)
+  | Msx_lane.Changed ({ count; incarnation }, frame) ->
+      `Assoc (marked_json source "changed" ~count ~incarnation @
+        [ "frame_number", `Int frame.Msx_lane.number
+        ; screen_json ~width:frame.Msx_lane.width ~height:frame.Msx_lane.height
+            ~rgb:frame.Msx_lane.rgb ])
+
+let dos_live source ~since () : Yojson.Safe.t =
+  let since = Option.map (fun { count; incarnation } -> { Dos_lane.count; incarnation }) since in
+  match Dos_lane.live ~since with
+  | Dos_lane.Nothing_loaded -> no_machine_json source
+  | Dos_lane.Unchanged { count; incarnation } ->
+      `Assoc (marked_json source "unchanged" ~count ~incarnation)
+  | Dos_lane.Changed ({ count; incarnation }, frame) ->
+      `Assoc (marked_json source "changed" ~count ~incarnation @
+        [ screen_json ~width:frame.Dos_lane.width ~height:frame.Dos_lane.height
+            ~rgb:frame.Dos_lane.rgb ])
+
 let live_json source ~since : Yojson.Safe.t =
-  let kind = "source_kind", `String (screen_source_kind source) in
-  let marked state (mark : Msx_lane.change_mark) =
-    [kind; "state", `String state; "change_count", `Int mark.Msx_lane.count;
-     "incarnation", `String mark.Msx_lane.incarnation] in
   match source with
   | Msx_screen ->
-      (match Msx_lane.live ~since with
-       | Msx_lane.Nothing_loaded -> `Assoc [kind; "state", `String "no_machine"]
-       | Msx_lane.Unchanged mark -> `Assoc (marked "unchanged" mark)
-       | Msx_lane.Changed (mark, frame) ->
-           `Assoc (marked "changed" mark @
-             ["frame_number", `Int frame.Msx_lane.number;
-              "screen", `Assoc ["format", `String "rgb8"; "width", `Int frame.Msx_lane.width;
-                "height", `Int frame.Msx_lane.height;
-                "rgb_base64", `String (Base64.encode_string frame.Msx_lane.rgb)]]))
+      let current =
+        Option.map (fun { Msx_lane.count; incarnation } -> (count, incarnation))
+          (Msx_lane.current_mark ()) in
+      answer_live source ~since ~current ~read:(msx_live source ~since)
+  | Dos_screen ->
+      let current =
+        Option.map (fun { Dos_lane.count; incarnation } -> (count, incarnation))
+          (Dos_lane.current_mark ()) in
+      answer_live source ~since ~current ~read:(dos_live source ~since)
 
 let get_live request reqd =
   with_read_auth (fun _state _request reqd ->
     match decode_live_query (query_fields request) with
     | Error detail -> respond request reqd (Error detail)
     | Ok (source, since) ->
-        let json = Eio_unix.run_in_systhread (fun () -> live_json source ~since) in
         Http.Response.json_value_on_cpu ~compress:true ~request
-          ~extra_headers:(cors_headers (get_origin request)) json reqd) request reqd
+          ~extra_headers:(cors_headers (get_origin request)) (live_json source ~since) reqd)
+    request reqd
 
 let post ~operation ~tool_name request reqd =
   with_tool_actor_auth ~tool_name (fun state caller _request reqd ->

@@ -197,6 +197,48 @@ val capture_with_identity : unit -> (identified_capture, error) result
 (** {!capture} with the machine's identity and input history, for a Lane
     Add-on source ([dos_capture]). Never advances the machine. *)
 
+(** {1 Spectating} — one read a watcher can repeat cheaply. *)
+
+type change_mark = {
+  count : int;
+      (** The machine change counter. Every run attempt raises it before it
+          touches the machine: {!step}, {!press}, {!type_text}, {!click}, and
+          a run that faults at its first instruction too. It is not
+          [steps], which a fault leaves where it was. {!load} raises it once
+          the new machine is installed, before its boot run, {!eject} once
+          the machine is gone. A call refused before it touches the
+          machine ([Held_by], [Invalid_request]) and {!pass} leave it.
+          Nothing resets it, so a value never names two screens while the
+          server runs; a restarted server counts from 0 again, which is why
+          {!live} answers [Unchanged] only when the incarnation matches
+          too. *)
+  incarnation : string;  (** as in {!identified_capture} *)
+}
+
+val current_mark : unit -> change_mark option
+(** The current count and incarnation, [None] with no machine, read without
+    the machine lock and without blocking: every call that moves either half
+    publishes the new mark before it lets go of the lock. A spectator whose
+    [since] equals this has nothing new to read and needs neither the lock
+    nor a systhread. A run publishes its new mark before it touches the
+    machine, so this never matches a [since] whose pixels a running call is
+    changing; reading those pixels then waits for the call in {!live}. *)
+
+type live =
+  | Nothing_loaded  (** no machine: nothing to watch *)
+  | Unchanged of change_mark
+      (** [since] names the current count and the current incarnation *)
+  | Changed of change_mark * frame
+      (** [since] was absent, or its count or incarnation differs *)
+
+val live : since:change_mark option -> live
+(** Reads the count, the incarnation and, when either differs from [since],
+    the frame under one hold of the machine lock, so a [Changed] mark always
+    names its pixels. Never runs the guest or writes anything. A run can hold
+    the lock for a whole call (up to {!max_steps_per_call} instructions), so
+    an Eio caller compares [since] with {!current_mark} first and runs this,
+    in [Eio_unix.run_in_systhread], only when they differ. *)
+
 val entry_json : entry -> Yojson.Safe.t
 (** One ledger line: [{"step", "who", "key"}], the shape written to
     [ledger.jsonl]. *)

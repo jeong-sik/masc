@@ -119,13 +119,32 @@ let state : machine option ref = ref None
 let lock = Mutex.create ()
 let locked f = Mutex.protect lock f
 
+type change_mark = { count : int; incarnation : string }
+
 (* The machine change counter a spectator compares against. Process-wide and
    written only while holding [lock]. Nothing resets it: an eject and the
    next load keep counting, so one value never names two different screens
-   while the server runs. A call marks before it touches the machine, so a
-   call that raises after running frames has already moved it. *)
+   while the server runs. A call that runs the machine marks before it
+   touches it, so a call that raises after running frames has already moved
+   it; a call that replaces the machine marks right after installing the new
+   one.
+
+   [published] is the same count with the incarnation of [!state], or [None]
+   with no machine. It is set only here, under [lock], every time either
+   half changes, so a reader holding neither the lock nor a systhread sees a
+   mark some lock holder left behind. That is what lets a spectator whose
+   [since] still matches be answered without waiting for a step that holds
+   the lock. *)
 let change_count = ref 0
-let mark_change () = incr change_count
+let published : change_mark option Atomic.t = Atomic.make None
+
+let mark_change () =
+  incr change_count;
+  Atomic.set published
+    (Option.map (fun (st : machine) -> { count = !change_count; incarnation = st.incarnation }) !state)
+;;
+
+let current_mark () = Atomic.get published
 (* Used only while holding [lock]. An incarnation names a newly installed
    history, including a restore of the exact same checkpoint. *)
 let fresh_incarnation () = Random_id.uuid_v7 ()
@@ -408,8 +427,8 @@ let load ~ledger_dir ~(roms_dir : string option) ~cart_path ~disk_path =
           ; input_count = 0
           }
         in
-        mark_change ();
         state := Some st;
+        mark_change ();
         Ok { observation = observe st
            ; transition = { before; after = medium_of (Some st) } })
 ;;
@@ -419,8 +438,8 @@ let eject () =
     match !state with
     | None -> Error No_machine
     | Some _ ->
-      mark_change ();
       state := None;
+      mark_change ();
       Ok ())
 ;;
 
@@ -643,8 +662,6 @@ let capture_with_identity () =
          input_ledger = st.entries })
 ;;
 
-type change_mark = { count : int; incarnation : string }
-
 type live =
   | Nothing_loaded
   | Unchanged of change_mark
@@ -849,8 +866,8 @@ let restore ~path ~ledger_dir =
         let st = {m; incarnation = fresh_incarnation (); pixels = None; frame;
                   cart; disk; disk_id; media; ledger_path; entries = List.rev entries;
                   input_count = List.length entries} in
-        mark_change ();
         state := Some st;
+        mark_change ();
         Ok (observe st)
       with Sys_error message -> Error (Unreadable message))
 ;;
@@ -873,8 +890,8 @@ let change_disk ~path ~backup_path =
           | Ok () ->
             atomic_write backup_path (Yojson.Safe.to_string (checkpoint_json st));
             let next = {st with m; pixels = None; disk = Some (Filename.basename path); disk_id = Some target_id; media = List.remove_assoc target_id media} in
-            mark_change ();
             state := Some next;
+            mark_change ();
             Ok (observe next)))
       | _ -> Error (Invalid_request "load a disk game before changing disks"))
   with Sys_error message -> Error (Unreadable message)

@@ -1,8 +1,4 @@
-type t = Live | Automation
-
-(* The [function] is exhaustive only while it names every constructor, so a
-   constructor added to [t] but not to this list fails the build here. *)
-let all = List.map (function (Live | Automation) as lane -> lane) [ Live; Automation ]
+type t = Live | Automation [@@deriving enumerate]
 
 let to_wire = function
   | Live -> "live"

@@ -2,15 +2,14 @@
     [source] of a surface, observation or screenshot, a lane addon's browser
     selection, and the TUI.
 
-    Every reader decodes the name here and matches on [t], so a new lane is a
-    non-exhaustive match at each reader instead of a string one of them
-    forgets. What a reader then requires of the name (a live client id, for
-    example) stays with that reader. *)
+    Every reader decodes the name here, and a reader that branches on the lane
+    matches on [t] without a catch-all, so a new lane is a non-exhaustive
+    match at each of them instead of a string one of them forgets. What a
+    reader then requires of the name (a live client id, for example) stays
+    with that reader. *)
 
-type t = Live | Automation
-
-(** Every lane, in constructor order. *)
-val all : t list
+(** [all] (derived) lists every lane in constructor order. *)
+type t = Live | Automation [@@deriving enumerate]
 
 val to_wire : t -> string
 

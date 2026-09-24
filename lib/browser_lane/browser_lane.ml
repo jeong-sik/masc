@@ -171,9 +171,6 @@ type answer =
   | Refused of string
   | Rejected_before_effect of string
 
-(* The public source stays live/automation. Native-process identity owns each
-   live command queue; browser-local tab IDs never select a different client. *)
-let external_lane_name = "live"
 type browser = Firefox | Zen
 let browser_name = function Firefox -> "firefox" | Zen -> "zen"
 let browser_of_string = function

@@ -45,7 +45,8 @@ val prune
 (** [prune ?max_entries ?max_bytes ~dir ()] prunes canonical artifact files
     (64-char lowercase-hex SHA-256) under [dir], evicting oldest files first
     (by mtime) until both [max_entries] and [max_bytes] are satisfied.
-    Non-canonical files and subdirectories are never removed. *)
+    Non-canonical files and subdirectories are never removed. A zero limit is
+    allowed here for an explicit cleanup; negative limits return [Error]. *)
 
 val store
   :  auto_prune:bool
@@ -59,8 +60,10 @@ val store
     file. A re-store compares a bounded owned regular-file read, skipping the atomic write
     only on an exact match. Missing or different content is written again.
     When [auto_prune] is true and a new file is written, triggers
-    a bounded prune pass.
-    [Error msg] when the required directory creation or write fails. *)
+    a bounded prune pass. A zero entry limit, a byte limit smaller than the
+    new frame, or any negative limit returns [Error] before writing, so a
+    successful store cannot immediately rotate away its own handle.
+    [Error msg] also covers required directory creation or write failure. *)
 
 type load_error =
   | Malformed_handle of string

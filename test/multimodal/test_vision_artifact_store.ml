@@ -239,6 +239,15 @@ let test_auto_prune_on_store () =
       assert (Result.is_ok (S.load ~dir h3))
   | _ -> assert false
 
+let test_invalid_limits_cannot_return_a_missing_frame () =
+  let dir = temp_dir () in
+  let frame = "frame that must survive its own store" in
+  assert (Result.is_error (S.store ~auto_prune:true ~max_entries:0 ~dir frame));
+  assert (Result.is_error (S.store ~auto_prune:true ~max_entries:(-1) ~dir frame));
+  assert (Result.is_error (S.store ~auto_prune:true ~max_bytes:1 ~dir frame));
+  assert (Result.is_error (S.prune ~max_entries:(-1) ~dir ()));
+  assert (not (Sys.file_exists dir))
+
 let test_re_store_refreshes_mtime_against_eviction () =
   let dir = temp_dir () in
   let a_bytes = "frame-A" in
@@ -315,6 +324,7 @@ let () =
   test_prune_by_max_bytes ();
   test_prune_preserves_non_canonical ();
   test_auto_prune_on_store ();
+  test_invalid_limits_cannot_return_a_missing_frame ();
   test_re_store_refreshes_mtime_against_eviction ();
   test_prune_stops_on_unlink_failure ();
   test_load_finds_in_frames_subdir ();

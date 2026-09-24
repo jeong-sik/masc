@@ -1,4 +1,5 @@
 type handle = string
+let ( let* ) = Result.bind
 
 let to_string h = h
 let of_string s = s
@@ -30,24 +31,23 @@ type prune_result =
   ; remaining_bytes : int
   }
 
-(* Default capacity limits: 500 frames at ~20 KB average covers ~10 MB,
-   providing sufficient recent temporal context for MSX/DOS/Browser vision
-   lanes across turns without unbounded disk accumulation. Derived from disk census
-   in task-1719 (top consumer msx-retro-mania.vision held 5,431 frames / 106.89 MB). *)
+(* Frames are an unviewed short-term cache, unlike the kept vision root and
+   generated chat media. Task-1719 measured 5,431 MSX frames / 106.89 MiB;
+   the 500-entry boundary covers that source's recent frames, while the
+   independent 20-MiB byte boundary also caps larger DOS/browser captures.
+   A successfully analyzed frame is copied to the kept root before success. *)
 let default_max_entries = 500
 let default_max_bytes = 20 * 1024 * 1024 (* 20 MB *)
 
-let resolve_limit ?custom default =
+let resolve_limit ~name ?custom default =
   match custom with
-  | Some n when n >= 0 -> n
-  | Some _ ->
-      Log.Misc.warn "vision: invalid custom limit: must be non-negative, using default %d" default;
-      default
-  | None -> default
+  | Some n when n < 0 -> Error (name ^ " must be non-negative")
+  | Some n -> Ok n
+  | None -> Ok default
 
 let prune ?max_entries ?max_bytes ~dir () : (prune_result, string) result =
-  let max_entries = resolve_limit ?custom:max_entries default_max_entries in
-  let max_bytes = resolve_limit ?custom:max_bytes default_max_bytes in
+  let* max_entries = resolve_limit ~name:"max_entries" ?custom:max_entries default_max_entries in
+  let* max_bytes = resolve_limit ~name:"max_bytes" ?custom:max_bytes default_max_bytes in
   if not (Sys.file_exists dir && Sys.is_directory dir) then
     Ok { deleted_count = 0; reclaimed_bytes = 0; remaining_count = 0; remaining_bytes = 0 }
   else
@@ -129,6 +129,14 @@ let prune ?max_entries ?max_bytes ~dir () : (prune_result, string) result =
         Error (Printf.sprintf "Vision_artifact_store.prune: %s" (Printexc.to_string exn))
 
 let store ~auto_prune ?max_entries ?max_bytes ~dir (raw : string) : (handle, string) result =
+  let* max_entries = resolve_limit ~name:"max_entries" ?custom:max_entries default_max_entries in
+  let* max_bytes = resolve_limit ~name:"max_bytes" ?custom:max_bytes default_max_bytes in
+  let* () =
+    if auto_prune && max_entries = 0 then Error "max_entries must be positive when storing a pruned frame"
+    else if auto_prune && (max_bytes = 0 || max_bytes < String.length raw) then
+      Error "max_bytes must hold the frame being stored"
+    else Ok ()
+  in
   let h = hash raw in
   (* [Fs_compat.mkdir_p] returns unit and raises on failure (EACCES, ENOSPC, a
      parent path component that is a regular file, test-isolation breach). Honor
@@ -171,7 +179,7 @@ let store ~auto_prune ?max_entries ?max_bytes ~dir (raw : string) : (handle, str
       match Fs_compat.save_file_atomic path raw with
       | Ok () ->
           if auto_prune then begin
-            match prune ?max_entries ?max_bytes ~dir () with
+            match prune ~max_entries ~max_bytes ~dir () with
             | Ok { deleted_count; reclaimed_bytes; remaining_count; remaining_bytes } ->
                 if deleted_count > 0 then
                   Log.Misc.info "vision: prune %s: deleted %d frames (%d bytes), %d remaining (%d bytes)" dir deleted_count reclaimed_bytes remaining_count remaining_bytes

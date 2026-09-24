@@ -102,7 +102,9 @@ val store_kept
   :  keeper_name:string
   -> string
   -> (Multimodal.Vision_artifact_store.handle, string) result
-(** Store a conversation or checkpoint image without retention pruning. *)
+(** Store a conversation or successfully analyzed frame without retention
+    pruning. A successful analysis promotes verified frame bytes here before
+    returning, so its handle survives frame rotation. *)
 
 (** Candidate identity and requested model come from the call configuration.
     [response_model] is the provider-reported label, not an independently
@@ -225,10 +227,12 @@ val handle_with_outcome
     string: [{"ok":true,"text":...}] or
     [{"ok":false,"error":code,"failure_class":class[,"detail":...]}] with code
     one of [invalid_args | invalid_artifact | artifact_not_found |
-    eio_context_unavailable | artifact_load_failed |
+    eio_context_unavailable | artifact_load_failed | artifact_store_failed |
     image_too_large | invalid_media_type | invalid_request |
     no_capable_runtime | timeout | provider_error | empty_extraction |
     truncated_extraction]. [complete] defaults to the live provider call (inject
     in tests). Malformed artifact handles are [Policy_rejection], absent artifacts
-    are [Workflow_rejection], and read/integrity failures remain [Runtime_failure].
+    are [Workflow_rejection], and read/integrity or promotion failures remain
+    [Runtime_failure]. A successful frame analysis first stores the verified
+    image in the kept root, so its returned handle survives frame rotation.
     Never returns a raw empty success. *)

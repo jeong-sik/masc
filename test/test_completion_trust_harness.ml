@@ -100,7 +100,7 @@ let with_ws name fn =
         (Filename.concat keepers_dir (meta.name ^ ".toml"))
         (fun channel ->
           Out_channel.output_string channel
-            "[keeper]\ninstructions = \"Submit task evidence for independent completion review.\"\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nnetwork_mode = \"none\"\n");
+            "[keeper]\ninstructions = \"Submit task evidence for independent completion review.\"\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\nnetwork_mode = \"none\"\n");
       (match Masc.Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error detail -> fail ("keeper meta fixture write failed: " ^ detail));

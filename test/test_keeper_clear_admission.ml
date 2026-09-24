@@ -54,7 +54,7 @@ max-context = 4096
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   Fs_compat.mkdir_p keepers_dir;
   Fs_compat.save_file (Filename.concat keepers_dir (meta.name ^ ".toml"))
-    "[keeper]\ninstructions = \"Clear admission fixture\"\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\n";
+    "[keeper]\ninstructions = \"Clear admission fixture\"\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n";
   Keeper_meta_store.replace_snapshot config meta |> require_ok;
   ignore (Keeper_registry.register_offline ~base_path meta.name meta);
   if install_owner then (

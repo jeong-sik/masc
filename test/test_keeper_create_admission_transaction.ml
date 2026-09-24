@@ -168,7 +168,7 @@ let test_shutdown_rejection_precedes_all_creation_writes () =
            (`Assoc
              [ "name", `String keeper_name
              ; "instructions", `String "must not be persisted"
-             ; "sandbox_profile", `String "docker"
+             ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
              ; "runtime_id", `String "test_provider.test_model"
              ; "activation_mode", `String "manual"
              ])
@@ -239,7 +239,7 @@ let test_unreadable_constitution_refuses_create_before_any_write () =
       (`Assoc
         [ "name", `String keeper_name
         ; "instructions", `String "must not be persisted"
-        ; "sandbox_profile", `String "docker"
+        ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
         ; "runtime_id", `String "test_provider.test_model"
         ; "activation_mode", `String "manual"
         ])
@@ -289,7 +289,7 @@ let test_create_wins_intake_fence_overlap_through_production_handoff () =
         (`Assoc
           [ "name", `String keeper_name
           ; "instructions", `String "create must retain its admission epoch"
-          ; "sandbox_profile", `String "docker"
+          ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
           ; "activation_mode", `String "manual"
           ])
     in
@@ -354,6 +354,7 @@ let test_config_only_keeper_materializes_without_rewriting_manifest () =
     {|[keeper]
 instructions = "Materialize this declarative Keeper"
 sandbox_profile = "docker"
+sandbox_image = "masc-sandbox:general"
 activation_mode = "on_demand"
 |}
   in
@@ -434,6 +435,7 @@ let check_config_boot_runtime_assignment ~requested_runtime ~expected_runtime ()
     {|[keeper]
 instructions = "Use the connection selected before first boot"
 sandbox_profile = "docker"
+sandbox_image = "masc-sandbox:general"
 activation_mode = "manual"
 |};
   (* Complete request ceilings make both configured HTTP bindings writable;

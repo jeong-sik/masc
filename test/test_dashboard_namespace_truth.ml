@@ -66,6 +66,7 @@ let write_keeper_toml ~keepers_dir ~name =
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
 sandbox_profile = "docker"
+sandbox_image = "masc-sandbox:general"
 instructions = "Dashboard keeper fixture"
 |}
 

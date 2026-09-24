@@ -4041,7 +4041,7 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
        let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
        write_file
          (Filename.concat keepers_dir "agent-operation-target.toml")
-         "[keeper]\nname = \"agent-operation-target\"\ninstructions = \"test keeper\"\nsandbox_profile = \"docker\"\n";
+         "[keeper]\nname = \"agent-operation-target\"\ninstructions = \"test keeper\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n";
        let meta = make_meta "agent-operation-target" in
        Keeper_meta_store.replace_snapshot config meta |> Result.get_ok;
        ignore
@@ -4426,7 +4426,7 @@ let test_root_inventory_reads_undecodable_meta_as_absent_and_boot_rematerializes
        write_file
          (Filename.concat keepers_dir (name ^ ".toml"))
          (Printf.sprintf
-            "[keeper]\nname = \"%s\"\ninstructions = \"test keeper\"\nsandbox_profile = \"docker\"\n"
+            "[keeper]\nname = \"%s\"\ninstructions = \"test keeper\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n"
             name);
        Keeper_meta_store.replace_snapshot config (make_meta name) |> Result.get_ok;
        let meta_path = Keeper_types_profile.keeper_meta_path config name in

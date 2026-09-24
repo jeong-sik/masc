@@ -34,7 +34,7 @@ let initialize_runtime ~base_path (server : Exact_output_fixture.test_server) =
 let install_keeper config name =
   save (Filename.concat (Config_dir_resolver.keepers_dir_for_base_path
     ~base_path:config.Workspace.base_path) (name ^ ".toml"))
-    "[keeper]\nsandbox_profile = \"docker\"\nnetwork_mode = \"none\"\nactivation_mode = \"autonomous\"\ninstructions = \"Acknowledge the synthetic Board message. Do not call tools.\"\n";
+    "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\nnetwork_mode = \"none\"\nactivation_mode = \"autonomous\"\ninstructions = \"Acknowledge the synthetic Board message. Do not call tools.\"\n";
   let meta = Masc_test_deps.meta_of_json_fixture
     (`Assoc ["name", `String name; "trace_id", `String ("trace-" ^ name)])
     |> get Fun.id in

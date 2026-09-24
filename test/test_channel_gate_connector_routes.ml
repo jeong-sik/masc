@@ -526,7 +526,7 @@ let test_keeper_status_http_200_valid_keeper () =
       (fun oc ->
         output_string
           oc
-          "[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"gate route fixture\"\n");
+          "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\ninstructions = \"gate route fixture\"\n");
     Eio_main.run (fun env ->
       let clock = Eio.Stdenv.clock env in
       Eio.Switch.run (fun sw ->

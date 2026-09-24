@@ -230,6 +230,11 @@ let selection_of_contents ~path ~contents ~profile:requested ~microvm_backend:re
       | None, Some b -> Ok (of_microvm b)
       | None, None -> Error "Choose a microVM backend explicitly; no host default is written on your behalf") in
   let sandbox_profile = match chosen_profile with Keeper_sandbox_config.Docker -> Keeper_types_profile_sandbox.Docker | Micro_vm -> Micro_vm | Remote_ssh -> Remote_ssh in
+  (* #37523: the image, like the backend above, is named by the operator; the
+     wizard does not write one on their behalf. Same rule as boot. *)
+  let* () = match Keeper_meta_contract.missing_required_sandbox_image_error
+      ~keeper_name:"imp" sandbox_profile defaults with
+    | None -> Ok () | Some reason -> Error reason in
   let network_mode = match requested_network, defaults.network_mode with
     | Some mode, _ | None, Some mode -> mode
     | None, None -> Keeper_types_profile_sandbox.default_network_mode_for_profile sandbox_profile in

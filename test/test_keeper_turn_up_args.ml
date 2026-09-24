@@ -117,7 +117,11 @@ let parse_stating_a_profile ctx json =
   let json =
     match json with
     | `Assoc fields when not (List.mem_assoc "sandbox_profile" fields) ->
-      `Assoc (fields @ [ "sandbox_profile", `String "docker" ])
+      let image =
+        if List.mem_assoc "sandbox_image" fields then []
+        else [ "sandbox_image", `String "masc-sandbox:general" ]
+      in
+      `Assoc (fields @ ("sandbox_profile", `String "docker") :: image)
     | other -> other
   in
   Keeper_turn_up_args.parse ~docker_preflight:no_daemon_in_this_suite ctx json
@@ -182,7 +186,7 @@ remote_root = "/srv/masc/playground"
        parsed.remote_endpoint_opt);
   (match
      parse
-       [ "sandbox_profile", `String "docker"
+       [ "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
        ; "remote_endpoint", `String "fixture"
        ]
    with
@@ -341,7 +345,7 @@ remote_root = "/srv/masc/playground"
     parse_or_fail
       (`Assoc
          [ "name", `String name
-         ; "sandbox_profile", `String "docker"
+         ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
          ; "remote_endpoint", `Null
          ])
   in
@@ -401,7 +405,7 @@ let test_microvm_backend_persistence_round_trip () =
       (`Assoc
          [ "name", `String name
          ; "instructions", `String "fixture instructions"
-         ; "sandbox_profile", `String "microvm"
+         ; "sandbox_profile", `String "microvm" ; "sandbox_image", `String "masc-sandbox:general"
          ; "microvm_backend", `String "nerdctl_kata"
          ])
   in
@@ -409,14 +413,14 @@ let test_microvm_backend_persistence_round_trip () =
     { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm; microvm_backend = create.profile_defaults.microvm_backend };
   check (option string) "backend persisted" (Some "nerdctl_kata") (read_back ());
   let omitted = parse_or_fail (`Assoc
-      [ "name", `String name; "sandbox_profile", `String "microvm"
+      [ "name", `String name; "sandbox_profile", `String "microvm" ; "sandbox_image", `String "masc-sandbox:general"
       ; "instructions", `String "updated instructions" ]) in
   persist omitted
     { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm;
                      microvm_backend = omitted.profile_defaults.microvm_backend };
   check (option string) "omitted backend survives update" (Some "nerdctl_kata") (read_back ());
   let changed = parse_or_fail (`Assoc
-      [ "name", `String name; "sandbox_profile", `String "microvm"
+      [ "name", `String name; "sandbox_profile", `String "microvm" ; "sandbox_image", `String "masc-sandbox:general"
       ; "microvm_backend", `String "apple_container" ]) in
   persist changed
     { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm;
@@ -426,7 +430,7 @@ let test_microvm_backend_persistence_round_trip () =
     parse_or_fail
       (`Assoc
          [ "name", `String name
-         ; "sandbox_profile", `String "docker"
+         ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
          ; "microvm_backend", `Null
          ])
   in
@@ -2588,7 +2592,7 @@ let test_parse_rejects_unknown_keys () =
           [ "name", `String "unknown-args-fixture"
           (* The tool schema defaults this to "docker"; [parse] is called
              directly here, so the fixture states what the schema would. *)
-          ; "sandbox_profile", `String "docker"
+          ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
           ; "instructions", `String "still fine"
           ])
    with

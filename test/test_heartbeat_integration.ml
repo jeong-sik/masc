@@ -252,7 +252,7 @@ let seed_keeper_sandbox_profile ~base_dir name =
   Fs_compat.mkdir_p keepers_dir;
   Fs_compat.save_file
     (Filename.concat keepers_dir (name ^ ".toml"))
-    ("[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"# " ^ name ^ "\"\n")
+    ("[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\ninstructions = \"# " ^ name ^ "\"\n")
 
 let dashboard_purge_cleanup requested_name
     (meta : Keeper_meta_contract.keeper_meta)
@@ -5456,6 +5456,7 @@ let test_field_only_update_honors_toml_declared_profile () =
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some Keeper_types_profile.Docker
+        ; sandbox_image = Some "masc-sandbox:general"
         }
       in
       let parsed : Turn_up_args.parsed_args =

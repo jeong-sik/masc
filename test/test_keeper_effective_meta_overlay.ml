@@ -835,7 +835,7 @@ let test_keeper_up_materializes_missing_profile_source () =
     `Assoc
       [ "name", `String name
       ; "instructions", `String "durable direct instructions"
-      ; "sandbox_profile", `String "docker"
+      ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
       ; "mention_targets", `List [ `String "operator" ]
       ; "board_interests", `List [ `String "MASC runtime" ]
       ; "activation_mode", `String "manual"

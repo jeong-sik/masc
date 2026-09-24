@@ -734,7 +734,7 @@ run_one() {
   local profile_dir="${CONFIG_DIR}/keepers"
   mkdir -p "${profile_dir}"
   {
-    printf '[keeper]\nalways_allow = true\nsandbox_profile = "docker"\ninstructions = """\n'
+    printf '[keeper]\nalways_allow = true\nsandbox_profile = "docker"\nsandbox_image = "masc-sandbox:general"\ninstructions = """\n'
     coding_keeper_instructions
     printf '"""\n'
   } > "${profile_dir}/${keeper_name}.toml"

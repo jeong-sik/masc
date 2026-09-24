@@ -354,7 +354,7 @@ let write_config_root_keeper_toml ?(autoboot_enabled = true) config_root name =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     (Printf.sprintf
-       "[keeper]\ninstructions = \"instructions-%s\"\nactivation_mode = %S\nsandbox_profile = \"docker\"\n"
+       "[keeper]\ninstructions = \"instructions-%s\"\nactivation_mode = %S\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n"
        name
        (if autoboot_enabled then "autonomous" else "manual"))
 
@@ -375,6 +375,7 @@ let write_basepath_keeper_toml base_path name =
 instructions = "example"
 activation_mode = "on_demand"
 sandbox_profile = "docker"
+sandbox_image = "masc-sandbox:general"
 |}
 let find_free_port_from start =
   let rec loop attempts port =

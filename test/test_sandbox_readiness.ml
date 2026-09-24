@@ -81,7 +81,7 @@ let test_kata_prerequisites () =
     ((probe linux [info] S.Nerdctl_kata).state <> S.Service_ready);
   check bool "Kata host check required" true
     ((probe linux [info; ["kata-runtime";"check";"--no-network-checks"],Ok ""] S.Nerdctl_kata).state = S.Service_ready)
-let contents = "# preserve this comment\n[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nnetwork_mode = \"inherit\"\ninstructions = \"Respond to the operator.\"\n"
+let contents = "# preserve this comment\n[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\nnetwork_mode = \"inherit\"\ninstructions = \"Respond to the operator.\"\n"
 let selected = function Ok value -> value | Error e -> fail e
 let test_staging () =
   let selection = S.selection_of_contents ~path:"imp.toml" ~contents
@@ -109,7 +109,7 @@ let test_commit_conflict () =
         check bool "concurrent edit refused" true (Result.is_error result);
         check string "other editor bytes preserved" edited
           (In_channel.with_open_text path In_channel.input_all)))
-let microvm_without_backend = "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"microvm\"\nnetwork_mode = \"inherit\"\ninstructions = \"Respond to the operator.\"\n"
+let microvm_without_backend = "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"microvm\"\nsandbox_image = \"masc-sandbox:general\"\nnetwork_mode = \"inherit\"\ninstructions = \"Respond to the operator.\"\n"
 (* F107. A microvm declaration that names no backend is refused by the
    selection itself; on origin/main it silently became Apple Container on
    macOS 26 arm64 while every other host was refused, so the written TOML on a

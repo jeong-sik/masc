@@ -829,7 +829,7 @@ let test_board_context_inference_uses_current_owner_contract_and_actor () =
   Fs_compat.mkdir_p keepers_dir;
   Fs_compat.save_file
     (Filename.concat keepers_dir (keeper_name ^ ".toml"))
-    "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nnetwork_mode = \"inherit\"\ninstructions = \"Test context inference.\"\n";
+    "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\nnetwork_mode = \"inherit\"\ninstructions = \"Test context inference.\"\n";
   let meta =
     match
       Masc_test_deps.meta_of_json_fixture

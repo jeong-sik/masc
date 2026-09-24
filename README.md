@@ -368,8 +368,11 @@ What a Keeper needs before its first turn runs:
 - **An image.** `docker` and `microvm` turns run inside an image, and until
   it exists image preflight refuses the turn. `masc sandbox-image`
   builds `masc-sandbox:general` (bash, ripgrep, git on Debian) from a recipe
-  embedded in the binary. A Keeper that has to build a project names that
-  project's toolchain image in `sandbox_image`. The container runs with a
+  embedded in the binary. Every `docker` or `microvm` Keeper names its image
+  in `sandbox_image`, and one that names none is refused rather than given a
+  default: a Keeper that only needs the general image writes
+  `sandbox_image = "masc-sandbox:general"`, and one that has to build a
+  project names that project's toolchain image. The container runs with a
   read-only rootfs, `--cap-drop=ALL`, and your uid, so an image has to carry
   `bash` and the toolchain already; nothing can be installed during a turn.
 - **A network mode.** Sandboxes start on `network_mode = "none"`: no web

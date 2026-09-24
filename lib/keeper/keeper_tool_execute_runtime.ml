@@ -795,13 +795,13 @@ let handle_tool_execute_typed
                   "execute stream end callback failed keeper=%s: %s"
                   meta.name
                   (Printexc.to_string exn));
-            (* The model's script reaches the shell as one opaque [-c]
-               argument, and the gate, parser and complexity checks judge
-               only the command tree masc lowers it to. That tree cannot
-               produce these refusals, so one firing is masc's own fault:
-               Runtime_failure. Path_reject below is different: it judges
-               the cwd and the script's cd and redirect targets the caller
-               wrote. *)
+            (* The gate, parser and complexity checks judge only the Shell IR
+               masc builds. An argv command is a Simple node with literal
+               arguments; a script is an opaque [-c] argument of its shell.
+               Pipes and redirects are allowed here, so this IR cannot
+               produce these refusals. One firing is masc's own fault:
+               Runtime_failure. Path_reject instead judges the cwd and argv
+               path operands supplied by the caller, not script contents. *)
             authorized (typed_error_json ~class_:Tool_result.Runtime_failure diagnostic)
           | Error (Keeper_tooling.Execute_shell_ir.Cannot_parse reason) ->
             let reason_tag = Keeper_tooling.Execute_shell_ir.parse_reason_tag reason in

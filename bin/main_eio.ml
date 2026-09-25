@@ -3136,8 +3136,9 @@ let sandbox_image_builder runtime =
          (Printf.sprintf
             "sandbox-image: %s builds no images -- it has pull, load and save \
              and no build. Next: build the image elsewhere, save it as an OCI \
-             archive, and `%s load` it."
-            cli cli))
+             archive, `%s load` it, and record its tag with `masc sandbox-image \
+             promote <name> <tag> --runtime %s`."
+            cli cli (Keeper_microvm_backend.to_string backend)))
 
 (* Only [base] travels inside the binary. Every other recipe names repository
    files in its inputs, so it is read from a checkout. *)
@@ -3279,21 +3280,26 @@ let sandbox_image_exit_of = function
     Cmd.Exit.some_error
 
 (* The catalog records a tag and nothing read from the store, so the store is
-   asked first: a tag it does not hold, or a store that does not answer, is
-   refused before the catalog is read. [command] is the store's own CLI,
-   which msb has even though masc cannot build into it. *)
+   asked before the file is written: a tag it does not hold, or a store that
+   does not answer, is refused and nothing is saved. The catalog judges the
+   name and reference first, so an unknown name is reported as that.
+   [command] is the store's own CLI, which msb has even though masc cannot
+   build into it. The store stays free to drop the image after the answer;
+   the start gate asks again before a Keeper runs. *)
 let sandbox_image_promote ~base_path ~command ~store ~name ~reference =
   let ( let* ) = Result.bind in
   let store_name = Keeper_sandbox_image_catalog.store_to_string store in
-  let* () =
+  let store_holds_reference () =
     match sandbox_image_tag_presence ~command ~tag:reference with
     | Tag_present -> Ok ()
     | Tag_absent ->
       Error
         (Printf.sprintf
-           "sandbox-image: %s is not in the %s image store, so nothing was \
-            promoted. Build or load it into that store first."
-           reference store_name)
+           "sandbox-image: the %s image store did not report %s (`image inspect` \
+            exited 1, which is also how a stopped store answers), so nothing \
+            was promoted. Check that the store is running and holds the tag; \
+            build or load it there first."
+           store_name reference)
     | Store_unanswered detail ->
       Error
         (Printf.sprintf
@@ -3303,9 +3309,13 @@ let sandbox_image_promote ~base_path ~command ~store ~name ~reference =
   in
   let* path =
     sandbox_image_change_catalog ~base_path (fun catalog ->
-      Keeper_sandbox_image_catalog.promote catalog ~name ~store ~reference
-      |> Result.map_error (fun error ->
-           "sandbox-image: " ^ Keeper_sandbox_image_catalog.change_error_to_string error))
+      let* next =
+        Keeper_sandbox_image_catalog.promote catalog ~name ~store ~reference
+        |> Result.map_error (fun error ->
+             "sandbox-image: " ^ Keeper_sandbox_image_catalog.change_error_to_string error)
+      in
+      let* () = store_holds_reference () in
+      Ok next)
   in
   Ok (Printf.sprintf "%s on %s is now %s, recorded in %s." name store_name reference path)
 
@@ -3411,7 +3421,8 @@ let sandbox_image_promote_cmd =
     ; `P
         "To go back, promote an earlier tag the store still has. `masc \
          sandbox-image` refuses a tag its store already holds, so a tag it \
-         built keeps naming that build."
+         built names that build until the image is removed or retagged \
+         outside masc; the catalog cannot tell when that happens."
     ; `P
         "On Docker, apple_container and nerdctl_kata, `masc sandbox-image` \
          builds the tag to promote. msb has no build command: load a build \
@@ -3420,7 +3431,10 @@ let sandbox_image_promote_cmd =
     ]
   in
   let reference =
-    let doc = "Image reference in that store, as printed by `masc sandbox-image`." in
+    let doc =
+      "Image reference in that store: the tag `masc sandbox-image` printed, or \
+       for microsandbox the tag `msb load` put there."
+    in
     Arg.(required & pos 1 (some string) None & info [] ~docv:"REFERENCE" ~doc)
   in
   Cmd.v (Cmd.info "promote" ~doc ~man)

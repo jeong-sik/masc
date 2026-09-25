@@ -154,7 +154,7 @@ sys.exit(0)
             absent = self.run_cli(root, base, 'promote', 'base', 'masc-sandbox-base:absent',
                                   '--runtime', 'apple_container', inspect_exit=1)
             self.assertNotEqual(absent.returncode, 0, 'a tag the store does not hold was promoted')
-            self.assertIn('is not in the apple_container image store', absent.stderr)
+            self.assertIn('the apple_container image store did not report', absent.stderr)
             self.assertEqual(catalog.read_text(), before)
 
             silent = self.run_cli(root, base, 'promote', 'base', 'masc-sandbox-base:unasked',
@@ -202,7 +202,7 @@ sys.exit(0)
             missing = self.run_cli(root, base, 'promote', 'base', 'masc-sandbox:not-loaded',
                                    '--runtime', 'microsandbox', inspect_exit=1)
             self.assertNotEqual(missing.returncode, 0, 'a tag msb does not hold was promoted')
-            self.assertIn('is not in the microsandbox image store', missing.stderr)
+            self.assertIn('the microsandbox image store did not report', missing.stderr)
             self.assertEqual(catalog.read_text(), before)
 
     def test_promote_writes_the_catalog_the_server_reads_under_masc_config_dir(self):

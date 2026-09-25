@@ -10,10 +10,12 @@
     reference = "masc-sandbox-ocaml:20260924T1130Z-3f9a1c07"
     v}
 
-    A tag names one build: [masc sandbox-image] refuses a tag its store
-    already has. So a new build always arrives under a new reference, and a
-    running guest is told apart from the promoted build by its reference
-    alone. Going back is a promote of an earlier tag the store still has.
+    [masc sandbox-image] refuses a tag its store already has, so a build it
+    makes arrives under a new reference, and the runtime tells a running
+    guest apart from the promoted build by reference alone. A tag moved to
+    other content outside masc (the image removed and rebuilt, [docker tag],
+    [msb load]) goes unnoticed: the catalog records no content identity.
+    Going back is a promote of an earlier tag the store still has.
 
     RFC keeper-sandbox-images-have-versions (#38699) §2.3. Parsing is strict:
     an unknown key or a store this runtime does not know is an error, not a

@@ -351,6 +351,64 @@ let test_graphics_refusal_is_a_complete_answer () =
   | None -> fail "refusal was dropped"
 ;;
 
+(* Read through [next] the way the input reader does after startup, with no
+   graphics answer, so the decoder never completes and stays in front. *)
+let read_through decoder text =
+  let position = ref 0 in
+  let next_raw () =
+    if !position >= String.length text then None
+    else begin
+      let byte = text.[!position] in
+      incr position;
+      Some byte
+    end
+  in
+  let out = Buffer.create 16 in
+  let rec loop () =
+    match Masc_tui_terminal_probe.next decoder ~next_raw with
+    | None -> ()
+    | Some byte ->
+      Buffer.add_char out byte;
+      loop ()
+  in
+  loop ();
+  Buffer.contents out
+;;
+
+let test_a_held_paste_head_is_reported_and_discarded () =
+  let decoder = Masc_tui_terminal_probe.create ~palette_requested:false in
+  check string "the truncated paste head is held, not served" ""
+    (read_through decoder "\x1b[200");
+  check bool "the hold is visible to the reader" true
+    (Masc_tui_terminal_probe.holds_incomplete_sequence decoder);
+  Masc_tui_terminal_probe.discard_incomplete_sequence decoder;
+  check bool "a discarded hold is gone" false
+    (Masc_tui_terminal_probe.holds_incomplete_sequence decoder);
+  check string "later keys arrive without the discarded head" "recovered"
+    (read_through decoder "recovered")
+;;
+
+let test_a_kept_paste_head_replays_into_later_keys () =
+  (* The control for the test above: without the discard, the held head is
+     replayed in front of the next keys and the reader parses its first
+     letter as the final byte of a CSI. *)
+  let decoder = Masc_tui_terminal_probe.create ~palette_requested:false in
+  ignore (read_through decoder "\x1b[200");
+  check string "the head is replayed in front of later keys"
+    "\x1b[200recovered" (read_through decoder "recovered")
+;;
+
+let test_a_started_paste_is_not_a_hold () =
+  let decoder = Masc_tui_terminal_probe.create ~palette_requested:false in
+  check string "a full start marker passes through" "\x1b[200~first"
+    (read_through decoder "\x1b[200~first");
+  check bool "paste bytes are served, not held" false
+    (Masc_tui_terminal_probe.holds_incomplete_sequence decoder);
+  Masc_tui_terminal_probe.discard_incomplete_sequence decoder;
+  check string "discard leaves a running paste alone" "second\x1b[201~"
+    (read_through decoder "second\x1b[201~")
+;;
+
 let test_process_palette_preserves_none () =
   Masc_tui_terminal_palette.set_current None;
   let unknown_snapshot = Masc_tui_terminal_palette.snapshot () in
@@ -438,6 +496,14 @@ let () =
             test_partial_osc_continues_in_the_normal_reader
         ; test_case "graphics refusal completes" `Quick
             test_graphics_refusal_is_a_complete_answer
+        ] )
+    ; ( "held sequence"
+      , [ test_case "a held paste head is reported and discarded" `Quick
+            test_a_held_paste_head_is_reported_and_discarded
+        ; test_case "a kept paste head replays into later keys" `Quick
+            test_a_kept_paste_head_replays_into_later_keys
+        ; test_case "a started paste is not a hold" `Quick
+            test_a_started_paste_is_not_a_hold
         ] )
     ]
 ;;

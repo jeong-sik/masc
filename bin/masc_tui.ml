@@ -698,6 +698,24 @@ let return_input_byte reader =
   reader.last_source <- None
 ;;
 
+(* A sequence begun but not finished, wherever this reader holds it: its own
+   CSI parameters, or the startup probe. The probe completes only on a
+   graphics reply, so on a terminal without one it stays in front of every
+   byte for the session and keeps an [ESC \[ 2 0 0] head in its own buffer as
+   a possible paste start. [read_input] then never sees the head, and a check
+   of [csi_parameters] alone showed no notice and let Ctrl-C fall through to
+   the quit prompt. *)
+let input_holds_incomplete_sequence reader =
+  Option.is_some reader.csi_parameters
+  || (match reader.terminal_probe with
+      | Some decoder -> Masc_tui_terminal_probe.holds_incomplete_sequence decoder
+      | None -> false)
+
+let cancel_incomplete_sequence reader =
+  reader.csi_parameters <- None;
+  Option.iter Masc_tui_terminal_probe.discard_incomplete_sequence
+    reader.terminal_probe
+
 (* Ctrl-C recovery only snapshots a paste after this much quiet since its
    last byte. Reading itself uses the caller's short render-loop deadline;
    this is a recovery observation, not a blocking terminal read. *)
@@ -18207,7 +18225,8 @@ and is loaded on demand through keeper_skill.
            raise Break
        | Masc_tui_exit_signals.Interrupt_armed ->
            state.quit_armed <- false;
-           (match input_reader.paste_phase, input_reader.csi_parameters with
+           (match input_reader.paste_phase,
+                  input_holds_incomplete_sequence input_reader with
             | Draining_tail tail, _
               when not (paste_can_recover input_reader tail.tail_last_byte_ns) ->
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
@@ -18248,14 +18267,14 @@ and is loaded on demand through keeper_skill.
                       tail_last_byte_ns = Mtime_clock.elapsed_ns () };
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 Some (Masc_tui_paste.snapshot_payload paste.decoder)
-            | No_paste, Some _ ->
-                input_reader.csi_parameters <- None;
+            | No_paste, true ->
+                cancel_incomplete_sequence input_reader;
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 skip_input_after_interrupt := true;
                 report_action state "system" "Incomplete terminal sequence cancelled";
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None
-            | No_paste, None ->
+            | No_paste, false ->
                 report_action state "system"
                   (Masc_tui_exit_signals.quit_notice ~key:"Ctrl-C"
                      ~waiting:(Masc_tui_keeper_chat_queue.length state.msg_queued));
@@ -18375,14 +18394,14 @@ and is loaded on demand through keeper_skill.
            paste_quiet_notified := false
        | Pasting _ -> ()
        | No_paste | Draining_tail _ -> paste_quiet_notified := false);
-      (match input_reader.csi_parameters with
-       | Some _ when not !csi_pause_notified ->
+      (match input_holds_incomplete_sequence input_reader with
+       | true when not !csi_pause_notified ->
            csi_pause_notified := true;
            report_action state "system"
              "Terminal sequence incomplete; Ctrl-C cancels it";
            Render_schedule.request render_schedule Render_schedule.Background
-       | Some _ -> ()
-       | None -> csi_pause_notified := false);
+       | true -> ()
+       | false -> csi_pause_notified := false);
       (match input_reader.paste_phase with
        | Draining_tail tail when paste_can_recover input_reader tail.tail_last_byte_ns
                      && not !paste_guard_idle_notified ->

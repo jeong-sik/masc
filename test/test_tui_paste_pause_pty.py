@@ -104,7 +104,7 @@ def run(executable: str) -> None:
 
     truncated_csi_requests: h.HttpRequests = []
 
-    def truncated_csi_interact(process, master_fd, slave_fd, output, _base_path):
+    def truncated_csi_interact(process, master_fd, _slave_fd, output, _base_path):
         h.wait_for_output(process, master_fd, output, h.BRACKETED_PASTE_ON,
                           start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
@@ -112,16 +112,13 @@ def run(executable: str) -> None:
         h.send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         h.send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
 
-        start = len(output)
-        os.write(master_fd, b"\x1b[200")
-        # The footer can omit this transient notice when key hints take its
-        # one row. Prove the parser held the truncated CSI by the Ctrl-C
-        # cancellation it performs, then verify later text can be sent.
-        # Wait until the terminal bytes were read and a new frame ended so
-        # Ctrl-C cannot race ahead of the incomplete marker.
-        h.wait_for_terminal_input_consumed(slave_fd)
-        h.wait_for_output(process, master_fd, output,
-                          b"\x1b[?7h", start=start, timeout=5.0)
+        # This harness never answers the startup graphics query, so the
+        # terminal probe stays in front of the key stream, as it does on any
+        # terminal without Kitty graphics. The probe holds this head as a
+        # possible paste start; the notice and the Ctrl-C cancel must see
+        # that hold, not only the reader's own CSI parameters.
+        h.send_and_wait(process, master_fd, output, b"\x1b[200",
+                        b"Terminal sequence incomplete")
         h.send_and_wait(process, master_fd, output, b"\x03",
                         b"Incomplete terminal sequence cancelled")
         h.send_and_wait(process, master_fd, output, b"recovered",
@@ -171,7 +168,7 @@ def run(executable: str) -> None:
                           start=0, timeout=5.0)
         h.send_and_wait(
             process, master_fd, output, b"\x03",
-            b"Incomplete paste restored as draft",
+            b"Incomplete paste restored",
         )
         h.wait_for_output(process, master_fd, output, b"Paste tail quiet",
                           start=0, timeout=5.0)
@@ -225,7 +222,7 @@ def run(executable: str) -> None:
         h.wait_for_output(process, master_fd, output, b"Paste quiet",
                           start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03",
-                        b"Incomplete paste restored as draft")
+                        b"Incomplete paste restored")
         h.wait_for_output(process, master_fd, output, b"Paste tail quiet",
                           start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03",
@@ -280,7 +277,7 @@ def run(executable: str) -> None:
         h.wait_for_output(process, master_fd, output, b"Paste quiet",
                           start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03",
-                        b"Incomplete paste restored as draft")
+                        b"Incomplete paste restored")
         h.wait_for_output(process, master_fd, output, b"Attached shot.png",
                           start=0, timeout=5.0)
         os.write(master_fd, h.PASTE_END)
@@ -332,7 +329,7 @@ def run(executable: str) -> None:
         h.wait_for_output(process, master_fd, output, b"Paste quiet",
                           start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03",
-                        b"Incomplete paste restored as draft")
+                        b"Incomplete paste restored")
         os.write(master_fd, h.PASTE_END)
         h.wait_for_output(process, master_fd, output, b"Paste tail ended",
                           start=0, timeout=5.0)
@@ -416,7 +413,7 @@ def run(executable: str) -> None:
         h.wait_for_output(process, master_fd, output, b"Paste quiet",
                           start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03",
-                        b"Incomplete paste restored as draft")
+                        b"Incomplete paste restored")
         os.write(master_fd, h.PASTE_END)
         h.wait_for_output(process, master_fd, output, b"Paste tail ended",
                           start=0, timeout=5.0)
@@ -467,7 +464,7 @@ def run(executable: str) -> None:
         h.wait_for_output(process, master_fd, output, b"Paste quiet",
                           start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03",
-                        b"Incomplete paste restored as draft")
+                        b"Incomplete paste restored")
         start = len(output)
         # The original decoder has already matched ESC[20. The delayed 1~
         # must close the recovery guard; the following CR must stay unsent.

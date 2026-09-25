@@ -939,13 +939,16 @@ let log_call
             , Keeper_file_change_evidence.to_yojson evidence ) ]
         | None -> []
       in
-      (* Stored with the same redaction and per-leaf bound as [input]: a
-         receipt's detail can quote the payload's stderr. *)
+      (* Secret-bearing keys are masked before anything reads the evidence. It
+         is stored with the same per-leaf bound as [input] (a receipt's detail
+         can quote the payload's stderr); route evidence reads the masked
+         object, which keeps its shape. *)
+      let redacted_execution_evidence =
+        Option.map Observability_redact.redact_json_value execution_evidence
+      in
       let execution_evidence_field =
-        match execution_evidence with
-        | Some evidence ->
-          [ ( "execution_evidence"
-            , input_to_json (Observability_redact.redact_json_value evidence) ) ]
+        match redacted_execution_evidence with
+        | Some evidence -> [ "execution_evidence", input_to_json evidence ]
         | None -> []
       in
       let composition_fields =
@@ -1063,7 +1066,7 @@ let log_call
             ~tool_name
             ~input:safe_input
             ~output_text
-            ~execution_evidence
+            ~execution_evidence:redacted_execution_evidence
         with
         | Some evidence -> [ "route_evidence", evidence ]
         | None -> []

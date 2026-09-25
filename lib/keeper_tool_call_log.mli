@@ -301,8 +301,8 @@ val log_call :
     [execution_evidence] is a completed Execute's audit object from
     {!execution_evidence_of_metadata}, recorded as [execution_evidence] after
     the same secret redaction and per-leaf bound as [input]; route evidence
-    reads it before redaction, as it reads [output_text]. The model's [output]
-    carries only the unusual parts of it.
+    reads the redacted object. The model's [output] carries only the unusual
+    parts of it.
     Explicit [artifact_refs] and [typed_result]'s retained artifacts require a
     synchronous append even without a callback; an unavailable store or failed
     append raises rather than losing their receipt in the preview queue.

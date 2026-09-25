@@ -632,6 +632,9 @@ let assemble_hooks
           (fun ~response ->
              Keeper_run_tools_hook_accumulator.record_assistant_turn_text
                acc
+               response;
+             Keeper_run_tools_hook_accumulator.record_wire_prompt_tokens
+               acc
                response)
         ~tool_result_commit_required:ctx.tool_result_commit_required
         ?on_tool_result_ready:ctx.on_tool_result_ready

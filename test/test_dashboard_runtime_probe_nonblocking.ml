@@ -464,7 +464,8 @@ let test_switch_fanout_raise_does_not_fail_root_switch () =
    soft-TTL branch stops scheduling the refresh at all, which brings back the
    TTL == poll-interval trap where every other poll lands on an expired cache.
    This pin fails in that case (runner count 0, the next poll keeps the seeded
-   marker) and fails if single-flight breaks and the refresh runs twice. *)
+   marker). It does not pin single-flight: the refresh finishes and clears its
+   in-flight flag before the second poll, which reads a fresh cache. *)
 let background_runner_invoked = ref 0
 
 let background_runner () : Yojson.Safe.t =

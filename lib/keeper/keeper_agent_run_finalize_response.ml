@@ -449,6 +449,7 @@ let finalize
       ; run_validation = result.run_validation
       ; stop_reason = result.stop_reason
       ; inference_telemetry = result.response.telemetry
+      ; wire_prompt_tokens = acc.wire_prompt_tokens
       ; tool_surface = acc.tool_surface
       }
 ;;

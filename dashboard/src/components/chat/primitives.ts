@@ -4579,6 +4579,7 @@ export function ChatTranscript({
   entries,
   keeperName = null,
   emptyText,
+  hydrating = false,
   showMetadata,
   variant = 'default',
   size = 'default',
@@ -4596,6 +4597,10 @@ export function ChatTranscript({
   entries: KeeperConversationEntry[]
   keeperName?: string | null
   emptyText: string
+  // True while the first history hydration for this transcript has not
+  // landed yet. Zero entries then means "not loaded", not "no messages", so
+  // the transcript renders a loading state instead of the empty card.
+  hydrating?: boolean
   showMetadata?: boolean
   variant?: ChatTranscriptVariant
   size?: ChatTranscriptSize
@@ -4720,9 +4725,22 @@ export function ChatTranscript({
         onScroll=${handleScroll}
       >
         <div class="chat-transcript-content flex grow shrink-0 flex-col" style=${{ gap: 'inherit' }}>
-        ${entries.length === 0
+        ${entries.length === 0 && hydrating
           ? html`
-              <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 text-center">
+              <div
+                class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 text-center"
+                role="status"
+                aria-live="polite"
+                aria-busy="true"
+                data-chat-transcript-loading
+              >
+                <div class="text-xs font-bold uppercase tracking-4 text-[var(--color-fg-secondary)]">대화 불러오는 중</div>
+                <div class="mt-3 max-w-[34rem] text-base font-medium leading-airy text-[var(--color-fg-primary)]">이전 대화를 불러오고 있습니다…</div>
+              </div>
+            `
+          : entries.length === 0
+          ? html`
+              <div data-chat-transcript-empty class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 text-center">
                 <div class="text-xs font-bold uppercase tracking-4 text-[var(--color-fg-secondary)]">직접 메시지 없음</div>
                 <div class="mt-3 max-w-[34rem] text-base font-medium leading-airy text-[var(--color-fg-primary)]">${emptyText}</div>
               </div>

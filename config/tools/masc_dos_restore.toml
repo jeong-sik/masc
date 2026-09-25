@@ -1,0 +1,16 @@
+name = "masc_dos_restore"
+description = """
+Resume a saved DOS machine, or list the saved ones.
+
+Replaces the current machine with the named checkpoint only after it reads; \
+you then hold the controller. Needs the controller free or yours, like \
+masc_dos_load. The key ledger continues from the checkpoint; the game's \
+saves folder is left as it is. No slot lists checkpoints."""
+additional_properties = false
+
+defer_loading = true
+
+[[params]]
+name = "slot"
+type = "string"
+description = "Checkpoint to restore. Omit to list them."

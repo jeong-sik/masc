@@ -16,6 +16,7 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
+  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -342,7 +343,8 @@ let host_stop_result
       (Keeper_internal_error.core_error_of_masc_internal_error
          (Keeper_internal_error.Terminal_effect_failed
             { failure_class; effect_disposition; detail }))
-  | ( Repeated_tool_call _
+  | ( Queued_chat_operation
+    | Repeated_tool_call _
     | Terminal_tool_boundary
         { outcome =
             (Terminal_completed | Durable_stimulus_deferred)
@@ -363,6 +365,8 @@ let host_stop_result
     in
     let stop_reason =
       match stop with
+      | Queued_chat_operation ->
+        Runtime_agent.Yielded_to_operation_queued { turns_used }
       | Repeated_tool_call { tool_name; repeated_count } ->
         Runtime_agent.Yielded_after_repeated_tool_call
           { turns_used; tool_name; repeated_count }

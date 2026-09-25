@@ -436,6 +436,16 @@ val count_noun : ?plural:string -> int -> string -> string
 (** [count_noun 1 "line"] is ["1 line"], [count_noun 2 "line"] is ["2 lines"].
     [?plural] names an irregular plural: [count_noun ~plural:"entries" 3 "entry"]. *)
 
+val compact_count : int -> string
+(** A figure read at a glance rather than counted digit by digit:
+    [compact_count 411465] is ["411.5k"], [compact_count 358] is ["358"].
+
+    Through 99,994,999,999 the result fits the six-character "≈%6s tok"
+    column. Larger counts widen. Each rung changes where the format below
+    it would round past that column: 999,950 reads ["1.00M"] rather than
+    ["1000.0k"]. {!Masc_tui_context_inspector}'s [format_tokens] delegates
+    to this function. *)
+
 val cut_mark : string
 (** What a cut leaves behind in place of the text it dropped.
 
@@ -503,14 +513,23 @@ val input_viewport : max_cells:int -> string -> string
     newest complete-scalar suffix that fits in the remaining cells. *)
 
 val scroll_hint : scrolled_back:int -> older_exist:bool -> string
-(** The footer's scrolling hint: which keys move the pane, how far back it
-    sits, and whether anything older is left to fetch.
+(** The footer's scrolling keys: which ones move the pane. How far back it
+    sits is {!scroll_position}, which travels beside these as
+    {!Masc_tui_footer.line}'s [?position] rather than on the end of this
+    string -- the fitter reads this string as key items and gives up the last
+    one first, and a position is the one item on the row that [?] cannot
+    recover. *)
+
+val scroll_position : scrolled_back:int -> older_exist:bool -> string option
+(** How far back the pane sits, and whether anything older is left to fetch.
+    [None] at the newest row, where there is no distance to say.
 
     The count used to be a row of its own above the composer. That row was
     drawn from the clamped position and counted from the unclamped one, so the
     pane came out a row short whenever they disagreed -- an [up] press on a
-    conversation that already fits does it. The count says the same thing here
-    without a row whose presence the pane's own height depends on. *)
+    conversation that already fits does it. The count says the same thing on
+    the footer without a row whose presence the pane's own height depends
+    on. *)
 
 val input_cursor_column : terminal_cols:int -> input:string -> int
 (** One-based cursor column after the visible input, clamped to the spacer

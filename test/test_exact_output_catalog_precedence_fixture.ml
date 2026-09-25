@@ -196,7 +196,7 @@ supports-structured-output = true
 [runtime]
 default = "replacement_provider.replacement"
 
-[runtime.exact_output_lanes.auxiliary_exact]
+[runtime.exact_output_lanes.librarian_exact]
 slots = [%s]
 max_output_tokens = 4096
 |}
@@ -439,12 +439,12 @@ let test_offline_runtime_save_converges_by_write_stage () =
        let config_a =
          transaction_runtime_toml
            ~runtime_name:"replacement"
-           ~lane_id:"offline-a"
+           ~lane_id:"librarian_exact"
        in
        let config_b =
          transaction_runtime_toml
            ~runtime_name:"alternate"
-           ~lane_id:"offline-b"
+           ~lane_id:"workspace_curator_exact"
        in
        require_registry_unpublished "offline baseline";
        (match Runtime.save_config_text ~runtime_config_path:path config_a with
@@ -521,14 +521,14 @@ let test_runtime_after_rename_converges_state () =
        let config_a =
          transaction_runtime_toml
            ~runtime_name:"replacement"
-           ~lane_id:"transaction-a"
+           ~lane_id:"librarian_exact"
        in
        let config_b =
          transaction_runtime_toml
            ~runtime_name:"alternate"
-           ~lane_id:"transaction-b"
+           ~lane_id:"workspace_curator_exact"
        in
-       (match Registry.publish ~lanes:(transaction_lanes "transaction-a") snapshot with
+       (match Registry.publish ~lanes:(transaction_lanes "librarian_exact") snapshot with
         | Ok _ -> ()
         | Error error ->
           Alcotest.failf
@@ -580,6 +580,6 @@ let test_runtime_after_rename_converges_state () =
          (not (baseline == converged));
        require_transaction_lane
          "after-rename registry converges to B"
-         ~lane_id:"transaction-b"
+         ~lane_id:"workspace_curator_exact"
          converged)
 ;;

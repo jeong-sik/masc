@@ -161,7 +161,7 @@ type turn_success =
 val autonomous_yield_request
   :  base_path:string
   -> keeper_name:string
-  -> (Keeper_agent_run.autonomous_yield_request option, string) result
+  -> (Keeper_agent_run.yield_request option, string) result
 (** Read Owner chat readiness and ready durable stimuli at a safe boundary.
     Waiting inputs remain durable without forcing an unproductive checkpoint. *)
 
@@ -169,7 +169,7 @@ val hitl_replay_preemption_request
   :  resolution_deliverable:(Keeper_event_queue.hitl_resolution -> bool)
   -> now:float
   -> Keeper_event_queue.t
-  -> Keeper_agent_run.autonomous_yield_request option
+  -> Keeper_agent_run.yield_request option
 (** Pure post-tool boundary decision (#28809): yield the in-flight source when
     a queued [Hitl_resolved] passes [resolution_deliverable]. The runtime
     predicate accepts only an approved resolution whose one-shot grant is
@@ -179,7 +179,7 @@ val hitl_replay_preemption_request
 val hitl_replay_yield_request
   :  base_path:string
   -> keeper_name:string
-  -> (Keeper_agent_run.autonomous_yield_request option, string) result
+  -> (Keeper_agent_run.yield_request option, string) result
 (** [hitl_replay_preemption_request] over the keeper's durable queue snapshot
     with the runtime deliverability predicate (approval left the pending map,
     grant durably unspent). *)
@@ -187,7 +187,7 @@ val hitl_replay_yield_request
 val connector_attention_preemption_request
   :  now:float
   -> Keeper_event_queue.t
-  -> Keeper_agent_run.autonomous_yield_request option
+  -> Keeper_agent_run.yield_request option
 (** Pure post-tool boundary decision (#20849): yield the in-flight [Woken]
     source when a pending [Connector_attention] stimulus — an ambient
     connector conversation message — is waiting. The owner-operation probe
@@ -200,7 +200,7 @@ val connector_attention_preemption_request
 val connector_attention_waiting
   :  base_path:string
   -> keeper_name:string
-  -> (Keeper_agent_run.autonomous_yield_request option, string) result
+  -> (Keeper_agent_run.yield_request option, string) result
 (** [connector_attention_preemption_request] over the keeper's durable queue
     snapshot. *)
 

@@ -11,8 +11,8 @@ type request =
 type t = {
   min_interval_ns : int64;
   mutable pending : request option;
-  mutable preempt_deadline : bool;
   mutable last_rendered_at_ns : int64 option;
+  mutable last_was_input : bool;
 }
 
 let create ~min_interval_ns () =
@@ -20,23 +20,15 @@ let create ~min_interval_ns () =
     invalid_arg "render interval must be non-negative";
   { min_interval_ns;
     pending = Some Force;
-    preempt_deadline = true;
     last_rendered_at_ns = None;
+    last_was_input = false;
   }
 
 let request schedule request =
   match request, schedule.pending with
-  | Force, _ ->
-      schedule.pending <- Some Force;
-      schedule.preempt_deadline <- true
-  | Input, Some Background ->
-      (* User input supersedes a scheduled background paint, matching pi's
-         immediate-render path without turning a byte burst into one write per
-         byte. Subsequent input inside the same frame window still coalesces. *)
-      schedule.pending <- Some Input;
-      schedule.preempt_deadline <- true
+  | Force, _ -> schedule.pending <- Some Force
   | Input, Some Force -> ()
-  | Input, Some Input | Input, None -> schedule.pending <- Some Input
+  | Input, Some (Input | Background) | Input, None -> schedule.pending <- Some Input
   | Background, None -> schedule.pending <- Some Background
   | Background, Some (Input | Background | Force) -> ()
 
@@ -45,33 +37,39 @@ let deadline schedule =
     (fun rendered_at -> Int64.add rendered_at schedule.min_interval_ns)
     schedule.last_rendered_at_ns
 
-let take schedule ~now_ns =
+let take ~input_pending schedule ~now_ns =
+  let render () =
+    schedule.last_was_input <- schedule.pending = Some Input;
+    schedule.pending <- None;
+    schedule.last_rendered_at_ns <- Some now_ns;
+    Render
+  in
   match schedule.pending with
   | None -> Idle
-  | Some _ ->
+  | Some Force -> render ()
+  | Some Input when not input_pending && not schedule.last_was_input -> render ()
+  | Some (Input | Background) ->
+    (* Drain the bytes from one terminal read before painting their result.
+       The first input frame preempts a recent background frame. Subsequent
+       input frames keep the interval even when each event arrives alone. *)
     match deadline schedule with
-    | Some due
-      when (not schedule.preempt_deadline) && Int64.compare now_ns due < 0 ->
+    | Some due when Int64.compare now_ns due < 0 ->
         Wait_until due
-    | None | Some _ ->
-        schedule.pending <- None;
-        schedule.preempt_deadline <- false;
-        schedule.last_rendered_at_ns <- Some now_ns;
-        Render
+    | None | Some _ -> render ()
 
 let input_timeout_seconds schedule ~now_ns ~maximum =
   let maximum = max 0.0 maximum in
   match schedule.pending with
   | None -> maximum
-  | Some _ when schedule.preempt_deadline -> 0.0
-  | Some _ ->
-    match deadline schedule with
-    | None -> 0.0
-    | Some due ->
-        let remaining_ns = Int64.sub due now_ns in
-        if Int64.compare remaining_ns 0L <= 0 then 0.0
-        else
-          min maximum (Int64.to_float remaining_ns /. 1_000_000_000.0)
+  | Some Force -> 0.0
+  | Some Input when not schedule.last_was_input -> 0.0
+  | Some (Input | Background) ->
+    (match deadline schedule with
+     | None -> 0.0
+     | Some due ->
+       let remaining_ns = Int64.sub due now_ns in
+       if Int64.compare remaining_ns 0L <= 0 then 0.0
+       else min maximum (Int64.to_float remaining_ns /. 1_000_000_000.0))
 
 let normalize_keeper_detail_scroll ~line_count ~content_height scroll =
   let line_count = max 0 line_count in
@@ -1054,6 +1052,50 @@ let fusion_row ~state_style columns values =
 
 let fusion_sidebar_label ~status ~time ~keeper ~run_id =
   Printf.sprintf "[%s] %s @%s %s" status time keeper run_id
+
+(* Task Review and Verdicts drew a row's task id and nothing else, and both
+   lists hold a task once per submission. Measured on the live history
+   2026-09-24: 200 Task Review rows carry 113 distinct ids, 45 of them more
+   than once, and seven rows are task-1663 -- one submitter, no stated
+   intent. The Verdicts list is shorter and collides too: of eight rows one
+   task carries two verdicts, at the same gate, parted only by what each one
+   said.
+
+   [apart] is what parts this row from its siblings. It has to hold still
+   while the reader looks at it, which an age does not: [age_text] spells
+   seconds under an hour, so an index row read "5m03s" and was a different
+   row a second later. And it has to be its own value rather than a reading
+   of one, because two rows minutes apart round to the same age.
+
+   A row with nothing to part it keeps the id alone rather than inventing a
+   mark for it. *)
+let task_history_sidebar_label ~task_id ~apart =
+  match apart with None -> task_id | Some apart -> task_id ^ "  " ^ apart
+
+let verdict_sidebar_labels rows =
+  List.mapi
+    (fun index (task_id, clock) ->
+      let same (other_id, other_clock) =
+        String.equal task_id other_id && String.equal clock other_clock
+      in
+      let siblings = List.length (List.filter same rows) in
+      let apart =
+        if siblings = 1 then clock
+        else
+          let earlier =
+            List.filteri (fun other_index row -> other_index < index && same row) rows
+            |> List.length
+          in
+          (* A second-resolution clock can name several verdicts. Keep the
+             date and minute, then number those rows within this snapshot. *)
+          let minute =
+            if String.length clock > 3 then String.sub clock 0 (String.length clock - 3)
+            else clock
+          in
+          Printf.sprintf "%s#%d" minute (earlier + 1)
+      in
+      task_history_sidebar_label ~task_id ~apart:(Some apart))
+    rows
 
 let fusion_pipeline_diagram
     ?(glyph_done = "●")

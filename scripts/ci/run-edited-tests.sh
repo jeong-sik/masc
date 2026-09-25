@@ -1113,8 +1113,23 @@ self_test() {
   # The regression this mapping exists for: #34247 edited only this module and
   # ran no suite, so the escape it dropped went to main.
   check "a source edit selects the suites named after it" \
-    "test/test_keeper_toml.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
+    "test/test_keeper_toml.ml test/test_tui_http_ast.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     "bin/masc_tui_msx.ml"
+  # Turn-record keys live in OCaml, while the Context Inspector's HTTP
+  # response is a Python fixture. Run only that PTY scenario when the
+  # contract moves; the full keyboard walk costs hundreds of seconds.
+  check_required "turn record contract selects its Python fixture consumer" \
+    "test/test_tui_context_inspector.py" \
+    "lib/types/turn_record.ml"
+  check_required "turn record interface selects its Python fixture consumer" \
+    "test/test_tui_context_inspector.py" \
+    "lib/types/turn_record.mli"
+  check_required "usage scope contract selects its Python fixture consumer" \
+    "test/test_tui_context_inspector.py" \
+    "lib/types/runtime_usage_scope.ml"
+  check_required "usage scope interface selects its Python fixture consumer" \
+    "test/test_tui_context_inspector.py" \
+    "lib/types/runtime_usage_scope.mli"
   # A module whose name is a namespace attributes nothing by name -- it
   # prefixes 136 suites, and picking those off one edit says nothing. What it
   # still selects is the guards and PTY scenarios that name the file. The name
@@ -1205,7 +1220,7 @@ self_test() {
   # looks for one. #38325 planted one, was green on its own checks, and
   # failed release candidate 35876460562 on main.
   check "an OCaml source edit runs the suite that reads the whole tree" \
-    "test/test_keeper_toml.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
+    "test/test_keeper_toml.ml test/test_tui_http_ast.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     bin/masc_tui_msx.ml
   # The input that splits it. Without this, a guard appended unconditionally
   # passes the case above and spends the budget on every documentation pull
@@ -1290,7 +1305,7 @@ self_test() {
     "bin/masc_tui_message_layout.ml"
   # Both halves together, deduplicated.
   check "a source and its own suite are one entry" \
-    "test/test_keeper_toml.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
+    "test/test_keeper_toml.ml test/test_tui_http_ast.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     "bin/masc_tui_msx.ml" "test/test_tui_msx_load.ml"
   # The regression these two exist for: every terminal scenario under test/
   # is a .py run by a dune rule, and no pull request ran one. #35534 added

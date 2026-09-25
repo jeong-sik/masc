@@ -224,6 +224,10 @@ pin-depends: [
     "git+https://github.com/patricoferris/bisect_ppx.git#5.2"
   ]
   [
+    "cohttp-eio.6.2.1"
+    "git+https://github.com/jeong-sik/ocaml-cohttp.git#45ecbe94b2a6e9a49e5ce11a9f69127833814d46"
+  ]
+  [
   "grpc-direct.0.2.6"
   "git+https://github.com/jeong-sik/grpc-direct.git#d7269ebebf9e4688486cc6591c66e794607e7b0f"
 ]

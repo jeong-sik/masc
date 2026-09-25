@@ -397,7 +397,7 @@ let overlay ~now ~localtime ~cols t =
     @ if cancel_count > cancellation_preview_rows then
         [ { tone = Question
           ; text = two_column ~cols
-              (Printf.sprintf "전체 %d건 열기 · Task Review" cancel_count) "Enter"
+              (Printf.sprintf "open all %d · Task Review" cancel_count) "Enter"
           ; goes_to = Full_cancel_queue } ]
       else []
   in

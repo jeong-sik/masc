@@ -602,7 +602,7 @@ let test_the_stuck_section_shows_a_few_and_counts_the_rest () =
              contains ~needle:"held by a session that is gone" line.Agenda.text)
           lines));
   check bool "the full queue is a selectable row" true
-    (contains ~needle:"전체 9건 열기" text);
+    (contains ~needle:"open all 9" text);
   check bool "the full queue has a destination" true
     (List.exists
        (fun index -> match List.nth_opt lines index with

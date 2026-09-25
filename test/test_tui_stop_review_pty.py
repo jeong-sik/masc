@@ -69,7 +69,7 @@ def open_agenda(process, master_fd, output):
         process, master_fd, output, "stop requests 7".encode(), start=0, timeout=3.0
     )
     h.wait_for_output(
-        process, master_fd, output, "전체 7건 열기".encode(), start=0, timeout=3.0
+        process, master_fd, output, b"open all 7", start=0, timeout=3.0
     )
 
 

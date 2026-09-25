@@ -526,7 +526,7 @@ let test_a_keeper_starts_from_the_build_promoted_now () =
     saved "promote"
       (save ~config_root ~expected:seen
          (changed "promote"
-            (promote catalog ~name:"ocaml" ~store:apple ~reference:newer ~digest:(digest 'c'))));
+            (promote catalog ~name:"ocaml" ~store:apple ~reference:newer)));
     check string "the next start reads the file again" newer
       (starts_from "after promote" ~config_root ~store:apple (Some "ocaml")))
 
@@ -560,14 +560,19 @@ let test_a_keeper_that_cannot_start_says_why () =
       refusal "ocaml on microsandbox" ~store:(Microvm Keeper_microvm_backend.Microsandbox)
         (Some "ocaml")
     in
-    mentions "msb unsupported" ocaml_on_msb "no supported build-and-promote path";
+    mentions "msb loads its build" ocaml_on_msb "`msb load`";
+    mentions "msb promotes what it loaded" ocaml_on_msb
+      "masc sandbox-image promote ocaml <tag> --runtime microsandbox`";
     omits "msb cannot build" ocaml_on_msb "--recipe ocaml";
     let ocaml_on_kata =
       refusal "ocaml on nerdctl_kata" ~store:(Microvm Keeper_microvm_backend.Nerdctl_kata)
         (Some "ocaml")
     in
-    mentions "kata promotion unsupported" ocaml_on_kata "no supported promote path";
-    omits "kata cannot promote" ocaml_on_kata "promote ocaml <tag>";
+    mentions "kata builds" ocaml_on_kata
+      "masc sandbox-image --recipe ocaml --source <checkout> --runtime nerdctl_kata`";
+    mentions "kata promotes" ocaml_on_kata
+      "masc sandbox-image promote ocaml <tag> --runtime nerdctl_kata`";
+    omits "kata needs no digest" ocaml_on_kata "digest";
     write_catalog config_root "[images.base]\nsurprise = 1\n";
     match refused_start "malformed" ~config_root ~store:apple (Some "base") with
     | Resolver.Catalog_unreadable (Invalid _) -> ()

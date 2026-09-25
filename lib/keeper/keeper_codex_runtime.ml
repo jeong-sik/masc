@@ -304,6 +304,18 @@ let read_usage_after_quota_refusal ~keeper_name ~runtime_id ~clock ~cwd config =
    count already includes the cached prefix and the output count already
    includes reasoning, so both copy across and the cache fields fill the
    canonical record's cache slots. *)
+(* The newest request's input side, the context it occupied, in the
+   inclusive convention [Runtime_observation.request_context] uses. OpenAI's
+   input count already includes the cached prefix. *)
+let request_context_of_token_usage (usage : Runtime_codex_app_server.token_usage)
+  : Runtime_observation.request_context
+  =
+  { input_tokens = usage.input_tokens
+  ; cache_creation_input_tokens = usage.cache_write_input_tokens
+  ; cache_read_input_tokens = usage.cached_input_tokens
+  }
+;;
+
 let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
   : Agent_core.Types.api_usage
   =
@@ -1388,12 +1400,16 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
          | Some detail -> Error (internal_error detail)
        in
        let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
+       (* The spend is the thread's running count, resolved against the
+          previous count of the same thread; a repeated frame adds nothing.
+          The newest request's [last] rides apart as the context it
+          occupied, the way the Claude Code lane keeps its request context. *)
        let response =
          { Agent_core.Types.id = turn.turn_id
          ; model = turn.model
          ; stop_reason = EndTurn
          ; content = [ Text turn.text ]
-         ; usage = Option.map api_usage_of_token_usage turn.usage
+         ; usage = Option.map api_usage_of_token_usage turn.thread_total
          ; telemetry =
              Some
                { Agent_core.Types.default_inference_telemetry with
@@ -1444,16 +1460,17 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
            ~attempt_details_source:"codex_app_server"
            ~agent_core_internal_runtime_allowed:false
            ~usage_scope:
-             (match turn.usage with
-              | Some _ -> Runtime_usage_scope.Per_request
+             (match turn.thread_total with
+              | Some _ -> Runtime_usage_scope.Conversation_cumulative
               | None -> Runtime_usage_scope.Usage_scope_unavailable)
+           ?request_context:(Option.map request_context_of_token_usage turn.usage)
            ()
        in
        Ok
          { Runtime_agent.response
          ; checkpoint = None
          ; session_id = turn.thread_id
-         ; session_resumed = None
+         ; session_resumed = Some turn.resumed
          ; turns = turn_count
          ; trace_ref = None
          ; run_validation = None

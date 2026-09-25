@@ -113,9 +113,12 @@ type turn_result =
   ; user_agent : string option
   ; resumed : bool
   ; usage : token_usage option
-    (* [None] when no thread/tokenUsage/updated for this turn arrived before
-       turn/completed; the host then reports the usage scope as unavailable
-       rather than a count of zero. *)
+    (* The newest frame's [last]: the context the turn's newest request
+       occupied. [None] when no thread/tokenUsage/updated for this turn
+       arrived before turn/completed. *)
+  ; thread_total : token_usage option
+    (* The newest frame's [total]: the thread's running count, from which
+       the turn's spend is resolved. [None] as for [usage]. *)
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
@@ -1390,8 +1393,8 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
        the thread's running count, so a repeat reports the same count and
        adds nothing to a spend resolved from it. That count is reported
        here, where it is read, so a turn that later fails still leaves what
-       it spent. [seen_usage] keeps [last], the newest request, for the turn
-       result's context occupancy. *)
+       it spent. [seen_usage] keeps the newest frame: [last] for the turn
+       result's context occupancy, [total] for its spend. *)
     Option.iter
       (fun (_last, thread_total) ->
          emit_stream_event
@@ -1400,7 +1403,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
       frame;
     let seen_usage =
       match frame with
-      | Some (last, _thread_total) -> Some last
+      | Some _ -> frame
       | None -> seen_usage
     in
     await_turn_terminal
@@ -1671,7 +1674,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
   in
   emit_stream_event on_stream_event (Turn_started { turn_id; model });
   let tool_call_count = ref 0 in
-  let* text, usage =
+  let* text, newest_frame =
     await_turn_terminal
       io
       ~tools:dynamic_tools
@@ -1695,7 +1698,8 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
     ; subscription
     ; user_agent
     ; resumed
-    ; usage
+    ; usage = Option.map fst newest_frame
+    ; thread_total = Option.map snd newest_frame
     }
 ;;
 

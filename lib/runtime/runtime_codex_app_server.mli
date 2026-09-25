@@ -105,9 +105,13 @@ type turn_result =
   ; user_agent : string option
   ; resumed : bool
   ; usage : token_usage option
-    (* [None] when no thread/tokenUsage/updated for this turn arrived before
-       turn/completed; the host then reports the usage scope as unavailable
-       rather than a count of zero. *)
+    (* The newest frame's [last]: the context the turn's newest request
+       occupied. [None] when no thread/tokenUsage/updated for this turn
+       arrived before turn/completed. *)
+  ; thread_total : token_usage option
+    (* The newest frame's [total]: the thread's running count, from which
+       the turn's spend is resolved against the previous count of the same
+       thread. [None] as for [usage]. *)
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =

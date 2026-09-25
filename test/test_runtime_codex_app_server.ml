@@ -833,9 +833,20 @@ let fixture_last_usage : Runtime_codex_app_server.token_usage =
   }
 ;;
 
+let fixture_thread_total : Runtime_codex_app_server.token_usage =
+  { input_tokens = 9000
+  ; cached_input_tokens = 8000
+  ; cache_write_input_tokens = 0
+  ; output_tokens = 700
+  ; reasoning_output_tokens = 300
+  ; total_tokens = 9700
+  }
+;;
+
 (* #33018 #33065: the Codex lane reported every turn as zero tokens because
    nothing read the app-server's thread/tokenUsage/updated. The turn result
-   now carries that frame's [last] breakdown for the turn it names. *)
+   now carries that frame's [last] breakdown for the turn it names, and its
+   [total], the thread's running count. *)
 let test_token_usage_of_this_turn_reaches_the_result () =
   with_fixture
     [ init_result
@@ -851,6 +862,8 @@ let test_token_usage_of_this_turn_reaches_the_result () =
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok result ->
         check (option token_usage) "last breakdown" (Some fixture_last_usage) result.usage;
+        check (option token_usage) "thread total" (Some fixture_thread_total)
+          result.thread_total;
         check string "text still lands" "MASC_SUBSCRIPTION_OK" result.text)
 ;;
 
@@ -867,7 +880,9 @@ let test_token_usage_of_another_turn_is_not_ours () =
     (fun path ->
       match run_fixture path with
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-      | Ok result -> check (option token_usage) "foreign frame ignored" None result.usage)
+      | Ok result ->
+        check (option token_usage) "foreign frame ignored" None result.usage;
+        check (option token_usage) "foreign total ignored" None result.thread_total)
 ;;
 
 let test_turn_without_token_usage_reports_none () =
@@ -4670,8 +4685,10 @@ let test_production_keeper_failed_turn_leaves_its_end_line () =
                 ~trace_id:"codex-production-failed-1"))
 ;;
 
-(* The host reads the runtime's count into the turn's usage: reported, per
-   request, with the app-server's numbers rather than zero. *)
+(* The host resolves a Codex turn's spend from the thread's running count
+   ([total]), conversation-cumulative and keyed by the thread and whether this
+   turn resumed it; a repeated frame then adds nothing. The newest request's
+   [last] rides apart as the context it occupied. *)
 let test_production_keeper_reports_codex_token_usage () =
   let base_path = temp_workspace "masc-codex-production-usage-" in
   Fun.protect
@@ -4700,16 +4717,25 @@ let test_production_keeper_reports_codex_token_usage () =
             | Error error -> fail (Agent_core.Error.to_string error)
             | Ok result ->
               check bool "usage reported" true result.Keeper_agent_run.usage_reported;
-              check int "input tokens" 1200 result.usage.input_tokens;
-              check int "output tokens" 80 result.usage.output_tokens;
-              check int "cache read tokens" 1000 result.usage.cache_read_input_tokens;
-              check bool "per-request scope" true
-                (result.usage_scope = Runtime_usage_scope.Per_request);
+              check int "thread input" 9000 result.usage.input_tokens;
+              check int "thread output" 700 result.usage.output_tokens;
+              check int "thread cache read" 8000 result.usage.cache_read_input_tokens;
+              check string "conversation-cumulative scope" "conversation_cumulative"
+                (Runtime_usage_scope.to_string result.usage_scope);
+              (match result.usage_basis with
+               | Keeper_usage_resolution.Conversation_counter
+                   { conversation_id = "thread-1"; position = Keeper_usage_resolution.Fresh; _ } -> ()
+               | _ -> fail "a Codex spend is not keyed by its thread and position");
               (match result.runtime_observation with
                | Some observation ->
-                 check bool "observation scope" true
-                   (observation.Runtime_observation.usage_scope
-                    = Runtime_usage_scope.Per_request)
+                 check string "observation scope" "conversation_cumulative"
+                   (Runtime_usage_scope.to_string
+                      observation.Runtime_observation.usage_scope);
+                 (match observation.Runtime_observation.request_context with
+                  | Some context ->
+                    check int "the newest request's occupancy" 1200 context.input_tokens;
+                    check int "its cache read" 1000 context.cache_read_input_tokens
+                  | None -> fail "the newest request's occupancy was dropped")
                | None -> fail "production turn recorded no runtime observation")))
 ;;
 

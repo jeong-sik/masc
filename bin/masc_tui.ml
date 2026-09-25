@@ -3263,6 +3263,7 @@ let launch_keeper_turns_load state ~mailbox =
     let port = state.port in
     Masc_tui_async_read.launch
       ~on_not_run:(fun () -> state.keeper_turns_inflight <- false)
+      ~subject:"keeper turns"
       ~deliver:(fun result ->
         enqueue_async mailbox (Keeper_turns_loaded (generation, result)))
       (fun () -> Masc_tui_loader.load_keeper_turns ~host ~port)

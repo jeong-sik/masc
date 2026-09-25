@@ -1378,20 +1378,13 @@ status: reference
   개별적으로 수행하던 취약하고 중복된 4문자열 휴리스틱 매칭을 대체하고, 서버
   SSE/REST 엔드포인트(`pending_entry`, `hitl_rows`)가 직접 방출한다(#38404). wire 값은
   각각 `"queued"` · `"judging"` · `"human_required"` · `"blocked"`다.
-  - `blocked`: 준비 단계 워커 부재(`Summary_attempt_pre_worker_unavailable`),
-    식별자 언바운드(`Summary_attempt_identity_unbound`), 지속성 불확실
-    (`Summary_attempt_persistence_uncertain`), 심판 실행 실패(`Summary_failed`)인 경우.
-    특히 `Summary_pre_worker_start_reserved` 상태는 초기 폴링 중 대시보드와 서버가
-    `judging`이 아닌 `blocked`로 투영하여 불필요한 대기 혼선을 막는다.
-  - `judging`: 자동 심판 워커가 실행 중(`Summary_attempt_in_flight`)이거나 요약 대기
-    (`Summary_pending`)인 경우. 심판 시도가 끝난 상태(`Summary_attempt_settled`)에서
-    요약 대기이거나 모델 판정이 `Approve` | `Deny`인 경우도 `judging`이다.
-  - `human_required`: 모델 심판 결과 명시적인 사람 개입이 필요하다고 판정된 경우
-    (`advisory_judgment = Require_human`).
-  - `queued`: 심판 전 대기 중(`Summary_attempt_ready`)이며 아직 심판이 요청되지
-    않았거나(`Summary_not_requested`) 모델 판정(`Approve` | `Deny`)이 대기 중인 경우.
-    판정이 `Approve` | `Deny`여도 `queued`가 되는 것은 `Summary_attempt_ready`일 때뿐이다.
-    `Summary_attempt_settled`에서는 `Summary_not_requested`만 `queued`다.
+  네 값의 뜻은 이렇다. 어떤 (심판 시도 상태, 요약 상태) 조합이 어느 값이 되는지는
+  `phase_of_disposition_and_summary` 한 곳이 정한다. 이 문서는 그 판정표를 옮겨 적지 않는다.
+  - `queued`: 아직 누구도 이 항목을 판정하고 있지 않다.
+  - `judging`: 자동 심판이 판정하는 중이거나, 판정이 끝나 적용을 기다린다.
+  - `human_required`: 자동 심판이 사람의 결정이 필요하다고 판정했다.
+  - `blocked`: 심판을 돌릴 수 없는 상태다(워커 없음, 식별자 없음, 지속성 불확실,
+    심판 실패). 사람이 보거나 원인이 풀려야 진행된다.
   - **비영속 투영 경계**: 승인 큐의 durable 저널 직렬화(`pending_entry_to_yojson` /
     `pending_entry_of_yojson`)에는 파생값인 `phase` 필드를 저장하지 않고, 오직
     클라이언트 관측을 위한 wire 프로젝션에서만 유지한다.

@@ -133,7 +133,7 @@ redirect도 마찬가지로 거절한다(도구 호출이 표준 입력을 소�
 ### 2.3.2 argv costume으로 감싼 표기
 
 `sh -c "masc board list"`(argv costume)는 tool 변환을 거치지 않고 샌드박스에서
-exit 127이 난다(이미지에 `masc` 바이너리가 의도적으로 없다 — Dockerfile.keeper-sandbox).
+exit 127이 난다(이미지에 `masc` 바이너리가 의도적으로 없다 — sandbox-images/ocaml/Dockerfile).
 costume의 기존 재작성 조언(replace_advice) 경로가 이 표기를 직접 표기로 안내하도록
 메시지를 하나 추가한다. 조용한 127이 아니라 설명된 안내다.
 

@@ -6,8 +6,8 @@
    2. lane_label goldens — the single response-label derivation.
    3. Lane roundtrip — a typed write persists only the structured
       [surface] identity; a retired label-only field never restores it;
-      an invalid persisted surface payload is reported without losing
-      the row. *)
+      a row whose persisted surface payload does not decode is reported
+      and dropped, never read back as an unscoped row. *)
 
 open Alcotest
 
@@ -117,7 +117,7 @@ let test_source_only_row_does_not_restore_surface () =
             source_only.surface
       | other -> failf "expected 2 lines, got %d" (List.length other))
 
-let test_invalid_surface_payload_keeps_row () =
+let test_invalid_surface_payload_drops_row () =
   with_base "surface-ref-invalid" (fun base ->
       Store.append_user_message ~base_dir:base ~keeper_name:"alice"
         ~content:"seed" ();
@@ -126,11 +126,11 @@ let test_invalid_surface_payload_keeps_row () =
         "{\"id\":\"bad-surface\",\"role\":\"user\",\"content\":\"bad surface\",\"ts\":2.0,\"surface\":{\"kind\":\"telepathy\"}}\n";
       close_out oc;
       match Store.load ~base_dir:base ~keeper_name:"alice" with
-      | [ _seed; bad ] ->
-          check (option surface) "invalid payload reported, decoded as None"
-            None bad.surface;
-          check string "row content survives" "bad surface" bad.content
-      | other -> failf "expected 2 lines, got %d" (List.length other))
+      | [ seed ] ->
+          check string "only the decodable row survives" "seed" seed.content
+      | other ->
+          failf "invalid surface row leaked as unscoped: expected 1 line, got %d"
+            (List.length other))
 
 let () =
   Random.self_init ();
@@ -148,7 +148,7 @@ let () =
             test_typed_write_round_trips;
           test_case "source-only row does not restore surface" `Quick
             test_source_only_row_does_not_restore_surface;
-          test_case "invalid payload keeps row" `Quick
-            test_invalid_surface_payload_keeps_row;
+          test_case "invalid payload drops row" `Quick
+            test_invalid_surface_payload_drops_row;
         ] );
     ]

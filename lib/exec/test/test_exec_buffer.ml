@@ -73,6 +73,66 @@ let test_head_cap_zero () =
   check_eq "tail last 4" "defg" (Exec_buffer.tail b);
   check_eq "render" "\n...(truncated 3 bytes)...\ndefg" (Exec_buffer.render b)
 
+(* Both cuts land inside a 3-byte Hangul character: the head keeps "ab"
+   of "ab" ^ 2 bytes of "가", the tail keeps "cd" of 2 bytes of "다" ^ "cd",
+   and the 4 split bytes join the 12 elided ones in the marker. *)
+let test_cut_inside_hangul () =
+  let b = Exec_buffer.create ~head_cap:4 ~tail_cap:4 in
+  Exec_buffer.add_string b ("ab가" ^ "0123456789" ^ "다cd");
+  check_int "dropped" 12 (Exec_buffer.bytes_dropped b);
+  let rendered = Exec_buffer.render b in
+  check_eq "render" "ab\n...(truncated 16 bytes)...\ncd" rendered;
+  Alcotest.(check bool) "valid UTF-8" true (String.is_valid_utf_8 rendered)
+
+(* A 4-byte emoji cut after its third byte at the head and after its first
+   byte at the tail: nothing of it survives on either side. *)
+let test_cut_inside_emoji () =
+  let emoji = "\xF0\x9F\x98\x80" in
+  let b = Exec_buffer.create ~head_cap:3 ~tail_cap:4 in
+  Exec_buffer.add_string b (emoji ^ "0123456789" ^ emoji ^ "z");
+  check_int "dropped" 12 (Exec_buffer.bytes_dropped b);
+  check_eq "render" "\n...(truncated 18 bytes)...\nz" (Exec_buffer.render b)
+
+(* Cuts on character boundaries trim nothing. *)
+let test_cut_between_characters () =
+  let b = Exec_buffer.create ~head_cap:3 ~tail_cap:3 in
+  Exec_buffer.add_string b ("가" ^ "0123456789" ^ "나");
+  check_eq "render" "가\n...(truncated 10 bytes)...\n나" (Exec_buffer.render b)
+
+(* Binary output: a head of continuation bytes with no lead in reach is not
+   a cut character and stays; a tail's leading continuation bytes go, and the
+   marker counts them with the elided ones. *)
+let test_binary_output_is_counted () =
+  let b = Exec_buffer.create ~head_cap:2 ~tail_cap:5 in
+  Exec_buffer.add_string b ("\x80\x80" ^ "0123456789" ^ "\x80\x80\x80\x80z");
+  check_eq "render" "\x80\x80\n...(truncated 14 bytes)...\nz"
+    (Exec_buffer.render b)
+
+(* Every cut of valid UTF-8 renders valid UTF-8, whatever the caps and
+   however the stream is chunked. *)
+let test_every_cut_renders_valid_utf8 () =
+  let text = "a가😀é나bc다\xE2\x82\xAC" ^ "xyz가나다라" in
+  let len = String.length text in
+  for head_cap = 0 to 12 do
+    for tail_cap = 0 to 12 do
+      for chunk = 1 to 5 do
+        let b = Exec_buffer.create ~head_cap ~tail_cap in
+        let rec feed off =
+          if off < len then begin
+            let n = min chunk (len - off) in
+            Exec_buffer.add_string b (String.sub text off n);
+            feed (off + n)
+          end
+        in
+        feed 0;
+        let rendered = Exec_buffer.render b in
+        if not (String.is_valid_utf_8 rendered) then
+          Alcotest.failf "head_cap=%d tail_cap=%d chunk=%d rendered %S"
+            head_cap tail_cap chunk rendered
+      done
+    done
+  done
+
 (* Negative caps rejected. *)
 let test_negative_caps_rejected () =
   (try
@@ -100,6 +160,11 @@ let () =
   test_tail_ring_rotates ();
   test_large_stream_caps ();
   test_head_cap_zero ();
+  test_cut_inside_hangul ();
+  test_cut_inside_emoji ();
+  test_cut_between_characters ();
+  test_binary_output_is_counted ();
+  test_every_cut_renders_valid_utf8 ();
   test_negative_caps_rejected ();
   test_add_bytes_oob ();
-  print_endline "exec_buffer: 8/8 passed"
+  print_endline "exec_buffer: 13/13 passed"

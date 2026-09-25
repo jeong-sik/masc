@@ -58,6 +58,9 @@ val of_request_validation_error
   -> Error.t
   -> detailed_error
 
+(** A reply the binding's endpoint returned but that does not parse. The
+    attempted binding is kept; ownership is [Unclassified], never
+    [Attempt_local]. *)
 val of_response_parse_error
   :  binding:Binding_identity.t
   -> Error.t

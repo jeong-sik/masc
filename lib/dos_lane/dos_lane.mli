@@ -123,6 +123,15 @@ type core = {
 
 val core : core
 
+type autosave =
+  | Not_attempted
+      (** nothing was written: the program has exited, so there is nothing to
+          resume *)
+  | Autosaved  (** the machine is in the {!autosave_slot} checkpoint *)
+  | Autosave_failed of string
+      (** the write did not reach disk, with the reason. The call itself
+          happened: the guest moved either way. *)
+
 type ran = {
   steps_run : int;  (** instructions actually advanced *)
   settled : bool;
@@ -143,6 +152,11 @@ type ran = {
           saves directory, one line each with the reason. Empty when every
           save is on disk. The call itself happened: the guest moved either
           way, so this is not a reason to send the same keys again. *)
+  autosave : autosave;
+      (** what the checkpoint written at the end of this call did. Only a call
+          that ran to an answer writes one: a fault, a refusal and an
+          unreadable ledger leave the previous autosave as it was, because the
+          machine they leave is not one worth resuming. *)
 }
 
 val settle_chunk : int
@@ -158,6 +172,7 @@ val load :
   who:string ->
   ledger_dir:string ->
   saves_dir:string ->
+  checkpoint_dir:string ->
   program_name:string ->
   program_bytes:string ->
   files:(string * string) list ->
@@ -381,21 +396,22 @@ val autosave_slot : Machine_checkpoint.slot
 (** The one name autosave writes to. Parsed once from a literal that always
     validates, so every caller shares this value instead of the string. *)
 
-val ran_the_guest : ('a, error) result -> bool
-(** Whether a lane call belongs to the set that moved the guest: it settled
-    ([Ok]), or it stopped at a fault it left loaded ([Guest_fault]). A call
-    refused before anything ran ([No_machine], [Invalid_request], [Held_by],
-    [Unreadable], [Unsaveable], [Checkpoint_refused]) is [false]. The tool
-    layer autosaves on [true] and writes nothing on [false]. *)
-
 type autosave_status = { program : string; steps : int; saved_by : string; saved_at : float }
 
-val autosave_status : dir:string -> autosave_status option
+type autosave_lookup =
+  | No_autosave
+  | Autosave of autosave_status
+  | Autosave_unreadable of string
+      (** a file is there but this server will not read it, with the reason:
+          another checkpoint format, a damaged file, a meta that does not
+          parse. Not the same as {!No_autosave}: the next call that runs the
+          guest replaces it. *)
+
+val lookup_autosave : dir:string -> autosave_lookup
 (** What the autosave slot holds, read through {!Machine_checkpoint}'s header
     and meta alone -- never through {!restore}, which would reconstruct the
-    whole guest machine just to say who saved it last. [None] when there is
-    no autosave, or it does not read: this is an offer to resume, never a
-    fact anything depends on. *)
+    whole guest machine just to say who saved it last. This is an offer to
+    resume, never a fact anything depends on. *)
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)

@@ -40,6 +40,16 @@ let observation_fields (o : Dos_lane.observation) =
   ]
 ;;
 
+(* What the autosave at the end of a call did. A program that has exited
+   wrote none, and the field says nothing rather than "false": the call did
+   not fail to save, there was nothing to save. *)
+let autosave_fields = function
+  | Dos_lane.Not_attempted -> []
+  | Dos_lane.Autosaved -> [ ("autosave", `Assoc [ ("saved", `Bool true) ]) ]
+  | Dos_lane.Autosave_failed reason ->
+    [ ("autosave", `Assoc [ ("saved", `Bool false); ("reason", `String reason) ]) ]
+;;
+
 let ran_fields (r : Dos_lane.ran) =
   [ ("steps_run", `Int r.Dos_lane.steps_run)
   ; ("settled", `Bool r.Dos_lane.settled)
@@ -47,7 +57,16 @@ let ran_fields (r : Dos_lane.ran) =
   ; ("keys_pressed", `Int r.Dos_lane.keys_pressed)
   ; ("unsaved", `List (List.map (fun u -> `String u) r.Dos_lane.unsaved))
   ]
+  @ autosave_fields r.Dos_lane.autosave
 ;;
+
+(* A call runs up to [Dos_lane.max_steps_per_call] instructions under the
+   lane's stdlib lock, a noticeable fraction of a second. On a system thread
+   the server's other fibers keep running meanwhile; a fiber that reaches
+   the lock waits on its own thread too, since every lane call goes through
+   here. Only the lane call moves: the announcements it queues are posted
+   afterwards, on the fiber, because posting takes an Eio lock. *)
+let off_domain f = Eio_guard.run_in_systhread ~label:"dos-lane" f
 
 (* Which DOS core this server was built with, on the two answers a caller
    reads first: the load and the screen. A black screen from a core that
@@ -70,7 +89,8 @@ let checkpoints_dir ~base_path = Filename.concat (dos_dir ~base_path) "checkpoin
 
 (* What the autosave slot holds, as the fields a caller reading a No_machine
    refusal or the program-less inventory needs to decide whether to resume:
-   what it is, when, by whom, and the one line that does it. *)
+   what it is, when, by whom, and the one line that does it. A file that is
+   there but does not read is said so, not left out. *)
 let autosave_status_json (s : Dos_lane.autosave_status) =
   `Assoc
     [ ("program", `String s.Dos_lane.program)
@@ -84,28 +104,47 @@ let autosave_status_json (s : Dos_lane.autosave_status) =
     ]
 ;;
 
-(* Every refusal a lane call can answer with, in one place: [No_machine]
-   alone is enriched with what the autosave slot holds, because it is the
-   answer a caller gets right after a restart, before anything is loaded.
-   Every other refusal (a bad argument, another holder, a checkpoint this
-   server will not read) is unaffected. *)
-let reject_for ~base_path ~tool_name ~start_time (e : Dos_lane.error) =
-  match e with
-  | Dos_lane.No_machine ->
-    (match Dos_lane.autosave_status ~dir:(checkpoints_dir ~base_path) with
-     | None -> reject ~tool_name ~start_time (Dos_lane.error_to_string e)
-     | Some s ->
-       reject ~tool_name ~start_time
-         ~data:(`Assoc [ ("autosave", autosave_status_json s) ])
-         (Printf.sprintf
-            "%s (an autosave is waiting: %s, %d steps, saved by %s at %s -- resume with \
-             masc_dos_restore slot=%s)"
-            (Dos_lane.error_to_string e) s.Dos_lane.program s.Dos_lane.steps s.Dos_lane.saved_by
-            (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at)
-            (Machine_checkpoint.slot_to_string Dos_lane.autosave_slot)))
-  | Dos_lane.Invalid_request _ | Dos_lane.Held_by _ | Dos_lane.Unreadable _
-  | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _ ->
-    reject ~tool_name ~start_time (Dos_lane.error_to_string e)
+(* Reads the autosave slot on a system thread: the read decompresses and
+   checksums the whole machine body, work that does not belong on the event
+   loop. *)
+let lookup_autosave ~base_path =
+  let found =
+    off_domain (fun () -> Dos_lane.lookup_autosave ~dir:(checkpoints_dir ~base_path))
+  in
+  (match found with
+   | Dos_lane.Autosave_unreadable reason -> Log.DosLog.warn "masc_dos autosave: %s" reason
+   | Dos_lane.No_autosave | Dos_lane.Autosave _ -> ());
+  found
+;;
+
+let autosave_lookup_fields = function
+  | Dos_lane.No_autosave -> []
+  | Dos_lane.Autosave s -> [ ("autosave", autosave_status_json s) ]
+  | Dos_lane.Autosave_unreadable reason ->
+    [ ("autosave", `Assoc [ ("unreadable", `String reason) ]) ]
+;;
+
+(* The answer to a call that needs a machine when none is loaded. It is the
+   answer a caller gets right after a restart, so it says what the autosave
+   slot holds and how to resume it. Every other refusal is unaffected. *)
+let no_machine ~base_path ~tool_name ~start_time =
+  let refusal = Dos_lane.error_to_string Dos_lane.No_machine in
+  let found = lookup_autosave ~base_path in
+  let message =
+    match found with
+    | Dos_lane.No_autosave -> refusal
+    | Dos_lane.Autosave s ->
+      Printf.sprintf
+        "%s (an autosave is waiting: %s, %d steps, saved by %s at %s -- resume with \
+         masc_dos_restore slot=%s)"
+        refusal s.Dos_lane.program s.Dos_lane.steps s.Dos_lane.saved_by
+        (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at)
+        (Machine_checkpoint.slot_to_string Dos_lane.autosave_slot)
+    | Dos_lane.Autosave_unreadable reason ->
+      Printf.sprintf "%s (an autosave file is there but this server cannot read it: %s)" refusal
+        reason
+  in
+  reject ~tool_name ~start_time ~data:(`Assoc (autosave_lookup_fields found)) message
 ;;
 
 let of_lane ?(extra = []) ~base_path ~tool_name ~start_time
@@ -115,20 +154,15 @@ let of_lane ?(extra = []) ~base_path ~tool_name ~start_time
     Tool_result.make_ok ~tool_name ~start_time
       ~data:(`Assoc (observation_fields o @ extra))
       ()
+  | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
   | Error
-      (( Dos_lane.No_machine | Dos_lane.Invalid_request _ | Dos_lane.Held_by _
+      (( Dos_lane.Invalid_request _ | Dos_lane.Held_by _
        | Dos_lane.Checkpoint_refused
            ( Machine_checkpoint.No_slot _ | Machine_checkpoint.Other_machine _
            | Machine_checkpoint.Other_format _ ) ) as e) ->
-    reject_for ~base_path ~tool_name ~start_time e
-  | Error (Dos_lane.Guest_fault _ as e) ->
-    (* A fault is one of the outcomes that autosaves (Dos_lane.ran_the_guest),
-       so [extra] here may carry the write's own outcome -- unlike the
-       refusals above, which never ran the guest and so never autosave. *)
-    Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
-      ~data:(`Assoc extra) (Dos_lane.error_to_string e)
+    reject ~tool_name ~start_time (Dos_lane.error_to_string e)
   | Error
-      (( Dos_lane.Unreadable _ | Dos_lane.Unsaveable _
+      (( Dos_lane.Unreadable _ | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _
        | Dos_lane.Checkpoint_refused
            (Machine_checkpoint.Corrupt _ | Machine_checkpoint.Unreadable _) ) as e) ->
     Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
@@ -138,8 +172,12 @@ let of_lane ?(extra = []) ~base_path ~tool_name ~start_time
 let of_lane_run ?(extra = []) ~base_path ~tool_name ~start_time
     (result : (Dos_lane.observation * Dos_lane.ran, Dos_lane.error) result) =
   match result with
-  | Ok (o, r) -> of_lane ~base_path ~tool_name ~start_time ~extra:(ran_fields r @ extra) (Ok o)
-  | Error e -> of_lane ~base_path ~tool_name ~start_time ~extra (Error e)
+  | Ok (o, r) ->
+    (match r.Dos_lane.autosave with
+     | Dos_lane.Autosave_failed reason -> Log.DosLog.warn "masc_dos autosave: %s" reason
+     | Dos_lane.Not_attempted | Dos_lane.Autosaved -> ());
+    of_lane ~base_path ~tool_name ~start_time ~extra:(ran_fields r @ extra) (Ok o)
+  | Error e -> of_lane ~base_path ~tool_name ~start_time (Error e)
 ;;
 
 (* What a program wrote on earlier machines, one directory per inventory
@@ -366,40 +404,6 @@ let after_announcing result =
   result
 ;;
 
-(* A call runs up to [Dos_lane.max_steps_per_call] instructions under the
-   lane's stdlib lock, a noticeable fraction of a second. On a system thread
-   the server's other fibers keep running meanwhile; a fiber that reaches
-   the lock waits on its own thread too, since every lane call goes through
-   here. Only the lane call moves: the announcements it queues are posted
-   afterwards, on the fiber, because posting takes an Eio lock. *)
-let off_domain f = Eio_guard.run_in_systhread ~label:"dos-lane" f
-
-(* Autosave: after every call that ran the guest -- it settled, or it
-   stopped at a fault it left loaded -- the machine is written to
-   [Dos_lane.autosave_slot], in the one place every such call passes through
-   ([of_lane_run] and [of_lane] via [handle_load], [handle_step],
-   [handle_press], [handle_click], [handle_type] and [handle_restore]). A
-   call [Dos_lane.ran_the_guest] says did not run the guest -- Held_by,
-   Invalid_request, No_machine, a refused restore -- writes nothing.
-
-   A write that fails does not fail the call: the guest moved either way,
-   and the call's own result is worth more than a checkpoint of it. The
-   failure is reported as a typed field, not swallowed, and logged once. *)
-let autosave_after ~base_path ~who outcome =
-  if Dos_lane.ran_the_guest outcome then
-    match
-      off_domain (fun () ->
-        Dos_lane.save ~who ~dir:(checkpoints_dir ~base_path) ~slot:Dos_lane.autosave_slot)
-    with
-    | Ok _ -> [ ("autosave", `Assoc [ ("saved", `Bool true) ]) ]
-    | Error e ->
-      Log.DosLog.warn "masc_dos autosave: %s" (Dos_lane.error_to_string e);
-      [ ( "autosave"
-        , `Assoc [ ("saved", `Bool false); ("reason", `String (Dos_lane.error_to_string e)) ] )
-      ]
-  else []
-;;
-
 (* A game can run for hours, and the Keeper holding the controller can stop
    in that time. It will never pass, and every other caller would be refused
    until a restart. [holder_left] says whether a holder can no longer act;
@@ -441,11 +445,7 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
        here too: this is the first call a caller makes after a restart, and
        an autosave from before it is worth resuming rather than starting
        over. *)
-    let autosave =
-      match Dos_lane.autosave_status ~dir:(checkpoints_dir ~base_path) with
-      | None -> []
-      | Some s -> [ ("autosave", autosave_status_json s) ]
-    in
+    let autosave = autosave_lookup_fields (lookup_autosave ~base_path) in
     Tool_result.make_ok ~tool_name ~start_time
       ~data:
         (`Assoc
@@ -468,14 +468,15 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
        let loaded =
          off_domain (fun () ->
            Dos_lane.load ~who:agent_name ~ledger_dir:(dos_dir ~base_path)
-             ~saves_dir:(saves_dir ~base_path (String.trim name)) ~program_name ~program_bytes
+             ~saves_dir:(saves_dir ~base_path (String.trim name))
+             ~checkpoint_dir:(checkpoints_dir ~base_path) ~program_name ~program_bytes
              ~files
              ~announce:
                (announce ~author:agent_name
                   (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name)))
        in
-       let extra = core_field :: autosave_after ~base_path ~who:agent_name loaded in
-       after_announcing (of_lane_run ~base_path ~extra ~tool_name ~start_time loaded))
+       after_announcing
+         (of_lane_run ~base_path ~extra:[ core_field ] ~tool_name ~start_time loaded))
 ;;
 
 let handle_eject ~tool_name ~start_time ~agent_name _args =
@@ -539,44 +540,36 @@ let handle_screen ~tool_name ~start_time ~base_path _args =
 let default_steps = Dos_lane.max_steps_per_call
 
 let handle_step ~tool_name ~start_time ~base_path ~who args =
-  let ran =
-    off_domain @@ fun () -> Dos_lane.step ~who
-       ~steps:(get_int args "steps" default_steps)
-       ~until_ready:(get_bool args "until_ready" true)
-  in
   after_announcing @@
-  of_lane_run ~base_path ~extra:(autosave_after ~base_path ~who ran) ~tool_name ~start_time ran
+  of_lane_run ~base_path ~tool_name ~start_time
+    (off_domain @@ fun () -> Dos_lane.step ~who
+       ~steps:(get_int args "steps" default_steps)
+       ~until_ready:(get_bool args "until_ready" true))
 ;;
 
 let handle_press ~tool_name ~start_time ~base_path ~who args =
-  let ran =
-    off_domain @@ fun () -> Dos_lane.press ~who
-       ~keys:(get_string_list args "keys")
-       ~steps:(get_int args "steps" default_steps)
-  in
   after_announcing @@
-  of_lane_run ~base_path ~extra:(autosave_after ~base_path ~who ran) ~tool_name ~start_time ran
+  of_lane_run ~base_path ~tool_name ~start_time
+    (off_domain @@ fun () -> Dos_lane.press ~who
+       ~keys:(get_string_list args "keys")
+       ~steps:(get_int args "steps" default_steps))
 ;;
 
 let handle_click ~tool_name ~start_time ~base_path ~who args =
-  let ran =
-    off_domain @@ fun () -> Dos_lane.click ~who
+  after_announcing @@
+  of_lane_run ~base_path ~tool_name ~start_time
+    (off_domain @@ fun () -> Dos_lane.click ~who
        ~x:(get_int args "x" 0)
        ~y:(get_int args "y" 0)
        ~buttons:(get_int args "buttons" 1)
-       ~steps:(get_int args "steps" default_steps)
-  in
-  after_announcing @@
-  of_lane_run ~base_path ~extra:(autosave_after ~base_path ~who ran) ~tool_name ~start_time ran
+       ~steps:(get_int args "steps" default_steps))
 ;;
 
 let handle_type ~tool_name ~start_time ~base_path ~who args =
-  let ran =
-    off_domain @@ fun () -> Dos_lane.type_text ~who ~text:(get_string args "text" "")
-       ~steps:(get_int args "steps" default_steps)
-  in
   after_announcing @@
-  of_lane_run ~base_path ~extra:(autosave_after ~base_path ~who ran) ~tool_name ~start_time ran
+  of_lane_run ~base_path ~tool_name ~start_time
+    (off_domain @@ fun () -> Dos_lane.type_text ~who ~text:(get_string args "text" "")
+       ~steps:(get_int args "steps" default_steps))
 ;;
 
 (* Addresses arrive as hex strings ("b8000", "0xB8000") because that is how
@@ -602,7 +595,8 @@ let handle_peek ~tool_name ~start_time ~base_path args =
         (`Assoc
           [ ("address", `String (Printf.sprintf "%05x" address)); ("hex", `String hex) ])
       ()
-  | Error e -> reject_for ~base_path ~tool_name ~start_time e
+  | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
+  | Error e -> reject ~tool_name ~start_time (Dos_lane.error_to_string e)
 ;;
 
 (* ---------- checkpoints ---------- *)
@@ -671,8 +665,6 @@ let handle_restore ~tool_name ~start_time ~base_path ~agent_name args =
                (Printf.sprintf "%s 님이 DOS 기계를 %s 체크포인트로 되돌렸습니다" agent_name
                   (Machine_checkpoint.slot_to_string slot))))
     in
-    let extra =
-      slot_field slot :: core_field :: autosave_after ~base_path ~who:agent_name restored
-    in
-    after_announcing (of_lane ~base_path ~extra ~tool_name ~start_time restored)
+    after_announcing
+      (of_lane ~base_path ~extra:[ slot_field slot; core_field ] ~tool_name ~start_time restored)
 ;;

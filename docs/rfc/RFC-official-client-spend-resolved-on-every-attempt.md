@@ -123,15 +123,15 @@ related: ["official-client-conversation-in-masc"]
 | 단계 | 내용 | 바뀌는 합계 |
 |---|---|---|
 | 1 (#39000) | D4: Codex 를 누적값 + `request_context` 로. `request_context` 선택 출력과 누적값 필드 정리 | Codex 성공 턴이 마지막 요청에서 턴 전체로 |
-| 2a | D1 재료 운반(D5.1 fill 포함), D2 fold, D3(autonomous 실패 분기): 실패 턴의 모든 시도를 계산해 같은 commit 에 합계·커서를 넣고, commit 뒤에 `Resolved_attempt_delta` 행을 쓴다. 성공 경로 커서 키를 후보 id 로 | autonomous 실패 턴 |
-| 2b | 성공 경로도 재료에서 계산: 진 시도 행, 이긴 시도의 앞 대화, Agent Core 응답 합. 성공 경로 행도 commit 뒤로 | 진 시도 · Agent Core 앞 응답 |
+| 2a (#39042, #39047) | D1 재료 운반(D5.1 fill 포함), D2 fold, D3(autonomous 실패 분기): 실패 턴의 모든 시도를 계산해 같은 commit 에 합계·커서를 넣고, commit 뒤에 `Resolved_attempt_delta` 행을 쓴다. 성공 경로 커서 키를 후보 id 로 | autonomous 실패 턴 |
+| 2b (#39051) | 성공 경로도 재료에서 계산: 진 시도 행, 이긴 시도의 앞 대화, Agent Core 응답 합. 성공 경로 행도 commit 뒤로 | 진 시도 · Agent Core 앞 응답 |
 | 3 | D3(direct lane): 실패 commit 과 turn id | direct lane 실패 턴 |
 | 4 | (측정 뒤) 커서를 (런타임, 대화)마다 | `baseline_missing` 으로 잃는 턴 |
 
 - 4단계 판단 기준: 2단계 배포 뒤 1주일 동안 Keeper 별 `baseline_missing` 턴 수와 그 턴들의 raw 행 입력 합. 이 값이 D4 의 전환 비율보다 커졌으면 한다. meta 스키마를 바꾸는 일이라 따로 정한다.
 - 2단계를 둘로 나눈 까닭: 가장 큰 손실은 실패한 턴이다(Codex 중단 턴 384개 입력 542.9M, §1). 2a 가 이것부터 고친다. 성공 경로를 재료로 옮기는 일은 이긴 시도의 해석을 받는 곳이 많아서 따로 한다.
 - 1·2단계는 운영 합계를 바꾼다. 각 PR 에 `### Upgrade notes` 로 "이 버전 앞뒤 합계는 바로 비교할 수 없다"를 적는다.
-- 2a 는 두 PR 이다. 2a-1(#39042)은 재료를 턴 밖으로 운반하고, 2a-2 는 autonomous 실패 턴을 계산해 attempt 행을 쓴다.
+- 2a 는 두 PR 이다. 2a-1(#39042)은 재료를 턴 밖으로 운반하고, 2a-2(#39047)는 autonomous 실패 턴을 계산해 attempt 행을 쓴다. 2b(#39051)는 `run_result.usage_basis` 를 지우고 성공 턴도 재료로 계산한다.
 
 ## 5. 검증
 

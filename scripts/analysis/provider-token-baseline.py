@@ -48,13 +48,16 @@ def stats(values):
 ledger = read_rows(args.masc_root / 'costs' / month / (stem + '.jsonl'))
 usage = {}
 for row in ledger:
-    # Never combine raw per-round observations with settled turn deltas.
-    key = (row.get('model'), row.get('usage_projection'), row.get('usage_trust'))
+    # Never combine raw per-round observations with settled turn deltas, nor
+    # raw rows of different scopes: a conversation-cumulative row repeats
+    # every earlier turn.
+    key = (row.get('model'), row.get('usage_projection'), row.get('usage_scope'),
+           row.get('usage_trust'))
     group = usage.setdefault(key, [])
     group.append(row)
 usage_rows = []
 for key, rows in sorted(usage.items(), key=lambda item: json.dumps(item[0])):
-    usage_rows.append({'model': key[0], 'projection': key[1], 'trust': key[2],
+    usage_rows.append({'model': key[0], 'projection': key[1], 'scope': key[2], 'trust': key[3],
                       'rows': len(rows),
                       'tokens': {f: stats([r.get(f) for r in rows]) for f in
                                  ['input_tokens', 'output_tokens', 'cache_read_tokens',

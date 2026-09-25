@@ -8,10 +8,14 @@
 (* Runtime types                                                     *)
 (* ================================================================ *)
 
-type request_context = {
-  input_tokens : int;
+type request_cache = {
   cache_creation_input_tokens : int;
   cache_read_input_tokens : int;
+}
+
+type request_context = {
+  input_tokens : int;
+  cache : request_cache option;
   output_tokens : int option;
 }
 

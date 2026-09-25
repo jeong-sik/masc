@@ -1115,7 +1115,8 @@ let test_terminal_generic_deferral_keeps_durable_stimulus_stop () =
    occupied travels, apart from the response usage. *)
 let test_host_stop_carries_request_context_not_spend () =
   let context : Runtime_observation.request_context =
-    { input_tokens = 305; cache_creation_input_tokens = 0; cache_read_input_tokens = 5
+    { input_tokens = 305
+    ; cache = Some { cache_creation_input_tokens = 0; cache_read_input_tokens = 5 }
     ; output_tokens = None }
   in
   let project request_context =

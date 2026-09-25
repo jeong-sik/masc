@@ -2209,11 +2209,20 @@ let run_turn
                this record's readers ask what one request carried. Its output
                is there when the runtime reports a final count (Codex); the
                turn's output goes to [turn_output_tokens] below, under its own
-               scope. *)
+               scope. Its cache split is absent when the input is an estimate
+               of the whole context (Codex after a compaction). *)
             { input_tokens = Some context.input_tokens
             ; output_tokens = context.output_tokens
-            ; cache_creation_input_tokens = Some context.cache_creation_input_tokens
-            ; cache_read_input_tokens = Some context.cache_read_input_tokens
+            ; cache_creation_input_tokens =
+                Option.map
+                  (fun (cache : Runtime_observation.request_cache) ->
+                     cache.cache_creation_input_tokens)
+                  context.cache
+            ; cache_read_input_tokens =
+                Option.map
+                  (fun (cache : Runtime_observation.request_cache) ->
+                     cache.cache_read_input_tokens)
+                  context.cache
             ; scope = Runtime_usage_scope.Per_request
             }
           | Ok result when result.usage_reported ->

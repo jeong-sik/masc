@@ -17,11 +17,19 @@ type runtime_attempt = {
   error : string option;
 }
 
+type request_cache = {
+  cache_creation_input_tokens : int;
+  cache_read_input_tokens : int;
+}
+
 type request_context = {
   input_tokens : int;
       (** Inclusive: uncached input plus both cache components. *)
-  cache_creation_input_tokens : int;
-  cache_read_input_tokens : int;
+  cache : request_cache option;
+      (** How [input_tokens] splits across the cache, when the runtime
+          reports the split. [None] when [input_tokens] is an estimate of
+          the whole context (Codex after a compaction replaces the
+          history). *)
   output_tokens : int option;
       (** That request's output, when the runtime reports its final count
           (Codex's per-response frame). [None] when only a mid-stream

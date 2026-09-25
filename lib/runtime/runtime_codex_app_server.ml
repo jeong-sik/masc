@@ -103,15 +103,61 @@ type token_usage =
   ; total_tokens : int
   }
 
-(* The two breakdowns one thread/tokenUsage/updated frame carries, which
-   always arrive together: [last], the newest request (the context it
-   occupied and its final output), and [thread_total], the thread's running
-   count, from which a turn's spend is resolved against the previous count
-   of the same thread. *)
+type last_usage =
+  | Request_usage of token_usage
+  | Context_estimate of { estimated_tokens : int }
+
 type frame_usage =
-  { last : token_usage
-  ; thread_total : token_usage
-  }
+  | Counted of
+      { last : last_usage
+      ; thread_total : token_usage
+      }
+  | Context_window_filled of { context_window : int }
+
+type turn_usage =
+  | Thread_count of
+      { last : last_usage
+      ; thread_total : token_usage
+      }
+  | Thread_count_replaced
+
+(* Both zero-count shapes are the whole breakdown Codex writes by name
+   (rust-v0.156.1): [TokenUsage { total_tokens: n, ..TokenUsage::default() }]
+   in recompute_token_usage for [last] and in fill_to_context_window for
+   [total]. A response's counts always carry input, so a breakdown with no
+   counts but a total is one of those two and never a request. Measured
+   2026-09-25 over 29,088 Keeper and interactive frames: 266 estimates and
+   332 fills, each fill its thread's final frame. *)
+let only_total_tokens (usage : token_usage) =
+  usage.input_tokens = 0
+  && usage.cached_input_tokens = 0
+  && usage.cache_write_input_tokens = 0
+  && usage.output_tokens = 0
+  && usage.reasoning_output_tokens = 0
+  && usage.total_tokens > 0
+;;
+
+let frame_usage_of_breakdowns ~last ~thread_total =
+  if only_total_tokens thread_total
+  then Context_window_filled { context_window = thread_total.total_tokens }
+  else
+    let last =
+      if only_total_tokens last
+      then Context_estimate { estimated_tokens = last.total_tokens }
+      else Request_usage last
+    in
+    Counted { last; thread_total }
+;;
+
+(* A fill replaces the running count for the rest of the turn: a count read
+   after it starts from zero again, so it cannot stand for the turn. *)
+let fold_turn_usage seen frame =
+  match seen, frame with
+  | Some Thread_count_replaced, (Counted _ | Context_window_filled _)
+  | (None | Some (Thread_count _)), Context_window_filled _ -> Thread_count_replaced
+  | (None | Some (Thread_count _)), Counted { last; thread_total } ->
+    Thread_count { last; thread_total }
+;;
 
 type turn_result =
   { thread_id : string
@@ -122,9 +168,9 @@ type turn_result =
   ; subscription : subscription
   ; user_agent : string option
   ; resumed : bool
-  ; usage : frame_usage option
-    (* The newest thread/tokenUsage/updated frame of the turn; [None] when
-       none arrived before turn/completed. *)
+  ; usage : turn_usage option
+    (* The turn's thread/tokenUsage/updated frames, folded; [None] when none
+       arrived before turn/completed. *)
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
@@ -1402,8 +1448,8 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
        the thread's running count, so a repeat reports the same count and
        adds nothing to a spend resolved from it. That count is reported
        here, where it is read, so a turn that later fails still leaves what
-       it spent. [seen_usage] keeps the newest frame: [last] for the turn
-       result's context occupancy, [total] for its spend. *)
+       it spent. [seen_usage] folds the turn's frames: the newest [last]
+       for the turn result's context occupancy, [total] for its spend. *)
     Option.iter
       (fun (_last, thread_total) ->
          emit_stream_event
@@ -1412,7 +1458,8 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
       frame;
     let seen_usage =
       match frame with
-      | Some _ -> frame
+      | Some (last, thread_total) ->
+        Some (fold_turn_usage seen_usage (frame_usage_of_breakdowns ~last ~thread_total))
       | None -> seen_usage
     in
     await_turn_terminal
@@ -1683,7 +1730,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
   in
   emit_stream_event on_stream_event (Turn_started { turn_id; model });
   let tool_call_count = ref 0 in
-  let* text, newest_frame =
+  let* text, turn_usage =
     await_turn_terminal
       io
       ~tools:dynamic_tools
@@ -1707,8 +1754,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
     ; subscription
     ; user_agent
     ; resumed
-    ; usage =
-        Option.map (fun (last, thread_total) -> { last; thread_total }) newest_frame
+    ; usage = turn_usage
     }
 ;;
 

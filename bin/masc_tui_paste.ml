@@ -84,23 +84,6 @@ let feed decoder byte =
     None
   end
 
-let read ~next_byte =
-  let decoder = create () in
-  let finished = ref false in
-  let ended = ref false in
-  let result = ref None in
-  while not (!finished || !ended) do
-    match next_byte () with
-    | None -> ended := true
-    | Some byte ->
-        (match feed decoder byte with
-         | Some paste -> result := Some paste; finished := true
-         | None -> ())
-  done;
-  match !result with
-  | Some paste -> paste
-  | None -> finish_unterminated decoder
-
 (* Dragging a file onto a terminal, or copying it in Finder, pastes the path
    the way a shell would need it: every space backslash-escaped. The draft is
    not a shell, so what lands in it is a path nobody can open —

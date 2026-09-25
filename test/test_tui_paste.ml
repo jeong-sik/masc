@@ -18,7 +18,23 @@ let of_string bytes =
     end
 ;;
 
-let read bytes = Masc_tui_paste.read ~next_byte:(of_string bytes)
+(* The reader feeds the decoder one byte at a time and ends an unterminated
+   paste with [finish_unterminated] on the operator's Ctrl-C. These tests do
+   the same, with the stream running dry standing in for that Ctrl-C. *)
+let read_from next_byte =
+  let decoder = Masc_tui_paste.create () in
+  let rec loop () =
+    match next_byte () with
+    | None -> Masc_tui_paste.finish_unterminated decoder
+    | Some byte -> (
+        match Masc_tui_paste.feed decoder byte with
+        | Some paste -> paste
+        | None -> loop ())
+  in
+  loop ()
+;;
+
+let read bytes = read_from (of_string bytes)
 
 let test_newlines_stay_text () =
   let paste = read ("first\nsecond\nthird" ^ Masc_tui_paste.end_marker) in
@@ -120,7 +136,7 @@ let test_the_cap_counts_what_it_drops () =
 let test_the_cap_still_finds_the_marker () =
   let source = String.make (Masc_tui_paste.max_bytes + 10) 'x' in
   let next = of_string (source ^ Masc_tui_paste.end_marker ^ "q") in
-  let _ = Masc_tui_paste.read ~next_byte:next in
+  let _ = read_from next in
   check (option char) "the byte after the marker is the next key" (Some 'q')
     (next ())
 ;;

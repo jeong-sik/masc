@@ -26,7 +26,10 @@ type decoder
 
 val create : unit -> decoder
 val feed : decoder -> char -> t option
-(** Consume one byte. [None] means the closing marker has not arrived yet. *)
+(** Consume one byte. [None] means the closing marker has not arrived yet.
+    Past {!max_bytes} the bytes are still matched against {!end_marker} --
+    the marker has to be consumed, or the tail of the paste arrives as
+    keystrokes -- and counted in [dropped] instead of kept. *)
 
 val finish_unterminated : decoder -> t
 (** Keep all bytes received so far, including a partial closing marker, when
@@ -44,16 +47,6 @@ val max_bytes : int
 (** How much of one paste is kept. A terminal hands over whatever was on the
     clipboard, and the draft holds it until it is sent; an accidental paste of
     a large file should not decide how much memory this process takes. *)
-
-val read : next_byte:(unit -> char option) -> t
-(** Read to {!end_marker}.
-
-    Past {!max_bytes} the bytes are still read -- the marker has to be
-    consumed, or the tail of the paste arrives as keystrokes -- and counted
-    instead of kept.
-
-    [next_byte] returning [None] ends the read: the terminal went away
-    mid-paste, and what arrived is returned rather than dropped. *)
 
 val unescaped_path : string -> string option
 (** The path a paste names, when the paste is one.

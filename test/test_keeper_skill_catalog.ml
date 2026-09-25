@@ -648,6 +648,54 @@ let test_partition_documents_isolates_rejections () =
     failf "expected one isolated rejection, got %d" (List.length rejected)
 ;;
 
+(* keeper_skill returns an instruction body as one inline tool result. A
+   catalog that offered a body over that boundary would fail every read, so
+   both catalog paths reject it with the typed reason instead. *)
+let test_unreadable_body_is_rejected_not_offered () =
+  let max_bytes = Common.max_tool_result_wire_bytes in
+  let document =
+    "---\nname: long-guide\ndescription: A body past the inline read boundary.\n---\n"
+    ^ String.make (max_bytes + 1) 'x'
+  in
+  let expect_body_rejection label = function
+    | Skill_catalog.Body_too_large_to_read { skill; bytes; max_bytes = reported } ->
+      check string (label ^ ": skill") "long-guide" skill;
+      check int (label ^ ": bytes") (max_bytes + 1) bytes;
+      check int (label ^ ": max_bytes") max_bytes reported
+    | error ->
+      fail (label ^ ": wrong rejection: " ^ Skill_catalog.error_to_string error)
+  in
+  let catalog, rejections =
+    Skill_catalog.partition_documents
+      [ "release-checklist", instruction_document; "long-guide", document ]
+  in
+  check
+    (list string)
+    "readable skill stays offered"
+    [ "release-checklist" ]
+    (Skill_catalog.skills catalog
+     |> List.map (fun skill -> skill.Skill_catalog.name));
+  (match rejections with
+   | [ { Skill_catalog.directory; error } ] ->
+     check string "rejection names its package" "long-guide" directory;
+     expect_body_rejection "document catalog" error
+   | rejections ->
+     failf "expected one rejection, got %d" (List.length rejections));
+  let snapshot_catalog, diagnostics =
+    Skill_catalog.of_snapshot (snapshot_of_document ~directory:"long-guide" document)
+  in
+  check
+    int
+    "snapshot catalog does not offer it"
+    0
+    (List.length (Skill_catalog.skills snapshot_catalog));
+  match diagnostics with
+  | [ diagnostic ] ->
+    expect_body_rejection "snapshot catalog" diagnostic.Skill_catalog.error
+  | diagnostics ->
+    failf "expected one projection diagnostic, got %d" (List.length diagnostics)
+;;
+
 let skill_catalog_of documents =
   match Skill_catalog.partition_documents documents with
   | catalog, [] -> catalog
@@ -811,6 +859,10 @@ let () =
             "partition sorts by name and reports duplicates"
             `Quick
             test_partition_documents_sorts_and_reports_duplicates
+        ; test_case
+            "unreadable body is rejected, not offered"
+            `Quick
+            test_unreadable_body_is_rejected_not_offered
         ; test_case
             "partition_documents isolates rejections"
             `Quick

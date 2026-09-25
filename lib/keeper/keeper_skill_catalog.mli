@@ -82,6 +82,14 @@ type error =
           The entry stays a projected instruction skill; the diagnostic tells
           the author why no composition tool appeared. *)
   | Duplicate_skill of { name : string }
+  | Body_too_large_to_read of
+      { skill : string
+      ; bytes : int
+      ; max_bytes : int
+      }
+      (** An instruction body over {!Common.max_tool_result_wire_bytes}, the
+          inline tool-result boundary [keeper_skill] returns it through. Such
+          a Skill would be offered and then refused on every read. *)
 
 type rejected_document = private
   { directory : string
@@ -147,20 +155,17 @@ val parse_skill : directory:string -> string -> (skill, error) result
 (** Parse one SKILL.md document. [directory] is the skill's directory name;
     {!Agent_core.Skill_document.decode} enforces the frontmatter contract. A
     composition block must declare exactly one composition and its [name]
-    must equal the skill name. *)
+    must equal the skill name. An instruction body must fit the inline
+    tool-result boundary ([Body_too_large_to_read]). *)
 
 type authored_source_error =
   | Source_too_large of { bytes : int; max_bytes : int }
-  | Body_too_large_to_read of { bytes : int; max_bytes : int }
-      (** The parsed body exceeds {!Common.max_tool_result_wire_bytes}, the
-          inline tool-result boundary [keeper_skill] reads it through. *)
   | Invalid_document of error
 
 val validate_authored_source :
   directory:string -> string -> (skill, authored_source_error) result
 (** Apply the editor's source-size limit and {!parse_skill} to proposed document
-    bytes, then refuse a body no Keeper could read back. This neither publishes
-    a Skill nor proves its execution succeeds. *)
+    bytes. This neither publishes a Skill nor proves its execution succeeds. *)
 
 val partition_documents :
   (string * string) list -> t * rejected_document list

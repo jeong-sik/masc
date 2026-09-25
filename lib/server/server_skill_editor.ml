@@ -469,11 +469,6 @@ let validate_source ~directory source_text =
   |> Result.map_error (function
     | Keeper_skill_catalog.Source_too_large { bytes; max_bytes } ->
       Source_too_large { bytes; max_bytes }
-    | Body_too_large_to_read { bytes; max_bytes } ->
-      Validation_failed
-        (Printf.sprintf
-           "Skill body is %d bytes; keeper_skill reads at most %d bytes inline"
-           bytes max_bytes)
     | Invalid_document error ->
       Validation_failed (Keeper_skill_catalog.error_to_string error))
 ;;

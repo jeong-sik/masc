@@ -244,12 +244,20 @@ let add_routes ~sw router =
                        ; "window_minutes", `Int window ])
              ~compute:(fun () ->
                let keeper_names = Keeper_meta_store.keeper_names config in
+               (* Only Keepers whose meta reads have a row. A Keeper whose meta
+                  is there but does not read is reported once, by the operator
+                  snapshot's [keepers_unread], which the briefing carries; a
+                  reader that asks this answer for it finds no row and draws it
+                  unknown. *)
                let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | _ -> None
-                 ) keeper_names
+                 List.filter_map
+                   (fun name ->
+                     match Keeper_meta_store.read_meta_presence config name with
+                     | Ok (Keeper_meta_store.Meta_present m) -> Some m
+                     | Ok Keeper_meta_store.Meta_absent
+                     | Ok (Keeper_meta_store.Meta_not_current _)
+                     | Error _ -> None)
+                   keeper_names
                in
                (* NDT-OK: request-time clock for a cost window; a dashboard read endpoint, not durable output. *)
                Dashboard_http_keeper.keeper_cost_aggregates_json ~config
@@ -259,49 +267,46 @@ let add_routes ~sw router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/provider-usage-history" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let days =
+         (* The window is parsed here, once; [read] takes the variant and has
+            no count of its own to check. *)
+         let window =
            match query_param req "days" with
-           | None -> Some 14
-           | Some raw -> int_of_string_opt raw
+           | None -> Some Server_provider_usage_history.Fourteen_days
+           | Some raw ->
+               Option.bind (int_of_string_opt raw)
+                 Server_provider_usage_history.window_of_days
          in
          let status, json =
-           match days with
-           | Some (1 | 7 | 14 as days) ->
+           match window with
+           | Some window ->
                let config = Mcp_server.workspace_config state in
-               (* NDT-OK: the request clock bounds a read-only UTC day window;
-                  no missing provider report is synthesized. *)
-               let request_now = Unix.gettimeofday () in
-               if Server_provider_usage_history.failure_in_window
-                    ~now:request_now ~days then
-                 `OK, `Assoc [ "state", `String "unavailable"
-                             ; "reason", `String "provider usage history incomplete: a report could not be stored" ]
-               else
-                 let key = cache_key [ config.base_path; string_of_int days ] in
-                 let json =
-                   cached_dashboard_json ~sw ~sync_first:false
-                     ~cache:dashboard_provider_history_cache ~key
-                     ~placeholder:(`Assoc [ "state", `String "loading" ])
-                     ~compute:(fun () ->
-                       let result =
-                         (* NDT-OK: compute time bounds this read-only history
-                            after an asynchronous cache refresh starts. *)
-                         let compute_now = Unix.gettimeofday () in
-                         try Server_provider_usage_history.read config
-                               ~now:compute_now ~days
-                         with Eio.Cancel.Cancelled _ as exn -> raise exn
-                            | exn ->
-                                Log.Server.warn "provider usage history crashed: %s"
-                                  (Printexc.to_string exn);
-                                Error "provider usage history store unavailable"
-                       in
-                       match result with
-                       | Ok json -> json
-                       | Error detail ->
-                           `Assoc [ "state", `String "unavailable"
-                                  ; "reason", `String detail ])
-                 in
-                 `OK, redact_provider_history_cache_error json
-           | Some _ | None ->
+               let days = Server_provider_usage_history.days_of_window window in
+               let key = cache_key [ config.base_path; string_of_int days ] in
+               let json =
+                 cached_dashboard_json ~sw ~sync_first:false
+                   ~cache:dashboard_provider_history_cache ~key
+                   ~placeholder:(`Assoc [ "state", `String "loading" ])
+                   ~compute:(fun () ->
+                     let result =
+                       (* NDT-OK: compute time bounds this read-only history
+                          after an asynchronous cache refresh starts. *)
+                       let compute_now = Unix.gettimeofday () in
+                       try Server_provider_usage_history.read config
+                             ~now:compute_now ~window
+                       with Eio.Cancel.Cancelled _ as exn -> raise exn
+                          | exn ->
+                              Log.Server.warn "provider usage history crashed: %s"
+                                (Printexc.to_string exn);
+                              Error "provider usage history store unavailable"
+                     in
+                     match result with
+                     | Ok json -> json
+                     | Error detail ->
+                         `Assoc [ "state", `String "unavailable"
+                                ; "reason", `String detail ])
+               in
+               `OK, redact_provider_history_cache_error json
+           | None ->
                `Bad_request,
                `Assoc [ "ok", `Bool false
                       ; "error", `String "days must be 1, 7, or 14" ]

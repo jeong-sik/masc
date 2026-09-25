@@ -25,10 +25,6 @@ val load : Workspace_utils.config -> (t list, string) result
     recovery mirror is an error, rather than an empty snapshot. There is at
     most one observation per Goal; a new one replaces its previous revision. *)
 
-val cache_generation : unit -> int
-(** Changes after a successful Goal or measurement primary write. The dashboard
-    includes it in the goal response cache key. *)
-
 val projection :
   (t list, string) result -> Goal_store.goal -> Yojson.Safe.t
 (** Explicit reported, not_recorded, or unavailable state for a Goal. *)

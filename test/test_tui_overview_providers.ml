@@ -19,15 +19,15 @@ let resolved state_word =
        {|{
   "provider_usage_windows_since": 1790179140.2,
   "provider_usage_windows": [
-    { "scope": "provider:codex", "providers": ["codex"],
+    { "scope": "provider:codex", "scope_id": "id-codex", "providers": ["codex"],
       "state": "not_reported_since_start", "windows": [] },
-    { "scope": "provider:kimi", "providers": ["kimi"], "state": "reported",
+    { "scope": "provider:kimi", "scope_id": "id-kimi", "providers": ["kimi"], "state": "reported",
       "windows": [
         { "limit_id": null, "window": {"kind": "duration_minutes", "minutes": 300},
           "utilization": {"unit": "percent", "value": 100},
           "resets_at": 1790179580, "observed_at": 1790170000.0,
           "source": "codex.account_rate_limits_updated" } ] },
-    { "scope": "provider:claude_code", "providers": ["claude_code"], "state": %S,
+    { "scope": "provider:claude_code", "scope_id": "id-claude_code", "providers": ["claude_code"], "state": %S,
       "windows": [
         { "limit_id": null, "window": {"kind": "five_hour"},
           "utilization": {"unit": "fraction", "value": 0.67},
@@ -37,7 +37,7 @@ let resolved state_word =
           "utilization": {"unit": "fraction", "value": 0.44},
           "resets_at": 1790700000, "observed_at": 1790180000.0,
           "source": "claude_code.rate_limit_event" } ] },
-    { "scope": "provider:ollama_cloud", "providers": ["ollama_cloud"],
+    { "scope": "provider:ollama_cloud", "scope_id": "id-ollama_cloud", "providers": ["ollama_cloud"],
       "state": "not_reported_since_start", "windows": [] }
   ]
 }|}
@@ -223,7 +223,7 @@ let test_unknown_state_is_rejected () =
 
 let test_history_preserves_reported_days_and_units () =
   let json = Yojson.Safe.from_string
-    {|{"days":14,"generated_at":1780000000.0,"sampling":"latest_provider_report_per_utc_day","points":[{"scope_id":"abc12345","kind":"five_hour","limit_id":null,"unit":"fraction","value":0.4,"observed_at":1779999900.0,"source":"codex.account_rate_limits_read","resets_at":null}]}|}
+    {|{"days":14,"generated_at":1780000000.0,"sampling":"latest_provider_report_per_utc_day","unreadable_reports":0,"points":[{"scope_id":"abc12345","kind":"five_hour","limit_id":null,"unit":"fraction","value":0.4,"observed_at":1779999900.0,"source":"codex.account_rate_limits_read","resets_at":null}]}|}
   in
   match Tui_decode.decode_provider_usage_history json with
   | Error detail -> fail detail
@@ -238,6 +238,51 @@ let test_history_preserves_reported_days_and_units () =
             | Tui_decode.Utilization_percent _ -> fail "unit changed")
        | _ -> fail "expected one reported point")
 
+(* The trend is built once from the answer. A day without a report is the
+   no-report mark, never the lowest bar; a scope whose only point is outside
+   the window keeps its row and says it reported no day. *)
+let test_trend_is_built_from_the_answer () =
+  let point ~scope_id ~observed_at unit : Tui_decode.provider_usage_history_point =
+    { puhp_scope_id = scope_id; puhp_kind = "five_hour"; puhp_limit_id = None;
+      puhp_unit = unit; puhp_observed_at = observed_at }
+  in
+  let generated_at = 1780000000.0 in
+  let day = 86400.0 in
+  let history : Tui_decode.provider_usage_history =
+    { puh_days = 3; puh_generated_at = generated_at; puh_unreadable_reports = 1;
+      puh_points =
+        [ point ~scope_id:"s1" ~observed_at:(generated_at -. (2.0 *. day))
+            (Tui_decode.Utilization_fraction 0.0)
+        ; point ~scope_id:"s1" ~observed_at:generated_at
+            (Tui_decode.Utilization_percent 100)
+        ; point ~scope_id:"s0" ~observed_at:(generated_at -. (30.0 *. day))
+            (Tui_decode.Utilization_fraction 0.5)
+        ] }
+  in
+  let trend =
+    Masc_tui_usage_trend.of_history ~share:Providers.share_of_full history
+  in
+  check int "the unreadable count is carried" 1 trend.unreadable_reports;
+  let none = Masc_tui_usage_trend.no_report_mark in
+  check (list (triple string string int)) "rows, marks and reported days"
+    [ ("s0", none ^ none ^ none, 0)
+    ; ("s1", "\xe2\x96\x81" ^ none ^ "\xe2\x96\x88", 2)
+    ]
+    (List.map
+       (fun (row : Masc_tui_usage_trend.row) ->
+         (row.scope_id, row.marks, row.reported_days))
+       trend.rows)
+
+(* The id the section names a scope by is the server's, carried on the row,
+   so the trend's points and the current windows cannot disagree. *)
+let test_scope_id_is_the_servers () =
+  match Tui_decode.decode_provider_usage_windows (resolved "reported") with
+  | Error err -> failf "fixture should decode: %s" err
+  | Ok windows ->
+      check (list string) "ids as the server sent them"
+        [ "id-codex"; "id-kimi"; "id-claude_code"; "id-ollama_cloud" ]
+        (List.map Providers.scope_id windows.puws_accounts)
+
 let () =
   run "tui_overview_providers"
     [ ( "providers"
@@ -248,5 +293,8 @@ let () =
         ; test_case "unknown state is rejected" `Quick test_unknown_state_is_rejected
         ; test_case "history uses reported points" `Quick
             test_history_preserves_reported_days_and_units
+        ; test_case "trend is built from the answer" `Quick
+            test_trend_is_built_from_the_answer
+        ; test_case "scope id is the server's" `Quick test_scope_id_is_the_servers
         ] )
     ]

@@ -63,7 +63,6 @@ let backlog (tasks : Masc_domain.task list) =
 
 type line =
   | Task_row of { index : int; task : Tui_decode.task }
-  | More_active of int
   | Nothing_active
   | Todo_backlog of backlog
 
@@ -99,24 +98,31 @@ let lines ~height ~selected tasks backlog =
     row_lines ~first:0 ~count:held_count @ trailer
   else if held_count <= height then row_lines ~first:0 ~count:held_count
   else
-    (* One line says how many rows were left out. It and the backlog line
-       are drawn only while at least one task row is still drawn beside
-       them; a single row is spent on a task. *)
-    let count_line = 1 in
-    let trailer =
-      if height - trailer_count - count_line >= 1 then trailer else []
-    in
-    let count_lines = if height - count_line >= 1 then count_line else 0 in
-    let visible = height - List.length trailer - count_lines in
+    (* How many rows were left out is said in the title, which is drawn
+       whatever the height. It used to be a line here, and a line costs a
+       row: at the heights where the pane is squeezed to one, that row was
+       spent on the count and then the count itself was dropped -- the pane
+       drew one of twenty-three and said nothing. *)
+    let trailer = if height - trailer_count >= 1 then trailer else [] in
+    let visible = height - List.length trailer in
     let first =
       match selected with
       | None -> 0
       | Some index ->
           min (max 0 (index - visible + 1)) (max 0 (held_count - visible))
     in
-    let window = row_lines ~first ~count:visible in
-    if count_lines = 0 then window
-    else window @ (More_active (held_count - visible) :: trailer)
+    row_lines ~first ~count:visible @ trailer
+
+(* How many held rows the pane could not draw at this height. The title says
+   it, the way the Team title above says its own. *)
+let held_back ~height ~selected tasks backlog =
+  let drawn =
+    List.length
+      (List.filter
+         (function Task_row _ -> true | Nothing_active | Todo_backlog _ -> false)
+         (lines ~height ~selected tasks backlog))
+  in
+  max 0 (List.length (rows tasks) - drawn)
 
 let row_of tasks ~task_id =
   let rec find index = function
@@ -190,6 +196,64 @@ let work_step tasks ~selected direction =
       Option.map (fun (task : Tui_decode.task) -> task.id)
         (List.nth_opt rows next)
 
+type focus = No_task_focus | Task_focus of { selected : string option }
+
+let selection = function
+  | No_task_focus -> None
+  | Task_focus { selected } -> selected
+
+let is_focused = function No_task_focus -> false | Task_focus _ -> true
+
+let focus_list tasks =
+  Task_focus
+    { selected =
+        Option.map (fun (task : Tui_decode.task) -> task.id)
+          (List.nth_opt (work_rows tasks) 0) }
+
+let toggle tasks = function
+  | No_task_focus -> focus_list tasks
+  | Task_focus _ -> No_task_focus
+
+let land_on tasks ~task_id =
+  match work_selected_index tasks ~selected:(Some task_id) with
+  | Some _ -> Task_focus { selected = Some task_id }
+  | None -> Task_focus { selected = None }
+
+let move tasks focus direction =
+  match focus with
+  | No_task_focus -> No_task_focus
+  | Task_focus { selected } ->
+      Task_focus { selected = work_step tasks ~selected direction }
+
+let reconcile tasks focus =
+  match focus with
+  | No_task_focus | Task_focus { selected = None } -> (focus, None)
+  | Task_focus { selected = Some task_id } -> (
+      match work_selected_index tasks ~selected:(Some task_id) with
+      | Some _ -> (focus, None)
+      | None -> (Task_focus { selected = None }, Some task_id))
+
+type rows_reading =
+  | Rows_unread
+  | Rows_read of Tui_decode.task list
+  | Rows_unavailable of string
+
+let after_read reading focus =
+  match reading with
+  | Rows_unread | Rows_unavailable _ -> (focus, None)
+  | Rows_read rows -> reconcile rows focus
+
+type opening = Open of Tui_decode.task | No_held_task | No_selection
+
+let opening tasks focus =
+  match focus with
+  | No_task_focus -> None
+  | Task_focus { selected } -> (
+      match work_selected_task tasks ~selected, work_rows tasks with
+      | Some task, _ -> Some (Open task)
+      | None, [] -> Some No_held_task
+      | None, _ :: _ -> Some No_selection)
+
 let age_text ~age_text ~now since =
   match since with
   | None -> "?"
@@ -198,7 +262,6 @@ let age_text ~age_text ~now since =
 let summary_text ~age_text:format ~now line =
   match line with
   | Task_row _ -> None
-  | More_active count -> Some (Printf.sprintf "+%d more active" count)
   | Nothing_active -> Some "no task in progress"
   | Todo_backlog { todo_count; oldest_created_at } ->
       Some

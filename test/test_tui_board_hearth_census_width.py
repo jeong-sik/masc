@@ -100,10 +100,20 @@ def run(executable: str) -> None:
         # Never 100: the scenario opens there, and resizing to the width the
         # terminal already has sends no SIGWINCH, so nothing redraws.
         for columns in (96, 130, 160):
-            drawn = h.resize_and_wait(process, fd, output, rows=30,
-                                      columns=columns, needle=CENSUS_ROW,
-                                      controls=(h.FULL_REDRAW,))
-            row = census_row(h.screen_rows(drawn), columns)
+            h.resize_and_wait(process, fd, output, rows=30,
+                              columns=columns, needle=CENSUS_ROW,
+                              controls=(h.FULL_REDRAW,))
+            # The label is the row's first cells, so a wait on it comes back
+            # while the rest of the row is still being written. At 130 columns
+            # the capture ended inside "verification": the row read as one
+            # hearth with neither its count nor the total, and the rows under
+            # it had not been drawn at all. The widths the loop below uses wait
+            # for the total instead, which is why they never saw this. Let the
+            # frame finish and read the last whole one.
+            h.drain_until_quiet(process, fd, output)
+            settled = bytes(
+                output[: output.rfind(h.FRAME_END) + len(h.FRAME_END)])
+            row = census_row(h.screen_rows(settled), columns)
             if CUT in row:
                 raise AssertionError(
                     f"at {columns} columns the census row was cut: {row!r}")

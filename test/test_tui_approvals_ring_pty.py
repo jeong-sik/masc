@@ -125,6 +125,54 @@ def run(executable: str) -> None:
         refresh=2.0,
     )
 
+    # The surface's own rows, counted against the screen. Every row it spends
+    # around the queue is read back off the buffer it was drawn into; held as
+    # a constant instead, the rows above the queue were subtracted twice --
+    # once inside boxed_surface_chrome_rows and again as the two Gate lane
+    # rows -- so the surface came out two rows short. finish_surface pads a
+    # short surface under its last row, and the last row here is the footer:
+    # it floated two rows above the composer at every terminal height, and the
+    # queue drew two blank rows where two approvals would have gone.
+    def the_footer_is_the_last_body_row(process, master_fd, _slave_fd, output,
+                                        _base_path):
+        h.resize_and_wait(process, master_fd, output, rows=24, columns=80,
+                          needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
+        h.drain_until_quiet(process, master_fd, output)
+        h.wait_for_fixture_state(
+            process, master_fd, output,
+            lambda: b"Approvals\xc2\xb71" in bytes(output),
+            timeout=45.0)
+        h.tab_until(process, master_fd, output, b"MASC Approvals")
+        h.wait_for_output(process, master_fd, output,
+                          b"(no pending approvals)", start=0, timeout=10)
+        h.drain_until_quiet(process, master_fd, output)
+        rows = h.screen_rows(
+            bytes(output[: output.rfind(h.FRAME_END) + len(h.FRAME_END)]))
+        # "y / n:decide" is one of the keys the footer never drops, so it
+        # names the footer row at any width this scenario runs at.
+        footer = h.screen_row_of(rows, b"y / n:decide")
+        composer = h.screen_row_of(rows, b"\xe2\x80\xba to ")
+        if footer < 0 or composer < 0:
+            raise AssertionError(
+                "expected a footer and a composer row on Approvals at 24x80, "
+                f"footer={footer} composer={composer}")
+        if composer != footer + 1:
+            blank = [row for row in range(footer + 1, composer)
+                     if not rows.get(row, b"").strip()]
+            raise AssertionError(
+                "the Approvals footer is not the last body row: footer on "
+                f"{footer}, composer on {composer}, {len(blank)} row(s) "
+                "padded under it")
+        os.write(master_fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="The Approvals footer sits on the last body row",
+        interact=the_footer_is_the_last_body_row,
+        http_fixtures=fixtures,
+        refresh=2.0,
+    )
+
     # The questions poll fails and one held call waits. The title's count has
     # no question in it because none was read, and the title says so rather
     # than let the count pass for "no question is open".

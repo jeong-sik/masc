@@ -3,7 +3,8 @@
     Claude Code's [rate_limit_event] and the Codex app-server's
     [account/rateLimits/updated] report, during a turn, how much of each
     usage window the account has used and when the window resets.  The
-    Codex app-server also answers [account/rateLimits/read] without a turn
+    Codex app-server also answers [account/rateLimits/read] without a turn,
+    and four HTTP providers answer a usage endpoint without a model call
     ({!Runtime_provider_usage_read}).  This module decodes those reports at
     the wire and keeps the latest one per quota scope and window, with the
     time MASC heard it.
@@ -37,6 +38,10 @@ type source =
   | Claude_code_rate_limit_event
   | Codex_account_rate_limits_updated
   | Codex_account_rate_limits_read
+  | Openrouter_key_read  (** OpenRouter [GET /api/v1/key]. *)
+  | Zai_quota_limit_read  (** Z.AI [GET /api/monitor/usage/quota/limit]. *)
+  | Kimi_coding_usages_read  (** Kimi [GET /coding/v1/usages]. *)
+  | Ollama_usage_read  (** Ollama [GET https://ollama.com/api/usage]. *)
 
 type window =
   { limit_id : string option
@@ -59,6 +64,24 @@ type decode_error =
       { path : string
       ; expected : string
       }
+  | Unexpected_value of
+      { path : string
+      ; expected : string
+      }
+      (** The field has the right type and a value this decoder does not
+          read, e.g. a limit of 0 or a time unit other than minutes. *)
+  | Not_successful of
+      { path : string
+      ; message : string option
+      }
+      (** The response says it failed ([success] false), with its [msg]. *)
+  | Duplicate_window of
+      { path : string
+      ; limit_id : string option
+      ; kind : window_kind
+      }
+      (** An HTTP usage report states two windows with the same
+          [(limit_id, kind)], the key {!record} keeps one row under. *)
 
 val decode_error_to_string : decode_error -> string
 val source_to_string : source -> string
@@ -83,6 +106,42 @@ val decode_codex_rate_limits_read : Yojson.Safe.t -> (report, decode_error) resu
     is read, a bucket without its own [limitId] taking its key; when that map
     is absent or null, the single [rateLimits] is read. Windows are decoded as
     in {!decode_codex_rate_limits_updated}. *)
+
+val decode_openrouter_key : Yojson.Safe.t -> (report, decode_error) result
+(** OpenRouter [GET /api/v1/key].  A numeric [data.limit] above 0 gives one
+    {!Provider_label} window "credit limit" used by
+    [(limit - limit_remaining) / limit], with [limit_remaining] within
+    [0..limit]; a null [limit] means no cap and no window.  [limit_reset] is
+    not read.  [data.free_model_daily_requests] gives "free model requests,
+    daily" as [used / limit], with [used] within [0..limit].  Neither states
+    a reset time.
+
+    Each HTTP decoder below refuses a report that states the same
+    [(limit_id, kind)] twice ({!Duplicate_window}), and a value outside its
+    stated range with {!Unexpected_value}. *)
+
+val decode_zai_quota_limit : Yojson.Safe.t -> (report, decode_error) result
+(** Z.AI [GET /api/monitor/usage/quota/limit].  [success] must be [true].
+    Each [data.limits[]] row is one window with [limit_id] its [type],
+    {!Percent} its [percentage] (within [0..100]) and [resets_at] its
+    [nextResetTime] in seconds.  [number] must be above 0.  [unit] 3 is
+    hours, so [number] hours is mapped like a Codex
+    length; any other unit keeps "<type>, <number> x unit <unit>". *)
+
+val decode_kimi_coding_usages : Yojson.Safe.t -> (report, decode_error) result
+(** Kimi [GET /coding/v1/usages].  Each [limits[]] row is one window whose
+    [window.timeUnit] must be [TIME_UNIT_MINUTE] and [window.duration]
+    above 0; its length maps like a Codex length.  [detail.used] and
+    [detail.limit] are decimal strings read as integers, [used] within
+    [0..limit].  The top-level [usage] is one more window labelled
+    "plan period".  [usages.*.used_ratio] is not read. *)
+
+val decode_ollama_usage : Yojson.Safe.t -> (report, decode_error) result
+(** Ollama [GET https://ollama.com/api/usage].  [limits] is required;
+    [limits.session.usage] is a {!Provider_label} "session" window and
+    [limits.weekly.usage] a {!Seven_day} window, each a {!Fraction} that
+    must be within [0..1].  No
+    reset time is stated. *)
 
 type recorded =
   { window : window

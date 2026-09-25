@@ -3,51 +3,15 @@
 open Workspace_types
 open Tool_args
 
-(* Local helpers: build typed [Tool_result.result] from response helpers.
-   ~tool_name and ~start_time are threaded through from dispatch.
-
-   RFC-0189 PR-1b.8: handlers return [Tool_result.result]. Failure class is
-   [Workflow_rejection] for caller-input rejections (typed codes
-   [Validation_error] / [Not_found] / [Conflict], or
-   [validation_error_response] from [Tool_args]) and for [Internal_error].
-   A goal store this build cannot read is not a caller mistake: it answers
-   through [Goal_unavailable_envelope] (RFC-0444 PR-2) with class
-   [Dependency_unavailable] and the typed [Unavailable] code. The plain
-   [error_result] helper was dead (0 callers) and removed. *)
+(* Handlers return [Tool_result.result] (RFC-0189 PR-1b.8). A failure is
+   built by [Tool_args.error_result_typed] or [Tool_args.validation_error_result],
+   which take the class from the error code. A goal store this build cannot
+   read answers through [Goal_unavailable_envelope] (RFC-0444 PR-2). *)
 let ok_result ~tool_name ~start_time fields : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data:(ok_assoc fields) ()
 ;;
 
-let error_result_typed ~tool_name ~start_time ~code msg : Tool_result.result =
-  let data =
-    error_assoc
-      [ "error_code", `String (error_code_to_string code)
-      ; "message", `String msg
-      ]
-  in
-  Tool_result.make_err
-    ~tool_name
-    ~class_:Tool_result.Workflow_rejection
-    ~start_time
-    ~data
-    (Yojson.Safe.to_string data)
-;;
-
 let unavailable_result = Goal_unavailable_envelope.tool_result
-
-let validation_error_result
-      ~tool_name
-      ~start_time
-      (errors : field_error list)
-  : Tool_result.result
-  =
-  let data = validation_error_assoc errors in
-  Tool_result.make_err
-    ~tool_name
-    ~class_:Tool_result.Workflow_rejection
-    ~start_time
-    ~data
-    (Yojson.Safe.to_string data)
 ;;
 
 (* RFC-0089: derive the accepted-value sets from the Goal_phase ADT (the goal
@@ -174,6 +138,7 @@ let parse_optional_transition_action args field =
    Conflict instead of inventing a transition. *)
 type phase_write_error =
   | Store_unavailable of Goal_store.unavailable
+  | Goal_missing of string
   | Store_error of string
   | Concurrent_transition of { expected : Goal_phase.t; actual : Goal_phase.t }
 
@@ -198,14 +163,16 @@ let update_goal_phase (ctx : context) (goal : Goal_store.goal) ~phase ?note () :
   | Ok (Goal_store.Goal_phase_mismatch actual) ->
     Error (Concurrent_transition { expected = goal.phase; actual })
   | Error (Goal_store.Store_unavailable unavailable) -> Error (Store_unavailable unavailable)
-  | Error (Goal_store.Goal_not_found _ | Goal_store.Rejected _
-          | Goal_store.Persist_failed _ as error) ->
+  | Error (Goal_store.Goal_not_found _ as error) ->
+    Error (Goal_missing (Goal_store.write_error_to_string error))
+  | Error (Goal_store.Rejected _ | Goal_store.Persist_failed _ as error) ->
     Error (Store_error (Goal_store.write_error_to_string error))
 ;;
 
 let phase_write_error_result ~tool_name ~start_time (error : phase_write_error) =
   match error with
   | Store_unavailable unavailable -> unavailable_result ~tool_name ~start_time unavailable
+  | Goal_missing msg -> error_result_typed ~tool_name ~start_time ~code:Not_found msg
   | Store_error msg ->
     error_result_typed ~tool_name ~start_time ~code:Internal_error msg
   | Concurrent_transition { expected; actual } ->
@@ -360,14 +327,17 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
           error_result_typed ~tool_name ~start_time ~code:Validation_error msg
         | Error (Goal_store.Store_unavailable unavailable) ->
           unavailable_result ~tool_name ~start_time unavailable
-        | Error (Goal_store.Goal_not_found _ | Goal_store.Persist_failed _ as error) ->
+        | Error (Goal_store.Goal_not_found _ as error) ->
+          error_result_typed ~tool_name ~start_time ~code:Not_found
+            (Goal_store.write_error_to_string error)
+        | Error (Goal_store.Persist_failed _ as error) ->
           error_result_typed ~tool_name ~start_time ~code:Internal_error
             (Goal_store.write_error_to_string error)
         | Ok (goal, action) ->
           let action_name =
             match action with
             | `created -> "created"
-            | `updated -> "updated"
+            | `updated _ -> "updated"
           in
           (* A goal's creation emitted nothing, so goals.json -- which holds only
              the current set -- was the only record that one ever existed. A goal
@@ -375,14 +345,28 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
              name, which is why "how many goals were opened" and "what were they"
              had no answer (#35359). Phase transitions already emit; this closes
              the other end of the same ledger. The payload is the goal as created
-             so its title outlives its row in the store. An update emits nothing:
-             the question is when a goal began, and a later edit is not a second
-             beginning. *)
+             so its title outlives its row in the store. An update is not a second
+             beginning and emits no goal_created; only an update that moves the
+             phase records a goal_phase event. *)
           (match action with
            | `created ->
              emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_created"
                ~payload:(Goal_store.goal_to_yojson goal)
-           | `updated -> ());
+           | `updated previous_phase ->
+             (* An edit to the success criterion takes a Verifying,
+                Awaiting_confirmation or Completed goal back to Executing
+                (Goal_store.upsert_goal). That is a phase move like any
+                other, so it enters the same ledger with the phase it left and
+                who moved it. *)
+             if previous_phase <> goal.phase then
+               emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_phase"
+                 ~payload:
+                   (`Assoc
+                      [ "phase", Goal_phase.to_yojson goal.phase
+                      ; "previous_phase", Goal_phase.to_yojson previous_phase
+                      ; "actor", `String ctx.agent_name
+                      ; "cause", `String "criterion_edit"
+                      ]));
           ok_result
             ~tool_name
             ~start_time
@@ -704,23 +688,76 @@ let parse_goal_evidence_refs args =
       collect [] rows
   | _ -> Error "evidence_refs must be a list"
 
+type goal_refusal = { code : error_code; message : string }
+
+type proof_request_error =
+  | Store of Goal_store.write_error
+  | Refused of goal_refusal
+
+let refuse code message = { code; message }
+
+(* Every capture error names a source the caller referenced, except storage. *)
+let refusal_of_evidence_error (error : Verification_collaboration_evidence.error) =
+  let code =
+    match error with
+    | Verification_collaboration_evidence.Invalid_request _ -> Validation_error
+    | Access_denied _ -> Permission_denied
+    | Source_unavailable _ -> Not_found
+    | Storage_failed _ -> Internal_error
+  in
+  refuse code (Verification_collaboration_evidence.error_to_string error)
+;;
+
 let capture_goal_evidence config = function
   | None -> Ok None
   | Some references ->
       Verification_collaboration_evidence.capture ~config
         ~authority:Verification_collaboration_evidence.Goal_workspace ~references
       |> Result.map Option.some
-      |> Result.map_error Verification_collaboration_evidence.error_to_string
+      |> Result.map_error refusal_of_evidence_error
+
+let mark_proof_pending ?submitted_evidence config ~goal_id goal =
+  Goal_verification.mark_proof_pending ?submitted_evidence config ~goal_id
+    ~criterion:(Goal_store.criterion_of_goal goal)
+  |> Result.map_error (refuse Internal_error)
+;;
+
+(* A refusal travels in the transaction's result with the goal unchanged, so
+   [Goal_store.transact_goal] writes nothing and the refusal keeps its code
+   instead of becoming [Goal_store.Rejected]'s string. *)
+let transact_or_refuse config ~goal_id decide =
+  match
+    Goal_store.transact_goal config ~goal_id (fun goal ->
+      match decide goal with
+      | Ok (updated, result) -> Ok (updated, Ok result)
+      | Error refusal -> Ok (goal, Error refusal))
+  with
+  | Error error -> Error (Store error)
+  | Ok (_, Error refusal) -> Error (Refused refusal)
+  | Ok (goal, Ok result) -> Ok (goal, result)
+;;
+
+let proof_request_failure ~tool_name ~start_time = function
+  | Store (Goal_store.Store_unavailable unavailable) ->
+    unavailable_result ~tool_name ~start_time unavailable
+  | Store (Goal_store.Goal_not_found _ as error) ->
+    error_result_typed ~tool_name ~start_time ~code:Not_found
+      (Goal_store.write_error_to_string error)
+  | Store (Goal_store.Rejected _ | Goal_store.Persist_failed _ as error) ->
+    error_result_typed ~tool_name ~start_time ~code:Internal_error
+      (Goal_store.write_error_to_string error)
+  | Refused { code; message } -> error_result_typed ~tool_name ~start_time ~code message
+;;
 
 let request_current_proof ?evidence_refs config ~goal_id =
-  Goal_store.transact_goal config ~goal_id (fun goal ->
+  transact_or_refuse config ~goal_id (fun goal ->
     match goal.phase with
     | Goal_phase.Executing | Goal_phase.Verifying ->
       Result.bind (capture_goal_evidence config evidence_refs) (fun submitted_evidence ->
         Result.map (fun record -> { goal with phase = Goal_phase.Verifying }, record)
-          (Goal_verification.mark_proof_pending ?submitted_evidence config ~goal_id
-            ~criterion:(Goal_store.criterion_of_goal goal)))
-    | Goal_phase.Awaiting_confirmation | Goal_phase.Completed | Goal_phase.Dropped -> Error "goal is not requesting verification")
+          (mark_proof_pending ?submitted_evidence config ~goal_id goal))
+    | Goal_phase.Awaiting_confirmation | Goal_phase.Completed | Goal_phase.Dropped ->
+      Error (refuse Precondition_failed "goal is not requesting verification"))
 ;;
 
 let recover_current_proof config ~goal_id =
@@ -741,8 +778,10 @@ let recover_current_proof config ~goal_id =
    verdict whose phase/event write was interrupted is reconciled from that
    exact ledger row without another model call. *)
 let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context) ~goal_id ~action _goal =
-  let result = Goal_store.transact_goal ctx.config ~goal_id (fun goal ->
-    Result.bind (Goal_verification.get_record_authoritative ctx.config ~goal_id)
+  let result = transact_or_refuse ctx.config ~goal_id (fun goal ->
+    Result.bind
+      (Goal_verification.get_record_authoritative ctx.config ~goal_id
+       |> Result.map_error (refuse Internal_error))
       (fun record ->
         if goal.phase <> Goal_phase.Verifying then Ok (goal, (record, None))
         else
@@ -751,7 +790,9 @@ let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context
               (Goal_verification.Proof_proven verdict | Goal_verification.Proof_refuted verdict); _ } as record)
             when Goal_verification.relation_for_goal ~goal record = Goal_verification.Current ->
               if Option.is_some evidence_refs then
-                Error "proof result is already committed; reconcile it without evidence_refs before submitting new evidence"
+                Error
+                  (refuse Validation_error
+                     "proof result is already committed; reconcile it without evidence_refs before submitting new evidence")
               else
               let proof_action, note = match verdict.outcome with
                 | Goal_verification.Proven -> Goal_phase.Record_proof_proven, None
@@ -759,20 +800,15 @@ let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context
               (match Goal_phase.decide_transition ~phase:goal.phase ~action:proof_action with
                | Ok (Goal_phase.Move_to phase) ->
                    Ok (goal_after_proof goal phase note, (Some record, Some (verdict, record)))
-               | Ok (Goal_phase.Already _) -> Error "proof reconciliation did not name a transition"
-               | Error detail -> Error detail)
+               | Ok (Goal_phase.Already _) ->
+                   Error (refuse Internal_error "proof reconciliation did not name a transition")
+               | Error detail -> Error (refuse Conflict detail))
           | Some _ | None ->
               Result.bind (capture_goal_evidence ctx.config evidence_refs) (fun submitted_evidence ->
                 Result.map (fun record -> goal, (Some record, None))
-                  (Goal_verification.mark_proof_pending ?submitted_evidence ctx.config ~goal_id
-                     ~criterion:(Goal_store.criterion_of_goal goal))))) in
+                  (mark_proof_pending ?submitted_evidence ctx.config ~goal_id goal)))) in
   match result with
-  | Error (Goal_store.Store_unavailable unavailable) ->
-    unavailable_result ~tool_name ~start_time unavailable
-  | Error (Goal_store.Goal_not_found _ | Goal_store.Rejected _
-          | Goal_store.Persist_failed _ as error) ->
-    error_result_typed ~tool_name ~start_time ~code:Internal_error
-      (Goal_store.write_error_to_string error)
+  | Error error -> proof_request_failure ~tool_name ~start_time error
   | Ok (goal, (record, reconciled)) ->
       (match goal.phase, record with
        | Goal_phase.Verifying, Some { Goal_verification.completion = Goal_verification.Proof_pending _; _ } ->
@@ -848,7 +884,8 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
          (match goal.Goal_store.phase with
           | Goal_phase.Executing | Goal_phase.Verifying -> false
           | Goal_phase.Awaiting_confirmation | Goal_phase.Completed | Goal_phase.Dropped -> true) ->
-       error_result_typed ~tool_name ~start_time ~code:Validation_error
+       (* The phase decides this, not the arguments. *)
+       error_result_typed ~tool_name ~start_time ~code:Precondition_failed
          "this Goal has no active proof request that can accept evidence_refs"
      | Goal_store.Goal_found goal ->
        (match Goal_phase.decide_transition ~phase:goal.phase ~action with
@@ -888,12 +925,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
                    the verdict, and refusing the request only hides the goal
                    from the thing that would judge it. *)
                    (match request_current_proof ?evidence_refs ctx.config ~goal_id with
-                    | Error (Goal_store.Store_unavailable unavailable) ->
-                      unavailable_result ~tool_name ~start_time unavailable
-                    | Error (Goal_store.Goal_not_found _ | Goal_store.Rejected _
-                            | Goal_store.Persist_failed _ as error) ->
-                      error_result_typed ~tool_name ~start_time ~code:Internal_error
-                        (Goal_store.write_error_to_string error)
+                    | Error error -> proof_request_failure ~tool_name ~start_time error
                     | Ok (updated_goal, record) ->
                       emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
                         ~payload:(`Assoc [ "phase", Goal_phase.to_yojson updated_goal.phase

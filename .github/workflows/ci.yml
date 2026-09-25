@@ -40,11 +40,11 @@ permissions:
   contents: read
   actions: write
 
-# One run at a time for the whole repo: a new dispatch cancels the run
-# in flight instead of stacking a second one.
+# Finish the main compile already running when another push arrives. Keep one
+# newer pending run so main CI cannot consume one runner per queued commit.
 concurrency:
   group: ${{ inputs.candidate_verification && format('candidate-ci-{0}', github.run_id) || 'ci' }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:

@@ -186,7 +186,7 @@ type standalone_lane_jev =
   | Jev_lane_unavailable
 
 type standalone_lane = {
-  sl_lane_id : string;
+  sl_lane : Standalone_lane.t;
   sl_label : string;
   sl_purpose : string option;
   sl_required : bool;
@@ -912,15 +912,13 @@ let decode_task json =
    sanitizers route those codepoints through here, so the rule lives in one
    place: the codepoint is drawn as its own escape text, never dropped. *)
 let is_invisible_codepoint code =
-  code = 0x061C
-  || (code >= 0x200B && code <= 0x200F)
-  || (code >= 0x202A && code <= 0x202E)
-  || (code >= 0x2066 && code <= 0x2069)
-  || code = 0xFEFF
-  (* #38501: the tag block copies ASCII into characters a terminal draws as
-     nothing (U+E0061 is a tag "a"), so a sentence can be spelled twice --
-     once for the reader and once for the bytes the approval hash covers. *)
-  || (code >= 0xE0000 && code <= 0xE007F)
+  (* Unicode's own list, not a hand-kept one: Default_Ignorable_Code_Point is
+     every scalar a renderer may draw as nothing -- the bidi controls, the
+     zero-widths, the word joiner family (U+2060-U+2064), the Hangul fillers
+     (U+115F, U+1160, U+3164, U+FFA0), the soft hyphen, the variation
+     selectors (U+FE00-U+FE0F, U+E0100-U+E01EF) and the tag block. A list
+     kept by hand here missed every one of those after the tag block. *)
+  Uchar.is_valid code && Uucp.Gen.is_default_ignorable (Uchar.of_int code)
 ;;
 
 let zero_width_joiner = 0x200D
@@ -1020,7 +1018,22 @@ let escape_text code =
 let escape_invisible text =
   let output = Buffer.create (String.length text) in
   let length = String.length text in
-  let rec walk index ~after_pictograph =
+  (* [base]: the scalar before this one, when it was drawn and is not itself
+     ignorable. The one selector kept is VS15/VS16 right after a text-default
+     emoji (Emoji, not Emoji_Presentation: U+2764, U+2642, a keycap digit) --
+     the pairs emoji-variation-sequences.txt registers, and the ones joined
+     emoji use. Every other selector is drawn as its escape: after a plain
+     letter, behind another selector, with no base, and also after an
+     ideograph, because this boundary cannot tell a registered IVD or
+     StandardizedVariants pair from an unregistered one, and an unregistered
+     pair displays as the bare base (Unicode FAQ, unsupported characters). *)
+  let keeps_selector ~base scalar =
+    let code = Uchar.to_int scalar in
+    (code = variation_selector_15 || code = variation_selector_16)
+    && Uucp.Emoji.is_emoji base
+    && not (Uucp.Emoji.is_emoji_presentation base)
+  in
+  let rec walk index ~after_pictograph ~base =
     if index < length
     then (
       let decoded = String.get_utf_8_uchar text index in
@@ -1036,7 +1049,7 @@ let escape_invisible text =
       match flag_tags with
       | Some tail ->
         Buffer.add_substring output text index (step + tail);
-        walk (index + step + tail) ~after_pictograph:true
+        walk (index + step + tail) ~after_pictograph:true ~base:None
       | None ->
         let joins_two_pictographs =
           valid
@@ -1044,9 +1057,26 @@ let escape_invisible text =
           && after_pictograph
           && opens_pictograph text (index + step)
         in
-        if valid && is_invisible_codepoint code && not joins_two_pictographs
+        let selects_its_base =
+          valid
+          && Uucp.Gen.is_variation_selector scalar
+          && (match base with
+              | Some base -> keeps_selector ~base scalar
+              | None -> false)
+        in
+        let escaped =
+          valid
+          && is_invisible_codepoint code
+          && not (joins_two_pictographs || selects_its_base)
+        in
+        if escaped
         then Buffer.add_string output (escape_text code)
         else Buffer.add_substring output text index step;
+        let base =
+          if valid && (not escaped) && not (is_invisible_codepoint code)
+          then Some scalar
+          else None
+        in
         let after_pictograph =
           if not valid
           then false
@@ -1060,9 +1090,9 @@ let escape_invisible text =
           then after_pictograph
           else false
         in
-        walk (index + step) ~after_pictograph)
+        walk (index + step) ~after_pictograph ~base)
   in
-  walk 0 ~after_pictograph:false;
+  walk 0 ~after_pictograph:false ~base:None;
   Buffer.contents output
 ;;
 
@@ -2993,18 +3023,18 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
+type memory_fact_retrieval =
+  | Never_retrieved
+  | Retrieved of { count : int; distinct_days : int; last_at : float }
+
 type memory_fact_events = {
-  mfe_retrieved_count : int;
-  mfe_retrieved_distinct_days : int;
-  mfe_last_retrieved_at : float option;
+  mfe_retrieval : memory_fact_retrieval;
   mfe_retracted_count : int;
   mfe_revised_from : string list;
 }
 
 let no_memory_fact_events =
-  { mfe_retrieved_count = 0
-  ; mfe_retrieved_distinct_days = 0
-  ; mfe_last_retrieved_at = None
+  { mfe_retrieval = Never_retrieved
   ; mfe_retracted_count = 0
   ; mfe_revised_from = []
   }
@@ -5165,6 +5195,7 @@ let decode_provider_usage_window json =
 
 let decode_provider_usage_account json =
   let* pua_scope = required_string_field json "scope" in
+  let* pua_scope_id = required_string_field json "scope_id" in
   let* provider_items = required_list_field json "providers" in
   let* pua_providers =
     decode_list "providers"
@@ -5188,7 +5219,7 @@ let decode_provider_usage_account json =
              pua_scope)
     | other, _ -> Error (Printf.sprintf "unknown usage state %S" other)
   in
-  Ok { pua_scope; pua_providers; pua_state }
+  Ok { pua_scope; pua_scope_id; pua_providers; pua_state }
 
 let decode_provider_usage_windows json =
   let* puws_since = required_number_field json "provider_usage_windows_since" in
@@ -5241,11 +5272,14 @@ let decode_provider_usage_history json =
     if sampling <> "latest_provider_report_per_utc_day" then
       Error "provider usage history: unknown sampling contract"
     else
+      let* puh_unreadable_reports =
+        required_int_field json "unreadable_reports"
+      in
       let* points = required_list_field json "points" in
       let* puh_points =
         decode_list "points" decode_provider_usage_history_point points
       in
-      Ok { puh_days; puh_generated_at; puh_points }
+      Ok { puh_days; puh_generated_at; puh_unreadable_reports; puh_points }
 
 type keeper_usage_coverage =
   | Keeper_usage_complete
@@ -6258,18 +6292,32 @@ let decode_memory_health_snapshot json =
 (* The server computes these from the keeper's memory-events sidecar and
    never stores them (RFC-0418). This side shows the record as it is. *)
 let decode_memory_fact_events json =
-  let* mfe_retrieved_count = required_int_field json "retrieved_count" in
-  let* mfe_retrieved_distinct_days = required_int_field json "retrieved_distinct_days" in
-  let* mfe_last_retrieved_at = optional_float_field json "last_retrieved_at" in
+  let* retrieved_count = required_int_field json "retrieved_count" in
+  let* retrieved_distinct_days = required_int_field json "retrieved_distinct_days" in
+  let* last_retrieved_at = optional_float_field json "last_retrieved_at" in
+  (* The server derives all three from one list of retrieval times
+     ([Keeper_memory_os_events.summary_for]): an empty list gives 0, 0 and
+     null, and a non-empty one gives a positive count, at least one day and
+     a clock. Any other combination is not a record this decoder knows, so it
+     is rejected here once instead of every reader drawing it. *)
+  let* mfe_retrieval =
+    match retrieved_count, retrieved_distinct_days, last_retrieved_at with
+    | 0, 0, None -> Ok Never_retrieved
+    | count, distinct_days, Some last_at when count > 0 && distinct_days > 0 ->
+        Ok (Retrieved { count; distinct_days; last_at })
+    | count, distinct_days, (None | Some _) ->
+        Error
+          (Printf.sprintf
+             "memory fact events disagree: retrieved_count %d, \
+              retrieved_distinct_days %d, last_retrieved_at %s"
+             count distinct_days
+             (match last_retrieved_at with
+              | None -> "null"
+              | Some at -> Float.to_string at))
+  in
   let* mfe_retracted_count = required_int_field json "retracted_count" in
   let* mfe_revised_from = require_string_list json "revised_from" in
-  Ok
-    { mfe_retrieved_count
-    ; mfe_retrieved_distinct_days
-    ; mfe_last_retrieved_at
-    ; mfe_retracted_count
-    ; mfe_revised_from
-    }
+  Ok { mfe_retrieval; mfe_retracted_count; mfe_revised_from }
 
 let decode_memory_fact json =
   let* mf_claim = required_string_field json "claim" in
@@ -7232,36 +7280,35 @@ let standalone_lane_configuration_phrase = function
   | Lane_unconfigured -> "not configured"
   | Lane_registry_unavailable -> "registry unreadable"
 
-(* The lane detail's last two lines. They used to be picked by comparing the
-   id with each lane's spelling in turn, and Workspace curator had no branch,
-   so it drew the sentence meant for a lane this TUI does not know. The id is
-   now read into the lane once and every lane has its own arm. *)
+(* The lane detail's last two lines. Every lane has its own arm, so a lane
+   added to [Standalone_lane.t] fails here until it says what its output
+   means. *)
 let standalone_lane_answer (lane : standalone_lane) =
   let structured_output_without_ledger =
     "Evidence: structured-output generation, not a MASC tool loop; the run \
      retains exact Input/Output, outcome, and selected slot, so no tool-call \
      ledger exists."
   in
-  match Standalone_lane.of_id lane.sl_lane_id with
-  | Some Standalone_lane.Board_attention ->
+  match lane.sl_lane with
+  | Standalone_lane.Board_attention ->
     { sla_output_meaning = "Output meaning: the accepted candidate judgment JSON."
     ; sla_evidence =
         "Evidence: structured-output generation, not a MASC tool loop; the run \
          retains exact Input/Output and outcome. HTTP/CLI attribution uses \
          selected slot; Vendor System One provenance stays in Output."
     }
-  | Some Standalone_lane.Hitl_auto_judge ->
+  | Standalone_lane.Hitl_auto_judge ->
     { sla_output_meaning =
         "Output meaning: the validated and durably settled approval-context \
          judgment summary."
     ; sla_evidence = structured_output_without_ledger
     }
-  | Some Standalone_lane.Librarian ->
+  | Standalone_lane.Librarian ->
     { sla_output_meaning =
         "Output meaning: selected memory facts plus committed snapshot metadata."
     ; sla_evidence = structured_output_without_ledger
     }
-  | Some Standalone_lane.Workspace_curator ->
+  | Standalone_lane.Workspace_curator ->
     { sla_output_meaning =
         "Output meaning: the id of the proposal it published, with shared claims \
          and conflicts that each cite source ids, and the sources it excluded \
@@ -7272,7 +7319,7 @@ let standalone_lane_answer (lane : standalone_lane) =
          memory inventory and rendered prompt as Input, the proposal as Output, \
          outcome, and selected slot."
     }
-  | Some Standalone_lane.Verifier ->
+  | Standalone_lane.Verifier ->
     { sla_output_meaning =
         "Output meaning: Task completion or Goal proof verdict, reason, and \
          evaluator runtime."
@@ -7280,13 +7327,6 @@ let standalone_lane_answer (lane : standalone_lane) =
         "Evidence: Verifier review records also retain MASC tool observations; \
          open a run to inspect inputs, dispositions, excerpts, duration, and \
          truncation."
-    }
-  | None ->
-    { sla_output_meaning = "Output meaning: open a retained run for its exact result."
-    ; sla_evidence =
-        Printf.sprintf
-          "Evidence: unknown lane id: %s; this TUI has no evidence contract for it."
-          (sanitize_terminal_text lane.sl_lane_id)
     }
 
 let standalone_lane_status_of_string = function
@@ -7342,8 +7382,24 @@ let decode_standalone_lane_jev json =
      | _ :: _ -> Ok (Jev_configured { destinations }))
   | other -> Error ("standalone lane JEV state: unknown value " ^ other)
 
+(* A standalone lane id read off the wire, into the lane it names. An id no
+   lane has is refused where it is read, so nothing past the decoder holds a
+   lane as a string. The server writes lane ids from the same [Standalone_lane],
+   so the likeliest cause of an id this build does not know is a server binary
+   newer than the TUI; the message names that cause. *)
+let required_standalone_lane_field json field =
+  let* id = required_string_field json field in
+  match Standalone_lane.of_id id with
+  | Some lane -> Ok lane
+  | None ->
+    Error
+      (Printf.sprintf
+         "%s: unknown standalone lane %s (the server may be newer than this \
+          TUI; check that both run the same version)"
+         field id)
+
 let decode_standalone_lane json =
-  let* sl_lane_id = required_string_field json "lane_id" in
+  let* sl_lane = required_standalone_lane_field json "lane_id" in
   let* sl_label = required_string_field json "label" in
   let* sl_purpose = optional_string_field json "purpose" in
   let* sl_required = required_bool_field json "required" in
@@ -7358,17 +7414,15 @@ let decode_standalone_lane json =
     standalone_lane_configuration_of_string configuration_state
   in
   let* sl_jev =
-    match Standalone_lane.of_id sl_lane_id with
-    | Some Standalone_lane.Board_attention ->
+    match sl_lane with
+    | Standalone_lane.Board_attention ->
       let* jev = required_object_field json "jev" in
       let* decoded = decode_standalone_lane_jev jev in
       Ok (Some decoded)
-    | Some
-        ( Standalone_lane.Librarian
-        | Standalone_lane.Hitl_auto_judge
-        | Standalone_lane.Workspace_curator
-        | Standalone_lane.Verifier )
-    | None -> Ok None
+    | Standalone_lane.Librarian
+    | Standalone_lane.Hitl_auto_judge
+    | Standalone_lane.Workspace_curator
+    | Standalone_lane.Verifier -> Ok None
   in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
@@ -7427,7 +7481,7 @@ let decode_standalone_lane json =
   let* slws_server_restarted = required_int_field runs_without_slot "server_restarted" in
   let* slws_no_slot = required_int_field runs_without_slot "no_slot" in
   Ok
-    { sl_lane_id
+    { sl_lane
     ; sl_label
     ; sl_purpose
     ; sl_required
@@ -7484,15 +7538,18 @@ let decode_standalone_lanes_snapshot json =
   in
   let* items = required_list_field json "lanes" in
   let* sls_lanes = decode_list "lanes" decode_standalone_lane items in
-  let expected_lane_ids =
-    (* [Standalone_lane] spells every lane id; spelling them here again is
-       how a list drifts when a lane is added or renamed. *)
-    List.map Standalone_lane.to_id Standalone_lane.all |> List.sort String.compare
+  let every_lane_once =
+    (* As many rows as lanes, and every lane among them: a lane present twice
+       would leave another one missing. *)
+    List.length sls_lanes = List.length Standalone_lane.all
+    && List.for_all
+         (fun lane ->
+            List.exists
+              (fun (row : standalone_lane) -> Standalone_lane.equal row.sl_lane lane)
+              sls_lanes)
+         Standalone_lane.all
   in
-  let observed_lane_ids =
-    sls_lanes |> List.map (fun lane -> lane.sl_lane_id) |> List.sort String.compare
-  in
-  if observed_lane_ids = expected_lane_ids
+  if every_lane_once
   then
     Ok
       { sls_observed_at_unix
@@ -8440,18 +8497,18 @@ let execute_gate_command envelope =
     | Some (_ :: _ as argv) -> Some (command_text argv)
     | Some [] | None -> None
   in
-  let script_command args =
-    (* The script form is already the command line the operator is
-       approving; there is nothing to assemble. *)
-    match member "script" args with
-    | `String script when String.trim script <> "" -> Some script
+  let line_command args =
+    (* The command form is already the line the operator is approving;
+       there is nothing to assemble. *)
+    match member "command" args with
+    | `String command when String.trim command <> "" -> Some command
     | _ -> None
   in
   match member "input" envelope with
   | `Assoc _ as args -> (
     match stage_command args with
     | Some command -> Some command
-    | None -> script_command args)
+    | None -> line_command args)
   | _ -> None
 
 (* Where the command would run. The same envelope carries it, and it decides
@@ -9696,20 +9753,27 @@ type librarian_run_page =
 let decode_librarian_run_page json =
   let* runs = required_list_field json "runs" in
   let* has_more = required_bool_field json "has_more" in
-  let rec find_librarian = function
-    | [] -> Ok None
-    | run :: rest ->
-        let* lane = required_string_field run "lane" in
-        if
-          String.equal
-            lane
-            (Standalone_lane.to_id Standalone_lane.Librarian)
-        then
-          let* run_id = required_string_field run "run_id" in
-          Ok (Some run_id)
-        else find_librarian rest
+  (* Every row is read before the first Librarian is picked, so an unknown lane
+     anywhere on the page refuses it whatever order the rows come in. *)
+  let* rows =
+    decode_list "runs"
+      (fun run ->
+         let* lane = required_standalone_lane_field run "lane" in
+         let* run_id = required_string_field run "run_id" in
+         Ok (lane, run_id))
+      runs
   in
-  let* run_id = find_librarian runs in
+  let run_id =
+    List.find_map
+      (fun (lane, run_id) ->
+         match lane with
+         | Standalone_lane.Librarian -> Some run_id
+         | Standalone_lane.Hitl_auto_judge
+         | Standalone_lane.Board_attention
+         | Standalone_lane.Workspace_curator
+         | Standalone_lane.Verifier -> None)
+      rows
+  in
   let* lrp_next =
     if not has_more then Ok None
     else
@@ -9952,13 +10016,13 @@ let decode_lane_run_skill_evidence run =
   | other -> Error (Printf.sprintf "unknown lane run Skill evidence state %S" other)
 ;;
 
-let decode_lane_run_gate_judgment ~lane ~status ~output =
-  let hitl_lane =
-    Standalone_lane.to_id Standalone_lane.Hitl_auto_judge
-  in
-  if not (String.equal lane hitl_lane)
-  then Ok Lane_run_not_gate_judgment
-  else
+let decode_lane_run_gate_judgment ~(lane : Standalone_lane.t) ~status ~output =
+  match lane with
+  | Standalone_lane.Librarian
+  | Standalone_lane.Board_attention
+  | Standalone_lane.Workspace_curator
+  | Standalone_lane.Verifier -> Ok Lane_run_not_gate_judgment
+  | Standalone_lane.Hitl_auto_judge ->
     let decode_advisory output =
       let* judgment = required_string_field output "judgment" in
       match
@@ -10014,7 +10078,7 @@ type lane_run_failure =
 type lane_run_summary =
   { lrs_run_id : string
   ; lrs_run_kind : lane_run_kind
-  ; lrs_lane : string
+  ; lrs_lane : Standalone_lane.t
   ; lrs_subject_id : string option
   ; lrs_actor : string
   ; lrs_started_at : float
@@ -10041,7 +10105,7 @@ type lane_run_answer_source =
 type lane_run_detail =
   { lrd_run_id : string
   ; lrd_run_kind : lane_run_kind
-  ; lrd_lane : string
+  ; lrd_lane : Standalone_lane.t
   ; lrd_subject_id : string option
   ; lrd_actor : string
   ; lrd_started_at : float
@@ -10063,7 +10127,7 @@ type lane_run_detail =
 let decode_lane_run_summary json =
   let* lrs_run_id = required_string_field json "run_id" in
   let* lrs_run_kind = optional_string_field json "run_kind" in
-  let* lrs_lane = required_string_field json "lane" in
+  let* lrs_lane = required_standalone_lane_field json "lane" in
   let* lrs_subject_id = optional_string_field json "subject_id" in
   let* lrs_actor = required_string_field json "actor" in
   let* lrs_started_at = require_float_field json "started_at" in
@@ -10118,7 +10182,7 @@ let decode_lane_run_page ~lane json =
     | Some _ | None -> Ok () in
   let* runs = decode_list "runs" decode_lane_run_summary runs_json in
   let lrpg_runs =
-    List.filter (fun run -> String.equal run.lrs_lane lane) runs
+    List.filter (fun run -> Standalone_lane.equal run.lrs_lane lane) runs
   in
   let* lrpg_next =
     if not has_more
@@ -10165,18 +10229,14 @@ let decode_lane_run_detail json =
                   | Exact_lane_run_registry.Unavailable _) -> Ok None
   in
   let* lrd_answer_source =
-    (* The lane key is read into the lane once; the answer-source rule below
-       is about the Board-attention lane, and a key no lane spells is not
-       that lane. *)
+    (* The answer-source rule below is about the Board-attention lane. *)
     let is_board_attention =
-      match Standalone_lane.of_id summary.lrs_lane with
-      | Some Standalone_lane.Board_attention -> true
-      | Some
-          ( Standalone_lane.Librarian
-          | Standalone_lane.Hitl_auto_judge
-          | Standalone_lane.Workspace_curator
-          | Standalone_lane.Verifier )
-      | None ->
+      match summary.lrs_lane with
+      | Standalone_lane.Board_attention -> true
+      | Standalone_lane.Librarian
+      | Standalone_lane.Hitl_auto_judge
+      | Standalone_lane.Workspace_curator
+      | Standalone_lane.Verifier ->
         false
     in
     let* answer_succeeded =
@@ -10258,15 +10318,23 @@ let decode_lane_run_detail json =
   in
   let* lrd_skill_evidence = decode_lane_run_skill_evidence run in
   let* lrd_gate_judgment =
-    match lrd_output_availability with
-    | Some (Exact_lane_run_registry.Not_loaded
-           | Exact_lane_run_registry.Unavailable _)
-      when String.equal summary.lrs_lane
-        (Standalone_lane.to_id Standalone_lane.Hitl_auto_judge) ->
-      Ok Lane_run_gate_judgment_unavailable
-    | _ ->
+    let decode_judgment () =
       decode_lane_run_gate_judgment ~lane:summary.lrs_lane
         ~status:summary.lrs_status ~output:lrd_output
+    in
+    (* Every lane is named so a judging lane added later has to say whether an
+       unread output means its judgment is unavailable. *)
+    match summary.lrs_lane with
+    | Standalone_lane.Hitl_auto_judge ->
+      (match lrd_output_availability with
+       | Some (Exact_lane_run_registry.Not_loaded
+              | Exact_lane_run_registry.Unavailable _) ->
+         Ok Lane_run_gate_judgment_unavailable
+       | Some Exact_lane_run_registry.Available | None -> decode_judgment ())
+    | Standalone_lane.Librarian
+    | Standalone_lane.Board_attention
+    | Standalone_lane.Workspace_curator
+    | Standalone_lane.Verifier -> decode_judgment ()
   in
   Ok
     { lrd_run_id = summary.lrs_run_id
@@ -12110,11 +12178,33 @@ let decode_async_request_observation json =
   | _ -> Error (Printf.sprintf "unknown async inventory status %S" status)
 ;;
 
+type schedule_hold_reason =
+  | Hold_previous_wake_untaken
+  | Hold_target_shutdown_fenced of
+      { target : string
+      ; fence_owner : string
+      }
+
 type schedule_runner_hold =
   { srh_occurrence_id : string
   ; srh_due_at_iso : string
+  ; srh_reason : schedule_hold_reason
   ; srh_observed_at : float
   }
+
+let decode_schedule_hold_reason hold =
+  match member "reason" hold with
+  | `Assoc _ as reason ->
+    let* kind = required_string_field reason "kind" in
+    (match kind with
+     | "previous_occurrence_unconsumed" -> Ok Hold_previous_wake_untaken
+     | "target_intake_fenced" ->
+       let* target = required_string_field reason "target" in
+       let* fence_owner = required_string_field reason "fence_owner" in
+       Ok (Hold_target_shutdown_fenced { target; fence_owner })
+     | unknown -> Error (Printf.sprintf "unknown runner hold reason %S" unknown))
+  | bad -> field_type_error "runner_hold.reason" "an object" bad
+;;
 
 (* 9999-12-31T23:59:59Z. The hold's time is drawn through [Unix.localtime],
    which fails with EOVERFLOW far above this (from 1e17 on macOS, measured),
@@ -12132,6 +12222,7 @@ let decode_schedule_runner_hold row =
   | `Assoc _ ->
     let* srh_occurrence_id = required_string_field hold "occurrence_id" in
     let* srh_due_at_iso = required_string_field hold "due_at_iso" in
+    let* srh_reason = decode_schedule_hold_reason hold in
     let* observed_at = required_nullable_float_field hold "observed_at" in
     let* srh_observed_at =
       match observed_at with
@@ -12141,7 +12232,7 @@ let decode_schedule_runner_hold row =
       | Some _ | None ->
         Error "runner_hold observed_at must be a time from 1970 to the end of year 9999"
     in
-    Ok (Some { srh_occurrence_id; srh_due_at_iso; srh_observed_at })
+    Ok (Some { srh_occurrence_id; srh_due_at_iso; srh_reason; srh_observed_at })
   | bad -> field_type_error "runner_hold" "an object or null" bad
 ;;
 
@@ -12200,3 +12291,13 @@ let schedule_hold_reading
         | Schedule_contract_values.Runner_degraded ) )
   | List_kept, Runner_unrecognised _ -> Hold_as_of hold.srh_observed_at
 ;;
+
+let decode_oauth_client_saved json =
+  match json with
+  | `Assoc _ ->
+      let* scopes = decode_string_list json "scopes" in
+      Ok (List.length scopes)
+  | other ->
+      Error
+        (Printf.sprintf "the reply must be an object (received %s)"
+           (Json_util.kind_name other))

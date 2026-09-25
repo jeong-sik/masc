@@ -293,11 +293,23 @@ open Alcotest
    whole sentence that fits. What it bought: those four schemas, 8,370 bytes,
    leave every Agent Core request that has not used them (5,047 requests on
    2026-09-23). No headroom. *)
-(* PR #38784 adds masc_goal_measure so a Keeper can record a reported metric
-   with evidence against an exact Goal criterion revision. The CI inventory at
-   d1a2e0a57f measured 122,668 bytes across 140 tools, 393 bytes beyond the
-   prior 122,275-byte ceiling. Pin the measured size without slack. *)
-let ceiling_bytes = 122_668
+(* 2026-09-24: 122,591 across 139 tools, +316 over the 122,275 ceiling above,
+   measured by this suite on CI for PR #38835 (PR check run 36051449813, the
+   "grew to" failure line). masc_board_post takes a typed `attachments`
+   argument: each entry declares a kind (image|video|youtube|external_link) and
+   exactly one of an absolute HTTPS url or an existing artifact sha256, on both
+   the MCP tool schema and the keeper projection. What it bought: the two Board
+   write paths (tool + HTTP) stop accepting a raw, unvalidated meta.attachments
+   blob; both now parse the same closed type and reject unsafe URLs, missing
+   artifacts, and duplicate meta. No headroom. *)
+(* 2026-09-25: 123,191 across 140 tools, +600 over the entry above (not a CI
+   reading). PR #38784 adds masc_goal_measure, whose rendered schema is 600
+   bytes: a Keeper records a reported metric with evidence against an exact
+   Goal criterion revision. Its CI runs measured the same tool against main
+   without the Board attachments: 122,674 at b537d38a89 (run 36024960454),
+   then 10 bytes less after a5322e4154 shortened the description. No
+   headroom. *)
+let ceiling_bytes = 123_191
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

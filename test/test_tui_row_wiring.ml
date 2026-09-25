@@ -35,20 +35,21 @@ let reads ~binding_name ~fields =
 let reads_prim ~binding_name ~fields =
   reads_in ~module_path:"bin/masc_tui_render_prim.ml" ~binding_name ~fields
 
-(* The detail under the list is three rows, and [boxed_surface_chrome_rows]
-   budgets one for the selected row's own line. Every kind takes that one
-   except a held tool call, which answers two questions -- what is being asked,
-   and why it was held -- and the ask runs the width of the pane, so at eighty
-   columns they cannot share a row.
+(* The detail under the list is three rows, and every kind takes one of them
+   except a held tool call, which answers two questions -- what is being
+   asked, and why it was held -- and the ask runs the width of the pane, so at
+   eighty columns they cannot share a row.
 
    That second row used to be spelled as a literal ["\\n"]: backslash and n,
    printed to the operator as those two characters, because a real newline
-   would have drawn a row nobody had counted. Both halves live in one place
-   now -- the budget asks [approval_detail_line] how tall its line is before
-   spending the rows on it -- and this pins that they stay one place. A height
-   declared beside the drawing instead of read off it is how the footer floats
-   a row, which is the defect the queue rows already taught the chat pane
-   (#29818). *)
+   would have drawn a row nobody had counted. The surface draws the block into
+   a buffer and reads its height back with [count_frame_lines], so a row it draws is
+   a row it counted. A height declared beside the drawing instead of read off
+   it is how the footer floats a row: the rows above the queue were once
+   subtracted twice, in [boxed_surface_chrome_rows] and again as the Gate lane
+   rows, and the Approvals footer sat two rows above the composer at every
+   height. The four readings are the block above the queue, the block below
+   it, the footer, and the ask section. *)
 let test_the_detail_height_is_read_off_the_line_it_draws () =
   let calls callee =
     Ast_grep.count_calls_in_value_binding ~module_path:render
@@ -56,8 +57,26 @@ let test_the_detail_height_is_read_off_the_line_it_draws () =
   in
   Alcotest.(check int) "the surface builds the detail line once" 1
     (calls "approval_detail_line");
-  Alcotest.(check int) "and asks that same line for its height" 1
-    (calls "approval_detail_rows")
+  Alcotest.(check int) "and reads every block's height off what it drew" 4
+    (calls "count_frame_lines")
+
+(* A window reading is a position, not a key. The footer fitter reads the
+   hints as key items and gives them up from the back, so a reading packed
+   into that string is the first thing a crowded row drops -- and the verdict
+   detail is the one screen that exists for reading a ruling in full. It said
+   nothing about which part of the ruling was on screen at a hundred, a
+   hundred and thirty or a hundred and sixty columns. [footer_line] carries a
+   [?position] for this, and the pane hands its reading up as an option so the
+   caller cannot spell it back into the hints. *)
+let test_the_verdict_detail_reading_is_a_position_not_a_key () =
+  let calls callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render
+      ~binding_name:"render_harness_detail" ~callee
+  in
+  Alcotest.(check int) "the surface draws one footer" 1 (calls "footer_line");
+  Alcotest.(check int) "and does not join the reading onto its keys" 0
+    (Ast_grep.count_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"render_harness_detail" ~literals:[ "%s  %s" ])
 
 (* Whether the reading is live. Forty-two surface renderers in this file end
    their title with [connection_badge]; the roster was the one that did not,
@@ -294,8 +313,9 @@ let test_the_fleet_row_reads_the_control_planes_own_word () =
        ~binding_name:"keeper_liveness_of_briefs"
        ~literals:
          [ "active"; "offline"; "idle"; "paused" ]);
+  (* The Dashboard's health row names its Keepers through one helper. *)
   Alcotest.(check bool) "and the summary row reads the counts" true
-    (reads ~binding_name:"render_overview" ~fields:[ "ov_keeper_liveness" ] > 0)
+    (reads ~binding_name:"dashboard_keeper_line" ~fields:[ "ov_keeper_liveness" ] > 0)
 
 (* [operation=] is the right-hand side of the line directly above whenever the
    two agree, which is every operation but an identity call. The detail line
@@ -760,6 +780,24 @@ let test_a_turn_on_a_keeper_that_is_not_running_stops_moving () =
        ~constructors:[ "Masc_tui_keeper_mark.Left_open" ]
      > 0)
 
+(* The TURN cell counts from the open turn when there is one. Counted from
+   the last recorded turn alone, a failing keeper's cell counts from the
+   failure: "failing 7m45s" beside a moving mark read as the work in
+   progress. [Masc_tui_keeper_mark.turn_clock] says which instant wins, and
+   test_tui_keeper_mark pins it; the row has to ask it and draw the open case
+   rather than parse the recorded timestamp on its own. *)
+let test_the_turn_cell_counts_from_the_open_turn () =
+  Alcotest.(check bool) "the row asks which turn its clock counts" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"keeper_row_content"
+       ~callee:"Masc_tui_keeper_mark.turn_clock"
+     > 0);
+  Alcotest.(check bool) "the row draws the open turn's clock" true
+    (Ast_grep.count_constructors_in_value_binding ~module_path:render
+       ~binding_name:"keeper_row_content"
+       ~constructors:[ "Masc_tui_keeper_mark.Open_turn_started" ]
+     > 0)
+
 (* The preview's em dash once appeared as double-encoded UTF-8. Running
    marks belong to Masc_tui_answering and are exercised as rendered rows by
    test_tui_answering, including their terminal-cell width. *)
@@ -995,6 +1033,69 @@ let test_both_doors_into_the_runtime_detail_ask_the_same_lane_list () =
    "newest post first" a post replied to a minute ago sat sixth reading "25s".
    The sort is read once for the whole list: the header word and every row's
    number name the same time only while one reading feeds both. *)
+(* Both list panes drew a row's task id and nothing else. Measured on the
+   live history 2026-09-24: 200 Task Review rows carry 113 distinct ids, 45
+   of them more than once, and seven rows are task-1663. The Verdicts list is
+   shorter and collides too -- of eight rows one task carries two verdicts at
+   the same gate.
+
+   What parts a row has to be the row's own and has to hold still. Task
+   Review has a request id. A verdict has no id on the wire, and its notes
+   hash is not one either -- it is SHA256 of the task title and the
+   completion notes, so a second verdict on the same submission hashes the
+   same -- so that pane reads when the verdict was recorded. Neither reads an
+   age, which moves under the reader. The label helper is tested on its own
+   in test_tui_render_schedule; these two say the panes reach it, and which
+   field each hands it. *)
+let test_both_task_history_panes_say_which_row_each_is () =
+  List.iter
+    (fun binding_name ->
+      Alcotest.(check int)
+        (binding_name ^ " builds its labels through the shared one")
+        1
+        (Ast_grep.count_calls_in_value_binding ~module_path:render
+           ~binding_name
+           ~callee:"Render_schedule.task_history_sidebar_label"))
+    [ "render_verification_detail" ];
+  Alcotest.(check int) "Verdicts builds labels through the collision-aware helper" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_harness_detail"
+       ~callee:"Render_schedule.verdict_sidebar_labels");
+  Alcotest.(check int) "Task Review reads the request id" 1
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"render_verification_detail" ~field_name:"vr_request_id");
+  Alcotest.(check int) "Verdicts reads when the verdict was recorded" 1
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"render_harness_detail" ~field_name:"hv_at");
+  (* And not the notes hash, which two verdicts on one submission share. *)
+  Alcotest.(check int) "and not the notes hash" 0
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"render_harness_detail" ~field_name:"hv_notes_hash");
+  (* Neither reads an age. An age moves under the reader, which is what this
+     pair of fields replaced. *)
+  Alcotest.(check int) "Task Review no longer reads a clock to age" 0
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"render_verification_detail" ~field_name:"vr_created_at")
+;;
+
+(* The Tasks pane beside the detail drew a row's title and nothing else. The
+   label itself is tested in test_tui_sidebar_index_fold; this says the pane
+   reaches it, and that the id it passes is the row's own. *)
+let test_the_tasks_list_pane_says_which_task_each_row_is () =
+  Alcotest.(check int) "the pane builds its labels through the shared one" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_task_detail"
+       ~callee:"Render_schedule.task_list_sidebar_label");
+  (* Off [task], which is the one the detail beside this pane is open on: a
+     label built from that id would give every row the same one. The pane
+     also reads [task.id] to find which row to highlight, and that read is
+     what this excludes rather than counts. *)
+  Alcotest.(check int) "and passes the row's own id, not the open task's" 1
+    (Ast_grep.count_field_accesses_off_other_records_in_value_binding
+       ~module_path:render ~binding_name:"render_task_detail" ~record:"task"
+       ~fields:[ "id" ])
+;;
+
 let test_the_board_age_column_reads_the_sort_once () =
   let asks ~callee =
     Ast_grep.count_calls_in_value_binding ~module_path:render
@@ -1023,6 +1124,30 @@ let test_the_board_age_column_reads_the_sort_once () =
    Each binding is checked twice: the key it no longer opens, and a key it
    still does, so a renamed binding cannot make this pass by matching
    nothing. *)
+(* The Keeper detail's token rows. A live roster drew "Total Tokens:
+   75111274" and "Tokens In / Out: 56865402 / 56616" -- eight digits a reader
+   counts rather than reads -- while the Acting pane's own block beside it
+   already spelled the same kind of figure "75.1M". Six figures on this pane
+   are sizes: the cumulative total, the window's input and output, and the
+   used/maximum pair of each Context row -- the observed one and the one
+   drawn when the window is not observed. *)
+let test_the_keeper_detail_reads_its_token_figures_at_a_glance () =
+  Alcotest.(check int) "every token figure goes through the ladder" 6
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"keeper_detail_pane"
+       ~callee:"Masc_tui_message_layout.compact_count");
+  (* The pair in the Context row is a size, so the row no longer spells it
+     with digits. Turns, heartbeats and tool calls keep theirs: three or four
+     digits, and a count of things done rather than a size. *)
+  Alcotest.(check int) "the Context row spells no digits of its own" 0
+    (Ast_grep.count_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"keeper_detail_pane"
+       ~literals:
+         [ "%s%.1f%%%s  %s  %d / %d tokens"
+         ; "%d tokens in context; window not observed"
+         ])
+;;
+
 let test_the_loader_stops_opening_keys_no_screen_draws () =
   let decode = "lib/tui_decode.ml" in
   let dropped =
@@ -1061,6 +1186,79 @@ let test_the_loader_stops_opening_keys_no_screen_draws () =
     still_read
 ;;
 
+(* The request clock distinguishes repeated Automation rows. The renderer
+   reads the persisted field and uses the terminal's shared projection. *)
+let test_an_automation_row_says_when_it_was_asked_for () =
+  Alcotest.(check int) "the row reads the request clock" 1
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"automation_lines" ~field_name:"sch_requested_at_iso");
+  Alcotest.(check int) "and spells it with the shared stamp" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"automation_lines" ~callee:"Terminal_text.short_timestamp")
+;;
+
+(* The renderer delegates the variable width to the pure schedule-row layout.
+   It keeps the request clock and the payload summary beside each other when
+   a long recurrence needs a continuation. *)
+let test_the_automation_row_cuts_the_columns_it_draws () =
+  Alcotest.(check int) "the row uses the width-aware layout" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"automation_lines" ~callee:"Layout.automation_schedule_lines");
+  (* The clock width is read off the format. A number typed here would drift
+     from it the first time the format changed. *)
+  Alcotest.(check int) "the clock width is read off the format" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"schedule_requested_clock_cells"
+       ~callee:"Terminal_text.short_timestamp_of_unix");
+  Alcotest.(check int) "and no column is padded by Printf" 0
+    (Ast_grep.count_string_literals_containing_in_value_binding
+       ~module_path:render ~binding_name:"automation_lines" ~needle:"%-");
+  (* The status column is the contract's vocabulary, not a number typed here,
+     so a new status word moves the column with it. *)
+  Alcotest.(check int) "the status width is read off the contract" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"schedule_status_word_cells" ~callee:"List.fold_left")
+;;
+
+let has_substring haystack needle =
+  let n = String.length needle and h = String.length haystack in
+  let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
+  n = 0 || scan 0
+
+(* A valid comma-list cron is much wider than one_shot. At eighty columns it
+   must not make the one_shot row's payload disappear; its own full expression
+   remains visible on a continuation. These are the exact pre-box layout
+   lines, so their cell widths prove the frame will not cut them. *)
+let test_one_long_cron_does_not_hide_any_schedule_identity () =
+  let inner_width = Masc_tui_frame.inner_width ~cols:80 in
+  let cron = "cron 0,5,10,15,20,25,30,35,40,45,50,55 * * * * UTC" in
+  let row status requested_clock recurrence summary : Masc_tui_layout.automation_schedule_row =
+    { status; requested_clock; recurrence; summary }
+  in
+  let lines =
+    Masc_tui_layout.automation_schedule_lines ~inner_width
+      ~status_cells:9 ~clock_cells:19
+      [ row "scheduled" "2026-09-24 03:55:20" cron "#38891 full cron task"
+      ; row "cancelled" "2026-09-14 22:43:50" "one_shot" "#36319 review registration"
+      ]
+  in
+  let painted =
+    List.map (fun line -> Masc_tui_message_layout.fit_width line inner_width) lines
+  in
+  Alcotest.(check int) "eighty columns has a 76-cell box content" 76 inner_width;
+  Alcotest.(check int) "one continuation only for the long cron" 3
+    (List.length lines);
+  Alcotest.(check bool) "cron row retains its payload" true
+    (has_substring (List.nth painted 0) "#38891 full cron task");
+  Alcotest.(check bool) "continuation retains the full recurrence" true
+    (has_substring (List.nth painted 1) cron);
+  Alcotest.(check bool) "one_shot row retains its payload" true
+    (has_substring (List.nth painted 2) "#36319 review registration");
+  List.iter (fun line ->
+    Alcotest.(check int) "the painted line fills the actual box content" inner_width
+      (Masc_tui_message_layout.display_width line)) painted
+;;
+
 (* Three lists draw a Fusion run's start: the Fusion list, the run detail and
    the Keeper detail's Runs tab. The first two read [fusion_run_clock]; the
    third held a copy of its Printf, so a change to the clock would have moved
@@ -1083,6 +1281,8 @@ let () =
             `Quick test_the_detail_pane_keeps_the_blocked_gate_reason
         ; Alcotest.test_case "the detail height is read off the line it draws"
             `Quick test_the_detail_height_is_read_off_the_line_it_draws
+        ; Alcotest.test_case "the verdict detail reading is a position" `Quick
+            test_the_verdict_detail_reading_is_a_position_not_a_key
         ; Alcotest.test_case "the title does not count another queue" `Quick
             test_the_title_does_not_count_another_queue
         ; Alcotest.test_case "the Overview row counts every approval list"
@@ -1091,6 +1291,9 @@ let () =
             `Quick test_the_summary_row_does_not_count_the_panel_below_it
         ; Alcotest.test_case "the load stops reading a field no screen draws"
             `Quick test_the_overview_load_stops_reading_a_field_no_screen_draws
+        ; Alcotest.test_case
+            "the keeper detail reads its token figures at a glance" `Quick
+            test_the_keeper_detail_reads_its_token_figures_at_a_glance
         ; Alcotest.test_case "the loader stops opening keys no screen draws"
             `Quick test_the_loader_stops_opening_keys_no_screen_draws
         ; Alcotest.test_case "the schedule counts read the shared status list"
@@ -1138,6 +1341,8 @@ let () =
             test_project_changes_use_the_requested_workspace_root
         ; Alcotest.test_case "a turn on a keeper that is not running stops"
             `Quick test_a_turn_on_a_keeper_that_is_not_running_stops_moving
+        ; Alcotest.test_case "the turn cell counts from the open turn"
+            `Quick test_the_turn_cell_counts_from_the_open_turn
         ; Alcotest.test_case "why a lane cannot admit is the detail pane's"
             `Quick test_why_a_lane_cannot_admit_is_the_detail_panes_to_say
         ; Alcotest.test_case "visible navigation glyphs are not mojibake"
@@ -1166,6 +1371,18 @@ let () =
             test_both_doors_into_the_runtime_detail_ask_the_same_lane_list
         ; Alcotest.test_case "the Board age column reads the sort once" `Quick
             test_the_board_age_column_reads_the_sort_once
+        ; Alcotest.test_case "an automation row says when it was asked for"
+            `Quick test_an_automation_row_says_when_it_was_asked_for
+        ; Alcotest.test_case "the automation row cuts the columns it draws"
+            `Quick test_the_automation_row_cuts_the_columns_it_draws
+        ; Alcotest.test_case "one long cron cannot hide schedule identities"
+            `Quick test_one_long_cron_does_not_hide_any_schedule_identity
+        ; Alcotest.test_case
+            "both task history panes say which row each is" `Quick
+            test_both_task_history_panes_say_which_row_each_is
+        ; Alcotest.test_case
+            "the Tasks list pane says which task each row is" `Quick
+            test_the_tasks_list_pane_says_which_task_each_row_is
         ; Alcotest.test_case "every Fusion run list reads one clock" `Quick
             test_every_fusion_run_list_reads_one_clock
         ] )

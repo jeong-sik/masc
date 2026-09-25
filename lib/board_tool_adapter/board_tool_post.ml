@@ -13,7 +13,38 @@ open Tool_args
 (* RFC-0189 PR-1b.2 — handlers in this module return the typed
    [Tool_result.result] variant directly. *)
 
+let attachment_error ~tool_name ~start_time error : Tool_result.result =
+  let class_ =
+    match error with
+    | Board_tool_attachment.Artifact_read_failed _ -> Tool_result.Runtime_failure
+    | Board_tool_attachment.Raw_meta_attachments
+    | Board_tool_attachment.Attachments_not_array
+    | Board_tool_attachment.Duplicate_attachments
+    | Board_tool_attachment.Entry_not_object _
+    | Board_tool_attachment.Invalid_entry_fields _
+    | Board_tool_attachment.Invalid_kind _
+    | Board_tool_attachment.Invalid_url _
+    | Board_tool_attachment.Invalid_sha256 _
+    | Board_tool_attachment.Missing_artifact _
+    | Board_tool_attachment.Invalid_artifact_reference _
+    | Board_tool_attachment.Youtube_requires_url _
+    | Board_tool_attachment.Artifact_too_large _ ->
+      Tool_result.Workflow_rejection
+  in
+  Tool_result.make_err
+    ~tool_name
+    ~class_
+    ~start_time
+    (Board_tool_attachment.error_to_string error)
+;;
+
+(* Attachment syntax is checked first, like any other argument. Artifact bytes
+   are read last, after every check that needs no I/O, so a post that is going
+   to be rejected for its title, author or post_kind reads no blob. *)
 let handle_post_create ~tool_name ~start_time args : Tool_result.result =
+  match Board_tool_attachment.parse_args args with
+  | Error error -> attachment_error ~tool_name ~start_time error
+  | Ok attachment_entries ->
   let title = get_string_opt args "title" in
   (* Reject empty or whitespace-only titles. *)
   match title with
@@ -75,14 +106,6 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
       let hearth = get_string_opt args "hearth" in
       let thread_id = get_string_opt args "thread_id" in
       let raw_post_kind = get_string_opt args "post_kind" in
-      let meta_json =
-        match sources with
-        | Some entries ->
-          Board_tool_format.merge_sources_into_meta
-            (Board_tool_format.normalize_board_post_meta args)
-            entries
-        | None -> Board_tool_format.normalize_board_post_meta args
-      in
       let visibility =
         match Board_tool_format.visibility_of_string visibility_str with
         | Some v -> v
@@ -96,6 +119,22 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
           ~start_time
           msg
       | Ok post_kind ->
+        match
+          Board_tool_attachment.resolve
+            ~base_path:(Env_config_core.base_path ())
+            ~max_artifact_bytes:Tool_blob_store.max_served_bytes
+            attachment_entries
+        with
+        | Error error -> attachment_error ~tool_name ~start_time error
+        | Ok attachments ->
+        let meta_json =
+          match sources with
+          | Some entries ->
+            Board_tool_format.merge_sources_into_meta
+              (Board_tool_format.normalize_board_post_meta ~attachments args)
+              entries
+          | None -> Board_tool_format.normalize_board_post_meta ~attachments args
+        in
         (match
            Board_dispatch.create_post
              ~author
@@ -327,10 +366,13 @@ let handle_post_list ~tool_name ~start_time args : Tool_result.result =
    metadata instead, so a caller continuing the read never parses the text.
    The size is measured on that text, the same bytes the boundary compares.
    [comment_limit] stays an upper bound a caller can ask for. *)
-let render_thread ~post_block ~comment_lines =
-  match comment_lines with
-  | [] -> Printf.sprintf "%s\n\nNo comments." post_block
-  | _ :: _ ->
+let render_thread ~post_block ~total ~comment_lines =
+  match comment_lines, total with
+  | [], 0 -> Printf.sprintf "%s\n\nNo comments." post_block
+  (* The end of a thread that has comments: the position line names the
+     offset and the thread's size at the read, so the body adds nothing. *)
+  | [], _ -> post_block
+  | _ :: _, _ ->
     Printf.sprintf "%s\n\n**Comments**:\n%s" post_block (String.concat "\n" comment_lines)
 ;;
 
@@ -409,6 +451,7 @@ let handle_post_get ~result_boundary ~tool_name ~start_time args : Tool_result.r
            (Board.Comment_page.Position.line position)
            (render_thread
               ~post_block
+              ~total:page.Board.Comment_page.total
               ~comment_lines:
                 (Board_tool_format.format_comment_tree
                    ~viewer_vote_of

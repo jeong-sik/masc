@@ -40,7 +40,8 @@ let test_long_thread_scroll_reuses_rows () =
       (List.nth comments index).bc_content (Layout.comment_line rows index)
   done;
   Alcotest.(check int) "one layout across scrolling" 1 !renders;
-  Alcotest.(check int) "entire thread retained" 128 (Layout.comment_count first);
+  Alcotest.(check int) "entire thread retained" 128
+    (Layout.comment_line_count first);
   (* A JSON refresh creates fresh records even when the document is unchanged. *)
   let copied = List.map (fun c -> {c with bc_content = String.concat "" [c.bc_content; ""]}) comments in
   ignore (get {source with detail = Detail.Ready (post, copied)});

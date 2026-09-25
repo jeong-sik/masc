@@ -118,6 +118,40 @@ type machine = {
 let state : machine option ref = ref None
 let lock = Mutex.create ()
 let locked f = Mutex.protect lock f
+
+type change_mark = { count : int; incarnation : string }
+
+(* The machine change counter a spectator compares against. Process-wide and
+   written only while holding [lock]. Nothing resets it: an eject and the
+   next load keep counting, so one value never names two different screens
+   while the server runs. [advance] publishes Running before the first frame;
+   the enclosing operation raises the count on completion, including when it
+   raises after partial progress. A call that replaces the machine marks
+   right after installing the new one.
+
+   [published] carries the same count and incarnation, plus whether frames
+   are still running. A matching Stable mark may answer without the lock;
+   Running always waits for the final frame. Both transitions are published
+   under [lock], including when a step raises after partial progress. *)
+let change_count = ref 0
+type 'mark publication = 'mark Machine_live_publication.t =
+  | No_screen
+  | Stable of 'mark
+  | Running of 'mark
+type published_state = change_mark publication
+let published : published_state Atomic.t = Atomic.make No_screen
+
+let publish make =
+  Atomic.set published
+    (match !state with
+     | None -> No_screen
+     | Some st -> make { count = !change_count; incarnation = st.incarnation })
+;;
+
+let publish_stable () = publish (fun mark -> Stable mark)
+let publish_running () = publish (fun mark -> Running mark)
+let mark_change () = incr change_count; publish_stable ()
+let current_publication () = Atomic.get published
 (* Used only while holding [lock]. An incarnation names a newly installed
    history, including a restore of the exact same checkpoint. *)
 let fresh_incarnation () = Random_id.uuid_v7 ()
@@ -126,7 +160,13 @@ let with_machine f =
   locked (fun () ->
     match !state with
     | None -> Error No_machine
-    | Some st -> f st)
+    | Some st ->
+      Fun.protect
+        ~finally:(fun () ->
+          match Atomic.get published with
+          | Running _ -> mark_change ()
+          | Stable _ | No_screen -> ())
+        (fun () -> f st))
 ;;
 
 let hex2 = Printf.sprintf "%02x"
@@ -401,6 +441,7 @@ let load ~ledger_dir ~(roms_dir : string option) ~cart_path ~disk_path =
           }
         in
         state := Some st;
+        mark_change ();
         Ok { observation = observe st
            ; transition = { before; after = medium_of (Some st) } })
 ;;
@@ -411,6 +452,7 @@ let eject () =
     | None -> Error No_machine
     | Some _ ->
       state := None;
+      mark_change ();
       Ok ())
 ;;
 
@@ -424,7 +466,12 @@ let check_frames ~what n =
   else Ok ()
 ;;
 
+(* The only place frames run on the installed machine. [Running] is published
+   before mutation; [with_machine] raises the mark and publishes Stable after
+   all frames finish or an exception leaves. A call refused before this point
+   leaves the mark alone. [st] is [!state]'s machine, from [with_machine]. *)
 let advance st n =
+  publish_running ();
   (* Invalidate before mutating even if stepping raises after partial progress. *)
   st.pixels <- None;
   Msx.step st.m ~frames:n;
@@ -607,7 +654,12 @@ let step_frame ~frames =
     | Error _ as error -> error
     | Ok () ->
         advance st frames;
-        Ok (frame_of st, List.rev st.entries))
+        (* Close the run here, not in [with_machine]'s finally, so the mark
+           returned with these pixels is the one a spectator reads next.
+           The publication is then [Stable], and the finally leaves it. *)
+        mark_change ();
+        let mark = { count = !change_count; incarnation = st.incarnation } in
+        Ok (frame_of st, List.rev st.entries, mark))
 ;;
 
 let capture () = with_machine (fun st -> Ok (observe st, frame_of st))
@@ -626,6 +678,26 @@ let capture_with_identity () =
     Ok { incarnation = st.incarnation; observation = observe st;
          frame = frame_of st; input_count = st.input_count;
          input_ledger = st.entries })
+;;
+
+type live =
+  | Nothing_loaded
+  | Unchanged of change_mark
+  | Changed of change_mark * frame
+
+(* Compare and copy under one lock hold, so the count, the incarnation and the
+   pixels always describe the same machine state. An unchanged answer renders
+   nothing. *)
+let live ~since =
+  locked (fun () ->
+    match !state with
+    | None -> Nothing_loaded
+    | Some st ->
+      let mark = { count = !change_count; incarnation = st.incarnation } in
+      (match since with
+       | Some seen when seen.count = mark.count
+                        && String.equal seen.incarnation mark.incarnation -> Unchanged mark
+       | Some _ | None -> Changed (mark, frame_of st)))
 ;;
 
 (* --- RAM 인트로스펙션 — 상태 센서 ---------------------------------------
@@ -813,6 +885,7 @@ let restore ~path ~ledger_dir =
                   cart; disk; disk_id; media; ledger_path; entries = List.rev entries;
                   input_count = List.length entries} in
         state := Some st;
+        mark_change ();
         Ok (observe st)
       with Sys_error message -> Error (Unreadable message))
 ;;
@@ -836,6 +909,7 @@ let change_disk ~path ~backup_path =
             atomic_write backup_path (Yojson.Safe.to_string (checkpoint_json st));
             let next = {st with m; pixels = None; disk = Some (Filename.basename path); disk_id = Some target_id; media = List.remove_assoc target_id media} in
             state := Some next;
+            mark_change ();
             Ok (observe next)))
       | _ -> Error (Invalid_request "load a disk game before changing disks"))
   with Sys_error message -> Error (Unreadable message)

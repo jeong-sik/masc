@@ -34,7 +34,7 @@ let test_the_item_names_the_pressure_and_where_to_read_it () =
       (Some (reading Masc.Transport_metrics.High))
   with
   | Some item ->
-      check string "summary" "transport queue pressure high (m: Metrics)"
+      check string "summary" "transport queue pressure high (m: Usage)"
         item.Types.ai_summary;
       (match item.Types.ai_target with
        | Types.Attention_other { target_type; target_id = None } ->

@@ -251,6 +251,7 @@ let usage_scope_json (scope, providers) : Yojson.Safe.t =
   in
   `Assoc
     [ "scope", `String (Runtime_quota_window.scope_to_string scope)
+    ; "scope_id", `String (Server_provider_usage_history.scope_id scope)
     ; "providers", Json_util.json_string_list providers
     ; "state", `String state
     ; "windows", `List windows

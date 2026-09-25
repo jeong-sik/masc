@@ -106,7 +106,11 @@ let config_bindings =
       ~help:"on prompts, switch between the read-only runtime assets and \
              the registry you can override",
       Some [ Config_prompts ]
-  ; b Act "Esc" "dashboard", None
+  (* "back", not the destination's name: [Esc] is pinned on every row, so
+     each cell of its label comes out of the pane's own keys. Spelled
+     "dashboard", params at 80 columns gave up [E], its only way to the JSON
+     value. The help names where it goes. *)
+  ; b Act "Esc" "back" ~help:"back to Dashboard", None
   ; b Meta "r" "reload", None
   ; b Meta "Tab" "next", None
   ; b Meta "q" "quit", None
@@ -1019,19 +1023,17 @@ let footer_hints_prompt_assets =
   in
   config_row ~own ~shared
 
-(* The Overview footer is the same table plus one runtime fact the renderer
-   owns: whether the task list is selected (task_focus). The table stays the
-   SSOT — this projection only drops the keys that are dead in the current
-   mode: t selects the task list, and j/k, Home/End, Enter and Esc act on
-   it only once it is selected. *)
-let footer_hints_overview ~task_focus =
-  let dead =
-    if task_focus then [ "t" ]
-    else [ "j/k"; "Home/End"; "Right / Enter"; "Left / Esc" ]
-  in
-  keepers_jump :: for_surface Overview
-  |> List.filter (fun b -> not (List.mem b.key dead))
-  |> hints_of_bindings
+(* Work's task list, while it owns j/k. The Goals pane under the same
+   surface reads [footer_hints Planning]; this is the other half of that one
+   screen, so its keys come from a table too rather than from the renderer. *)
+let work_tasks_bindings =
+  [ b Navigate "j/k" "select" ~help:"move through Work's open tasks"
+  ; b Navigate "t / Esc" "Goals" ~help:"hand j/k back to the Goals list"
+  ; b Act "Enter" "detail" ~help:"open the selected task"
+  ]
+  @ listing_meta
+
+let footer_hints_work_tasks = hints_of_bindings work_tasks_bindings
 
 (* The Code surface's footer, which the renderer used to spell by hand. It
    named d, H, m and w and nothing else, so the three language-server keys
@@ -1146,18 +1148,21 @@ let footer_hints_board_read ~focus_posts ~split =
        ; b Meta "Tab" "next"
        ])
 
-let footer_hints_fusion_detail ~position =
-  Printf.sprintf "%s  %s"
-    (hints_of_bindings
-       ([ b Navigate "j/k" "scroll"
-        ; b Navigate "PgUp/PgDn" "page"
-        ; fusion_caller_key
-        ; fusion_board_key
-        ; b Act "Y" "copy"
-        ; b Act "Esc" "back" ~help:"Left or Esc returns to the run list"
-        ]
-        @ listing_meta))
-    position
+(* The scroll position is not here. It is not a key and it cannot be looked
+   up, so it travels to the footer as its own argument
+   ([Masc_tui_footer.line]'s [?position]) rather than as two spaces on the end
+   of this string -- spelled that way the fitter read it as one more key item
+   and gave it up first, and on this surface it was never drawn. *)
+let footer_hints_fusion_detail =
+  hints_of_bindings
+    ([ b Navigate "j/k" "scroll"
+     ; b Navigate "PgUp/PgDn" "page"
+     ; fusion_caller_key
+     ; fusion_board_key
+     ; b Act "Y" "copy"
+     ; b Act "Esc" "back" ~help:"Left or Esc returns to the run list"
+     ]
+     @ listing_meta)
 
 (* Lanes sub-modes ([lanes_mode] owns overview/list/detail/notice —
    masc_tui_types.ml). The overview footer stays [for_surface Lanes]; these
@@ -1171,18 +1176,15 @@ let footer_hints_lanes_run_list =
      ]
      @ listing_meta)
 
-let footer_hints_lanes_run_detail ~position =
-  let hints =
-    hints_of_bindings
-      ([ b Navigate "j/k" "compare" ~help:"scroll Input and Output together"
-       ; b Navigate "PgUp/PgDn" "page" ~help:"page both evidence panes"
-       ; b Act "Left / Esc" "back" ~help:"back to the run list"
-       ]
-       @ listing_meta)
-  in
-  match position with
-  | None -> hints
-  | Some position -> hints ^ "  " ^ position
+(* The position travels as [Masc_tui_footer.line]'s [?position], for the
+   reason spelled over [footer_hints_fusion_detail]. *)
+let footer_hints_lanes_run_detail =
+  hints_of_bindings
+    ([ b Navigate "j/k" "compare" ~help:"scroll Input and Output together"
+     ; b Navigate "PgUp/PgDn" "page" ~help:"page both evidence panes"
+     ; b Act "Left / Esc" "back" ~help:"back to the run list"
+     ]
+     @ listing_meta)
 
 let footer_hints_git_changes =
   hints_of_bindings

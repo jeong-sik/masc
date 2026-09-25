@@ -177,11 +177,21 @@ let heard_text ~now observed_at =
 
 (* ---- accounts ----------------------------------------------------------- *)
 
+(* The server names the scope's id on the row, the same id its history
+   points carry; hashing it again here would be a second definition that
+   could drift from the first. *)
 let scope_id (account : Tui_decode.provider_usage_account) =
-  Digest.to_hex (Digest.string account.pua_scope)
+  account.pua_scope_id
+
+(* The id's leading cells, enough to tell scopes apart on one screen. *)
+let scope_id_cells = 8
 
 let scope_name (account : Tui_decode.provider_usage_account) =
-  let id = String.sub (scope_id account) 0 8 in
+  let id = scope_id account in
+  let id =
+    Terminal_text.single_line
+      (String.sub id 0 (min scope_id_cells (String.length id)))
+  in
   match account.pua_providers with
   | [] -> "scope " ^ id
   | providers -> Terminal_text.single_line (String.concat "," providers) ^ " · " ^ id

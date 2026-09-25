@@ -1,6 +1,6 @@
 (** A shell wearing an argv costume.
 
-    [argv:["sh";"-c";"cd x && build"]] and [script:"cd x && build"] are the same
+    [argv:["sh";"-c";"cd x && build"]] and [command:"cd x && build"] are the same
     text, but only the second crosses the gate: the first lowers to one opaque
     program with two literal arguments, so path scope, redirect policy, and the
     absence of [;] from {!Masc_exec.Shell_ir.connector} all stop applying inside

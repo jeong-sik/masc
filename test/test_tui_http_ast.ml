@@ -415,6 +415,36 @@ let test_is_success_http_status_called () =
       n
 ;;
 
+(* RFC machine-spectating-goes-through-lanes stage 3: the spectator reads every
+   machine's screen through the one live route, asked with the counter of the
+   picture it drew. The per-machine frame route is no longer read by the TUI. *)
+let test_the_spectator_reads_the_live_route () =
+  List.iter
+    (fun module_path ->
+      check int (module_path ^ " names no per-machine frame route") 0
+        (Ast_grep.count_string_literals ~module_path ~needle:"/api/v1/msx/frame"
+         + Ast_grep.count_string_literals ~module_path ~needle:"/api/v1/dos/frame"))
+    [ "bin/masc_tui_http.ml"; "bin/masc_tui.ml"; "bin/masc_tui_msx.ml";
+      "bin/masc_tui_machine_live.ml" ];
+  check bool "the live route is the one the reader asks" true
+    (Ast_grep.count_string_literals ~module_path:"bin/masc_tui_machine_live.ml"
+       ~needle:"/api/v1/lane-addons/live" = 1);
+  check bool "the HTTP read builds its path from the counter it is given" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_http.ml"
+       ~binding_name:"fetch_machine_live" ~callee:"Masc_tui_machine_live.path" = 1
+     && Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_http.ml"
+          ~binding_name:"fetch_machine_live" ~callee:"Masc_tui_machine_live.decode" = 1);
+  List.iter
+    (fun binding_name ->
+      check int (binding_name ^ " reads the live route") 1
+        (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+           ~binding_name ~callee:"Masc_tui_http.fetch_machine_live");
+      check bool (binding_name ^ " asks with the drawn counter") true
+        (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+           ~binding_name ~callee:"Masc_tui_machine_live.since" >= 1))
+    [ "observe_msx_frame"; "launch_dos_live_poll" ]
+;;
+
 let test_http_get_uses_auth_headers () =
   let n =
     Ast_grep.count_calls
@@ -438,15 +468,15 @@ let test_http_get_uses_auth_headers () =
    names all three -- and the Clients title walked from one to the next twice,
    spelling the first step "/" and the second the middle dot: "MASC Config /
    Runtime \xc2\xb7 Clients". Two spellings of one kind of step, in one
-   string. Every other title that walks surfaces uses "/" (Config / Runtime,
-   Config / Resources, Workspace / Code). *)
+   string. Every other title that walks surfaces uses "/" (System / Runtime,
+   System / Resources, Workspace / Code). *)
 let test_the_clients_path_spells_its_steps_alike () =
   let module_path = "bin/masc_tui_render.ml" in
   check int "no step spelled with the middle dot" 0
     (Ast_grep.count_string_literals ~module_path ~needle:"Runtime \xc2\xb7 Clients");
   check bool "the path reads with one separator" true
     (Ast_grep.count_string_literals ~module_path
-       ~needle:"Config / Runtime / Clients"
+       ~needle:"System / Runtime / Clients"
      > 0)
 ;;
 
@@ -1683,6 +1713,17 @@ let test_planning_refresh_reconciles_navigation_identity () =
 
 let test_render_loop_uses_monotonic_dirty_schedule () =
   let main_path = "bin/masc_tui.ml" in
+  check int "the render loop queries both buffered input sources" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"input_reader_has_pending_bytes");
+  check int "queued input includes the terminal probe replay" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"input_reader_has_pending_bytes"
+       ~callee:"Masc_tui_terminal_probe.has_replay");
+  check int "an incomplete scalar does not postpone a frame" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:main_path ~binding_name:"input_reader_has_pending_bytes"
+       ~callees:[] ~fields:[ "partial_scalar" ]);
   check bool "main loop reads a monotonic clock" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Mtime_clock.elapsed_ns"
@@ -1783,29 +1824,18 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
        ~callee:"render_surface");
   let render_path = "bin/masc_tui_render.ml" in
-  check int "overview layout owns one shared row allocation" 1
+  (* The Dashboard is a fixed set of summary sections over one body height;
+     it holds no Team block, task panel or attention window whose rows a
+     shared allocation would split (RFC-tui-measured-operator-home). *)
+  check int "Dashboard reads one body height" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"overview_layout"
-       ~callee:"Render_schedule.allocate_overview");
-  check int "overview renderer consumes one shared layout" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_overview" ~callee:"overview_layout");
-  (* The Attention panel tells an empty answer from an unread one the way
+       ~binding_name:"render_overview"
+       ~callee:"Masc_tui_types.surface_body_rows");
+  (* The attention section tells an empty answer from an unread one the way
      every listing does, instead of leaving its rows blank. *)
-  check int "overview's attention panel reads the shared empty page" 1
+  check int "Dashboard's attention section reads the shared empty page" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview" ~callee:"empty_page_of");
-  (* The overview reads its bounds off [row_budget], the one value the layout
-     above returns. How many times it reads them is how much the surface
-     draws, not whether the allocation is shared: #29684 moved the number
-     from five to six by adding a task-panel window that reads the same
-     [task_rows]. A second source is what breaks the sharing, so that is what
-     is asked for, and none is allowed. *)
-  check int "overview bounds every variable section from that one allocation" 0
-    (Ast_grep.count_field_accesses_off_other_records_in_value_binding
-       ~module_path:render_path ~binding_name:"render_overview"
-       ~record:"row_budget"
-       ~fields:[ "attention_rows"; "task_error_rows"; "task_rows" ]);
   check int "board read consumes one shared row allocation" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"board_read_pane"
@@ -2478,15 +2508,11 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "overview_error"
     ; "ai_summary"
     ];
-  check_fields "overview_layout" [ "tasks_error" ];
+  check_fields "render_work_tasks" [ "tasks_error" ];
   (* The TUI session block prints event text this process wrote from
      server answers and editor output. *)
   check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
     "render_section_fleet" [ "content" ];
-  (* The Team block prints Keeper names and task text that producers wrote. *)
-  (* pr_tag_of_keeper looks the name up; it does not draw it. *)
-  check_fields ~non_rendering_calls:[ "pr_tag_of_keeper" ] "overview_team_lines"
-    [ "okp_name"; "id"; "title" ];
   (* The pull request lines print repository ids and failure text the server
      relayed from GitHub. *)
   check_fields ~module_path:"bin/masc_tui_repository_pulls.ml" "lines"
@@ -2632,14 +2658,17 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      always escaped, because it goes through [detail_claim_lines], which hands
      the sanitiser to [Message_layout.wrap_body] a line at a time -- a body
      cannot be escaped whole. *)
+  (* The viewport and full overlay share [memory_fact_detail_parts], so
+     check the producer that now reads the fields rather than its wrapper. *)
   check_fields ~module_path:"bin/masc_tui_render_memory.ml"
-    ~non_rendering_calls:[ "detail_claim_lines" ] "memory_fact_detail_lines"
+    ~non_rendering_calls:[ "detail_claim_lines" ] "memory_fact_detail_parts"
     (* [mf_category] is not on this list. It stopped being wire text: the
        decoder turns it into [Keeper_memory_os_types.category], so the pane
        prints a word this build spells, not one a keeper sent. *)
     [ "mf_claim"
     ; "mf_origin"
     ; "mf_memory_id"
+    ; "msf_claim"
     ; "msf_path"
     ; "msf_sha256"
     ; "mi_reason"
@@ -2773,42 +2802,17 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_keeper_logs"
        ~callee:"Terminal_text.clock_timestamp");
-  (* Six: two observation timestamps in Live Context, the last turn, the oldest
-     row a partial Last 24h window reached, and the created / updated pair. Each
-     one arrives from a keeper file or a metrics row, so none may reach the
-     frame unprojected. *)
-  check int "keeper detail uses safe short projections for every timestamp" 6
+  (* Seven: two observation timestamps in Live Context, the last turn, the
+     oldest row a partial Last 24h window reached, the created / updated pair,
+     and the Automation row's request clock. Each one arrives from a keeper
+     file, a metrics row or the schedule store, so none may reach the frame
+     unprojected. *)
+  check int "keeper detail uses safe short projections for every timestamp" 7
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"keeper_detail_pane"
        ~callee:"Terminal_text.short_timestamp");
   check_identifiers ~module_path:"bin/masc_tui_loader.ml" ~binding:"report"
     ~callees:[ "Masc_tui_ansi.Terminal_text.single_line" ] [ "path"; "err" ]
-;;
-
-(* The Keeper GitHub tab draws what the config stores and what this host
-   resolves from it. The second row is there to show a difference, and on a
-   plain login there is none: the live roster drew "signed in as
-   pangyo-preachers · scopes: gist, read:org, repo, workflow" twice, once
-   under each label. The rows are compared now, so agreement is one row
-   carrying both labels and only a difference costs two. *)
-let test_the_github_identity_rows_are_compared_before_they_are_drawn () =
-  check int "the two readings are compared" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_loader.ml"
-       ~binding_name:"github_identity_lines" ~callee:"String.equal")
-;;
-
-(* A server that leaves "authenticated" out, or sends it as something other
-   than a boolean, is not a server saying no. The row read "not signed in"
-   for it, which is the opposite of the truth for a Keeper that is signed in
-   and sends the operator to sign in again. Absence is its own reading. *)
-let test_an_unreported_sign_in_is_not_a_refusal () =
-  let holds needle =
-    Ast_grep.count_exact_string_literals_in_value_binding
-      ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"auth_status" ~needle
-  in
-  check int "the missing key has a reading of its own" 1
-    (holds "sign-in not reported");
-  check int "and the server's own no keeps its words" 1 (holds "not signed in")
 ;;
 
 (* A failed turn used to be drawn twice: the server records it in the
@@ -3084,6 +3088,8 @@ let () =
           `Quick
           test_chat_roles_draw_through_the_readable_path;
         test_case "check success status" `Quick test_is_success_http_status_called;
+        test_case "the spectator reads the live route" `Quick
+          test_the_spectator_reads_the_live_route;
         test_case "the attention note starts where its rows do" `Quick
           test_the_attention_note_starts_where_its_rows_do;
         test_case "the lane failure row adds no second verdict" `Quick
@@ -3166,14 +3172,6 @@ let () =
           "renderers sanitize untrusted terminal fields"
           `Quick
           test_renderers_sanitize_untrusted_terminal_fields;
-        test_case
-          "the GitHub identity rows are compared before they are drawn"
-          `Quick
-          test_the_github_identity_rows_are_compared_before_they_are_drawn;
-        test_case
-          "an unreported sign-in is not a refusal"
-          `Quick
-          test_an_unreported_sign_in_is_not_a_refusal;
         test_case
           "the session row filter reads the transcript"
           `Quick

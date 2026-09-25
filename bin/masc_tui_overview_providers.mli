@@ -21,6 +21,11 @@ type section = {
 }
 
 val scope_id : Masc.Tui_decode.provider_usage_account -> string
+(** The server's id for the scope, as its usage history names it. *)
+
+val scope_id_cells : int
+(** How much of a scope id a row draws to tell scopes apart. *)
+
 val scope_name : Masc.Tui_decode.provider_usage_account -> string
 
 val section :

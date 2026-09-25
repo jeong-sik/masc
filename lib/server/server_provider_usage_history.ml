@@ -46,13 +46,25 @@ let install config =
     Dated_jsonl.append journal
       (`List (record_json ~scope ~observed_at report)))
 
+type window = One_day | Seven_days | Fourteen_days
+
+let window_of_days = function
+  | 1 -> Some One_day
+  | 7 -> Some Seven_days
+  | 14 -> Some Fourteen_days
+  | _ -> None
+
+let days_of_window = function
+  | One_day -> 1
+  | Seven_days -> 7
+  | Fourteen_days -> 14
+
 type point = {
   scope_id : string;
   source : string;
   kind : string;
   limit_id : string option;
-  unit : string;
-  value : Yojson.Safe.t;
+  utilization : Usage.utilization;
   observed_at : float;
   resets_at : int option;
 }
@@ -82,73 +94,78 @@ let number key json =
   | Some (`Int value) -> Ok (float_of_int value)
   | _ -> Error ("provider usage history: invalid " ^ key)
 
+(* The stored line back into the variant [utilization_json] wrote: the unit
+   word and the value's JSON type decide together, and anything else is not
+   a report this store wrote. *)
+let utilization_of_json json =
+  match member "unit" json, member "value" json with
+  | Some (`String "fraction"), Some (`Float value) when Float.is_finite value ->
+      Ok (Usage.Fraction value)
+  | Some (`String "fraction"), Some (`Int value) ->
+      Ok (Usage.Fraction (float_of_int value))
+  | Some (`String "percent"), Some (`Int value) -> Ok (Usage.Percent value)
+  | _ -> Error "provider usage history: invalid unit or value"
+
 let decode json =
   let* scope_id = string "scope_id" json in
   let* source = string "source" json in
   let* kind = string "kind" json in
   let* limit_id = optional_string "limit_id" json in
-  let* unit = string "unit" json in
-  let* value =
-    match member "value" json with
-    | Some (`Float value) when Float.is_finite value -> Ok (`Float value)
-    | Some (`Int value) -> Ok (`Int value)
-    | _ -> Error "provider usage history: invalid value"
-  in
+  let* utilization = utilization_of_json json in
   let* observed_at = number "observed_at" json in
   let* resets_at = optional_int "resets_at" json in
-  if unit <> "fraction" && unit <> "percent" then
-    Error "provider usage history: unknown unit"
-  else Ok { scope_id; source; kind; limit_id; unit; value; observed_at; resets_at }
+  Ok { scope_id; source; kind; limit_id; utilization; observed_at; resets_at }
 
 let point_json point =
+  let unit, value = utilization_json point.utilization in
   `Assoc
     [ "scope_id", `String point.scope_id
     ; "source", `String point.source
     ; "kind", `String point.kind
     ; "limit_id", Option.fold ~none:`Null ~some:(fun id -> `String id) point.limit_id
-    ; "unit", `String point.unit
-    ; "value", point.value
+    ; "unit", `String unit
+    ; "value", value
     ; "observed_at", `Float point.observed_at
     ; "resets_at", Option.fold ~none:`Null ~some:(fun ts -> `Int ts) point.resets_at
     ]
 
-let window_start ~now ~days =
-  (floor (now /. 86400.0) -. float_of_int (days - 1)) *. 86400.0
+let window_start ~now ~window =
+  (floor (now /. 86400.0) -. float_of_int (days_of_window window - 1)) *. 86400.0
 
-let failure_in_window ~now ~days =
+let failure_in_window ~now ~window =
   match Usage.record_observer_failure_at () with
-  | Some at -> at >= window_start ~now ~days && at <= now
+  | Some at -> at >= window_start ~now ~window && at <= now
   | None -> false
 
-let read config ~now ~days =
-  if not (List.mem days [ 1; 7; 14 ]) then
-    Error "provider usage history: days must be 1, 7, or 14"
-  else if failure_in_window ~now ~days then
+(* A stored line that cannot be read is logged with its place and counted in
+   the answer, and the rest of the window is still read: one bad line is one
+   unknown report, not fourteen unknown days. The count is the evidence that
+   something is missing, so the reader never takes a gap for a quiet day. *)
+let read config ~now ~window =
+  if failure_in_window ~now ~window then
     Error "provider usage history incomplete: a report could not be stored"
   else
-    let since_at = window_start ~now ~days in
+    let since_at = window_start ~now ~window in
     let journal = store config in
     let latest = Hashtbl.create 128 in
-    let error = ref None in
+    let unreadable = ref 0 in
+    let skip ~where detail =
+      Log.Server.warn "provider usage history unreadable report: %s: %s" where
+        detail;
+      incr unreadable
+    in
     let consume = function
       | Dated_jsonl.Malformed_json { path; line_number; detail } ->
-          Log.Server.warn "provider usage history malformed: %s:%s: %s"
-            path
-            (Option.fold ~none:"?" ~some:string_of_int line_number)
-            detail;
-          error := Some "provider usage history: malformed stored report"
-      | Dated_jsonl.Parsed json ->
-          let items =
-            match json with
-            | `List items -> items
-            | _ ->
-                error := Some "provider usage history: expected report list";
-                []
-          in
+          skip
+            ~where:
+              (Printf.sprintf "%s:%s" path
+                 (Option.fold ~none:"?" ~some:string_of_int line_number))
+            detail
+      | Dated_jsonl.Parsed (`List items) ->
           List.iter
             (fun item ->
               match decode item with
-              | Error detail -> error := Some detail
+              | Error detail -> skip ~where:"stored report" detail
               | Ok point when point.observed_at >= since_at && point.observed_at <= now ->
                   let day = Log.format_utc_date_of point.observed_at in
                   let key = point.scope_id, point.kind, point.limit_id, day in
@@ -157,19 +174,20 @@ let read config ~now ~days =
                    | Some _ | None -> Hashtbl.replace latest key point)
               | Ok _ -> ())
             items
+      | Dated_jsonl.Parsed _ ->
+          skip ~where:"stored line" "expected a report list"
     in
     let result =
       Dated_jsonl.iter_range_entries_result journal
         ~since:(Log.format_utc_date_of since_at)
         ~until:(Log.format_utc_date_of now) consume
     in
-    match result, !error with
-    | Error read_error, _ ->
+    match result with
+    | Error read_error ->
         Log.Server.warn "provider usage history read failed: %s"
           (Dated_jsonl.read_error_to_string read_error);
         Error "provider usage history store unavailable"
-    | Ok (), Some detail -> Error detail
-    | Ok (), None ->
+    | Ok () ->
         let points = Hashtbl.fold (fun _ point acc -> point :: acc) latest [] in
         let points =
           List.sort
@@ -180,8 +198,9 @@ let read config ~now ~days =
         in
         Ok
           (`Assoc
-            [ "days", `Int days
+            [ "days", `Int (days_of_window window)
             ; "generated_at", `Float now
             ; "sampling", `String "latest_provider_report_per_utc_day"
+            ; "unreadable_reports", `Int !unreadable
             ; "points", `List (List.map point_json points)
             ])

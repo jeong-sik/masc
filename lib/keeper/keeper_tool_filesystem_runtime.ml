@@ -200,7 +200,7 @@ let slice_read_window ~(window : read_line_window) ~first_line ~max_bytes ~scan_
       }
 ;;
 
-type read_file_resolution_error = Read_path_error of string
+type read_file_resolution_error = Read_path_error of Keeper_alerting_path.path_refusal
 
 let string_opt_nonempty name json =
   match Safe_ops.json_string_opt name json with
@@ -267,19 +267,37 @@ let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cw
        Execute/search cwd goes through the strict no-projection resolvers
        instead (keeper_tool_execute_path). *)
     let* cwd = resolve_keeper_read_path ~config ~meta ~raw_path:raw_cwd in
+    let cwd_refusal reason = Error (Keeper_alerting_path.caller_refusal reason) in
     (* The hint scans the host playground, so it is only offered where the
        host holds the tree. *)
     (match cwd_existence ~meta cwd with
      | Endpoint_decides | Host_directory -> Ok cwd
      | Host_file ->
-       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
+       cwd_refusal (Keeper_alerting_path.Cwd_is_file { cwd })
      | Host_missing ->
-       Error
-         (Printf.sprintf
-            "cwd_not_directory: %s (directory does not exist; Read will not create \
-             cwd);%s"
-            cwd
-            (available_cwd_hint ~config ~meta)))
+       cwd_refusal
+         (Keeper_alerting_path.Missing_cwd
+            { cwd; read_hint = Some (available_cwd_hint ~config ~meta) }))
+;;
+
+(* What a Read names. A remote keeper's file is either a name in its own
+   bookkeeping tree, which the lane translates to the endpoint, or an endpoint
+   path under one of the endpoint's declared roots ([allowed_paths], #38593),
+   which is already the endpoint's own name. *)
+type read_file_target =
+  | Keeper_tree_file of string
+  | Declared_endpoint_file of string
+
+let read_file_target_path = function
+  | Keeper_tree_file path | Declared_endpoint_file path -> path
+;;
+
+(* The host containment check guards a name in the keeper's bookkeeping tree.
+   A declared endpoint path is no host name at all: the endpoint account is its
+   boundary, as it is for the Execute command that may name the same path. *)
+let check_read_file_target ~config ~meta = function
+  | Keeper_tree_file target -> Keeper_sandbox_containment.check_read_target ~config ~meta ~target
+  | Declared_endpoint_file _ -> Ok ()
 ;;
 
 let resolve_read_file_target
@@ -294,62 +312,90 @@ let resolve_read_file_target
   then
     Error
       (Read_path_error
-         (Keeper_alerting_path.rejection_to_user_message Keeper_alerting_path.Path_required))
-  else
-    let* cwd_abs =
-      resolve_read_file_cwd ~config ~meta ~cwd
-      |> Result.map_error (fun e -> Read_path_error e)
+         (Keeper_alerting_path.refusal_of_rejection Keeper_alerting_path.Path_required))
+  else (
+    let keeper_tree =
+      let* cwd_abs = resolve_read_file_cwd ~config ~meta ~cwd in
+      let candidate =
+        if Filename.is_relative raw_path then Filename.concat cwd_abs raw_path else raw_path
+      in
+      resolve_projected_keeper_read_path
+        ~config
+        ~meta
+        ~raw_for_error:raw_path
+        ~projected_path:candidate
     in
-    let candidate =
-      if Filename.is_relative raw_path then Filename.concat cwd_abs raw_path else raw_path
-    in
-    resolve_projected_keeper_read_path
-      ~config
-      ~meta
-      ~raw_for_error:raw_path
-      ~projected_path:candidate
-    |> Result.map_error (fun error -> Read_path_error error)
+    match keeper_tree with
+    | Ok path -> Ok (Keeper_tree_file path)
+    | Error refusal ->
+      (* Only what the keeper's own tree refused may be a path under the
+         endpoint's declared roots (#38593). Everything the tree accepts keeps
+         the meaning it had, however a declared root is spelled. *)
+      (match
+         Keeper_sandbox_remote_lane.declared_endpoint_path_of_args
+           ~config ~meta ~path:raw_path ~cwd
+       with
+       | Ok (Some endpoint_path) -> Ok (Declared_endpoint_file endpoint_path)
+       | Ok None -> Error (Read_path_error refusal)
+       | Error endpoint_error ->
+         Error
+           (Read_path_error
+              (Keeper_alerting_path.endpoint_unresolved ~tree_refusal:refusal ~endpoint_error))))
 ;;
 
+(* A Read that did not return content says whose it is to fix: a path, limit
+   or file the caller named is a [Policy_rejection]; a backend or host I/O
+   failure is a [Runtime_failure]. *)
 type read_file_attempt =
   | Read_succeeded of Yojson.Safe.t
-  | Read_failed_payload of string
-  | Read_failed_message of string
+  | Read_refused of
+      { failure_class : Tool_result.tool_failure_class
+      ; payload : string
+      }
 
 let read_sandbox_bytes ?turn_sandbox_factory ?cwd ~config ~meta ~path ~max_bytes () =
   let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
-  let* target =
+  let* read_target =
     resolve_read_file_target ~config ~meta ~args ~raw_path:path
-    |> Result.map_error (function Read_path_error detail -> detail)
+    |> Result.map_error (function Read_path_error refusal -> refusal.Keeper_alerting_path.message)
   in
-  let* () = Keeper_sandbox_containment.check_read_target ~config ~meta ~target in
+  let* () =
+    check_read_file_target ~config ~meta read_target
+    |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) -> refusal.message)
+  in
   Keeper_sandbox_read_runner.read_file ?turn_sandbox_factory ~config ~meta
-    ~host_path:target ~max_bytes
+    ~host_path:(read_file_target_path read_target) ~max_bytes
     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
   |> Result.map_error Keeper_sandbox_read_backend.read_error_to_string
 ;;
 
 let read_complete_sandbox_bytes ?turn_sandbox_factory ~config ~meta ~path ?cwd () =
   let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
-  let* target =
+  let* read_target =
     resolve_read_file_target ~config ~meta ~args ~raw_path:path
-    |> Result.map_error (function Read_path_error detail -> detail)
+    |> Result.map_error (function Read_path_error refusal -> refusal.Keeper_alerting_path.message)
   in
-  let* () = Keeper_sandbox_containment.check_read_target ~config ~meta ~target in
+  let* () =
+    check_read_file_target ~config ~meta read_target
+    |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) -> refusal.message)
+  in
   Keeper_sandbox_read_backend.read_complete_file ?turn_sandbox_factory ~config ~meta
-    ~host_path:target
+    ~host_path:(read_file_target_path read_target)
     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
 ;;
 
 let read_sandbox_raw_prefix ?turn_sandbox_factory ~config ~meta ~path ?cwd ~max_bytes () =
   let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
-  let* target =
+  let* read_target =
     resolve_read_file_target ~config ~meta ~args ~raw_path:path
-    |> Result.map_error (function Read_path_error detail -> detail)
+    |> Result.map_error (function Read_path_error refusal -> refusal.Keeper_alerting_path.message)
   in
-  let* () = Keeper_sandbox_containment.check_read_target ~config ~meta ~target in
+  let* () =
+    check_read_file_target ~config ~meta read_target
+    |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) -> refusal.message)
+  in
   Keeper_sandbox_read_backend.read_raw_prefix ?turn_sandbox_factory ~config ~meta
-    ~host_path:target ~max_bytes
+    ~host_path:(read_file_target_path read_target) ~max_bytes
     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
 ;;
 
@@ -366,30 +412,40 @@ let handle_read_file_with_outcome
   in
   let cwd = string_opt_nonempty "cwd" args in
   match read_line_window_of_args args, resolve_read_file_target ~config ~meta ~args ~raw_path:path with
-  | Error window_error, _ -> Keeper_tool_execution.failure (error_json window_error)
-  | Ok _, Error (Read_path_error e) -> Keeper_tool_execution.failure (error_json e)
-  | Ok window, Ok target ->
-    let payload_of_slice ~via ~file_bytes ~first_line ~scan_complete body =
-      match slice_read_window ~window ~first_line ~max_bytes ~scan_complete body with
-      (* Neither caller below reaches this arm. The sandbox body begins at
-         [window.start_line], so the window's first line is the body's first
-         line and always has a start. The host read passes the whole file
-         with [scan_complete:true], which turns a line past EOF into an empty
-         window. Only [handle_owned_read_file_with_outcome] can get
-         [Offset_beyond_scan], in its own arm; #38609 removes the [Error]
-         case there. *)
+  | Error window_error, _ ->
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Policy_rejection
+      (error_json window_error)
+  | Ok _, Error (Read_path_error refusal) ->
+    Keeper_tool_execution.failure
+      ~class_:refusal.Keeper_alerting_path.failure_class
+      (error_json refusal.message)
+  | Ok window, Ok read_target ->
+    let target = read_file_target_path read_target in
+    let payload_of_slice ~scan_complete body =
+      match
+        slice_read_window ~window ~first_line:window.start_line ~max_bytes ~scan_complete body
+      with
+      (* The backend body begins at [window.start_line], so the window's first
+         line is the body's first line and always has a start. Only
+         [handle_owned_read_file_with_outcome] can get [Offset_beyond_scan], in
+         its own arm; #38609 removes the [Error] case there. Reaching it here is
+         masc's defect, not the caller's. *)
       | Error `Offset_beyond_scan ->
-        Read_failed_payload
-          (error_json
-             ~fields:
-               [ "path", `String target
-               ; "offset", `Int window.start_line
-               ]
-             (fs_guidance_text
-                (Offset_beyond_window
-                   { offset = window.start_line
-                   ; window_bytes = String.length body
-                   })))
+        Read_refused
+          { failure_class = Tool_result.Runtime_failure
+          ; payload =
+              error_json
+                ~fields:
+                  [ "path", `String target
+                  ; "offset", `Int window.start_line
+                  ]
+                (fs_guidance_text
+                   (Offset_beyond_window
+                      { offset = window.start_line
+                      ; window_bytes = String.length body
+                      }))
+          }
       | Ok slice ->
         let optional_fields =
           List.concat
@@ -399,12 +455,6 @@ let handle_read_file_with_outcome
             ; (if slice.last_line_partial
                then [ "last_line_partial", `Bool true ]
                else [])
-            ; (match file_bytes with
-               | Some total -> [ "file_bytes", `Int total ]
-               | None -> [])
-            ; (match via with
-               | Some via -> [ "via", `String via ]
-               | None -> [])
             ]
         in
         Read_succeeded
@@ -417,86 +467,61 @@ let handle_read_file_with_outcome
                ; "returned_lines", `Int slice.returned_lines
                ; "content", `String slice.window_content
                ]
-               @ optional_fields))
+               @ optional_fields
+               @ [ "via", `String Keeper_sandbox_read_runner.backend_via ]))
+    in
+    let refused failure_class message =
+      Read_refused
+        { failure_class
+        ; payload = error_json ~fields:[ "path", `String target ] message
+        }
+    in
+    let missing_file error =
+      Read_refused
+        { failure_class = Tool_result.Policy_rejection
+        ; payload = missing_file_error_json ~cwd ~raw_path:(Some path) ~target ~error
+        }
     in
     let run_read () =
-         (* RFC-0006 Phase B-1: Docker keepers are always contained to their
-            playground bundle on the host before any read-side I/O proceeds.
-            The resolver-level sandbox_roots check is augmented by this
-            strict containment so host FS cannot leak through Read
-            while Execute is container-isolated. *)
-         let* () = Keeper_sandbox_containment.check_read_target ~config ~meta ~target in
-         (* RFC-0006 Phase B-2: sandbox-backed keepers route the actual
-            byte read through the backend read runner so the backend mount
-            restrictions are the load-bearing isolation. The host containment
-            check above remains as defense-in-depth. *)
-         if Keeper_sandbox_read_runner.should_route_read ~meta
-         then (
-           let timeout_sec =
-             Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()
-           in
-           (* The backend streams from [window.start_line], so the byte bound
-              is the window's and every line of the file is reachable. *)
-           match
-             Keeper_sandbox_read_runner.read_file
-               ?turn_sandbox_factory
-               ~start_line:window.start_line
-               ~config
-               ~meta
-               ~host_path:target
-               ~max_bytes
-               ~timeout_sec
-               ()
-           with
-           | Error (Keeper_sandbox_read_backend.Missing_file err) ->
-             Ok
-               (Read_failed_payload
-                  (missing_file_error_json
-                     ~cwd
-                     ~raw_path:(Some path)
-                     ~target
-                     ~error:err))
-           | Error err ->
-             Error (Keeper_sandbox_read_backend.read_error_to_string err)
-           | Ok body ->
-             let scan_complete = String.length body < max_bytes in
-             Ok
-               (payload_of_slice
-                  ~via:(Some Keeper_sandbox_read_runner.backend_via)
-                  ~file_bytes:None
-                  ~first_line:window.start_line
-                  ~scan_complete
-                  body))
-         else (
-           match Safe_ops.read_file_result target with
-           | Error (Safe_ops.File_not_found _ as err) ->
-             Ok
-               (Read_failed_payload
-                  (missing_file_error_json
-                     ~cwd
-                     ~raw_path:(Some path)
-                     ~target
-                     ~error:(Safe_ops.read_file_error_to_string err)))
-           | Error err ->
-             Ok (Read_failed_message (Safe_ops.read_file_error_to_string err))
-           | Ok content ->
-             Ok
-               (payload_of_slice
-                  ~via:None
-                  ~file_bytes:(Some (String.length content))
-                  ~first_line:1
-                  ~scan_complete:true
-                  content))
+      (* RFC-0006 Phase B-1: Docker keepers are always contained to their
+         playground bundle on the host before any read-side I/O proceeds.
+         The resolver-level sandbox_roots check is augmented by this
+         strict containment so host FS cannot leak through Read
+         while Execute is container-isolated. *)
+      match check_read_file_target ~config ~meta read_target with
+      | Error (refusal : Keeper_alerting_path.path_refusal) ->
+        refused refusal.failure_class refusal.message
+      | Ok () ->
+        (* RFC-0006 Phase B-2: every sandbox profile reads through its
+           backend read runner, so the backend's mount restrictions are the
+           load-bearing isolation. The host containment check above remains
+           as defense in depth. *)
+        let timeout_sec = Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read () in
+        (* The backend streams from [window.start_line], so the byte bound is
+           the window's and every line of the file is reachable. *)
+        (match
+           Keeper_sandbox_read_runner.read_file
+             ?turn_sandbox_factory
+             ~start_line:window.start_line
+             ~config
+             ~meta
+             ~host_path:target
+             ~max_bytes
+             ~timeout_sec
+             ()
+         with
+         | Error (Keeper_sandbox_read_backend.Missing_file error) -> missing_file error
+         | Error (Keeper_sandbox_read_backend.Not_a_file detail) ->
+           refused Tool_result.Policy_rejection detail
+         | Error (Keeper_sandbox_read_backend.Read_failed detail) ->
+           refused Tool_result.Runtime_failure detail
+         | Ok body ->
+           payload_of_slice ~scan_complete:(String.length body < max_bytes) body)
     in
     (match run_read () with
-     | Ok (Read_succeeded json) -> Keeper_tool_execution.success_data json
-     | Ok (Read_failed_payload payload) -> Keeper_tool_execution.failure payload
-     | Ok (Read_failed_message msg) ->
-       Keeper_tool_execution.failure
-         (error_json ~fields:[ "path", `String target ] msg)
-     | Error msg ->
-       Keeper_tool_execution.failure
-         (error_json ~fields:[ "path", `String target ] msg))
+     | Read_succeeded json -> Keeper_tool_execution.success_data json
+     | Read_refused { failure_class; payload } ->
+       Keeper_tool_execution.failure ~class_:failure_class payload)
 ;;
 
 (** Resolve a [path] when the tool caller omits [cwd]. The verifier
@@ -611,9 +636,12 @@ let default_owned_target ~ownership_root ~path =
         | _ -> (ownership_root, path)))
 [@@coverage off]
 
+(* A refusal names the caller's path or cwd: an empty path, or a cwd outside
+   the ownership root, not a directory, or missing. With no cwd the directory
+   is the default this module picked, so its absence is not the caller's. *)
 let resolve_owned_read_target ~ownership_root ~path ~cwd =
   if String.equal path ""
-  then Error "path is required"
+  then Error (Keeper_alerting_path.refusal_of_rejection Keeper_alerting_path.Path_required)
   else
     let cwd_abs, target_rel =
       match cwd with
@@ -625,9 +653,19 @@ let resolve_owned_read_target ~ownership_root ~path ~cwd =
     in
     match Fs_compat.inspect_owned_directory_chain ~ownership_root cwd_abs with
     | Error rejection ->
-      Error (Fs_compat.owned_directory_chain_rejection_to_string rejection)
+      let reason =
+        match cwd with
+        | Some _ -> Keeper_alerting_path.Caller_cwd_rejected rejection
+        | None -> Keeper_alerting_path.Default_cwd_rejected rejection
+      in
+      Error (Keeper_alerting_path.owned_read_target_refusal reason)
     | Ok Fs_compat.Owned_directory_missing ->
-      Error (fs_guidance_text (Cwd_not_directory { cwd = cwd_abs }))
+      let reason =
+        match cwd with
+        | Some _ -> Keeper_alerting_path.Caller_cwd_missing { cwd = cwd_abs }
+        | None -> Keeper_alerting_path.Default_cwd_missing { cwd = cwd_abs }
+      in
+      Error (Keeper_alerting_path.owned_read_target_refusal reason)
     | Ok (Fs_compat.Owned_directory _) ->
       let target =
         if Filename.is_relative target_rel
@@ -638,7 +676,10 @@ let resolve_owned_read_target ~ownership_root ~path ~cwd =
 ;;
 
 let read_owned_bytes ~ownership_root ~path ?cwd ~max_bytes () =
-  let* target = resolve_owned_read_target ~ownership_root ~path ~cwd in
+  let* target =
+    resolve_owned_read_target ~ownership_root ~path ~cwd
+    |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) -> refusal.message)
+  in
   match Fs_compat.load_owned_regular_file_prefix ~ownership_root ~max_bytes target with
   | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
   | Ok None -> Error "owned file is missing"
@@ -646,11 +687,25 @@ let read_owned_bytes ~ownership_root ~path ?cwd ~max_bytes () =
 ;;
 
 let read_complete_owned_bytes ~ownership_root ~path ?cwd () =
-  let* target = resolve_owned_read_target ~ownership_root ~path ~cwd in
+  let* target =
+    resolve_owned_read_target ~ownership_root ~path ~cwd
+    |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) -> refusal.message)
+  in
   match Fs_compat.load_owned_regular_file ~ownership_root target with
   | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
   | Ok None -> Error "owned file is missing"
   | Ok (Some bytes) -> Ok bytes
+;;
+
+(* A path that crosses the ownership boundary or names no regular file is the
+   caller's to correct; a file that changed under the read or an I/O error is
+   the runtime's. *)
+let owned_read_failure_class (error : Fs_compat.owned_regular_file_read_error) =
+  match error.failure with
+  | Fs_compat.Ownership_boundary_rejected _ | Fs_compat.Path_is_not_regular_file _ ->
+    Tool_result.Policy_rejection
+  | Fs_compat.Filesystem_identity_changed _ | Fs_compat.Owned_file_operation_failed _ ->
+    Tool_result.Runtime_failure
 ;;
 
 let handle_owned_read_file_with_outcome
@@ -661,8 +716,10 @@ let handle_owned_read_file_with_outcome
   let max_bytes = read_file_default_max_bytes in
   let cwd = string_opt_nonempty "cwd" args in
   match read_line_window_of_args args, resolve_owned_read_target ~ownership_root ~path ~cwd with
-  | Error window_error, _ -> Keeper_tool_execution.failure (error_json window_error)
-  | Ok _, Error detail -> Keeper_tool_execution.failure (error_json detail)
+  | Error window_error, _ ->
+    Keeper_tool_execution.failure ~class_:Tool_result.Policy_rejection (error_json window_error)
+  | Ok _, Error (refusal : Keeper_alerting_path.path_refusal) ->
+    Keeper_tool_execution.failure ~class_:refusal.failure_class (error_json refusal.message)
   | Ok window, Ok target ->
     let fetch_bytes = read_window_fetch_bytes ~max_bytes window in
     (match
@@ -673,11 +730,13 @@ let handle_owned_read_file_with_outcome
      with
      | Error error ->
        Keeper_tool_execution.failure
+         ~class_:(owned_read_failure_class error)
          (error_json
             ~fields:[ "path", `String target ]
             (Fs_compat.owned_regular_file_read_error_to_string error))
      | Ok None ->
        Keeper_tool_execution.failure
+         ~class_:Tool_result.Policy_rejection
          (missing_file_error_json
             ~cwd
             ~raw_path:(Some path)
@@ -692,8 +751,12 @@ let handle_owned_read_file_with_outcome
             ~scan_complete:(not prefix.truncated)
             prefix.content
         with
+        (* Only a truncated prefix gets here: a complete scan turns a line past
+           EOF into an empty window. The line may exist past the prefix, and no
+           offset the caller picks reaches it (#38609). *)
         | Error `Offset_beyond_scan ->
           Keeper_tool_execution.failure
+            ~class_:Tool_result.Runtime_failure
             (error_json
                ~fields:
                  [ "path", `String target
@@ -1456,7 +1519,7 @@ let write_call_summary ~requested_target =
 let gate_operation = Keeper_gate.filesystem_write_gate_operation
 
 let file_write_gate_input
-      ~gate_effect
+      ~effect_json
       ~requested_target
       ~content
       ?content_source
@@ -1480,7 +1543,7 @@ let file_write_gate_input
     | Some value -> [ name, `Int value ]
   in
   `Assoc
-    ([ "effect", Keeper_alerting_path.path_effect_to_yojson gate_effect
+    ([ "effect", effect_json
      ; "requested_target", `String requested_target
      ]
      @ Keeper_write_content.fields (match content_source with
@@ -1516,6 +1579,66 @@ let decide_file_write
     ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
     ; continuation_channel
     }
+;;
+
+(* The Gate effect names what the write does to the file. A host write
+   carries a pinned capability ([Keeper_alerting_path.path_effect]); an
+   endpoint's file has none this host can pin, so a write under a declared
+   root names the endpoint and its path. The operation is spelled as for a
+   host write, and [fs_write_mode_of_gate_effect_operation] reads it back, so
+   an approved endpoint write replays as the same mode. *)
+let path_effect_operation_of_write_mode = function
+  | Overwrite -> Keeper_alerting_path.Atomic_replace_entry
+  | Append -> Keeper_alerting_path.Append_pinned_resource
+  | Patch -> Keeper_alerting_path.Patch_then_atomic_replace_entry
+;;
+
+(* A write to a path under an endpoint's declared roots (#38593) is outside
+   the keeper's tree, so it takes the Gate decision a host write outside the
+   playground takes, with the same operation and the same input shape. The
+   effect carries the endpoint's whole configuration, not only its name:
+   replay rebuilds this input from the configuration current then, so an
+   approval given for one host, key or pinned host key is not spent on
+   another that took the same name. The configuration is the endpoint's own
+   runtime.toml serialization, so a field added to the endpoint joins it. *)
+let declared_root_write_gate_input
+      ~(endpoint : Exec_ssh_endpoint.t)
+      ~requested_target
+      ~mode
+      ~content_source
+      ~content
+      ~(patch : Keeper_tool_filesystem_remote_write.patch_request option)
+  =
+  let effect_json =
+    `Assoc
+      [ ( "operation"
+        , `String
+            (Keeper_alerting_path.path_effect_operation_to_string
+               (path_effect_operation_of_write_mode mode)) )
+      ; ( "endpoint"
+        , `Assoc
+            [ "name", `String endpoint.name
+            ; "config_toml", `String (Exec_ssh_endpoint.to_toml endpoint)
+            ] )
+      ; "endpoint_path", `String requested_target
+      ]
+  in
+  match patch with
+  | None -> file_write_gate_input ~effect_json ~requested_target ~content ~content_source ()
+  | Some { old_string; new_string; replace_all } ->
+    file_write_gate_input ~effect_json ~requested_target ~content ~old_string ~new_string
+      ~replace_all ()
+;;
+
+let declared_root_writes ~config ~meta ?continuation_channel ?gate_context ?gate_grant () =
+  Keeper_tool_filesystem_remote_write.Authorize_declared_roots
+    (fun ~endpoint ~requested_target ~mode ~content_source ~content ~patch ->
+      let input =
+        declared_root_write_gate_input ~endpoint ~requested_target ~mode ~content_source
+          ~content ~patch
+      in
+      decide_file_write ~config ~meta ?continuation_channel ?gate_context ?gate_grant
+        ~requested_target ~input ())
 ;;
 
 let confined_write_is_keeper_playground
@@ -2339,6 +2462,9 @@ let handle_file_write_content_with_outcome
   match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
   | Keeper_types_profile_sandbox.Endpoint_owned ->
     Keeper_tool_filesystem_remote_write.handle
+      ~declared_root_writes:
+        (declared_root_writes ~config ~meta ?continuation_channel ?gate_context
+           ?gate_grant ())
       ~turn_sandbox_factory
       ~config
       ~meta
@@ -2492,7 +2618,7 @@ let handle_file_write_content_with_outcome
     let mode_label = fs_write_mode_to_string mode in
     let input =
       file_write_gate_input
-        ~gate_effect
+        ~effect_json:(Keeper_alerting_path.path_effect_to_yojson gate_effect)
         ~requested_target:target
         ~content_source
         ~content:(content ())
@@ -2602,7 +2728,8 @@ let handle_file_write_content_with_outcome
         ~endpoint:Keeper_alerting_path.Lexical_entry
         ~raw_path:path
     with
-    | Error msg -> Keeper_tool_execution.failure (error_json msg)
+    | Error (refusal : Keeper_alerting_path.path_refusal) ->
+      Keeper_tool_execution.failure ~class_:refusal.failure_class (error_json refusal.message)
     | Ok confined ->
       let target = Keeper_alerting_path.confined_host_path confined in
       let run () =
@@ -2659,8 +2786,15 @@ let handle_file_write_content_with_outcome
            run
        with
        | Ok attempt -> file_write_attempt_to_execution ~config attempt
+       (* An untyped string from the write: the sandbox isolation invariant,
+          the parent chain, file permissions, the effect projection. It also
+          carries refusals the caller could correct (a directory at the
+          target, a non-regular append or patch target, a file in the parent
+          path), which have no type to tell them apart yet; none reached the
+          September 2026 ledger. Runtime_failure until they are typed. *)
        | Error msg ->
          Keeper_tool_execution.failure
+           ~class_:Tool_result.Runtime_failure
            (error_json ~fields:[ "path", `String target ] msg))
   in
   let handle_append () =
@@ -2671,7 +2805,8 @@ let handle_file_write_content_with_outcome
         ~endpoint:Keeper_alerting_path.Follow_referent
         ~raw_path:path
     with
-    | Error msg -> Keeper_tool_execution.failure (error_json msg)
+    | Error (refusal : Keeper_alerting_path.path_refusal) ->
+      Keeper_tool_execution.failure ~class_:refusal.failure_class (error_json refusal.message)
     | Ok confined ->
       let target = Keeper_alerting_path.confined_host_path confined in
       let run () =
@@ -2785,8 +2920,15 @@ let handle_file_write_content_with_outcome
            run
        with
        | Ok attempt -> file_write_attempt_to_execution ~config attempt
+       (* An untyped string from the write: the sandbox isolation invariant,
+          the parent chain, file permissions, the effect projection. It also
+          carries refusals the caller could correct (a directory at the
+          target, a non-regular append or patch target, a file in the parent
+          path), which have no type to tell them apart yet; none reached the
+          September 2026 ledger. Runtime_failure until they are typed. *)
        | Error msg ->
          Keeper_tool_execution.failure
+           ~class_:Tool_result.Runtime_failure
            (error_json ~fields:[ "path", `String target ] msg))
   in
   if String.trim path = ""
@@ -2829,7 +2971,10 @@ let handle_file_write_content_with_outcome
              ~endpoint:Keeper_alerting_path.Follow_referent
              ~raw_path:path
          with
-         | Error msg -> Keeper_tool_execution.failure (error_json msg)
+         | Error (refusal : Keeper_alerting_path.path_refusal) ->
+           Keeper_tool_execution.failure
+             ~class_:refusal.failure_class
+             (error_json refusal.message)
          | Ok confined ->
               let target = Keeper_alerting_path.confined_host_path confined in
               let finish_write
@@ -2844,7 +2989,7 @@ let handle_file_write_content_with_outcome
                   match operation with
                   | Keeper_tool_patch.Replace { old_string; new_string; replace_all } ->
                     file_write_gate_input
-                      ~gate_effect
+                      ~effect_json:(Keeper_alerting_path.path_effect_to_yojson gate_effect)
                       ~requested_target:target
                       ~content:updated
                       ~old_string
@@ -2853,7 +2998,7 @@ let handle_file_write_content_with_outcome
                       ()
                   | Keeper_tool_patch.Insert_before_line { line; text } ->
                     file_write_gate_input
-                      ~gate_effect
+                      ~effect_json:(Keeper_alerting_path.path_effect_to_yojson gate_effect)
                       ~requested_target:target
                       ~content:updated
                       ~insert_before_line:line
@@ -3107,8 +3252,10 @@ let handle_file_write_content_with_outcome
                    run
                with
                | Ok attempt -> file_write_attempt_to_execution ~config attempt
+               (* Untyped, as for the atomic and append writes above. *)
                | Error msg ->
                  Keeper_tool_execution.failure
+                   ~class_:Tool_result.Runtime_failure
                    (error_json ~fields:[ "path", `String target ] msg))))
     | Ok Overwrite ->
       handle_atomic_content_write
@@ -3171,7 +3318,11 @@ let handle_file_write_with_outcome ~turn_sandbox_factory ~config ~(meta : Keeper
     ~publication_recovery ?continuation_channel ?gate_context ?gate_grant ~args () =
   match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
   | Keeper_types_profile_sandbox.Endpoint_owned ->
-    Keeper_tool_filesystem_remote_write.handle ~turn_sandbox_factory ~config ~meta ~args
+    Keeper_tool_filesystem_remote_write.handle
+      ~declared_root_writes:
+        (declared_root_writes ~config ~meta ?continuation_channel ?gate_context
+           ?gate_grant ())
+      ~turn_sandbox_factory ~config ~meta ~args
   | Keeper_types_profile_sandbox.Shared_mount ->
   match Keeper_write_content.of_args args with
   | Error error -> Keeper_write_content.failure error

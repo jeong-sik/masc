@@ -241,7 +241,8 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
       ; _
       } ->
     rotate Request_refused
-  (* [Json_parse_error] is this binding's [Admission] (RFC-38531 §3.2): the
+  (* [Json_parse_error] is this binding's [Admission]
+     (RFC-one-slot-fault-judgment-for-every-walk.md §3.2): the
      refusal happened before dispatch, so the walk predicate
      [attempt_rejected_should_try_next] rotates to the next candidate. The
      route names that rotation as [Admission], matching the exact walk's
@@ -517,7 +518,8 @@ let response_observed = function
         (#34475): no generation. *)
      | Admission
      (* this binding's pre-dispatch admission refused the prepared request
-        (RFC-38531 §3.2: [InputCapacity]/[Json_parse_error]): no generation. *)
+        (RFC-one-slot-fault-judgment-for-every-walk.md §3.2:
+        [InputCapacity]/[Json_parse_error]): no generation. *)
      | Refusal_body_not_received
      (* the provider refused the request; the body naming why never
         arrived, and a refusal is not an answer. *)

@@ -548,6 +548,101 @@ let transition ctx goal_id ?note ?evidence action =
   dispatch ctx ~name:"masc_goal_transition" args
 ;;
 
+let measurable_goal config ctx title =
+  let goal_id = create_goal ctx title in
+  match Goal_store.find_goal config ~goal_id with
+  | Goal_store.Goal_found goal -> goal
+  | Goal_store.Goal_absent | Goal_store.Store_unavailable _ ->
+      fail "created Goal is not readable"
+;;
+
+let record_evidence config (goal : Goal_store.goal) evidence =
+  Goal_measurement.record config ~goal_id:goal.id
+    ~criterion_revision:goal.criterion_revision ~observed_value:"7" ~evidence
+    ~actor:"test"
+;;
+
+(* "Evidence-backed" means the product's Evidence Reference grammar, the one
+   Task completion accepts, not any non-blank text: a Keeper sending
+   evidence "done" must not put a reported value on the Goal tree. *)
+let test_measurement_evidence_is_an_evidence_reference () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal = measurable_goal config ctx "Evidence must resolve" in
+  List.iter
+    (fun evidence ->
+       match record_evidence config goal evidence with
+       | Error (Goal_measurement.Invalid_request _) -> ()
+       | Error ((Goal_measurement.Conflict _ | Goal_measurement.Store_error _) as error) ->
+           fail
+             (Printf.sprintf "evidence %S: expected Invalid_request, got %s" evidence
+                (Goal_measurement.error_to_string error))
+       | Ok _ -> fail (Printf.sprintf "evidence %S is not a reference but was recorded" evidence))
+    [ "done"; "100%"; "https://example.com/proof"; "note:   "; "board:" ];
+  (match Goal_measurement.load config with
+   | Ok [] -> ()
+   | Ok _ -> fail "rejected evidence left a measurement row"
+   | Error detail -> fail detail);
+  ignore
+    (must_fail "tool rejects evidence that is not a reference"
+       (dispatch ctx ~name:"masc_goal_measure"
+          [ "goal_id", `String goal.id
+          ; "criterion_revision", `String goal.criterion_revision
+          ; "observed_value", `String "100%"
+          ; "evidence", `String "done"
+          ]));
+  List.iter
+    (fun evidence ->
+       match record_evidence config goal evidence with
+       | Ok row -> check string "reference is stored as given" evidence row.evidence
+       | Error error ->
+           fail
+             (Printf.sprintf "evidence %S was refused: %s" evidence
+                (Goal_measurement.error_to_string error)))
+    [ "artifact:reports/cases.json"; "note:seven cases passed in CI"; "board:p-123";
+      "fusion:run-9" ]
+;;
+
+(* Deleting a Goal takes its observation row with it, so the snapshot is
+   bounded by the Goals that exist. A closed Goal still takes an
+   observation: recording never moves the phase. *)
+let test_measurement_rows_follow_goal_existence_not_phase () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let kept = measurable_goal config ctx "Kept" in
+  let deleted = measurable_goal config ctx "Deleted" in
+  List.iter
+    (fun (goal, evidence) ->
+       match record_evidence config goal evidence with
+       | Ok _ -> ()
+       | Error error -> fail (Goal_measurement.error_to_string error))
+    [ kept, "artifact:kept"; deleted, "artifact:deleted" ];
+  (match Goal_store.delete_goal config ~goal_id:deleted.id with
+   | Ok _ -> ()
+   | Error error -> fail (Goal_store.delete_goal_error_to_string error));
+  (match Goal_measurement.remove_goal config ~goal_id:deleted.id with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  (match Goal_measurement.load config with
+   | Ok [ row ] -> check string "only the live Goal keeps a row" kept.id row.goal_id
+   | Ok rows -> fail (Printf.sprintf "expected 1 row, found %d" (List.length rows))
+   | Error detail -> fail detail);
+  ignore (must_succeed "drop" (transition ctx kept.id "drop"));
+  (match record_evidence config kept "note:metric seen again after the drop" with
+   | Ok row ->
+       check string "a dropped Goal records the new observation"
+         "note:metric seen again after the drop" row.evidence
+   | Error error -> fail (Goal_measurement.error_to_string error));
+  (match Goal_store.find_goal config ~goal_id:kept.id with
+   | Goal_store.Goal_found goal ->
+       check string "the observation did not move the phase" "dropped"
+         (Goal_phase.to_string goal.phase)
+   | Goal_store.Goal_absent | Goal_store.Store_unavailable _ ->
+       fail "dropped Goal is not readable")
+;;
+
 let verifier_transition config goal_id decision evidence =
   let request_id, criterion = proof_identity config goal_id in
   Workspace_goals.commit_verifier_decision
@@ -1437,6 +1532,10 @@ let () =
             test_goal_list_renders_a_ledger_error_state
         ; test_case "measurements require current criterion and evidence" `Quick
             test_measurement_requires_current_criterion_and_evidence
+        ; test_case "measurement evidence is an Evidence Reference" `Quick
+            test_measurement_evidence_is_an_evidence_reference
+        ; test_case "measurement rows follow Goal existence, not phase" `Quick
+            test_measurement_rows_follow_goal_existence_not_phase
         ] )
     ; ( "stage 2 gate"
       , [ test_case "reopen works before any completion request" `Quick

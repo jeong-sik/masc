@@ -166,13 +166,13 @@ let usage_missing_of_usage = function
   | None -> true
   | Some usage -> not (usage_has_tokens usage)
 
-(* One model response's spend, reported by an official client on its own
-   stream while the turn runs ([Runtime_execution.Client_stream_per_response]).
-   The row is the same raw observation [AfterTurn] writes for an AGENT_CORE
-   response, keyed by the official turn the client is running. It is written
-   when the report arrives, so a turn that later fails keeps the requests it
-   already paid for. Without a trajectory accumulator no row is written, the
-   same rule [AfterTurn] follows. *)
+(* One usage report an official client sent on its own stream while the
+   turn runs ([Runtime_execution.Client_usage_stream]). The row is the same
+   raw observation [AfterTurn] writes for an AGENT_CORE response, keyed by the
+   official turn the client is running. It is written when the report
+   arrives, so a turn that later fails keeps what it already paid for.
+   Without a trajectory accumulator no row is written, the same rule
+   [AfterTurn] follows. *)
 let emit_client_usage_report
     ~(trajectory_acc : Trajectory.accumulator option)
     ~agent_name
@@ -461,7 +461,7 @@ let make_hooks
               newest of them. [None] is a turn with no dispatched attempt,
               which keeps the row [AfterTurn] always wrote. *)
            (match current_usage_report () with
-            | Some Runtime_execution.Client_stream_per_response -> ()
+            | Some Runtime_execution.Client_usage_stream -> ()
             | Some
                 ( Runtime_execution.Each_agent_core_response
                 | Runtime_execution.Client_turn_result )

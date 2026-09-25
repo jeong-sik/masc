@@ -32,7 +32,7 @@ type checkpoint_owner =
 
 type usage_report =
   | Each_agent_core_response
-  | Client_stream_per_response
+  | Client_usage_stream
   | Client_turn_result
 
 let supports_native_none = function
@@ -60,6 +60,6 @@ let checkpoint_owner = function
 
 let usage_report = function
   | Agent_core _ -> Each_agent_core_response
-  | Codex_app_server _ -> Client_stream_per_response
+  | Codex_app_server _ -> Client_usage_stream
   | Claude_code _ | Antigravity_cli _ -> Client_turn_result
 ;;

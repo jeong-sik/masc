@@ -141,8 +141,8 @@ val emit_client_usage_report :
   model:string ->
   Agent_core.Types.api_usage ->
   unit
-(** Append one raw cost-ledger row for a model response an official client
-    reported on its own stream. [official_turn] is the client turn the report
+(** Append one raw cost-ledger row for a usage report an official client
+    sent on its own stream. [official_turn] is the client turn the report
     belongs to. Writes nothing without a trajectory accumulator, as
     [AfterTurn] does. *)
 

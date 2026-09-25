@@ -318,9 +318,11 @@ let fetch_range_with ~after_window_read t ~sha256 ~offset ~max_bytes =
        rewritten between them (a put repairing a corrupt address with a
        temp+rename) let bytes nobody hashed go out as verified and entered
        their snapshot into the cache. *)
+    (* INTENDED RED control for #38979: main's two-open cold branch, with
+       the seam between the window read and the hash. Do not merge. *)
     let validate_and_read_cold () =
       match
-        Fs_compat.load_owned_regular_file_range_with_sha256
+        Fs_compat.load_owned_regular_file_range
           ~ownership_root:t.ownership_root
           ~offset
           ~max_bytes
@@ -333,21 +335,29 @@ let fetch_range_with ~after_window_read t ~sha256 ~offset ~max_bytes =
         remove_validated_snapshot path;
         forget_written path;
         Ok None
-      | Ok (Some (observed : Fs_compat.owned_regular_file_range_digest)) ->
+      | Ok (Some { content; snapshot }) ->
         after_window_read ();
-        let actual = observed.sha256 in
-        if String.equal sha256 actual
-        then (
-          cache_validated_snapshot path observed.snapshot;
-          Ok
-            (Some
-               { content = observed.content
-               ; total_bytes = observed.snapshot.file_size
-               }))
-        else (
-          remove_validated_snapshot path;
-          forget_written path;
-          Error (Integrity_mismatch { path; expected = sha256; actual }))
+        (match
+           Fs_compat.sha256_owned_regular_file
+             ~ownership_root:t.ownership_root
+             path
+         with
+         | Error error ->
+           forget_written path;
+           Error (Owned_read_failed error)
+         | Ok None ->
+           remove_validated_snapshot path;
+           forget_written path;
+           Ok None
+         | Ok (Some actual) ->
+           if String.equal sha256 actual
+           then (
+             cache_validated_snapshot path snapshot;
+             Ok (Some { content; total_bytes = snapshot.file_size }))
+           else (
+             remove_validated_snapshot path;
+             forget_written path;
+             Error (Integrity_mismatch { path; expected = sha256; actual })))
     in
     let validate_whole_snapshot () =
       match fetch t ~sha256 with

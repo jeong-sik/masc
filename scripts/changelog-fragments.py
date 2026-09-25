@@ -294,14 +294,6 @@ def pr_guard(base: str, head: str) -> int:
     return 1
 
 
-def merge_subject(rev: str) -> str:
-    result = subprocess.run(["git", "log", "-1", "--format=%s", rev],
-                            text=True, capture_output=True)
-    if result.returncode != 0:
-        raise FragmentError(f"cannot read the subject of {rev}: {result.stderr.strip()}")
-    return result.stdout.strip()
-
-
 def merged_squashes(base: str, head: str) -> list[tuple[int, str]]:
     """[(PR number, subject)] of squash commits merged into `head` since `base`.
 

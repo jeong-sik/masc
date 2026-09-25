@@ -3129,22 +3129,23 @@ let render_board_read (state : state) (list_post : board_post) =
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let layout =
+    Masc_tui_types.board_read_layout ~cols ~wide:state.board_detail_wide
+  in
   let buf = Buffer.create 4096 in
   let footer =
     footer_line state ~max_cells:cols
       ~hints:
         (Masc_tui_keys.footer_hints_board_read
-           ~focus_posts:(state.board_focus = Left_pane)
-           ~split:
-             (cols >= keeper_split_threshold_cols && not state.board_detail_wide))
+           ~focus_posts:(state.board_focus = Left_pane) ~layout)
   in
-  if cols < keeper_split_threshold_cols || state.board_detail_wide then begin
+  match layout with
+  | Board_read_wide | Board_read_one_pane ->
     let scroll = board_read_pane state list_post ~rows ~cols buf in
     Buffer.add_string buf footer;
     finish_surface state ~clamped:(Board_read scroll)
       ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
-  end
-  else begin
+  | Board_read_split ->
     let left_cols = keeper_roster_pane_cols in
     let right_cols = cols - left_cols in
     let left_buf = Buffer.create 1024 in
@@ -3158,7 +3159,6 @@ let render_board_read (state : state) (list_post : board_post) =
     Buffer.add_string buf footer;
     finish_surface state ~clamped:(Board_read scroll)
       ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
-  end
 
 (* The lifecycle as a rail, not a single word. The phase says where the goal
    is; it never said what the stages are or which way they run, so "what does
@@ -13312,10 +13312,12 @@ let render_runtime_pick (state : state) =
     | None -> Masc_tui_theme.Glyph.no_value
   in
   let items = Masc_tui_types.runtime_picker_items state in
-  let count = List.length items in
+  (* The columns are measured over every item, not the filtered window, so
+     typing a filter does not move them. *)
   let target_width, route_width =
     Masc_tui_types.runtime_pick_column_widths ~cols items
   in
+  let view = Masc_tui_types.keeper_runtime_picker_view state ~terminal_rows in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"runtime-pick"
     ~title:
       (Printf.sprintf "%s  %scurrent: %s%s"
@@ -13323,90 +13325,64 @@ let render_runtime_pick (state : state) =
             (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 runtime" keeper_name))
          Ansi.dim current Ansi.reset)
     ~hints:(Masc_tui_keys.footer_hints (Keepers Keeper_runtime_pick))
-    ~body:(fun ~budget c ->
-      let status_rows =
-        match state.runtime_catalog_error with
-        | Some err ->
-            c.push (data_unreliable_row ~cols err);
-            1
-        | None when count = 0 ->
-            c.push (Ansi.dim ^ "  (loading runtime catalogue\xe2\x80\xa6)" ^ Ansi.reset);
-            1
-        | None ->
-            (* The first header cell spans badge and target, as the rows
-               do. *)
-            let header =
-              Printf.sprintf "  %s  %s  %s"
-                (fit_width "KIND   TARGET"
-                   (Masc_tui_types.runtime_pick_badge_cells + target_width))
-                (fit_width "CONFIGURED ROUTE / MODEL" route_width)
-                (fit_width "PROPERTIES / CANDIDATES"
-                   (Masc_tui_types.runtime_pick_properties_room ~cols
-                      ~target:target_width ~route:route_width))
-            in
-            c.push (Ansi.dim ^ header ^ Ansi.reset);
-            1
-      in
-      let height = max 0 (budget - status_rows) in
-      let scroll_offset =
-        if height > 0 && state.runtime_pick_cursor >= height then
-          state.runtime_pick_cursor - height + 1
-        else 0
-      in
+    ~body:(fun ~budget:_ c ->
+      c.push_styled ~style:(Theme.info ())
+        ("  " ^ Masc_tui_types.keeper_runtime_picker_summary view);
+      (match state.runtime_catalog_error, Masc_tui_types.keeper_runtime_picker_empty_note view with
+       | Some err, _ -> c.push (data_unreliable_row ~cols err)
+       | None, Some note -> c.push (Ansi.dim ^ note ^ Ansi.reset)
+       | None, None ->
+           (* The first header cell spans badge and target, as the rows
+              do. *)
+           let header =
+             Printf.sprintf "  %s  %s  %s"
+               (fit_width "KIND   TARGET"
+                  (Masc_tui_types.runtime_pick_badge_cells + target_width))
+               (fit_width "CONFIGURED ROUTE / MODEL" route_width)
+               (fit_width "PROPERTIES / CANDIDATES"
+                  (Masc_tui_types.runtime_pick_properties_room ~cols
+                     ~target:target_width ~route:route_width))
+           in
+           c.push (Ansi.dim ^ header ^ Ansi.reset));
       List.iteri
-        (fun idx item ->
-          if idx >= scroll_offset && idx < scroll_offset + height then begin
-            let line =
-              (* The target column draws ids, and an id tells its neighbours
-                 apart at both ends: [claude_code.claude-sonnet-5-low] and
-                 [-high] share everything but the last four cells, which a
-                 head-keeping cut drops. [fit_middle] keeps both ends, which
-                 is what it says it is for. *)
-              let badge, target, route_col =
-                match item with
-                | Masc_tui_types.Pick_lane lane ->
-                    let chain =
-                      String.concat " \xe2\x86\x92 "
-                        (List.map
-                           (fun id ->
-                              match String.split_on_char '.' id with
-                              | [ _prov; model ] -> model
-                              | _ -> id)
-                           lane.rrl_runtime_ids)
-                    in
-                    ( Ansi.cyan
-                      ^ fit_width Masc_tui_types.runtime_pick_lane_badge
-                          Masc_tui_types.runtime_pick_badge_cells
-                      ^ Ansi.reset
-                    , Message_layout.fit_middle target_width (Terminal_text.single_line lane.rrl_id)
-                    , fit_width (Terminal_text.single_line chain) route_width )
-                | Masc_tui_types.Pick_model option ->
-                    ( Ansi.dim
-                      ^ fit_width Masc_tui_types.runtime_pick_model_badge
-                          Masc_tui_types.runtime_pick_badge_cells
-                      ^ Ansi.reset
-                    , Message_layout.fit_middle target_width (Terminal_text.single_line option.ro_id)
-                    , fit_width
-                        (Terminal_text.single_line
-                           (option.ro_provider ^ " / " ^ option.ro_model))
-                        route_width )
-              in
-              let facts =
-                Masc_tui_types.runtime_pick_visible_facts ~cols item
-                |> List.map (fun (fact : Masc_tui_types.runtime_pick_fact) ->
-                     if fact.rpf_warn
-                     then (Theme.warn ()) ^ fact.rpf_text ^ Ansi.reset
-                     else fact.rpf_text)
-                |> String.concat " "
-              in
-              Printf.sprintf "%s%s  %s  %s" badge target route_col facts
+        (fun row item ->
+          let line =
+            (* The target column draws ids, and an id tells its neighbours
+               apart at both ends: [claude_code.claude-sonnet-5-low] and
+               [-high] share everything but the last four cells, which a
+               head-keeping cut drops. [fit_middle] keeps both ends, which
+               is what it says it is for. *)
+            let columns = Masc_tui_types.runtime_pick_columns item in
+            let badge_style =
+              match item with
+              | Masc_tui_types.Pick_lane _ -> Ansi.cyan
+              | Masc_tui_types.Pick_model _ -> Ansi.dim
             in
-            c.push
-              (if idx = state.runtime_pick_cursor then
-                 Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
-               else "  " ^ line)
-          end)
-        items)
+            let badge =
+              badge_style
+              ^ fit_width columns.Masc_tui_types.rpc_badge
+                  Masc_tui_types.runtime_pick_badge_cells
+              ^ Ansi.reset
+            in
+            let target =
+              Message_layout.fit_middle target_width columns.Masc_tui_types.rpc_target
+            in
+            let route_col = fit_width columns.Masc_tui_types.rpc_route route_width in
+            let facts =
+              Masc_tui_types.runtime_pick_visible_facts ~cols item
+              |> List.map (fun (fact : Masc_tui_types.runtime_pick_fact) ->
+                   if fact.rpf_warn
+                   then (Theme.warn ()) ^ fact.rpf_text ^ Ansi.reset
+                   else fact.rpf_text)
+              |> String.concat " "
+            in
+            Printf.sprintf "%s%s  %s  %s" badge target route_col facts
+          in
+          c.push
+            (if view.Masc_tui_pick_list.selected_row = Some row then
+               Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
+             else "  " ^ line))
+        view.Masc_tui_pick_list.rows)
 
 (* The Resources surface: the MCP resource inventory on the left, the
    selected read on the right. Wide terminals show both; narrow ones show

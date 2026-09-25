@@ -670,8 +670,9 @@ let transition_task_outcome_r
                 kind
                 detail);
           let phase_duration_ms () =
-            Some
-              (max 0 (int_of_float ((now_ts -. task_started_at_unix task.task_status) *. 1000.0)))
+            Option.map
+              (fun started_at -> max 0 (int_of_float ((now_ts -. started_at) *. 1000.0)))
+              (task_started_at_unix task.task_status)
           in
           let duration_ms =
             if completes_task
@@ -1053,13 +1054,13 @@ let commit_verdict_r
                          ~to_status:new_status
                          ?notes:(if notes = "" then None else Some notes)
                          ?duration_ms:
-                           (Some
-                              (max
-                                 0
-                                 (int_of_float
-                                    ((Time_compat.now ()
-                                      -. task_started_at_unix task.task_status)
-                                     *. 1000.0))))
+                           (Option.map
+                              (fun started_at ->
+                                 max
+                                   0
+                                   (int_of_float
+                                      ((Time_compat.now () -. started_at) *. 1000.0)))
+                              (task_started_at_unix task.task_status))
                          ()
                      in
                      match base with
@@ -1074,19 +1075,24 @@ let commit_verdict_r
                  longer passes through — without this a verdict-completed task
                  would record no completion at all. [collaborators] is empty by
                  construction: the authority is not an agent and does not
-                 collaborate on the task. *)
+                 collaborate on the task. A start that does not parse records no
+                 metric: this hook measures duration, and one measured from an
+                 invented start lands in the same average as a real one. *)
               run_post_commit "completion_metric" (fun () ->
-                (Atomic.get Workspace_hooks.record_task_metric_fn)
-                  config
-                  ~agent_id:assignee
-                  ~task_id
-                  ~started_at:(task_started_at_unix task.task_status)
-                  ~completed_at:(Some (Time_compat.now ()))
-                  ~success:true
-                  ~error_message:None
-                  ~collaborators:[]
-                  ~handoff_from:None
-                  ~handoff_to:None)
+                match task_started_at_unix task.task_status with
+                | Some started_at ->
+                  (Atomic.get Workspace_hooks.record_task_metric_fn)
+                    config
+                    ~agent_id:assignee
+                    ~task_id
+                    ~started_at
+                    ~completed_at:(Some (Time_compat.now ()))
+                    ~success:true
+                    ~error_message:None
+                    ~collaborators:[]
+                    ~handoff_from:None
+                    ~handoff_to:None
+                | None -> ())
             | Masc_domain.Cancelled _ -> reconcile_terminal ()
             | Masc_domain.Todo
             | Masc_domain.Claimed _

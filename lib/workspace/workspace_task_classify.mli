@@ -92,7 +92,12 @@ val next_actions_hint
   :  Masc_domain.task_status
   -> string
 
-val task_started_at_unix : Masc_domain.task_status -> float
+(** Epoch seconds at which the work in [status] started: [claimed_at] for
+    [Claimed], the preserved producer [started_at] for [InProgress] and
+    [AwaitingVerification]. [None] when the status carries no start or its
+    timestamp does not parse — a duration measured from an invented start
+    lands in the same average as a real one, so callers emit no duration. *)
+val task_started_at_unix : Masc_domain.task_status -> float option
 
 val task_transition_details
   :  from_status:Masc_domain.task_status

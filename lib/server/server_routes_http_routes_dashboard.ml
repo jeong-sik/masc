@@ -192,7 +192,7 @@ let handle_execute_output_stream ~sw ~clock request reqd =
            let wrote_initial =
              write_string
                (Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms)
-             && write_json (Dashboard_execute_output.event_json ~keeper_name)
+             && write_json (Dashboard_execute_output.initial_event_json subscriber)
            in
            if not wrote_initial
            then Dashboard_execute_output.unsubscribe subscriber

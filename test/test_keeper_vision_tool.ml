@@ -2343,7 +2343,8 @@ let test_generated_sandbox_image_reaches_vision () =
             ~complete ~config ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
             ~meta ~args () in
         let result = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"]) in
-        assert (result.disposition = Tool_result.Completed ());
+        if result.disposition <> Tool_result.Completed ()
+        then failwith ("analyze_image did not complete: " ^ result.raw_output);
         let output = json_of_output result.raw_output in
         let handle = assoc_string "artifact" output in
         assert (assoc_string "text" output = "generated image read");

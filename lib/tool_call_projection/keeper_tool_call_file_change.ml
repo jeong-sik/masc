@@ -239,7 +239,7 @@ let kind_of_row ~(handler : Keeper_tool_descriptor.runtime_handler) row =
               | Ok memo -> (
                   match Lsp_process_manager.memo_line ~path:file_path memo with
                   | Error refusal ->
-                      Error (Malformed (Lsp_process_manager.memo_line_refusal_to_string refusal))
+                      Error (Malformed (Lsp_process_manager.memo_line_error_to_string refusal))
                   | Ok comment_line ->
                     Ok (Some (keeper, Inserted { line; text = comment_line })))))
       | Error detail, _, _ | _, Error detail, _ | _, _, Error detail -> Error detail)

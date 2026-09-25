@@ -6393,7 +6393,7 @@ let test_composition_externalizes_oversized_shell_ir_output () =
               durable_root_present;
             let maintenance mode =
               match
-                Tool_blob_maintenance.run ~base_path:config.base_path ~mode
+                Tool_blob_maintenance.run ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~base_path:config.base_path ~mode
               with
               | Ok report -> report
               | Error error ->
@@ -6488,7 +6488,7 @@ let test_direct_execute_artifact_manifest_survives_maintenance () =
          | Tool_output.Invalid_normalized_artifact_ref { detail } -> fail detail
        in
        let maintenance mode =
-         match Tool_blob_maintenance.run ~base_path:config.base_path ~mode with
+         match Tool_blob_maintenance.run ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~base_path:config.base_path ~mode with
          | Ok report -> report
          | Error error -> fail (Tool_blob_maintenance.error_to_string error)
        in
@@ -6607,7 +6607,8 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
               ()
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | Some (Masc.Keeper_official_client_host.Queued_chat_operation
+                   | Masc.Keeper_official_client_host.Repeated_tool_call _)
             | None ->
               fail "direct Execute post-effect failure remained provider-retryable"))
 ;;
@@ -7575,7 +7576,8 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
                 tool_name
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | Some (Masc.Keeper_official_client_host.Queued_chat_operation
+                   | Masc.Keeper_official_client_host.Repeated_tool_call _)
             | None ->
               fail "official-client provider loop remained open after prior effect"))
 ;;
@@ -7958,7 +7960,8 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
                 tool_name
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | Some (Masc.Keeper_official_client_host.Queued_chat_operation
+                   | Masc.Keeper_official_client_host.Repeated_tool_call _)
             | None ->
               fail "official-client provider loop remained open after unknown effect"))
 ;;

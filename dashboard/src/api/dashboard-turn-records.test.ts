@@ -594,11 +594,10 @@ describe('keeper turn record final input composition', () => {
     ])
   })
 
-  // The decoder switch and TURN_PROMPT_BLOCK_IDS are two copies of the same
-  // list, and they drifted: 'operator_note' shipped in the constant and in the
-  // OCaml producer (prompt_block_id.ml:24) but never reached the switch, so a
-  // turn carrying an operator note failed decodeTurnInputComponents and was
-  // rejected whole. Walk the constant so the next block added cannot repeat it.
+  // A prompt component is parsed as `prompt.` plus an id from
+  // TURN_PROMPT_BLOCK_IDS. Walk the constant through the full record path so
+  // every id it holds decodes as a component; prompt-block-id-parity.test.ts
+  // holds the constant equal to the OCaml producer.
   it.each([...TURN_PROMPT_BLOCK_IDS])('decodes the %s prompt component', async (block) => {
     getMock.mockResolvedValue(payload(entry({
       input_components: [{ component: `prompt.${block}`, bytes: 1 }],

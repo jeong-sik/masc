@@ -222,6 +222,26 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
     })
   })
 
+  it('offers the project root and reports picking the first repository', () => {
+    const store = createFileTreeStore()
+    const picked: Array<string | null> = []
+
+    render(h(IdeExplorer, {
+      fileTreeStore: store,
+      repositories: () => [repo('repo-a', 'repo A'), repo('repo-b', 'repo B')],
+      activeRepositoryId: () => null,
+      onRepositoryChange: id => { picked.push(id) },
+    }), container)
+
+    const select = container.querySelector<HTMLSelectElement>('[aria-label="IDE repository"]')!
+    expect(select.value).toBe('')
+    expect([...select.options].map(option => option.value)).toEqual(['', 'repo-a', 'repo-b'])
+
+    select.value = 'repo-a'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(picked).toEqual(['repo-a'])
+  })
+
   it('labels loaded visible files distinctly from filtered results', () => {
     const store = createFileTreeStore()
     store.seed(SAMPLE)

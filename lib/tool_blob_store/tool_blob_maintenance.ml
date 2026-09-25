@@ -14,9 +14,9 @@ type mode =
   | Delete_previous_candidates
 
 type error =
-  | Clustered_durable_roots_uncoordinated of
+  | Cluster_workspace_rejected of
       { path : string
-      ; entries : int
+      ; reason : string
       }
   | Durable_source_stat_failed of
       { path : string
@@ -65,15 +65,15 @@ type report =
   ; blobs_observed : int
   ; candidates_recorded : int
   ; deleted : int
+  ; skipped_cluster_files : string list
   }
 
 let error_to_string = function
-  | Clustered_durable_roots_uncoordinated { path; entries } ->
+  | Cluster_workspace_rejected { path; reason } ->
     Printf.sprintf
-      "tool blob maintenance requires cross-cluster writer coordination before \
-       scanning shared blobs path=%s entries=%d"
+      "tool blob maintenance cannot read cluster workspace path=%s: %s"
       path
-      entries
+      reason
   | Durable_source_stat_failed { path; reason } ->
     Printf.sprintf "durable source stat failed path=%s: %s" path reason
   | Durable_source_read_failed { path; reason } ->
@@ -287,25 +287,6 @@ let durable_consumer_basenames =
   ]
 ;;
 
-let durable_consumer_roots ~base_path =
-  let runtime_root = Common.masc_dir_from_base_path ~base_path in
-  List.map (Filename.concat runtime_root) durable_consumer_basenames
-;;
-
-(* The default cluster's Board posts file, the same place
-   [Board_paths.file_path ~workspace_masc_dir Posts] writes when the cluster is
-   "default" (this library sits below Board, so the name is repeated here and
-   test_tool_blob_store pins the two together through Board_paths). A
-   non-default cluster keeps its posts under .masc/clusters/<name>/, and [run]
-   refuses before this scan whenever that directory has an entry
-   ([reject_uncoordinated_cluster_roots]). So an absent file here means the
-   default cluster has no posts, not that the posts live somewhere unread. *)
-let board_post_consumer_path ~base_path =
-  Filename.concat
-    (Common.masc_dir_from_base_path ~base_path)
-    "board_posts.jsonl"
-;;
-
 let same_directory_snapshot (left : Unix.stats) (right : Unix.stats) =
   left.st_dev = right.st_dev
   && left.st_ino = right.st_ino
@@ -316,65 +297,129 @@ let same_directory_snapshot (left : Unix.stats) (right : Unix.stats) =
   && left.st_ctime = right.st_ctime
 ;;
 
-let reject_uncoordinated_cluster_roots ~base_path =
-  let path =
-    Filename.concat
-      (Common.masc_dir_from_base_path ~base_path)
-      "clusters"
+(* Where blob references live, as data. Every durable consumer writes under the
+   workspace root of its own cluster: [.masc] for the default cluster and
+   [.masc/clusters/<name>] for every other one
+   ([Workspace_utils_paths_backend.masc_root_dir_from]; tool-call logs, for
+   one, follow [Workspace.masc_root_dir config]). The blob store itself is one
+   per BasePath, so a hash is live when any workspace references it, and the
+   scan reads the same consumer list in every workspace (#38919). *)
+type consumer_source =
+  | Tree of string (* scanned recursively; an absent root holds no references *)
+  | Optional_file of string (* a single file; absent means no references *)
+
+(* The Board posts file comes from the caller ([Board_paths] in production):
+   this library sits below Board, so it neither names the file nor depends on
+   the module that does. *)
+let workspace_sources ~board_posts_file ~workspace_masc_dir =
+  List.map
+    (fun basename -> Tree (Filename.concat workspace_masc_dir basename))
+    durable_consumer_basenames
+  @ [ Optional_file (board_posts_file ~workspace_masc_dir) ]
+;;
+
+let clusters_root ~base_path = Common.clusters_dir_from_base_path ~base_path
+;;
+
+let unix_reason fn arg code =
+  Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
+;;
+
+(* What one entry under [clusters] is. A regular file (Finder's [.DS_Store],
+   a stray note) cannot be a workspace root, so it holds no references and is
+   skipped by name. A symlink can point at a real workspace and a special
+   file is never expected there, so both reject the pass: skipping a
+   workspace would make its references look dead. *)
+type cluster_entry =
+  | Workspace of string
+  | Skipped_file of string
+
+(* The cluster set as one observation: the [clusters] directory snapshot, the
+   workspace roots it held and the regular files it skipped. *)
+let observe_cluster_workspaces ~base_path =
+  let path = clusters_root ~base_path in
+  let reject ?(path = path) reason =
+    Error (Cluster_workspace_rejected { path; reason })
   in
-  let inspect () =
+  let inspect target =
     match
-      Fs_compat.inspect_owned_directory_chain
-        ~ownership_root:base_path
-        path
+      Fs_compat.inspect_owned_directory_chain ~ownership_root:base_path target
     with
     | Ok observation -> Ok observation
     | Error rejection ->
-      Error
-        (Durable_source_stat_failed
-           { path
-           ; reason =
-               Fs_compat.owned_directory_chain_rejection_to_string
-                 rejection
-           })
+      reject
+        ~path:target
+        (Fs_compat.owned_directory_chain_rejection_to_string rejection)
   in
-  match inspect () with
-  | Error _ as error -> error
-  | Ok Fs_compat.Owned_directory_missing -> Ok ()
-  | Ok (Fs_compat.Owned_directory before) ->
-    (try
-       let entries = Sys.readdir path in
-       match inspect () with
+  let workspace entry =
+    let root = Filename.concat path entry in
+    match (Unix.lstat root).Unix.st_kind with
+    | Unix.S_DIR ->
+      (match inspect root with
        | Error _ as error -> error
+       | Ok (Fs_compat.Owned_directory _) -> Ok (Workspace root)
        | Ok Fs_compat.Owned_directory_missing ->
-         Error
-           (Durable_source_stat_failed
-              { path; reason = "cluster root disappeared during scan" })
-       | Ok (Fs_compat.Owned_directory after) ->
-         if not (same_directory_snapshot before after)
-         then
-           Error
-             (Durable_source_stat_failed
-                { path; reason = "cluster root changed during scan" })
-         else if Array.length entries = 0
-         then Ok ()
-         else
-           Error
-             (Clustered_durable_roots_uncoordinated
-                { path; entries = Array.length entries })
-     with
-     | Sys_error reason ->
-       Error (Durable_source_stat_failed { path; reason })
-     | Unix.Unix_error (code, fn, arg) ->
-       Error
-         (Durable_source_stat_failed
-            { path
-            ; reason =
-                Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
-            }))
+         reject ~path:root "cluster workspace disappeared during scan")
+    | Unix.S_LNK -> reject ~path:root "a symbolic link is not a cluster workspace"
+    | Unix.S_REG -> Ok (Skipped_file root)
+    | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+      reject ~path:root "a special file is not a cluster workspace"
+    | exception Unix.Unix_error (code, fn, arg) ->
+      reject ~path:root (unix_reason fn arg code)
+  in
+  match inspect path with
+  | Error _ as error -> error
+  | Ok Fs_compat.Owned_directory_missing -> Ok (None, [], [])
+  | Ok (Fs_compat.Owned_directory before) ->
+    (match Sys.readdir path with
+     | exception Sys_error reason -> reject reason
+     | entries ->
+       entries
+       |> Array.to_list
+       |> List.sort String.compare
+       |> List.fold_left
+            (fun result entry ->
+               Result.bind result (fun classified ->
+                 Result.map (fun kind -> kind :: classified) (workspace entry)))
+            (Ok [])
+       |> Result.map (fun classified ->
+         let roots, skipped =
+           List.partition_map
+             (function
+               | Workspace root -> Either.Left root
+               | Skipped_file file -> Either.Right file)
+             (List.rev classified)
+         in
+         Some before, roots, skipped))
 ;;
 
-let live_references ~base_path =
+(* A cluster created, removed or renamed while the scan ran would leave a
+   workspace half read, so the [clusters] snapshot must be the same after the
+   scan as before it. *)
+let confirm_cluster_set_unchanged ~base_path before =
+  let path = clusters_root ~base_path in
+  let changed () =
+    Error
+      (Cluster_workspace_rejected
+         { path; reason = "the cluster set changed during the scan" })
+  in
+  match Fs_compat.inspect_owned_directory_chain ~ownership_root:base_path path with
+  | Error rejection ->
+    Error
+      (Cluster_workspace_rejected
+         { path
+         ; reason = Fs_compat.owned_directory_chain_rejection_to_string rejection
+         })
+  | Ok observed ->
+    (match before, observed with
+     | None, Fs_compat.Owned_directory_missing -> Ok ()
+     | Some before, Fs_compat.Owned_directory after ->
+       if same_directory_snapshot before after then Ok () else changed ()
+     | None, Fs_compat.Owned_directory _
+     | Some _, Fs_compat.Owned_directory_missing -> changed ())
+;;
+
+let live_references ~after_scan ~base_path ~board_posts_file =
   let read_directory path =
     let inspect () =
       match
@@ -464,25 +509,31 @@ let live_references ~base_path =
                 scan_entry (Filename.concat path name) current))
            (Ok references)
   in
-  let scan_board_post_file references =
-    let path = board_post_consumer_path ~base_path in
-    match Unix.lstat path with
-    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok references
-    | exception Unix.Unix_error (code, fn, arg) ->
-      Error
-        (Durable_source_stat_failed
-           { path
-           ; reason =
-               Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
-           })
-    | _ -> scan_entry path references
+  let scan_source references = function
+    | Tree root -> scan_directory root references
+    | Optional_file path ->
+      (match Unix.lstat path with
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok references
+       | exception Unix.Unix_error (code, fn, arg) ->
+         Error (Durable_source_stat_failed { path; reason = unix_reason fn arg code })
+       | _ -> scan_entry path references)
   in
-  durable_consumer_roots ~base_path
-  |> List.fold_left
-       (fun result root ->
-          Result.bind result (fun progress -> scan_directory root progress))
-       (Ok Artifact_reference_set.empty)
-  |> (fun result -> Result.bind result scan_board_post_file)
+  let open Result.Syntax in
+  let* cluster_snapshot, cluster_roots, skipped_cluster_files =
+    observe_cluster_workspaces ~base_path
+  in
+  let* references =
+    Common.masc_dir_from_base_path ~base_path :: cluster_roots
+    |> List.concat_map (fun workspace_masc_dir ->
+      workspace_sources ~board_posts_file ~workspace_masc_dir)
+    |> List.fold_left
+         (fun result source ->
+            Result.bind result (fun progress -> scan_source progress source))
+         (Ok Artifact_reference_set.empty)
+  in
+  after_scan ();
+  let* () = confirm_cluster_set_unchanged ~base_path cluster_snapshot in
+  Ok (references, skipped_cluster_files)
 ;;
 
 let expand_artifact_manifests ~store references =
@@ -664,11 +715,12 @@ let save_candidate_snapshot ~base_path candidates =
     Error (Candidate_snapshot_write_failed { path; detail })
 ;;
 
-let run ~base_path ~mode =
+let run_with ~after_scan ~base_path ~board_posts_file ~mode =
   let open Result.Syntax in
-  let* () = reject_uncoordinated_cluster_roots ~base_path in
   let store = Tool_blob_store.create ~base_path in
-  let* direct_live = live_references ~base_path in
+  let* direct_live, skipped_cluster_files =
+    live_references ~after_scan ~base_path ~board_posts_file
+  in
   let* live_references = expand_artifact_manifests ~store direct_live in
   let live =
     Artifact_reference_set.fold
@@ -713,5 +765,14 @@ let run ~base_path ~mode =
     ; blobs_observed = String_set.cardinal blobs
     ; candidates_recorded = String_set.cardinal current_candidates
     ; deleted
+    ; skipped_cluster_files
     }
 ;;
+
+let run ~base_path ~board_posts_file ~mode =
+  run_with ~after_scan:(fun () -> ()) ~base_path ~board_posts_file ~mode
+;;
+
+module For_testing = struct
+  let run = run_with
+end

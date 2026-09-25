@@ -2205,13 +2205,13 @@ let run_turn
                   Some { request_context = Some (context : Runtime_observation.request_context); _ }
               ; _
               } ->
-            (* A runtime that reports the newest request apart from the
-               turn's spend (Claude Code, Codex) records that request here:
-               this record's readers ask what one request carried. Its output
-               is there when the runtime reports a final count (Codex); the
-               turn's output goes to [turn_output_tokens] below, under its own
-               scope. Its cache split is absent when the input is an estimate
-               of the whole context (Codex after a compaction). *)
+            (* A runtime that reports its newest request apart from the
+               turn's spend records that request here: this record's readers
+               ask what one request carried. Its output is there when the
+               runtime reports that request's final count; the turn's output
+               goes to [turn_output_tokens] below, under its own scope. Its
+               cache split is absent when the runtime reports only an
+               estimate of the whole context, as it does after a compaction. *)
             { input_tokens = Some context.input_tokens
             ; output_tokens = context.output_tokens
             ; cache_creation_input_tokens =

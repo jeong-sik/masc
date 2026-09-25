@@ -1206,7 +1206,7 @@
  (name masc_tui_keeper_config)
  (wrapped false)
  (modules masc_tui_keeper_config)
- (libraries yojson masc_tui_theme masc.string_util))
+ (libraries yojson masc masc_tui_theme masc.string_util))
 
 (library
  (name masc_tui_keeper_sandbox)
@@ -1253,6 +1253,9 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries digestif mtime.clock.os masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+  ;; [threshold_cols] is the width two panes need: the Board read layout is
+  ;; decided here so the footer and the frame cannot disagree about it.
+  masc_tui_roster_pane
   masc_tui_overview_tasks
   masc_tui_machine_live
   masc_tui_connector_unbind

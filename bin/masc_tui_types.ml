@@ -8812,6 +8812,22 @@ let surface_body_rows (state : state) ~terminal_rows =
      - agenda_chrome_rows state)
 ;;
 
+(* The three layouts the Board read surface draws in. Both the pane split and
+   the [z] key read this one answer: spelled as a pair of booleans it admitted
+   a state no screen draws -- a split that is also wide -- and each reader
+   rebuilt it from [cols] and the flag on its own, so the footer could name a
+   pane the frame had not laid out. *)
+type board_read_layout =
+  | Board_read_split (* the post list sits beside the open post *)
+  | Board_read_wide (* the open post owns the screen and [z] gives the list back *)
+  | Board_read_one_pane (* no room for two panes, so [z] has nowhere to go *)
+
+let board_read_layout ~cols ~wide =
+  if cols < Masc_tui_roster_pane.threshold_cols then Board_read_one_pane
+  else if wide then Board_read_wide
+  else Board_read_split
+;;
+
 let standalone_lanes_chrome ~row_count ~error ~truncated =
   let evidence_rows = match row_count with None -> 1 | Some count -> count in
   let stale_error_row =

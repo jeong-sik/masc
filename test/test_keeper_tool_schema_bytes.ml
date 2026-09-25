@@ -293,16 +293,12 @@ open Alcotest
    whole sentence that fits. What it bought: those four schemas, 8,370 bytes,
    leave every Agent Core request that has not used them (5,047 requests on
    2026-09-23). No headroom. *)
-(* 2026-09-24: 122,591 across 139 tools, +316 over the 122,275 ceiling above,
-   measured by this suite on CI for PR #38835 (PR check run 36051449813, the
-   "grew to" failure line). masc_board_post takes a typed `attachments`
-   argument: each entry declares a kind (image|video|youtube|external_link) and
-   exactly one of an absolute HTTPS url or an existing artifact sha256, on both
-   the MCP tool schema and the keeper projection. What it bought: the two Board
-   write paths (tool + HTTP) stop accepting a raw, unvalidated meta.attachments
-   blob; both now parse the same closed type and reject unsafe URLs, missing
-   artifacts, and duplicate meta. No headroom. *)
-let ceiling_bytes = 122_591
+(* 2026-09-25: 123,093 across 141 tools (+818), measured by this suite built
+   locally at the change. masc_dos_save and masc_dos_restore, both deferred:
+   the whole DOS machine saved under a name and put back after a server
+   restart, which took a 133-million-step 삼국지3 hotseat game with it
+   (#38981). No headroom. *)
+let ceiling_bytes = 123_093
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -469,6 +465,8 @@ let all_surface_golden_names =
   ; "masc_dos_pass"
   ; "masc_dos_peek"
   ; "masc_dos_press"
+  ; "masc_dos_restore"
+  ; "masc_dos_save"
   ; "masc_dos_screen"
   ; "masc_dos_step"
   ; "masc_dos_type"

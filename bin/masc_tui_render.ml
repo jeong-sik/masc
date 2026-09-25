@@ -544,10 +544,12 @@ let overview_providers_section (state : state) ~cols =
 let overview_layout (state : state) ~terminal_rows =
   let all_attention = overview_attention state in
   let tasks_error = Terminal_text.optional_single_line state.tasks_error in
-  let team_count =
+  let team_count, team_stuck =
     match overview_team state with
-    | None -> 0
-    | Some team -> Overview_team.drawn_rows team
+    | None -> (0, false)
+    | Some team ->
+        ( Overview_team.drawn_rows team
+        , Overview_team.count team Overview_team.Needs_you > 0 )
   in
   let providers_count =
     match overview_providers_section state ~cols:(snd (get_terminal_size ())) with
@@ -558,7 +560,7 @@ let overview_layout (state : state) ~terminal_rows =
     Render_schedule.allocate_overview ~terminal_rows
       ~attention_count:(List.length attention_items)
       ~goal_count:(Overview_goals.wanted_rows state.overview_goals)
-      ~team_count
+      ~team_count ~team_stuck
       ~providers_count
       ~task_count:
         (Overview_tasks.line_count state.tasks
@@ -1255,6 +1257,8 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
       (* The highlight names the task this detail shows, not the cursor: a
          todo task opened from the palette or a link has no row here, and
          the row the cursor last rested on would be a different task. *)
+      (* The id follows each title because the shared sidebar fold keeps the
+         tail, so titles with the same opening and ending still differ. *)
       write_list_sidebar_selection left_buf ~rows ~cols:left_cols
         ~title:"Tasks" ~focused:false
         (* [Overview_tasks.rows] drops what is done, cancelled or still todo.
@@ -1264,8 +1268,8 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
         ~labels:
           (List.map
              (fun (row : Tui_decode.task) ->
-               Render_schedule.task_list_sidebar_label ~title:row.title
-                 ~task_id:row.id)
+               Render_schedule.sidebar_row_label ~about:row.title
+                 ~apart:(Some row.id))
              (Overview_tasks.rows state.tasks))
         ~selection:(Overview_tasks.row_of state.tasks ~task_id:task.id);
       let answer =
@@ -1419,11 +1423,23 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
 
 (* The queue stays beside the ask. Reading one used to hide the rest, and the
    rest is what tells an operator whether this one is the urgent one. *)
+(* Who asked, beside what they asked for. The label was the tool alone, and a
+   queue holds one row per held call. Many calls can name the same tool while
+   different Keepers wait. The full-width list row beside this pane already
+   draws the asker; only the index dropped it.
+
+   The asker goes after the tool because the pane folds a label from the
+   middle and keeps its tail (Render_schedule.sidebar_row_label). *)
 let approval_sidebar_label (row : approval_row) =
-  match row with
-  | Keeper_tool_row held -> held.Tui_decode.kta_tool
-  | Gate_row pending -> pending.Tui_decode.gp_display_tool
-  | Operator_row item -> item.ap_action_type
+  let about, apart =
+    match row with
+    | Keeper_tool_row held ->
+      held.Tui_decode.kta_tool, held.Tui_decode.kta_keeper
+    | Gate_row pending ->
+      pending.Tui_decode.gp_display_tool, pending.Tui_decode.gp_keeper
+    | Operator_row item -> item.ap_action_type, item.ap_actor
+  in
+  Render_schedule.sidebar_row_label ~about ~apart:(Some apart)
 
 let render_approval_detail (state : state) (row : approval_row) =
   let terminal_rows, cols = get_terminal_size () in
@@ -11254,7 +11270,12 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
      and the row [finish_surface] then dropped was the footer, so the diff was
      the one screen that did not say how to leave it. *)
   let chrome_rows = count_frame_lines buf + listing_rows_below_the_body in
-  let content_height = max 1 (rows - chrome_rows) in
+  (* The position row carries the esc hint at every count, so it is one of
+     [listing_rows_below_the_body] and needs no row of its own. *)
+  let content_height =
+    Masc_tui_scroll.content_height ~rows ~chrome:chrome_rows ~count:total
+      ~preview_keep:None ~overflow_takes_row:false
+  in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.changes_diff_scroll max_scroll) in
   let diff_rows_window = Rows.of_list ~first:scroll ~height:content_height diff_rows in
@@ -11271,10 +11292,10 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
       | None -> box_empty buf cols
       | Some row -> box_line_span buf cols (diff_row_span ~width:(framed_inner_width cols) row)
     done;
-  if total > content_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[lines %s]  esc closes" (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
-  else box_line_styled buf cols ~style:(Theme.recede ()) "  esc closes";
+  Option.iter
+    (box_line_styled buf cols ~style:(Theme.recede ()))
+    (Masc_tui_scroll.position_row ~scroll ~height:content_height
+       ~hint:"esc closes" total);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Left / Esc:back  o:open in editor  q:quit");
@@ -16215,13 +16236,9 @@ let overlay_window_height ~rows ~count =
    nothing when every row fits. The row's height is the one
    [overlay_window_height] took off. *)
 let overlay_window_row ~scroll ~height count =
-  if count > height then
-    Some
-      (Theme.recede ()
-      ^ Printf.sprintf "  [lines %s]"
-          (Masc_tui_scroll.window_text ~scroll ~height count)
-      ^ Ansi.reset)
-  else None
+  Option.map
+    (fun row -> Theme.recede () ^ row ^ Ansi.reset)
+    (Masc_tui_scroll.position_row ~scroll ~height count)
 
 (* The sheet's rows and the viewport that shows them, at this width. One
    answer for the two readers -- the keypress that bounds the scroll and the
@@ -16320,9 +16337,10 @@ let patch_modal_viewport (state : state) =
   (* The column heading and the divider under it open the body. *)
   let heading_rows = 2 in
   ( total
-  , max 1
-      (Masc_tui_types.surface_body_rows state ~terminal_rows
-       - surface_chrome_rows - heading_rows) )
+  , Masc_tui_scroll.content_height
+      ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
+      ~chrome:(surface_chrome_rows + heading_rows) ~count:total
+      ~preview_keep:None ~overflow_takes_row:true )
 
 let render_patch_modal (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -16350,10 +16368,7 @@ let render_patch_modal (state : state) =
     ~title:
       (screen_title " MASC Patch review" ^ "  " ^ Ansi.bold
        ^ Terminal_text.single_line path_label ^ Ansi.reset)
-    ~hints:
-      (Printf.sprintf
-         "[lines %s]  e:edit  j/k:scroll  d/u:page  g/G:top/bottom  Esc/q:close"
-         (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
+    ~hints:"e:edit  j/k:scroll  d/u:page  g/G:top/bottom  Esc/q:close"
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.recede ())
         "  old   new     diff preview (syntax colored)";
@@ -16366,7 +16381,7 @@ let render_patch_modal (state : state) =
                   Printf.sprintf "   (diff load error: %s)" (Terminal_text.single_line e)
               | None, None -> "   (no pending patch diff loaded)")
            ^ Ansi.reset)
-      else
+      else begin
         let width = framed_inner_width cols in
         List.iteri
           (fun index row ->
@@ -16375,7 +16390,11 @@ let render_patch_modal (state : state) =
                 (fit_width
                    (Masc_tui_span.render (tree_diff_row_span ~width row))
                    width))
-          diff_rows)
+          diff_rows
+      end;
+      (* The window's position is a body row, as on the other overlays, and
+         [patch_modal_viewport] took its row off when the diff overflows. *)
+      Option.iter c.push (overlay_window_row ~scroll ~height:content_height total))
 
 (* The link preview overlay, through the same contract. The title names the
    site, so the footer carries only keys. *)

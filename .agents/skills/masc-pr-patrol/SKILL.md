@@ -224,7 +224,7 @@ gh api -X GET --paginate "repos/$REPO/commits/$SHA/check-runs" \
 - `gh pr checks --watch` 는 체크가 아직 등록되기 전이나 head 가 바뀐 순간 `no checks reported` 를
   찍고 exit 0 으로 끝난다. 판정이 아니다.
 - 파이프를 붙이면 `$?` 는 마지막 명령의 종료 코드다. `cmd | tail; echo $?` 는 `cmd` 의 실패를 숨긴다.
-- 키퍼 sandbox 이미지(`Dockerfile.keeper-sandbox`)에는 `gh` 가 설치돼 있다. `gh` 가 안 되면 먼저
+- 키퍼 sandbox 이미지(`sandbox-images/ocaml/Dockerfile`)에는 `gh` 가 설치돼 있다. `gh` 가 안 되면 먼저
   인증과 네트워크를 본다. TLS 우회 스크립트를 쓰지 않는다.
 - 빈 커밋으로 CI 를 다시 부르지 않는다. `lint suite` 가 빈 커밋을 실패로 잡는다. main 보다 뒤처진
   브랜치면 브랜치 갱신(1절 6번)이 새 run 을 만든다.

@@ -32,6 +32,7 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
   ; mutable assistant_turn_texts : string list
+  ; mutable wire_prompt_tokens : Keeper_agent_result.wire_prompt_tokens option
   }
 
 type hook_outputs = Keeper_run_tools_hook_accumulator.hook_outputs =

@@ -208,9 +208,10 @@ type projection =
 type window_observation =
   { transmitted_atoms : int
   ; total_atoms : int
-  ; front_atom_digest : string
-        (** {!atom_opening_digest} of the oldest carried atom, index
-            [total_atoms - transmitted_atoms] of the history. *)
+  ; front_atom_digest : string option
+        (** [Some] {!atom_opening_digest} of the oldest carried atom, index
+            [total_atoms - transmitted_atoms] of the history. [None] names no
+            front; the full contract arrives with the #39013 fix. *)
   }
 (** How much of a history one projection carried, kept without the messages so
     an observer can hold it for the length of a turn. *)

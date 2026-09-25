@@ -64,7 +64,7 @@ type model_input_window =
   { transmitted_atoms : int
   ; total_atoms : int
   ; measurement : model_input_measurement
-  ; front_atom_digest : string
+  ; front_atom_digest : string option
   }
 
 type response_observed_model_input =
@@ -218,7 +218,9 @@ let to_json (r : t) : Yojson.Safe.t =
       ( `Int window.transmitted_atoms
       , `Int window.total_atoms
       , `String (model_input_measurement_to_string window.measurement)
-      , `String window.front_atom_digest )
+      , match window.front_atom_digest with
+        | Some digest -> `String digest
+        | None -> `Null )
     | None -> `Null, `Null, `Null, `Null
   in
   let response_observed_model_input =
@@ -232,7 +234,10 @@ let to_json (r : t) : Yojson.Safe.t =
         ; "total_atoms", `Int window.total_atoms
         ; ( "model_input_measurement"
           , `String (model_input_measurement_to_string window.measurement) )
-        ; "front_atom_digest", `String window.front_atom_digest
+        ; ( "front_atom_digest"
+          , match window.front_atom_digest with
+            | Some digest -> `String digest
+            | None -> `Null )
         ]
   in
   `Assoc
@@ -641,7 +646,13 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           if transmitted_atoms > total_atoms
           then Error "turn_record: transmitted_atoms cannot exceed total_atoms"
           else
-            Ok (Some { transmitted_atoms; total_atoms; measurement; front_atom_digest })
+            Ok
+              (Some
+                 { transmitted_atoms
+                 ; total_atoms
+                 ; measurement
+                 ; front_atom_digest = Some front_atom_digest
+                 })
         | None, None, None, None -> Ok None
         | _ ->
           Error
@@ -724,7 +735,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
                      { transmitted_atoms
                      ; total_atoms
                      ; measurement
-                     ; front_atom_digest
+                     ; front_atom_digest = Some front_atom_digest
                      }
                  })
         | _ ->

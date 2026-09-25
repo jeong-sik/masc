@@ -555,7 +555,7 @@ let test_chained_cut_keeps_the_whole_history_as_denominator () =
     (Window.atom_opening_digest
        history
        (observed.Window.total_atoms - observed.Window.transmitted_atoms))
-    (Some observed.Window.front_atom_digest);
+    observed.Window.front_atom_digest;
   Alcotest.(check int)
     "denominator is the whole history, not the survivors"
     (count_atoms history)
@@ -1045,7 +1045,39 @@ let test_a_window_without_an_atom_is_no_observation () =
   | Some observed ->
     Alcotest.(check (option string)) "named by the newest atom"
       (digest_at (atom_count - 1))
-      (Some observed.Window.front_atom_digest)
+      observed.Window.front_atom_digest
+
+(* #39013: a floor the ceiling composed on purpose is still a measurement.
+   The projection carried no atom, so it names no front — but the observation
+   itself must survive, with the zero transmitted count that tells the next
+   turn why it restarts instead of carrying. [None] here would leave the
+   turn record silent, and the next turn would resurrect an older front the
+   floor had just made untenable. *)
+let test_the_floor_projection_is_an_observation_with_no_front () =
+  let history = atoms 5 in
+  let atom_count = count_atoms history in
+  let observe ~dropped_atoms =
+    Window.observe
+      ~digest_at:(Window.atom_opening_digest history)
+      ~history_atom_count:atom_count
+      { Window.messages = []; dropped_atoms; atom_count }
+  in
+  match observe ~dropped_atoms:atom_count with
+  | None -> Alcotest.fail "the floor projection reported no observation"
+  | Some floor ->
+    Alcotest.(check int) "nothing was transmitted" 0 floor.Window.transmitted_atoms;
+    Alcotest.(check int) "the denominator is the whole history" atom_count
+      floor.Window.total_atoms;
+    Alcotest.(check (option string)) "and it names no front" None
+      floor.Window.front_atom_digest;
+    match observe ~dropped_atoms:(atom_count - 1) with
+    | None -> Alcotest.fail "a projection carrying an atom reported no window"
+    | Some carried ->
+      Alcotest.(check (option string)) "its neighbour still names its front"
+        (Window.atom_opening_digest history (atom_count - 1))
+        (match carried.Window.front_atom_digest with
+         | Some digest -> Some digest
+         | None -> Alcotest.fail "the carried atom names no front")
 ;;
 
 let () =
@@ -1102,8 +1134,9 @@ let () =
             `Quick test_chained_cut_keeps_the_whole_history_as_denominator
         ; Alcotest.test_case "opening digest names the first message of each atom"
             `Quick test_opening_digest_names_the_first_message_of_each_atom
-        ; Alcotest.test_case "a window without an atom is no observation" `Quick
-            test_a_window_without_an_atom_is_no_observation
+        ; Alcotest.test_case "the floor projection is an observation with no front"
+            `Quick
+            test_the_floor_projection_is_an_observation_with_no_front
         ; Alcotest.test_case "dropping unsent reasoning widens the window"
             `Quick test_dropping_unsent_reasoning_widens_the_window
         ; Alcotest.test_case "tool results stay with their call" `Quick

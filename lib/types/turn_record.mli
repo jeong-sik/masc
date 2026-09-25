@@ -80,14 +80,15 @@ type model_input_window =
   { transmitted_atoms : int
   ; total_atoms : int
   ; measurement : model_input_measurement
-  ; front_atom_digest : string
-        (** SHA-256 hex of the message that opens the front atom, index
+  ; front_atom_digest : string option
+        (** [Some] SHA-256 hex of the message that opens the front atom, index
             [total_atoms - transmitted_atoms]
             ([Runtime_model_input_tail_window.atom_opening_digest]). The
             index and this digest together are the position a later turn
             resumes from: the position holds only while that index still
             opens with the same message, whatever the history's atom count
-            is now. *)
+            is now. [None] names no front; the full contract arrives with
+            the #39013 fix. *)
   }
 (** How much of the keeper's own history the dispatched request carried, in
     atoms — one organic user message, or one assistant message together with

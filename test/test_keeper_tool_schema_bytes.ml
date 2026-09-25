@@ -302,12 +302,12 @@ open Alcotest
    write paths (tool + HTTP) stop accepting a raw, unvalidated meta.attachments
    blob; both now parse the same closed type and reject unsafe URLs, missing
    artifacts, and duplicate meta. No headroom. *)
-(* 2026-09-25: the Stagehand lane adds 119 bytes over the 122,228 surface it
-   was measured against (122,347, the #38697 entry: BrowserSession and
-   BrowserGoto take a lane, BrowserSession says what each lane needs, and
-   BrowserTabs says a stagehand tab has no clientId). Added to main's ceiling
-   above with no headroom; the next CI run measures it. *)
-let ceiling_bytes = 122_710
+(* 2026-09-25: 122,882 across 139 tools, measured by this suite on CI for
+   #38697 after main was merged in (PR check run 36123827619, the "grew to"
+   line). BrowserSession and BrowserGoto take a lane, BrowserSession says what
+   each lane needs, and BrowserTabs says a stagehand tab has no clientId. No
+   headroom. *)
+let ceiling_bytes = 122_882
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

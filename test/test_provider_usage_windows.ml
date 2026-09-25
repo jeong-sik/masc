@@ -389,7 +389,7 @@ let http_readable ~provider_id ~url ~key =
   ; how =
       Http
         { credential = Llm_provider.Provider_config.Static_credential, Llm_provider.Secret.of_string key
-        ; usage_read = { shape = Runtime_schema.Ollama_usage; url }
+        ; usage_read = { shape = Runtime_schema.Ollama_usage; url; refresh_s = None }
         }
   }
 ;;
@@ -432,6 +432,75 @@ let test_an_empty_key_sends_no_request () =
   check bool "nothing recorded" false (reported empty.scope)
 ;;
 
+(* --- Repeating a read: [run_full]'s clock moves only when every fiber
+   waits, so a period of minutes costs no real time. --- *)
+
+let start_period_s = 600.0
+let found_period_s = 60.0
+
+let http_of (readable : Read.readable) =
+  match readable.how with
+  | Http http -> http
+  | Codex _ -> fail "an HTTP readable was expected"
+;;
+
+(* Answers the lookups in order, and fails a lookup past the last one: the
+   repeats must end on the [None]. *)
+let lookups_in_order answers =
+  let remaining = ref answers in
+  fun _scope ->
+    match !remaining with
+    | next :: rest ->
+      remaining := rest;
+      next
+    | [] -> fail "looked up again after a lookup found no refresh"
+;;
+
+(* Each repeat waits the period the lookup before it gave, the first one the
+   period it started with; a lookup with no refresh ends the repeats. *)
+let test_a_refresh_waits_the_period_it_finds_and_ends_on_none () =
+  Eio_mock.Backend.run_full
+  @@ fun env ->
+  let clock = env#clock in
+  let readable =
+    http_readable ~provider_id:"usage_refresh_periods" ~url:"https://ok.invalid" ~key:"k"
+  in
+  let found = Some (found_period_s, http_of readable) in
+  let lookup = lookups_in_order [ found; found; None ] in
+  let fetches = ref 0 in
+  let fetch ~api_key:_ _ =
+    incr fetches;
+    Ok ollama_usage_response
+  in
+  let started = Eio.Time.now clock in
+  Read.refresh_scope ~clock ~fetch ~lookup readable.scope start_period_s;
+  check int "one read per lookup that found a refresh" 2 !fetches;
+  check (float 1e-6) "waited the start period, then each period found"
+    (start_period_s +. found_period_s +. found_period_s)
+    (Eio.Time.now clock -. started);
+  check bool "the repeated read recorded its answer" true (reported readable.scope)
+;;
+
+(* A repeat whose read raises is logged, and the next repeat still reads. *)
+let test_a_raising_repeat_does_not_end_the_repeats () =
+  Eio_mock.Backend.run_full
+  @@ fun env ->
+  let clock = env#clock in
+  let readable =
+    http_readable ~provider_id:"usage_refresh_raises_once" ~url:"https://ok.invalid" ~key:"k"
+  in
+  let found = Some (found_period_s, http_of readable) in
+  let lookup = lookups_in_order [ found; found; None ] in
+  let fetches = ref 0 in
+  let fetch ~api_key:_ _ =
+    incr fetches;
+    if !fetches = 1 then failwith "connection reset by peer" else Ok ollama_usage_response
+  in
+  Read.refresh_scope ~clock ~fetch ~lookup readable.scope start_period_s;
+  check int "the repeat after the raising one still read" 2 !fetches;
+  check bool "the later read recorded its answer" true (reported readable.scope)
+;;
+
 let () =
   run
     "provider_usage_windows"
@@ -453,6 +522,12 @@ let () =
       , [ test_case "a raising scope does not stop the rest" `Quick
             test_a_raising_scope_does_not_stop_the_rest
         ; test_case "an empty key sends no request" `Quick test_an_empty_key_sends_no_request
+        ] )
+    ; ( "repeating a read"
+      , [ test_case "a refresh waits the period it finds and ends on none" `Quick
+            test_a_refresh_waits_the_period_it_finds_and_ends_on_none
+        ; test_case "a raising repeat does not end the repeats" `Quick
+            test_a_raising_repeat_does_not_end_the_repeats
         ] )
     ]
 ;;

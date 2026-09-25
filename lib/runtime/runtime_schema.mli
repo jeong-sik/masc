@@ -104,6 +104,9 @@ val usage_read_shape_to_string : usage_read_shape -> string
 type usage_read =
   { shape : usage_read_shape
   ; url : string
+  ; refresh_s : float option
+    (** [refresh-s] — seconds from one answer to the next read, after the
+        read at server start. [None] reads at server start only. *)
   }
 [@@deriving show, eq]
 

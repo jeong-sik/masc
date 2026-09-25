@@ -10,7 +10,9 @@
     thread or turn. A provider that declares [usage-read] in runtime.toml is
     asked with one HTTP GET to that URL, authenticated with the key its HTTP
     runtime was built with, and the answer is decoded by the declared shape.
-    runtime.toml refuses [usage-read] on an official-client protocol. *)
+    A provider that also declares [usage-read.refresh-s] is asked again that
+    many seconds after each answer. runtime.toml refuses [usage-read] on an
+    official-client protocol. *)
 
 val read_timeout_s : float
 (** The bound on one read: a Codex account admission and one request, or one
@@ -70,6 +72,31 @@ val read_all :
     failed read is logged with its scope (and shape for an HTTP read) and
     leaves that scope as it was; neither the response body nor the key is
     logged. *)
+
+val refresh_scope :
+  clock:_ Eio.Time.clock ->
+  fetch:(api_key:Llm_provider.Secret.t -> string -> (string, http_error) result) ->
+  lookup:(Runtime_quota_window.scope -> (float * http_read) option) ->
+  Runtime_quota_window.scope ->
+  float ->
+  unit
+(** [refresh_scope ~clock ~fetch ~lookup scope period] waits [period]
+    seconds, then asks [lookup] for [scope]'s read. It reads, logging a
+    failure the way {!read_scopes} does, and repeats with the period [lookup]
+    gave, or returns when [lookup] answers [None]. A failed or raising read is logged and the
+    repeats go on; only {!Eio.Cancel.Cancelled} is re-raised. *)
+
+val refresh_declared :
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  clock:_ Eio.Time.clock ->
+  unit
+(** Repeat the read of every HTTP account whose provider declares
+    [usage-read.refresh-s] at the time of the call, each on its own period,
+    after {!read_all} has read it once. Each repeat looks the account up in
+    the catalogue again: a provider that no longer declares [refresh-s], or
+    that is gone, ends that account's repeats, and a changed period applies
+    after the current wait. Returns when every account's repeats have
+    ended, so the server runs it on a fiber of its own. *)
 
 type background =
   | Started  (** A read was forked on the server's root switch. *)

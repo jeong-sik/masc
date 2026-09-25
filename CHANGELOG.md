@@ -189,7 +189,7 @@
   `failed`) (#38773).
 - The Planning goal list now says which of the goals it is holding when the
   frame cannot draw them all. At sixty columns it drew seven of eight with
-  nothing on the screen saying an eighth existed (#38797).
+  nothing on the screen saying an eighth existed (#38797, #39163).
 - An autonomous keeper that deferred the rest of its runtime lane to the next
   cycle resumes on that next runtime after a server restart. The heartbeat held
   the deferred suffix only in memory, so a restart walked the assignment from

@@ -345,6 +345,7 @@ let with_bundle_tools
              ; agent_cell = ref None
              ; history = []
              ; load_receipts
+             ; keeper_turn_id = 1
              }
            ~composition_plan_index
            ?skill_activation_context:

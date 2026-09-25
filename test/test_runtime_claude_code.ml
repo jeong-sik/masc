@@ -328,6 +328,9 @@ let test_routed_credentials_reach_probe_and_turn () =
         output_string out "#!/bin/sh\nset -eu\n";
         output_string out "[ \"$ANTHROPIC_AUTH_TOKEN\" = fixture-token ] || exit 71\n";
         output_string out "[ \"$ANTHROPIC_BASE_URL\" = https://gateway.example.test/anthropic ] || exit 72\n";
+        (* A routed base URL would otherwise turn the client's tool search
+           off and send every masc schema inline. *)
+        output_string out "[ \"$ENABLE_TOOL_SEARCH\" = true ] || exit 74\n";
         output_string out "if [ \"${2-}\" = auth ]; then [ \"$1\" = --setting-sources= ] || exit 73; fi\n";
         output_string out ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
         close_out out; Unix.chmod wrapper 0o700;

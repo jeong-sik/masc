@@ -696,6 +696,36 @@ let test_unreadable_body_is_rejected_not_offered () =
     failf "expected one projection diagnostic, got %d" (List.length diagnostics)
 ;;
 
+(* A broken composition falls back to its frozen instruction body, and that
+   body is read through [keeper_skill] too. An oversized one is unavailable,
+   not served as an instruction every read would refuse. *)
+let test_oversized_frozen_fallback_is_unavailable () =
+  let max_bytes = Common.max_tool_result_wire_bytes in
+  let document =
+    "---\nname: broken-long\ndescription: Broken composition, long body.\n---\n\n```toml composition\n[[compositions]]\n"
+    ^ String.make max_bytes 'x'
+  in
+  let catalog, diagnostics =
+    Skill_catalog.of_snapshot (snapshot_of_document ~directory:"broken-long" document)
+  in
+  check
+    int
+    "oversized fallback is not offered"
+    0
+    (List.length (Skill_catalog.skills catalog));
+  match diagnostics with
+  | [ diagnostic ] ->
+    (match diagnostic.Skill_catalog.error with
+     | Skill_catalog.Body_too_large_to_read { skill; bytes; max_bytes = reported } ->
+       check string "skill" "broken-long" skill;
+       check bool "bytes exceed the boundary" true (bytes > max_bytes);
+       check int "max_bytes" max_bytes reported
+     | error ->
+       fail ("unexpected projection diagnostic: " ^ Skill_catalog.error_to_string error))
+  | diagnostics ->
+    failf "expected one projection diagnostic, got %d" (List.length diagnostics)
+;;
+
 let skill_catalog_of documents =
   match Skill_catalog.partition_documents documents with
   | catalog, [] -> catalog
@@ -863,6 +893,10 @@ let () =
             "unreadable body is rejected, not offered"
             `Quick
             test_unreadable_body_is_rejected_not_offered
+        ; test_case
+            "oversized frozen fallback is unavailable"
+            `Quick
+            test_oversized_frozen_fallback_is_unavailable
         ; test_case
             "partition_documents isolates rejections"
             `Quick

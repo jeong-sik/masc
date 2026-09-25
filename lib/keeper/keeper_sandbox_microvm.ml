@@ -406,19 +406,17 @@ let phase_label = function
 (* Each runtime keeps its own image store, so the refusal names the CLI that
    was asked. Telling an [msb] keeper to install Apple container -- which the
    Apple-only wording did -- sends the operator to fix a runtime the keeper
-   does not use. *)
+   does not use.
+
+   Promote records a tag the store already has, so what differs per runtime
+   is how a build gets into its store: [masc sandbox-image] builds into
+   container's and nerdctl's, and msb has no build command, so a build
+   reaches it through [msb load]. Going back is a promote of an earlier tag
+   the store still has. *)
 let missing_image_recovery backend ~name ~image =
-  let rollback =
-    match name with
-    | None -> ""
-    | Some name ->
-      Printf.sprintf
-        " If its previous build is still in this store, use `masc sandbox-image \
-         rollback %s --runtime %s`."
-        name (Backend.to_string backend)
-  in
+  let runtime = Backend.to_string backend in
   match backend, name with
-  | Backend.Apple_container, Some name ->
+  | (Backend.Apple_container | Backend.Nerdctl_kata), Some name ->
     let source =
       if String.equal name Keeper_sandbox_image_version.(base_embedded.name)
       then ""
@@ -426,24 +424,28 @@ let missing_image_recovery backend ~name ~image =
     in
     Printf.sprintf
       "Next: build a new version with `masc sandbox-image --recipe %s%s \
-       --runtime apple_container`, then promote the tag it prints with `masc \
-       sandbox-image promote %s <tag> --runtime apple_container`.%s"
-      name source name rollback
-  | Backend.Apple_container, None ->
-    "Next: inspect this Keeper's sandbox_image catalog name, then build and \
-     promote a new version for apple_container."
-  | Backend.Microsandbox, _ ->
+       --runtime %s` and promote the tag it prints, or promote an earlier tag \
+       this store still has: `masc sandbox-image promote %s <tag> --runtime \
+       %s`."
+      name source runtime name runtime
+  | (Backend.Apple_container | Backend.Nerdctl_kata), None ->
     Printf.sprintf
-      "Next: restore the exact promoted image %s to msb's store from a \
-       trusted OCI archive with `msb load`. MASC cannot build or promote a new \
-       microsandbox image through `masc sandbox-image` yet.%s"
-      image rollback
-  | Backend.Nerdctl_kata, _ ->
+      "Next: inspect this Keeper's sandbox_image catalog name, then build and \
+       promote a new version for %s."
+      runtime
+  | Backend.Microsandbox, Some name ->
     Printf.sprintf
-      "Next: restore the exact promoted image %s to nerdctl's store from a \
-       trusted archive. MASC cannot promote a new nerdctl_kata image yet \
-       because it cannot read that store's image digest.%s"
-      image rollback
+      "Next: restore %s to msb's store from a trusted OCI archive with `msb \
+       load`, or load another build and promote its tag with `masc \
+       sandbox-image promote %s <tag> --runtime %s`. MASC cannot build a \
+       microsandbox image: msb has no build command."
+      image name runtime
+  | Backend.Microsandbox, None ->
+    Printf.sprintf
+      "Next: restore %s to msb's store from a trusted OCI archive with `msb \
+       load`. MASC cannot build a microsandbox image: msb has no build \
+       command."
+      image
 ;;
 
 let image_present_result_for backend ~name ~image = function

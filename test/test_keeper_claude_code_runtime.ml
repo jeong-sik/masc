@@ -326,7 +326,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                     let run () =
                       Result.map
                         (fun selected -> selected.Keeper_turn_driver.run_result)
-                        (Keeper_turn_driver.run_named
+                        (Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                            ~runtime_id:"claude.claude"
                            ~keeper_name:"claude-fixture"
                            ~base_path

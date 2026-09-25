@@ -1064,8 +1064,14 @@ let test_tokens_and_ages_are_compact () =
 let test_legend_row_fits_whole () =
   check bool "legend is whole" true (contains (Pane.legend ~cols) (nth 1))
 
-(* An end event with a three-digit count and two large parts is the widest done reading;
-   it fits the pane whole now that no clock shares the row. *)
+(* An end event with a three-digit count and two large parts is the widest
+   done reading; it fits the pane whole now that no clock shares the row.
+
+   The summed figure is 1,999,800, and the ladder every figure on this screen
+   reads through draws a millions rung to a hundredth -- "2.00M" -- because
+   the rung changes where "%.1fk" would round past its column. The pane drew
+   "2.0M" while the context inspector drew the same count as "2.00M" beside
+   it. *)
 let test_widest_done_reading_fits_whole () =
   let event =
     match settled ~at:990. "tester" with
@@ -1087,7 +1093,7 @@ let test_widest_done_reading_fits_whole () =
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
   let row = find_row_in texts "tester" in
   check bool "the count is whole" true (contains "  123" row);
-  check bool "the summed figure is whole" true (contains "     2.0M" row)
+  check bool "the summed figure is whole" true (contains "    2.00M" row)
 
 (* tester's session turn 5 opened, settled as the keeper's turn 3141 twenty
    seconds ago, and session turn 6 has opened since: the earlier turn draws

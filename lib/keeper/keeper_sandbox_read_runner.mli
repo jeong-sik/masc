@@ -4,8 +4,6 @@
     directly selecting the concrete Docker read backend. *)
 
 module type Backend = sig
-  val should_route_read : meta:Keeper_meta_contract.keeper_meta -> bool
-
   val container_path_of_host :
     config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
@@ -51,9 +49,7 @@ module type Backend = sig
 end
 
 module type S = sig
-  val host_via : string
   val backend_via : string
-  val should_route_read : meta:Keeper_meta_contract.keeper_meta -> bool
 
   val container_path_of_host :
     config:Workspace.config ->

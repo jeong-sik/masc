@@ -8,7 +8,9 @@ val register_delivery_handler :
     (Yojson.Safe.t, string) result) -> unit
 val dispatch : ?caller:string -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
   (Yojson.Safe.t, error) result
-(** Root-domain notification only: no I/O and no package callback. Only sources
+(** No I/O and no package callback. Runs on the root-switch owner domain: a
+    caller on another domain (the HTTP serving domain, a pool worker) is
+    carried there and waits until the hint is recorded. Only sources
     interested in the typed activity receive a capture hint. Repeated hints
     coalesce; explicit observations take precedence over refresh hints. *)
 val notify_activity : config:Workspace.config -> activity:Lane_addon_sources.activity -> unit

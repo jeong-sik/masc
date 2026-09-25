@@ -33,7 +33,7 @@ type guest_profile =
   | Docker_guest
   | Micro_vm_guest
 
-let target_error ?(fields = []) ?(class_ = Tool_result.Runtime_failure) message =
+let target_error ?(fields = []) ~class_ message =
   { message; fields; class_ }
 ;;
 

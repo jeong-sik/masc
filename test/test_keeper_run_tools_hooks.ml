@@ -1606,6 +1606,54 @@ let test_no_trailing_tool_message_yields_no_receipt () =
     0 (List.length receipts)
 ;;
 
+let navigate = "keeper_compose_browser-navigate-read"
+let follow = "keeper_compose_browser-live-follow-read"
+let github = "keeper_compose_github-pr-read"
+
+let test_skills_block_names_a_deferred_composition_for_search () =
+  check
+    (option string)
+    "a deferred composition not yet loaded is named for keeper_tool_search"
+    (Some
+       ("[Skills] 1 composition tools on this turn — each is one call whose reads \
+         run in parallel: " ^ github
+        ^ "\n[Skills] 2 more composition tools load by name through \
+           keeper_tool_search: " ^ navigate ^ ", " ^ follow))
+    (Masc.Keeper_run_tools_hooks.skill_compositions_block
+       ~compositions:[ navigate; follow; github ]
+       ~deferred:[ navigate; follow ]
+       ~on_the_wire:[ github ])
+;;
+
+(* [keeper_tool_search] extends the running agent's tool set, and the deferred
+   list is fixed for the run. Splitting on the deferred list alone kept the
+   loaded composition on the "load by name" line every round after the load. *)
+let test_skills_block_counts_a_loaded_composition_on_this_turn () =
+  check
+    (option string)
+    "a deferred composition already on the wire is on this turn"
+    (Some
+       ("[Skills] 2 composition tools on this turn — each is one call whose reads \
+         run in parallel: " ^ navigate ^ ", " ^ github
+        ^ "\n[Skills] 1 more composition tools load by name through \
+           keeper_tool_search: " ^ follow))
+    (Masc.Keeper_run_tools_hooks.skill_compositions_block
+       ~compositions:[ navigate; follow; github ]
+       ~deferred:[ navigate; follow ]
+       ~on_the_wire:[ navigate; github ])
+;;
+
+let test_skills_block_is_absent_without_compositions () =
+  check
+    (option string)
+    "no composition tools, no block"
+    None
+    (Masc.Keeper_run_tools_hooks.skill_compositions_block
+       ~compositions:[]
+       ~deferred:[ navigate ]
+       ~on_the_wire:[])
+;;
+
 let () =
   run
     "keeper_run_tools_hooks"
@@ -1793,6 +1841,14 @@ let () =
             `Quick test_receipts_survive_a_trailing_non_tool_message
         ; test_case "no trailing tool message yields no receipt" `Quick
             test_no_trailing_tool_message_yields_no_receipt
+        ] )
+    ; ( "Skills block"
+      , [ test_case "a deferred composition is named for search" `Quick
+            test_skills_block_names_a_deferred_composition_for_search
+        ; test_case "a loaded composition is on this turn" `Quick
+            test_skills_block_counts_a_loaded_composition_on_this_turn
+        ; test_case "no compositions, no block" `Quick
+            test_skills_block_is_absent_without_compositions
         ] )
     ]
 ;;

@@ -69,17 +69,19 @@ def test_rows_that_are_not_calls_are_not_counted(tmp_path):
 
 
 def test_the_failure_rule_is_the_repositorys(tmp_path):
-    # disposition first; wire_outcome only without one; "unknown" is not a
-    # failure.
+    # disposition first; wire_outcome only without one; "unknown" and a row
+    # with neither key are unsettled, not failures.
     write_day(tmp_path, "24", [
         {"record_kind": "tool_call", "tool": "A", "wire_outcome": "error", "output": "boom"},
         {"record_kind": "tool_call", "tool": "B", "wire_outcome": "unknown"},
         {"record_kind": "tool_call", "tool": "C", "disposition": "completed", "wire_outcome": "error"},
         {"record_kind": "tool_call", "tool": "D", "disposition": "deferred"},
+        {"record_kind": "tool_call", "tool": "E"},
     ])
     data = json.loads(outcomes(tmp_path).stdout)
     failed = {row["tool"]: row["failed"] for row in data["by_tool"]}
-    assert failed == {"A": 1, "B": 0, "C": 0, "D": 0}
+    assert failed == {"A": 1, "B": 0, "C": 0, "D": 0, "E": 0}
+    assert data["tool_calls"] == 5
 
 
 def test_an_outcome_the_writer_does_not_write_fails_rather_than_passing(tmp_path):
@@ -88,8 +90,10 @@ def test_an_outcome_the_writer_does_not_write_fails_rather_than_passing(tmp_path
     broken = [
         call("Execute", disposition="succeeded"),
         call("Execute", disposition=None),
+        call("Execute", disposition=1),
         {"record_kind": "tool_call", "tool": "Execute", "wire_outcome": "failed"},
         {"record_kind": "tool_call", "tool": "Execute", "wire_outcome": None},
+        {"record_kind": "tool_call", "tool": "Execute", "wire_outcome": True},
     ]
     for row in broken:
         write_day(tmp_path, "24", [call("Read"), row])
@@ -124,8 +128,6 @@ def test_a_row_it_cannot_read_fails_rather_than_being_left_out(tmp_path):
     path = tmp_path / "2026-09" / "24.jsonl"
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(call("Execute")) + "\n{not json\n")
-    assert outcomes(tmp_path).returncode != 0
-    write_day(tmp_path, "24", [{"record_kind": "tool_call", "tool": "Execute"}])
     assert outcomes(tmp_path).returncode != 0
 
 

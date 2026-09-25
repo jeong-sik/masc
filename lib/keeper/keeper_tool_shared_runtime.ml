@@ -159,7 +159,7 @@ let cwd_existence ~(meta : keeper_meta) cwd =
 
 let user_message_error (rej : Keeper_alerting_path.keeper_path_rejection) =
   Keeper_alerting_path.rejection_to_telemetry rej;
-  Error (Keeper_alerting_path.rejection_to_user_message rej)
+  Error (Keeper_alerting_path.refusal_of_rejection rej)
 ;;
 
 let project_keeper_logical_path

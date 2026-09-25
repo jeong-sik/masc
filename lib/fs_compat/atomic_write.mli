@@ -30,6 +30,19 @@ val save_file_atomic
   -> string
   -> (unit, string) Result.t
 
+(** [save_file_atomic_rename_only ~save_file path content] writes [content]
+    to a temp file in [path]'s directory and renames it over [path], with no
+    fsync of the temp file or the parent directory. Readers see the old file
+    or the new one, never a mix; after a power loss the renamed file can be
+    empty or partial. Use it only for a file the caller rebuilds from its own
+    source on the next pass. Errors and cancellation behave as in
+    {!save_file_atomic}. *)
+val save_file_atomic_rename_only
+  :  save_file:(string -> string -> unit)
+  -> string
+  -> string
+  -> (unit, string) Result.t
+
 type atomic_replace_failure_stage =
   | Before_rename
   | After_rename

@@ -192,6 +192,10 @@ def run(executable: str) -> None:
         description="invalid authored Skill is rejected before create",
         source=b"---\nname: reviewed-skill\n---\n\n# Missing description\n",
         diagnostic=MISSING_DESCRIPTION,
+        # At 100 columns the Tools footer keeps its pinned keys
+        # ([Enter:evidence], [Esc:config], [q:quit]) and the cut marker, so
+        # the diagnostic is shown clipped. The prefix must survive the cut.
+        diagnostic_preview=b"SKILL.md frontmatter is missing required",
     )
     for name, diagnostic in (
         (PACKAGE_ID, None),
@@ -219,7 +223,7 @@ def run(executable: str) -> None:
             source=source,
             diagnostic=diagnostic,
             diagnostic_preview=(
-                b'skill "reviewed-skill": composition name "new-skill" must equal'
+                b'skill "reviewed-skill": composition name'
                 if diagnostic is not None
                 else None
             ),

@@ -10,7 +10,7 @@ type source =
 
 type seed =
   { first_atom : int
-  ; front_digest : string
+  ; front : Model_input_front.t
   ; source : source
   }
 
@@ -35,7 +35,7 @@ let of_ledger (ledger : Keeper_model_input_ledger.t) =
   match ledger.last.ends with
   | Keeper_model_input_ledger.No_atom_carried -> None
   | Keeper_model_input_ledger.Carried_atoms { front_digest; end_digest = _ } ->
-    Some { first_atom = ledger.last.first_atom; front_digest; source = Ledger }
+    Some { first_atom = ledger.last.first_atom; front = Model_input_front.At_atom front_digest; source = Ledger }
 ;;
 
 type composer =
@@ -77,12 +77,13 @@ let composer_to_string = function
    enough to go whole loses nothing: seeding its oldest atom and seeding
    nothing both carry everything. *)
 let carried_front_of_window (window : Turn_record.model_input_window) =
-  if window.Turn_record.transmitted_atoms >= window.Turn_record.total_atoms
+  if window.Turn_record.transmitted_atoms > 0
+     && window.Turn_record.transmitted_atoms >= window.Turn_record.total_atoms
   then None
   else
     Some
       ( window.Turn_record.total_atoms - window.Turn_record.transmitted_atoms
-      , window.Turn_record.front_atom_digest )
+      , window.Turn_record.model_input_front )
 ;;
 
 let of_records ~trace_id (records : Turn_record.t list) =
@@ -99,8 +100,8 @@ let of_records ~trace_id (records : Turn_record.t list) =
           | Some _ | None ->
             (match carried_front_of_window observed.Turn_record.window with
              | None -> newest
-             | Some (first_atom, front_digest) ->
-               Some (turn, { first_atom; front_digest; source = Turn_record { turn } })))
+             | Some (first_atom, front) ->
+               Some (turn, { first_atom; front; source = Turn_record { turn } })))
        | Some _ | None -> newest)
     None
     records
@@ -256,10 +257,16 @@ type dropped_front =
   | Front_message_differs
 
 let for_history ~digest_at (seed : seed) =
-  match digest_at seed.first_atom with
-  | None -> Error Front_atom_missing
-  | Some digest when String.equal digest seed.front_digest -> Ok seed
-  | Some _ -> Error Front_message_differs
+  let checked atom expected =
+    match digest_at atom with
+    | None -> Error Front_atom_missing
+    | Some digest when String.equal digest expected -> Ok seed
+    | Some _ -> Error Front_message_differs
+  in
+  match seed.front with
+  | Model_input_front.At_atom digest -> checked seed.first_atom digest
+  | Model_input_front.After_history digest -> checked (seed.first_atom - 1) digest
+  | Model_input_front.Empty_history -> Ok seed
 ;;
 
 let dropped_front_to_string = function
@@ -269,6 +276,13 @@ let dropped_front_to_string = function
 
 let clamp ~atom_count first_atom =
   if atom_count <= 0 then 0 else max 0 (min first_atom (atom_count - 1))
+;;
+
+let clamp_seed ~atom_count (seed : seed) =
+  match seed.front with
+  | Model_input_front.At_atom _ -> clamp ~atom_count seed.first_atom
+  | Model_input_front.After_history _ | Model_input_front.Empty_history ->
+    max 0 (min seed.first_atom atom_count)
 ;;
 
 let newest_atom ~atom_count = if atom_count <= 0 then 0 else atom_count - 1
@@ -303,7 +317,7 @@ let source_to_string = function
 let seed_to_json (seed : seed) =
   `Assoc
     [ "first_atom", `Int seed.first_atom
-    ; "front_digest", `String seed.front_digest
+    ; "front", Model_input_front.to_json seed.front
     ; "source", `String (source_to_string seed.source)
     ]
 ;;

@@ -1,6 +1,12 @@
 open Alcotest
 open Masc
 
+let carried_digest = function
+  | Model_input_front.At_atom digest -> digest
+  | Model_input_front.After_history _ | Model_input_front.Empty_history ->
+    Alcotest.fail "expected a nonempty carried window"
+;;
+
 let shell_quote value =
   "'" ^ String.concat "'\"'\"'" (String.split_on_char '\'' value) ^ "'"
 ;;
@@ -2279,7 +2285,7 @@ let start_seed_history () =
 
 let completed_record ~messages ~transmitted : Turn_record.t =
   let total_atoms = snd (Runtime_model_input_tail_window.annotate messages) in
-  let front_atom_digest =
+  let model_input_front =
     match
       Runtime_model_input_tail_window.atom_opening_digest
         messages
@@ -2312,7 +2318,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
         { Turn_record.transmitted_atoms = transmitted
         ; total_atoms
         ; measurement = Turn_record.Wire_shape
-        ; front_atom_digest
+        ; model_input_front = Model_input_front.At_atom model_input_front
         }
   ; response_observed_model_input =
       Some
@@ -2321,7 +2327,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
             { transmitted_atoms = transmitted
             ; total_atoms
             ; measurement = Turn_record.Wire_shape
-            ; front_atom_digest
+            ; model_input_front = Model_input_front.At_atom model_input_front
             }
         }
   ; raw_trace_run_ref = None
@@ -2801,7 +2807,7 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
         observation.transmitted_atoms;
       check (option string) (label ^ ": and names atom 60 as its front")
         (Runtime_model_input_tail_window.atom_opening_digest messages 60)
-        (Some observation.front_atom_digest)
+        (Some (carried_digest observation.model_input_front))
   in
   (match project () with
    | Error error -> fail (Agent_core.Error.to_string error)

@@ -14,7 +14,7 @@
     {!origin} a request reports -- and the reads that produce a seed.
 
     A seed is the front of a range already carried: the oldest atom that
-    request carried. It is a position in the keeper's checkpoint history --
+    request carried, or the witnessed end of a history it omitted entirely. It is a position in the keeper's checkpoint history --
     the trace -- and every runtime cuts its request from that one history,
     so a position measured on one names the same atom on the next. While the
     process holds a ledger for the (keeper, runtime) pair, the seed is the
@@ -27,11 +27,10 @@
     {!Turn_start_after_seed_refusal}) belongs to the turn and takes
     precedence over an older front in a later candidate's ledger.
 
-    A front is a position: the atom index and the digest of the message that
-    opens that atom
-    ({!Runtime_model_input_tail_window.atom_opening_digest}). A seed is used
-    only while the history in hand opens the same index with the same
-    message ({!for_history}); the history's atom count is not compared. A
+    A front is a position witnessed by an opening-message digest
+    ({!Runtime_model_input_tail_window.atom_opening_digest}): the front atom
+    when any atom was carried, the preceding atom for an accepted empty
+    range. A seed is used only while that witness matches ({!for_history}); the history's atom count is not compared. A
     history one unsaved atom shorter keeps the position, and a checkpoint
     purge that rewrote the message opening the front drops it. *)
 
@@ -59,9 +58,9 @@ type source =
 
 type seed =
   { first_atom : int
-  ; front_digest : string
-        (** The opening-message digest of [first_atom] in the history the
-            front was measured on. *)
+  ; front : Model_input_front.t
+        (** [At_atom] witnesses [first_atom]; [After_history] witnesses
+            [first_atom - 1], the end of a successfully omitted history. *)
   ; source : source
   }
 
@@ -234,13 +233,15 @@ val for_history
   :  digest_at:(int -> string option)
   -> seed
   -> (seed, dropped_front) result
-(** The seed when [digest_at seed.first_atom] is [Some seed.front_digest],
-    where [digest_at] is {!Runtime_model_input_tail_window.atom_opening_digest}
-    over the history in hand; otherwise why not. A dropped position names no
+(** The seed while its opening atom or history-end witness matches the
+    history in hand; otherwise why not. A dropped position names no
     atom of this history, and carrying the newest atom alone from there
     would never widen again, so the caller starts over as with no seed. *)
 
 val dropped_front_to_string : dropped_front -> string
+
+val clamp_seed : atom_count:int -> seed -> int
+(** An accepted empty boundary may sit just past the newest atom. *)
 
 val clamp : atom_count:int -> int -> int
 (** The front as a position in a history of [atom_count] atoms: at least 0,
@@ -266,7 +267,7 @@ val halve : first_atom:int -> atom_count:int -> int option
 
 val source_to_string : source -> string
 val seed_to_json : seed -> Yojson.Safe.t
-(** [first_atom], [front_digest] and [source]. *)
+(** [first_atom], [front] and [source]. *)
 val origin_to_string : origin -> string
 
 val origin_to_json : origin -> Yojson.Safe.t

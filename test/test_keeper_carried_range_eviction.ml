@@ -13,6 +13,12 @@ module Types = Agent_core.Types
 
 open Alcotest
 
+let carried_digest = function
+  | Model_input_front.At_atom digest -> digest
+  | Model_input_front.After_history _ | Model_input_front.Empty_history ->
+    Alcotest.fail "expected a nonempty carried window"
+;;
+
 let overflow =
   Agent_core.Error.Api (Agent_core.Retry.ContextOverflow { message = "too long"; limit = None })
 ;;
@@ -372,7 +378,7 @@ let test_a_halving_answers_whether_the_retry_moves () =
   match !held with
   | Some (seed : Front.seed) ->
     check int "held at the halved front" 8 seed.first_atom;
-    check string "named by the message that opens it" (opener 8) seed.front_digest
+    check string "named by the message that opens it" (opener 8) (carried_digest seed.front)
   | None -> fail "the halved seed was not held"
 ;;
 
@@ -797,7 +803,7 @@ let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
           let first_atom = Front.clamp ~atom_count boundary in
           Option.map
             (fun front_digest ->
-               { Front.first_atom; front_digest; source = Front.Turn_start_after_seed_refusal })
+               { Front.first_atom; front = Model_input_front.At_atom front_digest; source = Front.Turn_start_after_seed_refusal })
             (digest_at first_atom))
         ~held_front:(fun () -> !held)
         ~restore_front:(fun prior -> held := prior)
@@ -941,7 +947,7 @@ let librarian_turn ?(refusal = overflow) ?(refuses = fun ~atoms:_ -> false)
         let first_atom = Front.clamp ~atom_count boundary in
         Option.map
           (fun front_digest ->
-             { Front.first_atom; front_digest; source = Front.Turn_start_after_librarian_refusal })
+             { Front.first_atom; front = Model_input_front.At_atom front_digest; source = Front.Turn_start_after_librarian_refusal })
           (digest_at first_atom))
       ~held_front:(fun () -> !held)
       ~restore_front:(fun prior -> held := prior)
@@ -970,7 +976,7 @@ let librarian_turn ?(refusal = overflow) ?(refuses = fun ~atoms:_ -> false)
     Result.to_option outcome
     |> Option.map (fun first_atom ->
       { Front.first_atom
-      ; front_digest = Option.get (digest_at first_atom)
+      ; front = Model_input_front.At_atom (Option.get (digest_at first_atom))
       ; source = Front.Turn_record { turn = 1 }
       })
   in

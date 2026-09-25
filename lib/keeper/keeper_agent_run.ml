@@ -2472,8 +2472,8 @@ let run_turn
                   ; total_atoms =
                       observation.Runtime_model_input_tail_window.total_atoms
                   ; measurement
-                  ; front_atom_digest =
-                      observation.Runtime_model_input_tail_window.front_atom_digest
+                  ; model_input_front =
+                      observation.Runtime_model_input_tail_window.model_input_front
                   })
                !model_input_window_ref)
           ~response_observed_model_input:

@@ -64,7 +64,7 @@ type model_input_window =
   { transmitted_atoms : int
   ; total_atoms : int
   ; measurement : model_input_measurement
-  ; front_atom_digest : string
+  ; model_input_front : Model_input_front.t
   }
 
 type response_observed_model_input =
@@ -212,13 +212,13 @@ let to_json (r : t) : Yojson.Safe.t =
       `String observation.runtime_profile, `Int observation.body_bytes
     | None -> `Null, `Null
   in
-  let transmitted_atoms, total_atoms, model_input_measurement, front_atom_digest =
+  let transmitted_atoms, total_atoms, model_input_measurement, model_input_front =
     match r.model_input_window with
     | Some window ->
       ( `Int window.transmitted_atoms
       , `Int window.total_atoms
       , `String (model_input_measurement_to_string window.measurement)
-      , `String window.front_atom_digest )
+      , Model_input_front.to_json window.model_input_front )
     | None -> `Null, `Null, `Null, `Null
   in
   let response_observed_model_input =
@@ -232,7 +232,7 @@ let to_json (r : t) : Yojson.Safe.t =
         ; "total_atoms", `Int window.total_atoms
         ; ( "model_input_measurement"
           , `String (model_input_measurement_to_string window.measurement) )
-        ; "front_atom_digest", `String window.front_atom_digest
+        ; "model_input_front", Model_input_front.to_json window.model_input_front
         ]
   in
   `Assoc
@@ -256,7 +256,7 @@ let to_json (r : t) : Yojson.Safe.t =
      ; "transmitted_atoms", transmitted_atoms
      ; "total_atoms", total_atoms
      ; "model_input_measurement", model_input_measurement
-     ; "front_atom_digest", front_atom_digest
+     ; "model_input_front", model_input_front
      ; "response_observed_model_input", response_observed_model_input
      ; ( "raw_trace_run_ref"
        , match r.raw_trace_run_ref with
@@ -527,7 +527,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "transmitted_atoms"
             ; "total_atoms"
             ; "model_input_measurement"
-            ; "front_atom_digest"
+            ; "model_input_front"
             ; "response_observed_model_input"
             ; "raw_trace_run_ref"
             ; "selected_model"
@@ -632,21 +632,22 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           let* raw = as_nonempty_string name json in
           model_input_measurement_of_string raw)
       in
-      let* front_atom_digest =
-        nullable "front_atom_digest" fields as_nonempty_string
+      let* model_input_front =
+        nullable "model_input_front" fields (fun _ json -> Model_input_front.of_json json)
       in
       let* model_input_window =
-        match transmitted_atoms, total_atoms, measurement, front_atom_digest with
-        | Some transmitted_atoms, Some total_atoms, Some measurement, Some front_atom_digest ->
+        match transmitted_atoms, total_atoms, measurement, model_input_front with
+        | Some transmitted_atoms, Some total_atoms, Some measurement, Some model_input_front ->
           if transmitted_atoms > total_atoms
           then Error "turn_record: transmitted_atoms cannot exceed total_atoms"
           else
-            Ok (Some { transmitted_atoms; total_atoms; measurement; front_atom_digest })
+            let* () = Model_input_front.validate ~transmitted_atoms ~total_atoms model_input_front in
+            Ok (Some { transmitted_atoms; total_atoms; measurement; model_input_front })
         | None, None, None, None -> Ok None
         | _ ->
           Error
             "turn_record: transmitted_atoms, total_atoms, \
-             model_input_measurement and front_atom_digest must all be present \
+             model_input_measurement and model_input_front must all be present \
              or all be null"
       in
       let* response_observed_model_input_json =
@@ -672,7 +673,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
                 ; "transmitted_atoms"
                 ; "total_atoms"
                 ; "model_input_measurement"
-                ; "front_atom_digest"
+                ; "model_input_front"
                 ]
                 observed_fields
             then Ok ()
@@ -705,11 +706,14 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
               measurement_json
           in
           let* measurement = model_input_measurement_of_string measurement_raw in
-          let* front_atom_digest_json = require_observed "front_atom_digest" in
-          let* front_atom_digest =
-            as_sha256_digest
-              "response_observed_model_input.front_atom_digest"
-              front_atom_digest_json
+          let* model_input_front_json = require_observed "model_input_front" in
+          let* model_input_front =
+            Model_input_front.of_json model_input_front_json
+          in
+          let* () =
+            Model_input_front.validate ~transmitted_atoms ~total_atoms model_input_front
+            |> Result.map_error (fun detail ->
+              "turn_record: response_observed_model_input: " ^ detail)
           in
           if transmitted_atoms > total_atoms
           then
@@ -724,7 +728,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
                      { transmitted_atoms
                      ; total_atoms
                      ; measurement
-                     ; front_atom_digest
+                     ; model_input_front
                      }
                  })
         | _ ->

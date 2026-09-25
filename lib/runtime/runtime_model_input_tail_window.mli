@@ -208,9 +208,8 @@ type projection =
 type window_observation =
   { transmitted_atoms : int
   ; total_atoms : int
-  ; front_atom_digest : string
-        (** {!atom_opening_digest} of the oldest carried atom, index
-            [total_atoms - transmitted_atoms] of the history. *)
+  ; model_input_front : Model_input_front.t
+        (** The oldest carried atom, or the witnessed end when no atom rides. *)
   }
 (** How much of a history one projection carried, kept without the messages so
     an observer can hold it for the length of a turn. *)
@@ -223,10 +222,10 @@ val observe
 (** [observe ~digest_at ~history_atom_count projection] pairs what [projection]
     transmitted with the history it was measured against, and names the
     front it carried from by [digest_at], {!atom_opening_digest} applied to
-    that history. [None] when [digest_at] has no atom at the front index
-    [history_atom_count - transmitted]: a projection that carried no atom puts
-    it at [history_atom_count], past the history's last atom, and a window
-    without a front atom has no position to report.
+    that history. A zero-atom transmission reports [After_history] using the
+    last offered atom's digest, or [Empty_history] when the history itself is
+    empty. [None] means a required witness could not be read; empty carriage
+    is an observation and replaces the preceding attempted range.
 
     [history_atom_count] is passed in rather than read off [projection]
     because a projection only knows the list it was handed. The demotion

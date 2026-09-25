@@ -1,6 +1,12 @@
 open Alcotest
 open Masc
 
+let carried_digest = function
+  | Model_input_front.At_atom digest -> digest
+  | Model_input_front.After_history _ | Model_input_front.Empty_history ->
+    Alcotest.fail "expected a nonempty carried window"
+;;
+
 let shell_quote value =
   "'" ^ String.concat "'\"'\"'" (String.split_on_char '\'' value) ^ "'"
 ;;
@@ -1220,7 +1226,7 @@ let test_declared_capacity_windows_history_and_reports_the_cut () =
             (Runtime_model_input_tail_window.atom_opening_digest
                history
                (history_atoms - projected_atoms))
-            (Some reading.front_atom_digest)))
+            (Some (carried_digest reading.model_input_front))))
 ;;
 
 let test_appended_gate_reference_is_inside_the_window () =
@@ -1241,7 +1247,7 @@ let test_appended_gate_reference_is_inside_the_window () =
     { seed =
         Some
           { first_atom = seed_first_atom
-          ; front_digest = seed_front_digest
+          ; front = Model_input_front.At_atom seed_front_digest
           ; source = Keeper_carried_front.Turn_record { turn = 40 }
           }
     ; unreadable = None
@@ -1284,10 +1290,10 @@ let test_appended_gate_reference_is_inside_the_window () =
           let expected_front = reading.total_atoms - reading.transmitted_atoms in
           check (option string) "the front digest uses the original history coordinate"
             (Runtime_model_input_tail_window.atom_opening_digest history expected_front)
-            (Some reading.front_atom_digest);
+            (Some (carried_digest reading.model_input_front));
           let next_seed : Keeper_carried_front.seed =
             { first_atom = expected_front
-            ; front_digest = reading.front_atom_digest
+            ; front = reading.model_input_front
             ; source = Keeper_carried_front.Turn_record { turn = 41 }
             }
           in
@@ -1302,7 +1308,7 @@ let test_appended_gate_reference_is_inside_the_window () =
            | Error _ -> fail "the projected observation did not seed the same history")))
 ;;
 
-let test_gate_only_floor_emits_no_durable_front () =
+let test_gate_only_floor_observes_an_empty_durable_range () =
   let observed = ref None in
   let history =
     List.init 3 (fun index ->
@@ -1331,7 +1337,23 @@ let test_gate_only_floor_emits_no_durable_front () =
      check bool "the Gate atom remains at the floor" true
        (last.Agent_core.Types.content = marker.content)
    | [] -> fail "the capacity floor removed the Gate atom");
-  check (option reject) "a Gate-only suffix has no durable front" None !observed
+  (* The Gate reference is not a durable atom, so the attempt carried none of
+     the offered history: a typed zero observation witnessed by the last
+     offered atom. It is an attempted range only; it seeds a later turn only
+     once a successful response joins it to the TurnRecord
+     (test_keeper_carried_front "an unanswered empty attempt does not seed"). *)
+  match !observed with
+  | None -> fail "a Gate-only floor must still report its empty attempted range"
+  | Some reading ->
+    check int "no durable atom rides with the Gate reference" 0 reading.transmitted_atoms;
+    check int "the offered history is counted in its own coordinate"
+      (List.length history) reading.total_atoms;
+    check bool "the front witnesses the end of the offered history" true
+      (reading.model_input_front
+       = Model_input_front.After_history
+           (Option.get
+              (Runtime_model_input_tail_window.atom_opening_digest
+                 history (List.length history - 1))))
 ;;
 
 let carried_front_history () =
@@ -1347,7 +1369,7 @@ let seed_read_at ~messages first_atom =
   { Keeper_carried_front.seed =
       Some
         { Keeper_carried_front.first_atom
-        ; front_digest
+        ; front = Model_input_front.At_atom front_digest
         ; source = Keeper_carried_front.Turn_record { turn = 41 }
         }
   ; unreadable = None
@@ -1776,7 +1798,7 @@ let test_a_dropped_preamble_is_not_a_durable_atom () =
       (List.length durable) reading.transmitted_atoms;
     check (option string) "so its front is the first atom sent"
       (Runtime_model_input_tail_window.atom_opening_digest history 30)
-      (Some reading.front_atom_digest)
+      (Some (carried_digest reading.model_input_front))
 ;;
 
 let test_a_front_from_another_history_is_dropped () =
@@ -1905,9 +1927,9 @@ let () =
               `Quick
               test_appended_gate_reference_is_inside_the_window
           ; test_case
-              "a Gate-only floor emits no durable front"
+              "a Gate-only floor observes an empty durable range"
               `Quick
-              test_gate_only_floor_emits_no_durable_front
+              test_gate_only_floor_observes_an_empty_durable_range
           ; test_case
               "a seeded start matches the Agent Core carried range"
               `Quick

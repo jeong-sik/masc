@@ -20,7 +20,6 @@ type rotate_class =
   | No_progress_truncated
   | Refusal_body_not_received
   | Generation_repeated
-  | Attempt_rejected
   | Admission
   | Provider_reported_failure
   | Request_refused
@@ -467,7 +466,6 @@ let rotate_class_label = function
   | No_progress_empty -> "no_progress_empty"
   | No_progress_thinking_only -> "no_progress_thinking_only"
   | No_progress_truncated -> "no_progress_truncated"
-  | Attempt_rejected -> "attempt_rejected"
   | Admission -> "admission"
   | Refusal_body_not_received -> "refusal_body_not_received"
   | Generation_repeated -> "generation_repeated"
@@ -542,13 +540,11 @@ let response_observed = function
      (* the CLI session ended without an answer; a recovery lane resumes it. *)
      | Candidates_filtered
      (* the candidate set emptied before any answer. *)
-     | Attempt_rejected
-     (* the candidate's own policy refused the request before the wire
-        (#34475): no generation. *)
      | Admission
      (* this binding's pre-dispatch admission refused the prepared request
         (RFC-one-slot-fault-judgment-for-every-walk.md §3.2:
-        [InputCapacity]/[Json_parse_error]): no generation. *)
+        [InputCapacity]/[Json_parse_error], or the candidate's own policy
+        refusing it before the wire, #34475): no generation. *)
      | Refusal_body_not_received
      (* the provider refused the request; the body naming why never
         arrived, and a refusal is not an answer. *)
@@ -694,7 +690,6 @@ let route_resumes_on_same_path = function
      | No_progress_truncated
      | Refusal_body_not_received
      | Generation_repeated
-     | Attempt_rejected
      | Admission
      | Provider_reported_failure
      | Request_refused

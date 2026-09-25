@@ -49,7 +49,8 @@ val redact_stream_chunk : stream_state -> string -> string
 val redact_stream_finish : stream_state -> string
 (** Boundary-safe streaming redaction. Newline and carriage-return records are
     emitted immediately. Long unterminated records are emitted in bounded
-    chunks while retaining a suffix large enough for every snapshotted exact
+    chunks, each ending on a UTF-8 character boundary when the record is
+    UTF-8, while retaining a suffix large enough for every snapshotted exact
     secret (and a bounded structural-pattern overlap), so process progress does
     not require buffering an unbounded line. Call [finish] once to redact and
     emit the remaining suffix. *)

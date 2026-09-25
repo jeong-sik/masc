@@ -1020,7 +1020,7 @@ let overrides_of_manifest_entry (entry : Capability_manifest.entry) =
   ; supports_audio_input = entry.supports_audio_input
   ; supports_video_input = entry.supports_video_input
   ; supports_document_input = entry.supports_document_input
-  ; modality_priority = None
+  ; modality_priority = entry.modality_priority
   ; (* The JSON capability manifest carries no task field; task is
        catalog-only vocabulary. *)
     task = None
@@ -1241,7 +1241,23 @@ let apply_declarative_capability_overrides overrides =
 ;;
 
 let apply_manifest_entry (entry : Capability_manifest.entry) : capabilities =
-  entry |> overrides_of_manifest_entry |> apply_declarative_capability_overrides
+  let capabilities =
+    entry |> overrides_of_manifest_entry |> apply_declarative_capability_overrides
+  in
+  (* [emits_usage_tokens] and [supported_models] are manifest-only overrides:
+     the shared declarative override record also serves the model catalog,
+     whose rows do not route these fields through it, so they are applied
+     here instead of widening the catalog path. *)
+  { capabilities with
+    emits_usage_tokens =
+      (match entry.emits_usage_tokens with
+       | Some emits -> emits
+       | None -> capabilities.emits_usage_tokens)
+  ; supported_models =
+      (match entry.supported_models with
+       | Some _ as models -> models
+       | None -> capabilities.supported_models)
+  }
 ;;
 
 let%test "apply_manifest_entry applies thinking_control_format (Agent Core contract)" =
@@ -1701,6 +1717,7 @@ let[@warning "-32"] test_manifest_entry id_prefix : Capability_manifest.entry =
   ; supports_audio_input = None
   ; supports_video_input = None
   ; supports_document_input = None
+  ; modality_priority = None
   ; supports_native_streaming = None
   ; supports_system_prompt = None
   ; supports_prompt_caching = None
@@ -1715,6 +1732,8 @@ let[@warning "-32"] test_manifest_entry id_prefix : Capability_manifest.entry =
   ; reasoning_output_format = None
   ; reasoning_streaming_format = None
   ; reasoning_replay = None
+  ; emits_usage_tokens = None
+  ; supported_models = None
   }
 ;;
 

@@ -159,6 +159,7 @@ type parse_error =
   | Missing_success_model
   | Missing_success_inference_identity
   | Missing_error_model_attribution
+  | Invalid_executed_runtime_id
   | Invalid_current_cost_row of Cost_ledger.decode_error
 
 val parse_error_label : parse_error -> string

@@ -128,7 +128,6 @@ type transient_release_record =
 
 type context_delivery =
   | Prepared_start_context
-  | Replaced_configuration
   | Canonical_source_guard
   | Held_by_vendor_session
 
@@ -660,7 +659,6 @@ let context_frontier_to_yojson = function
       ; "message_count", `Int frontier.message_count
       ; "delivery", `String (match frontier.delivery with
           | Prepared_start_context -> "prepared_start_context"
-          | Replaced_configuration -> "replaced_configuration"
           | Canonical_source_guard -> "canonical_source_guard"
           | Held_by_vendor_session -> "held_by_vendor_session")
       ; "acknowledged_turn", settlement_opt_to_yojson frontier.acknowledged_turn ]
@@ -674,7 +672,6 @@ let context_frontier_of_yojson = function
        when message_count >= 0 && valid_sha256 snapshot_sha256 ->
        let* delivery = match delivery with
          | "prepared_start_context" -> Ok Prepared_start_context
-         | "replaced_configuration" -> Ok Replaced_configuration
          | "canonical_source_guard" -> Ok Canonical_source_guard
          | "held_by_vendor_session" -> Ok Held_by_vendor_session
          | _ -> Error "invalid context frontier delivery" in
@@ -1101,7 +1098,7 @@ let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expec
   let plan = match context_frontier with
     | Some {delivery=Canonical_source_guard; snapshot_sha256; _} ->
       reconcile_context plan ~expected ~snapshot_sha256
-    | Some {delivery=(Prepared_start_context | Replaced_configuration | Held_by_vendor_session); _}
+    | Some {delivery=(Prepared_start_context | Held_by_vendor_session); _}
     | None -> plan
   in
   let last_recovery_resolution =
@@ -1302,7 +1299,7 @@ let restored_phase previous_settlement =
 let frontier_restored_to previous_settlement frontier =
   match frontier.delivery with
   | Canonical_source_guard -> { frontier with acknowledged_turn = previous_settlement }
-  | Prepared_start_context | Replaced_configuration | Held_by_vendor_session -> frontier
+  | Prepared_start_context | Held_by_vendor_session -> frontier
 ;;
 
 let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =

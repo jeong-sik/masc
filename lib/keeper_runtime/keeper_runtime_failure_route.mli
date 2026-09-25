@@ -110,6 +110,12 @@ type rotate_class =
   | Server_error_not_transient
       (** a 5xx the provider marked as not transient. The same path answers
           the same way; the walk rotates on every 5xx *)
+  | Context_window_exceeded
+      (** the request did not fit this binding's context window
+          ({!Llm_provider.Candidate_fault.Binding} [Window]). A later
+          candidate with a larger window can serve the same turn, so the
+          walk moves on and the route rotates with it (#38984). Its label
+          stays ["context_overflow"]. *)
 
 (** What the driver had observed of tool effects when it fenced a provider
     attempt. Only the two dispositions that fence an attempt appear here:
@@ -131,7 +137,6 @@ type terminal_class =
   | Deterministic_request
       (** a request body that did not parse, or an input past a declared
           serving bound; no candidate accepts it *)
-  | Context_overflow  (** typed context-window overflow *)
   | Session_claim_refused
       (** an official client refused its durable session claim before provider
           dispatch; the held recovery requires explicit operator resolution *)

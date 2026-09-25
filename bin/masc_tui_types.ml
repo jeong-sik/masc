@@ -5473,6 +5473,11 @@ type state = {
   mutable msx_live: Masc_tui_machine_live.view;
   mutable dos_live: Masc_tui_machine_live.view;
   mutable dos_live_in_flight: machine_live_request option;
+  (* Recent Keeper activity on the DOS machine, newest first, from the same
+     live route [dos_live] reads. MSX has no such feed yet (its Lane takes no
+     [~who] on several calls), so there is no [msx_activity] here -- adding
+     one before the server ever fills it would be a field nothing draws. *)
+  mutable dos_activity: Masc_tui_machine_live.activity_entry list;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
@@ -7821,6 +7826,7 @@ let create_state
   msx_live = Masc_tui_machine_live.Unread;
   dos_live = Masc_tui_machine_live.Unread;
   dos_live_in_flight = None;
+  dos_activity = [];
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;

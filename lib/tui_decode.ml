@@ -1227,6 +1227,15 @@ let short_timestamp_of_unix_for_terminal ~localtime unix_seconds =
     tm.Unix.tm_sec
 ;;
 
+(* {!clock_timestamp_for_terminal}'s [HH:MM:SS] shape, for a time the wire
+   carries as a number rather than an RFC 3339 string -- the same pairing
+   {!short_timestamp_of_unix_for_terminal} already is for
+   {!short_timestamp_for_terminal}. *)
+let clock_timestamp_of_unix_for_terminal ~localtime unix_seconds =
+  let tm = localtime unix_seconds in
+  Printf.sprintf "%02d:%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+;;
+
 (* The date and time beside a record, in the zone the operator's terminal is
    in. It sliced the first nineteen bytes of the server's RFC 3339 string, which
    kept a UTC reading and dropped the [Z] that said so -- "2026-08-22T00:03:00"

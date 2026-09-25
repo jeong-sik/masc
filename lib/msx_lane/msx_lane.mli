@@ -210,10 +210,6 @@ val frame : unit -> frame option
     Repeated reads of the same machine state reuse immutable rendered pixels.
     Advancing, loading, restoring, or replacing media invalidates that snapshot. *)
 
-val step_frame : frames:int -> (frame * entry list, error) result
-(** Advance once and capture the resulting pixels, metadata and oldest-first
-    input ledger under one machine lock. Encoding happens outside that lock. *)
-
 val capture : unit -> (observation * frame, error) result
 (** Copy observation and pixels under the same machine lock. Does not advance
     the machine. Consumers encode/persist the immutable copy outside the lock. *)
@@ -235,6 +231,57 @@ val capture_with_identity : unit -> (identified_capture, error) result
 (** Atomically reads the same machine as {!capture}, with its explicit history
     identity, input cursor and ledger. Never steps, peeks, or changes a RAM
     baseline. The immutable list is shared without traversal or copying. *)
+
+(** {b Spectating} — one read a watcher can repeat cheaply. *)
+
+type change_mark = {
+  count : int;
+      (** The machine change counter. It rises once after a call runs frames,
+          including a call that raises after partial progress, and right
+          after load, eject, restore or change_disk installs or removes a
+          machine. A call refused before it runs frames leaves it alone.
+          Nothing resets it -- eject and the next load
+          keep counting -- so a value never names two screens while the server
+          runs. A restarted server counts from 0 again, so the count alone
+          can repeat across restarts; {!live} answers [Unchanged] only when
+          the incarnation matches too. *)
+  incarnation : string;  (** as in {!identified_capture} *)
+}
+
+type 'mark publication = 'mark Machine_live_publication.t =
+  | No_screen
+  | Stable of 'mark
+  | Running of 'mark
+type published_state = change_mark publication
+
+val current_publication : unit -> published_state
+(** An atomic, lock-free read. [Running] is published before frames mutate
+    the machine; a spectator then uses {!live} on a systhread and waits for
+    the final frame. [Stable mark] permits an immediate unchanged answer for
+    the same count and incarnation. A failed run returns to [Stable] with a
+    raised count after any partial progress. *)
+
+type live =
+  | Nothing_loaded  (** no machine: nothing to watch *)
+  | Unchanged of change_mark
+      (** [since] names the current count and the current incarnation *)
+  | Changed of change_mark * frame
+      (** [since] was absent, or its count or incarnation differs *)
+
+val live : since:change_mark option -> live
+(** Reads the count, the incarnation and, when either differs from [since], the
+    pixels under one hold of the machine lock, the same lock a call that
+    advances the machine holds, so a [Changed] mark always names its pixels.
+    Never steps or writes anything. The lock is a stdlib mutex that a step can
+    hold for a whole call, so an Eio caller compares [since] with
+    {!current_publication} first and runs this, in
+    [Eio_unix.run_in_systhread], when the mark differs or frames are running. *)
+
+val step_frame : frames:int -> (frame * entry list * change_mark, error) result
+(** Advance once and capture pixels, metadata, ledger and the change mark
+    under one machine lock. The tick response uses this mark so a concurrent
+    press cannot attach a newer mark to older pixels. Encoding happens outside
+    that lock. *)
 
 (** {b RAM introspection} — the state sensor. The screen is the expensive
     detour a human eye needs; the game's truth is in memory, and the core

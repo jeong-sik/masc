@@ -46,7 +46,6 @@ describe('ReactionBar', () => {
         emoji: '👏',
         count: 5,
         reacted: true,
-        has_reacted: true,
         recent_user_ids: ['agent-a'],
       }],
       supportedEmojis: ['👏'],
@@ -65,7 +64,6 @@ describe('ReactionBar', () => {
           emoji: '🔥',
           count: 3,
           reacted: false,
-          has_reacted: false,
           recent_user_ids: ['agent-a', 'agent-b'],
         }],
         supportedEmojis: ['🔥'],
@@ -147,7 +145,6 @@ describe('ReactionBar', () => {
         emoji: '👍',
         count: 1,
         reacted: true,
-        has_reacted: true,
         recent_user_ids: ['dashboard-reviewer'],
       }],
     })

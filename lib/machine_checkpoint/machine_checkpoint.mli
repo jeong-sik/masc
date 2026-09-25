@@ -60,6 +60,18 @@ val read :
   dir:string -> slot -> machine:machine -> format:int -> (contents, error) result
 (** The slot's checkpoint, refused unless [machine] and [format] match. *)
 
+type meta_contents = { header : header; meta : Yojson.Safe.t; modified : float }
+
+val read_meta :
+  dir:string -> slot -> machine:machine -> format:int -> (meta_contents, error) result
+(** {!read} without the machine bytes: still the full header check, checksum
+    and decompression -- nothing here skips those -- only the final
+    [String.sub] that would carve the decompressed body's tail into a second
+    string is skipped. For a caller that wants to say what a checkpoint is --
+    not restore it -- so it never makes that second, guest-memory-sized copy
+    just to read who saved it. [modified] is the file's own mtime, the slot's
+    [Unix.stat], the same clock {!listed.modified} reads. *)
+
 type listed = {
   slot : slot;
   size : int;  (** bytes on disk *)

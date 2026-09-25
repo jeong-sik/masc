@@ -6,7 +6,7 @@ import {
   setExternalGateMode,
   setGateMode,
 } from '../api/dashboard-gate'
-import type { SetGateModeResponse } from '../api/dashboard-gate'
+import type { GateModeRecoveryBlocker, SetGateModeResponse } from '../api/dashboard-gate'
 import type { GateMode, KeeperAutoJudgeRearmExpectation } from '../types'
 import { refreshGate } from './gate-refresh'
 import {
@@ -102,6 +102,31 @@ function gateModeLabel(mode: GateMode): string {
   return mode === 'manual' ? 'Human' : mode === 'auto_judge' ? 'Auto Judge' : 'Always Allow'
 }
 
+function recoveryBlockerLabel(blocker: GateModeRecoveryBlocker): string {
+  const ids = blocker.approval_ids.join(', ')
+  switch (blocker.kind) {
+    case 'owner_at_capacity':
+      return `판정 슬롯이 모두 사용 중 (active ${ids})`
+    case 'entry_changed':
+      return `시작 전에 승인 ${ids} 상태가 바뀜`
+    case 'entry_missing':
+      return `승인 ${ids} 이(가) 더 이상 대기 중이 아님`
+    case 'start_failed':
+      return `승인 ${ids} 시작 실패: ${blocker.reason ?? '상세 오류 없음'}`
+    case 'mode_manual':
+      return 'Gate 모드가 Human 으로 바뀜'
+    case 'mode_always_allow':
+      return 'Gate 모드가 Always Allow 로 바뀜'
+  }
+}
+
+function recoveryBlockersDetail(blockers: GateModeRecoveryBlocker[]): string {
+  const first = blockers[0]
+  if (!first) return ''
+  const more = blockers.length > 1 ? ` 외 ${(blockers.length - 1).toLocaleString()}건` : ''
+  return ` · blocked ${first.keeper_name}: ${recoveryBlockerLabel(first)}${more}`
+}
+
 function showGateModeSaved(result: SetGateModeResponse): void {
   const saved = `Gate 모드를 ${gateModeLabel(result.mode)}(으)로 저장했습니다`
   switch (result.recovery_status) {
@@ -109,7 +134,8 @@ function showGateModeSaved(result: SetGateModeResponse): void {
       showToast(
         `${saved} · Auto Judge backlog recovery 요청 처리 완료`
         + ` (started ${result.started.toLocaleString()},`
-        + ` queued ${result.queued.toLocaleString()})`,
+        + ` queued ${result.queued.toLocaleString()})`
+        + recoveryBlockersDetail(result.recovery_blockers),
         'success',
       )
       return
@@ -123,7 +149,8 @@ function showGateModeSaved(result: SetGateModeResponse): void {
         + ` (started ${result.started.toLocaleString()},`
         + ` queued ${result.queued.toLocaleString()},`
         + ` failed ${result.recovery_failure_count.toLocaleString()})`
-        + firstFailureDetail,
+        + firstFailureDetail
+        + recoveryBlockersDetail(result.recovery_blockers),
         'warning',
       )
       return

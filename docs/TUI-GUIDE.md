@@ -7,8 +7,9 @@ status: runbook
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
-`bin/masc_tui_types.ml`: Overview, Activity, Keepers, Memory, Approvals,
-Board, Planning, Fusion, Workspace, Config.
+`bin/masc_tui_types.ml`: Overview, Activity, Keepers, Lanes, Memory,
+Approvals, Board, Planning, Fusion, Workspace, Config. Approvals holds its stop
+only while something waits in it or while it is the current view.
 Additional surfaces hang off parents instead of holding Tab stops:
 Planning's `v` cycles through Task Review and Task Verdicts, then back to Goals;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
@@ -493,9 +494,9 @@ For TOML package installations, open `/addons` from the composer or choose
 covers configuration editing, connections, Skills, actions and cross-Lane evidence.
 
 Standalone execution lanes only. Keeper lifecycle and turn-cycle facts live on
-Keepers, so this surface no longer repeats a second Keeper table. It hangs
-off Runtime rather than holding a Tab stop: `p` on Runtime walks keeper
-lanes, all runtimes, and then this surface. From the lane overview, `p` or
+Keepers, so this surface no longer repeats a second Keeper table. It holds
+its own Tab stop between Keepers and Memory, and Runtime also reaches it: `p`
+on Runtime walks keeper lanes, all runtimes, and then this surface. From the lane overview, `p` or
 `Esc` returns to Runtime; inside the run list and run detail, `Esc` first
 backs out one drill-down level as before. The palette keeps `go Lanes`.
 
@@ -1955,11 +1956,10 @@ wrong. The list reads `.masc/keepers/` below `--base-path`, with no server
 involved, so an empty list with no error means the directory is empty.
 
 **Tasks panel prints `task backlog unavailable`.** The message carries the full
-path, but it does not tell you whether the file is missing or malformed. A
-missing key currently reads back as an empty JSON object, so an absent
-`.masc/tasks/backlog.json` surfaces as the schema complaint
-`backlog must contain exactly one tasks list, last_updated string, and positive
-version`. Check that the path exists before treating it as a schema problem.
+path and says which case it is: `no backlog at <path>` when
+`.masc/tasks/backlog.json` does not exist, `backlog decode failed for <path>`
+when it exists but does not match the schema, and `backlog read failed for
+<path>` when it is blank, unparsable or unreadable.
 
 **A surface says `(not loaded yet)`.** Nothing has been read for it: the
 request is still out, or the surface was opened before a server was reachable.

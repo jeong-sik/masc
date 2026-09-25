@@ -82,6 +82,11 @@ module For_testing : sig
   (** Feed one runtime event through the Keeper stream projection with only a
       usage observer installed. *)
 
+  val project_stream :
+    Runtime_antigravity.stream_event list -> Agent_core.Types.sse_event list
+  (** The Keeper live-stream events the projection emits for [events], in
+      order, with no MASC tool call between them. *)
+
   val capacity_bounded_model_input_projection
     :  declared_max_prompt_bytes:int option
     -> system_prompt:string

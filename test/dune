@@ -190,6 +190,7 @@
  (libraries
   alcotest
   masc
+  masc.masc_core
   masc.runtime
   masc_server
   masc.skill_config

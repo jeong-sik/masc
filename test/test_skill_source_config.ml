@@ -261,7 +261,7 @@ let test_seed_declares_sources () =
    | Some value ->
      check int
        "seed resource read bound"
-       65536
+       16384
        (resource_read_max_bytes_to_int value)
    | None -> fail "seed omitted the resource read bound");
   let projected =

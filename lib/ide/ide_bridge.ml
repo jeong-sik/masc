@@ -283,6 +283,21 @@ let compare_event_json left right =
   if by_time <> 0 then by_time else compare left right
 ;;
 
+(* The JSONL row has no persisted event id. Derive an opaque identifier from
+   its exact stored content and codebase only when serving a page, so old rows
+   gain the same id after page shifts or segment rotation. Do not put the
+   output summary itself in a dashboard source_id or URL. *)
+let with_event_id ~codebase = function
+  | `Assoc fields as row ->
+    let canonical = Yojson.Safe.to_string row in
+    let id =
+      Digestif.SHA256.(
+        digest_string ("ide-event\000" ^ codebase ^ "\000" ^ canonical) |> to_hex)
+    in
+    `Assoc (("event_id", `String id) :: List.filter (fun (name, _) -> name <> "event_id") fields)
+  | row -> row
+;;
+
 let now_ms () =
   (* NDT-OK: IDE bridge timestamps are runtime telemetry for operator ordering;
      they are not used to make deterministic build or scheduling decisions. *)
@@ -333,7 +348,7 @@ let list_events
       kinds
     |> List.sort compare_event_json
   in
-  events |> drop offset |> take limit
+  events |> drop offset |> take limit |> List.map (with_event_id ~codebase)
 
 let ingest_tool_event
     ~base_path

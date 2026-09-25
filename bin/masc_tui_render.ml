@@ -15352,6 +15352,19 @@ let finish_voice_surface (state : state) ~terminal_rows ~cols ~head ~body ~hints
         Buffer.add_char buf '\n'
       end)
     lines;
+  (* The rows the reading does not fill. Without them the box bottom and the
+     footer sit under the last line drawn, wherever that lands, and the pane
+     ends in the middle of the frame with blank rows under it. It is the same
+     hand-drawn frame the cheat sheet and the answering overlay were moved off
+     for the same reason.
+
+     How many were drawn is the window, not a tally of it: [normalize] holds
+     [scroll] at or under [count - height], so the loop above draws exactly
+     this many. *)
+  let drawn = min height (max 0 (List.length lines - scroll)) in
+  for _ = drawn + 1 to height do
+    box_empty buf cols
+  done;
   box_bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
   finish_surface state ~clamped:(Voice_scroll scroll) ~surface_key:"voice"

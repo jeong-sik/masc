@@ -313,11 +313,7 @@ let fetch_range_with ~after_window_read t ~sha256 ~offset ~max_bytes =
        read.
 
        The window and the digest come from the same descriptor, so the bytes
-       returned are the bytes hashed by construction (#38972).  An earlier
-       version read the window and hashed the file through two opens; a shard
-       rewritten between them (a put repairing a corrupt address with a
-       temp+rename) let bytes nobody hashed go out as verified and entered
-       their snapshot into the cache. *)
+       returned are the bytes hashed by construction (#38972). *)
     let validate_and_read_cold () =
       match
         Fs_compat.load_owned_regular_file_range_with_sha256

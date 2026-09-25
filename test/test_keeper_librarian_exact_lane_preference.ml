@@ -148,6 +148,44 @@ let test_keeper_preference_reorders_the_librarian_lane () =
        ~actor:"test"
        ~keeper_name:"librarian-preference"
        ~lane_id:"librarian_exact"
+       (Some "librarian-removed")
+   with
+   | Ok _ -> ()
+   | Error detail -> fail detail);
+  (* A slot the lane stopped offering leaves the declared order: the lane
+     keeps running instead of failing on every pass. *)
+  (match
+     Result.bind
+       (Runtime_exact_output_registry.current ()
+        |> Result.map_error Runtime_exact_output_registry.publication_error_to_string)
+       (fun registry ->
+          Runtime_exact_output_registry.resolve_lane registry ~lane_id:"librarian_exact"
+          |> Result.map_error Runtime_exact_output_registry.lane_resolution_error_to_string)
+   with
+   | Error detail -> fail detail
+   | Ok resolved ->
+     (match
+        Keeper_exact_lane_preference.apply
+          ~base_path
+          ~keeper_name:"librarian-preference"
+          ~lane_id:"librarian_exact"
+          resolved
+      with
+      | Error detail -> fail ("a stale preference failed the lane: " ^ detail)
+      | Ok applied ->
+        check
+          (list string)
+          "a stale preference keeps the declared order"
+          [ "librarian-default"; "librarian-preferred" ]
+          (List.map
+             (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+             applied.Runtime_exact_output_registry.selected_slots)));
+  (match
+     Keeper_exact_lane_preference.set
+       (Workspace.default_config base_path)
+       ~actor:"test"
+       ~keeper_name:"librarian-preference"
+       ~lane_id:"librarian_exact"
        (Some "librarian-preferred")
    with
    | Ok _ -> ()

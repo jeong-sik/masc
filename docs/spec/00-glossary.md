@@ -91,8 +91,8 @@ status: reference
 
 **Goals 블록 (Overview Goals)**
 : TUI Overview 최상단에서 fleet의 활성 작업이 목표를 실제로 진전시키고 있는지를
-  보여주는 자리(`Masc_tui_overview_goals`). Attention 패널 뒤, Team 블록 앞에
-  배치된다. 헤드라인은 전체 활성 태스크(진행 중이거나 검증 대기 중인 Task) 중 그려진
+  보여주는 자리(`Masc_tui_overview_goals`). 요약 줄 바로 아래, Attention 패널 앞에
+  그려진다. 순서는 Goals, Attention, Team이다(그 사이에 Providers 구획이 있다). 헤드라인은 전체 활성 태스크(진행 중이거나 검증 대기 중인 Task) 중 그려진
   목표에 연결된 태스크 수 비율을 표시하고, 아직 일이 진행 중인 단계(`Executing`·
   `Verifying`·`Awaiting_confirmation`)의 Goal마다 우선순위(낮은 숫자 우선) 및 마감일
   순으로 한 줄씩 그린다(#38386).
@@ -546,9 +546,11 @@ status: reference
   판정은 누구의 사정인지만 답하고, 다음 후보로 넘길지는 걸음이 정한다 — exact 걸음은
   Exact-output route의 슬롯 전진 조건이, Keeper 걸음은 `lane_should_retry`의 predicate가
   정한다. 공식 클라이언트가 만드는 provider 오류(`Llm_provider.Error.provider_error`)는 이
-  판정 밖이다(#38776). 영수증에 적히는 Failure Route는 이 판정을 읽지 않고 따로 분류한다 —
-  #38913은 `InputCapacity`·`Json_parse_error`를 route의 `admission` 회전으로 옮겨 걸음과
-  답을 맞췄다. `Window`는 이 바인딩의 context window이고, Provider Usage Window(사용량 한도
+  판정 밖이다(#38776). 영수증에 적히는 Failure Route도 API 오류(`Retry.api_error`)의 class를
+  이 판정에서 끌어온다(#38958) — route와 걸음이 같은 사실표를 읽어서,
+  `Retry.Attempt_rejected`(보내기 전 이 후보 자신의 정책 거절)·`InputCapacity`·`Json_parse_error`는
+  모두 `Binding Admission`이고 route class는 `admission`이다. 원래 오류에서는 `retry_after`
+  힌트만 읽는다. `Window`는 이 바인딩의 context window이고, Provider Usage Window(사용량 한도
   창)와 다른 창이다. 한국어 이름의 "사정"은 탓이 아니다 — 429·529는 누구의 잘못도 아니고
   그 후보의 형편이다.
   → [Candidate_fault](../../packages/agent_core/lib/llm_provider/candidate_fault.mli) ·
@@ -646,11 +648,15 @@ status: reference
   descriptor와 권한 검사는 MASC가 소유한다. → [Tool boundary](13-agent-core.md#tool-boundary)
 
 **Tool Input Validation (도구 입력 검증)**
-: 도구 핸들러로 전달하기 전에 인자 스키마를 사전 검사하는 경계(`Tool_input_validation.validate_input`).
-  도구 선언의 `required`·`type`·`enum`·`const`를 중첩 객체(`properties`)와 배열 항목(`items`)까지
-  재귀적으로 검사하며, 위반된 모든 경로(`JSON path`)와 원인을 한 번에 보고한다(#38391).
-  스키마 위반은 도구 실행이 아니라 사전 거절(`pre-dispatch refusal`)이며, `oneOf`는 루트에서만 검사한다.
-  → [Tool_input_validation](../../packages/agent_core/lib/tool_input_validation.mli)
+: 도구 핸들러로 전달하기 전에 인자 스키마를 사전 검사하는 경계. MASC의
+  `Tool_input_validation.validate`가 Agent-Core의 `Agent_core.Tool_input_validation.validate`를 부른다.
+  Agent-Core 쪽은 도구 선언의 `required`·`type`·`enum`·`const`를 중첩 객체(`properties`)와 배열
+  항목(`items`)까지 재귀적으로 검사하며, 위반된 모든 경로(`JSON path`)와 원인을 한 번에 보고한다(#38391).
+  MASC 쪽은 Agent-Core가 하지 않는 검사를 더한다. 선언 안 된 필드(`additionalProperties: false`),
+  `oneOf` 분기 선택, 범위·길이 한계다. `oneOf`는 루트 스키마에서만 검사한다.
+  스키마 위반은 도구 실행이 아니라 사전 거절(`pre-dispatch refusal`)이다.
+  → [Tool_input_validation (MASC)](../../lib/tool_input_validation.mli),
+  [Tool_input_validation (Agent-Core)](../../packages/agent_core/lib/tool_input_validation.mli)
 
 **Deferred Tool Loading (도구 스키마 지연 로딩)**
 : 도구 스키마를 요청마다 싣지 않고, `keeper_tool_search` 목록에 이름과 요약만 올려 두는
@@ -917,6 +923,22 @@ status: reference
   권한 검사가 아니라 차례를 정하는 장치다.
   → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli)
 
+**기계 체크포인트 (Machine Checkpoint)**
+: 공유 기계 하나를 통째로 이름 붙여 디스크에 남긴 파일. CPU·메모리·화면·열린 파일과
+  키 기록(ledger)이 다 들어 있어서, 서버를 다시 켜도 그 순간부터 이어서 할 수 있다.
+  게임 메뉴로 하는 저장과 다르다. 게임마다 메뉴가 없어도 되고, 저장한 뒤로 한 일까지
+  남는다. 지금은 DOS Lane 이 `masc_dos_save`·`masc_dos_restore` 로 쓴다.
+  파일 머리에 어느 기계인지, 형식 번호, 만든 코어의 digest 가 적힌다. 기계나 형식
+  번호가 다르면 읽지 않는다. 코어 digest 는 보여 주기만 하고 비교하지 않는다.
+  되살리면 새 incarnation 이 되고, 조종권은 되살린 사람이 쥔다.
+  → [Machine_checkpoint](../../lib/machine_checkpoint/machine_checkpoint.mli),
+  [Dos_lane.restore](../../lib/dos_lane/dos_lane.mli)
+
+**슬롯 (Slot)**
+: 기계 체크포인트에 붙이는 이름. 영문자·숫자·`_`·`-` 로 1~64자이고, 경로가 될 수
+  없다. Keeper 끼리 같은 이름 공간을 쓴다. 같은 이름에 다시 저장하면 덮어쓴다.
+  → [Machine_checkpoint.slot_of_string](../../lib/machine_checkpoint/machine_checkpoint.mli)
+
 **MSX Lane**
 : 서버 안에 사는 MSX 기계 하나. Keeper 는 `masc_msx_*` 도구로 같은 기계에 키를
   넣고 화면을 읽는다. DOS Lane과 같은 축의 공유 머신으로, Lane Add-on의
@@ -1122,6 +1144,29 @@ status: reference
   같은 내용으로 다시 저장하면 `content_updated_at`은 유지한다.
   `Board_post_updated`는 실제 편집 저장이 성공한 뒤 발행한다. 게시글 ID와
   `content_updated_at`이 같은 편집은 한 사건이며, 뒤의 편집은 새 사건이다.
+
+**Board Attachment (게시판 첨부)**
+: Board 글에 붙는 타입이 정해진 참조 하나(`Board_tool_attachment`). 글쓰기 시점에
+  종류(`kind`)와 정확히 하나의 출처 — 절대 HTTPS `url` 또는 기존 아티팩트의 `sha256` —
+  를 적는다(#38835). Keeper 도구 경로와 HTTP 경로가 같은 입력을 쓰고, 게시 처리기가
+  유일한 작성자다. 저장 wire 형식은 `_blob` 래퍼로 기록해 durable 정리가 자식 참조를
+  따라가게 한다.
+  - `kind`는 읽는 쪽이 어떻게 보여 줄지 정한다: `image`·`video`·`youtube`·`external_link`.
+    아티팩트를 가리키는 참조는 대시보드가 바이트를 불러온 뒤 `image`는 이미지,
+    `video`는 영상으로 보여 주고, 그 외는 다운로드를 둔다(미디어 종류는 해시마다
+    저장되지 않아 요소가 직접 감지한다). `youtube`는 `url`만 허용한다 — 저장된
+    아티팩트는 유튜브 영상이 아니다.
+  - 출처 둘은 동시에 쓰지 않고, 둘 다 없으면 거절한다. `http:`·`javascript:`·
+    `data:` URL과 형식이 맞지 않는 항목은 받지 않는다. 아티팩트 참조는
+    쓰기 전에 기존 Tool_blob_store에서 바이트를 확인하고, 지정된 상한
+    (`max_served_bytes`, HTTP 아티팩트 라우트와 같은 32 MiB)을 넘으면
+    `Artifact_too_large`로 거절해 대시보드에서 열 수 없는 카드가 남지 않게 한다.
+  - 이름 경계: 첨부는 글쓰기 입력의 최상위 `attachments` 인자에 적는다. Artifact(실행
+    산출물)는 이 첨부보다 넓은 개념 — Board Attachment는 그 넓은 개념을 가리키는
+    하나의 용도일 뿐이다.
+  → [Board_tool_attachment](../../lib/board_tool_adapter/board_tool_attachment.mli),
+  [Board_tool_format](../../lib/board_tool_adapter/board_tool_format.mli),
+  [Tool_blob_store](../../lib/tool_blob_store/tool_blob_store.mli)
 
 **Karma**
 : 다른 에이전트가 내 글이나 댓글에 준 upvote 한 번마다 생기는 `karma_event`의 합.
@@ -1333,17 +1378,13 @@ status: reference
   개별적으로 수행하던 취약하고 중복된 4문자열 휴리스틱 매칭을 대체하고, 서버
   SSE/REST 엔드포인트(`pending_entry`, `hitl_rows`)가 직접 방출한다(#38404). wire 값은
   각각 `"queued"` · `"judging"` · `"human_required"` · `"blocked"`다.
-  - `blocked`: 준비 단계 워커 부재(`Summary_attempt_pre_worker_unavailable`),
-    식별자 언바운드(`Summary_attempt_identity_unbound`), 지속성 불확실
-    (`Summary_attempt_persistence_uncertain`), 심판 실행 실패(`Summary_failed`)인 경우.
-    특히 `Summary_pre_worker_start_reserved` 상태는 초기 폴링 중 대시보드와 서버가
-    `judging`이 아닌 `blocked`로 투영하여 불필요한 대기 혼선을 막는다.
-  - `judging`: 자동 심판 워커가 실행 중(`Summary_attempt_in_flight`)이거나 요약 대기
-    (`Summary_pending`)인 경우.
-  - `human_required`: 모델 심판 결과 명시적인 사람 개입이 필요하다고 판정된 경우
-    (`advisory_judgment = Require_human`).
-  - `queued`: 심판 전 대기 중(`Summary_attempt_ready`)이며 아직 심판이 요청되지
-    않았거나(`Summary_not_requested`) 모델 판정(`Approve` | `Deny`)이 대기 중인 경우.
+  네 값의 뜻은 이렇다. 어떤 (심판 시도 상태, 요약 상태) 조합이 어느 값이 되는지는
+  `phase_of_disposition_and_summary` 한 곳이 정한다. 이 문서는 그 판정표를 옮겨 적지 않는다.
+  - `queued`: 아직 누구도 이 항목을 판정하고 있지 않다.
+  - `judging`: 자동 심판이 판정하는 중이거나, 판정이 끝나 적용을 기다린다.
+  - `human_required`: 자동 심판이 사람의 결정이 필요하다고 판정했다.
+  - `blocked`: 심판을 돌릴 수 없는 상태다(워커 없음, 식별자 없음, 지속성 불확실,
+    심판 실패). 사람이 보거나 원인이 풀려야 진행된다.
   - **비영속 투영 경계**: 승인 큐의 durable 저널 직렬화(`pending_entry_to_yojson` /
     `pending_entry_of_yojson`)에는 파생값인 `phase` 필드를 저장하지 않고, 오직
     클라이언트 관측을 위한 wire 프로젝션에서만 유지한다.
@@ -1598,7 +1639,10 @@ status: reference
     지원하기 위해 `runtime.toml`의 `[exec.ssh.endpoints.<name>] allowed_paths = ["/app", ...]`로
     추가 허용 루트를 선언할 수 있다(#38603).
   - **설정 불변식**: 선언 경로는 반드시 절대 경로이자 정규화된(normalized) 경로여야 하며,
-    루트(`/`)는 거절된다(`Exec_ssh_endpoint.parse_toml`).
+    루트(`/`)는 거절된다(`runtime_toml.ml`의 `exec_ssh_allowed_path_error`). 선언 경로는 그
+    엔드포인트의 `remote_root` 자신이거나 그 조상이면 안 된다. 루트는 한 Keeper가 아니라
+    엔드포인트에 속하므로, 그런 경로는 각 Keeper가 서로의 영역을 가리키게 한다
+    (`exec_ssh_allowed_path_covers_remote_root`).
   - **어휘 비교 경계**: 엔드포인트가 원격 머신일 수 있으므로 호스트 파일시스템의 심볼릭
     링크를 해석하지 않고 순수 어휘(lexical prefix)로만 비교한다. 그래서 추가 루트 아래에서
     밖을 가리키는 심볼릭 링크는 이 검사가 막지 못한다. 엔드포인트가 이 머신이면 추가 루트는 링크를
@@ -1613,6 +1657,7 @@ status: reference
   → [Sandbox_target](../../lib/exec/sandbox_target.mli),
   [Exec_policy_paths](../../lib/exec_policy/exec_policy_paths.mli),
   [Exec_ssh_endpoint](../../lib/runtime/exec_ssh_endpoint.mli),
+  [runtime_toml](../../lib/runtime/runtime_toml.ml),
   [Keeper_sandbox_remote_lane](../../lib/keeper/keeper_sandbox_remote_lane.mli)
 
 **Worktree**
@@ -1700,12 +1745,13 @@ status: reference
 
 **Boot Meta Failure Cause (부팅 메타 실패 사유)**
 : Keeper 기동 및 구체화(materialization) 시점에 메타데이터 검증 실패를 표현하는 닫힌 구조화 사유(`Keeper_runtime.boot_meta_failure_cause`).
-  - 닫힌 다섯 가지 variant:
-    1. `Meta_read_error`: 메타데이터 파일 읽기 또는 디코딩 실패.
-    2. `Config_invalid`: TOML 파싱 또는 유효성 검사 실패.
-    3. `Sandbox_profile_required`: 선언형 키퍼 프로필에 필수 `sandbox_profile` 누락.
-    4. `Sandbox_image_required`: 컨테이너 실행 프로필(`docker`·`microvm`)에 `sandbox_image` 누락 또는 공백(#37523·#38572). `remote_ssh`는 이미지를 쓰지 않으므로 요구되지 않음. 부팅 조정(`reconcile`)과 `keeper_up` 생성 파싱 양쪽에서 `Keeper_meta_contract.missing_required_sandbox_image_error` 공통 규칙으로 즉시 거절.
-    5. `Materialization_failed`: 파일시스템 또는 디렉터리 구조 구체화 실패.
+  - 닫힌 여섯 가지 variant:
+    1. `Missing_meta`: 영속 메타 파일이 없음. Keeper TOML이 있으면 부팅이 그 TOML로 메타를 구체화하고, TOML이 없거나 구체화한 뒤에도 메타가 써지지 않았으면 이 사유로 남음.
+    2. `Meta_read_error`: 메타데이터 파일 읽기 또는 디코딩 실패.
+    3. `Config_invalid`: TOML 파싱 또는 유효성 검사 실패.
+    4. `Sandbox_profile_required`: 선언형 키퍼 프로필에 필수 `sandbox_profile` 누락.
+    5. `Sandbox_image_required`: 컨테이너 실행 프로필(`docker`·`microvm`)에 `sandbox_image` 누락 또는 공백(#37523·#38572). `remote_ssh`는 이미지를 쓰지 않으므로 요구되지 않음. 부팅 조정(`reconcile`)과 `keeper_up` 생성 파싱 양쪽에서 `Keeper_meta_contract.missing_required_sandbox_image_error` 공통 규칙으로 즉시 거절.
+    6. `Materialization_failed`: 파일시스템 또는 디렉터리 구조 구체화 실패.
   → [keeper_runtime](../../lib/keeper/keeper_runtime.mli),
   [Keeper_meta_contract](../../lib/keeper/keeper_meta_contract.mli)
 
@@ -1860,8 +1906,8 @@ status: reference
   `speaker=unknown`, 잘못된 형태(`Invalid`)면 `speaker=invalid(...)`, 중복(`Duplicate`)이면
   `speaker=duplicate`로 표기해 패스를 중단하지 않고 대화를 계속 읽는다.
   이 메타데이터는 LLM provider로 전송되지 않고(`Input_speaker.without`), 공식 클라이언트
-  이력 봉투 및 스냅숏 해시에서 제외되며, 승인 입학 다이제스트(`Keeper_approval_input_admission.admission_digest`)
-  에서도 제외된다.
+  이력 봉투 및 스냅숏 해시에서 제외되며, 승인 입력 입학 표식이 메시지를 대조할 때 쓰는
+  다이제스트(`keeper_approval_input_admission.ml`의 내부 `digest`)에서도 제외된다.
   → [Keeper_input_speaker](../../lib/keeper/keeper_input_speaker.mli)
 
 **Atom**
@@ -2188,19 +2234,6 @@ status: reference
   잴 수 있는 Keeper가 다 가려진다.
   → [server_dashboard_http_keeper_memory_health](../../lib/server/server_dashboard_http_keeper_memory_health.ml)
 
-**Librarian Stalled (Librarian 이 멈춰 건너뛴 구간)**
-: Librarian 지점이 provider 가 마지막으로 받아들인 시작점보다 뒤에 있어서, 다음 요청이
-  건너뛰는 atom 중 요청에도 기억에도 없는 구간. 시작은 스냅숏 컷과 durable 읽은 위치 중 늦은
-  쪽, 끝은 받아들여진 시작점 바로 앞이다. 비면 gap 이 없다. 규칙은 순수 함수
-  `Keeper_carried_front.librarian_gap` 하나이고, 경보는 Keeper 의 작은 파일(meta, 스냅숏,
-  진행 파일, 턴 기록)만 읽어 그 함수를 부른다(`Keeper_next_request_forecast.librarian_gap`).
-  health JSON 의 `librarian.stalled`(`kind: "gap"`, `gap_start_atom`, `gap_end_atom` — 끝은
-  제외)이고, TUI 는 `Librarian stalled · atoms <a>-<b>` 로 그린다. 읽어야 할 파일을 못 읽으면
-  gap 없음(`null`)도 gap 도 아닌 `kind: "unmeasured"` 와 못 읽은 파일(`cause`)로 보낸다.
-  경보이지 Gate 가 아니다. Librarian 이 받아들여진 시작점에 닿으면 사라진다(RFC
-  librarian-lifecycle §4.10).
-  → [keeper_carried_front](../../lib/keeper/keeper_carried_front.mli) · [keeper_next_request_forecast](../../lib/keeper/keeper_next_request_forecast.mli)
-
 **Continuity Width (연속성 회차의 폭)**
 : 연속성 회차가 한 번에 읽을 수 있는 atom 수의 상한. 크기 때문에 거절당한 회차가 좁힌
   값을 다음 회차가 이어받는다. (keepers dir, keeper)별로 그 값을 잰 trace와 함께 루프
@@ -2386,7 +2419,17 @@ status: reference
   직전까지가 틈이 된다. `accepted_start`가 그 끝 이하이거나 두 위치를 모두 알 수 없으면
   틈은 없다(`None`). 현재 이력에 맞지 않는 스냅숏이 남아 있는 동안에는 읽은 위치 대신
   그 자르기부터 계산되어 틈이 짧게 산출될 수 있다 (RFC librarian-lifecycle §4.10, rule 3).
-  → [Keeper_carried_front.librarian_gap](../../lib/keeper/keeper_carried_front.mli)
+  틈의 끝(`gap_end_atom`)은 범위에 들지 않는다.
+  규칙은 이 순수 함수 하나다. 경보는 Keeper의 작은 파일(meta, 스냅숏, 진행 파일, 턴 기록)만
+  읽어 그 함수를 부른다(`Keeper_next_request_forecast.librarian_gap`). checkpoint는 읽지 않는다.
+  health JSON의 키는 `librarian.stalled`다. 틈이 있으면 `kind: "gap"`과 `gap_start_atom`,
+  `gap_end_atom`을 싣고, 틈이 없으면 `null`이다. 읽어야 할 파일을 못 읽으면 틈 없음도 틈도 아닌
+  `kind: "unmeasured"`와 못 읽은 파일(`cause`), 그 오류 문장(`detail`)을 보낸다.
+  TUI는 `Librarian stalled · atoms <a>-<b> are in neither the request nor memory`로 그린다
+  (`<b>`는 틈의 마지막 atom, 한 atom이면 `atom <a> is ...`). 못 잰 경우는 `Librarian stalled · not measured, <원인> · <detail>`이다.
+  경보이지 Gate가 아니다. Librarian이 받아들여진 시작점에 닿으면 사라진다.
+  → [Keeper_carried_front.librarian_gap](../../lib/keeper/keeper_carried_front.mli),
+  [Keeper_next_request_forecast](../../lib/keeper/keeper_next_request_forecast.mli)
 
 **Librarian Replay**
 : `masc-librarian-replay` CLI. 라이브 워크스페이스의 turn-boundary 로그와 checkpoint에

@@ -915,8 +915,8 @@ let live_lane_configuration registry lane_id =
          | Ok admitted ->
            ( List.map
                (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
-               (admitted.first_slot :: admitted.other_slots)
-           , []
+               admitted.http_slots
+           , admitted.cli_slots
            , []
            , List.map
                (fun (slot : Browser_stagehand_model.refused_slot) -> slot.slot_id)

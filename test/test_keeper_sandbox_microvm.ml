@@ -1688,6 +1688,20 @@ let test_build_link_actions_only_includes_create_and_retarget () =
     (M.build_link_actions rows = [ "a", "/masc-build/a"; "b", "/masc-build/b" ])
 ;;
 
+let test_build_link_targets_include_already_correct_links () =
+  let rows =
+    [ { M.checkout = "a"; target = Some "/masc-build/a"; plan = M.Link_create "/masc-build/a" }
+    ; { M.checkout = "b"; target = Some "/masc-build/b"; plan = M.Link_retarget "/masc-build/b" }
+    ; { M.checkout = "c"; target = Some "/masc-build/c"; plan = M.Link_already_correct }
+    ; { M.checkout = "d"; target = None; plan = M.Link_refused_real_directory }
+    ]
+  in
+  Alcotest.(check (list string))
+    "a fresh build volume is empty, so an already-correct link needs its target made too"
+    [ "/masc-build/a"; "/masc-build/b"; "/masc-build/c" ]
+    (M.build_link_targets rows)
+;;
+
 let test_build_link_apply_argv_carries_positional_pairs () =
   let argv =
     M.build_link_apply_argv_for
@@ -2763,6 +2777,8 @@ let () =
             test_build_link_refusal_message_names_the_checkout
         ; Alcotest.test_case "build link actions only includes create and retarget" `Quick
             test_build_link_actions_only_includes_create_and_retarget
+        ; Alcotest.test_case "build link targets include already-correct links" `Quick
+            test_build_link_targets_include_already_correct_links
         ; Alcotest.test_case "build link apply argv carries positional pairs" `Quick
             test_build_link_apply_argv_carries_positional_pairs
         ; Alcotest.test_case "build link apply argv with no actions is still a valid script" `Quick

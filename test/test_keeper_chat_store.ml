@@ -433,7 +433,7 @@ let test_attachment_dimensions_survive_the_reference_swap () =
                    |> Result.map_error Tool_blob_store.fetch_error_to_string);
                 Alcotest.(check string) "no inline image in marker preview"
                   "attachment payload" reference.preview;
-                (match Tool_blob_maintenance.run ~base_path:base_dir ~mode:Tool_blob_maintenance.Observe_only with
+                (match Tool_blob_maintenance.run ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~base_path:base_dir ~mode:Tool_blob_maintenance.Observe_only with
                  | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error)
                  | Ok report ->
                      Alcotest.(check int) "chat attachment is a live blob consumer" 1 report.live_references;

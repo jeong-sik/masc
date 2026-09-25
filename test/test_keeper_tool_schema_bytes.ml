@@ -286,12 +286,35 @@ open Alcotest
    keeper_skill_publish tool lets a Keeper publish a Skill package it wrote
    (RFC keeper-self-authored-skills); main's surface had shrunk below the
    entry above, so the total still falls. No headroom. *)
-(* 2026-09-25: the Stagehand tool changes on the merged parent project to
-   122,394 bytes. BrowserInstruct adds 739 rendered bytes by the production
-   renderer's rules replayed on config/tools/masc_browser_instruct.toml.
-   BrowserRead's stagehand lane enum adds 12 rendered bytes. The combined
-   ceiling is projected until exact-head CI measures it. No headroom. *)
-let ceiling_bytes = 123_145
+(* 2026-09-24: +47 rendered bytes, computed from the four description edits
+   (not a CI reading). BrowserAct, BrowserInteract, BrowserRead and
+   keeper_skill_validate become deferred, and a deferred tool is chosen from
+   the first line of its description, cut at 80 bytes; each now opens with a
+   whole sentence that fits. What it bought: those four schemas, 8,370 bytes,
+   leave every Agent Core request that has not used them (5,047 requests on
+   2026-09-23). No headroom. *)
+(* 2026-09-24: 122,591 across 139 tools, +316 over the 122,275 ceiling above,
+   measured by this suite on CI for PR #38835 (PR check run 36051449813, the
+   "grew to" failure line). masc_board_post takes a typed `attachments`
+   argument: each entry declares a kind (image|video|youtube|external_link) and
+   exactly one of an absolute HTTPS url or an existing artifact sha256, on both
+   the MCP tool schema and the keeper projection. What it bought: the two Board
+   write paths (tool + HTTP) stop accepting a raw, unvalidated meta.attachments
+   blob; both now parse the same closed type and reject unsafe URLs, missing
+   artifacts, and duplicate meta. No headroom. *)
+(* 2026-09-25: the Stagehand lane adds 119 bytes over the 122,228 surface it
+   was measured against (122,347, the #38697 entry: BrowserSession and
+   BrowserGoto take a lane, BrowserSession says what each lane needs, and
+   BrowserTabs says a stagehand tab has no clientId). Added to main's ceiling
+   above with no headroom; the next CI run measures it. *)
+(* 2026-09-25: BrowserInstruct adds 739 rendered bytes by the production
+   renderer's rules replayed on config/tools/masc_browser_instruct.toml, over
+   the 122,710 ceiling above. Projected until exact-head CI measures it. No
+   headroom. *)
+(* 2026-09-25: BrowserRead's stagehand lane enum adds 12 rendered bytes over
+   the 123,449 ceiling above. Projected until exact-head CI measures it. No
+   headroom. *)
+let ceiling_bytes = 123_461
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

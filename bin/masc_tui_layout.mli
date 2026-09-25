@@ -11,7 +11,7 @@ val board_read_box_rows : int
 val allocate_board_read :
   terminal_rows:int ->
   body_line_count:int ->
-  comment_count:int ->
+  comment_line_count:int ->
   board_read_allocation
 
 type board_read_scroll = {
@@ -23,7 +23,7 @@ type board_read_scroll = {
 val project_board_read_scroll :
   body_line_count:int ->
   body_rows:int ->
-  comment_count:int ->
+  comment_line_count:int ->
   comment_rows:int ->
   int ->
   board_read_scroll
@@ -56,8 +56,25 @@ type board_read_side_allocation = {
 val allocate_board_read_side :
   terminal_rows:int ->
   body_line_count:int ->
-  comment_count:int ->
+  comment_line_count:int ->
   board_read_side_allocation
 (** Give each side-by-side column the full shared vertical viewport. A comment
     column with content still reserves its first row for the heading and folds
     away when the viewport cannot fit both heading and content. *)
+type automation_schedule_row =
+  { status : string
+  ; requested_clock : string
+  ; recurrence : string
+  ; summary : string
+  }
+
+val automation_schedule_lines :
+  inner_width:int ->
+  status_cells:int ->
+  clock_cells:int ->
+  automation_schedule_row list ->
+  string list
+(** Preserve each schedule's summary in the main Automation row. Rows whose
+    recurrence exceeds the space left after a summary reserve put the full
+    recurrence on labelled continuation lines. Inputs must already be safe
+    single-line terminal text. *)

@@ -55,19 +55,25 @@ let resolve_path ?base_dir path =
 let is_within_dir ~dir path =
   path = dir || String.starts_with ~prefix:(dir ^ "/") path
 
-(** Whether [path] lies within one of [extra_roots]. The roots are
-    endpoint-side paths (an ssh endpoint's [allowed_paths]) that may not
-    exist on this host, so both sides are normalized lexically: resolving
-    them with the host's [Unix.realpath] would judge another machine's
-    filesystem by this one. *)
-let is_within_extra_root ?workdir ~extra_roots path =
+(** [Some p] when [path] lies within one of [extra_roots], [p] being its
+    lexical normal form; [None] otherwise. The roots are endpoint-side paths
+    (an ssh endpoint's [allowed_paths]) that may not exist on this host, so
+    both sides are normalized lexically: resolving them with the host's
+    [Unix.realpath] would judge another machine's filesystem by this one. *)
+let extra_root_path ?workdir ~extra_roots path =
   match extra_roots with
-  | [] -> false
+  | [] -> None
   | _ :: _ ->
       let lexical = normalize_path ?base_dir:workdir path in
-      List.exists
-        (fun root -> is_within_dir ~dir:(normalize_path root) lexical)
-        extra_roots
+      if
+        List.exists
+          (fun root -> is_within_dir ~dir:(normalize_path root) lexical)
+          extra_roots
+      then Some lexical
+      else None
+
+let is_within_extra_root ?workdir ~extra_roots path =
+  Option.is_some (extra_root_path ?workdir ~extra_roots path)
 
 (** Path allowlist. When workdir is set, restrict to workdir + /tmp only.
     When unset, allow /tmp, cwd subtree, and the documented sandbox workspace

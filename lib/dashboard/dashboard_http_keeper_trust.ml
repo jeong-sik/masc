@@ -49,14 +49,16 @@ let keeper_trust_json ?(include_receipt = false)
         match latest_receipt with
         | Some receipt -> Option.value ~default:(`String "no_receipt") (Json_util.assoc_member_opt "terminal_reason_code" receipt)
         | None -> `String "no_receipt" );
-      ( "operator_disposition",
-        match latest_receipt with
-        | Some receipt -> Option.value ~default:(`String "not_run") (Json_util.assoc_member_opt "operator_disposition" receipt)
-        | None -> `String "not_run" );
-      ( "operator_disposition_reason",
-        match latest_receipt with
-        | Some receipt -> Option.value ~default:(`String "no_receipt") (Json_util.assoc_member_opt "operator_disposition_reason" receipt)
-        | None -> `String "no_receipt" );
+      (* The receipt's disposition as the trust snapshot relays it. It is
+         [null] when there is no receipt, when the receipt's pair is damaged
+         (a kind the receipt module does not write, or a kind without its
+         reason), and when the snapshot shows its own verdict instead (a
+         pending approval, an unreadable approval queue, an active runtime
+         blocker). The compact trust projections copy the same two fields
+         from the same snapshot. *)
+      (* DET-OK: the snapshot writes both keys on every path; null is its own value for "none relayed". *)
+      ("operator_disposition", Option.value ~default:`Null (Json_util.assoc_member_opt "operator_disposition" runtime_trust));
+      ("operator_disposition_reason", Option.value ~default:`Null (Json_util.assoc_member_opt "operator_disposition_reason" runtime_trust));
       ( "completion_contract_result",
         match latest_receipt with
         (* Missing receipt field stays a UI marker; this is not a runtime
@@ -94,3 +96,11 @@ let keeper_trust_json ?(include_receipt = false)
         else
           `Null );
     ]
+
+let degraded_keeper_trust_json ~site ~attention_reason =
+  Keeper_runtime_trust_snapshot.unread_keeper_json
+    ~disposition:"Degraded"
+    ~disposition_reason:site
+    ~attention_reason
+    ~next_human_action:"inspect_keeper_dashboard_worker"
+;;

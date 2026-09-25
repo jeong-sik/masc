@@ -61,6 +61,14 @@ save survives an eject or a server restart. Save through the game's own menu
 before a long pause. A save that did not reach disk is listed in `unsaved`
 on the call that wrote it; the call itself still happened.
 
+`masc_dos_save` keeps the whole machine under a slot name — CPU, memory,
+screen, open files and the key ledger — without moving it, and anyone may
+call it. It works in every game and keeps the exact moment, so save at the
+end of your turn and before a risky choice. `masc_dos_restore` with no slot
+lists the saved ones; with a slot it puts that machine back and you hold the
+controller, so restore only a game nobody else is playing. Restoring does not
+touch the game's own save files.
+
 ## Loading
 
 `masc_dos_load` with no `program` lists the inventory. A game directory with

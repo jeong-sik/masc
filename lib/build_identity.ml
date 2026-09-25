@@ -8,6 +8,7 @@ type t =
   ; commit_source : string option [@default None]
   ; binary_commit : string option [@default None]
   ; binary_commit_source : string option [@default None]
+  ; ocaml_dos_core : Dos_lane.core
   ; source_fingerprint : string option [@default None]
   ; provenance_source : string [@default "absent"]
   ; executable_sha256 : string option [@default None]
@@ -1268,6 +1269,7 @@ let current () =
   ; commit_source = commit_resolution.commit_source
   ; binary_commit = commit_resolution.binary_commit
   ; binary_commit_source = commit_resolution.binary_commit_source
+  ; ocaml_dos_core = Dos_lane.core
   ; source_fingerprint =
       Option.map
         (fun binding -> binding.provenance.build_input_fingerprint)

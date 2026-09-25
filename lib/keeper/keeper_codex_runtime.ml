@@ -93,18 +93,21 @@ let project_messages messages =
 
 let unbounded_model_input_capacity_bytes = max_int
 
-(* #37353: a Resume carries the whole canonical snapshot inside
-   [developerInstructions], one string, and the app-server refuses a string
-   over 10 MiB. That refusal came after a tool effect, so the effect fence
-   forbade the narrowed retry and the turn was lost. A declared
-   max-prompt-bytes therefore windows the first attempt, not only the retry
-   after a typed overflow (window RFC §4.1).
+(* A declared max-prompt-bytes windows the first attempt, not only the retry
+   after a typed overflow (window RFC §4.1): a refusal that comes after a tool
+   effect is fenced from the narrowed retry, and the turn is lost.
 
    Nothing declared keeps this lane exactly as it was: the first attempt
    unbounded, [measure_model_input_message_bytes], the cut made inside
    [Host.prepare_turn]. That is the operator's decision (ask7a9c2dbf75c6a2fa);
    window RFC §4.1 records it as the Codex exception to "refuse at
-   admission". *)
+   admission".
+
+   The vendor states its limit as a string length in characters
+   ([string_above_max_length], 10485760); this window counts bytes
+   ([String.length]). A UTF-8 string has at least as many bytes as
+   characters, so a byte window at the declared number always fits the
+   character limit: it can cut short, never over. *)
 let starting_capacity_of_declared_prompt_limit = function
   | Some bytes -> bytes
   | None -> unbounded_model_input_capacity_bytes
@@ -115,36 +118,30 @@ let measure_model_input_message_bytes (message : Agent_core.Types.message) =
 ;;
 
 (* What one kept message adds to what this lane writes, charged only when a
-   limit is declared. [project_messages] renders a [System] message into
-   [developerInstructions] joined by a two-byte separator. On a Resume every
-   message the snapshot keeps is the same encoding again inside a JSON array,
-   plus a comma. On a Start a non-system message goes to [thread/inject_items]
-   as that encoding and no snapshot is sent. The larger of the two is charged,
-   so the window fits whichever mode the attempt turns out to be. *)
+   limit is declared. On a Start [project_messages] renders a [System] message
+   into [developerInstructions] joined by a two-byte separator, and any other
+   message goes to [thread/inject_items] as that encoding. A Resume writes no
+   conversation: the thread holds it. It writes only what
+   {!Host.is_carried_on_resume} selects, each behind its role label and a
+   two-byte separator in front of the goal ({!Host.resume_prompt}); every other
+   [System] message goes to [developerInstructions] as on a Start. The larger
+   of the two is charged, so the window fits whichever mode the attempt turns
+   out to be. *)
 let measure_declared_prompt_message_bytes (message : Agent_core.Types.message) =
   let encoded = String.length (Host.encode_history_message message) in
-  let developer_bytes =
+  if Host.is_carried_on_resume message
+  then String.length (Host.history_role_label message.role) + encoded + 2
+  else
     match message.role with
     | Agent_core.Types.System -> encoded + 2
-    | Agent_core.Types.User | Agent_core.Types.Assistant | Agent_core.Types.Tool -> 0
-  in
-  let resume_bytes =
-    developer_bytes
-    + if Host.is_composed_system_context message then 0 else encoded + 1
-  in
-  let start_bytes =
-    match message.role with
-    | Agent_core.Types.System -> developer_bytes
     | Agent_core.Types.User | Agent_core.Types.Assistant | Agent_core.Types.Tool ->
       encoded + 1
-  in
-  max resume_bytes start_bytes
 ;;
 
 (* The provider-bound copy is windowed; the durable conversation is not
    rewritten. [reserved_bytes] is what the attempt sends besides history --
-   system prompt, posture note, goal, the Resume preamble and snapshot
-   envelope -- so the window and the fixed sections share one ceiling. *)
+   system prompt, posture note and goal -- so the window and the fixed
+   sections share one ceiling. *)
 (* Same cut the Agent Core path makes, and the same reading it reports:
    [project_with_drop] keeps how much of the history survived, [project]
    throws it away. Discarding it wrote every official-client turn record with
@@ -303,16 +300,75 @@ let read_usage_after_quota_refusal ~keeper_name ~runtime_id ~clock ~cwd config =
          "Codex usage not read after a quota refusal: no server root switch")
 ;;
 
-(* Always installed so usage-window reports are recorded. A turn nobody
-   streams, traces or observes gets only that; its other events are ignored as
-   before. *)
-let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action on_event =
+(* The newest request: the context it occupied, in the inclusive convention
+   [Runtime_observation.request_context] uses (OpenAI's input count already
+   includes the cached prefix), and its output, final once the frame for
+   that response arrives. A compaction estimate is the whole new history:
+   its size is the occupancy, and it has no cache split and no response
+   behind it. *)
+let request_context_of_last_usage : Runtime_codex_app_server.last_usage -> Runtime_observation.request_context =
+  function
+  | Runtime_codex_app_server.Request_usage usage ->
+    { input_tokens = usage.input_tokens
+    ; cache =
+        Some
+          { Runtime_observation.cache_creation_input_tokens = usage.cache_write_input_tokens
+          ; cache_read_input_tokens = usage.cached_input_tokens
+          }
+    ; output_tokens = Some usage.output_tokens
+    }
+  | Runtime_codex_app_server.Context_estimate { estimated_tokens } ->
+    { input_tokens = estimated_tokens; cache = None; output_tokens = None }
+;;
+
+(* OpenAI counting, as Backend_openai_parse reads the API wire: the input
+   count already includes the cached prefix and the output count already
+   includes reasoning, so both copy across and the cache fields fill the
+   canonical record's cache slots. *)
+let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
+  : Agent_core.Types.api_usage
+  =
+  { input_tokens = usage.input_tokens
+  ; output_tokens = usage.output_tokens
+  ; cache_creation_input_tokens = usage.cache_write_input_tokens
+  ; cache_read_input_tokens = usage.cached_input_tokens
+  ; cost_usd = None
+  }
+;;
+
+(* Always installed so usage-window reports and the thread's usage counts are
+   recorded. A turn nobody streams, traces or observes gets only those; its
+   other events are ignored as before. *)
+let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
+    ~on_usage_report ~position on_event =
+  (* The thread's running count, reported under the app-server turn id (the
+     identity the completion hook also writes for a Codex turn) and the
+     thread it counts. The app-server's own total is kept: an overflow reset
+     reports zero counts with the window size there. *)
+  let report_usage ~thread_id ~turn_id ~model
+      (thread_total : Runtime_codex_app_server.token_usage) =
+    Option.iter
+      (fun report ->
+         report
+           { Keeper_client_usage_report.official_turn = turn_count
+           ; response_id = turn_id
+           ; model
+           ; conversation_id = thread_id
+           ; position
+           ; usage_scope = Runtime_usage_scope.Conversation_cumulative
+           ; usage = api_usage_of_token_usage thread_total
+           ; vendor_total_tokens = Some thread_total.total_tokens
+           })
+      on_usage_report
+  in
   match on_event, raw_trace_run, on_native_action with
   | None, None, None ->
     Some
       (function
         | Runtime_codex_app_server.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
+        | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; thread_total } ->
+          report_usage ~thread_id ~turn_id ~model thread_total
         | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
         | Turn_finished _ -> ())
@@ -404,6 +460,8 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
             server_name
         | Runtime_codex_app_server.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
+        | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; thread_total } ->
+          report_usage ~thread_id ~turn_id ~model thread_total
         | Runtime_codex_app_server.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text
@@ -623,23 +681,22 @@ let recovery_failure_of_client_error = function
     Keeper_official_client_session_store.Protocol_failed
 ;;
 
-(* A Gate continuation may only resume the thread it was captured in. An
-   overflow there after a tool effect cannot be shrink-retried and the thread
-   cannot take the continuation again, so it is recorded [Vendor_session_full]
-   like the Claude Code lane: the Gate operation fails for good, the effect
-   stays on the attempt's evidence, and the next ordinary turn starts fresh.
-   An observation-free overflow keeps [Input_rejected Bootstrap_floor_exceeded]:
-   this lane resends its canonical context on resume, so the same-thread
-   shrink retry ([resolve_input_rejected_for_shrink_retry]) can still fit.
-   When that retry has nothing smaller left, [conclude_exhausted_gate_resume]
-   re-records it as [Vendor_session_full No_activity_observed]. *)
+(* A Gate continuation may only resume the thread it was captured in. When
+   that thread refuses the resume as a context overflow, the thread itself is
+   full: a Resume sends none of the conversation, so its input is the same at
+   every capacity, and no fresh start may carry the continuation. It is
+   recorded [Vendor_session_full], as in the Claude Code lane: the Gate
+   operation fails for good, whether a tool effect came first stays in the
+   record, and the next ordinary turn starts fresh. *)
 let recovery_failure_of_attempt ~thread_mode ~gate_continuation error =
   match thread_mode, gate_continuation, error with
   | ( Runtime_codex_app_server.Resume _
     , true
-    , Runtime_codex_app_server.Context_window_exceeded { tool_effect_attempted = true; _ } ) ->
+    , Runtime_codex_app_server.Context_window_exceeded { tool_effect_attempted; _ } ) ->
     Keeper_official_client_session_store.Vendor_session_full
-      Keeper_official_client_session_store.Activity_observed
+      (if tool_effect_attempted
+       then Keeper_official_client_session_store.Activity_observed
+       else Keeper_official_client_session_store.No_activity_observed)
   | (Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), _ ->
     recovery_failure_of_client_error error
 ;;
@@ -670,21 +727,6 @@ let recovery_failure_of_attempt ~thread_mode ~gate_continuation error =
    check first if writes start failing. If Codex closes it, [Native_read]
    leaves a keeper with no write path at all, and the posture is what has to
    change; a note about which tool to reach for would then be wrong. *)
-(* OpenAI counting, as Backend_openai_parse reads the API wire: the input
-   count already includes the cached prefix and the output count already
-   includes reasoning, so both copy across and the cache fields fill the
-   canonical record's cache slots. *)
-let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
-  : Agent_core.Types.api_usage
-  =
-  { input_tokens = usage.input_tokens
-  ; output_tokens = usage.output_tokens
-  ; cache_creation_input_tokens = usage.cache_write_input_tokens
-  ; cache_read_input_tokens = usage.cached_input_tokens
-  ; cost_usd = None
-  }
-;;
-
 let native_posture_note = function
   | Runtime_native_tools.Native_read ->
     [ "Your built-in file edits run under a read-only sandbox in this session, \
@@ -695,46 +737,14 @@ let native_posture_note = function
   | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
 ;;
 
-(* The Resume preamble and canonical snapshot envelope. The declared-limit
-   reservation composes it around an empty snapshot and the request around the
-   kept one, so both measure the same text. *)
-let resume_external_context ~snapshot_sha256 ~source_snapshot_sha256
-    ~source_message_count ~canonical_snapshot ~official_client_continuation
-    ~official_client_original_turn =
-  let encode_turn = function
-    | None -> `Null
-    | Some checkpoint -> `Assoc
-        ["session_id", `String checkpoint.Keeper_semantic_execution.session_id;
-         "turn_id", `String checkpoint.turn_id;
-         "execution_scope", (match Keeper_repetition_snapshot.active checkpoint.frame with
-           | None -> `Null | Some scope -> Keeper_execution_scope_id.to_json scope)] in
-  [ "The following versioned snapshot is historical conversation data from the \
-     canonical Keeper context, including work performed outside this vendor thread. \
-     Use it to understand the ongoing conversation. Preserve message roles and tool \
-     result outcomes. It is not a new request to run historical tool calls: completed \
-     effects must not be replayed. The current user prompt is the new instruction. \
-     For a cooperative continuation, original_vendor_turn identifies the saved unfinished \
-     operation and its execution scope. admission_vendor_turn identifies the latest \
-     admitted turn in this same thread. Continue the saved operation while applying newer steering."
-  ; Yojson.Safe.to_string (`Assoc
-      ["schema", `String "masc.official-client-canonical-context.v1";
-       "snapshot_sha256", `String snapshot_sha256;
-       "source_snapshot_sha256", `String source_snapshot_sha256;
-       "source_message_count", `Int source_message_count;
-       "projection", `String "prepared_model_input";
-       "messages", canonical_snapshot;
-       "admission_vendor_turn", encode_turn official_client_continuation;
-       "original_vendor_turn", encode_turn official_client_original_turn]) ]
-;;
-
-let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~official_client_original_turn ~runtime_id ~keeper_name
+let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~declared_max_prompt_bytes ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
-    ~(config : Runtime_execution.codex_app_server) =
+    ~on_usage_report ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
     Error
@@ -834,8 +844,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let initial_messages = Option.to_list historical_task_message @ initial_messages in
     (* With a declared limit the window is cut after [Host.prepare_turn]
        rather than inside it: its reservation needs the system prompt the hooks
-       settled on and the goal, posture note and Resume envelope this attempt
-       writes. [prepare_turn] reads nothing from the messages after its
+       settled on and the goal and posture note this attempt writes.
+       [prepare_turn] reads nothing from the messages after its
        projection step, so the cut is the one it would have made. With nothing
        declared the cut stays where it was. *)
     let* prepared =
@@ -871,41 +881,22 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
               images )
     in
     let posture_notes = native_posture_note native_posture in
-    let compose_developer_instructions ~developer_messages ~external_context =
-      (prepared.system_prompt :: posture_notes)
-      @ developer_messages @ external_context
+    let compose_developer_instructions developer_messages =
+      (prepared.system_prompt :: posture_notes) @ developer_messages
       |> List.filter (fun text -> String.trim text <> "")
       |> String.concat "\n\n"
     in
-    let source_snapshot_sha256 = `List (List.map Keeper_official_client_context_codec.to_json initial_messages)
-      |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
     let* prepared =
       match declared_max_prompt_bytes with
       | None -> Ok prepared
       | Some _ ->
         (* Everything this attempt writes that is not history, measured by
-           composing it with no history at all. The snapshot digest is not
-           known until the cut is made; the source digest stands in for it
-           because both are 64 hex characters. Each message the cut keeps then
+           composing it with no history at all. Each message the cut keeps then
            adds at most what [measure_declared_prompt_message_bytes] charges
            for it, and the composition is measured before its final trim, so
            the two sums bound the request. *)
         let reserved_bytes =
-          let external_context =
-            match thread_mode with
-            | Runtime_codex_app_server.Start -> []
-            | Runtime_codex_app_server.Resume _ ->
-              resume_external_context
-                ~snapshot_sha256:source_snapshot_sha256
-                ~source_snapshot_sha256
-                ~source_message_count:(List.length initial_messages)
-                ~canonical_snapshot:(`List [])
-                ~official_client_continuation
-                ~official_client_original_turn
-          in
-          String.length
-            (compose_developer_instructions ~developer_messages:[] ~external_context)
-          + String.length prompt
+          String.length (compose_developer_instructions []) + String.length prompt
         in
         if reserved_bytes >= capacity_bytes
         then
@@ -945,33 +936,50 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~model_id:config.model
         ~requested:prepared.reasoning_effort
     in
-    let* developer_messages, history = project_messages prepared.messages in
-    (* Full canonical context is data, not a guessed unseen suffix. Resume
-       replaces this configuration on the existing vendor thread; it never
-       appends native tool calls into the vendor execution stream. *)
+    (* A Resume sends none of the conversation: the thread holds it and
+       compacts it itself. What changes per turn or per operation -- the
+       context carrier, the Librarian working state and the historical task
+       reference ({!Host.is_carried_on_resume}) -- goes in front of the goal,
+       as the Claude Code lane sends it. Codex applies the [developerInstructions]
+       a [thread/resume] names only when it next compacts the thread (codex-cli
+       0.156.1, 2026-09-25: a resumed thread's requests carried none of them
+       until its compaction wrote them into the replacement history), so the
+       carried messages stay out of them and the compacted thread never holds a
+       stale copy of what the prompt carries. *)
+    let* developer_messages, history =
+      project_messages
+        (match thread_mode with
+         | Runtime_codex_app_server.Start -> prepared.messages
+         | Runtime_codex_app_server.Resume _ ->
+           (* Runtime_codex_app_server drops history on Resume. Only
+              non-carried System messages can enter developerInstructions;
+              formatting the held conversation here would allocate it again. *)
+           List.filter
+             (fun (message : Agent_core.Types.message) ->
+                not (Host.is_carried_on_resume message)
+                && match message.role with
+                   | Agent_core.Types.System -> true
+                   | Agent_core.Types.User | Agent_core.Types.Assistant
+                   | Agent_core.Types.Tool -> false)
+             prepared.messages)
+    in
+    let prompt =
+      match thread_mode with
+      | Runtime_codex_app_server.Start -> prompt
+      | Runtime_codex_app_server.Resume _ ->
+        Host.resume_prompt ~goal:prompt prepared.messages
+    in
     let snapshot_messages =
       List.filter (fun message -> not (Host.is_composed_system_context message))
         prepared.messages in
-    let canonical_snapshot =
-      `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages) in
-    let snapshot_sha256 = canonical_snapshot |> Yojson.Safe.to_string
-      |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
-    let external_context = match thread_mode with
-      | Runtime_codex_app_server.Start -> []
-      | Runtime_codex_app_server.Resume _ ->
-        resume_external_context
-          ~snapshot_sha256
-          ~source_snapshot_sha256
-          ~source_message_count:(List.length initial_messages)
-          ~canonical_snapshot
-          ~official_client_continuation
-          ~official_client_original_turn
-    in
+    let snapshot_sha256 =
+      `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages)
+      |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
     let context_frontier : Keeper_official_client_session_store.context_frontier =
       { snapshot_sha256; message_count = List.length snapshot_messages;
         delivery = (match thread_mode with
           | Runtime_codex_app_server.Start -> Prepared_start_context
-          | Runtime_codex_app_server.Resume _ -> Replaced_configuration);
+          | Runtime_codex_app_server.Resume _ -> Held_by_vendor_session);
         acknowledged_turn = None } in
     (* [None] here means "send no developerInstructions": [optional_field]
        omits the member and the app-server runs the thread on Codex's own
@@ -982,8 +990,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
        not see a blank keeper prompt behind the posture note this lane
        appends (#33165). *)
     let composed_developer_instructions =
-      compose_developer_instructions ~developer_messages ~external_context
-      |> String.trim
+      compose_developer_instructions developer_messages |> String.trim
     in
     let developer_instructions = Some composed_developer_instructions in
     (* The window already fits; this is the account checked once more before
@@ -1007,20 +1014,17 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                   request_bytes
                   capacity_bytes))
     in
-    (* Current System context belongs to replaceable thread configuration,
-       including on Resume. Injected developer items are durable history and
-       would retain obsolete observation frames on every later turn. The
-       existing vendor thread still owns its conversation and tool effects. *)
+    (* No developer items: a Start carries the per-turn context in
+       [developerInstructions], a Resume in front of its goal. *)
     let developer_context = [] in
-    (* Attribute the actual encoded snapshot only after the complete turn/start
-       write. Resumed vendor-owned tool history remains outside this capture. *)
+    (* Reported only after the complete turn/start write. A Resume sent none of
+       the conversation; the thread holds it. *)
     let report_transmitted_input () =
       match
         on_transmitted_model_input
           (match thread_mode with
            | Runtime_codex_app_server.Start -> Host.Whole_input_transmitted prepared.messages
-           | Runtime_codex_app_server.Resume _ ->
-             Host.Whole_input_transmitted prepared.messages)
+           | Runtime_codex_app_server.Resume _ -> Host.Held_by_client_session)
       with
       | () -> ()
       | exception exn ->
@@ -1264,8 +1268,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             ~latency_ms:
               (Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
               (* A host stop ends the turn from inside a tool call, before
-                 the app-server's thread/tokenUsage/updated for this turn has
-                 arrived, so there is no count to report here. *)
+                 the app-server's thread/tokenUsage/updated for the response
+                 that asked for it arrives. Frames of earlier responses in
+                 the turn were already reported on the stream. *)
             ~request_context:None
             stop
         in
@@ -1306,7 +1311,13 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       try
         let on_stream_event =
           codex_stream_callback
-          ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action on_event
+          ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
+          ~on_usage_report
+          ~position:
+            (match thread_mode with
+             | Runtime_codex_app_server.Start -> Keeper_usage_resolution.Fresh
+             | Runtime_codex_app_server.Resume _ -> Keeper_usage_resolution.Resumed)
+          on_event
         in
         (match
        Runtime_codex_app_server.run_turn
@@ -1398,12 +1409,25 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
          | Some detail -> Error (internal_error detail)
        in
        let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
+       (* The spend is the thread's running count, resolved against the
+          previous count of the same thread; a repeated frame adds nothing.
+          The newest request's [last] rides apart as the context it
+          occupied, the way the Claude Code lane keeps its request context.
+          A turn whose count a context-window fill replaced has no one count
+          that measures it, so it reports no spend rather than the count
+          that restarted from zero. *)
+       let spend, request_context =
+         match turn.usage with
+         | Some (Runtime_codex_app_server.Thread_count { last; thread_total }) ->
+           Some (api_usage_of_token_usage thread_total), Some (request_context_of_last_usage last)
+         | Some Runtime_codex_app_server.Thread_count_replaced | None -> None, None
+       in
        let response =
          { Agent_core.Types.id = turn.turn_id
          ; model = turn.model
          ; stop_reason = EndTurn
          ; content = [ Text turn.text ]
-         ; usage = Option.map api_usage_of_token_usage turn.usage
+         ; usage = spend
          ; telemetry =
              Some
                { Agent_core.Types.default_inference_telemetry with
@@ -1454,16 +1478,17 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
            ~attempt_details_source:"codex_app_server"
            ~agent_core_internal_runtime_allowed:false
            ~usage_scope:
-             (match turn.usage with
-              | Some _ -> Runtime_usage_scope.Per_request
+             (match spend with
+              | Some _ -> Runtime_usage_scope.Conversation_cumulative
               | None -> Runtime_usage_scope.Usage_scope_unavailable)
+           ?request_context
            ()
        in
        Ok
          { Runtime_agent.response
          ; checkpoint = None
          ; session_id = turn.thread_id
-         ; session_resumed = None
+         ; session_resumed = Some turn.resumed
          ; turns = turn_count
          ; trace_ref = None
          ; run_validation = None
@@ -1527,10 +1552,10 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
    next capacity, so consuming the just-written
    [Input_rejected] recovery with the applicable explicit resolution
    cannot bypass the fence. A failed resolution is not retried here; the next
-   attempt's claim surfaces the refusal instead. *)
-(* A Gate is bound to its previous settlement. An observation-free rejected
-   input may retry there, but may never discard that session for a fresh one. *)
-let resolve_input_rejected_for_shrink_retry ~official_client_continuation ~base_path ~keeper_name ~runtime_id
+   attempt's claim surfaces the refusal instead. A Gate continuation never
+   gets here ([same_run_retry_authorized] in [run]), so the retry is always a
+   fresh start. *)
+let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id
   ()
   =
   match Keeper_official_client_session_store.load ~base_path ~keeper_name with
@@ -1552,58 +1577,13 @@ let resolve_input_rejected_for_shrink_retry ~official_client_continuation ~base_
          ~keeper_name
          ~expected
          ~recovery_id
-         ~resolution:(match official_client_continuation with
-           | Some _ -> Keeper_official_client_session_store.Retry_previous
-           | None -> Keeper_official_client_session_store.Restart_fresh)
+         ~resolution:Keeper_official_client_session_store.Restart_fresh
          ~resolved_by:"context-overflow-shrink-retry"
          ~resolved_at:(Time_compat.now ())
      with
      | Ok _ -> ()
      | Error _ -> ())
   | Ok _ -> ()
-;;
-(* The shrink sequence returns an error only once it will not retry, so a
-   Gate continuation's floor rejection still on record at that point is final:
-   the thread refused every smaller input, and no fresh session may carry the
-   continuation. Left as [Input_rejected], the Gate would wait on an operator
-   whose only resume is [Retry_previous] into the same full thread. It is
-   re-recorded [Vendor_session_full No_activity_observed], the same outcome as
-   an overflow after activity, so the Gate operation fails with that cause and
-   the next ordinary turn starts fresh. *)
-let conclude_exhausted_gate_resume ~gate_continuation ~base_path ~keeper_name ~runtime_id
-  ()
-  =
-  match gate_continuation, Keeper_official_client_session_store.load ~base_path ~keeper_name with
-  | false, _ | true, (Error _ | Ok None) -> ()
-  | ( true
-    , Ok
-        (Some
-           ({ Keeper_official_client_session_store.phase =
-                Recovery_required
-                  { failure = Input_rejected Bootstrap_floor_exceeded
-                  ; previous_settlement = Some _
-                  ; recovery_id
-                  ; _
-                  }
-            ; runtime_id = stored_runtime_id
-            ; _
-            } as expected)) )
-    when String.equal stored_runtime_id runtime_id ->
-    (match
-       Keeper_official_client_session_store.conclude_resume_session_full
-         ~base_path
-         ~keeper_name
-         ~expected
-         ~recovery_id
-         ~updated_at:(Time_compat.now ())
-     with
-     | Ok _ -> ()
-     | Error detail ->
-       Log.Keeper.error
-         ~keeper_name
-         "Codex Gate resume stayed an input rejection; recording the full thread failed: %s"
-         detail)
-  | true, Ok (Some _) -> ()
 ;;
 (* Uncertainty cannot erase stronger evidence from an earlier attempt. The
    compare-and-set also preserves an effect observed concurrently. *)
@@ -1614,7 +1594,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ?official_task_reference ~accepts_image_input ?required_native_posture ?official_client_continuation ?official_client_original_turn ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ?official_task_reference ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1623,6 +1603,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
+    ?on_usage_report
     ~event_bus ~raw_trace ~on_event ~config () =
   let settled_session = Atomic.make None in
   let on_session_settled value = Atomic.set settled_session (Some value) in
@@ -1653,9 +1634,14 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
       ~starting_capacity:
         (starting_capacity_of_declared_prompt_limit declared_max_prompt_bytes)
+      (* A continuation always resumes its original thread, and a Resume's
+         input is the same at every capacity; the retry would be a fresh
+         start, which a continuation forbids. Its overflow ends the turn on the
+         typed error instead ([recovery_failure_of_attempt]). *)
       ~same_run_retry_authorized:(fun () ->
-        Keeper_provider_attempt_effect.allows_same_turn_retry
-          (Atomic.get effect_disposition)
+        Option.is_none official_client_continuation
+        && Keeper_provider_attempt_effect.allows_same_turn_retry
+             (Atomic.get effect_disposition)
         && Option.is_some !observed_next_shrink_capacity_bytes)
       ~shrink_capacity:(fun ~capacity:_ ~default_capacity ->
         Option.value
@@ -1671,7 +1657,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
       ~shrink_admits_history:(fun ~capacity:_ -> true)
       ~on_shrink_retry:
         (fun ~shrink_attempt ~previous_capacity:previous_capacity_bytes ~capacity:capacity_bytes ->
-          resolve_input_rejected_for_shrink_retry ~official_client_continuation
+          resolve_input_rejected_for_shrink_retry
             ~base_path
             ~keeper_name
             ~runtime_id
@@ -1683,7 +1669,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
             previous_capacity_bytes
             capacity_bytes)
       ~attempt:(fun ~capacity:capacity_bytes ->
-        run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~official_client_continuation ~official_client_original_turn
+        run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~official_client_continuation
           ~required_native_posture
           ~runtime_id
           ~keeper_name
@@ -1716,6 +1702,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
           ~context
           ~terminal_effect_state
         ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+          ~on_usage_report
           ~event_bus
           ~raw_trace
           ~on_event
@@ -1725,15 +1712,6 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
           ~config)
       ())
   in
-  (match result with
-   | Ok _ -> ()
-   | Error _ ->
-     conclude_exhausted_gate_resume
-       ~gate_continuation:(Option.is_some official_client_continuation)
-       ~base_path
-       ~keeper_name
-       ~runtime_id
-       ());
   { result
   ; settled_session = Atomic.get settled_session
   ; effect_disposition = Atomic.get effect_disposition
@@ -1751,6 +1729,8 @@ module For_testing = struct
         ~raw_trace_run:None
         ~turn_count
         ~on_native_action:(Some observe)
+        ~on_usage_report:None
+        ~position:Keeper_usage_resolution.Fresh
         None
     with
     | Some callback -> callback event
@@ -1760,5 +1740,4 @@ module For_testing = struct
   let codex_error_to_core_error = codex_error_to_core_error
   let recovery_failure_of_client_error = recovery_failure_of_client_error
   let recovery_failure_of_attempt = recovery_failure_of_attempt
-  let conclude_exhausted_gate_resume = conclude_exhausted_gate_resume
 end

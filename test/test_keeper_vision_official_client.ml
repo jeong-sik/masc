@@ -106,7 +106,7 @@ let with_fixture mode test =
   let execute () =
     let meta = match Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String "vision-fixture"]) with
       | Ok meta -> meta | Error detail -> fail detail in
-    let artifact = match V.store_artifact ~dir:(V.vision_store_dir ~keeper_name:meta.name)
+    let artifact = match V.store_kept ~keeper_name:meta.name
         (Base64.decode_exn png) with
       | Ok handle -> Multimodal.Vision_artifact_store.to_string handle
       | Error detail -> fail detail in

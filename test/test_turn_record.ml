@@ -62,6 +62,39 @@ let test_block_id_post_tool_round_classes () =
         (List.exists (fun (row, _) -> Prompt_block_id.equal row block) pinned))
     Prompt_block_id.all_known
 
+(* The Dashboard decodes turn records against its own copy of this vocabulary,
+   and a block it does not know rejects the whole record — tokens and price
+   included. [skill_compositions] shipped here and not there, and every turn
+   that carried composition Skills vanished from the Dashboard with no error.
+   Hold [TURN_PROMPT_BLOCK_IDS] equal to [all_known]; the Dashboard derives
+   its block type and both decoders from that one array. *)
+let test_block_id_dashboard_mirror () =
+  let source =
+    In_channel.with_open_text
+      "../dashboard/src/api/dashboard-turn-records.ts"
+      In_channel.input_all
+  in
+  let start_marker = "export const TURN_PROMPT_BLOCK_IDS = [" in
+  let end_marker = "] as const" in
+  let dashboard_ids =
+    match Astring.String.find_sub ~sub:start_marker source with
+    | None -> failf "TURN_PROMPT_BLOCK_IDS not found in the Dashboard decoder"
+    | Some start ->
+      let body_start = start + String.length start_marker in
+      (match Astring.String.find_sub ~start:body_start ~sub:end_marker source with
+       | None -> failf "TURN_PROMPT_BLOCK_IDS has no closing [as const]"
+       | Some stop ->
+         (* Entries are single-quoted, so splitting on the quote leaves every
+            id at an odd index. *)
+         String.sub source body_start (stop - body_start)
+         |> String.split_on_char '\''
+         |> List.filteri (fun index _ -> index mod 2 = 1))
+  in
+  check (list string)
+    "Dashboard TURN_PROMPT_BLOCK_IDS equals Prompt_block_id.all_known"
+    (List.map Prompt_block_id.to_string Prompt_block_id.all_known)
+    dashboard_ids
+
 (* ── TurnRecord codec ─────────────────────────────────── *)
 
 let digest_of_label label =
@@ -1110,6 +1143,8 @@ let () =
         ; test_case "unknown block rejected" `Quick test_block_id_unknown_rejected
         ; test_case "post-tool round classes" `Quick
             test_block_id_post_tool_round_classes
+        ; test_case "Dashboard block ids mirror all_known" `Quick
+            test_block_id_dashboard_mirror
         ] )
     ; ( "codec"
       , [ test_case "roundtrip" `Quick test_codec_roundtrip

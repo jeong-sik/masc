@@ -7,17 +7,19 @@ import { ensureDevToken } from './dev-token'
 import { isRecord, asBoolean, asNumber, asString, asRecordArray } from '../components/common/normalize'
 import { type TelemetryFreshnessMetadata } from './dashboard-shared'
 
-// The type is derived from the list, and the decoder reads the list, so a
-// block id is added or removed in one place. It used to be a hand-written
-// union with a switch beside it and a second switch in dashboard-keeper-prompt:
-// the persona hard-cut (masc#27048) updated the type and one switch, the twin
-// kept `case 'persona'`, and three adversarial-review rounds ran red on it.
+// The wire vocabulary of `Prompt_block_id.to_string` over
+// `Prompt_block_id.all_known` (lib/types/prompt_block_id.ml), in that order.
+// test/test_turn_record.ml reads this array and fails when it differs from the
+// OCaml list, so a block the server starts emitting cannot be rejected here.
+// The block type, the `prompt.*` input component ids, and both decoders are
+// derived from this one array.
 export const TURN_PROMPT_BLOCK_IDS = [
   'keeper_instructions',
   'dynamic_context',
   'temporal_summary',
   'memory_os_recall',
   'operator_note',
+  'skill_compositions',
 ] as const
 
 export type TurnPromptBlockId = (typeof TURN_PROMPT_BLOCK_IDS)[number]
@@ -28,19 +30,30 @@ export function decodeTurnPromptBlockId(raw: unknown): TurnPromptBlockId | null 
     : null
 }
 
+// The non-prompt constructors of `Turn_record.input_component_id`
+// (lib/types/turn_record.ml `input_component_id_to_string`).
+const TURN_REQUEST_INPUT_COMPONENT_IDS = [
+  'tool_schemas',
+  'message_user',
+  'message_system',
+  'message_assistant_text',
+  'message_thinking',
+  'message_redacted_thinking',
+  'message_tool_use',
+  'message_tool_result',
+  'message_image',
+  'message_document',
+  'message_audio',
+] as const
+
 export type TurnInputComponentId =
   | `prompt.${TurnPromptBlockId}`
-  | 'tool_schemas'
-  | 'message_user'
-  | 'message_system'
-  | 'message_assistant_text'
-  | 'message_thinking'
-  | 'message_redacted_thinking'
-  | 'message_tool_use'
-  | 'message_tool_result'
-  | 'message_image'
-  | 'message_document'
-  | 'message_audio'
+  | (typeof TURN_REQUEST_INPUT_COMPONENT_IDS)[number]
+
+const TURN_INPUT_COMPONENT_IDS: readonly TurnInputComponentId[] = [
+  ...TURN_PROMPT_BLOCK_IDS.map(block => `prompt.${block}` as const),
+  ...TURN_REQUEST_INPUT_COMPONENT_IDS,
+]
 
 export type TurnBlock = {
   block: TurnPromptBlockId
@@ -396,27 +409,9 @@ function decodeTurnBlockList(raw: unknown): TurnBlock[] | null {
 }
 
 function decodeTurnInputComponentId(raw: unknown): TurnInputComponentId | null {
-  switch (raw) {
-    case 'prompt.keeper_instructions':
-    case 'prompt.dynamic_context':
-    case 'prompt.temporal_summary':
-    case 'prompt.memory_os_recall':
-    case 'prompt.operator_note':
-    case 'tool_schemas':
-    case 'message_user':
-    case 'message_system':
-    case 'message_assistant_text':
-    case 'message_thinking':
-    case 'message_redacted_thinking':
-    case 'message_tool_use':
-    case 'message_tool_result':
-    case 'message_image':
-    case 'message_document':
-    case 'message_audio':
-      return raw
-    default:
-      return null
-  }
+  return (TURN_INPUT_COMPONENT_IDS as readonly unknown[]).includes(raw)
+    ? (raw as TurnInputComponentId)
+    : null
 }
 
 function decodeTurnInputComponents(raw: unknown): TurnInputComponent[] | null {

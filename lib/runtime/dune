@@ -57,6 +57,7 @@
   masc.fd_accountant
   masc.types_boundary
   time_compat
+  masc.time_codec
   masc_random_id
   masc.masc_process
   masc.otel_spans

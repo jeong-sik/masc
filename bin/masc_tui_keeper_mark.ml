@@ -25,6 +25,25 @@ let open_turn = function
   | Some Reading.Health_failing -> Worked_while_failing
   | Some (Reading.Health_running | Reading.Health_idle) | None -> Worked
 
+type turn_clock =
+  | Open_turn_started of float
+  | Last_turn_recorded of float
+  | No_turn_recorded
+
+(* The open turn wins because it is what the keeper is doing now. The last
+   recorded turn is a finished one: on a failing keeper it is the failure, and
+   drawn beside a moving mark its age read as the age of the work in progress
+   (code-reviewer, 2026-09-24: "7m45s" was a failure from before a restart,
+   under a turn that had run for half a minute). *)
+let turn_clock ~(turn : Reading.keeper_turn_state option) ~last_turn_at =
+  match turn with
+  | Some (Reading.Keeper_turn_running { started_at_unix; _ }) ->
+      Open_turn_started started_at_unix
+  | Some Reading.Keeper_turn_idle | Some (Reading.Keeper_turn_unavailable _) | None -> (
+      match last_turn_at with
+      | Some at -> Last_turn_recorded at
+      | None -> No_turn_recorded)
+
 let legend =
   [ health_glyph Reading.Health_running, "healthy"
   ; health_glyph Reading.Health_failing, "failing"
@@ -68,7 +87,7 @@ let column_legend =
   let words word values = String.concat " / " (List.map word values) in
   [ "HEALTH", "keepalive / turn history"
   ; "LIFECYCLE", "the keeper process"
-  ; "TURN", "time since the last turn"
+  ; "TURN", "open turn's run time, else time since the last turn"
   ; "Mode " ^ letters activation_letter activations, words activation_word activations
   ; "S " ^ letters sandbox_letter sandboxes, "sandbox: " ^ words sandbox_word sandboxes
   ]

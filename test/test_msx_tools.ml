@@ -529,6 +529,36 @@ let test_arcade_relay_posts_once_per_medium_change () =
   check posts "a rejected disk boot is not announced" expected (arcade_posts ())
 ;;
 
+(* The Board relay may yield and be cancelled after the machine is installed.
+   The activity callback must have run before that optional side effect starts. *)
+let test_load_activity_precedes_board_relay () =
+  with_workspace @@ fun base_path ->
+  let carts = Filename.concat (Filename.concat (Filename.concat base_path ".masc") "msx") "carts" in
+  List.iter (fun d -> if not (Sys.file_exists d) then Sys.mkdir d 0o755)
+    [ Filename.concat base_path ".masc"; Filename.dirname carts; carts ];
+  write_cart carts "hero.rom" (String.make 0x4000 '\000');
+  ignore (Msx_lane.eject () : (unit, Msx_lane.error) result);
+  Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ())) (fun () ->
+    let notified = ref false in
+    let relay ~author:_ _message =
+      check bool "activity reached the Lane before Board relay" true !notified;
+      raise Exit
+    in
+    let interrupted =
+      try
+        ignore
+          (Tool_misc_msx_lane.handle_load ~tool_name:"masc_msx_load"
+             ~start_time:0. ~base_path ~agent_name:"msx-test"
+             ~after_load:(fun () -> notified := true) ~relay
+             (`Assoc [ ("roms_dir", `String ""); ("cart", `String "hero") ]));
+        false
+      with Exit -> true
+    in
+    check bool "the relay interrupted the response" true interrupted;
+    check bool "the machine was installed before relay" true
+      (Option.is_some (Msx_lane.frame ())))
+;;
+
 (* Two loads of one cartridge at once. The lane serialises them and reads
    each transition inside that critical section, so whichever load takes the
    lock first starts from no machine and the other starts from the cartridge:
@@ -1173,6 +1203,8 @@ let () =
         ; test_case "rendered snapshot reuse and invalidation" `Quick test_rendered_pixel_snapshot
         ; test_case "arcade relay posts once per medium change" `Quick
             test_arcade_relay_posts_once_per_medium_change
+        ; test_case "load activity precedes Board relay" `Quick
+            test_load_activity_precedes_board_relay
         ; test_case "concurrent loads announce the medium once" `Quick
             test_concurrent_loads_announce_the_medium_once
         ; test_case "disk image loads into the drive" `Quick test_disk_load

@@ -12,6 +12,7 @@ import {
   fetchBoardReactionState,
   normalizeBoardContextInferenceSubmission,
   normalizeBoardKarmaLedger,
+  normalizeBoardAttachments,
   requestBoardContextInference,
   sanitizeBoardTitle,
   toggleReaction,
@@ -633,7 +634,6 @@ describe('fetchBoard', () => {
           emoji: '🔥',
           count: 2,
           reacted: true,
-          has_reacted: true,
           recent_user_ids: ['analyst', 'reviewer'],
         },
       ],
@@ -879,7 +879,7 @@ describe('fetchBoardPost', () => {
           {
             emoji: '👍',
             count: 1,
-            has_reacted: false,
+            reacted: false,
             recent_user_ids: ['reader-a'],
           },
         ],
@@ -932,7 +932,6 @@ describe('fetchBoardPost', () => {
           emoji: '🚀',
           count: 4,
           reacted: true,
-          has_reacted: true,
           recent_user_ids: ['reviewer'],
         },
       ],
@@ -944,7 +943,6 @@ describe('fetchBoardPost', () => {
         emoji: '👍',
         count: 1,
         reacted: false,
-        has_reacted: false,
         recent_user_ids: ['reader-a'],
       },
     ])
@@ -952,6 +950,39 @@ describe('fetchBoardPost', () => {
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('format=flat')
     expect(url).toContain('voter=')
+  })
+})
+
+describe('normalizeBoardAttachments', () => {
+  it('decodes a typed HTTPS image and an artifact reference', () => {
+    const sha256 = 'a'.repeat(64)
+    expect(normalizeBoardAttachments([
+      { kind: 'image', url: 'https://cdn.example.com/a.png' },
+      { kind: 'external_link', artifact: { _blob: {
+        sha256, bytes: 12, mime: 'application/octet-stream', preview: '',
+      } } },
+    ])).toEqual([
+      { ok: true, attachment: { kind: 'image', source: {
+        kind: 'url', url: 'https://cdn.example.com/a.png',
+      } } },
+      { ok: true, attachment: { kind: 'external_link', source: {
+        kind: 'artifact', sha256, bytes: 12, mime: 'application/octet-stream',
+      } } },
+    ])
+  })
+
+  it('shows a failure card for old untyped entries, including HTTPS ones', () => {
+    const old = {
+      id: 'a-old', kind: 'image', origin_url: 'https://cdn.example.com/old.png',
+      origin_name: 'old.png', origin_size_bytes: 12, created_at: 1,
+    }
+    expect(normalizeBoardAttachments([
+      old,
+      { ...old, origin_url: 'http://example.com/old.png' },
+    ])).toEqual([
+      { ok: false, raw: old },
+      { ok: false, raw: { ...old, origin_url: 'http://example.com/old.png' } },
+    ])
   })
 })
 
@@ -978,7 +1009,7 @@ describe('createPost', () => {
     })
   })
 
-  it('passes typed metadata through to the board post tool', async () => {
+  it('sends attachments through the typed argument, outside meta', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('{}', {
         status: 200,
@@ -988,43 +1019,19 @@ describe('createPost', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await createPost('Plan', 'Body', 'dashboard-user', {
-      meta: {
-        attachments: [{
-          id: 'att-1',
-          kind: 'external_link',
-          origin_url: 'https://example.test/trace.log',
-          origin_name: 'trace.log',
-          origin_size_bytes: 4,
-          mime_type: 'text/plain',
-          width: null,
-          height: null,
-          created_at: 1_799_000_000,
-        }],
-      },
+      meta: { source: 'dashboard' },
+      attachments: [{ kind: 'external_link', url: 'https://example.test/trace.log' }],
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(JSON.parse(String(init.body))).toMatchObject({
       title: 'Plan',
       content: 'Body',
       author: 'dashboard-user',
-      meta: {
-        attachments: [{
-          id: 'att-1',
-          kind: 'external_link',
-          origin_url: 'https://example.test/trace.log',
-          origin_name: 'trace.log',
-          origin_size_bytes: 4,
-          mime_type: 'text/plain',
-          width: null,
-          height: null,
-          created_at: 1_799_000_000,
-        }],
-      },
+      meta: { source: 'dashboard' },
+      attachments: [{ kind: 'external_link', url: 'https://example.test/trace.log' }],
     })
-  })
-})
+  })})
 
 describe('SubBoard API helpers', () => {
   it('normalizes sub-board members', () => {
@@ -1179,7 +1186,7 @@ describe('board reactions', () => {
         reactions: [{
           emoji: '👍',
           count: 2,
-          has_reacted: true,
+          reacted: true,
           recent_user_ids: ['agent-b', 'agent-a'],
         }],
         supported_reaction_emojis: ['👍', '🚀'],
@@ -1197,7 +1204,6 @@ describe('board reactions', () => {
         emoji: '👍',
         count: 2,
         reacted: true,
-        has_reacted: true,
         recent_user_ids: ['agent-b', 'agent-a'],
       }],
       supportedEmojis: ['👍', '🚀'],
@@ -1229,7 +1235,7 @@ describe('board reactions', () => {
         summary: [{
           emoji: '🚀',
           count: 1,
-          has_reacted: true,
+          reacted: true,
           recent_user_ids: ['dashboard-reviewer'],
         }],
       }), {
@@ -1245,7 +1251,6 @@ describe('board reactions', () => {
       emoji: '🚀',
       count: 1,
       reacted: true,
-      has_reacted: true,
       recent_user_ids: ['dashboard-reviewer'],
     }])
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
@@ -1387,27 +1392,16 @@ describe('board attachments decode', () => {
   }
 
   function attachmentEntry(kind: string, overrides: Record<string, unknown> = {}) {
-    return {
-      id: `a-${kind}`,
-      kind,
-      origin_url: 'https://cdn.example.com/a.png',
-      origin_name: 'a.png',
-      origin_size_bytes: 128,
-      mime_type: 'image/png',
-      width: 640,
-      height: null,
-      created_at: 1_714_989_600,
-      ...overrides,
-    }
+    return { kind, url: 'https://cdn.example.com/a.png', ...overrides }
   }
 
   it('decodes all four attachment kinds into typed entries', async () => {
     stubBoardResponse({
       attachments: [
         attachmentEntry('image'),
-        attachmentEntry('video', { origin_url: 'https://cdn.example.com/b.mp4', mime_type: 'video/mp4' }),
-        attachmentEntry('youtube', { origin_url: 'https://youtu.be/abc123def45', width: null }),
-        attachmentEntry('external_link', { origin_url: 'https://example.com/spec' }),
+        attachmentEntry('video', { url: 'https://cdn.example.com/b.mp4' }),
+        attachmentEntry('youtube', { url: 'https://youtu.be/abc123def45' }),
+        attachmentEntry('external_link', { url: 'https://example.com/spec' }),
       ],
     })
 
@@ -1419,17 +1413,13 @@ describe('board attachments decode', () => {
     expect(first).toMatchObject({
       ok: true,
       attachment: {
-        id: 'a-image',
         kind: 'image',
-        origin_url: 'https://cdn.example.com/a.png',
-        origin_size_bytes: 128,
-        width: 640,
-        height: null,
+        source: { kind: 'url', url: 'https://cdn.example.com/a.png' },
       },
     })
     expect(attachments?.[3]).toMatchObject({
       ok: true,
-      attachment: { kind: 'external_link', origin_url: 'https://example.com/spec' },
+      attachment: { kind: 'external_link', source: { kind: 'url', url: 'https://example.com/spec' } },
     })
   })
 

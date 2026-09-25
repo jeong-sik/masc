@@ -6,5 +6,5 @@ val check_read_target :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   target:string ->
-  (unit, string) result
+  (unit, Keeper_alerting_path.path_refusal) result
 

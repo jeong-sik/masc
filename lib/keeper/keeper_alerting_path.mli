@@ -10,6 +10,46 @@ end
     with a [kind] label derived from the constructor. *)
 val rejection_to_telemetry : keeper_path_rejection -> unit
 
+(** The class a tool failure takes when this rejection refuses its path:
+    [Policy_rejection] for a path the caller can correct, [Runtime_failure]
+    when the keeper's own sandbox roots are unusable. *)
+val failure_class_of_rejection : keeper_path_rejection -> Tool_result.tool_failure_class
+
+(** A refused path as a tool reports it: the rejection's message and the
+    class {!failure_class_of_rejection} gives it. *)
+type path_refusal = private
+  { failure_class : Tool_result.tool_failure_class
+  ; message : string
+  }
+
+val refusal_of_rejection : keeper_path_rejection -> path_refusal
+
+(** A caller-supplied cwd that is absent or names a file. The optional hint is
+    the Read tool's available-cwd guidance; it does not change the class. *)
+type caller_cwd_refusal =
+  | Missing_cwd of { cwd : string; read_hint : string option }
+  | Cwd_is_file of { cwd : string }
+
+val caller_refusal : caller_cwd_refusal -> path_refusal
+
+(** The owned-read resolver keeps the typed filesystem refusal and the cwd
+    origin together. No arbitrary message can claim a caller-correctable
+    rejection. *)
+type owned_read_target_failure =
+  | Caller_cwd_rejected of Fs_compat.owned_directory_chain_rejection
+  | Caller_cwd_missing of { cwd : string }
+  | Default_cwd_rejected of Fs_compat.owned_directory_chain_rejection
+  | Default_cwd_missing of { cwd : string }
+
+val owned_read_target_refusal : owned_read_target_failure -> path_refusal
+
+(** The keeper's tree refused a path, and the endpoint whose declared roots
+    might hold it could not be resolved. The endpoint is the operator's
+    configuration, so this is a [Runtime_failure] and its error leads the
+    message; the tree's refusal follows, since the path may be refused either
+    way. *)
+val endpoint_unresolved : tree_refusal:path_refusal -> endpoint_error:string -> path_refusal
+
 (** Project a [Workspace.config] to its project root by stripping the
     trailing [.masc] base-path component when present. *)
 val project_root_of_config : Workspace.config -> string

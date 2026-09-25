@@ -105,6 +105,33 @@ let record_turn_boundary
      | exception exn -> not_recorded ~site:"append" (Printexc.to_string exn))
 ;;
 
+(* An official-client turn that failed never reaches [finalize], yet its input
+   is already a fragment of its [turn_ref] and the tools it called may already
+   have acted. Its end line names the turn so a Librarian round reads what it
+   left (RFC librarian-lifecycle §10-3). It saved no checkpoint and kept no
+   assistant text, so the line is [No_atom_history] and the round reads the
+   input and the tool observations. *)
+let record_errored_official_turn_boundary
+      ~config
+      ~meta
+      ~turn_ref
+      ~session
+      ~tool_observations
+      ~history_at_start
+      ~restart_notice_pending
+  =
+  record_turn_boundary
+    ~config
+    ~meta
+    ~turn_ref
+    ~session
+    ~checkpoint_owner:Runtime_execution.Official_client
+    ~tool_observations
+    ~history_at_start
+    ~restart_notice_pending
+    None
+;;
+
 let finalize
     ~config
     ~meta

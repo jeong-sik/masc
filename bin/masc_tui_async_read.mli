@@ -5,7 +5,9 @@
     own error, an exception the read raised, the Eio switch being absent, or
     the daemon launch being refused synchronously (a finished switch, see
     {!Masc_tui_fork_guard.launch}). Cancellation is re-raised, never
-    delivered.
+    delivered: the only switch a read runs on is the TUI's root switch
+    (set once at startup), which is cancelled only when the TUI exits, so
+    no pane is left "loading" by it.
 
     [subject], when given, labels every cause exactly once at this boundary
     as ["<subject> load failed: <cause>"]. A read whose loader already

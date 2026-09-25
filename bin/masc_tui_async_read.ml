@@ -1,9 +1,7 @@
-(* The shared launch for TUI reads. Every read site used to repeat the same
-   four moves -- catch the read's exceptions, answer on the mailbox, answer
-   "Eio switch is unavailable" when there is no switch, and (at some sites
-   only) survive a refused launch -- and each site labelled its failure in
-   its own place, which is how a failure came to be labelled twice. The
-   moves live here once. *)
+(* The shared launch for TUI reads: catch the read's exceptions, answer on
+   the mailbox, answer "Eio switch is unavailable" when there is no switch,
+   and survive a refused launch. A failure is labelled once, here, when the
+   caller names a subject. *)
 
 let label ?subject cause =
   match subject with

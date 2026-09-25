@@ -2332,6 +2332,13 @@ let test_generated_sandbox_image_reaches_vision () =
       with_env "MASC_TEST_FAKE_DOCKER_PATH" docker (fun () ->
       with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" (fun () ->
       Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        (* The server spawns sandbox processes through an initialised
+           Process_eio; the image read's binary capture needs its pipe EOF. *)
+        Process_eio.init
+          ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
+          ~proc_mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env);
+        Fun.protect ~finally:Process_eio.reset_for_testing (fun () ->
         let calls = ref 0 in
         let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages ?tools:_ () =
           incr calls;
@@ -2372,7 +2379,7 @@ let test_generated_sandbox_image_reaches_vision () =
           let oversized = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"]) in
           assert (assoc_string "error" (json_of_output oversized.raw_output) = "image_too_large"));
         assert (!calls = 2)
-      )))))))
+      ))))))))
 
 let () =
   test_generated_sandbox_image_reaches_vision ();

@@ -31,6 +31,7 @@ module Overview_team = Masc_tui_overview_team
 module Overview_goals = Masc_tui_overview_goals
 module Overview_providers = Masc_tui_overview_providers
 module Repository_pulls = Masc_tui_repository_pulls
+module Keeper_spend = Masc_tui_keeper_spend
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
 module Markdown = Masc_tui_markdown
@@ -326,15 +327,31 @@ let overview_team (state : state) =
 let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview_pulls
 
 (* Lines under the Team block that explain no Keeper row: the pull request
-   summary. *)
-let overview_team_detail_lines (state : state) = overview_pulls_lines state
+   summary and why a Keeper's spend could not be read. *)
+let overview_team_detail_lines (state : state) =
+  overview_pulls_lines state @ Keeper_spend.lines state.overview_spend
 
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the name lines and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
-    ~detail_lines ~pr_tag_of_keeper =
+    ~detail_lines ~pr_tag_of_keeper ~spend_tags ~spend_total =
+  (* Each Keeper's spend over the window, padded to the widest tag among
+     the rows so the tags stand in one column at the right. The title sums
+     the same rows. *)
+  let spend_tag_of_keeper =
+    spend_tags (List.map (fun (row : Overview_team.row) -> row.keeper.okp_name) team.rows)
+  in
+  (* The title's total covers every Keeper the block knows, the ones drawn
+     only on a name line included: a paused or stopped Keeper's turns in the
+     window are still spend. *)
+  let spend_forms =
+    spend_total
+      (List.map (fun (row : Overview_team.row) -> row.keeper.okp_name) team.rows
+      @ List.map fst (team.no_phase @ team.paused @ team.stopped))
+  in
+  let inner = framed_inner_width cols in
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -388,11 +405,16 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
     (* The Keeper's PR, ahead of the detail so a narrow row keeps it: its
        number and one glyph for its checks, "+N" for more. *)
     let pr_tag = pr_tag_of_keeper row.keeper.okp_name in
-    Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s%s" tone mark Ansi.reset
-      (fit_width (Terminal_text.single_line row.keeper.okp_name) name_cells)
-      tone
-      (fit_width (Terminal_text.single_line (Overview_team.phase_word row.keeper)) 10)
-      Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset pr_tag detail
+    (* Spend goes at the right, after the detail, and only where the row
+       still fits whole: the detail is the row's reason, and a stuck
+       Keeper's cause is drawn nowhere else. *)
+    Keeper_spend.place_tag ~inner
+      ~tag:(spend_tag_of_keeper row.keeper.okp_name)
+      (Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s%s" tone mark Ansi.reset
+         (fit_width (Terminal_text.single_line row.keeper.okp_name) name_cells)
+         tone
+         (fit_width (Terminal_text.single_line (Overview_team.phase_word row.keeper)) 10)
+         Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset pr_tag detail)
   in
   let off_glyph = "\xe2\x97\x8b" in
   let names_line glyph label = function
@@ -499,15 +521,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
             ; spark
             ])
   in
-  let title =
-    match
-      List.find_opt
-        (fun tail -> Message_layout.display_width (head ^ tail) <= cols)
-        tails
-    with
-    | Some tail -> head ^ tail
-    | None -> head
-  in
+  let title = Keeper_spend.fit_title ~cols ~head ~forms:spend_forms ~tails in
   (title, List.filteri (fun index _ -> index < team_rows) rows)
 
 (* Every item the Overview has to place: the transport's, then the
@@ -836,6 +850,8 @@ let render_overview (state : state) =
            ~flow:state.task_flow ~cols
            ~detail_lines:(overview_team_detail_lines state)
            ~pr_tag_of_keeper:(Repository_pulls.keeper_tag state.overview_pulls)
+           ~spend_tags:(Keeper_spend.keeper_tags state.overview_spend)
+           ~spend_total:(Keeper_spend.team_total state.overview_spend)
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;
@@ -1239,6 +1255,8 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
       (* The highlight names the task this detail shows, not the cursor: a
          todo task opened from the palette or a link has no row here, and
          the row the cursor last rested on would be a different task. *)
+      (* The id follows each title because the shared sidebar fold keeps the
+         tail, so titles with the same opening and ending still differ. *)
       write_list_sidebar_selection left_buf ~rows ~cols:left_cols
         ~title:"Tasks" ~focused:false
         (* [Overview_tasks.rows] drops what is done, cancelled or still todo.
@@ -1248,8 +1266,8 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
         ~labels:
           (List.map
              (fun (row : Tui_decode.task) ->
-               Render_schedule.task_list_sidebar_label ~title:row.title
-                 ~task_id:row.id)
+               Render_schedule.sidebar_row_label ~about:row.title
+                 ~apart:(Some row.id))
              (Overview_tasks.rows state.tasks))
         ~selection:(Overview_tasks.row_of state.tasks ~task_id:task.id);
       let answer =
@@ -1403,11 +1421,23 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
 
 (* The queue stays beside the ask. Reading one used to hide the rest, and the
    rest is what tells an operator whether this one is the urgent one. *)
+(* Who asked, beside what they asked for. The label was the tool alone, and a
+   queue holds one row per held call. Many calls can name the same tool while
+   different Keepers wait. The full-width list row beside this pane already
+   draws the asker; only the index dropped it.
+
+   The asker goes after the tool because the pane folds a label from the
+   middle and keeps its tail (Render_schedule.sidebar_row_label). *)
 let approval_sidebar_label (row : approval_row) =
-  match row with
-  | Keeper_tool_row held -> held.Tui_decode.kta_tool
-  | Gate_row pending -> pending.Tui_decode.gp_display_tool
-  | Operator_row item -> item.ap_action_type
+  let about, apart =
+    match row with
+    | Keeper_tool_row held ->
+      held.Tui_decode.kta_tool, held.Tui_decode.kta_keeper
+    | Gate_row pending ->
+      pending.Tui_decode.gp_display_tool, pending.Tui_decode.gp_keeper
+    | Operator_row item -> item.ap_action_type, item.ap_actor
+  in
+  Render_schedule.sidebar_row_label ~about ~apart:(Some apart)
 
 let render_approval_detail (state : state) (row : approval_row) =
   let terminal_rows, cols = get_terminal_size () in
@@ -3129,22 +3159,23 @@ let render_board_read (state : state) (list_post : board_post) =
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let layout =
+    Masc_tui_types.board_read_layout ~cols ~wide:state.board_detail_wide
+  in
   let buf = Buffer.create 4096 in
   let footer =
     footer_line state ~max_cells:cols
       ~hints:
         (Masc_tui_keys.footer_hints_board_read
-           ~focus_posts:(state.board_focus = Left_pane)
-           ~split:
-             (cols >= keeper_split_threshold_cols && not state.board_detail_wide))
+           ~focus_posts:(state.board_focus = Left_pane) ~layout)
   in
-  if cols < keeper_split_threshold_cols || state.board_detail_wide then begin
+  match layout with
+  | Board_read_wide | Board_read_one_pane ->
     let scroll = board_read_pane state list_post ~rows ~cols buf in
     Buffer.add_string buf footer;
     finish_surface state ~clamped:(Board_read scroll)
       ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
-  end
-  else begin
+  | Board_read_split ->
     let left_cols = keeper_roster_pane_cols in
     let right_cols = cols - left_cols in
     let left_buf = Buffer.create 1024 in
@@ -3158,7 +3189,6 @@ let render_board_read (state : state) (list_post : board_post) =
     Buffer.add_string buf footer;
     finish_surface state ~clamped:(Board_read scroll)
       ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
-  end
 
 (* The lifecycle as a rail, not a single word. The phase says where the goal
    is; it never said what the stages are or which way they run, so "what does
@@ -7349,10 +7379,30 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
               | Some word -> " \xc2\xb7 " ^ Terminal_text.single_line word
               | None -> "")
            ^ Ansi.reset);
-    add_row "Judge first:"
-      (match List.assoc_opt k.k_name state.keeper_gate_judges with
-       | Some slot -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ Terminal_text.single_line slot ^ Ansi.reset
-       | None -> Ansi.dim ^ "lane order" ^ Ansi.reset);
+    add_row "Lane first:"
+      (match
+         List.filter
+           (fun (first : Tui_decode.keeper_exact_lane_first) ->
+             String.equal first.Tui_decode.kel_keeper k.k_name)
+           state.keeper_exact_lane_firsts
+       with
+       | [] -> Ansi.dim ^ "lane order" ^ Ansi.reset
+       | firsts ->
+           (Masc_tui_theme.tone Masc_tui_theme.Accent)
+           ^ Terminal_text.single_line
+               (String.concat ", "
+                  (List.map
+                     (fun (first : Tui_decode.keeper_exact_lane_first) ->
+                       first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
+                       ^ first.kel_slot_id)
+                     firsts))
+           ^ Ansi.reset);
+    (match state.keeper_gate_settings_unread with
+     | None -> ()
+     | Some reason ->
+         add_row "Gate settings:"
+           (Theme.bad () ^ "unread \xc2\xb7 "
+            ^ Terminal_text.single_line reason ^ Ansi.reset));
     add_empty ();
 
     (* Current work section *)
@@ -13312,10 +13362,12 @@ let render_runtime_pick (state : state) =
     | None -> Masc_tui_theme.Glyph.no_value
   in
   let items = Masc_tui_types.runtime_picker_items state in
-  let count = List.length items in
+  (* The columns are measured over every item, not the filtered window, so
+     typing a filter does not move them. *)
   let target_width, route_width =
     Masc_tui_types.runtime_pick_column_widths ~cols items
   in
+  let view = Masc_tui_types.keeper_runtime_picker_view state ~terminal_rows in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"runtime-pick"
     ~title:
       (Printf.sprintf "%s  %scurrent: %s%s"
@@ -13323,90 +13375,64 @@ let render_runtime_pick (state : state) =
             (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 runtime" keeper_name))
          Ansi.dim current Ansi.reset)
     ~hints:(Masc_tui_keys.footer_hints (Keepers Keeper_runtime_pick))
-    ~body:(fun ~budget c ->
-      let status_rows =
-        match state.runtime_catalog_error with
-        | Some err ->
-            c.push (data_unreliable_row ~cols err);
-            1
-        | None when count = 0 ->
-            c.push (Ansi.dim ^ "  (loading runtime catalogue\xe2\x80\xa6)" ^ Ansi.reset);
-            1
-        | None ->
-            (* The first header cell spans badge and target, as the rows
-               do. *)
-            let header =
-              Printf.sprintf "  %s  %s  %s"
-                (fit_width "KIND   TARGET"
-                   (Masc_tui_types.runtime_pick_badge_cells + target_width))
-                (fit_width "CONFIGURED ROUTE / MODEL" route_width)
-                (fit_width "PROPERTIES / CANDIDATES"
-                   (Masc_tui_types.runtime_pick_properties_room ~cols
-                      ~target:target_width ~route:route_width))
-            in
-            c.push (Ansi.dim ^ header ^ Ansi.reset);
-            1
-      in
-      let height = max 0 (budget - status_rows) in
-      let scroll_offset =
-        if height > 0 && state.runtime_pick_cursor >= height then
-          state.runtime_pick_cursor - height + 1
-        else 0
-      in
+    ~body:(fun ~budget:_ c ->
+      c.push_styled ~style:(Theme.info ())
+        ("  " ^ Masc_tui_types.keeper_runtime_picker_summary view);
+      (match state.runtime_catalog_error, Masc_tui_types.keeper_runtime_picker_empty_note view with
+       | Some err, _ -> c.push (data_unreliable_row ~cols err)
+       | None, Some note -> c.push (Ansi.dim ^ note ^ Ansi.reset)
+       | None, None ->
+           (* The first header cell spans badge and target, as the rows
+              do. *)
+           let header =
+             Printf.sprintf "  %s  %s  %s"
+               (fit_width "KIND   TARGET"
+                  (Masc_tui_types.runtime_pick_badge_cells + target_width))
+               (fit_width "CONFIGURED ROUTE / MODEL" route_width)
+               (fit_width "PROPERTIES / CANDIDATES"
+                  (Masc_tui_types.runtime_pick_properties_room ~cols
+                     ~target:target_width ~route:route_width))
+           in
+           c.push (Ansi.dim ^ header ^ Ansi.reset));
       List.iteri
-        (fun idx item ->
-          if idx >= scroll_offset && idx < scroll_offset + height then begin
-            let line =
-              (* The target column draws ids, and an id tells its neighbours
-                 apart at both ends: [claude_code.claude-sonnet-5-low] and
-                 [-high] share everything but the last four cells, which a
-                 head-keeping cut drops. [fit_middle] keeps both ends, which
-                 is what it says it is for. *)
-              let badge, target, route_col =
-                match item with
-                | Masc_tui_types.Pick_lane lane ->
-                    let chain =
-                      String.concat " \xe2\x86\x92 "
-                        (List.map
-                           (fun id ->
-                              match String.split_on_char '.' id with
-                              | [ _prov; model ] -> model
-                              | _ -> id)
-                           lane.rrl_runtime_ids)
-                    in
-                    ( Ansi.cyan
-                      ^ fit_width Masc_tui_types.runtime_pick_lane_badge
-                          Masc_tui_types.runtime_pick_badge_cells
-                      ^ Ansi.reset
-                    , Message_layout.fit_middle target_width (Terminal_text.single_line lane.rrl_id)
-                    , fit_width (Terminal_text.single_line chain) route_width )
-                | Masc_tui_types.Pick_model option ->
-                    ( Ansi.dim
-                      ^ fit_width Masc_tui_types.runtime_pick_model_badge
-                          Masc_tui_types.runtime_pick_badge_cells
-                      ^ Ansi.reset
-                    , Message_layout.fit_middle target_width (Terminal_text.single_line option.ro_id)
-                    , fit_width
-                        (Terminal_text.single_line
-                           (option.ro_provider ^ " / " ^ option.ro_model))
-                        route_width )
-              in
-              let facts =
-                Masc_tui_types.runtime_pick_visible_facts ~cols item
-                |> List.map (fun (fact : Masc_tui_types.runtime_pick_fact) ->
-                     if fact.rpf_warn
-                     then (Theme.warn ()) ^ fact.rpf_text ^ Ansi.reset
-                     else fact.rpf_text)
-                |> String.concat " "
-              in
-              Printf.sprintf "%s%s  %s  %s" badge target route_col facts
+        (fun row item ->
+          let line =
+            (* The target column draws ids, and an id tells its neighbours
+               apart at both ends: [claude_code.claude-sonnet-5-low] and
+               [-high] share everything but the last four cells, which a
+               head-keeping cut drops. [fit_middle] keeps both ends, which
+               is what it says it is for. *)
+            let columns = Masc_tui_types.runtime_pick_columns item in
+            let badge_style =
+              match item with
+              | Masc_tui_types.Pick_lane _ -> Ansi.cyan
+              | Masc_tui_types.Pick_model _ -> Ansi.dim
             in
-            c.push
-              (if idx = state.runtime_pick_cursor then
-                 Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
-               else "  " ^ line)
-          end)
-        items)
+            let badge =
+              badge_style
+              ^ fit_width columns.Masc_tui_types.rpc_badge
+                  Masc_tui_types.runtime_pick_badge_cells
+              ^ Ansi.reset
+            in
+            let target =
+              Message_layout.fit_middle target_width columns.Masc_tui_types.rpc_target
+            in
+            let route_col = fit_width columns.Masc_tui_types.rpc_route route_width in
+            let facts =
+              Masc_tui_types.runtime_pick_visible_facts ~cols item
+              |> List.map (fun (fact : Masc_tui_types.runtime_pick_fact) ->
+                   if fact.rpf_warn
+                   then (Theme.warn ()) ^ fact.rpf_text ^ Ansi.reset
+                   else fact.rpf_text)
+              |> String.concat " "
+            in
+            Printf.sprintf "%s%s  %s  %s" badge target route_col facts
+          in
+          c.push
+            (if view.Masc_tui_pick_list.selected_row = Some row then
+               Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
+             else "  " ^ line))
+        view.Masc_tui_pick_list.rows)
 
 (* The Resources surface: the MCP resource inventory on the left, the
    selected read on the right. Wide terminals show both; narrow ones show
@@ -14664,16 +14690,27 @@ let render_prompt_registry (state : state) =
         Printf.sprintf "%d/%d개" total all_prompt_count)
   in
   box_top buf cols;
+  (* The count the registry answered, and -- before any decoration that can
+     be cut -- how many overrides it held back. The row keeps a fixed floor
+     for the tab strip, so at a hundred and twenty columns the reading can
+     run a cell short and [config_pane_title_head] shortens the tail first.
+     An override the registry declined is exactly the warning an operator
+     must not lose to an ellipsis, so it sits beside the count the row
+     protects rather than after the part that gives way. *)
+  let held_back_note =
+    match held_back with
+    | [] -> ""
+    | entries ->
+      Printf.sprintf " %s적용 안 된 오버라이드 %d개%s" (Theme.warn ())
+        (List.length entries) Ansi.reset
+  in
   let reading =
-    Printf.sprintf "%s%s · %s%s%s"
+    Printf.sprintf "%s%s%s%s · %s%s"
       Ansi.dim count_text
+      held_back_note
+      Ansi.dim
       (if state.prompts_show_fragments then "내부 조각 포함" else "주 프롬프트")
       Ansi.reset
-      (match held_back with
-       | [] -> ""
-       | entries ->
-         Printf.sprintf "  %s적용 안 된 오버라이드 %d개%s" (Theme.warn ())
-           (List.length entries) Ansi.reset)
   in
   box_line buf cols
     (config_pane_title ~cols ~name:(screen_title " MASC 프롬프트") ~reading state);

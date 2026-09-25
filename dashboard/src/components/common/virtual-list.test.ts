@@ -323,4 +323,73 @@ describe('VirtualList', () => {
 
     global.ResizeObserver = OriginalResizeObserver
   })
+  it('observes and remeasures rows that replace the visible keys in the same range', async () => {
+    const OriginalResizeObserver = global.ResizeObserver
+    const live = new Set<{ callback: ResizeObserverCallback; targets: Set<Element> }>()
+    global.ResizeObserver = class MockResizeObserver {
+      private readonly entry: { callback: ResizeObserverCallback; targets: Set<Element> }
+
+      constructor(callback: ResizeObserverCallback) {
+        this.entry = { callback, targets: new Set() }
+        live.add(this.entry)
+      }
+
+      observe(target: Element) {
+        this.entry.targets.add(target)
+      }
+
+      disconnect() {
+        this.entry.targets.clear()
+        live.delete(this.entry)
+      }
+    } as unknown as typeof ResizeObserver
+    const observedByAnyone = (el: Element) => [...live].some(o => o.targets.has(el))
+
+    try {
+      const before = items
+      const after = items.map((_, i) => ({ id: `swap-${i}`, name: `Swap ${i}` }))
+      const container = document.createElement('div')
+      const draw = (list: Item[]) => render(
+        h(VirtualList<Item>, {
+          items: list,
+          estimatedItemHeight: 40,
+          renderItem: (item) => h('div', null, item.name),
+          // Inline on every render, as work.ts passes it.
+          getKey: (item) => item.id,
+        }),
+        container,
+      )
+
+      draw(before)
+      await vi.waitFor(() => {
+        const row = container.querySelector('[data-vl-key="item-0"]')
+        expect(row && observedByAnyone(row)).toBe(true)
+      })
+
+      // Same length, same range, every visible key replaced.
+      draw(after)
+      const swapped = await vi.waitFor(() => {
+        const row = container.querySelector('[data-vl-key="swap-0"]')
+        expect(row).not.toBeNull()
+        expect(observedByAnyone(row as Element)).toBe(true)
+        return row as HTMLElement
+      })
+
+      const entry = {
+        target: swapped,
+        borderBoxSize: [{ blockSize: 140 }],
+        contentRect: { height: 140 },
+      } as unknown as ResizeObserverEntry
+      for (const o of [...live]) {
+        if (o.targets.has(swapped)) o.callback([entry], o as unknown as ResizeObserver)
+      }
+
+      const spacer = container.querySelector('.virtual-list-spacer') as HTMLElement
+      await vi.waitFor(() => {
+        expect(spacer.style.height).toBe(`${49 * 40 + 140}px`)
+      })
+    } finally {
+      global.ResizeObserver = OriginalResizeObserver
+    }
+  })
 })

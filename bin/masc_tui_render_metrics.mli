@@ -7,7 +7,11 @@ open Masc_tui_types
 type turn_counts = { running : int; idle : int; unavailable : int }
 type metrics_kpis = {
   total_keepers : int;
-  unpaused_keepers : int;
+  paused_keepers : int;
+  (** How many of [total_keepers] an operator has paused. Counted rather than
+      left as a difference: the row draws both numbers, and a reader who has
+      to subtract one from the other reads whatever the subtraction happens
+      to hold. *)
   turns : turn_counts option;
   tasks : Masc_tui_task_flow.counts option;
   gate_pending_count : int option;

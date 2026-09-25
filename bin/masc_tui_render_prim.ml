@@ -730,7 +730,7 @@ let surface_strip (state : state) ~cols =
   Buffer.add_char parts ' ';
   if lo > 0 then
     Buffer.add_string parts
-      (Printf.sprintf "%s\xe2\x80\xb9%d%s " Ansi.dim lo Ansi.reset);
+      (Printf.sprintf "%s%s%s " Ansi.dim (hidden_before_mark lo) Ansi.reset);
   for i = lo to hi do
     if i > lo then Buffer.add_string parts "  ";
     let surface, _ = ring.(i) in
@@ -752,7 +752,7 @@ let surface_strip (state : state) ~cols =
   done;
   if hi < n - 1 then
     Buffer.add_string parts
-      (Printf.sprintf " %s%d\xe2\x80\xba%s" Ansi.dim (n - 1 - hi) Ansi.reset);
+      (Printf.sprintf " %s%s%s" Ansi.dim (hidden_after_mark (n - 1 - hi)) Ansi.reset);
   (match burn_hud_text state with
    | None -> ()
    | Some hud_raw ->
@@ -1631,10 +1631,14 @@ let selected_ask_question (state : state) =
           List.nth_opt row.Masc.Tui_decode.ar_questions state.ask_question_cursor)
 
 
-(* Drawn into its own buffer so the pane above can be told how many rows it
-   has to give up. Counting the rows a second way is what let the section draw
-   its header into the one row left over and push every question off-screen. *)
-let ask_section_rows buf =
+(* The rows a block has drawn into its own buffer. A surface that lays a
+   block out against a height declared beside the drawing loses whatever the
+   two disagree by: the ask section drew its header into the one row left
+   over and pushed every question off-screen, and the Approvals surface spent
+   its Gate lane rows twice and left its footer floating two rows above the
+   composer. Reading the height back off the buffer is what the surfaces use
+   instead. *)
+let rows_drawn buf =
   let n = ref 0 in
   String.iter (fun c -> if c = '\n' then incr n) (Buffer.contents buf);
   !n
@@ -1799,7 +1803,7 @@ let draw_ask_context buf cols ~(row : Masc.Tui_decode.ask_row) =
 let ask_block f =
   let b = Buffer.create 256 in
   f b;
-  (Buffer.contents b, ask_section_rows b)
+  (Buffer.contents b, rows_drawn b)
 
 
 let question_hints (state : state) =
@@ -2926,6 +2930,34 @@ let config_pane_strip ~cols ~before ~after (state : state) =
       ~width:(tab_strip_width ~cols ~before:(before ^ config_pane_keys) ~after)
       (config_pane_tabs state)
 
+(* What a Config pane's title row draws in [room] cells: the name the pane is
+   known by, and the reading it has to add beside it.
+
+   The reading gives way first and is cut with a mark. The name is not cut --
+   it is drawn whole or it is not drawn. A cut name is not a reading: at
+   eighty columns the row read "MASC Conf" and a mark, which says nothing the
+   tab strip a row above does not already say, and it still spent the cells
+   the strip needs to name the pane the reader is on -- one of eleven panes
+   was drawn beside that stub, where at sixty columns, the name gone
+   entirely, three were. This is the rule the footer states for its own row:
+   what has a second way to be found gives way to what has none. *)
+let config_pane_title_head ~room ~name ~reading =
+  let cells text =
+    Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
+  in
+  let gap = cells tab_strip_gap in
+  let name_row = name ^ tab_strip_gap in
+  if cells name_row > room then ""
+  else
+    let left = room - cells name_row in
+    if reading = "" || left <= gap then name_row
+    else if cells reading + gap <= left then name_row ^ reading ^ tab_strip_gap
+    else
+      name_row
+      ^ Masc_tui_message_layout.fit_width reading (left - gap)
+      ^ tab_strip_gap
+
+
 (* The whole title row a Config pane draws: its name, the strip, and the badge
    at the end -- with the file it is reading and the clock between them where
    the pane has those to show. Eleven panes built this row and nine of them
@@ -2933,7 +2965,8 @@ let config_pane_strip ~cols ~before ~after (state : state) =
    none of them could tell the strip to leave room for it: at a hundred
    columns the strip took the row and the frame cut the badge, the clock and
    half of "(load failed)" with it. Built once, the row knows both halves. *)
-let config_pane_title ~cols ~before ?(note = "") ?(clock = "") (state : state) =
+let config_pane_title ~cols ~name ?(reading = "") ?(note = "") ?(clock = "")
+    (state : state) =
   let piece text = if text = "" then "" else "  " ^ text in
   let cells text =
     Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
@@ -2960,21 +2993,13 @@ let config_pane_title ~cols ~before ?(note = "") ?(clock = "") (state : state) =
      read "@p@" and "@them@" where it meant prompts and themes. The strip
      cannot say it was cut that far; it has already spent its marks. *)
   let strip_floor = tab_strip_min_width (config_pane_tabs state) in
-  (* What the title gives way with is its tail. Every pane spells this row the
-     same way -- the name it is known by, then whatever reading it has to add
-     -- so cutting from the right spends the reading before it reaches the
-     name, and the cut mark says it happened. *)
+  (* What the title gives way with is its tail: the reading first, and then
+     the name whole. [config_pane_title_head] owns that order. *)
   let before =
     let room =
       framed_inner_width cols - cells config_pane_keys - strip_floor - cells tail
     in
-    if cells before <= room then before
-    else
-      (* The gap the title carries at its end is what holds it off the keys,
-         and cutting takes the end. It is put back, so a cut title reads
-         "... 주 프 …  9:Runtime" rather than running into the key. *)
-      let gap = cells tab_strip_gap in
-      Masc_tui_message_layout.fit_width before (max 0 (room - gap)) ^ tab_strip_gap
+    config_pane_title_head ~room ~name ~reading
   in
   let note =
     if note = "" then ""

@@ -317,6 +317,49 @@ name = "query"
 |}
 ;;
 
+(* A composition declares [defer_loading] in its own block, as a tool file
+   does. Absent or false is always loaded; a value that is not a boolean is
+   refused rather than read as either answer. *)
+let composition_with_line line =
+  Printf.sprintf
+    {|[[compositions]]
+name = "lane-check"
+execution = "inline"
+%s
+[[compositions.nodes]]
+id = "lane"
+tool = "keeper_lane_status"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+|}
+    line
+;;
+
+let test_catalog_reads_defer_loading () =
+  let loading_of document =
+    match Catalog.parse document with
+    | Error error -> fail ("valid composition was rejected: " ^ Catalog.error_to_string error)
+    | Ok catalog ->
+      (match Catalog.find catalog "lane-check" with
+       | Some entry -> entry.Catalog.loading
+       | None -> fail "named composition lookup failed")
+  in
+  check bool "true defers" true
+    (loading_of (composition_with_line "defer_loading = true")
+     = Tool_definition_toml.Deferrable);
+  check bool "false stays loaded" true
+    (loading_of (composition_with_line "defer_loading = false")
+     = Tool_definition_toml.Always_loaded);
+  check bool "absent stays loaded" true
+    (loading_of (composition_with_line "") = Tool_definition_toml.Always_loaded);
+  match Catalog.parse (composition_with_line {|defer_loading = "yes"|}) with
+  | Error (Catalog.Wrong_value_kind { field = "defer_loading"; expected = Catalog.Bool_value; _ }) ->
+    ()
+  | Error error -> fail ("string defer_loading: " ^ Catalog.error_to_string error)
+  | Ok _ -> fail "a string defer_loading was accepted"
+;;
+
 let parse_ok document =
   match Catalog.parse document with
   | Ok catalog -> catalog
@@ -756,6 +799,7 @@ let () =
             `Quick
             test_catalog_builds_executable_typed_plan
         ; test_case "rejects unknown fields" `Quick test_catalog_rejects_unknown_fields
+        ; test_case "reads defer_loading" `Quick test_catalog_reads_defer_loading
         ; test_case
             "rejects malformed pointer"
             `Quick

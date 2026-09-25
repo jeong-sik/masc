@@ -135,13 +135,22 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
   let read_request ?(expect_version = false) () =
-    output_string output "IFS= read -r request\n";
+    output_string output "IFS= read -r request || exit 98\n";
     if expect_version
     then
       output_string output
         (Printf.sprintf
            "printf '%%s' \"$request\" | grep -F %s >/dev/null || exit 97\n"
            (shell_quote (Printf.sprintf {|"version":"%s"|} Runtime_build_version.current)));
+    Option.iter
+      (fun capture_path ->
+         output_string
+           output
+           ("printf '%s\\n' \"$request\" >> " ^ shell_quote capture_path ^ "\n"))
+      capture_path
+  in
+  let capture_request () =
+    output_string output "IFS= read -r request || exit 98\n";
     Option.iter
       (fun capture_path ->
          output_string
@@ -163,7 +172,7 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture
   if close_before_turn then output_string output "exec 0<&-\n";
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 2) ^ "\n");
   if close_before_turn then output_string output "exit 62\n";
-  read_request ();
+  capture_request ();
   let remaining_lines =
     if inject_items then (
       (* Acknowledge thread/inject_items before reading/capturing turn/start.
@@ -992,7 +1001,7 @@ let test_metadata_listing_pages_without_turn () =
 let test_rate_limits_read_without_turn () =
   let capture = Filename.temp_file "masc-rate-limits-capture-" ".jsonl" in
   Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
-    with_fixture ~capture_path:capture [init_result; account_chatgpt;
+    with_fixture ~close_before_turn:true ~capture_path:capture [init_result; account_chatgpt;
       {|{"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000},"secondary":null},"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000},"secondary":{"usedPercent":64,"windowDurationMins":10080,"resetsAt":1790800000}},"codex_other":{"primary":{"usedPercent":3,"windowDurationMins":300}}}}}|}]
       (fun path ->
         let outcome = Eio_main.run (fun env ->
@@ -4574,6 +4583,33 @@ let test_production_keeper_dispatches_codex_runtime () =
                 ~trace_id:"codex-production-trace-1"))
 ;;
 
+(* An official-client turn that fails never reaches finalize. Its input is
+   already a fragment of its turn, so it still leaves the line that names the
+   turn; without it no Librarian round would read that input. *)
+let test_production_keeper_failed_turn_leaves_its_end_line () =
+  let base_path = temp_workspace "masc-codex-production-failed-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result; account_chatgpt; thread_result; turn_result; turn_failed ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn
+                ~base_path
+                ~trace_id:"codex-production-failed-1"
+                ~user_message:"This turn fails at the provider."
+                ~cli_path
+                ~model:"gpt-fixture"
+                ~turn_instructions:None
+            with
+            | Ok _ -> fail "the fixture turn was expected to fail"
+            | Error _ ->
+              assert_official_client_turn_boundary
+                ~base_path
+                ~trace_id:"codex-production-failed-1"))
+;;
+
 (* The host reads the runtime's count into the turn's usage: reported, per
    request, with the app-server's numbers rather than zero. *)
 let test_production_keeper_reports_codex_token_usage () =
@@ -5621,6 +5657,10 @@ let () =
             "production Keeper dispatches Codex runtime"
             `Quick
             test_production_keeper_dispatches_codex_runtime
+        ; test_case
+            "production Keeper failed turn leaves its end line"
+            `Quick
+            test_production_keeper_failed_turn_leaves_its_end_line
         ; test_case
             "production Keeper reports Codex token usage"
             `Quick

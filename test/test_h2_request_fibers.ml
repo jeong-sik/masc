@@ -141,7 +141,7 @@ let test_multiplexed_progress meth =
           (* Do not send DATA until the route has registered its body reader.
              A prebuffered body would invoke EOF inside the request fiber and
              could hide a missing body-completion dispatcher. *)
-          let writer, reply = open_request ~meth client "/slow" in
+          let writer, reply = open_request ~meth:`POST client "/slow" in
           Eio.Promise.await reader_ready;
           send_body writer "request body";
           reply

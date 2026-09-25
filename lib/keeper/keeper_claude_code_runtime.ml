@@ -252,13 +252,15 @@ let record_usage_windows ~keeper_name ~runtime_id report =
 (* Always installed so usage-window reports are recorded. A turn nobody
    streams, traces or observes gets only that; its other events are ignored as
    before. *)
-let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action on_event =
+let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
+    ~on_compacted on_event =
   match on_event, raw_trace_run, on_native_action with
   | None, None, None ->
     Some
       (function
         | Runtime_claude_code.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
+        | Runtime_claude_code.Conversation_compacted -> on_compacted ()
         | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Turn_finished _ -> ())
   | _ ->
@@ -344,6 +346,7 @@ let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~
             observation.identity
         | Runtime_claude_code.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
+        | Runtime_claude_code.Conversation_compacted -> on_compacted ()
         | Runtime_claude_code.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text
@@ -523,6 +526,7 @@ module For_testing = struct
         ~raw_trace_run:None
         ~turn_count
         ~on_native_action:(Some observe)
+        ~on_compacted:ignore
         None
     with
     | Some callback -> callback event
@@ -612,7 +616,7 @@ let recording_effect_attempt ~effect_disposition (tool : Host.dynamic_tool) =
   }
 ;;
 
-let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection_for
     ~on_transmitted_model_input ~hooks ~context_injector
@@ -755,27 +759,46 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
        first launch ([--system-prompt-snapshot], default on): every later
        request and resume sends that record as-is until the conversation is
        compacted, whatever [--system-prompt-file] holds. What changes per turn
-       or per operation -- the context carrier, the Librarian working state
-       and the historical task reference ({!Host.is_carried_on_resume}) -- is
-       therefore sent in front of the resume prompt, and the canonical
+       or per operation -- the context carrier's blocks, the Librarian working
+       state and the historical task reference ({!Host.is_carried_on_resume})
+       -- is therefore sent in front of the resume prompt, and the canonical
        conversation, which the vendor session already holds, is not sent. The
-       frontier and the input report say so. *)
+       session also keeps every resume prompt as history, so a carried context
+       goes out only when the session does not already hold it as sent
+       ({!Host.resume_prompt}). What it holds is read from the frontier the
+       resumed settlement acknowledged; a start holds everything it composed.
+       The frontier and the input report say so. *)
+    let composed_context =
+      match composed_context with
+      | None -> None
+      | Some read -> read ()
+    in
+    let prompt, held_context =
+      match session_mode with
+      | Runtime_claude_code.Start ->
+        ( initial_turn_prompt ~history ~goal
+        , Host.start_held_context ?composed_context prepared.messages )
+      | Runtime_claude_code.Resume _ ->
+        let delivery =
+          Host.resume_prompt
+            ~goal
+            ~held:(Session_store.held_context_for_resume claim_plan ~expected:stored_session)
+            ?composed_context
+            prepared.messages
+        in
+        delivery.prompt, delivery.held_context
+    in
     let context_frontier : Session_store.context_frontier =
       {snapshot_sha256; message_count=List.length snapshot_messages;
        delivery=(match session_mode with
          | Start -> Prepared_start_context
          | Resume _ -> Held_by_vendor_session);
-       acknowledged_turn=None} in
+       acknowledged_turn=None; held_context} in
     let report_transmitted_input () =
       on_transmitted_model_input
         (match session_mode with
          | Runtime_claude_code.Start -> Host.Whole_input_transmitted prepared.messages
          | Runtime_claude_code.Resume _ -> Host.Held_by_client_session)
-    in
-    let prompt =
-      match session_mode with
-      | Runtime_claude_code.Start -> initial_turn_prompt ~history ~goal
-      | Runtime_claude_code.Resume _ -> Host.resume_prompt ~goal prepared.messages
     in
     (* A resume file only takes effect once the conversation is compacted and
        the client records a new prompt. It keeps out what the resume prompt
@@ -977,6 +1000,31 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         Error error
     in
     let session_state = ref claimed_session in
+    (* Set when the client reports it compacted the conversation this turn. *)
+    let compacted = ref false in
+    (* A compacted conversation holds a summary, not the copies it was sent,
+       so the settlement records that it holds none and the next resume sends
+       every carried context again. *)
+    let settle_session ~session_id ~turn_id =
+      if !compacted
+      then
+        Session_store.settle_holding
+          ~held_context:[]
+          ~base_path
+          ~keeper_name
+          ~expected:!session_state
+          ~session_id
+          ~turn_id
+          ~updated_at:(Time_compat.now ())
+      else
+        Session_store.settle
+          ~base_path
+          ~keeper_name
+          ~expected:!session_state
+          ~session_id
+          ~turn_id
+          ~updated_at:(Time_compat.now ())
+    in
     let recovery_failure = ref Session_store.Transport_interrupted in
     let state_persistence_failed = ref false in
     let update_session label transition =
@@ -1123,15 +1171,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
               result.response
         in
         recovery_failure := Session_store.State_persistence_failed;
-        (match
-           Session_store.settle
-             ~base_path
-             ~keeper_name
-             ~expected:!session_state
-             ~session_id
-             ~turn_id
-             ~updated_at:(Time_compat.now ())
-         with
+        (match settle_session ~session_id ~turn_id with
          | Error detail ->
            Error
              (internal_error
@@ -1148,7 +1188,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let turn_result =
       let on_stream_event =
         claude_stream_callback
-          ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action on_event
+          ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
+          ~on_compacted:(fun () -> compacted := true) on_event
       in
       try
         let client_result =
@@ -1318,15 +1359,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
            in
            recovery_failure := Session_store.State_persistence_failed;
            let* () =
-             match
-               Session_store.settle
-                 ~base_path
-                 ~keeper_name
-                 ~expected:!session_state
-                 ~session_id:turn.session_id
-                 ~turn_id:turn.turn_id
-                 ~updated_at:(Time_compat.now ())
-             with
+             match settle_session ~session_id:turn.session_id ~turn_id:turn.turn_id with
              | Ok settled ->
                session_state := settled;
            on_session_settled settled;
@@ -1412,7 +1445,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                   recovery_detail))))
 ;;
 
-let run ?official_task_reference ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1486,7 +1519,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
               previous_capacity_bytes
               capacity_bytes)
         ~attempt:(fun ~capacity:capacity_bytes ->
-          run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~official_client_continuation
+          run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation
           ~required_native_posture
             ~runtime_id
             ~keeper_name

@@ -1769,6 +1769,17 @@ let run_turn
                           ~config
                           ~keeper_name:meta.name
                           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id))
+                      ~official_client_composed_context:(fun () ->
+                        match
+                          acc.Keeper_run_tools.extra_system_context_digest,
+                          acc.Keeper_run_tools.extra_system_context_blocks
+                        with
+                        | Some carrier_sha256, Some blocks ->
+                          Some
+                            { Keeper_official_client_host.carrier_sha256
+                            ; blocks
+                            }
+                        | None, _ | Some _, None -> None)
                       ~on_request_attribution:
                         (fun ~runtime_id ~tools ~transmitted ->
                            (* Official-client lanes send their requests

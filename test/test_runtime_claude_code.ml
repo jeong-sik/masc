@@ -833,7 +833,8 @@ let test_usage_windows_are_reported_without_changing_the_turn () =
   let on_stream_event = function
     | Runtime_claude_code.Usage_windows_reported report -> reports := report :: !reports
     | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-    | Native_tool_started _ | Native_tool_finished _ | Turn_finished _ -> ()
+    | Native_tool_started _ | Native_tool_finished _ | Conversation_compacted
+    | Turn_finished _ -> ()
   in
   with_fixture
     [ Emit rate_limit_with_windows
@@ -1017,7 +1018,7 @@ let test_api_diagnostic_preserves_native_effects () =
                 (function
                   | Runtime_claude_code.Native_tool_started _ | Native_tool_finished _ ->
                     true
-                  | Turn_started _ | Usage_windows_reported _ -> false
+                  | Turn_started _ | Usage_windows_reported _ | Conversation_compacted -> false
                   | Text_delta _
                   | Dynamic_tool_started _
                   | Dynamic_tool_finished _

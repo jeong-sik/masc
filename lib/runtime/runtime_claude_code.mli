@@ -192,6 +192,10 @@ type stream_event =
   | Usage_windows_reported of Runtime_provider_usage_window.report
       (** The windows a [rate_limit_event] reported, for the operator
           projection only; nothing that routes or retries reads it. *)
+  | Conversation_compacted
+      (** The client reported a [compact_boundary]: it summarised the
+          conversation during this turn, so the copies the session held of
+          earlier prompts are no longer there as sent. *)
   | Turn_finished of { text : string }
 
 val dynamic_tool_bytes : dynamic_tool list -> int

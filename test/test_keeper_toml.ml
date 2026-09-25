@@ -2000,6 +2000,20 @@ let test_health_json_build_exposes_runtime_binary_identity () =
     (String.length (build |> member "executable_dir" |> to_string) > 0);
   check bool "build repo_root field present" true
     (match build |> member "repo_root" with `Null | `String _ -> true | _ -> false)
+  ;
+  (* The DOS core is part of what a build is: one masc commit can link the
+     vendored core or an older opam one, and only this field differs. *)
+  let core = build |> member "ocaml_dos_core" in
+  check string "build names the linked DOS core"
+    (Yojson.Safe.to_string
+       (Masc.Build_identity.to_yojson (Masc.Build_identity.current ()) |> member "ocaml_dos_core"))
+    (Yojson.Safe.to_string core);
+  check int "the core digest is a 32-character hex digest" 32
+    (String.length (core |> member "source_digest" |> to_string));
+  check int "so is the pinned one" 32
+    (String.length (core |> member "pinned_source_digest" |> to_string));
+  check bool "the pin comparison is a flag, not text" true
+    (match core |> member "matches_pin" with `Bool _ -> true | _ -> false)
 
 (* ================================================================ *)
 (* Test suite                                                        *)

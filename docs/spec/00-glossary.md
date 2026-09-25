@@ -67,14 +67,21 @@ status: reference
   (`Approval_detail`). 한 줄 요약(`single_line`)만으로 수십 줄의 코드 편집이나 명령을
   다 보지 못한 채 운영자가 승인하는 위험을 막기 위해, 작성된 줄바꿈을 유지하며 전체
   내용을 래핑하여 렌더링한다.
-  - **제어 문자 이스케이프 및 터미널 탈취 방지 경계**: 모델이 작성한 질문(`kta_question`)
-    이나 인자(`kta_args`)에 포함된 ANSI 제어 문자(`ESC [ 1 A` 등)가 터미널 커서를 조작해
-    운영자가 이미 읽은 화면을 임의 변조하고 승인을 유도하는 터미널 재작성 공격
-    (Loopjacking 완화)을 차단하기 위해, 모든 라벨은 `sanitize_terminal_text`, 모든 값은
-    `sanitize_terminal_lines`를 거친다. 개행(`LF`)만 실제 줄바꿈으로 유지하고 그 밖의 모든
-    0x20 미만 제어 문자는 가시적인 이스케이프 문자열(`[\x1B]`, `[\x09]`)로 치환하여
-    출력한다. 공백으로 숨기지 않고 이스케이프 시도 사실을 그대로 투영하며, 행 타입이
-    비공개(`type line = private`)로 보호되어 화면의 모든 행은 이 경계를 우회할 수 없다(#38478).
+  - **제어 문자·보이지 않는 글자 이스케이프 경계**: 모델이 작성한 질문(`kta_question`)이나
+    인자(`kta_args`)에 든 바이트가 터미널 커서를 옮기거나(ANSI 제어 문자 `ESC [ 1 A` 등)
+    화면에는 보이지 않은 채 승인 해시에만 들어가면, 운영자가 읽은 글과 승인하는 바이트가
+    달라진다(Loopjacking 완화). 그래서 모든 라벨은 `sanitize_terminal_text`, 모든 값은
+    `sanitize_terminal_lines`를 거친다. 개행(`LF`)만 실제 줄바꿈으로 남기고, 나머지는
+    지우거나 공백으로 숨기지 않고 눈에 보이는 이스케이프로 그린다. 제어 바이트(0x20 미만,
+    DEL 0x7F, 0x80–0x9F)와 잘못된 UTF-8 바이트는 `\xNN`(ESC는 `\x1B`, 탭은 `\x09`),
+    UTF-8로 쓴 C1 제어 문자(U+0080–U+009F)는 `\u00NN`으로 그린다. 보이지 않는 글자
+    (Unicode `Default_Ignorable_Code_Point`: zero-width 문자, word joiner 계열, 한글 채움
+    문자 U+115F·U+1160·U+3164·U+FFA0, soft hyphen, variation selector, tag 문자)는
+    `\uXXXX`나 `\UXXXXXXXX`로 그린다(#38445·#38501·#38851). 예외는 셋이다 — 그림 문자 둘을
+    잇는 ZWJ(🤷‍♂️), 텍스트가 기본인 이모지(U+2764 등) 바로 뒤의 VS15·VS16 하나, 검은
+    깃발(U+1F3F4) 뒤에 tag 문자로 붙인 지역 깃발. 한자 뒤의 variation selector는 등록된
+    이체자인지 이 경계가 가릴 수 없어 이스케이프한다. 행 타입이 비공개
+    (`type line = private`)라 화면의 모든 행은 이 경계를 우회할 수 없다(#38478).
   → [Approval_detail](../../bin/masc_tui_approval_detail.mli),
   [Tui_decode](../../lib/tui_decode.mli)
 
@@ -518,6 +525,34 @@ status: reference
   (실행 경로 이름)와 이름이 겹치지만 다른 축이다.
   → [keeper_runtime_failure_route](../../lib/keeper_runtime/keeper_runtime_failure_route.mli)
 
+**Candidate Fault (후보 사정 판정)**
+: 한 후보(provider·모델·자격 증명·계정을 묶은 바인딩)가 실패했을 때, 그 실패가 이 후보의
+  사정인지 답하는 닫힌 판정(`Candidate_fault.t`). exact 걸음(Librarian·`verifier_exact`·HITL
+  판정·Board attention)과 Keeper 걸음이 같은 오류에 같은 답을 하도록 둘 다 이 판정 하나를
+  읽는다(#38913). 값은 셋이다.
+  - `Binding of binding_fact`: 이 바인딩의 사정이라, 다음 후보가 같은 입력을 받아도 된다.
+    사정은 열둘이다 — `Credential`(401·403. 지금 코드는 전송 오류 `NetworkError`도 이 값으로
+    읽는다), `Account`(402), `Model_absent`(404), `Rate_limit`(429), `Capacity`(529),
+    `Server`(5xx), `Window`(창 초과, 또는 창에서 멈춘 빈 답), `Body_limit`(413),
+    `Admission`(보내기 전에 이 바인딩이 준비된 요청을 받지 않음: 선언된 입력 용량 초과,
+    입력을 잴 수 없음, 준비된 요청 거절), `Deadline`(보낸 뒤 헤더·전체 기한 초과),
+    `Output_dialect`(답이 content 밖 필드에 옴), `Refusal_unread`(거절 상태는 왔지만 거절
+    본문이 기한 안에 오지 않음).
+  - `Unattributed`: 거절은 왔지만, 누구의 사정인지 응답이 기계가 읽는 꼴로 말하지 않는다.
+    기록에도 모른다고 남긴다.
+  - `Unknown_after_dispatch`: 보냈고 결과를 모른다. 다시 보내도 되는지는 이 판정이 아니라
+    걸음의 효과 규칙이 정한다.
+  판정은 누구의 사정인지만 답하고, 다음 후보로 넘길지는 걸음이 정한다 — exact 걸음은
+  Exact-output route의 슬롯 전진 조건이, Keeper 걸음은 `lane_should_retry`의 predicate가
+  정한다. 공식 클라이언트가 만드는 provider 오류(`Llm_provider.Error.provider_error`)는 이
+  판정 밖이다(#38776). 영수증에 적히는 Failure Route는 이 판정을 읽지 않고 따로 분류한다 —
+  #38913은 `InputCapacity`·`Json_parse_error`를 route의 `admission` 회전으로 옮겨 걸음과
+  답을 맞췄다. `Window`는 이 바인딩의 context window이고, Provider Usage Window(사용량 한도
+  창)와 다른 창이다. 한국어 이름의 "사정"은 탓이 아니다 — 429·529는 누구의 잘못도 아니고
+  그 후보의 형편이다.
+  → [Candidate_fault](../../packages/agent_core/lib/llm_provider/candidate_fault.mli) ·
+  [RFC-one-slot-fault-judgment-for-every-walk](../rfc/RFC-one-slot-fault-judgment-for-every-walk.md)
+
 **Demotion (강등)**
 : 어떤 항목을 제거하지 않고 우선순위·가시성·전송 여부만 낮추는 처분. 세 곳이 같은
   불변식을 지킨다 — 강등된 것은 사라지지 않는다.
@@ -640,7 +675,16 @@ status: reference
   `Deferred`를 `true`로 접는다; 지연은 실패가 아니다). 그 투영은 `Deferred`를
   표현하지 못하므로(`tool_result.mli`) 원장의 `success` 하나만 보고 결말을
   되돌릴 수는 없다. turn 수준의 Operator Disposition과 이름이 겹치지만 다른
-  단위를 분류한다.
+  단위를 분류한다. `Failed`는 실패 등급(`Tool_result.tool_failure_class`) 다섯 가운데
+  하나를 나르고, 도구 응답의 `failure_class`에 소문자로 실린다 —
+  `dependency_unavailable`(필요한 외부 의존이 없음), `policy_rejection`(인증·권한·경계
+  또는 호출 인자 검증에서 거절; 같은 요청은 계속 거절되지만 인자를 고치면 통할 수 있음),
+  `runtime_failure`(내부 오류·결함), `workflow_rejection`(업무 규칙 위반; 지금 상태가 이
+  행동을 받지 않음), `operator_cancelled`(운영자가 멈춤). 등급은 실패를 만드는 쪽이
+  정한다 — `Keeper_tool_execution.failure`는 등급을 필수 인자로 받고 기본값이 없다
+  (#38689·#38703). 등급을 모르는 채 `runtime_failure`("인자 탓이 아니다")로 내보내면,
+  모델은 인자를 고치면 통할 호출을 고치지 않기 때문이다. 로그는 `runtime_failure`만
+  ERROR, 나머지는 WARN이다(`log_level_of_failure_class`).
   → [Tool_result](../../lib/tool_types/tool_result.mli)
 
 **Recorded Call Outcome (기록된 호출 결말)**
@@ -872,7 +916,7 @@ status: reference
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
   DOS Lane의 머신, Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러
   Lane 행을 제공할 수 있다. 패키지는 `lane.toml`의 `contributions`로 observe·derive·act
-  기여를 선언하며, act 기여 패키지(예: `dos-world`·`quiz-grader`)는 `lane_act` 도구로
+  기여를 선언하며, act 기여 패키지(예: `dos-world`·`quiz-grader`)는 `masc_lane_act` 도구로
   조치를 출하한다 — 즉 이 레이어는 관측뿐 아니라 조치(act)까지 포함한다. 패키지 worker는
   그 계산을 격리한다. attach·detach와 Add-on 장애는 기존 Keeper의 권한·도구·진행 중
   작업을 축소하지 않으며, 추가 근거는 활용·보류·무시할 수 있다. 원천 어댑터는
@@ -888,7 +932,7 @@ status: reference
   출제와 채점의 권한을 엄격히 분리하고, 기록 인용과 완전 단어 일치를 강제한다(#38433, task-1688).
   - **출제·채점 분리**: 출제 패키지(`quiz-questions`, `derive` 기여)는 팩트 덱에서 문제를
     뽑아 `quiz/questions`로 내보낼 뿐 채점할 수 없다. 채점 패키지(`quiz-grader`, `derive`·
-    `act` 기여)는 출제 결과(`lane_output`)와 같은 팩트 덱을 함께 받아, `lane_act` 도구로
+    `act` 기여)는 출제 결과(`lane_output`)와 같은 팩트 덱을 함께 받아, `masc_lane_act` 도구로
     들어온 응답을 대조해 `quiz/grades` 판정과 `quiz/score` 누적 점수를 발행한다.
   - **기록 인용 및 완전 단어 일치**: 문제는 임의의 요약이나 추정이 아니라 실제 저장된
     기록 파일에 글자 그대로 존재하는 인용문(`quote`)이어야 하며, 정답(`answer`)은 그 인용문
@@ -920,16 +964,22 @@ status: reference
   (`lib/task/anti_rationalization.ml`: "The verdict channel is the
   report_review_verdict tool call, so every slot needs a tool-calling model"). 이 lane의
   모든 slot은 도구 호출이 가능한 모델이어야 한다.
-  - **슬롯 전진 조건 (타임아웃 및 컨텍스트 초과)**: 슬롯 전진은 공통적으로 이 슬롯에서
-    발송이 한 번이었을 때(`receipt_dispatch_count = 1`)만 허용된다. 요청이 wire로 나간
-    뒤 바인딩의 헤더 기한(`connect_timeout_s`, `Http_operation`) 또는 전체 기한
-    (`body_timeout_s`, `Wall_clock`) 안에 응답 헤더를 받지 못한 타임아웃
-    (`Http_client.TimeoutError`)이 발생하거나(#38437), 제공자가 입력을 바인딩 창보다
-    크다고 거절한 경우(`Context_overflow`, #38454) 첫 슬롯에서 패스를 중단하거나 범위를
-    축소하지 않고 선언된 다음 후보 슬롯으로 전진(`execution_failure_may_advance`)한다.
-    바인딩별 응답 기한과 컨텍스트 윈도우 크기는 슬롯 자체의 고유 속성이므로, 더 큰
-    창이나 독립 기한을 가진 후속 후보(예: Claude CLI)가 동일 입력을 처리할 기회를
-    보장한다.
+  - **슬롯 전진 조건 (`execution_failure_may_advance`)**: 한 슬롯이 실패했을 때 패스를
+    끝내거나 범위를 줄이지 않고 선언된 다음 후보 슬롯으로 넘어가는 경우는 둘이다.
+    (1) 보내기 직전 단계(`Before_dispatch`)에서 실패했고 이 슬롯이 아무것도 보내지 않았다
+    (`receipt_dispatch_count = 0`). (2) 한 번 보낸 뒤(`receipt_dispatch_count = 1`) 이
+    바인딩의 사정으로 실패했다 — 헤더 기한(`connect_timeout_s`, `Http_operation`)이나 전체
+    기한(`body_timeout_s`, `Wall_clock`) 안에 응답 헤더가 오지 않음(#38437); 2xx 헤더는
+    왔지만 전체 기한 안에 본문이 끝나지 않음(`Response_body_deadline_exceeded`, 원문 응답과
+    provider trace가 남지 않았을 때); 응답으로 온 제공자 거절(Candidate Fault가 모든 거절을
+    `Binding`이나 `Unattributed`로 읽으므로 413·429·402·529·5xx·창 초과(#38454)·401·403·
+    404·이유를 기계가 읽을 수 없는 거절·본문이 기한 안에 오지 않은 거절이 모두 넘어간다,
+    #38913); 답이 JSON으로 읽히지 않음(`Invalid_json_output`); content가 비었음(답을 content
+    밖 필드에 둠, `Missing_output`). 그 밖에는 넘기지 않는다 — 보낸 뒤의 다른 기한 종류
+    (`Queue`·`First_token`·`Capacity_backpressure`·`Non_streaming_body`·`Stream_body`·
+    `Stream_idle`·`Provider_step`·`Cli_stdout_idle`·`Unknown_timeout`)와 보낸 뒤 결과를
+    모르는 실패가 그렇다. 바인딩의 기한·창·키·quota·출력 방언은 그 슬롯의 성질이라, 다음
+    후보는 자기 것을 들고 같은 입력을 받을 수 있다(예: 더 큰 창의 Claude CLI).
   - **생성 발송 관측 권위 (`flow_evidence_generation_dispatch`)**: 걸음(walk)에 속한 어느
     후보라도 외부 완료 생성 요청(`generation dispatch`)을 시작했는지 여부를 불변
     증거(`Started`·`Not_started`)로 기록한다. 앞선 슬롯이 생성 요청을 보낸 뒤(예: 5xx

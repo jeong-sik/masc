@@ -82,6 +82,11 @@ type entry =
   ; supports_audio_input : bool option
   ; supports_video_input : bool option
   ; supports_document_input : bool option
+  ; modality_priority : string option
+    (** Canonical multimodal block ordering policy (preserve_input_order /
+        visual_first, plus the aliases in
+        {!Capability_vocab.modality_priority_values}); unknown values fail
+        closed in {!of_json}. Applied in {!Capabilities.apply_manifest_entry}. *)
   ; supports_native_streaming : bool option
   ; supports_system_prompt : bool option
   ; supports_prompt_caching : bool option
@@ -118,6 +123,13 @@ type entry =
   ; reasoning_replay : string option
     (** Optional multi-turn reasoning replay policy override (default /
         no_replay / drop_without_tool / preserve_always). *)
+  ; emits_usage_tokens : bool option
+    (** Whether the standard response carries usage tokens; applied in
+        {!Capabilities.apply_manifest_entry}. *)
+  ; supported_models : string list option
+    (** Exact client-side model allow-list; applied in
+        {!Capabilities.apply_manifest_entry}. {!of_json} rejects an empty list
+        and blank, padded, or duplicate ids. *)
   }
 
 (** A parsed capability manifest: an ordered list of model entries.
@@ -130,8 +142,10 @@ type t = entry list
     Returns [Error msg] when [schema_version] is missing or not 1, a closed
     root or entry object contains an unknown or duplicate field, an optional
     field has the wrong JSON type, an integer literal is outside the native
-    [int] range, [id_prefix] is missing, empty, or padded with whitespace, or
-    [base] names an unknown provider preset. The non-operational [_comment]
+    [int] range, [id_prefix] is missing, empty, or padded with whitespace,
+    [base] or another closed-vocabulary field (e.g. [modality_priority]) names
+    an unknown value, or [supported_models] is empty or holds a blank, padded,
+    or duplicate id. The non-operational [_comment]
     field is accepted at the root and entry levels. *)
 val of_json : Yojson.Safe.t -> (t, string) result
 

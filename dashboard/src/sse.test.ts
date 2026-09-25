@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   _resetJournalForTests,
-  _resetKvReuseForTests,
   journal,
   normalizeSSEDispatchType,
   recordServerPushEvent,
@@ -262,52 +261,26 @@ describe('server-push Agent Core typed-payload handlers', () => {
 describe('keeper turn KV reuse', () => {
   beforeEach(() => {
     _resetJournalForTests()
-    _resetKvReuseForTests()
   })
 
-  function observe(turn: number, keeperTurnId: number, cacheN: number | null, promptN: number | null) {
-    recordServerPushEvent({
-      type: 'keeper_turn_observation',
-      name: 'sangsu',
-      turn,
-      keeper_turn_id: keeperTurnId,
-      cache_n: cacheN,
-      prompt_n: promptN,
-    })
-  }
-
-  function complete(turn: number) {
+  function complete(fields: { cache_n?: number | null; prompt_n?: number | null }) {
     recordServerPushEvent({
       type: 'keeper_turn_complete',
       name: 'sangsu',
-      turn,
+      turn: 42,
       input_tokens: 10,
       output_tokens: 5,
       tool_calls_made: 1,
+      ...fields,
     })
     return journal.value[0]?.text ?? ''
   }
 
-  it('sums the request timings of one Keeper turn onto its turn line', () => {
-    observe(1, 42, 1741, 26)
-    observe(2, 42, 1767, 40)
-    expect(journal.value).toHaveLength(0)
-    expect(complete(42)).toContain('KV 재사용 3508/3574tok (98%)')
+  it('shows the turn sum the server put on keeper_turn_complete', () => {
+    expect(complete({ cache_n: 3508, prompt_n: 66 })).toContain('KV 재사용 3508/3574tok (98%)')
   })
 
-  it('leaves the suffix off when no request reported wire timings', () => {
-    observe(1, 42, null, null)
-    expect(complete(42)).not.toContain('KV 재사용')
-  })
-
-  it('does not attach timings from another Keeper turn', () => {
-    observe(1, 41, 100, 10)
-    expect(complete(42)).not.toContain('KV 재사용')
-  })
-
-  it('shows a sum once', () => {
-    observe(1, 42, 100, 10)
-    expect(complete(42)).toContain('KV 재사용 100/110tok')
-    expect(complete(42)).not.toContain('KV 재사용')
+  it('leaves the suffix off when the turn reported no wire timings', () => {
+    expect(complete({ cache_n: null, prompt_n: null })).not.toContain('KV 재사용')
   })
 })

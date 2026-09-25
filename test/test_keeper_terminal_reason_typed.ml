@@ -1151,6 +1151,7 @@ let () =
     ; run_validation = None
     ; stop_reason
     ; inference_telemetry = None
+    ; wire_prompt_tokens = None
     ; tool_surface
     }
   in
@@ -2813,6 +2814,7 @@ max-concurrent = 1
     ; run_validation = None
     ; stop_reason = Runtime_agent.Completed
     ; inference_telemetry = None
+    ; wire_prompt_tokens = None
     ; tool_surface
     }
   in

@@ -3709,8 +3709,20 @@ let launch_tools_load ?(force = true) state ~mailbox =
     in
     (match Eio_context.get_switch_opt () with
      | Some sw ->
-         Eio.Fiber.fork_daemon ~sw (fun () -> run_catalog (); `Stop_daemon);
-         Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+         (* Guarded like every other launch: a finished switch refuses the
+            fork synchronously, and each part it refuses still has to land
+            so [settle_tools_read] can release [tools_read_inflight]. *)
+         Masc_tui_fork_guard.launch ~sw
+           ~on_sync_failure:(fun detail ->
+               enqueue_async mailbox (Skills_catalog_loaded (generation, Error detail)))
+           (fun () -> run_catalog (); `Stop_daemon);
+         Masc_tui_fork_guard.launch ~sw
+           ~on_sync_failure:(fun detail ->
+               let error = Error detail in
+               enqueue_async mailbox (Tools_loaded (generation, keeper, error));
+               enqueue_async mailbox
+                 (Tools_async_observation_loaded (generation, error)))
+           (fun () -> run (); `Stop_daemon)
      | None ->
          let error = Error "Eio switch is unavailable" in
          enqueue_async mailbox (Tools_loaded (generation, keeper, error));

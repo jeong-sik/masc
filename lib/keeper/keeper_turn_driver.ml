@@ -2876,4 +2876,6 @@ module For_testing = struct
   let accept_no_progress_should_try_next =
     Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next
 
+  let lane_should_retry = lane_should_retry
+
 end

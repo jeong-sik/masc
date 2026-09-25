@@ -701,14 +701,16 @@ let test_route_resumes_on_same_path_per_class () =
    Api-error classes derive from the closed [Candidate_fault] judgment, and
    the Keeper walk predicates read the same judgment. This test calls both on
    one fixture per [Retry.api_error] constructor, so a change on either side
-   shows up here instead of in a second hand-typed table:
-   - [Rotate_now] must meet a walk that advances (one of
-     [candidate_access_should_try_next], [attempt_rejected_should_try_next],
-     [context_overflow_should_try_next] is true);
-   - [Exhausted_visible_alive] must meet a walk that stops (none is true);
-   - [Retry_after_observed] is exempt: the walk rests on the same candidate or
-     rotates through [Runtime_attempt_fsm.should_try_next], which these three
-     predicates do not decide.
+   shows up here instead of in a second hand-typed table. The walk side is the
+   lane's own decision, [Keeper_turn_driver.lane_should_retry] with every
+   gate open (not the last candidate, retry allowed): every predicate in its
+   chain plus the HTTP fallback, so a predicate added to the chain is compared
+   without editing this test.
+   - [Rotate_now] must meet a walk that advances;
+   - [Exhausted_visible_alive] must meet a walk that stops;
+   - [Retry_after_observed] is exempt: the route reports a wait hint, and
+     whether the walk rests on the same candidate or rotates is decided by
+     [Runtime_attempt_fsm.should_try_next], not by the route.
    The one known disagreement is pinned by name: a typed [ContextOverflow]
    ([Binding Window]) advances the walk, while the route keeps the typed
    terminal [Context_overflow] it had before the RFC walk. That is a defect,
@@ -719,12 +721,12 @@ let test_route_resumes_on_same_path_per_class () =
    [Candidate_fault.of_api_error] from compiling, which is where this table
    has to grow. *)
 let test_candidate_fault_route_agreement () =
-  let module Walk = Masc.Keeper_turn_driver_try_runtime in
   let walk_advances api =
-    let error = Agent_core.Error.Api api in
-    Walk.candidate_access_should_try_next error
-    || Walk.attempt_rejected_should_try_next error
-    || Walk.context_overflow_should_try_next error
+    Masc.Keeper_turn_driver.For_testing.lane_should_retry
+      ~is_last:false
+      ~allow_retry:true
+      ~allow_accept_no_progress_retry:true
+      (Agent_core.Error.Api api)
   in
   let label_of route = KFR.route_kind_label route ^ ":" ^ KFR.route_class_label route in
   let retry ?retry_after retry_class =

@@ -15,6 +15,7 @@
     Errors:
       400 — malformed sha256 (not 64 hex chars)
       404 — sha256 not in store
+      413 — artifact exceeds the 32 MiB whole-response limit
       503 — stored artifact unreadable *)
 
 open Server_utils
@@ -26,9 +27,32 @@ let is_valid_sha256 value = Result.is_ok (Tool_blob_store.validate_sha256 value)
 
 let artifact_read_permission = Masc_domain.CanAdmin
 
+(* Whole responses are materialised by both HTTP backends. Bound their
+   largest single allocation before serving any bytes. *)
+let maximum_artifact_response_bytes = Tool_blob_store.max_served_bytes
+
+let artifact_bytes ~base_path ~sha256 =
+  Eio_unix.run_in_systhread (fun () ->
+    Tool_blob_store.fetch_bounded
+      (Tool_blob_store.create ~base_path)
+      ~sha256
+      ~max_bytes:maximum_artifact_response_bytes)
+;;
+
+let too_large_response actual maximum =
+  `Assoc
+    [ "error", `String "artifact too large for HTTP download"
+    ; "bytes", `Int actual
+    ; "maximum_bytes", `Int maximum
+    ]
+;;
+
 let blob_response ~base_path ~sha256 =
   let store = Tool_blob_store.create ~base_path in
-  match Tool_blob_store.fetch store ~sha256 with
+  match
+    Tool_blob_store.fetch_bounded
+      store ~sha256 ~max_bytes:maximum_artifact_response_bytes
+  with
   | Ok None ->
       ( `Assoc
           [
@@ -45,6 +69,8 @@ let blob_response ~base_path ~sha256 =
             ("content", `String bytes);
           ],
         `OK )
+  | Error (Tool_blob_store.Too_large { actual; maximum; _ }) ->
+      too_large_response actual maximum, `Payload_too_large
   | Error error ->
       Log.Misc.error
         "tool blob read failed sha256=%s cause=%s"
@@ -83,7 +109,44 @@ let add_routes router =
                          ])
                 | Ok () ->
                     let json, status =
-                      blob_response ~base_path ~sha256:raw
+                      Eio_unix.run_in_systhread (fun () ->
+                        blob_response ~base_path ~sha256:raw)
                     in
                     respond_json_value_with_cors ~status request reqd json))
+         request reqd)
+  |> Http.Router.prefix_get "/api/v1/artifact-bytes/" (fun request reqd ->
+       with_token_permission_auth ~permission:artifact_read_permission
+         (fun state _agent_name _req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           let path = Http.Request.path request in
+           match extract_path_param ~prefix:"/api/v1/artifact-bytes/" path with
+           | None ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (`Assoc [ "error", `String "sha256 path parameter required" ])
+           | Some sha256 ->
+             (match Tool_blob_store.validate_sha256 sha256 with
+              | Error invalid ->
+                respond_json_value_with_cors ~status:`Bad_request request reqd
+                  (`Assoc [ "error", `String (Tool_blob_store.invalid_sha256_to_string invalid) ])
+              | Ok () ->
+                (match artifact_bytes ~base_path ~sha256 with
+                 | Ok (Some bytes) ->
+                   Http.Response.bytes ~content_type:"application/octet-stream"
+                     ~headers:
+                       ([ "cache-control", "no-store"
+                        ; "x-content-type-options", "nosniff"
+                        ; "content-disposition", "attachment; filename=artifact-" ^ sha256 ^ ".bin"
+                        ] @ cors_headers (get_origin request))
+                     bytes reqd
+                 | Ok None ->
+                   respond_json_value_with_cors ~status:`Not_found request reqd
+                     (`Assoc [ "error", `String "not found" ])
+                 | Error (Tool_blob_store.Too_large { actual; maximum; _ }) ->
+                   respond_json_value_with_cors ~status:`Payload_too_large request reqd
+                     (too_large_response actual maximum)
+                 | Error error ->
+                   Log.Misc.error "tool blob raw read failed sha256=%s cause=%s"
+                     sha256 (Tool_blob_store.fetch_error_to_string error);
+                   respond_json_value_with_cors ~status:`Service_unavailable request reqd
+                     (`Assoc [ "error", `String "tool blob read failed" ]))))
          request reqd)

@@ -250,6 +250,32 @@ let test_put_then_fetch () =
               Alcotest.failf "fetch failed: %s" (B.fetch_error_to_string error))
       | O.Inline _ -> Alcotest.fail "put returned Inline")
 
+let test_fetch_bounded_rejects_large_real_blob () =
+  with_temp_dir (fun dir ->
+    let store = B.create ~base_path:dir in
+    let payload = "bounded blob" in
+    let sha256 =
+      match B.put store ~bytes:payload ~mime:"application/octet-stream" with
+      | O.Stored { sha256; _ } -> sha256
+      | O.Inline _ -> Alcotest.fail "put returned Inline"
+    in
+    let maximum = String.length payload - 1 in
+    (match B.fetch_bounded store ~sha256 ~max_bytes:maximum with
+     | Error (B.Too_large { actual; maximum = reported; _ }) ->
+       Alcotest.(check int) "actual size" (String.length payload) actual;
+       Alcotest.(check int) "reported limit" maximum reported
+     | Error error ->
+       Alcotest.failf "wrong bounded error: %s" (B.fetch_error_to_string error)
+     | Ok _ -> Alcotest.fail "oversized blob was returned");
+    (match B.fetch_bounded store ~sha256 ~max_bytes:(String.length payload) with
+     | Ok (Some bytes) -> Alcotest.(check string) "at limit" payload bytes
+     | Ok None -> Alcotest.fail "blob disappeared"
+     | Error error -> Alcotest.fail (B.fetch_error_to_string error));
+    match B.fetch_bounded store ~sha256 ~max_bytes:(-1) with
+    | Error (B.Invalid_max_bytes (-1)) -> ()
+    | _ -> Alcotest.fail "negative bound was accepted")
+;;
+
 let test_binary_previews_are_utf8_without_changing_stored_bytes () =
   with_temp_dir (fun dir ->
     let store = B.create ~base_path:dir in
@@ -593,6 +619,75 @@ let test_maintenance_keeps_live_and_deletes_stable_dead_after_restart () =
         (Some "live gate replay output")
         (fetch_ok store ~sha256:replay_live.sha256))
 
+let test_maintenance_keeps_board_attachment_reference () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let live =
+        B.put store ~bytes:"board attachment" ~mime:"image/png"
+        |> stored_ref_exn
+      in
+      let dead =
+        B.put store ~bytes:"unreferenced attachment" ~mime:"image/png"
+        |> stored_ref_exn
+      in
+      let child = B.put_durable store ~bytes:"board manifest child" ~mime:"text/plain" in
+      let structured_content =
+        `Assoc [ "output_artifact", O.normalized_artifact_ref_to_json child ]
+      in
+      let manifest =
+        B.put_durable store
+          ~bytes:
+            (O.artifact_manifest_to_json
+               ~content:"board manifest child" ~structured_content
+             |> Yojson.Safe.to_string)
+          ~mime:O.artifact_manifest_mime
+      in
+      (* Written where the product writes it (Board_paths), not where the scan
+         reads, so a scanner path that drifts from Board's turns this red. *)
+      let board_posts =
+        Masc_board_handlers.Board_paths.file_path
+          ~workspace_masc_dir:
+            (Workspace_utils.masc_root_dir_from ~base_path ~cluster_name:"default")
+          Masc_board_handlers.Board_paths.Posts
+      in
+      Fs_compat.mkdir_p (Filename.dirname board_posts);
+      Fs_compat.save_file
+        board_posts
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ "meta",
+                `Assoc
+                  [ "attachments",
+                    `List
+                      [ `Assoc
+                          [ "kind", `String "image"
+                          ; "artifact", O.normalized_artifact_ref_to_json live
+                          ]
+                      ; `Assoc
+                          [ "kind", `String "external_link"
+                          ; "artifact", O.normalized_artifact_ref_to_json manifest
+                          ]
+                      ]
+                  ]
+              ])
+         ^ "\n");
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int) "Board and manifest child references are live" 3 observed.live_references;
+      let swept = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+      Alcotest.(check int) "only dead blob deleted" 1 swept.deleted;
+      Alcotest.(check (option string))
+        "Board artifact survives"
+        (Some "board attachment")
+        (fetch_ok store ~sha256:live.sha256);
+      Alcotest.(check (option string))
+        "Board manifest child survives"
+        (Some "board manifest child")
+        (fetch_ok store ~sha256:child.sha256);
+      Alcotest.(check (option string))
+        "unreferenced artifact is deleted"
+        None
+        (fetch_ok store ~sha256:dead.sha256))
+
 let test_maintenance_keeps_wire_capture_reference_within_retention () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -642,6 +737,58 @@ let test_maintenance_keeps_wire_capture_reference_within_retention () =
         "unreferenced blob no longer exists"
         None
         (fetch_ok store ~sha256:dead.sha256))
+
+(* A non-default cluster keeps its Board under .masc/clusters/<name>/, which
+   the maintenance scan does not read. The run must refuse before it can call
+   that post's artifact unreferenced (review of #38835: tick N writes, N+1
+   scans nothing, N+2 marks, N+3 deletes). Written through Board_paths. *)
+let test_maintenance_refuses_clustered_board_reference () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let attached =
+        B.put store ~bytes:"clustered board attachment" ~mime:"image/png"
+        |> stored_ref_exn
+      in
+      let board_posts =
+        Masc_board_handlers.Board_paths.file_path
+          ~workspace_masc_dir:
+            (Workspace_utils.masc_root_dir_from ~base_path ~cluster_name:"secondary")
+          Masc_board_handlers.Board_paths.Posts
+      in
+      Fs_compat.mkdir_p (Filename.dirname board_posts);
+      Fs_compat.save_file
+        board_posts
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ "meta",
+                `Assoc
+                  [ "attachments",
+                    `List
+                      [ `Assoc
+                          [ "kind", `String "image"
+                          ; "artifact", O.normalized_artifact_ref_to_json attached
+                          ]
+                      ]
+                  ]
+              ])
+         ^ "\n");
+      let refuses round =
+        match M.run ~base_path ~mode:M.Delete_previous_candidates with
+        | Error (M.Clustered_durable_roots_uncoordinated _) -> ()
+        | Error error ->
+          Alcotest.failf
+            "round %d: unexpected maintenance error: %s"
+            round
+            (M.error_to_string error)
+        | Ok _ ->
+          Alcotest.failf "round %d: maintenance ran over an unread cluster Board" round
+      in
+      refuses 1;
+      refuses 2;
+      Alcotest.(check (option string))
+        "clustered Board attachment survives two delete runs"
+        (Some "clustered board attachment")
+        (fetch_ok store ~sha256:attached.sha256))
 
 let test_maintenance_rejects_uncoordinated_cluster_roots () =
   with_temp_dir (fun base_path ->
@@ -1446,6 +1593,8 @@ let () =
           Alcotest.test_case "put returns Stored" `Quick
             test_put_returns_stored;
           Alcotest.test_case "put then fetch" `Quick test_put_then_fetch;
+          Alcotest.test_case "bounded fetch rejects oversized real blob" `Quick
+            test_fetch_bounded_rejects_large_real_blob;
           Alcotest.test_case "binary previews preserve UTF-8 and stored bytes" `Quick
             test_binary_previews_are_utf8_without_changing_stored_bytes;
           Alcotest.test_case "put then fetch bounded ranges" `Quick
@@ -1471,6 +1620,10 @@ let () =
             `Quick
             test_maintenance_keeps_live_and_deletes_stable_dead_after_restart;
           Alcotest.test_case
+            "maintenance keeps Board attachment artifact"
+            `Quick
+            test_maintenance_keeps_board_attachment_reference;
+          Alcotest.test_case
             "maintenance malformed reference fails closed"
             `Quick
             test_maintenance_malformed_reference_fails_closed;
@@ -1490,6 +1643,10 @@ let () =
             "maintenance rejects uncoordinated cluster roots"
             `Quick
             test_maintenance_rejects_uncoordinated_cluster_roots;
+          Alcotest.test_case
+            "maintenance refuses a clustered Board reference"
+            `Quick
+            test_maintenance_refuses_clustered_board_reference;
           Alcotest.test_case
             "maintenance ignores repository mirrors"
             `Quick

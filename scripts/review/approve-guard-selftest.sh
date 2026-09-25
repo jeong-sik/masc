@@ -4,6 +4,11 @@
 # + whether a POST happened.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
+# Resolve the repo root ONCE, at the top level. (A $(cd ... && pwd) nested
+# inside a $(git ... || ...) command substitution loses cd's stdout in bash,
+# which embeds a newline in REPO_ROOT and makes every later `git -C
+# "$REPO_ROOT"` fail — that is what silently skipped the red control.)
+REPO_ROOT="$(cd "$here/../.." && pwd)"
 guard="$here/approve-guard.sh"
 work="$(mktemp -d "${TMPDIR:-/tmp}/agtest.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
@@ -72,8 +77,10 @@ H2=fedcba9876543210fedcba9876543210fedcba98
 pass=0; fail=0
 
 # Red control (run BEFORE the local edit): main's guard does not know
-# red-control: main's guard must NOT know --replaces, so every new case below
-# must fail against it. Defer the actual guard runs until after setup() exists.
+# --replaces. If MAIN_GUARD is set, that file is the pre-change guard and the
+# new cases below must fail against it. Otherwise main's guard is read from
+# MERGE_BASE (the commit this branch forked from), so the control still fails
+# after a future merge. Defer the actual guard runs until after setup() exists.
 setup() { # setup <casedir>: default happy fixtures
   local d="$1"; mkdir -p "$d"
   echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\"}}" >"$d/pull.json"
@@ -102,11 +109,20 @@ run_case() { # run_case <name> <want_rc> <needle> <want_post 0|1> <casedir> [gua
 
 args() { echo --repo o/r --pr 5 --head "$1" --slot "$2" --body "$3"; }
 
-# Fetch main's guard late: the fetch is what proves the red control (main must
-# NOT know --replaces, so every new case below must fail against it).
-REPO_ROOT="$(git -C "$here" rev-parse --show-toplevel 2>/dev/null || cd "$here/../../.." && pwd)"
+# Fetch the pre-change guard late: main (or the merge base) must NOT know
+# --replaces, so every new case below must fail against it. REPO_ROOT is
+# resolved once at the top of this script.
 if [ "${MAIN_GUARD+x}" != "x" ]; then
   MAIN_GUARD="$(git -C "$REPO_ROOT" show origin/main:scripts/review/approve-guard.sh 2>/dev/null || true)"
+fi
+if [ -z "${MAIN_GUARD//[$' \t\n']/}" ]; then
+  # No main ref checked out: fall back to this branch's fork point. After a
+  # future merge the merge base IS the renamed guard, so this control fails
+  # loudly instead of silently skipping (owner review on #39001).
+  mb="$(git -C "$REPO_ROOT" merge-base HEAD origin/main 2>/dev/null || true)"
+  if [ -n "$mb" ]; then
+    MAIN_GUARD="$(git -C "$REPO_ROOT" show "$mb:scripts/review/approve-guard.sh" 2>/dev/null || true)"
+  fi
 fi
 if [ -z "${MAIN_GUARD//[$' \t\n']/}" ]; then MAIN_GUARD=""; fi
 red_fail=0
@@ -126,8 +142,9 @@ else
   echo "skip red-control-main-guard-refuses (MAIN_GUARD unavailable)"
 fi
 
-# Now that setup() exists, run the red-control passes deferred above: main's
-# guard does not know --replaces, so every new case must fail against it.
+# Now that setup() exists, run the red-control passes deferred above: the
+# pre-change guard does not know --replaces, so every new case must fail
+# against it.
 if [ -n "$MAIN_GUARD" ]; then
   for i in "${!red_names[@]}"; do
     cname="${red_names[$i]}"; carg="${red_args[$i]}"

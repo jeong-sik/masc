@@ -49,4 +49,4 @@ val log_event : Browser_stagehand_session.event -> unit
     [\[browser.stagehand\]], installs the Stagehand lane's backend on [sw]
     (RFC-browser-lane-stagehand §3.4). No browser starts until a
     [Session_open]. *)
-val start : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> unit
+val start : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> base_path:string -> unit

@@ -39,6 +39,10 @@ val create :
 (** What {!Browser_lane.install_stagehand_executor} takes.
 
     - [Session_open] starts a session unless one is open, which it reuses.
+      A session that stops working (its service worker went away, its
+      connection ended, or an answer to the extension could not be
+      delivered) is let go at once and its browser stopped, so the next open
+      starts a new one; [Session_status] says why until then.
     - [Session_close] asks the runtime to close, then stops the browser.
     - [Session_status] reports the backend's record and sends nothing.
     - Page verbs go to {!Browser_stagehand_executor.execute} on the open

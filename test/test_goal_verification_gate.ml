@@ -499,27 +499,27 @@ let test_measurement_requires_current_criterion_and_evidence () =
        check string "list preserves reported zero" "0"
          (json_state goal_json [ "measurement"; "record"; "observed_value" ])
    | _ -> fail "expected one listed Goal");
-  let cache_before = Goal_measurement.cache_generation () in
+  let cache_before = Goal_projection_generation.current () in
   (match Goal_measurement.record config ~goal_id
            ~criterion_revision:goal.criterion_revision ~observed_value:"1"
            ~evidence:"artifact:updated-count" ~actor:"test" with
    | Ok _ -> ()
    | Error error -> fail (Goal_measurement.error_to_string error));
   check int "successful write changes dashboard cache key" (cache_before + 1)
-    (Goal_measurement.cache_generation ());
+    (Goal_projection_generation.current ());
   (match Goal_measurement.load config with
    | Ok [ row ] ->
        check string "latest replaces prior value" "1" row.observed_value;
        check string "latest replaces prior evidence" "artifact:updated-count" row.evidence
    | Ok _ | Error _ -> fail "measurement snapshot kept more than one row for a Goal");
-  let before_revision = Goal_measurement.cache_generation () in
+  let before_revision = Goal_projection_generation.current () in
   let changed =
     match Goal_store.upsert_goal config ~id:goal_id ~target_value:"2" () with
     | Ok (goal, _) -> goal
     | Error error -> fail (Goal_store.write_error_to_string error)
   in
   check bool "criterion change refreshes dashboard cache" true
-    (Goal_measurement.cache_generation () > before_revision);
+    (Goal_projection_generation.current () > before_revision);
   check string "old criterion is not current" "not_recorded"
     (json_state (Goal_measurement.projection (Goal_measurement.load config) changed)
        [ "state" ]);

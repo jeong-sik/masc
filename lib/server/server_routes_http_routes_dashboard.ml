@@ -2984,7 +2984,7 @@ let add_routes ~sw ~clock router =
          let config = Mcp_server.workspace_config state in
          let cache_key =
            Printf.sprintf "goals_tree:%s:%d" config.base_path
-             (Goal_measurement.cache_generation ())
+             (Goal_projection_generation.current ())
          in
          let json =
            Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s
@@ -3036,7 +3036,7 @@ let add_routes ~sw ~clock router =
            let config = Mcp_server.workspace_config state in
            let cache_key =
              Printf.sprintf "goal_detail:%s:%s:%d" config.base_path goal_id
-               (Goal_measurement.cache_generation ())
+               (Goal_projection_generation.current ())
            in
            let json =
              Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s

@@ -1,7 +1,5 @@
 let ( let* ) = Result.bind
 
-let cache_generation = Goal_projection_generation.current
-
 type t = {
   id : string;
   goal_id : string;
@@ -70,7 +68,8 @@ let read_optional config file =
   | None -> Error "goal_measurement: store path is outside workspace"
   | Some key ->
       (match Workspace_utils.backend_get config ~key with
-       | Error _ -> Error "goal_measurement: store read failed"
+       | Error error ->
+           Error ("goal_measurement: store read failed: " ^ Backend_types.show_error error)
        | Ok None -> Ok None
        | Ok (Some bytes) ->
            (try Ok (Some (Yojson.Safe.from_string bytes))

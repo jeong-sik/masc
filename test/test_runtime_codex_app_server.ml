@@ -42,6 +42,17 @@ let other_turn_token_usage_updated =
   {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-9","tokenUsage":{"total":{"inputTokens":5,"cachedInputTokens":0,"outputTokens":5,"reasoningOutputTokens":0,"totalTokens":10},"last":{"inputTokens":5,"cachedInputTokens":0,"outputTokens":5,"reasoningOutputTokens":0,"totalTokens":10}}}}|}
 ;;
 
+(* The frame after the turn's second model response: [total] moved on and
+   [last] is that response alone. *)
+let second_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":11000,"cachedInputTokens":9500,"outputTokens":740,"reasoningOutputTokens":310,"totalTokens":11740},"last":{"inputTokens":2000,"cachedInputTokens":1500,"outputTokens":40,"reasoningOutputTokens":10,"totalTokens":2040},"modelContextWindow":272000}}}|}
+;;
+
+(* The weekly limit ends the turn after it has already paid for responses. *)
+let usage_limit_terminal =
+  {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"You've hit your usage limit. Try again later.","codexErrorInfo":"usageLimitExceeded","additionalDetails":null}}}|}
+;;
+
 (* Ours, with the breakdown missing two required counts. *)
 let truncated_token_usage_updated =
   {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80}}}}|}
@@ -1520,6 +1531,38 @@ let test_error_notification_reads_usage_limit () =
       | Ok _ -> fail "usage limit notification did not fail the turn")
 ;;
 
+(* Every usage frame of the turn is reported when it is read, so the two
+   responses this turn paid for are still reported when the usage limit ends
+   it. A frame for another turn is not this turn's spend. *)
+let test_usage_frames_are_reported_before_a_usage_limit_ends_the_turn () =
+  let reported = ref [] in
+  let on_stream_event = function
+    | Runtime_codex_app_server.Usage_reported { model; usage } ->
+      reported := (model, usage.input_tokens, usage.output_tokens) :: !reported
+    | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
+    | Usage_windows_reported _ | Turn_finished _ -> ()
+  in
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result
+    ; token_usage_updated; other_turn_token_usage_updated; second_token_usage_updated
+    ; usage_limit_terminal
+    ]
+    (fun path ->
+      (match run_fixture ~on_stream_event path with
+       | Error
+           (Runtime_codex_app_server.Turn_failed
+              { codex_error_info =
+                  Some Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
+              ; detail = _
+              }) -> ()
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "usage limit notification did not fail the turn");
+      check (list (triple string int int)) "each response of this turn, in order"
+        [ "gpt-fixture", 1200, 80; "gpt-fixture", 2000, 40 ]
+        (List.rev !reported))
+;;
+
 (* The object variants carry the upstream HTTP status, and a value the schema
    does not name is kept whole rather than read as some known class. *)
 let test_failed_turn_reads_object_and_unknown_error_info () =
@@ -2252,7 +2295,7 @@ let test_rate_limit_updates_are_reported_without_changing_the_turn () =
     | Runtime_codex_app_server.Usage_windows_reported report -> reports := report :: !reports
     | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
-    | Turn_finished _ -> ()
+    | Usage_reported _ | Turn_finished _ -> ()
   in
   with_fixture
     [ init_result; account_chatgpt; thread_result; turn_result; readable; unreadable
@@ -2731,7 +2774,7 @@ let production_keeper_meta ~base_path ~trace_id =
   | Error detail -> fail ("production Keeper meta fixture failed: " ^ detail)
 ;;
 
-let run_production_keeper_turn_with_projection ~after_turn
+let run_production_keeper_turn_with_projection ?(write_cost_ledger = false) ~after_turn
     ~dynamic_context_for_tools
     ~http_requests ~base_path ~trace_id
     ~user_message ~cli_path ~model ~turn_instructions =
@@ -2812,7 +2855,22 @@ candidates = ["projection.http", "codex.codex"]
                                 ; keeper_name = meta.name
                                 }
                               in
+                              (* The cost ledger is written only with a
+                                 trajectory accumulator, as a scheduled
+                                 Keeper turn runs. *)
+                              let trajectory_acc =
+                                if write_cost_ledger
+                                then
+                                  Some
+                                    (Trajectory.create_accumulator
+                                       ~masc_root:(Workspace.masc_root_dir config)
+                                       ~keeper_name:meta.name
+                                       ~trace_id
+                                       ())
+                                else None
+                              in
                               let result = (Keeper_agent_run.run_turn
+                                ?trajectory_acc
                                 ~config
                                 ~meta
                                 ~publication_recovery
@@ -4653,6 +4711,81 @@ let test_production_keeper_reports_codex_token_usage () =
                | None -> fail "production turn recorded no runtime observation")))
 ;;
 
+(* The raw rows the cost ledger holds under [base_path], as
+   (input, output) pairs in ascending order. *)
+let raw_cost_rows ~base_path =
+  let store =
+    Cost_ledger.store_of_masc_root
+      (Workspace.masc_root_dir (Workspace.default_config base_path))
+  in
+  Dated_jsonl.read_recent store 100
+  |> List.filter_map (fun json ->
+    match Cost_ledger.of_json json with
+    | Ok { Cost_ledger.usage_projection = Cost_ledger.Raw_observation
+         ; usage = Cost_ledger.Usage_reported { input_tokens; output_tokens; _ }
+         ; _
+         } -> Some (input_tokens, output_tokens)
+    | Ok _ -> None
+    | Error error -> failf "cost row: %s" (Cost_ledger.decode_error_to_string error))
+  |> List.sort compare
+;;
+
+let run_cost_ledger_turn ~base_path ~trace_id ~cli_path =
+  run_production_keeper_turn_with_projection
+    ~write_cost_ledger:true
+    ~after_turn:ignore
+    ~dynamic_context_for_tools:None
+    ~http_requests:None
+    ~base_path
+    ~trace_id
+    ~user_message:"Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
+    ~cli_path
+    ~model:"gpt-fixture"
+    ~turn_instructions:None
+;;
+
+(* A Codex turn the usage limit ends has already paid for two model
+   responses. Each one is a raw cost row, written when the app-server
+   reported it; before, a failed official-client turn wrote no row at all. *)
+let test_production_keeper_ledgers_codex_spend_of_a_failed_turn () =
+  let base_path = temp_workspace "masc-codex-production-failed-cost-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result; account_chatgpt; thread_result; turn_result
+         ; token_usage_updated; second_token_usage_updated; usage_limit_terminal
+         ]
+         (fun cli_path ->
+            (match run_cost_ledger_turn ~base_path ~trace_id:"codex-failed-cost-1" ~cli_path with
+             | Error _ -> ()
+             | Ok _ -> fail "usage limit did not fail the production turn");
+            check (list (pair int int)) "one raw row per response the turn paid for"
+              [ 1200, 80; 2000, 40 ]
+              (raw_cost_rows ~base_path)))
+;;
+
+(* A successful Codex turn has one raw row per reported response. The
+   completion hook sees the same newest frame again and must not write it a
+   second time. *)
+let test_production_keeper_ledgers_each_codex_response_once () =
+  let base_path = temp_workspace "masc-codex-production-once-cost-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result; account_chatgpt; thread_result; turn_result
+         ; item_completed; token_usage_updated; turn_completed
+         ]
+         (fun cli_path ->
+            (match run_cost_ledger_turn ~base_path ~trace_id:"codex-once-cost-1" ~cli_path with
+             | Error error -> fail (Agent_core.Error.to_string error)
+             | Ok _ -> ());
+            check (list (pair int int)) "the one response, written once"
+              [ 1200, 80 ]
+              (raw_cost_rows ~base_path)))
+;;
+
 let test_production_keeper_resumes_across_trace_rotation () =
   let base_path = temp_workspace "masc-codex-production-resume-" in
   Fun.protect
@@ -5430,6 +5563,8 @@ let () =
             test_failed_turn_uses_official_context_error_enum
         ; test_case "error notification reads usage limit" `Quick
             test_error_notification_reads_usage_limit
+        ; test_case "usage frames are reported before a usage limit ends the turn" `Quick
+            test_usage_frames_are_reported_before_a_usage_limit_ends_the_turn
         ; test_case "failed turn reads object and unknown error info" `Quick
             test_failed_turn_reads_object_and_unknown_error_info
         ; test_case "failed turn keeps unnamed error scalars" `Quick
@@ -5665,6 +5800,14 @@ let () =
             "production Keeper reports Codex token usage"
             `Quick
             test_production_keeper_reports_codex_token_usage
+        ; test_case
+            "production Keeper ledgers Codex spend of a failed turn"
+            `Quick
+            test_production_keeper_ledgers_codex_spend_of_a_failed_turn
+        ; test_case
+            "production Keeper ledgers each Codex response once"
+            `Quick
+            test_production_keeper_ledgers_each_codex_response_once
         ; test_case
             "production Keeper resumes across trace rotation"
             `Quick

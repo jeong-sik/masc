@@ -99,7 +99,7 @@ default = "codex.context"
     | Some {execution=Runtime_execution.Codex_app_server config;_} -> config
     | Some _ | None -> fail "fixture runtime missing" in
   let reports = ref [] in
-  let run ?official_task_reference ?model_input_projection ?on_model_input_window_observation ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"]) ?official_client_continuation ?(goal="Continue from current World State.") ~instructions ~world () =
+  let run ?official_task_reference ?model_input_projection ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"]) ?official_client_continuation ?(goal="Continue from current World State.") ~instructions ~world () =
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world}
@@ -110,8 +110,7 @@ default = "codex.context"
       ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_task_reference ?official_client_continuation
       ~goal_blocks:None ~system_prompt:instructions ~tools:[]
       ~initial_messages
-      ~model_input_projection ?on_model_input_window_observation
-      ~on_transmitted_model_input:(fun report -> reports := report :: !reports)
+      ~model_input_projection ~on_transmitted_model_input:(fun report -> reports := report :: !reports)
       ~hooks:(Some hooks) ~context_injector:None ~context:(Some (Agent_core.Context.create ()))
       ~event_bus:None ~raw_trace:None ~on_event:None ~config ()
   in
@@ -397,25 +396,6 @@ let test_resume_sends_no_history () =
         (String_util.contains_substring sent "xxxx")) wire)
     [ "nothing declared", None; "a declared limit", Some declared_limit ]
 
-let test_resume_reports_no_window () =
-  (* A Resume sends none of the history, so it reports no window: a window
-     would record a range on the turn that never reached the wire. *)
-  with_fixture @@ fun ~run ~capture ~reports:_ ->
-  let observed = ref 0 in
-  let count _ = incr observed in
-  let attempt, _ = resume_large_history ~capture
-    ~start:(fun () ->
-      let first = run ~on_model_input_window_observation:count
-        ~instructions:"Keeper instructions" ~world:"world" () in
-      check bool "a Start reports its window" true (!observed > 0);
-      observed := 0;
-      first)
-    ~resume:(fun checkpoint -> run ~on_model_input_window_observation:count
-      ~initial_messages:large_history ~official_client_continuation:checkpoint
-      ~instructions:"Keeper instructions" ~world:"world" ()) in
-  successful attempt;
-  check int "a Resume reports no window" 0 !observed
-
 let test_declared_limit_above_history_changes_nothing () =
   (* (b) A limit the history fits under sends exactly what an undeclared lane
      sends. *)
@@ -428,7 +408,6 @@ let test_declared_limit_above_history_changes_nothing () =
 let () = run "Keeper current Codex context" ["native requests",[
   test_case "a declared prompt limit windows a Start" `Quick test_declared_limit_windows_start;
   test_case "a Resume sends none of the history" `Quick test_resume_sends_no_history;
-  test_case "a Resume reports no window" `Quick test_resume_reports_no_window;
   test_case "a prompt limit above the history changes nothing" `Quick test_declared_limit_above_history_changes_nothing;
   test_case "a continuation's resume overflow ends on a full thread" `Quick test_continuation_resume_overflow_ends_on_a_full_thread;
   test_case "cooperative native resume does not replay original input" `Quick test_cooperative_resume_sends_only_remaining_work_instruction;

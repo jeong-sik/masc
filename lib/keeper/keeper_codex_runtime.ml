@@ -867,7 +867,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~initial_messages
         ~model_input_projection:
           (match declared_max_prompt_bytes with
-           | None -> Some (project_history ~thread_mode ~reserved_bytes:0)
+           | None -> Some (project_history ~reserved_bytes:0)
            | Some _ -> None)
         ~hooks:(Some hooks)
     in
@@ -917,7 +917,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                   capacity_bytes))
         else
           let* messages =
-            try project_history ~thread_mode ~reserved_bytes prepared.messages with
+            try project_history ~reserved_bytes prepared.messages with
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn ->
               Error
@@ -1697,16 +1697,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
           ~initial_messages
           ~declared_max_prompt_bytes
           ~capacity_bytes
-          (* A Resume still projects: the per-turn context it carries in front
-             of the goal is placed by this projection. It reports no window,
-             though -- the range it measures is not what a Resume sends, as on
-             the Claude Code lane. *)
-          ~project_history:(fun ~thread_mode ~reserved_bytes ->
-            let on_model_input_window_observation =
-              match thread_mode with
-              | Runtime_codex_app_server.Start -> on_model_input_window_observation
-              | Runtime_codex_app_server.Resume _ -> None
-            in
+          ~project_history:(fun ~reserved_bytes ->
             model_input_projection_for_capacity
               ~measure_message_bytes
               ~capacity_bytes

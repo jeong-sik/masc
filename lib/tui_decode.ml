@@ -10139,14 +10139,23 @@ let decode_lane_run_detail json =
   in
   let* lrd_skill_evidence = decode_lane_run_skill_evidence run in
   let* lrd_gate_judgment =
-    match lrd_output_availability with
-    | Some (Exact_lane_run_registry.Not_loaded
-           | Exact_lane_run_registry.Unavailable _)
-      when Standalone_lane.equal summary.lrs_lane Standalone_lane.Hitl_auto_judge ->
-      Ok Lane_run_gate_judgment_unavailable
-    | _ ->
+    let decode_judgment () =
       decode_lane_run_gate_judgment ~lane:summary.lrs_lane
         ~status:summary.lrs_status ~output:lrd_output
+    in
+    (* Every lane is named so a judging lane added later has to say whether an
+       unread output means its judgment is unavailable. *)
+    match summary.lrs_lane with
+    | Standalone_lane.Hitl_auto_judge ->
+      (match lrd_output_availability with
+       | Some (Exact_lane_run_registry.Not_loaded
+              | Exact_lane_run_registry.Unavailable _) ->
+         Ok Lane_run_gate_judgment_unavailable
+       | Some Exact_lane_run_registry.Available | None -> decode_judgment ())
+    | Standalone_lane.Librarian
+    | Standalone_lane.Board_attention
+    | Standalone_lane.Workspace_curator
+    | Standalone_lane.Verifier -> decode_judgment ()
   in
   Ok
     { lrd_run_id = summary.lrs_run_id

@@ -2581,7 +2581,9 @@ type librarian_run_page =
 val decode_librarian_run_page : Yojson.Safe.t -> (librarian_run_page, string) result
 (** One cursor page of exact-lane summaries. [lrp_next] is present only when
     the server says older rows exist, so a client can search through the full
-    retained registry without assuming the newest page contains a Librarian. *)
+    retained registry without assuming the newest page contains a Librarian.
+    Every row is read before the first Librarian is picked, so an unknown lane
+    or a missing [run_id] in any row refuses the whole page. *)
 
 val decode_librarian_actual_input :
   run_id:string -> Yojson.Safe.t -> (string list, string) result

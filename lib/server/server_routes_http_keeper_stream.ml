@@ -1695,6 +1695,20 @@ type translated_keeper_stream_event =
 let empty_keeper_stream_bridge_state () = Keeper_chat_agent_core_stream_bridge.empty_state ()
 let translate_agent_core_stream_event = Keeper_chat_agent_core_stream_bridge.translate
 
+(* Provider events that already passed the request's
+   [Keeper_stream_text_redaction.Scoped] redactor, each under the stream scope
+   it names, through the bridge and onto the chat bus in order. *)
+let publish_stream_events ~redact_text ~base_dir ~publish bridge_state scoped_events =
+  List.fold_left
+    (fun bridge_state (stream_scope, evt) ->
+       let translated =
+         translate_agent_core_stream_event ~redact_text ~base_dir ~stream_scope
+           bridge_state evt
+       in
+       List.iter publish translated.chat_events;
+       translated.bridge_state)
+    bridge_state scoped_events
+
 (* [user_row_origin] and [submission] are required labelled arguments. Every
    caller presents the typed transcript provenance and execution ownership
    selected at its persistence boundary; this function never infers either
@@ -2645,22 +2659,43 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       in
       List.iter (Keeper_chat_events.publish events) failed.chat_events)
   in
+  (* The bridge redacts one delta at a time, and a secret split between two
+     deltas matched neither half, so the journal stored it and every adapter
+     published it. Provider events reach the bridge through one stream
+     redactor per request instead; it holds back an unfinished line and
+     releases it under its own stream scope. *)
+  let stream_text = Keeper_stream_text_redaction.Scoped.create redaction in
+  let publish_stream_events =
+    publish_stream_events ~redact_text ~base_dir:base_path
+      ~publish:(Keeper_chat_events.publish events)
+  in
+  let publish_held_stream_text bridge_state =
+    publish_stream_events bridge_state
+      (Keeper_stream_text_redaction.Scoped.flush stream_text)
+  in
   let rec consume_worker_events bridge_state =
-    match next_worker_projection () with
+    let projection = next_worker_projection () in
+    (* Text the redactor still holds arrived before the request ended or its
+       reader left, so it is published before either is handled. *)
+    let bridge_state =
+      match projection with
+      | `Completion _ | `Client_disconnected -> publish_held_stream_text bridge_state
+      | `Worker_event _ -> bridge_state
+    in
+    match projection with
     | `Client_disconnected -> None
     | `Worker_event (Stream_event (stream_scope, evt)) ->
-        let translated =
-          translate_agent_core_stream_event ~redact_text
-            ~base_dir:base_path ~stream_scope bridge_state evt
-        in
-        List.iter (Keeper_chat_events.publish events) translated.chat_events;
-        consume_worker_events translated.bridge_state
+        consume_worker_events
+          (publish_stream_events bridge_state
+             (Keeper_stream_text_redaction.Scoped.on_event stream_text
+                ~stream_scope evt))
     | `Worker_event
         (Stream_runtime_attempt_started
            (previous_scope, runtime_id, attempt_index)) ->
         let translated =
           Keeper_chat_agent_core_stream_bridge.start_runtime_attempt
-            ~runtime_id ~attempt_index ~previous_scope bridge_state
+            ~runtime_id ~attempt_index ~previous_scope
+            (publish_held_stream_text bridge_state)
         in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
@@ -3611,6 +3646,7 @@ module For_testing = struct
   let synthesize_wire_terminal_on_settle = synthesize_wire_terminal_on_settle
   let on_operation_execution_settled = on_operation_execution_settled
   let register_operation_live_sink = register_operation_live_sink
+  let publish_stream_events = publish_stream_events
 end
 
 (* POST /api/v1/keepers/ask-answer

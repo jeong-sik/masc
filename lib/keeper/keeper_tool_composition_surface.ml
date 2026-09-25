@@ -344,6 +344,9 @@ let observe_node_result
       ~tool_name:result.tool_name
       ~input:result.input
       ~output_text:(Tool_result.message observed_result)
+      ?execution_evidence:
+        (Keeper_tool_call_log.execution_evidence_of_metadata
+           (Tool_result.metadata observed_result))
       ~wire_outcome:(wire_outcome_of_result observed_result)
       ~duration_ms:(Tool_result.duration_ms observed_result)
       ~model:(Keeper_hooks_agent_core_types.current_keeper_model meta)

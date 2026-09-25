@@ -142,21 +142,26 @@ let with_workspace ~response_kind f =
     (match execution.disposition with
      | Tool_result.Completed () -> ()
      | Failed _ | Deferred _ -> fail ("Execute did not complete: " ^ execution.raw_output));
-    Yojson.Safe.from_string execution.raw_output in
+    let evidence =
+      match Keeper_tool_call_log.execution_evidence_of_metadata execution.metadata with
+      | Some evidence -> evidence
+      | None -> fail ("completed Execute carried no execution evidence: " ^ execution.raw_output)
+    in
+    (Yojson.Safe.from_string execution.raw_output, evidence) in
   f execute (fun () -> List.map Yojson.Safe.from_string (lines request_log))
 
 let field name value = Yojson.Safe.Util.member name value
 let text name value = field name value |> Yojson.Safe.Util.to_string
 let integer name value = field name value |> Yojson.Safe.Util.to_int
 
-let single_receipt payload =
-  let evidence = field "shim_execution_evidence" payload in
-  check string "the model-visible result records receipt observations" "recorded" (text "status" evidence);
-  match field "receipts" evidence with
+let single_receipt evidence =
+  let shim = field "shim_execution_evidence" evidence in
+  check string "the ledger evidence records receipt observations" "recorded" (text "status" shim);
+  match field "receipts" shim with
   | `List [receipt] -> receipt
   | other -> fail ("expected exactly one per-call receipt: " ^ Yojson.Safe.to_string other)
 
-let assert_payload ~ordinal ~exit_code payload =
+let assert_payload ~ordinal ~exit_code (payload, evidence) =
   check bool "payload success follows process exit" (exit_code = 0)
     (field "ok" payload |> Yojson.Safe.Util.to_bool);
   check int "actual remote process outcome survives" exit_code
@@ -166,39 +171,59 @@ let assert_payload ~ordinal ~exit_code payload =
     (Printf.sprintf "fixture-call-%d\nfixture-stderr-%d\n" ordinal ordinal)
     (text "output" payload);
   check string "remote preview does not claim full capture" "capture_only"
-    (text "output_completeness" payload)
+    (text "output_completeness" evidence);
+  check bool "the model is not told the usual capture marker" true
+    (field "output_completeness" payload = `Null);
+  check bool "the model still reads its location observation" true
+    (match field "execution_location" payload |> field "scope" with
+     | `String _ -> true
+     | _ -> false);
+  List.iter (fun name ->
+    check string (name ^ " is recorded as evidence") "remote_ssh" (text name evidence);
+    check bool (name ^ " is not sent to the model") true (field name payload = `Null))
+    ["requested_sandbox"; "via"; "sandbox_profile"]
 
 let test_each_owner_call_retains_only_its_own_receipt () =
   with_workspace ~response_kind:"recorded" @@ fun execute requests ->
   let first = execute ~always_allow:true ["echo"; "first"] in
   let second = execute ~always_allow:true ["echo"; "second"] in
-  List.iter (fun (ordinal, exit_code, payload) ->
-    assert_payload ~ordinal ~exit_code payload;
-    let evidence = single_receipt payload in
-    check string "receipt is observed" "observed" (text "status" evidence);
-    check string "unboxed effect receipt is preserved" "effect" (field "receipt" evidence |> text "mode");
-    check string "effect receipt retains its reported plan" "unrestricted" (field "receipt" evidence |> text "plan");
-    check int "each receipt has its own exit" exit_code (field "outcome" evidence |> integer "exit"))
+  List.iter (fun (ordinal, exit_code, ((payload, evidence) as result)) ->
+    assert_payload ~ordinal ~exit_code result;
+    let receipt = single_receipt evidence in
+    check string "receipt is observed" "observed" (text "status" receipt);
+    check string "unboxed effect receipt is preserved" "effect" (field "receipt" receipt |> text "mode");
+    check string "effect receipt retains its reported plan" "unrestricted" (field "receipt" receipt |> text "plan");
+    check int "each receipt has its own exit" exit_code (field "outcome" receipt |> integer "exit");
+    check bool "one usual effect receipt is not sent to the model" true
+      (field "shim_execution_evidence" payload = `Null))
     [1, 3, first; 2, 7, second];
   check (list string) "two separate owner calls reached transport" ["effect"; "effect"]
     (List.map (text "mode") (requests ()))
 
 let test_observe_result_is_reused_by_actual_owner () =
   with_workspace ~response_kind:"recorded" @@ fun execute requests ->
-  let payload = execute ~always_allow:false ["git"; "status"] in
-  assert_payload ~ordinal:1 ~exit_code:0 payload;
-  let receipt = single_receipt payload |> field "receipt" in
+  let (payload, evidence) as result = execute ~always_allow:false ["git"; "status"] in
+  assert_payload ~ordinal:1 ~exit_code:0 result;
+  let receipt = single_receipt evidence |> field "receipt" in
   check string "actual observation mode survives owner settlement" "observe" (text "mode" receipt);
   check string "reported box boundary survives" "sandbox_applied" (text "boundary" receipt);
+  check bool "an Observe receipt still reaches the model" true
+    (Yojson.Safe.equal
+       (field "shim_execution_evidence" evidence)
+       (field "shim_execution_evidence" payload));
   check (list string) "completed Observe was not dispatched again as Effect" ["observe"]
     (List.map (text "mode") (requests ()))
 
 let test_unavailable_receipt_does_not_erase_process_result () =
   List.iter (fun (response_kind, reason) ->
     with_workspace ~response_kind @@ fun execute requests ->
-    let payload = execute ~always_allow:true ["echo"; "first"] in
-    assert_payload ~ordinal:1 ~exit_code:3 payload;
-    let receipt = single_receipt payload in
+    let (payload, evidence) as result = execute ~always_allow:true ["echo"; "first"] in
+    assert_payload ~ordinal:1 ~exit_code:3 result;
+    let receipt = single_receipt evidence in
+    check bool "an unavailable receipt still reaches the model" true
+      (Yojson.Safe.equal
+         (field "shim_execution_evidence" evidence)
+         (field "shim_execution_evidence" payload));
     check string "receipt availability is explicit" "unavailable" (text "status" receipt);
     check string "exact receipt failure survives" reason (text "reason" receipt);
     check bool "no receipt was invented from the requested mode" true (field "receipt" receipt = `Null);

@@ -861,9 +861,12 @@ let test_token_usage_of_this_turn_reaches_the_result () =
       match run_fixture path with
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok result ->
-        check (option token_usage) "last breakdown" (Some fixture_last_usage) result.usage;
+        check (option token_usage) "last breakdown" (Some fixture_last_usage)
+          (Option.map (fun (frame : Runtime_codex_app_server.frame_usage) -> frame.last) result.usage);
         check (option token_usage) "thread total" (Some fixture_thread_total)
-          result.thread_total;
+          (Option.map
+             (fun (frame : Runtime_codex_app_server.frame_usage) -> frame.thread_total)
+             result.usage);
         check string "text still lands" "MASC_SUBSCRIPTION_OK" result.text)
 ;;
 
@@ -881,8 +884,7 @@ let test_token_usage_of_another_turn_is_not_ours () =
       match run_fixture path with
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok result ->
-        check (option token_usage) "foreign frame ignored" None result.usage;
-        check (option token_usage) "foreign total ignored" None result.thread_total)
+        check bool "foreign frame ignored" true (Option.is_none result.usage))
 ;;
 
 let test_turn_without_token_usage_reports_none () =
@@ -891,7 +893,7 @@ let test_turn_without_token_usage_reports_none () =
     (fun path ->
       match run_fixture path with
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-      | Ok result -> check (option token_usage) "no frame, no count" None result.usage)
+      | Ok result -> check bool "no frame, no count" true (Option.is_none result.usage))
 ;;
 
 let test_truncated_token_usage_of_this_turn_fails_closed () =
@@ -4935,6 +4937,58 @@ let test_production_keeper_resumes_across_trace_rotation () =
             fail "production Codex state did not settle"))
 ;;
 
+(* The second turn resumes the thread the first turn started. Its spend is
+   the thread's count now minus the count the first turn left: the resolver
+   subtracts the same thread's cursor, so the first turn is not charged
+   again. *)
+let test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread () =
+  let base_path = temp_workspace "masc-codex-production-resumed-spend-" in
+  let resumed_token_usage_updated =
+    {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-2","tokenUsage":{"total":{"inputTokens":11000,"cachedInputTokens":9500,"outputTokens":740,"reasoningOutputTokens":310,"totalTokens":11740},"last":{"inputTokens":2000,"cachedInputTokens":1500,"outputTokens":40,"reasoningOutputTokens":10,"totalTokens":2040},"modelContextWindow":272000}}}|}
+  in
+  let run_turn ~trace_id ~user_message lines =
+    with_fixture lines (fun cli_path ->
+      match
+        run_production_keeper_turn
+          ~base_path ~trace_id ~user_message ~cli_path ~model:"gpt-fixture"
+          ~turn_instructions:None
+      with
+      | Error error -> fail (Agent_core.Error.to_string error)
+      | Ok result -> result)
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let first =
+         run_turn ~trace_id:"codex-resumed-spend-1" ~user_message:"Start the thread."
+           [ init_result; account_chatgpt; thread_result; turn_result
+           ; item_completed; token_usage_updated; turn_completed ]
+       in
+       let second =
+         run_turn ~trace_id:"codex-resumed-spend-2" ~user_message:"Resume the thread."
+           [ init_result; account_chatgpt; thread_result; resumed_turn_result
+           ; resumed_item_completed; resumed_token_usage_updated; resumed_turn_completed ]
+       in
+       (match second.Keeper_agent_run.usage_basis with
+        | Keeper_usage_resolution.Conversation_counter
+            { conversation_id = "thread-1"; position = Keeper_usage_resolution.Resumed; _ } -> ()
+        | _ -> fail "the resumed turn is not keyed to its thread as resumed");
+       let resolve ~cursor (result : Keeper_agent_run.run_result) =
+         Keeper_usage_resolution.resolve
+           ~cursor
+           ~basis:result.usage_basis
+           ~observation:(Some (Keeper_usage_resolution.sample_of_api_usage result.usage))
+           ~observed_at:0.0
+       in
+       let _, cursor = resolve ~cursor:None first in
+       let resolution, _ = resolve ~cursor second in
+       match resolution.Keeper_usage_resolution.delta with
+       | Some delta ->
+         check int "input the second turn added" 2000 delta.input_tokens;
+         check int "output the second turn added" 40 delta.output_tokens
+       | None -> fail "the resumed turn resolved no spend")
+;;
+
 let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
   let base_path = temp_workspace "masc-codex-production-context-" in
   let capture = Filename.temp_file "masc-codex-production-context-" ".jsonl" in
@@ -5896,6 +5950,10 @@ let () =
             "production Keeper marks a Codex turn that reported no usage"
             `Quick
             test_production_keeper_marks_a_codex_turn_that_reported_no_usage
+        ; test_case
+            "production Keeper resolves a resumed Codex turn against its thread"
+            `Quick
+            test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread
         ; test_case
             "production Keeper resumes across trace rotation"
             `Quick

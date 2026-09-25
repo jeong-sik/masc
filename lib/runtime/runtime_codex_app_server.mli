@@ -95,6 +95,16 @@ type token_usage =
   ; total_tokens : int
   }
 
+(* The two breakdowns one thread/tokenUsage/updated frame carries, which
+   always arrive together: [last], the newest request (the context it
+   occupied and its final output), and [thread_total], the thread's running
+   count, from which a turn's spend is resolved against the previous count
+   of the same thread. *)
+type frame_usage =
+  { last : token_usage
+  ; thread_total : token_usage
+  }
+
 type turn_result =
   { thread_id : string
   ; turn_id : string
@@ -104,14 +114,9 @@ type turn_result =
   ; subscription : subscription
   ; user_agent : string option
   ; resumed : bool
-  ; usage : token_usage option
-    (* The newest frame's [last]: the context the turn's newest request
-       occupied. [None] when no thread/tokenUsage/updated for this turn
-       arrived before turn/completed. *)
-  ; thread_total : token_usage option
-    (* The newest frame's [total]: the thread's running count, from which
-       the turn's spend is resolved against the previous count of the same
-       thread. [None] as for [usage]. *)
+  ; usage : frame_usage option
+    (* The newest thread/tokenUsage/updated frame of the turn; [None] when
+       none arrived before turn/completed. *)
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =

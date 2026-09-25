@@ -1411,7 +1411,11 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
          ; model = turn.model
          ; stop_reason = EndTurn
          ; content = [ Text turn.text ]
-         ; usage = Option.map api_usage_of_token_usage turn.thread_total
+         ; usage =
+             Option.map
+               (fun (frame : Runtime_codex_app_server.frame_usage) ->
+                  api_usage_of_token_usage frame.thread_total)
+               turn.usage
          ; telemetry =
              Some
                { Agent_core.Types.default_inference_telemetry with
@@ -1462,10 +1466,14 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
            ~attempt_details_source:"codex_app_server"
            ~agent_core_internal_runtime_allowed:false
            ~usage_scope:
-             (match turn.thread_total with
+             (match turn.usage with
               | Some _ -> Runtime_usage_scope.Conversation_cumulative
               | None -> Runtime_usage_scope.Usage_scope_unavailable)
-           ?request_context:(Option.map request_context_of_token_usage turn.usage)
+           ?request_context:
+             (Option.map
+                (fun (frame : Runtime_codex_app_server.frame_usage) ->
+                   request_context_of_token_usage frame.last)
+                turn.usage)
            ()
        in
        Ok

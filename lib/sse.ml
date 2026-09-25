@@ -755,14 +755,6 @@ let touch session_id =
   | Some client -> mark_seen client
   | None -> ()
 
-(** Update client's last event ID *)
-let update_last_event_id session_id event_id =
-  match SMap.find_opt session_id (Atomic.get clients).entries with
-  | Some client ->
-      Atomic.set client.last_event_id event_id;
-      mark_seen client
-  | None -> ()
-
 let client_matches_target target ~jsonrpc_payload (client : client) =
   session_kind_matches_target target ~jsonrpc_payload client.kind
 

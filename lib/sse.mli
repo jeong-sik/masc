@@ -111,7 +111,6 @@ val unregister_if_current : string -> int -> unit
 
 val exists : string -> bool
 val touch : string -> unit
-val update_last_event_id : string -> int -> unit
 val client_count : unit -> int
 val client_count_by_kind : session_kind -> int
 val close_all_clients : unit -> int

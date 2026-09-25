@@ -319,8 +319,7 @@ let log_event = function
   | Session.Connection_ended reason -> Log.Server.info "browser-lane stagehand: connection ended: %s" reason
 ;;
 
-let start ~sw ~env =
-  let base_path = Config_dir_resolver.base_path_or_cwd () in
+let start ~sw ~env ~base_path =
   let masc_root = Config_dir_resolver.masc_root ~base_path in
   Eio.Fiber.fork ~sw (fun () ->
     stop_left_behind ~clock:(Eio.Stdenv.clock env) ~masc_root;
@@ -336,7 +335,14 @@ let start ~sw ~env =
       in
       let backend =
         Browser_stagehand_backend.create ~sw ~clock
-          ~open_session:(fun ~sw ~headless ~log -> open_ ~sw ~env ~masc_root ~config ~headless ~model ~log)
+          ~open_session:(fun ~sw ~headless ~log ->
+            (* The caller may have left before a slow open failed, so the
+               reason is also put where the operator reads. *)
+            match open_ ~sw ~env ~masc_root ~config ~headless ~model ~log with
+            | Ok _ as opened -> opened
+            | Error detail as failed ->
+              Log.Server.warn "browser-lane stagehand: the browser did not open: %s" detail;
+              failed)
           ~call:(fun t -> Session.call t.session)
           ~pid ~log:log_event
       in

@@ -9345,6 +9345,27 @@ let test_decode_librarian_page_keeps_the_server_cursor () =
       Alcotest.(check (option (pair (float 0.0) string))) "next cursor"
         (Some (42.5, "judge-older")) page.Tui_decode.lrp_next
 
+(* The unknown row sits after the Librarian row in one order and before it in
+   the other. Both pages must be refused and name the unknown id. *)
+let test_decode_librarian_page_refuses_an_unknown_lane_in_any_order () =
+  let librarian =
+    `Assoc [ "run_id", `String "lib-1"; "lane", `String "librarian_exact" ]
+  in
+  let unknown =
+    `Assoc [ "run_id", `String "old-1"; "lane", `String "retired_lane_exact" ]
+  in
+  let page runs = `Assoc [ "has_more", `Bool false; "runs", `List runs ] in
+  List.iter
+    (fun (label, runs) ->
+       match Tui_decode.decode_librarian_run_page (page runs) with
+       | Ok _ -> Alcotest.failf "%s: a page with an unknown lane must not decode" label
+       | Error detail ->
+           Alcotest.(check bool) (label ^ ": names the unknown id") true
+             (Astring.String.is_infix ~affix:"retired_lane_exact" detail))
+    [ "unknown after Librarian", [ librarian; unknown ]
+    ; "unknown before Librarian", [ unknown; librarian ]
+    ]
+
 let lane_run_summary_json ?(lane = "librarian_exact") ?(status = "succeeded")
     ?(completion = true) ?failure run_id =
   let completion_fields =
@@ -12327,6 +12348,8 @@ let () =
           test_decode_latest_librarian_input_requires_actual_input;
         Alcotest.test_case "Librarian page keeps the server cursor" `Quick
           test_decode_librarian_page_keeps_the_server_cursor;
+        Alcotest.test_case "Librarian page refuses an unknown lane in any order"
+          `Quick test_decode_librarian_page_refuses_an_unknown_lane_in_any_order;
       ] );
     ( "server_identity",
       [

@@ -7205,12 +7205,19 @@ let decode_standalone_lane_jev json =
 
 (* A standalone lane id read off the wire, into the lane it names. An id no
    lane has is refused where it is read, so nothing past the decoder holds a
-   lane as a string. *)
+   lane as a string. The server writes lane ids from the same [Standalone_lane],
+   so the likeliest cause of an id this build does not know is a server binary
+   newer than the TUI; the message names that cause. *)
 let required_standalone_lane_field json field =
   let* id = required_string_field json field in
   match Standalone_lane.of_id id with
   | Some lane -> Ok lane
-  | None -> Error (Printf.sprintf "%s: unknown standalone lane %s" field id)
+  | None ->
+    Error
+      (Printf.sprintf
+         "%s: unknown standalone lane %s (the server may be newer than this \
+          TUI; check that both run the same version)"
+         field id)
 
 let decode_standalone_lane json =
   let* sl_lane = required_standalone_lane_field json "lane_id" in
@@ -9567,20 +9574,27 @@ type librarian_run_page =
 let decode_librarian_run_page json =
   let* runs = required_list_field json "runs" in
   let* has_more = required_bool_field json "has_more" in
-  let rec find_librarian = function
-    | [] -> Ok None
-    | run :: rest ->
-        let* lane = required_standalone_lane_field run "lane" in
-        (match lane with
-         | Standalone_lane.Librarian ->
-           let* run_id = required_string_field run "run_id" in
-           Ok (Some run_id)
+  (* Every row is read before the first Librarian is picked, so an unknown lane
+     anywhere on the page refuses it whatever order the rows come in. *)
+  let* rows =
+    decode_list "runs"
+      (fun run ->
+         let* lane = required_standalone_lane_field run "lane" in
+         let* run_id = required_string_field run "run_id" in
+         Ok (lane, run_id))
+      runs
+  in
+  let run_id =
+    List.find_map
+      (fun (lane, run_id) ->
+         match lane with
+         | Standalone_lane.Librarian -> Some run_id
          | Standalone_lane.Hitl_auto_judge
          | Standalone_lane.Board_attention
          | Standalone_lane.Workspace_curator
-         | Standalone_lane.Verifier -> find_librarian rest)
+         | Standalone_lane.Verifier -> None)
+      rows
   in
-  let* run_id = find_librarian runs in
   let* lrp_next =
     if not has_more then Ok None
     else

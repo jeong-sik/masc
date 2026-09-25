@@ -436,11 +436,13 @@ masc sandbox-image --runtime nerdctl_kata
 Each build gets its own tag, `masc-sandbox-base:<UTC minute>-<input hash>`,
 and the command prints it. A tag already in the store is refused rather than
 rebuilt, so a build never changes under a tag. A Keeper does not name the tag:
-its `sandbox_image` is a name in the host's image catalog,
-`<base-path>/.masc/config/sandbox-images.toml` (`base`, `ocaml`).
+its `sandbox_image` is an image name the binary ships (`base`, `ocaml`, from
+`config/sandbox-images.toml`), and this host's builds for those names are in
+`<base-path>/.masc/config/sandbox-image-builds.toml`.
 `masc sandbox-image promote <name> <tag>`, with the same `--runtime`, makes a
-build the one that name starts from on the next turn, and
-`masc sandbox-image rollback <name>` returns to the build before it.
+build the one that name starts from on the next turn. It records a tag only
+when that store holds it, and the catalog keeps one tag per name and store.
+To go back, promote an earlier tag the store still has.
 `masc setup` builds `base` and promotes it when the catalog has no `base`
 build for the store it sets up. Recipes other than `base` live under
 `sandbox-images/` in a checkout: `masc sandbox-image --recipe ocaml --source .`.

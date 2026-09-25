@@ -34,10 +34,11 @@ start.
 
 ## The sandbox image
 
-MASC ships no image. A Keeper names one in `sandbox_image` by its name in the
-host's image catalog, `<base-path>/.masc/config/sandbox-images.toml`: `base`
-for a Keeper that builds nothing, `ocaml` for one that builds MASC. The catalog
-records, per image store (Docker's, or a microVM runtime's own), which build
+MASC ships no image. A Keeper names one in `sandbox_image` by a name the
+binary ships in `config/sandbox-images.toml`: `base` for a Keeper that builds
+nothing, `ocaml` for one that builds MASC. This host's builds for those names
+are in `<base-path>/.masc/config/sandbox-image-builds.toml`, which records, per
+image store (Docker's, or a microVM runtime's own), which build
 each name is on this host. `masc setup` builds `base` and promotes it when the
 catalog has no `base` build for the store it sets up.
 
@@ -46,13 +47,19 @@ By hand:
 ```bash
 masc sandbox-image                          # builds base, prints masc-sandbox-base:<UTC minute>-<input hash>
 masc sandbox-image promote base <that tag>  # the next turn of a base Keeper starts from it
-masc sandbox-image rollback base            # back to the build it replaced
 ```
 
 Other recipes are read from a checkout:
 `masc sandbox-image --recipe ocaml --source <checkout>`. Each command takes
 `--runtime <backend>` for a microVM runtime's store. A tag already in the store
 is refused, so a build never changes under a tag.
+
+Promote records a tag only when the store `--runtime` names holds it, and the
+catalog keeps one tag per name and store. To go back, promote an earlier tag
+the store still has. On Docker, `apple_container` and `nerdctl_kata`,
+`masc sandbox-image` builds the tag to promote. `msb` has no build command:
+build the image elsewhere, `msb load` its OCI archive, then promote that tag
+with `--runtime microsandbox`.
 
 A Keeper whose name the catalog lacks, or that has nothing promoted for its
 store, starts no container; the refusal names the commands above. A turn looks

@@ -61,7 +61,7 @@ CLI 를 놓고 읽으면 된다. 아래 계약 표의 항목 1·2 는 백엔드�
 | # | 항목 | 없으면 |
 |---|------|--------|
 | 1 | `container` CLI 1.3+ 와 실행 중인 container system | `microvm_cli_unavailable` / `microvm_image_probe_failed` |
-| 2 | Keeper 의 `sandbox_image` 이름에 이미지 목록(`<base-path>/.masc/config/sandbox-images.toml`)이 `apple_container` 빌드를 올려 두었고, 그 태그가 container 이미지 저장소에 있음 (`container image inspect <목록의 reference>`) | 목록에 없으면 `sandbox_image_unresolved`, 저장소에 없으면 `microvm_image_missing` |
+| 2 | Keeper 의 `sandbox_image` 이름에 이미지 목록(`<base-path>/.masc/config/sandbox-image-builds.toml`)이 `apple_container` 빌드를 올려 두었고, 그 태그가 container 이미지 저장소에 있음 (`container image inspect <목록의 reference>`) | 목록에 없으면 `sandbox_image_unresolved`, 저장소에 없으면 `microvm_image_missing` |
 | 3 | 정적 arm64 shim: `<base>/.masc/microvm/shim/masc-exec-shim` (실행 권한). 옆의 `masc-exec-shim.sha256` 은 설치기가 쓴 릴리즈 해시이며, 있으면 부팅이 바이너리와 맞춰 본다 | `microvm_shim_missing` — 부팅 거부. 해시가 다르면 `microvm_shim_hash_mismatch` — 부팅 거부 |
 | 4 | 디스크 여유. 볼륨 상한은 `MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE` (기본 256g, sparse) | `microvm_work_volume_create_failed` |
 

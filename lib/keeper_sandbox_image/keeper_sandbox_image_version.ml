@@ -62,14 +62,23 @@ let listed_paths text =
     String.length line > 0 && not (Char.equal line.[0] '#'))
 
 (* The recipe's own Dockerfile sits at the context root, so an input listed
-   under that name would overwrite it there. *)
+   under that name would overwrite it there. Paths are judged by segment:
+   an empty, "." or ".." segment is refused, so [./Dockerfile] cannot reach
+   the recipe's place under another spelling. *)
 let recipe_file_name = "Dockerfile"
 
 let path_stays_inside path =
-  String.length path > 0
-  && Filename.is_relative path
-  && (not (String.equal path recipe_file_name))
-  && not (List.exists (String.equal "..") (String.split_on_char '/' path))
+  Filename.is_relative path
+  &&
+  match String.split_on_char '/' path with
+  | [ single ] when String.equal single recipe_file_name -> false
+  | segments ->
+    List.for_all
+      (fun segment ->
+         String.length segment > 0
+         && (not (String.equal segment "."))
+         && not (String.equal segment ".."))
+      segments
 
 (* Resolve the checkout once. A symlink used to reach the checkout is fine,
    but subsequent reads use this canonical root, not a movable link. *)

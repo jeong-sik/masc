@@ -256,7 +256,9 @@ let guest_target
   else
     match binding.image with
     | Error error ->
-      Error (target_error (Keeper_turn_sandbox_runtime.image_unresolved_message error))
+      Error
+        (target_error ~class_:Tool_result.Dependency_unavailable
+           (Keeper_turn_sandbox_runtime.image_unresolved_message error))
     | Ok image ->
     let runtime = binding.runtime in
     let target, observe_route =

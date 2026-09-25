@@ -138,6 +138,8 @@ let test_load_refusals () =
     ; "sandbox-images/gone/inputs", "missing.txt\n"
     ; "sandbox-images/self/Dockerfile", "FROM scratch\n"
     ; "sandbox-images/self/inputs", "Dockerfile\n"
+    ; "sandbox-images/dotself/Dockerfile", "FROM scratch\n"
+    ; "sandbox-images/dotself/inputs", "./Dockerfile\n"
     ]
     (fun source ->
        let root = Unix.realpath source in
@@ -158,7 +160,10 @@ let test_load_refusals () =
          (V.load ~source ~name:"gone");
        expect_error "the recipe's own name"
          (V.Input_path_rejected { listed_in = inputs_of "self"; path = "Dockerfile" })
-         (V.load ~source ~name:"self"))
+         (V.load ~source ~name:"self");
+       expect_error "the recipe's own name under ./"
+         (V.Input_path_rejected { listed_in = inputs_of "dotself"; path = "./Dockerfile" })
+         (V.load ~source ~name:"dotself"))
 
 (* A link inside the checkout that points outside it would carry that file
    into the image; docker itself does not follow links out of its context. *)

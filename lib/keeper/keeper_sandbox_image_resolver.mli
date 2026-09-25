@@ -32,7 +32,7 @@ val resolve :
   string option ->
   (Keeper_sandbox_image_catalog.pinned, error) result
 (** [resolve ~config_root ~store declared] reads shipped names and
-    [<config_root>/sandbox-images.toml] builds, then returns the build promoted
+    [<config_root>/sandbox-image-builds.toml] builds, then returns the build promoted
     for [declared] on [store]. An absent host file means no build is promoted. *)
 
 val resolve_in_workspace :

@@ -14,19 +14,11 @@ let store_of_string raw =
   if String.equal raw docker_store_name then Some Docker_daemon
   else Option.map (fun backend -> Microvm backend) (Keeper_microvm_backend.of_string raw)
 
-type pinned =
-  { reference : string
-  ; digest : string
-  }
-
-type promotion =
-  { current : pinned
-  ; previous : pinned option
-  }
+type pinned = { reference : string }
 
 type entry =
   { name : string
-  ; promoted : (store * promotion) list
+  ; promoted : (store * pinned) list
   }
 
 type t =
@@ -45,7 +37,6 @@ type parse_error =
   | Unknown_store of { image : string; store : string }
   | Missing_field of { path : string list; field : string }
   | Expected_string of { path : string list; field : string }
-  | Invalid_digest of { path : string list; value : string }
   | Invalid_reference of { path : string list; value : string }
   | Shipped_build of { name : string }
   | Host_name_without_build of { name : string }
@@ -72,12 +63,10 @@ let parse_error_to_string = function
   | Missing_field { path; field } -> Printf.sprintf "%s has no %s" (dotted path) field
   | Expected_string { path; field } ->
     Printf.sprintf "%s.%s is not a string" (dotted path) field
-  | Invalid_digest { path; value } ->
-    Printf.sprintf "%s.digest %S is not sha256:<64 lowercase hex>" (dotted path) value
   | Invalid_reference { path; value } ->
     Printf.sprintf
-      "%s.reference %S is not repository:tag (a lowercase repository, a tag of \
-       letters, digits, '_', '.', '-', no digest)"
+      "%s.reference %S is not repository:tag (a tag after the last ':', \
+       letters, digits, '.', '_', '-', '/', ':' only, not starting with '-')"
       (dotted path) value
   | Shipped_build { name } ->
     Printf.sprintf "shipped image %S contains a host build" name
@@ -86,13 +75,9 @@ let parse_error_to_string = function
 
 let ( let* ) = Result.bind
 
-(* Words of lowercase letters and digits joined by single '-': the directory
-   names under sandbox-images/. *)
-let valid_name name =
-  let word w = String.length w > 0 && String.for_all (function 'a' .. 'z' | '0' .. '9' -> true | _ -> false) w in
-  List.for_all word (String.split_on_char '-' name)
-
-let is_name = valid_name
+(* A catalog name is a recipe directory name under sandbox-images/, so the
+   rule is the recipe loader's own: a buildable name is always promotable. *)
+let valid_name = Keeper_sandbox_image_version.valid_name
 
 let name_error ~field value =
   if valid_name value then None
@@ -104,95 +89,27 @@ let name_error ~field value =
           from sandbox-images.toml; the catalog says which build that name is."
          field value)
 
-let digest_prefix = "sha256:"
-let sha256_hex_length = 64
-
-let valid_digest value =
-  let hex = function '0' .. '9' | 'a' .. 'f' -> true | _ -> false in
-  let prefix_length = String.length digest_prefix in
-  String.length value = prefix_length + sha256_hex_length
-  && String.equal (String.sub value 0 prefix_length) digest_prefix
-  && String.for_all hex (String.sub value prefix_length sha256_hex_length)
-
-(* OCI's limit on a tag's length. *)
-let max_tag_length = 128
-
-(* Docker's path component is an alphanumeric word followed by zero or more
-   separator + word pairs. A separator is '.', '_', '__', or one or more '-'.
-   Checking components separately also rejects empty components and '..'. *)
-let lower_alnum = function 'a' .. 'z' | '0' .. '9' -> true | _ -> false
-
-let valid_path_component component =
-  let length = String.length component in
-  let rec word i =
-    if i < length && lower_alnum component.[i] then word (i + 1)
-    else if i = length then true
-    else separator i
-  and separator i =
-    let next =
-      match component.[i] with
-      | '.' -> i + 1
-      | '_' when i + 1 < length && component.[i + 1] = '_' -> i + 2
-      | '_' -> i + 1
-      | '-' ->
-        let rec dashes j =
-          if j < length && component.[j] = '-' then dashes (j + 1) else j
-        in
-        dashes i
-      | _ -> length
-    in
-    next < length && lower_alnum component.[next] && word next
-  in
-  length > 0 && lower_alnum component.[0] && word 0
-
-let valid_registry_host host =
-  let labels = String.split_on_char '.' host in
-  let valid_label label =
-    let length = String.length label in
-    length > 0
-    && lower_alnum label.[0]
-    && lower_alnum label.[length - 1]
-    && String.for_all (fun c -> lower_alnum c || c = '-') label
-  in
-  List.for_all valid_label labels
-
-let valid_registry_component component =
-  match String.split_on_char ':' component with
-  | [ host ] -> valid_registry_host host
-  | [ host; port ] ->
-    valid_registry_host host
-    && String.length port > 0
-    && String.for_all (function '0' .. '9' -> true | _ -> false) port
-  | _ -> false
-
-let valid_repository repository =
-  match String.split_on_char '/' repository with
-  | [] -> false
-  | [ component ] -> valid_path_component component
-  | first :: rest ->
-    let registry =
-      String.contains first ':' || String.contains first '.' || String.equal first "localhost"
-    in
-    (if registry then valid_registry_component first else valid_path_component first)
-    && List.for_all valid_path_component rest
-
-(* [repository:tag]. The tag is the part after the last ':', and cannot hold
-   '/', which distinguishes it from a registry port. The repository follows
-   Docker's component and optional registry grammar. A digest reference is
-   refused because the digest has its own field. *)
+(* [repository:tag], checked only as far as the value's two uses need: it is
+   written between TOML quotes and passed as one argv word to an image
+   store's CLI. So: no leading '-' (it would read as a flag), only characters
+   that need no quoting, and a nonempty tag after the last ':' that holds no
+   '/' (so a registry port is not taken for a tag). '@' is not allowed, which
+   refuses a digest reference. Whether the image exists is the store's answer
+   at promote, not this parser's. *)
 let valid_reference value =
+  let safe = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | '-' | '/' | ':' -> true
+    | _ -> false
+  in
   match String.rindex_opt value ':' with
   | None -> false
   | Some colon ->
-    let repository = String.sub value 0 colon in
     let tag = String.sub value (colon + 1) (String.length value - colon - 1) in
-    let tag_start = function 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true | _ -> false in
-    let tag_char c = tag_start c || (match c with '.' | '-' -> true | _ -> false) in
-    valid_repository repository
+    colon > 0
+    && value.[0] <> '-'
     && String.length tag > 0
-    && String.length tag <= max_tag_length
-    && tag_start tag.[0]
-    && String.for_all tag_char tag
+    && (not (String.contains tag '/'))
+    && String.for_all safe value
 
 let is_reference = valid_reference
 
@@ -214,33 +131,17 @@ let string_field ~path ~field fields =
   | Some _ -> Error (Expected_string { path; field })
 
 let reference_key = "reference"
-let digest_key = "digest"
-let previous_key = "previous"
 
-let checked_pin ~path ~reference ~digest =
-  if not (valid_reference reference) then Error (Invalid_reference { path; value = reference })
-  else if not (valid_digest digest) then Error (Invalid_digest { path; value = digest })
-  else Ok { reference; digest }
+let checked_pin ~path ~reference =
+  if valid_reference reference then Ok { reference }
+  else Error (Invalid_reference { path; value = reference })
 
+(* A store table holds its tag and nothing else; [only_keys] refuses any
+   other key. *)
 let pinned ~path fields =
-  let* () = only_keys ~path ~allowed:[ reference_key; digest_key ] fields in
+  let* () = only_keys ~path ~allowed:[ reference_key ] fields in
   let* reference = string_field ~path ~field:reference_key fields in
-  let* digest = string_field ~path ~field:digest_key fields in
-  checked_pin ~path ~reference ~digest
-
-let promotion ~path fields =
-  let* () = only_keys ~path ~allowed:[ reference_key; digest_key; previous_key ] fields in
-  let current_fields = List.filter (fun (key, _) -> not (String.equal key previous_key)) fields in
-  let* current = pinned ~path current_fields in
-  let* previous =
-    match List.assoc_opt previous_key fields with
-    | None -> Ok None
-    | Some value ->
-      let path = path @ [ previous_key ] in
-      let* previous_fields = table ~path value in
-      Result.map Option.some (pinned ~path previous_fields)
-  in
-  Ok { current; previous }
+  checked_pin ~path ~reference
 
 let images_key = "images"
 
@@ -257,8 +158,8 @@ let entry (name, value) =
          | Some store ->
            let path = path @ [ store_name ] in
            let* fields = table ~path store_value in
-           let* promotion = promotion ~path fields in
-           Ok ((store, promotion) :: read))
+           let* pin = pinned ~path fields in
+           Ok ((store, pin) :: read))
       (Ok []) stores
   in
   Ok { name; promoted = List.rev promoted }
@@ -294,10 +195,11 @@ let resolve t ~name ~store =
   | None -> Unknown_image { name; known = List.map (fun entry -> entry.name) t.active }
   | Some entry ->
     (match List.assoc_opt store entry.promoted with
-     | Some promotion -> Resolved promotion.current
+     | Some pin -> Resolved pin
      | None -> Not_built_on_host { name; store })
 
-let file_name = Common.sandbox_image_catalog_file_name
+let shipped_file_name = "sandbox-images.toml"
+let file_name = "sandbox-image-builds.toml"
 
 type load_error =
   | Unreadable of { path : string; detail : string }
@@ -386,16 +288,12 @@ let load_for_change ~config_root ~shipped =
 type change_error =
   | No_such_image of { name : string; known : string list }
   | Invalid_pin of parse_error
-  | Nothing_to_roll_back of { name : string; store : store }
 
 let change_error_to_string = function
   | No_such_image { name; known } ->
     Printf.sprintf "the catalog has no image %S (it has: %s)" name
       (match known with [] -> "none" | names -> String.concat ", " names)
   | Invalid_pin error -> parse_error_to_string error
-  | Nothing_to_roll_back { name; store } ->
-    Printf.sprintf "%s on %s has no previous build to roll back to" name
-      (store_to_string store)
 
 let known_names t = List.map (fun entry -> entry.name) t.active
 
@@ -414,34 +312,23 @@ let change_entry t ~name f =
     in
     Result.map (fun active -> { t with active }) (replace t.active)
 
-let set_store store promotion promoted =
+(* A store keeps its place in the list when its tag is replaced, so the
+   file keeps its order across a promote. *)
+let set_store store pin promoted =
   if List.mem_assoc store promoted
-  then List.map (fun (s, p) -> if s = store then (s, promotion) else (s, p)) promoted
-  else promoted @ [ store, promotion ]
+  then List.map (fun (s, p) -> if s = store then (s, pin) else (s, p)) promoted
+  else promoted @ [ store, pin ]
 
-let promote t ~name ~store ~reference ~digest =
+let promote t ~name ~store ~reference =
   let path = [ images_key; name; store_to_string store ] in
-  match checked_pin ~path ~reference ~digest with
+  match checked_pin ~path ~reference with
   | Error error -> Error (Invalid_pin error)
-  | Ok pin ->
-    change_entry t ~name (fun promoted ->
-      match List.assoc_opt store promoted with
-      | Some { current; _ } when current = pin -> Ok promoted
-      | Some { current; _ } ->
-        Ok (set_store store { current = pin; previous = Some current } promoted)
-      | None -> Ok (set_store store { current = pin; previous = None } promoted))
-
-let rollback t ~name ~store =
-  change_entry t ~name (fun promoted ->
-    match List.assoc_opt store promoted with
-    | Some { current; previous = Some previous } ->
-      Ok (set_store store { current = previous; previous = Some current } promoted)
-    | Some { previous = None; _ } | None -> Error (Nothing_to_roll_back { name; store }))
+  | Ok pin -> change_entry t ~name (fun promoted -> Ok (set_store store pin promoted))
 
 let header =
   "# Builds this host promoted for each image store. The binary's shipped\n\
-   # sandbox-images.toml supplies the image names. `masc sandbox-image promote` and\n\
-   # `rollback` rewrite this file. RFC keeper-sandbox-images-have-versions.\n"
+   # sandbox-images.toml supplies the image names. `masc sandbox-image promote`\n\
+   # rewrites this file. RFC keeper-sandbox-images-have-versions.\n"
 
 let to_toml t =
   let buf = Buffer.create 512 in
@@ -449,15 +336,9 @@ let to_toml t =
   List.iter
     (fun entry ->
        List.iter
-         (fun (store, promotion) ->
-            Printf.bprintf buf "\n[%s.%s.%s]\n%s = \"%s\"\n%s = \"%s\"\n" images_key
-              entry.name (store_to_string store) reference_key
-              promotion.current.reference digest_key promotion.current.digest;
-            Option.iter
-              (fun previous ->
-                 Printf.bprintf buf "%s = { %s = \"%s\", %s = \"%s\" }\n" previous_key
-                   reference_key previous.reference digest_key previous.digest)
-              promotion.previous)
+         (fun (store, pin) ->
+            Printf.bprintf buf "\n[%s.%s.%s]\n%s = \"%s\"\n" images_key entry.name
+              (store_to_string store) reference_key pin.reference)
          entry.promoted)
     (t.active @ t.orphaned_builds);
   Buffer.contents buf

@@ -34,9 +34,10 @@ Keeper 가 띄울 microVM 런타임이 없습니다.
 ## 샌드박스 이미지
 
 MASC 는 이미지를 같이 배송하지 않습니다. Keeper 는 `sandbox_image` 에 이미지
-이름을 적습니다. 이름은 이 호스트의 이미지 목록
-`<base-path>/.masc/config/sandbox-images.toml` 에 있는 것이어야 합니다. 아무것도
-빌드하지 않는 Keeper 는 `base`, MASC 를 빌드하는 Keeper 는 `ocaml` 입니다. 목록은
+이름을 적습니다. 이름은 바이너리에 든 `config/sandbox-images.toml` 에 있는 것이어야
+합니다. 아무것도 빌드하지 않는 Keeper 는 `base`, MASC 를 빌드하는 Keeper 는
+`ocaml` 입니다. 이 호스트의 빌드 목록
+`<base-path>/.masc/config/sandbox-image-builds.toml` 은
 이미지 저장소(Docker, 또는 microVM 런타임마다 따로 있는 저장소)별로 각 이름이 이
 호스트에서 어떤 빌드인지 적어 둡니다. `masc setup` 은 설정하는 저장소에 `base`
 빌드가 목록에 없으면 빌드해서 목록에 올립니다(promote).
@@ -46,13 +47,18 @@ MASC 는 이미지를 같이 배송하지 않습니다. Keeper 는 `sandbox_imag
 ```bash
 masc sandbox-image                          # base 를 빌드하고 masc-sandbox-base:<UTC 분>-<입력 해시> 를 출력
 masc sandbox-image promote base <그 태그>    # base Keeper 의 다음 턴부터 이 빌드로 뜸
-masc sandbox-image rollback base            # 바로 전 빌드로 되돌림
 ```
 
 다른 레시피는 저장소 체크아웃에서 읽습니다.
 `masc sandbox-image --recipe ocaml --source <checkout>` 입니다. microVM 런타임의
 저장소를 쓰려면 명령마다 `--runtime <backend>` 를 붙입니다. 이미 저장소에 있는 태그는
 거절하므로, 한 태그 아래에서 빌드가 바뀌는 일은 없습니다.
+
+promote 는 `--runtime` 으로 고른 저장소에 그 태그가 있을 때만 목록에 적습니다. 목록에는
+이름과 저장소마다 태그 하나만 남습니다. 되돌리려면 저장소에 남아 있는 예전 태그를 다시
+promote 합니다. Docker, `apple_container`, `nerdctl_kata` 는 `masc sandbox-image` 로
+promote 할 태그를 빌드합니다. `msb` 는 빌드 명령이 없어서, 다른 데서 만든 이미지를
+OCI 아카이브로 `msb load` 한 뒤 그 태그를 `--runtime microsandbox` 로 promote 합니다.
 
 목록에 없는 이름을 적었거나, 이름은 있는데 그 저장소에 promote 된 빌드가 없는
 Keeper 는 컨테이너를 띄우지 않습니다. 거절 메시지에 위 명령이 함께 나옵니다. 턴은
@@ -74,8 +80,8 @@ masc sandbox-image --runtime apple_container
 `apple_container` 는 `container build` 가 `-` 를 안 받고 컨텍스트 디렉터리를 받으므로
 레시피를 임시 디렉터리에 파일로 써서 `-f` 로 지목합니다. `nerdctl` 은 Docker 문법이라
 같은 stdin 경로를 씁니다. `microsandbox`(`msb`)는 `build` 자체가 없어서 — `pull`,
-`load`, `save` 뿐입니다 — 다른 데서 만들어 OCI 아카이브로 `msb load` 해야 하고,
-이 명령이 그렇게 알려줍니다. `masc sandbox-image --print`
+`load`, `save` 뿐입니다 — 다른 데서 만들어 OCI 아카이브로 `msb load` 한 뒤 promote
+해야 하고, 이 명령이 그렇게 알려줍니다. `masc sandbox-image --print`
 는 빌드 대신 Dockerfile 을 표준출력으로 내보냅니다.
 
 ## 설정

@@ -1,0 +1,8 @@
+### Fixed
+
+- `analyze_image` with `path` reads the image through the raw byte prefix
+  (`head -c`, binary capture) instead of Read's line window. The window is a
+  text read: on an OpenSSH or container endpoint its output has the remote
+  workspace root rewritten to the host's, so image bytes that spell that root
+  came back changed. `read_sandbox_bytes`, whose only production caller was
+  this read, is gone.

@@ -12,6 +12,16 @@ let request ~turn ~base_path ~keeper_name =
          Log.Keeper.warn ~keeper_name
            "chat readiness unavailable; retaining current turn progress";
          Ok None)
+       else if turn = Autonomous && operations.Keeper_owner.autonomous_owed_slot
+       then (
+         (* RFC-0373 direction 2: this turn was admitted into the slot the
+            deferral debt cap held open. The claimable chat behind it is
+            what the slot was bought against, not news: yielding now would
+            hand the just-bought slot straight back and starve the lane the
+            cap protects. No durable stimulus waits, so keep the turn. *)
+         Log.Keeper.info ~keeper_name
+           "the deferral debt cap bought this turn's slot; skipping the chat yield";
+         Ok None)
        else
          let ready = match turn with
            | Autonomous -> Ok operations.has_claimable_queued

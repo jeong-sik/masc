@@ -1,8 +1,8 @@
-(** Server_routes_http_routes_msx — the workspace MSX machine's frame.
+(** Server_routes_http_routes_msx — the workspace MSX machine HTTP routes.
 
-    Registers [GET /api/v1/msx/frame], a read-only view of the single machine
-    [Msx_lane] holds, for the TUI spectator (RFC-0439 §3.7). The serializer is
-    hidden; the wired route is the surface. *)
+    Registers MSX control and manipulation routes (RFC-0439 §3.7, RFC #38695).
+    Machine spectating is handled via
+    [GET /api/v1/lane-addons/live?source_kind=msx_capture]. *)
 
 val frame_json : unit -> Yojson.Safe.t
 (** The frame payload: [{loaded:false}] when no machine is loaded, else

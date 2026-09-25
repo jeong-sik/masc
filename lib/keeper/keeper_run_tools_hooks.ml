@@ -641,13 +641,15 @@ let assemble_hooks
         ?trajectory_acc
         ~on_tool_executed:
           (fun
-            ~tool_name ~input ~output_text ~success ~duration_ms ~provider ~typed_outcome ->
+            ~tool_name ~input ~output_text ~execution_evidence ~success ~duration_ms
+            ~provider ~typed_outcome ->
             serialize_tool_observer (fun () ->
               let route_evidence =
                 Keeper_tool_call_log.route_evidence_json_of_tool_io
                   ~tool_name
                   ~input
                   ~output_text
+                  ~execution_evidence
               in
               let progress_io_fingerprints =
                 Keeper_tool_progress_identity.digest_tool_io

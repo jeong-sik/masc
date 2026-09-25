@@ -298,7 +298,14 @@ open Alcotest
    the whole DOS machine saved under a name and put back after a server
    restart, which took a 133-million-step 삼국지3 hotseat game with it
    (#38981). No headroom. *)
-let ceiling_bytes = 123_093
+(* 2026-09-25: 123,620 across 141 tools (+527 over the 123,093 above), measured
+   by this suite on a clean origin/main checkout (6b62091a40); the suite
+   passes at this value on 7c89bffab2. No commit after the entry above touches
+   lib/tool_schemas*, so
+   main was already this wide when that entry was written from a local
+   measurement; nothing is added here. Where the 527 bytes came from was not
+   traced. No headroom. *)
+let ceiling_bytes = 123_620
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

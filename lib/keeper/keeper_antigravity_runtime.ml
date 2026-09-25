@@ -356,7 +356,9 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
                    ; conversation_id
                    ; position
                    ; usage_scope = Runtime_usage_scope.Conversation_cumulative
-                   ; usage = api_usage_of_antigravity_usage usage
+                   ; count =
+                       Keeper_client_usage_report.Running_count
+                         (api_usage_of_antigravity_usage usage)
                    ; vendor_total_tokens = Some usage.total_tokens
                    })
               on_usage_report

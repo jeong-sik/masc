@@ -48,6 +48,19 @@ let second_token_usage_updated =
   {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":11000,"cachedInputTokens":9500,"outputTokens":740,"reasoningOutputTokens":310,"totalTokens":11740},"last":{"inputTokens":2000,"cachedInputTokens":1500,"outputTokens":40,"reasoningOutputTokens":10,"totalTokens":2040},"modelContextWindow":272000}}}|}
 ;;
 
+(* After a compaction replaces the history, Codex re-estimates the context
+   (recompute_token_usage): [last] carries only the estimate as its total,
+   and the thread's running count does not move. *)
+let compaction_estimate_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":45000},"modelContextWindow":272000}}}|}
+;;
+
+(* A request overflowed the window: fill_to_context_window replaces the
+   running count with zero counts and the window as its total. *)
+let context_window_filled_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":272000},"last":{"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":262300},"modelContextWindow":272000}}}|}
+;;
+
 (* The weekly limit ends the turn after it has already paid for responses. *)
 let usage_limit_terminal =
   {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"You've hit your usage limit. Try again later.","codexErrorInfo":"usageLimitExceeded","additionalDetails":null}}}|}
@@ -833,9 +846,20 @@ let fixture_last_usage : Runtime_codex_app_server.token_usage =
   }
 ;;
 
+let fixture_thread_total : Runtime_codex_app_server.token_usage =
+  { input_tokens = 9000
+  ; cached_input_tokens = 8000
+  ; cache_write_input_tokens = 0
+  ; output_tokens = 700
+  ; reasoning_output_tokens = 300
+  ; total_tokens = 9700
+  }
+;;
+
 (* #33018 #33065: the Codex lane reported every turn as zero tokens because
    nothing read the app-server's thread/tokenUsage/updated. The turn result
-   now carries that frame's [last] breakdown for the turn it names. *)
+   now carries that frame's [last] breakdown for the turn it names, and its
+   [total], the thread's running count. *)
 let test_token_usage_of_this_turn_reaches_the_result () =
   with_fixture
     [ init_result
@@ -850,7 +874,15 @@ let test_token_usage_of_this_turn_reaches_the_result () =
       match run_fixture path with
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok result ->
-        check (option token_usage) "last breakdown" (Some fixture_last_usage) result.usage;
+        (match result.usage with
+         | Some
+             (Runtime_codex_app_server.Thread_count
+               { last = Runtime_codex_app_server.Request_usage last; thread_total }) ->
+           check token_usage "last breakdown" fixture_last_usage last;
+           check token_usage "thread total" fixture_thread_total thread_total
+         | Some (Runtime_codex_app_server.Thread_count { last = Runtime_codex_app_server.Context_estimate _; _ })
+         | Some Runtime_codex_app_server.Thread_count_replaced
+         | None -> fail "the turn's request frame was not kept as its count");
         check string "text still lands" "MASC_SUBSCRIPTION_OK" result.text)
 ;;
 
@@ -867,7 +899,8 @@ let test_token_usage_of_another_turn_is_not_ours () =
     (fun path ->
       match run_fixture path with
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-      | Ok result -> check (option token_usage) "foreign frame ignored" None result.usage)
+      | Ok result ->
+        check bool "foreign frame ignored" true (Option.is_none result.usage))
 ;;
 
 let test_turn_without_token_usage_reports_none () =
@@ -876,7 +909,98 @@ let test_turn_without_token_usage_reports_none () =
     (fun path ->
       match run_fixture path with
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-      | Ok result -> check (option token_usage) "no frame, no count" None result.usage)
+      | Ok result -> check bool "no frame, no count" true (Option.is_none result.usage))
+;;
+
+(* A compaction estimate is the size of the new history, not a request: it
+   stays the turn's newest [last] as occupancy, and the thread count it rode
+   with is still the spend. *)
+let test_a_compaction_estimate_is_occupancy_not_a_request () =
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; token_usage_updated
+    ; compaction_estimate_token_usage_updated
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+      match run_fixture path with
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok result ->
+        (match result.usage with
+         | Some
+             (Runtime_codex_app_server.Thread_count
+               { last = Runtime_codex_app_server.Context_estimate { estimated_tokens }
+               ; thread_total
+               }) ->
+           check int "the estimate is kept" 45000 estimated_tokens;
+           check token_usage "the thread count did not move" fixture_thread_total thread_total
+         | Some (Runtime_codex_app_server.Thread_count { last = Runtime_codex_app_server.Request_usage _; _ })
+         | Some Runtime_codex_app_server.Thread_count_replaced
+         | None -> fail "a compaction estimate was read as a request"))
+;;
+
+(* A fill replaced the running count mid-turn, so the count read after it
+   restarts from zero and cannot stand for the turn; the fold keeps that
+   instead of the newest count. *)
+let test_a_context_window_fill_replaces_the_turns_count () =
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; token_usage_updated
+    ; context_window_filled_token_usage_updated
+    ; second_token_usage_updated
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+      match run_fixture path with
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok result ->
+        (match result.usage with
+         | Some Runtime_codex_app_server.Thread_count_replaced -> ()
+         | Some (Runtime_codex_app_server.Thread_count _) | None ->
+           fail "a count read after a fill stood for the turn"))
+;;
+
+let test_frame_shapes_parse_by_their_counts () =
+  let usage ~input ~cached ~output ~total : Runtime_codex_app_server.token_usage =
+    { input_tokens = input
+    ; cached_input_tokens = cached
+    ; cache_write_input_tokens = 0
+    ; output_tokens = output
+    ; reasoning_output_tokens = 0
+    ; total_tokens = total
+    }
+  in
+  let request = usage ~input:1200 ~cached:0 ~output:80 ~total:1280 in
+  let label = function
+    | Runtime_codex_app_server.Counted { last = Runtime_codex_app_server.Request_usage _; _ } -> "request"
+    | Runtime_codex_app_server.Counted { last = Runtime_codex_app_server.Context_estimate _; _ } -> "estimate"
+    | Runtime_codex_app_server.Context_window_filled _ -> "fill"
+  in
+  check string "an uncached request is a request" "request"
+    (label (Runtime_codex_app_server.frame_usage_of_breakdowns ~last:request ~thread_total:request));
+  check string "a thread with nothing counted yet is a count, not a fill" "request"
+    (label
+       (Runtime_codex_app_server.frame_usage_of_breakdowns
+          ~last:(usage ~input:0 ~cached:0 ~output:0 ~total:0)
+          ~thread_total:(usage ~input:0 ~cached:0 ~output:0 ~total:0)));
+  check string "only a total in last is an estimate" "estimate"
+    (label
+       (Runtime_codex_app_server.frame_usage_of_breakdowns
+          ~last:(usage ~input:0 ~cached:0 ~output:0 ~total:45000)
+          ~thread_total:request));
+  check string "only a total in the thread count is a fill" "fill"
+    (label
+       (Runtime_codex_app_server.frame_usage_of_breakdowns
+          ~last:(usage ~input:0 ~cached:0 ~output:0 ~total:262300)
+          ~thread_total:(usage ~input:0 ~cached:0 ~output:0 ~total:272000)))
 ;;
 
 let test_truncated_token_usage_of_this_turn_fails_closed () =
@@ -1539,8 +1663,12 @@ let test_error_notification_reads_usage_limit () =
 let test_usage_frames_report_the_thread_count_before_a_usage_limit_ends_the_turn () =
   let reported = ref [] in
   let on_stream_event = function
-    | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; thread_total } ->
+    | Runtime_codex_app_server.Usage_reported
+        { thread_id; turn_id; model; frame = Runtime_codex_app_server.Counted { thread_total; _ } } ->
       reported := (thread_id ^ "/" ^ turn_id, model, thread_total.input_tokens) :: !reported
+    | Runtime_codex_app_server.Usage_reported
+        { frame = Runtime_codex_app_server.Context_window_filled _; _ } ->
+      fail "a counted frame was read as a fill"
     | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
     | Usage_windows_reported _ | Turn_finished _ -> ()
@@ -2874,7 +3002,7 @@ candidates = ["projection.http", "codex.codex"]
                                        ())
                                 else None
                               in
-                              let result = (Keeper_agent_run.run_turn
+                              let settlement = Keeper_agent_run.run_turn
                                 ?trajectory_acc
                                 ~config
                                 ~meta
@@ -2903,11 +3031,11 @@ candidates = ["projection.http", "codex.codex"]
                                      ~detail:"test fixture has no Skill publication")
                                 ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
                                 ~runtime_id
-                                ()).Keeper_agent_run.result in
+                                () in
                               (* Read while the turn's runtime catalog is
                                  still the published one. *)
-                              after_turn ();
-                              result))))))
+                              after_turn settlement;
+                              settlement.Keeper_agent_run.result))))))
 ;;
 
 let run_production_keeper_turn_with_predecessor ~http_requests ~base_path ~trace_id
@@ -2949,7 +3077,8 @@ let test_production_turn_records_its_keeper_as_the_failure_recorder () =
       (fun cli_path ->
         let trace_id = "recorder-trace" in
         let result =
-          run_production_keeper_turn_with_projection ~write_cost_ledger:false ~after_turn:read_mark
+          run_production_keeper_turn_with_projection ~write_cost_ledger:false
+            ~after_turn:(fun _settlement -> read_mark ())
             ~dynamic_context_for_tools:None ~http_requests:None ~base_path ~trace_id
             ~user_message:"Start the turn." ~cli_path ~model:"gpt-fixture"
             ~turn_instructions:None
@@ -4670,8 +4799,10 @@ let test_production_keeper_failed_turn_leaves_its_end_line () =
                 ~trace_id:"codex-production-failed-1"))
 ;;
 
-(* The host reads the runtime's count into the turn's usage: reported, per
-   request, with the app-server's numbers rather than zero. *)
+(* The host resolves a Codex turn's spend from the thread's running count
+   ([total]), conversation-cumulative and keyed by the thread and whether this
+   turn resumed it; a repeated frame then adds nothing. The newest request's
+   [last] rides apart as the context it occupied. *)
 let test_production_keeper_reports_codex_token_usage () =
   let base_path = temp_workspace "masc-codex-production-usage-" in
   Fun.protect
@@ -4700,16 +4831,30 @@ let test_production_keeper_reports_codex_token_usage () =
             | Error error -> fail (Agent_core.Error.to_string error)
             | Ok result ->
               check bool "usage reported" true result.Keeper_agent_run.usage_reported;
-              check int "input tokens" 1200 result.usage.input_tokens;
-              check int "output tokens" 80 result.usage.output_tokens;
-              check int "cache read tokens" 1000 result.usage.cache_read_input_tokens;
-              check bool "per-request scope" true
-                (result.usage_scope = Runtime_usage_scope.Per_request);
+              check int "thread input" 9000 result.usage.input_tokens;
+              check int "thread output" 700 result.usage.output_tokens;
+              check int "thread cache read" 8000 result.usage.cache_read_input_tokens;
+              check string "conversation-cumulative scope" "conversation_cumulative"
+                (Runtime_usage_scope.to_string result.usage_scope);
+              (match result.usage_basis with
+               | Keeper_usage_resolution.Conversation_counter
+                   { conversation_id = "thread-1"; position = Keeper_usage_resolution.Fresh; _ } -> ()
+               | _ -> fail "a Codex spend is not keyed by its thread and position");
               (match result.runtime_observation with
                | Some observation ->
-                 check bool "observation scope" true
-                   (observation.Runtime_observation.usage_scope
-                    = Runtime_usage_scope.Per_request)
+                 check string "observation scope" "conversation_cumulative"
+                   (Runtime_usage_scope.to_string
+                      observation.Runtime_observation.usage_scope);
+                 (match observation.Runtime_observation.request_context with
+                  | Some context ->
+                    check int "the newest request's occupancy" 1200 context.input_tokens;
+                    check (option int) "its cache read" (Some 1000)
+                      (Option.map
+                         (fun (cache : Runtime_observation.request_cache) ->
+                            cache.cache_read_input_tokens)
+                         context.cache);
+                    check (option int) "its final output" (Some 80) context.output_tokens
+                  | None -> fail "the newest request's occupancy was dropped")
                | None -> fail "production turn recorded no runtime observation")))
 ;;
 
@@ -4736,10 +4881,10 @@ let raw_cost_rows ~base_path =
   |> List.sort compare
 ;;
 
-let run_cost_ledger_turn ~base_path ~trace_id ~cli_path =
+let run_cost_ledger_turn ?(after_turn = ignore) ~base_path ~trace_id ~cli_path () =
   run_production_keeper_turn_with_projection
     ~write_cost_ledger:true
-    ~after_turn:ignore
+    ~after_turn
     ~dynamic_context_for_tools:None
     ~http_requests:None
     ~base_path
@@ -4755,6 +4900,92 @@ let run_cost_ledger_turn ~base_path ~trace_id ~cli_path =
    so the count the turn ended on is there although the turn failed; before,
    a failed official-client turn wrote no row at all. The repeated frame
    states the same count, which adds nothing to a spend resolved from it. *)
+(* The turn ended on a compaction estimate (8 of 2,709 completed Codex
+   turns, 2026-09-23..25). Its occupancy is the estimate with no cache split
+   and no output, not a request of zero input; the spend is still the
+   thread count. *)
+let test_production_keeper_takes_a_compaction_estimate_as_occupancy () =
+  let base_path = temp_workspace "masc-codex-production-estimate-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; token_usage_updated
+         ; compaction_estimate_token_usage_updated
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn
+                ~base_path
+                ~trace_id:"codex-production-estimate-1"
+                ~user_message:
+                  "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
+                ~cli_path
+                ~model:"gpt-fixture"
+                ~turn_instructions:None
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok result ->
+              check int "the spend is still the thread count" 9000 result.Keeper_agent_run.usage.input_tokens;
+              (match result.runtime_observation with
+               | Some { Runtime_observation.request_context = Some context; _ } ->
+                 check int "the occupancy is the estimate" 45000 context.input_tokens;
+                 check bool "an estimate has no cache split" true (Option.is_none context.cache);
+                 check (option int) "nor a response's output" None context.output_tokens
+               | Some { Runtime_observation.request_context = None; _ } | None ->
+                 fail "the estimate's occupancy was dropped")))
+;;
+
+(* The usage limit fails the turn after the thread already counted two
+   responses. What it spent still travels out of the turn: its attempt, with
+   one reading for its thread holding the newest count, not one per frame. *)
+let test_production_keeper_carries_a_failed_turns_spend_out () =
+  let base_path = temp_workspace "masc-codex-production-failed-spend-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result; account_chatgpt; thread_result; turn_result
+         ; token_usage_updated; second_token_usage_updated; second_token_usage_updated
+         ; usage_limit_terminal
+         ]
+         (fun cli_path ->
+            let spend = ref [] in
+            (match
+               run_cost_ledger_turn
+                 ~after_turn:(fun settlement -> spend := settlement.Keeper_agent_run.spend)
+                 ~base_path
+                 ~trace_id:"codex-failed-spend-1"
+                 ~cli_path
+                 ()
+             with
+             | Error _ -> ()
+             | Ok _ -> fail "usage limit did not fail the production turn");
+            match !spend with
+            | [ { Keeper_turn_spend.readings = [ reading ]; runtime_id; _ } ] ->
+              check string "the attempt's runtime" "codex.codex" runtime_id;
+              check (option int) "the thread's newest count" (Some 11000)
+                (Option.map
+                   (fun (sample : Keeper_usage_resolution.sample) -> sample.input_tokens)
+                   reading.observation);
+              (match reading.basis with
+               | Keeper_usage_resolution.Conversation_counter
+                   { conversation_id = "thread-1"; runtime_id = "codex.codex"; _ } -> ()
+               | Keeper_usage_resolution.Conversation_counter _
+               | Keeper_usage_resolution.Per_request
+               | Keeper_usage_resolution.Turn_total
+               | Keeper_usage_resolution.Unavailable ->
+                 fail "the reading is not keyed by its thread")
+            | attempts ->
+              failf "expected one attempt with one reading, got %d attempts" (List.length attempts)))
+;;
+
 let test_production_keeper_ledgers_codex_spend_of_a_failed_turn () =
   let base_path = temp_workspace "masc-codex-production-failed-cost-" in
   Fun.protect
@@ -4766,7 +4997,7 @@ let test_production_keeper_ledgers_codex_spend_of_a_failed_turn () =
          ; usage_limit_terminal
          ]
          (fun cli_path ->
-            (match run_cost_ledger_turn ~base_path ~trace_id:"codex-failed-cost-1" ~cli_path with
+            (match run_cost_ledger_turn ~base_path ~trace_id:"codex-failed-cost-1" ~cli_path () with
              | Error _ -> ()
              | Ok _ -> fail "usage limit did not fail the production turn");
             check (list (pair string (option int))) "every frame's thread count, as reported"
@@ -4814,7 +5045,7 @@ let test_production_keeper_ledgers_each_codex_response_once () =
          ; item_completed; token_usage_updated; turn_completed
          ]
          (fun cli_path ->
-            (match run_cost_ledger_turn ~base_path ~trace_id:"codex-once-cost-1" ~cli_path with
+            (match run_cost_ledger_turn ~base_path ~trace_id:"codex-once-cost-1" ~cli_path () with
              | Error error -> fail (Agent_core.Error.to_string error)
              | Ok _ -> ());
             check (list (pair string (option int))) "the one frame, written once"
@@ -4835,7 +5066,7 @@ let test_production_keeper_marks_a_codex_turn_that_reported_no_usage () =
          ; item_completed; turn_completed
          ]
          (fun cli_path ->
-            (match run_cost_ledger_turn ~base_path ~trace_id:"codex-unreported-cost-1" ~cli_path with
+            (match run_cost_ledger_turn ~base_path ~trace_id:"codex-unreported-cost-1" ~cli_path () with
              | Error error -> fail (Agent_core.Error.to_string error)
              | Ok _ -> ());
             check (list (pair string (option int))) "one row saying the usage is missing"
@@ -4906,6 +5137,58 @@ let test_production_keeper_resumes_across_trace_rotation () =
             check string "production thread" "thread-1" session_id
           | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
             fail "production Codex state did not settle"))
+;;
+
+(* The second turn resumes the thread the first turn started. Its spend is
+   the thread's count now minus the count the first turn left: the resolver
+   subtracts the same thread's cursor, so the first turn is not charged
+   again. *)
+let test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread () =
+  let base_path = temp_workspace "masc-codex-production-resumed-spend-" in
+  let resumed_token_usage_updated =
+    {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-2","tokenUsage":{"total":{"inputTokens":11000,"cachedInputTokens":9500,"outputTokens":740,"reasoningOutputTokens":310,"totalTokens":11740},"last":{"inputTokens":2000,"cachedInputTokens":1500,"outputTokens":40,"reasoningOutputTokens":10,"totalTokens":2040},"modelContextWindow":272000}}}|}
+  in
+  let run_turn ~trace_id ~user_message lines =
+    with_fixture lines (fun cli_path ->
+      match
+        run_production_keeper_turn
+          ~base_path ~trace_id ~user_message ~cli_path ~model:"gpt-fixture"
+          ~turn_instructions:None
+      with
+      | Error error -> fail (Agent_core.Error.to_string error)
+      | Ok result -> result)
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let first =
+         run_turn ~trace_id:"codex-resumed-spend-1" ~user_message:"Start the thread."
+           [ init_result; account_chatgpt; thread_result; turn_result
+           ; item_completed; token_usage_updated; turn_completed ]
+       in
+       let second =
+         run_turn ~trace_id:"codex-resumed-spend-2" ~user_message:"Resume the thread."
+           [ init_result; account_chatgpt; thread_result; resumed_turn_result
+           ; resumed_item_completed; resumed_token_usage_updated; resumed_turn_completed ]
+       in
+       (match second.Keeper_agent_run.usage_basis with
+        | Keeper_usage_resolution.Conversation_counter
+            { conversation_id = "thread-1"; position = Keeper_usage_resolution.Resumed; _ } -> ()
+        | _ -> fail "the resumed turn is not keyed to its thread as resumed");
+       let resolve ~cursor (result : Keeper_agent_run.run_result) =
+         Keeper_usage_resolution.resolve
+           ~cursor
+           ~basis:result.usage_basis
+           ~observation:(Some (Keeper_usage_resolution.sample_of_api_usage result.usage))
+           ~observed_at:0.0
+       in
+       let _, cursor = resolve ~cursor:None first in
+       let resolution, _ = resolve ~cursor second in
+       match resolution.Keeper_usage_resolution.delta with
+       | Some delta ->
+         check int "input the second turn added" 2000 delta.input_tokens;
+         check int "output the second turn added" 40 delta.output_tokens
+       | None -> fail "the resumed turn resolved no spend")
 ;;
 
 let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
@@ -5269,13 +5552,22 @@ let test_live_developer_context_comparison () =
               (match !observed_model with
                | None -> observed_model := Some result.model
                | Some model -> check string "same model across comparison" model result.model);
+              (* The newest request's counts, as the experiment compares
+                 them; a compaction estimate or a replaced count is not a
+                 request. *)
               let usage = match result.usage with
-                | None -> `Null
-                | Some usage -> `Assoc
+                | Some
+                    (Runtime_codex_app_server.Thread_count
+                      { last = Runtime_codex_app_server.Request_usage usage; _ }) -> `Assoc
                     [ "input_tokens", `Int usage.input_tokens
                     ; "cache_read_tokens", `Int usage.cached_input_tokens
                     ; "output_tokens", `Int usage.output_tokens
-                    ; "reasoning_output_tokens", `Int usage.reasoning_output_tokens ] in
+                    ; "reasoning_output_tokens", `Int usage.reasoning_output_tokens ]
+                | Some
+                    (Runtime_codex_app_server.Thread_count
+                      { last = Runtime_codex_app_server.Context_estimate { estimated_tokens }; _ }) ->
+                  `Assoc [ "estimated_context_tokens", `Int estimated_tokens ]
+                | Some Runtime_codex_app_server.Thread_count_replaced | None -> `Null in
               print_endline (Yojson.Safe.to_string (`Assoc
                 [ "experiment", `String "developer-context-placement"
                 ; "arm", `String (match arm with `Rewrite -> "rewrite" | `Append -> "append")
@@ -5745,6 +6037,18 @@ let () =
             `Quick
             test_turn_without_token_usage_reports_none
         ; test_case
+            "a compaction estimate is occupancy, not a request"
+            `Quick
+            test_a_compaction_estimate_is_occupancy_not_a_request
+        ; test_case
+            "a context-window fill replaces the turn's count"
+            `Quick
+            test_a_context_window_fill_replaces_the_turns_count
+        ; test_case
+            "frame shapes parse by their counts"
+            `Quick
+            test_frame_shapes_parse_by_their_counts
+        ; test_case
             "a truncated token usage of this turn fails closed"
             `Quick
             test_truncated_token_usage_of_this_turn_fails_closed
@@ -5858,6 +6162,14 @@ let () =
             `Quick
             test_production_keeper_reports_codex_token_usage
         ; test_case
+            "production Keeper takes a compaction estimate as occupancy"
+            `Quick
+            test_production_keeper_takes_a_compaction_estimate_as_occupancy
+        ; test_case
+            "production Keeper carries a failed turn's spend out"
+            `Quick
+            test_production_keeper_carries_a_failed_turns_spend_out
+        ; test_case
             "production Keeper ledgers Codex spend of a failed turn"
             `Quick
             test_production_keeper_ledgers_codex_spend_of_a_failed_turn
@@ -5869,6 +6181,10 @@ let () =
             "production Keeper marks a Codex turn that reported no usage"
             `Quick
             test_production_keeper_marks_a_codex_turn_that_reported_no_usage
+        ; test_case
+            "production Keeper resolves a resumed Codex turn against its thread"
+            `Quick
+            test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread
         ; test_case
             "production Keeper resumes across trace rotation"
             `Quick

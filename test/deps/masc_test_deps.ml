@@ -575,7 +575,7 @@ let write_sandbox_image_catalog
     | Error error -> failwith ("write_sandbox_image_catalog: " ^ to_string error)
   in
   let shipped =
-    match Embedded_config.read Catalog.file_name with
+    match Embedded_config.read Catalog.shipped_file_name with
     | Some text -> text
     | None -> failwith "write_sandbox_image_catalog: this binary ships no image catalog"
   in

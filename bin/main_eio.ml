@@ -3263,9 +3263,25 @@ let sandbox_image_store_digest ~builder ~store ~reference =
   let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None in
   match store with
   | Keeper_sandbox_image_catalog.Docker_daemon ->
-    Result.map String.trim
-      (sandbox_image_read_stdout
-         (builder.build_command @ [ "image"; "inspect"; "--format"; "{{.Id}}"; reference ]))
+    (* [{{.Id}}] is [sha256:<64 hex>]. Anything else (an empty line included)
+       is refused here, so the error names the store's answer rather than a
+       catalog field downstream. *)
+    let* output =
+      sandbox_image_read_stdout
+        (builder.build_command @ [ "image"; "inspect"; "--format"; "{{.Id}}"; reference ])
+    in
+    let id = String.trim output in
+    let prefix = "sha256:" in
+    let prefix_length = String.length prefix in
+    let hex = function '0' .. '9' | 'a' .. 'f' -> true | _ -> false in
+    if String.length id = prefix_length + 64
+       && String.starts_with ~prefix id
+       && String.for_all hex (String.sub id prefix_length 64)
+    then Ok id
+    else
+      Error
+        (Printf.sprintf "%s image inspect gave no image id for %s (it answered %S)"
+           (String.concat " " builder.build_command) reference id)
   | Keeper_sandbox_image_catalog.Microvm Keeper_microvm_backend.Apple_container ->
     let* output =
       sandbox_image_read_stdout (builder.build_command @ [ "image"; "inspect"; reference ])
@@ -3302,7 +3318,7 @@ let sandbox_image_change_catalog ~base_path change =
   let ( let* ) = Result.bind in
   let config_root = sandbox_image_config_root base_path in
   let* shipped =
-    match Embedded_config.read Keeper_sandbox_image_catalog.file_name with
+    match Embedded_config.read Keeper_sandbox_image_catalog.shipped_file_name with
     | Some shipped -> Ok shipped
     | None ->
       Error "sandbox-image: missing embedded config/sandbox-images.toml"
@@ -3351,8 +3367,8 @@ let sandbox_image_promote_exit base_path runtime name reference =
        else
          Error
            (Printf.sprintf
-              "sandbox-image: %S is not repository:tag (a lowercase repository and \
-               a tag; not a digest reference, not starting with '-')"
+              "sandbox-image: %S is not repository:tag (a tag after the last ':'; \
+               not a digest reference, not starting with '-')"
               reference)
      in
      let* runtime = runtime in

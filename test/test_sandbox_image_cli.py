@@ -96,7 +96,7 @@ sys.exit(int(os.environ['TEST_EXIT']))
 
 
 class SandboxImageCatalogCliTest(unittest.TestCase):
-    """promote and rollback record builds in <base>/.masc/config/sandbox-images.toml."""
+    """promote and rollback record builds in <base>/.masc/config/sandbox-image-builds.toml."""
 
     def run_cli(self, root, base, *args, inspect_output='', inspect_exit=0,
                 config_dir=None):
@@ -138,7 +138,7 @@ sys.exit(0)
             self.install_fake_container(root)
             base = root / 'workspace'
             (base / '.masc' / 'config').mkdir(parents=True)
-            catalog = base / '.masc' / 'config' / 'sandbox-images.toml'
+            catalog = base / '.masc' / 'config' / 'sandbox-image-builds.toml'
 
             first = self.run_cli(root, base, 'promote', 'base', 'masc-sandbox:general',
                                  '--runtime', 'apple_container', inspect_output=inspect(digest_a))
@@ -197,8 +197,8 @@ sys.exit(0)
                                   config_dir=config_dir)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn('[images.base.apple_container]',
-                          (config_dir / 'sandbox-images.toml').read_text())
-            self.assertFalse((base / '.masc' / 'config' / 'sandbox-images.toml').exists())
+                          (config_dir / 'sandbox-image-builds.toml').read_text())
+            self.assertFalse((base / '.masc' / 'config' / 'sandbox-image-builds.toml').exists())
 
     def test_rollback_without_a_previous_build_changes_nothing(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -208,7 +208,7 @@ sys.exit(0)
             result = self.run_cli(root, base, 'rollback', 'base', '--runtime', 'apple_container')
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('no previous build', result.stderr)
-            self.assertFalse((base / '.masc' / 'config' / 'sandbox-images.toml').exists())
+            self.assertFalse((base / '.masc' / 'config' / 'sandbox-image-builds.toml').exists())
 
 if __name__ == '__main__':
     unittest.main()

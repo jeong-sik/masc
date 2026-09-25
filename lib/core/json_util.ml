@@ -227,6 +227,54 @@ let bool_opt_to_json : bool option -> Yojson.Safe.t = function
 let string_opt_field name (opt : string option) : string * Yojson.Safe.t =
   (name, string_opt_to_json opt)
 
+(** {1 Optional field extraction (Result-returning)}
+
+    [get_*] above answers [None] both for a field that is not there and for
+    one that is there but unreadable, so a caller that falls back on [None]
+    also falls back on a value the operator wrote wrong. These keep the two
+    apart: absent is [Ok None], present and readable is [Ok (Some v)],
+    present and unreadable is [Error]. A [`Null] is present: it is something
+    written, not a field left out. *)
+
+let optional_member ~key json =
+  match json with
+  | `Assoc fields -> Ok (List.assoc_opt key fields)
+  | other ->
+    Error
+      (Printf.sprintf "%s cannot be read from %s, which is not an object" key
+         (kind_name other))
+
+let optional_float json key : (float option, string) result =
+  match optional_member ~key json with
+  | Error message -> Error message
+  | Ok None -> Ok None
+  | Ok (Some (`Float f)) -> Ok (Some f)
+  | Ok (Some (`Int n)) -> Ok (Some (Float.of_int n))
+  | Ok (Some other) ->
+    Error
+      (Printf.sprintf "%s must be a number, got %s: %s" key (kind_name other)
+         (excerpt other))
+
+let optional_bool json key : (bool option, string) result =
+  match optional_member ~key json with
+  | Error message -> Error message
+  | Ok None -> Ok None
+  | Ok (Some (`Bool b)) -> Ok (Some b)
+  | Ok (Some other) ->
+    Error
+      (Printf.sprintf "%s must be true or false, got %s: %s" key (kind_name other)
+         (excerpt other))
+
+let optional_nonblank_string json key : (string option, string) result =
+  match optional_member ~key json with
+  | Error message -> Error message
+  | Ok None -> Ok None
+  | Ok (Some (`String s)) when String.trim s <> "" -> Ok (Some (String.trim s))
+  | Ok (Some other) ->
+    Error
+      (Printf.sprintf "%s must be a non-blank string, got %s: %s" key
+         (kind_name other) (excerpt other))
+
 
 (** {1 Assoc field extraction}
 

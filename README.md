@@ -222,8 +222,10 @@ waits for `/health`, and stops that child when it exits. A server that was
 already running is left alone.
 
 `Tab` and `Shift-Tab` rotate through eleven surfaces, drawn as a strip on the
-top row. Approvals holds a stop only while something waits in it (or while
-you are on it). Every child view is also a `go <name>` entry in the `:` palette.
+top row. Approvals leaves the strip only when a current reading shows nothing
+waiting and you are not on it; while the server is unreachable or the queue
+has not been read yet, it stays. Every child view is also a `go <name>` entry
+in the `:` palette.
 
 | Surface | Shows |
 |---|---|

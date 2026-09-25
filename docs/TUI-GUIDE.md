@@ -8,8 +8,9 @@ Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
 `bin/masc_tui_types.ml`: Overview, Activity, Keepers, Lanes, Memory,
-Approvals, Board, Planning, Fusion, Workspace, Config. Approvals holds its stop
-only while something waits in it or while it is the current view.
+Approvals, Board, Planning, Fusion, Workspace, Config. Approvals leaves the ring
+only when a current reading shows nothing waiting and it is not the current
+view; while the queue cannot be read (server unreachable, first load) it stays.
 Additional surfaces hang off parents instead of holding Tab stops:
 Planning's `v` cycles through Task Review and Task Verdicts, then back to Goals;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,

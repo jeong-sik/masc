@@ -9376,12 +9376,34 @@ let render_harness_list (state : state) =
        box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  let chrome_rows =
-    (if Option.is_some state.harness_error then 9 else 7)
-    + 1
-    + (if Option.is_some stale_note then 1 else 0)
+  (* Every row above the list, counted off the buffer they were drawn into
+     rather than declared beside them. The constant said seven where the head
+     draws nine: rows were added above the list and the number was not, so the
+     surface ran three rows past its budget. [finish_surface] takes an overrun
+     off the end, and the end of this surface is its footer -- the screen drew
+     no key hints at all, at every terminal height. The ledger block is a list
+     whose length varies, which is why this is measured and not counted by
+     hand. *)
+  let head_rows = count_frame_lines buf in
+  (* The rows still to come under the list: the frame's closing row and the
+     footer. Drawn now so their height is the same measured fact. *)
+  let tail = Buffer.create 256 in
+  box_bottom tail cols;
+  let link_hint =
+    match List.nth_opt verdicts state.harness_cursor with
+    | None -> ""
+    | Some verdict ->
+        "  selected:"
+        ^ Link.reference Task
+            (Terminal_text.single_line verdict.Masc.Tui_decode.hv_task_id)
   in
-  let content_height = max 1 (rows - chrome_rows) in
+  Buffer.add_string tail
+    (footer_line state ~max_cells:cols
+       ~hints:
+         (Masc_tui_keys.footer_hints ~detail_open:false state.view ^ link_hint));
+  let room = max 1 (rows - head_rows - count_frame_lines tail) in
+  (* The window reading costs one of the rows it describes. *)
+  let content_height = if shown > room then max 1 (room - 1) else room in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.harness_scroll max_scroll) in
   let verdicts_window = Rows.of_list ~first:scroll ~height:content_height verdicts in
@@ -9453,19 +9475,7 @@ let render_harness_list (state : state) =
   if shown > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "[verdicts %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
-  box_bottom buf cols;
-  let link_hint =
-    match List.nth_opt verdicts state.harness_cursor with
-    | None -> ""
-    | Some verdict ->
-        "  selected:"
-        ^ Link.reference Task
-            (Terminal_text.single_line verdict.Masc.Tui_decode.hv_task_id)
-  in
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Masc_tui_keys.footer_hints ~detail_open:false state.view ^ link_hint));
+  Buffer.add_buffer buf tail;
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
 
 (* Which goals the judged task serves, and what those goals are aiming at.

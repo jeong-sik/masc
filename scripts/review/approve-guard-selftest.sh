@@ -206,7 +206,7 @@ run_case cr-own-refuses-unless-named 2 "pass --replaces 50" 0 "$d" --repo o/r --
 run_case cr-own-refuses-unless-named-check 2 "pass --replaces 50" 0 "$d" --check --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H"
 d="$work/cr-own-named"; setup "$d"; echo "[$(rv 50 pangyo-preachers CHANGES_REQUESTED)]" >"$d/reviews.json"
 run_case cr-own-replaced-when-named 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md" --replaces 50
-if jq -e '.body|endswith(" · replaces own CHANGES_REQUESTED 50")' "$d/posted.json" >/dev/null 2>&1; then pass=$((pass+1)); echo "ok   cr-own-replaced-footer"; else fail=$((fail+1)); echo "FAIL cr-own-replaced-footer"; cat "$d/posted.json" 2>/dev/null; fi
+if jq -e '.body|endswith(" · replaces review 50")' "$d/posted.json" >/dev/null 2>&1; then pass=$((pass+1)); echo "ok   cr-own-replaced-footer"; else fail=$((fail+1)); echo "FAIL cr-own-replaced-footer"; cat "$d/posted.json" 2>/dev/null; fi
 d="$work/cr-own-wrong-id"; setup "$d"; echo "[$(rv 50 pangyo-preachers CHANGES_REQUESTED)]" >"$d/reviews.json"
 run_case cr-own-named-wrong-id 2 "--replaces 51 does not name" 0 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md" --replaces 51
 d="$work/cr-own-stale-flag"; setup "$d"; echo "[$(rv 60 pangyo-preachers APPROVED),$(rv 50 pangyo-preachers CHANGES_REQUESTED)]" >"$d/reviews.json"

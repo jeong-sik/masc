@@ -386,7 +386,7 @@ let search_marker_styled (state : state) =
          | None -> Ansi.dim)
         marker Ansi.reset
 
-let footer_line ?(status = []) (state : state) ~max_cells ~hints =
+let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the
      door back. One seam for every surface, which is what makes the setting
      a setting instead of per-screen behaviour. *)
@@ -525,7 +525,7 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
             }
         ]
   in
-  Masc_tui_footer.line ?literal_prefix ?action_text
+  Masc_tui_footer.line ?literal_prefix ?action_text ?position
     ~status:(status @ identity @ conflict @ answering @ answered)
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 
@@ -1249,6 +1249,16 @@ let coordinator_status_row (state : state) ~style status =
   "  coordinator " ^ connection_badge state ^ "  " ^ style ^ status ^ Ansi.reset
 
 
+(* The rows a buffer holds. A surface that lays a block out against a height
+   declared beside the drawing loses whatever the two disagree by: the ask
+   section drew its header into the one row left over and pushed every
+   question off-screen, and the Approvals surface spent its Gate lane rows
+   twice and left its footer floating two rows above the composer. Reading the
+   height back off the buffer is what the surfaces use instead.
+
+   A last line with no newline after it is a row: the terminal draws it, and a
+   footer is written that way. Counting newlines alone was a second reading of
+   this one question, off by that row, and the two lived under two names. *)
 let count_frame_lines buf =
   let len = Buffer.length buf in
   if len = 0 then 0
@@ -1631,19 +1641,6 @@ let selected_ask_question (state : state) =
           List.nth_opt row.Masc.Tui_decode.ar_questions state.ask_question_cursor)
 
 
-(* The rows a block has drawn into its own buffer. A surface that lays a
-   block out against a height declared beside the drawing loses whatever the
-   two disagree by: the ask section drew its header into the one row left
-   over and pushed every question off-screen, and the Approvals surface spent
-   its Gate lane rows twice and left its footer floating two rows above the
-   composer. Reading the height back off the buffer is what the surfaces use
-   instead. *)
-let rows_drawn buf =
-  let n = ref 0 in
-  String.iter (fun c -> if c = '\n' then incr n) (Buffer.contents buf);
-  !n
-
-
 let draw_ask_text_entry buf cols ~draft ~question (entry : ask_text_entry) =
   box_wrapped_field buf cols
     ~head:(Printf.sprintf "      %swrite: " Ansi.bold)
@@ -1803,7 +1800,7 @@ let draw_ask_context buf cols ~(row : Masc.Tui_decode.ask_row) =
 let ask_block f =
   let b = Buffer.create 256 in
   f b;
-  (Buffer.contents b, rows_drawn b)
+  (Buffer.contents b, count_frame_lines b)
 
 
 let question_hints (state : state) =
@@ -2448,6 +2445,7 @@ let fusion_run_clock run =
   Printf.sprintf "%04d-%02d-%02d %02d:%02d"
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min
+
 
 
 let fusion_run_duration ~now run =

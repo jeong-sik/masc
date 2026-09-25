@@ -124,6 +124,8 @@ let invalid_sha256_to_string = Tool_output.invalid_sha256_to_string
 type fetch_error =
   | Invalid_sha256 of invalid_sha256
   | Owned_read_failed of Fs_compat.owned_regular_file_read_error
+  | Too_large of { path : string; actual : int; maximum : int }
+  | Invalid_max_bytes of int
   | Integrity_mismatch of {
       path : string;
       expected : string;
@@ -134,6 +136,10 @@ let fetch_error_to_string = function
   | Invalid_sha256 invalid -> invalid_sha256_to_string invalid
   | Owned_read_failed error ->
       Fs_compat.owned_regular_file_read_error_to_string error
+  | Too_large { path; actual; maximum } ->
+      Printf.sprintf "artifact too large path=%s bytes=%d maximum=%d" path actual maximum
+  | Invalid_max_bytes value ->
+      Printf.sprintf "max_bytes must be non-negative, got %d" value
   | Integrity_mismatch { path; expected; actual } ->
       Printf.sprintf
         "integrity mismatch path=%s expected=%s actual=%s"
@@ -228,6 +234,39 @@ let fetch t ~sha256 =
            remove_validated_snapshot path;
            forget_written path;
            Error (Integrity_mismatch { path; expected = sha256; actual })))
+
+let max_served_bytes = 32 * 1024 * 1024
+
+let fetch_bounded t ~sha256 ~max_bytes =
+  match validate_sha256 sha256 with
+  | Error invalid -> Error (Invalid_sha256 invalid)
+  | Ok () when max_bytes < 0 -> Error (Invalid_max_bytes max_bytes)
+  | Ok () ->
+    let path = shard_path t sha256 in
+    (match
+       Fs_compat.load_owned_regular_file_prefix
+         ~ownership_root:t.ownership_root
+         ~max_bytes
+         path
+     with
+     | Error error ->
+       forget_written path;
+       Error (Owned_read_failed error)
+     | Ok None ->
+       remove_validated_snapshot path;
+       forget_written path;
+       Ok None
+     | Ok (Some { truncated = true; file_size; _ }) ->
+       Error (Too_large { path; actual = file_size; maximum = max_bytes })
+     | Ok (Some { content = bytes; _ }) ->
+       let actual = Digestif.SHA256.(digest_string bytes |> to_hex) in
+       if String.equal sha256 actual
+       then Ok (Some bytes)
+       else (
+         remove_validated_snapshot path;
+         forget_written path;
+         Error (Integrity_mismatch { path; expected = sha256; actual })))
+;;
 
 type range =
   { content : string

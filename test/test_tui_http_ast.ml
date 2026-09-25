@@ -1683,6 +1683,17 @@ let test_planning_refresh_reconciles_navigation_identity () =
 
 let test_render_loop_uses_monotonic_dirty_schedule () =
   let main_path = "bin/masc_tui.ml" in
+  check int "the render loop queries both buffered input sources" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"input_reader_has_pending_bytes");
+  check int "queued input includes the terminal probe replay" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"input_reader_has_pending_bytes"
+       ~callee:"Masc_tui_terminal_probe.has_replay");
+  check int "an incomplete scalar does not postpone a frame" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:main_path ~binding_name:"input_reader_has_pending_bytes"
+       ~callees:[] ~fields:[ "partial_scalar" ]);
   check bool "main loop reads a monotonic clock" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Mtime_clock.elapsed_ns"
@@ -2776,11 +2787,12 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_keeper_logs"
        ~callee:"Terminal_text.clock_timestamp");
-  (* Six: two observation timestamps in Live Context, the last turn, the oldest
-     row a partial Last 24h window reached, and the created / updated pair. Each
-     one arrives from a keeper file or a metrics row, so none may reach the
-     frame unprojected. *)
-  check int "keeper detail uses safe short projections for every timestamp" 6
+  (* Seven: two observation timestamps in Live Context, the last turn, the
+     oldest row a partial Last 24h window reached, the created / updated pair,
+     and the Automation row's request clock. Each one arrives from a keeper
+     file, a metrics row or the schedule store, so none may reach the frame
+     unprojected. *)
+  check int "keeper detail uses safe short projections for every timestamp" 7
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"keeper_detail_pane"
        ~callee:"Terminal_text.short_timestamp");

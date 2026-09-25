@@ -97,7 +97,8 @@ let test_api_auth_rotates_invalid_request_judges () =
    own pre-wire policy refuses the attempt, but the route labelled that
    failure a deterministic terminal one. The label now says rotate. A
    provider's own refusal of the body rotates too, because the walk moves on
-   it (#37631). RFC-38531 §3.2 absorbs [Json_parse_error] and [InputCapacity]
+   it (#37631). RFC-one-slot-fault-judgment-for-every-walk.md §3.2 absorbs
+   [Json_parse_error] and [InputCapacity]
    into [Admission], so a JSON parse failure rotates as well — the walk
    predicate now moves the lane on it, and the route names that rotation. *)
 let test_api_attempt_rejected_routes_as_rotation () =

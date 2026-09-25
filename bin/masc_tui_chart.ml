@@ -142,8 +142,28 @@ let gauge ~width ~value ~max_value ?label () =
     in
     let prefix = match label with Some l -> l ^ " " | None -> "" in
     let prefix_cells = Layout.display_width prefix in
-    let full_suffix = Printf.sprintf " %d%% (%s / %s)" pct (format_compact_num value) (format_compact_num max_value) in
-    let full_suffix_cells = Layout.display_width full_suffix in
+    (* A bar says how big something is only against the bar above it, so the
+       axis has to be the same length on every row of a column. It was sized
+       from the suffix this value prints, and the suffix is a percentage whose
+       width grows with its digits: at sixteen cells a row reading "10%" drew
+       a nine-cell axis beside a row reading "6%" with ten, so the fleet's
+       largest fact holder drew the shortest trough. The percentage is written
+       to three digits, which is every percentage there is, and the numbers
+       beside it are measured at [max_value] -- the widest they can be -- so
+       the axis comes off the gauge rather than off the row. *)
+    let full_suffix =
+      Printf.sprintf " %3d%% (%s / %s)" pct (format_compact_num value)
+        (format_compact_num max_value)
+    in
+    let full_suffix_cells =
+      let widest =
+        Printf.sprintf " %3d%% (%s / %s)" 100 (format_compact_num max_value)
+          (format_compact_num max_value)
+      in
+      Stdlib.max (Layout.display_width widest)
+        (Layout.display_width full_suffix)
+    in
+    let full_suffix = Layout.fit_width full_suffix full_suffix_cells in
     let chrome_cells = prefix_cells + full_suffix_cells + 2 in
     if width >= chrome_cells + 4 then
       let bar_width = width - chrome_cells in
@@ -155,7 +175,9 @@ let gauge ~width ~value ~max_value ?label () =
       prefix ^ "[" ^ repeat bar_full filled ^ Masc_tui_theme.Sgr.dim
       ^ repeat bar_light unfilled ^ Masc_tui_theme.Sgr.reset ^ "]" ^ full_suffix
     else
-      let short_suffix = Printf.sprintf " %d%%" pct in
+      (* Three digits, so " 100%" and "   6%" are the same five cells and the
+         text after the bar starts in one column too. *)
+      let short_suffix = Printf.sprintf " %3d%%" pct in
       let short_chrome = prefix_cells + Layout.display_width short_suffix + 2 in
       if width >= short_chrome + 2 then
         let bar_width = width - short_chrome in

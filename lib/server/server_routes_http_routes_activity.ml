@@ -455,6 +455,13 @@ let json_upsert_string_field name value = function
   | _non_object ->
       Error (Printf.sprintf "json_upsert_string_field: expected JSON object, got non-object for field %S" name)
 
+let json_reject_duplicate_meta = function
+  | `Assoc fields as args ->
+      (match List.filter (fun (key, _) -> String.equal key "meta") fields with
+       | _ :: _ :: _ -> Error "duplicate meta fields are not accepted"
+       | _ -> Ok args)
+  | args -> Ok args
+
 let json_ensure_meta_source source = function
   | `Assoc fields ->
       let meta_json =
@@ -1335,6 +1342,7 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
+             let* args = json_reject_duplicate_meta args in
              let author = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "author" author args in
              let* args =

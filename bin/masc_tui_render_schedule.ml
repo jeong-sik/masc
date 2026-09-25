@@ -1029,22 +1029,6 @@ let allocate_fusion_columns ~inner_width ~keeper_width =
   let fcol_run = max 3 (inner_width - named - fcol_keeper) in
   { fcol_keeper; fcol_run; fcol_show_preset }
 
-(* The Tasks list pane beside the detail drew a row's title and nothing else,
-   and the frame folds a label from the middle, keeping its opening and its
-   ending. Titles that share both and differ only in between all draw the same
-   row.
-
-   Measured on the live backlog 2026-09-24, 694 open tasks folded to the
-   pane's room: titles alone left 30 rows in four groups that read alike, 18
-   of them "[triage]...(jeong-sik/masc)". With the task id after the title all
-   694 read differently; with it in front, 31 rows still read alike, because
-   the fold takes the middle out either way and the ids of a group share their
-   opening. So the id goes last, where the fold keeps it.
-
-   The full-width list row already spells the id; only the pane beside the
-   detail dropped it. *)
-let task_list_sidebar_label ~title ~task_id = title ^ "  " ^ task_id
-
 let fusion_header_row columns =
   Table.header_row
     (fusion_cells columns fusion_no_values)
@@ -1406,6 +1390,25 @@ let board_cells ?(styles = board_no_styles) ~age_header ~title_width values =
 let board_age_text ~now = function
   | Some at -> Masc_tui_message_layout.span_text (now -. at)
   | None -> Masc_tui_theme.Glyph.no_value
+
+(* A list pane's row label: what the row is about, then the reading that
+   parts it from its neighbours. The pane folds a label from the middle and
+   keeps its tail, so the parting reading goes last -- in front it folds away
+   whenever the neighbours share an opening, which is the ordinary case for a
+   column of rows that are alike enough to need parting at all.
+
+   The full-width list rows put the same reading first, where nothing folds.
+   These two orders are not a disagreement: one draws in the room it has, the
+   other in the room a fold leaves.
+
+   [apart] is an option because a row may have nothing to be parted by -- a
+   verdict whose clock the codec could not read, an asker the wire did not
+   name -- and that row keeps its subject alone rather than trailing a
+   separator with nothing after it. An empty string would say the same thing
+   in a second vocabulary, and would leave every caller deciding which of the
+   two absences it holds. *)
+let sidebar_row_label ~about ~apart =
+  match apart with None -> about | Some apart -> about ^ "  " ^ apart
 
 let board_title_width ~inner_width =
   (* The header word does not move the column: [board_age_width] is fixed and

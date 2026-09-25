@@ -1329,6 +1329,15 @@ let load_repository_pulls ~(host : string) ~(port : int) :
   | Error err -> Error ("pull requests load failed: " ^ err)
   | Ok json -> Repository_pulls.decode_reading json
 
+(* Each Keeper's spend over the server's default window; the title draws the
+   window the answer names. A Keeper row the decoder cannot read is counted,
+   and that Keeper is drawn unknown. *)
+let load_keeper_spend ~(host : string) ~(port : int) :
+    (overview_spend_reading, string) result =
+  match Masc_tui_http.fetch_keeper_costs ~host ~port with
+  | Error err -> Error ("keeper spend load failed: " ^ err)
+  | Ok json -> Masc_tui_keeper_spend.decode_reading json
+
 (* The Overview's GOALS section. A phase this build does not know refuses the
    whole reading: a goal dropped from the list, or drawn under a phase it is
    not in, would answer "is work moving a goal" about a different fleet. *)

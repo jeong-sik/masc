@@ -267,7 +267,23 @@ type stream_projection =
   ; on_tool_finished : call_id:string -> unit
   }
 
-let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action on_event =
+(* The CLI reports an exclusive prompt count: [parse_usage] accepts a frame
+   only when total_tokens = input_tokens + output_tokens, so the cache it
+   read is not in either. [api_usage.input_tokens] is the inclusive total, so
+   the components go through the shared constructor -- assembling the record
+   by hand put an exclusive count in an inclusive slot, and every cache hit
+   went missing from context occupancy. The keeper's claude_code sibling
+   builds through it too. *)
+let api_usage_of_antigravity_usage (usage : Runtime_antigravity.usage) =
+  Agent_core.Llm_provider.Backend_anthropic.usage_of_wire_counts
+    ~input_tokens:usage.input_tokens
+    ~output_tokens:usage.output_tokens
+    ~cache_creation_input_tokens:0
+    ~cache_read_input_tokens:usage.cache_read_tokens
+;;
+
+let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action ~on_usage_report
+    on_event =
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
     let tool_indexes = Hashtbl.create 8 in
@@ -328,6 +344,12 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
                       emit (Agent_core.Types.ContentBlockStop { index }))
                    (Hashtbl.find_opt native_tool_indexes identity))
               observation.identity
+          | Runtime_antigravity.Usage_reported { model; usage } ->
+            Option.iter
+              (fun report ->
+                 report ~official_turn:turn_count ~model
+                   (api_usage_of_antigravity_usage usage))
+              on_usage_report
           | Runtime_antigravity.Turn_finished { text = _ } ->
             emit
               (Agent_core.Types.MessageDelta
@@ -374,7 +396,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
-    ~(config : Runtime_execution.antigravity_cli) =
+    ~on_usage_report ~(config : Runtime_execution.antigravity_cli) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
     Error
@@ -796,7 +818,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
     let started_at = Time_compat.now () in
       let stream =
-        stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action on_event
+        stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action
+          ~on_usage_report on_event
       in
     let settle_host_stop stop =
       match (!session_state).Session_store.phase with
@@ -1038,21 +1061,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             | Some detail -> Error (internal_error detail)
           in
           let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
-          (* The CLI reports an exclusive prompt count: [parse_usage] accepts a
-             frame only when total_tokens = input_tokens + output_tokens, so
-             the cache it read is not in either. [api_usage.input_tokens] is
-             the inclusive total, so the components go through the shared
-             constructor -- assembling the record here put an exclusive count
-             in an inclusive slot, and every cache hit went missing from
-             context occupancy. The keeper's claude_code sibling has always
-             built through it. *)
-          let usage =
-            Agent_core.Llm_provider.Backend_anthropic.usage_of_wire_counts
-              ~input_tokens:turn.usage.input_tokens
-              ~output_tokens:turn.usage.output_tokens
-              ~cache_creation_input_tokens:0
-              ~cache_read_input_tokens:turn.usage.cache_read_tokens
-          in
+          let usage = api_usage_of_antigravity_usage turn.usage in
           let response =
             { Agent_core.Types.id = turn_id
             ; model = turn.model
@@ -1176,6 +1185,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
+    ?on_usage_report
     ~event_bus ~raw_trace ~on_event ~config () =
   let settled_session = Atomic.make None in
   let on_session_settled value = Atomic.set settled_session (Some value) in
@@ -1210,6 +1220,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
         ~context
         ~terminal_effect_state
         ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+        ~on_usage_report
         ~event_bus
         ~raw_trace
         ~on_event

@@ -119,6 +119,13 @@ type stream_event =
   | Text_delta of string
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
+  | Usage_reported of
+      { model : string
+      ; usage : usage
+      }
+      (** The result event's usage, the conversation's running count, emitted
+          before the result decides whether the turn succeeded, so a failed
+          turn still reports it. *)
   | Turn_finished of { text : string }
 
 type error =

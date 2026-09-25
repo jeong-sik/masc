@@ -50,13 +50,10 @@ type checkpoint_owner =
     - [Client_usage_stream]: the official client reports usage on its own
       stream while the turn runs, before the turn has an outcome. What one
       report covers (one model response, one client turn, the conversation so
-      far) is that client's usage scope, not part of this answer.
-    - [Client_turn_result]: the official client reports usage only in the
-      result of a completed turn. *)
+      far) is that client's usage scope, not part of this answer. *)
 type usage_report =
   | Each_agent_core_response
   | Client_usage_stream
-  | Client_turn_result
 
 val supports_native_none : t -> bool
 (** Whether the execution owner can enforce that all tools are supplied by MASC. *)

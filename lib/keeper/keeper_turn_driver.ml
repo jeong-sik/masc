@@ -2408,6 +2408,7 @@ let run_named
                  Option.iter
                    (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~identity ~tool_name)
                    on_official_client_native_action)
+            ?on_usage_report:on_official_client_usage_report
             ~event_bus
             ~raw_trace
             ~on_event

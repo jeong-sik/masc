@@ -455,16 +455,14 @@ let make_hooks
               any turn and the tool timeline disappeared. Adopt the turn the
               runtime already assigns here; [round] derives from it. *)
            Trajectory.set_turn acc turn;
-           (* A client that reports usage per response on its own stream has
-              already written this turn's rows through
-              [emit_client_usage_report]; this response only repeats the
-              newest of them. [None] is a turn with no dispatched attempt,
-              which keeps the row [AfterTurn] always wrote. *)
+           (* An official client reports its usage on its own stream, which
+              already wrote this turn's rows through
+              [emit_client_usage_report]; this response only repeats it.
+              [None] is a turn with no dispatched attempt, which keeps the row
+              [AfterTurn] always wrote. *)
            (match current_usage_report () with
             | Some Runtime_execution.Client_usage_stream -> ()
-            | Some
-                ( Runtime_execution.Each_agent_core_response
-                | Runtime_execution.Client_turn_result )
+            | Some Runtime_execution.Each_agent_core_response
             | None ->
               emit_cost_event ~masc_root:acc.masc_root
                 ~agent_name:meta.name ~task_id:acc.task_id

@@ -2978,6 +2978,7 @@
 (include stanzas/test_keeper_shutdown_reconciliation_settlement.inc)
 (include stanzas/test_keeper_shutdown_blocked_purge_release.inc)
 (include stanzas/test_keeper_shutdown_fence_stage.inc)
+(include stanzas/test_keeper_shutdown_blocked_replay.inc)
 
 (include stanzas/test_keeper_shutdown_ownerless_admission_release.inc)
 (include stanzas/test_keeper_shutdown_reconciliation_http.inc)
@@ -3624,6 +3625,7 @@
   fmt
   masc
   masc_tui_types
+  masc_tui_pick_list
   masc_tui_fusion_launch
   masc_tui_ask_projection
   masc.voice_setup
@@ -3863,7 +3865,15 @@
  (modules test_tui_acting)
  ; masc for the call log's disposition vocabulary the ledger rows are typed
  ; with, agent_core for the schedule contract they carry.
- (libraries alcotest masc agent_core masc_tui_acting masc_tui_observer))
+ ; masc_tui_message_layout so the row's token figure is asked of the ladder
+ ; that draws it rather than spelled again here.
+ (libraries
+  alcotest
+  masc
+  agent_core
+  masc_tui_acting
+  masc_tui_message_layout
+  masc_tui_observer))
 
 (test
  (name test_tui_observer)
@@ -5511,11 +5521,18 @@
  ; and a byte offset would report the header and its own cell as misaligned.
  ; masc_tui_table so the gap between columns is asked of the contract that
  ; sets it, not spelled again here.
+ ; masc_tui_frame and masc_tui_roster_pane so the list pane's label room is
+ ; asked of the two contracts that set it rather than counted here.
+ ; masc_tui_render_prim for the caret lead that room is narrower by, and for
+ ; the minute clock a Verdicts row is parted from its siblings with.
  (libraries
   alcotest
+  masc_tui_frame
   masc_tui_layout
   masc_tui_message_layout
+  masc_tui_render_prim
   masc_tui_render_schedule
+  masc_tui_roster_pane
   masc_tui_table))
 
 (test
@@ -5628,6 +5645,8 @@
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
 
+(include stanzas/test_tui_voice_pane_fills_its_height.inc)
+
 (include stanzas/test_tui_overlay_window_reading.inc)
 (include stanzas/test_tui_approvals_footer_matches_the_sheet.inc)
 (include stanzas/test_tui_sheet_names_every_palette_destination.inc)
@@ -5666,6 +5685,7 @@
 (include stanzas/test_tui_config.inc)
 (include stanzas/test_tui_config_highlight_wiring.inc)
 (include stanzas/test_tui_row_wiring.inc)
+(include stanzas/test_tui_pick_list.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
@@ -5955,7 +5975,7 @@
 (test
  (name test_tui_identity_tab)
  (modules test_tui_identity_tab)
- (libraries alcotest masc_tui_types masc_tui_keys masc_tui_footer))
+ (libraries alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer))
 
 (test
  (name test_tui_log_channel_column)
@@ -6207,11 +6227,14 @@
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
  ; The pick dispatch lives in the executable, which no test can link, so the
- ; one assertion about it is read through Ast_grep. The source is a dep:
- ; without it the test reads a cached verdict and stays green while the
- ; wiring it asserts is gone.
- (deps %{workspace_root}/bin/masc_tui.ml)
- (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
+ ; assertions about it and about the two renderers are read through Ast_grep.
+ ; The sources are deps: without them the test reads a cached verdict and
+ ; stays green while the wiring it asserts is gone.
+ (deps
+  %{workspace_root}/bin/masc_tui.ml
+  %{workspace_root}/bin/masc_tui_types.ml
+  %{workspace_root}/bin/masc_tui_render.ml)
+ (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
 
 
 (rule
@@ -6333,6 +6356,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_tab_strip_pty)))
+
+(rule
+ (alias runtest-test_tui_input_frame_pty)
+ (deps test_tui_input_frame_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_input_frame_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_input_frame_pty)))
 
 (rule
  (alias runtest-test_tui_approvals_ring_pty)

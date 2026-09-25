@@ -4229,7 +4229,8 @@ let input_capacity_error reason =
        ; reason
        })
 
-(* A typed InputCapacity is this binding's [Admission] (RFC-38531 §3.2): the
+(* A typed InputCapacity is this binding's [Admission]
+   (RFC-one-slot-fault-judgment-for-every-walk.md §3.2): the
    declared input capacity was exceeded, or the input could not be measured,
    before dispatch — a fact about this candidate's binding, not the request.
    Another declared candidate may accept the same semantic input, so the walk
@@ -5486,7 +5487,8 @@ let test_access_failover_preserves_effect_and_caller_authority () =
 
 let test_exhausted_access_errors_rotate_and_deterministic_requests_remain_terminal () =
   (* A request body that is not valid JSON is this binding's [Admission]
-     (RFC-38531 §3.2 absorbs [Json_parse_error] into [Admission]): the refusal
+     (RFC-one-slot-fault-judgment-for-every-walk.md §3.2 absorbs
+     [Json_parse_error] into [Admission]): the refusal
      happened before dispatch, so another declared candidate may accept the
      same input. The walk rotates, matching the exact walk's [Binding
      Admission] advance. The superseded contract that kept Json_parse_error

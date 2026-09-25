@@ -130,8 +130,9 @@ max_output_tokens = 8192
 # Answers the Stagehand browser extension's llm.generate
 # (RFC-browser-lane-stagehand §3.7). Stagehand's system_prompt goes to the
 # system slot, so a slot whose model takes no system prompt is refused when
-# the lane is resolved. This bridge currently executes HTTP exact slots only;
-# Stagehand's usage field is optional, but the CLI tail is not wired here yet.
+# the lane is resolved. The lane may also declare cli_slots (subscription
+# official clients); they run as one-shots after the HTTP slots and answer
+# without usage, which Stagehand's protocol leaves optional.
 [runtime.exact_output_lanes.browser_stagehand_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
 max_output_tokens = 8192

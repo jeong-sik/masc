@@ -14,7 +14,14 @@
     dialects (Gemini's allowlist has no [$schema] or [pattern]; OpenAI strict
     mode refuses [additionalProperties: {}], which Stagehand's extract schema
     carries). The extension checks the answer's shape with its own Zod schema,
-    so masc adds no JSON Schema validator. *)
+    so masc adds no JSON Schema validator.
+
+    The lane's [cli_slots] (subscription official clients) are walked as
+    one-shots ({!Keeper_lane_cli_oneshot}) after every HTTP slot failed, or
+    alone when the lane admits no HTTP slot. A one-shot gets the same schema
+    sentence and the same one-JSON-value check. It takes one prompt and a
+    separate system prompt, so a conversation with an assistant turn is not
+    sent to it ({!cli_unfit}). *)
 
 type role =
   | User
@@ -74,25 +81,26 @@ type refused_slot =
   }
 
 type admitted_lane =
-  { first_slot : Runtime_exact_output_registry.selected_slot
-  ; other_slots : Runtime_exact_output_registry.selected_slot list
+  { http_slots : Runtime_exact_output_registry.selected_slot list
+  ; cli_slots : string list
   ; refused_slots : refused_slot list
   }
-(** At least one slot, walked in declaration order. *)
+(** At least one HTTP or CLI slot. HTTP slots are walked first in declaration
+    order, then the CLI slots in {!Keeper_lane_cli_oneshot.walk}'s order. *)
 
 val refused_slot_to_string : refused_slot -> string
 
 type lane_refusal =
-  | Cli_slots_declared of string list
-      (** The lane walks no CLI tail ({!Runtime.exact_lane_supports_cli_tail}). *)
   | No_slot_admitted of refused_slot list
+      (** The lane declares no [cli_slots] and every HTTP slot was refused. *)
 
 val admit_lane
   :  Runtime_exact_output_registry.resolved_lane
   -> (admitted_lane, lane_refusal) result
-(** Keep the slots whose model takes a system prompt, read from the same
+(** Keep the HTTP slots whose model takes a system prompt, read from the same
     capabilities AGENT_CORE's admission reads for [Unsupported_system_prompt],
-    in declaration order. *)
+    in declaration order, and every declared CLI slot: a one-shot takes the
+    system prompt as its own argument. *)
 
 type lane_unavailable =
   | Registry_unavailable of Runtime_exact_output_registry.publication_error
@@ -114,6 +122,24 @@ type unserved_generation =
   | Text_generation_requested
   | Tool_generation_requested of { tool_names : string list }
 
+(** Why a request could not go to the CLI slots. *)
+type cli_unfit =
+  | Assistant_turn_in_conversation
+      (** A one-shot takes one prompt; user turns join into it, but an
+          assistant turn has no place in it that keeps its role. *)
+
+type cli_tail =
+  | Cli_tail_undeclared  (** The lane declares no [cli_slots]. *)
+  | Cli_tail_unfit of cli_unfit
+  | Cli_tail_exhausted of Keeper_lane_cli_oneshot.failure list
+      (** Every CLI slot failed, in walk order. *)
+
+type generation_failure =
+  { http_failure : no_callback_error Agent_core.Exact_output.flow_execution_error option
+        (** [None] when the lane admitted no HTTP slot. *)
+  ; cli_tail : cli_tail
+  }
+
 type refusal =
   | Params_malformed of string
   | Generation_not_served of unserved_generation
@@ -122,9 +148,9 @@ type refusal =
   | Lane_unavailable of lane_unavailable
   | Lane_refused of lane_refusal
   | Flow_not_started of flow_not_started
-  | Generation_failed of no_callback_error Agent_core.Exact_output.flow_execution_error
-      (** The flow ended without an answer. The rendering names each slot the
-          flow reached and why it did not answer. *)
+  | Generation_failed of generation_failure
+      (** Neither the HTTP flow nor the CLI tail answered. The rendering names
+          each slot reached and why it did not answer. *)
 
 val refusal_to_string : refusal -> string
 
@@ -146,13 +172,17 @@ val answer_of_success : Agent_core.Exact_output.success -> Yojson.Safe.t
     already inside [input_tokens]. *)
 
 val create
-  :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  :  ?cli_runner:Keeper_lane_cli_oneshot.runner
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> clock:_ Eio.Time.clock
+  -> base_path:string
   -> resolve_lane:
        (unit -> (Runtime_exact_output_registry.resolved_lane, lane_unavailable) result)
   -> Browser_stagehand_session.model
 (** A model for {!Browser_stagehand_session.create}. Each [llm.generate] is
     parsed, checked for what this step serves, then sent through the lane
     [resolve_lane] answers at that moment, so a reloaded registry applies to
-    the next request. Production passes {!published_lane}. The model never
-    raises: every refusal is a {!refusal} rendered as an rpc error. *)
+    the next request. Production passes {!published_lane}. [base_path] is
+    where an official client runs; [cli_runner] replaces the official-client
+    edge in tests. An answer from a CLI slot carries no [usage]. The model
+    never raises: every refusal is a {!refusal} rendered as an rpc error. *)

@@ -160,7 +160,6 @@ let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
       ; ("status", `String "failed")
       ; ("reason_code", `String reason_code)
       ; ("reason_detail", `String reason_detail)
-      ; ("reason", `String reason_detail)
       ]
 
 (* judge_synthesis → board meta_json 필드 리스트 (status/decision/resolved_answer/

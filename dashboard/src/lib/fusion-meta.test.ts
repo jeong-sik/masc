@@ -94,6 +94,13 @@ describe('normalizeFusionPanel', () => {
     })
   })
 
+  it('reads the failed panel detail from reason_detail', () => {
+    const panel = normalizeFusionPanel([
+      { model: 'm1', status: 'failed', reason_detail: 'provider timeout', reason: 'stale copy' },
+    ])
+    expect(panel[0]!.reason).toBe('provider timeout')
+  })
+
   it('reads only the producer keys, not guessed aliases', () => {
     const panel = normalizeFusionPanel([
       { name: 'claude', status: '', content: 'alias', usage: { input_tokens: 10, output_tokens: 20 } },

@@ -395,19 +395,16 @@ let test_raw_rows_carry_their_scope () =
     Runtime_usage_scope.all
 ;;
 
-(* A raw row written before rows carried a scope never said what its counts
-   cover. It reads as unavailable, not as a guessed scope and not as an
-   unreadable row. *)
-let test_a_raw_row_without_a_scope_reads_as_unavailable () =
-  let historical =
+(* A raw row that does not say what its counts cover cannot be read; it is
+   rejected, not given a guessed scope. *)
+let test_a_raw_row_without_a_scope_is_rejected () =
+  let unscoped =
     without_field "usage_scope"
       (Cost_ledger.to_json (raw_row Runtime_usage_scope.Per_request))
   in
-  match decoded_projection historical with
-  | Cost_ledger.Raw_observation Runtime_usage_scope.Usage_scope_unavailable -> ()
-  | Cost_ledger.Raw_observation scope ->
-    failf "a row without a scope read as %s" (Runtime_usage_scope.to_string scope)
-  | Cost_ledger.Resolved_delta -> fail "a raw row decoded as a resolved delta"
+  match Cost_ledger.of_json unscoped with
+  | Error _ -> ()
+  | Ok _ -> fail "a raw row without a scope was accepted"
 ;;
 
 (* A resolved delta is one Keeper turn's spend; a scope on it is a row this
@@ -462,8 +459,8 @@ let () =
       ( "usage-scope",
         [
           test_case "raw rows carry their scope" `Quick test_raw_rows_carry_their_scope;
-          test_case "a raw row without a scope reads as unavailable" `Quick
-            test_a_raw_row_without_a_scope_reads_as_unavailable;
+          test_case "a raw row without a scope is rejected" `Quick
+            test_a_raw_row_without_a_scope_is_rejected;
           test_case "a resolved row with a scope is rejected" `Quick
             test_a_resolved_row_with_a_scope_is_rejected;
         ] );

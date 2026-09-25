@@ -120,13 +120,12 @@ let usage_projection_to_string = function
 
 let usage_scope_field = "usage_scope"
 
-(* A raw row carries the scope of its counts. One written before rows did
-   has no [usage_scope] field and reads as unavailable, the same reading
-   [Turn_record] gives a row that never stated its scope; it is not guessed.
-   A present value this build does not know is a decode error. *)
+(* A raw row carries the scope of its counts; without it the counts cannot
+   be read, so a row that lacks it, or names a scope this build does not
+   know, is a decode error. *)
 let raw_observation_scope_of_fields fields =
   match List.assoc_opt usage_scope_field fields with
-  | None -> Ok Runtime_usage_scope.Usage_scope_unavailable
+  | None -> invalid usage_scope_field "is required on a raw_observation row"
   | Some (`String wire) ->
     (match Runtime_usage_scope.of_string wire with
      | Some scope -> Ok scope

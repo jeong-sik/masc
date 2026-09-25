@@ -123,6 +123,24 @@ let cases =
       "providers.p.usage-read.shape: unknown shape \"openrouter\" — expected one of \
        openrouter-key, zai-quota-limit, kimi-coding-usages, ollama-usage"
   ; provider_case
+      "providers.p.usage-read.refresh-s integer"
+      (with_credentials
+         "[providers.p.usage-read]\nshape = \"ollama-usage\"\nurl = \"https://example.invalid/usage\"\n\
+          refresh-s = 600")
+      "providers.p.usage-read.refresh-s: refresh-s must be a float"
+  ; provider_case
+      "providers.p.usage-read.refresh-s zero"
+      (with_credentials
+         "[providers.p.usage-read]\nshape = \"ollama-usage\"\nurl = \"https://example.invalid/usage\"\n\
+          refresh-s = 0.0")
+      "providers.p.usage-read.refresh-s: refresh-s must be a positive finite float"
+  ; provider_case
+      "providers.p.usage-read.refresh-s string"
+      (with_credentials
+         "[providers.p.usage-read]\nshape = \"ollama-usage\"\nurl = \"https://example.invalid/usage\"\n\
+          refresh-s = \"10m\"")
+      "providers.p.usage-read.refresh-s: refresh-s must be a float"
+  ; provider_case
       "providers.p.usage-read.url http"
       (with_credentials
          "[providers.p.usage-read]\nshape = \"ollama-usage\"\nurl = \"http://example.invalid/usage\"")
@@ -270,7 +288,30 @@ let test_usage_read_parses_to_the_shape () =
          (Some
             { Runtime_schema.shape = Zai_quota_limit
             ; url = "https://example.invalid/api/monitor/usage/quota/limit"
+            ; refresh_s = None
             }))
+;;
+
+(* A declared [refresh-s] reaches the record as its seconds. *)
+let test_usage_read_carries_its_refresh_period () =
+  let toml =
+    config
+      ~provider_lines:
+        (well_typed_provider ^ "\n"
+         ^ with_credentials
+             "[providers.p.usage-read]\nshape = \"openrouter-key\"\n\
+              url = \"https://example.invalid/api/v1/key\"\nrefresh-s = 600.0")
+      ~model_lines:""
+  in
+  match Runtime_toml.parse_string toml with
+  | Error errors ->
+    failf
+      "expected the config to load: %s"
+      (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) -> e.message) errors))
+  | Ok config ->
+    let provider = List.find (fun (p : Runtime_schema.provider) -> p.id = "p") config.providers in
+    check (option (float 0.0)) "refresh_s" (Some 600.0)
+      (Option.bind provider.usage_read (fun (read : Runtime_schema.usage_read) -> read.refresh_s))
 ;;
 
 let () =
@@ -280,6 +321,8 @@ let () =
     ; ( "usage-read"
       , [ test_case "a declared usage-read parses to its shape" `Quick
             test_usage_read_parses_to_the_shape
+        ; test_case "a declared usage-read carries its refresh period" `Quick
+            test_usage_read_carries_its_refresh_period
         ] )
     ]
 ;;

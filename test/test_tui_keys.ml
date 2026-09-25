@@ -2714,6 +2714,13 @@ let test_every_searchable_surface_names_its_search () =
          (List.mem "n / N" keys))
     surfaces_that_answer_the_row_search
 
+(* The Keeper runtime picker's [/] narrows its own list, so its footer says
+   so; it has no [n / N], which is the row search's. *)
+let test_the_runtime_picker_names_its_own_filter () =
+  let keys = surface_keys (Keepers Keeper_runtime_pick) in
+  check Alcotest.bool "Runtime pick names /" true (List.mem "/" keys);
+  check Alcotest.bool "and not the row search's n / N" false (List.mem "n / N" keys)
+
 let test_a_surface_without_rows_offers_no_row_search () =
   (* The other direction: [/] on these reaches the same arm and finds no row
      list, so listing it would advertise a key that does nothing. Board's
@@ -2728,7 +2735,8 @@ let test_a_surface_without_rows_offers_no_row_search () =
     ; "Keeper logs", Keepers Keeper_logs
     ; "Keeper calls", Keepers Keeper_calls
     ; "Chat", Keepers Keeper_message
-    ; "Runtime pick", Keepers Keeper_runtime_pick
+      (* Runtime pick is not here: its [/] is the picker's own filter, not
+         the row search, and its footer names it as that. *)
       (* Both have rows worth searching and still say no "/", for the same
          reason and it is [n]. The key that steps to the next match is the
          key these two give to something else: on Approvals it denies the
@@ -2958,6 +2966,8 @@ let () =
             `Quick test_workspace_activity_offers_no_row_search
         ; Alcotest.test_case "a surface without rows offers no row search"
             `Quick test_a_surface_without_rows_offers_no_row_search
+        ; Alcotest.test_case "the runtime picker names its own filter"
+            `Quick test_the_runtime_picker_names_its_own_filter
         ] )
     ; ( "two-press arms"
       , [ Alcotest.test_case "a loop turn without input keeps an arm" `Quick

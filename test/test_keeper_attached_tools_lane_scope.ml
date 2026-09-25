@@ -150,6 +150,7 @@ let with_bundle
         ; agent_cell = ref None
         ; history
         ; load_receipts
+        ; keeper_turn_id = 1
         }
     else None
   in

@@ -43,9 +43,15 @@ while [ $# -gt 0 ]; do
 done
 
 if [ "$skip_build" = false ]; then
-  # --root: a worktree under .worktrees sits inside the parent checkout's dune
-  # project, which excludes that directory, so dune must be told this root.
-  dune build --root "$repo" ./bin/main_eio.exe ./bin/masc_tui.exe ./bin/masc_browser_host.exe
+  # Built through dune-local.sh, which stops before Dune runs when the active
+  # switch's OCaml is not the one dune-project names, when an external pin
+  # differs from scripts/opam-pin-external-deps.sh, or when a findlib library
+  # is missing. A plain `dune build` linked whatever the switch held: installs
+  # went out on OCaml 5.5.0 after the repo moved to 5.5.1, and with an ocaml-dos
+  # older than the pin. --root: a worktree under .worktrees sits inside the
+  # parent checkout's dune project, which excludes that directory.
+  (cd "$repo" && scripts/dune-local.sh build --root "$repo" \
+    ./bin/main_eio.exe ./bin/masc_tui.exe ./bin/masc_browser_host.exe)
 fi
 
 mkdir -p "$prefix"

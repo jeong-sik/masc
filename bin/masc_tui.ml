@@ -1931,7 +1931,6 @@ type async_msg =
       string * Approval.Listing_order.ticket option
   | Board_post_refresh_done of
       Board_detail.request * (board_post * board_comment list, string) result
-  | Board_post_refresh_failed of Board_detail.request * string
   | Approval_decision_done of
       approval_item
       * approval_decision
@@ -4830,17 +4829,10 @@ let launch_identity_app_save state ~mailbox
             ~client_id ~client_secret ~scopes
         with
         | Error err -> Error err
-        | Ok (`Assoc pairs) -> (
-          match List.assoc_opt "error" pairs with
-          | Some (`String detail) -> Error detail
-          | Some _ | None ->
-            let count =
-              match List.assoc_opt "scopes" pairs with
-              | Some (`List rows) -> List.length rows
-              | Some _ | None -> 0
-            in
-            Ok count)
-        | Ok _ -> Error "the server answered with something unreadable"
+        | Ok json ->
+          Masc.Tui_decode.decode_oauth_client_saved json
+          |> Result.map_error (fun detail ->
+            "app recorded, but the reply could not be read: " ^ detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -11391,10 +11383,11 @@ let apply_board_post_load state request result =
   if board_detail_request_still_current state request then
     let post_id = Board_detail.request_post_id request in
     let fail err =
+      let err = "Board post load failed: " ^ err in
       state.board_detail <-
         Board_detail.complete state.board_detail request (Error err);
       if state.view <> Board then
-        add_event state "error" (Printf.sprintf "Board detail unavailable: %s" err)
+        add_event state "error" err
     in
     match result with
     | Ok (post, comments) when String.equal post.bp_id post_id ->
@@ -11411,7 +11404,7 @@ let apply_board_post_load state request result =
     | Ok (post, _) ->
         fail
           (Printf.sprintf
-             "Board detail response ID mismatch: expected %s, received %s"
+             "response ID mismatch: expected %s, received %s"
              post_id post.bp_id)
     | Error err -> fail err
 
@@ -11420,32 +11413,24 @@ let start_board_post_refresh state ~host ~port ~post_id ~mailbox =
   | Board_detail.Already_loading -> ()
   | Board_detail.Started (detail, request) ->
     state.board_detail <- detail;
+    let load_result () =
+      try load_board_post ~host ~port ~post_id with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
     let run_refresh () =
       try
-        enqueue_async mailbox
-          (Board_post_refresh_done
-             (request, load_board_post ~host ~port ~post_id))
+        enqueue_async mailbox (Board_post_refresh_done (request, load_result ()))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
-        enqueue_async mailbox
-          (Board_post_refresh_failed
-             ( request,
-               Printf.sprintf "board post refresh failed: %s"
-                 (Printexc.to_string exn) ))
+          enqueue_async mailbox
+            (Board_post_refresh_done
+               (request, Error (Printexc.to_string exn)))
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork ~sw run_refresh
-    | None ->
-        let result =
-          try load_board_post ~host ~port ~post_id with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn ->
-              Error
-                (Printf.sprintf "board post refresh failed: %s"
-                   (Printexc.to_string exn))
-        in
-        apply_board_post_load state request result
+    | None -> apply_board_post_load state request (load_result ())
 
 let open_board_post state ~mailbox ~focus (post : board_post) =
   state.board_mode <- Board_read post.bp_id;
@@ -13650,8 +13635,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         ~scoped_refresh_followup ~mailbox
   | Board_post_refresh_done (request, result) ->
       apply_board_post_load state request result
-  | Board_post_refresh_failed (request, err) ->
-      apply_board_post_load state request (Error err)
   | Keeper_deletions_loaded (generation, result) ->
       if generation = state.keeper_deletions_generation then (
         state.keeper_deletions_loading <- false;

@@ -3637,3 +3637,12 @@ val schedule_hold_reading :
     succeeds, and a list kept after a failed reload is an earlier answer, so
     every other combination draws the hold at the time it was read
     (#38411). *)
+
+val decode_oauth_client_saved : Yojson.Safe.t -> (int, string) result
+(** Reads the reply of [POST /api/v1/keepers/oauth/client]: the number of
+    scopes the saved app will ask for, [0] being an app saved with none, so
+    the service's own list is asked for. The server always echoes [scopes];
+    a reply without it, or with a non-string scope, is refused rather than
+    read as a valid scope count. The server's refusals arrive as a non-2xx
+    status, which the HTTP client has already turned into an error before this
+    runs. *)

@@ -56,12 +56,9 @@ function fusionDecisionNote(row: TaskHistoryRow): string | null {
   }
   if (typeof row.choice !== 'string' || !row.choice.trim()
     || typeof row.reason !== 'string' || !row.reason.trim()) return null
-  const decision = `${row.decision}: ${row.choice} — ${row.reason}`
-  const recordedNote = `Fusion ${row.decision}: ${row.choice} — ${row.reason}`
-  if (typeof row.notes === 'string' && row.notes.trim() && row.notes !== recordedNote) {
-    return `${decision} · Note: ${row.notes}`
-  }
-  return decision
+  // The sentence comes from the recorded fields only; a stored `notes`
+  // string is not read for Fusion decisions.
+  return `${row.decision}: ${row.choice} — ${row.reason}`
 }
 
 function normalizeTaskHistory(raw: TaskHistoryRow[]): NormalizedTaskEvent[] {

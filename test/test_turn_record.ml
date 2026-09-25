@@ -107,7 +107,6 @@ let sample_record () : Turn_record.t =
   ; selected_model = Some "deepseek-v4-flash"
   ; finish_reason = Some "completed"
   ; context_window = Some 131072
-  ; provider_context_tokens = None
   ; provider_context_window = None
   ; price_input_per_million = Some 0.15
   ; price_output_per_million = Some 0.6
@@ -190,7 +189,6 @@ let test_provider_context_stays_separate_from_turn_budget () =
   let record =
     { (sample_record ()) with
       context_window = Some 128_000
-    ; provider_context_tokens = Some 310_500
     ; provider_context_window = Some 272_000
     }
   in
@@ -199,15 +197,12 @@ let test_provider_context_stays_separate_from_turn_budget () =
    | Ok decoded ->
      check (option int) "MASC shaping ceiling" (Some 128_000)
        decoded.context_window;
-     check (option int) "provider active context" (Some 310_500)
-       decoded.provider_context_tokens;
      check (option int) "provider model window" (Some 272_000)
        decoded.provider_context_window);
   match Turn_record.to_json (sample_record ()) with
   | `Assoc fields ->
-    check bool "old records need no provider context keys" false
-      (List.mem_assoc "provider_context_tokens" fields
-       || List.mem_assoc "provider_context_window" fields)
+    check bool "old records need no provider window key" false
+      (List.mem_assoc "provider_context_window" fields)
   | _ -> fail "turn record is not an object"
 ;;
 

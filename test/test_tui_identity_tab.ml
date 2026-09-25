@@ -307,7 +307,7 @@ let test_the_filter_rows_say_how_much_is_left () =
   with
   | [ line; "" ] ->
     let contains needle =
-      Masc_tui_types.lowercase_contains ~needle line
+      Masc_tui_pick_list.lowercase_contains ~needle line
     in
     check Alcotest.bool "the query is shown" true (contains "/g");
     check Alcotest.bool "and the count" true (contains "2 of 3")
@@ -367,9 +367,9 @@ let test_the_secret_is_never_drawn () =
   in
   let joined = String.concat "\n" rows in
   check Alcotest.bool "the value is nowhere" false
-    (Masc_tui_types.lowercase_contains ~needle:"hunter2" joined);
+    (Masc_tui_pick_list.lowercase_contains ~needle:"hunter2" joined);
   check Alcotest.bool "its length still shows" true
-    (Masc_tui_types.lowercase_contains ~needle:"*******" joined)
+    (Masc_tui_pick_list.lowercase_contains ~needle:"*******" joined)
 
 let test_the_marker_is_on_the_field_taking_keys () =
   let marked field =

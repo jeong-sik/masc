@@ -8,10 +8,15 @@
 (* Runtime types                                                     *)
 (* ================================================================ *)
 
-type request_context = {
-  input_tokens : int;
+type request_cache = {
   cache_creation_input_tokens : int;
   cache_read_input_tokens : int;
+}
+
+type request_context = {
+  input_tokens : int;
+  cache : request_cache option;
+  output_tokens : int option;
 }
 
 type runtime_observation = {
@@ -27,7 +32,6 @@ type runtime_observation = {
   streaming_inter_chunk_avg_ms : float option;
   usage_scope : Runtime_usage_scope.t;
   request_context : request_context option;
-  reported_context_tokens : int option;
   reported_context_window : int option;
 }
 
@@ -58,7 +62,6 @@ let runtime_observation_of_candidates ~runtime_id
     ?(streaming_inter_chunk_avg_ms = None)
     ?(usage_scope = Runtime_usage_scope.Usage_scope_unavailable)
     ?request_context
-    ?reported_context_tokens
     ?reported_context_window
     () : runtime_observation =
   (* Thread the caller-supplied raw model attribution into both fields.
@@ -82,7 +85,6 @@ let runtime_observation_of_candidates ~runtime_id
     streaming_inter_chunk_avg_ms;
     usage_scope;
     request_context;
-    reported_context_tokens;
     reported_context_window;
   }
 
@@ -242,7 +244,6 @@ let runtime_observation_with_metrics ~runtime_id
     ?(agent_core_internal_runtime_allowed = false)
     ?(usage_scope = Runtime_usage_scope.Usage_scope_unavailable)
     ?request_context
-    ?reported_context_tokens
     ?reported_context_window
     () =
   let ttfrc, chunk_count, chunk_avg =
@@ -258,6 +259,5 @@ let runtime_observation_with_metrics ~runtime_id
     ~streaming_inter_chunk_avg_ms:chunk_avg
     ~usage_scope
     ?request_context
-    ?reported_context_tokens
     ?reported_context_window
     ()

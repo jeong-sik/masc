@@ -357,6 +357,13 @@ module ToolCallResponse = struct
   ;;
 end
 
+(** Failure a gRPC [ToolCall] dispatcher returns. [code] becomes the
+    response's wire [error_code]; [message] its [error_message]. *)
+type tool_dispatch_error =
+  { code : Mcp_error_code.t
+  ; message : string
+  }
+
 (** {1 Broadcast} *)
 
 module BroadcastRequest = struct

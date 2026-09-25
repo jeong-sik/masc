@@ -288,6 +288,34 @@ let config_write_status_message ~keeper_name json =
               timing ))
       (config_write_warning_codes json))
 
+type edit_refusal =
+  | Fix_in_editor of string
+  | Cannot_send of string
+
+let edit_refusal_to_string = function
+  | Fix_in_editor detail | Cannot_send detail -> detail
+
+let activation_values =
+  Masc.Keeper_activation_mode.all
+  |> List.map Masc.Keeper_activation_mode.to_string
+  |> String.concat " | "
+
+(* The server parses activation_mode with the same [of_string] and refuses
+   anything else with one status line. Parsing it here, before the request,
+   turns that refusal into something the operator can fix where they typed
+   it. No alias: the value set stays the server's closed set. *)
+let activation_refusal edited_fields =
+  match List.assoc_opt "activation_mode" edited_fields with
+  | None -> None
+  | Some (`String raw) when Option.is_some (Masc.Keeper_activation_mode.of_string raw) ->
+    None
+  | Some value ->
+    Some
+      (* The allowed set leads: a status line cuts the tail at the terminal
+         width, and the set is what the operator needs to read. *)
+      (Printf.sprintf "activation_mode must be %s, not %s" activation_values
+         (Yojson.Safe.to_string value))
+
 let patch_of_edit ~before ~after =
   match after with
   | `Assoc edited_fields ->
@@ -300,8 +328,13 @@ let patch_of_edit ~before ~after =
                else Some key)
       in
       if unknown <> [] then
-        Error ("unknown keeper setting(s): " ^ String.concat ", " unknown)
+        Error
+          (Fix_in_editor
+             ("unknown keeper setting(s): " ^ String.concat ", " unknown))
       else
+        (match activation_refusal edited_fields with
+        | Some reason -> Error (Fix_in_editor reason)
+        | None ->
         let before_fields =
           match editable_snapshot before with
           | `Assoc fields -> fields
@@ -326,11 +359,25 @@ let patch_of_edit ~before ~after =
         if settings_changed = []
         then Ok (`Assoc [])
         else
-          Result.map
-            (fun revision ->
-              `Assoc (("expected_config_revision", revision) :: changed))
-            (expected_config_revision before)
-  | _ -> Error "keeper settings must remain a JSON object"
+          expected_config_revision before
+          |> Result.map (fun revision ->
+                 `Assoc (("expected_config_revision", revision) :: changed))
+          |> Result.map_error (fun detail -> Cannot_send detail))
+  | _ -> Error (Fix_in_editor "keeper settings must remain a JSON object")
+
+(* The editor reopens on a refusal the operator can fix, with the reason as a
+   [//] line on top: Yojson reads line comments, so the reopened text parses
+   exactly as the operator left it. Earlier refusal lines are dropped first,
+   so a second refusal replaces the first instead of stacking above it. *)
+let reopened_stem ~reason edited =
+  let one_line = String.map (function '\n' | '\r' -> ' ' | c -> c) reason in
+  let rec drop_refusals = function
+    | line :: rest when String.starts_with ~prefix:"//" (String.trim line) ->
+      drop_refusals rest
+    | lines -> lines
+  in
+  let body = String.split_on_char '\n' edited |> drop_refusals |> String.concat "\n" in
+  "// " ^ one_line ^ "\n" ^ body
 
 (* Marker column. The glyph carries the editable/read-only split on its own,
    because colour collapses to nothing under NO_COLOR and dim inverts on a

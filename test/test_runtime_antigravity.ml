@@ -306,6 +306,11 @@ let test_stream_events_preserve_available_wire_data () =
                ; model = "gemini-fixture"
                }
            ; Text_delta "MASC_ANTIGRAVITY_OK\n"
+           ; Usage_reported
+               { model = "gemini-fixture"
+               ; usage = { input_tokens = 100; output_tokens = 7; _ }
+               ; _
+               }
            ; Turn_finished { text = "MASC_ANTIGRAVITY_OK\n" }
            ] -> ()
          | _ -> fail "Antigravity stream did not preserve available wire data")
@@ -338,6 +343,11 @@ let test_answer_pieces_reach_the_reader_and_the_result_adds_nothing () =
                { conversation_id = "conversation-1"; model = "gemini-fixture" }
            ; Text_delta "PO"
            ; Text_delta "NG\n"
+           ; Usage_reported
+               { model = "gemini-fixture"
+               ; usage = { input_tokens = 100; output_tokens = 7; _ }
+               ; _
+               }
            ; Turn_finished { text = "PONG\n" }
            ] -> ()
          | _ ->
@@ -364,6 +374,11 @@ let test_an_empty_piece_is_not_forwarded () =
          match List.rev !events with
          | [ Runtime_antigravity.Turn_started _
            ; Text_delta "PONG\n"
+           ; Usage_reported
+               { model = "gemini-fixture"
+               ; usage = { input_tokens = 100; output_tokens = 7; _ }
+               ; _
+               }
            ; Turn_finished { text = "PONG\n" }
            ] -> ()
          | _ -> fail "An empty piece changed what the reader was shown")
@@ -405,6 +420,11 @@ let test_stream_events_preserve_exact_native_tool_steps () =
                ; origin = Runtime_native_tools.Built_in
                }
            ; Text_delta "MASC_ANTIGRAVITY_OK\n"
+           ; Usage_reported
+               { model = "gemini-fixture"
+               ; usage = { input_tokens = 100; output_tokens = 7; _ }
+               ; _
+               }
            ; Turn_finished { text = "MASC_ANTIGRAVITY_OK\n" }
            ] -> ()
          | _ -> fail "Antigravity tool step lost its exact provider identity")
@@ -512,6 +532,29 @@ let test_transmitted_prompt_survives_provider_rejection () =
        | Error error -> fail (Runtime_antigravity.error_to_string error)
        | Ok _ -> fail "provider rejection became a completed response");
       check int "transmission is retained despite provider rejection" 1 !sent)
+;;
+
+(* The result event of a refused turn still carries the conversation's
+   usage, and it is reported before the refusal fails the turn. *)
+let test_refused_result_still_reports_usage () =
+  let reported = ref [] in
+  let on_stream_event = function
+    | Runtime_antigravity.Usage_reported { model; usage; _ } ->
+      reported := (model, usage.input_tokens, usage.cache_read_tokens) :: !reported
+    | Turn_started _ | Text_delta _ | Native_tool_started _ | Native_tool_finished _
+    | Turn_finished _ -> ()
+  in
+  with_fixture [ init (); result ~status:"ERROR" ~response:"" ~error:"fixture rejected" () ]
+    (fun path ->
+      (match run_fixture ~on_stream_event path with
+       | Error (Runtime_antigravity.Turn_failed "fixture rejected") -> ()
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "provider rejection became a completed response");
+      match !reported with
+      | [ ("gemini-fixture", 100, 50) ] -> ()
+      | reports ->
+        failf "expected the refused result's usage reported once, got %d"
+          (List.length reports))
 ;;
 
 let test_child_environment_is_allowlisted () =
@@ -1255,6 +1298,8 @@ let () =
             `Quick test_a_cli_that_answers_without_reading_the_prompt_does_not_hold_the_turn
         ; test_case "transmission survives provider rejection" `Quick
             test_transmitted_prompt_survives_provider_rejection
+        ; test_case "refused result still reports usage" `Quick
+            test_refused_result_still_reports_usage
         ; test_case
             "resume mismatch"
             `Quick

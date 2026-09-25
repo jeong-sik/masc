@@ -133,6 +133,15 @@ type keeper_chat_stream_request = {
     connector context is supplied; [channel_user_id] and
     [channel_user_name] are optional. *)
 
+(** {1 Reply chunks} *)
+
+val split_keeper_reply_chunks : string -> string list
+(** Splits a reply the provider did not stream into the text deltas published
+    in its place: after a sentence end followed by whitespace, after the first
+    newline of a blank line, and at a space once a chunk passes the hard-wrap
+    width. [String.concat "" (split_keeper_reply_chunks text) = text] for every
+    [text]; no chunk is empty. *)
+
 (** {1 Parsing} *)
 
 val parse_keeper_chat_stream_request :
@@ -365,6 +374,9 @@ type operation_wire_stream = Wire_started | Wire_terminal_sent
     settle hook after the child switch unwinds (#28811). *)
 
 module For_testing : sig
+  val operation_heartbeat_decision :
+    Keeper_owner.Chat_operation.state option ->
+    [ `Send_comment | `Finish_stream | `Retain_idle_timeout ]
   val persist_batch_user_rows : base_dir:string -> keeper_name:string ->
     Keeper_chat_operation.t list -> (unit, string) result
   val operation_execution_of_outcome :

@@ -21,7 +21,6 @@ let record ?(blocks = []) ?input_components ?(usage_scope = Runtime_usage_scope.
   ; selected_model = Some "glm-5.3"
   ; finish_reason = Some "stop"
   ; context_window = Some 200_000
-  ; provider_context_tokens = None
   ; provider_context_window = None
   ; price_input_per_million = None
   ; price_output_per_million = None

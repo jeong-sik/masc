@@ -27,7 +27,6 @@ let record ?(tokens = Some 18_000) ~wire ~scope () : Turn_record.t =
   ; selected_model = Some "deepseek-v4-flash"
   ; finish_reason = Some "completed"
   ; context_window = Some 131072
-  ; provider_context_tokens = None
   ; provider_context_window = None
   ; price_input_per_million = None
   ; price_output_per_million = None
@@ -308,7 +307,6 @@ let test_codex_client_context_stays_distinct_from_masc_ceiling () =
   let turn =
     { (record ~tokens:(Some 310_209) ~wire:None ~scope:per_request ()) with
       context_window = Some 272_000
-    ; provider_context_tokens = Some 310_500
     ; provider_context_window = Some 272_000
     }
   in
@@ -316,7 +314,6 @@ let test_codex_client_context_stays_distinct_from_masc_ceiling () =
     { turn = turn.absolute_turn
     ; ts = turn.ts
     ; input_tokens = turn.usage.input_tokens
-    ; provider_context_tokens = turn.provider_context_tokens
     ; provider_context_window = turn.provider_context_window
     ; cache_read = Some 1000
     ; output_tokens = Some 80
@@ -329,10 +326,13 @@ let test_codex_client_context_stays_distinct_from_masc_ceiling () =
     Masc_tui_render_prim.context_composition_lines ~cols:140 ~turn_back:0
       ~forecast:(Error "next-request not fetched") reading
   in
+  (* The client's context is the request's input plus its output
+     (310,209 + 412), the count Codex holds against its model window; there is
+     no second occupancy field to disagree with it. *)
   Alcotest.(check bool) "provider active context stays visible" true
-    (says "Client reports active context 310.5k / provider window 272.0k" rows);
-  Alcotest.(check bool) "the previous-turn row keeps that provider reading" true
-    (says "client ctx 310.5k/272.0k" rows);
+    (says "Client reports active context 310.6k / provider window 272.0k" rows);
+  Alcotest.(check bool) "the previous-turn row derives it from that row's request" true
+    (says "client ctx 310.3k/272.0k" rows);
   Alcotest.(check bool) "the previous-turn row retains cache and output" true
     (says "cache read 1.0k     out 80" rows);
   Alcotest.(check bool) "MASC's smaller ceiling is still named" true
@@ -343,15 +343,29 @@ let test_codex_client_context_stays_distinct_from_masc_ceiling () =
 let test_codex_below_ceiling_names_each_denominator () =
   let turn =
     { (record ~wire:None ~scope:per_request ()) with
-      provider_context_tokens = Some 20_000
-    ; provider_context_window = Some 272_000
+      provider_context_window = Some 272_000
     }
   in
   let rows = lines turn in
   Alcotest.(check bool) "request ratio uses the MASC shaping ceiling" true
     (says "13.7% of MASC shaping ceiling" rows);
   Alcotest.(check bool) "client window remains separate" true
-    (says "Client reports active context 20.0k / provider window 272.0k" rows)
+    (says "Client reports active context 18.4k / provider window 272.0k" rows)
+
+(* A conversation-cumulative count is the thread's spend, not what one
+   request held: it never becomes the client's context. *)
+let test_a_cumulative_count_is_not_a_client_context () =
+  let turn =
+    { (record ~tokens:(Some 9_000) ~wire:None
+         ~scope:Runtime_usage_scope.Conversation_cumulative ())
+      with provider_context_window = Some 272_000
+    }
+  in
+  let rows = lines turn in
+  Alcotest.(check bool) "no active context is drawn from the thread total" false
+    (says "Client reports active context" rows);
+  Alcotest.(check bool) "the window alone is still named" true
+    (says "Client reports a 272.0k-token model window; active context unavailable" rows)
 
 (* No serialized body is the ordinary case on a lane whose client assembles
    the request. The band says what masc handed over rather than reporting a
@@ -517,6 +531,8 @@ let () =
             `Quick test_codex_client_context_stays_distinct_from_masc_ceiling
         ; Alcotest.test_case "Codex ratio names MASC's denominator"
             `Quick test_codex_below_ceiling_names_each_denominator
+        ; Alcotest.test_case "a cumulative count is not a client context"
+            `Quick test_a_cumulative_count_is_not_a_client_context
         ; Alcotest.test_case "no body names what masc handed over" `Quick
             test_no_body_names_what_masc_handed_over
         ] )

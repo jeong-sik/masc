@@ -233,7 +233,12 @@ let target_fixture_toml
     enable_thinking_line
 ;;
 
-let resolver_snapshot
+(* The replacement catalog text the fixture targets are declared in. A case
+   that needs the server's own build to see these targets -- a config commit
+   rebuilds the registry from [AGENT_CORE_MODEL_CATALOG] -- writes this text
+   to that file ([replacement_catalog_file]) instead of publishing a snapshot
+   no commit could rebuild. *)
+let catalog_document
       ?(connect_timeouts = [])
       ?(body_timeouts = [])
       ?(enable_thinkings = [])
@@ -244,6 +249,7 @@ let resolver_snapshot
       ?(supports_structured_output = true)
       ~source
       fixtures
+  : EO.catalog_document
   =
   let timeout_for id =
     List.assoc_opt id connect_timeouts
@@ -257,23 +263,53 @@ let resolver_snapshot
   let api_key_env_for id =
     List.assoc_opt id api_key_envs |> Option.value ~default:api_key_env
   in
-  let overlay : EO.catalog_document =
-    { source
-    ; contents =
-        fixtures
-        |> List.mapi (fun index fixture ->
-            target_fixture_toml
-              ~connect_timeout_s:(timeout_for fixture.id)
-              ~body_timeout_s:(body_timeout_for fixture.id)
-              ?enable_thinking:(enable_thinking_for fixture.id)
-              ~requires_token_measurement
-              ~supports_response_format_json
-              ~supports_structured_output
-              ~api_key_env:(api_key_env_for fixture.id)
-            index
-            fixture)
-        |> String.concat "\n"
-    }
+  { source
+  ; contents =
+      fixtures
+      |> List.mapi (fun index fixture ->
+          target_fixture_toml
+            ~connect_timeout_s:(timeout_for fixture.id)
+            ~body_timeout_s:(body_timeout_for fixture.id)
+            ?enable_thinking:(enable_thinking_for fixture.id)
+            ~requires_token_measurement
+            ~supports_response_format_json
+            ~supports_structured_output
+            ~api_key_env:(api_key_env_for fixture.id)
+          index
+          fixture)
+      |> String.concat "\n"
+  }
+;;
+
+let replacement_catalog_file ~path fixtures =
+  Out_channel.with_open_bin path (fun channel ->
+    output_string channel (catalog_document ~source:path fixtures).contents)
+;;
+
+let resolver_snapshot
+      ?connect_timeouts
+      ?body_timeouts
+      ?enable_thinkings
+      ?api_key_env
+      ?api_key_envs
+      ?requires_token_measurement
+      ?supports_response_format_json
+      ?supports_structured_output
+      ~source
+      fixtures
+  =
+  let overlay =
+    catalog_document
+      ?connect_timeouts
+      ?body_timeouts
+      ?enable_thinkings
+      ?api_key_env
+      ?api_key_envs
+      ?requires_token_measurement
+      ?supports_response_format_json
+      ?supports_structured_output
+      ~source
+      fixtures
   in
   let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
   match

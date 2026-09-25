@@ -21,9 +21,7 @@ let handle ~keeper_name ~tool_name ~start_time _args =
         (fun bytes ->
           Result.map
             (fun handle -> (bytes, handle))
-            (Keeper_vision_tool.store_artifact
-               ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name)
-               bytes))
+            (Keeper_vision_tool.store_frame ~keeper_name bytes))
     in
     (match result with
      | Error message ->
@@ -37,5 +35,6 @@ let handle ~keeper_name ~tool_name ~start_time _args =
            ; ("width", `Int frame.width)
            ; ("height", `Int frame.height)
            ; ("bytes", `Int (String.length bytes))
+           ; Tool_misc_dos_lane.core_field
            ])
 ;;

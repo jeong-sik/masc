@@ -39,7 +39,6 @@ let record
   ; selected_model = None
   ; finish_reason = finish
   ; context_window = None
-  ; provider_context_tokens = None
   ; provider_context_window = None
   ; price_input_per_million = None
   ; price_output_per_million = None

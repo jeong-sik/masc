@@ -25,7 +25,6 @@ let sample_record
       ?(absolute_turn = 4071)
       ?(input_tokens = Some 18_000)
       ?(context_window = Some 131_072)
-      ?(provider_context_tokens = None)
       ?(provider_context_window = None)
       ?(usage_scope = Runtime_usage_scope.Per_request)
       ()
@@ -50,7 +49,6 @@ let sample_record
   ; selected_model = Some "glm-5-turbo"
   ; finish_reason = Some "completed"
   ; context_window
-  ; provider_context_tokens
   ; provider_context_window
   ; price_input_per_million = None
   ; price_output_per_million = None
@@ -300,7 +298,6 @@ let test_per_request_overflow_is_unavailable_not_clamped () =
       (sample_record
          ~input_tokens:(Some 310_209)
          ~context_window:(Some 272_000)
-         ~provider_context_tokens:(Some 310_500)
          ~provider_context_window:(Some 272_000)
          ());
     let fields =

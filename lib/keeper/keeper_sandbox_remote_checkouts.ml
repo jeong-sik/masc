@@ -406,10 +406,11 @@ let discover_and_inspect
         ]
       in
       (* Matched rather than collapsed with [status_tuple]: that helper turns
-         a transport failure into [WEXITED 1], and the non-zero-exit arm below
-         reports [Root_unreadable] -- a claim about the root. A payload that
-         exceeded the remote timeout never read the root at all, and its own
-         [.mli] says not to collapse where a non-zero exit carries a distinct
+         a transport failure into a non-zero status (the timeout status or
+         [WEXITED 1]), and the non-zero-exit arm below reports
+         [Root_unreadable] -- a claim about the root. A payload that exceeded
+         the remote timeout never read the root at all, and its own [.mli]
+         says not to collapse where a non-zero exit carries a distinct
          meaning. *)
       let outcome =
         runner

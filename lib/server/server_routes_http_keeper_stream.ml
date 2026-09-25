@@ -3522,7 +3522,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
          finish ());
       (* A queued operation has no journal events until its Keeper gets the
          slot. Keep the HTTP stream alive during that silence, so a healthy
-         queue does not become a 180-second transport timeout in the TUI.
+         queue does not trip the TUI's per-chunk idle bound.
          Check the exact durable operation before every comment: if it has
          settled without a wire terminal, closing this stream lets the TUI
          reconcile the terminal from the authoritative operation record.
@@ -3556,10 +3556,23 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
             if keeper_stream_send_raw writer mutex closed ": keepalive\n\n"
             then heartbeat ()
             else finish ()
-          | `Finish_stream -> finish ()
+          | `Finish_stream ->
+            (* The live sink may be writing this operation's terminal at the
+               same moment. If the close wins, the client sees a stream that
+               ended after acceptance without a terminal: the same case as a
+               terminal the wire never carried, settled from the operation
+               record, so the race changes no outcome. *)
+            finish ()
           | `Retain_idle_timeout ->
             (* Preserve the existing idle/reconnect path while operation
-               authority is unreadable, without a rapid close/re-POST loop. *)
+               authority is unreadable, without a rapid close/re-POST loop.
+               A comment here would hold the stream open with nothing able to
+               end it if the operation settled without a wire terminal.
+               Cost: with no write, a departed client goes unnoticed. This
+               fiber and its live sink stay until the store is readable
+               again (the next check then writes a comment, which fails, or
+               closes) or [finished] resolves, as every stream did before
+               this heartbeat existed. *)
             heartbeat ())
       in
       Eio.Fiber.first

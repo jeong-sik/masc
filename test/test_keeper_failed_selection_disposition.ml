@@ -292,7 +292,7 @@ let unobserved_failure_routes =
     , KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None } )
   ; "auth failed", KFR.Rotate_now { rotate = KFR.Auth_failed }
   ; "model unavailable", KFR.Rotate_now { rotate = KFR.Model_unavailable }
-  ; "attempt rejected", KFR.Rotate_now { rotate = KFR.Attempt_rejected }
+  ; "admission", KFR.Rotate_now { rotate = KFR.Admission }
   ; ( "refusal body not received"
     , KFR.Rotate_now { rotate = KFR.Refusal_body_not_received } )
   ; "context overflow", exhausted_route "context overflow" KFR.Context_overflow

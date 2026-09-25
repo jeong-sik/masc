@@ -2005,7 +2005,7 @@ type async_msg =
   (* Keyed by the lane / run they answer for: an answer that lands after the
      operator left the list or the run is not this view's answer. *)
   | Lane_runs_loaded of
-      string * int * (float * string) option *
+      Standalone_lane.t * int * (float * string) option *
       (Masc.Tui_decode.lane_run_page, string) result
   | Lane_run_detail_loaded of
       string * int * (Masc.Tui_decode.lane_run_detail, string) result
@@ -6299,7 +6299,7 @@ let launch_clients_load state ~mailbox =
           (Clients_loaded (generation, Error "Eio switch is unavailable"))
   end
 
-let launch_lane_runs_load ?before state ~mailbox ~lane_id =
+let launch_lane_runs_load ?before state ~mailbox ~(lane : Standalone_lane.t) =
   state.lane_runs_generation <- state.lane_runs_generation + 1;
   let generation = state.lane_runs_generation in
   state.lane_runs_loading <- true;
@@ -6307,11 +6307,11 @@ let launch_lane_runs_load ?before state ~mailbox ~lane_id =
   let port = state.port in
   let run () =
     let result =
-      try Masc_tui_http.fetch_lane_runs ?before ~host ~port ~lane:lane_id () with
+      try Masc_tui_http.fetch_lane_runs ?before ~host ~port ~lane () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Lane_runs_loaded (lane_id, generation, before, result))
+    enqueue_async mailbox (Lane_runs_loaded (lane, generation, before, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -6320,7 +6320,7 @@ let launch_lane_runs_load ?before state ~mailbox ~lane_id =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Lane_runs_loaded (lane_id, generation, before, Error "Eio switch is unavailable"))
+        (Lane_runs_loaded (lane, generation, before, Error "Eio switch is unavailable"))
 
 let launch_lane_run_detail_load state ~mailbox ~run_id =
   state.lane_run_detail_generation <- state.lane_run_detail_generation + 1;
@@ -6347,17 +6347,17 @@ let launch_lane_run_detail_load state ~mailbox ~run_id =
 (* Opening a standalone lane's runs drops the previous lane's list so a stale
    answer can never draw under the new heading. *)
 let open_lane_run_list state ~mailbox (lane : Tui_decode.standalone_lane) =
-  state.lanes_mode <- Lanes_run_list lane.sl_lane_id;
+  state.lanes_mode <- Lanes_run_list lane.sl_lane;
   state.lane_runs <- None;
   state.lane_runs_error <- None;
   state.lane_runs_next <- None;
   state.lane_runs_total <- None;
   state.lane_runs_cursor <- 0;
   state.lane_runs_scroll <- 0;
-  launch_lane_runs_load state ~mailbox ~lane_id:lane.sl_lane_id
+  launch_lane_runs_load state ~mailbox ~lane:lane.sl_lane
 
-let open_lane_run_detail state ~mailbox ~lane_id ~run_id =
-  state.lanes_mode <- Lanes_run_detail (lane_id, run_id);
+let open_lane_run_detail state ~mailbox ~(lane : Standalone_lane.t) ~run_id =
+  state.lanes_mode <- Lanes_run_detail (lane, run_id);
   state.lane_run_detail <- None;
   state.lane_run_detail_error <- None;
   state.lane_run_detail_scroll <- 0;
@@ -7869,12 +7869,12 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
             | Masc_tui_types.Pick_conversation_lane lane ->
                 Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
                   ~runtime_ids:(existing @ [ runtime_id ])
-            | Masc_tui_types.Pick_exact_lane name ->
+            | Masc_tui_types.Pick_exact_lane lane ->
                 (* Only the one slot is sent: the server appends it to the order
                    the file declares, so a declared slot the registry dropped is
                    kept. [existing] is used above only to refuse an id the lane
                    already names. *)
-                Masc_tui_http.append_exact_lane_slot ~host ~port ~name ~runtime_id
+                Masc_tui_http.append_exact_lane_slot ~host ~port ~lane ~runtime_id
             | Masc_tui_types.Pick_new_lane lane ->
                 Masc_tui_http.create_runtime_lane ~host ~port ~lane
                   ~runtime_ids:[ runtime_id ]
@@ -7905,9 +7905,9 @@ let handle_slot_edit state ~mailbox edit =
       launch_runtime_lane_write state ~mailbox ~written (fun ~host ~port ->
         match request, target with
         | Masc_tui_types.Drop_declared_slot, Masc_tui_types.Exact_lane_slots lane ->
-            Masc_tui_http.drop_exact_lane_slot ~host ~port ~name:lane ~runtime_id:slot
+            Masc_tui_http.drop_exact_lane_slot ~host ~port ~lane ~runtime_id:slot
         | Masc_tui_types.Move_declared_slot move, Masc_tui_types.Exact_lane_slots lane ->
-            Masc_tui_http.move_exact_lane_slot ~host ~port ~name:lane ~runtime_id:slot
+            Masc_tui_http.move_exact_lane_slot ~host ~port ~lane ~runtime_id:slot
               ~move:
                 (match move with
                  | Masc_tui_types.Move_up -> Masc_tui_http.Move_slot_up
@@ -15922,10 +15922,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 (min state.clients_surface_cursor
                    (List.length snapshot.Masc.Tui_decode.cls_clients - 1))
         | Error detail -> state.clients_surface_error <- Some detail)
-  | Lane_runs_loaded (lane_id, generation, before, result) ->
+  | Lane_runs_loaded (lane, generation, before, result) ->
       (match state.lanes_mode with
        | Lanes_run_list open_lane | Lanes_run_detail (open_lane, _)
-         when String.equal open_lane lane_id
+         when Standalone_lane.equal open_lane lane
            && generation = state.lane_runs_generation
            && state.lane_runs_loading ->
            state.lane_runs_loading <- false;
@@ -17897,26 +17897,43 @@ and is loaded on demand through keeper_skill.
             ~keeper_name:keeper.k_name
         with
         | Error detail -> report_action state "error" detail
-        | Ok (observed, stem) -> (
-          match
-            Masc_tui_editor.roundtrip ~restore:restore_terminal
-              ~reenter:reenter_terminal stem
-          with
-          | Error abort ->
-              report_editor_abort state
-                ~action:(keeper.k_name ^ " settings")
-                ~cancelled:(keeper.k_name ^ ": settings unchanged")
-                abort
-          | Ok edited -> (
-            match Yojson.Safe.from_string edited with
-            | exception Yojson.Json_error detail ->
-                report_action state "error" ("settings are not JSON: " ^ detail)
-            | edited_json -> (
+        | Ok (observed, stem) ->
+          (* A refusal the operator can fix reopens the editor with the reason
+             on top instead of dropping the edit on one status line. Saving
+             the reopened text unchanged is the operator declining to fix it,
+             so that ends the loop with the reason reported: :w alone must
+             never be a way to get stuck in the editor. *)
+          let rec edit_round stem =
+            match
+              Masc_tui_editor.roundtrip ~restore:restore_terminal
+                ~reenter:reenter_terminal stem
+            with
+            | Error abort ->
+                report_editor_abort state
+                  ~action:(keeper.k_name ^ " settings")
+                  ~cancelled:(keeper.k_name ^ ": settings unchanged")
+                  abort
+            | Ok edited ->
+              let reopen reason =
+                if String.equal edited stem then
+                  report_action state "error"
+                    (keeper.k_name ^ ": " ^ reason ^ " (settings unchanged)")
+                else
+                  edit_round
+                    (Masc_tui_keeper_config.reopened_stem ~reason edited)
+              in
+              (match Yojson.Safe.from_string edited with
+               | exception Yojson.Json_error detail ->
+                   reopen ("settings are not JSON: " ^ detail)
+               | edited_json -> apply_edit ~reopen edited_json)
+          and apply_edit ~reopen edited_json =
               match
                 Masc_tui_keeper_config.patch_of_edit ~before:observed
                   ~after:edited_json
               with
-              | Error detail -> report_action state "error" detail
+              | Error (Masc_tui_keeper_config.Fix_in_editor reason) -> reopen reason
+              | Error (Masc_tui_keeper_config.Cannot_send detail) ->
+                  report_action state "error" detail
               | Ok (`Assoc []) ->
                   report_action state "system"
                     (keeper.k_name ^ ": no settings changed")
@@ -17957,7 +17974,9 @@ and is loaded on demand through keeper_skill.
                       state.keeper_config_view <- None;
                       state.keeper_config_view_error <- None;
                       launch_keeper_config_view state
-                        ~mailbox:async_messages keeper.k_name)))))))
+                        ~mailbox:async_messages keeper.k_name))
+          in
+          edit_round stem))
   in
   (* Set the sandbox backend (sandbox_profile) in place from the Sandbox tab,
      without the $EDITOR JSON round-trip. Each key names an absolute backend, so
@@ -20575,7 +20594,7 @@ and is loaded on demand through keeper_skill.
                 state.slot_editor <-
                   Some
                     { Masc_tui_types.se_target =
-                        Masc_tui_types.Exact_lane_slots lane.Masc.Tui_decode.sl_lane_id
+                        Masc_tui_types.Exact_lane_slots lane.Masc.Tui_decode.sl_lane
                     ; se_cursor = 0
                     };
                 Masc_tui_types.dismiss_runtime_lane_notice state;
@@ -20592,7 +20611,7 @@ and is loaded on demand through keeper_skill.
             | None -> ()
             | Some lane ->
                 Masc_tui_types.open_runtime_lane_pick state
-                  (Masc_tui_types.Pick_exact_lane lane.Masc.Tui_decode.sl_lane_id);
+                  (Masc_tui_types.Pick_exact_lane lane.Masc.Tui_decode.sl_lane);
                 Masc_tui_types.dismiss_runtime_lane_notice state;
                 state.lanes_action_error <- None;
                 launch_runtime_catalog_load state ~mailbox:async_messages)
@@ -21317,8 +21336,8 @@ and is loaded on demand through keeper_skill.
                open_selected_resource state ~mailbox:async_messages)
        | Some "]" when state.view = Lanes ->
            (match state.lanes_mode, state.lane_runs_next, state.lane_runs_loading with
-            | Lanes_run_list lane_id, Some before, false ->
-              launch_lane_runs_load ~before state ~mailbox:async_messages ~lane_id
+            | Lanes_run_list lane, Some before, false ->
+              launch_lane_runs_load ~before state ~mailbox:async_messages ~lane
             | _ -> ())
        | Some (("[" | "]") as bracket) when state.view = Tools ->
            cycle_tools_keeper state ~mailbox:async_messages
@@ -22711,9 +22730,9 @@ and is loaded on demand through keeper_skill.
              | Lanes ->
                 launch_lanes_reread state ~mailbox:async_messages;
                 (match state.lanes_mode with
-                 | Lanes_run_list lane_id ->
+                 | Lanes_run_list lane ->
                      launch_lane_runs_load state ~mailbox:async_messages
-                       ~lane_id
+                       ~lane
                  | Lanes_run_detail (_, run_id) ->
                      launch_lane_run_detail_load state ~mailbox:async_messages
                        ~run_id
@@ -22940,8 +22959,8 @@ and is loaded on demand through keeper_skill.
                      state.measurement_report <- None;
                      state.lane_run_detail_error <- None;
                      state.lane_run_detail_scroll <- 0
-                 | Lanes_run_detail (lane_id, _) ->
-                     state.lanes_mode <- Lanes_run_list lane_id;
+                 | Lanes_run_detail (lane, _) ->
+                     state.lanes_mode <- Lanes_run_list lane;
                      state.lane_run_detail <- None;
                      state.lane_run_detail_error <- None;
                      state.lane_run_detail_scroll <- 0
@@ -23122,8 +23141,8 @@ and is loaded on demand through keeper_skill.
                      state.measurement_report <- None;
                      state.lane_run_detail_error <- None;
                      state.lane_run_detail_scroll <- 0
-                 | Lanes_run_detail (lane_id, _) ->
-                     state.lanes_mode <- Lanes_run_list lane_id;
+                 | Lanes_run_detail (lane, _) ->
+                     state.lanes_mode <- Lanes_run_list lane;
                      state.lane_run_detail <- None;
                      state.lane_run_detail_error <- None;
                      state.lane_run_detail_scroll <- 0
@@ -24065,7 +24084,7 @@ and is loaded on demand through keeper_skill.
                  | None -> ())
             | Lanes ->
                 (match state.lanes_mode with
-                 | Lanes_run_list lane_id ->
+                 | Lanes_run_list lane ->
                      (match state.lane_runs with
                       | Some runs ->
                           (match
@@ -24073,7 +24092,7 @@ and is loaded on demand through keeper_skill.
                            with
                            | Some (run : Tui_decode.lane_run_summary) ->
                                open_lane_run_detail state
-                                 ~mailbox:async_messages ~lane_id
+                                 ~mailbox:async_messages ~lane
                                  ~run_id:run.lrs_run_id
                            | None -> ())
                       | None -> ())
@@ -25175,7 +25194,7 @@ and is loaded on demand through keeper_skill.
                 (match state.lanes_mode, selected_standalone_lane state with
                  | Lanes_overview, Some lane ->
                    let section =
-                     "runtime.exact_output_lanes." ^ lane.Tui_decode.sl_lane_id
+                     "runtime.exact_output_lanes." ^ Standalone_lane.to_id lane.Tui_decode.sl_lane
                    in
                    state.view <- Config;
                    state.config_pane <- Config_runtime;

@@ -20,7 +20,6 @@ type rotate_class =
   | No_progress_truncated
   | Refusal_body_not_received
   | Generation_repeated
-  | Attempt_rejected
   | Admission
   | Provider_reported_failure
   | Request_refused
@@ -235,26 +234,29 @@ let api_error_retry_after (api : Llm_provider.Retry.api_error) =
    declarations and the .mli docstrings. *)
 let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
   let exhaust_failure = exhaust ~err ~provenance:Agent_core_api_error in
-  let retry_after = api_error_retry_after api in
+  (* Intended, not a pass-through: the wait hint belongs to the source
+     constructor and the class belongs to [Candidate_fault], so every
+     [observe_retry] arm forwards whatever hint the constructor carried
+     through this one binding, and no arm picks the hint by class. Today
+     only [RateLimited] carries one; Account ([PaymentRequired]), Capacity,
+     Server, Deadline and Unknown_after_dispatch ([NetworkError]) receive
+     [None]. When a constructor gains a hint in [api_error_retry_after],
+     its arm forwards it without an edit here. *)
+  let observe = observe_retry ?retry_after:(api_error_retry_after api) in
   match Llm_provider.Candidate_fault.of_api_error api with
   | Llm_provider.Candidate_fault.Binding Credential -> rotate Auth_failed
-  | Llm_provider.Candidate_fault.Binding Account ->
-    observe_retry ?retry_after Hard_quota
+  | Llm_provider.Candidate_fault.Binding Account -> observe Hard_quota
   | Llm_provider.Candidate_fault.Binding Model_absent ->
     rotate Model_unavailable
-  | Llm_provider.Candidate_fault.Binding Rate_limit ->
-    observe_retry ?retry_after Rate_limited
-  | Llm_provider.Candidate_fault.Binding Capacity ->
-    observe_retry Provider_capacity
-  | Llm_provider.Candidate_fault.Binding Server ->
-    observe_retry Server_error
+  | Llm_provider.Candidate_fault.Binding Rate_limit -> observe Rate_limited
+  | Llm_provider.Candidate_fault.Binding Capacity -> observe Provider_capacity
+  | Llm_provider.Candidate_fault.Binding Server -> observe Server_error
   | Llm_provider.Candidate_fault.Binding Window ->
     exhaust_failure Context_overflow
   | Llm_provider.Candidate_fault.Binding Body_limit ->
     rotate Request_refused
   | Llm_provider.Candidate_fault.Binding Admission -> rotate Admission
-  | Llm_provider.Candidate_fault.Binding Deadline ->
-    observe_retry Provider_timeout
+  | Llm_provider.Candidate_fault.Binding Deadline -> observe Provider_timeout
   | Llm_provider.Candidate_fault.Binding Output_dialect ->
     (* No [Retry.api_error] constructor currently maps here. If one is
        added, this arm names the route action for a binding whose declared
@@ -279,7 +281,7 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
        candidate shares. The walk still rotates on it through
        [Runtime_attempt_fsm.should_try_next]; the route answers the same
        observation it did when the match was hand-written. *)
-    observe_retry ?retry_after Network_transient
+    observe Network_transient
 
 let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   let exhaust_failure = exhaust ~err ~provenance:Agent_core_provider_error in
@@ -467,7 +469,6 @@ let rotate_class_label = function
   | No_progress_empty -> "no_progress_empty"
   | No_progress_thinking_only -> "no_progress_thinking_only"
   | No_progress_truncated -> "no_progress_truncated"
-  | Attempt_rejected -> "attempt_rejected"
   | Admission -> "admission"
   | Refusal_body_not_received -> "refusal_body_not_received"
   | Generation_repeated -> "generation_repeated"
@@ -542,13 +543,11 @@ let response_observed = function
      (* the CLI session ended without an answer; a recovery lane resumes it. *)
      | Candidates_filtered
      (* the candidate set emptied before any answer. *)
-     | Attempt_rejected
-     (* the candidate's own policy refused the request before the wire
-        (#34475): no generation. *)
      | Admission
      (* this binding's pre-dispatch admission refused the prepared request
         (RFC-one-slot-fault-judgment-for-every-walk.md §3.2:
-        [InputCapacity]/[Json_parse_error]): no generation. *)
+        [InputCapacity]/[Json_parse_error], or the candidate's own policy
+        refusing it before the wire, #34475): no generation. *)
      | Refusal_body_not_received
      (* the provider refused the request; the body naming why never
         arrived, and a refusal is not an answer. *)
@@ -694,7 +693,6 @@ let route_resumes_on_same_path = function
      | No_progress_truncated
      | Refusal_body_not_received
      | Generation_repeated
-     | Attempt_rejected
      | Admission
      | Provider_reported_failure
      | Request_refused

@@ -1202,7 +1202,7 @@ let fetch_measurement_artifact ~host ~port ~sha256 =
           Error ("Measurement artifact response is not JSON: " ^ detail)))
 
 (** One server-filtered page, with the exact continuation cursor retained. *)
-let fetch_lane_runs ?before ~(host : string) ~(port : int) ~(lane : string) () :
+let fetch_lane_runs ?before ~(host : string) ~(port : int) ~(lane : Standalone_lane.t) () :
     (Masc.Tui_decode.lane_run_page, string) result =
   let open Result.Syntax in
   let cursor = match before with
@@ -1214,7 +1214,7 @@ let fetch_lane_runs ?before ~(host : string) ~(port : int) ~(lane : string) () :
     Printf.sprintf
       "/api/v1/dashboard/exact-lane-runs?limit=%d&lane=%s%s"
       lane_run_list_limit
-      (percent_encode_path_segment lane) cursor
+      (percent_encode_path_segment (Standalone_lane.to_id lane)) cursor
   in
   let* listing = get_json ~host ~port ~path in
   Masc.Tui_decode.decode_lane_run_page ~lane listing
@@ -1716,7 +1716,7 @@ let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
 
 (* The routing API names a standalone lane's walk order "exact/<name>", which
    keeps its names apart from conversation-lane ids. *)
-let exact_lane_route name = "exact/" ^ name
+let exact_lane_route lane = "exact/" ^ Standalone_lane.to_id lane
 
 let post_runtime_lane_action ~host ~port fields =
   match
@@ -1779,10 +1779,10 @@ let rename_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
     a declared slot the registry did not admit stays, and a slot another
     writer added in between is kept. The server refuses an id the lane already
     declares. *)
-let append_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
+let append_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane.t)
       ~(runtime_id : string) : (unit, string) result =
   post_runtime_lane_action ~host ~port
-    [ "lane", `String (exact_lane_route name)
+    [ "lane", `String (exact_lane_route lane)
     ; "action", `String "append"
     ; "runtime_id", `String runtime_id
     ]
@@ -1794,15 +1794,15 @@ type exact_slot_move =
   | Move_slot_down
 
 (** POST /api/v1/runtime/config/routing with [action = "drop"]: take
-    [runtime_id] out of the standalone lane [name]. Only the one id is sent,
+    [runtime_id] out of the standalone lane [lane]. Only the one id is sent,
     for the reason the append gives -- this caller can see the slots the
     registry admitted, and an order rebuilt from that view would delete every
     declared slot it rejected. The server refuses a slot the lane does not
     declare, and its last one. *)
-let drop_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
+let drop_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane.t)
       ~(runtime_id : string) : (unit, string) result =
   post_runtime_lane_action ~host ~port
-    [ "lane", `String (exact_lane_route name)
+    [ "lane", `String (exact_lane_route lane)
     ; "action", `String "drop"
     ; "runtime_id", `String runtime_id
     ]
@@ -1811,10 +1811,10 @@ let drop_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
     [runtime_id] with its neighbour in the lane's declared order. Sent as one
     id and a direction for the same reason as the drop. The server refuses a
     slot already at the end the move heads for. *)
-let move_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
+let move_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane.t)
       ~(runtime_id : string) ~(move : exact_slot_move) : (unit, string) result =
   post_runtime_lane_action ~host ~port
-    [ "lane", `String (exact_lane_route name)
+    [ "lane", `String (exact_lane_route lane)
     ; "action", `String "move"
     ; "runtime_id", `String runtime_id
     ; ( "direction"

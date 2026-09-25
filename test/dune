@@ -3544,7 +3544,7 @@
 (test
  (name test_tui_lane_slot_reach)
  (modules test_tui_lane_slot_reach)
- (libraries alcotest masc masc_tui_types))
+ (libraries alcotest masc masc.runtime masc_tui_types))
 
 ; Its own anchor, under the other suite that links only the state vocabulary,
 ; so two pull requests adding a suite do not both land on the head of this
@@ -5385,6 +5385,7 @@
   alcotest
   astring
   masc
+  masc.runtime
   masc_tui_answering
   masc_tui_message_layout))
 
@@ -6258,7 +6259,7 @@
   %{workspace_root}/bin/masc_tui.ml
   %{workspace_root}/bin/masc_tui_types.ml
   %{workspace_root}/bin/masc_tui_render.ml)
- (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
+ (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
 
 
 (rule

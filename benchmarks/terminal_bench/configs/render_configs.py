@@ -99,8 +99,10 @@ def denied_tools(spec: dict) -> list[str]:
 REMOTE_ROOT = "/opt/masc-bench/remote"
 
 # Canonical bench keeper instructions. Rendered into every keeper profile TOML
-# (keeper_up requires non-empty keeper.instructions); run_episode.sh passes
-# the same text on the keeper_up call.
+# (keeper_up requires non-empty keeper.instructions) and into
+# KEEPER_INSTRUCTIONS_FILE, which run_episode.sh reads for the keeper_up call,
+# so the text lives here only.
+KEEPER_INSTRUCTIONS_FILE = "keeper-instructions.txt"
 KEEPER_INSTRUCTIONS = (
     "You are an autonomous engineering agent inside a Linux container. "
     "Complete the task by running shell commands (your tool calls execute in "
@@ -698,6 +700,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         root.rmdir()
     shutil.copytree(REPO_ROOT / "config", root, ignore=shutil.ignore_patterns(
         "keepers", "keepers-default", "runtime.toml", "*.env"))
+    (root / KEEPER_INSTRUCTIONS_FILE).write_text(KEEPER_INSTRUCTIONS)
 
     if is_official_client(provider):
         runtime_toml = OFFICIAL_CLIENT_RUNTIME_TOML.format(

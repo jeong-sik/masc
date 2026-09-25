@@ -1720,6 +1720,29 @@ let provider_refusal_of_api_error : Retry.api_error -> provider_refusal = functi
   | Retry.Timeout _ -> Timeout
 ;;
 
+(* The candidate-fault judgment projects onto the flow's collapsed refusal
+   vocabulary. [provider_refusal] folds [Retry.InvalidRequest]'s five reasons
+   to one [Invalid_request]; that collapsed refusal is the un-attributed one,
+   and [Refusal_body_not_received] is the unread one. A new [provider_refusal]
+   constructor stops compilation here, so the two walks stay on one judgment
+   (RFC-one-slot-fault-judgment-for-every-walk.md, #38472). *)
+let candidate_fault_of_provider_refusal : provider_refusal -> Candidate_fault.t = function
+  | Request_body_refused -> Binding Body_limit
+  | Refusal_body_not_received -> Binding Refusal_unread
+  | Rate_limited -> Binding Rate_limit
+  | Overloaded -> Binding Capacity
+  | Server_error -> Binding Server
+  | Auth_failed -> Binding Credential
+  | Authorization_refused -> Binding Credential
+  | Payment_required -> Binding Account
+  | Invalid_request -> Unattributed
+  | Not_found -> Binding Model_absent
+  | Context_overflow -> Binding Window
+  | Input_capacity -> Binding Admission
+  | Network_error -> Unknown_after_dispatch
+  | Timeout -> Binding Deadline
+;;
+
 let execution_error_cause ~http_status ~dispatch = function
   | Exec.Clock_required_for_timeout -> Clock_required_for_timeout
   | Exec.Frozen_request_mismatch -> Frozen_request_mismatch
@@ -1955,11 +1978,21 @@ let execution_failure_may_advance (error : execution_error) =
      the reasoning field (2026-08-16/08-27). *)
   | Missing_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
-  (* The remaining refusals do not advance, as before this classification
-     existed ([Payment_required] and [Context_overflow] were promoted above:
-     the successor bills a different account, or carries its own window).
-     Promoting any other one needs its own argument about whether the
-     successor can serve the same input. *)
+  (* One closed judgment decides whose affair a refusal is (Candidate_fault,
+     RFC-one-slot-fault-judgment-for-every-walk.md, #38472). §3.3: 401·403·404
+     are this binding's affair — the key, permission, or model is missing
+     here, not in the request — so the successor carries its own and may serve
+     the same input. §3.4: an un-attributed refusal (the collapsed
+     Invalid_request) is advanced too, since no response yet proves the input
+     itself is what failed. §2.1: Refusal_body_not_received is the unread
+     refusal. Exact requests have no tools, so advancing cannot double an
+     effect. *)
+  | Provider_response_refused { refusal; _ }, Response_received
+    when (match candidate_fault_of_provider_refusal refusal with
+          | Candidate_fault.Binding _ | Candidate_fault.Unattributed -> true
+          | Candidate_fault.Unknown_after_dispatch -> false) ->
+    receipt_dispatch_count error.receipt = 1
+  (* The remaining transport and non-advance refusals do not advance. *)
   | ( Provider_response_refused
         { refusal =
             ( Auth_failed
@@ -1972,7 +2005,7 @@ let execution_failure_may_advance (error : execution_error) =
             | Timeout )
         ; _
         }
-    , (Not_started | Before_dispatch | Dispatch_started | Response_received | Terminal) )
+    , (Not_started | Before_dispatch | Dispatch_started | Terminal) )
   | Completion_failed _, (Not_started | Dispatch_started | Response_received | Terminal)
   | Response_body_deadline_exceeded,
       (Not_started | Before_dispatch | Dispatch_started | Terminal)
@@ -1996,7 +2029,8 @@ let execution_failure_may_advance (error : execution_error) =
       | Ambiguous_output _
       | Unexpected_output_content
       | Internal_non_json_output )
-    , _ ) -> false
+    , _ )
+  | ( Provider_response_refused _, _ ) -> false
 ;;
 
 let candidate_rejection_may_advance (receipt : candidate_rejection_receipt) =

@@ -1119,6 +1119,12 @@ let validate_embedded_mcp_surface () =
   | Ok () -> ()
   | Error message -> failwith (Printf.sprintf "embedded mcp surface: %s" message)
 
+(* Prompt files are written with an fsync each; tool and MCP files are not
+   (Managed_asset_sync.asset_write, #37503). A crash can leave a prompt
+   torn with its frontmatter whole, and the edit layer below,
+   Prompt_registry.promote_file_edit, would read that as an operator edit
+   and keep it as an override (#38741). Tools and MCP have no edit layer,
+   so the next boot rewrites a torn file from the binary. *)
 let bootstrap_prompt_assets ~base_path =
   sync_managed_assets_from_binary
     ~label:"prompt"
@@ -1160,28 +1166,37 @@ let bootstrap_prompt_registry_from_binary ~base_path =
     sync.Managed_asset_sync.failed;
   Prompt_defaults.bootstrap_markdown_dir ~workspace_path:base_path ~prompt_markdown_dir:dir
 
-let bootstrap_prompt_state (state : Mcp_server.server_state) =
+let bootstrap_prompt_state ~boot_stage (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
   Config_dir_resolver.log_resolution ~context:"ServerBootstrap" ();
+  boot_stage "resolved";
   (* Converge the runtime prompt markdown and tool definition dirs onto the
      binary-embedded assets before anything scans them (#20929: merged
      prompt edits never reached the runtime dir otherwise). *)
+  boot_stage "prompt_assets.begin";
   bootstrap_prompt_assets ~base_path:config.base_path;
+  boot_stage "prompt_assets.end";
+  boot_stage "tool_assets.begin";
   sync_managed_assets_from_binary
     ~label:"tool"
     ~domain:Managed_asset_sync.Tools
     ~edit_layer:Managed_asset_sync.No_edit_layer
     ~dest_dir:(Config_dir_resolver.tools_dir ())
     ();
+  boot_stage "tool_assets.end";
+  boot_stage "mcp_assets.begin";
   sync_managed_assets_from_binary
     ~label:"mcp"
     ~domain:Managed_asset_sync.Mcp
     ~edit_layer:Managed_asset_sync.No_edit_layer
     ~dest_dir:(Config_dir_resolver.mcp_dir ())
     ();
+  boot_stage "mcp_assets.end";
+  boot_stage "embedded_validation.begin";
   validate_embedded_tool_definitions ();
   validate_embedded_mcp_surface ();
+  boot_stage "embedded_validation.end";
   (* Load the registry and replay operator overrides. The resolved directory is
      not inspected afterwards: three checks used to stand here and none of them
      gated. One compared a value against the call that produced it. One
@@ -1196,11 +1211,13 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
      register as a key, resolve from a real source, render with the variables
      its own frontmatter declares, and use each one. Repeating that at start
      decides nothing the build did not already decide. *)
+  boot_stage "prompt_registry.begin";
   ignore
     (Prompt_defaults.bootstrap_runtime
        ~workspace_path:config.workspace_path
        ~base_path:config.base_path
-     : string)
+     : string);
+  boot_stage "prompt_registry.end"
 
 let start_owner_lazy_tasks ~sw state =
   let run_lazy_task (task_name, task_fn) =
@@ -1486,6 +1503,7 @@ let install_keeper_gate_persistence state =
 ;;
 
 let activate_owner_state
+      ?(boot_stage = fun _ -> ())
       ~sw
       ~clock
       ~net
@@ -1500,9 +1518,14 @@ let activate_owner_state
      required transport surfaces are installed. *)
   (* Auto Judge recovery renders prompts immediately. Prompt state is therefore
      a recovery prerequisite, not an eventually-consistent lazy task. *)
-  bootstrap_prompt_state state;
+  bootstrap_prompt_state ~boot_stage state;
+  boot_stage "gate_persistence.begin";
   install_keeper_gate_persistence state;
+  boot_stage "gate_persistence.end";
+  boot_stage "lazy_tasks.begin";
   start_owner_lazy_tasks ~sw state;
+  boot_stage "lazy_tasks.end";
+  boot_stage "keeper_persistence.begin";
   claim_and_start_keeper_persistence
     ~prepared_persistence:initialized.prepared_keeper_persistence
     ~sw
@@ -1511,6 +1534,7 @@ let activate_owner_state
     ~domain_mgr
     ~proc_mgr
     state;
+  boot_stage "keeper_persistence.end";
   { state
   ; path_diagnostics = initialized.path_diagnostics
   ; domain_pool = initialized.domain_pool
@@ -1583,6 +1607,29 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
   clear_server_state ();
   Server_startup_state.reset ();
   let listener_bound, publish_listener_bound = Eio.Promise.create () in
+  (* The first mark is ServerBootstrap's resolved line. Each later mark names
+     the time since the previous mark and since resolved; a stage that stalls
+     leaves its .begin line as the last boot timing record. *)
+  let boot_stage =
+    let times = ref None in
+    fun stage ->
+      let now = Mtime_clock.now () in
+      match !times with
+      | None ->
+        times := Some (now, now);
+        Log.Server.info "boot stage=%s elapsed_ms=%.1f total_ms=%.1f" stage 0.0 0.0
+      | Some (started, previous) ->
+        let elapsed_ms =
+          Mtime.Span.to_float_ns (Mtime.span previous now) /. 1_000_000.0
+        in
+        let total_ms =
+          Mtime.Span.to_float_ns (Mtime.span started now) /. 1_000_000.0
+        in
+        times := Some (started, now);
+        Log.Server.info
+          "boot stage=%s elapsed_ms=%.1f total_ms=%.1f"
+          stage elapsed_ms total_ms
+  in
 
   (* 2. Run owner initialization outside the accept loop. The state and
      long-lived owner fibers attach to the parent switch because HTTP request
@@ -1615,6 +1662,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
       in
       let activated_owner =
         activate_owner_state
+        ~boot_stage
         ~sw
         ~clock
         ~net
@@ -1626,6 +1674,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
       (* Authentication wrappers treat [server_state = Some _] as the mutation
          capability boundary. Publish only after transport-neutral activation
          has restored Gate state and started the owner persistence lanes. *)
+      boot_stage "owner_publication.begin";
       publish_server_state state;
       (* Global readiness is the transport-neutral owner capability, not a
          quorum over optional transports. Mark it before starting fallible
@@ -1635,13 +1684,16 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
       (match mark_owner_state_ready () with
        | Ok () -> ()
        | Error error -> raise (Owner_initialization_failed error));
+      boot_stage "owner_publication.end";
       (* The owner and HTTP listener initialize independently. A successful
          start requires both before publishing caller-owned startup effects. *)
       (match on_ready with
        | None -> ()
        | Some on_ready ->
+         boot_stage "listener_wait.begin";
          Eio.Promise.await listener_bound;
-         on_ready ());
+         on_ready ();
+         boot_stage "listener_wait.end");
       (* The lag probe forks here, on the main domain, so its ring reports
          the scheduler every handler on this domain shares. It starts at the
          readiness boundary rather than at process start so the boot replay
@@ -1696,34 +1748,50 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
           , fun walk -> Telemetry_unified.heap_root (fun value -> walk (Some value)) )
         ];
       let path_diagnostics = activated_owner.path_diagnostics in
+      boot_stage "post_ready_lanes.begin";
       let resolved_base, masc_dir =
         start_post_ready_owner_lanes ~sw ~clock ~env state
       in
+      boot_stage "post_ready_lanes.end";
       (* RFC-0203 Phase 3: in-process Discord gateway replaces the
          deleted sidecars/discord-bot/ Python connector. Always-on:
          if DISCORD_BOT_TOKEN is unset the start function logs a
          warning and skips, leaving the server otherwise unaffected. *)
+      boot_stage "discord_gateway.begin";
       Server_discord_in_process_gateway.start ~sw ~env ~clock ~state;
+      boot_stage "discord_gateway.end";
       (* RFC-0317 PR-3: in-process Slack Socket Mode gateway, mirroring the
          Discord one. Off unless SLACK_APP_TOKEN is set; the start function
          logs a warning and skips otherwise, leaving the server unaffected. *)
+      boot_stage "slack_gateway.begin";
       Server_slack_in_process_gateway.start ~sw ~env ~state;
+      boot_stage "slack_gateway.end";
       (* slack-lane (task-1418): in-process collection fiber for bound
          channels without app event subscriptions. Off unless
          [slack] poll_enabled is set in runtime.toml; the start function
          logs and skips otherwise, leaving the server unaffected. *)
+      boot_stage "slack_poll.begin";
       Server_slack_poll_lane.start ~sw ~env ~state;
+      boot_stage "slack_poll.end";
       (* The browser lanes keep their owner records and profiles under the
          server's own base path, not one resolved again from env or cwd. *)
+      boot_stage "browser_webdriver.begin";
       Server_browser_webdriver.start ~sw ~env ~base_path;
+      boot_stage "browser_webdriver.end";
+      boot_stage "browser_stagehand.begin";
       Server_browser_stagehand.start ~sw ~env ~base_path;
+      boot_stage "browser_stagehand.end";
       (* In-process iMessage connector, replacing the deleted
          sidecars/imessage-bot/ Python connector. Off unless Messages.app's
          chat.db is readable — on Linux it never is, and the start function
          records the reason and skips, leaving the server unaffected. *)
+      boot_stage "imessage_gateway.begin";
       Server_imessage_in_process_gateway.start ~sw ~env ~state;
+      boot_stage "imessage_gateway.end";
+      boot_stage "listening_banner.begin";
       Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path
         ~masc_dir ~path_diagnostics;
+      boot_stage "listening_banner.end";
       (* Auxiliary transports start after owner readiness and report their own
          availability. They must not gain lifecycle authority over HTTP or
          unrelated Keeper lanes. *)

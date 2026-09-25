@@ -2258,6 +2258,13 @@ let test_execution_trust_uses_narrow_keeper_projection () =
     | [ full_row ] -> full_row
     | rows -> failf "expected one full Keeper row, got %d" (List.length rows)
   in
+  (match full_row with
+   | `Assoc fields ->
+     check bool "dashboard omits invented handoff count" false
+       (List.mem_assoc "handoff_count_total" fields);
+     check bool "dashboard omits unwritten handoff age" false
+       (List.mem_assoc "last_handoff_ago_s" fields)
+   | _ -> fail "Keeper dashboard row was not an object");
   let full_row_field key =
     Option.value ~default:`Null (Json_util.assoc_member_opt key full_row)
   in
@@ -2776,8 +2783,12 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
     expected
   in
   ignore (check_surfaces ~phase:"executing" ~proof_state:"idle");
-  let _, pending = get_ok (Result.map_error Goal_store.write_error_to_string
-    (Lib.Workspace_goals.request_current_proof config ~goal_id)) in
+  let _, pending =
+    match Lib.Workspace_goals.request_current_proof config ~goal_id with
+    | Ok requested -> requested
+    | Error (Lib.Workspace_goals.Store error) -> fail (Goal_store.write_error_to_string error)
+    | Error (Lib.Workspace_goals.Refused { message; _ }) -> fail message
+  in
   let request_id, criterion = match pending.Goal_verification.completion with
     | Goal_verification.Proof_pending pending -> pending.request_id, pending.criterion
     | _ -> fail "request did not persist pending proof"

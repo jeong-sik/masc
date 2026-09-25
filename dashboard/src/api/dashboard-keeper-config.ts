@@ -402,7 +402,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       models: normalizeStringList(execution.models),
       active_model: '',
       active_model_label: null,
-      last_model_used_label: null,
       verify: asLooseBoolean(execution.verify),
       selected_runtime_id: asNullableString(execution.selected_runtime_id) ?? '',
       selected_runtime_canonical:
@@ -428,7 +427,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       fiber_health: asNullableString(runtime.fiber_health) ?? 'unknown',
       runtime_blocker_class: asKeeperRuntimeBlockerClass(runtime.runtime_blocker_class),
       active_model_label: null,
-      last_model_used_label: null,
       runtime_blocker_summary: asNullableString(runtime.runtime_blocker_summary),
     },
     runtime_trust: runtimeTrust,

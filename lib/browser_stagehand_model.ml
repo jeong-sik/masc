@@ -201,14 +201,12 @@ type refused_slot =
   }
 
 type admitted_lane =
-  { first_slot : Registry.selected_slot
-  ; other_slots : Registry.selected_slot list
+  { http_slots : Registry.selected_slot list
+  ; cli_slots : string list
   ; refused_slots : refused_slot list
   }
 
-type lane_refusal =
-  | Cli_slots_declared of string list
-  | No_slot_admitted of refused_slot list
+type lane_refusal = No_slot_admitted of refused_slot list
 
 (* The capability AGENT_CORE's own admission reads before it refuses a
    request that carries a system prompt ([Unsupported_system_prompt]). Reading
@@ -219,24 +217,21 @@ let slot_takes_system_prompt (slot : Registry.selected_slot) =
     .Llm_provider.Capabilities.supports_system_prompt
 ;;
 
+(* An official-client one-shot takes the system prompt as its own argument,
+   so every declared CLI slot is kept; only HTTP slots are read for the
+   capability. *)
 let admit_lane (resolved : Registry.resolved_lane) =
-  (* This bridge executes only AGENT_CORE HTTP candidates. Stagehand's usage
-     field is optional; the CLI tail is refused because this bridge has no
-     official-client executor yet, rather than silently skipping its slots. *)
-  match resolved.cli_slots with
-  | _ :: _ as cli_slots -> Error (Cli_slots_declared cli_slots)
-  | [] ->
-    let slots, refused_slots =
-      List.partition_map
-        (fun (slot : Registry.selected_slot) ->
-           if slot_takes_system_prompt slot
-           then Either.Left slot
-           else Either.Right { slot_id = slot.slot_id; refusal = System_prompt_not_accepted })
-        resolved.selected_slots
-    in
-    (match slots with
-     | [] -> Error (No_slot_admitted refused_slots)
-     | first_slot :: other_slots -> Ok { first_slot; other_slots; refused_slots })
+  let http_slots, refused_slots =
+    List.partition_map
+      (fun (slot : Registry.selected_slot) ->
+         if slot_takes_system_prompt slot
+         then Either.Left slot
+         else Either.Right { slot_id = slot.slot_id; refusal = System_prompt_not_accepted })
+      resolved.selected_slots
+  in
+  match http_slots, resolved.cli_slots with
+  | [], [] -> Error (No_slot_admitted refused_slots)
+  | _, _ -> Ok { http_slots; cli_slots = resolved.cli_slots; refused_slots }
 ;;
 
 type lane_unavailable =
@@ -264,6 +259,18 @@ type unserved_generation =
   | Text_generation_requested
   | Tool_generation_requested of { tool_names : string list }
 
+type cli_unfit = Assistant_turn_in_conversation
+
+type cli_tail =
+  | Cli_tail_undeclared
+  | Cli_tail_unfit of cli_unfit
+  | Cli_tail_exhausted of Keeper_lane_cli_oneshot.failure list
+
+type generation_failure =
+  { http_failure : no_callback_error Exact.flow_execution_error option
+  ; cli_tail : cli_tail
+  }
+
 type refusal =
   | Params_malformed of string
   | Generation_not_served of unserved_generation
@@ -271,7 +278,7 @@ type refusal =
   | Lane_unavailable of lane_unavailable
   | Lane_refused of lane_refusal
   | Flow_not_started of flow_not_started
-  | Generation_failed of no_callback_error Exact.flow_execution_error
+  | Generation_failed of generation_failure
 
 let unserved_block_name = function
   | Image_block -> "image"
@@ -297,10 +304,8 @@ let refusal_to_string = function
     "exact-output registry unavailable: " ^ Registry.publication_error_to_string error
   | Lane_unavailable (Lane_unresolved error) ->
     Registry.lane_resolution_error_to_string error
-  | Lane_refused (Cli_slots_declared cli_slots) ->
-    "the lane declares cli_slots, which it does not walk: " ^ String.concat ", " cli_slots
   | Lane_refused (No_slot_admitted refused) ->
-    "no slot of the lane can take a system prompt: "
+    "the lane declares no cli_slots and no HTTP slot of it can take a system prompt: "
     ^ String.concat "; " (List.map refused_slot_to_string refused)
   | Flow_not_started (Candidate_refused Exact.Blank_flow_candidate_id) ->
     "a lane slot has a blank id"
@@ -309,7 +314,24 @@ let refusal_to_string = function
     "the lane names a slot twice: " ^ candidate_id
   | Flow_not_started (Start_refused (Exact.Flow_id_generation_failed detail)) ->
     "flow id generation failed: " ^ detail
-  | Generation_failed error -> Keeper_exact_flow_detail.flow_execution_error_detail error
+  | Generation_failed { http_failure; cli_tail } ->
+    let http =
+      Option.map Keeper_exact_flow_detail.flow_execution_error_detail http_failure
+    in
+    let cli =
+      match cli_tail with
+      | Cli_tail_undeclared -> None
+      | Cli_tail_unfit Assistant_turn_in_conversation ->
+        Some
+          "the cli_slots were not walked: an official-client one-shot takes one \
+           prompt, and this conversation has an assistant turn whose role it \
+           cannot carry"
+      | Cli_tail_exhausted failures ->
+        Some
+          ("every cli slot failed: "
+           ^ String.concat "; " (List.map Keeper_lane_cli_oneshot.failure_to_string failures))
+    in
+    String.concat "; " (List.filter_map Fun.id [ http; cli ])
 ;;
 
 let refusal_to_rpc_error refusal : Wire.rpc_error =
@@ -347,6 +369,16 @@ let usage_json (usage : Agent_core.Types.api_usage) =
      @ cached)
 ;;
 
+let answer_json ~output ~usage =
+  `Assoc
+    ([ "role", `String "assistant"
+     ; "content", `Assoc [ "type", `String "text"; "text", `String (Yojson.Safe.to_string output) ]
+     ; "output_format", `String "json_schema"
+     ; "structured_content", output
+     ]
+     @ usage)
+;;
+
 let answer_of_success (success : Exact.success) =
   let usage =
     match success.usage with
@@ -357,16 +389,12 @@ let answer_of_success (success : Exact.success) =
     | Some usage when usage.input_tokens <= 0 || usage.output_tokens <= 0 -> []
     | Some usage -> [ "usage", usage_json usage ]
   in
-  `Assoc
-    ([ "role", `String "assistant"
-     ; ( "content"
-       , `Assoc
-           [ "type", `String "text"; "text", `String (Yojson.Safe.to_string success.output) ] )
-     ; "output_format", `String "json_schema"
-     ; "structured_content", success.output
-     ]
-     @ usage)
+  answer_json ~output:success.output ~usage
 ;;
+
+(* An official-client one-shot reports no token usage, and Stagehand's usage
+   field is optional, so the key is left out. *)
+let answer_of_cli_output output = answer_json ~output ~usage:[]
 
 (* ---- Serving -------------------------------------------------------------- *)
 
@@ -403,7 +431,7 @@ let exact_messages request =
     :: conversation
 ;;
 
-let start_flow ~(lane : admitted_lane) ~messages ~schema =
+let start_flow ~first_slot ~other_slots ~messages ~requirement =
   let candidate (slot : Registry.selected_slot) =
     Exact.make_flow_candidate ~id:slot.slot_id ~admitted_target:slot.admitted_target
     |> Result.map_error (fun error -> Candidate_refused error)
@@ -415,11 +443,8 @@ let start_flow ~(lane : admitted_lane) ~messages ~schema =
       let* rest = candidates rest in
       Ok (candidate :: rest)
   in
-  let* first = candidate lane.first_slot in
-  let* rest = candidates lane.other_slots in
-  let requirement =
-    Exact.make_output_requirement ~schema ~minimum_guarantee:Exact.Json_syntax
-  in
+  let* first = candidate first_slot in
+  let* rest = candidates other_slots in
   let* snapshot =
     Exact.snapshot_flow ~first ~rest ~messages requirement
     |> Result.map_error (fun error -> Snapshot_refused error)
@@ -427,9 +452,75 @@ let start_flow ~(lane : admitted_lane) ~messages ~schema =
   Exact.start_flow snapshot |> Result.map_error (fun error -> Start_refused error)
 ;;
 
+(* ---- CLI tail --------------------------------------------------------------- *)
+
+(* An official-client one-shot takes one prompt and a separate system prompt.
+   User turns join into that prompt in order; an assistant turn has no place
+   in it that keeps its role, so such a conversation is not sent. *)
+let cli_prompt messages =
+  let rec texts acc = function
+    | [] -> Ok (String.concat "\n\n" (List.rev acc))
+    | { role = Assistant; content = _ } :: _ -> Error Assistant_turn_in_conversation
+    | { role = User; content } :: rest ->
+      let text =
+        String.concat
+          "\n\n"
+          (List.filter_map
+             (function
+               | Text text -> Some text
+               | Unserved _ -> None)
+             content)
+      in
+      texts (text :: acc) rest
+  in
+  texts [] messages
+;;
+
+let cli_failure_kind = function
+  | Keeper_lane_cli_oneshot.Not_an_official_client { runtime_id } ->
+    runtime_id, "not_an_official_client"
+  | Keeper_lane_cli_oneshot.Execution_failed { runtime_id; cause = _ } ->
+    runtime_id, "execution_failed"
+  | Keeper_lane_cli_oneshot.Invalid_json_output { runtime_id; detail = _ } ->
+    runtime_id, "invalid_json_output"
+  | Keeper_lane_cli_oneshot.Invalid_domain_output { runtime_id; detail = _ } ->
+    runtime_id, "invalid_domain_output"
+;;
+
+let walk_cli_tail ?cli_runner ~base_path ~cli_slots ~request ~requirement () =
+  match cli_slots with
+  | [] -> Error Cli_tail_undeclared
+  | _ :: _ ->
+    (match cli_prompt request.messages with
+     | Error unfit -> Error (Cli_tail_unfit unfit)
+     | Ok prompt ->
+       (* The runner reads an empty system prompt as none. *)
+       let system_prompt =
+         match request.system_prompt with
+         | Some system_prompt -> system_prompt
+         | None -> ""
+       in
+       (* [Json_syntax], as on the HTTP slots: the extension checks the
+          answer's shape with its own schema. *)
+       Keeper_lane_cli_oneshot.walk
+         ?runner:cli_runner
+         ~base_dir:base_path
+         ~cli_slots
+         ~system_prompt
+         ~requirement
+         ~prompt
+         ~validate:(fun output -> Ok output)
+         ~on_failure:(fun failure ->
+           let runtime_id, kind = cli_failure_kind failure in
+           Log.Server.warn "browser_stagehand: cli slot %s failed (%s)" runtime_id kind)
+         ()
+       |> Result.map (fun (_runtime_id, output) -> output)
+       |> Result.map_error (fun failures -> Cli_tail_exhausted failures))
+;;
+
 type no_rejection = |
 
-let serve ~net ~clock ~resolve_lane params =
+let serve ?cli_runner ~net ~clock ~base_path ~resolve_lane params =
   let* request = parse_params params |> Result.map_error (fun detail -> Params_malformed detail) in
   let* schema =
     match request.generation with
@@ -441,35 +532,51 @@ let serve ~net ~clock ~resolve_lane params =
   let* () = text_only request.messages in
   let* resolved = resolve_lane () |> Result.map_error (fun error -> Lane_unavailable error) in
   let* lane = admit_lane resolved |> Result.map_error (fun refusal -> Lane_refused refusal) in
-  let* attempt =
-    start_flow ~lane ~messages:(exact_messages request) ~schema
-    |> Result.map_error (fun failure -> Flow_not_started failure)
+  let requirement =
+    Exact.make_output_requirement ~schema ~minimum_guarantee:Exact.Json_syntax
   in
-  let accept success : (Exact.flow_success, no_rejection) Exact.semantic_verdict =
-    Exact.Accept success
+  (* The CLI tail runs after every HTTP slot failed, or alone when the lane
+     admitted none. *)
+  let cli_tail ~http_failure =
+    match
+      walk_cli_tail ?cli_runner ~base_path ~cli_slots:lane.cli_slots ~request ~requirement ()
+    with
+    | Ok output -> Ok (answer_of_cli_output output)
+    | Error cli_tail -> Error (Generation_failed { http_failure; cli_tail })
   in
-  match
-    Exact.execute_flow_once
-      ~net
-      ~clock
-      ~before_measurement_dispatch:(fun _ -> Ok ())
-      ~on_measurement_terminal:(fun _ -> Ok ())
-      ~before_dispatch:(fun _ -> Ok ())
-      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
-      ~validate:accept
-      attempt
-  with
-  | Ok validated -> Ok (answer_of_success (Exact.flow_success_output validated.accepted))
-  | Error (Exact.Flow_execution_terminal { cause; prior_rejections = _ }) ->
-    Error (Generation_failed cause)
-  | Error (Exact.Flow_semantic_candidates_exhausted _) -> .
+  match lane.http_slots with
+  | [] -> cli_tail ~http_failure:None
+  | first_slot :: other_slots ->
+    let* attempt =
+      start_flow ~first_slot ~other_slots ~messages:(exact_messages request) ~requirement
+      |> Result.map_error (fun failure -> Flow_not_started failure)
+    in
+    let accept success : (Exact.flow_success, no_rejection) Exact.semantic_verdict =
+      Exact.Accept success
+    in
+    (match
+       Exact.execute_flow_once
+         ~net
+         ~clock
+         ~before_measurement_dispatch:(fun _ -> Ok ())
+         ~on_measurement_terminal:(fun _ -> Ok ())
+         ~before_dispatch:(fun _ -> Ok ())
+         ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+         ~validate:accept
+         attempt
+     with
+     | Ok validated -> Ok (answer_of_success (Exact.flow_success_output validated.accepted))
+     | Error (Exact.Flow_execution_terminal { cause; prior_rejections = _ }) ->
+       cli_tail ~http_failure:(Some cause)
+     | Error (Exact.Flow_semantic_candidates_exhausted _) -> .)
 ;;
 
-let create ~net ~clock ~resolve_lane : Browser_stagehand_session.model =
-  fun params ->
-    match serve ~net ~clock ~resolve_lane params with
-    | Ok answer -> Ok answer
-    | Error refusal ->
-      Log.Server.warn "browser_stagehand: llm.generate refused (%s)" (refusal_kind refusal);
-      Error (refusal_to_rpc_error refusal)
+let create ?cli_runner ~net ~clock ~base_path ~resolve_lane params
+  : (Yojson.Safe.t, Wire.rpc_error) result
+  =
+  match serve ?cli_runner ~net ~clock ~base_path ~resolve_lane params with
+  | Ok answer -> Ok answer
+  | Error refusal ->
+    Log.Server.warn "browser_stagehand: llm.generate refused (%s)" (refusal_kind refusal);
+    Error (refusal_to_rpc_error refusal)
 ;;

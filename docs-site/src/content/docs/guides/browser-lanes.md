@@ -106,20 +106,22 @@ first; a configured profile is kept. Either way the directory is owner-only.
 The Stagehand runtime asks for a model through `llm.generate`. MASC answers it
 with the `browser_stagehand_exact` exact-output lane in `runtime.toml`: its
 slots are walked in order and a slot whose model takes no system prompt is
-skipped. A lane that declares CLI slots is refused. The answer is checked to be one JSON value;
-the extension checks its shape against its own schema.
+skipped. Declared `cli_slots` (official subscription clients) run as
+one-shots after every HTTP slot failed, or alone when no HTTP slot takes a
+system prompt; a conversation with an assistant turn is not sent to them. The
+answer is checked to be one JSON value; the extension checks its shape against
+its own schema.
 
 The browser starts when `BrowserSession` opens with `lane="stagehand"` and
 stops on close, when the session fails, or when the server stops. A Chromium a
 crashed server left is stopped at the next start.
 
 Stagehand has one server-shared session. `BrowserSession` with `action="open"`
-can reuse an existing session; `reused: true` does not prove that its connection
-is healthy. If a call reports a disconnected session, check `action="status"`
-for `ended`. After confirming the session can be closed, call `action="close"`
-then `action="open"`, and rediscover its tab IDs with `BrowserTabs`. Repeating
-`open` alone can return `reused: true` for the disconnected session. Do not
-repeat an act that may already have changed the page.
+reuses a live session (`reused: true`). A session whose service worker or
+connection went away is let go at once: `status` reports why under `ended`, an
+`open` in between answers "ask again", and the next `open` starts a new
+browser. Rediscover tab IDs with `BrowserTabs` after that. Do not repeat an act
+that may already have changed the page.
 
 `status` does not report who opened or is using the session. Close it only when
 the operator has confirmed it can be stopped or your task has an explicit

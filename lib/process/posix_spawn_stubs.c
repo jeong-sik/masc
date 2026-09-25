@@ -148,16 +148,23 @@ static value spawn_process(value v_executable, value v_argv, value v_env,
   }
   if (rc == 0 && cwd != NULL) rc = posix_spawn_file_actions_addchdir_np(&actions, cwd);
   for (int j = 0; rc == 0 && j < fd_count; j++) {
-    if (own_group && child_fds[j] == STDIN_FILENO && isatty(parent_fds[j])) {
-      /* A child in its own process group is a background job of the terminal
-         it came from. Handed that terminal as stdin, its first read stops it
-         with SIGTTIN, and the group owner then ends the stopped leader:
-         `masc setup` run in a terminal lost every Claude Code verification
-         this way, SIGKILLed before the child wrote its report (2026-09-15).
-         Such a child cannot read the terminal at all, so it reads /dev/null;
-         a pipe or file passed as stdin is not a terminal and is kept. A child
-         that must read the terminal stays in the foreground group, as the
-         installer's prerequisite runner does with Unix.create_process. */
+    if (child_fds[j] == STDIN_FILENO && isatty(parent_fds[j])) {
+      /* No child of this stub reads a terminal it is handed as stdin: it
+         reads /dev/null. A pipe or file passed as stdin is not a terminal
+         and is kept.
+         - A child in its own process group is a background job of that
+           terminal, and its first read stops it with SIGTTIN. `masc setup`
+           run in a terminal lost every Claude Code verification this way;
+           the group owner SIGKILLed the stopped leader before it wrote its
+           report (2026-09-15).
+         - A child left in the parent's group takes input typed for the
+           terminal's foreground job when the parent is that job. When the
+           parent is a background job, the read can stop the parent's whole
+           group. Explicit /dev/tty access needs the separate server-session
+           design in RFC-0470.
+         A child that must read the terminal is started with
+         Unix.create_process in the foreground group, as the installer's
+         prerequisite runner does. */
       rc = posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
     } else if (child_fds[j] == parent_fds[j]) {
 #ifdef POSIX_SPAWN_CLOEXEC_DEFAULT

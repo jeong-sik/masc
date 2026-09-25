@@ -2564,9 +2564,7 @@ let test_no_unclaimed_tasks_stop_signal () =
 
 
 (* An absent backlog and a malformed one demand different operator actions, so
-   the read must not report the first as the second. [read_json_result] answers a
-   missing key with an empty object, which decodes as a schema violation unless
-   absence is split out first (#29562). *)
+   the read must not report the first as the second (#29562). *)
 
 let temp_workspace_dir () =
   let dir =
@@ -2585,7 +2583,7 @@ let temp_workspace_dir () =
    pinned ("must contain exactly one tasks list") with the derived decoder's
    own message, so the phrase to hold is the one decode_backlog puts in front
    of it -- workspace_backlog.ml writes it, and absence never reaches there
-   (#29562 split absence out ahead of the decode). *)
+   ([Workspace_utils.read_json_doc] answers absence with [Ok None]). *)
 let decode_complaint = "backlog decode failed for"
 
 let test_absent_backlog_is_not_reported_as_malformed () =

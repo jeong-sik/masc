@@ -453,7 +453,9 @@ let for_surface = function
       ; b Act "Esc" "back" ~help:"back; during a turn, interrupt it"
       ]
   | Keepers Keeper_runtime_pick ->
-      [ b Navigate "j/k" "move"
+      [ b Navigate "j/k" "move" ~help:"move; PgUp/PgDn page, Home/End jump"
+      ; b Navigate "/" "filter"
+          ~help:"type to narrow the lanes and runtimes; Esc drops the filter"
       ; b Act "Enter" "choose"
       ; b Act "d" "use the default"
           ~help:"drop this Keeper's own binding and follow [runtime].default"

@@ -370,11 +370,44 @@ let json_lexer text =
 (* The fence tag decides who lexes. Untagged and unknown tags answer None and
    the fence keeps the single code span -- a guess at the grammar from the
    text alone is exactly the colouring-as-pretence the palette avoids. *)
+(* A cell of [Masc_tui_diff.numbered_gutter]: what [line_number_cell] emits,
+   a right-aligned number or a spelled absence. Anything else in the column
+   means the line is not guttered, however digit-shaped its start looks. *)
+let is_gutter_cell_char char =
+  char = ' ' || char = '-'
+  || (char >= '0' && char <= '9')
+
+(* The marker of a numbered diff row, when the line wears the gutter the chat
+   preview emits: two five-cell columns, the marker, their three separating
+   spaces. The marker sits at offset twelve; a six-digit line overflows its
+   column and the offset misses, which reads the row by its first cell below
+   instead — the marker stays in the text, only the colour is lost. *)
+let numbered_gutter_marker line =
+  if String.length line >= 13 && line.[5] = ' ' && line.[11] = ' ' then
+    let cells_ok =
+      let ok = ref true in
+      for i = 0 to 4 do
+        if not (is_gutter_cell_char line.[i]) then ok := false
+      done;
+      for i = 6 to 10 do
+        if not (is_gutter_cell_char line.[i]) then ok := false
+      done;
+      !ok
+    in
+    if cells_ok then
+      match line.[12] with
+      | '+' | '-' | '@' | ' ' -> Some line.[12]
+      | _ -> None
+    else None
+  else None
+
 (* A diff line is read whole: its first cell decides the whole line, so this
    emits one run per line instead of scanning for tokens. A hunk header reads
    as a comment because it locates the change rather than being part of it,
    and "---"/"+++" file headers are left plain so they are not mistaken for
-   the removal and addition directly under them. *)
+   the removal and addition directly under them. A numbered gutter's marker
+   is read before the first cell because the gutter, not the old line number,
+   says which side of the change the row is on. *)
 let diff_line_kind line =
   if String.length line = 0 then kind_code
   else if
@@ -385,11 +418,17 @@ let diff_line_kind line =
        "+++" directly above the first added line and read as part of it. *)
     kind_code
   else
-    match line.[0] with
-    | '+' -> kind_diff_added
-    | '-' -> kind_diff_removed
-    | '@' -> kind_comment
-    | _ -> kind_code
+    match numbered_gutter_marker line with
+    | Some '+' -> kind_diff_added
+    | Some '-' -> kind_diff_removed
+    | Some '@' -> kind_comment
+    | Some _ -> kind_code
+    | None -> (
+        match line.[0] with
+        | '+' -> kind_diff_added
+        | '-' -> kind_diff_removed
+        | '@' -> kind_comment
+        | _ -> kind_code)
 
 let diff_lexer text =
   let runs = new_runs kind_code in

@@ -12,6 +12,10 @@ type prepared_kind =
       removed : int;
       added : int;
       replace_all : bool;
+      numbered : (Diff.numbered list * int) option;
+          (** The same window with file coordinates, when the log records
+              exactly one occurrence: the only shape whose rows have one
+              true address each. [None] renders the unnumbered preview. *)
     }
   | Written of {
       preview : Diff.row list;
@@ -56,6 +60,34 @@ let nonblank = function
   | Some value when String.trim value <> "" -> Some value
   | Some _ | None -> None
 
+(* The occurrence a numbered preview may count from: exactly one recorded
+   match. Two matches give every template row two true addresses, and a
+   bounded omission gives none, so both keep the unnumbered preview rather
+   than printing one match's coordinates as the change's. *)
+let single_occurrence (change : Masc.Tui_decode.file_change) =
+  match change.fc_line_evidence with
+  | Some
+      (Masc.Keeper_file_change_evidence.Edited
+        { occurrence_count = 1; occurrences = Some [ occurrence ] }) ->
+      Some occurrence
+  | Some (Masc.Keeper_file_change_evidence.Edited _)
+  | Some (Masc.Keeper_file_change_evidence.Written _)
+  | None ->
+      None
+
+let numbered_preview (change : Masc.Tui_decode.file_change) rows =
+  match single_occurrence change with
+  | None -> None
+  | Some occurrence ->
+      let old_start = occurrence.old_range.start_line in
+      let new_start =
+        Option.map (fun range -> range.start_line) occurrence.new_range
+      in
+      Some
+        (Diff.preview_numbered
+           ~context:preview_context ~max_rows:preview_rows
+           (Diff.number ~old_start ~new_start rows))
+
 let prepare (change : Masc.Tui_decode.file_change) =
   let kind =
     match change.fc_kind with
@@ -65,7 +97,8 @@ let prepare (change : Masc.Tui_decode.file_change) =
         let preview, omitted =
           Diff.preview ~context:preview_context ~max_rows:preview_rows rows
         in
-        Edited { preview; omitted; removed; added; replace_all }
+        let numbered = numbered_preview change rows in
+        Edited { preview; omitted; removed; added; replace_all; numbered }
     | Masc.Tui_decode.Fc_inserted { text; _ } ->
         (* A memo is an edit that removed nothing: the one line, added. *)
         let rows = Diff.rows ~before:"" ~after:text in
@@ -73,7 +106,9 @@ let prepare (change : Masc.Tui_decode.file_change) =
         let preview, omitted =
           Diff.preview ~context:preview_context ~max_rows:preview_rows rows
         in
-        Edited { preview; omitted; removed; added; replace_all = false }
+        let numbered = numbered_preview change rows in
+        Edited
+          { preview; omitted; removed; added; replace_all = false; numbered }
     | Masc.Tui_decode.Fc_written { content } ->
         let rows = Diff.rows ~before:"" ~after:content in
         let preview, omitted =
@@ -152,6 +187,21 @@ let diff_line ~max_line_cells = function
   | Diff.Context line -> " " ^ clipped ~max_cells:(max_line_cells - 1) line
   | Diff.Removed line -> "-" ^ clipped ~max_cells:(max_line_cells - 1) line
   | Diff.Added line -> "+" ^ clipped ~max_cells:(max_line_cells - 1) line
+
+(* The same row with its file coordinates, the gutter the Changes tree draws.
+   The gutter's own cells come out of the source budget, so the row still
+   fits [max_line_cells]; a pane narrower than the gutter keeps the
+   unnumbered row instead (see [edited_section]). *)
+let numbered_line ~max_line_cells (numbered : Diff.numbered) =
+  let marker, text =
+    match numbered.nrow with
+    | Diff.Context line -> (' ', line)
+    | Diff.Removed line -> ('-', line)
+    | Diff.Added line -> ('+', line)
+  in
+  Diff.numbered_gutter
+    ~old_line:numbered.old_line ~new_line:numbered.new_line ~marker
+  ^ clipped ~max_cells:(max_line_cells - Diff.numbered_gutter_cells) text
 
 let preview_block ~max_line_cells ~language lines =
   match Markdown.non_colliding_fence_marker lines with
@@ -278,7 +328,7 @@ let address_row ~max_line_cells ~summary change =
   clipped ~max_cells:max_line_cells (prefix ^ address ^ suffix)
 
 let edited_section ~max_line_cells change ~preview ~omitted ~removed ~added
-    ~replace_all =
+    ~replace_all ~numbered =
   let detail, evidence_rows =
     edited_evidence_rows ~max_line_cells ~replace_all change
   in
@@ -293,8 +343,19 @@ let edited_section ~max_line_cells change ~preview ~omitted ~removed ~added
     ]
     @ evidence_rows
   else
+    (* Coordinates cost fourteen cells of gutter; a pane that cannot spare
+       them keeps the unnumbered rows rather than a gutter with no source. *)
+    let numbered =
+      if max_line_cells > Diff.numbered_gutter_cells then numbered else None
+    in
     let detail = clipped ~max_cells:max_line_cells detail in
-    let lines = List.map (diff_line ~max_line_cells) preview in
+    let lines, omitted =
+      match numbered with
+      | Some (numbered_preview, numbered_omitted) ->
+          ( List.map (numbered_line ~max_line_cells) numbered_preview
+          , numbered_omitted )
+      | None -> (List.map (diff_line ~max_line_cells) preview, omitted)
+    in
     address :: detail :: (evidence_rows
                           @ preview_block ~max_line_cells ~language:"diff" lines
                           @ omission_row ~max_line_cells omitted)
@@ -361,9 +422,9 @@ let materialized_section ~max_line_cells (change : Masc.Tui_decode.file_change)
 let section ~max_line_cells prepared =
   let change = prepared.change in
   match prepared.kind with
-  | Edited { preview; omitted; removed; added; replace_all } ->
+  | Edited { preview; omitted; removed; added; replace_all; numbered } ->
       edited_section ~max_line_cells change ~preview ~omitted ~removed ~added
-        ~replace_all
+        ~replace_all ~numbered
   | Written { preview; omitted; row_count } ->
       written_section ~max_line_cells change ~preview ~omitted ~row_count
   | Materialized { sha256; bytes } ->

@@ -370,6 +370,106 @@ let test_full_projection_shows_actual_edit_range () =
     (contains ~needle:"old L42-43 -> new L42-44" (body rows))
 ;;
 
+let test_full_projection_numbers_single_occurrence () =
+  let evidence =
+    Evidence.edited
+      [ Evidence.edit_occurrence
+          ~old_start_line:42
+          ~new_start_line:42
+          ~old_string:"old a\nold b"
+          ~new_string:"new a\nnew b\nnew c"
+      ]
+    |> Evidence.to_yojson
+  in
+  let rows =
+    projected_rows Transcript.Full
+      (index
+         [ change_json
+             ~line_evidence:evidence
+             ~kind:
+               (`Edit
+                 ( "old a\nold b"
+                 , "new a\nnew b\nnew c"
+                 , false ))
+             ()
+         ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+  in
+  check (list string) "one match carries file coordinates per row"
+    [ "✓ Edit lib/example.ml · 12ms"
+    ; "↳ masc:lib/example.ml (+3 -2)"
+    ; "  recorded replacement"
+    ; "  old L42-43 -> new L42-44"
+    ; "```diff"
+    ; "   42     - - old a"
+    ; "   43     - - old b"
+    ; "    -    42 + new a"
+    ; "    -    43 + new b"
+    ; "    -    44 + new c"
+    ; "```"
+    ]
+    rows
+;;
+
+let test_full_projection_skips_numbers_for_many_matches () =
+  let occurrence old_start new_start =
+    Evidence.edit_occurrence
+      ~old_start_line:old_start
+      ~new_start_line:new_start
+      ~old_string:"old"
+      ~new_string:"new\nextra"
+  in
+  let evidence =
+    Evidence.edited
+      [ occurrence 2 2
+      ; occurrence 5 6
+      ; occurrence 8 10
+      ; occurrence 13 16
+      ]
+    |> Evidence.to_yojson
+  in
+  let rows =
+    projected_rows Transcript.Full
+      (index
+         [ change_json
+             ~line_evidence:evidence
+             ~kind:(`Edit ("old", "new\nextra", true))
+             ()
+         ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+  in
+  let body = body rows in
+  check bool "every template row has four true addresses, so none is printed"
+    true
+    (contains ~needle:"```diff\n-old\n+new\n+extra\n```" body);
+  check bool "no gutter cell is emitted" false (contains ~needle:"    - " body)
+;;
+
+let test_full_projection_skips_numbers_on_narrow_pane () =
+  let evidence =
+    Evidence.edited
+      [ Evidence.edit_occurrence
+          ~old_start_line:1
+          ~new_start_line:1
+          ~old_string:"old"
+          ~new_string:"new"
+      ]
+    |> Evidence.to_yojson
+  in
+  let rows =
+    projected_rows ~max_line_cells:14 Transcript.Full
+      (index
+         [ change_json
+             ~line_evidence:evidence
+             ~kind:(`Edit ("old", "new", false))
+             ()
+         ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+  in
+  check bool "fourteen cells cannot spare a gutter" true
+    (contains ~needle:"```diff\n-old\n+new\n```" (body rows))
+;;
+
 let test_replace_all_shows_bounded_actual_ranges () =
   let occurrence old_start new_start =
     Evidence.edit_occurrence
@@ -458,6 +558,8 @@ let test_deletion_and_write_ranges_are_explicit () =
   in
   check bool "deletion has no fabricated new coordinate" true
     (contains ~needle:"old L7 -> deleted" (body deletion_rows));
+  check bool "deletion numbers its old line" true
+    (contains ~needle:"    7     - - delete me" (body deletion_rows));
   let write = Evidence.written "first\nsecond\n" |> Evidence.to_yojson in
   let write_rows =
     projected_rows Transcript.Full
@@ -747,6 +849,12 @@ let () =
             test_full_projection_weaves_recorded_replacement
         ; test_case "actual Edit range" `Quick
             test_full_projection_shows_actual_edit_range
+        ; test_case "single occurrence carries coordinates" `Quick
+            test_full_projection_numbers_single_occurrence
+        ; test_case "many matches keep unnumbered rows" `Quick
+            test_full_projection_skips_numbers_for_many_matches
+        ; test_case "a narrow pane keeps unnumbered rows" `Quick
+            test_full_projection_skips_numbers_on_narrow_pane
         ; test_case "replace-all range annotations are bounded" `Quick
             test_replace_all_shows_bounded_actual_ranges
         ; test_case "omitted ranges keep count only" `Quick

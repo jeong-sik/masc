@@ -6393,7 +6393,7 @@ let test_composition_externalizes_oversized_shell_ir_output () =
               durable_root_present;
             let maintenance mode =
               match
-                Tool_blob_maintenance.run ~base_path:config.base_path ~mode
+                Tool_blob_maintenance.run ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~base_path:config.base_path ~mode
               with
               | Ok report -> report
               | Error error ->
@@ -6488,7 +6488,7 @@ let test_direct_execute_artifact_manifest_survives_maintenance () =
          | Tool_output.Invalid_normalized_artifact_ref { detail } -> fail detail
        in
        let maintenance mode =
-         match Tool_blob_maintenance.run ~base_path:config.base_path ~mode with
+         match Tool_blob_maintenance.run ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~base_path:config.base_path ~mode with
          | Ok report -> report
          | Error error -> fail (Tool_blob_maintenance.error_to_string error)
        in

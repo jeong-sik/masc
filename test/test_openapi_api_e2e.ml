@@ -228,6 +228,53 @@ let test_openapi_route_serves_document () =
        (fun row -> row |> member "operationId" |> to_string = "masc_status")
        operations)
 
+(* The authority cases send their Host lines as written, over a plain socket.
+   curl keeps one Host header however many are given (8.7.1 sent only the
+   first), so through curl the "multiple" case reached the server as one
+   untrusted Host and never tested the duplicate. The answer is the status
+   and body; there is no curl exit or stderr to report. *)
+let run_raw ~host_lines ~port ~path () =
+  let request =
+    String.concat ""
+      ([ Printf.sprintf "GET %s HTTP/1.1\r\n" path ]
+       @ List.map (fun line -> line ^ "\r\n") host_lines
+       @ [ "Connection: close\r\n\r\n" ])
+  in
+  let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Fun.protect
+    ~finally:(fun () -> try Unix.close socket with Unix.Unix_error _ -> ())
+    (fun () ->
+      Unix.connect socket (Unix.ADDR_INET (Unix.inet_addr_loopback, port));
+      let bytes = Bytes.of_string request in
+      let rec send off =
+        if off < Bytes.length bytes then
+          send (off + Unix.write socket bytes off (Bytes.length bytes - off))
+      in
+      send 0;
+      let buffer = Buffer.create 1024 in
+      let chunk = Bytes.create 4096 in
+      let rec receive () =
+        match Unix.read socket chunk 0 (Bytes.length chunk) with
+        | 0 -> ()
+        | n ->
+          Buffer.add_subbytes buffer chunk 0 n;
+          receive ()
+      in
+      receive ();
+      let raw = Buffer.contents buffer in
+      let rec split_at index =
+        if index + 4 > String.length raw then
+          fail ("no header terminator in response: " ^ raw)
+        else if String.sub raw index 4 = "\r\n\r\n" then index
+        else split_at (index + 1)
+      in
+      let header_end = split_at 0 in
+      let header_raw = String.sub raw 0 header_end in
+      let body =
+        String.sub raw (header_end + 4) (String.length raw - header_end - 4)
+      in
+      (parse_status header_raw, body))
+
 let test_invalid_authority_is_rejected_before_authority_routes () =
   with_server @@ fun ~port ~base_path ->
   let dev_token_path =
@@ -249,7 +296,7 @@ let test_invalid_authority_is_rejected_before_authority_routes () =
   in
   let invalid_authorities =
     [ ( "missing"
-      , [ "Host:" ]
+      , []
       , "request_authority_missing" )
     ; ( "multiple"
       , [ "Host: localhost:8935"; "hOsT: attacker.example" ]
@@ -263,10 +310,10 @@ let test_invalid_authority_is_rejected_before_authority_routes () =
     (fun (case, headers, expected_code) ->
       List.iter
         (fun path ->
-          let result = run_curl ~headers ~port ~path () in
+          let status, body = run_raw ~host_lines:headers ~port ~path () in
           let label = case ^ " " ^ path in
-          check (option int) (label ^ " status") (Some 400) result.status;
-          let json = Yojson.Safe.from_string result.body in
+          check (option int) (label ^ " status") (Some 400) status;
+          let json = Yojson.Safe.from_string body in
           check
             string
             (label ^ " error code")

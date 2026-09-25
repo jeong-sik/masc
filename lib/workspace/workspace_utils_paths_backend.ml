@@ -12,7 +12,7 @@ let masc_root_dir_from ~base_path ~cluster_name =
   | "" | "default" -> masc_root
   | other ->
       let seg = sanitize_namespace_segment other in
-      Filename.concat (Filename.concat masc_root "clusters") seg
+      Filename.concat (Common.clusters_dir_from_base_path ~base_path) seg
 
 let masc_root_dir config =
   masc_root_dir_from

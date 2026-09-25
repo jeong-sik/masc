@@ -30,8 +30,8 @@ def listing_trace(tool_input):
 
 
 class DirectoryEvidence(unittest.TestCase):
-    def test_script_and_observed_shell_argv(self):
-        inputs = [{'script': 'pwd; ls -la'}] + [
+    def test_command_and_observed_shell_argv(self):
+        inputs = [{'command': 'pwd; ls -la'}] + [
             {'argv': [shell, flag, 'pwd; ls -la']}
             for shell in ('sh', 'bash', '/bin/sh', '/bin/bash')
             for flag in ('-c', '-lc')]
@@ -71,7 +71,7 @@ class DirectoryEvidence(unittest.TestCase):
                 acceptance.directory_execution(pwd + mismatched)
 
     def test_nonlisting_or_arbitrary_argv_rejected(self):
-        for value in ({'script': 'pwd'}, {'script': 'ls -la'},
+        for value in ({'command': 'pwd'}, {'command': 'ls -la'},
                       {'argv': ['echo', 'pwd; ls -la']},
                       {'argv': ['sh', '-x', 'pwd; ls -la']},
                       {'argv': ['env', 'sh', '-lc', 'pwd; ls -la']},

@@ -167,6 +167,11 @@ let stub_main () =
        write_all Unix.stderr (trailer 0)
      | [ "test"; "-s"; path ] when String.equal path (expected_gh_dir ^ "/hosts.yml") ->
        record "preflight-identity-file";
+       if Sys.file_exists (Filename.concat dir "fail-identity-file-transport")
+       then (
+         (* The probe never reaches the endpoint: no trailer, exit 255. *)
+         write_all Unix.stderr "ssh: connect to host fixture.invalid port 22: refused\n";
+         exit 255);
        let login_ran = Sys.file_exists (frame_path ~dir "login") in
        write_all Unix.stderr (trailer (if login_ran then 0 else 1))
      | [ "env"; gh_config; "gh"; "auth"; "status" ]
@@ -631,6 +636,48 @@ let test_remote_observe_names_an_unreachable_endpoint () =
 
 (* A Keeper with no meta declares no endpoint, so the only place its login can
    be is this host, and the token read goes there as it always has. *)
+
+(* The identity preflight is skipped only when the endpoint answered that
+   it holds no login. A probe that never reached it cannot say so (#38890):
+   before, the transport failure read as [test]'s exit 1 and the preflight
+   was skipped with the keeper left identity-blind. *)
+let test_an_unanswered_login_probe_does_not_skip_identity () =
+  with_eio
+  @@ fun () ->
+  let base_path = temp_dir () in
+  let dir = temp_dir () in
+  write_runtime_toml ~base_path;
+  write_keeper_toml ~base_path;
+  with_stub_ssh ~dir
+  @@ fun () ->
+  let config = workspace ~base_path in
+  (match
+     Keeper_github_login_lane.for_keeper
+       ~config
+       ~meta:(meta ~sandbox:Keeper_types_profile_sandbox.Remote_ssh)
+       ~hostname
+   with
+   | Error error -> failf "remote lane was not built: %s" error
+   | Ok _ -> ());
+  let endpoint =
+    match Keeper_sandbox_ssh.resolve_endpoint ~base_path ~keeper_name with
+    | Error error -> failf "remote endpoint did not resolve: %s" error
+    | Ok endpoint ->
+      (match Keeper_sandbox_ssh.create ~base_path ~keeper_name ~endpoint () with
+       | Error error -> failf "remote endpoint was not built: %s" error
+       | Ok endpoint -> endpoint)
+  in
+  let identity_ran () = Sys.file_exists (frame_path ~dir "preflight-identity") in
+  Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
+  ignore (Keeper_sandbox_remote.check_preflight endpoint);
+  check bool "an endpoint that answered 'no login' skips the identity preflight" false
+    (identity_ran ());
+  save (Filename.concat dir "fail-identity-file-transport") "fail";
+  Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
+  ignore (Keeper_sandbox_remote.check_preflight endpoint);
+  check bool "an endpoint that did not answer does not" true (identity_ran ())
+;;
+
 let test_stored_token_without_meta_reads_the_host () =
   with_eio
   @@ fun () ->
@@ -710,6 +757,10 @@ let () =
               "remote stored token is refused by name"
               `Quick
               test_remote_stored_token_is_refused_by_name
+          ; test_case
+              "an unanswered login probe does not skip identity"
+              `Quick
+              test_an_unanswered_login_probe_does_not_skip_identity
           ] )
       ]
 ;;

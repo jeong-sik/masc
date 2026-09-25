@@ -76,7 +76,6 @@ key = "OPENROUTER_API_KEY"
 api-name = "z-ai/glm-5.3-flash"
 tools-support = true
 thinking-support = true
-max-output-tokens = 384000
 reasoning-effort = %S
 [openrouter.probe]
 |} exact_body_timeout_s effort

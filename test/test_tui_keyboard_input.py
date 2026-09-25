@@ -17751,6 +17751,22 @@ def resources_detail_interaction() -> Interaction:
                     f"80-column Resources detail omitted {needle!r}: {narrow_plain!r}"
                 )
 
+        # Eighty columns is under the split threshold, so the frame draws one
+        # pane and the focus chooses which. h goes back to the listing with
+        # the detail still read, l opens it again. Both keys were refused
+        # under the threshold until #39017, on a screen already drawing their
+        # answer.
+        listing = send_and_wait(
+            process, master_fd, output, b"h", b"Event Log (JSON)"
+        )
+        if b"read-only data exposed by this server" in CSI_RE.sub(b"", listing):
+            raise AssertionError(
+                f"h left the detail drawn instead of the listing: {listing!r}"
+            )
+        send_and_wait(
+            process, master_fd, output, b"l", b"read-only data exposed by this server"
+        )
+
         wide = resize_and_wait(
             process,
             master_fd,

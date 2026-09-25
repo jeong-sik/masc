@@ -377,6 +377,18 @@ let test_kimi_coding_usages () =
     "kimi-coding-usages.limits[0].detail.remaining must be within 0..100"
     (refused Usage.decode_kimi_coding_usages
        {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","remaining":"101"}}]}|});
+  check (list string) "a null count is a count left out"
+    [ "limit=- five_hour fraction 0.25 resets=-" ]
+    (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
+       {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":null,"remaining":"75"}}]}|});
+  check (list string) "no remaining is all of the limit used"
+    [ "limit=- five_hour fraction 1 resets=-" ]
+    (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
+       {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","remaining":"0"}}]}|});
+  check string "used above limit is refused when remaining is present too"
+    "kimi-coding-usages.limits[0].detail.used must be within 0..100"
+    (refused Usage.decode_kimi_coding_usages
+       {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"101","remaining":"0"}}]}|});
   check string "a duration of 0 is refused"
     "kimi-coding-usages.limits[0].window.duration must be greater than 0"
     (refused Usage.decode_kimi_coding_usages

@@ -425,12 +425,19 @@ let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
 
 let test_guest_target_follows_the_factory_contract () =
   with_eio_fs @@ fun () ->
-  let base = temp_dir "guest_target_contract_" in
-  let config = Masc.Workspace.default_config base in
-  (* A Docker guest's target names the image its keeper's name resolves to. *)
-  Masc_test_deps.write_sandbox_image_catalog ~base_path:base
-    [ "base", Keeper_sandbox_image.default_tag ];
   let resolve (meta : Masc.Keeper_meta_contract.keeper_meta) =
+    let base = temp_dir "guest_target_contract_" in
+    let config = Masc.Workspace.default_config base in
+    let store =
+      match meta.sandbox_profile with
+      | Profile.Micro_vm ->
+        Masc.Keeper_sandbox_image_catalog.Microvm Backend.Apple_container
+      | Profile.Docker -> Masc.Keeper_sandbox_image_catalog.Docker_daemon
+      | Profile.Remote_ssh -> Alcotest.fail "expected a guest profile"
+    in
+    Masc_test_deps.write_sandbox_image_catalog ~store ~base_path:base
+      [ "base", "alpine:test" ];
+    let meta = { meta with sandbox_image = Some "base" } in
     let factory = Masc.Keeper_sandbox_factory.create ~config ~meta () in
     let result =
       match
@@ -468,7 +475,7 @@ let test_guest_target_follows_the_factory_contract () =
     | Error error, _ -> Alcotest.fail error.message
   in
   resolve (microvm_meta ~name:"microvm-contract-probe");
-  resolve { (docker_meta ~name:"docker-contract-probe") with sandbox_image = Some "base" }
+  resolve (docker_meta ~name:"docker-contract-probe")
 
 let test_guest_target_refuses_a_profile_mismatch () =
   with_eio_fs @@ fun () ->

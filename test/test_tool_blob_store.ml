@@ -933,20 +933,19 @@ let test_maintenance_collects_unreferenced_blob_in_clustered_deployment () =
         (Some "clustered board attachment")
         (fetch_ok store ~sha256:attached.sha256))
 
-(* (c) An entry under clusters/ that is not an owned directory rejects the
-   pass instead of being skipped: a skipped workspace would make its
-   references look dead. Nothing is deleted and no candidate snapshot is
-   published, over two delete passes. *)
-let test_maintenance_rejects_non_directory_cluster_entry () =
+(* (c) A symlink or a special file under clusters/ rejects the pass instead
+   of being skipped: a symlink can point at a real workspace, and skipping a
+   workspace would make its references look dead. Nothing is deleted and no
+   candidate snapshot is published, over two delete passes. A regular file is
+   the one entry that is skipped, see (e). *)
+let test_maintenance_rejects_symlink_or_special_cluster_entry () =
   List.iter
     (fun (label, make_entry) ->
        with_temp_dir (fun base_path ->
            let store = B.create ~base_path in
            let bytes = "unreferenced output beside a " ^ label in
            let dead = B.put store ~bytes ~mime:"text/plain" |> stored_ref_exn in
-           let clusters =
-             Filename.concat (Common.masc_dir_from_base_path ~base_path) "clusters"
-           in
+           let clusters = Common.clusters_dir_from_base_path ~base_path in
            Fs_compat.mkdir_p clusters;
            let entry = Filename.concat clusters "secondary" in
            make_entry ~base_path entry;
@@ -986,9 +985,61 @@ let test_maintenance_rejects_non_directory_cluster_entry () =
           let target = Filename.concat base_path "elsewhere" in
           Fs_compat.mkdir_p target;
           Unix.symlink target entry )
-    ; ( "regular file"
-      , fun ~base_path:_ entry -> Fs_compat.save_file entry "not a workspace" )
+    ; "named pipe", fun ~base_path:_ entry -> Unix.mkfifo entry 0o600
     ]
+
+(* (e) A regular file under clusters/ (Finder's .DS_Store) cannot be a
+   workspace, so it is skipped by name instead of stopping maintenance on
+   every Mac that opened the directory. The pass beside it still reads the
+   real cluster: its Board attachment stays live, the unreferenced blob is
+   collected on the second pass, and both reports name the skipped file. *)
+let test_maintenance_skips_regular_file_cluster_entry () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let attached =
+        B.put store ~bytes:"attachment beside a .DS_Store" ~mime:"image/png"
+        |> stored_ref_exn
+      in
+      let dead =
+        B.put store ~bytes:"unreferenced output beside a .DS_Store" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      write_json_line
+        (Masc_board_handlers.Board_paths.posts_file
+           ~workspace_masc_dir:(cluster_workspace ~base_path "secondary"))
+        (board_post_with_attachment attached);
+      let ds_store =
+        Filename.concat (Common.clusters_dir_from_base_path ~base_path) ".DS_Store"
+      in
+      Fs_compat.save_file ds_store "Finder metadata";
+      List.iter
+        (fun (round, deleted) ->
+           let report = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+           Alcotest.(check (list string))
+             (Printf.sprintf "round %d: the report names the skipped file" round)
+             [ ds_store ]
+             report.skipped_cluster_files;
+           Alcotest.(check int)
+             (Printf.sprintf "round %d: the clustered attachment is live" round)
+             1
+             report.live_references;
+           Alcotest.(check int)
+             (Printf.sprintf "round %d: deleted" round)
+             deleted
+             report.deleted)
+        [ 1, 0; 2, 1 ];
+      Alcotest.(check (option string))
+        "the unreferenced blob is collected"
+        None
+        (fetch_ok store ~sha256:dead.sha256);
+      Alcotest.(check (option string))
+        "the clustered attachment stays"
+        (Some "attachment beside a .DS_Store")
+        (fetch_ok store ~sha256:attached.sha256);
+      Alcotest.(check bool)
+        "the skipped file is left alone"
+        true
+        (Sys.file_exists ds_store))
 
 (* (d) The second fail-closed rule: a cluster that appears while the pass is
    reading was never scanned, so its references would look dead. The
@@ -1005,9 +1056,7 @@ let test_maintenance_rejects_a_cluster_set_that_changes_during_the_scan () =
       Fs_compat.mkdir_p (cluster_workspace ~base_path "secondary");
       let first = maintenance_ok ~base_path ~mode:M.Observe_only in
       Alcotest.(check int) "first pass records the candidate" 1 first.candidates_recorded;
-      let clusters =
-        Filename.concat (Common.masc_dir_from_base_path ~base_path) "clusters"
-      in
+      let clusters = Common.clusters_dir_from_base_path ~base_path in
       let after_scan () = Fs_compat.mkdir_p (cluster_workspace ~base_path "tertiary") in
       (match
          M.For_testing.run
@@ -1849,9 +1898,13 @@ let () =
             `Quick
             test_maintenance_collects_unreferenced_blob_in_clustered_deployment;
           Alcotest.test_case
-            "maintenance rejects a non-directory entry under clusters"
+            "maintenance rejects a symlink or special file under clusters"
             `Quick
-            test_maintenance_rejects_non_directory_cluster_entry;
+            test_maintenance_rejects_symlink_or_special_cluster_entry;
+          Alcotest.test_case
+            "maintenance skips a regular file under clusters and reports it"
+            `Quick
+            test_maintenance_skips_regular_file_cluster_entry;
           Alcotest.test_case
             "maintenance rejects a cluster set that changes during the scan"
             `Quick

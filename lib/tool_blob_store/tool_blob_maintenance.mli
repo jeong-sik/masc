@@ -24,10 +24,12 @@
     each writes under its cluster's workspace root, [<base>/.masc] for the
     default cluster and [<base>/.masc/clusters/<name>] for the others. The
     scan therefore reads the same consumer registry in every workspace, and a
-    hash is live when any workspace references it (#38919). Every entry under
-    [clusters] must be an owned directory: a symlink, a regular file or a
-    special file rejects the pass ([Cluster_workspace_rejected]) instead of
-    being skipped, and so does a cluster set that changes while the scan runs.
+    hash is live when any workspace references it (#38919). A symlink or a
+    special file under [clusters] rejects the pass ([Cluster_workspace_rejected])
+    instead of being skipped, because a symlink can point at a real workspace;
+    so does a cluster set that changes while the scan runs. A regular file there
+    (Finder's [.DS_Store]) cannot be a workspace, holds no references, and is
+    skipped and reported in [skipped_cluster_files].
     Both leave the candidate snapshot untouched and delete nothing. *)
 
 type mode =
@@ -86,6 +88,11 @@ type report =
   ; blobs_observed : int
   ; candidates_recorded : int
   ; deleted : int
+  ; skipped_cluster_files : string list
+        (** Regular files found directly under [<base>/.masc/clusters] (for
+            example [.DS_Store]). They cannot be workspace roots, so they
+            hold no references; the pass skips them and names them here so
+            the caller can log each one. *)
   }
 
 val error_to_string : error -> string

@@ -65,6 +65,7 @@ type report =
   ; blobs_observed : int
   ; candidates_recorded : int
   ; deleted : int
+  ; skipped_cluster_files : string list
   }
 
 let error_to_string = function
@@ -317,19 +318,24 @@ let workspace_sources ~board_posts_file ~workspace_masc_dir =
   @ [ Optional_file (board_posts_file ~workspace_masc_dir) ]
 ;;
 
-let clusters_root ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "clusters"
+let clusters_root ~base_path = Common.clusters_dir_from_base_path ~base_path
 ;;
 
 let unix_reason fn arg code =
   Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
 ;;
 
-(* The cluster set as one observation: the [clusters] directory snapshot and
-   the workspace roots it held. Every entry must be an owned directory; a
-   symlink, a regular file or anything else under [clusters] rejects the whole
-   pass rather than being skipped, because a skipped workspace would make its
-   references look dead. *)
+(* What one entry under [clusters] is. A regular file (Finder's [.DS_Store],
+   a stray note) cannot be a workspace root, so it holds no references and is
+   skipped by name. A symlink can point at a real workspace and a special
+   file is never expected there, so both reject the pass: skipping a
+   workspace would make its references look dead. *)
+type cluster_entry =
+  | Workspace of string
+  | Skipped_file of string
+
+(* The cluster set as one observation: the [clusters] directory snapshot, the
+   workspace roots it held and the regular files it skipped. *)
 let observe_cluster_workspaces ~base_path =
   let path = clusters_root ~base_path in
   let reject ?(path = path) reason =
@@ -351,11 +357,11 @@ let observe_cluster_workspaces ~base_path =
     | Unix.S_DIR ->
       (match inspect root with
        | Error _ as error -> error
-       | Ok (Fs_compat.Owned_directory _) -> Ok root
+       | Ok (Fs_compat.Owned_directory _) -> Ok (Workspace root)
        | Ok Fs_compat.Owned_directory_missing ->
          reject ~path:root "cluster workspace disappeared during scan")
     | Unix.S_LNK -> reject ~path:root "a symbolic link is not a cluster workspace"
-    | Unix.S_REG -> reject ~path:root "a regular file is not a cluster workspace"
+    | Unix.S_REG -> Ok (Skipped_file root)
     | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
       reject ~path:root "a special file is not a cluster workspace"
     | exception Unix.Unix_error (code, fn, arg) ->
@@ -363,7 +369,7 @@ let observe_cluster_workspaces ~base_path =
   in
   match inspect path with
   | Error _ as error -> error
-  | Ok Fs_compat.Owned_directory_missing -> Ok (None, [])
+  | Ok Fs_compat.Owned_directory_missing -> Ok (None, [], [])
   | Ok (Fs_compat.Owned_directory before) ->
     (match Sys.readdir path with
      | exception Sys_error reason -> reject reason
@@ -373,10 +379,18 @@ let observe_cluster_workspaces ~base_path =
        |> List.sort String.compare
        |> List.fold_left
             (fun result entry ->
-               Result.bind result (fun roots ->
-                 Result.map (fun root -> root :: roots) (workspace entry)))
+               Result.bind result (fun classified ->
+                 Result.map (fun kind -> kind :: classified) (workspace entry)))
             (Ok [])
-       |> Result.map (fun roots -> Some before, List.rev roots))
+       |> Result.map (fun classified ->
+         let roots, skipped =
+           List.partition_map
+             (function
+               | Workspace root -> Either.Left root
+               | Skipped_file file -> Either.Right file)
+             (List.rev classified)
+         in
+         Some before, roots, skipped))
 ;;
 
 (* A cluster created, removed or renamed while the scan ran would leave a
@@ -505,7 +519,9 @@ let live_references ~after_scan ~base_path ~board_posts_file =
        | _ -> scan_entry path references)
   in
   let open Result.Syntax in
-  let* cluster_snapshot, cluster_roots = observe_cluster_workspaces ~base_path in
+  let* cluster_snapshot, cluster_roots, skipped_cluster_files =
+    observe_cluster_workspaces ~base_path
+  in
   let* references =
     Common.masc_dir_from_base_path ~base_path :: cluster_roots
     |> List.concat_map (fun workspace_masc_dir ->
@@ -517,7 +533,7 @@ let live_references ~after_scan ~base_path ~board_posts_file =
   in
   after_scan ();
   let* () = confirm_cluster_set_unchanged ~base_path cluster_snapshot in
-  Ok references
+  Ok (references, skipped_cluster_files)
 ;;
 
 let expand_artifact_manifests ~store references =
@@ -702,7 +718,9 @@ let save_candidate_snapshot ~base_path candidates =
 let run_with ~after_scan ~base_path ~board_posts_file ~mode =
   let open Result.Syntax in
   let store = Tool_blob_store.create ~base_path in
-  let* direct_live = live_references ~after_scan ~base_path ~board_posts_file in
+  let* direct_live, skipped_cluster_files =
+    live_references ~after_scan ~base_path ~board_posts_file
+  in
   let* live_references = expand_artifact_manifests ~store direct_live in
   let live =
     Artifact_reference_set.fold
@@ -747,6 +765,7 @@ let run_with ~after_scan ~base_path ~board_posts_file ~mode =
     ; blobs_observed = String_set.cardinal blobs
     ; candidates_recorded = String_set.cardinal current_candidates
     ; deleted
+    ; skipped_cluster_files
     }
 ;;
 

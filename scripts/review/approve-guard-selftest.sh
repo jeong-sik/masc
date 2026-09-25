@@ -20,11 +20,11 @@ cat >"$work/gh" <<'EOF'
 #!/usr/bin/env bash
 # fake gh: api [--paginate] [-X POST] <endpoint> [--jq F] [-f k=v] [-F k=@-]
 # FAKE_FAIL=<glob>: endpoints matching it fail like a transport error.
-d="$FAKE_DIR"; jqf="."; method=GET; ep=""; ev=""; cid=""; body_src=""
+d="$FAKE_DIR"; jqf="."; method=GET; ep=""; ev=""; cid=""; body_src=""; paged=0
 shift # "api"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --paginate) shift ;;
+    --paginate) paged=1; shift ;;
     -X) method="$2"; shift 2 ;;
     --jq) jqf="$2"; shift 2 ;;
     --input) echo "fake gh: --input is not how the guard posts" >&2; exit 1 ;;
@@ -37,6 +37,11 @@ while [ $# -gt 0 ]; do
     *) ep="$1"; shift ;;
   esac
 done
+# A GET that reads only the first page would miss the newest reviews on a PR
+# with more than 100 of them (API order is oldest first).
+if [ "$method" = GET ] && [ "$paged" = 0 ]; then
+  echo "fake gh: GET $ep without --paginate" >&2; exit 1
+fi
 if [ -n "${FAKE_FAIL:-}" ]; then
   case "$ep" in $FAKE_FAIL) echo "HTTP 502: Bad Gateway (fake)" >&2; exit 1 ;; esac
 fi
@@ -142,6 +147,32 @@ d="$work/dup"; setup "$d"; echo "[{\"id\":42,\"user\":{\"login\":\"pangyo-preach
 run_case already-approved 0 "already APPROVED" 0 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md"
 d="$work/dupold"; setup "$d"; echo "[{\"id\":42,\"user\":{\"login\":\"pangyo-preachers\"},\"state\":\"APPROVED\",\"commit_id\":\"$H2\"}]" >"$d/reviews.json"
 run_case approved-older-head-still-posts 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md"
+# ---- open change requests (leader, #38810): another account's CR refuses ----
+rv() { echo "{\"id\":$1,\"user\":{\"login\":\"$2\"},\"state\":\"$3\",\"commit_id\":\"$H2\"}"; }
+d="$work/cr-other"; setup "$d"; echo "[$(rv 50 jeong-sik CHANGES_REQUESTED)]" >"$d/reviews.json"
+run_case cr-other-account-refuses 2 "open CHANGES_REQUESTED from jeong-sik (review 50)" 0 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md"
+run_case cr-other-account-refuses-check 2 "open CHANGES_REQUESTED from jeong-sik" 0 "$d" --check --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H"
+d="$work/cr-comment"; setup "$d"; echo "[$(rv 50 jeong-sik CHANGES_REQUESTED),$(rv 60 jeong-sik COMMENTED)]" >"$d/reviews.json"
+run_case cr-not-lifted-by-later-comment 2 "review 50" 0 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md"
+d="$work/cr-lifted"; setup "$d"; echo "[$(rv 60 jeong-sik APPROVED),$(rv 50 jeong-sik CHANGES_REQUESTED)]" >"$d/reviews.json"
+run_case cr-lifted-by-later-approve 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md"
+d="$work/cr-dismissed"; setup "$d"; echo "[$(rv 50 jeong-sik DISMISSED)]" >"$d/reviews.json"
+run_case cr-dismissed-does-not-block 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md"
+# ---- this account's own CR (operator P2 on #38928): replaced only when named ----
+d="$work/cr-own"; setup "$d"; echo "[$(rv 50 pangyo-preachers CHANGES_REQUESTED)]" >"$d/reviews.json"
+run_case cr-own-refuses-unless-named 2 "pass --replace-own-cr 50" 0 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md"
+run_case cr-own-refuses-unless-named-check 2 "pass --replace-own-cr 50" 0 "$d" --check --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H"
+d="$work/cr-own-named"; setup "$d"; echo "[$(rv 50 pangyo-preachers CHANGES_REQUESTED)]" >"$d/reviews.json"
+run_case cr-own-replaced-when-named 0 "review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md" --replace-own-cr 50
+if jq -e '.body|endswith(" · replaces own CHANGES_REQUESTED 50")' "$d/posted.json" >/dev/null 2>&1; then pass=$((pass+1)); echo "ok   cr-own-replaced-footer"; else fail=$((fail+1)); echo "FAIL cr-own-replaced-footer"; cat "$d/posted.json" 2>/dev/null; fi
+d="$work/cr-own-wrong-id"; setup "$d"; echo "[$(rv 50 pangyo-preachers CHANGES_REQUESTED)]" >"$d/reviews.json"
+run_case cr-own-named-wrong-id 2 "--replace-own-cr 51 does not name" 0 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md" --replace-own-cr 51
+d="$work/cr-own-stale-flag"; setup "$d"; echo "[$(rv 60 pangyo-preachers APPROVED),$(rv 50 pangyo-preachers CHANGES_REQUESTED)]" >"$d/reviews.json"
+run_case cr-own-named-but-already-lifted 2 "--replace-own-cr 50 does not name" 0 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md" --replace-own-cr 50
+d="$work/cr-own-plus-other"; setup "$d"; echo "[$(rv 50 pangyo-preachers CHANGES_REQUESTED),$(rv 52 jeong-sik CHANGES_REQUESTED)]" >"$d/reviews.json"
+run_case cr-own-named-other-still-refuses 2 "from jeong-sik (review 52)" 0 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md" --replace-own-cr 50
+d="$work/cr-flag-junk"; setup "$d"
+run_case replace-own-cr-not-digits 2 "must be a review id" 0 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md" --replace-own-cr 5306112777x
 d="$work/readback"; setup "$d"; echo "{\"id\":777,\"state\":\"COMMENTED\",\"commit_id\":\"$H\"}" >"$d/reviewget.json"
 run_case readback-mismatch 1 "reads back as COMMENTED" 1 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md"
 d="$work/multi"; setup "$d"; jq '.draft=true|.base.ref="dev"' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"

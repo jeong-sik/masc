@@ -281,6 +281,25 @@ let test_goal_upsert_and_list () =
   | _ -> fail "expected one listed goal"
 ;;
 
+(* A goal in [phase], for fixtures. upsert_goal only creates Executing goals;
+   the phase is then moved with the store's compare-and-update, the same
+   primitive the lifecycle handlers write through. *)
+let upsert_goal_in_phase config ~title phase =
+  match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1" () with
+  | Error error -> Error error
+  | Ok (goal, _) when goal.Goal_store.phase = phase -> Ok goal
+  | Ok (goal, _) ->
+    (match
+       Goal_store.update_goal_if_phase config ~goal_id:goal.Goal_store.id
+         ~expected_phase:goal.Goal_store.phase
+         (fun current -> { current with Goal_store.phase })
+     with
+     | Ok (Goal_store.Goal_updated goal) -> Ok goal
+     | Ok (Goal_store.Goal_phase_mismatch actual) ->
+       failwith ("fixture goal moved to " ^ Goal_phase.to_string actual)
+     | Error error -> Error error)
+;;
+
 let test_goal_list_filters_by_phase () =
   with_workspace
   @@ fun config ->
@@ -290,8 +309,7 @@ let test_goal_list_filters_by_phase () =
       | Some phase -> phase
       | None -> fail ("invalid phase fixture: " ^ phase)
     in
-    match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1"
-            ~phase () with
+    match upsert_goal_in_phase config ~title phase with
     | Ok _ -> ()
     | Error error -> fail (Goal_store.write_error_to_string error)
   in
@@ -323,8 +341,7 @@ let test_goal_list_includes_rollup () =
            ~target_value:"1" () with
    | Ok _ -> ()
    | Error error -> fail (Goal_store.write_error_to_string error));
-  (match Goal_store.upsert_goal config ~title:"Verifying goal" ~metric:"m"
-           ~target_value:"1" ~phase:Goal_phase.Verifying () with
+  (match upsert_goal_in_phase config ~title:"Verifying goal" Goal_phase.Verifying with
    | Ok _ -> ()
    | Error error -> fail (Goal_store.write_error_to_string error));
   let listed =

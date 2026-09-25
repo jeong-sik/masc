@@ -22535,9 +22535,17 @@ and is loaded on demand through keeper_skill.
                 | "m" -> "microvm"
                 | _ -> "remote_ssh")
        | Some ("h" | "l")
-         when terminal_columns >= keeper_split_threshold_cols
-              && (match state.view with
-                  | Keepers Keeper_detail | Resources -> true
+         (* The width belongs to the screen that needs two panes, not to the
+            key. Keeper detail below the threshold draws the detail alone and
+            never reads the focus -- its footer drops [h/l] there for that
+            reason -- while Resources and Code draw whichever pane the focus
+            names at every width, so the key was refused on screens already
+            drawing its answer. On Code that also left a file open with no way
+            back to the tree but [Esc], which closes the file. *)
+         when (match state.view with
+                  | Keepers Keeper_detail ->
+                      terminal_columns >= keeper_split_threshold_cols
+                  | Resources -> true
                   | Board ->
                       (match state.board_mode with
                        | Board_read _ -> (

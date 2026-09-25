@@ -12146,6 +12146,19 @@ def code_lane_interaction(
         )
     if re.search(rb"\x1b\[[0-9;]*m" + re.escape(b"(* hi *)") + rb"\x1b\[0m", opened) is None:
         raise AssertionError(f"the comment did not colour: {opened!r}")
+    # This scenario runs at 100 columns, under the split threshold, so the
+    # frame draws one pane and the focus chooses which. h and l move that
+    # focus, and with a file open they are the only way back to the tree:
+    # Esc closes the file. The keys were refused under the threshold until
+    # #39017, on a screen already drawing their answer.
+    tree_focus = send_and_wait(
+        process, master_fd, output, b"h", b"j/k:move  h/l:pane"
+    )
+    if "\u25c6 a.ml" not in CSI_RE.sub(b"", tree_focus).decode("utf-8"):
+        raise AssertionError(
+            f"h did not put the tree back under the focus: {tree_focus!r}"
+        )
+    send_and_wait(process, master_fd, output, b"l", b"j/k:scroll  h/l:pane")
     # Shift-Right pans the open file sideways by one cell: lowercase h/l now
     # choose the split pane. The keyword span is cut mid-word but its colour
     # still opens the remainder, and the title says the view is shifted.

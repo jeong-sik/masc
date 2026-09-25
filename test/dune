@@ -6223,6 +6223,7 @@
  (modules test_browser_bidi_downloads_reply_window)
  (libraries masc alcotest eio eio.mock))
 (include stanzas/test_browser_webdriver.inc)
+(include stanzas/test_browser_cdp.inc)
 (include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)

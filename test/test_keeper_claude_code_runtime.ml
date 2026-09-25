@@ -490,9 +490,12 @@ let test_real_two_request_turn_routes_spend_and_occupancy_apart () =
                | Some context ->
                  check int "occupancy is the second request's inclusive input"
                    (8 + 2747 + 22834) context.input_tokens;
-                 check int "occupancy cache read" 22834 context.cache_read_input_tokens;
-                 check int "occupancy cache creation" 2747
-                   context.cache_creation_input_tokens))))
+                 (match context.cache with
+                  | None -> fail "the request's cache split was dropped"
+                  | Some cache ->
+                    check int "occupancy cache read" 22834 cache.cache_read_input_tokens;
+                    check int "occupancy cache creation" 2747
+                      cache.cache_creation_input_tokens)))))
 ;;
 
 (* An assistant frame reported usage but the result frame carried none: the

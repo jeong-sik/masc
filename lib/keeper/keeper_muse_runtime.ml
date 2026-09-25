@@ -241,7 +241,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     Error
       (config_error ~field:"eio_clock" "Muse runtime requires the initialized Eio clock")
   | Some env, Some clock ->
-    let hooks = Option.value hooks ~default:Agent_core.Hooks.empty in
+    let hooks =
+      match hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty
+    in
     let owner_epoch = Session_store.process_epoch () in
     let* stored_session =
       Session_store.load ~base_path ~keeper_name

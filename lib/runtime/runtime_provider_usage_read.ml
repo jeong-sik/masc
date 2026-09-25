@@ -237,7 +237,7 @@ let read_scope ~codex ~muse ~fetch { scope; how } =
      | Ok () -> ()
      | Error detail ->
        Log.Runtime_agent.warn "provider usage read failed for %s: %s" scope_label detail
-     | exception (EioCancel.Cancelled _ as cancelled) -> raise cancelled
+     | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
      | exception exn ->
        Log.Runtime_agent.warn
          "provider usage read raised for %s: %s"

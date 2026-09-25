@@ -424,7 +424,8 @@ let drain_stderr flow tail =
 let terminate_spawned_process ~clock proc =
   Eio.Cancel.protect (fun () ->
     (try Eio.Process.signal proc Sys.sigterm with
-     | exn -> (* cancel-guard-ok: the whole termination body runs under Eio.Cancel.protect, so ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
        Log.Runtime_agent.debug "Muse termination signal failed: %s" (Printexc.to_string exn));
     try
       Eio.Time.with_timeout_exn clock process_termination_grace_s (fun () ->
@@ -435,10 +436,11 @@ let terminate_spawned_process ~clock proc =
          Eio.Process.signal proc Sys.sigkill;
          Eio.Process.await proc |> ignore
        with
-       | exn -> (* cancel-guard-ok: the body is Eio.Cancel.protect *)
+       | EioCancel.Cancelled _ as exn -> raise exn
+       | exn ->
          Log.Runtime_agent.debug "Muse forced reap failed: %s" (Printexc.to_string exn))
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> (* cancel-guard-ok: the body is Eio.Cancel.protect *)
+    | exn ->
       Log.Runtime_agent.debug "Muse reap observed an already-closed process: %s"
         (Printexc.to_string exn))
 ;;

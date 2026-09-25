@@ -121,6 +121,8 @@ type turn_result =
   ; text : string
   ; usage : token_usage option
   ; resumed : bool
+        (** Echoes the requested [session_mode]: true when the turn ran
+            under [Resume], however the server answered. *)
   }
 
 type error =
@@ -149,7 +151,9 @@ val error_to_string : error -> string
 val apply_record : progress -> Yojson.Safe.t -> ((progress * stream_event list), error) result
 (** Fold one parsed envelope line. Unknown payload kinds are ignored.
     A failed or cancelled terminal word ends the fold with [Turn_failed];
-    an unknown terminal word ends it with [Protocol_error]. *)
+    an unknown terminal word ends it with [Protocol_error]. The first
+    observed session and turn identity sticks: a later record naming a
+    different one does not move the fold. *)
 
 val command :
   prompt_file:string
@@ -204,7 +208,8 @@ val serve_usage :
     [muse serve] over stdio, [initialize], [initialized], [usage/read],
     then stdin EOF and reap. Returns the raw [usage] value, or [None] when
     the host answers [{}]: it truthfully observed nothing, which is not an
-    error. No session is created: the host runs memory-only.
+    error. No session log is written: the host runs under
+    [--no-session-log].
 
     The JSON-RPC errors the host answers with are protocol errors carrying
     the host's own code and message; no prompt is ever sent on this

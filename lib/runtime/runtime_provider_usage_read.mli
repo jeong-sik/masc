@@ -72,7 +72,7 @@ val read_scopes :
 (** Read each scope in order with [codex], [muse] or [fetch] (one GET of
     the declared URL), decode, and record.  A failed or raising read is
     logged with its scope (and shape) and does not stop the scopes after
-    it; only {!EioCancel.Cancelled} is re-raised.  A read that states no
+    it; only {!Eio.Cancel.Cancelled} is re-raised.  A read that states no
     windows logs one info line.  An HTTP read with an empty key fails
     without a request. *)
 

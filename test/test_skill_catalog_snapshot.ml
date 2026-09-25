@@ -3,7 +3,7 @@ open Alcotest
 module Snapshot = Skill_catalog_snapshot
 module Reference = Skill_reference
 
-let config_text ?(runtime = "one") ?(resource_read_max_bytes = 65536) sources =
+let config_text ?(runtime = "one") ?(resource_read_max_bytes = 16384) sources =
   Printf.sprintf
     "[skills]\nresource-read-max-bytes = %d\n%s\n[runtime]\ndefault = %S\n"
     resource_read_max_bytes

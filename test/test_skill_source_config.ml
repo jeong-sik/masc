@@ -19,7 +19,7 @@ let test_absent_section_is_empty () =
 
 let ordered_sources =
   {|[skills]
-resource-read-max-bytes = 65536
+resource-read-max-bytes = 16384
 
 [[skills.sources]]
 id = "project"
@@ -36,7 +36,7 @@ access = "read-write"
 ;;
 
 let skills_header =
-  "[skills]\nresource-read-max-bytes = 65536\n\n"
+  "[skills]\nresource-read-max-bytes = 16384\n\n"
 ;;
 
 let configured sources = skills_header ^ sources
@@ -118,9 +118,18 @@ let test_resource_read_max_bytes_contract () =
     | Missing_resource_read_max_bytes -> true
     | _ -> false);
   expect_error
-    (with_bound_line "resource-read-max-bytes = \"65536\"\n")
+    (with_bound_line "resource-read-max-bytes = \"16384\"\n")
     (function
       | Invalid_resource_read_max_bytes_type String -> true
+      | _ -> false);
+  (* A resource is returned as one inline tool result; a bound above that
+     boundary only lets a file be read and then refused. *)
+  expect_error
+    (with_bound_line
+       (Printf.sprintf "resource-read-max-bytes = %d\n"
+          (Common.max_tool_result_wire_bytes + 1)))
+    (function
+      | Resource_read_max_bytes_over_inline_boundary _ -> true
       | _ -> false);
   List.iter
     (fun value ->
@@ -174,7 +183,7 @@ let test_anchor_and_path_rules () =
 
 let test_top_level_contract_and_all_diagnostics () =
   let text =
-    "[skills]\nactivation-lifetme = \"turn\"\nprecedence = 1\nresource-read-max-bytes = 65536\n\n"
+    "[skills]\nactivation-lifetme = \"turn\"\nprecedence = 1\nresource-read-max-bytes = 16384\n\n"
     ^ "[[skills.sources]]\nid = 1\nanchor = \"base-path\"\naccess = \"read-only\"\n"
   in
   match parse_text text with
@@ -291,7 +300,7 @@ let test_projection_names_policy () =
   match to_yojson (parse_exn ordered_sources) with
   | `Assoc fields ->
     (match List.assoc_opt "resource_read_max_bytes" fields with
-     | Some (`Int value) -> check int "resource read bound" 65536 value
+     | Some (`Int value) -> check int "resource read bound" 16384 value
      | _ -> fail "resource read bound projection was not an integer")
   | _ -> fail "Skill source projection was not an object"
 ;;

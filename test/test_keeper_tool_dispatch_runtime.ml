@@ -6607,7 +6607,8 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
               ()
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | Some (Masc.Keeper_official_client_host.Queued_chat_operation
+                   | Masc.Keeper_official_client_host.Repeated_tool_call _)
             | None ->
               fail "direct Execute post-effect failure remained provider-retryable"))
 ;;
@@ -7575,7 +7576,8 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
                 tool_name
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | Some (Masc.Keeper_official_client_host.Queued_chat_operation
+                   | Masc.Keeper_official_client_host.Repeated_tool_call _)
             | None ->
               fail "official-client provider loop remained open after prior effect"))
 ;;
@@ -7958,7 +7960,8 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
                 tool_name
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | Some (Masc.Keeper_official_client_host.Queued_chat_operation
+                   | Masc.Keeper_official_client_host.Repeated_tool_call _)
             | None ->
               fail "official-client provider loop remained open after unknown effect"))
 ;;

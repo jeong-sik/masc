@@ -93,14 +93,19 @@ val allocate_overview :
   attention_count:int ->
   goal_count:int ->
   team_count:int ->
+  team_stuck:bool ->
   providers_count:int ->
   task_count:int ->
   has_task_error:bool ->
   overview_allocation
-(** The Providers section is sized after GOALS and before the Team block: it
-    takes up to [providers_count] rows of what is left once the one task row
-    held back is kept. With no room for one row besides its chrome it is not
-    drawn at all. *)
+(** The blocks share the rows through {!Masc_tui_layout.allocate}, served in
+    the order Attention panel, GOALS, Providers, Team, Tasks. Each is first
+    paid what it cannot give up -- the panel's first row, the GOALS headline,
+    the first Team row when [team_stuck] says it is a stuck Keeper, the first
+    held task and the backlog line -- and then each grows, in the same order,
+    to what it wants. A block with no room for one row besides its chrome is
+    not drawn at all and its rows are filler. A taller terminal never gives
+    any block fewer rows, and fewer attention items never give Team fewer. *)
 
 (** {1 Keeper roster columns} *)
 
@@ -416,11 +421,14 @@ val fusion_row :
     where it used to be unbounded in the header and cut at fourteen in the
     row. *)
 
-val task_list_sidebar_label : title:string -> task_id:string -> string
-(** A Tasks list row beside the task detail. The id goes after the title
-    because the frame folds a label from the middle: titles that share an
-    opening and an ending draw the same row, and the id at the end is what
-    parts them. *)
+val sidebar_row_label : about:string -> apart:string option -> string
+(** A list pane's row label: what the row is about, then the value that parts
+    it from its neighbours. The parting value goes last because the pane
+    folds a label from the middle and keeps its tail.
+
+    Every index that parts its rows asks this one, so a row reads the same
+    way whichever pane draws it. [None] is a row with nothing to be parted
+    by, and it keeps its subject alone. *)
 
 val fusion_sidebar_label :
   status:string -> time:string -> keeper:string -> run_id:string -> string

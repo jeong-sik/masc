@@ -68,8 +68,13 @@ let scrolled_surface state surface =
   match surface with
   | Tools -> Some (Masc_tui_render.tools_scrolled state)
   | Memory when Option.is_none state.memory_facts_keeper ->
-      let _, cols = get_terminal_size () in
-      Some (Masc_tui_render_memory.memory_overview_scrolled ~cols state)
+      let terminal_rows, cols = get_terminal_size () in
+      let budget =
+        max 1
+          (Masc_tui_types.surface_body_rows state ~terminal_rows
+           - Masc_tui_frame.chrome_rows)
+      in
+      Some (Masc_tui_render_memory.memory_overview_scrolled ~cols ~budget state)
   (* Runtime's authority row wraps to the terminal width too, so its bound is
      read at that width for the same reason the Memory overview's is. *)
   | Runtime ->
@@ -366,7 +371,9 @@ let surface_body_height_at (state : state) ~cursor scrolled =
     let scrolled =
       if state.view = Memory then
         let _, cols = get_terminal_size () in
-        Masc_tui_render_memory.memory_overview_scrolled ~cols ~cursor state
+        Masc_tui_render_memory.memory_overview_scrolled ~cols
+          ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
+          ~cursor state
       else scrolled
     in
     surface_body_height ~rows:(surface_rows state) scrolled

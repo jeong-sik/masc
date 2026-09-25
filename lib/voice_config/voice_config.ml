@@ -267,10 +267,35 @@ let parse_endpoint ~ctx json =
   let mcp_url = Json_util.get_string_nonempty json "mcp_url" in
   let health_url = Json_util.get_string_nonempty json "health_url" in
   let api_key_env = Json_util.get_string_nonempty json "api_key_env" in
-  let enabled =
-    Option.value ~default:true (Json_util.get_bool json "enabled")
+  (* Absent means on. Written means meant, as for the timeout below: an
+     [enabled] that is not a boolean, such as "no", is refused by name rather
+     than read as absent, which would turn on the endpoint it was written to
+     turn off. *)
+  let* enabled =
+    match Json_util.optional_bool json "enabled" with
+    | Error message -> Error (Printf.sprintf "%s.%s" ctx message)
+    | Ok None -> Ok true
+    | Ok (Some enabled) -> Ok enabled
   in
-  let timeout_seconds = Json_util.get_float json "timeout_seconds" in
+  (* Absent means the workspace timeout. Written means meant: a value that is
+     not a number, or that is not a finite duration above zero, is refused by
+     name rather than read as absent, which would quietly hand this endpoint
+     the workspace's. Zero is not a short timeout but one already expired:
+     the voice bridge hands the value to its timer as written, so the endpoint
+     would fail every call (#35641). The dashboard route refuses the same
+     values before they reach the file. *)
+  let* timeout_seconds =
+    match Json_util.optional_float json "timeout_seconds" with
+    | Error message -> Error (Printf.sprintf "%s.%s" ctx message)
+    | Ok None -> Ok None
+    | Ok (Some seconds) when Float.is_finite seconds && seconds > 0. ->
+      Ok (Some seconds)
+    | Ok (Some seconds) ->
+      Error
+        (Printf.sprintf
+           "%s.timeout_seconds must be a finite number greater than zero (got %g)"
+           ctx seconds)
+  in
   (* A voice id is provider vocabulary, so it belongs to the endpoint that
      answers to it rather than to the workspace (#24068). *)
   let default_voice = Json_util.get_string_nonempty json "default_voice" in

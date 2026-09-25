@@ -187,6 +187,12 @@ let test_seeds_rejects_keeper_manifests () =
        check bool rel false (Common.seeds_into_fresh_config_root rel))
     [ "keepers"; "keepers/reviewer.toml"; "keepers/nested/deep.toml" ]
 
+(* The shipped image name catalog is read from the binary; the config root's
+   file of that name holds builds and refuses a name with none. *)
+let test_seeds_rejects_the_image_name_catalog () =
+  check bool "sandbox-images.toml" false
+    (Common.seeds_into_fresh_config_root Common.sandbox_image_catalog_file_name)
+
 let test_seeds_rejects_dune_files () =
   check bool "top-level dune" false (Common.seeds_into_fresh_config_root "dune");
   check bool "nested dune" false
@@ -242,6 +248,7 @@ let () =
       test_case "rejects keeper manifests" `Quick
         test_seeds_rejects_keeper_manifests;
       test_case "rejects dune files" `Quick test_seeds_rejects_dune_files;
+      test_case "rejects the image name catalog" `Quick test_seeds_rejects_the_image_name_catalog;
       test_case "rejects the default roster verbatim" `Quick
         test_seeds_rejects_default_roster_verbatim;
       test_case "default roster seeds into the keepers dir" `Quick

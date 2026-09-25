@@ -925,7 +925,7 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
       ~terminal_effect_state:Masc.Keeper_tools_agent_core.Terminal_effect_open
       ~tool_calls:calls
       ~assistant_turn_texts:[]
-      ~autonomous_yield_requested:(Some requested)
+      ~yield_requested:(Some requested)
   in
   (match native (live_call () :: run_2_starts_from) with
    | Ok (Runtime_agent.Yield
@@ -952,6 +952,7 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
     Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
       ~repetition_execution:None
       ~tool_calls:calls
+      ()
   in
   (match official (live_call () :: run_2_starts_from) with
    | Ok (Some (Masc.Keeper_official_client_host.Repeated_tool_call
@@ -1076,10 +1077,10 @@ let test_repeated_assistant_text_boundary () =
 
 let test_autonomous_yield_boundary_contract () =
   let module F = Masc.Keeper_agent_run.For_testing in
-  let chat : Masc.Keeper_agent_run.autonomous_yield_request =
+  let chat : Masc.Keeper_agent_run.yield_request =
     { reason = Masc.Keeper_agent_run.Operation_queued }
   in
-  let durable_stimulus : Masc.Keeper_agent_run.autonomous_yield_request =
+  let durable_stimulus : Masc.Keeper_agent_run.yield_request =
     { reason =
         Masc.Keeper_agent_run.Durable_stimulus_waiting
           { pending_count = 1
@@ -1151,6 +1152,25 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Yielded_after_repeated_tool_call _
      | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ -> false)
+
+let test_claimed_direct_input_waits_for_resumable_tool_boundary () =
+  let calls = ref 0 in
+  let requested () =
+    incr calls;
+    Ok (Some Masc.Keeper_agent_run.{ reason = Operation_queued })
+  in
+  let probe turn_kind =
+    Masc.Keeper_agent_run.For_testing.person_queued_probe
+      ~turn_kind ~yield_requested:(Some requested)
+  in
+  check bool "claimed direct input has no pre-first-token abort" true
+    (Option.is_none (probe Turn_record.Direct));
+  check int "direct probe did not read the queue" 0 !calls;
+  (match probe Turn_record.Autonomous with
+   | Some run -> check bool "autonomous stimulus can give way" true (run ())
+   | None -> fail "autonomous queue probe disappeared");
+  check int "autonomous probe read the queue" 1 !calls
+;;
 
 let test_terminal_externalization_failure_contract () =
   let classify =
@@ -1601,6 +1621,34 @@ let test_direct_reply_projection_keeps_external_wait_typed () =
   | Error error ->
     fail (Ops.direct_reply_decode_error_to_string error)
 
+(* A reply the provider did not stream is published as deltas cut from the
+   stored reply, and Discord and Slack post those deltas joined. The joined
+   chunks must be the reply: a whitespace-only chunk between two paragraphs
+   used to be dropped, so "\n\n" arrived as "\n". *)
+let test_reply_chunks_join_back_to_the_reply () =
+  let long_line = String.concat " " (List.init 60 (fun i -> Printf.sprintf "단어%d" i)) in
+  let replies =
+    [ "첫 문단입니다.\n\n둘째 문단."
+    ; "Done!\n\n\nNext?\n\nLast."
+    ; "코드:\n\n```\nlet x = 1\n\n\nlet y = 2\n```\n"
+    ; "  앞 공백. 뒤 공백.  "
+    ; "\n\n"
+    ; long_line ^ ".\n\n" ^ long_line
+    ; ""
+    ]
+  in
+  List.iter
+    (fun reply ->
+       let chunks = Server_routes_http_keeper_stream.split_keeper_reply_chunks reply in
+       check string (Printf.sprintf "joined chunks of %S" reply) reply (String.concat "" chunks);
+       check bool (Printf.sprintf "no empty chunk in %S" reply) false
+         (List.exists (String.equal "") chunks))
+    replies;
+  check (list string) "a paragraph break is its own chunk, not dropped"
+    [ "첫 문단입니다."; "\n"; "\n둘째 문단." ]
+    (Server_routes_http_keeper_stream.split_keeper_reply_chunks "첫 문단입니다.\n\n둘째 문단.")
+;;
+
 let () =
   run "keeper_turn_outcome"
     [
@@ -1655,6 +1703,8 @@ let () =
             test_repeated_assistant_text_boundary;
           test_case "autonomous yield boundary contract" `Quick
             test_autonomous_yield_boundary_contract;
+          test_case "direct input waits for a resumable tool boundary" `Quick
+            test_claimed_direct_input_waits_for_resumable_tool_boundary;
           test_case "terminal externalization failure contract" `Quick
             test_terminal_externalization_failure_contract;
         ] );
@@ -1695,5 +1745,10 @@ let () =
             test_connector_projection_suppresses_completed_external_effect;
           test_case "direct reply keeps external wait typed" `Quick
             test_direct_reply_projection_keeps_external_wait_typed;
+        ] );
+      ( "reply chunks",
+        [
+          test_case "joined chunks equal the reply" `Quick
+            test_reply_chunks_join_back_to_the_reply;
         ] );
     ]

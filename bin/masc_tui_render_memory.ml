@@ -98,7 +98,7 @@ let memory_date ts =
     tm.Unix.tm_hour tm.Unix.tm_min
 
 let memory_updated_text = function
-  | None -> "-"
+  | None -> Masc_tui_theme.Glyph.no_value
   | Some ts -> memory_date ts
 
 (* Every size on this screen is the recall block the keeper injects, not the
@@ -116,7 +116,55 @@ let memory_updated_text = function
 let recall_tokens bytes =
   Masc_tui_token_scale.format_estimate Masc_tui_token_scale.fleet bytes
 ;;
-let memory_context_lines (k : memory_keeper_health) =
+(* One break, and no more. The block sits under the list and is paid for out
+   of the same frame, so a reading never takes more than two rows. At a
+   terminal wide enough to draw the roster, the Librarian row and an alert
+   each need one break; a narrower one folds the middle (see [clause_rows]). *)
+let maximum_rows_for_a_reading = 2
+
+(* A row of the keeper block, given as its clauses rather than as the joined
+   string: [pack_clauses] keeps a clause whose own text holds the mark whole,
+   which it cannot do for a row that has already been joined. The block was
+   drawn one row per reading and cut at the frame: the Librarian row lost
+   "failed N since server start", the tail #36497 records as reading like a
+   running total, and a server alert lost the half that says what to do about
+   it.
+
+   An alert is one sentence and arrives as one clause; [pack_clauses] wraps a
+   clause too wide for a row rather than cutting it. Continuation rows carry
+   the same two-space indent as the first.
+
+   A reading that packs into more rows than the block pays for keeps its
+   first row and its last, with the cut mark between them, the way a roster
+   name folds its middle (#38469). The first row says which reading it is;
+   the last holds the clause that changes what the others mean. Joined back
+   into one row instead, the frame cut that tail again -- at 80 columns, the
+   commonest terminal, the Librarian row still ended "failed N". The fold
+   draws exactly two rows, so it holds for any [maximum_rows_for_a_reading]
+   of two or more. *)
+let clause_rows ~cols clauses =
+  let indent = "  " in
+  let fold = Message_layout.cut_mark ^ " " in
+  let lead_cells =
+    max (Message_layout.display_width indent) (Message_layout.display_width fold)
+  in
+  let rows =
+    Message_layout.pack_clauses
+      ~max_cells:(max 1 (framed_inner_width cols - lead_cells))
+      clauses
+  in
+  match rows with
+  | first :: rest when List.length rows > maximum_rows_for_a_reading ->
+    let last = List.fold_left (fun _ row -> row) first rest in
+    [ indent ^ first; fold ^ last ]
+  | rows -> List.map (fun row -> indent ^ row) rows
+
+type memory_context_projection =
+  { rows : string list
+  ; stalled_row : (int * string) option
+  }
+
+let memory_context_lines ~cols (k : memory_keeper_health) =
   let current_line =
     Printf.sprintf "  %s · %s · snapshot r%d · recall %s tok · updated %s"
       k.mkh_keeper_id (memory_state_label (memory_state k)) k.mkh_revision
@@ -132,7 +180,7 @@ let memory_context_lines (k : memory_keeper_health) =
   (* RFC librarian-lifecycle §4.9: how far behind, when that was counted,
      and what the journal last said. A count the durable drain could not take prints
      as "unread ?" rather than as zero. *)
-  let librarian_line =
+  let librarian_clauses =
     let librarian = k.mkh_librarian in
     let unread =
       match librarian.mlh_unread_atom_turns, librarian.mlh_unread_official_turns with
@@ -147,19 +195,20 @@ let memory_context_lines (k : memory_keeper_health) =
       | Some atoms -> Printf.sprintf "continuity behind %d" atoms
       | None -> "continuity behind ?"
     in
-    Printf.sprintf
-      "  Librarian · %s · %s · %s · measured %s · Memory saved %s · last failure %s · failed %d since server start"
-      (match librarian.mlh_state with
+    [ "Librarian"
+    ; (match librarian.mlh_state with
        | Some state -> librarian_pass_end_words state
        | None -> "not measured")
-      unread
-      continuity
-      (memory_updated_text librarian.mlh_measured_at)
-      (memory_updated_text librarian.mlh_last_success_at)
-      (match librarian.mlh_last_failure_kind with
-       | Some kind -> librarian_failure_words kind
-       | None -> "-")
-      k.mkh_librarian_failures
+    ; unread
+    ; continuity
+    ; "measured " ^ memory_updated_text librarian.mlh_measured_at
+    ; "Memory saved " ^ memory_updated_text librarian.mlh_last_success_at
+    ; "last failure "
+      ^ (match librarian.mlh_last_failure_kind with
+         | Some kind -> librarian_failure_words kind
+         | None -> Masc_tui_theme.Glyph.no_value)
+    ; Printf.sprintf "failed %d since server start" k.mkh_librarian_failures
+    ]
   in
   (* RFC librarian-lifecycle §4.10: the atoms requests skip while the
      Librarian stands behind the start the provider last accepted. An alarm,
@@ -282,7 +331,7 @@ let memory_context_lines (k : memory_keeper_health) =
   let alert_lines =
     List.map
       (fun (a : memory_alert) ->
-        Printf.sprintf "  [%s] %s \xe2\x80\x94 %s"
+        Printf.sprintf "[%s] %s \xe2\x80\x94 %s"
           (match Masc.Tui_decode.memory_alert_severity a.ma_code with
            | `Warn -> "warn"
            | `Error -> "error")
@@ -302,9 +351,27 @@ let memory_context_lines (k : memory_keeper_health) =
           k.mkh_source_read_error
       ]
   in
-  [current_line; facts_line; source_line; librarian_line] @ librarian_stalled_lines
-  @ librarian_cause_lines @ context_lines
-  @ (vision_line :: (read_error_lines @ alert_lines))
+  (* Only the rows whose tail changes what the row claims are broken. The
+     Librarian row ends in "failed N since server start", and a cut leaves
+     "failed N", which reads as a running total (#36497); an alert is one
+     sentence from the server and a cut takes the half that says what to do.
+     The readings around them end in a timestamp or a byte count, where a cut
+     costs a value rather than the meaning of the ones before it, and
+     breaking every row would double the block at the widths a terminal is
+     likely to have. *)
+  let librarian_rows = clause_rows ~cols librarian_clauses in
+  { rows =
+      [ current_line; facts_line; source_line ]
+      @ librarian_rows
+      @ librarian_stalled_lines
+      @ librarian_cause_lines @ context_lines
+      @ (vision_line :: read_error_lines)
+      @ List.concat_map (fun sentence -> clause_rows ~cols [ sentence ]) alert_lines
+  ; stalled_row =
+      (match librarian_stalled_lines with
+       | row :: _ -> Some (3 + List.length librarian_rows, row)
+       | [] -> None)
+  }
 
 type memory_state = Masc_tui_types.memory_state =
   | Memory_ordinary | Memory_warning | Memory_degraded | Memory_no_current
@@ -336,15 +403,15 @@ let memory_deviation_style (k : memory_keeper_health) =
     | Memory_ordinary -> None
 
 let memory_row_line columns (k : memory_keeper_health) =
-  let em_dash = "\xe2\x80\x94" in
-  let ordinary_reading value = if k.mkh_snapshot_present then value () else em_dash in
+  let no_value = Masc_tui_theme.Glyph.no_value in
+  let ordinary_reading value = if k.mkh_snapshot_present then value () else no_value in
   let source =
     if Option.is_some k.mkh_source_read_error then "read error"
     else if k.mkh_source_snapshot_present then
       Printf.sprintf "r%d i%d %s tok" k.mkh_source_revision
         k.mkh_source_invalidations
         (recall_tokens k.mkh_source_snapshot_bytes)
-    else em_dash
+    else no_value
   in
   let delta =
     match k.mkh_added, k.mkh_removed with
@@ -555,23 +622,60 @@ let detail_field label value = "    " ^ detail_label label ^ value
    printed \x0A (#37017) -- and wrapped at spaces, so a word is not cut in two
    at the pane's edge. A blank line stays a blank row: it is a paragraph break,
    not an absence. *)
-let detail_claim_lines ~inner_width claim =
-  Message_layout.wrap_body ~max_cells:inner_width
-    ~sanitize:Terminal_text.single_line claim
-  |> List.map (fun line -> if String.equal line "" then "" else "    " ^ line)
+let detail_claim_lines ?state ~inner_width claim =
+  let wrap () =
+    let lines =
+      Message_layout.wrap_body ~max_cells:inner_width
+        ~sanitize:Terminal_text.single_line claim
+      |> List.map (fun line -> if String.equal line "" then "" else "    " ^ line)
+    in
+    let count = List.length lines in
+    Option.iter
+      (fun (state : state) ->
+        state.memory_fact_claim_wrap <- Some (claim, inner_width, lines, count))
+      state;
+    lines, count
+  in
+  match state with
+  | Some state ->
+      (match state.memory_fact_claim_wrap with
+       | Some (source, width, lines, count)
+         when source == claim && width = inner_width -> lines, count
+       | Some _ | None -> wrap ())
+  | None -> wrap ()
 
-let memory_fact_detail_lines ~cols (row : memory_fact_row) =
+type fact_detail_parts = {
+  heading : string;
+  claim_lines : string list;
+  claim_line_count : int;
+  other_lines : string list;
+}
+
+let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
   let inner_width = max 30 (cols - 6) in
   match row with
   | Memory_row_fact fact ->
-      let claim_lines = detail_claim_lines ~inner_width fact.mf_claim in
+      let claim_lines, claim_line_count =
+        detail_claim_lines ?state ~inner_width fact.mf_claim
+      in
       let history =
-        Printf.sprintf "Retrieved %d · %s · last %s · Retracted %d · Revised from %d"
-          fact.mf_events.mfe_retrieved_count
-          (Message_layout.count_noun fact.mf_events.mfe_retrieved_distinct_days "day")
-          (match fact.mf_events.mfe_last_retrieved_at with
-           | None -> "never"
-           | Some at -> memory_fact_age_label at)
+        (* The retrieval count, its day count and its last clock are one
+           reading: the server derives all three from the same list of
+           retrieval times, and the decoder keeps them as one value. A fact
+           nobody has read draws the single phrase "Never retrieved".
+
+           [Retracted] and [Revised from] keep their zeros. Both are measured
+           counts the server always sends, and hiding a measured zero makes it
+           read as "not measured" -- the shape RFC-0462 closed. *)
+        let read =
+          match fact.mf_events.mfe_retrieval with
+          | Never_retrieved -> "Never retrieved"
+          | Retrieved { count; distinct_days; last_at } ->
+              Printf.sprintf "Retrieved %d on %s · last %s" count
+                (Message_layout.count_noun distinct_days "day")
+                (memory_fact_age_label last_at)
+        in
+        Printf.sprintf "%s · Retracted %d · Revised from %d" read
           fact.mf_events.mfe_retracted_count
           (List.length fact.mf_events.mfe_revised_from)
       in
@@ -582,9 +686,12 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
         |> List.mapi (fun index line ->
              (if index = 0 then history_prefix else String.make prefix_width ' ') ^ line)
       in
-      [ Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
-      @ claim_lines
-      @ [ (* The word comes from [Keeper_memory_os_types.category], a closed
+      { heading =
+          Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset
+      ; claim_lines
+      ; claim_line_count
+      ; other_lines =
+        [ (* The word comes from [Keeper_memory_os_types.category], a closed
              set this build spells itself, so it is printed rather than
              escaped: there is no wire text left in it to escape. *)
           detail_field "Category:"
@@ -602,26 +709,63 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
                (memory_fact_age_label fact.mf_first_seen)
                (memory_fact_age_label fact.mf_last_seen))
         ]
-      @ history_lines
-      @ [ detail_field "Memory ID:" (Terminal_text.single_line fact.mf_memory_id) ]
+        @ history_lines
+        @ [ detail_field "Memory ID:" (Terminal_text.single_line fact.mf_memory_id) ]
+      }
   | Memory_row_source_fact fact ->
-      let claim_lines = detail_claim_lines ~inner_width fact.msf_claim in
-      [ Printf.sprintf "  %s%sSource-Bound Fact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
-      @ claim_lines
-      @ [ detail_field "Bound Path:" (Terminal_text.single_line fact.msf_path)
+      let claim_lines, claim_line_count =
+        detail_claim_lines ?state ~inner_width fact.msf_claim
+      in
+      { heading =
+          Printf.sprintf "  %s%sSource-Bound Fact Detail%s" Ansi.bold
+            (Theme.info ()) Ansi.reset
+      ; claim_lines
+      ; claim_line_count
+      ; other_lines =
+        [ detail_field "Bound Path:" (Terminal_text.single_line fact.msf_path)
         ; detail_field "File SHA:"
             (Printf.sprintf "%s · %sFirst Seen:%s %s" 
                (Terminal_text.single_line fact.msf_sha256)
                (Theme.recede ()) Ansi.reset
                (memory_fact_age_label fact.msf_first_seen))
         ]
+      }
   | Memory_row_invalidation row ->
-      [ Printf.sprintf "  %s%sDropped / Invalidated Fact%s" Ansi.bold (Theme.bad ()) Ansi.reset
-      ; detail_field "Reason:" (Terminal_text.single_line row.mi_reason)
-      ; detail_field "Source Path:" (Terminal_text.single_line row.mi_source_path)
-      ; detail_field "Dropped At:"
-          (memory_fact_age_label row.mi_invalidated_at ^ " ago")
-      ]
+      { heading =
+          Printf.sprintf "  %s%sDropped / Invalidated Fact%s" Ansi.bold
+            (Theme.bad ()) Ansi.reset
+      ; claim_lines = []
+      ; claim_line_count = 0
+      ; other_lines =
+        [ detail_field "Reason:" (Terminal_text.single_line row.mi_reason)
+        ; detail_field "Source Path:" (Terminal_text.single_line row.mi_source_path)
+        ; detail_field "Dropped At:"
+            (memory_fact_age_label row.mi_invalidated_at ^ " ago")
+        ]
+      }
+
+let fact_detail_line_count parts =
+  1 + parts.claim_line_count + List.length parts.other_lines
+
+let first_lines count lines =
+  let rec collect remaining kept = function
+    | _ when remaining <= 0 -> List.rev kept
+    | [] -> List.rev kept
+    | line :: rest -> collect (remaining - 1) (line :: kept) rest
+  in
+  collect count [] lines
+
+let fact_detail_prefix parts count =
+  if count <= 0 then []
+  else
+    let claim_kept = min parts.claim_line_count (count - 1) in
+    parts.heading
+    :: (first_lines claim_kept parts.claim_lines
+       @ first_lines (count - 1 - claim_kept) parts.other_lines)
+
+let memory_fact_detail_lines ~cols row =
+  let parts = memory_fact_detail_parts ~cols row in
+  fact_detail_prefix parts (fact_detail_line_count parts)
 
 (* The fleet header above the sort row: the Total, Ordinary and Librarian
    readings, each wrapped to the frame. Its row count depends on the width, so
@@ -705,10 +849,130 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
   total @ readings
 
 
-let memory_overview_scrolled ~cols ?cursor (state : state) =
+(* Both counts are the length of what this module draws: the fleet header
+   above the list, and the selected keeper's block below it. Neither is a
+   count of readings -- a reading breaks into as many rows as the frame
+   gives it. *)
+(* The header and selected Keeper's detail share one finite body with the
+   roster. If their wrapped rows do not fit, show both ends when there is room
+   and say how many rows are hidden. A one-row slot shows only that omission,
+   rather than pretending that a clipped alert is complete. *)
+let fold_memory_rows ~subject ~max_rows rows =
+  let count = List.length rows in
+  if count <= max_rows then rows
+  else if max_rows <= 0 then []
+  else
+    let leading = (max_rows - 1) / 2 in
+    let trailing = max_rows - 1 - leading in
+    let hidden = count - leading - trailing in
+    let note =
+      Printf.sprintf "  … %d %s rows hidden; enlarge terminal" hidden subject
+    in
+    List.filteri (fun index _ -> index < leading) rows
+    @ [ note ]
+    @ List.filteri (fun index _ -> index >= count - trailing) rows
+
+(* A stalled gap is the actionable reading in the selected Keeper's block.
+   Keep its typed row when the body budget folds the surrounding detail; the
+   generic first/last fold could otherwise hide it in the middle. *)
+let fold_memory_context_rows ~max_rows context =
+  let rows = context.rows in
+  let count = List.length rows in
+  match context.stalled_row with
+  | None -> fold_memory_rows ~subject:"Keeper detail" ~max_rows rows
+  | Some _ when count <= max_rows -> rows
+  | Some _ when max_rows <= 1 ->
+    fold_memory_rows ~subject:"Keeper detail" ~max_rows rows
+  | Some (stalled_index, stalled_row) ->
+    let extra = max_rows - 2 in
+    let before = min stalled_index (extra / 2) in
+    let after = min (count - stalled_index - 1) (extra - before) in
+    let before = min stalled_index (extra - after) in
+    let hidden = count - before - after - 1 in
+    let note =
+      Printf.sprintf "  … %d Keeper detail rows hidden; enlarge terminal" hidden
+    in
+    List.filteri (fun index _ -> index < before) rows
+    @ [ note; stalled_row ]
+    @ List.filteri (fun index _ -> index >= count - after) rows
+
+let memory_refused_keeper_lines (state : state) =
+  match state.memory_health with
+  | Some { mhs_refused_keepers = []; _ } | None -> []
+  | Some { mhs_refused_keepers = refused; _ } ->
+    List.map
+      (fun refusal ->
+        Printf.sprintf "  %s · row not read: %s"
+          (match refusal.mkr_keeper_id with
+           | Some keeper_id -> Terminal_text.single_line keeper_id
+           | None -> "(keeper id not read)")
+          (Terminal_text.single_line refusal.mkr_reason))
+      refused
+
+type memory_overview_projection =
+  { header : string list
+  ; refused : string list
+  ; refused_divider : bool
+  ; context : string list
+  }
+
+let refused_rows projection =
+  List.length projection.refused + if projection.refused_divider then 1 else 0
+
+let memory_overview_rows ~cols ~budget ?cursor (state : state) =
+  let keepers = visible_memory_keepers state in
+  let cursor = Option.value cursor ~default:state.memory_health_cursor in
+  let context =
+    match List.nth_opt keepers (max 0 (min cursor (List.length keepers - 1))) with
+    | None -> { rows = []; stalled_row = None }
+    | Some keeper -> memory_context_lines ~cols keeper
+  in
+  let all_refused = memory_refused_keeper_lines state in
+  let base = memory_overview_scrolled ~header_rows:0 ~refused_rows:0 ~context_rows:0 state in
+  (* The context divider needs a row only when the detail itself is shown. *)
+  let fixed_rows = base.sc_chrome - Masc_tui_frame.chrome_rows in
+  (* A nonempty list needs one selected row; a longer list also needs its
+     overflow line. The empty state needs one explanation row. *)
+  let list_rows = if List.length keepers > 1 then 2 else 1 in
+  (* Reserve a visible count when decoding rejected rows. The rejection
+     block spends any additional room after the summary and before detail. *)
+  let refused_min = if all_refused = [] then 0 else 1 in
+  (* Preserve an omission count and the stalled-gap row, plus their divider,
+     before the fleet summary and rejected rows spend the remaining body. *)
+  let context_reserve =
+    if Option.is_some context.stalled_row then 3 else 0
+  in
+  let header =
+    memory_fleet_header_rows ~cols state
+    |> fold_memory_rows ~subject:"Memory summary"
+         ~max_rows:(max 0 (budget - fixed_rows - list_rows - refused_min - context_reserve))
+  in
+  let refused_available =
+    max 0 (budget - fixed_rows - list_rows - List.length header - context_reserve)
+  in
+  let refused =
+    fold_memory_rows ~subject:"rejected Keeper"
+      ~max_rows:(if refused_available > 1 then refused_available - 1 else refused_available)
+      all_refused
+  in
+  let refused_divider = refused <> [] && refused_available > 1 in
+  let refused_spent = List.length refused + if refused_divider then 1 else 0 in
+  let context =
+    let available =
+      budget - fixed_rows - list_rows - List.length header - refused_spent
+    in
+    if context.rows = [] || available <= 1 then []
+    else
+      fold_memory_context_rows ~max_rows:(available - 1) context
+  in
+  { header; refused; refused_divider; context }
+
+let memory_overview_scrolled ~cols ~budget ?cursor (state : state) =
+  let projection = memory_overview_rows ~cols ~budget ?cursor state in
   memory_overview_scrolled
-    ~header_rows:(List.length (memory_fleet_header_rows ~cols state))
-    ?cursor state
+    ~header_rows:(List.length projection.header)
+    ~refused_rows:(refused_rows projection)
+    ~context_rows:(List.length projection.context) state
 
 let render_memory_body ~cols ~budget (state : state)
     ~(push : string -> unit)
@@ -733,7 +997,8 @@ let render_memory_body ~cols ~budget (state : state)
       (Theme.recede ()) Ansi.reset
       (Theme.recede ()) Ansi.reset
   in
-  List.iter push (memory_fleet_header_rows ~cols state);
+  let projection = memory_overview_rows ~cols ~budget state in
+  List.iter push projection.header;
   push info_bar;
   let search_bar =
     (* The one value the list was filtered by. [visible_memory_keepers] narrows
@@ -764,30 +1029,17 @@ let render_memory_body ~cols ~budget (state : state)
        push_styled ~style:(Theme.bad ())
          ("  " ^ Terminal_text.single_line detail);
        push_divider ());
-  (* A keeper row the decoder refused is drawn as one line naming the keeper
-     and the reason; the rows that decoded are drawn below as usual. *)
-  (match state.memory_health with
-   | Some { mhs_refused_keepers = []; _ } | None -> ()
-   | Some { mhs_refused_keepers = refused; _ } ->
-       List.iter
-         (fun refusal ->
-           push_styled ~style:(Theme.bad ())
-             (Printf.sprintf "  %s · row not read: %s"
-                (match refusal.mkr_keeper_id with
-                 | Some keeper_id -> Terminal_text.single_line keeper_id
-                 | None -> "(keeper id not read)")
-                (Terminal_text.single_line refusal.mkr_reason)))
-         refused;
-       push_divider ());
+  (* The rejected rows use the same bounded projection as scroll layout. An
+     omitted block retains its count, and never pushes the roster offscreen. *)
+  List.iter (push_styled ~style:(Theme.bad ())) projection.refused;
+  if projection.refused_divider then push_divider ();
   let cursor =
     if shown = 0 then 0 else max 0 (min state.memory_health_cursor (shown - 1))
   in
-  let context_lines =
-    match List.nth_opt keepers cursor with
-    | None -> []
-    | Some k -> memory_context_lines k
-  in
-  let layout = memory_overview_scrolled ~cols ~cursor state in
+  let layout = Masc_tui_types.memory_overview_scrolled
+      ~header_rows:(List.length projection.header)
+      ~refused_rows:(refused_rows projection)
+      ~context_rows:(List.length projection.context) state in
   let rows = budget + Masc_tui_frame.chrome_rows in
   let available = max 1 (rows - layout.sc_chrome) in
   let overflowing = shown > available in
@@ -833,22 +1085,28 @@ let render_memory_body ~cols ~budget (state : state)
       push_styled ~style:(Theme.recede ())
         (Printf.sprintf "[keepers %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
   end;
-  (match context_lines with
+  (match projection.context with
    | [] -> ()
    | lines ->
        push_divider ();
        List.iter (push_styled ~style:(Theme.recede ())) lines)
 
+(* How many fact rows the list keeps before the detail below it takes any.
+   Enough to read the cursor against its neighbours -- one row above, one
+   below, and the room a filter leaves when it lands the cursor near an
+   edge. One of these rows goes to the window reading when the list
+   overflows, the way it does on every other reading pane. Under this the
+   browser stops being one. *)
+let memory_fact_list_floor_rows = 5
+
 let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   let total = List.length rows in
   let cursor = max 0 (min cursor (total - 1)) in
-  let detail_lines =
-    match List.nth_opt rows cursor with
-    | None -> []
-    | Some row -> memory_fact_detail_lines ~cols row
+  let detail =
+    Option.map (memory_fact_detail_parts ~state ~cols) (List.nth_opt rows cursor)
   in
-  let detail_rows =
-    match detail_lines with [] -> 0 | lines -> 1 + List.length lines
+  let total_detail_lines =
+    Option.fold ~none:0 ~some:fact_detail_line_count detail
   in
   let store_error_rows =
     match state.memory_facts with
@@ -867,14 +1125,49 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
      divider. Input asks for the target cursor because wrapped details can
      change the height on every movement. The search row is counted from
      [memory_search_query], the same value the renderer draws it from. *)
-  let fixed_rows =
+  let chrome_rows =
     4
     + (if Option.is_some state.memory_facts then 1 else 0)
     + (if String.trim (memory_search_query state) <> "" then 1 else 0)
-    + detail_rows + store_error_rows
+    + store_error_rows
     + (if Option.is_some state.memory_facts_error then 2 else 0)
   in
-  let room = max 1 (budget - fixed_rows) in
+  (* The detail is as tall as the fact under the cursor, and a fact can be
+     any length. On the live store at thirty rows one fact filled fifteen of
+     them and the list fell to its floor of one: a browser of 254 facts
+     showing one row, whose height then moved on every [j] as the next fact
+     wrapped to a different depth. The list keeps this many rows before the
+     detail takes any, and what the detail then loses is one keypress away --
+     [Enter] opens the whole fact in an overlay that owns the terminal. *)
+  let room_below_chrome = max 1 (budget - chrome_rows) in
+  let detail_row_budget =
+    min (if total_detail_lines = 0 then 0 else 1 + total_detail_lines)
+      (max 0 (room_below_chrome - memory_fact_list_floor_rows))
+  in
+  let detail_lines =
+    match detail with
+    | None -> []
+    | Some parts ->
+      let kept = max 0 (detail_row_budget - 1) in
+      (* The detail also needs its divider. With no line left after that,
+         even the folded marker would exceed the rows reserved for it. *)
+      if kept = 0 then []
+      else if kept >= total_detail_lines then
+        fact_detail_prefix parts total_detail_lines
+      else
+        (* The last row it can draw says what is under the fold, in the
+           window the list below and the other reading panes draw. *)
+        fact_detail_prefix parts (kept - 1)
+        @ [ Printf.sprintf "      [fact %s \xc2\xb7 Enter for the whole fact]"
+              (Masc_tui_scroll.window_text ~scroll:0
+                 ~height:(kept - 1) total_detail_lines) ]
+  in
+  (* A budgeted detail that drew nothing also spends no divider. Returning
+     that row to the list keeps tiny viewports full. *)
+  let detail_rows =
+    match detail_lines with [] -> 0 | lines -> 1 + List.length lines
+  in
+  let room = max 1 (room_below_chrome - detail_rows) in
   let overflowing = total > room in
   let height = if overflowing then max 1 (room - 1) else room in
   let scroll =

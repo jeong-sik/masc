@@ -378,6 +378,19 @@ let rec param_of_pairs ~context pairs =
     | other -> Error (sprintf "%s: unknown key %S" context other)
   in
   let* fields = ordered_fields ~field pairs in
+  (* An array must say what its elements are. Gemini refuses the whole request
+     over one array property without [items] ("...items: missing field", HTTP
+     400); other providers accept it, so masc_board_curation_submit carried two
+     such arrays unnoticed while it was deferred, and once #38588 declared every
+     Antigravity tool eagerly, each Antigravity turn failed on it. *)
+  let* () =
+    match declared, List.mem_assoc "items" pairs with
+    | Ptype_array, false ->
+      Error (sprintf "%s: an array parameter must declare items" context)
+    | Ptype_array, true
+    | (Ptype_string | Ptype_integer | Ptype_number | Ptype_boolean | Ptype_object), _ ->
+      Ok ()
+  in
   (* A nested object carries its children's [required] as a sibling list, the
      same way the top level does. The child's own [required = true] is read
      here rather than emitted into the child, so the list sits where JSON

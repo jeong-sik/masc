@@ -259,6 +259,7 @@ let combinator_tool =
           ; ( "properties"
             , `Assoc
                 [ "argv", `Assoc [ "type", `String "array" ]
+                ; "command", `Assoc [ "type", `String "string" ]
                 ; ( "shell"
                   , `Assoc
                       [ "type", `String "string"
@@ -272,7 +273,7 @@ let combinator_tool =
           ; ( "oneOf"
             , `List
                 [ `Assoc [ "required", `List [ `String "argv" ] ]
-                ; `Assoc [ "required", `List [ `String "script" ] ]
+                ; `Assoc [ "required", `List [ `String "command" ] ]
                 ] )
           ] )
     ]
@@ -301,6 +302,7 @@ let test_anthropic_strips_top_level_combinators () =
   check bool "properties kept" true (List.mem_assoc "properties" schema);
   match List.assoc_opt "properties" schema with
   | Some (`Assoc properties) -> (
+    check bool "command property kept" true (List.mem_assoc "command" properties);
     match List.assoc_opt "shell" properties with
     | Some (`Assoc shell) ->
       check bool "nested oneOf kept" true (List.mem_assoc "oneOf" shell)
@@ -1419,7 +1421,11 @@ let test_invalid_count_response_is_provider_parse_failure () =
           Agent_core.Error.Api
             (Retry.InvalidRequest { reason = Retry.Json_parse_error; _ })
       ; provider_failure =
-          Some { Agent_core.Provider_failure_attribution.evidence = Response_parse; _ }
+          Some
+            { Agent_core.Provider_failure_attribution.evidence = Response_parse
+            ; ownership = Agent_core.Provider_failure_attribution.Unclassified
+            ; binding = Some _
+            }
       } -> ()
   | Error detailed -> fail (Agent_core.Error.to_string detailed.error)
   | Ok _ -> fail "malformed provider count response must fail"

@@ -111,9 +111,6 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
   | Keeper_meta_contract.Runtime_exhausted _ ->
       Keeper_turn_disposition.Provider_error
         (Keeper_turn_terminal_code.Provider_runtime_error raw_blocker_class)
-  | Keeper_meta_contract.Capacity_backpressure ->
-      Keeper_turn_disposition.Provider_error
-        (Keeper_turn_terminal_code.Provider_runtime_error raw_blocker_class)
   | Keeper_meta_contract.Fiber_unresolved ->
       Keeper_turn_disposition.Provider_error
         Keeper_turn_terminal_code.Fiber_unresolved
@@ -338,6 +335,19 @@ let trust_model_json_fields (model : Trust_core.t) =
   ; "attention_reason", Json_util.string_opt_to_json model.attention_reason
   ; "next_human_action", Json_util.string_opt_to_json model.next_human_action
   ]
+;;
+
+let unread_keeper_json ~disposition ~disposition_reason ~attention_reason
+    ~next_human_action =
+  `Assoc
+    (trust_model_json_fields
+       { Trust_core.disposition
+       ; disposition_reason
+       ; receipt_operator_disposition = None
+       ; needs_attention = true
+       ; attention_reason = Some attention_reason
+       ; next_human_action = Some next_human_action
+       })
 ;;
 
 let decision_log_persistence_surface = "keeper_runtime_trust_decision_log"

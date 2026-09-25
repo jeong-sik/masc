@@ -72,6 +72,17 @@ val cancel_keeper_schedules :
 (** Cancels only future wake schedules for [keeper_name]. Already-delivered
     wake messages and their Keeper-owned results are not schedule state. *)
 
+val resume_fenced_owners :
+  Workspace_utils.config ->
+  newly_held:Schedule_runner.held list ->
+  Schedule_runner.held list ->
+  unit
+(** For each Keeper a tick held on its shutdown fence, ask the operation that
+    now holds that fence to walk its finalization again, once. Call it after
+    the tick, so every held schedule is already settled as [Due] (#34642).
+    If an operation cannot be walked in-process, log that phase only when
+    its fence first causes a hold. *)
+
 type keeper_wake_acceptance =
   | Wake_required
   | Already_pending of string

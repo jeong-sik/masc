@@ -295,6 +295,23 @@ let test_dedup_keeps_the_event_the_journal_lost () =
   Alcotest.(check bool) "seq 6 arrives live only" true (is_new (Some 6));
   Alcotest.(check bool) "a seq-less settle event always passes" true (is_new None)
 
+(* A transport comment must never conceal an operation whose wire terminal was
+   missed. The stream closes on a durable terminal so the TUI can reconcile
+   its exact request; an unreadable store retains the old idle recovery. *)
+let test_heartbeat_preserves_terminal_reconciliation () =
+  let decide = Stream.For_testing.operation_heartbeat_decision in
+  Alcotest.(check bool) "queued operation keeps its stream" true
+    (decide (Some Keeper_owner.Chat_operation.Queued) = `Send_comment);
+  Alcotest.(check bool) "running operation keeps its stream" true
+    (decide (Some (Keeper_owner.Chat_operation.Running { started_at = 1.0 }))
+     = `Send_comment);
+  Alcotest.(check bool) "terminal operation closes for exact reconciliation" true
+    (decide (Some (Keeper_owner.Chat_operation.Succeeded
+                     { completed_at = 2.0; outcome_ref = "receipt" }))
+     = `Finish_stream);
+  Alcotest.(check bool) "unreadable operation retains idle recovery" true
+    (decide None = `Retain_idle_timeout)
+
 let test_handler_replay_matches_the_pure_fold () =
   with_base "keeper-chat-replay-handler" (fun base_dir ->
     ignore (write_journal ~base_dir journaled : string);
@@ -392,6 +409,8 @@ let () =
             test_read_result_names_missing_corrupt_and_unreadable
         ; Alcotest.test_case "dedup keeps the event the journal lost" `Quick
             test_dedup_keeps_the_event_the_journal_lost
+        ; Alcotest.test_case "heartbeat preserves terminal reconciliation" `Quick
+            test_heartbeat_preserves_terminal_reconciliation
         ; Alcotest.test_case "handler replay matches the pure fold" `Quick
             test_handler_replay_matches_the_pure_fold
         ; Alcotest.test_case "handler replay degrades to nothing" `Quick

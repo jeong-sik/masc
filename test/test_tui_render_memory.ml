@@ -86,9 +86,12 @@ let test_detail_names_the_use_record () =
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-1"
     ; mf_events =
-        { mfe_retrieved_count = 4
-        ; mfe_retrieved_distinct_days = 2
-        ; mfe_last_retrieved_at = Some (Unix.gettimeofday () -. 7200.0)
+        { mfe_retrieval =
+            Decode.Retrieved
+              { count = 4
+              ; distinct_days = 2
+              ; last_at = Unix.gettimeofday () -. 7200.0
+              }
         ; mfe_retracted_count = 1
         ; mfe_revised_from = [ "mem-0" ]
         }
@@ -101,10 +104,47 @@ let test_detail_names_the_use_record () =
   match List.find_opt (fun line -> contains "History:" line) lines with
   | None -> fail "the detail has no History line"
   | Some line ->
-    check bool "retrieval count and days" true (contains "Retrieved 4 · 2 days" line);
+    check bool "retrieval count and days" true (contains "Retrieved 4 on 2 days" line);
     check bool "last retrieval as an age" true (contains "last 2h" line);
     check bool "past retractions and predecessors" true
       (contains "Retracted 1 · Revised from 1" line)
+;;
+
+(* A fact nobody has read draws "Never retrieved" once, with no count, day
+   count or clock beside it: the day count and the clock are computed from
+   the count, so a zero count has nothing more to say.
+
+   The two counts after it keep their zeros: they are measured, and a hidden
+   measured zero reads as "not measured". *)
+let test_a_fact_nobody_read_says_so_once () =
+  let fact : Decode.memory_fact =
+    { mf_claim = "the deploy needs assets"
+    ; mf_category = Cat.Lesson
+    ; mf_origin = "authored"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_memory_id = "mem-2"
+    ; mf_events =
+        { mfe_retrieval = Decode.Never_retrieved
+        ; mfe_retracted_count = 0
+        ; mfe_revised_from = []
+        }
+    }
+  in
+  let lines =
+    Render_memory.memory_fact_detail_lines ~cols:120 (Types.Memory_row_fact fact)
+    |> List.map Masc_tui_theme.strip_sgr
+  in
+  match List.find_opt (fun line -> contains "History:" line) lines with
+  | None -> fail "the detail has no History line"
+  | Some line ->
+    check bool "the unread reading is one clause" true
+      (contains "Never retrieved" line);
+    check bool "it does not also count to zero" false (contains "Retrieved 0" line);
+    check bool "nor spell a day count" false (contains "0 days" line);
+    check bool "nor a clock" false (contains "last never" line);
+    check bool "the measured zeros stay" true
+      (contains "Retracted 0 · Revised from 0" line)
 ;;
 
 let test_detail_lines () =
@@ -418,6 +458,69 @@ let rows_drawn ~cols ~budget state =
     ~push_empty:(fun () -> incr count);
   !count
 
+let body_lines ~cols ~budget state =
+  let lines = ref [] in
+  let keep line = lines := Masc_tui_theme.strip_sgr line :: !lines in
+  Render_memory.render_memory_body ~cols ~budget state
+    ~push:keep
+    ~push_styled:(fun ~style:_ line -> keep line)
+    ~push_selected:keep
+    ~push_divider:(fun () -> keep "")
+    ~push_empty:(fun () -> keep "");
+  List.rev !lines
+
+(* The Librarian row ends in "failed N since server start". Cut at the frame
+   it reads "failed N", which is a running total and not what the server
+   said (#36497) -- the reading the fleet summary above already breaks at its
+   clause mark rather than lose. The row under the list did not.
+
+   A reading that needs more than two rows still takes two: the block is paid
+   for out of the list's rows, and a block that grows without a bound takes
+   the list with it. It keeps its first row and its last and folds the middle
+   into the cut mark, so the tail survives at 80 columns and narrower. Joined
+   back into one row, as the block drew it before, the frame cut "since
+   server start" off at both narrow widths below. *)
+let test_the_keeper_block_breaks_the_librarian_row_at_a_clause_mark () =
+  let keeper =
+    { (make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024) with
+      Decode.mkh_librarian_failures = 3
+    }
+  in
+  let state = make_state () in
+  state.memory_health <- Some (make_fleet_health keeper);
+  state.memory_health_cursor <- 0;
+  let holds needle lines =
+    List.exists (fun line -> String.equal (String.trim line) needle) lines
+  in
+  check bool "the count keeps its qualifier on a row of its own" true
+    (holds "failed 3 since server start" (body_lines ~cols:140 ~budget:30 state));
+  List.iter
+    (fun cols ->
+      let inner = Masc_tui_frame.inner_width ~cols in
+      let rec librarian_rows = function
+        | first :: second :: _
+          when String.starts_with ~prefix:"Librarian \xc2\xb7 " (String.trim first) ->
+          Some (first, second)
+        | _ :: rest -> librarian_rows rest
+        | [] -> None
+      in
+      match librarian_rows (body_lines ~cols ~budget:30 state) with
+      | None -> fail (Printf.sprintf "%d columns draws no Librarian row" cols)
+      | Some (first, fold) ->
+        check bool
+          (Printf.sprintf "%d columns: the second row is the fold" cols)
+          true
+          (String.starts_with ~prefix:Layout.cut_mark fold);
+        check bool
+          (Printf.sprintf "%d columns: the fold keeps the qualifier" cols)
+          true
+          (String.ends_with ~suffix:"failed 3 since server start" fold);
+        check bool
+          (Printf.sprintf "%d columns: both rows fit inside the frame" cols)
+          true
+          (Layout.display_width first <= inner && Layout.display_width fold <= inner))
+    [ 60; 80 ]
+
 (* The fleet readings wrap, so the header takes more rows at a narrow width
    than a fixed count could assume; the scroll bound now receives the real
    length ([~header_rows]) instead of a guess, and the body has to draw inside
@@ -443,7 +546,57 @@ let test_memory_header_rows_come_out_of_the_budget () =
         (Printf.sprintf "%d columns draws inside its budget" cols)
         true
         (rows_drawn ~cols ~budget:20 state <= 20))
-    [ 80; 100; 140 ]
+    [ 80; 100; 140 ];
+  let compact = body_lines ~cols:80 ~budget:20 state in
+  check bool "a short frame names hidden detail rows" true
+    (List.exists (contains "Keeper detail rows hidden") compact);
+  check bool "a short frame keeps the selected Keeper" true
+    (List.exists (contains "alpha") compact);
+  check bool "a short frame keeps the detail's last reading" true
+    (List.exists (contains "vision ingest errors 0") compact)
+;;
+
+let test_refused_keeper_rows_stay_inside_the_memory_budget () =
+  let state = make_state () in
+  let keepers =
+    List.map
+      (fun id -> make_keeper_health ~keeper_id:id ~facts:10 ~snapshot_bytes:1024)
+      [ "alpha"; "beta"; "gamma" ]
+  in
+  let refused =
+    List.init 40 (fun index ->
+      { Decode.mkr_keeper_id = Some (Printf.sprintf "broken-%02d" index)
+      ; mkr_reason = "unsupported snapshot state"
+      })
+  in
+  state.memory_health <- Some
+    { (make_fleet_health (List.hd keepers)) with
+      Decode.mhs_keepers = keepers
+    ; mhs_refused_keepers = refused
+    };
+  state.memory_health_cursor <- 2;
+  let budget = 20 in
+  check bool "rejected rows leave the selected roster and footer inside the body" true
+    (rows_drawn ~cols:100 ~budget state <= budget);
+  let lines = body_lines ~cols:100 ~budget state in
+  let hidden =
+    match List.find_opt (contains "rejected Keeper rows hidden") lines with
+    | None -> fail "the truncated rejected rows have no count"
+    | Some note ->
+      Scanf.sscanf note "  … %d rejected Keeper rows hidden; enlarge terminal"
+        (fun count -> count)
+  in
+  let displayed = List.length (List.filter (contains "row not read") lines) in
+  check int "the hidden count reconciles with the shown rejected rows" 40
+    (hidden + displayed);
+  let selected = ref [] in
+  let ignore_row _ = () in
+  Render_memory.render_memory_body ~cols:100 ~budget state
+    ~push:ignore_row ~push_styled:(fun ~style:_ _ -> ())
+    ~push_selected:(fun row -> selected := row :: !selected)
+    ~push_divider:(fun () -> ()) ~push_empty:(fun () -> ());
+  check bool "the last selected Keeper remains visible" true
+    (List.exists (contains "gamma") !selected)
 ;;
 
 
@@ -1666,8 +1819,13 @@ let test_render_memory_overflow_selection () =
       ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
       ~overflow_takes_row:layout.sc_overflow_takes_row
   in
-  check int "five keepers fit two list rows beside their context" 2
-    (height (Render_memory.memory_overview_scrolled ~cols:100 state));
+  (* One of the two list rows went to the context block when the Librarian
+     row started breaking at its clause mark rather than losing "failed N
+     since server start" to the frame. The block is paid for out of the same
+     rows as the list, and this fixture's frame is 22 rows: a terminal tall
+     enough to show the roster spends the row against many more. *)
+  check int "five keepers fit one list row beside their context" 1
+    (height (Render_memory.memory_overview_scrolled ~cols:100 ~budget state));
   let assert_selected_visible () =
     let used = ref 0 and selected = ref None in
     let push _ = incr used in
@@ -1679,12 +1837,14 @@ let test_render_memory_overflow_selection () =
       ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
     let expected = Option.get (Types.selected_memory_keeper state) in
     check bool "the selected keeper is inside the visible body" true
-      (Option.fold ~none:false ~some:(contains expected.mkh_keeper_id) !selected)
+      (Option.fold ~none:false ~some:(contains expected.mkh_keeper_id) !selected);
+    check bool "header, roster, overflow and detail fit their shared budget" true
+      (rows_drawn ~cols:100 ~budget state <= budget)
   in
   (* Move through an overflowing list using the same target-row layout as
      keyboard input, including the context of the newly selected keeper. *)
   for cursor = 0 to 4 do
-    let layout = Render_memory.memory_overview_scrolled ~cols:100 ~cursor state in
+    let layout = Render_memory.memory_overview_scrolled ~cols:100 ~budget ~cursor state in
     state.memory_health_cursor <- cursor;
     state.memory_health_scroll <-
       Masc_tui_scroll.ensure_visible ~cursor ~height:(height layout)
@@ -1692,11 +1852,11 @@ let test_render_memory_overflow_selection () =
     assert_selected_visible ()
   done;
   check int "the final row's error and alert leave one list row" 1
-    (height (Render_memory.memory_overview_scrolled ~cols:100 state));
+    (height (Render_memory.memory_overview_scrolled ~cols:100 ~budget state));
   check int "the final row requires scrolling" 4 state.memory_health_scroll;
   state.search_last <- "keeper-4";
   state.memory_health_error <- Some "refresh failed";
-  let layout = Render_memory.memory_overview_scrolled ~cols:100 state in
+  let layout = Render_memory.memory_overview_scrolled ~cols:100 ~budget state in
   check int "filter bounds the cursor to the one visible keeper" 1 layout.sc_count;
   check (option (list string)) "search names the same filtered row"
     (Some ["keeper-4 read-error"]) (Types.surface_row_texts state Types.Memory);
@@ -1801,6 +1961,8 @@ let () =
         ; test_case "invalidation_row" `Quick test_invalidation_row_line
         ; test_case "rows_and_header_share_one_grid" `Quick test_rows_and_header_share_one_grid
         ; test_case "detail_names_the_use_record" `Quick test_detail_names_the_use_record
+        ; test_case "a fact nobody read says so once" `Quick
+            test_a_fact_nobody_read_says_so_once
         ] )
     ; ( "detail_lines"
       , [ test_case "detail_lines_bounded" `Quick test_detail_lines
@@ -1814,6 +1976,10 @@ let () =
       , [ test_case "memory_body_budget" `Quick test_render_memory_body
         ; test_case "header rows come out of the budget" `Quick
             test_memory_header_rows_come_out_of_the_budget
+        ; test_case "rejected Keeper rows remain inside the budget" `Quick
+            test_refused_keeper_rows_stay_inside_the_memory_budget
+        ; test_case "the keeper block breaks the Librarian row at a clause mark"
+            `Quick test_the_keeper_block_breaks_the_librarian_row_at_a_clause_mark
         ; test_case "memory_body_with_keepers" `Quick test_render_memory_body_with_keepers
         ; test_case "the filter bar names the query it counted" `Quick
             test_the_memory_filter_bar_names_the_query_it_counted

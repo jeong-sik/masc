@@ -39,14 +39,15 @@ val lines :
   localtime:(float -> Unix.tm) ->
   inner_width:int ->
   rows:int ->
-  tasks:(Tui_decode.task list, string) result ->
+  tasks:Masc_tui_overview_tasks.rows_reading ->
   Masc_tui_types.overview_goals_reading ->
   string list
 (** At most [rows] lines, headline first. Goals past the budget are cut from
     the bottom and the headline says how many are drawn. [now] is the Unix
     time the due-date countdown counts from; [localtime] puts it on the
     operator's calendar, since a due date carries no zone. [tasks] is the
-    backlog the headline counts; its read error replaces the count. *)
+    backlog the headline counts. Only rows that were read are counted; an
+    unread or unavailable backlog is said instead. *)
 
 val draw :
   Buffer.t ->
@@ -54,7 +55,7 @@ val draw :
   rows:int ->
   now:float ->
   localtime:(float -> Unix.tm) ->
-  tasks:(Tui_decode.task list, string) result ->
+  tasks:Masc_tui_overview_tasks.rows_reading ->
   Masc_tui_types.overview_goals_reading ->
   unit
 (** The {!lines} as framed rows and the divider under them. Nothing when

@@ -103,6 +103,62 @@ type token_usage =
   ; total_tokens : int
   }
 
+type last_usage =
+  | Request_usage of token_usage
+  | Context_estimate of { estimated_tokens : int }
+
+type frame_usage =
+  | Counted of
+      { last : last_usage
+      ; thread_total : token_usage
+      }
+  | Context_window_filled of { context_window : int }
+
+type turn_usage =
+  | Thread_count of
+      { last : last_usage
+      ; thread_total : token_usage
+      }
+  | Thread_count_replaced
+
+(* Both zero-count shapes are the whole breakdown Codex writes by name
+   (rust-v0.156.1): [TokenUsage { total_tokens: n, ..TokenUsage::default() }]
+   in recompute_token_usage for [last] and in fill_to_context_window for
+   [total]. A response's counts always carry input, so a breakdown with no
+   counts but a total is one of those two and never a request. Measured
+   2026-09-25 over 29,088 Keeper and interactive frames: 266 estimates and
+   332 fills, each fill its thread's final frame. *)
+let only_total_tokens (usage : token_usage) =
+  usage.input_tokens = 0
+  && usage.cached_input_tokens = 0
+  && usage.cache_write_input_tokens = 0
+  && usage.output_tokens = 0
+  && usage.reasoning_output_tokens = 0
+  && usage.total_tokens > 0
+;;
+
+let frame_usage_of_breakdowns ~last ~thread_total =
+  if only_total_tokens thread_total
+  then Context_window_filled { context_window = thread_total.total_tokens }
+  else
+    let last =
+      if only_total_tokens last
+      then Context_estimate { estimated_tokens = last.total_tokens }
+      else Request_usage last
+    in
+    Counted { last; thread_total }
+;;
+
+(* A fill replaces the running count for the rest of the turn: a count read
+   after it starts from zero again, so it cannot stand for the turn. *)
+let fold_turn_usage seen frame =
+  match seen, frame with
+  | Some Thread_count_replaced, (Counted _ | Context_window_filled _)
+  | (None | Some (Thread_count _)), Context_window_filled _ -> Thread_count_replaced
+  | (None | Some (Thread_count _)), Counted { last; thread_total } ->
+    Thread_count { last; thread_total }
+;;
+
 type turn_result =
   { thread_id : string
   ; turn_id : string
@@ -112,10 +168,10 @@ type turn_result =
   ; subscription : subscription
   ; user_agent : string option
   ; resumed : bool
-  ; usage : token_usage option
-    (* [None] when no thread/tokenUsage/updated for this turn arrived before
-       turn/completed; the host then reports the usage scope as unavailable
-       rather than a count of zero. *)
+  ; usage : turn_usage option
+    (* The turn's thread/tokenUsage/updated frames, folded; [None] when none
+       arrived before turn/completed. *)
+  ; model_context_window : int option
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
@@ -128,6 +184,7 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
+  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -160,7 +217,10 @@ type stream_event =
       { turn_id : string
       ; model : string
       }
-  | Text_delta of string
+  | Text_delta of
+      { item_id : string option
+      ; delta : string
+      }
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -175,6 +235,12 @@ type stream_event =
       ; reason : elicitation_cancel_reason
       }
   | Usage_windows_reported of Runtime_provider_usage_window.report
+  | Usage_reported of
+      { thread_id : string
+      ; turn_id : string
+      ; model : string
+      ; frame : frame_usage
+      }
   | Turn_finished of { text : string }
 
 let emit_stream_event on_stream_event event =
@@ -367,6 +433,8 @@ let error_to_string = function
       "Codex app-server stopped after repeated tool call: tool=%s count=%d"
       tool_name
       repeated_count
+  | Stopped_by_host Queued_chat_operation ->
+    "Codex app-server stopped for a queued chat operation"
   | Stopped_by_host (Terminal_tool_boundary { tool_name; _ }) ->
     Printf.sprintf "Codex app-server stopped at terminal tool boundary: tool=%s" tool_name
   | Turn_interrupted -> "Codex app-server turn was interrupted"
@@ -1076,6 +1144,43 @@ let item_delta_notification ~method_ ~thread_id ~turn_id params =
   else Ok delta
 ;;
 
+(* The agentMessage item an [item/agentMessage/delta] belongs to. It only
+   tells two assistant messages of one turn apart in the live stream, so it
+   stays optional for the reason [item_delta_notification] gives: a frame
+   that omits it or sends it blank streams its delta and names no item. *)
+let agent_message_item_id params =
+  match params with
+  | `Assoc fields ->
+    (match List.assoc_opt "itemId" fields with
+     | Some (`String item_id) when String.trim item_id <> "" -> Some item_id
+     | Some _ | None -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+;;
+
+(* One [TokenUsageBreakdown] of a [thread/tokenUsage/updated] frame. *)
+let token_usage_breakdown stage usage_fields name =
+  let* breakdown_json = required_member stage name usage_fields in
+  let* breakdown = assoc_at stage breakdown_json in
+  let* input_tokens = required_count stage "inputTokens" breakdown in
+  let* cached_input_tokens = required_count stage "cachedInputTokens" breakdown in
+  let* output_tokens = required_count stage "outputTokens" breakdown in
+  let* reasoning_output_tokens = required_count stage "reasoningOutputTokens" breakdown in
+  let* total_tokens = required_count stage "totalTokens" breakdown in
+  let* cache_write_input_tokens =
+    match List.assoc_opt "cacheWriteInputTokens" breakdown with
+    | None -> Ok 0
+    | Some _ -> required_count stage "cacheWriteInputTokens" breakdown
+  in
+  Ok
+    { input_tokens
+    ; cached_input_tokens
+    ; cache_write_input_tokens
+    ; output_tokens
+    ; reasoning_output_tokens
+    ; total_tokens
+    }
+;;
+
 (* thread/tokenUsage/updated carries the thread's running totals and the
    [last] breakdown of the turn it names. Identity decides whether the frame
    is about the turn this call awaits: one for another thread or turn is an
@@ -1094,27 +1199,16 @@ let token_usage_notification ~thread_id ~turn_id params =
   else
     let* usage_json = required_member stage "tokenUsage" fields in
     let* usage_fields = assoc_at stage usage_json in
-    let* last_json = required_member stage "last" usage_fields in
-    let* last = assoc_at stage last_json in
-    let* input_tokens = required_count stage "inputTokens" last in
-    let* cached_input_tokens = required_count stage "cachedInputTokens" last in
-    let* output_tokens = required_count stage "outputTokens" last in
-    let* reasoning_output_tokens = required_count stage "reasoningOutputTokens" last in
-    let* total_tokens = required_count stage "totalTokens" last in
-    let* cache_write_input_tokens =
-      match List.assoc_opt "cacheWriteInputTokens" last with
-      | None -> Ok 0
-      | Some _ -> required_count stage "cacheWriteInputTokens" last
+    let* last = token_usage_breakdown stage usage_fields "last" in
+    let* thread_total = token_usage_breakdown stage usage_fields "total" in
+    let* model_context_window =
+      match List.assoc_opt "modelContextWindow" usage_fields with
+      | None | Some `Null -> Ok None
+      | Some (`Int window) when window > 0 -> Ok (Some window)
+      | Some _ ->
+        protocol_error stage "field \"modelContextWindow\" must be a positive integer or null"
     in
-    Ok
-      (Some
-         { input_tokens
-         ; cached_input_tokens
-         ; cache_write_input_tokens
-         ; output_tokens
-         ; reasoning_output_tokens
-         ; total_tokens
-         })
+    Ok (Some (last, thread_total, model_context_window))
 ;;
 
 (* Codex MCP requests include approvals and forms, independently of shell
@@ -1162,7 +1256,7 @@ let cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id par
     Ok ())
 ;;
 
-let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final
+let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~thread_id ~turn_id ~model ~seen_final
     ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event =
   let* message = io.receive () in
   match message with
@@ -1183,9 +1277,10 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final
       ~seen_fallback
       ~seen_usage
@@ -1193,14 +1288,16 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~on_stream_event
   | Server_request { id; method_ = "mcpServer/elicitation/request"; params } ->
     let* () = cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params in
-    await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id
+    await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~thread_id ~turn_id ~model
       ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
     Error (Unsupported_server_request method_)
   | Notification { method_ = "item/agentMessage/delta" as method_; params } ->
     let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params in
-    emit_stream_event on_stream_event (Text_delta delta);
+    emit_stream_event
+      on_stream_event
+      (Text_delta { item_id = agent_message_item_id params; delta });
     let seen_fallback =
       match seen_fallback with
       | None -> Some delta
@@ -1212,9 +1309,10 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final
       ~seen_fallback
       ~seen_usage
@@ -1226,9 +1324,10 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final
       ~seen_fallback
       ~seen_usage
@@ -1245,9 +1344,10 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final
       ~seen_fallback
       ~seen_usage
@@ -1277,7 +1377,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         :: List.filter (fun open_id -> not (String.equal open_id call_id)) open_tool_call_ids
     in
     await_turn_terminal
-      io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final ~seen_fallback
+      io ~tools ~tool_call_count ~model_context_window ~thread_id ~turn_id ~model ~seen_final ~seen_fallback
       ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
@@ -1311,9 +1411,10 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final
       ~seen_fallback
       ~seen_usage
@@ -1335,9 +1436,10 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       await_turn_terminal
         io
         ~tools
-        ~tool_call_count
+        ~tool_call_count ~model_context_window
         ~thread_id
         ~turn_id
+        ~model
         ~seen_final
         ~seen_fallback
         ~seen_usage
@@ -1364,18 +1466,39 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     in
     Ok (text, seen_usage)
   | Notification { method_ = "thread/tokenUsage/updated"; params } ->
-    let* usage = token_usage_notification ~thread_id ~turn_id params in
+    let* frame = token_usage_notification ~thread_id ~turn_id params in
+    (* A frame is not one response. Codex core sends it after a response and
+       again on a rate-limit update, a usage-limit refusal, a compaction or a
+       retried request, carrying the unchanged [last] (rust-v0.156.1;
+       measured 2026-09-25: 211 repeats in 11,815 Keeper frames). [total] is
+       the thread's running count, so a repeat reports the same count and
+       adds nothing to a spend resolved from it. That count is reported
+       here, where it is read, so a turn that later fails still leaves what
+       it spent. [seen_usage] folds the turn's frames: the newest [last]
+       for the turn result's context occupancy, [total] for its spend. *)
+    let frame =
+      Option.map
+        (fun (last, thread_total, window) ->
+           Option.iter (fun window -> model_context_window := Some window) window;
+           frame_usage_of_breakdowns ~last ~thread_total)
+        frame
+    in
+    Option.iter
+      (fun frame ->
+         emit_stream_event on_stream_event (Usage_reported { thread_id; turn_id; model; frame }))
+      frame;
     let seen_usage =
-      match usage with
-      | Some _ -> usage
+      match frame with
+      | Some frame -> Some (fold_turn_usage seen_usage frame)
       | None -> seen_usage
     in
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final
       ~seen_fallback
       ~seen_usage
@@ -1394,9 +1517,10 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final
       ~seen_fallback
       ~seen_usage
@@ -1409,9 +1533,10 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final
       ~seen_fallback
       ~seen_usage
@@ -1528,10 +1653,17 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
       , false )
     | Resume { thread_id } ->
       ( "thread/resume"
+      (* [excludeTurns]: the reply is read for the thread id and the model only
+         (parse_thread_response). Without it Codex returns every past turn in
+         [thread.turns], and a long thread's reply outgrew the 8 MiB line limit
+         (masc-pro-builder, 2026-09-20 13:11Z: Buffer_limit_exceeded on
+         resume); the next turn started a fresh thread. The flag changes the
+         reply, not the history the model sees. *)
       , [ "threadId", `String thread_id
         ; "cwd", `String protocol_cwd
         ; "approvalPolicy", `String approval_policy
         ; "permissions", `String permissions_profile
+        ; "excludeTurns", `Bool true
         ]
         @ optional_field "model" config.model
         @ optional_field "developerInstructions" config.developer_instructions
@@ -1635,13 +1767,15 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
   in
   emit_stream_event on_stream_event (Turn_started { turn_id; model });
   let tool_call_count = ref 0 in
-  let* text, usage =
+  let model_context_window = ref None in
+  let* text, turn_usage =
     await_turn_terminal
       io
       ~tools:dynamic_tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final:None
       ~seen_fallback:None
       ~seen_usage:None
@@ -1658,7 +1792,8 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
     ; subscription
     ; user_agent
     ; resumed
-    ; usage
+    ; usage = turn_usage
+    ; model_context_window = !model_context_window
     }
 ;;
 
@@ -1851,19 +1986,28 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
     in
     let receive_phase = ref Awaiting_admission in
     let send json =
-      let payload = Yojson.Safe.to_string json in
-      (* The child decodes stdin as UTF-8 and exits on an invalid sequence,
-         which loses every in-flight turn and leaves the producer unnamed.
-         Refuse the write instead: the child survives and the field is named. *)
-      if not (String_util.is_valid_utf8 payload)
-      then
-        failwith
-          (Printf.sprintf
-             "codex app-server stdin: refusing invalid UTF-8 payload (field %s)"
-             (Option.value (invalid_utf8_field json) ~default:"<unknown>"));
       with_idle_timeout clock
         (Runtime_wall_clock.cap_window wall_clock (Some config.admission_timeout_s))
         (fun () ->
+          (* Encoding and its worker queue wait share the write's admission
+             and wall-clock bounds. Await the immutable payload before the
+             owner writes, preserving protocol order and callback ownership. *)
+          let payload =
+            Domain_pool_ref.submit_cpu_or_inline (fun () ->
+              let payload = Yojson.Safe.to_string json in
+              (* The child decodes stdin as UTF-8 and exits on an invalid sequence,
+                 which loses every in-flight turn and leaves the producer unnamed.
+                 Refuse the write instead: the child survives and the field is named. *)
+              if not (String_util.is_valid_utf8 payload)
+              then
+                failwith
+                  (Printf.sprintf
+                     "codex app-server stdin: refusing invalid UTF-8 payload (field %s)"
+                     (match invalid_utf8_field json with
+                      | Some field -> field
+                      | None -> "<unknown>"));
+              payload)
+          in
           Eio.Flow.copy_string payload stdin_w;
           Eio.Flow.copy_string "\n" stdin_w)
     in

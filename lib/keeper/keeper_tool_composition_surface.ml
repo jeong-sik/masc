@@ -344,6 +344,9 @@ let observe_node_result
       ~tool_name:result.tool_name
       ~input:result.input
       ~output_text:(Tool_result.message observed_result)
+      ?execution_evidence:
+        (Keeper_tool_call_log.execution_evidence_of_metadata
+           (Tool_result.metadata observed_result))
       ~wire_outcome:(wire_outcome_of_result observed_result)
       ~duration_ms:(Tool_result.duration_ms observed_result)
       ~model:(Keeper_hooks_agent_core_types.current_keeper_model meta)
@@ -1816,7 +1819,10 @@ let make_tools_with_authority
       | Catalog.Async -> None
       | Catalog.Inline -> on_externalization_error
     in
-    Tool_bridge.agent_core_tool_of_masc_with_execution_env
+    (* Paired here, where the entry is in hand: a composition declares
+       [defer_loading] in its Skill block, and nothing downstream should have
+       to find that block again by the generated tool name. *)
+    ( Tool_bridge.agent_core_tool_of_masc_with_execution_env
       ~descriptor
       ~base_path:config.base_path
       ?on_externalization_error:tool_externalization_error
@@ -2156,7 +2162,8 @@ let make_tools_with_authority
                ~duration_ms:(Tool_result.duration_ms result)
                ~typed_result:result
                ();
-             result))))))
+             result)))))
+    , entry.Catalog.loading ))
   in
   (* A keeper with no instruction skills gets no tool: an empty [Available]
      list would ask the model to reach for something that answers nothing. *)
@@ -2165,7 +2172,7 @@ let make_tools_with_authority
     | [] -> composition_tools
     | skills ->
       composition_tools
-      @ [ make_instruction_skill_tool
+      @ [ ( make_instruction_skill_tool
             ~config
             ?record_activation:record_instruction_activation
             ~assess_applicability:(fun ~reference ~body ->
@@ -2174,6 +2181,7 @@ let make_tools_with_authority
                 ~context ~reference ~body ())
             ~instruction_skills:skills
             ()
+          , Tool_loading_declarations.loading_of_tool Catalog.skill_tool_name )
         ]
   in
   let status_tool =
@@ -2195,7 +2203,12 @@ let make_tools_with_authority
         ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
         ~handle:(fun request_id -> cancel_result ~config ~meta ~request_id)
   in
-  composition_tools @ [ status_tool; cancel_tool ]
+  (* The Skill reader and the two request controls are not Skill
+     compositions; each is declared in its own [config/tools/<name>.toml]. *)
+  composition_tools
+  @ [ status_tool, Tool_loading_declarations.loading_of_tool Catalog.status_tool_name
+    ; cancel_tool, Tool_loading_declarations.loading_of_tool Catalog.cancel_tool_name
+    ]
 ;;
 
 let make_tools ~capability_surface =

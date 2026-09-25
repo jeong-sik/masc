@@ -8,14 +8,15 @@ module Markdown_cache = Masc_tui_markdown_render_cache
    one: [String.contains text '~'] used to answer it, and once the mark became
    "…" that check could no longer fail -- the byte it looked for had left the
    renderer, so an assertion meant to catch a regression passed for free. *)
-let carries_cut_mark text =
-  let mark = "\xe2\x80\xa6" in
-  let n = String.length mark in
+let holds text needle =
+  let n = String.length needle in
   let rec seek i =
     i + n <= String.length text
-    && (String.sub text i n = mark || seek (i + 1))
+    && (String.sub text i n = needle || seek (i + 1))
   in
-  seek 0
+  n = 0 || seek 0
+
+let carries_cut_mark text = holds text "\xe2\x80\xa6"
 
 (* No [timeline_bucket] unless a test passes one: an entry without a
    trustworthy time. Tests about the heading's clock pass [twelve_o_clock]. *)
@@ -43,6 +44,130 @@ let twelve_o_clock : Layout.timeline_bucket =
   { tb_year = 2026; tb_month = 9; tb_day = 1; tb_hour = 12; tb_is_dst = false }
 
 let notice_room_at_eighty_columns = 55
+
+let test_ascii_columns_keep_unicode_boundaries () =
+  let ascii = String.init 95 (fun i -> Char.chr (i + 0x20)) in
+  let styled = "\027[38;2;90;120;180m" ^ ascii ^ "\027[0m" in
+  List.iter
+    (fun text ->
+      check int "every printable ASCII byte is one cell" 95
+        (Layout.display_width text);
+      check string "a fitting column preserves its styles and padding"
+        (text ^ "   ") (Layout.fit_width text 98);
+      check string "an exact column preserves all bytes" text
+        (Layout.fit_width text 95))
+    [ ascii; styled ];
+  check string "cutting a styled column resets before the cut mark"
+    "\027[31mabc\027[0m…" (Layout.fit_width "\027[31mabcdef\027[0m" 4);
+  check string "cutting printable ASCII keeps its exact cell prefix"
+    (String.sub ascii 0 79 ^ "…") (Layout.fit_width ascii 80);
+  List.iter
+    (fun (text, cells, prefix) ->
+      check int "mixed column width" cells (Layout.display_width text);
+      check string "a cut keeps the ASCII base with its Unicode continuation"
+        prefix (Layout.take_cells text (cells - 1));
+      check int "mixed columns still fit" (cells + 2)
+        (Layout.display_width (Layout.fit_width text (cells + 2))))
+    [ "Ae\xcc\x81Z", 3, "Ae\xcc\x81"
+    ; "A1\xef\xb8\x8f\xe2\x83\xa3Z", 4, "A1\xef\xb8\x8f\xe2\x83\xa3"
+    ; "A한Z", 4, "A한"
+    ; "A\r\nZ", 2, "A\r\n"
+    ; "A\xffZ", 3, "A\xff"
+    ];
+  check int "an unfinished CSI is not swallowed" 4
+    (Layout.display_width "a\027[31")
+
+(* Explicit clusters and cell widths exercise both ends of printable ASCII
+   runs without deriving expected values from the layout under test. Under
+   Uucp's terminal width policy, U+0600 (Cf), U+0301/U+094D (Mn) and ZWJ (Cf)
+   occupy zero cells; U+093E (Mc) occupies one. Controls are clamped to zero. *)
+let test_mixed_ascii_cluster_boundaries () =
+  let fixtures =
+    [ "prepend and combining", [ "\xd8\x80a", 1; "b", 1; "c", 1; "d\xcc\x81", 1; "한", 2 ]
+    ; "keycap", [ "한", 2; "a", 1; "b", 1; "1\xef\xb8\x8f\xe2\x83\xa3", 2; "Z", 1 ]
+    ; "text selector", [ "한", 2; "a", 1; "b", 1; "1\xef\xb8\x8e", 1; "Z", 1 ]
+    ; "joiner", [ "a", 1; "b", 1; "c\xe2\x80\x8d", 1; "👩‍💻", 2; "Z", 1 ]
+    ; "spacing mark", [ "a", 1; "b", 1; "c\xe0\xa4\xbe", 2; "Z", 1 ]
+    ; "short runs", [ "한", 2; "a", 1; "국", 2; "b", 1; "c", 1; "어", 2 ]
+    ; "two runs", [ "가", 2; "a", 1; "b", 1; "c", 1; "나", 2; "d", 1; "e", 1; "f\xcc\x81", 1; "다", 2 ]
+    ; "hangul and flag", [ "각", 2; "a", 1; "b", 1; "c", 1; "🇰🇷", 2; "d", 1; "e", 1; "f", 1; "한", 2 ]
+    ; "controls", [ "a", 1; "b", 1; "c", 1; "\r\n", 0; "d", 1; "e", 1; "f", 1; "\t", 0; "Z", 1 ]
+    ; "leading combining", [ "\xcc\x81", 0; "a", 1; "b", 1; "c", 1; "한", 2 ]
+    ; "trailing ASCII", [ "한", 2; "a", 1; "b", 1; "c", 1 ]
+    ; "emoji context resets", [ "👩", 2; "a", 1; "b", 1; "c\xe2\x80\x8d", 1; "👩", 2 ]
+    ; "regional indicator context resets", [ "🇰", 1; "a", 1; "b", 1; "c", 1; "🇰🇷", 2; "🇺", 1 ]
+    ; "Indic context resets", [ "क्", 1; "a", 1; "b", 1; "c", 1; "क", 1 ]
+    ]
+  in
+  List.iter
+    (fun (name, clusters) ->
+      let text = String.concat "" (List.map fst clusters) in
+      let cells = List.fold_left (fun cells (_, width) -> cells + width) 0 clusters in
+      check int (name ^ ": width") cells (Layout.display_width text);
+      for budget = 0 to cells + 1 do
+        let rec take remaining = function
+          | (cluster, width) :: rest when width <= remaining ->
+              cluster ^ take (remaining - width) rest
+          | _ -> ""
+        in
+        let expected = take budget clusters in
+        check string (name ^ ": prefix") expected (Layout.take_cells text budget);
+        if budget > 0 then begin
+          let prefix, tail = Layout.split_at_cells text budget in
+          check string (name ^ ": wrap boundary") expected prefix;
+          check string (name ^ ": wrap preserves bytes") text (prefix ^ tail)
+        end
+      done)
+    fixtures;
+  let styled = "\027[31m한abc1\xef\xb8\x8f\xe2\x83\xa3Z\027[0m" in
+  check string "styled cut keeps the keycap whole"
+    "\027[31m한abc1\xef\xb8\x8f\xe2\x83\xa3" (Layout.take_cells styled 7);
+  check string "styled narrow cut stops before the keycap"
+    "\027[31m한abc" (Layout.take_cells styled 6);
+  let malformed = "abc1\xef\xb8\x8f\xe2\x83\xa3\xff" in
+  check int "malformed range keeps scalar widths throughout" 5
+    (Layout.display_width malformed)
+
+(* Observe equal-cell rows, including mixed runs, short runs and no ASCII.
+   These are batch CPU/allocation readings with harness overhead, not terminal
+   response latency or a comparison against an earlier implementation. Keep
+   correctness assertions outside the measured loop and impose no time gate. *)
+let test_column_layout_observations () =
+  let ascii = String.init 120 (fun i -> Char.chr (Char.code 'a' + i mod 26)) in
+  let iterations = 2_000 in
+  let observe case operation text apply =
+    ignore (Sys.opaque_identity (apply (Sys.opaque_identity text)));
+    let allocated_before = Gc.allocated_bytes () in
+    let started = Sys.time () in
+    for _ = 1 to iterations do
+      ignore (Sys.opaque_identity (apply (Sys.opaque_identity text)))
+    done;
+    let elapsed = Sys.time () -. started in
+    let allocated = Gc.allocated_bytes () -. allocated_before in
+    Printf.printf
+      "layout observation case=%s operation=%s iterations=%d input_bytes=%d cpu_us/op=%.3f allocated_bytes/op=%.1f (includes harness)\n%!"
+      case operation iterations (String.length text)
+      (elapsed *. 1_000_000. /. float_of_int iterations)
+      (allocated /. float_of_int iterations)
+  in
+  List.iter
+    (fun (case, text) ->
+      check int (case ^ ": fixture occupies 120 cells") 120
+        (Layout.display_width text);
+      check int (case ^ ": padded row occupies 128 cells") 128
+        (Layout.display_width (Layout.fit_width text 128));
+      check int (case ^ ": clipped row occupies 80 cells") 80
+        (Layout.display_width (Layout.fit_width text 80));
+      observe case "display_width" text Layout.display_width;
+      observe case "fit_padded" text (fun row -> Layout.fit_width row 128);
+      observe case "fit_clipped" text (fun row -> Layout.fit_width row 80))
+    [ "ascii", ascii
+    ; "ansi", "\027[38;2;90;120;180m" ^ ascii ^ "\027[0m"
+    ; "late_unicode", String.sub ascii 0 118 ^ "한"
+    ; "leading_box", "│" ^ String.sub ascii 0 119
+    ; "short_mixed", String.concat "" (List.init 24 (fun _ -> "ab한c"))
+    ; "unicode", String.concat "" (List.init 60 (fun _ -> "한"))
+    ]
 
 let test_a_load_failure_keeps_its_address_at_eighty_columns () =
   let err =
@@ -381,16 +506,40 @@ let test_scroll_hint_says_how_far_back () =
   in
   check string "an unscrolled pane names the key that scrolls" "PgUp:scroll back" (hint 0);
   check string "a clamped position is not scrolled" "PgUp:scroll back" (hint (-1));
-  check string "a scrolled pane says how far back and that more history loads"
-    "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (3 back \xc2\xb7 more\xe2\x86\x91)"
+  check string "a scrolled pane names the keys that move it"
+    "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest"
     (hint 3);
-  check string "at the start, that is said instead of the distance"
-    "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (start)"
-    (hint ~older_exist:false 3);
-  check bool "the count does not widen the start-of-history hint" true
-    (Layout.display_width (hint ~older_exist:false 9999)
+  (* How far back is not among them. It travels as the footer's own
+     ?position, because the fitter gives up key items from the back and a
+     position is the one item on the row that [?] cannot recover. *)
+  check bool "and does not carry how far back" false (holds (hint 3) "back");
+  check bool "nor the parenthesis the distance is drawn in" false
+    (holds (hint 3) "(");
+  check string "the keys are the same at the start of the conversation"
+    (hint 3) (hint ~older_exist:false 3)
+;;
+
+(* The distance beside them. The marker answers the other half of the
+   question: how far back is one number, whether pressing up keeps finding
+   history is the other. At the oldest row with nothing more to fetch, that it
+   is the start is the more useful fact than the distance. *)
+let test_scroll_position_says_how_far_back () =
+  let position ?(older_exist = true) scrolled_back =
+    Layout.scroll_position ~scrolled_back ~older_exist
+  in
+  check (option string) "an unscrolled pane has no distance to say" None
+    (position 0);
+  check (option string) "a clamped position is not scrolled" None (position (-1));
+  check (option string) "a scrolled pane says how far back and that more loads"
+    (Some "(3 back \xc2\xb7 more\xe2\x86\x91)")
+    (position 3);
+  check (option string) "at the start, that is said instead of the distance"
+    (Some "(start)")
+    (position ~older_exist:false 3);
+  check bool "the count does not widen the start-of-history reading" true
+    (Layout.display_width (Option.get (position ~older_exist:false 9999))
      <= Layout.display_width
-          "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (start)")
+          (Option.get (position ~older_exist:false 3)))
 ;;
 
 let test_utf8_scalar_input_contract () =
@@ -2456,6 +2605,19 @@ let test_a_count_takes_the_number_it_counts () =
     (Layout.count_noun ~plural:"entries" 1 "entry")
 
 
+(* The Keepers roster's TURN cell is right-aligned to six cells. It was
+   padded with Printf's "%*s", which counts bytes, so the no-value mark --
+   three bytes and one column -- left the cell four cells wide and pulled the
+   runtime column after it two cells left. *)
+let test_a_right_aligned_cell_counts_cells_not_bytes () =
+  let width text = Layout.display_width (Layout.pad_left text 6) in
+  check int "an ascii age fills the cell" 6 (width "99d23h");
+  check int "a shorter one still fills it" 6 (width "2m14s");
+  check int "and a three-byte mark fills it too" 6 (width "\xe2\x80\x94");
+  check string "the padding goes in front" "     x" (Layout.pad_left "x" 6);
+  check string "a reading past the cell is cut, not widened" "99d2\xe2\x80\xa6"
+    (Layout.pad_left "99d23h12m" 5)
+
 (* The Board and Keeper roster ages are six cells. Days and hours from a
    hundred days on drew seven, and the column cut the day count out. *)
 let test_a_span_fits_a_six_cell_column () =
@@ -2667,6 +2829,53 @@ let test_a_clause_wider_than_the_row_is_wrapped_not_cut () =
   check string "the words survive in order" "one clause that is far too wide"
     (String.concat " " rows)
 
+(* The one ladder for a figure a reader reads at a glance. Four spelled the
+   same count four ways: the Acting pane drew "1.0M" for 1,048,576 while the
+   context inspector drew "1.05M" for it on the same screen. The rungs kept
+   are the inspector's, because they are the only set whose boundaries were
+   worked out against the six-character column they have to fit. *)
+let test_compact_count_reads_at_a_glance () =
+  Alcotest.(check string) "under a thousand keeps its digits" "358"
+    (Layout.compact_count 358);
+  Alcotest.(check string) "a thousand keeps a tenth" "2.0k"
+    (Layout.compact_count 2_000);
+  Alcotest.(check string) "the tenth is what parts near neighbours" "73.9k"
+    (Layout.compact_count 73_877);
+  Alcotest.(check bool) "so two near figures do not read alike" true
+    (Layout.compact_count 73_877 <> Layout.compact_count 73_212);
+  Alcotest.(check string) "millions keep a hundredth" "1.50M"
+    (Layout.compact_count 1_500_000);
+  Alcotest.(check string) "and the boundary belongs to the larger unit" "1.0k"
+    (Layout.compact_count 1_000)
+
+(* Each rung changes where the format below it would round past the column:
+   the last figure the lower rung can draw, and the first the higher one
+   takes. *)
+let test_every_rung_changes_where_the_rounding_reaches_it () =
+  List.iter
+    (fun (below, below_text, at, at_text) ->
+       Alcotest.(check string)
+         (Printf.sprintf "%d is the last of its rung" below) below_text
+         (Layout.compact_count below);
+       Alcotest.(check string)
+         (Printf.sprintf "%d changes rung" at) at_text
+         (Layout.compact_count at))
+    [ 999_949, "999.9k", 999_950, "1.00M"
+    ; 99_994_999, "99.99M", 99_995_000, "100.0M"
+    ; 999_949_999, "999.9M", 999_950_000, "1.00B"
+    ]
+
+(* And no rung draws past the column it was measured for. *)
+let test_no_rung_outgrows_its_column () =
+  List.iter
+    (fun n ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%d fits six characters" n)
+         true
+         (Layout.display_width (Layout.compact_count n) <= 6))
+    [ 0; 999; 1_000; 73_877; 999_949; 999_950; 1_048_576; 99_994_999
+    ; 99_995_000; 999_949_999; 999_950_000 ]
+
 let () =
   run "tui_message_layout"
     [
@@ -2716,10 +2925,18 @@ let () =
             `Quick test_a_load_failure_keeps_its_address_at_eighty_columns
         ; test_case "terminal cell width and UTF-8 fit" `Quick
             test_terminal_cell_width_and_fit
+        ; test_case "ASCII columns preserve Unicode and ANSI boundaries" `Quick
+            test_ascii_columns_keep_unicode_boundaries
+        ; test_case "column CPU and allocation observations" `Quick
+            test_column_layout_observations
+        ; test_case "mixed ASCII retains Unicode cluster boundaries" `Quick
+            test_mixed_ascii_cluster_boundaries
         ; test_case "an emoji cluster with VS16, ZWJ, or a skin tone is two cells"
             `Quick test_emoji_cluster_is_two_cells
         ; test_case "the scroll hint says how far back" `Quick
             test_scroll_hint_says_how_far_back
+        ; test_case "scroll position says how far back" `Quick
+            test_scroll_position_says_how_far_back
         ; test_case "UTF-8 scalar input contract" `Quick
             test_utf8_scalar_input_contract
         ; test_case "backspace removes one UTF-8 scalar" `Quick
@@ -2874,6 +3091,14 @@ let () =
             test_a_count_takes_the_number_it_counts
         ; test_case "a span fits a six-cell column" `Quick
             test_a_span_fits_a_six_cell_column
+        ; test_case "compact count reads at a glance" `Quick
+            test_compact_count_reads_at_a_glance
+        ; test_case "every rung changes where the rounding reaches it" `Quick
+            test_every_rung_changes_where_the_rounding_reaches_it
+        ; test_case "no rung outgrows its column" `Quick
+            test_no_rung_outgrows_its_column
+        ; test_case "a right-aligned cell counts cells, not bytes" `Quick
+            test_a_right_aligned_cell_counts_cells_not_bytes
         ; test_case "a duration keeps the tenths only while they are read" `Quick
             test_a_duration_keeps_the_tenths_only_while_they_are_read
         ; test_case "a duration does not step back at a rung" `Quick

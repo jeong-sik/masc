@@ -10,12 +10,6 @@
     defense in depth and is still applied before this module is
     consulted. *)
 
-(** [should_route_read ~meta] is [true] iff this keeper's reads
-    should go through the sandbox backend. Encapsulates the
-    [sandbox_profile=docker|micro_vm|remote_ssh] policy so callers do not have
-    to repeat it. *)
-val should_route_read : meta:Keeper_meta_contract.keeper_meta -> bool
-
 (** Translate a runner's [run_outcome] into a read result. A
     [Transport_failed] is always an [Error]; a [Ran] result applies
     [ok_exit_codes] to its exit status. Exposed for the differential test that
@@ -31,9 +25,13 @@ val classify_read_outcome :
 
 (** [container_path_of_host ~config ~meta ~host_path] maps a host-side
     absolute playground path to its selected backend counterpart (container or
-    SSH endpoint). Returns [Error _] when [host_path] is not inside the
-    keeper's playground bundle (programmer error — caller should have
-    run the containment check first). *)
+    SSH endpoint). On an OpenSSH endpoint, a path outside the keeper's tree
+    that lies under the endpoint's declared roots
+    ({!Keeper_sandbox_remote_lane.declared_endpoint_path}) is the endpoint's
+    own path and returns as itself. Returns [Error _] when [host_path] is
+    neither inside the keeper's playground bundle nor such a declared path
+    (programmer error — caller should have run the containment check
+    first). *)
 val container_path_of_host :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
@@ -48,14 +46,22 @@ type read_error =
 val read_error_to_string : read_error -> string
 
 (** The program and arguments [read_file] runs inside the backend for a window
-    starting at [start_line] of [path], producing at most [max_bytes]. Line 1
-    is [head -c]; a later line streams from that line through [sh]. *)
+    starting at [start_line] of [path], producing at most [max_bytes]: one
+    [sh] script that takes the window with [head -c], through [tail -n +N]
+    after line 1. The script exits {!read_window_missing_exit} when [path]
+    does not exist and {!read_window_not_a_file_exit} when it is not a
+    regular file; [read_file] classifies by those codes, never by stderr. *)
 val read_window_argv : start_line:int -> max_bytes:int -> path:string -> string list
+
+val read_window_missing_exit : int
+val read_window_not_a_file_exit : int
 
 (** [read_file ~config ~meta ~host_path ~max_bytes ~timeout_sec ()] reads
     [host_path] through the selected sandbox backend and returns the captured
     bytes (clamped to [max_bytes]). Docker mounts the playground read-only;
-    SSH invokes the fixed remote shim and never probes the host path first.
+    SSH invokes the fixed remote shim and never probes the host path first;
+    a missing path or a non-file is [Missing_file] or [Not_a_file] from the
+    script's exit code.
 
     [start_line] (default 1) is the file's line the returned bytes begin at;
     [max_bytes] bounds the bytes from that line, not the file's prefix.

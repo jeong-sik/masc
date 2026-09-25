@@ -167,7 +167,9 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
         staged_paths := paths;
         check "upload uses a private snapshot instead of caller source" (List.hd paths <> source_path);
         act upload (Browser_action.Upload {selector="#upload";paths})) with
-     | Ok () -> () | Error error -> failwith error);
+     | Ok () -> ()
+     | Error (Browser_lane.Upload_lease.Read_failed error
+             | Browser_lane.Upload_lease.Snapshot_failed error) -> failwith error);
     check "selected snapshots survive staging callback return" (List.for_all Sys.file_exists !staged_paths);
     let session_id = match !remote_session with Some id -> id | None -> failwith "no owned session" in
     let result = request ~method_:`POST ~path:("/session/" ^ session_id ^ "/execute/async")

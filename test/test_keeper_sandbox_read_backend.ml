@@ -103,33 +103,6 @@ let make_meta ~name ~sandbox =
     { m with Masc.Keeper_meta_contract.sandbox_profile = sandbox }
   | Error e -> Alcotest.fail e
 
-(* ── should_route_read profile policy ────────────────────────────── *)
-
-(* The case that answered [false] was the [Local] profile, and it is gone:
-   every profile a keeper may declare routes reads through its backend. *)
-let test_docker_keeper_routes () =
-  let meta =
-    make_meta ~name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker
-  in
-  Alcotest.(check bool) "docker keeper routes through docker"
-    true
-    (Keeper_sandbox_read_backend.should_route_read ~meta)
-
-let test_docker_second_keeper_routes () =
-  let meta =
-    make_meta ~name:"poe" ~sandbox:Keeper_types_profile_sandbox.Docker
-  in
-  Alcotest.(check bool) "docker second keeper also routes" true
-    (Keeper_sandbox_read_backend.should_route_read ~meta)
-
-let test_remote_ssh_keeper_routes () =
-  let meta =
-    make_meta ~name:"remote" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
-  in
-  Alcotest.(check bool) "remote SSH keeper routes through backend"
-    true
-    (Keeper_sandbox_read_backend.should_route_read ~meta)
-
 (* ── container_path_of_host pure mapping ─────────────────────────── *)
 
 let setup_config name =
@@ -572,6 +545,22 @@ exit 0
     (Exec_ssh_protocol.render_trailer
        { v = Exec_ssh_protocol.newest
        ; exit = Some 0
+       ; signal = None
+       ; timed_out = false
+       ; shim_error = None
+       ; observed_syscalls = []
+       })
+
+let fake_ssh_read_status_script code =
+  Printf.sprintf
+    {|#!/bin/sh
+cat >/dev/null 2>/dev/null &
+printf '%%s' '%s' >&2
+exit 0
+|}
+    (Exec_ssh_protocol.render_trailer
+       { v = Exec_ssh_protocol.newest
+       ; exit = Some code
        ; signal = None
        ; timed_out = false
        ; shim_error = None
@@ -1208,6 +1197,255 @@ esac\n\
 printf 'unexpected docker invocation\\n' >&2\n\
 exit 2\n"
 
+(* #38593: an OpenSSH endpoint declares /app, a Terminal-Bench task root, in
+   [allowed_paths]. Execute may already name it (#38603); a Read of the same
+   file must reach the endpoint as that path instead of failing the host
+   bookkeeping check with path_outside_sandbox. *)
+let remote_reader_with_allowed_paths ~allowed_paths =
+  let base, config, meta = setup_config "remote-reader" in
+  let allowed_paths = allowed_paths base in
+  let meta = { meta with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh } in
+  let keepers_dir = Filename.concat base ".masc/config/keepers" in
+  ensure_dir keepers_dir;
+  write_file (Filename.concat keepers_dir "remote-reader.toml")
+    {|[keeper]
+instructions = "remote read test"
+sandbox_profile = "remote_ssh"
+remote_endpoint = "fixture"
+|};
+  write_file
+    (Filename.concat base ".masc/config/runtime.toml")
+    (Exec_ssh_endpoint.to_toml
+       Exec_ssh_endpoint.
+         { name = "fixture"
+         ; host = "fixture.invalid"
+         ; user = "masc"
+         ; port = default_port
+         ; identity_file = default_identity_file ~name:"fixture"
+         ; known_hosts_file = default_known_hosts_file ~name:"fixture"
+         ; remote_root = "/srv/masc/playground"
+         ; connect_timeout_sec = 1
+         ; max_concurrent_sessions = 2
+         ; env_allowlist = []
+         ; capabilities = []
+         ; private_home = false
+         ; allowed_paths
+         });
+  base, config, meta
+
+(* The shim's stdin is the framed request; keep it so the test can read the
+   argv the endpoint was asked to run. The runner holds stdin open until the
+   child exits, so the frame is read by its own length -- an 8-byte big-endian
+   prefix L, then L bytes -- never to EOF. The probe that precedes each
+   dispatch runs this same script; it keeps nothing, or it would overwrite
+   the frame. *)
+let fake_ssh_recording_script ~frame_path =
+  let quoted suffix = Filename.quote (frame_path ^ suffix) in
+  Printf.sprintf
+    {|#!/bin/sh
+case "$*" in
+  *--probe*) ;;
+  *)
+    dd bs=1 count=8 of=%s 2>/dev/null
+    len=0
+    for byte in $(od -An -tu1 %s); do len=$((len * 256 + byte)); done
+    dd bs=1 count="$len" of=%s 2>/dev/null
+    cat %s %s > %s
+    ;;
+esac
+cat >/dev/null 2>/dev/null &
+printf 'remote-file-content'
+printf '%%s' '%s' >&2
+exit 0
+|}
+    (quoted ".len") (quoted ".len") (quoted ".body") (quoted ".len") (quoted ".body")
+    (Filename.quote frame_path)
+    (Exec_ssh_protocol.render_trailer
+       { v = Exec_ssh_protocol.newest
+       ; exit = Some 0
+       ; signal = None
+       ; timed_out = false
+       ; shim_error = None
+       ; observed_syscalls = []
+       })
+
+(* The remote shim's typed exit is carried in its trailer, not in the host
+   ssh process status. Exercise that wire boundary as well as the local sh
+   script, including an unrelated command failure that must stay runtime. *)
+let test_remote_read_classifies_only_the_declared_exit_codes () =
+  let base, config, meta =
+    remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> [ "/app" ])
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  let read ~start_line code =
+    with_fake_ssh (fake_ssh_read_status_script code) @@ fun () ->
+    Keeper_sandbox_read_backend.read_file ~config ~meta
+      ~host_path:"/app/read-target" ~start_line ~max_bytes:4096
+      ~timeout_sec:2.0 ()
+  in
+  List.iter
+    (fun start_line ->
+      (match read ~start_line Keeper_sandbox_read_backend.read_window_missing_exit with
+       | Error (Keeper_sandbox_read_backend.Missing_file detail) ->
+         Alcotest.(check bool) "missing path stays typed" true
+           (String_util.contains_substring detail "path_not_found")
+       | Error error -> Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
+       | Ok _ -> Alcotest.fail "missing path read as success");
+      (match read ~start_line Keeper_sandbox_read_backend.read_window_not_a_file_exit with
+       | Error (Keeper_sandbox_read_backend.Not_a_file detail) ->
+         Alcotest.(check bool) "directory stays typed" true
+           (String_util.contains_substring detail "path_is_not_a_file")
+       | Error error -> Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
+       | Ok _ -> Alcotest.fail "directory read as success");
+      match read ~start_line 1 with
+      | Error (Keeper_sandbox_read_backend.Read_failed _) -> ()
+      | Error error -> Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
+      | Ok _ -> Alcotest.fail "unexpected command failure read as success")
+    [ 1; 10 ]
+
+let test_declared_endpoint_root_maps_as_itself () =
+  let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> [ "/app" ]) in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let map host_path =
+    Keeper_sandbox_read_backend.container_path_of_host ~config ~meta ~host_path
+  in
+  let own = Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "notes.md" in
+  Alcotest.(check (result string string)) "a declared path is the endpoint's own"
+    (Ok "/app/drift_monitor/windowing.py") (map "/app/drift_monitor/windowing.py");
+  Alcotest.(check (result string string)) "it is normalized lexically"
+    (Ok "/app/data/x.npy") (map "/app/./drift_monitor/../data/x.npy");
+  Alcotest.(check (result string string)) "the keeper's own tree still translates"
+    (Ok "/srv/masc/playground/remote-reader/notes.md") (map own);
+  List.iter
+    (fun host_path ->
+       Alcotest.(check bool) (host_path ^ " stays refused") true
+         (Result.is_error (map host_path)))
+    [ "/app/../etc/passwd"; "/application/x"; "/etc/passwd" ]
+
+(* A declared root may cover the keeper's own bookkeeping tree. The tree
+   keeps its meaning: its names still translate to the keeper's endpoint
+   workspace, and only what the tree refused is read as an endpoint path. *)
+let test_own_tree_translates_even_under_a_declared_root () =
+  let base, config, meta =
+    remote_reader_with_allowed_paths ~allowed_paths:(fun base ->
+      [ Masc.Keeper_remote_path.normalize_remote base ])
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let map host_path =
+    Keeper_sandbox_read_backend.container_path_of_host ~config ~meta ~host_path
+  in
+  let own = Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "notes.md" in
+  let elsewhere =
+    Filename.concat (Masc.Keeper_remote_path.normalize_remote base) "elsewhere/x.txt"
+  in
+  Alcotest.(check (result string string)) "the keeper's own file still translates"
+    (Ok "/srv/masc/playground/remote-reader/notes.md") (map own);
+  Alcotest.(check (result string string)) "the declared root is live for other paths"
+    (Ok elsewhere) (map elsewhere)
+
+let test_undeclared_endpoint_root_stays_refused () =
+  let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> []) in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Alcotest.(check bool) "without allowed_paths /app is outside the keeper" true
+    (Result.is_error
+       (Keeper_sandbox_read_backend.container_path_of_host ~config ~meta
+          ~host_path:"/app/drift_monitor/windowing.py"));
+  match
+    Masc.Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ~config ~meta
+      ~path:"/app/drift_monitor/windowing.py" ~max_bytes:4096 ()
+  with
+  | Ok _ -> Alcotest.fail "an undeclared endpoint path was read"
+  | Error message ->
+    Alcotest.(check bool) "Read names the refusal" true
+      (String.starts_with ~prefix:"path_outside_sandbox" message)
+
+(* The keeper names no remote_endpoint, so whether /app is a declared root
+   cannot be known. That is the operator's to fix and leads the refusal; the
+   tree's own path_outside_sandbox follows it rather than being dropped. *)
+let test_unresolved_endpoint_leads_and_keeps_the_tree_refusal () =
+  let base, config, meta = setup_config "remote-unresolved" in
+  let meta = { meta with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh } in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let keepers_dir = Filename.concat base ".masc/config/keepers" in
+  ensure_dir keepers_dir;
+  write_file (Filename.concat keepers_dir "remote-unresolved.toml")
+    {|[keeper]
+instructions = "remote read test"
+sandbox_profile = "remote_ssh"
+|};
+  let contains ~needle hay =
+    let n = String.length needle in
+    let rec from i = i + n <= String.length hay && (String.sub hay i n = needle || from (i + 1)) in
+    from 0
+  in
+  match
+    Masc.Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ~config ~meta
+      ~path:"/app/drift_monitor/windowing.py" ~max_bytes:4096 ()
+  with
+  | Ok _ -> Alcotest.fail "a path no endpoint could declare was read"
+  | Error message ->
+    Alcotest.(check bool) "the endpoint error leads" false
+      (String.starts_with ~prefix:"path_outside_sandbox" message);
+    Alcotest.(check bool) "the tree refusal follows" true
+      (contains ~needle:"(the keeper's tree also refused the path: path_outside_sandbox" message)
+
+let test_read_of_a_declared_path_asks_the_endpoint_for_that_path () =
+  let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> [ "/app" ]) in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  let read ?cwd ~path () =
+    let frame_path = Filename.concat base ("frame-" ^ string_of_int (Hashtbl.hash (cwd, path))) in
+    with_fake_ssh (fake_ssh_recording_script ~frame_path) @@ fun () ->
+    match
+      Masc.Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ?cwd ~config ~meta ~path
+        ~max_bytes:4096 ()
+    with
+    | Error message -> Alcotest.fail message
+    | Ok content ->
+      Alcotest.(check string) "content comes from the endpoint" "remote-file-content" content;
+      (match Exec_ssh_protocol.decode_request (read_file frame_path) with
+       | Error error -> Alcotest.fail error
+       | Ok (request, _stdin) -> request.argv)
+  in
+  let prefix path = [ "head"; "-c"; "4096"; path ] in
+  Alcotest.(check (list string)) "an absolute declared path"
+    (prefix "/app/drift_monitor/windowing.py")
+    (read ~path:"/app/drift_monitor/windowing.py" ());
+  Alcotest.(check (list string)) "a relative path under a declared cwd"
+    (prefix "/app/data/reference_embeddings.npy")
+    (read ~cwd:"/app" ~path:"data/reference_embeddings.npy" ())
+
+(* analyze_image reads a generated image through this prefix. The endpoint's
+   bytes come back as they are, even when they spell the keeper's remote
+   root: the text reads map that root to the host's, which is right for
+   Read's lines and corrupts an image. *)
+let test_raw_prefix_keeps_remote_bytes_that_spell_the_workspace_root () =
+  let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> []) in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  let bytes = "\137PNG /srv/masc/playground/remote-reader\n" in
+  let script =
+    Printf.sprintf "#!/bin/sh\ncat >/dev/null 2>/dev/null &\nprintf '%%b' %s\nprintf '%%s' %s >&2\nexit 0\n"
+      (Filename.quote "\\0211PNG /srv/masc/playground/remote-reader\\n")
+      (Filename.quote
+         (Exec_ssh_protocol.render_trailer
+            { v = Exec_ssh_protocol.newest
+            ; exit = Some 0
+            ; signal = None
+            ; timed_out = false
+            ; shim_error = None
+            ; observed_syscalls = []
+            }))
+  in
+  with_fake_ssh script @@ fun () ->
+  match
+    Masc.Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ~config ~meta
+      ~path:"shot.png" ~max_bytes:4096 ()
+  with
+  | Error message -> Alcotest.fail message
+  | Ok content -> Alcotest.(check string) "the endpoint's bytes, unchanged" bytes content
+
 let test_sandbox_container_label_args_include_owner_scope () =
   let args =
     Keeper_sandbox_runtime.docker_label_args
@@ -1839,7 +2077,10 @@ let test_read_asks_the_sandbox_for_a_bounded_prefix () =
       Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
   | Ok echoed_command ->
       Alcotest.(check string) "the sandbox is asked for the prefix, not the file"
-        (Printf.sprintf "head -c 4096 %s\n" container_path)
+        (String.concat " "
+           (Keeper_sandbox_read_backend.read_window_argv ~start_line:1 ~max_bytes:4096
+              ~path:container_path)
+         ^ "\n")
         echoed_command
 
 let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
@@ -2569,7 +2810,7 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
 let test_transport_failure_is_error_not_empty () =
   let outcome =
     Masc_exec.Sandbox_target.Transport_failed
-      { output_files = None; reason = "remote_ssh_version_error: trailer carries v=2"
+      { failure = Masc_exec.Sandbox_target.Lane_unavailable; output_files = None; reason = "remote_ssh_version_error: trailer carries v=2"
       ; stdout = ""
       ; stderr = "remote_ssh_version_error"
       }
@@ -2687,18 +2928,33 @@ let test_read_window_line_one_is_a_byte_prefix () =
     | Unix.WEXITED 0, out -> Alcotest.(check string) "prefix" "line-1\nli" out
     | _, out -> Alcotest.fail ("prefix read failed: " ^ out))
 
+(* The script names why it read nothing with its own exit code, which is how
+   an endpoint's missing file reaches the caller as path_not_found instead of
+   a runtime failure. Both line 1 and a later line take the same checks. *)
 let test_read_window_missing_file_fails () =
   (* A fresh name, removed, so the path is known to be absent. *)
   let path = Filename.temp_file "read-window-missing-" ".txt" in
   Sys.remove path;
-  match run_read_window ~start_line:10 ~max_bytes:64 path with
-  | Unix.WEXITED 0, _ -> Alcotest.fail "a missing file read as an empty window"
-  | _, out -> Alcotest.(check string) "no bytes" "" out
+  List.iter
+    (fun start_line ->
+      match run_read_window ~start_line ~max_bytes:64 path with
+      | Unix.WEXITED code, out ->
+        Alcotest.(check int) "the missing-file exit"
+          Keeper_sandbox_read_backend.read_window_missing_exit code;
+        Alcotest.(check string) "no bytes" "" out
+      | (Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> Alcotest.fail "read window was signalled")
+    [ 1; 10 ]
 
 let test_read_window_directory_fails () =
-  match run_read_window ~start_line:10 ~max_bytes:64 (Filename.get_temp_dir_name ()) with
-  | Unix.WEXITED 0, _ -> Alcotest.fail "a directory read as an empty window"
-  | _, out -> Alcotest.(check string) "no bytes" "" out
+  List.iter
+    (fun start_line ->
+      match run_read_window ~start_line ~max_bytes:64 (Filename.get_temp_dir_name ()) with
+      | Unix.WEXITED code, out ->
+        Alcotest.(check int) "the not-a-file exit"
+          Keeper_sandbox_read_backend.read_window_not_a_file_exit code;
+        Alcotest.(check string) "no bytes" "" out
+      | (Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> Alcotest.fail "read window was signalled")
+    [ 1; 10 ]
 
 let run_tests ~clock () =
   Alcotest.run "Keeper_sandbox_read_backend"
@@ -2709,22 +2965,13 @@ let run_tests ~clock () =
             test_read_window_reaches_lines_past_the_prefix;
           Alcotest.test_case "line 1 stays a byte prefix" `Quick
             test_read_window_line_one_is_a_byte_prefix;
-          Alcotest.test_case "missing file exits non-zero" `Quick
+          Alcotest.test_case "missing file exits with its own code" `Quick
             test_read_window_missing_file_fails;
-          Alcotest.test_case "directory exits non-zero" `Quick
+          Alcotest.test_case "directory exits with its own code" `Quick
             test_read_window_directory_fails;
         ] );
       ( "raw_prefix", [Alcotest.test_case "command bounded before binary transport" `Quick
             test_raw_prefix_bounds_command_and_preserves_binary] );
-      ( "should_route_read",
-        [
-          Alcotest.test_case "docker keeper routes" `Quick
-            test_docker_keeper_routes;
-          Alcotest.test_case "docker second keeper also routes" `Quick
-            test_docker_second_keeper_routes;
-          Alcotest.test_case "remote SSH keeper routes" `Quick
-            test_remote_ssh_keeper_routes;
-        ] );
       ( "container_path_of_host",
         [
           Alcotest.test_case "a microvm host path maps to the work volume" `Quick
@@ -2782,6 +3029,20 @@ let run_tests ~clock () =
             test_read_directory_names_a_real_listing_tool;
           Alcotest.test_case "remote read skips host existence preflight" `Quick
             test_remote_ssh_read_skips_host_existence_preflight;
+          Alcotest.test_case "remote read classifies only declared exit codes" `Quick
+            test_remote_read_classifies_only_the_declared_exit_codes;
+          Alcotest.test_case "declared endpoint root maps as itself" `Quick
+            test_declared_endpoint_root_maps_as_itself;
+          Alcotest.test_case "undeclared endpoint root stays refused" `Quick
+            test_undeclared_endpoint_root_stays_refused;
+          Alcotest.test_case "unresolved endpoint leads and keeps the tree refusal" `Quick
+            test_unresolved_endpoint_leads_and_keeps_the_tree_refusal;
+          Alcotest.test_case "own tree translates even under a declared root" `Quick
+            test_own_tree_translates_even_under_a_declared_root;
+          Alcotest.test_case "read of a declared path asks the endpoint for that path"
+            `Quick test_read_of_a_declared_path_asks_the_endpoint_for_that_path;
+          Alcotest.test_case "raw prefix keeps remote bytes that spell the workspace root"
+            `Quick test_raw_prefix_keeps_remote_bytes_that_spell_the_workspace_root;
         ] );
       ( "run_command",
         [

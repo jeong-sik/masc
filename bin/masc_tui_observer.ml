@@ -86,6 +86,8 @@ type keeper_turn_complete = {
   tc_turn : int option;
   tc_model : string option;
   tc_input_tokens : int option;
+  tc_cache_read_tokens : int option;
+  tc_cache_creation_tokens : int option;
   tc_output_tokens : int option;
   tc_cost_usd : float option;
   tc_tool_calls : int option;
@@ -362,12 +364,20 @@ let decode_keeper_turn_complete fields =
   let event = "keeper_turn_complete" in
   let* tc_keeper = required string_field fields "name" ~event in
   let* tc_at = required float_field fields "ts_unix" ~event in
+  let* tc_cache_read_tokens =
+    optional_int_field fields "cache_read_tokens" ~event
+  in
+  let* tc_cache_creation_tokens =
+    optional_int_field fields "cache_creation_tokens" ~event
+  in
   Ok
     (Keeper_turn_complete
        { tc_keeper
        ; tc_turn = int_field fields "turn"
        ; tc_model = string_field fields "model_used"
        ; tc_input_tokens = int_field fields "input_tokens"
+       ; tc_cache_read_tokens
+       ; tc_cache_creation_tokens
        ; tc_output_tokens = int_field fields "output_tokens"
        ; tc_cost_usd = float_field fields "cost_usd"
        ; tc_tool_calls = int_field fields "tool_calls_made"

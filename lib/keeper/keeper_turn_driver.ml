@@ -931,11 +931,11 @@ let attempt_runtime_candidates
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Provider_capacity; retry_after = _ } ->
           note_failed_attempt Runtime_candidate_backpressure.Provider_capacity
-        (* A 403 refused the account and does not say why. Kimi For Coding
-           answers a spent 5-hour window this way, and the same body answers
-           a client its plan does not admit (2026-09-25: 17 of 17 cycles
-           after a restart walked Kimi first, the one candidate on its lanes
-           with no mark). The status rests nothing. A provider that declares
+        (* A 403 refused the account and does not say why. A provider may
+           answer a spent usage window this way and answer a client its plan
+           does not admit with the same body (2026-09-25: 17 of 17 cycles
+           after a restart walked such a candidate first, the one on its
+           lanes with no mark). The status rests nothing. A provider that declares
            [usage-read] is asked once, here, before the walk moves on: a
            spent window rests the scope until its stated reset, so this walk
            and every later one sees it; a window with headroom, a failed

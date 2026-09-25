@@ -75,11 +75,9 @@ let parse_error_to_string = function
 
 let ( let* ) = Result.bind
 
-(* Words of lowercase letters and digits joined by single '-': the directory
-   names under sandbox-images/. *)
-let valid_name name =
-  let word w = String.length w > 0 && String.for_all (function 'a' .. 'z' | '0' .. '9' -> true | _ -> false) w in
-  List.for_all word (String.split_on_char '-' name)
+(* A catalog name is a recipe directory name under sandbox-images/, so the
+   rule is the recipe loader's own: a buildable name is always promotable. *)
+let valid_name = Keeper_sandbox_image_version.valid_name
 
 (* [repository:tag], checked only as far as the value's two uses need: it is
    written between TOML quotes and passed as one argv word to an image

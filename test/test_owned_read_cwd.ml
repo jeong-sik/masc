@@ -89,6 +89,24 @@ let test_parent_cwd_stays_rejected () =
       (`Assoc [ "path", `String "hello.txt"; "cwd", `String ".." ])
     |> expect_read_failure ~what:"cwd:\"..\"")
 
+let test_owned_cwd_failure_classes_follow_the_source () =
+  let check_class what expected execution =
+    match execution.Masc.Keeper_tool_execution.disposition with
+    | Tool_result.Failed class_ ->
+      Alcotest.(check bool) what true (class_ = expected)
+    | Tool_result.Completed () | Tool_result.Deferred () ->
+      Alcotest.failf "%s: expected failure, got %s" what execution.raw_output
+  in
+  with_ownership_root (fun root ->
+    read_via_tool ~ownership_root:root
+      (`Assoc [ "path", `String "file.txt"; "cwd", `String ".." ])
+    |> check_class "caller supplied cwd outside root is policy"
+         Tool_result.Policy_rejection;
+    Unix.rmdir root;
+    read_via_tool ~ownership_root:root (`Assoc [ "path", `String "file.txt" ])
+    |> check_class "missing server chosen cwd is runtime"
+         Tool_result.Runtime_failure)
+
 (* Issue #28950: when the tool caller omits cwd and the ownership root
    contains exactly one sub-directory whose name matches the first segment
    of the path, the sub-directory is the repository checkout and the read
@@ -273,6 +291,8 @@ let () =
             test_dot_slash_subdirectory_cwd
         ; Alcotest.test_case "cwd \"..\" stays rejected" `Quick
             test_parent_cwd_stays_rejected
+        ; Alcotest.test_case "owned cwd classes follow caller or server source"
+            `Quick test_owned_cwd_failure_classes_follow_the_source
         ; Alcotest.test_case
             "omitted cwd reads single sub-repo (issue #28950)" `Quick
             test_omitted_cwd_reads_single_sub_repo

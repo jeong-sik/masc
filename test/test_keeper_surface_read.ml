@@ -45,6 +45,14 @@ let external_speaker ?name id : Store.speaker =
 
 let parse s = Yojson.Safe.from_string s
 
+let answered = function
+  | Ok body -> parse body
+  | Error refusal -> failf "expected an answer, got the refusal %S" refusal
+
+let refused = function
+  | Error refusal -> refusal
+  | Ok body -> failf "expected a refusal, got %s" body
+
 let member key json = Yojson.Safe.Util.member key json
 
 let to_list json = Yojson.Safe.Util.to_list json
@@ -70,7 +78,7 @@ let discord_fixture : Store.chat_message list =
   ]
 
 let test_lane_filter_excludes_other_surfaces_and_unscoped () =
-  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~before:None ~has_more:false ~notes:[] discord_fixture) in
+  let json = answered (SR.respond ~surface:"discord" ~limit:50 ~before:None ~has_more:false ~notes:[] discord_fixture) in
   check int "lane rows" 4 (to_int (member "lane_row_count" json));
   check int "returned" 4 (to_int (member "returned" json));
   let contents =
@@ -87,7 +95,7 @@ let test_lane_filter_excludes_other_surfaces_and_unscoped () =
     contents
 
 let test_roster_groups_by_id_latest_name_wins () =
-  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~before:None ~has_more:false ~notes:[] discord_fixture) in
+  let json = answered (SR.respond ~surface:"discord" ~limit:50 ~before:None ~has_more:false ~notes:[] discord_fixture) in
   let participants = to_list (member "participants" json) in
   check int "two participants" 2 (List.length participants);
   let find id =
@@ -110,7 +118,7 @@ let test_roster_groups_by_id_latest_name_wins () =
     (to_string_j (member "id" (List.hd participants)))
 
 let test_limit_truncates_messages_not_roster () =
-  let json = parse (SR.respond ~surface:"discord" ~limit:2 ~before:None ~has_more:false ~notes:[] discord_fixture) in
+  let json = answered (SR.respond ~surface:"discord" ~limit:2 ~before:None ~has_more:false ~notes:[] discord_fixture) in
   check int "returned capped" 2 (to_int (member "returned" json));
   check int "lane count still full" 4 (to_int (member "lane_row_count" json));
   check int "roster still full" 2
@@ -124,7 +132,7 @@ let test_limit_truncates_messages_not_roster () =
     contents
 
 let test_keeper_own_lines_are_not_participants () =
-  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~before:None ~has_more:false ~notes:[] discord_fixture) in
+  let json = answered (SR.respond ~surface:"discord" ~limit:50 ~before:None ~has_more:false ~notes:[] discord_fixture) in
   let ids =
     to_list (member "participants" json)
     |> List.map (fun p -> to_string_j (member "id" p))
@@ -133,11 +141,14 @@ let test_keeper_own_lines_are_not_participants () =
     (List.exists (fun id -> String.equal id "keeper") ids)
 
 let test_blank_surface_is_error () =
-  let json = parse (SR.respond ~surface:"  " ~limit:10 ~before:None ~has_more:false ~notes:[] discord_fixture) in
-  check bool "error field present" true (member "error" json <> `Null)
+  let refusal =
+    refused (SR.respond ~surface:"  " ~limit:10 ~before:None ~has_more:false ~notes:[] discord_fixture)
+  in
+  check bool "the refusal says surface is required" true
+    (String.length refusal > 0 && String.sub refusal 0 7 = "surface")
 
 let test_empty_lane_is_success_with_zero_rows () =
-  let json = parse (SR.respond ~surface:"slack" ~limit:10 ~before:None ~has_more:false ~notes:[] discord_fixture) in
+  let json = answered (SR.respond ~surface:"slack" ~limit:10 ~before:None ~has_more:false ~notes:[] discord_fixture) in
   check int "lane empty" 0 (to_int (member "lane_row_count" json));
   check int "no participants" 0
     (List.length (to_list (member "participants" json)))
@@ -147,7 +158,7 @@ let test_empty_lane_is_success_with_zero_rows () =
    progress through pages that hold no rows for the requested lane. *)
 let test_paging_fields_reflect_page_not_lane () =
   let json =
-    parse (SR.respond ~surface:"discord" ~limit:50 ~before:None ~has_more:true ~notes:[] discord_fixture)
+    answered (SR.respond ~surface:"discord" ~limit:50 ~before:None ~has_more:true ~notes:[] discord_fixture)
   in
   check bool "has_more passthrough" true
     (Yojson.Safe.Util.to_bool (member "has_more" json));
@@ -160,7 +171,7 @@ let test_notes_annotate_and_resurrect_participants () =
     [ ("98791450001", "deploy owner"); ("00009999", "met three weeks ago") ]
   in
   let json =
-    parse
+    answered
       (SR.respond ~surface:"discord" ~limit:50 ~before:None ~has_more:false ~notes
          discord_fixture)
   in
@@ -182,7 +193,7 @@ let test_notes_annotate_and_resurrect_participants () =
 
 let test_oldest_ts_absent_when_page_empty () =
   let json =
-    parse (SR.respond ~surface:"discord" ~limit:10 ~before:None ~has_more:false ~notes:[] [])
+    answered (SR.respond ~surface:"discord" ~limit:10 ~before:None ~has_more:false ~notes:[] [])
   in
   check bool "oldest_ts omitted" true (member "oldest_ts" json = `Null)
 
@@ -200,25 +211,21 @@ let contains s sub =
   go 0
 
 let test_unbound_connector_label_is_error () =
-  let json =
-    parse
+  let error =
+    refused
       (SR.respond ~bindings ~surface:"slack" ~limit:10 ~before:None ~has_more:false ~notes:[]
          discord_fixture)
   in
-  check bool "unbound slack is an error" true (member "error" json <> `Null);
-  let error = to_string_j (member "error" json) in
   check bool "error names the label" true (contains error "surface slack");
   check bool "error names the binding state" true
     (contains error "no bound channels there (slack: [none]")
 
 let test_unknown_label_is_error_with_page_labels () =
-  let json =
-    parse
+  let error =
+    refused
       (SR.respond ~bindings ~surface:"dicsord" ~limit:10 ~before:None ~has_more:false
          ~notes:[] discord_fixture)
   in
-  check bool "typo label is an error" true (member "error" json <> `Null);
-  let error = to_string_j (member "error" json) in
   check bool "hint names the page's real labels" true
     (contains error "dashboard, discord")
 
@@ -227,7 +234,7 @@ let test_gate_label_present_on_page_reads () =
     [ msg ~ts:6.0 ~lane:"calendar" ~role:Store.Role.User "standup moved" ]
   in
   let json =
-    parse
+    answered
       (SR.respond ~bindings ~surface:"calendar" ~limit:10 ~before:None ~has_more:false
          ~notes:[] gate_fixture)
   in
@@ -235,23 +242,22 @@ let test_gate_label_present_on_page_reads () =
     (to_int (member "lane_row_count" json))
 
 let test_gate_label_absent_from_page_is_error () =
-  let json =
-    parse
+  let error =
+    refused
       (SR.respond ~bindings ~surface:"calendar" ~limit:10 ~before:None ~has_more:false
          ~notes:[] discord_fixture)
   in
   check bool "gate label with no rows anywhere is refused" true
-    (member "error" json <> `Null)
+    (contains error "surface calendar matches no lane")
 
 (* The page is the newest window. A gate lane whose rows are all older reads
    as an empty page with the cursor the caller pages back with. *)
 let test_gate_label_behind_the_page_reads_with_a_cursor () =
   let json =
-    parse
+    answered
       (SR.respond ~bindings ~surface:"calendar" ~limit:10 ~before:None ~has_more:true
          ~notes:[] discord_fixture)
   in
-  check bool "not refused while older rows remain" true (member "error" json = `Null);
   check int "no rows of it on this page" 0 (to_int (member "lane_row_count" json));
   check bool "the cursor to page back is there" true
     (Yojson.Safe.Util.to_bool (member "has_more" json)
@@ -262,24 +268,22 @@ let test_gate_label_behind_the_page_reads_with_a_cursor () =
    read may sit on a newer page, so its absence here is an empty page. *)
 let test_gate_label_absent_from_the_oldest_page_reads () =
   let json =
-    parse
+    answered
       (SR.respond ~bindings ~surface:"calendar" ~limit:10 ~before:(Some 100.0)
          ~has_more:false ~notes:[] discord_fixture)
   in
-  check bool "not refused on a page reached with a cursor" true
-    (member "error" json = `Null);
   check int "no rows of it on this page" 0 (to_int (member "lane_row_count" json))
 
 let test_known_lanes_still_read_with_bindings () =
   let json =
-    parse
+    answered
       (SR.respond ~bindings ~surface:"discord" ~limit:50 ~before:None ~has_more:false
          ~notes:[] discord_fixture)
   in
   check int "bound connector lane reads as before" 4
     (to_int (member "lane_row_count" json));
   let json =
-    parse
+    answered
       (SR.respond ~bindings ~surface:"dashboard" ~limit:50 ~before:None ~has_more:false
          ~notes:[] discord_fixture)
   in

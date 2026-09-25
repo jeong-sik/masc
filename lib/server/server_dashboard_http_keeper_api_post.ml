@@ -106,17 +106,23 @@ let handle_keeper_github_token_post state req reqd body_str =
           | Some (`String s) when String.trim s <> "" -> Ok (String.trim s)
           | _ -> Error "token is required and must be a non-empty string"
         in
+        (* The hostname picks the login lane the token is written to. Only an
+           absent one falls back to the query and then github.com; one that is
+           written but unreadable is refused, since a fallback would store the
+           token under a host the caller did not name (#38766). *)
         let hostname =
-          match Json_util.assoc_member_opt "hostname" json with
-          | Some (`String s) when String.trim s <> "" -> String.trim s
-          | _ ->
-            (match Server_utils.query_param req "hostname" with
-             | Some h -> h
-             | None -> Keeper_github_identity.default_hostname)
+          match Json_util.optional_nonblank_string json "hostname" with
+          | Ok (Some hostname) -> Ok hostname
+          | Ok None ->
+            Ok
+              (match Server_utils.query_param req "hostname" with
+               | Some h -> h
+               | None -> Keeper_github_identity.default_hostname)
+          | Error message -> Error message
         in
-        match token with
-        | Ok tok -> Ok (tok, hostname)
-        | Error err -> Error err
+        match token, hostname with
+        | Ok tok, Ok hostname -> Ok (tok, hostname)
+        | Error err, _ | Ok _, Error err -> Error err
       with
       | Yojson.Json_error msg -> Error (Printf.sprintf "invalid json: %s" msg)
       | exn -> Error (Printexc.to_string exn) (* cancel-guard-ok: Yojson decoding performs no Eio operation *)

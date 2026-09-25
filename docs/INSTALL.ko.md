@@ -407,8 +407,9 @@ masc sandbox-image --runtime nerdctl_kata
 `sandbox_image` 에는 바이너리에 든 이미지 이름(`config/sandbox-images.toml` 의
 `base`, `ocaml`)을 적고, 이 호스트가 그 이름에 올린 빌드는
 `<base-path>/.masc/config/sandbox-image-builds.toml` 에 있습니다. `masc sandbox-image promote <이름> <태그>` 를 같은 `--runtime` 으로
-실행하면 다음 턴부터 그 이름이 이 빌드로 뜨고, `masc sandbox-image rollback <이름>`
-은 바로 전 빌드로 되돌립니다. `masc setup` 은 설정하는 저장소에 `base` 빌드가
+실행하면 다음 턴부터 그 이름이 이 빌드로 뜹니다. promote 는 그 저장소에 있는 태그만
+받고, 목록에는 이름과 저장소마다 태그 하나만 남습니다. 되돌리려면 저장소에 남아 있는
+예전 태그를 다시 promote 하면 됩니다. `masc setup` 은 설정하는 저장소에 `base` 빌드가
 목록에 없으면 빌드해서 목록에 올립니다. `base` 가 아닌 레시피는
 checkout 의 `sandbox-images/` 아래에 있고 `masc sandbox-image --recipe ocaml --source .`
 처럼 빌드합니다.

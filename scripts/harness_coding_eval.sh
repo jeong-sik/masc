@@ -192,14 +192,15 @@ prepare_live_environment() {
   cp -R "${ROOT_DIR}/config/." "${CONFIG_DIR}"
   # The eval Keeper names `base`, which the copied catalog lists with no build.
   # Promote the general image this host already has, the one the harness ran on
-  # before Keepers named catalog images.
-  local base_image="masc-sandbox:general" base_digest
-  if ! base_digest="$(docker image inspect --format '{{.Id}}' "${base_image}")"; then
+  # before Keepers named catalog images. The host file holds builds only: the
+  # binary ships the names, `ocaml` included.
+  local base_image="masc-sandbox:general"
+  if ! docker image inspect "${base_image}" > /dev/null; then
     echo "coding eval failed: ${base_image} is not in Docker's image store; build it with \`masc sandbox-image --tag ${base_image}\`" >&2
     exit 1
   fi
-  printf '[images.base.docker]\nreference = "%s"\ndigest = "%s"\n\n[images.ocaml]\n' \
-    "${base_image}" "${base_digest}" > "${CONFIG_DIR}/sandbox-image-builds.toml"
+  printf '[images.base.docker]\nreference = "%s"\n' \
+    "${base_image}" > "${CONFIG_DIR}/sandbox-image-builds.toml"
   declare_requested_runtimes
   if [[ -z "${PORT}" ]]; then
     PORT="$(harness_pick_free_port)"

@@ -3611,17 +3611,16 @@ def assert_row_budgeted_surfaces(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    # At 16 rows the Attention panel holds three of the six items. The
-    # smallest surface the TUI draws is 15 rows, where it drops the composer
-    # and keeps the same three, so three is the tightest this panel gets. The
-    # budget checked here is that the panel stops where its rows stop: the
-    # third item is the last one drawn and the fourth is not. GOALS is served
-    # after the panel and the one held task row, so at this height it gets no
-    # row (4 spare rows: 3 attention + 1 task) and the count is unchanged.
-    for expected in (b"attention-1", b"attention-3", b"5 todo", b"q:quit"):
+    # At 16 rows the Overview has four rows to share, and each block is paid
+    # the rows it cannot give up before any block grows: the Attention
+    # panel's first item, the GOALS headline and its divider, and the one
+    # Tasks row left, which draws the backlog line. The budget checked here
+    # is that the panel stops where its rows stop: the first item is the
+    # last one drawn and the second is not.
+    for expected in (b"attention-1", b"GOALS", b"5 todo", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
-    if b"attention-4" in overview:
+    if b"attention-2" in overview:
         raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
 
     resize_and_wait(

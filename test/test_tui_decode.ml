@@ -1,5 +1,26 @@
 open Masc
 
+(* The saved-app reply's scope count picks the TUI notice: 0 says the
+   service's own list will be asked for. A reply without [scopes] used to
+   count as 0 and so told the operator something the server never said. *)
+let test_decode_oauth_client_saved_reads_scopes_and_refuses_their_absence () =
+  let decode text =
+    Tui_decode.decode_oauth_client_saved (Yojson.Safe.from_string text)
+  in
+  let result = Alcotest.(result int string) in
+  Alcotest.check result "two scopes" (Ok 2)
+    (decode {|{"provider":"github","scopes":["repo","read:org"]}|});
+  Alcotest.check result "saved with none" (Ok 0)
+    (decode {|{"provider":"github","scopes":[]}|});
+  Alcotest.(check bool) "no scopes field is refused" true
+    (Result.is_error (decode {|{"provider":"github"}|}));
+  Alcotest.(check bool) "scopes that are not a list are refused" true
+    (Result.is_error (decode {|{"provider":"github","scopes":"repo"}|}));
+  Alcotest.(check bool) "a non-string scope after a valid scope is refused" true
+    (Result.is_error (decode {|{"provider":"github","scopes":["repo",null]}|}));
+  Alcotest.(check bool) "a reply that is not an object is refused" true
+    (Result.is_error (decode {|[]|}))
+
 (* #38205, #38411: a schedule row carries the occurrence the runner is holding
    back and when the runner read it. The hold is read, not guessed: the key is
    always sent and null is "not held"; an object must name the occurrence, its
@@ -13,6 +34,7 @@ let test_decode_schedule_runner_hold_reads_a_held_row () =
             [ "occurrence_id", `String "occ-2"
             ; "due_at", `Float 260.0
             ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+            ; "reason", `Assoc [ "kind", `String "previous_occurrence_unconsumed" ]
             ; "observed_at", `Float 275.5
             ; "observed_at_iso", `String "1970-01-01T00:04:35Z"
             ] )
@@ -22,9 +44,56 @@ let test_decode_schedule_runner_hold_reads_a_held_row () =
   | Ok (Some hold) ->
       Alcotest.(check string) "occurrence" "occ-2" hold.Tui_decode.srh_occurrence_id;
       Alcotest.(check string) "due" "1970-01-01T00:04:20Z" hold.Tui_decode.srh_due_at_iso;
+      Alcotest.(check bool) "reason" true
+        (hold.Tui_decode.srh_reason = Tui_decode.Hold_previous_wake_untaken);
       Alcotest.(check (float 0.0)) "seen" 275.5 hold.Tui_decode.srh_observed_at
   | Ok None -> Alcotest.fail "a held row decoded as not held"
   | Error err -> Alcotest.fail err
+
+(* #34642: a schedule held on its target's shutdown fence names that fence,
+   and a reason the TUI does not know is refused rather than read as the
+   previous-wake hold. The seen-time is carried like any other hold. *)
+let test_decode_schedule_runner_hold_reads_a_fence_hold_and_refuses_unknown_reasons () =
+  let hold reason =
+    `Assoc
+      [ ( "runner_hold"
+        , `Assoc
+            [ "occurrence_id", `String "occ-3"
+            ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+            ; "reason", reason
+            ; "observed_at", `Float 275.5
+            ] )
+      ]
+  in
+  (match
+     Tui_decode.decode_schedule_runner_hold
+       (hold
+          (`Assoc
+            [ "kind", `String "target_intake_fenced"
+            ; "target", `String "analyst"
+            ; "fence_owner", `String "shutdown-1"
+            ]))
+   with
+   | Ok (Some { srh_reason = Hold_target_shutdown_fenced { target; fence_owner }; _ }) ->
+       Alcotest.(check string) "target" "analyst" target;
+       Alcotest.(check string) "fence owner" "shutdown-1" fence_owner
+   | Ok _ -> Alcotest.fail "a fence hold decoded as another reason"
+   | Error err -> Alcotest.fail err);
+  Alcotest.(check bool) "an unknown reason is refused" true
+    (Result.is_error
+       (Tui_decode.decode_schedule_runner_hold
+          (hold (`Assoc [ "kind", `String "cooling_down" ]))));
+  Alcotest.(check bool) "a missing reason is refused" true
+    (Result.is_error
+       (Tui_decode.decode_schedule_runner_hold
+          (`Assoc
+            [ ( "runner_hold"
+              , `Assoc
+                  [ "occurrence_id", `String "occ-3"
+                  ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+                  ; "observed_at", `Float 275.5
+                  ] )
+            ])))
 
 let test_decode_schedule_runner_hold_reads_not_held_and_refuses_bad_shapes () =
   let decode hold = Tui_decode.decode_schedule_runner_hold (`Assoc hold) in
@@ -46,6 +115,7 @@ let test_decode_schedule_runner_hold_reads_not_held_and_refuses_bad_shapes () =
             , `Assoc
                 [ "occurrence_id", `String "occ-2"
                 ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+                ; "reason", `Assoc [ "kind", `String "previous_occurrence_unconsumed" ]
                 ] )
           ]));
   Alcotest.(check bool) "and so is a null time" true
@@ -55,6 +125,7 @@ let test_decode_schedule_runner_hold_reads_not_held_and_refuses_bad_shapes () =
             , `Assoc
                 [ "occurrence_id", `String "occ-2"
                 ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+                ; "reason", `Assoc [ "kind", `String "previous_occurrence_unconsumed" ]
                 ; "observed_at", `Null
                 ] )
           ]));
@@ -73,6 +144,7 @@ let test_decode_schedule_runner_hold_refuses_a_time_no_clock_can_draw () =
            , `Assoc
                [ "occurrence_id", `String "occ-2"
                ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+               ; "reason", `Assoc [ "kind", `String "previous_occurrence_unconsumed" ]
                ; "observed_at", `Float observed_at
                ] )
          ])
@@ -120,6 +192,7 @@ let test_schedule_hold_reads_as_of_its_time_unless_the_runner_is_ok () =
   let hold =
     { Tui_decode.srh_occurrence_id = "occ-2"
     ; srh_due_at_iso = "1970-01-01T00:04:20Z"
+    ; srh_reason = Tui_decode.Hold_previous_wake_untaken
     ; srh_observed_at = 275.5
     }
   in
@@ -543,6 +616,55 @@ let test_terminal_text_keeps_the_tags_that_spell_a_flag () =
      a function nothing draws through. *)
   Alcotest.(check string) "the terminal sanitizer keeps the flag too" scotland
     (Tui_decode.sanitize_terminal_text scotland)
+
+(* The hand-kept list stopped at the tag block. Default_Ignorable_Code_Point
+   also holds the word joiner family, the Hangul fillers and the variation
+   selectors. The only selector kept is VS15/VS16 right after a text-default
+   emoji. Anywhere else -- after a letter, after an ideograph, behind another
+   selector -- it can hide bytes under one glyph, so it is drawn. *)
+let test_terminal_text_escapes_every_default_ignorable () =
+  let word_joiner = "\xe2\x81\xa0" (* U+2060 *) in
+  let invisible_plus = "\xe2\x81\xa4" (* U+2064 *) in
+  let hangul_filler = "\xe3\x85\xa4" (* U+3164 *) in
+  let soft_hyphen = "\xc2\xad" (* U+00AD *) in
+  let vs16 = "\xef\xb8\x8f" (* U+FE0F *) in
+  let vs17 = "\xf3\xa0\x84\x80" (* U+E0100 *) in
+  let vs18 = "\xf3\xa0\x84\x81" (* U+E0101 *) in
+  let heart = "\xe2\x9d\xa4" (* U+2764 *) in
+  let ideograph = "\xe8\x91\x9b" (* U+845B *) in
+  Alcotest.(check string) "the word joiner is drawn" "a\\u2060b"
+    (Tui_decode.escape_invisible ("a" ^ word_joiner ^ "b"));
+  Alcotest.(check string) "invisible plus is drawn" "a\\u2064b"
+    (Tui_decode.escape_invisible ("a" ^ invisible_plus ^ "b"));
+  Alcotest.(check string) "the Hangul filler is drawn" "\\u3164"
+    (Tui_decode.escape_invisible hangul_filler);
+  Alcotest.(check string) "the soft hyphen is drawn" "a\\u00ADb"
+    (Tui_decode.escape_invisible ("a" ^ soft_hyphen ^ "b"));
+  Alcotest.(check string) "one selector keeps the emoji form" (heart ^ vs16)
+    (Tui_decode.escape_invisible (heart ^ vs16));
+  Alcotest.(check string) "an ideographic selector is drawn even after an ideograph"
+    (ideograph ^ "\\U000E0100")
+    (Tui_decode.escape_invisible (ideograph ^ vs17));
+  Alcotest.(check string) "VS1 after an ideograph is drawn"
+    ("\xe4\xb8\x80" ^ "\\uFE00")
+    (Tui_decode.escape_invisible ("\xe4\xb8\x80" (* U+4E00 *) ^ "\xef\xb8\x80" (* U+FE00 *)));
+  Alcotest.(check string) "one ideographic selector after a letter is drawn"
+    "a\\U000E0100"
+    (Tui_decode.escape_invisible ("a" ^ vs17));
+  Alcotest.(check string) "an emoji selector after a letter is drawn"
+    "a\\uFE0F"
+    (Tui_decode.escape_invisible ("a" ^ vs16));
+  Alcotest.(check string) "a keycap keeps its emoji selector"
+    ("1" ^ vs16)
+    (Tui_decode.escape_invisible ("1" ^ vs16));
+  Alcotest.(check string) "a run of selectors behind one letter is drawn"
+    "a\\U000E0100\\U000E0101\\U000E0100"
+    (Tui_decode.escape_invisible ("a" ^ vs17 ^ vs18 ^ vs17));
+  Alcotest.(check string) "a second emoji selector is drawn"
+    (heart ^ vs16 ^ "\\uFE0F")
+    (Tui_decode.escape_invisible (heart ^ vs16 ^ vs16));
+  Alcotest.(check string) "a selector with no base is drawn" "\\U000E0100"
+    (Tui_decode.escape_invisible vs17)
 
 let test_preview_line_marks_breaks_and_escapes_the_rest () =
   let mark = "\xe2\x8f\x8e" in
@@ -11583,6 +11705,10 @@ let test_tool_approval_mode_unknown_word_fails () =
 
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_oauth_client_saved",
+      [ Alcotest.test_case "reads scopes and refuses their absence" `Quick
+          test_decode_oauth_client_saved_reads_scopes_and_refuses_their_absence
+      ] );
     ( "decode_tool_approval_mode_overrides",
       [ Alcotest.test_case "the wire word becomes the mode" `Quick
           test_tool_approval_mode_overrides_are_typed
@@ -12037,6 +12163,8 @@ let () =
           test_terminal_text_keeps_the_joiner_inside_an_emoji
       ; Alcotest.test_case "keeps the tags that spell a flag" `Quick
           test_terminal_text_keeps_the_tags_that_spell_a_flag
+      ; Alcotest.test_case "escapes every default-ignorable" `Quick
+          test_terminal_text_escapes_every_default_ignorable
       ; Alcotest.test_case "is idempotent and single-line" `Quick
           test_terminal_text_is_idempotent_and_single_line
       ; Alcotest.test_case "preview marks breaks and escapes the rest" `Quick
@@ -12354,6 +12482,8 @@ let () =
           test_decode_schedule_runner_hold_reads_a_held_row
       ; Alcotest.test_case "reads not held and refuses bad shapes" `Quick
           test_decode_schedule_runner_hold_reads_not_held_and_refuses_bad_shapes
+      ; Alcotest.test_case "reads a fence hold and refuses unknown reasons" `Quick
+          test_decode_schedule_runner_hold_reads_a_fence_hold_and_refuses_unknown_reasons
       ; Alcotest.test_case "refuses a time no clock can draw" `Quick
           test_decode_schedule_runner_hold_refuses_a_time_no_clock_can_draw
       ; Alcotest.test_case "reads the list's runner status" `Quick

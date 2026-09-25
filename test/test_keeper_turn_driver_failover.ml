@@ -4229,7 +4229,13 @@ let input_capacity_error reason =
        ; reason
        })
 
-let test_attempt_loop_input_capacity_does_not_advance_masc_lane () =
+(* A typed InputCapacity is this binding's [Admission] (RFC-38531 §3.2): the
+   declared input capacity was exceeded, or the input could not be measured,
+   before dispatch — a fact about this candidate's binding, not the request.
+   Another declared candidate may accept the same semantic input, so the walk
+   advances, matching what the exact walk already does for [Binding Admission].
+   The typed error stays on the failing candidate's receipt; the lane moves on. *)
+let test_attempt_loop_input_capacity_advances_to_measurable_candidate () =
   let attempts = ref [] in
   let result =
     Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
@@ -4246,22 +4252,24 @@ let test_attempt_loop_input_capacity_does_not_advance_masc_lane () =
                   (Agent_core.Retry.Token_measurement_unavailable
                      Llm_provider.Input_token_count.Anthropic_messages_count_tokens)))
             None
+        | "measurable.test_model" ->
+          (* The measurable candidate serves the same input. *)
+          attempt_without_effect (Ok runtime_id) None
         | other ->
           Alcotest.failf
-            "MASC advanced to candidate %s without an AGENT_CORE flow receipt"
+            "MASC advanced to unexpected candidate %s"
             other)
       [ "unmeasurable.test_model"; "measurable.test_model" ]
   in
   (match result with
-   | Error (Agent_core.Error.Api (Agent_core.Retry.InputCapacity _)) -> ()
+   | Ok _ -> ()
    | Error error ->
      Alcotest.failf
-       "typed input capacity was not preserved: %s"
-       (Agent_core.Error.to_string error)
-   | Ok _ -> Alcotest.fail "MASC must not advance an InputCapacity failure");
+       "InputCapacity (Admission) should rotate to the measurable candidate: %s"
+       (Agent_core.Error.to_string error));
   Alcotest.(check (list string))
-    "only AGENT_CORE may advance the candidate flow"
-    [ "unmeasurable.test_model" ]
+    "InputCapacity rotates past the unmeasurable candidate"
+    [ "unmeasurable.test_model"; "measurable.test_model" ]
     !attempts
 
 (* A typed ContextOverflow is a per-candidate capacity bound: a later lane
@@ -5477,9 +5485,12 @@ let test_access_failover_preserves_effect_and_caller_authority () =
 ;;
 
 let test_exhausted_access_errors_rotate_and_deterministic_requests_remain_terminal () =
-  (* A request that did not parse is the request's own defect: every walk
-     predicate refuses it, so no other candidate is asked (#37631 keeps
-     Json_parse_error terminal while an unknown 400 walks on). *)
+  (* A request body that is not valid JSON is this binding's [Admission]
+     (RFC-38531 §3.2 absorbs [Json_parse_error] into [Admission]): the refusal
+     happened before dispatch, so another declared candidate may accept the
+     same input. The walk rotates, matching the exact walk's [Binding
+     Admission] advance. The superseded contract that kept Json_parse_error
+     terminal (#37631) is retired by the one-closed-judgment RFC. *)
   let unparsed_request =
     Agent_core.Error.Api
       (Agent_core.Retry.InvalidRequest
@@ -5488,7 +5499,8 @@ let test_exhausted_access_errors_rotate_and_deterministic_requests_remain_termin
          })
   in
   let cases =
-    (unparsed_request, ["first"])
+    (* Json_parse_error is now Admission: rotates to the next candidate. *)
+    (unparsed_request, ["first"; "last"])
     (* HTTP 400 carries no machine-readable reason, so the lane walk advances to
        the next declared candidate (attempt_rejected_should_try_next). *)
     :: (access_error_from_http 400, ["first"; "last"])
@@ -5868,7 +5880,7 @@ let () =
           Alcotest.test_case
             "input capacity does not advance MASC lane"
             `Quick
-            test_attempt_loop_input_capacity_does_not_advance_masc_lane;
+            test_attempt_loop_input_capacity_advances_to_measurable_candidate;
           Alcotest.test_case
             "context overflow on last candidate stays terminal"
             `Quick

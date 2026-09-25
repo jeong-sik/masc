@@ -217,6 +217,45 @@ val capture_with_identity : unit -> (identified_capture, error) result
 (** {!capture} with the machine's identity and input history, for a Lane
     Add-on source ([dos_capture]). Never advances the machine. *)
 
+(** {1 Spectating} — one read a watcher can repeat cheaply. *)
+
+type change_mark = {
+  count : int;
+      (** The machine change counter. A completed run raises it even when
+          the guest faults before [steps] moves. {!load} also raises it when
+          installing a new machine, and {!eject} when removing it. Refused
+          calls and {!pass} leave it alone. Nothing resets it in this process;
+          after a restart {!live} also compares the incarnation. *)
+  incarnation : string;  (** as in {!identified_capture} *)
+}
+
+type 'mark publication = 'mark Machine_live_publication.t =
+  | No_screen
+  | Stable of 'mark
+  | Running of 'mark
+type published_state = change_mark publication
+
+val current_publication : unit -> published_state
+(** An atomic, lock-free read. [Running] is published before a run can mutate
+    the guest; a spectator must then use {!live} on a systhread and wait for
+    the final frame. [Stable mark] permits an immediate unchanged answer for
+    the same mark. A refused call restores [Stable] without raising the count. *)
+
+type live =
+  | Nothing_loaded  (** no machine: nothing to watch *)
+  | Unchanged of change_mark
+      (** [since] names the current count and the current incarnation *)
+  | Changed of change_mark * frame
+      (** [since] was absent, or its count or incarnation differs *)
+
+val live : since:change_mark option -> live
+(** Reads the count, the incarnation and, when either differs from [since],
+    the frame under one hold of the machine lock, so a [Changed] mark always
+    names its pixels. Never runs the guest or writes anything. A run can hold
+    the lock for a whole call (up to {!max_steps_per_call} instructions), so
+    an Eio caller uses {!current_publication} first and runs this in
+    [Eio_unix.run_in_systhread] when it sees [Running] or a different mark. *)
+
 val entry_json : entry -> Yojson.Safe.t
 (** One ledger line: [{"step", "who", "key"}], the shape written to
     [ledger.jsonl]. *)

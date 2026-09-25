@@ -911,15 +911,13 @@ let decode_task json =
    sanitizers route those codepoints through here, so the rule lives in one
    place: the codepoint is drawn as its own escape text, never dropped. *)
 let is_invisible_codepoint code =
-  code = 0x061C
-  || (code >= 0x200B && code <= 0x200F)
-  || (code >= 0x202A && code <= 0x202E)
-  || (code >= 0x2066 && code <= 0x2069)
-  || code = 0xFEFF
-  (* #38501: the tag block copies ASCII into characters a terminal draws as
-     nothing (U+E0061 is a tag "a"), so a sentence can be spelled twice --
-     once for the reader and once for the bytes the approval hash covers. *)
-  || (code >= 0xE0000 && code <= 0xE007F)
+  (* Unicode's own list, not a hand-kept one: Default_Ignorable_Code_Point is
+     every scalar a renderer may draw as nothing -- the bidi controls, the
+     zero-widths, the word joiner family (U+2060-U+2064), the Hangul fillers
+     (U+115F, U+1160, U+3164, U+FFA0), the soft hyphen, the variation
+     selectors (U+FE00-U+FE0F, U+E0100-U+E01EF) and the tag block. A list
+     kept by hand here missed every one of those after the tag block. *)
+  Uchar.is_valid code && Uucp.Gen.is_default_ignorable (Uchar.of_int code)
 ;;
 
 let zero_width_joiner = 0x200D
@@ -1019,7 +1017,22 @@ let escape_text code =
 let escape_invisible text =
   let output = Buffer.create (String.length text) in
   let length = String.length text in
-  let rec walk index ~after_pictograph =
+  (* [base]: the scalar before this one, when it was drawn and is not itself
+     ignorable. The one selector kept is VS15/VS16 right after a text-default
+     emoji (Emoji, not Emoji_Presentation: U+2764, U+2642, a keycap digit) --
+     the pairs emoji-variation-sequences.txt registers, and the ones joined
+     emoji use. Every other selector is drawn as its escape: after a plain
+     letter, behind another selector, with no base, and also after an
+     ideograph, because this boundary cannot tell a registered IVD or
+     StandardizedVariants pair from an unregistered one, and an unregistered
+     pair displays as the bare base (Unicode FAQ, unsupported characters). *)
+  let keeps_selector ~base scalar =
+    let code = Uchar.to_int scalar in
+    (code = variation_selector_15 || code = variation_selector_16)
+    && Uucp.Emoji.is_emoji base
+    && not (Uucp.Emoji.is_emoji_presentation base)
+  in
+  let rec walk index ~after_pictograph ~base =
     if index < length
     then (
       let decoded = String.get_utf_8_uchar text index in
@@ -1035,7 +1048,7 @@ let escape_invisible text =
       match flag_tags with
       | Some tail ->
         Buffer.add_substring output text index (step + tail);
-        walk (index + step + tail) ~after_pictograph:true
+        walk (index + step + tail) ~after_pictograph:true ~base:None
       | None ->
         let joins_two_pictographs =
           valid
@@ -1043,9 +1056,26 @@ let escape_invisible text =
           && after_pictograph
           && opens_pictograph text (index + step)
         in
-        if valid && is_invisible_codepoint code && not joins_two_pictographs
+        let selects_its_base =
+          valid
+          && Uucp.Gen.is_variation_selector scalar
+          && (match base with
+              | Some base -> keeps_selector ~base scalar
+              | None -> false)
+        in
+        let escaped =
+          valid
+          && is_invisible_codepoint code
+          && not (joins_two_pictographs || selects_its_base)
+        in
+        if escaped
         then Buffer.add_string output (escape_text code)
         else Buffer.add_substring output text index step;
+        let base =
+          if valid && (not escaped) && not (is_invisible_codepoint code)
+          then Some scalar
+          else None
+        in
         let after_pictograph =
           if not valid
           then false
@@ -1059,9 +1089,9 @@ let escape_invisible text =
           then after_pictograph
           else false
         in
-        walk (index + step) ~after_pictograph)
+        walk (index + step) ~after_pictograph ~base)
   in
-  walk 0 ~after_pictograph:false;
+  walk 0 ~after_pictograph:false ~base:None;
   Buffer.contents output
 ;;
 
@@ -11949,11 +11979,33 @@ let decode_async_request_observation json =
   | _ -> Error (Printf.sprintf "unknown async inventory status %S" status)
 ;;
 
+type schedule_hold_reason =
+  | Hold_previous_wake_untaken
+  | Hold_target_shutdown_fenced of
+      { target : string
+      ; fence_owner : string
+      }
+
 type schedule_runner_hold =
   { srh_occurrence_id : string
   ; srh_due_at_iso : string
+  ; srh_reason : schedule_hold_reason
   ; srh_observed_at : float
   }
+
+let decode_schedule_hold_reason hold =
+  match member "reason" hold with
+  | `Assoc _ as reason ->
+    let* kind = required_string_field reason "kind" in
+    (match kind with
+     | "previous_occurrence_unconsumed" -> Ok Hold_previous_wake_untaken
+     | "target_intake_fenced" ->
+       let* target = required_string_field reason "target" in
+       let* fence_owner = required_string_field reason "fence_owner" in
+       Ok (Hold_target_shutdown_fenced { target; fence_owner })
+     | unknown -> Error (Printf.sprintf "unknown runner hold reason %S" unknown))
+  | bad -> field_type_error "runner_hold.reason" "an object" bad
+;;
 
 (* 9999-12-31T23:59:59Z. The hold's time is drawn through [Unix.localtime],
    which fails with EOVERFLOW far above this (from 1e17 on macOS, measured),
@@ -11971,6 +12023,7 @@ let decode_schedule_runner_hold row =
   | `Assoc _ ->
     let* srh_occurrence_id = required_string_field hold "occurrence_id" in
     let* srh_due_at_iso = required_string_field hold "due_at_iso" in
+    let* srh_reason = decode_schedule_hold_reason hold in
     let* observed_at = required_nullable_float_field hold "observed_at" in
     let* srh_observed_at =
       match observed_at with
@@ -11980,7 +12033,7 @@ let decode_schedule_runner_hold row =
       | Some _ | None ->
         Error "runner_hold observed_at must be a time from 1970 to the end of year 9999"
     in
-    Ok (Some { srh_occurrence_id; srh_due_at_iso; srh_observed_at })
+    Ok (Some { srh_occurrence_id; srh_due_at_iso; srh_reason; srh_observed_at })
   | bad -> field_type_error "runner_hold" "an object or null" bad
 ;;
 
@@ -12039,3 +12092,13 @@ let schedule_hold_reading
         | Schedule_contract_values.Runner_degraded ) )
   | List_kept, Runner_unrecognised _ -> Hold_as_of hold.srh_observed_at
 ;;
+
+let decode_oauth_client_saved json =
+  match json with
+  | `Assoc _ ->
+      let* scopes = decode_string_list json "scopes" in
+      Ok (List.length scopes)
+  | other ->
+      Error
+        (Printf.sprintf "the reply must be an object (received %s)"
+           (Json_util.kind_name other))

@@ -642,6 +642,12 @@ val schedule_hold_reading : due:string -> string
     since when its held occurrence has been due, and that it waits for the
     target Keeper to take the previous wake. [due] is already formatted. *)
 
+val schedule_fence_hold_reading :
+  due:string -> target:string -> fence_owner:string -> string
+(** The same reading for a schedule held because its target Keeper is
+    shutting down: it names the Keeper and the shutdown operation instead of
+    the previous wake. *)
+
 val schedule_hold_as_of_tag : checked:string -> string
 (** The short form of a hold the runner has not read again since [checked]:
     the time the hold was seen, in place of since when it has been due. It
@@ -652,3 +658,9 @@ val schedule_hold_as_of_reading : checked:string -> string
     previous wake as of [checked]. Drawn instead of {!schedule_hold_reading}
     when the runner status beside the list is not [ok], because a failed tick
     does not re-read the hold (#38411). [checked] is already formatted. *)
+
+val schedule_fence_hold_as_of_reading :
+  checked:string -> target:string -> fence_owner:string -> string
+(** The fence hold ({!schedule_fence_hold_reading}) drawn as of [checked],
+    for the same failed-tick reason as {!schedule_hold_as_of_reading}.
+    [checked] is already formatted. *)

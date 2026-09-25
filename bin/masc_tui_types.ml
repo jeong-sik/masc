@@ -6070,6 +6070,11 @@ type state = {
   mutable memory_facts_error: string option;
   mutable memory_facts_cursor: int;
   mutable memory_facts_scroll: int;
+  (* One selected claim's wrapped rows. The cursor and renderer ask for the
+     same layout in one frame; retaining its immutable claim avoids wrapping
+     a long CJK fact twice and again on every redraw. *)
+  mutable memory_fact_claim_wrap:
+    (string * int * string list * int) option;
   mutable memory_facts_category: memory_category_filter;
   mutable memory_facts_sort: memory_sort_order;
   mutable memory_overview_sort: memory_overview_sort;
@@ -8039,6 +8044,7 @@ let create_state
   memory_facts_error = None;
   memory_facts_cursor = 0;
   memory_facts_scroll = 0;
+  memory_fact_claim_wrap = None;
   memory_facts_category = Category_all;
   memory_facts_sort = Sort_recency;
   memory_overview_sort = Mem_overview_facts;
@@ -8966,6 +8972,7 @@ let memory_back (state : state) =
         state.memory_facts_error <- None;
         state.memory_facts_cursor <- 0;
         state.memory_facts_scroll <- 0;
+        state.memory_fact_claim_wrap <- None;
         state.memory_facts_category <- Category_all;
         Memory_stays
     | None -> Memory_leaves
@@ -10308,11 +10315,32 @@ let approvals_questions_reading (state : state) =
 let approvals_surface_pending (state : state) =
   List.length (approval_items state) + approvals_open_question_count state
 
+(* Whether every list the count is taken over was read. The count is a
+   reading of what is waiting only when all three came back: the confirm
+   queue, the held calls, and the questions. The surface's own title already
+   parts the two -- it says "confirm queue unread", "held calls stale",
+   "questions unread" beside the number -- and the strip asked the number
+   alone. *)
+let approvals_reading_current (state : state) =
+  Option.is_some state.approval_snapshot
+  && Option.is_none state.keeper_tool_approvals_error
+  && (match approvals_questions_reading state with
+      | Questions_current -> true
+      | Questions_unread | Questions_stale -> false)
+
 let is_surface_active (state : state) (s : surface) =
   match s with
   | Metrics -> false
   | Approvals ->
-      state.view = Approvals || approvals_surface_pending state > 0
+      (* An entry that disappears says "nothing is waiting", which is the one
+         thing the strip cannot say when it could not look. With the server
+         unreachable every other surface drew "(load failed)" and this one
+         left the ring, so the screen that holds the operator's decisions was
+         the only one that read as settled. The entry stands until a reading
+         says the lists are empty. *)
+      state.view = Approvals
+      || approvals_surface_pending state > 0
+      || not (approvals_reading_current state)
   | _ -> true
 ;;
 

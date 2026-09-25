@@ -718,6 +718,22 @@ let test_an_unimplemented_instruction_is_an_error () =
       (is_completed (dispatch ~base_path "masc_dos_screen" [])))
 ;;
 
+(* The instructions before a fault still ran and may have repainted the
+   screen. The step count in tool responses and ledger positions must include
+   them. Three instructions complete here (mov ax,0xb800; mov es,ax;
+   mov byte es:[0],'X') before lea ax,ax faults. *)
+let test_a_fault_keeps_the_steps_that_ran () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "paint-then-fault.com"
+      "\xb8\x00\xb8\x8e\xc0\x26\xc6\x06\x00\x00\x58\x8d\xc0";
+    let loaded = load ~base_path "paint-then-fault.com" in
+    check bool "the load reports the fault" false (is_completed loaded);
+    match Dos_lane.screen () with
+    | Error e -> fail (Dos_lane.error_to_string e)
+    | Ok observation ->
+      check int "the completed instructions are counted" 3 observation.Dos_lane.steps)
+;;
+
 let test_unknown_key_is_refused () =
   with_workspace (fun base_path ->
     install_program ~base_path "hello.com" hello_com;
@@ -830,6 +846,8 @@ let () =
             test_a_stopped_holders_controller_is_let_go
         ; test_case "unimplemented instruction" `Quick
             test_an_unimplemented_instruction_is_an_error
+        ; test_case "a fault keeps the steps that ran" `Quick
+            test_a_fault_keeps_the_steps_that_ran
         ; test_case "unknown key" `Quick test_unknown_key_is_refused
         ; test_case "step cap" `Quick test_step_cap
         ; test_case "peek" `Quick test_peek_reads_the_text_page

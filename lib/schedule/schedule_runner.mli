@@ -19,12 +19,28 @@ type wake_signal =
   ; payload : Yojson.Safe.t
   }
 
+type hold_reason =
+  | Previous_occurrence_unconsumed
+      (** The target still holds this schedule's previous occurrence (#36213). *)
+  | Target_intake_fenced of
+      { target : string
+      ; fence_owner : string
+      }
+      (** The target refuses intake while [fence_owner] holds its intake
+          fence. The occurrence stays due and is reconsidered next tick
+          (#34642). *)
+
+type held =
+  { signal : wake_signal
+  ; reason : hold_reason
+  }
+
 type tick_result =
   { due_changed : int
   ; emitted : wake_signal list
   ; rescheduled : int
   ; dispatches : dispatch_result list
-  ; held : wake_signal list
+  ; held : held list
       (** Due candidates the consumer held back this tick ([defer_wake]):
           no signal was appended and nothing was dispatched, so they are not
           dispatch results. A held occurrence keeps its identity from tick to
@@ -80,15 +96,18 @@ type consumer =
   ; defer_wake :
       Workspace_utils.config ->
       occurrence_id:Schedule_occurrence_id.t ->
-      Schedule_domain.schedule_request -> bool
-      (** Self-clock: [true] leaves this due schedule unfired this tick — no
+      Schedule_domain.schedule_request -> hold_reason option
+      (** [Some reason] leaves this due schedule unfired this tick. A pure
+          judgment: acting on a reason's owner belongs to the caller of
+          [tick], after it returns.
+          Self-clock: [Some Previous_occurrence_unconsumed] leaves this due schedule unfired this tick — no
           signal, no dispatch, no advance — because its target still holds the
           previous, unconsumed occurrence. The current [occurrence_id] is a
           retry, not a new wake, and must remain eligible for reconciliation.
           Emission then tracks consumption
           rather than wall-clock, bounding a slow keeper to one pending
           occurrence per instance (#36213). A schedule whose every occurrence is
-          distinct work returns [false] and fires on every due. *)
+          distinct work returns [None] and fires on every due. *)
   }
 
 type runner_error =
@@ -104,10 +123,13 @@ val signals_dir : Workspace_utils.config -> string
 
 val wake_signal_of_yojson : Yojson.Safe.t -> (wake_signal, string) result
 
-val newly_held : previous:wake_signal list -> wake_signal list -> wake_signal list
+val hold_reason_to_json : hold_reason -> Yojson.Safe.t
+(** [{"kind": "previous_occurrence_unconsumed"}] or
+    [{"kind": "target_intake_fenced", "target": _, "fence_owner": _}]. *)
+
+val newly_held : previous:held list -> held list -> held list
 (** The held occurrences that were not held in [previous], by occurrence
-    identity. A hold is a state that lasts until the target consumes its
-    earlier occurrence, so a caller reports it when it starts rather than on
+    identity and reason. A hold is a state that lasts until its reason clears, so a caller reports it when it starts rather than on
     every tick that re-observes it (#37912). *)
 
 val tick :

@@ -35,20 +35,21 @@ let reads ~binding_name ~fields =
 let reads_prim ~binding_name ~fields =
   reads_in ~module_path:"bin/masc_tui_render_prim.ml" ~binding_name ~fields
 
-(* The detail under the list is three rows, and [boxed_surface_chrome_rows]
-   budgets one for the selected row's own line. Every kind takes that one
-   except a held tool call, which answers two questions -- what is being asked,
-   and why it was held -- and the ask runs the width of the pane, so at eighty
-   columns they cannot share a row.
+(* The detail under the list is three rows, and every kind takes one of them
+   except a held tool call, which answers two questions -- what is being
+   asked, and why it was held -- and the ask runs the width of the pane, so at
+   eighty columns they cannot share a row.
 
    That second row used to be spelled as a literal ["\\n"]: backslash and n,
    printed to the operator as those two characters, because a real newline
-   would have drawn a row nobody had counted. Both halves live in one place
-   now -- the budget asks [approval_detail_line] how tall its line is before
-   spending the rows on it -- and this pins that they stay one place. A height
-   declared beside the drawing instead of read off it is how the footer floats
-   a row, which is the defect the queue rows already taught the chat pane
-   (#29818). *)
+   would have drawn a row nobody had counted. The surface draws the block into
+   a buffer and reads its height back with [rows_drawn], so a row it draws is
+   a row it counted. A height declared beside the drawing instead of read off
+   it is how the footer floats a row: the rows above the queue were once
+   subtracted twice, in [boxed_surface_chrome_rows] and again as the Gate lane
+   rows, and the Approvals footer sat two rows above the composer at every
+   height. The four readings are the block above the queue, the block below
+   it, the footer, and the ask section. *)
 let test_the_detail_height_is_read_off_the_line_it_draws () =
   let calls callee =
     Ast_grep.count_calls_in_value_binding ~module_path:render
@@ -56,8 +57,8 @@ let test_the_detail_height_is_read_off_the_line_it_draws () =
   in
   Alcotest.(check int) "the surface builds the detail line once" 1
     (calls "approval_detail_line");
-  Alcotest.(check int) "and asks that same line for its height" 1
-    (calls "approval_detail_rows")
+  Alcotest.(check int) "and reads every block's height off what it drew" 4
+    (calls "rows_drawn")
 
 (* Whether the reading is live. Forty-two surface renderers in this file end
    their title with [connection_badge]; the roster was the one that did not,

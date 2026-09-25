@@ -8,6 +8,7 @@
   ocaml-dos.cpu86core
   ocaml-dos.core-identity
   yojson
-  masc.masc_random_id)
+  masc.masc_random_id
+  masc.machine_live_publication)
  (preprocess
   (pps ppx_deriving_yojson)))

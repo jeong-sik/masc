@@ -45,7 +45,9 @@ type glm_error =
     - 1300: policy block (terminal)
     - 1301: unsafe content (terminal)
     - 1302,1303,1305,1312: rate/load limit
-    - 1304,1308,1310: quota exhausted
+    - 1304,1308,1310: quota exhausted. 1304 is not in the docs.z.ai or
+      docs.bigmodel.cn code tables (checked 2026-09-24); its only record
+      here is the inline test naming it a daily limit.
     - 1309,1311,1313: subscription/plan (quota)
     - 1230,1234,500: server error *)
 let classify_glm_error ~code : glm_error_class =
@@ -203,6 +205,55 @@ let check_glm_error_json (json : Yojson.Safe.t) : glm_error option =
 let check_glm_error body : glm_error option =
   try check_glm_error_json (Yojson.Safe.from_string body) with
   | Yojson.Json_error _ -> None
+;;
+
+(* The one rule both completion seams (sync and stream) read a GLM error
+   envelope by. A class that names a typed failure is promoted while the
+   provider identity is still known; every other class keeps the HTTP path.
+   A context overflow carries no token limit in the envelope. Arrears, an
+   exhausted package, an expired plan or a spent usage window (1113, 1304,
+   1308-1311, 1313) take the hard-quota route; 1308 and 1310 state their
+   reset time only inside the message prose, which is not parsed, so the
+   failure carries no retry_after. *)
+let provider_failure_of_glm_error (error : glm_error) : Http_client.http_error option =
+  match error.error_class with
+  | Glm_context_overflow ->
+    Some
+      (Http_client.ProviderFailure
+         { kind = Http_client.Context_overflow { limit = None }; message = error.message })
+  | Glm_quota_exceeded ->
+    Some
+      (Http_client.ProviderFailure
+         { kind = Http_client.Hard_quota { retry_after = None }
+         ; message =
+             (match error.code with
+              | Some code -> Printf.sprintf "Glm error %s: %s" code error.message
+              | None -> error.message)
+         })
+  | Glm_rate_limited | Glm_auth_error | Glm_server_error | Glm_invalid_request -> None
+;;
+
+let%test "glm quota envelopes promote to hard quota" =
+  List.for_all
+    (fun code ->
+      match
+        check_glm_error
+          (Printf.sprintf {|{"error":{"code":"%s","message":"quota"}}|} code)
+      with
+      | Some error ->
+        (match provider_failure_of_glm_error error with
+         | Some
+             (Http_client.ProviderFailure
+                { kind = Http_client.Hard_quota { retry_after = None }; _ }) -> true
+         | Some _ | None -> false)
+      | None -> false)
+    [ "1113"; "1304"; "1308"; "1309"; "1310"; "1311"; "1313" ]
+;;
+
+let%test "glm rate limit keeps the http path" =
+  match check_glm_error {|{"error":{"code":"1305","message":"busy"}}|} with
+  | Some error -> Option.is_none (provider_failure_of_glm_error error)
+  | None -> false
 ;;
 
 (** Extract reasoning_content from Glm response and prepend as Thinking block.

@@ -26,7 +26,7 @@ doc:
 
 # Install dependencies
 install-deps:
-	opam install . --deps-only --with-test -y
+	opam install ./masc.opam --deps-only --with-test -y
 
 # Align external opam pins to repo SSOT.
 pin-external-deps:

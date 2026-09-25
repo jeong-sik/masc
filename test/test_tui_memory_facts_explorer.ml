@@ -14,11 +14,9 @@ let make_fact ?(category = Cat.Fact) ?(origin = "chat") ?(first = 100.0)
   ; mf_events = events
   }
 
-let used ?(retrieved = 0) ?(days = 0) ?last ?(retracted = 0) ?(revised_from = []) () :
+let retrieved ~count ~days ~last ?(retracted = 0) ?(revised_from = []) () :
   Decode.memory_fact_events =
-  { mfe_retrieved_count = retrieved
-  ; mfe_retrieved_distinct_days = days
-  ; mfe_last_retrieved_at = last
+  { mfe_retrieval = Decode.Retrieved { count; distinct_days = days; last_at = last }
   ; mfe_retracted_count = retracted
   ; mfe_revised_from = revised_from
   }
@@ -209,8 +207,8 @@ let test_sorting_orders () =
    record, stay last in their own recency order. *)
 let test_use_based_sorting () =
   let state = make_state () in
-  let often = make_fact ~last:100.0 ~claim:"often" ~events:(used ~retrieved:5 ~days:3 ~last:1_000.0 ()) "1" in
-  let latest = make_fact ~last:900.0 ~claim:"latest" ~events:(used ~retrieved:2 ~days:1 ~last:5_000.0 ()) "2" in
+  let often = make_fact ~last:100.0 ~claim:"often" ~events:(retrieved ~count:5 ~days:3 ~last:1_000.0 ()) "1" in
+  let latest = make_fact ~last:900.0 ~claim:"latest" ~events:(retrieved ~count:2 ~days:1 ~last:5_000.0 ()) "2" in
   let never = make_fact ~last:800.0 ~claim:"never" "3" in
   state.memory_facts <-
     Some (make_snapshot ~ordinary_facts:[ never; often; latest ]
@@ -260,6 +258,89 @@ let test_search_filtering () =
   check int "no match" 0 (List.length (Types.memory_fact_rows state))
 ;;
 
+(* A fact has no length limit, and the detail under the cursor is as tall as
+   the fact. On the live store at thirty rows one fact filled fifteen of them
+   and the list fell to a single row -- a browser of 254 facts showing one,
+   whose height then moved on every [j] as the next fact wrapped to a
+   different depth.
+
+   Measured against the exported floor rather than a number typed here, and
+   swept over the depths a fact can reach, so the case cannot pass by
+   happening to pick a fact that fits. *)
+let test_a_long_fact_leaves_the_list_its_floor () =
+  let paragraph = String.concat " " (List.init 40 (fun _ -> "claim")) in
+  List.iter
+    (fun depth ->
+       let state = make_state () in
+       let long =
+         make_fact ~claim:(String.concat "\n" (List.init depth (fun _ -> paragraph)))
+           "long"
+       in
+       let others =
+         List.init 30 (fun i ->
+           make_fact ~claim:(Printf.sprintf "short %d" i) (string_of_int i))
+       in
+       state.memory_facts <-
+         Some
+           (make_snapshot ~ordinary_facts:(long :: others) ~source_facts:[]
+              ~invalidations:[]);
+       let height =
+         Masc_tui_render_memory.memory_facts_content_height ~cols:80 ~budget:20
+           ~cursor:0 state
+       in
+       check bool
+         (Printf.sprintf "a %d-paragraph fact leaves the list its floor" depth)
+         true
+         (height
+          >= Masc_tui_render_memory.memory_fact_list_floor_rows - 1))
+    [ 1; 4; 12; 40 ]
+;;
+
+(* And the floor is a floor, not the height: a fact that fits leaves the list
+   everything the detail does not need. *)
+let test_a_short_fact_leaves_the_list_more_than_its_floor () =
+  let state = make_state () in
+  let facts =
+    List.init 30 (fun i ->
+      make_fact ~claim:(Printf.sprintf "short %d" i) (string_of_int i))
+  in
+  state.memory_facts <-
+    Some (make_snapshot ~ordinary_facts:facts ~source_facts:[] ~invalidations:[]);
+  let height =
+    Masc_tui_render_memory.memory_facts_content_height ~cols:80 ~budget:40
+      ~cursor:0 state
+  in
+  check bool "a short fact leaves more than the floor" true
+    (height > Masc_tui_render_memory.memory_fact_list_floor_rows)
+;;
+
+let test_a_tiny_viewport_never_draws_unbudgeted_detail () =
+  let state = make_state () in
+  let long =
+    make_fact ~claim:(String.concat " " (List.init 100 (fun _ -> "claim"))) "long"
+  in
+  let others =
+    List.init 30 (fun i ->
+      make_fact ~claim:(Printf.sprintf "short %d" i) (string_of_int i))
+  in
+  state.memory_facts <-
+    Some
+      (make_snapshot ~ordinary_facts:(long :: others) ~source_facts:[]
+         ~invalidations:[]);
+  List.iter
+    (fun budget ->
+      let drawn = ref 0 in
+      let row _ = incr drawn in
+      Masc_tui_render_memory.render_memory_facts_body ~cols:80 ~budget state
+        ~push:row ~push_styled:(fun ~style:_ _ -> incr drawn)
+        ~push_selected:row ~push_divider:(fun () -> incr drawn)
+        ~push_empty:(fun () -> incr drawn);
+      check int
+        (Printf.sprintf "budget %d is exactly filled" budget)
+        budget !drawn)
+    [ 10; 11; 12 ]
+;;
+
 let () =
   run "masc_tui_memory_facts_explorer"
     [ ( "navigation"
@@ -272,5 +353,13 @@ let () =
         ] )
     ; ( "search"
       , [ test_case "search filtering" `Quick test_search_filtering ] )
+    ; ( "layout"
+      , [ test_case "a long fact leaves the list its floor" `Quick
+            test_a_long_fact_leaves_the_list_its_floor
+        ; test_case "a short fact leaves the list more than its floor" `Quick
+            test_a_short_fact_leaves_the_list_more_than_its_floor
+        ; test_case "tiny viewport keeps detail inside budget" `Quick
+            test_a_tiny_viewport_never_draws_unbudgeted_detail
+        ] )
     ]
 ;;

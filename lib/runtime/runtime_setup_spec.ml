@@ -151,6 +151,14 @@ let table ?(array=false) path fields =
   ^ (if array then "]]\n" else "]\n")
   ^ String.concat "" (List.map (fun (key,value) -> quoted key ^ " = " ^ Yojson.Safe.to_string value ^ "\n") fields)
 type rendered = {runtime_id:string;runtime_toml:string}
+(* [--setup-lanes] points the exact-output lanes at the connection set up here
+   when it is an HTTP one. An exact slot whose provider declares no
+   [exact-body-timeout-s] is left out at boot and cannot be added by a save
+   (rule 3, #38779), so the connection declares one. The wizard has no
+   measurement of the operator's endpoint to size it from, so it writes the
+   value the seed runtime.toml gives its own exact-slot providers; the
+   operator narrows it in the file. *)
+let setup_exact_body_timeout_s = 1200.0
 let render spec =
   let name = choice_name spec.choice in
   let provider = "setup_" ^ name ^ "_" ^ Digestif.SHA256.(to_hex (digest_string spec.canonical_spec)) in
@@ -160,7 +168,8 @@ let render spec =
   let transport_fields,credential = match spec.transport with
     | Http h ->
       (if protocol_fixes_dialect spec.choice then [] else ["kind",`String (wire_kind_name h.kind)])
-      @ ["endpoint",`String h.endpoint],h.credential
+      @ ["endpoint",`String h.endpoint;
+         Runtime_schema.exact_body_timeout_s_key,`Float setup_exact_body_timeout_s],h.credential
     | Client c -> ["command",`String c.command;"is-non-interactive",`Bool true]
       @ (match c.timeout with None -> [] | Some timeout -> ["timeout-s",`Float timeout]),
       Option.map (fun path -> File_reference path) c.oauth in

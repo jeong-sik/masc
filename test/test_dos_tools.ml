@@ -1000,14 +1000,125 @@ let test_restore_refusals_and_listing () =
     match member "checkpoints" (Tool_result.data listing) with
     | Some (`List rows) ->
       let slots = List.map (fun r -> match member "slot" r with Some (`String s) -> s | _ -> "") rows in
-      check (list string) "every slot" [ "junk"; "kept" ] slots;
+      (* [boot] above ran the guest, so it autosaved too: a third, earlier
+         slot alongside the two this test saved itself. *)
+      check (list string) "every slot" [ "autosave"; "junk"; "kept" ] slots;
       (match rows with
-       | [ junk; kept ] ->
+       | [ _autosave; junk; kept ] ->
          check bool "the broken one says why" true (member "unreadable" junk <> None);
          check bool "the good one names its core" true
            (member "core" kept = Some (`String Dos_core_identity.source_digest))
-       | _ -> fail "two rows")
+       | _ -> fail "three rows")
     | _ -> fail "no checkpoints list")
+;;
+
+(* ---------- autosave ---------- *)
+
+let autosave_field result =
+  match member "autosave" (Tool_result.data result) with
+  | Some a -> a
+  | None -> fail (Printf.sprintf "no autosave in %s" (Tool_result.message result))
+;;
+
+(* The set every call that runs the guest belongs to, named exhaustively
+   against every constructor of Dos_lane.error: only [Ok] and [Guest_fault]
+   autosave. A future edit that widens or narrows the set without updating
+   this test is caught here, not by chance in a dispatch scenario below. *)
+let test_ran_the_guest_mutation_check () =
+  check bool "a settled call ran the guest" true (Dos_lane.ran_the_guest (Ok ()));
+  check bool "a guest fault still ran the guest" true
+    (Dos_lane.ran_the_guest (Error (Dos_lane.Guest_fault "an unimplemented instruction")));
+  let refused name e =
+    check bool (name ^ " did not run the guest") false (Dos_lane.ran_the_guest (Error e))
+  in
+  refused "no machine" Dos_lane.No_machine;
+  refused "a bad argument" (Dos_lane.Invalid_request "bad");
+  refused "an unreadable file" (Dos_lane.Unreadable "io");
+  refused "another holder" (Dos_lane.Held_by "someone");
+  refused "an unsaveable state" (Dos_lane.Unsaveable "state");
+  refused "a refused checkpoint" (Dos_lane.Checkpoint_refused (Machine_checkpoint.Corrupt "bad"))
+;;
+
+let test_autosave_written_after_a_successful_step () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    let stepped = dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] in
+    check bool "the step succeeds" true (is_completed stepped);
+    check bool "and reports the autosave as saved" true
+      (member "saved" (autosave_field stepped) = Some (`Bool true));
+    let before_steps = int_field "steps" stepped in
+    let restored = restore_as ~base_path "autosave" in
+    check bool "the autosave slot restores" true (is_completed restored);
+    check int "at the same step count" before_steps (int_field "steps" restored))
+;;
+
+let test_autosave_not_written_after_a_refused_call () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~agent:"liu-bei" ~base_path "echo.com";
+    let refused =
+      dispatch ~base_path ~agent:"cao-cao" "masc_dos_press" [ ("keys", `List [ `String "a" ]) ]
+    in
+    check bool "another player's press is refused" false (is_completed refused);
+    eject ();
+    let after = dispatch ~base_path "masc_dos_screen" [] in
+    check bool "no machine, so the offer comes from before" false (is_completed after);
+    (* If the refused press had autosaved, this would name cao-cao instead. *)
+    check bool "the boot's autosave is still the one on file" true
+      (member "saved_by" (autosave_field after) = Some (`String "liu-bei")))
+;;
+
+let test_no_autosave_offered_when_nothing_ever_ran () =
+  with_workspace (fun base_path ->
+    let result = dispatch ~base_path "masc_dos_screen" [] in
+    check bool "no machine" false (is_completed result);
+    check bool "and nothing to offer" true (member "autosave" (Tool_result.data result) = None))
+;;
+
+let test_a_failed_autosave_does_not_fail_the_call () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    let checkpoints_dir =
+      Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos")
+        "checkpoints"
+    in
+    mkdir_p (Filename.dirname checkpoints_dir);
+    write_file checkpoints_dir "a file where the checkpoints directory would be";
+    let loaded = load ~base_path "echo.com" in
+    check bool "the load still succeeds" true (is_completed loaded);
+    let autosave = autosave_field loaded in
+    check bool "reports the write as failed" true (member "saved" autosave = Some (`Bool false));
+    check bool "and says why" true (member "reason" autosave <> None))
+;;
+
+let test_no_machine_names_the_autosave_after_an_eject () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~agent:"liu-bei" ~base_path "echo.com";
+    eject ();
+    let screen = dispatch ~base_path "masc_dos_screen" [] in
+    check bool "still refused: no machine" false (is_completed screen);
+    check bool "the message points at the autosave" true
+      (contains "autosave" (Tool_result.message screen));
+    let autosave = autosave_field screen in
+    check bool "names the program" true (member "program" autosave = Some (`String "echo.com"));
+    check bool "names who saved it" true (member "saved_by" autosave = Some (`String "liu-bei"));
+    check bool "names how to resume" true
+      (match member "resume" autosave with
+       | Some (`String s) -> contains "masc_dos_restore" s && contains "autosave" s
+       | _ -> false))
+;;
+
+let test_inventory_names_the_autosave () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    eject ();
+    let listing = dispatch ~base_path "masc_dos_load" [] in
+    check bool "listing succeeds" true (is_completed listing);
+    check bool "and names the autosave" true
+      (member "autosave" (Tool_result.data listing) <> None))
 ;;
 
 let () =
@@ -1060,6 +1171,16 @@ let () =
         ; test_case "ledger continues" `Quick test_the_ledger_continues_from_the_checkpoint
         ; test_case "restore leaves saves" `Quick test_a_restore_leaves_the_saves_directory
         ; test_case "restore refusals and listing" `Quick test_restore_refusals_and_listing
+        ; test_case "ran the guest mutation check" `Quick test_ran_the_guest_mutation_check
+        ; test_case "autosave after a step" `Quick test_autosave_written_after_a_successful_step
+        ; test_case "autosave skips a refusal" `Quick
+            test_autosave_not_written_after_a_refused_call
+        ; test_case "no autosave to offer" `Quick test_no_autosave_offered_when_nothing_ever_ran
+        ; test_case "a failed autosave still returns the call" `Quick
+            test_a_failed_autosave_does_not_fail_the_call
+        ; test_case "no machine names the autosave" `Quick
+            test_no_machine_names_the_autosave_after_an_eject
+        ; test_case "inventory names the autosave" `Quick test_inventory_names_the_autosave
         ] )
     ]
 ;;

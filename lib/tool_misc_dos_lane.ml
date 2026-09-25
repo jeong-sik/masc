@@ -16,8 +16,8 @@
 
 open Tool_args
 
-let reject ~tool_name ~start_time message =
-  Tool_result.make_err ~tool_name ~class_:Tool_result.Workflow_rejection ~start_time message
+let reject ?(data = `Null) ~tool_name ~start_time message =
+  Tool_result.make_err ~tool_name ~class_:Tool_result.Workflow_rejection ~start_time ~data message
 ;;
 
 let observation_fields (o : Dos_lane.observation) =
@@ -49,34 +49,6 @@ let ran_fields (r : Dos_lane.ran) =
   ]
 ;;
 
-let of_lane ?(extra = []) ~tool_name ~start_time
-    (result : (Dos_lane.observation, Dos_lane.error) result) =
-  match result with
-  | Ok o ->
-    Tool_result.make_ok ~tool_name ~start_time
-      ~data:(`Assoc (observation_fields o @ extra))
-      ()
-  | Error
-      (( Dos_lane.No_machine | Dos_lane.Invalid_request _ | Dos_lane.Held_by _
-       | Dos_lane.Checkpoint_refused
-           ( Machine_checkpoint.No_slot _ | Machine_checkpoint.Other_machine _
-           | Machine_checkpoint.Other_format _ ) ) as e) ->
-    reject ~tool_name ~start_time (Dos_lane.error_to_string e)
-  | Error
-      (( Dos_lane.Unreadable _ | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _
-       | Dos_lane.Checkpoint_refused
-           (Machine_checkpoint.Corrupt _ | Machine_checkpoint.Unreadable _) ) as e) ->
-    Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
-      (Dos_lane.error_to_string e)
-;;
-
-let of_lane_run ?(extra = []) ~tool_name ~start_time
-    (result : (Dos_lane.observation * Dos_lane.ran, Dos_lane.error) result) =
-  match result with
-  | Ok (o, r) -> of_lane ~tool_name ~start_time ~extra:(ran_fields r @ extra) (Ok o)
-  | Error e -> of_lane ~tool_name ~start_time (Error e)
-;;
-
 (* Which DOS core this server was built with, on the two answers a caller
    reads first: the load and the screen. A black screen from a core that
    lacks a fix looks the same as a game bug until this says the core differs
@@ -95,6 +67,80 @@ let programs_dir ~base_path = Filename.concat (dos_dir ~base_path) "programs"
    holds one directory per inventory name, and a program may be called
    anything. *)
 let checkpoints_dir ~base_path = Filename.concat (dos_dir ~base_path) "checkpoints"
+
+(* What the autosave slot holds, as the fields a caller reading a No_machine
+   refusal or the program-less inventory needs to decide whether to resume:
+   what it is, when, by whom, and the one line that does it. *)
+let autosave_status_json (s : Dos_lane.autosave_status) =
+  `Assoc
+    [ ("program", `String s.Dos_lane.program)
+    ; ("steps", `Int s.Dos_lane.steps)
+    ; ("saved_by", `String s.Dos_lane.saved_by)
+    ; ("saved_at", `String (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at))
+    ; ( "resume"
+      , `String
+          (Printf.sprintf "masc_dos_restore slot=%s"
+             (Machine_checkpoint.slot_to_string Dos_lane.autosave_slot)) )
+    ]
+;;
+
+(* Every refusal a lane call can answer with, in one place: [No_machine]
+   alone is enriched with what the autosave slot holds, because it is the
+   answer a caller gets right after a restart, before anything is loaded.
+   Every other refusal (a bad argument, another holder, a checkpoint this
+   server will not read) is unaffected. *)
+let reject_for ~base_path ~tool_name ~start_time (e : Dos_lane.error) =
+  match e with
+  | Dos_lane.No_machine ->
+    (match Dos_lane.autosave_status ~dir:(checkpoints_dir ~base_path) with
+     | None -> reject ~tool_name ~start_time (Dos_lane.error_to_string e)
+     | Some s ->
+       reject ~tool_name ~start_time
+         ~data:(`Assoc [ ("autosave", autosave_status_json s) ])
+         (Printf.sprintf
+            "%s (an autosave is waiting: %s, %d steps, saved by %s at %s -- resume with \
+             masc_dos_restore slot=%s)"
+            (Dos_lane.error_to_string e) s.Dos_lane.program s.Dos_lane.steps s.Dos_lane.saved_by
+            (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at)
+            (Machine_checkpoint.slot_to_string Dos_lane.autosave_slot)))
+  | Dos_lane.Invalid_request _ | Dos_lane.Held_by _ | Dos_lane.Unreadable _
+  | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _ ->
+    reject ~tool_name ~start_time (Dos_lane.error_to_string e)
+;;
+
+let of_lane ?(extra = []) ~base_path ~tool_name ~start_time
+    (result : (Dos_lane.observation, Dos_lane.error) result) =
+  match result with
+  | Ok o ->
+    Tool_result.make_ok ~tool_name ~start_time
+      ~data:(`Assoc (observation_fields o @ extra))
+      ()
+  | Error
+      (( Dos_lane.No_machine | Dos_lane.Invalid_request _ | Dos_lane.Held_by _
+       | Dos_lane.Checkpoint_refused
+           ( Machine_checkpoint.No_slot _ | Machine_checkpoint.Other_machine _
+           | Machine_checkpoint.Other_format _ ) ) as e) ->
+    reject_for ~base_path ~tool_name ~start_time e
+  | Error (Dos_lane.Guest_fault _ as e) ->
+    (* A fault is one of the outcomes that autosaves (Dos_lane.ran_the_guest),
+       so [extra] here may carry the write's own outcome -- unlike the
+       refusals above, which never ran the guest and so never autosave. *)
+    Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
+      ~data:(`Assoc extra) (Dos_lane.error_to_string e)
+  | Error
+      (( Dos_lane.Unreadable _ | Dos_lane.Unsaveable _
+       | Dos_lane.Checkpoint_refused
+           (Machine_checkpoint.Corrupt _ | Machine_checkpoint.Unreadable _) ) as e) ->
+    Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
+      (Dos_lane.error_to_string e)
+;;
+
+let of_lane_run ?(extra = []) ~base_path ~tool_name ~start_time
+    (result : (Dos_lane.observation * Dos_lane.ran, Dos_lane.error) result) =
+  match result with
+  | Ok (o, r) -> of_lane ~base_path ~tool_name ~start_time ~extra:(ran_fields r @ extra) (Ok o)
+  | Error e -> of_lane ~base_path ~tool_name ~start_time ~extra (Error e)
+;;
 
 (* What a program wrote on earlier machines, one directory per inventory
    name. Keyed by the inventory name, not the executable: two games may both
@@ -328,6 +374,32 @@ let after_announcing result =
    afterwards, on the fiber, because posting takes an Eio lock. *)
 let off_domain f = Eio_guard.run_in_systhread ~label:"dos-lane" f
 
+(* Autosave: after every call that ran the guest -- it settled, or it
+   stopped at a fault it left loaded -- the machine is written to
+   [Dos_lane.autosave_slot], in the one place every such call passes through
+   ([of_lane_run] and [of_lane] via [handle_load], [handle_step],
+   [handle_press], [handle_click], [handle_type] and [handle_restore]). A
+   call [Dos_lane.ran_the_guest] says did not run the guest -- Held_by,
+   Invalid_request, No_machine, a refused restore -- writes nothing.
+
+   A write that fails does not fail the call: the guest moved either way,
+   and the call's own result is worth more than a checkpoint of it. The
+   failure is reported as a typed field, not swallowed, and logged once. *)
+let autosave_after ~base_path ~who outcome =
+  if Dos_lane.ran_the_guest outcome then
+    match
+      off_domain (fun () ->
+        Dos_lane.save ~who ~dir:(checkpoints_dir ~base_path) ~slot:Dos_lane.autosave_slot)
+    with
+    | Ok _ -> [ ("autosave", `Assoc [ ("saved", `Bool true) ]) ]
+    | Error e ->
+      Log.DosLog.warn "masc_dos autosave: %s" (Dos_lane.error_to_string e);
+      [ ( "autosave"
+        , `Assoc [ ("saved", `Bool false); ("reason", `String (Dos_lane.error_to_string e)) ] )
+      ]
+  else []
+;;
+
 (* A game can run for hours, and the Keeper holding the controller can stop
    in that time. It will never pass, and every other caller would be refused
    until a restart. [holder_left] says whether a holder can no longer act;
@@ -365,14 +437,23 @@ let free_left_controller ~holder_left ~who =
 let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
   match get_string_opt args "program" with
   | None | Some "" ->
-    (* No name: the inventory, so the next call can name a program. *)
+    (* No name: the inventory, so the next call can name a program. Named
+       here too: this is the first call a caller makes after a restart, and
+       an autosave from before it is worth resuming rather than starting
+       over. *)
+    let autosave =
+      match Dos_lane.autosave_status ~dir:(checkpoints_dir ~base_path) with
+      | None -> []
+      | Some s -> [ ("autosave", autosave_status_json s) ]
+    in
     Tool_result.make_ok ~tool_name ~start_time
       ~data:
         (`Assoc
-          [ ( "programs_available"
-            , `List (List.map (fun n -> `String n) (programs_available ~base_path)) )
-          ; ("programs_dir", `String (programs_dir ~base_path))
-          ])
+          ([ ( "programs_available"
+             , `List (List.map (fun n -> `String n) (programs_available ~base_path)) )
+           ; ("programs_dir", `String (programs_dir ~base_path))
+           ]
+           @ autosave))
       ()
   | Some name ->
     let boot =
@@ -393,7 +474,8 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
                (announce ~author:agent_name
                   (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name)))
        in
-       after_announcing (of_lane_run ~extra:[ core_field ] ~tool_name ~start_time loaded))
+       let extra = core_field :: autosave_after ~base_path ~who:agent_name loaded in
+       after_announcing (of_lane_run ~base_path ~extra ~tool_name ~start_time loaded))
 ;;
 
 let handle_eject ~tool_name ~start_time ~agent_name _args =
@@ -419,7 +501,7 @@ let handle_eject ~tool_name ~start_time ~agent_name _args =
    controller would otherwise go to a name no caller has, nobody could move or
    eject the machine again, and the post meant to wake the next player would
    address no one. *)
-let handle_pass ~tool_name ~start_time ~agent_name args =
+let handle_pass ~tool_name ~start_time ~base_path ~agent_name args =
   let to_ =
     match get_string_opt args "to" with
     | None -> Ok None
@@ -441,13 +523,13 @@ let handle_pass ~tool_name ~start_time ~agent_name args =
       | None -> Printf.sprintf "%s 님이 DOS 조종권을 내려놓았습니다" agent_name
     in
     after_announcing
-      (of_lane ~tool_name ~start_time
+      (of_lane ~base_path ~tool_name ~start_time
          (off_domain (fun () ->
             Dos_lane.pass ~who:agent_name ~to_ ~announce:(announce ~author:agent_name content))))
 ;;
 
-let handle_screen ~tool_name ~start_time _args =
-  of_lane ~extra:[ core_field ] ~tool_name ~start_time (off_domain Dos_lane.screen)
+let handle_screen ~tool_name ~start_time ~base_path _args =
+  of_lane ~base_path ~extra:[ core_field ] ~tool_name ~start_time (off_domain Dos_lane.screen)
 ;;
 
 (* The whole per-call ceiling: a call that settles stops early, so a large
@@ -456,37 +538,45 @@ let handle_screen ~tool_name ~start_time _args =
    settles in one call instead of coming back busy. *)
 let default_steps = Dos_lane.max_steps_per_call
 
-let handle_step ~tool_name ~start_time ~who args =
-  after_announcing @@
-  of_lane_run ~tool_name ~start_time
-    (off_domain @@ fun () -> Dos_lane.step ~who
+let handle_step ~tool_name ~start_time ~base_path ~who args =
+  let ran =
+    off_domain @@ fun () -> Dos_lane.step ~who
        ~steps:(get_int args "steps" default_steps)
-       ~until_ready:(get_bool args "until_ready" true))
+       ~until_ready:(get_bool args "until_ready" true)
+  in
+  after_announcing @@
+  of_lane_run ~base_path ~extra:(autosave_after ~base_path ~who ran) ~tool_name ~start_time ran
 ;;
 
-let handle_press ~tool_name ~start_time ~who args =
-  after_announcing @@
-  of_lane_run ~tool_name ~start_time
-    (off_domain @@ fun () -> Dos_lane.press ~who
+let handle_press ~tool_name ~start_time ~base_path ~who args =
+  let ran =
+    off_domain @@ fun () -> Dos_lane.press ~who
        ~keys:(get_string_list args "keys")
-       ~steps:(get_int args "steps" default_steps))
+       ~steps:(get_int args "steps" default_steps)
+  in
+  after_announcing @@
+  of_lane_run ~base_path ~extra:(autosave_after ~base_path ~who ran) ~tool_name ~start_time ran
 ;;
 
-let handle_click ~tool_name ~start_time ~who args =
-  after_announcing @@
-  of_lane_run ~tool_name ~start_time
-    (off_domain @@ fun () -> Dos_lane.click ~who
+let handle_click ~tool_name ~start_time ~base_path ~who args =
+  let ran =
+    off_domain @@ fun () -> Dos_lane.click ~who
        ~x:(get_int args "x" 0)
        ~y:(get_int args "y" 0)
        ~buttons:(get_int args "buttons" 1)
-       ~steps:(get_int args "steps" default_steps))
+       ~steps:(get_int args "steps" default_steps)
+  in
+  after_announcing @@
+  of_lane_run ~base_path ~extra:(autosave_after ~base_path ~who ran) ~tool_name ~start_time ran
 ;;
 
-let handle_type ~tool_name ~start_time ~who args =
+let handle_type ~tool_name ~start_time ~base_path ~who args =
+  let ran =
+    off_domain @@ fun () -> Dos_lane.type_text ~who ~text:(get_string args "text" "")
+       ~steps:(get_int args "steps" default_steps)
+  in
   after_announcing @@
-  of_lane_run ~tool_name ~start_time
-    (off_domain @@ fun () -> Dos_lane.type_text ~who ~text:(get_string args "text" "")
-       ~steps:(get_int args "steps" default_steps))
+  of_lane_run ~base_path ~extra:(autosave_after ~base_path ~who ran) ~tool_name ~start_time ran
 ;;
 
 (* Addresses arrive as hex strings ("b8000", "0xB8000") because that is how
@@ -499,7 +589,7 @@ let parse_address s =
   int_of_string_opt ("0x" ^ s)
 ;;
 
-let handle_peek ~tool_name ~start_time args =
+let handle_peek ~tool_name ~start_time ~base_path args =
   let address =
     match parse_address (get_string args "address" "") with
     | Some a -> a
@@ -512,7 +602,7 @@ let handle_peek ~tool_name ~start_time args =
         (`Assoc
           [ ("address", `String (Printf.sprintf "%05x" address)); ("hex", `String hex) ])
       ()
-  | Error e -> reject ~tool_name ~start_time (Dos_lane.error_to_string e)
+  | Error e -> reject_for ~base_path ~tool_name ~start_time e
 ;;
 
 (* ---------- checkpoints ---------- *)
@@ -533,7 +623,7 @@ let handle_save ~tool_name ~start_time ~base_path ~who args =
   | Error message -> reject ~tool_name ~start_time message
   | Ok None -> reject ~tool_name ~start_time "slot must name a checkpoint"
   | Ok (Some slot) ->
-    of_lane ~extra:[ slot_field slot ] ~tool_name ~start_time
+    of_lane ~base_path ~extra:[ slot_field slot ] ~tool_name ~start_time
       (off_domain (fun () -> Dos_lane.save ~who ~dir:(checkpoints_dir ~base_path) ~slot))
 ;;
 
@@ -570,7 +660,7 @@ let handle_restore ~tool_name ~start_time ~base_path ~agent_name args =
              ; ("checkpoint_format", `Int Dos_lane.checkpoint_format)
              ])
          ()
-     | Error e -> of_lane ~tool_name ~start_time (Error e))
+     | Error e -> of_lane ~base_path ~tool_name ~start_time (Error e))
   | Ok (Some slot) ->
     let restored =
       off_domain (fun () ->
@@ -581,6 +671,8 @@ let handle_restore ~tool_name ~start_time ~base_path ~agent_name args =
                (Printf.sprintf "%s 님이 DOS 기계를 %s 체크포인트로 되돌렸습니다" agent_name
                   (Machine_checkpoint.slot_to_string slot))))
     in
-    after_announcing
-      (of_lane ~extra:[ slot_field slot; core_field ] ~tool_name ~start_time restored)
+    let extra =
+      slot_field slot :: core_field :: autosave_after ~base_path ~who:agent_name restored
+    in
+    after_announcing (of_lane ~base_path ~extra ~tool_name ~start_time restored)
 ;;

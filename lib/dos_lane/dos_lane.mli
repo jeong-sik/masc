@@ -373,5 +373,29 @@ val restore :
 
 val checkpoints : dir:string -> (Machine_checkpoint.listed list, error) result
 
+(** {2 Autosave}
+
+    One fixed slot, offered back, never resumed on its own. *)
+
+val autosave_slot : Machine_checkpoint.slot
+(** The one name autosave writes to. Parsed once from a literal that always
+    validates, so every caller shares this value instead of the string. *)
+
+val ran_the_guest : ('a, error) result -> bool
+(** Whether a lane call belongs to the set that moved the guest: it settled
+    ([Ok]), or it stopped at a fault it left loaded ([Guest_fault]). A call
+    refused before anything ran ([No_machine], [Invalid_request], [Held_by],
+    [Unreadable], [Unsaveable], [Checkpoint_refused]) is [false]. The tool
+    layer autosaves on [true] and writes nothing on [false]. *)
+
+type autosave_status = { program : string; steps : int; saved_by : string; saved_at : float }
+
+val autosave_status : dir:string -> autosave_status option
+(** What the autosave slot holds, read through {!Machine_checkpoint}'s header
+    and meta alone -- never through {!restore}, which would reconstruct the
+    whole guest machine just to say who saved it last. [None] when there is
+    no autosave, or it does not read: this is an offer to resume, never a
+    fact anything depends on. *)
+
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)

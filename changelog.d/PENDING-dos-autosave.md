@@ -1,0 +1,14 @@
+### Added
+
+- The DOS lane writes an `autosave` checkpoint slot after every
+  `masc_dos_load`, `masc_dos_step`, `masc_dos_press`, `masc_dos_click`,
+  `masc_dos_type` or `masc_dos_restore` call that ran the guest, settled or
+  stopped at a fault. A call refused before anything ran writes nothing, and
+  a failed write never fails the call: the result carries a typed
+  `autosave: {"saved": false, "reason": ...}` field instead. After a
+  restart, `masc_dos_screen` and `masc_dos_load` with no program say what
+  the autosave slot holds and how to resume it (`masc_dos_restore
+  slot=autosave`); nothing restores it automatically.
+- `Machine_checkpoint.read_meta`, a header-and-meta-only read that never
+  slices out the machine bytes, for a caller that wants to say what a
+  checkpoint is without paying to reconstruct it.

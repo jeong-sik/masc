@@ -74,3 +74,24 @@ touch the game's own save files.
 `masc_dos_load` with no `program` lists the inventory. A game directory with
 several programs needs `boot` (for example `KOEI.COM`). Loading replaces the
 machine: never load over a game someone else is playing.
+
+## Autosave
+
+After every `masc_dos_load`, `masc_dos_step`, `masc_dos_press`,
+`masc_dos_click`, `masc_dos_type` or `masc_dos_restore` that ran the guest —
+settled or stopped at a fault — the machine is written to the fixed slot
+`autosave`, no call needed. A call refused before anything ran (no machine,
+another holder, a bad argument) writes nothing. The write never fails the
+call: if it could not be written, the result still carries what you asked
+for, plus `autosave: {"saved": false, "reason": ...}`.
+
+After a restart, before anything is loaded, `masc_dos_screen` and
+`masc_dos_load` with no `program` say whether an autosave exists — what it
+is, when, and who saved it — under `autosave` in the result. Nothing resumes
+it for you: read the field and call `masc_dos_restore slot=autosave`
+yourself when you want it back.
+
+There is one `autosave` slot, so the next call that runs the guest replaces
+it. After a restart, call `masc_dos_screen` (or `masc_dos_load` with no
+`program`) first. `masc_dos_load` with a program name starts a new machine,
+and its own autosave overwrites the one from before the restart.

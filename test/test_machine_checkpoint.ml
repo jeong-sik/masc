@@ -147,6 +147,53 @@ let test_list () =
        | _ -> fail "three rows"))
 ;;
 
+let read_meta dir s = C.read_meta ~dir (slot s) ~machine:C.Dos ~format:1
+
+(* What [read_meta] gives up to stay cheap: the machine bytes never come
+   back, so it cannot claim to carry them. What it keeps: the same header,
+   the same meta, and the same refusals [read] gives -- checked here against
+   [read] on the same files, not restated by hand. *)
+let test_read_meta_matches_read_without_the_machine_bytes () =
+  with_dir (fun dir ->
+    write_ok dir "one" (header ());
+    match read_meta dir "one", read dir "one" with
+    | Ok { C.header = mh; meta = mm; modified }, Ok { C.header = rh; meta = rm; machine_bytes = _ } ->
+      check string "same header core" rh.core mh.core;
+      check int "same header format" rh.format mh.format;
+      check string "same meta" (Yojson.Safe.to_string rm) (Yojson.Safe.to_string mm);
+      check bool "modified is the file's own mtime" true
+        (Float.abs (modified -. (Unix.stat (file dir "one")).Unix.st_mtime) < 1.0)
+    | Error e, _ | _, Error e -> fail (C.error_to_string e))
+;;
+
+let test_read_meta_refusals_match_read () =
+  with_dir (fun dir ->
+    check bool "never saved" true
+      (match read_meta dir "none", read dir "none" with
+       | Error (C.No_slot _), Error (C.No_slot _) -> true
+       | _ -> false);
+    write_ok dir "msx" (header ~machine:C.Msx ());
+    check bool "another machine" true
+      (match read_meta dir "msx", read dir "msx" with
+       | Error (C.Other_machine _ as a), Error (C.Other_machine _ as b) ->
+         String.equal (C.error_to_string a) (C.error_to_string b)
+       | _ -> false);
+    write_ok dir "v2" (header ~format:2 ());
+    check bool "another format" true
+      (match read_meta dir "v2", read dir "v2" with
+       | Error (C.Other_format _ as a), Error (C.Other_format _ as b) ->
+         String.equal (C.error_to_string a) (C.error_to_string b)
+       | _ -> false);
+    write_ok dir "flip" (header ());
+    let s = read_file (file dir "flip") in
+    let b = Bytes.of_string s in
+    let last = Bytes.length b - 1 in
+    Bytes.set b last (Char.chr (Char.code s.[last] lxor 1));
+    write_file (file dir "flip") (Bytes.to_string b);
+    check bool "a flipped byte" true
+      (match read_meta dir "flip" with Error (C.Corrupt _) -> true | _ -> false))
+;;
+
 let () =
   run "machine-checkpoint"
     [ ( "store"
@@ -155,6 +202,9 @@ let () =
         ; test_case "refusals" `Quick test_refusals
         ; test_case "atomic replace" `Quick test_replace_is_atomic
         ; test_case "list" `Quick test_list
+        ; test_case "read_meta matches read" `Quick
+            test_read_meta_matches_read_without_the_machine_bytes
+        ; test_case "read_meta refusals match read" `Quick test_read_meta_refusals_match_read
         ] )
     ]
 ;;

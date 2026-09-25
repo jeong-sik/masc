@@ -815,6 +815,34 @@ let type_text ~who ~text ~steps =
    nothing reads an old one. *)
 let checkpoint_format = 1
 
+(* The one slot autosave writes to. A literal that never fails
+   [Machine_checkpoint.slot_of_string] -- "autosave" is 8 lowercase letters --
+   parsed once here so every caller shares the same validated value instead
+   of a string repeated at each call site. *)
+let autosave_slot =
+  match Machine_checkpoint.slot_of_string "autosave" with
+  | Ok s -> s
+  | Error message -> failwith message
+;;
+
+(* Whether a call belongs to the set that moved the guest -- it settled, or
+   it stopped at a fault it left loaded -- as opposed to one refused before
+   anything ran. Named exhaustively, not as a catch-all: an [error] added
+   later without a line here is a compile error, not a silently wrong
+   default. Used by the tool layer to decide whether to autosave. *)
+let ran_the_guest = function
+  | Ok _ -> true
+  | Error (Guest_fault _) -> true
+  | Error (No_machine | Invalid_request _ | Unreadable _ | Held_by _ | Unsaveable _
+           | Checkpoint_refused _) ->
+    false
+;;
+
+let field_of_json name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+;;
+
 let checkpoint_meta st ~who : Yojson.Safe.t =
   `Assoc
     [ ("program", `String st.program)
@@ -855,11 +883,7 @@ type restored_meta = {
    count is not zero and a missing ledger is not empty. *)
 let meta_of_json json =
   let corrupt message = Error (Checkpoint_refused (Machine_checkpoint.Corrupt message)) in
-  let field name =
-    match json with
-    | `Assoc fields -> List.assoc_opt name fields
-    | _ -> None
-  in
+  let field name = field_of_json name json in
   let entry_of = function
     | `Assoc fields ->
       (match
@@ -957,6 +981,29 @@ let checkpoints ~dir =
   match Machine_checkpoint.list ~dir with
   | Ok listed -> Ok listed
   | Error message -> Error (Unreadable message)
+;;
+
+(* ---------- autosave ---------- *)
+
+type autosave_status = { program : string; steps : int; saved_by : string; saved_at : float }
+
+(* Read only, through {!Machine_checkpoint}'s header and meta -- never
+   {!Dos_snapshot.restore}, which would reconstruct the whole guest machine
+   just to say who last saved it. [None] covers both "nothing there" and
+   "there but unreadable": a caller offering a resume, never one relying on
+   it, has no more to do with either. *)
+let autosave_status ~dir =
+  match Machine_checkpoint.read_meta ~dir autosave_slot ~machine:Dos ~format:checkpoint_format with
+  | Error _ -> None
+  | Ok { Machine_checkpoint.meta; modified; header = _ } ->
+    (match
+       ( field_of_json "program" meta
+       , field_of_json "steps" meta
+       , field_of_json "saved_by" meta )
+     with
+     | Some (`String program), Some (`Int steps), Some (`String saved_by) ->
+       Some { program; steps; saved_by; saved_at = modified }
+     | _ -> None)
 ;;
 
 (* ---------- introspection ---------- *)

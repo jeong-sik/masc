@@ -935,6 +935,23 @@ status: reference
   없다. Keeper 끼리 같은 이름 공간을 쓴다. 같은 이름에 다시 저장하면 덮어쓴다.
   → [Machine_checkpoint.slot_of_string](../../lib/machine_checkpoint/machine_checkpoint.mli)
 
+**자동 저장 (Autosave)**
+: DOS Lane 이 `autosave` 라는 고정 슬롯에 스스로 쓰는 기계 체크포인트. `masc_dos_load`·
+  `masc_dos_step`·`masc_dos_press`·`masc_dos_click`·`masc_dos_type`·
+  `masc_dos_restore` 가운데 기계를 실제로 움직인 호출(정상 종료했거나, 멈춘 채로
+  guest fault 를 만난 경우 포함) 뒤에 한 번 쓴다. 조종권이 없어 거절된 호출,
+  잘못된 인자, 기계가 없어 거절된 호출은 아무것도 쓰지 않는다. 쓰기 자체가 실패해도
+  (예: 디렉터리를 쓸 수 없음) 원래 호출의 결과는 그대로 돌아가고, 결과 안에
+  `autosave: {"saved": false, "reason": ...}` 로만 남는다.
+  서버를 다시 켠 뒤 기계가 없을 때 — `masc_dos_screen` 의 거절과 `masc_dos_load` 를
+  프로그램 이름 없이 부른 인벤토리 응답 — 은 이 자동 저장이 있는지, 무엇인지(프로그램,
+  걸음 수, 저장한 사람, 시각), 어떻게 되살리는지(`masc_dos_restore slot=autosave`)를
+  `autosave` 필드로 알려 준다. 되살리는 것은 언제나 사람의 몫이고, 서버가 스스로
+  되살리지 않는다. 슬롯이 하나라서 기계를 움직이는 다음 호출이 이 자동 저장을 덮어쓴다.
+  재시작 뒤 프로그램 이름을 넣은 `masc_dos_load` 가 첫 호출이면 이전 자동 저장은 사라진다.
+  → [Dos_lane.autosave_status](../../lib/dos_lane/dos_lane.mli),
+  [Machine_checkpoint.read_meta](../../lib/machine_checkpoint/machine_checkpoint.mli)
+
 **MSX Lane**
 : 서버 안에 사는 MSX 기계 하나. Keeper 는 `masc_msx_*` 도구로 같은 기계에 키를
   넣고 화면을 읽는다. DOS Lane과 같은 축의 공유 머신으로, Lane Add-on의

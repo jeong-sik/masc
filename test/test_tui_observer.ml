@@ -222,7 +222,7 @@ let cached_turn_complete_frame cache_fields =
 
 let settle_cache_counts frame =
   match decode_all [ frame ] with
-  | [ Observer.Keeper_turn_complete t ] ->
+  | [ Observer.Event (Observer.Keeper_turn_complete t) ] ->
     Ok (t.Observer.tc_cache_read_tokens, t.Observer.tc_cache_creation_tokens)
   | [ Observer.Undecodable reason ] -> Error reason
   | events -> failf "expected one event, got %d" (List.length events)

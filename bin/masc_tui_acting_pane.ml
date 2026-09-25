@@ -980,8 +980,8 @@ let turn_summary_line ~cols ~health (chunk : Acting.chunk) =
      reading that sent an operator looking for a fault. The last candidate is
      at most
      [123 calls · in 999.9k new · out 999.9k], 54 cells with a five-digit
-     turn against the pane's 56. A split input is never summed: the sum is
-     the figure that read as all new. *)
+     turn against the pane's 56. This row never sums a split input: the sum
+     is the figure that read as all new. *)
   let candidates =
     match chunk.Acting.ck_tokens with
     | Some (Acting.Input_split { fresh; cached }), out ->

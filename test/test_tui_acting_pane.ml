@@ -1200,7 +1200,8 @@ let test_the_widest_cached_turn_row_keeps_its_new_part () =
   let five = earlier_turn_row ~name:"turn 31415" (widest ~turn:31415 ()) in
   check bool "five-digit turn: the new part and the output, whole" true
     (contains "123 calls · in 999.9k new · out 999.9k" five);
-  check bool "and never the sum" false (contains "2.00M" five)
+  check bool "and never the whole input" false (contains "2.00M" five);
+  check bool "and never input plus output" false (contains "3.00M" five)
 
 (* Beside the roster every fleet row would be a roster row said twice. The
    pane then draws the selected keeper's record alone: no fleet rows, no

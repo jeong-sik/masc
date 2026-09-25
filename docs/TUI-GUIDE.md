@@ -283,7 +283,8 @@ its cache, the input is split into what the turn processed fresh and what it
 read back from the cache: `30 calls · in 159.8k new · 3.56M cached · out
 6.6k`. The input count alone (`in 3.72M` for that turn) holds the cache reads
 and is mostly them on a cached runtime. Where the row is too narrow it drops
-the cost, then the output, then the cached part; the new part stays. A
+the cost, then the output; where that still does not fit, it drops the
+cached part and shows the output again. The new part stays. A
 runtime that reports no cache reads, or counts that do not add up, keeps the
 single `in` figure.
 

@@ -1131,7 +1131,13 @@ let test_no_autosave_offered_when_nothing_ever_ran () =
   with_workspace (fun base_path ->
     let result = dispatch ~base_path "masc_dos_screen" [] in
     check bool "no machine" false (is_completed result);
-    check bool "and nothing to offer" true (member "autosave" (Tool_result.data result) = None))
+    check bool "and nothing to offer" true (member "autosave" (Tool_result.data result) = None);
+    (* Tool_bridge drops only a `Null data field from the model-facing
+       message; an empty `Assoc [] is not the same to it, and every plain
+       No_machine refusal (no autosave to report) would carry a JSON
+       envelope where it used to carry the plain refusal text. *)
+    check bool "and the refusal carries no data envelope at all" true
+      (Tool_result.data result = `Null))
 ;;
 
 let test_a_failed_autosave_does_not_fail_the_call () =

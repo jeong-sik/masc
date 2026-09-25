@@ -124,6 +124,16 @@ let autosave_lookup_fields = function
     [ ("autosave", `Assoc [ ("unreadable", `String reason) ]) ]
 ;;
 
+(* [reject]'s [~data] defaults to [`Null], and Tool_bridge (tool_bridge.ml)
+   only drops a [`Null] one from the model-facing message; a [`Null] and an
+   [`Assoc []] are not the same to it. [No_autosave] must reach [reject] as
+   the same [`Null] a plain refusal always carried, not as an empty object
+   that turns every ordinary No_machine refusal into a JSON envelope. *)
+let reject_data_of_fields = function
+  | [] -> `Null
+  | fields -> `Assoc fields
+;;
+
 (* The answer to a call that needs a machine when none is loaded. It is the
    answer a caller gets right after a restart, so it says what the autosave
    slot holds and how to resume it. Every other refusal is unaffected. *)
@@ -144,7 +154,7 @@ let no_machine ~base_path ~tool_name ~start_time =
       Printf.sprintf "%s (an autosave file is there but this server cannot read it: %s)" refusal
         reason
   in
-  reject ~tool_name ~start_time ~data:(`Assoc (autosave_lookup_fields found)) message
+  reject ~tool_name ~start_time ~data:(reject_data_of_fields (autosave_lookup_fields found)) message
 ;;
 
 let of_lane ?(extra = []) ~base_path ~tool_name ~start_time

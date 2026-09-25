@@ -18,13 +18,13 @@ and no_progress_reason =
 
 and claim_scope_exclusions = {
   scope_excluded_count : int;
-  all_goals_excluded : bool;
 }
 
 (** JSON serialization for telemetry and trace surfaces. *)
 val to_json : t -> Yojson.Safe.t
 
-(** JSON deserialization from tool output embedding. *)
+(** JSON deserialization from tool output embedding. Missing or malformed
+    no-eligible exclusion fields return [None]. *)
 val of_json : Yojson.Safe.t -> t option
 
 (** Is this typed outcome a no-progress signal ([No_progress _] or [Error _])?
@@ -32,4 +32,3 @@ val of_json : Yojson.Safe.t -> t option
     does not emit a typed outcome. Single owner of the outcome gate shared by
     the no-progress detector and the unified-metrics substantive check. *)
 val is_nonprogress : t option -> bool
-

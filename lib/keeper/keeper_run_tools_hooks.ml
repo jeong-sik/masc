@@ -53,6 +53,10 @@ type agent_setup =
   ; observe_official_client_native_action :
       runtime_id:string -> official_turn:int ->
       identity:Runtime_native_tools.action_identity -> tool_name:string -> unit
+  ; observe_official_client_usage_report :
+      Keeper_client_usage_report.t -> unit
+  ; spend_attempts : unit -> Keeper_turn_spend.attempt list
+      (** What every dispatched attempt so far reported about its spend. *)
   ; acc : hook_accumulator
   ; all_tool_names : string list
   ; skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list
@@ -552,13 +556,49 @@ let assemble_hooks
              meta.name runtime_id official_turn tool_name (Printexc.to_string exn))
     in
     let usage_attempt = ref None in
+    let usage_report_of_attempt = ref None in
+    let client_reported_in_attempt = ref false in
+    let spend = ref Keeper_turn_spend.empty in
+    (* A reading belongs to the attempt that produced it. One that arrives
+       before any attempt started has no attempt to name, so it is logged
+       and left out of the turn's spend. *)
+    let record_spend reading_name placed =
+      match placed with
+      | Ok next -> spend := next
+      | Error Keeper_turn_spend.No_attempt_started ->
+        Log.Keeper.warn
+          ~keeper_name:(!meta_ref).name
+          "turn spend: %s arrived before any attempt started and is left out of the turn's spend"
+          reading_name
+    in
     let on_runtime_attempt (attempt : Keeper_turn_driver.runtime_attempt) =
       usage_attempt := Some (attempt.routing_run_id, attempt.runtime_id, attempt.lane_attempt_index);
+      usage_report_of_attempt := Some attempt.usage_report;
+      client_reported_in_attempt := false;
+      spend :=
+        Keeper_turn_spend.start_attempt
+          !spend
+          ~routing_run_id:attempt.routing_run_id
+          ~runtime_id:attempt.runtime_id
+          ~lane_attempt_index:attempt.lane_attempt_index;
       (* An official-client handoff belongs only to the runtime that produced
          it. A failover candidate must receive the Skill result itself before
          one of its actions can complete that activation's evidence. *)
       Skill_delivery_state.begin_runtime_attempt skill_delivery_state;
       ctx.on_runtime_attempt attempt
+    in
+    (* [client_reported_in_attempt] says the attempt's client reported on its
+       stream; the completion hook reads it to leave its row to the stream. *)
+    let observe_official_client_usage_report report =
+      client_reported_in_attempt := true;
+      record_spend "an official client report" (Keeper_turn_spend.observe_client_report !spend report);
+      Keeper_hooks_agent_core.emit_client_usage_report
+        ~trajectory_acc
+        ~agent_name:(!meta_ref).name
+        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+        ~keeper_turn_id
+        ?runtime_attempt:!usage_attempt
+        report
     in
     let base_hooks =
       Keeper_hooks_agent_core.make_hooks
@@ -570,9 +610,30 @@ let assemble_hooks
         ~on_after_turn_ordinal:(fun turn -> final_agent_core_turn_ordinal_ref := Some turn)
         ?on_tool_stream_observation:ctx.on_tool_stream_observation
         ~current_runtime_attempt:(fun () -> !usage_attempt)
+        ~current_attempt_usage:(fun () ->
+          Option.map
+            (function
+              | Runtime_execution.Each_agent_core_response ->
+                Keeper_hooks_agent_core.Agent_core_attempt
+              | Runtime_execution.Client_usage_stream ->
+                Keeper_hooks_agent_core.Client_stream_attempt
+                  { reported = !client_reported_in_attempt })
+            !usage_report_of_attempt)
+        ~on_agent_core_response_usage:(fun ~response_id ~ordinal ~model usage ->
+          record_spend
+            "an Agent Core response"
+            (Keeper_turn_spend.observe_agent_core_response
+               !spend
+               ~response_id
+               ~ordinal
+               ~model
+               usage))
         ~on_after_turn_response:
           (fun ~response ->
              Keeper_run_tools_hook_accumulator.record_assistant_turn_text
+               acc
+               response;
+             Keeper_run_tools_hook_accumulator.record_wire_prompt_tokens
                acc
                response)
         ~tool_result_commit_required:ctx.tool_result_commit_required
@@ -580,13 +641,15 @@ let assemble_hooks
         ?trajectory_acc
         ~on_tool_executed:
           (fun
-            ~tool_name ~input ~output_text ~success ~duration_ms ~provider ~typed_outcome ->
+            ~tool_name ~input ~output_text ~execution_evidence ~success ~duration_ms
+            ~provider ~typed_outcome ->
             serialize_tool_observer (fun () ->
               let route_evidence =
                 Keeper_tool_call_log.route_evidence_json_of_tool_io
                   ~tool_name
                   ~input
                   ~output_text
+                  ~execution_evidence
               in
               let progress_io_fingerprints =
                 Keeper_tool_progress_identity.digest_tool_io
@@ -1203,6 +1266,8 @@ let assemble_hooks
       ; stage_skill_delivery_on_wire
       ; observe_official_client_result_handoff
       ; observe_official_client_native_action
+      ; observe_official_client_usage_report
+      ; spend_attempts = (fun () -> Keeper_turn_spend.attempts !spend)
       ; acc
       ; all_tool_names
       ; skill_projection_diagnostics

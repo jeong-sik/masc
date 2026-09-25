@@ -443,6 +443,7 @@ describe('IdeActivityPanel', () => {
               summary: 'updated runtime',
               file_path: 'lib/runtime.ml',
               timestamp_ms: 500,
+              event_id: 'a'.repeat(64),
             }],
           },
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -471,8 +472,52 @@ describe('IdeActivityPanel', () => {
       file_path: 'lib/runtime.ml',
       surface: 'Log',
       keeper_id: 'sangsu',
-      source_id: 'ide-tool-turn-bridge-500-0',
+      source_id: `ide-${'a'.repeat(64)}`,
     })
+  })
+
+  it('keeps a bridge row focus when another same-millisecond tool event arrives first', async () => {
+    vi.useFakeTimers()
+    const older = {
+      type: 'tool', tool_name: 'execute', keeper_id: 'sangsu', turn_id: 'turn-bridge',
+      outcome: 'success', typed_outcome: 'progress', latency_ms: 50,
+      summary: 'older output', file_path: 'lib/runtime.ml', timestamp_ms: 500,
+      event_id: 'a'.repeat(64),
+    }
+    const newer = {
+      ...older, outcome: 'failure', typed_outcome: 'error', latency_ms: 2,
+      summary: 'newer output', event_id: 'b'.repeat(64),
+    }
+    let bridgeCalls = 0
+    vi.stubGlobal('fetch', vi.fn(async input => {
+      const url = String(input)
+      const body = url.includes('/api/v1/ide/events')
+        ? { ok: true, data: { events: ++bridgeCalls === 1 ? [older] : [newer, older] } }
+        : { events: [] }
+      return new Response(JSON.stringify(body), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, {
+      activeFile: 'lib/runtime.ml', codebase: 'github.com_x_masc', pollMs: 1_000,
+    }), container)
+    const rowFor = (detail: string) =>
+      [...container.querySelectorAll('.ide-activity-row')]
+        .find(row => row.textContent?.includes(detail))
+    await vi.waitFor(() => expect(rowFor('older output')).toBeDefined())
+    fireEvent.click(rowFor('older output')!.querySelector<HTMLButtonElement>('.ide-activity-context-jump')!)
+    const olderFocus = ideContextFocus.value?.source_id
+    expect(olderFocus).toBeTruthy()
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(rowFor('newer output')).toBeDefined())
+    fireEvent.click(rowFor('newer output')!.querySelector<HTMLButtonElement>('.ide-activity-context-jump')!)
+    expect(ideContextFocus.value?.source_id).not.toBe(olderFocus)
+    fireEvent.click(rowFor('older output')!.querySelector<HTMLButtonElement>('.ide-activity-context-jump')!)
+    expect(ideContextFocus.value?.source_id).toBe(olderFocus)
+    render(null, container)
   })
 
   it('scopes IDE bridge activity events to the active repository', async () => {

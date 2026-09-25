@@ -161,21 +161,27 @@ let read_goal_task_links config =
 let verify_goal_task_links_write config ~path ~json ~expected_links ~label =
   try
     write_json config path json;
-    match read_json_result config path with
-    | Ok written when links_of_yojson written = Ok expected_links -> Ok ()
-    | Ok _ ->
+    match read_json_doc config path with
+    | Ok (Some written) when links_of_yojson written = Ok expected_links -> Ok ()
+    | Ok (Some _) ->
       Error
         (Printf.sprintf
            "write_goal_task_links: %s readback mismatch for %s"
            label
            path)
-    | Error msg ->
+    | Ok None ->
+      Error
+        (Printf.sprintf
+           "write_goal_task_links: %s readback found no document at %s"
+           label
+           path)
+    | Error error ->
       Error
         (Printf.sprintf
            "write_goal_task_links: %s write/readback failed for %s: %s"
            label
            path
-           msg)
+           (json_doc_error_to_string error))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

@@ -94,9 +94,11 @@ val cost_event_payload :
   input_tokens:int ->
   output_tokens:int ->
   cost_usd:float ->
-  ?usage_projection:Cost_ledger.usage_projection ->
+  usage_projection:Cost_ledger.usage_projection ->
   ?response_id:string ->
   ?runtime_attempt:(string * string * int) ->
+  ?conversation:(string * Keeper_usage_resolution.cumulative_position) ->
+  ?vendor_total_tokens:int ->
   ?cache_creation_input_tokens:int ->
   ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->
@@ -121,9 +123,11 @@ val emit_cost_event :
   input_tokens:int ->
   output_tokens:int ->
   cost_usd:float ->
-  ?usage_projection:Cost_ledger.usage_projection ->
+  usage_projection:Cost_ledger.usage_projection ->
   ?response_id:string ->
   ?runtime_attempt:(string * string * int) ->
+  ?conversation:(string * Keeper_usage_resolution.cumulative_position) ->
+  ?vendor_total_tokens:int ->
   ?cache_creation_input_tokens:int ->
   ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->
@@ -131,13 +135,41 @@ val emit_cost_event :
   ?telemetry:Agent_core.Types.inference_telemetry -> unit -> unit
 (** Append a structured cost-ledger event to [costs/YYYY-MM/DD.jsonl]. *)
 
+type attempt_usage =
+  | Agent_core_attempt
+      (** AGENT_CORE hands [AfterTurn] every provider response. *)
+  | Client_stream_attempt of { reported : bool }
+      (** An official client reports usage on its own stream; [reported] is
+          whether a report of this attempt reached
+          [emit_client_usage_report]. *)
+(** How the dispatched attempt's usage becomes visible, read by [AfterTurn]
+    to decide whether its response still needs a raw row. *)
+
+val emit_client_usage_report :
+  trajectory_acc:Trajectory.accumulator option ->
+  agent_name:string ->
+  trace_id:string ->
+  keeper_turn_id:int ->
+  ?runtime_attempt:(string * string * int) ->
+  Keeper_client_usage_report.t ->
+  unit
+(** Append one raw cost-ledger row for a usage report an official client
+    sent on its own stream, under the scope the client reports in, keyed by
+    the client turn and conversation it names. Writes nothing without a
+    trajectory accumulator, as [AfterTurn] does. *)
+
 val broadcast_resolved_turn_complete :
   keeper_name:string ->
   turn:int ->
   tool_calls_made:int ->
   total_turns:int ->
   usage_resolution:Keeper_usage_resolution.t ->
+  wire_prompt_tokens:(int * int) option ->
   unit
+(** [wire_prompt_tokens] is the turn's summed wire [(cache_n, prompt_n)]
+    (llama-server, Ollama), [None] when no response reported both. It fills
+    the event's [cache_n] / [prompt_n], so the turn line is whole even for a
+    reader that joined mid-turn. *)
 
 
 (** PR-review / PR-work metric event types live in Keeper_hooks_agent_core_types
@@ -173,10 +205,14 @@ val make_hooks :
   on_after_turn_ordinal:(int -> unit) ->
   ?on_tool_stream_observation:(tool_stream_observation -> unit) ->
   ?current_runtime_attempt:(unit -> (string * string * int) option) ->
+  ?current_attempt_usage:(unit -> attempt_usage option) ->
   ?on_after_turn_response:(response:Agent_core.Types.api_response -> unit) ->
+  ?on_agent_core_response_usage:(response_id:string -> ordinal:int -> model:string ->
+                                 Agent_core.Types.api_usage option -> unit) ->
   ?on_tool_executed:(tool_name:string ->
                      input:Yojson.Safe.t ->
                      output_text:string ->
+                     execution_evidence:Yojson.Safe.t option ->
                      success:bool ->
                      duration_ms:float -> provider:string ->
                      typed_outcome:Keeper_tool_outcome.t option -> unit) ->

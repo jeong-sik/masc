@@ -294,6 +294,18 @@ type exact_slot_degradation =
 val exact_slot_body_deadline_gap_to_string : exact_slot_body_deadline_gap -> string
 (** One line naming the lane table, the slot, the provider and the key to add. *)
 
+type exact_lane_cli_slot_not_official_client =
+  { lane_id : string
+  ; slot_id : string
+  ; provider_id : string
+  }
+(** One [\[runtime.exact_output_lanes.<lane>\]] [cli_slots] entry that names a
+    configured runtime dispatched over HTTP ([Agent_core]) rather than an
+    official client. Every lane's [cli_slots] dispatches through
+    {!Keeper_lane_cli_oneshot.run} alone, which requires
+    {!Runtime_execution.Official_client}; an id that resolves to nothing
+    instead is {!Reference_unresolved}, not this. *)
+
 type load_failure =
   | Toml_unparsable of Runtime_toml.parse_error list
   | Undeclared_bindings of (string * drop_reason) list
@@ -324,6 +336,7 @@ type load_failure =
       ; high_water_tokens : int
       ; max_context : int
       }
+  | Exact_lane_cli_slot_not_official_client of exact_lane_cli_slot_not_official_client
       (** Why {!load_list} refused a configuration. Closed, so a consumer
           decides per case instead of matching rendered text — the contract
           {!drop_reason} keeps one level down. [Toml_unparsable] is the one case

@@ -2042,10 +2042,23 @@ type keeper_tool_approval = {
   kta_timeout_sec : float;
 }
 
+(** The slot one Keeper reaches first in one exact-output lane. *)
+type keeper_exact_lane_first = {
+  kel_keeper : string;
+  kel_lane_id : string;
+  kel_slot_id : string;
+  kel_offered : bool;
+      (** [false]: the published lane no longer offers [kel_slot_id], so the
+          lane walks its declared order and this row has no effect. *)
+}
+
 val decode_keeper_gate_settings :
-  Yojson.Safe.t -> ((string * string) list * (string * string) list, string) result
-(** [(keeper, mode) list, (keeper, slot_id) list] from
-    [/api/v1/dashboard/gate/keeper-settings].
+  Yojson.Safe.t ->
+  ((string * string) list * keeper_exact_lane_first list, string) result
+(** [(keeper, mode) list, exact-lane firsts] from
+    [/api/v1/dashboard/gate/keeper-settings] ([modes] and [exact_lanes]). A
+    list whose [*_state] says [unavailable] is an [Error], never an empty
+    list.
 
     Distinct from {!decode_tool_approval_mode_overrides}: that one is the
     in-memory YOLO stance a restart clears, this is what the Gate decides an
@@ -2957,6 +2970,17 @@ val decode_memory_fact_snapshot :
     its rows -- and any other shape is a decode error, not an empty store.
     [mfs_events_read_error] keeps a sidecar read failure distinct from an empty
     event history. *)
+
+val merge_keeper_memory_facts :
+  now:float ->
+  (string * (memory_fact_snapshot, string) result) list ->
+  memory_fact_snapshot * string option
+(** Merge per-keeper fact listings into the "all keepers" view ([mfs_keeper =
+    "*"]). Each fact is tagged with its keeper. The second value names every
+    keeper that could not be read -- a failed load, or a store answering
+    [Memory_store_read_error] -- as ["N of M keepers not read: ..."]; [None]
+    when all were read. [Memory_store_absent] is a keeper with no memory yet,
+    not a failure. *)
 
 val decode_harness_snapshot :
   Yojson.Safe.t -> (harness_snapshot, string) result

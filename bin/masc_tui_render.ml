@@ -11431,7 +11431,14 @@ let render_changes_list (state : state) =
       (Printf.sprintf "[changes %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:move  Right/Enter:diff  [/]:keeper  d:tree diff  v:code  o:editor  r:refresh  q:quit");
+    (* Read from the key table, not written out here. The literal named eight
+       keys and the surface answers fourteen: it left out the row search this
+       surface has rows for, the page and edge keys, [Tab] -- and [Left /
+       Esc], which is the way back to the keeper this opened from. A fixed
+       string drops the same keys at every width, so no terminal was wide
+       enough to be told how to leave; [q:quit] left the terminal. *)
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints Changes));
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 

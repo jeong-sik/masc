@@ -477,6 +477,18 @@ let test_resources_footer_steps_through_detail () =
     ("j/k:scroll text" ^ tail ^ meta)
     (Masc_tui_keys.footer_hints_resources ~detail_focus:true)
 
+(* Changes drew a literal in the renderer, and a literal names a fixed set at
+   every width. It named eight of the fourteen keys this surface answers and
+   left out [Left / Esc] -- the way back to the keeper the surface was opened
+   from -- so the only exit an operator could read was [q], which leaves the
+   terminal. The row search went with it, on a surface that has rows for it. *)
+let test_changes_footer_names_the_way_back_and_the_search () =
+  check str "the Changes footer is the table's"
+    "j/k:move  [ / ]:keeper  PgUp/PgDn:page  Home/End:top/bottom  \
+     Right / Enter:written diff  Left / Esc:back  d:tree diff  v:view code  \
+     o:editor  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Changes)
+
 let test_repositories_footer_offers_code_and_git_changes () =
   check str "repositories names the Code and Git changes paths"
     "j/k:scroll  H:recent activity  PgUp/PgDn:page  Home/End:top/bottom  Enter:browse  d:Git changes  a:add  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
@@ -3022,6 +3034,8 @@ let () =
             test_system_logs_footer_names_browser_controls
         ; Alcotest.test_case "Tools carries the Keeper axis" `Quick
             test_tools_footer_carries_the_keeper_axis
+        ; Alcotest.test_case "Changes names the way back and the search" `Quick
+            test_changes_footer_names_the_way_back_and_the_search
         ; Alcotest.test_case "Resources steps through detail" `Quick
             test_resources_footer_steps_through_detail
         ; Alcotest.test_case "Lanes opens standalone runs" `Quick

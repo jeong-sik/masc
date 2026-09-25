@@ -2435,7 +2435,17 @@ let test_docker_preflight_is_consulted_only_for_the_docker_profile () =
     incr probes;
     Some (preflight_fixture ~ok:false)
   in
-  (match Keeper_turn_up_args.parse ~docker_preflight:failing ctx (docker_args ~profile:"microvm") with
+  (* A microvm keeper's image is looked up in its runtime's store, so that
+     store has the build here. *)
+  Masc_test_deps.write_sandbox_image_catalog
+    ~store:(Keeper_sandbox_image_catalog.Microvm Keeper_microvm_backend.Apple_container)
+    ~base_path:ctx.config.base_path catalog_images;
+  let microvm_args =
+    match docker_args ~profile:"microvm" with
+    | `Assoc fields -> `Assoc (fields @ [ "microvm_backend", `String "apple_container" ])
+    | other -> other
+  in
+  (match Keeper_turn_up_args.parse ~docker_preflight:failing ctx microvm_args with
    | Ok _ -> ()
    | Error result ->
      failf
@@ -2444,31 +2454,145 @@ let test_docker_preflight_is_consulted_only_for_the_docker_profile () =
   check int "microvm never consulted the probe" 1 !probes
 ;;
 
-(* The preflight is handed the catalog's answer for the name, and a name the
-   catalog lacks reaches it as that refusal, with the names the catalog has,
-   rather than as a tag to probe. *)
-let test_a_name_the_catalog_lacks_reaches_the_preflight_as_its_reason () =
+(* A name the catalog lacks is refused before the preflight, with the names
+   the catalog has, and the preflight's switch does not change that: keeper
+   up starts the keeper it creates, and boot refuses the same name. The probe
+   here answers [None], which is the switch being off. *)
+let test_a_name_the_catalog_lacks_is_refused_before_the_preflight () =
   with_test_context
   @@ fun ctx ->
-  let seen = ref None in
-  let probe ~image ~timeout_sec:_ () =
-    seen := Some image;
+  let probes = ref 0 in
+  let switched_off ~image:_ ~timeout_sec:_ () =
+    incr probes;
     None
   in
-  ignore
-    (Keeper_turn_up_args.parse ~docker_preflight:probe ctx
-       (`Assoc
-         [ "name", `String "unbuilt"
-         ; "sandbox_profile", `String "docker"
-         ; "sandbox_image", `String "rust"
-         ]));
-  match !seen with
-  | Some (Error reason) ->
+  match
+    Keeper_turn_up_args.parse ~docker_preflight:switched_off ctx
+      (`Assoc
+        [ "name", `String "unbuilt"
+        ; "sandbox_profile", `String "docker"
+        ; "sandbox_image", `String "rust"
+        ])
+  with
+  | Ok _ -> fail "a docker keeper naming an image the catalog lacks was admitted"
+  | Error result ->
+    let body = Keeper_types_profile.tool_result_body result in
+    check bool "refused as unresolved" true
+      (String.starts_with ~prefix:"sandbox_image_unresolved: " body);
     check bool "the catalog's refusal" true
-      (contains "sandbox_image \"rust\" is not in the image catalog" reason);
-    check bool "with the names it has" true (contains "base, ocaml" reason)
-  | Some (Ok tag) -> failf "a name the catalog lacks was probed as %s" tag
-  | None -> fail "the preflight was not consulted"
+      (contains "sandbox_image \"rust\" is not in the image catalog" body);
+    check bool "with the names it has" true (contains "base, ocaml" body);
+    check int "refused before the preflight" 0 !probes
+;;
+
+(* A microvm guest starts from its runtime's own image store, so a build
+   promoted only in Docker's does not admit it. The same name promoted in the
+   runtime's store does. *)
+let test_a_microvm_keeper_needs_its_name_promoted_in_its_runtime_store () =
+  with_test_context
+  @@ fun ctx ->
+  let args =
+    `Assoc
+      [ "name", `String "guest"
+      ; "sandbox_profile", `String "microvm"
+      ; "microvm_backend", `String "apple_container"
+      ; "sandbox_image", `String "base"
+      ]
+  in
+  (match Keeper_turn_up_args.parse ~docker_preflight:no_daemon_in_this_suite ctx args with
+   | Ok _ -> fail "a microvm keeper with nothing promoted in its runtime's store was admitted"
+   | Error result ->
+     let body = Keeper_types_profile.tool_result_body result in
+     check bool "refused as unresolved" true
+       (String.starts_with ~prefix:"sandbox_image_unresolved: " body);
+     check bool "names the runtime's store" true
+       (contains "nothing is promoted for \"base\" in the apple_container image store"
+          body));
+  Masc_test_deps.write_sandbox_image_catalog
+    ~store:(Keeper_sandbox_image_catalog.Microvm Keeper_microvm_backend.Apple_container)
+    ~base_path:ctx.config.base_path catalog_images;
+  match Keeper_turn_up_args.parse ~docker_preflight:no_daemon_in_this_suite ctx args with
+  | Ok _ -> ()
+  | Error result ->
+    failf "a microvm keeper whose name is promoted in its runtime's store was refused: %s"
+      (Keeper_types_profile.tool_result_body result)
+;;
+
+(* With no microvm_backend declared the store is the host's default runtime,
+   which is what boot resolves too; a host with none has no store at all. *)
+let test_an_undeclared_microvm_backend_is_looked_up_in_the_host_default () =
+  with_test_context
+  @@ fun ctx ->
+  match
+    Keeper_turn_up_args.parse ~docker_preflight:no_daemon_in_this_suite ctx
+      (`Assoc
+        [ "name", `String "guest"
+        ; "sandbox_profile", `String "microvm"
+        ; "sandbox_image", `String "base"
+        ])
+  with
+  | Ok _ -> fail "a microvm keeper with nothing promoted in any runtime store was admitted"
+  | Error result ->
+    let body = Keeper_types_profile.tool_result_body result in
+    let expected =
+      match Keeper_microvm_backend.default_for_host () with
+      | Some backend ->
+        Printf.sprintf "nothing is promoted for \"base\" in the %s image store"
+          (Keeper_microvm_backend.to_string backend)
+      | None -> "no microvm_backend, so there is no image store"
+    in
+    check bool "refused as unresolved" true
+      (String.starts_with ~prefix:"sandbox_image_unresolved: " body);
+    check bool "names the store it looked in" true (contains expected body)
+;;
+
+(* The rule boot applies and keeper up shares: a profile that starts a
+   container boots only on a name its own image store has a build for, and
+   remote_ssh, which starts none, is not asked. The fixture catalog promotes
+   [base] and [ocaml] in Docker's store only. *)
+let test_boot_refuses_a_name_its_store_cannot_resolve () =
+  with_test_context
+  @@ fun ctx ->
+  let module R = Keeper_sandbox_image_resolver in
+  let meta ~profile ?backend image =
+    match
+      Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String "booting" ])
+    with
+    | Error detail -> fail ("meta fixture: " ^ detail)
+    | Ok meta ->
+      { meta with
+        sandbox_profile = profile
+      ; sandbox_image = image
+      ; microvm_backend = backend
+      }
+  in
+  let refusal meta =
+    Keeper_sandbox_image_admission.boot_refusal
+      ~base_path:ctx.config.Workspace.base_path meta
+  in
+  (match refusal (meta ~profile:Keeper_types_profile_sandbox.Docker (Some "base")) with
+   | None -> ()
+   | Some error -> fail ("a promoted name was refused: " ^ R.error_to_string error));
+  (match refusal (meta ~profile:Keeper_types_profile_sandbox.Docker (Some "rust")) with
+   | Some (R.Unknown_image _) -> ()
+   | Some error -> fail ("an unknown name was refused for another reason: " ^ R.error_to_string error)
+   | None -> fail "a name the catalog lacks booted");
+  (match
+     refusal
+       (meta ~profile:Keeper_types_profile_sandbox.Micro_vm
+          ~backend:Keeper_microvm_backend.Apple_container (Some "base"))
+   with
+   | Some (R.Not_built_on_host _) -> ()
+   | Some error -> fail ("a guest's unbuilt name was refused for another reason: " ^ R.error_to_string error)
+   | None -> fail "a guest booted on a build promoted only in Docker's store");
+  (match
+     refusal (meta ~profile:Keeper_types_profile_sandbox.Micro_vm (Some "base"))
+   with
+   | Some (R.No_image_store _) -> ()
+   | Some error -> fail ("a guest with no runtime was refused for another reason: " ^ R.error_to_string error)
+   | None -> fail "a guest with no runtime to look in booted");
+  check bool "remote_ssh is not asked" true
+    (Option.is_none (refusal (meta ~profile:Keeper_types_profile_sandbox.Remote_ssh None)))
 ;;
 
 (* A tag where a name belongs is refused where the call is read, not looked
@@ -2826,10 +2950,21 @@ let () =
             test_docker_preflight_is_consulted_only_for_the_docker_profile
         ; test_case "a tag in sandbox_image is refused" `Quick
             test_a_tag_in_sandbox_image_is_refused
+        ; test_case "boot refuses a name its store cannot resolve" `Quick
+            test_boot_refuses_a_name_its_store_cannot_resolve
         ; test_case
-            "a name the catalog lacks reaches the preflight as its reason"
+            "a name the catalog lacks is refused before the preflight"
             `Quick
-            test_a_name_the_catalog_lacks_reaches_the_preflight_as_its_reason        ; test_case
+            test_a_name_the_catalog_lacks_is_refused_before_the_preflight
+        ; test_case
+            "a microvm keeper needs its name promoted in its runtime's store"
+            `Quick
+            test_a_microvm_keeper_needs_its_name_promoted_in_its_runtime_store
+        ; test_case
+            "an undeclared microvm backend is looked up in the host default"
+            `Quick
+            test_an_undeclared_microvm_backend_is_looked_up_in_the_host_default
+        ; test_case
             "docker preflight receives sandbox_image from profile defaults"
             `Quick
             test_docker_preflight_receives_sandbox_image_from_profile_defaults

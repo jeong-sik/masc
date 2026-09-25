@@ -153,6 +153,11 @@ let create_keeper env sw state name =
         Lib.Mcp_server.publication_recovery_availability_provider state;
     }
   in
+  (* keeper up refuses a sandbox_image with nothing promoted on this host;
+     the keeper TOMLs here name "base". *)
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:workspace_scope.config.base_path
+    [ "base", Masc_test_deps.live_sandbox_image_tag ];
   Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   match
     Lib.Keeper_tool_surface.dispatch ctx ~name:"masc_keeper_up"

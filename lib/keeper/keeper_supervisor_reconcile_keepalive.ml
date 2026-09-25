@@ -36,25 +36,25 @@ let reconcile_keepalive_keepers
       ~labels:[ "keeper", name; "operation", "reconcile_materialize" ]
       ()
   in
+  let dominated_by_sweep meta =
+    match Keeper_registry.get ~base_path meta.name with
+    | None -> false (* no entry = orphaned, reconcile OK *)
+    | Some e ->
+      (match e.phase with
+       | Keeper_state_machine.Running
+       | Keeper_state_machine.Paused -> true
+       | Keeper_state_machine.Crashed -> true
+       | Keeper_state_machine.Failing
+       | Keeper_state_machine.Draining
+       | Keeper_state_machine.Restarting -> true
+       | Keeper_state_machine.Offline -> false
+       | Keeper_state_machine.Stopped ->
+         (* A terminal event is not a join. The sweep owns cleanup until
+            the exact lane scope has released all fibers and resources. *)
+         not (Keeper_registry.lane_has_exited e))
+  in
   let reconcile_meta meta =
-    let dominated_by_sweep =
-      match Keeper_registry.get ~base_path meta.name with
-      | None -> false (* no entry = orphaned, reconcile OK *)
-      | Some e ->
-        (match e.phase with
-         | Keeper_state_machine.Running
-         | Keeper_state_machine.Paused -> true
-         | Keeper_state_machine.Crashed -> true
-         | Keeper_state_machine.Failing
-         | Keeper_state_machine.Draining
-         | Keeper_state_machine.Restarting -> true
-         | Keeper_state_machine.Offline -> false
-         | Keeper_state_machine.Stopped ->
-           (* A terminal event is not a join. The sweep owns cleanup until
-              the exact lane scope has released all fibers and resources. *)
-           not (Keeper_registry.lane_has_exited e))
-    in
-    if not dominated_by_sweep
+    if not (dominated_by_sweep meta)
     then (
       (try supervise_keepalive ~proactive_warmup_sec:immediate_warmup_sec ctx meta with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -81,7 +81,24 @@ let reconcile_keepalive_keepers
     try
       match read_effective_meta ctx.config name with
       | Ok (Some meta) when not meta.paused ->
-        reconcile_meta meta
+        (* Starting a keeper that is not running is a boot, so it meets the
+           refusal autoboot applies ([Keeper_runtime.load_or_materialize_boot_meta]);
+           otherwise a keeper refused at autoboot would start here one sweep
+           later. A keeper the sweep already owns is not judged: this path
+           does not stop a running keeper. Materialized meta arrives through
+           [load_or_materialize_keeper_meta], which judges it itself. *)
+        if dominated_by_sweep meta
+        then ()
+        else (
+          match
+            Keeper_sandbox_image_admission.boot_refusal ~base_path meta
+          with
+          | None -> reconcile_meta meta
+          | Some error ->
+            Log.Keeper.warn
+              "reconcile: keeper %s rejected: %s"
+              meta.name
+              (Keeper_sandbox_image_resolver.error_to_string error))
       | Ok (Some _) -> ()
       | Ok None ->
         (match load_or_materialize_keeper_meta ctx name with

@@ -4422,6 +4422,9 @@ let test_root_inventory_reads_undecodable_meta_as_absent_and_boot_rematerializes
        mkdir_p (Filename.concat config_dir "keepers");
        Unix.putenv "MASC_CONFIG_DIR" config_dir;
        Config_dir_resolver.reset ();
+       (* Boot refuses a sandbox_image with nothing promoted on this host. *)
+       Masc_test_deps.write_sandbox_image_catalog ~base_path
+         [ "base", Masc_test_deps.live_sandbox_image_tag ];
        let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
        write_file
          (Filename.concat keepers_dir (name ^ ".toml"))

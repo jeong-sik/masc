@@ -171,6 +171,10 @@ let with_config_dir f =
     (fun () ->
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
       Config_dir_resolver.reset ();
+      (* The keepers these fixtures declare name "base"; boot refuses a name
+         with nothing promoted on this host, so the workspace has a build. *)
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:dir
+        [ "base", Masc_test_deps.live_sandbox_image_tag ];
       f config_dir)
 
 let write_keeper_toml config_dir ~name =

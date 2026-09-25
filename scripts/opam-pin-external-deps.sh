@@ -135,7 +135,7 @@ readonly OCAML_MSX_SHA="870e61063e08ca4a0b15b939cb72a1c11aade1d3"
 # its letters are no longer mirrored.
 # Bump Dos_lane.pinned_core_source_digest (lib/dos_lane/dos_lane.ml) with this
 # SHA: test_dos_tools fails with the new digest in its message until they agree.
-readonly OCAML_DOS_SHA="49bc23217cfc9ed12acc04eef1f1562603c4a5cd"
+readonly OCAML_DOS_SHA="909e14318c651b1c6fd72168f96ada0339587906"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first

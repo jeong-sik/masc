@@ -10,10 +10,13 @@ let primary = "openrouter.primary"
 let secondary = "openrouter.secondary"
 
 (* Two HTTP slots on one lane, each its own runtime and therefore its own
-   backpressure cell. No request leaves the process. *)
+   backpressure cell. HITL is declared too because bootstrap refuses a
+   runtime.toml without both mandatory lanes. No request leaves the process. *)
 let runtime_toml = {|[runtime]
 default = "openrouter.primary"
 [runtime.exact_output_lanes.board_attention_exact]
+slots = ["openrouter.primary", "openrouter.secondary"]
+[runtime.exact_output_lanes.hitl_auto_judge]
 slots = ["openrouter.primary", "openrouter.secondary"]
 [providers.openrouter]
 protocol = "openai-compatible-http"

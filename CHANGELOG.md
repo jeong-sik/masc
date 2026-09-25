@@ -28,6 +28,13 @@
 - HTTP callers must send attachments in top-level `attachments` rather than `meta.attachments`. The raw metadata carrier now returns a bad-request error. `http:`, `javascript:`, and `data:` attachment URLs are refused (#38835).
 - A `youtube` attachment must use `url`; `youtube` with `sha256` is refused. An artifact attachment over 32 MiB is refused when the post is written, because the dashboard can open artifacts only up to that size (#38835).
 - Old untyped attachment metadata, including HTTPS entries, displays a failure card. Artifact downloads require an Admin token and return exact bytes. The whole-body HTTP readers return 413 for artifacts over 32 MiB (#38835).
+- The session store no longer knows the `replaced_configuration` context
+  delivery. An official-client session file that still records it fails to
+  load, and that Keeper's turns fail until the file is removed. Before
+  starting this release, remove
+  `<base>/.masc/keepers/<name>/official-client-runtime/session.json` for each
+  Keeper whose file contains `"delivery":"replaced_configuration"`. The next
+  turn starts a new vendor session (#38882).
 
 ### Added
 
@@ -95,6 +102,38 @@
   footer is written without one. The rule -- a last line with no newline is a
   row, because the terminal draws it -- is now stated once on the one function
   that remains rather than living as the difference between two names (#38922).
+- The TUI reads the machine screen through
+  `GET /api/v1/lane-addons/live` instead of `/api/v1/msx/frame`. Each read
+  sends the `since` change count and `incarnation` of the picture already
+  drawn. A `state: "unchanged"` answer draws nothing and decodes no pixels.
+  `state: "no_machine"` says no machine is loaded. A failed read is drawn
+  as its error, not as an empty machine or an old picture. The MSX tick
+  (`POST /api/v1/msx/tick`) still advances a watched MSX game (#38952).
+- The MSX load menu (`&` or `:go msx`) now also lists `watch DOS machine`
+  while a DOS machine is loaded. Picking it shows the DOS screen, scaled the
+  way an MSX frame is and titled by its change count. Only `Esc` and `+`/`-`
+  act there, and no key reaches either machine (#38952).
+- The menu keeps its highlight on a row, not on a position. When the DOS
+  watch row appears or disappears while the menu is open, Enter still picks
+  the highlighted row, or nothing if that row has gone. It never loads the
+  cartridge that moved into its place (#38952).
+- A key on the DOS screen no longer drops the DOS read in flight, so typing
+  there does not stop the picture from updating. A changed DOS answer is
+  parsed and base64-decoded on a system thread, off the UI domain (#38952).
+- The live route names no mode or cartridge, so until the first tick
+  answers, the menu's MSX watch row reads `watch MSX machine` and the
+  spectator title shows only the frame number. After a tick, both name the
+  mode and cartridge again for as long as the machine keeps its
+  incarnation (#38952).
+- The MSX tick now returns its picture and change mark from one machine-lock
+  snapshot, so the next live read can send `since` without reloading pixels.
+  A keypress keeps the current title metadata within the same incarnation.
+  Opening the menu starts DOS discovery asynchronously and keeps menu input
+  responsive while its first full-screen response is in flight. Reopening
+  starts a fresh read without waiting for an older view's response (#38952).
+- The MSX tick answers with the change mark a spectator reads next. It
+  answered one below it, so a live read after a tick never matched as
+  unchanged and always carried the whole picture (#38952).
 
 ### Removed
 
@@ -314,6 +353,17 @@
 - Board read in the TUI shows a failed post-detail load once, with the whole
   error, in both read layouts; the loader no longer reports the same failure
   twice in different words (#38877).
+- A resumed Codex Keeper no longer sends its whole conversation in
+  `developerInstructions`. Codex applies those instructions only when it next
+  compacts the thread, so the 12-85 MB copy became one input item over the
+  10,485,760-character limit and the turn after compaction failed
+  (`string_above_max_length`). The thread keeps the conversation; the
+  per-turn context and the continuation's task reference go in front of the
+  resume prompt, as in the Claude Code lane, and now reach the model on every
+  resumed turn (#37353, #38882).
+- A Gate or checkpoint continuation whose resume overflows is recorded as a
+  full thread at once instead of being resent unchanged into the same thread
+  (#38882).
 
 ### Performance
 

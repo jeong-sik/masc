@@ -927,9 +927,18 @@ let test_mixed_cli_failure_keeps_http_evidence () =
       with
       | Error
           (Exact_flow.Cli_slots_exhausted
-             { prior_error = Some (Exact_flow.Providers_exhausted { attempts = [ provenance ]; _ })
+             { prior_error =
+                 Some
+                   (Exact_flow.Providers_exhausted
+                     { attempts = [ provenance ]
+                     ; terminal_kind = Exact_output.Advanceable_candidates_exhausted
+                     ; detail = _
+                     })
              ; failures = [ _ ]
              }) ->
+        (* The HTTP slot answered text that is not JSON, a failure of that
+           binding's output, so the walk it ended is advanceable and the
+           worker defers the lane instead of quarantining the candidate. *)
         Alcotest.(check string)
           "CLI failure retains the exhausted HTTP receipt"
           http.id

@@ -54,6 +54,7 @@ type 'callback_error execution_error =
   | Providers_exhausted of
       { attempts : attempt_provenance list
       ; detail : string
+      ; terminal_kind : Exact_output.flow_execution_terminal_kind
       }
   | Cli_slots_exhausted of
       { prior_error : 'callback_error execution_error option
@@ -295,6 +296,7 @@ let terminal_of_flow_error ~callback_error_to_string error =
     Providers_exhausted
       { attempts = evidence_provenance evidence
       ; detail = detail cause
+      ; terminal_kind = Exact_output.flow_execution_terminal_kind cause
       }
 ;;
 

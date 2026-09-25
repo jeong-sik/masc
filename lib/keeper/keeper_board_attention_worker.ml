@@ -22,6 +22,10 @@ type step =
       { candidate_id : string
       ; reason : Partition.blocked_reason
       }
+  | Judgment_deferred of
+      { candidate_id : string
+      ; detail : string
+      }
 
 type retry_reason =
   | Exact_claim_contended
@@ -46,6 +50,10 @@ type drain_outcome =
   | Retry_later of
       { contention : contention
       ; reason : retry_reason
+      ; progress : drain_progress
+      }
+  | Lane_deferred of
+      { candidate_id : string
       ; progress : drain_progress
       }
 
@@ -372,6 +380,7 @@ let drain_outcome_label = function
   | Retry_later { reason = Exact_claim_contended; _ } -> "retry_claim_contended"
   | Retry_later { reason = Selected_generation_changed; _ } ->
     "retry_generation_changed"
+  | Lane_deferred _ -> "deferred_lane_exhausted"
 ;;
 
 (* The drain line derives its level from the outcome it reports. [Retry_later]
@@ -380,16 +389,19 @@ let drain_outcome_label = function
    grows; at [Info] that state reads the same as normal draining. *)
 let drain_outcome_log_level = function
   | Drained _ -> Log.Info
-  | Retry_later _ -> Log.Warn
+  | Retry_later _ | Lane_deferred _ -> Log.Warn
 ;;
 
 let drain_outcome_progress = function
   | Drained progress -> progress
-  | Retry_later { progress; _ } -> progress
+  | Retry_later { progress; _ } | Lane_deferred { progress; _ } -> progress
 ;;
 
+(* [Lane_deferred] arms no timer. The deferred root is Ready again and the
+   next wake claims it: the next Board signal for this Keeper, a resume, or
+   process start. *)
 let apply_drain_rearm scheduler = function
-  | Drained _ ->
+  | Drained _ | Lane_deferred _ ->
     reset_contention_rearms scheduler ~keep:None;
     None
   | Retry_later { contention; reason = _ } ->
@@ -937,7 +949,31 @@ let before_advance_failure_reason partition ~cause ~failed ~next =
 
 type execution_disposition =
   | Execution_blocked of Partition.blocked_reason
+  | Execution_deferred of { detail : string }
+      (** Every slot refused for its own binding (quota, rate limit, an
+          unavailable slot), so the same candidate can be judged once one
+          frees. On 2026-09-25 every slot of this lane was in quota rest and
+          1,459 candidates were quarantined as [Exact_lane_exhausted] instead
+          of waiting. *)
 
+let lane_exhausted partition exhausted =
+  Execution_blocked
+    (Partition.Exact_lane_exhausted
+       { detail = Exact_flow.error_detail exhausted
+       ; progress = classified_progress partition
+       })
+;;
+
+(* A lane is deferred only when AGENT_CORE read the last HTTP refusal as
+   belonging to the slot's binding ([Advanceable_candidates_exhausted]).
+   The CLI tail runs only after such a walk, or after every HTTP answer
+   failed domain validation; a CLI-only lane has no HTTP walk
+   ([prior_error = None]). A tail that fails after an advanceable walk, or on
+   a CLI-only lane, failed because no binding could serve now, not because of
+   this input. Every other lane end stays Blocked: a refusal of the input
+   itself would fail the same way on every retry, and a deferred root is
+   claimed first again (Ready roots are claimed oldest first), so deferring
+   it would hold every newer candidate of this Keeper behind it. *)
 let execution_disposition partition = function
   | Exact_flow.Flow_already_started _ ->
     Execution_blocked (Partition.Exact_flow_replayed (classified_progress partition))
@@ -963,13 +999,44 @@ let execution_disposition partition = function
     Execution_blocked
       (Partition.Execution_provenance_mismatch
          { detail; progress = classified_progress partition })
-  | (Exact_flow.Providers_exhausted _ | Exact_flow.Cli_slots_exhausted _) as
-    exhausted ->
-    Execution_blocked
-      (Partition.Exact_lane_exhausted
-         { detail = Exact_flow.error_detail exhausted
-         ; progress = classified_progress partition
-         })
+  | ( Exact_flow.Providers_exhausted
+        { terminal_kind = Agent_core.Exact_output.Advanceable_candidates_exhausted
+        ; attempts = _
+        ; detail = _
+        }
+    | Exact_flow.Cli_slots_exhausted
+        { prior_error =
+            ( None
+            | Some
+                (Exact_flow.Providers_exhausted
+                  { terminal_kind =
+                      Agent_core.Exact_output.Advanceable_candidates_exhausted
+                  ; attempts = _
+                  ; detail = _
+                  }) )
+        ; failures = _
+        } ) as exhausted ->
+    Execution_deferred { detail = Exact_flow.error_detail exhausted }
+  | ( Exact_flow.Providers_exhausted
+        { terminal_kind = Agent_core.Exact_output.Non_advanceable_terminal
+        ; attempts = _
+        ; detail = _
+        }
+    | Exact_flow.Cli_slots_exhausted
+        { prior_error =
+            Some
+              ( Exact_flow.Providers_exhausted
+                  { terminal_kind = Agent_core.Exact_output.Non_advanceable_terminal
+                  ; attempts = _
+                  ; detail = _
+                  }
+              | Exact_flow.Flow_already_started _
+              | Exact_flow.Before_dispatch_persistence_failed _
+              | Exact_flow.Before_advance_persistence_failed _
+              | Exact_flow.Cli_slots_exhausted _
+              | Exact_flow.Flow_bookkeeping_failed _ )
+        ; failures = _
+        } ) as exhausted -> lane_exhausted partition exhausted
   | Exact_flow.Flow_bookkeeping_failed _ as failed ->
     Execution_blocked
       (Partition.Exact_flow_bookkeeping_failed
@@ -1120,6 +1187,36 @@ let settle_existing_consumed
     Ok (Candidate_already_consumed { candidate_id = settled.candidate_id })
 ;;
 
+(* The lane's own failure stays where the run already wrote it: the
+   exact-lane run record closes with the same sentence as [detail]. The
+   candidate keeps its Pending status and gains nothing here. *)
+let deferred_step ~worker_epoch ~base_path latest_partition ~detail =
+  let* transition =
+    Partition.defer ~worker_epoch ~base_path ~partition:!latest_partition
+  in
+  let* ready =
+    match transition.Partition.write_outcome with
+    | Partition.Fsync_completed -> Ok transition.partition
+    | Partition.Visible_sync_unconfirmed _ ->
+      let* confirmed =
+        Partition.confirm_ready ~base_path ~partition:transition.partition
+      in
+      (match confirmed.write_outcome with
+       | Partition.Fsync_completed -> Ok confirmed.partition
+       | Partition.Visible_sync_unconfirmed detail ->
+         Error ("deferred partition fsync remains unconfirmed: " ^ detail))
+  in
+  latest_partition := ready;
+  Log.Keeper.warn
+    ~keeper_name:ready.keeper_name
+    "board_attention_lane_deferred keeper=%s candidate=%s partition=%s detail=%s"
+    ready.keeper_name
+    ready.candidate_id
+    ready.partition_id
+    detail;
+  Ok (Judgment_deferred { candidate_id = ready.candidate_id; detail })
+;;
+
 let process_pending
       ~now
       ~worker_epoch
@@ -1144,7 +1241,9 @@ let process_pending
          ~worker_epoch
          ~base_path
          !latest_partition
-         reason)
+         reason
+     | Execution_deferred { detail } ->
+       deferred_step ~worker_epoch ~base_path latest_partition ~detail)
   | Ok judgment ->
     let* projection =
       complete_projection
@@ -1886,6 +1985,12 @@ let drain_available_with_process ~yield ~process =
     | Ok (Candidate_already_consumed _ | Partition_blocked _) ->
       yield ();
       loop { progress with steps = progress.steps + 1 }
+    (* Stop here. The deferred root is Ready again and the oldest, so another
+       iteration would claim it straight back into the same exhausted lane. *)
+    | Ok (Judgment_deferred { candidate_id; detail = _ }) ->
+      Ok
+        (Lane_deferred
+           { candidate_id; progress = { progress with steps = progress.steps + 1 } })
     | Error detail -> Error detail
   in
   loop { judgments = 0; steps = 0 }

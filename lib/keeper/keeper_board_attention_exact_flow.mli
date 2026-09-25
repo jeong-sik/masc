@@ -67,6 +67,13 @@ type 'callback_error execution_error =
           (** Why the HTTP walk gave up: the provider error's label and
               payload. The CLI tail, when the lane walks one, reports through
               {!Cli_slots_exhausted} rather than being folded in here. *)
+      ; terminal_kind : Agent_core.Exact_output.flow_execution_terminal_kind
+          (** AGENT_CORE's own reading of the last slot's failure.
+              [Advanceable_candidates_exhausted]: every slot refused for a
+              reason that belongs to its binding (quota, rate limit, an
+              unavailable slot, a window too small), so the same input may be
+              served once a binding frees. [Non_advanceable_terminal]: the
+              input itself was refused, or the request's effect is unknown. *)
       }
   | Cli_slots_exhausted of
       { prior_error : 'callback_error execution_error option
@@ -143,5 +150,5 @@ val execute :
     progress is the sole terminalization authority and must be quarantined
     under cancellation protection; no AGENT_CORE receipt state is inspected. *)
 (** Cancellation is propagated promptly without protected partition I/O.
-    Durable [Bound] or [Advancing] progress is quarantined only by the subsequent
-    process-start recovery path. *)
+    Durable [Bound] or [Advancing] progress returns to [Ready] only through the
+    subsequent process-start recovery path. *)

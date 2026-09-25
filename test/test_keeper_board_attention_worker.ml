@@ -311,6 +311,7 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
    | W.Contended _
    | W.Rescan_later _
    | W.Candidate_already_consumed _
+   | W.Judgment_deferred _
    | W.Partition_blocked _ ->
      Alcotest.fail "worker exact callback chain did not complete");
   Alcotest.(check (list string))
@@ -368,6 +369,7 @@ let test_a_not_relevant_judgment_settles_without_an_owner_turn () =
    | W.Contended _
    | W.Rescan_later _
    | W.Candidate_already_consumed _
+   | W.Judgment_deferred _
    | W.Partition_blocked _ ->
      Alcotest.fail "fixture did not complete the discard's judgment");
   (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
@@ -408,6 +410,7 @@ let test_discards_do_not_hold_the_owner_delivery_slot () =
     | W.Contended _
     | W.Rescan_later _
     | W.Candidate_already_consumed _
+    | W.Judgment_deferred _
     | W.Partition_blocked _ -> Alcotest.fail "fixture did not complete a judgment"
   in
   let first = judge_next J.Not_relevant in
@@ -632,7 +635,7 @@ let test_setup_error_stops_before_claim_without_hot_retry () =
        "typed setup failure stops the lifecycle"
        "Board attention exact setup unavailable before claim: network context unavailable"
        detail
-   | Ok (W.Drained _ | W.Retry_later _) ->
+   | Ok (W.Drained _ | W.Retry_later _ | W.Lane_deferred _) ->
      Alcotest.fail "setup-unavailable drain returned normally");
   Alcotest.(check int) "one setup attempt" 1 !calls;
   Alcotest.(check int) "setup failure did not yield into a retry" 0 !yields;
@@ -710,6 +713,7 @@ let test_claim_generation_change_discards_without_sibling_selection () =
      Alcotest.fail "changed generation reported quiescent or same-generation contention"
    | W.Judgment_completed _
    | W.Candidate_already_consumed _
+   | W.Judgment_deferred _
    | W.Partition_blocked _ ->
      Alcotest.fail "claim retry exhaustion produced a terminal step");
   Alcotest.(check int) "selected target is prepared once" 1 !prepare_calls;
@@ -814,6 +818,7 @@ let test_exact_claim_retry_exhaustion_has_no_self_wake () =
    | W.Rescan_later _
    | W.Judgment_completed _
    | W.Candidate_already_consumed _
+   | W.Judgment_deferred _
    | W.Partition_blocked _ ->
      Alcotest.fail "exact claim exhaustion reported quiescent or terminal");
   Alcotest.(check int) "one prepared target" 1 !prepare_calls;
@@ -977,6 +982,7 @@ let test_rescan_later_reaches_delayed_run_rearm () =
        true
        (P.Generation.equal contention.generation observed.generation)
    | W.Drained _
+   | W.Lane_deferred _
    | W.Retry_later { reason = W.Exact_claim_contended; _ } ->
      Alcotest.fail "changed selection did not reach typed delayed rescan");
   Alcotest.(check int) "no same-turn rescan" 1 !process_calls;
@@ -1144,7 +1150,12 @@ let test_execution_error_preserves_bound_progress_without_hot_retry () =
   let execute ~before_dispatch ~before_advance:_ _candidate =
     incr calls;
     ok "bind terminal attempt" (before_dispatch exact);
-    Error (E.Providers_exhausted { attempts = [ exact ]; detail = "provider exhausted" })
+    Error
+      (E.Providers_exhausted
+         { attempts = [ exact ]
+         ; detail = "provider exhausted"
+         ; terminal_kind = Agent_core.Exact_output.Non_advanceable_terminal
+         })
   in
   (match
      ok
@@ -1318,23 +1329,106 @@ let test_domain_error_preserves_classification_and_bound_progress () =
   Alcotest.(check int) "one domain-invalid exact execution" 1 !calls
 ;;
 
-let test_payment_refusal_exhaustion_reads_apart_from_interrupt () =
-  (* Contract: the lane's last HTTP slot refused on account grounds (a 402)
-     and the CLI tail declared none. The Blocked reason must keep the typed
-     cause AND the bound progress, and the candidate-side category must
-     read apart from a restart cut so operator tooling can count the two. *)
+(* A Pending candidate the lane could not judge because every slot refused for
+   its own binding. On main this quarantined the candidate as
+   [Exact_lane_exhausted]; on 2026-09-25 that happened 1,459 times while every
+   slot of the lane was in quota rest. *)
+let spent_http_walk_then_spent_cli_tail () : string E.execution_error =
+  E.Cli_slots_exhausted
+    { prior_error =
+        Some
+          (E.Providers_exhausted
+             { attempts = []
+             ; detail =
+                 "agent_core_execution_failed: slot=ollama_cloud.deepseek cause=provider \
+                  refused (http_status=429 refusal=rate_limited)"
+             ; terminal_kind = Agent_core.Exact_output.Advanceable_candidates_exhausted
+             })
+    ; failures =
+        [ Masc.Keeper_lane_cli_oneshot.Execution_failed
+            { runtime_id = "codex_subscription.gpt-5.6-luna"
+            ; cause =
+                Masc.Fusion_official_client.Setup_failure
+                  (Provider_error "usage limit reached")
+            }
+        ]
+    }
+;;
+
+let test_a_spent_lane_defers_and_the_next_drain_judges_the_candidate () =
+  with_temp_base "board-attention-worker-spent-lane-defers" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let exact = provenance "spent-lane" in
+  let running_generation = ref None in
+  let calls = ref 0 in
+  let drain execute =
+    ok
+      "drain"
+      (W.For_testing.drain_available
+         ~yield:(fun () -> ())
+         ~now:(fun () -> 3.0)
+         ~worker_epoch:(P.Worker_epoch.generate ())
+         ~base_path
+         ~keeper_name:"alpha"
+         ~prepare:(fun candidate -> Ok candidate)
+         ~execute)
+  in
+  let spent ~before_dispatch ~before_advance:_ _candidate =
+    incr calls;
+    ok "bind spent attempt" (before_dispatch exact);
+    running_generation := Some (load_one_partition ~base_path).generation;
+    Error (spent_http_walk_then_spent_cli_tail ())
+  in
+  (match drain spent with
+   | W.Lane_deferred { candidate_id; progress = { judgments = 0; steps = 1 } }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | W.Lane_deferred _ | W.Drained _ | W.Retry_later _ ->
+     Alcotest.fail "a spent lane did not end the drain as deferred");
+  Alcotest.(check int)
+    "the drain stopped instead of claiming the deferred root again"
+    1
+    !calls;
+  (match (load_one_candidate ~base_path).status with
+   | A.Pending { last_delivery_failure = None } -> ()
+   | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+     Alcotest.fail "a spent lane moved the candidate out of Pending");
+  (match load_one_partition ~base_path, !running_generation with
+   | { state = P.Ready; generation; _ }, Some previous ->
+     Alcotest.(check bool)
+       "the root is Ready at the generation after its run"
+       true
+       (P.Generation.is_direct_successor ~previous generation)
+   | _, None -> Alcotest.fail "the spent run never bound"
+   | _, Some _ -> Alcotest.fail "the deferred root is not Ready");
+  let answered ~before_dispatch ~before_advance:_ _candidate =
+    incr calls;
+    ok "bind answered attempt" (before_dispatch exact);
+    Ok (judgment exact J.Not_relevant)
+  in
+  (match drain answered with
+   | W.Drained { judgments = 1; steps = 1 } -> ()
+   | W.Drained _ | W.Lane_deferred _ | W.Retry_later _ ->
+     Alcotest.fail "the next drain did not judge the deferred candidate");
+  match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+  | A.Consumed { delivery = A.Not_relevant; _ }, P.Settled _ -> ()
+  | (A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _), _ ->
+    Alcotest.fail "the deferred candidate was not judged and consumed"
+;;
+
+(* A 402 on the last HTTP slot of a lane that declares no CLI slot. AGENT_CORE
+   reads a payment refusal as the binding's, so the lane defers. *)
+let test_a_payment_refusal_on_the_last_slot_defers () =
   with_temp_base "board-attention-worker-payment-refusal" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
   let exact = provenance "payment-refused" in
-  let calls = ref 0 in
   let execute ~before_dispatch ~before_advance:_ _candidate =
-    incr calls;
     ok "bind payment-refused attempt" (before_dispatch exact);
     Error
       (E.Providers_exhausted
          { attempts = [ exact ]
          ; detail =
              "payment refused: You requested up to 384000 tokens, but can only afford 15455"
+         ; terminal_kind = Agent_core.Exact_output.Advanceable_candidates_exhausted
          })
   in
   (match
@@ -1342,34 +1436,21 @@ let test_payment_refusal_exhaustion_reads_apart_from_interrupt () =
        "payment refusal exhaustion"
        (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
    with
-   | W.Partition_blocked
-       { candidate_id
-       ; reason =
-           P.Exact_lane_exhausted
-             { detail; progress = Some (P.Bound durable) }
-       }
+   | W.Judgment_deferred { candidate_id; detail }
      when String.equal candidate_id persisted.candidate_id
-          && same_provenance durable exact
           && String.length detail > 0 -> ()
-   | _ -> Alcotest.fail "payment refusal lost its typed cause or bound progress");
-  (match (load_one_candidate ~base_path).status with
-   | A.Quarantine
-       { quarantine = { failure_category = A.Exact_lane_exhausted; _ }; _ } ->
-     (* Distinct kinds: a restart cut reads [Exact_execution_interrupted]
-        instead, so the two are countable apart. *)
-     ()
-   | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
-     Alcotest.fail "payment refusal did not read as a lane exhaustion");
-  ignore calls
+   | _ -> Alcotest.fail "a payment refusal on the last slot did not defer");
+  match (load_one_candidate ~base_path).status with
+  | A.Pending _ -> ()
+  | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+    Alcotest.fail "a payment refusal quarantined the candidate"
 ;;
 
-let test_interrupted_bound_partition_requeues_back_to_ready () =
-  (* Contract: a restart cut on a bound execution is not a terminal judgment
-     failure. After [recover_for_process_start] blocks it as
-     [Exact_execution_interrupted], the manual requeue path must return it
-     to [Ready] — the judgment lane is a read-only model call, so
-     redispatch spends tokens and nothing else. *)
-  with_temp_base "board-attention-worker-interrupted-requeue" @@ fun base_path ->
+let test_restart_returns_a_cut_bound_run_to_ready () =
+  (* A restart that cuts a bound run is not a judgment about its candidate.
+     Each claim starts a fresh AGENT_CORE flow, so the next claim judges the
+     candidate without an operator requeue. *)
+  with_temp_base "board-attention-worker-interrupted-ready" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
   let exact = provenance "interrupted-bound" in
   let entered, publish_entered = Eio.Promise.create () in
@@ -1388,7 +1469,7 @@ let test_interrupted_bound_partition_requeues_back_to_ready () =
           : (W.step, string) result))
     (fun () -> Eio.Promise.await entered);
   Alcotest.(check int)
-    "recovery blocks one interrupted execution"
+    "recovery releases one cut run"
     1
     (ok
        "recover interrupted Bound"
@@ -1397,24 +1478,21 @@ let test_interrupted_bound_partition_requeues_back_to_ready () =
           ~base_path
           ~keeper_name:"alpha"));
   (match (load_one_partition ~base_path).state with
-   | P.Blocked
-       { reason = P.Exact_execution_interrupted (P.Bound durable); _ } ->
-     Alcotest.(check bool)
-       "interrupted keeps its bound provenance"
-       true
-       (same_provenance durable exact)
-   | _ -> Alcotest.fail "interrupted execution was not blocked requeueably");
-  ignore
-    (ok
-       "manual requeue returns the partition to Ready"
-       (P.requeue_blocked
-          ~base_path
-          ~partition:(load_one_partition ~base_path))
-     : P.requeue_blocked_outcome);
-  (match (load_one_partition ~base_path).state with
    | P.Ready -> ()
-   | _ -> Alcotest.fail "interrupted partition did not requeue back to Ready");
-  ignore persisted
+   | _ -> Alcotest.fail "a cut bound run did not return to Ready");
+  match
+    ok
+      "judge after restart"
+      (process
+         ~base_path
+         ~prepare:(fun candidate -> Ok candidate)
+         ~execute:(fun ~before_dispatch ~before_advance:_ _candidate ->
+           ok "bind after restart" (before_dispatch exact);
+           Ok (judgment exact J.Not_relevant)))
+  with
+  | W.Judgment_completed { candidate_id; _ }
+    when String.equal candidate_id persisted.candidate_id -> ()
+  | _ -> Alcotest.fail "the candidate was not judged after the restart"
 ;;
 
 let test_cli_exhaustion_preserves_prior_domain_rejection () =
@@ -1585,7 +1663,7 @@ let test_bound_cancellation_is_prompt_and_process_recoverable () =
      when same_provenance durable exact -> ()
    | _ -> Alcotest.fail "cancellation performed partition I/O before returning");
   Alcotest.(check int)
-    "process-start recovery blocks one Bound execution"
+    "process-start recovery releases one Bound execution"
     1
     (ok
        "recover cancelled Bound"
@@ -1593,12 +1671,9 @@ let test_bound_cancellation_is_prompt_and_process_recoverable () =
           ~now:4.0
           ~base_path
           ~keeper_name:"alpha"));
-  match load_one_partition ~base_path with
-  | { state =
-        P.Blocked { reason = P.Exact_execution_interrupted (P.Bound durable); _ }
-    ; _
-    } when same_provenance durable exact -> ()
-  | _ -> Alcotest.fail "process-start recovery lost the cancelled Bound provenance"
+  match (load_one_partition ~base_path).state with
+  | P.Ready -> ()
+  | _ -> Alcotest.fail "process-start recovery did not return the cut Bound run to Ready"
 ;;
 
 let test_released_cancellation_is_prompt_and_process_recoverable () =
@@ -1655,7 +1730,7 @@ let test_released_cancellation_is_prompt_and_process_recoverable () =
     ()
    | _ -> Alcotest.fail "cancellation lost durable advancement evidence");
   Alcotest.(check int)
-    "process-start recovery quarantines one advancing execution"
+    "process-start recovery releases one advancing execution"
     1
     (ok
        "recover cancelled released execution"
@@ -1663,24 +1738,9 @@ let test_released_cancellation_is_prompt_and_process_recoverable () =
           ~now:4.0
           ~base_path
           ~keeper_name:"alpha"));
-  match load_one_partition ~base_path with
-  | { state =
-        P.Blocked
-          { reason =
-              P.Exact_execution_interrupted
-                (P.Advancing
-                   { execution_anchor = Some durable
-                   ; last_from = None
-                   ; next = durable_next
-                   })
-          ; _
-          }
-    ; _
-    }
-    when same_provenance durable failed
-         && same_candidate_visit durable_next next ->
-   ()
-  | _ -> Alcotest.fail "process-start recovery lost durable advancement evidence"
+  match (load_one_partition ~base_path).state with
+  | P.Ready -> ()
+  | _ -> Alcotest.fail "process-start recovery did not return the cut advancing run to Ready"
 ;;
 
 let test_unbound_cancellation_waits_for_process_start_recovery () =
@@ -1739,7 +1799,13 @@ let test_terminal_root_does_not_strand_ready_sibling () =
        ~execute:(fun ~before_dispatch ~before_advance:_ observed ->
          calls := !calls @ [ observed.A.candidate_id ];
          if String.equal observed.candidate_id first.candidate_id
-         then Error (E.Providers_exhausted { attempts = []; detail = "provider exhausted" })
+         then
+           Error
+             (E.Providers_exhausted
+                { attempts = []
+                ; detail = "provider exhausted"
+                ; terminal_kind = Agent_core.Exact_output.Non_advanceable_terminal
+                })
          else (
            ok "bind sibling" (before_dispatch sibling_exact);
            (* Relevant, not Not_relevant: this test's subject is the drain
@@ -2145,6 +2211,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    | W.Rescan_later _
    | W.Judgment_completed _
    | W.Candidate_already_consumed _
+   | W.Judgment_deferred _
    | W.Partition_blocked _ ->
      Alcotest.fail "blocked partition was exposed before authorization");
   Alcotest.(check int) "no exact dispatch before authorization" 0 !execute_calls;
@@ -2266,6 +2333,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    | W.Contended _
    | W.Rescan_later _
    | W.Candidate_already_consumed _
+   | W.Judgment_deferred _
    | W.Partition_blocked _ ->
      Alcotest.fail "authorized manual requeue did not complete its exact judgment");
   (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
@@ -2860,15 +2928,20 @@ let test_drain_outcome_labels_stay_distinct () =
           ; reason = W.Selected_generation_changed
           ; progress = no_progress
           }
+      ; W.Lane_deferred { candidate_id = "c"; progress = no_progress }
       ]
   in
   Alcotest.(check (list string))
     "one token per verdict"
-    [ "drained"; "retry_claim_contended"; "retry_generation_changed" ]
+    [ "drained"
+    ; "retry_claim_contended"
+    ; "retry_generation_changed"
+    ; "deferred_lane_exhausted"
+    ]
     labels;
   Alcotest.(check int)
     "no two verdicts share a token"
-    3
+    4
     (List.length (List.sort_uniq compare labels))
 ;;
 
@@ -2911,7 +2984,11 @@ let test_undrained_outcomes_are_not_routine () =
           { contention
           ; reason = W.Selected_generation_changed
           ; progress = no_progress
-          }))
+          }));
+  Alcotest.(check string)
+    "a deferred lane is not routine"
+    "warn"
+    (level_name (W.Lane_deferred { candidate_id = "c"; progress = no_progress }))
 ;;
 
 (* task-336 sibling defect (masc, 2026-08-16): before this fix,
@@ -2932,7 +3009,12 @@ let test_reconcile_quarantines_abandons_a_blocked_partition_whose_candidate_was_
   let attempt = provenance "quarantine-retired" in
   let execute ~before_dispatch ~before_advance:_ _prepared =
     ok "bind quarantine attempt" (before_dispatch attempt);
-    Error (E.Providers_exhausted { attempts = [ attempt ]; detail = "provider exhausted" })
+    Error
+      (E.Providers_exhausted
+         { attempts = [ attempt ]
+         ; detail = "provider exhausted"
+         ; terminal_kind = Agent_core.Exact_output.Non_advanceable_terminal
+         })
   in
   (match
      ok
@@ -3092,13 +3174,17 @@ let () =
             `Quick
             test_bookkeeping_failure_keeps_its_cause_and_the_flow_sentence
         ; Alcotest.test_case
-            "payment refusal exhaustion reads apart from interrupt"
+            "a spent lane defers and the next drain judges the candidate"
             `Quick
-            test_payment_refusal_exhaustion_reads_apart_from_interrupt
+            test_a_spent_lane_defers_and_the_next_drain_judges_the_candidate
         ; Alcotest.test_case
-            "interrupted bound partition requeues back to Ready"
+            "a payment refusal on the last slot defers"
             `Quick
-            test_interrupted_bound_partition_requeues_back_to_ready
+            test_a_payment_refusal_on_the_last_slot_defers
+        ; Alcotest.test_case
+            "restart returns a cut bound run to Ready"
+            `Quick
+            test_restart_returns_a_cut_bound_run_to_ready
         ; Alcotest.test_case
             "completion failure preserves bound provenance"
             `Quick

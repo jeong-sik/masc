@@ -469,9 +469,14 @@ check_boundary() {
   forbid_pattern \
     '(^|[\n])[[:space:]]*(let|and)[[:space:]]+(rec[[:space:]]+)?[^=]*(^|[^[:alnum:]_])(provider|model|tier|pricing|price|cost)([^[:alnum:]_]|$)[^=]*=|(^|[\n])[[:space:]]*fun[[:space:]]+[^-]*(^|[^[:alnum:]_])(provider|model|tier|pricing|price|cost)([^[:alnum:]_]|$)[^-]*->' \
     "Board attention execution must not regain provider, model, tier, pricing, price, or cost through tuple destructuring"
+  # A spent lane returns its root to Ready through [Partition.defer], decided
+  # only from AGENT_CORE's typed [Advanceable_candidates_exhausted]. What stays
+  # forbidden is the local retry clock: retry deadlines, retryable flags and
+  # provider retry queues owned by Board attention.
+  require_present "Agent_core.Exact_output.Advanceable_candidates_exhausted" "${cached_worker_ml}"
   forbid_pattern \
-    'Keeper_board_attention_failure|attempt_failure|retryable|Retry\.|retry_after|retry_deadline|is_retryable|Partition_deferred|(^|[^[:alnum:]_])defer([^[:alnum:]_]|$)|release_due_provider_retries|next_provider_retry_deadline|recover_claim_after_lane_abort' \
-    "Board attention execution must not regain local retry or defer authority"
+    'Keeper_board_attention_failure|attempt_failure|retryable|Retry\.|retry_after|retry_deadline|is_retryable|Partition_deferred|release_due_provider_retries|next_provider_retry_deadline|recover_claim_after_lane_abort' \
+    "Board attention execution must not regain a local retry clock"
   forbid_pattern \
     'Exact_output\.(receipt_phase|receipt_dispatch_count|candidate_rejection_(disposition|phase|dispatch_count))|receipt_(phase|dispatch_count)|candidate_rejection_(disposition|phase|dispatch_count)|dispatch_count|exact_execution_failed_before_dispatch' \
     "Board attention execution must not inspect AGENT_CORE receipt or candidate-rejection phase, disposition, or dispatch count"
@@ -612,7 +617,7 @@ EOF
     'let keep, provider = (), "forbidden"' \
     'fun keep, model -> keep' \
     'let (keep, (tier, rest)) = ((), ("forbidden", ()))' \
-    'let defer value = value' \
+    'let retry_deadline value = value' \
     'let _ = Exact_output.receipt_phase' \
     'let _ = Exact_output.receipt_dispatch_count' \
     'let _ = Exact_output.candidate_rejection_disposition' \

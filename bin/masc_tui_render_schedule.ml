@@ -1504,6 +1504,14 @@ let schedule_hold_tag ~due = "held since " ^ due
 let schedule_hold_reading ~due =
   schedule_hold_tag ~due ^ ": the keeper has not taken the previous wake yet"
 
+(* #34642: a schedule held on its target's shutdown fence. *)
+let schedule_fence_hold_reading ~due ~target ~fence_owner =
+  Printf.sprintf
+    "%s: %s is shutting down (%s) and takes no wakes until that finishes"
+    (schedule_hold_tag ~due)
+    target
+    fence_owner
+
 (* The same hold when the runner has not read its list again since (#38411).
    A tick that fails keeps the list without looking, so the hold is drawn at
    the time it was [checked], not as the present. The due column beside the
@@ -1513,3 +1521,12 @@ let schedule_hold_as_of_tag ~checked = "held as of " ^ checked
 let schedule_hold_as_of_reading ~checked =
   schedule_hold_as_of_tag ~checked
   ^ ": the keeper had not taken the previous wake by then"
+
+(* The fence hold drawn the same way, at the time it was [checked]: a failed
+   tick does not re-read why it held either (#38411, #34642). *)
+let schedule_fence_hold_as_of_reading ~checked ~target ~fence_owner =
+  Printf.sprintf
+    "%s: %s was shutting down (%s) and took no wakes until that finished"
+    (schedule_hold_as_of_tag ~checked)
+    target
+    fence_owner

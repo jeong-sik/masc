@@ -10,6 +10,7 @@
 #      completed+success
 #      (a queued workflow has no check-runs yet; this catches it)
 #   5. the body file is non-empty (no evidence-free approvals)
+#   6. no other account has an open CHANGES_REQUESTED on the PR
 # Skips (exit 0, no write) if this account already APPROVED that exact SHA.
 #
 # The caller passes the SLOT line because a lane shell cannot read the Board.
@@ -116,9 +117,28 @@ done <<<"$wf"
 [ ${#wf_ids[@]} -gt 0 ] || refuse "no workflow runs for ${head}"
 [ ${#reasons[@]} -eq 0 ] || finish_refused
 
-# ---- 5. idempotence: already approved this SHA? ----
+# ---- 5. open change requests ----
 me="$(gh_json user '.login')" || exit 1
 [ -n "$me" ] || { echo "approve-guard: gh api user returned no login; cannot check for a duplicate approval" >&2; exit 1; }
+# GitHub decides each account's stance by that account's newest review in
+# APPROVED, CHANGES_REQUESTED or DISMISSED; a later COMMENTED does not lift a
+# change request. Another account's open change request blocks the merge, so an
+# APPROVE over it is noise that reads like a green light (#38810, 2026-09-24).
+# This account's own change request is replaced by the approval, but the
+# account is shared by several lanes, so the caller is told to read it first.
+revs="$(gh_json "repos/${repo}/pulls/${pr}/reviews?per_page=100" '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") | [.user.login, (.id|tostring), .state] | @tsv')" || exit 1
+revs="$(printf '%s\n' "$revs" | sort -t "$(printf '\t')" -k1,1 -k2,2nr | awk -F '\t' 'NF && !seen[$1]++')"
+while IFS=$'\t' read -r who rid rstate; do
+  [ -n "${who:-}" ] && [ "$rstate" = "CHANGES_REQUESTED" ] || continue
+  if [ "$who" = "$me" ]; then
+    echo "note: ${me} has open CHANGES_REQUESTED review ${rid}; this approval replaces it. The account is shared: read that review before approving." >&2
+  else
+    refuse "open CHANGES_REQUESTED from ${who} (review ${rid}); the merge stays blocked until ${who} approves or the review is dismissed"
+  fi
+done <<<"$revs"
+[ ${#reasons[@]} -eq 0 ] || finish_refused
+
+# ---- 6. idempotence: already approved this SHA? ----
 dup="$(gh_json "repos/${repo}/pulls/${pr}/reviews?per_page=100" ".[] | select(.user.login == \"${me}\" and .state == \"APPROVED\" and .commit_id == \"${head}\") | .id")" || exit 1
 if [ -n "$dup" ]; then
   echo "SKIP #${pr}: ${me} already APPROVED ${head} (review $(echo "$dup" | head -n1))"
@@ -132,7 +152,7 @@ if [ "$check_only" -eq 1 ]; then
   exit 0
 fi
 
-# ---- 6. write, then read back ----
+# ---- 7. write, then read back ----
 if ! resp="$({ cat "$body"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/${repo}/pulls/${pr}/reviews" \
     -f event=APPROVE -f "commit_id=${head}" -F body=@- \
     --jq '[(.id|tostring), .state, .commit_id] | @tsv' 2>&1)"; then

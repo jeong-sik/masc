@@ -102,35 +102,38 @@ related: ["official-client-conversation-in-masc"]
 
 `resolve` 가 알아볼 수 있는 것은 타입으로, 없는 값은 추정하지 않는다.
 
-1. **Codex overflow 초기화**: context overflow 는 `total` 을 "입력·출력 0, `total_tokens` = 창 크기"로 바꾼다(rust-v0.156.1 `fill_to_context_window`).
-   - `sample` 에 `vendor_total_tokens : int option` 을 더해 `resolve` 가 받게 한다.
-   - `Resumed` 에서는 지금처럼 `Counter_regressed` 로 다시 기준을 잡는다.
-   - `Fresh` 에서는 지금 정확한 0 delta 로 해석된다. 그런데 `Counter_regressed` 는 `Fresh` 에서 유효하지 않다(285-291). 그래서 새 상태 `Counter_reset`(0 입력·출력 + vendor total 있음)을 둔다.
-   - 둘 다 그 턴에서 overflow 전에 쓴 양은 잃는다.
-2. **remote compaction**: 요청의 사용량이 `total` 에 들어가지 않는다. 보이지 않는다.
-3. **기록 전 중단**: 프레임이 기록되기 전에 app-server 가 멈추면 그 응답은 이후 `total` 에 없다.
-4. **host stop**: MASC 가 도구 경계에서 턴을 끝내면, 그 도구를 부른 응답의 프레임은 도구가 끝난 뒤에 오므로 오지 않는다. vendor 가 아니라 MASC 쪽 빈틈이다. #38970 은 이 경우 "사용량 없음" 행을 남긴다.
-5. **한 시도 안의 스레드 전환**: D1 이 대화 단위로 재료를 들어서 다룬다.
-6. **fork**: fork 한 스레드는 부모의 `total` 을 이어받는다. MASC 는 fork 하지 않는다. D4 는 `Start` 스레드가 0 에서 시작한다고 전제한다.
+1. **Codex 창 채움(fill)**: 요청이 창을 넘치면 `total` 이 "모든 개수 0, `total_tokens` = 창 크기"로 바뀌고(rust-v0.156.1 `fill_to_context_window`), 턴은 곧바로 실패한다(`session/turn.rs` 의 `set_total_tokens_full` 뒤 `return Err`). guardian 리뷰 예산 경로만 compaction 뒤 다시 시도한다.
+   - 9/23~25 rollout 1,207개 중 332개에 이 프레임이 있었다. 모두 스레드당 하나였고, 모두 **스레드의 마지막 프레임**이었다. 뒤에 다시 쌓인 프레임은 0개였다.
+   - 그래서 fill 직전 프레임이 그 스레드의 마지막 실제 누적값이다. 관찰자는 프레임마다 보고를 받으므로(#38970) 이 값을 든다. overflow 전에 쓴 양을 **잃지 않는다**.
+   - 재료: 대화마다 "fill 전 마지막 누적값" + "fill 로 끝났다". delta 는 그 값으로 평소처럼 계산한다(정확). 커서는 그 대화의 0 으로 옮긴다. fill 뒤 누적은 0 에서 다시 시작하기 때문이다. 새 상태(`Counter_reset`)나 `vendor_total_tokens` 비교는 두지 않는다.
+   - 모양은 Codex runtime 경계에서 타입으로 가른다. 1단계(#39000)가 `frame_usage = Counted | Context_window_filled` 로 파싱한다. 한 턴에서 fill 을 본 성공 결과는 사용량을 "모름"으로 낸다(`Thread_count_replaced`). fill 뒤의 개수는 0 에서 다시 센 값이라 턴을 대표하지 못한다.
+2. **Codex compaction 추정**: compaction 이 기록을 갈아 끼우면 `last` 가 "모든 개수 0, `total_tokens` = 새 기록 추정 크기"가 된다(`recompute_token_usage`). `total` 은 그대로다. 같은 기간 266 프레임이었고, 완료된 턴 2,709개 중 8개가 이 프레임으로 끝났다. 사용량과는 상관없고 점유량만 바뀐다. 1단계가 `last_usage = Request_usage | Context_estimate` 로 가르고, 추정값은 캐시 분할 없는 점유량으로 쓴다(`request_context.cache = None`).
+3. **remote compaction**: 요청의 사용량이 `total` 에 들어가지 않는다. 보이지 않는다.
+4. **기록 전 중단**: 프레임이 기록되기 전에 app-server 가 멈추면 그 응답은 이후 `total` 에 없다.
+5. **host stop**: MASC 가 도구 경계에서 턴을 끝내면, 그 도구를 부른 응답의 프레임은 도구가 끝난 뒤에 오므로 오지 않는다. vendor 가 아니라 MASC 쪽 빈틈이다. #38970 은 이 경우 "사용량 없음" 행을 남긴다.
+6. **한 시도 안의 스레드 전환**: D1 이 대화 단위로 재료를 들어서 다룬다.
+7. **fork**: fork 한 스레드는 부모의 `total` 을 이어받는다. MASC 는 fork 하지 않는다. D4 는 `Start` 스레드가 0 에서 시작한다고 전제한다.
 
 ## 4. 단계
 
 | 단계 | 내용 | 바뀌는 합계 |
 |---|---|---|
 | 1 (#39000) | D4: Codex 를 누적값 + `request_context` 로. `request_context` 선택 출력과 누적값 필드 정리 | Codex 성공 턴이 마지막 요청에서 턴 전체로 |
-| 2 | D1·D2·D3(autonomous): 재료 운반, fold, 진 시도 행, commit 뒤 행 쓰기, identity 에 attempt, D5.1 `Counter_reset`. Agent Core 도 응답 합으로 | 실패 턴 · 진 시도 · Agent Core 앞 응답이 합계에 |
+| 2a | D1 재료 운반(D5.1 fill 포함), D2 fold, D3(autonomous 실패 분기): 실패 턴의 모든 시도를 계산해 같은 commit 에 합계·커서를 넣고, commit 뒤에 행을 쓴다. identity 에 `lane_attempt_index` | autonomous 실패 턴 |
+| 2b | 성공 경로도 재료에서 계산: 진 시도 행, 이긴 시도의 앞 대화, Agent Core 응답 합. 성공 경로 행도 commit 뒤로 | 진 시도 · Agent Core 앞 응답 |
 | 3 | D3(direct lane): 실패 commit 과 turn id | direct lane 실패 턴 |
 | 4 | (측정 뒤) 커서를 (런타임, 대화)마다 | `baseline_missing` 으로 잃는 턴 |
 
 - 4단계 판단 기준: 2단계 배포 뒤 1주일 동안 Keeper 별 `baseline_missing` 턴 수와 그 턴들의 raw 행 입력 합. 이 값이 D4 의 전환 비율보다 커졌으면 한다. meta 스키마를 바꾸는 일이라 따로 정한다.
-- 1·2단계는 운영 합계를 바꾼다. 각 PR 에 `### Upgrade notes` 로 "이 버전 앞뒤 합계는 바로 비교할 수 없다"를 적는다. 2단계의 identity 변경은 `### Fresh state required` 다.
+- 2단계를 둘로 나눈 까닭: 가장 큰 손실은 실패한 턴이다(Codex 중단 턴 384개 입력 542.9M, §1). 2a 가 이것부터 고친다. 성공 경로를 재료로 옮기는 일은 이긴 시도의 해석을 받는 곳이 많아서 따로 한다.
+- 1·2단계는 운영 합계를 바꾼다. 각 PR 에 `### Upgrade notes` 로 "이 버전 앞뒤 합계는 바로 비교할 수 없다"를 적는다. 2a 의 identity 변경은 `### Fresh state required` 다.
 
 ## 5. 검증
 
 - 단위(`Keeper_usage_resolution`)
   - fold 불변식: 한 대화의 delta 합 = 마지막 관측 − 시작 커서.
   - 시도 여러 개(같은 대화, 다른 대화, 누적과 턴 합계 섞임).
-  - overflow: `Resumed` 는 `Counter_regressed`, `Fresh` 는 `Counter_reset`.
+  - fill: fill 전 마지막 누적값으로 delta 를 내고, 커서는 그 대화의 0 이 된다. fill 뒤 같은 대화를 이어 쓰면 0 부터 센 값이 그대로 delta 다.
   - 재전송: 같은 값은 delta 0.
 - 실제 Keeper 경로
   - Codex fixture 로 "여러 응답 → 성공", "응답 두 번 → 사용량 한도"를 돌려 `Resolved_delta` 합을 본다.

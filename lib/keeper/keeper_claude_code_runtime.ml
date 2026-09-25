@@ -249,16 +249,46 @@ let record_usage_windows ~keeper_name ~runtime_id report =
       runtime_id
 ;;
 
-(* Always installed so usage-window reports are recorded. A turn nobody
-   streams, traces or observes gets only that; its other events are ignored as
-   before. *)
-let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action on_event =
+(* The CLI frame carries Anthropic exclusive counts; the shared constructor
+   produces the canonical inclusive api_usage without changing its scope. *)
+let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
+  Agent_core.Llm_provider.Backend_anthropic.usage_of_wire_counts
+    ~input_tokens:usage.input_tokens
+    ~output_tokens:usage.output_tokens
+    ~cache_creation_input_tokens:usage.cache_creation_input_tokens
+    ~cache_read_input_tokens:usage.cache_read_input_tokens
+;;
+
+(* Always installed so usage-window and turn usage reports are recorded. A
+   turn nobody streams, traces or observes gets only those; its other events
+   are ignored as before. *)
+let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
+    ~on_usage_report ~position on_event =
+  (* The result frame's uuid is the response identity the completion hook
+     also writes for a Claude Code turn; the session is the conversation. *)
+  let report_usage ~session_id ~turn_id ~model usage =
+    Option.iter
+      (fun report ->
+         report
+           { Keeper_client_usage_report.official_turn = turn_count
+           ; response_id = turn_id
+           ; model
+           ; conversation_id = session_id
+           ; position
+           ; usage_scope = Runtime_usage_scope.Turn_total
+           ; usage = api_usage_of_turn_usage usage
+           ; vendor_total_tokens = None
+           })
+      on_usage_report
+  in
   match on_event, raw_trace_run, on_native_action with
   | None, None, None ->
     Some
       (function
         | Runtime_claude_code.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
+        | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
+          report_usage ~session_id ~turn_id ~model usage
         | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Turn_finished _ -> ())
   | _ ->
@@ -344,6 +374,8 @@ let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~
             observation.identity
         | Runtime_claude_code.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
+        | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
+          report_usage ~session_id ~turn_id ~model usage
         | Runtime_claude_code.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text
@@ -490,16 +522,6 @@ let recovery_failure_of_attempt ~session_mode ~gate_continuation error =
     recovery_failure_of_client_error error
 ;;
 
-(* The CLI frame carries Anthropic exclusive counts; the shared constructor
-   produces the canonical inclusive api_usage without changing its scope. *)
-let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
-  Agent_core.Llm_provider.Backend_anthropic.usage_of_wire_counts
-    ~input_tokens:usage.input_tokens
-    ~output_tokens:usage.output_tokens
-    ~cache_creation_input_tokens:usage.cache_creation_input_tokens
-    ~cache_read_input_tokens:usage.cache_read_input_tokens
-;;
-
 (* Same inclusive convention as [api_usage_of_turn_usage], for the input side
    of the newest request only: the context it occupied. *)
 let request_context_of_request_input (input : Runtime_claude_code.request_input)
@@ -507,8 +529,13 @@ let request_context_of_request_input (input : Runtime_claude_code.request_input)
   =
   { input_tokens =
       input.input_tokens + input.cache_creation_input_tokens + input.cache_read_input_tokens
-  ; cache_creation_input_tokens = input.cache_creation_input_tokens
-  ; cache_read_input_tokens = input.cache_read_input_tokens
+  ; cache =
+      Some
+        { Runtime_observation.cache_creation_input_tokens =
+            input.cache_creation_input_tokens
+        ; cache_read_input_tokens = input.cache_read_input_tokens
+        }
+  ; output_tokens = None (* an assistant frame's output is a streaming snapshot *)
   }
 ;;
 
@@ -523,6 +550,8 @@ module For_testing = struct
         ~raw_trace_run:None
         ~turn_count
         ~on_native_action:(Some observe)
+        ~on_usage_report:None
+        ~position:Keeper_usage_resolution.Fresh
         None
     with
     | Some callback -> callback event
@@ -619,7 +648,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
-    ~(config : Runtime_execution.claude_code) =
+    ~on_usage_report ~(config : Runtime_execution.claude_code) =
   context_overflow_retry_safe := false;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -1148,7 +1177,13 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let turn_result =
       let on_stream_event =
         claude_stream_callback
-          ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action on_event
+          ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
+          ~on_usage_report
+          ~position:
+            (match session_mode with
+             | Runtime_claude_code.Start -> Keeper_usage_resolution.Fresh
+             | Runtime_claude_code.Resume _ -> Keeper_usage_resolution.Resumed)
+          on_event
       in
       try
         let client_result =
@@ -1425,6 +1460,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
+    ?on_usage_report
     ~event_bus ~raw_trace ~on_event ~config () =
   let settled_session = Atomic.make None in
   let on_session_settled value = Atomic.set settled_session (Some value) in
@@ -1539,6 +1575,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
             ~effect_disposition
             ~context_overflow_retry_safe
         ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+            ~on_usage_report
             ~config)
         ())
   in

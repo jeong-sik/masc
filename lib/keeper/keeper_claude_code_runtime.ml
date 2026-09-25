@@ -526,8 +526,7 @@ module For_testing = struct
         ~raw_trace_run:None
         ~turn_count
         ~on_native_action:(Some observe)
-        (* See the name: this probe checks native actions, not compaction. *)
-        ~on_compacted:ignore
+        ~on_compacted:(fun () -> ())
         None
     with
     | Some callback -> callback event

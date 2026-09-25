@@ -237,7 +237,12 @@ let contains ~affix text =
 (* The terminal-error renderer is checked where a real flow produced the
    error, so the payload it prints is the one AGENT_CORE actually carried. *)
 let check_rendered label ~affixes (error : string EO.flow_execution_error) =
-  let rendered = EO.flow_execution_error_to_string ~callback_error_to_string:Fun.id error in
+  let rendered =
+    EO.flow_execution_error_to_string
+      ~callback_error_to_string:Fun.id
+      ~raw_response_to_string:EO.raw_response_sha256_to_string
+      error
+  in
   List.iter
     (fun affix ->
        check bool (Printf.sprintf "%s renders %S in %S" label affix rendered) true

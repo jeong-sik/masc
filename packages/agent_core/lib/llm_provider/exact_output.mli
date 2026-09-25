@@ -919,8 +919,11 @@ val flow_execution_terminal_kind
     than a payload a consumer drops behind [_]. Numeric fields (token counts,
     unix seconds, HTTP status) are always printed: they are what separates a
     local capacity refusal from a provider failure. Transport errors are
-    rendered by their typed kind and raw provider bodies by their sha256,
-    never by their text, because either can echo request material. *)
+    rendered by their typed kind, never by their message, because a message
+    can echo request material. A raw provider body is rendered by the
+    caller-supplied [raw_response_to_string]: {!raw_response_sha256_to_string}
+    prints only its sha256, and a consumer that owns a redactor may print a
+    redacted excerpt instead. *)
 
 (** e.g. ["capacity evidence expired (now=1700000100 expires_at=1700000000)"]. *)
 val token_capacity_rejection_to_string : token_capacity_rejection -> string
@@ -934,8 +937,14 @@ val candidate_rejection_disposition_to_string : candidate_rejection_disposition 
     ["completion failed (network_error:dns_failure, not sent)"]. *)
 val execution_error_cause_to_string : execution_error_cause -> string
 
-(** ["call_id=... cause=... raw_response_sha256=<sha|none>"]. *)
-val execution_error_to_string : execution_error -> string
+(** ["raw_response_sha256=<sha|none>"]: the body's digest, never its text. *)
+val raw_response_sha256_to_string : raw_response option -> string
+
+(** ["call_id=... cause=... <raw_response_to_string raw_response>"]. *)
+val execution_error_to_string
+  :  raw_response_to_string:(raw_response option -> string)
+  -> execution_error
+  -> string
 
 val start_attempt_error_to_string : start_attempt_error -> string
 val measurement_start_error_to_string : measurement_start_error -> string
@@ -952,9 +961,12 @@ val flow_evidence_to_string : flow_evidence -> string
 (** One line for any terminal flow error: a static label
     (["candidates_exhausted: "], ["execution_failed: "], ...), the payload the
     branch carries, and the flow journey (["; flow=[...]"]). The callback
-    error type belongs to the caller, so the caller supplies its renderer. *)
+    error type belongs to the caller, so the caller supplies its renderer and
+    the callback arms keep their cause. The raw provider body of an execution
+    failure goes through [raw_response_to_string]. *)
 val flow_execution_error_to_string
   :  callback_error_to_string:('callback_error -> string)
+  -> raw_response_to_string:(raw_response option -> string)
   -> 'callback_error flow_execution_error
   -> string
 

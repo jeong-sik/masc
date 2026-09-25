@@ -2258,8 +2258,10 @@ let execute_flow_once
    they are what tells a local capacity refusal from a provider outage. The
    strings are for logs and operator lines only; nothing may branch on them.
    A transport error is rendered by its typed kind, never by its message,
-   because a message can echo request material; a raw provider body is
-   rendered by its sha256 for the same reason. *)
+   because a message can echo request material. A raw provider body is
+   rendered by the caller's [raw_response_to_string]: AGENT_CORE offers only
+   the sha256 ([raw_response_sha256_to_string]), and a consumer that owns a
+   redactor may pass a redacted excerpt instead. *)
 
 let optional_token_count_to_string = function
   | None -> "unknown"
@@ -2431,30 +2433,36 @@ let flow_evidence_to_string (evidence : flow_evidence) =
 ;;
 
 let raw_response_sha256_to_string : raw_response option -> string = function
-  | None -> "none"
-  | Some raw -> raw.body_sha256
+  | None -> "raw_response_sha256=none"
+  | Some raw -> "raw_response_sha256=" ^ raw.body_sha256
 ;;
 
-let execution_error_to_string (error : execution_error) =
+let execution_error_to_string
+      ~(raw_response_to_string : raw_response option -> string)
+      (error : execution_error)
+  =
   Printf.sprintf
-    "call_id=%s cause=%s raw_response_sha256=%s"
+    "call_id=%s cause=%s %s"
     (call_id_to_string error.call_id)
     (execution_error_cause_to_string error.cause)
-    (raw_response_sha256_to_string error.raw_response)
+    (raw_response_to_string error.raw_response)
 ;;
 
-let flow_candidate_failure_to_string : flow_candidate_failure -> string = function
+let flow_candidate_failure_to_string ~raw_response_to_string
+  : flow_candidate_failure -> string
+  = function
   | Flow_candidate_rejected rejection ->
     "candidate_rejected " ^ candidate_rejection_to_string rejection
   | Flow_candidate_execution_failed { candidate; cause } ->
     Printf.sprintf
       "execution_failed slot=%s %s"
       candidate.visit.identity.candidate_id
-      (execution_error_to_string cause)
+      (execution_error_to_string ~raw_response_to_string cause)
 ;;
 
 let flow_execution_error_to_string
       ~(callback_error_to_string : 'callback_error -> string)
+      ~(raw_response_to_string : raw_response option -> string)
       (error : 'callback_error flow_execution_error)
   =
   let with_flow evidence detail =
@@ -2502,7 +2510,7 @@ let flow_execution_error_to_string
       evidence
       (Printf.sprintf
          "before_advance_callback_failed: failed=[%s] next=%s cause=%s"
-         (flow_candidate_failure_to_string failed)
+         (flow_candidate_failure_to_string ~raw_response_to_string failed)
          next.identity.candidate_id
          (callback_error_to_string cause))
   | Flow_candidates_exhausted { rejection; evidence } ->
@@ -2513,5 +2521,5 @@ let flow_execution_error_to_string
       (Printf.sprintf
          "execution_failed: slot=%s %s"
          candidate.visit.identity.candidate_id
-         (execution_error_to_string cause))
+         (execution_error_to_string ~raw_response_to_string cause))
 ;;

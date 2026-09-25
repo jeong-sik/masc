@@ -9,8 +9,10 @@ type t = private {
   evidence : string;
       (** An Evidence Reference that
           {!Workspace_verification_store.classify_evidence_reference} resolves
-          ([artifact:], [note:], [board:] or [fusion:]), trimmed. A row is
-          built only after that classification, on record and on load. *)
+          ([artifact:], [note:], [board:] or [fusion:]), trimmed; an
+          [artifact:] path also passes
+          {!Workspace_verification_store.valid_producer_relative_path}. A row
+          is built only after that check, on record and on load. *)
   actor : string;
   recorded_at : string;
 }
@@ -23,6 +25,10 @@ type error =
 val error_to_string : error -> string
 
 val to_yojson : t -> Yojson.Safe.t
+
+val path : Workspace_utils.config -> string
+(** The measurement snapshot; its recovery mirror is this path with
+    [.last-good] appended. *)
 
 val load : Workspace_utils.config -> (t list, string) result
 (** An unreadable primary is an error. A missing primary with an existing

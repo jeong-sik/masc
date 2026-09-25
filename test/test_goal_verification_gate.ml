@@ -579,19 +579,24 @@ let test_measurement_evidence_is_an_evidence_reference () =
              (Printf.sprintf "evidence %S: expected Invalid_request, got %s" evidence
                 (Goal_measurement.error_to_string error))
        | Ok _ -> fail (Printf.sprintf "evidence %S is not a reference but was recorded" evidence))
-    [ "done"; "100%"; "https://example.com/proof"; "note:   "; "board:" ];
+    [ "done"; "100%"; "https://example.com/proof"; "note:   "; "board:";
+      "artifact:"; "artifact:/abs"; "artifact:../x" ];
   (match Goal_measurement.load config with
    | Ok [] -> ()
    | Ok _ -> fail "rejected evidence left a measurement row"
    | Error detail -> fail detail);
-  ignore
-    (must_fail "tool rejects evidence that is not a reference"
-       (dispatch ctx ~name:"masc_goal_measure"
-          [ "goal_id", `String goal.id
-          ; "criterion_revision", `String goal.criterion_revision
-          ; "observed_value", `String "100%"
-          ; "evidence", `String "done"
-          ]));
+  let refused =
+    must_fail "tool rejects evidence that is not a reference"
+      (dispatch ctx ~name:"masc_goal_measure"
+         [ "goal_id", `String goal.id
+         ; "criterion_revision", `String goal.criterion_revision
+         ; "observed_value", `String "100%"
+         ; "evidence", `String "done"
+         ])
+  in
+  check string "the tool refuses it as a validation error"
+    (Tool_args.error_code_to_string Tool_args.Validation_error)
+    (json_state refused [ "error_code" ]);
   List.iter
     (fun evidence ->
        match record_evidence config goal evidence with
@@ -602,6 +607,47 @@ let test_measurement_evidence_is_an_evidence_reference () =
                 (Goal_measurement.error_to_string error)))
     [ "artifact:reports/cases.json"; "note:seven cases passed in CI"; "board:p-123";
       "fusion:run-9" ]
+;;
+
+(* The store is read with the same evidence check: a row whose evidence is
+   not a reference makes the snapshot unreadable instead of being shown as a
+   reported value. The first write is the control that the hand-written row
+   shape is one [load] accepts. *)
+let test_stored_non_reference_evidence_is_unreadable () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal = measurable_goal config ctx "Stored evidence is checked" in
+  let store evidence =
+    Fs_compat.save_file (Goal_measurement.path config)
+      (Yojson.Safe.to_string
+         (`Assoc
+           [ "version", `Int 1
+           ; "measurements",
+             `List
+               [ `Assoc
+                   [ "id", `String "measurement-1"
+                   ; "goal_id", `String goal.id
+                   ; "criterion_revision", `String goal.criterion_revision
+                   ; "observed_value", `String "7"
+                   ; "evidence", `String evidence
+                   ; "actor", `String "test"
+                   ; "recorded_at", `String "2026-09-25T00:00:00Z"
+                   ]
+               ]
+           ]))
+  in
+  store "artifact:reports/cases.json";
+  (match Goal_measurement.load config with
+   | Ok [ row ] -> check string "control row loads" "artifact:reports/cases.json" row.evidence
+   | Ok rows -> fail (Printf.sprintf "control: expected 1 row, found %d" (List.length rows))
+   | Error detail -> fail ("control row was refused: " ^ detail));
+  store "done";
+  (match Goal_measurement.load config with
+   | Error _ -> ()
+   | Ok _ -> fail "a stored row with evidence \"done\" was loaded");
+  check string "the Goal shows the store as unavailable" "unavailable"
+    (json_state (Goal_measurement.projection (Goal_measurement.load config) goal) [ "state" ])
 ;;
 
 (* Deleting a Goal takes its observation row with it, so the snapshot is
@@ -1536,6 +1582,8 @@ let () =
             test_measurement_evidence_is_an_evidence_reference
         ; test_case "measurement rows follow Goal existence, not phase" `Quick
             test_measurement_rows_follow_goal_existence_not_phase
+        ; test_case "stored non-reference evidence is unreadable" `Quick
+            test_stored_non_reference_evidence_is_unreadable
         ] )
     ; ( "stage 2 gate"
       , [ test_case "reopen works before any completion request" `Quick

@@ -1093,8 +1093,8 @@ let add_delete_action_routes router =
                          goal_id detail;
                        Some
                          (Printf.sprintf
-                            "goal deleted but failed to remove its measurement: %s"
-                            detail)
+                            "goal deleted but failed to remove the measurement for %s: %s"
+                            goal_id detail)
                  in
                  (match List.filter_map Fun.id [ link_warning; measurement_warning ] with
                   | [] -> respond_ok ~request:req reqd

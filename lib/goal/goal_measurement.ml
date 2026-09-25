@@ -32,20 +32,27 @@ let text json name =
   | Some (`String value) when String.trim value <> "" -> Ok value
   | _ -> Error ("goal_measurement: missing or blank " ^ name)
 
-(* The same Evidence Reference grammar Task completion accepts. The
-   classifier stays in Workspace_verification_store; this is a call into it,
-   not a second copy of the prefixes. A row is only built after its evidence
-   classifies, both when a request records it and when the store is read. *)
+(* Evidence the verification store can read: its reference classifier, plus
+   the artifact path check its snapshotter applies (an [artifact:] path that
+   is empty, absolute, or has [.]/[..]/empty segments snapshots as an invalid
+   reference). Both are calls into Workspace_verification_store, not copies.
+   A row is only built after this passes, when a request records it and when
+   the store is read. *)
 let evidence_reference value =
   let reference = String.trim value in
+  let refused () =
+    Error
+      ("goal_measurement: evidence must be one of "
+       ^ String.concat ", " Workspace_verification_store.resolvable_reference_forms)
+  in
   match Workspace_verification_store.classify_evidence_reference reference with
-  | Workspace_verification_store.Artifact_reference _
+  | Workspace_verification_store.Artifact_reference path ->
+      if Workspace_verification_store.valid_producer_relative_path path
+      then Ok reference
+      else refused ()
   | Workspace_verification_store.Note_reference _
   | Workspace_verification_store.Collaboration_reference _ -> Ok reference
-  | Workspace_verification_store.Unresolvable_reference ->
-      Error
-        ("goal_measurement: evidence must be one of "
-         ^ String.concat ", " Workspace_verification_store.resolvable_reference_forms)
+  | Workspace_verification_store.Unresolvable_reference -> refused ()
 
 let decode json =
   let* json =

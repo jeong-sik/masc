@@ -1143,7 +1143,12 @@ let split_keeper_reply_chunks (text : string) : string list =
     done;
     if !start < len then
       chunks := String.sub text !start (len - !start) :: !chunks;
-    List.rev !chunks |> List.filter (fun chunk -> String.trim chunk <> "")
+    (* Every chunk is kept, whitespace-only ones included: [push] never makes
+       an empty one, and the joined chunks must equal [text]. Dropping the
+       "\n" chunk between "첫 문단입니다." and "\n둘째" turned a paragraph
+       break into a line break, and Discord and Slack post the joined deltas
+       as the reply. *)
+    List.rev !chunks
 
 let notify_closed on_closed =
   match on_closed with

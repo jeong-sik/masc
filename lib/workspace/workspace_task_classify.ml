@@ -213,22 +213,21 @@ let next_actions_hint status =
 ;;
 
 let task_started_at_unix status =
-  let default_time = Time_compat.now () in
-  let timestamp_or_default value =
-    match Masc_domain.parse_iso8601_opt value with
-    | Some timestamp -> timestamp
-    | None -> default_time
-  in
   match status with
-  | Masc_domain.Claimed { claimed_at; _ } ->
-    timestamp_or_default claimed_at
-  | Masc_domain.InProgress { started_at; _ } ->
-    timestamp_or_default started_at
+  | Masc_domain.Claimed { claimed_at; _ } -> Masc_domain.parse_iso8601_opt claimed_at
+  | Masc_domain.InProgress { started_at; _ } -> Masc_domain.parse_iso8601_opt started_at
   | Masc_domain.AwaitingVerification { started_at; _ } ->
-    timestamp_or_default started_at
+    Masc_domain.parse_iso8601_opt started_at
   | Masc_domain.Todo
   | Masc_domain.Done _
-  | Masc_domain.Cancelled _ -> default_time
+  | Masc_domain.Cancelled _ -> None
+;;
+
+let task_duration_ms_since ~now status =
+  Option.bind (task_started_at_unix status) (fun started_at ->
+    if now >= started_at
+    then Some (int_of_float ((now -. started_at) *. 1000.0))
+    else None)
 ;;
 
 let task_transition_details

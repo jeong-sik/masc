@@ -20,11 +20,11 @@ let strip_sgr row =
    side. *)
 let border_bytes = String.length Masc_tui_theme.Box.v + 1
 
-let content_rows ~cols ~focused ~labels ~selected =
+let content_rows ~title ~cols ~focused ~labels ~selected =
   let buf = Buffer.create 1024 in
   (* This fold is about the label column, not the count in the title, so the
      index holds exactly what it was given. *)
-  Masc_tui_render_prim.write_list_sidebar buf ~rows:12 ~cols ~title:"Board"
+  Masc_tui_render_prim.write_list_sidebar buf ~rows:12 ~cols ~title
     ~focused ~holding:None ~labels ~selected;
   match String.split_on_char '\n' (strip_sgr (Buffer.contents buf)) with
   | _top :: _title :: _divider :: rest ->
@@ -51,7 +51,7 @@ let approved_by_pangyo =
 
 let test_names_that_share_an_opening_stay_apart () =
   match
-    content_rows ~cols:40 ~focused:true
+    content_rows ~title:"Board" ~cols:40 ~focused:true
       ~labels:[ approved_by_anyang; approved_by_pangyo ]
       ~selected:0
   with
@@ -68,7 +68,7 @@ let test_names_that_share_an_opening_stay_apart () =
 
 let first_row ~cols ~focused ~selected =
   match
-    content_rows ~cols ~focused
+    content_rows ~title:"Board" ~cols ~focused
       ~labels:[ approved_by_anyang; approved_by_pangyo ]
       ~selected
   with
@@ -89,7 +89,7 @@ let test_the_fold_holds_still_under_the_cursor () =
 let test_a_row_never_runs_past_the_frame () =
   let cols = 36 in
   let rows =
-    content_rows ~cols ~focused:false
+    content_rows ~title:"Board" ~cols ~focused:false
       ~labels:[ approved_by_anyang; approved_by_pangyo ]
       ~selected:0
   in
@@ -121,17 +121,45 @@ let test_titles_that_share_both_ends_are_parted_by_the_id () =
     "the titles alone fold to the same row" bare_first bare_second;
   let first =
     fold
-      (Masc_tui_render_schedule.task_list_sidebar_label
-         ~title:(triage_title 30858) ~task_id:"task-1174")
+      (Masc_tui_render_schedule.sidebar_row_label
+         ~about:(triage_title 30858) ~apart:(Some "task-1174"))
   and second =
     fold
-      (Masc_tui_render_schedule.task_list_sidebar_label
-         ~title:(triage_title 30904) ~task_id:"task-1175")
+      (Masc_tui_render_schedule.sidebar_row_label
+         ~about:(triage_title 30904) ~apart:(Some "task-1175"))
   in
   Alcotest.(check bool) "with the id they part" true (first <> second);
   Alcotest.(check bool) "and each row ends in its own id" true
     (String.ends_with ~suffix:"task-1174" first
     && String.ends_with ~suffix:"task-1175" second)
+
+(* The Approvals detail uses this same framed index at its real pane width.
+   The labels below come from the same helper as approval_sidebar_label; the
+   row-wiring test checks that all three approval kinds pass their actor to it.
+   A head-only fit made these two valid Keeper ids draw the same line. *)
+let test_approval_requesters_stay_distinct_in_rendered_rows () =
+  let cols = Masc_tui_roster_pane.pane_cols in
+  Alcotest.(check int) "Approvals sidebar width" 34 cols;
+  let label keeper =
+    Masc_tui_render_schedule.sidebar_row_label ~about:"tool_execute"
+      ~apart:(Some keeper)
+  in
+  match
+    content_rows ~title:"Approvals" ~cols ~focused:false
+      ~labels:
+        [ label "keeper-with-a-very-long-alpha"
+        ; label "keeper-with-a-very-long-beta"
+        ]
+      ~selected:0
+  with
+  | [ first; second ] ->
+    Alcotest.(check bool) "the rendered rows differ" true
+      (trimmed first <> trimmed second);
+    Alcotest.(check bool) "both requesters keep their distinguishing tail" true
+      (String.ends_with ~suffix:"alpha" (trimmed first)
+      && String.ends_with ~suffix:"beta" (trimmed second))
+  | rows ->
+    Alcotest.failf "expected two Approvals rows, drew %d" (List.length rows)
 
 let () =
   Alcotest.run "tui_sidebar_index_fold"
@@ -145,5 +173,7 @@ let () =
         ; Alcotest.test_case
             "titles that share both ends are parted by the id" `Quick
             test_titles_that_share_both_ends_are_parted_by_the_id
+        ; Alcotest.test_case "Approvals requesters differ in rendered rows" `Quick
+            test_approval_requesters_stay_distinct_in_rendered_rows
         ] )
     ]

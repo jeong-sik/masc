@@ -109,6 +109,10 @@ try {
   browser = await chromium.launch({ headless: true })
   page = await browser.newPage({ viewport: { width: 1440, height: 1100 }, serviceWorkers: 'block',
     extraHTTPHeaders: { Authorization: `Bearer ${token}` } })
+  // The IDE language-server socket is token-gated and a browser WebSocket
+  // sends no Authorization header; the dashboard passes its stored bearer as
+  // the socket's token query parameter.
+  await page.addInitScript(value => sessionStorage.setItem('masc_bearer_token', value), token)
   page.on('pageerror', error => errors.push(error.message))
   let socketNumber = 0
   let lspObserved = false, notifyLspObservation

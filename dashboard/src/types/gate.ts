@@ -273,6 +273,9 @@ export interface KeeperExactLanePreference {
   slot_id: string
   updated_by: string
   updated_at: string
+  /** False when the published lane no longer offers slot_id: the lane then
+   *  walks its declared order and this preference has no effect. */
+  offered: boolean
 }
 
 /**

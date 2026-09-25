@@ -51,6 +51,86 @@ let operation_requires_fence (operation : Keeper_shutdown_types.t) =
   Keeper_shutdown_types.requires_admission_fence operation
 ;;
 
+(* Where a replayable [Blocked] operation stands among its Keeper's durable
+   operations. Only the newest operation of a Keeper may replay: an older one
+   describes a Keeper that a later operation already acted on. Two operations
+   for one Keeper never both hold the boot fence, because a replay owner has no
+   sibling that holds it. *)
+type replay_standing =
+  | Replay_owner
+  | Replay_overtaken of Operation_id.t
+  | Replay_deferred of string
+
+let replay_standing (operation : Keeper_shutdown_types.t) operations =
+  let siblings =
+    List.filter
+      (fun (sibling : Keeper_shutdown_types.t) ->
+         String.equal sibling.keeper_name operation.keeper_name
+         && not (Operation_id.equal sibling.operation_id operation.operation_id))
+      operations
+  in
+  match Masc_domain.parse_iso8601_opt operation.created_at with
+  | None ->
+    Replay_deferred
+      (Printf.sprintf "created_at %S is not an ISO 8601 timestamp" operation.created_at)
+  | Some created ->
+    let created_after (sibling : Keeper_shutdown_types.t) =
+      match Masc_domain.parse_iso8601_opt sibling.created_at with
+      | Some sibling_created -> Float.compare sibling_created created > 0
+      | None -> false
+    in
+    let created_together (sibling : Keeper_shutdown_types.t) =
+      match Masc_domain.parse_iso8601_opt sibling.created_at with
+      | Some sibling_created -> Float.equal sibling_created created
+      | None -> false
+    in
+    (match List.find_opt created_after siblings with
+     | Some newer -> Replay_overtaken newer.operation_id
+     | None ->
+       (match List.find_opt created_together siblings with
+        | Some twin ->
+          Replay_deferred
+            (Printf.sprintf
+               "operation %s was created at the same instant"
+               (Operation_id.to_string twin.operation_id))
+        | None ->
+          (match List.find_opt operation_requires_fence siblings with
+           | Some holder ->
+             Replay_deferred
+               (Printf.sprintf
+                  "operation %s holds the admission fence"
+                  (Operation_id.to_string holder.operation_id))
+           | None -> Replay_owner)))
+;;
+
+(* Boot fences an operation that requires the admission fence, and a
+   replayable [Blocked] operation that will replay: the Keeper must not
+   autoboot ahead of the operator intent the replay completes. *)
+let holds_boot_fence ~operations (operation : Keeper_shutdown_types.t) =
+  operation_requires_fence operation
+  ||
+  match Keeper_shutdown_types.boot_replay operation with
+  | None -> false
+  | Some (Replay_unsettled_tasks | Replay_settled_tasks) ->
+    (match replay_standing operation operations with
+     | Replay_owner -> true
+     | Replay_overtaken _ | Replay_deferred _ -> false)
+;;
+
+(* An operator asked for this stop or purge. When the boot replay could not
+   finish it, the Keeper stays fenced for this process instead of autobooting
+   against that instruction; the WARN names the stage, and the next boot
+   replays again. A supervisor cleanup was nobody's instruction, so its
+   Keeper boots. *)
+let keeps_fence_after_unfinished_replay (operation : Keeper_shutdown_types.t) =
+  Option.is_some (Keeper_shutdown_types.boot_replay operation)
+  &&
+  match operation.cleanup_intent.reason with
+  | Operator_stop_retain_meta | Operator_stop_remove_meta | Dashboard_keeper_purge _ ->
+    true
+  | Supervisor_cleanup -> false
+;;
+
 type ownerless_restore_policy =
   | Require_removal_evidence of Keeper_shutdown_types.t
   | Restore_corrupt_fence
@@ -115,6 +195,14 @@ let restore_admission ~config ~ownerless_policy ~keeper_name ~operation_id =
 ;;
 
 let restore_inventory_admission ~config inventory =
+  let operations =
+    List.filter_map
+      (function
+        | Keeper_shutdown_store.Operation operation -> Some operation
+        | Keeper_shutdown_store.Corrupt_record _ -> None)
+      inventory
+  in
+  let holds_boot_fence = holds_boot_fence ~operations in
   let corrupt_fences =
     Keeper_shutdown_store.canonical_corrupt_operation_ids inventory
     |> List.fold_left
@@ -201,7 +289,7 @@ let restore_inventory_admission ~config inventory =
           if operation_requires_fence operation
           then loop (operation :: operations) blocked rest
           else loop operations blocked rest
-        else if operation_requires_fence operation
+        else if holds_boot_fence operation
         then
           (match
              restore_admission
@@ -210,6 +298,17 @@ let restore_inventory_admission ~config inventory =
                ~keeper_name:operation.keeper_name
                ~operation_id:operation.operation_id
            with
+           | Error detail when not (operation_requires_fence operation) ->
+             (* A replay needs the fence it could not take. Leave the record
+                [Blocked] and unrecovered this boot, exactly as it was, so
+                the rest of boot restore and this Keeper's admission go on. *)
+             Log.Keeper.warn
+               "boot recovery could not fence a blocked shutdown for replay; it stays blocked until the next boot: keeper=%s operation=%s intent=%s error=%s"
+               operation.keeper_name
+               (Operation_id.to_string operation.operation_id)
+               (cleanup_reason_label operation.cleanup_intent.reason)
+               detail;
+             loop operations blocked rest
            | Error _ as error -> error
            | Ok () ->
              loop
@@ -574,6 +673,108 @@ let blocked_interrupted_join_state (operation : Keeper_shutdown_types.t) =
   }
 ;;
 
+(* Logged once the outcome is durable, so a failed write never claims it. *)
+let log_boot_replay_outcome (operation : Keeper_shutdown_types.t) =
+  match operation.phase with
+  | Blocked { stage; detail } ->
+    Log.Keeper.warn
+      "boot recovery left a shutdown blocked at a replayable stage; the next boot replays it (an operator stop or purge keeps the Keeper fenced until then): keeper=%s operation=%s intent=%s stage=%s detail=%s"
+      operation.keeper_name
+      (Operation_id.to_string operation.operation_id)
+      (cleanup_reason_label operation.cleanup_intent.reason)
+      (failure_stage_to_string stage)
+      detail
+  | Superseded (Boot_replay_abandoned { blocked; abandonment }) ->
+    Log.Keeper.warn
+      "boot recovery closed a blocked shutdown instead of replaying it; the operator intent was not applied: keeper=%s operation=%s intent=%s stage=%s reason=%s detail=%s"
+      operation.keeper_name
+      (Operation_id.to_string operation.operation_id)
+      (cleanup_reason_label operation.cleanup_intent.reason)
+      (failure_stage_to_string blocked.stage)
+      (boot_replay_abandonment_to_string abandonment)
+      blocked.detail
+  | Superseded
+      ( Operator_blocked_purge_released _
+      | Operator_metadata_update _
+      | Operator_reconciliation_accepted _ )
+  | Prepared
+  | Joining_lanes
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Finalized _
+  | Owner_absent _
+  | Operator_absence_acknowledged _ -> ()
+;;
+
+(* The next durable state of a replayable [Blocked] operation, or [None] to
+   leave it untouched. [Finalizing_tasks] hands it to finalization in
+   [recover_operation]; a fresh [Blocked] or a [Superseded] closes it for this
+   boot. Nothing here writes Keeper state. *)
+let replayed_blocked_state
+    ~config
+    (operation : Keeper_shutdown_types.t)
+    (blocked : failure)
+    replay
+  =
+  let still_blocked detail =
+    { operation with
+      revision = operation.revision + 1
+    ; phase = Blocked { blocked with detail }
+    ; updated_at = Masc_domain.now_iso ()
+    }
+  in
+  let abandoned abandonment =
+    { operation with
+      revision = operation.revision + 1
+    ; phase = Superseded (Boot_replay_abandoned { blocked; abandonment })
+    ; updated_at = Masc_domain.now_iso ()
+    }
+  in
+  match
+    Keeper_shutdown_store.list_for_keeper ~config ~keeper_name:operation.keeper_name
+  with
+  | Error error ->
+    Some (still_blocked (Keeper_shutdown_store.error_to_string error))
+  | Ok operations ->
+    (match replay_standing operation operations with
+     | Replay_overtaken newer -> Some (abandoned (Newer_operation newer))
+     | Replay_deferred reason ->
+       Log.Keeper.warn
+         "boot recovery left a blocked shutdown unreplayed: keeper=%s operation=%s intent=%s reason=%s"
+         operation.keeper_name
+         (Operation_id.to_string operation.operation_id)
+         (cleanup_reason_label operation.cleanup_intent.reason)
+         reason;
+       None
+     | Replay_owner ->
+       (match Keeper_shutdown_finalize.plan_blocked_replay ~config operation replay with
+        | Keeper_shutdown_finalize.Replay_unavailable detail -> Some (still_blocked detail)
+        | Keeper_shutdown_finalize.Replay_abandon abandonment ->
+          Some (abandoned abandonment)
+        | Keeper_shutdown_finalize.Replay_resume settled_task_ids ->
+          Log.Keeper.info
+            "boot recovery replays a blocked shutdown: keeper=%s operation=%s intent=%s stage=%s settled_tasks=%d"
+            operation.keeper_name
+            (Operation_id.to_string operation.operation_id)
+            (cleanup_reason_label operation.cleanup_intent.reason)
+            (failure_stage_to_string blocked.stage)
+            (List.length settled_task_ids);
+          let join_evidence =
+            match operation.join_evidence with
+            | Some _ as recorded -> recorded
+            | None -> Some process_boundary_evidence
+          in
+          Some
+            { operation with
+              revision = operation.revision + 1
+            ; join_evidence
+            ; phase = Finalizing_tasks settled_task_ids
+            ; updated_at = Masc_domain.now_iso ()
+            }))
+;;
+
 let recover_operation
     ~config
     ?successor_operation_id
@@ -595,11 +796,22 @@ let recover_operation
     | Joining_lanes -> persist_recovered (blocked_interrupted_join_state operation)
     | Reconciliation_required turn ->
       persist_recovered (settled_reconciliation_state operation turn)
+    | Blocked blocked ->
+      (match failure_stage_boot_replay blocked.stage with
+       | None -> Ok operation
+       | Some replay ->
+         (match replayed_blocked_state ~config operation blocked replay with
+          | None -> Ok operation
+          | Some replayed ->
+            (match persist_recovered replayed with
+             | Error _ as error -> error
+             | Ok persisted ->
+               log_boot_replay_outcome persisted;
+               Ok persisted)))
     | Joined_idle
     | Finalizing_tasks _
     | Cleanup_ready _
     | Finalized _
-    | Blocked _
     | Owner_absent _
     | Operator_absence_acknowledged _
     | Superseded _ -> Ok operation
@@ -612,12 +824,23 @@ let recover_operation
      | Finalizing_tasks _
      | Cleanup_ready _
      | Finalized _ ->
-       Keeper_shutdown_finalize.run
-         ~config
-         ~entry:None
-         ?successor_operation_id
-         recovered
-       |> Result.map_error Keeper_shutdown_finalize.error_to_string
+       (match
+          Keeper_shutdown_finalize.run
+            ~config
+            ~entry:None
+            ?successor_operation_id
+            recovered
+        with
+        | Ok finalized -> Ok finalized
+        | Error (Keeper_shutdown_finalize.Finalization_blocked blocked)
+          when not (Keeper_shutdown_types.requires_admission_fence blocked) ->
+          (* A replayable stage: the next boot replays it. Returning it as
+             recovered lets the caller decide the fence: a supervisor cleanup
+             releases it so the Keeper boots now; an operator stop or purge
+             keeps it ([keeps_fence_after_unfinished_replay]). *)
+          log_boot_replay_outcome blocked;
+          Ok blocked
+        | Error error -> Error (Keeper_shutdown_finalize.error_to_string error))
      | Prepared
      | Joining_lanes
      | Reconciliation_required _
@@ -650,6 +873,25 @@ let reclaim_settled_record ~config (recovered : Keeper_shutdown_types.t) =
       recovered.keeper_name
       (Operation_id.to_string recovered.operation_id)
       (Keeper_shutdown_store.error_to_string error)
+;;
+
+let abandoned_boot_replay (operation : Keeper_shutdown_types.t) =
+  match operation.phase with
+  | Superseded (Boot_replay_abandoned _) -> true
+  | Superseded
+      ( Operator_blocked_purge_released _
+      | Operator_metadata_update _
+      | Operator_reconciliation_accepted _ )
+  | Prepared
+  | Joining_lanes
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Finalized _
+  | Owner_absent _
+  | Operator_absence_acknowledged _
+  | Blocked _ -> false
 ;;
 
 let recover_claimed
@@ -690,7 +932,9 @@ let recover_claimed
        below applies to it. *)
     Ok observed
   | Ok recovered ->
-    if Keeper_shutdown_types.requires_admission_fence recovered
+    if
+      Keeper_shutdown_types.requires_admission_fence recovered
+      || keeps_fence_after_unfinished_replay recovered
     then Ok recovered
     else
       let keeper_name, successor_operation_id =
@@ -710,12 +954,19 @@ let recover_claimed
          reclaim_settled_record ~config recovered;
          Ok recovered
        | Ok (Keeper_owner.Shutdown_transition_reserved_by_other existing) ->
-         Error
-           (Printf.sprintf
-              "shutdown admission restore conflict: keeper=%s recovered=%s existing=%s"
-              keeper_name
-              (Operation_id.to_string operation.operation_id)
-              (Operation_id.to_string existing))
+         if abandoned_boot_replay recovered
+         then (
+           (* The admission reservation belongs to a later operation; this
+              closed record never held it and has nothing to release. *)
+           reclaim_settled_record ~config recovered;
+           Ok recovered)
+         else
+           Error
+             (Printf.sprintf
+                "shutdown admission restore conflict: keeper=%s recovered=%s existing=%s"
+                keeper_name
+                (Operation_id.to_string operation.operation_id)
+                (Operation_id.to_string existing))
        | Error error ->
          if
            Keeper_shutdown_finalize.admission_already_released_by_removal

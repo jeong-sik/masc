@@ -102,19 +102,19 @@ let test_api_auth_rotates_invalid_request_judges () =
    into [Admission], so a JSON parse failure rotates as well — the walk
    predicate now moves the lane on it, and the route names that rotation. *)
 let test_api_attempt_rejected_routes_as_rotation () =
-  check_route
-    "pre-wire policy refusal rotates"
-    (KFR.Rotate_now { rotate = KFR.Attempt_rejected })
-    (Agent_core.Error.Api
-       (Llm_provider.Retry.InvalidRequest
-          { message = "reasoning effort 'xhigh' is outside the ladder for this model"
-          ; reason = Llm_provider.Retry.Attempt_rejected
-          }));
   (* [Attempt_rejected] is [Binding Admission] in the [Candidate_fault]
      judgment (a pre-dispatch refusal another binding may accept), so the
      route through [Candidate_fault] names it [Admission]. The walk predicate
      [attempt_rejected_should_try_next] rotates on [Admission] — the route
      and the walk agree. *)
+  check_route
+    "pre-wire policy refusal rotates as admission"
+    (KFR.Rotate_now { rotate = KFR.Admission })
+    (Agent_core.Error.Api
+       (Llm_provider.Retry.InvalidRequest
+          { message = "reasoning effort 'xhigh' is outside the ladder for this model"
+          ; reason = Llm_provider.Retry.Attempt_rejected
+          }));
   check_route
     "attempt rejected is an admission refusal"
     (KFR.Rotate_now { rotate = KFR.Admission })
@@ -726,7 +726,13 @@ let test_candidate_fault_route_agreement () =
       { terminal; provenance = KFR.Agent_core_api_error; detail = "" }
   in
   let check label api expected =
-    Alcotest.check route label expected (route_of_agent_core_error (Agent_core.Error.Api api))
+    let actual = route_of_agent_core_error (Agent_core.Error.Api api) in
+    (* Compare only kind and class, not detail: [detail] is display-only and
+       carries the raw error string, which the test does not pin. *)
+    Alcotest.(check string)
+      label
+      (KFR.route_kind_label expected ^ ":" ^ KFR.route_class_label expected)
+      (KFR.route_kind_label actual ^ ":" ^ KFR.route_class_label actual)
   in
   (* Credential: both walk predicates rotate. *)
   check

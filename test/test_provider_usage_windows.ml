@@ -218,6 +218,13 @@ let kimi_coding_usages_response =
   {|{"usage":{"limit":"100","used":"15","remaining":"85","resetTime":"2026-09-30T10:10:16.485718Z"},"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"20","remaining":"80","resetTime":"2026-09-24T15:10:16.485718Z"}}],"usages":{"limit_5h":{"used_ratio":0,"reset_time":"2026-09-24T15:10:15Z"},"limit_7d":{"used_ratio":0,"reset_time":"2026-09-30T10:10:15Z"}},"booster_wallet":{"balance":"0"}}|}
 ;;
 
+(* The body in MoonshotAI/kimi-code#3951, the same shape the live endpoint
+   answered on 2026-09-25: a count whose value is zero is left out, so the
+   5-hour [detail] has no [used] and the weekly [usage] no [remaining]. *)
+let kimi_coding_usages_zero_counts_left_out =
+  {|{"usage":{"limit":"100","used":"100","resetTime":"2026-09-24T02:09:07.465054Z"},"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","remaining":"100","resetTime":"2026-09-21T01:09:07.465054Z"}}],"usages":{"limit_5h":{"used_ratio":0,"reset_time":"2026-09-21T01:09:06Z"},"limit_7d":{"used_ratio":0,"reset_time":"2026-09-24T02:09:06Z"}}}|}
+;;
+
 let ollama_usage_response =
   {|{"activity":{"requests":1},"limits":{"session":{"usage":0,"models":[]},"weekly":{"usage":1,"models":[{"name":"m","request_count":48876}]}}}|}
 ;;
@@ -352,6 +359,24 @@ let test_kimi_coding_usages () =
     "kimi-coding-usages.usage.used must be within 0..10"
     (refused Usage.decode_kimi_coding_usages
        {|{"limits":[],"usage":{"limit":"10","used":"11"}}|});
+  check (list string) "a count left out is read from the other one"
+    [ "limit=- five_hour fraction 0 resets=1789952947"
+    ; "limit=- label \"usage (provider resetTime)\" fraction 1 resets=1790215747"
+    ]
+    (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
+       kimi_coding_usages_zero_counts_left_out);
+  check string "used and remaining that do not add up to the limit are refused"
+    "kimi-coding-usages.limits[0].detail.remaining must be 80 (limit - used)"
+    (refused Usage.decode_kimi_coding_usages
+       {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"20","remaining":"70"}}]}|});
+  check string "neither used nor remaining is refused"
+    "kimi-coding-usages.limits[0].detail.used or remaining is missing"
+    (refused Usage.decode_kimi_coding_usages
+       {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100"}}]}|});
+  check string "remaining above limit is refused"
+    "kimi-coding-usages.limits[0].detail.remaining must be within 0..100"
+    (refused Usage.decode_kimi_coding_usages
+       {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","remaining":"101"}}]}|});
   check string "a duration of 0 is refused"
     "kimi-coding-usages.limits[0].window.duration must be greater than 0"
     (refused Usage.decode_kimi_coding_usages

@@ -78,3 +78,29 @@ val automation_schedule_lines :
     recurrence exceeds the space left after a summary reserve put the full
     recurrence on labelled continuation lines. Inputs must already be safe
     single-line terminal text. *)
+
+(** {1 Sharing rows between sections} *)
+
+type section = {
+  floor : int;
+      (** The rows without which the section says nothing: a heading, the
+          first row of what it lists. Clamped to [0 .. want]. *)
+  want : int;  (** Every row the section could draw. *)
+}
+
+type allocation = {
+  rows : int list;
+      (** One count per section, in the order the sections were given. *)
+  filler : int;  (** The budget no section wanted. *)
+}
+
+val allocate : budget:int -> section list -> allocation
+(** Share [budget] rows between sections listed in priority order, in two
+    passes. The first gives each section its floor, in order, while rows
+    last; the second gives what is left, in the same order, up to each
+    section's want. A section before another cannot take the rows that
+    other one needs to mean anything until every floor is paid.
+
+    The counts sum to at most [budget] and none is negative. Adding a row to
+    [budget] never takes a row from any section, and neither does lowering
+    one section's floor or want take a row from another. *)

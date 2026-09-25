@@ -53,6 +53,9 @@ let no_session =
   Browser_lane.Rejected_before_effect "no stagehand session is open: open one with BrowserSession lane=stagehand"
 ;;
 
+(* See [run_session]: an ended session may already be let go; a later release then does nothing. *)
+let release_session release = ignore (Eio.Promise.try_resolve release ())
+
 let note_end ended event =
   let reason =
     match event with
@@ -79,7 +82,7 @@ let run_session t ~headless ~opened ~resolve_opened =
   (* A session that stopped working is let go at once: its browser stops,
      status keeps the reason, and the next open starts a new one instead of
      reusing a session every page verb would find gone. *)
-  let release_on_end = ref ignore in
+  let release_on_end = ref (fun () -> ()) in
   let log event =
     note_end ended event;
     (match !ended with Some _ -> !release_on_end () | None -> ());
@@ -107,7 +110,7 @@ let run_session t ~headless ~opened ~resolve_opened =
         Executor.Tabs.forget_pages t.tabs;
         t.last_end <- None;
         t.state <- Open { session; release; stopped; ended };
-        release_on_end := (fun () -> ignore (Eio.Promise.try_resolve release ()));
+        release_on_end := (fun () -> release_session release);
         (* An end that came between attach and now. *)
         (match !ended with Some _ -> !release_on_end () | None -> ());
         Eio.Promise.resolve resolve_opened (Ok ());
@@ -165,7 +168,7 @@ let close_session t =
       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
       | exception exn -> "did not close: " ^ Printexc.to_string exn
     in
-    ignore (Eio.Promise.try_resolve opened.release ());
+    release_session opened.release;
     Eio.Promise.await opened.stopped;
     answered (`Assoc [ "closed", `Bool true; "runtime", `String runtime ])
 ;;
@@ -230,7 +233,7 @@ let retire_sentence_session t expected =
   match expected, t.state with
   | Some expected, Open current when expected == current ->
     t.state <- Closing;
-    ignore (Eio.Promise.try_resolve current.release ());
+    release_session current.release;
     Eio.Promise.await current.stopped
   | (Some _ | None), (Closed | Opening | Closing | Open _) -> ()
 ;;

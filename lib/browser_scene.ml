@@ -264,9 +264,9 @@ let read_request = function
         | None -> Ok None
         | Some json -> Result.map Option.some (navigation_source_of_json json) in
       let* max_chars = match List.assoc_opt "maxChars" fields with
-        | None -> Ok 50_000
-        | Some (`Int value) when value>=1 && value<=100_000 -> Ok value
-        | _ -> Error "maxChars must be between 1 and 100000" in
+        | None -> Browser_page_script.text_cap None
+        | Some (`Int value) -> Browser_page_script.text_cap (Some value)
+        | Some _ -> Error Browser_page_script.text_cap_refused in
       read ~view ?scope ?expected_url ?navigation_source request ~max_chars
       |> Result.map_error Browser_surface.failure_message
   | _ -> Error "scene request must be an object"

@@ -13,14 +13,9 @@ let read_body request reqd f =
 (* Sessions and navigation belong to the lanes the server owns. The request
    names one; the live browser belongs to the operator. *)
 let server_lane fields =
-  let refused = "lane must be " ^ Browser_lane.server_lanes_expected in
   match List.assoc_opt "lane" fields with
-  | Some (`String raw) ->
-    (match Browser_lane.Lane_name.of_wire raw with
-     | Some Browser_lane.Lane_name.Live -> Error ("the live browser belongs to the operator; " ^ refused)
-     | Some (Browser_lane.Lane_name.Automation | Browser_lane.Lane_name.Stagehand) | None ->
-       Option.to_result ~none:refused (Browser_lane.server_lane_of_wire raw))
-  | Some _ | None -> Error refused
+  | Some (`String raw) -> Browser_lane.parse_server_lane raw
+  | Some _ | None -> Error Browser_lane.server_lane_refused
 let session = function
   | `Assoc fields ->
     let headless = match List.assoc_opt "headless" fields with

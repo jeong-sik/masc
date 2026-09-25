@@ -13,11 +13,11 @@ include Keeper_unified_metrics_json_support
    runtime that answered the turn. A turn with no runtime observation names
    none; borrowing the Keeper's assigned lane there would put a lane and a
    runtime under one label (#38452). *)
-let unobserved_runtime_profile = "unobserved"
-
-let latency_runtime_profile = function
-  | Some runtime_id -> runtime_id
-  | None -> unobserved_runtime_profile
+let latency_runtime_profile runtime_id =
+  Runtime_answerer.to_label
+    (match runtime_id with
+     | Some runtime_id -> Runtime_answerer.Executed runtime_id
+     | None -> Runtime_answerer.Not_observed)
 ;;
 
 let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)

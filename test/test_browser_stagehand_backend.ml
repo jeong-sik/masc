@@ -32,6 +32,7 @@ type harness =
   ; sessions : fake_session list ref
   ; behaviour : behaviour
   ; settle : unit -> unit
+  ; past_the_sentence_deadline : unit -> unit
   }
 
 let page = `Assoc [ "page_id", `String "P"; "url", `String "http://127.0.0.1:1/" ]
@@ -81,7 +82,14 @@ let with_backend ?(configure = ignore) f =
       failf "the backend sent %s" (Wire.method_name request)
   in
   let backend = Backend.create ~sw ~clock ~open_session ~call ~pid:(fun _ -> 42) ~log:ignore in
-  f { backend; sessions; behaviour; settle = (fun () -> Eio.Time.sleep clock settle_s) }
+  f
+    { backend
+    ; sessions
+    ; behaviour
+    ; settle = (fun () -> Eio.Time.sleep clock settle_s)
+    ; past_the_sentence_deadline =
+        (fun () -> Eio.Time.sleep clock ((float_of_int (Wire.timeout_ms Wire.sentence_timeout) /. 1000.) +. 1.))
+    }
 ;;
 
 let data = function
@@ -173,6 +181,9 @@ let test_open_outlives_its_caller () =
   check bool "its browser is running" false (the_session h).stopped
 ;;
 
+(* The session is shared: a sentence whose caller left keeps it open while
+   the extension may still answer, and retires it only once the sentence's
+   own deadline has passed without an answer. *)
 let test_sentence_caller_retires_its_session () =
   with_backend
   @@ fun h ->
@@ -182,10 +193,30 @@ let test_sentence_caller_retires_its_session () =
   leave_during h (Lane.Page_instruct { tab_id = 0; instruction = "click Buy" });
   h.settle ();
   check bool "the call was cancelled with its caller" true h.behaviour.act_cancelled;
-  check bool "the abandoned session was stopped" true first.stopped;
+  check bool "the session outlives its caller leaving" false first.stopped;
+  check bool "and stays open for the other callers" true (is_open h);
+  h.past_the_sentence_deadline ();
+  check bool "an unanswered sentence retires its session after its deadline" true first.stopped;
   check bool "the backend is closed" false (is_open h);
   check bool "the next open makes a new session" false (flag "reused" (data (Backend.execute h.backend open_)));
   check int "two distinct sessions existed" 2 (List.length !(h.sessions))
+;;
+
+(* A sentence the extension answers after its caller left leaves the session
+   open for everyone else. *)
+let test_an_answered_sentence_keeps_the_session () =
+  with_backend
+  @@ fun h ->
+  ignore (data (Backend.execute h.backend open_));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  let first = the_session h in
+  leave_during h (Lane.Page_instruct { tab_id = 0; instruction = "click Buy" });
+  h.settle ();
+  first.log (Session.Abandoned_call_ended { method_ = "stagehand.act"; rejected = false });
+  h.past_the_sentence_deadline ();
+  check bool "the answered sentence stopped nothing" false first.stopped;
+  check bool "the session is still open" true (is_open h);
+  check bool "an open reuses it" true (flag "reused" (data (Backend.execute h.backend open_)))
 ;;
 
 (* A tab id read before a close reaches no page after the next open, even
@@ -259,7 +290,9 @@ let test_a_queued_caller_leaves_the_session_open () =
   check bool "the session is still open" true (is_open h);
   Eio.Promise.resolve first_left ();
   h.settle ();
-  check bool "the sentence that began retires the session when its caller leaves" true (the_session h).stopped
+  check bool "the sentence that began keeps the session while it may be answered" false (the_session h).stopped;
+  h.past_the_sentence_deadline ();
+  check bool "and retires it once unanswered past its deadline" true (the_session h).stopped
 ;;
 
 let test_close_does_not_wait_forever () =
@@ -341,6 +374,10 @@ let () =
       test_case "an ended session is let go" `Quick test_an_ended_session_is_let_go;
       test_case "status reports an answer the session could not deliver" `Quick test_status_reports_an_undelivered_answer;
     ];
-    "callers", [ test_case "a sentence whose caller leaves retires its session" `Quick test_sentence_caller_retires_its_session ];
+    ( "callers",
+      [ test_case "an unanswered sentence whose caller left retires its session" `Quick
+          test_sentence_caller_retires_its_session;
+        test_case "an answered sentence keeps the shared session" `Quick test_an_answered_sentence_keeps_the_session
+      ] );
   ]
 ;;

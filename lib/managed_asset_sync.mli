@@ -28,6 +28,19 @@ type domain =
   | Tools
   | Mcp
 
+(** How a domain's assets reach their runtime files. [Fsync_each_file]
+    fsyncs every file and its directory; [Rename_only] writes a temp file
+    and renames it with no fsync (#37503). *)
+type asset_write =
+  | Fsync_each_file
+  | Rename_only
+
+(** [Prompts] keep [Fsync_each_file]: a torn prompt can be promoted to a
+    permanent override (#38741). [Tools] and [Mcp] are [Rename_only]: a
+    torn file differs from the embedded copy and the next pass rewrites
+    it. The runtime manifest is fsynced for every domain. *)
+val asset_write : domain -> asset_write
+
 (** Where an operator's edit of a managed runtime file can go. The server
     passes [Prompt_overrides] for {!Prompts} and [No_edit_layer] for
     {!Tools} and {!Mcp}. *)

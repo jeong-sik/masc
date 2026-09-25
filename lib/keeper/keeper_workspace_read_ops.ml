@@ -2,7 +2,7 @@
 
    This module owns structured read/list/search operations so
    the Grep facade stays as the public dispatcher instead of reabsorbing
-   read-backend, path-resolution, and host Shell IR details. *)
+   read-backend and path-resolution details. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -36,9 +36,30 @@ let validate_rg_inputs ~pattern:_ ~file_type =
   | Ok () -> Ok ()
 ;;
 
-type read_target_result =
-  | Read_target of string
-  | Read_target_error of string
+let rg_type_list_max_bytes = 1_000_000
+
+let rg_type_names listing =
+  String.split_on_char '\n' listing
+  |> List.filter_map (fun line ->
+    match String.index_opt line ':' with
+    | Some index when index > 0 -> Some (String.sub line 0 index)
+    | Some _ | None -> None)
+;;
+
+(* The failed rg and this inventory run on the same backend, so custom types
+   from that backend's config are included. An incomplete or unavailable
+   inventory cannot prove that the caller's type is invalid. *)
+let rg_error_class ~status ~file_type ~read_type_list =
+  match status with
+  | Unix.WEXITED 2 when not (String.equal file_type "") ->
+    (match read_type_list () with
+     | Some listing when String.length listing < rg_type_list_max_bytes ->
+       (match rg_type_names listing with
+        | _ :: _ as names when not (List.mem file_type names) -> Tool_result.Policy_rejection
+        | [] | _ :: _ -> Tool_result.Runtime_failure)
+     | Some _ | None -> Tool_result.Runtime_failure)
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Tool_result.Runtime_failure
+;;
 
 let try_handle_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -51,65 +72,43 @@ let try_handle_with_outcome
   let containment_check target =
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target
   in
-  let path_error e =
+  let path_error ~class_ e =
     Keeper_tool_execution.failure
+      ~class_
       (error_json
          ~fields:[ "ok", `Bool false; "op", `String op; "path", `String raw_path ]
          e)
   in
   let read_target () =
-    match Keeper_tool_execute_path.resolve_tool_read_path ~config ~meta ~args with
-    | Error e -> Read_target_error e
-    | Ok target ->
-      (match containment_check target with
-       | Error msg -> Read_target_error msg
-       | Ok () -> Read_target target)
-  in
-  (* TEL-OK: read-op adapter delegates to Keeper_tooling.Execute_shell_ir/Exec_dispatch or the
-     sandbox read runner; execution telemetry stays with those runtime paths. *)
-  let dispatch_host_shell_ir ~workdir ir =
-    Keeper_tooling.Execute_shell_ir.dispatch
-      ~workdir
-      ~sandbox:(Masc_exec.Sandbox_target.host ())
-      ir
-  in
-  let run_host_shell_ir
-        ?path
-        ~workdir
-        ~cmd
-        ir
-        ~on_ok
-    =
-    let fields =
-      [ "typed", `Bool true; "cmd", `String cmd ]
-      @
-      match path with
-        | None -> []
-        | Some path -> [ "path", `String path ]
+    let keeper_tree_target =
+      match Keeper_tool_execute_path.resolve_tool_read_path ~config ~meta ~args with
+      | Error e -> Error e
+      | Ok target -> Result.map (fun () -> target) (containment_check target)
     in
-    match dispatch_host_shell_ir ~workdir ir with
-    | Error (Gate_reject diagnostic) ->
-      Keeper_tool_execution.failure (error_json ~fields diagnostic)
-    | Error (Cannot_parse reason) ->
-      Keeper_tool_execution.failure
-        (error_json
-           ~fields
-           (Printf.sprintf
-              "Cannot parse command: %s"
-              (Keeper_tooling.Execute_shell_ir.parse_reason_tag reason)))
-    | Error (Too_complex reason) ->
-      Keeper_tool_execution.failure
-        (error_json
-           ~fields
-           (Printf.sprintf
-              "Command too complex: %s. %s."
-              (Keeper_tooling.Execute_shell_ir.too_complex_reason_tag reason)
-              (Keeper_tooling.Subset_rewrite.to_string
-                 (Keeper_tooling.Subset_rewrite.of_reason reason))))
-    | Error (Path_reject e) ->
-      Keeper_tool_execution.failure
-        (error_json ~fields:[ "blocked_cmd", `String cmd ] e)
-    | Ok result -> on_ok result
+    match keeper_tree_target with
+    | Ok target -> Ok target
+    | Error refusal ->
+      (* Only what the keeper's own tree refused may be a path under the
+         endpoint's declared roots (#38593): the endpoint's own name, which
+         the backend reads as itself. [path] and [cwd] are read from [args]
+         exactly as [resolve_tool_read_path] reads them. *)
+      let arg key = Safe_ops.json_string ~default:"" key args |> String.trim in
+      let cwd =
+        match arg "cwd" with
+        | "" -> None
+        | cwd -> Some cwd
+      in
+      (match
+         Keeper_sandbox_remote_lane.declared_endpoint_path_of_args
+           ~config ~meta ~path:(arg "path") ~cwd
+       with
+       | Ok (Some endpoint_path) -> Ok endpoint_path
+       | Ok None -> Error refusal
+       (* An endpoint that cannot be resolved is the operator's
+          configuration, not the caller's path. *)
+       | Error endpoint_error ->
+         Error
+           (Keeper_alerting_path.endpoint_unresolved ~tree_refusal:refusal ~endpoint_error))
   in
   let sandbox_read_error ~target msg =
     error_json ~fields:[ "op", `String op; "path", `String target ] msg
@@ -125,16 +124,20 @@ let try_handle_with_outcome
       && not (Sys.file_exists target)
     then
       Error
-        (sandbox_read_error ~target
-           (Printf.sprintf
-              "path_not_found: %s (host path does not exist; list your \
-               workspace root to see what is actually there before searching)"
-              target))
+        ( Tool_result.Policy_rejection
+        , sandbox_read_error ~target
+            (Printf.sprintf
+               "path_not_found: %s (host path does not exist; list your \
+                workspace root to see what is actually there before searching)"
+               target) )
     else
+      (* An admitted path the backend cannot map, or a backend command that
+         failed, is not claimed as the caller's: a declared endpoint path maps
+         only through the endpoint's configuration. *)
       match
         Keeper_sandbox_read_runner.container_path_of_host ~config ~meta ~host_path:target
       with
-      | Error e -> Error (sandbox_read_error ~target e)
+      | Error e -> Error (Tool_result.Runtime_failure, sandbox_read_error ~target e)
       | Ok cpath -> (
           match
             Keeper_sandbox_read_runner.run_command_with_status
@@ -142,11 +145,8 @@ let try_handle_with_outcome
               ~ok_exit_codes ~config ~meta ~command_argv:(command_argv cpath)
               ~max_bytes ~timeout_sec ()
           with
-          | Error msg -> Error (sandbox_read_error ~target msg)
+          | Error msg -> Error (Tool_result.Runtime_failure, sandbox_read_error ~target msg)
           | Ok payload -> Ok payload)
-  in
-  let host_search_workdir target =
-    if safe_is_dir target then target else Filename.dirname target
   in
   match op with
   | "rg" ->
@@ -167,12 +167,9 @@ let try_handle_with_outcome
              ~class_:Tool_result.Policy_rejection
              (error_json ~fields:[ "op", `String op ] msg)
          | Ok () -> (
-           match read_target () with
-           | Read_target_error e -> path_error e
-           | Read_target target ->
-             let limit = shell_readonly_limit args in
-             let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
-             if Keeper_sandbox_read_runner.should_route_read ~meta then
+           let limit = shell_readonly_limit args in
+           let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
+           let rg_in_sandbox target =
                let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
                let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
                let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
@@ -189,7 +186,7 @@ let try_handle_with_outcome
                     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
                     ()
                 with
-                | Error response -> Keeper_tool_execution.failure response
+                | Error (class_, response) -> Keeper_tool_execution.failure ~class_ response
                 | Ok (st, out) ->
                   let is_ok =
                     match st with
@@ -216,69 +213,29 @@ let try_handle_with_outcome
                   in
                   if is_ok
                   then Keeper_tool_execution.success_data payload
-                  else Keeper_tool_execution.failure (Yojson.Safe.to_string payload))
-           else
-             let rg_available = Keeper_tool_execute_path.shell_command_available "rg" in
-             if not rg_available then
-               path_error "rg executable not found; Grep requires rg"
-             else
-               let argv =
-                 [ "-n"; "-m"; string_of_int limit ]
-                 @ (if file_type <> "" then
-                      [ "--type"; file_type ]
-                    else [])
-                 @ (if glob <> "" then
-                      [ "--glob"; glob ]
-                    else [])
-                 (* [-e]: same leading-dash guard as the sandbox lane. *)
-                 @ [ "-e"; pattern; target ]
-               in
-               (match Masc_exec.Exec_program.of_string "rg" with
-                | Error (`Unknown executable) ->
-                  path_error (Printf.sprintf "invalid executable: %S" executable)
-                | Ok bin ->
-                  let ir = Keeper_tooling.Execute_shell_ir.simple_bin bin argv in
-                  run_host_shell_ir
-                    ~workdir:(host_search_workdir target)
-                    ~cmd:op
-                    ~path:target
-                    ir
-                    ~on_ok:(fun result ->
-                   let is_ok =
-                     match result.status with
-                     | Unix.WEXITED 0 | Unix.WEXITED 1 -> true
-                     | _ -> false
-                   in
-                   (* On non-zero rg exit (exit 2 for an unrecognized
-                      --type/--glob value or a missing path), surface rg's
-                      own stderr so the keeper can self-correct instead of
-                      retrying the same broken argv until the circuit
-                      breaker trips. exit_code.ml's generic exit-2 hint
-                      already promises "Check stderr for details", but the
-                      rg result dropped stderr — this fulfils that broken
-                      contract. It does NOT classify stderr (RFC-0089: no
-                      new string classifier; status.category stays typed,
-                      error_detail is a human-readable diagnostic). *)
-                   let trimmed_stderr = String.trim result.stderr in
-                   let error_detail =
-                     if is_ok || String.equal trimmed_stderr ""
-                     then []
-                     else [ "error_detail", `String trimmed_stderr ]
-                   in
-                   let payload =
-                     `Assoc
-                        ([ "ok", `Bool is_ok
-                         ; "op", `String op
-                         ; "path", `String target
-                         ; "pattern", `String pattern
-                         ; "via", `String "host"
-                         ; "status", Keeper_alerting_path.process_status_to_json result.status
-                         ; "matches", lines_to_json ~limit result.stdout
-                         ]
-                         @ error_detail)
-                   in
-                   if is_ok
-                   then Keeper_tool_execution.success_data payload
-                   else Keeper_tool_execution.failure (Yojson.Safe.to_string payload))))))
+                  else
+                    (* Preserve rg's own error payload. A missing --type can
+                       be established from this backend's type inventory;
+                       other exit-2 causes stay unclassified as caller errors. *)
+                    Keeper_tool_execution.failure
+                      ~class_:(rg_error_class ~status:st ~file_type ~read_type_list:(fun () ->
+                        match
+                          Keeper_sandbox_read_runner.run_command_with_status
+                            ?turn_sandbox_factory
+                            ~config ~meta ~command_argv:[ "rg"; "--type-list" ]
+                            ~max_bytes:rg_type_list_max_bytes
+                            ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
+                            ()
+                        with
+                        | Ok (Unix.WEXITED 0, listing) -> Some listing
+                        | Ok _ | Error _ -> None))
+                      (Yojson.Safe.to_string payload))
+           in
+           match read_target () with
+           | Error refusal ->
+             path_error ~class_:refusal.Keeper_alerting_path.failure_class refusal.message
+           (* A keeper-tree path and a path under the endpoint's declared
+              roots (#38593) are both searched through the backend. *)
+           | Ok target -> rg_in_sandbox target)))
   | _ -> None
 ;;

@@ -114,7 +114,18 @@ let keeper_costs_window_of_query = function
     those lines vanished from the sums without a trace. [read] carries the
     rows that were not JSON, any of which may have been a turn, so a sum
     beside a non-zero count is a floor. [failed] is a store that could not
-    be read; its sums are zeroed and say nothing. *)
+    be read; its sums are zeroed and say nothing.
+
+    [read.unread_turn_rows] counts turn rows the window may hold but whose
+    [ts_unix] or [latency_ms] has a shape the writer never produces: a time
+    that cannot place the row, or an in-window row with no readable latency.
+    Either may have been a turn in the window, so a sum beside a non-zero
+    count is a floor. A row whose kind this build cannot read (another
+    schema, or no [record_kind]) is counted there too: it may have been a
+    turn. A row whose time places it before the window start is outside it
+    and counts nowhere. The window's first day file is read whole, so an
+    unreadable row from earlier that day counts as well: the count is rows
+    that may be in the window, not rows known to be. *)
 let keeper_cost_aggregates_json
     ~(config : Workspace.config)
     ~(keepers : Keeper_meta_contract.keeper_meta list)
@@ -132,28 +143,34 @@ let keeper_cost_aggregates_json
         let sample_count = ref 0 in
         let latencies_rev = ref [] in
         let malformed_rows = ref 0 in
+        let unread_turn_rows = ref 0 in
         let add_row j =
-          if keeper_cost_metric_row_is_event j
-          then
-            match
-              Json_util.assoc_member_opt "ts_unix" j,
-              Json_util.assoc_member_opt "latency_ms" j
-            with
-            | Some (`Float ts_unix), Some (`Int latency_ms)
-              when Float.is_finite ts_unix
-                   && latency_ms >= 0
-                   && ts_unix >= start_ts ->
-                incr sample_count;
-                latencies_rev := float_of_int latency_ms :: !latencies_rev;
-                add_reading cost ~add:( +. ) (cost_reading_of_row j);
-                add_reading tokens
-                  ~add:(fun sum counts ->
-                    { input = sum.input + counts.input
-                    ; output = sum.output + counts.output
-                    ; total = sum.total + counts.total
-                    })
-                  (token_reading_of_row j)
-            | _ -> ()
+          let ts = Json_util.assoc_member_opt "ts_unix" j in
+          (* The first day file is read whole. Even an unknown-kind row is
+             outside this window when its readable time precedes the start. *)
+          match ts with
+          | Some (`Float value) when Float.is_finite value && value < start_ts -> ()
+          | Some _ | None ->
+            (match Keeper_metrics_record.kind_of_json j with
+             | Some Keeper_metrics_record.Heartbeat -> ()
+             | None -> incr unread_turn_rows
+             | Some Keeper_metrics_record.Turn ->
+               match ts, Json_util.assoc_member_opt "latency_ms" j with
+               | Some (`Float ts_unix), latency when Float.is_finite ts_unix ->
+                 (match latency with
+                  | Some (`Int latency_ms) when latency_ms >= 0 ->
+                    incr sample_count;
+                    latencies_rev := float_of_int latency_ms :: !latencies_rev;
+                    add_reading cost ~add:( +. ) (cost_reading_of_row j);
+                    add_reading tokens
+                      ~add:(fun sum counts ->
+                        { input = sum.input + counts.input
+                        ; output = sum.output + counts.output
+                        ; total = sum.total + counts.total
+                        })
+                      (token_reading_of_row j)
+                  | Some _ | None -> incr unread_turn_rows)
+               | Some _, _ | None, _ -> incr unread_turn_rows)
         in
         let read =
           Dated_jsonl.iter_range_entries_result metrics_store
@@ -166,7 +183,11 @@ let keeper_cost_aggregates_json
         let metrics_read =
           match read with
           | Ok () ->
-              `Assoc [ "state", `String "read"; "malformed_rows", `Int !malformed_rows ]
+              `Assoc
+                [ "state", `String "read"
+                ; "malformed_rows", `Int !malformed_rows
+                ; "unread_turn_rows", `Int !unread_turn_rows
+                ]
           | Error error ->
               (* The rows seen before the failure are a fragment of the
                  window; drawing them would pass a part for the whole. *)
@@ -311,6 +332,31 @@ let keeper_decisions_json
           | `Float value when Float.is_finite value -> Some (int_of_float value)
           | _ -> None
         in
+        (* Usage, stop reason and error category are written inside the turn
+           row's [telemetry] object (Keeper_unified_metrics_decision), not at
+           the top level. Rows without a [telemetry] object carry none of
+           them. *)
+        let telemetry =
+          match m "telemetry" json with
+          | `Assoc _ as telemetry -> telemetry
+          | _ -> `Null
+        in
+        let telemetry_float_or_null key =
+          match m key telemetry with
+          | `Float f -> `Float f
+          | `Int i -> `Float (float_of_int i)
+          | _ -> `Null
+        in
+        let telemetry_int_or_null key =
+          match m key telemetry with
+          | `Int i -> `Int i
+          | _ -> `Null
+        in
+        let telemetry_string_or_null key =
+          match string_member_opt key telemetry with
+          | Some value -> `String value
+          | None -> `Null
+        in
         let first_string_or_null keys =
           match List.find_map (fun key -> string_member_opt key json) keys with
           | Some value -> `String value
@@ -371,11 +417,11 @@ let keeper_decisions_json
           ; "reason", first_string_or_null [ "reason"; "rationale"; "why" ]
           ; "context", context_json
           ; "latency_ms", float_or_null "latency_ms"
-          ; "cost_usd", float_or_null "cost_usd"
-          ; "input_tokens", int_or_null "input_tokens"
-          ; "output_tokens", int_or_null "output_tokens"
-          ; "stop_reason", string_or_null "stop_reason"
-          ; "error_category", string_or_null "error_category"
+          ; "cost_usd", telemetry_float_or_null "cost_usd"
+          ; "input_tokens", telemetry_int_or_null "input_tokens"
+          ; "output_tokens", telemetry_int_or_null "output_tokens"
+          ; "stop_reason", telemetry_string_or_null "stop_reason"
+          ; "error_category", telemetry_string_or_null "error_category"
           ; "tool", string_or_null "tool"
           ; "duration_ms", duration_ms
           ; "match_count", int_or_null "match_count"

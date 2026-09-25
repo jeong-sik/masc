@@ -29,8 +29,9 @@ val store_of_string : string -> store option
 
 type pinned = private
   { reference : string
-        (** [repository:tag]: a lowercase repository and a tag, never a
-            digest reference and never starting with ['-']. *)
+        (** [repository:tag]: a tag after the last [':'], only characters
+            that need no quoting, never a digest reference and never
+            starting with ['-']. *)
   ; digest : string
         (** [sha256:<64 lowercase hex>], as the store reports it for a
             running guest. *)

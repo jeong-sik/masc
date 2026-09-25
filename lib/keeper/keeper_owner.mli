@@ -239,7 +239,10 @@ val start
     The callback runs on the Owner fiber. It must not block, and an exception
     it raises is contained rather than propagated — a lost wake degrades to the
     listener's own cadence. This does not change admission order: the chat lane
-    still receives the freed slot first. *)
+    still receives the freed slot first — except when the autonomous lane has
+    been refused {e autonomous_deferral_debt_cap} consecutive releases (see
+    {!autonomous_deferral_debt_cap}); then the freed slot is left open for the
+    autonomous lane. *)
 
 val projection : t -> Keeper_owner_reducer.projection
 (** Lock-free immutable snapshot. *)
@@ -266,6 +269,16 @@ val shutdown_operation_id : t -> Keeper_shutdown_types.Operation_id.t option
 val autonomous_block_kind : autonomous_block -> string
 val autonomous_block_to_string : autonomous_block -> string
 val autonomous_block_to_yojson : autonomous_block -> Yojson.Safe.t
+
+val autonomous_deferral_debt_cap : int
+(** How many consecutive releases the autonomous lane may lose to a chat turn
+    before admission stops handing the freed slot to the queued chat first.
+    RFC-0373 direction 2: a deferral becomes deferral debt, and the debt
+    changes the next admission decision instead of only the log. The count
+    covers chat-turn holders only — a maintenance or autonomous holder is not
+    the queue that starves the lane — and resets to zero the moment an
+    autonomous turn is admitted. The price of the cap is bounded: a chat turn
+    can wait out at most this many forfeited releases. *)
 
 val run_autonomous_if_idle
   :  t

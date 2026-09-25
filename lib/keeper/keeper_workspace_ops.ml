@@ -38,6 +38,7 @@ let handle_tool_search_files_with_outcome
          rg. Kept as a typed guard rather than an assert so a future routing
          change degrades to a clear message instead of a crash. *)
       Keeper_tool_execution.failure
+        ~class_:Tool_result.Runtime_failure
         (Yojson.Safe.to_string
            (`Assoc
                [ "ok", `Bool false

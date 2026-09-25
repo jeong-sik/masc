@@ -266,6 +266,62 @@ let test_decisions_json_terminal_reason_duration_fallback () =
      String_util.string_contains_substring ~needle:"reason: provider_error" s)
 ;;
 
+(* The turn row as Keeper_unified_metrics_decision writes it: usage, stop
+   reason and error category sit inside [telemetry], never at the top level
+   (#31729). *)
+let test_decisions_json_reads_turn_telemetry () =
+  with_config
+  @@ fun config ->
+  let meta = keeper_meta "k2-decision-telemetry" in
+  let path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
+  append_jsonl
+    path
+    (`Assoc
+        [ "event", `String "turn"
+        ; "ts_unix", `Float 1_400.0
+        ; "keeper_name", `String meta.name
+        ; "outcome", `String "success"
+        ; "latency_ms", `Int 900
+        ; ( "telemetry"
+          , `Assoc
+              [ "outcome", `String "success"
+              ; "stop_reason", `String "end_turn"
+              ; "input_tokens", `Int 1200
+              ; "output_tokens", `Int 340
+              ; "cost_usd", `Float 0.0125
+              ] )
+        ]);
+  append_jsonl
+    path
+    (`Assoc
+        [ "event", `String "turn"
+        ; "ts_unix", `Float 1_401.0
+        ; "keeper_name", `String meta.name
+        ; "outcome", `String "error"
+        ; ( "telemetry"
+          , `Assoc
+              [ "error_category", `String "provider_error"
+              ; "outcome", `String "error"
+              ; "usage_reported", `Bool false
+              ] )
+        ]);
+  let compact = Dash.keeper_decisions_json ~config ~keepers:[ meta ] ~limit:10 () in
+  let failed, succeeded =
+    match Json.(compact |> member "events" |> to_list) with
+    | [ newest; older ] -> newest, older
+    | events -> failf "expected two decision events, got %d" (List.length events)
+  in
+  check string "stop reason" "end_turn"
+    Json.(succeeded |> member "stop_reason" |> to_string);
+  check int "input tokens" 1200 Json.(succeeded |> member "input_tokens" |> to_int);
+  check int "output tokens" 340 Json.(succeeded |> member "output_tokens" |> to_int);
+  check (float 1e-9) "cost" 0.0125 Json.(succeeded |> member "cost_usd" |> to_float);
+  check string "error category" "provider_error"
+    Json.(failed |> member "error_category" |> to_string);
+  check bool "an unreported cost stays null" true
+    (Json.(failed |> member "cost_usd") = `Null)
+;;
+
 let () =
   run
     "dashboard_k2_feeds"
@@ -281,6 +337,10 @@ let () =
             "terminal reason and duration fallback"
             `Quick
             test_decisions_json_terminal_reason_duration_fallback
+        ; test_case
+            "turn telemetry fields come from the telemetry object"
+            `Quick
+            test_decisions_json_reads_turn_telemetry
         ] )
     ]
 ;;

@@ -27,6 +27,9 @@ type publication_error =
       ; cause : Agent_core.Exact_output.target_ref_error
       }
   | Required_lane_unavailable of { lane_id : string }
+  | Resolver_snapshot_rejected of Agent_core.Exact_output.resolver_snapshot_error
+      (** The resolver snapshot for a replacement could not be built from the
+          text being committed. *)
 
 type rejected_slot =
   { lane_id : string
@@ -55,6 +58,16 @@ type rejected_slot_diagnosis =
 
 type prepared_replacement
 
+(** What committing a prepared replacement does to the published registry. *)
+type replacement_outcome =
+  | Registry_replaced
+      (** A new registry, admitted against a resolver snapshot built from the
+          committed text, is published with the write. *)
+  | Registry_unpublished
+      (** No registry was published when the replacement was prepared, and the
+          replacement publishes none: only boot and setup resume publish the
+          first one. *)
+
 type ('not_committed, 'committed) replacement_effect =
   | Not_committed of 'not_committed
   | Committed of 'committed
@@ -81,6 +94,7 @@ type lane_resolution_error =
 
 val publish
   :  ?required_lane_ids:string list
+  -> ?excused_lane_ids:string list
   -> lanes:Runtime_schema.exact_output_lane_decl list
   -> Agent_core.Exact_output.resolver_snapshot
   -> (t, publication_error) result
@@ -93,7 +107,10 @@ val publish
     catalog targets are retained as typed [rejected_slot] observations and do
     not suppress admitted siblings. Blank or duplicate ids (including across
     [slots] and [cli_slots]) and malformed target
-    refs remain fatal. A required lane must retain at least one admitted slot.
+    refs remain fatal. A required lane must retain at least one admitted slot,
+    unless it is in [excused_lane_ids] (a lane rule 3 emptied): that lane is
+    unavailable alone. The registry keeps [required_lane_ids] whole, so a
+    replacement requires an excused lane again unless it excuses it too.
     Returns [Publication_busy] while a replacement reservation is active. *)
 
 val unpublish : unit -> (unit, publication_error) result
@@ -103,11 +120,30 @@ val unpublish : unit -> (unit, publication_error) result
 
 val prepare_replacement
   :  lanes:Runtime_schema.exact_output_lane_decl list
+  -> excused_lane_ids:string list
+  -> load_resolver_snapshot:
+       (unit
+        -> ( Agent_core.Exact_output.resolver_snapshot
+           , Agent_core.Exact_output.resolver_snapshot_error )
+           result)
   -> (prepared_replacement, publication_error) result
-(** Purely admit [lanes] against the currently published frozen resolver and
-    return an immutable candidate tied to that exact base registry identity.
-    This performs no credential resolution, global mutation, or publication
+(** Admit [lanes] against the resolver snapshot [load_resolver_snapshot]
+    builds, requiring the published registry's required lanes less
+    [excused_lane_ids], and return an immutable candidate tied to the currently published
+    registry's identity. The snapshot is built only when a registry is
+    published; the candidate never reuses a handle admitted against the
+    previous snapshot, so a changed binding (its body deadline, its endpoint)
+    reaches the candidate. This performs no global mutation or publication
     fence. When no registry exists, only an empty lane set can be prepared. *)
+
+val prepare_retention : unit -> prepared_replacement option
+(** A candidate that is the published registry itself. Committing it keeps
+    that registry, under the same reservation a replacement takes, for a
+    config commit whose text the registry cannot be rebuilt from when the
+    file on disk could not be rebuilt either. [None] when nothing is
+    published. *)
+
+val replacement_outcome : prepared_replacement -> replacement_outcome
 
 val transact_replacement
   :  prepared_replacement
@@ -128,6 +164,12 @@ val current : unit -> (t, publication_error) result
     [Registry_not_published] before bootstrap has published one. *)
 
 val rejected_slots : t -> rejected_slot list
+
+val rejected_target_bindings
+  :  t
+  -> Agent_core.Exact_output.rejected_target_binding list
+(** Declared targets the resolver snapshot of [t] excluded because their
+    provider or model has no catalog row. *)
 
 val declared_lane
   :  t
@@ -171,6 +213,12 @@ val catalog_generation_fingerprint : t -> string
     credentials nor serialized provider configuration. *)
 
 val publication_error_to_string : publication_error -> string
+val resolver_snapshot_error_to_string
+  :  Agent_core.Exact_output.resolver_snapshot_error
+  -> string
+val binding_component_to_string
+  :  Agent_core.Exact_output.resolver_binding_component
+  -> string
 val lane_resolution_error_to_string : lane_resolution_error -> string
 
 module For_testing : sig

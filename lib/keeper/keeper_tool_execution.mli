@@ -55,8 +55,11 @@ val deferred_external_effect_data :
   ?effect_disposition:Tool_result.failure_effect_disposition ->
   ?metadata:Yojson.Safe.t -> Yojson.Safe.t -> t
 
+(** A failed call. [class_] has no default: the producer is the one place
+    that knows whether the caller can correct the call, so it names the class
+    rather than inheriting [Runtime_failure] (#27742). *)
 val failure
-  :  ?class_:Tool_result.tool_failure_class
+  :  class_:Tool_result.tool_failure_class
   -> ?effect_disposition:Tool_result.failure_effect_disposition
   -> string
   -> t

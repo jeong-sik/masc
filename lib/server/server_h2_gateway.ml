@@ -1634,6 +1634,44 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                      ~status:`Bad_request
                      ~extra_headers:cors))
 
+      | `GET, path when String.starts_with ~prefix:"/api/v1/artifact-bytes/" path ->
+          with_h2_token_permission_auth
+            h2_reqd ~permission:Masc_domain.CanAdmin
+            (fun state _actor ->
+               let prefix = "/api/v1/artifact-bytes/" in
+               let sha256 = String.sub path (String.length prefix)
+                   (String.length path - String.length prefix) in
+               match Tool_blob_store.validate_sha256 sha256 with
+               | Error invalid ->
+                 h2_respond_json_value h2_reqd
+                   (`Assoc [ "error", `String (Tool_blob_store.invalid_sha256_to_string invalid) ])
+                   ~status:`Bad_request ~extra_headers:cors
+               | Ok () ->
+                 let base_path = (Mcp_server.workspace_config state).base_path in
+                 (match Server_routes_http_routes_artifacts.artifact_bytes ~base_path ~sha256 with
+                  | Ok (Some bytes) ->
+                    h2_respond_bytes h2_reqd bytes
+                      ~content_type:"application/octet-stream"
+                      ~extra_headers:
+                        ([ "cache-control", "no-store"
+                         ; "x-content-type-options", "nosniff"
+                         ; "content-disposition", "attachment; filename=artifact-" ^ sha256 ^ ".bin"
+                         ] @ cors)
+                  | Ok None ->
+                    h2_respond_json_value h2_reqd
+                      (`Assoc [ "error", `String "not found" ])
+                      ~status:`Not_found ~extra_headers:cors
+                  | Error (Tool_blob_store.Too_large { actual; maximum; _ }) ->
+                    h2_respond_json_value h2_reqd
+                      (Server_routes_http_routes_artifacts.too_large_response actual maximum)
+                      ~status:`Payload_too_large ~extra_headers:cors
+                  | Error error ->
+                    Log.Misc.error "tool blob raw read failed sha256=%s cause=%s"
+                      sha256 (Tool_blob_store.fetch_error_to_string error);
+                    h2_respond_json_value h2_reqd
+                      (`Assoc [ "error", `String "tool blob read failed" ])
+                      ~status:`Service_unavailable ~extra_headers:cors))
+
       | _
         when Server_h2_gateway_routes_extra.dispatch ~h2_reqd ~httpun_request
                ~cors ~path

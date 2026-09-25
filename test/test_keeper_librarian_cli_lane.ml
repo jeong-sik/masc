@@ -645,7 +645,7 @@ let () =
         ; test_case "CLI admission refusal reaches journal and exact-run projection" `Quick
             (test_failure_reaches_journal ~cli_only:false
               ~cli_slot_ids:["missing-cli-runtime"] ~answer:(Error (Masc.Fusion_official_client.Setup_failure (Provider_error "must not run")))
-              ~failure:(Some (Cli.Not_an_official_client {runtime_id = "missing-cli-runtime"}))
+              ~failure:(Some (Cli.Unknown_runtime {runtime_id = "missing-cli-runtime"}))
               ~kind:Current.Exact_setup_failure ~calls:0)
         ; test_case "CLI domain failure reaches journal and exact-run projection" `Quick
             (fun () -> test_failure_reaches_journal ~cli_only:false

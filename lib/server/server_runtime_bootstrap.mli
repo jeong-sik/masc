@@ -97,15 +97,6 @@ val mandatory_exact_output_lane_ids : string list
 module For_testing : sig
   val configure_exact_output_registry : ?config_root:string -> unit -> unit
 
-  val exact_output_targets_of_runtimes
-    :  unit
-    -> Agent_core.Exact_output.declared_target list
-  (** The exact-output slots of the runtimes loaded right now. A test that asks
-      what a deployment's bindings admit reads them from here rather than
-      building its own list beside this one: a second copy of this derivation
-      is what left the slots on a different wire than their Keeper requests
-      (#37674). *)
-
   val install_domain_pool_references : Domain_pool.t -> unit
 end
 
@@ -200,7 +191,8 @@ val initialize_owner_state_blocking
     (Store_quarantine_refused _)] and nothing is moved aside. *)
 
 val activate_owner_state
-  :  sw:Eio.Switch.t
+  :  ?boot_stage:(string -> unit)
+  -> sw:Eio.Switch.t
   -> clock:float Eio.Time.clock_ty Eio.Resource.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> domain_mgr:[> Eio.Domain_manager.ty ] Eio.Domain_manager.t
@@ -212,7 +204,9 @@ val activate_owner_state
     persistence ownership, then immediately start the affine Keeper token.
     Current request writers use a disjoint staging namespace, so forensic
     cleanup cannot hold readiness. Readiness remains an explicit transport
-    commit after its required surfaces are installed. *)
+    commit after its required surfaces are installed. [boot_stage] is the
+    optional release-smoke timing observer; direct test/stdio callers may
+    omit it. *)
 
 val mark_owner_state_ready
   :  unit

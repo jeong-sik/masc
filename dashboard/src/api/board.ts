@@ -480,12 +480,8 @@ function normalizeBoardMeta(raw: unknown): BoardPost['meta'] {
   return Object.keys(next).length > 0 ? next : null
 }
 
-// RFC-0000 §3.1: `meta.attachments` carries Board_attachment_meta entries.
-// Decode mirrors the OCaml contract (id/kind/origin_url/origin_size_bytes/
-// created_at required, width/height nullable). Entries that fail the contract
-// are kept as `{ ok: false }` — the surface renders an explicit failure card,
-// never a silent skip. A present-but-non-array carrier is itself one invalid
-// entry, matching Board_render's Invalid_attachment block on the OCaml side.
+// Board post entries use the handler's closed {kind,url|artifact} carrier.
+// Every other stored value becomes a failure card.
 const BOARD_ATTACHMENT_KINDS: ReadonlySet<string> = new Set([
   'image',
   'video',
@@ -493,36 +489,57 @@ const BOARD_ATTACHMENT_KINDS: ReadonlySet<string> = new Set([
   'external_link',
 ])
 
+function isHttpsAttachmentUrl(raw: unknown): raw is string {
+  if (typeof raw !== 'string' || raw.trim() !== raw || /[\u0000-\u0020\u007f\\]/.test(raw)) {
+    return false
+  }
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'https:' && !!url.hostname && !url.username && !url.password
+  } catch {
+    return false
+  }
+}
+
 function normalizeBoardAttachment(raw: unknown): BoardAttachmentDecode {
   if (!isRecord(raw)) return { ok: false, raw }
-  const id = asString(raw.id, '').trim()
-  const kindRaw = asString(raw.kind, '').trim()
-  const originUrl = asString(raw.origin_url, '').trim()
-  const originSizeBytes = asNumber(raw.origin_size_bytes)
-  const createdAt = asNumber(raw.created_at)
-  if (
-    !id
-    || !BOARD_ATTACHMENT_KINDS.has(kindRaw)
-    || !originUrl
-    || originSizeBytes === undefined
-    || createdAt === undefined
-  ) {
+  const kindRaw = raw.kind
+  if (typeof kindRaw !== 'string' || !BOARD_ATTACHMENT_KINDS.has(kindRaw)) {
     return { ok: false, raw }
   }
-  return {
-    ok: true,
-    attachment: {
-      id,
-      kind: kindRaw as BoardAttachmentKind,
-      origin_url: originUrl,
-      origin_name: asString(raw.origin_name, ''),
-      origin_size_bytes: originSizeBytes,
-      mime_type: asString(raw.mime_type, ''),
-      width: asNumber(raw.width) ?? null,
-      height: asNumber(raw.height) ?? null,
-      created_at: createdAt,
-    },
+  const kind = kindRaw as BoardAttachmentKind
+  const keys = Object.keys(raw)
+
+  if (keys.length === 2 && keys.includes('url') && isHttpsAttachmentUrl(raw.url)) {
+    return { ok: true, attachment: { kind, source: { kind: 'url', url: raw.url } } }
   }
+
+  if (keys.length === 2 && keys.includes('artifact') && isRecord(raw.artifact)) {
+    const wrapper = raw.artifact
+    if (Object.keys(wrapper).length === 1 && isRecord(wrapper._blob)) {
+      const blob = wrapper._blob
+      if (
+        Object.keys(blob).length === 4
+        && /^[0-9a-f]{64}$/.test(asString(blob.sha256, ''))
+        && typeof blob.bytes === 'number'
+        && Number.isSafeInteger(blob.bytes)
+        && blob.bytes >= 0
+        && typeof blob.mime === 'string'
+        && !!blob.mime.trim()
+        && typeof blob.preview === 'string'
+      ) {
+        return {
+          ok: true,
+          attachment: {
+            kind,
+            source: { kind: 'artifact', sha256: blob.sha256 as string, bytes: blob.bytes, mime: blob.mime },
+          },
+        }
+      }
+    }
+  }
+
+  return { ok: false, raw }
 }
 
 export function normalizeBoardAttachments(raw: unknown): BoardAttachmentDecode[] | undefined {
@@ -854,7 +871,7 @@ function normalizeBoardReactionSummary(raw: unknown): BoardReactionSummary | nul
   if (!isRecord(raw)) return null
   const emoji = asString(raw.emoji, '').trim()
   if (!emoji) return null
-  const hasReacted = raw.has_reacted === true || raw.reacted === true
+  const reacted = raw.reacted === true
   const recentUserIds = Array.isArray(raw.recent_user_ids)
     ? raw.recent_user_ids
         .map(value => asString(value, '').trim())
@@ -863,8 +880,7 @@ function normalizeBoardReactionSummary(raw: unknown): BoardReactionSummary | nul
   return {
     emoji,
     count: asNumber(raw.count, 0),
-    reacted: hasReacted,
-    has_reacted: hasReacted,
+    reacted,
     recent_user_ids: recentUserIds,
   }
 }
@@ -1185,9 +1201,14 @@ export async function requestBoardContextInference(
   return normalized
 }
 
+export type BoardAttachmentInput =
+  | { kind: BoardAttachmentKind; url: string; sha256?: never }
+  | { kind: BoardAttachmentKind; sha256: string; url?: never }
+
 export interface CreateBoardPostOptions {
   hearth?: string
   meta?: Record<string, unknown>
+  attachments?: BoardAttachmentInput[]
 }
 
 export function createPost(
@@ -1204,6 +1225,7 @@ export function createPost(
   const hearth = options.hearth?.trim()
   if (hearth) body.hearth = hearth
   if (options.meta && Object.keys(options.meta).length > 0) body.meta = options.meta
+  if (options.attachments?.length) body.attachments = options.attachments
   return post(`/api/v1/tools/masc_board_post`, body)
 }
 

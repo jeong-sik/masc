@@ -367,6 +367,35 @@ let count_string_literals_in_value_binding ~module_path ~binding_name ~literals 
       | _ -> false)
 ;;
 
+(* [needle] as a substring of a string literal inside one binding. The exact
+   list above pins the spellings a binding may use; this asks the other
+   question -- whether a shape appears at all -- which is what a rule like
+   "this row does not pad a column with [%-Ns]" needs: the next such format
+   would carry a different number and slip past an exact list. *)
+let count_string_literals_containing_in_value_binding ~module_path ~binding_name
+  ~needle =
+  let needle_len = String.length needle in
+  let contains haystack =
+    if needle_len = 0 then false
+    else begin
+      let haystack_len = String.length haystack in
+      let rec scan i =
+        if i + needle_len > haystack_len then false
+        else if String.equal (String.sub haystack i needle_len) needle then true
+        else scan (i + 1)
+      in
+      scan 0
+    end
+  in
+  count_expressions_outside_calls_in_value_binding ~module_path ~binding_name
+    ~callees:[]
+    ~matches:(fun expression ->
+      match expression.pexp_desc with
+      | Pexp_constant { pconst_desc = Pconst_string (text, _, _); _ } ->
+        contains text
+      | _ -> false)
+;;
+
 (* Constructors a binding names, in patterns as well as expressions. A match
    arm is where a rule about which cases behave alike actually lives, and an
    arm is a pattern -- an expression walk alone sees nothing. *)

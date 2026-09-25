@@ -590,6 +590,7 @@ let cli_failure_shows_size (failure : Keeper_lane_cli_oneshot.failure) =
   match failure with
   | Keeper_lane_cli_oneshot.Invalid_json_output _
   | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> true
+  | Keeper_lane_cli_oneshot.Unknown_runtime _
   | Keeper_lane_cli_oneshot.Not_an_official_client _
   | Keeper_lane_cli_oneshot.Execution_failed _ -> false
 ;;

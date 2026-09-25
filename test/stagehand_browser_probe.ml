@@ -195,6 +195,25 @@ let () =
        (let* data = read "scene" in
         if contains ~sub:"Order form" (Yojson.Safe.to_string data) then Ok data
         else Error ("the scene read answered " ^ Yojson.Safe.to_string data));
+     record "BrowserRead elements lists the page's controls"
+       (let* data = read "elements" in
+        if contains ~sub:"Submit order" (Yojson.Safe.to_string data) then Ok data
+        else Error ("the elements read answered " ^ Yojson.Safe.to_string data));
+     (* A scope from another document makes the scene script throw
+        scene_document_changed. Stagehand words an uncaught throw as
+        "Uncaught", so this shows the page script's own reason survives. *)
+     record "a page script's throw reaches the caller by its reason"
+       (match
+          tool "BrowserRead"
+            (Tools.handle_read ~base_path:out ~tool_name:"masc_browser_read" ~start_time:0.0
+               (args
+                  [ lane; "tabId", `Int tab_id; "mode", `String "scene"
+                  ; "scope", `Assoc [ "documentId", `String "stale-document"; "nodeId", `String "n0" ]
+                  ]))
+        with
+        | Error detail when contains ~sub:"scene_document_changed" detail -> Ok (`String detail)
+        | Error detail -> Error ("the stale scope was refused without the script's reason: " ^ detail)
+        | Ok data -> Error ("a scope from another document was read: " ^ Yojson.Safe.to_string data));
      record "extract reads the page through the model"
        (let* data =
           instruct

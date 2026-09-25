@@ -59,6 +59,13 @@ let backend_read ~turn_sandbox_factory ~config ~meta ~host_path ~max_bytes =
         else read (offset + String.length chunk)) in
   read 0
 
+type staging_error =
+  | Path_refused of Keeper_alerting_path.path_refusal
+  | File_too_large of string
+  | Staging_failed of string
+
+type read_error = Read_failed of string | Oversized_file of string
+
 let with_staged_paths ?read_file ?turn_sandbox_factory ~config ~meta ~paths f =
   let read_file = match read_file with
     | Some reader -> reader
@@ -66,17 +73,21 @@ let with_staged_paths ?read_file ?turn_sandbox_factory ~config ~meta ~paths f =
   let rec resolve acc = function
     | [] -> Ok (List.rev acc)
     | raw_path :: rest ->
-      let* path =
-        Keeper_tool_shared_runtime.resolve_keeper_read_path ~config ~meta ~raw_path
-        |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) ->
-          refusal.message)
-      in
-      resolve ((raw_path,path) :: acc) rest in
+      (match Keeper_tool_shared_runtime.resolve_keeper_read_path ~config ~meta ~raw_path with
+       | Error refusal -> Error (Path_refused refusal)
+       | Ok path -> resolve ((raw_path, path) :: acc) rest) in
   let* resolved = resolve [] paths in
   let files = List.map (fun (raw_path,host_path) ->
     Filename.basename host_path, (fun () ->
-      let* bytes = read_file ~host_path ~max_bytes:(max_file_bytes + 1) in
+      let* bytes =
+        read_file ~host_path ~max_bytes:(max_file_bytes + 1)
+        |> Result.map_error (fun message -> Read_failed message)
+      in
       if String.length bytes > max_file_bytes then
-        Error (Printf.sprintf "upload file exceeds %d bytes: %s" max_file_bytes raw_path)
+        Error (Oversized_file (Printf.sprintf "upload file exceeds %d bytes: %s" max_file_bytes raw_path))
       else Ok bytes)) resolved in
   Browser_lane.Upload_lease.with_staged_files ~files f
+  |> Result.map_error (function
+    | Browser_lane.Upload_lease.Read_failed (Oversized_file message) -> File_too_large message
+    | Browser_lane.Upload_lease.Read_failed (Read_failed message)
+    | Browser_lane.Upload_lease.Snapshot_failed message -> Staging_failed message)

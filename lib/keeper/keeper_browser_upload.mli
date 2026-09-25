@@ -5,6 +5,14 @@
     the callback exits. *)
 val max_file_bytes : int
 
+(** Why staging stopped. A path refused by read authority carries its class;
+    an oversized file is a caller-correctable pre-effect refusal. Backend read
+    and snapshot failures are not claimed as the caller's to correct. *)
+type staging_error =
+  | Path_refused of Keeper_alerting_path.path_refusal
+  | File_too_large of string
+  | Staging_failed of string
+
 val with_staged_paths :
   ?read_file:(host_path:string -> max_bytes:int -> (string, string) result) ->
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
@@ -12,7 +20,7 @@ val with_staged_paths :
   meta:Keeper_meta_contract.keeper_meta ->
   paths:string list ->
   (string list -> 'a) ->
-  ('a, string) result
+  ('a, staging_error) result
 (** [read_file] is an injectable backend byte reader for tests. Production uses
     [Keeper_sandbox_read_runner], including endpoint-owned trees, and never
     falls back to reading a same-named file on the server. Files larger than

@@ -62,6 +62,30 @@ let caller_refusal reason =
   in
   { failure_class = Tool_result.Policy_rejection; message }
 
+type owned_read_target_failure =
+  | Caller_cwd_rejected of Fs_compat.owned_directory_chain_rejection
+  | Caller_cwd_missing of { cwd : string }
+  | Default_cwd_rejected of Fs_compat.owned_directory_chain_rejection
+  | Default_cwd_missing of { cwd : string }
+
+let owned_read_target_refusal = function
+  | Caller_cwd_rejected rejection ->
+    { failure_class = Tool_result.Policy_rejection
+    ; message = Fs_compat.owned_directory_chain_rejection_to_string rejection
+    }
+  | Caller_cwd_missing { cwd } ->
+    { failure_class = Tool_result.Policy_rejection
+    ; message = "cwd_not_directory: " ^ cwd
+    }
+  | Default_cwd_rejected rejection ->
+    { failure_class = Tool_result.Runtime_failure
+    ; message = Fs_compat.owned_directory_chain_rejection_to_string rejection
+    }
+  | Default_cwd_missing { cwd } ->
+    { failure_class = Tool_result.Runtime_failure
+    ; message = "cwd_not_directory: " ^ cwd
+    }
+
 let endpoint_unresolved ~tree_refusal ~endpoint_error =
   { failure_class = Tool_result.Runtime_failure
   ; message =

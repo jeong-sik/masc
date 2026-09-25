@@ -1709,8 +1709,15 @@ let prepare_exact ~base_path ~keeper_name ~net =
   Exact_flow.prepare ~base_path ~keeper_name ~net
 ;;
 
+(* The worker's durable callbacks fail with the partition transition's own
+   sentence, so the flow renderer prints that sentence as the cause. *)
 let execute_exact ~clock ~before_dispatch ~before_advance prepared =
-  Exact_flow.execute ~clock ~before_dispatch ~before_advance prepared
+  Exact_flow.execute
+    ~clock
+    ~callback_error_to_string:Fun.id
+    ~before_dispatch
+    ~before_advance
+    prepared
 ;;
 
 let process_next_exact ~clock ~net ~now ~worker_epoch ~base_path ~keeper_name =

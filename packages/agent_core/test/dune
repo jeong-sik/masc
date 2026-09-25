@@ -498,6 +498,11 @@
  (libraries agent_core_test_deps agent_core llm_provider alcotest digestif eio_main))
 
 (test
+ (name test_exact_output_renderers)
+ (modules test_exact_output_renderers)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest))
+
+(test
  (name test_exact_output_resolver_snapshot)
  (modules test_exact_output_resolver_snapshot)
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))

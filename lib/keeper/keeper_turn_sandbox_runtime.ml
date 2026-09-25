@@ -377,6 +377,14 @@ let create
 ;;
 
 
+(* A Keeper whose image cannot be resolved starts no container. The catalog's
+   reason carries the commands that fix it. *)
+let image_unresolved_message error =
+  "sandbox_image_unresolved: " ^ Keeper_sandbox_image_resolver.error_to_string error
+;;
+
+let image t = t.image
+
 (* One container per keeper configuration, not per turn: the name is stable, an already
    running container is adopted instead of created (amortising the container
    start and image preflight across turns), and turn cleanup leaves
@@ -388,19 +396,12 @@ let create
 
    The network mode is part of the name because it is part of [docker run]:
    a keeper whose network config changed must not adopt a container wired to
-   the old network. That orphan is collected by the keeper's teardown, which
-   lists by label rather than by name. The resolved image reference is also
-   part of the coordinate: a newly configured tag must not adopt the old
-   image. This distinguishes references, not mutations behind the same tag.
+   the old network. The resolved image reference is also part of the
+   coordinate: a newly promoted build must not adopt the old image. This
+   distinguishes references, not mutations behind the same tag. Once a new
+   container runs, the ones it supersedes are removed ([start_container]);
+   teardown lists by label rather than by name and takes any that remain.
    Existing turn runtimes keep their cached container until that turn ends. *)
-(* A Keeper whose image cannot be resolved starts no container. The catalog's
-   reason carries the commands that fix it. *)
-let image_unresolved_message error =
-  "sandbox_image_unresolved: " ^ Keeper_sandbox_image_resolver.error_to_string error
-;;
-
-let image t = t.image
-
 let docker_container_name_for_image (t : t) ~image =
   Keeper_sandbox_container_name.make
     (Keeper_sandbox_container_name.Docker_persistent
@@ -1891,6 +1892,27 @@ let start_container ?timeout_sec (t : t) =
                  with
                  | Ok () ->
                    set_state t (Running { container_name });
+                   (* The new container runs, so the ones an earlier build
+                      or network mode named are not coming back. A failed
+                      removal leaves them to teardown; it does not undo a
+                      start that worked. *)
+                   (match
+                      Keeper_sandbox_runtime.remove_superseded_persistent_containers
+                        ~keeper_name:t.meta.name
+                        ~base_path:t.config.base_path
+                        ~keep:container_name
+                        ~timeout_sec:
+                          (Env_config_sandbox.Shell_timeout.timeout_sec
+                             ~bucket:Env_config_sandbox.Shell_timeout.Cleanup_rm
+                             ())
+                        ()
+                    with
+                    | Ok () -> ()
+                    | Error detail ->
+                      Log.Keeper.warn
+                        ~keeper_name:t.meta.name
+                        "superseded sandbox containers were not removed: %s"
+                        detail);
                    Ok container_name
                  | Error inspect_out ->
                    (* Inspect failed after a successful `docker run`. Without

@@ -458,6 +458,65 @@ let remove_persistent_containers ~keeper_name ~base_path ~timeout_sec () =
      | errors -> Error (String.concat "; " errors))
 ;;
 
+(* A promoted build or a changed network mode names a new persistent
+   container, and the one it replaces is never adopted again. Left alone it
+   runs until the keeper is removed: one more container for every promote.
+   The caller removes them once [keep] is running, so a new build that fails
+   to start leaves the old container where it was. *)
+let remove_superseded_persistent_containers
+      ~keeper_name ~base_path ~keep ~timeout_sec ()
+  =
+  let listed =
+    try
+      let argv =
+        docker_command_argv ()
+        @ [ "ps"; "-a"; "--no-trunc"; "--format"; "{{.ID}}\t{{.Names}}" ]
+        @ docker_filter_args
+            ~keeper_name
+            ~container_kind:persistent_container_kind
+            ~base_path
+            ()
+      in
+      let st, out = run_docker_argv_with_status ~timeout_sec argv in
+      if st = Unix.WEXITED 0
+      then Ok (nonempty_lines out)
+      else
+        Error
+          (Printf.sprintf
+             "docker ps failed while listing superseded keeper containers: %s"
+             (Exec_policy.truncate_for_log out))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Error
+        (Printf.sprintf
+           "docker ps raised while listing superseded keeper containers: %s"
+           (Printexc.to_string exn))
+  in
+  match listed with
+  | Error _ as err -> err
+  | Ok lines ->
+    let errors =
+      List.filter_map
+        (fun line ->
+           match String.split_on_char '\t' line with
+           | [ _id; name ] when String.equal (String.trim name) keep -> None
+           | [ container_id; _name ] ->
+             (match remove_cleanup_container ~container_id ~timeout_sec with
+              | Ok Cleanup_removed | Ok Cleanup_remove_already_absent -> None
+              | Error err -> Some err)
+           | _ ->
+             Some
+               (Printf.sprintf
+                  "docker ps answered a line that is not <id>\\t<name>: %s"
+                  (Exec_policy.truncate_for_log line)))
+        lines
+    in
+    (match errors with
+     | [] -> Ok ()
+     | errors -> Error (String.concat "; " errors))
+;;
+
 let live_inspect_format =
   "{{ .Id }}\t{{ .Name }}\t{{ .Config.Image }}\t{{ .State.Status }}\t{{ .State.Running \
    }}\t{{ .Created }}\t{{ index .Config.Labels \""

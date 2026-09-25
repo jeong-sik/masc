@@ -50,7 +50,7 @@ let test_pre_destruction_stages_are_retryable () =
          (failure_stage_to_string stage ^ " is retryable")
          false
          (requires_admission_fence (operation_with_stage stage)))
-    [ Task_discovery; Record_persist; Meta_update; Pending_confirm_cleanup ]
+    [ Task_discovery; Record_persist; Meta_read; Meta_update; Pending_confirm_cleanup ]
 ;;
 
 (* Failures at or after the first durable mutation. These keep the fence. *)
@@ -106,13 +106,14 @@ let test_every_stage_is_classified () =
     ; Task_settlement
     ; Pending_confirm_cleanup
     ; Approval_summary_retirement
+    ; Meta_read
     ; Meta_update
     ; Meta_remove
     ; Session_remove
     ; Registry_unregister
     ]
   in
-  check int "every stage is exercised" 15 (List.length all_stages);
+  check int "every stage is exercised" 16 (List.length all_stages);
   List.iter
     (fun stage -> ignore (failure_stage_requires_admission_fence stage : bool))
     all_stages

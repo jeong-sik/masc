@@ -8,6 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "configs"))
 
 from render_configs import (  # noqa: E402
     ARMS,
+    KEEPER_INSTRUCTIONS,
+    KEEPER_INSTRUCTIONS_FILE,
     BENCH_LANE,
     COMPOSITION_FENCE,
     REPO_ROOT,
@@ -20,6 +22,8 @@ from render_configs import (  # noqa: E402
     provider_parallel_suppression_contract,
     render_arm,
 )
+
+DRIVER = Path(__file__).resolve().parents[1] / "driver"
 
 
 def fallbacks(arm):
@@ -588,3 +592,25 @@ def test_the_failover_arm_refuses_an_official_client():
     with pytest.raises(ValueError, match="official client"):
         render_arm("l", runtime_id="claude_code.claude-sonnet-5", effort="high",
                    fallback_runtime_ids=("claude_code.claude-opus-5",))
+
+
+def test_the_keeper_up_instructions_are_the_profile_instructions(tmp_path):
+    """run_episode.sh reads the keeper_up instructions from the rendered file,
+    so the call and the keeper profile carry the one text."""
+    import subprocess
+    out = render_arm("e", runtime_id="anthropic.claude-fable-5", effort="high")
+    written = (out / KEEPER_INSTRUCTIONS_FILE).read_text()
+    assert written == KEEPER_INSTRUCTIONS
+    assert KEEPER_INSTRUCTIONS in (out / "keepers" / "bench-1.toml").read_text()
+    # Run the script's own assignment line against a bench laid out as the
+    # container has it, rather than matching its text.
+    line = next(l for l in (DRIVER / "run_episode.sh").read_text().splitlines()
+                if l.startswith("KEEPER_INSTRUCTIONS="))
+    bench = tmp_path / "bench"
+    (bench / "config").mkdir(parents=True)
+    (bench / "config" / KEEPER_INSTRUCTIONS_FILE).write_text(written)
+    got = subprocess.run(
+        ["bash", "-c", f'set -euo pipefail; BENCH="$1"; {line}; printf %s "$KEEPER_INSTRUCTIONS"',
+         "bash", str(bench)],
+        check=True, capture_output=True, text=True).stdout
+    assert got == KEEPER_INSTRUCTIONS

@@ -12,6 +12,7 @@ type t = {
   min_interval_ns : int64;
   mutable pending : request option;
   mutable last_rendered_at_ns : int64 option;
+  mutable last_was_input : bool;
 }
 
 let create ~min_interval_ns () =
@@ -20,6 +21,7 @@ let create ~min_interval_ns () =
   { min_interval_ns;
     pending = Some Force;
     last_rendered_at_ns = None;
+    last_was_input = false;
   }
 
 let request schedule request =
@@ -35,8 +37,9 @@ let deadline schedule =
     (fun rendered_at -> Int64.add rendered_at schedule.min_interval_ns)
     schedule.last_rendered_at_ns
 
-let take ?(input_pending = false) schedule ~now_ns =
+let take ~input_pending schedule ~now_ns =
   let render () =
+    schedule.last_was_input <- schedule.pending = Some Input;
     schedule.pending <- None;
     schedule.last_rendered_at_ns <- Some now_ns;
     Render
@@ -44,11 +47,11 @@ let take ?(input_pending = false) schedule ~now_ns =
   match schedule.pending with
   | None -> Idle
   | Some Force -> render ()
-  | Some Input when not input_pending -> render ()
+  | Some Input when not input_pending && not schedule.last_was_input -> render ()
   | Some (Input | Background) ->
     (* Drain the bytes from one terminal read before painting their result.
-       The deadline still paints a continuously arriving burst, but a lone
-       key or the last key in a burst never waits out a background interval. *)
+       The first input frame preempts a recent background frame. Subsequent
+       input frames keep the interval even when each event arrives alone. *)
     match deadline schedule with
     | Some due when Int64.compare now_ns due < 0 ->
         Wait_until due
@@ -58,15 +61,15 @@ let input_timeout_seconds schedule ~now_ns ~maximum =
   let maximum = max 0.0 maximum in
   match schedule.pending with
   | None -> maximum
-  | Some (Input | Force) -> 0.0
-  | Some Background ->
-    match deadline schedule with
-    | None -> 0.0
-    | Some due ->
-        let remaining_ns = Int64.sub due now_ns in
-        if Int64.compare remaining_ns 0L <= 0 then 0.0
-        else
-          min maximum (Int64.to_float remaining_ns /. 1_000_000_000.0)
+  | Some Force -> 0.0
+  | Some Input when not schedule.last_was_input -> 0.0
+  | Some (Input | Background) ->
+    (match deadline schedule with
+     | None -> 0.0
+     | Some due ->
+       let remaining_ns = Int64.sub due now_ns in
+       if Int64.compare remaining_ns 0L <= 0 then 0.0
+       else min maximum (Int64.to_float remaining_ns /. 1_000_000_000.0))
 
 let normalize_keeper_detail_scroll ~line_count ~content_height scroll =
   let line_count = max 0 line_count in
@@ -1023,6 +1026,22 @@ let allocate_fusion_columns ~inner_width ~keeper_width =
   let fcol_run = max 3 (inner_width - named - fcol_keeper) in
   { fcol_keeper; fcol_run; fcol_show_preset }
 
+(* The Tasks list pane beside the detail drew a row's title and nothing else,
+   and the frame folds a label from the middle, keeping its opening and its
+   ending. Titles that share both and differ only in between all draw the same
+   row.
+
+   Measured on the live backlog 2026-09-24, 694 open tasks folded to the
+   pane's room: titles alone left 30 rows in four groups that read alike, 18
+   of them "[triage]...(jeong-sik/masc)". With the task id after the title all
+   694 read differently; with it in front, 31 rows still read alike, because
+   the fold takes the middle out either way and the ids of a group share their
+   opening. So the id goes last, where the fold keeps it.
+
+   The full-width list row already spells the id; only the pane beside the
+   detail dropped it. *)
+let task_list_sidebar_label ~title ~task_id = title ^ "  " ^ task_id
+
 let fusion_header_row columns =
   Table.header_row
     (fusion_cells columns fusion_no_values)
@@ -1033,6 +1052,50 @@ let fusion_row ~state_style columns values =
 
 let fusion_sidebar_label ~status ~time ~keeper ~run_id =
   Printf.sprintf "[%s] %s @%s %s" status time keeper run_id
+
+(* Task Review and Verdicts drew a row's task id and nothing else, and both
+   lists hold a task once per submission. Measured on the live history
+   2026-09-24: 200 Task Review rows carry 113 distinct ids, 45 of them more
+   than once, and seven rows are task-1663 -- one submitter, no stated
+   intent. The Verdicts list is shorter and collides too: of eight rows one
+   task carries two verdicts, at the same gate, parted only by what each one
+   said.
+
+   [apart] is what parts this row from its siblings. It has to hold still
+   while the reader looks at it, which an age does not: [age_text] spells
+   seconds under an hour, so an index row read "5m03s" and was a different
+   row a second later. And it has to be its own value rather than a reading
+   of one, because two rows minutes apart round to the same age.
+
+   A row with nothing to part it keeps the id alone rather than inventing a
+   mark for it. *)
+let task_history_sidebar_label ~task_id ~apart =
+  match apart with None -> task_id | Some apart -> task_id ^ "  " ^ apart
+
+let verdict_sidebar_labels rows =
+  List.mapi
+    (fun index (task_id, clock) ->
+      let same (other_id, other_clock) =
+        String.equal task_id other_id && String.equal clock other_clock
+      in
+      let siblings = List.length (List.filter same rows) in
+      let apart =
+        if siblings = 1 then clock
+        else
+          let earlier =
+            List.filteri (fun other_index row -> other_index < index && same row) rows
+            |> List.length
+          in
+          (* A second-resolution clock can name several verdicts. Keep the
+             date and minute, then number those rows within this snapshot. *)
+          let minute =
+            if String.length clock > 3 then String.sub clock 0 (String.length clock - 3)
+            else clock
+          in
+          Printf.sprintf "%s#%d" minute (earlier + 1)
+      in
+      task_history_sidebar_label ~task_id ~apart:(Some apart))
+    rows
 
 let fusion_pipeline_diagram
     ?(glyph_done = "●")
@@ -1339,7 +1402,7 @@ let board_cells ?(styles = board_no_styles) ~age_header ~title_width values =
    to this cell. *)
 let board_age_text ~now = function
   | Some at -> Masc_tui_message_layout.span_text (now -. at)
-  | None -> "\xe2\x80\x94"
+  | None -> Masc_tui_theme.Glyph.no_value
 
 let board_title_width ~inner_width =
   (* The header word does not move the column: [board_age_width] is fixed and
@@ -1483,6 +1546,14 @@ let schedule_hold_tag ~due = "held since " ^ due
 let schedule_hold_reading ~due =
   schedule_hold_tag ~due ^ ": the keeper has not taken the previous wake yet"
 
+(* #34642: a schedule held on its target's shutdown fence. *)
+let schedule_fence_hold_reading ~due ~target ~fence_owner =
+  Printf.sprintf
+    "%s: %s is shutting down (%s) and takes no wakes until that finishes"
+    (schedule_hold_tag ~due)
+    target
+    fence_owner
+
 (* The same hold when the runner has not read its list again since (#38411).
    A tick that fails keeps the list without looking, so the hold is drawn at
    the time it was [checked], not as the present. The due column beside the
@@ -1492,3 +1563,12 @@ let schedule_hold_as_of_tag ~checked = "held as of " ^ checked
 let schedule_hold_as_of_reading ~checked =
   schedule_hold_as_of_tag ~checked
   ^ ": the keeper had not taken the previous wake by then"
+
+(* The fence hold drawn the same way, at the time it was [checked]: a failed
+   tick does not re-read why it held either (#38411, #34642). *)
+let schedule_fence_hold_as_of_reading ~checked ~target ~fence_owner =
+  Printf.sprintf
+    "%s: %s was shutting down (%s) and took no wakes until that finished"
+    (schedule_hold_as_of_tag ~checked)
+    target
+    fence_owner

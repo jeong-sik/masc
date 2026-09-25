@@ -49,7 +49,10 @@ val format_comment_tree
 val sources_footer : Yojson.Safe.t list -> string
 val parse_sort_order : string -> (sort_order, string) Result.t
 val judgment_arg : Yojson.Safe.t -> Yojson.Safe.t option
-val normalize_board_post_meta : Yojson.Safe.t -> Yojson.Safe.t option
+val normalize_board_post_meta :
+  ?attachments:Board_tool_attachment.t list -> Yojson.Safe.t -> Yojson.Safe.t option
+(** [attachments] contains entries parsed and validated by the post handler.
+    Raw [meta.attachments] is never copied into the persisted carrier. *)
 val source_entries_arg : Yojson.Safe.t -> Yojson.Safe.t list option
 val merge_sources_into_meta : Yojson.Safe.t option -> Yojson.Safe.t list -> Yojson.Safe.t option
 val string_field : (string * Yojson.Safe.t) list -> string -> string -> string

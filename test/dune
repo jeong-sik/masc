@@ -235,6 +235,11 @@
  (libraries alcotest masc_tui_keeper_config yojson str))
 
 (test
+ (name test_tui_github_identity)
+ (modules test_tui_github_identity)
+ (libraries alcotest masc_tui_github_identity yojson))
+
+(test
  (name test_tui_keeper_sandbox)
  (modules test_tui_keeper_sandbox)
  ; masc.config for Env_config_sandbox.Runtime.image_source_strings: the
@@ -1262,6 +1267,12 @@
  ; The pane count is read out of the renderer source, so it is a dep.
  (deps %{workspace_root}/bin/masc_tui_render_prim.ml)
  (libraries alcotest ast_grep masc_tui_keys masc_tui_types))
+
+(test
+ (name test_tui_config_pane_title_head)
+ (modules test_tui_config_pane_title_head)
+ (libraries alcotest masc_tui_ansi masc_tui_message_layout
+  masc_tui_render_prim masc_tui_theme))
 
 (test
  (name test_tui_voice_wizard_wiring)
@@ -2531,6 +2542,8 @@
 
 (include stanzas/test_msx_frame_route.inc)
 
+(include stanzas/test_lane_addon_live_route.inc)
+
 (include stanzas/test_discord_gateway_client.inc)
 
 (include stanzas/test_discord_tls_config_cache.inc)
@@ -2965,6 +2978,7 @@
 (include stanzas/test_keeper_shutdown_reconciliation_settlement.inc)
 (include stanzas/test_keeper_shutdown_blocked_purge_release.inc)
 (include stanzas/test_keeper_shutdown_fence_stage.inc)
+(include stanzas/test_keeper_shutdown_blocked_replay.inc)
 
 (include stanzas/test_keeper_shutdown_ownerless_admission_release.inc)
 (include stanzas/test_keeper_shutdown_reconciliation_http.inc)
@@ -3530,7 +3544,7 @@
 (test
  (name test_tui_lane_slot_reach)
  (modules test_tui_lane_slot_reach)
- (libraries alcotest masc masc_tui_types))
+ (libraries alcotest masc masc.runtime masc_tui_types))
 
 ; Its own anchor, under the other suite that links only the state vocabulary,
 ; so two pull requests adding a suite do not both land on the head of this
@@ -3611,6 +3625,7 @@
   fmt
   masc
   masc_tui_types
+  masc_tui_pick_list
   masc_tui_fusion_launch
   masc_tui_ask_projection
   masc.voice_setup
@@ -3620,6 +3635,13 @@
  (name test_tui_runtime_param_picker)
  (modules test_tui_runtime_param_picker)
  (libraries alcotest yojson masc_tui_types))
+
+(test
+ (name test_tui_no_value_mark)
+ (modules test_tui_no_value_mark)
+ (libraries alcotest ast_grep masc_tui_theme tui_source)
+ (deps
+  (source_tree ../bin)))
 
 (test
  (name test_tui_ask_selection_wiring)
@@ -3843,7 +3865,15 @@
  (modules test_tui_acting)
  ; masc for the call log's disposition vocabulary the ledger rows are typed
  ; with, agent_core for the schedule contract they carry.
- (libraries alcotest masc agent_core masc_tui_acting masc_tui_observer))
+ ; masc_tui_message_layout so the row's token figure is asked of the ladder
+ ; that draws it rather than spelled again here.
+ (libraries
+  alcotest
+  masc
+  agent_core
+  masc_tui_acting
+  masc_tui_message_layout
+  masc_tui_observer))
 
 (test
  (name test_tui_observer)
@@ -4262,6 +4292,7 @@
   masc_types
   masc_tui_types
   masc_tui_overview_goals
+  masc_tui_overview_tasks
   unix
   yojson))
 
@@ -4344,7 +4375,7 @@
 (test
  (name test_tui_memory_facts_explorer)
  (modules test_tui_memory_facts_explorer)
- (libraries alcotest masc masc_tui_types))
+ (libraries alcotest masc masc_tui_render_memory masc_tui_types))
 
 (test
  (name test_tui_memory_header_states)
@@ -4711,6 +4742,22 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-msx-size)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-dos-live)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   dos-live)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-dos-live)))
 
 (rule
  (alias runtest-test_tui_keyboard_input-cli-base-path)
@@ -5338,6 +5385,7 @@
   alcotest
   astring
   masc
+  masc.runtime
   masc_tui_answering
   masc_tui_message_layout))
 
@@ -5490,11 +5538,18 @@
  ; and a byte offset would report the header and its own cell as misaligned.
  ; masc_tui_table so the gap between columns is asked of the contract that
  ; sets it, not spelled again here.
+ ; masc_tui_frame and masc_tui_roster_pane so the list pane's label room is
+ ; asked of the two contracts that set it rather than counted here.
+ ; masc_tui_render_prim for the caret lead that room is narrower by, and for
+ ; the minute clock a Verdicts row is parted from its siblings with.
  (libraries
   alcotest
+  masc_tui_frame
   masc_tui_layout
   masc_tui_message_layout
+  masc_tui_render_prim
   masc_tui_render_schedule
+  masc_tui_roster_pane
   masc_tui_table))
 
 (test
@@ -5606,16 +5661,22 @@
 (include stanzas/test_tui_planning_summary_rows.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
+
+(include stanzas/test_tui_voice_pane_fills_its_height.inc)
+
+(include stanzas/test_tui_overlay_window_reading.inc)
 (include stanzas/test_tui_approvals_footer_matches_the_sheet.inc)
 (include stanzas/test_tui_sheet_names_every_palette_destination.inc)
 (include stanzas/test_tui_keeper_detail_key_help_names_the_tabs.inc)
 (include stanzas/test_tui_board_read_title.inc)
+(include stanzas/test_tui_board_detail_error_once.inc)
 (include stanzas/test_workspace_git_log.inc)
 (include stanzas/test_tui_code_lexer.inc)
 (include stanzas/test_tui_overview_pulse.inc)
 (include stanzas/test_tui_overview_transport_item.inc)
 (include stanzas/test_tui_schedules_empty_row_names_its_key.inc)
 (include stanzas/test_tui_activity_title_dot_belongs_to_the_strip.inc)
+(include stanzas/test_tui_keeper_roster_window.inc)
 (include stanzas/test_tui_feed_row_counts_events.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_runtime_lane_editor.inc)
@@ -5641,6 +5702,7 @@
 (include stanzas/test_tui_config.inc)
 (include stanzas/test_tui_config_highlight_wiring.inc)
 (include stanzas/test_tui_row_wiring.inc)
+(include stanzas/test_tui_pick_list.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
@@ -5930,7 +5992,7 @@
 (test
  (name test_tui_identity_tab)
  (modules test_tui_identity_tab)
- (libraries alcotest masc_tui_types masc_tui_keys masc_tui_footer))
+ (libraries alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer))
 
 (test
  (name test_tui_log_channel_column)
@@ -6155,18 +6217,26 @@
 (test
  (name test_tui_msx_load)
  (modules test_tui_msx_load)
- (libraries alcotest unix masc_tui_types masc_tui_interactive masc_tui_msx))
+ (libraries alcotest unix masc_tui_types masc_tui_machine_live masc_tui_interactive
+   masc_tui_msx))
+
+; The spectator's typed read of GET /api/v1/lane-addons/live: every answer
+; shape, the malformed ones, and what a read does to the drawn view.
+(test
+ (name test_tui_machine_live)
+ (modules test_tui_machine_live)
+ (libraries alcotest yojson base64 masc_tui_machine_live))
 
 (test
  (name test_tui_msx_tick)
  (modules test_tui_msx_tick)
- (libraries masc_test_deps))
+ (libraries masc_test_deps masc_tui_machine_live))
 
 (test
  (name test_tui_msx_graphics)
  (modules test_tui_msx_graphics)
  (libraries alcotest unix masc_tui_types masc_tui_interactive masc_tui_graphics
-   masc_tui_msx masc_tui_ansi))
+   masc_tui_msx masc_tui_ansi masc_tui_machine_live))
 
 (test
  (name test_tui_interactive)
@@ -6182,11 +6252,14 @@
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
  ; The pick dispatch lives in the executable, which no test can link, so the
- ; one assertion about it is read through Ast_grep. The source is a dep:
- ; without it the test reads a cached verdict and stays green while the
- ; wiring it asserts is gone.
- (deps %{workspace_root}/bin/masc_tui.ml)
- (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
+ ; assertions about it and about the two renderers are read through Ast_grep.
+ ; The sources are deps: without them the test reads a cached verdict and
+ ; stays green while the wiring it asserts is gone.
+ (deps
+  %{workspace_root}/bin/masc_tui.ml
+  %{workspace_root}/bin/masc_tui_types.ml
+  %{workspace_root}/bin/masc_tui_render.ml)
+ (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
 
 
 (rule
@@ -6709,7 +6782,7 @@
 (test
  (name test_lane_addon)
  (modules test_lane_addon)
- (libraries masc_test_deps eio eio_main yojson unix))
+ (libraries masc_test_deps masc.server masc.msx_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_sources)
@@ -7018,3 +7091,5 @@
  ; it asserts is gone.
  (deps %{workspace_root}/bin/masc_tui_render.ml)
  (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
+
+(include stanzas/test_tui_sidebar_index_fold.inc)

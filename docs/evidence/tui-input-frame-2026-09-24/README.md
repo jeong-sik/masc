@@ -6,7 +6,7 @@ Each input is sent immediately after the preceding expected frame, without a set
 
 Nine recent-frame observations took 14.746333–23.421417ms. One first detail-scroll observation took 1.315417ms. All arrow, wheel, page and detail scroll transitions passed. The full draft burst also survived byte-for-byte without submitting a message. These are ten observations, not a percentile acceptance claim.
 
-The scheduler previously held Input to its 16ms frame interval unless a background request happened to be pending. The change renders an input as soon as the terminal buffer and terminal-probe replay queue drain; background updates and continuously buffered input still coalesce to the frame interval. A partial UTF-8 scalar alone does not count as queued actionable input.
+The scheduler previously held Input to its 16ms frame interval unless a background request happened to be pending. The change renders the leading input as soon as the terminal buffer and terminal-probe replay queue drain; later input frames, background updates and continuously buffered input keep the 16ms interval. A partial UTF-8 scalar alone does not count as queued actionable input.
 
 Validation added: deterministic recent-frame/buffer-drain/continuous-burst schedules, terminal-probe replay drain behavior, main-loop wiring, and this PTY scenario. Local formatting, Python syntax, diff checks and installed-baseline PTY pass; candidate compile/execution belong to CI. An independent reviewer found the omitted replay queue, which was corrected and covered. The broader 0.1ms TUI/server/scroll objective remains unachieved.
 

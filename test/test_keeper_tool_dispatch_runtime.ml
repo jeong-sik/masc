@@ -8536,10 +8536,9 @@ let composable_output_probes =
              ; "content", `String "composable output probe\n"
              ])
     }
-    (* Read and Grep route through the backend read runner for every
-       sandbox profile (Keeper_sandbox_read_backend.should_route_read), so
-       they can no more report on a host without the guest image than
-       Execute can. *)
+    (* Read and Grep read through the backend read runner for every sandbox
+       profile, so they can no more report on a host without the guest image
+       than Execute can. *)
   ; probe
       ~needs_sandbox:true
       "Read"

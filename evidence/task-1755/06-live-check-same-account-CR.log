@@ -1,0 +1,19 @@
+# task-1755 — live --check 영수증: same-account CR 거절 (진짜 gh + 진짜 GitHub)
+# 계정: anyang-keepers  repo: jeong-sik/masc  PR: #38363 (open, draft=false, mergeable_state=blocked, base==origin/main 4df9922a)
+# head: 440980079f7b14455a2b40e57f55b3a1e82660f9  (feat/tui-team-cost)
+# 이 PR 에 걸린 이 계정의 열린 CHANGES_REQUESTED: review id 5311119132
+
+## live --check WITHOUT --replaces (approve-guard.sh @ c36851a84f661a7272347ef32b886309048c1e49)
+$ approve-guard.sh --repo jeong-sik/masc --pr 38363 --head 440980079f7b14455a2b40e57f55b3a1e82660f9 --slot "SLOT: #38363 head 440980079f7b14455a2b40e57f55b3a1e82660f9" --body /tmp/t1755-body.txt --check
+REFUSED #38363 head 440980079f7b14455a2b40e57f55b3a1e82660f9
+  - open CHANGES_REQUESTED from anyang-keepers (review 5311119132) is this account's own, and the account is shared: read it, then pass --replaces 5311119132 to replace it
+rc=2
+
+## 대조: 같은 PR 에 --replaces 5311119132 를 지명하면?
+(CR 이 여전히 열려 있으므로 §6 는 통과하되 뒤 단계에서 거절/통과가 결정된다 — 아래 실행 결과가 그 답)
+WOULD APPROVE #38363 head 440980079f7b14455a2b40e57f55b3a1e82660f9 (5 check-runs, workflow runs 36102180511)
+rc=0
+
+## 판정 원문이 요구한 문구와의 일치
+# verifier 가 요구한 것: 'open CHANGES_REQUESTED from ${me} ... pass --replaces' 거절 문구를 보이는 live --check 영수증
+# 이번 실행이 낸 것:      'open CHANGES_REQUESTED from anyang-keepers (review 5311119132) is this account's own, and the account is shared: read it, then pass --replaces 5311119132 to replace it'

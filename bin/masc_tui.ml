@@ -5472,12 +5472,16 @@ let launch_memory_facts_load state ~mailbox ~keeper_name =
 let launch_all_memory_facts_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
-  let keepers =
-    match state.memory_health with
-    | Some h -> h.Tui_decode.mhs_keepers
-    | None -> []
-  in
   let run () =
+    match state.memory_health with
+    | None ->
+      (* Without the health read there is no keeper list to merge. An empty
+         "all keepers" view would read as memory that is empty. *)
+      enqueue_async mailbox
+        (Memory_facts_loaded
+           ("*", Error "keeper list not read yet (memory health has not loaded)"))
+    | Some health ->
+    let keepers = health.Tui_decode.mhs_keepers in
     if keepers = [] then
       enqueue_async mailbox
         (Memory_facts_loaded
@@ -5504,13 +5508,19 @@ let launch_all_memory_facts_load state ~mailbox =
       let all_src_facts = ref [] in
       let all_invals = ref [] in
       let all_event_read_errors = ref [] in
+      (* A keeper whose read failed is named, never folded into the merge as
+         a keeper with no facts. *)
+      let unread = ref [] in
+      let note_unread keeper_name detail =
+        unread := Printf.sprintf "%s: %s" keeper_name detail :: !unread
+      in
       List.iter
         (fun (k : Tui_decode.memory_keeper_health) ->
           let keeper_name = k.Tui_decode.mkh_keeper_id in
           match
             try Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name with
             | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | _ -> Error "failed"
+            | exn -> Error (Printexc.to_string exn)
           with
           | Ok snap ->
               (match snap.Tui_decode.mfs_events_read_error with
@@ -5533,7 +5543,9 @@ let launch_all_memory_facts_load state ~mailbox =
                        store.Tui_decode.mos_facts
                    in
                    all_ord_facts := !all_ord_facts @ tagged
-               | _ -> ());
+               | Tui_decode.Memory_store_read_error detail ->
+                   note_unread keeper_name ("ordinary store: " ^ detail)
+               | Tui_decode.Memory_store_absent -> ());
               (match snap.Tui_decode.mfs_source with
                | Tui_decode.Memory_store_present store ->
                    let tagged_src =
@@ -5560,8 +5572,10 @@ let launch_all_memory_facts_load state ~mailbox =
                    in
                    all_src_facts := !all_src_facts @ tagged_src;
                    all_invals := !all_invals @ tagged_inv
-               | _ -> ())
-          | Error _ -> ())
+               | Tui_decode.Memory_store_read_error detail ->
+                   note_unread keeper_name ("source-bound store: " ^ detail)
+               | Tui_decode.Memory_store_absent -> ())
+          | Error detail -> note_unread keeper_name detail)
         keepers;
       let combined =
         { Tui_decode.mfs_keeper = "*"
@@ -5584,7 +5598,19 @@ let launch_all_memory_facts_load state ~mailbox =
              | errors -> Some (String.concat "; " errors))
         }
       in
-      enqueue_async mailbox (Memory_facts_loaded ("*", Ok combined))
+      enqueue_async mailbox (Memory_facts_loaded ("*", Ok combined));
+      (* The facts that were read stay on screen; the error line above them
+         says which keepers are missing from the merge. *)
+      match List.rev !unread with
+      | [] -> ()
+      | failures ->
+        enqueue_async mailbox
+          (Memory_facts_loaded
+             ( "*",
+               Error
+                 (Printf.sprintf "%d of %d keepers not read: %s"
+                    (List.length failures) (List.length keepers)
+                    (String.concat "; " failures)) ))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->

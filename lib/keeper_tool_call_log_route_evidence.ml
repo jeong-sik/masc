@@ -100,24 +100,19 @@ let route_evidence_json_of_tool_io
     | Ok json -> Some json
     | Error _ -> None
   in
-  let output_route_json =
-    match parsed_output with
-    | Some json -> route_candidate_of_output json
-    | None -> None
-  in
   (* A completed Execute keeps [via] and [sandbox_profile] in its execution
      evidence, which the model does not read (#39035); its output keeps
-     [status]. No route field is in both, so reading the two objects is one
+     [status]. No route field is in both, so the two field lists are one
      record rather than a choice between sources. *)
+  let output_route_fields =
+    Option.bind (Option.bind parsed_output route_candidate_of_output) assoc_opt
+  in
+  let evidence_route_fields = Option.bind execution_evidence assoc_opt in
   let route_json =
-    match output_route_json, execution_evidence with
+    match output_route_fields, evidence_route_fields with
     | None, None -> None
-    | Some json, None | None, Some json -> Some json
-    | Some output, Some evidence ->
-      Some
-        (`Assoc
-            (Option.value ~default:[] (assoc_opt output)
-             @ Option.value ~default:[] (assoc_opt evidence)))
+    | Some fields, None | None, Some fields -> Some (`Assoc fields)
+    | Some output, Some evidence -> Some (`Assoc (output @ evidence))
   in
   let command_present =
     Option.is_some (Json_util.assoc_string_opt "cmd" input)

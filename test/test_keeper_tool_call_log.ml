@@ -1172,7 +1172,20 @@ let test_execution_evidence_metadata_round_trip () =
        (Keeper_tool_call_log.execution_evidence_of_metadata
           (Some (`Assoc [ "masc.artifact_manifest", `Null ]))));
   Alcotest.(check bool) "no metadata carries none" true
-    (Option.is_none (Keeper_tool_call_log.execution_evidence_of_metadata None))
+    (Option.is_none (Keeper_tool_call_log.execution_evidence_of_metadata None));
+  (* A Gate-authorized Execute keeps its producer metadata under "producer"
+     (Keeper_gate.authorization_metadata); the reader must look there. *)
+  Alcotest.(check (option string)) "evidence under a Gate authorization is found"
+    (Some {|{"via":"docker"}|})
+    (Keeper_tool_call_log.execution_evidence_of_metadata
+       (Some
+          (`Assoc
+              [ "gate", `Assoc [ "decision", `String "allow" ]
+              ; ( "producer"
+                , Keeper_tool_call_log.execution_evidence_metadata
+                    [ "via", `String "docker" ] )
+              ]))
+     |> Option.map Yojson.Safe.to_string)
 
 let test_route_evidence_stored_for_git_push () =
   with_tmp_log (fun () ->

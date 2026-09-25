@@ -1066,7 +1066,8 @@ let handle_tool_execute_typed
                in
                (* The same call's audit fields, which the model does not read:
                   tool-result metadata reaches the tool-call ledger as
-                  [execution_evidence] and never the provider (#39035). *)
+                  [execution_evidence] and is not part of a direct call's
+                  provider request (#39035). *)
                let execution_evidence =
                  Keeper_tool_call_log.execution_evidence_metadata
                    ([ "shim_execution_evidence", shim_execution_evidence_json receipts ]

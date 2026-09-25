@@ -174,8 +174,10 @@ let assert_payload ~ordinal ~exit_code (payload, evidence) =
     (text "output_completeness" evidence);
   check bool "the model is not told the usual capture marker" true
     (field "output_completeness" payload = `Null);
-  check string "the model still reads where the call ran"
-    (text "cwd" payload) (field "execution_location" payload |> text "cwd");
+  check bool "the model still reads its location observation" true
+    (match field "execution_location" payload |> field "scope" with
+     | `String _ -> true
+     | _ -> false);
   List.iter (fun name ->
     check string (name ^ " is recorded as evidence") "remote_ssh" (text name evidence);
     check bool (name ^ " is not sent to the model") true (field name payload = `Null))

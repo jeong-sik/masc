@@ -193,12 +193,23 @@ let execution_evidence_metadata fields =
   `Assoc [ execution_evidence_metadata_key, `Assoc fields ]
 ;;
 
-let execution_evidence_of_metadata = function
-  | Some (`Assoc fields) ->
-    (match List.assoc_opt execution_evidence_metadata_key fields with
-     | Some (`Assoc _ as evidence) -> Some evidence
-     | Some _ | None -> None)
-  | Some _ | None -> None
+(* A Gate-authorized result keeps its producer's metadata under "producer"
+   ([Keeper_gate.authorization_metadata]); read through it the way
+   [Tool_bridge.artifact_manifest_from_metadata] does. *)
+let execution_evidence_of_metadata metadata =
+  let rec find = function
+    | `Assoc fields ->
+      (match List.assoc_opt execution_evidence_metadata_key fields with
+       | Some (`Assoc _ as evidence) -> Some evidence
+       | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->
+         None
+       | None ->
+         (match List.assoc_opt "producer" fields with
+          | Some producer -> find producer
+          | None -> None))
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+  in
+  Option.bind metadata find
 ;;
 
 type store_state =
@@ -928,12 +939,13 @@ let log_call
             , Keeper_file_change_evidence.to_yojson evidence ) ]
         | None -> []
       in
-      let safe_execution_evidence =
-        Option.map Observability_redact.redact_json_value execution_evidence
-      in
+      (* Stored with the same redaction and per-leaf bound as [input]: a
+         receipt's detail can quote the payload's stderr. *)
       let execution_evidence_field =
-        match safe_execution_evidence with
-        | Some evidence -> [ "execution_evidence", evidence ]
+        match execution_evidence with
+        | Some evidence ->
+          [ ( "execution_evidence"
+            , input_to_json (Observability_redact.redact_json_value evidence) ) ]
         | None -> []
       in
       let composition_fields =
@@ -1051,7 +1063,7 @@ let log_call
             ~tool_name
             ~input:safe_input
             ~output_text
-            ~execution_evidence:safe_execution_evidence
+            ~execution_evidence
         with
         | Some evidence -> [ "route_evidence", evidence ]
         | None -> []

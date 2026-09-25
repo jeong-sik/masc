@@ -163,9 +163,11 @@ val route_evidence_json_of_tool_io :
 
 val execution_evidence_metadata : (string * Yojson.Safe.t) list -> Yojson.Safe.t
 (** Tool-result metadata carrying a completed Execute's audit fields (shell
-    receipts, sandbox labels, a captured stream's output completeness). The
-    metadata reaches the tool-call hook and never the provider, so these fields
-    are recorded without being sent to the model (#39035). *)
+    receipts, sandbox labels, a captured stream's output completeness). A
+    direct call's metadata reaches the tool-call hook and is not part of the
+    provider request, so these fields are recorded without being sent to the
+    model (#39035). A composition node's model-facing result still carries its
+    whole node result, metadata included. *)
 
 val execution_evidence_of_metadata : Yojson.Safe.t option -> Yojson.Safe.t option
 (** The audit object {!execution_evidence_metadata} put in tool-result
@@ -298,8 +300,9 @@ val log_call :
     persisted independently of the truncated opaque [output] preview.
     [execution_evidence] is a completed Execute's audit object from
     {!execution_evidence_of_metadata}, recorded as [execution_evidence] after
-    the same secret redaction as [input]; the model's [output] carries only the
-    unusual parts of it.
+    the same secret redaction and per-leaf bound as [input]; route evidence
+    reads it before redaction, as it reads [output_text]. The model's [output]
+    carries only the unusual parts of it.
     Explicit [artifact_refs] and [typed_result]'s retained artifacts require a
     synchronous append even without a callback; an unavailable store or failed
     append raises rather than losing their receipt in the preview queue.

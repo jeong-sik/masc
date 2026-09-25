@@ -193,11 +193,13 @@ type stream_event =
       (** The windows a [rate_limit_event] reported, for the operator
           projection only; nothing that routes or retries reads it. *)
   | Usage_reported of
-      { turn_id : string
+      { session_id : string
+      ; turn_id : string
       ; model : string
       ; usage : turn_usage
       }
-      (** The turn's spend from the result frame ([turn_id] is its [uuid]),
+      (** The turn's spend from the result frame of [session_id] ([turn_id]
+          is its [uuid]),
           emitted once the frame is known to be this session's and before it
           decides whether the turn succeeded, so a failed turn still reports
           it. Absent when the frame carries no usage or no model response was

@@ -167,9 +167,8 @@ let usage_missing_of_usage = function
   | Some usage -> not (usage_has_tokens usage)
 
 type attempt_usage =
-  { usage_report : Runtime_execution.usage_report
-  ; client_reported : bool
-  }
+  | Agent_core_attempt
+  | Client_stream_attempt of { reported : bool }
 
 (* One usage report an official client sent on its own stream while the
    turn runs ([Runtime_execution.Client_usage_stream]). The row is a raw
@@ -184,12 +183,9 @@ let emit_client_usage_report
     ~trace_id
     ~keeper_turn_id
     ?runtime_attempt
-    ~official_turn
-    ~response_id
-    ~model
-    ~usage_scope
-    (usage : Agent_core.Types.api_usage)
+    (report : Keeper_client_usage_report.t)
   =
+  let usage = report.usage in
   match trajectory_acc with
   | None -> ()
   | Some acc ->
@@ -199,10 +195,12 @@ let emit_client_usage_report
       ~task_id:acc.task_id
       ~trace_id
       ~keeper_turn_id
-      ~agent_core_turn_ordinal:official_turn
-      ~model
-      ~usage_projection:(Cost_ledger.Raw_observation usage_scope)
-      ~response_id
+      ~agent_core_turn_ordinal:report.official_turn
+      ~model:report.model
+      ~usage_projection:(Cost_ledger.Raw_observation report.usage_scope)
+      ~response_id:report.response_id
+      ~conversation:(report.conversation_id, report.position)
+      ?vendor_total_tokens:report.vendor_total_tokens
       ?runtime_attempt
       ~input_tokens:usage.input_tokens
       ~output_tokens:usage.output_tokens
@@ -466,26 +464,28 @@ let make_hooks
            Trajectory.set_turn acc turn;
            (* An AGENT_CORE response is one provider request, and this is
               where its usage is seen. An official client reports usage on
-              its own stream: once a report of this attempt reached the ledger
-              through [emit_client_usage_report], this response only repeats
-              it. When none did (a host stop ends the turn before the client
-              reports; a result without usage), this row is what records
-              that the attempt's usage is missing, under no scope. [None] is
-              a turn with no dispatched attempt and keeps the per-request row
-              [AfterTurn] always wrote. *)
+              its own stream through [emit_client_usage_report]: a response
+              that carries usage after such a report only repeats it. A
+              response without usage (a host stop, which ends the turn before
+              the client reports on the response that asked for it; a result
+              without usage) gets a row that records the missing usage under
+              no scope, whether or not earlier reports of the attempt arrived.
+              A count this hook cannot place ([None]: no dispatched attempt;
+              a client response no report preceded) is written under no
+              scope rather than a guessed one. *)
            let raw_projection =
              match current_attempt_usage () with
-             | Some { usage_report = Runtime_execution.Client_usage_stream
-                    ; client_reported = true
-                    } -> None
-             | Some { usage_report = Runtime_execution.Client_usage_stream
-                    ; client_reported = false
-                    } ->
+             | Some (Client_stream_attempt { reported = true }) when not usage_missing -> None
+             | Some (Client_stream_attempt _) | None ->
                Some
                  (Cost_ledger.Raw_observation
                     Runtime_usage_scope.Usage_scope_unavailable)
-             | Some { usage_report = Runtime_execution.Each_agent_core_response; _ }
-             | None -> Some (Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
+             | Some Agent_core_attempt ->
+               Some
+                 (Cost_ledger.Raw_observation
+                    (if usage_missing
+                     then Runtime_usage_scope.Usage_scope_unavailable
+                     else Runtime_usage_scope.Per_request))
            in
            (match raw_projection with
             | None -> ()

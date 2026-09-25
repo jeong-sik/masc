@@ -176,7 +176,8 @@ type stream_event =
       }
   | Usage_windows_reported of Runtime_provider_usage_window.report
   | Usage_reported of
-      { turn_id : string
+      { thread_id : string
+      ; turn_id : string
       ; model : string
       ; thread_total : token_usage
       }
@@ -1081,14 +1082,6 @@ let item_delta_notification ~method_ ~thread_id ~turn_id params =
   else Ok delta
 ;;
 
-(* thread/tokenUsage/updated carries the thread's running totals and the
-   [last] breakdown of the turn it names. Identity decides whether the frame
-   is about the turn this call awaits: one for another thread or turn is an
-   observation about work nobody here is waiting on, so it changes nothing
-   rather than ending the turn (#27967 is what a needless identity failure
-   costs). A frame that is ours but malformed is a protocol error: these
-   counts reach the usage ledger, and a half-read breakdown would be a number
-   nobody sent. *)
 (* One [TokenUsageBreakdown] of a [thread/tokenUsage/updated] frame. *)
 let token_usage_breakdown stage usage_fields name =
   let* breakdown_json = required_member stage name usage_fields in
@@ -1113,6 +1106,14 @@ let token_usage_breakdown stage usage_fields name =
     }
 ;;
 
+(* thread/tokenUsage/updated carries the thread's running totals and the
+   [last] breakdown of the turn it names. Identity decides whether the frame
+   is about the turn this call awaits: one for another thread or turn is an
+   observation about work nobody here is waiting on, so it changes nothing
+   rather than ending the turn (#27967 is what a needless identity failure
+   costs). A frame that is ours but malformed is a protocol error: these
+   counts reach the usage ledger, and a half-read breakdown would be a number
+   nobody sent. *)
 let token_usage_notification ~thread_id ~turn_id params =
   let stage = "thread/tokenUsage/updated" in
   let* fields = assoc_at stage params in
@@ -1393,7 +1394,9 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
        result's context occupancy. *)
     Option.iter
       (fun (_last, thread_total) ->
-         emit_stream_event on_stream_event (Usage_reported { turn_id; model; thread_total }))
+         emit_stream_event
+           on_stream_event
+           (Usage_reported { thread_id; turn_id; model; thread_total }))
       frame;
     let seen_usage =
       match frame with

@@ -263,15 +263,22 @@ let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
    turn nobody streams, traces or observes gets only those; its other events
    are ignored as before. *)
 let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
-    ~on_usage_report on_event =
+    ~on_usage_report ~position on_event =
   (* The result frame's uuid is the response identity the completion hook
-     also writes for a Claude Code turn. *)
-  let report_usage ~turn_id ~model usage =
+     also writes for a Claude Code turn; the session is the conversation. *)
+  let report_usage ~session_id ~turn_id ~model usage =
     Option.iter
       (fun report ->
-         report ~official_turn:turn_count ~response_id:turn_id ~model
-           ~usage_scope:Runtime_usage_scope.Turn_total
-           (api_usage_of_turn_usage usage))
+         report
+           { Keeper_client_usage_report.official_turn = turn_count
+           ; response_id = turn_id
+           ; model
+           ; conversation_id = session_id
+           ; position
+           ; usage_scope = Runtime_usage_scope.Turn_total
+           ; usage = api_usage_of_turn_usage usage
+           ; vendor_total_tokens = None
+           })
       on_usage_report
   in
   match on_event, raw_trace_run, on_native_action with
@@ -280,8 +287,8 @@ let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~
       (function
         | Runtime_claude_code.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
-        | Runtime_claude_code.Usage_reported { turn_id; model; usage } ->
-          report_usage ~turn_id ~model usage
+        | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
+          report_usage ~session_id ~turn_id ~model usage
         | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Turn_finished _ -> ())
   | _ ->
@@ -367,8 +374,8 @@ let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~
             observation.identity
         | Runtime_claude_code.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
-        | Runtime_claude_code.Usage_reported { turn_id; model; usage } ->
-          report_usage ~turn_id ~model usage
+        | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
+          report_usage ~session_id ~turn_id ~model usage
         | Runtime_claude_code.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text
@@ -539,6 +546,7 @@ module For_testing = struct
         ~turn_count
         ~on_native_action:(Some observe)
         ~on_usage_report:None
+        ~position:Keeper_usage_resolution.Fresh
         None
     with
     | Some callback -> callback event
@@ -1165,7 +1173,12 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       let on_stream_event =
         claude_stream_callback
           ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
-          ~on_usage_report on_event
+          ~on_usage_report
+          ~position:
+            (match session_mode with
+             | Runtime_claude_code.Start -> Keeper_usage_resolution.Fresh
+             | Runtime_claude_code.Resume _ -> Keeper_usage_resolution.Resumed)
+          on_event
       in
       try
         let client_result =

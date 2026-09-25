@@ -46,8 +46,7 @@ val run :
     (invocation:Agent_core.Tool_contract.Invocation.t -> content:string -> unit) ->
   ?on_native_action:(official_turn:int ->
     identity:Runtime_native_tools.action_identity -> tool_name:string -> unit) ->
-  ?on_usage_report:(official_turn:int -> response_id:string -> model:string ->
-      usage_scope:Runtime_usage_scope.t -> Agent_core.Types.api_usage -> unit) ->
+  ?on_usage_report:(Keeper_client_usage_report.t -> unit) ->
   event_bus:Agent_core.Event_bus.t option ->
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->
@@ -63,9 +62,10 @@ val run :
     rather than optional: a lane that reports nothing is what wrote every
     turn's input attribution on this lane as zero (masc#32995).
 
-    [on_usage_report] receives each model response's spend as the
-    app-server reports it, while the turn is still running, so a turn that
-    ends in an error still reports what it spent.
+    [on_usage_report] receives the thread's running count from every
+    [thread/tokenUsage/updated] frame of the turn, with the thread it counts,
+    while the turn is still running, so a turn that ends in an error still
+    reports it. A frame is not one response: repeats carry the same count.
 
     It reports [Whole_input_transmitted] only on a [Start], the one branch
     that injects the history into the thread. A [Resume] reports

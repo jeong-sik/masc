@@ -283,7 +283,7 @@ let api_usage_of_antigravity_usage (usage : Runtime_antigravity.usage) =
 ;;
 
 let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action ~on_usage_report
-    on_event =
+    ~position on_event =
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
     let tool_indexes = Hashtbl.create 8 in
@@ -350,11 +350,15 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
             Option.iter
               (fun report ->
                  report
-                   ~official_turn:num_turns
-                   ~response_id:(provider_turn_identity ~conversation_id ~num_turns)
-                   ~model
-                   ~usage_scope:Runtime_usage_scope.Conversation_cumulative
-                   (api_usage_of_antigravity_usage usage))
+                   { Keeper_client_usage_report.official_turn = num_turns
+                   ; response_id = provider_turn_identity ~conversation_id ~num_turns
+                   ; model
+                   ; conversation_id
+                   ; position
+                   ; usage_scope = Runtime_usage_scope.Conversation_cumulative
+                   ; usage = api_usage_of_antigravity_usage usage
+                   ; vendor_total_tokens = Some usage.total_tokens
+                   })
               on_usage_report
           | Runtime_antigravity.Turn_finished { text = _ } ->
             emit
@@ -825,7 +829,12 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let started_at = Time_compat.now () in
       let stream =
         stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action
-          ~on_usage_report on_event
+          ~on_usage_report
+          ~position:
+            (match conversation_mode with
+             | Runtime_antigravity.Start -> Keeper_usage_resolution.Fresh
+             | Runtime_antigravity.Resume _ -> Keeper_usage_resolution.Resumed)
+          on_event
       in
     let settle_host_stop stop =
       match (!session_state).Session_store.phase with
@@ -1237,13 +1246,14 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
 ;;
 
 module For_testing = struct
-  let report_stream_usage ~turn_count ~report event =
+  let report_stream_usage ~turn_count ~position ~report event =
     (stream_projection
        ~keeper_name:"test"
        ~raw_trace_run:None
        ~turn_count
        ~on_native_action:None
        ~on_usage_report:(Some report)
+       ~position
        None).on_runtime_event
       event
   ;;

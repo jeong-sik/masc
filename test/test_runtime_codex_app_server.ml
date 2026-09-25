@@ -1539,8 +1539,8 @@ let test_error_notification_reads_usage_limit () =
 let test_usage_frames_report_the_thread_count_before_a_usage_limit_ends_the_turn () =
   let reported = ref [] in
   let on_stream_event = function
-    | Runtime_codex_app_server.Usage_reported { turn_id; model; thread_total } ->
-      reported := (turn_id, model, thread_total.input_tokens) :: !reported
+    | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; thread_total } ->
+      reported := (thread_id ^ "/" ^ turn_id, model, thread_total.input_tokens) :: !reported
     | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
     | Usage_windows_reported _ | Turn_finished _ -> ()
@@ -1561,9 +1561,9 @@ let test_usage_frames_report_the_thread_count_before_a_usage_limit_ends_the_turn
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "usage limit notification did not fail the turn");
       check (list (triple string string int)) "the thread count each frame of this turn stated"
-        [ "turn-1", "gpt-fixture", 9000
-        ; "turn-1", "gpt-fixture", 11000
-        ; "turn-1", "gpt-fixture", 11000
+        [ "thread-1/turn-1", "gpt-fixture", 9000
+        ; "thread-1/turn-1", "gpt-fixture", 11000
+        ; "thread-1/turn-1", "gpt-fixture", 11000
         ]
         (List.rev !reported))
 ;;
@@ -4777,7 +4777,27 @@ let test_production_keeper_ledgers_codex_spend_of_a_failed_turn () =
               ; "conversation_cumulative", Some 11000
               ; "conversation_cumulative", Some 11000
               ]
-              (raw_cost_rows ~base_path)))
+              (raw_cost_rows ~base_path);
+            (* Each row names the thread it counts and the app-server's own
+               total, which a cumulative count is read against. *)
+            let store =
+              Cost_ledger.store_of_masc_root
+                (Workspace.masc_root_dir (Workspace.default_config base_path))
+            in
+            let conversation_of json =
+              let open Yojson.Safe.Util in
+              ( json |> member "conversation_id" |> to_string
+              , json |> member "conversation_position" |> to_string
+              , json |> member "vendor_total_tokens" |> to_int )
+            in
+            check (list (triple string string int)) "thread, position and vendor total"
+              [ "thread-1", "fresh", 9700
+              ; "thread-1", "fresh", 11740
+              ; "thread-1", "fresh", 11740
+              ]
+              (Dated_jsonl.read_recent store 100
+               |> List.map conversation_of
+               |> List.sort compare)))
 ;;
 
 (* A successful Codex turn's frame is written once. The completion hook sees

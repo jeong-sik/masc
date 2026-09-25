@@ -324,19 +324,29 @@ let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
   }
 ;;
 
-(* Always installed so usage-window and per-response usage reports are
+(* Always installed so usage-window reports and the thread's usage counts are
    recorded. A turn nobody streams, traces or observes gets only those; its
    other events are ignored as before. *)
 let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
-    ~on_usage_report on_event =
-  (* The thread's running count, reported under the app-server turn id: the
-     identity the completion hook also writes for a Codex turn. *)
-  let report_usage ~turn_id ~model thread_total =
+    ~on_usage_report ~position on_event =
+  (* The thread's running count, reported under the app-server turn id (the
+     identity the completion hook also writes for a Codex turn) and the
+     thread it counts. The app-server's own total is kept: an overflow reset
+     reports zero counts with the window size there. *)
+  let report_usage ~thread_id ~turn_id ~model
+      (thread_total : Runtime_codex_app_server.token_usage) =
     Option.iter
       (fun report ->
-         report ~official_turn:turn_count ~response_id:turn_id ~model
-           ~usage_scope:Runtime_usage_scope.Conversation_cumulative
-           (api_usage_of_token_usage thread_total))
+         report
+           { Keeper_client_usage_report.official_turn = turn_count
+           ; response_id = turn_id
+           ; model
+           ; conversation_id = thread_id
+           ; position
+           ; usage_scope = Runtime_usage_scope.Conversation_cumulative
+           ; usage = api_usage_of_token_usage thread_total
+           ; vendor_total_tokens = Some thread_total.total_tokens
+           })
       on_usage_report
   in
   match on_event, raw_trace_run, on_native_action with
@@ -345,8 +355,8 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
       (function
         | Runtime_codex_app_server.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
-        | Runtime_codex_app_server.Usage_reported { turn_id; model; thread_total } ->
-          report_usage ~turn_id ~model thread_total
+        | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; thread_total } ->
+          report_usage ~thread_id ~turn_id ~model thread_total
         | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
         | Turn_finished _ -> ())
@@ -438,8 +448,8 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
             server_name
         | Runtime_codex_app_server.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
-        | Runtime_codex_app_server.Usage_reported { turn_id; model; thread_total } ->
-          report_usage ~turn_id ~model thread_total
+        | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; thread_total } ->
+          report_usage ~thread_id ~turn_id ~model thread_total
         | Runtime_codex_app_server.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text
@@ -1329,7 +1339,12 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         let on_stream_event =
           codex_stream_callback
           ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
-          ~on_usage_report on_event
+          ~on_usage_report
+          ~position:
+            (match thread_mode with
+             | Runtime_codex_app_server.Start -> Keeper_usage_resolution.Fresh
+             | Runtime_codex_app_server.Resume _ -> Keeper_usage_resolution.Resumed)
+          on_event
         in
         (match
        Runtime_codex_app_server.run_turn
@@ -1777,6 +1792,7 @@ module For_testing = struct
         ~turn_count
         ~on_native_action:(Some observe)
         ~on_usage_report:None
+        ~position:Keeper_usage_resolution.Fresh
         None
     with
     | Some callback -> callback event

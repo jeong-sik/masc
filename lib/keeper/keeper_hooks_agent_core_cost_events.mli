@@ -37,6 +37,8 @@ val cost_event_payload
   -> usage_projection:Cost_ledger.usage_projection
   -> ?response_id:string
   -> ?runtime_attempt:(string * string * int)
+  -> ?conversation:(string * Keeper_usage_resolution.cumulative_position)
+  -> ?vendor_total_tokens:int
   -> ?cache_creation_input_tokens:int
   -> ?cache_read_input_tokens:int
   -> ?usage_missing:bool
@@ -59,6 +61,8 @@ val emit_cost_event
   -> usage_projection:Cost_ledger.usage_projection
   -> ?response_id:string
   -> ?runtime_attempt:(string * string * int)
+  -> ?conversation:(string * Keeper_usage_resolution.cumulative_position)
+  -> ?vendor_total_tokens:int
   -> ?cache_creation_input_tokens:int
   -> ?cache_read_input_tokens:int
   -> ?usage_missing:bool

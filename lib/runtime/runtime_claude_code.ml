@@ -190,7 +190,8 @@ type stream_event =
   | Native_tool_finished of Runtime_native_tools.observation
   | Usage_windows_reported of Runtime_provider_usage_window.report
   | Usage_reported of
-      { turn_id : string
+      { session_id : string
+      ; turn_id : string
       ; model : string
       ; usage : turn_usage
       }
@@ -1229,7 +1230,9 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     let usage = turn_usage_of_fields fields in
     (match assistant_model, usage with
      | Some model, Some usage ->
-       emit_stream_event on_stream_event (Usage_reported { turn_id; model; usage })
+       emit_stream_event
+         on_stream_event
+         (Usage_reported { session_id = expected_session_id; turn_id; model; usage })
      | None, Some usage ->
        Log.Runtime_agent.warn
          "Claude Code result %s reported usage (input=%d output=%d) with no measured \

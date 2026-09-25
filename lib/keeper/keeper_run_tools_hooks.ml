@@ -54,8 +54,7 @@ type agent_setup =
       runtime_id:string -> official_turn:int ->
       identity:Runtime_native_tools.action_identity -> tool_name:string -> unit
   ; observe_official_client_usage_report :
-      official_turn:int -> response_id:string -> model:string ->
-      usage_scope:Runtime_usage_scope.t -> Agent_core.Types.api_usage -> unit
+      Keeper_client_usage_report.t -> unit
   ; acc : hook_accumulator
   ; all_tool_names : string list
   ; skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list
@@ -567,8 +566,9 @@ let assemble_hooks
       Skill_delivery_state.begin_runtime_attempt skill_delivery_state;
       ctx.on_runtime_attempt attempt
     in
-    let observe_official_client_usage_report ~official_turn ~response_id ~model ~usage_scope
-        usage =
+    (* [client_reported_in_attempt] says the attempt's client reported on its
+       stream; the completion hook reads it to leave its row to the stream. *)
+    let observe_official_client_usage_report report =
       client_reported_in_attempt := true;
       Keeper_hooks_agent_core.emit_client_usage_report
         ~trajectory_acc
@@ -576,11 +576,7 @@ let assemble_hooks
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~keeper_turn_id
         ?runtime_attempt:!usage_attempt
-        ~official_turn
-        ~response_id
-        ~model
-        ~usage_scope
-        usage
+        report
     in
     let base_hooks =
       Keeper_hooks_agent_core.make_hooks
@@ -594,10 +590,12 @@ let assemble_hooks
         ~current_runtime_attempt:(fun () -> !usage_attempt)
         ~current_attempt_usage:(fun () ->
           Option.map
-            (fun usage_report ->
-               { Keeper_hooks_agent_core.usage_report
-               ; client_reported = !client_reported_in_attempt
-               })
+            (function
+              | Runtime_execution.Each_agent_core_response ->
+                Keeper_hooks_agent_core.Agent_core_attempt
+              | Runtime_execution.Client_usage_stream ->
+                Keeper_hooks_agent_core.Client_stream_attempt
+                  { reported = !client_reported_in_attempt })
             !usage_report_of_attempt)
         ~on_after_turn_response:
           (fun ~response ->

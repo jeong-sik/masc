@@ -322,8 +322,7 @@ val run_named :
     (runtime_id:string -> official_turn:int ->
      identity:Runtime_native_tools.action_identity -> tool_name:string -> unit) ->
   ?on_official_client_usage_report:
-    (official_turn:int -> response_id:string -> model:string ->
-      usage_scope:Runtime_usage_scope.t -> Agent_core.Types.api_usage -> unit) ->
+    (Keeper_client_usage_report.t -> unit) ->
   ?on_model_input_window_observation:
     (measurement:Turn_record.model_input_measurement
      -> Runtime_model_input_tail_window.window_observation

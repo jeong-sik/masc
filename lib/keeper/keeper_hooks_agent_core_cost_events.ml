@@ -62,6 +62,8 @@ let assemble_cost_event_payload
     ~(usage_projection : Cost_ledger.usage_projection)
     ?response_id
     ?runtime_attempt
+    ?conversation
+    ?vendor_total_tokens
     ?(cache_creation_input_tokens : int = 0)
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
@@ -164,6 +166,24 @@ let assemble_cost_event_payload
          | None -> `Null)
     | Cost_ledger.Raw_observation _, None | Cost_ledger.Resolved_delta, _ -> `Null
   in
+  (* The client conversation a raw observation's counts belong to, and the
+     client's own total: a conversation-cumulative count is read against
+     both. A settlement is this Keeper turn's spend and carries neither. *)
+  let conversation_fields =
+    match usage_projection, conversation with
+    | Cost_ledger.Raw_observation _, Some (conversation_id, position) ->
+        [ "conversation_id", `String conversation_id
+        ; "conversation_position",
+          `String (Keeper_usage_resolution.position_to_string position) ]
+    | Cost_ledger.Raw_observation _, None | Cost_ledger.Resolved_delta, _ ->
+        [ "conversation_id", `Null; "conversation_position", `Null ]
+  in
+  let vendor_total_fields =
+    match usage_projection, vendor_total_tokens with
+    | Cost_ledger.Raw_observation _, Some total -> [ "vendor_total_tokens", `Int total ]
+    | Cost_ledger.Raw_observation _, None | Cost_ledger.Resolved_delta, _ ->
+        [ "vendor_total_tokens", `Null ]
+  in
   let telemetry_fields = match telemetry with
     | Some t ->
       int_field "reasoning_tokens" t.reasoning_tokens
@@ -223,6 +243,8 @@ let assemble_cost_event_payload
             token or cost observation in the current row. *)
          ]
          @ attempt_fields
+         @ conversation_fields
+         @ vendor_total_fields
          @ Keeper_usage_trust.json_fields usage_trust
          @ cache_token_fields
          @ wall_tok_s_fields
@@ -250,6 +272,8 @@ let cost_event_payload
     ~(usage_projection : Cost_ledger.usage_projection)
     ?response_id
     ?runtime_attempt
+    ?conversation
+    ?vendor_total_tokens
     ?(cache_creation_input_tokens : int = 0)
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
@@ -269,6 +293,8 @@ let cost_event_payload
      ~usage_projection
      ?response_id
      ?runtime_attempt
+     ?conversation
+     ?vendor_total_tokens
      ~cache_creation_input_tokens
      ~cache_read_input_tokens
      ~usage_missing
@@ -290,6 +316,8 @@ let emit_cost_event
     ~(usage_projection : Cost_ledger.usage_projection)
     ?response_id
     ?runtime_attempt
+    ?conversation
+    ?vendor_total_tokens
     ?(cache_creation_input_tokens : int = 0)
     ?(cache_read_input_tokens : int = 0)
     ?(usage_missing : bool = false)
@@ -311,6 +339,8 @@ let emit_cost_event
       ~usage_projection
       ?response_id
       ?runtime_attempt
+      ?conversation
+      ?vendor_total_tokens
       ~cache_creation_input_tokens
       ~cache_read_input_tokens
       ~usage_missing

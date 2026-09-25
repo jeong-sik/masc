@@ -171,16 +171,24 @@ type stream_event =
           for the operator projection only; nothing that routes or retries
           reads it. *)
   | Usage_reported of
-      { turn_id : string
+      { thread_id : string
+      ; turn_id : string
       ; model : string
       ; thread_total : token_usage
       }
       (** One [thread/tokenUsage/updated] frame for this turn: its [total]
-          breakdown, the thread's running count. A frame is not one
+          breakdown, the running count of [thread_id]. A frame is not one
           response; the app-server repeats it on rate-limit updates,
-          refusals, compaction and retries, and a repeat carries the same
-          count. Emitted when the frame is read, before the turn's outcome is
-          known, so a turn that ends in an error still reports its count. *)
+          refusals and retries, and a repeat carries the same count. Emitted
+          when the frame is read, before the turn's outcome is known, so a
+          turn that ends in an error still reports its count.
+
+          The count is the app-server's, with its gaps (rust-v0.156.1): a
+          context-window overflow replaces it with zero counts and the
+          window size as [total_tokens] (fill_to_context_window), after
+          which it counts up from zero; remote compaction spend never enters
+          it; and a response whose frame was not persisted before the
+          process stopped is not in any later count. *)
   | Turn_finished of { text : string }
 
 type history_role =

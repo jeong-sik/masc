@@ -901,7 +901,7 @@ let quota_result_with_usage =
 let test_quota_refusal_still_reports_the_turns_spend () =
   let reported = ref [] in
   let on_stream_event = function
-    | Runtime_claude_code.Usage_reported { turn_id; model; usage } ->
+    | Runtime_claude_code.Usage_reported { turn_id; model; usage; _ } ->
       reported :=
         (turn_id, model, usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens)
         :: !reported

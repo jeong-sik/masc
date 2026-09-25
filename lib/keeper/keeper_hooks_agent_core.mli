@@ -97,6 +97,8 @@ val cost_event_payload :
   usage_projection:Cost_ledger.usage_projection ->
   ?response_id:string ->
   ?runtime_attempt:(string * string * int) ->
+  ?conversation:(string * Keeper_usage_resolution.cumulative_position) ->
+  ?vendor_total_tokens:int ->
   ?cache_creation_input_tokens:int ->
   ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->
@@ -124,6 +126,8 @@ val emit_cost_event :
   usage_projection:Cost_ledger.usage_projection ->
   ?response_id:string ->
   ?runtime_attempt:(string * string * int) ->
+  ?conversation:(string * Keeper_usage_resolution.cumulative_position) ->
+  ?vendor_total_tokens:int ->
   ?cache_creation_input_tokens:int ->
   ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->
@@ -132,11 +136,12 @@ val emit_cost_event :
 (** Append a structured cost-ledger event to [costs/YYYY-MM/DD.jsonl]. *)
 
 type attempt_usage =
-  { usage_report : Runtime_execution.usage_report
-  ; client_reported : bool
-        (** A usage report of this attempt reached
-            [emit_client_usage_report]. *)
-  }
+  | Agent_core_attempt
+      (** AGENT_CORE hands [AfterTurn] every provider response. *)
+  | Client_stream_attempt of { reported : bool }
+      (** An official client reports usage on its own stream; [reported] is
+          whether a report of this attempt reached
+          [emit_client_usage_report]. *)
 (** How the dispatched attempt's usage becomes visible, read by [AfterTurn]
     to decide whether its response still needs a raw row. *)
 
@@ -146,16 +151,11 @@ val emit_client_usage_report :
   trace_id:string ->
   keeper_turn_id:int ->
   ?runtime_attempt:(string * string * int) ->
-  official_turn:int ->
-  response_id:string ->
-  model:string ->
-  usage_scope:Runtime_usage_scope.t ->
-  Agent_core.Types.api_usage ->
+  Keeper_client_usage_report.t ->
   unit
 (** Append one raw cost-ledger row for a usage report an official client
-    sent on its own stream, under the scope the client reports in.
-    [official_turn] is the client turn the report belongs to and
-    [response_id] the client's identity for it. Writes nothing without a
+    sent on its own stream, under the scope the client reports in, keyed by
+    the client turn and conversation it names. Writes nothing without a
     trajectory accumulator, as [AfterTurn] does. *)
 
 val broadcast_resolved_turn_complete :

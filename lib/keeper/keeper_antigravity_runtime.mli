@@ -44,8 +44,7 @@ val run :
     (invocation:Agent_core.Tool_contract.Invocation.t -> content:string -> unit) ->
   ?on_native_action:(official_turn:int ->
     identity:Runtime_native_tools.action_identity -> tool_name:string -> unit) ->
-  ?on_usage_report:(official_turn:int -> response_id:string -> model:string ->
-      usage_scope:Runtime_usage_scope.t -> Agent_core.Types.api_usage -> unit) ->
+  ?on_usage_report:(Keeper_client_usage_report.t -> unit) ->
   event_bus:Agent_core.Event_bus.t option ->
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->
@@ -76,9 +75,8 @@ val run :
 module For_testing : sig
   val report_stream_usage
     :  turn_count:int
-    -> report:
-         (official_turn:int -> response_id:string -> model:string ->
-          usage_scope:Runtime_usage_scope.t -> Agent_core.Types.api_usage -> unit)
+    -> position:Keeper_usage_resolution.cumulative_position
+    -> report:(Keeper_client_usage_report.t -> unit)
     -> Runtime_antigravity.stream_event
     -> unit
   (** Feed one runtime event through the Keeper stream projection with only a

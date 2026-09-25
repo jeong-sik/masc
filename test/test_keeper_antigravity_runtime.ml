@@ -1817,21 +1817,28 @@ let test_fixed_sections_at_capacity_are_refused () =
 (* The projection keys an Antigravity usage report as the completion hook
    keys the turn: the CLI's own turn count, the identity built from it, the
    conversation-cumulative scope, and the inclusive input (100 exclusive +
-   50 cache read). The Keeper's claim counter (turn_count) is not the key. *)
+   50 cache read). The Keeper's claim counter (turn_count) is not the key.
+   The report names the conversation, whether this turn resumed it, and the
+   CLI's own total. *)
 let test_stream_usage_is_keyed_by_the_clis_turn () =
   let reports = ref [] in
-  let report ~official_turn ~response_id ~model ~usage_scope
-      (usage : Agent_core.Types.api_usage) =
+  let report (report : Keeper_client_usage_report.t) =
     reports :=
-      ( official_turn
-      , response_id
-      , model
-      , Runtime_usage_scope.to_string usage_scope
-      , (usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens) )
+      ( ( report.official_turn
+        , report.response_id
+        , report.model
+        , Runtime_usage_scope.to_string report.usage_scope )
+      , ( report.conversation_id
+        , Keeper_usage_resolution.position_to_string report.position
+        , report.vendor_total_tokens )
+      , ( report.usage.input_tokens
+        , report.usage.output_tokens
+        , report.usage.cache_read_input_tokens ) )
       :: !reports
   in
   Keeper_antigravity_runtime.For_testing.report_stream_usage
     ~turn_count:2
+    ~position:Keeper_usage_resolution.Resumed
     ~report
     (Runtime_antigravity.Usage_reported
        { conversation_id = "conversation-1"
@@ -1846,7 +1853,9 @@ let test_stream_usage_is_keyed_by_the_clis_turn () =
            }
        });
   match !reports with
-  | [ (73, "conversation-1:ordinal:73", "gemini-fixture", "conversation_cumulative", (150, 7, 50)) ]
+  | [ ( (73, "conversation-1:ordinal:73", "gemini-fixture", "conversation_cumulative")
+      , ("conversation-1", "resumed", Some 107)
+      , (150, 7, 50) ) ]
     -> ()
   | reports ->
     failf "expected one report keyed by the CLI turn, got %d" (List.length reports)

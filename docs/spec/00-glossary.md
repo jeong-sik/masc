@@ -546,9 +546,11 @@ status: reference
   판정은 누구의 사정인지만 답하고, 다음 후보로 넘길지는 걸음이 정한다 — exact 걸음은
   Exact-output route의 슬롯 전진 조건이, Keeper 걸음은 `lane_should_retry`의 predicate가
   정한다. 공식 클라이언트가 만드는 provider 오류(`Llm_provider.Error.provider_error`)는 이
-  판정 밖이다(#38776). 영수증에 적히는 Failure Route는 이 판정을 읽지 않고 따로 분류한다 —
-  #38913은 `InputCapacity`·`Json_parse_error`를 route의 `admission` 회전으로 옮겨 걸음과
-  답을 맞췄다. `Window`는 이 바인딩의 context window이고, Provider Usage Window(사용량 한도
+  판정 밖이다(#38776). 영수증에 적히는 Failure Route도 API 오류(`Retry.api_error`)의 class를
+  이 판정에서 끌어온다(#38958) — route와 걸음이 같은 사실표를 읽어서,
+  `Retry.Attempt_rejected`(보내기 전 이 후보 자신의 정책 거절)·`InputCapacity`·`Json_parse_error`는
+  모두 `Binding Admission`이고 route class는 `admission`이다. 원래 오류에서는 `retry_after`
+  힌트만 읽는다. `Window`는 이 바인딩의 context window이고, Provider Usage Window(사용량 한도
   창)와 다른 창이다. 한국어 이름의 "사정"은 탓이 아니다 — 429·529는 누구의 잘못도 아니고
   그 후보의 형편이다.
   → [Candidate_fault](../../packages/agent_core/lib/llm_provider/candidate_fault.mli) ·

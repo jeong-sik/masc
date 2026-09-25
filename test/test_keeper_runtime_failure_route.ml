@@ -711,7 +711,8 @@ let test_route_resumes_on_same_path_per_class () =
      predicates do not decide.
    The one known disagreement is pinned by name: a typed [ContextOverflow]
    ([Binding Window]) advances the walk, while the route keeps the typed
-   terminal [Context_overflow] it had before the RFC walk. A new
+   terminal [Context_overflow] it had before the RFC walk. That is a defect,
+   not a design choice (#38984); fixing it turns the pinned list into [[]]. A new
    disagreement fails the test, and so does closing the pinned one, so the
    allow-list cannot go stale. Each row also pins its route class so a class
    cannot move silently. A new [Retry.api_error] constructor stops

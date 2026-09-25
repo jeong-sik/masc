@@ -407,7 +407,7 @@ const runtimeBlockerLabels = {
   agent_core_guardrail_violation: 'Agent Core 가드레일 위반',
   agent_core_tripwire_violation: 'Agent Core Tripwire 위반',
   agent_core_input_required: 'Agent Core 입력 대기',
-  capacity_backpressure: '공급자 용량 초과',
+  provider_capacity: '공급자 용량 초과',
   gate_replay_repair_required: '승인 기록 복구 필요',
   incomplete_tool_transcript: '도구 기록 깨짐',
   internal_bridge_exception: '브리지 예외',

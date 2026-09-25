@@ -92,7 +92,7 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
 
 type blocker_class =
   | Runtime_exhausted of runtime_exhaustion_reason
-  | Capacity_backpressure
+  | Provider_capacity
   | Fiber_unresolved
   | Agent_core_context_window_exceeded
   | Agent_core_unrecognized_stop_reason

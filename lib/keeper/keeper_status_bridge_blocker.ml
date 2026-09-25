@@ -11,90 +11,6 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-let blocker_reason_of_turn_driver_reason
-    (reason : Keeper_turn_driver.runtime_exhaustion_reason)
-  : Keeper_meta_contract.runtime_exhaustion_reason
-  =
-  match reason with
-  | Keeper_turn_driver.Connection_refused -> Connection_refused
-  | Keeper_turn_driver.Dns_failure -> Dns_failure
-  | Keeper_turn_driver.No_providers_available -> No_providers_available
-  | Keeper_turn_driver.All_providers_failed -> All_providers_failed
-  | Keeper_turn_driver.Candidates_filtered_after_cycles ->
-    Candidates_filtered_after_cycles
-  | Keeper_turn_driver.Session_conflict -> Session_conflict
-  | Keeper_turn_driver.Other_detail detail -> Other_detail detail
-;;
-
-let blocker_class_of_core_error (err : Agent_core.Error.t) : blocker_class option =
-  match Keeper_error_classify.recoverable_runtime_failure_reason err with
-  | Some Keeper_error_classify.Capacity_backpressure -> Some Capacity_backpressure
-  | _ ->
-  match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Runtime_exhausted { reason; _ }) ->
-    Some (Runtime_exhausted (blocker_reason_of_turn_driver_reason reason))
-  (* Preserve the pre-existing Config-error policy: this local refusal is
-     observed through the registry, not a new durable supervisor blocker. *)
-  | Some (Keeper_turn_driver.Official_client_recovery_required _) -> None
-  | Some (Keeper_turn_driver.Resumable_cli_session _) -> None
-  | Some (Keeper_turn_driver.Accept_rejected _) -> None
-  (* Typed [Internal_*] variants map to dedicated [blocker_class] values so
-     dashboards and operators can tell an unhandled internal failure from a
-     clean turn. *)
-  | Some (Keeper_turn_driver.Internal_unhandled_exception _) ->
-    Some Internal_unhandled_exception
-  | Some (Keeper_turn_driver.Internal_bridge_exception _) ->
-    Some Internal_bridge_exception
-  | Some (Keeper_turn_driver.Internal_contract_rejected _) ->
-    Some Internal_contract_rejected
-  | Some (Keeper_turn_driver.Incomplete_tool_transcript _) ->
-    Some Incomplete_tool_transcript
-  | Some (Keeper_turn_driver.Terminal_effect_failed _) ->
-    Some Terminal_effect_failed
-  | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _) ->
-    Some Provider_attempt_effect_fenced
-  | Some (Keeper_turn_driver.Tool_correction_lost _) ->
-    Some Tool_correction_lost
-  (* Neither blocks the keeper: the host stopped one turn, and a closed
-     runtime connection is retried on the next candidate. A blocker_class
-     here would put a keeper on the supervisor's blocked list that was never
-     blocked. *)
-  | Some (Keeper_turn_driver.Host_stopped_turn _)
-  | Some (Keeper_turn_driver.Preempted_before_first_token _)
-  | Some (Keeper_turn_driver.Runtime_connection_closed _) -> None
-  | Some (Keeper_turn_driver.Receipt_persistence_failed _) ->
-    Some Receipt_persistence_failed
-  | Some (Keeper_turn_driver.Gate_replay_repair_required _) ->
-    Some Gate_replay_repair_required
-  | None ->
-    (match err with
-     | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> None
-     | Agent_core.Error.Agent
-         ( HookExecutionFailed _
-         | TerminalToolEffectFailed _
-         | TerminalToolDurabilityFailed _
-         (* Hitting the declared round ceiling is not a blocked keeper: the
-            next turn starts normally against the same history. The turn's
-            terminal reason code carries it, which is the visibility this
-            needs. *)
-         | ToolRoundLimitExceeded _ ) ->
-       None
-     | Agent_core.Error.Agent (UnrecognizedStopReason _) ->
-       Some Agent_core_unrecognized_stop_reason
-     | Agent_core.Error.Agent (GuardrailViolation _) -> Some Agent_core_guardrail_violation
-     | Agent_core.Error.Agent (TripwireViolation _) -> Some Agent_core_tripwire_violation
-     | Agent_core.Error.Agent (InputRequired _) -> Some Agent_core_input_required
-     (* Provider-level [Api] errors are surfaced via AGENT_CORE retry / runtime
-         layers and do not map to a typed blocker_class by themselves. *)
-     | Agent_core.Error.Api _
-     | Agent_core.Error.Provider _
-     | Agent_core.Error.Mcp _
-     | Agent_core.Error.Config _
-     | Agent_core.Error.Serialization _
-     | Agent_core.Error.Io _
-     | Agent_core.Error.Orchestration _ -> None)
-;;
-
 (* ── Runtime blocker surface ───────────────────────────────── *)
 
 type runtime_blocker_surface =
@@ -127,9 +43,9 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   let str = runtime_blocker_class_label cls in
   let summary =
     match cls with
-    | Capacity_backpressure ->
+    | Provider_capacity ->
       if summary = ""
-      then "Provider or client capacity backpressure blocked this keeper turn."
+      then "Provider capacity exhaustion blocked this keeper turn."
       else summary
     | Runtime_exhausted reason ->
       if summary = "" then runtime_exhaustion_summary reason else summary

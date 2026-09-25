@@ -3983,6 +3983,24 @@ let schedule_wake_word_cells =
     (fun widest word -> max widest (Message_layout.display_width word))
     0 Schedule_contract_values.wake_status_strings
 
+(* The same rule for the schedule's own status. [sch_status] arrives as a
+   string rather than the contract's variant, so the cell is cut to this
+   width as well: a word the contract does not name cannot push the columns
+   beside it out of line. *)
+let schedule_status_word_cells =
+  List.fold_left
+    (fun widest word -> max widest (Message_layout.display_width word))
+    0 Schedule_contract_values.schedule_status_strings
+
+
+(* The width of the request clock column, read off the format rather than
+   typed. [short_timestamp] answers a parsed stamp in this shape, but an
+   unparsed one comes back as the source text and an absent one as "(never)",
+   and either of those pulls the three columns after it out of line -- the
+   same shape as the printf padding this row gave up. *)
+let schedule_requested_clock_cells =
+  Message_layout.display_width (Terminal_text.short_timestamp_of_unix 0.)
+
 (* What became of the wake, for a list row that has one line to say it in.
 
    The word is the server's own [projection_status], not a reading of it.
@@ -7920,14 +7938,25 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                    ^ Ansi.reset
                  ; ""
                  ])
-            @ List.map
+            @ Layout.automation_schedule_lines ~inner_width:inner
+                ~status_cells:schedule_status_word_cells
+                ~clock_cells:schedule_requested_clock_cells
+                (List.map
                 (fun (row : schedule_row) ->
-                   Printf.sprintf "  %-12s %-18s %s"
-                     (Terminal_text.single_line row.sch_status)
-                     (Terminal_text.single_line row.sch_recurrence_summary)
-                     (Terminal_text.single_line
-                        (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)))
-                rows
+                   (* The requested clock disambiguates repeated one-shot
+                      requests. The pure layout keeps each payload summary in
+                      the main row; a long recurrence gets a continuation
+                      rather than consuming every row's summary space. *)
+                   ({ Layout.status = Terminal_text.single_line row.sch_status
+                    ; requested_clock =
+                        Terminal_text.short_timestamp row.sch_requested_at_iso
+                    ; recurrence =
+                        Terminal_text.single_line row.sch_recurrence_summary
+                    ; summary =
+                        Terminal_text.single_line
+                          (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)
+                    } : Layout.automation_schedule_row))
+                rows)
       | _, _ ->
           [ Ansi.dim ^ "  (loading this Keeper's schedules…)" ^ Ansi.reset ]
     in

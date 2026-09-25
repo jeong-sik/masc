@@ -1,5 +1,48 @@
 let nonnegative_width width = max 0 width
 
+type automation_schedule_row =
+  { status : string
+  ; requested_clock : string
+  ; recurrence : string
+  ; summary : string
+  }
+
+(* Keep the summary on every main row. A single long recurrence must not make
+   every other row pad to its width and disappear at the frame's right edge.
+   The variable area gives at least a third to the summary; a recurrence that
+   cannot fit there gets a labelled continuation with its full text. *)
+let automation_schedule_lines ~inner_width ~status_cells ~clock_cells rows =
+  let module Text = Masc_tui_message_layout in
+  let lead_cells = 2 + max 0 status_cells + 1 + max 0 clock_cells + 2 in
+  let variable_cells = max 0 (inner_width - lead_cells - 1) in
+  let summary_reserve = max 1 (variable_cells / 3) in
+  let recurrence_limit = max 0 (variable_cells - summary_reserve) in
+  let recurrence_cells =
+    List.fold_left
+      (fun widest (row : automation_schedule_row) ->
+         let width = Text.display_width row.recurrence in
+         if width <= recurrence_limit then max widest width else widest)
+      0 rows
+  in
+  List.concat_map
+    (fun (row : automation_schedule_row) ->
+       let lead =
+         "  " ^ Text.fit_width row.status status_cells ^ " "
+         ^ Text.fit_width row.requested_clock clock_cells ^ "  "
+       in
+       if Text.display_width row.recurrence <= recurrence_limit then
+         [ lead ^ Text.fit_width row.recurrence recurrence_cells ^ " " ^ row.summary ]
+       else
+         let label = "    recurrence: " in
+         let continuation_width = max 1 (inner_width - Text.display_width label) in
+         let continuation =
+           Text.wrap_words ~max_cells:continuation_width row.recurrence
+           |> List.map (fun line -> label ^ line)
+         in
+         (lead ^ row.summary) :: continuation)
+    rows
+;;
+
 let keeper_context_bar_width ~inner_width =
   nonnegative_width (min 30 (inner_width - 40))
 

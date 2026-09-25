@@ -1,28 +1,9 @@
 (** Consolidated constants for the llm_provider library.
 
-    Centralises downstream handoff evidence, cache TTL, and endpoint defaults
+    Centralises cache TTL, error-body truncation, and endpoint defaults
     so they are defined once and referenced everywhere.
 
     @since 0.99.0 *)
-
-(* ── HTTP handoff evidence ───────────────────────── *)
-
-module Http = struct
-  (** HTTP status codes that downstream coordinators may use when deciding
-      whether to hand work to another provider. AGENT_CORE exposes the codes;
-      orchestration lives outside agent core. 498 = Groq Flex tier capacity
-      exceeded. *)
-  let cascadable_codes = [ 401; 403; 429; 498; 500; 502; 503; 529 ]
-end
-
-(* The former unknown-model [max_tokens] fallback (16384, env
-   AGENT_CORE_MAX_TOKENS_DEFAULT) was removed: when neither the caller nor the
-   capability catalog declares an output ceiling, request builders omit
-   the field and the provider applies the model's real limit. An
-   invented value is shared by thinking and answer and truncates long
-   reasoning mid-thought on catalog-silent models. Anthropic (the one
-   wire that requires the field) fails loudly via
-   [Backend_anthropic.required_max_output_tokens]. *)
 
 (* ── Cache ───────────────────────────────────────── *)
 

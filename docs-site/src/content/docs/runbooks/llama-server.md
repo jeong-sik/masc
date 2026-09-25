@@ -45,6 +45,9 @@ Find this in `<base-path>/.masc/config/runtime.toml`, drop the `#`, and point
 display-name = "llama.cpp llama-server"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:8080/v1"
+# An exact-output lane slot on this provider needs a whole-request deadline.
+# connect-timeout-s stops at the response headers, so it does not count.
+exact-body-timeout-s = 1200.0
 
 [providers.llama_server.healthcheck]
 path = "/models"
@@ -81,6 +84,10 @@ default = "llama_server.qwen-2-5-coder-32b"
 [runtime.exact_output_lanes.verifier_exact]
 slots = ["llama_server.qwen-2-5-coder-32b"]
 ```
+
+A slot's provider must declare `exact-body-timeout-s`. A save that adds a slot
+without it is refused; at boot such a slot is left out of its lane and the
+runtime startup report names the lane, the slot and the provider.
 
 The installer probes `healthcheck.path` while configuring, so a server that is
 not up shows as `not running` in the wizard rather than failing quietly later.

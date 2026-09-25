@@ -380,7 +380,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                   |> Result.map_error (fun error -> fail error)
                   |> Result.get_ok;
                   match
-                    Keeper_turn_driver.run_named
+                    Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-fixture"
                       ~base_path
@@ -509,7 +509,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                            (Filename.concat base_path "antigravity-prompt.txt")
                            In_channel.input_all);
                     match
-                      Keeper_turn_driver.run_named
+                      Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                         ~runtime_id:"antigravity.gemini"
                         ~keeper_name:"antigravity-fixture"
                         ~base_path
@@ -560,7 +560,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         | Ok _ | Error _ -> fail "resumed session did not settle" in
                       let prompt_before_gate = In_channel.with_open_bin
                         (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
-                      (match Keeper_turn_driver.run_named
+                      (match Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
                           ~base_path ~goal:"Resume the approved call"
                           ~official_client_continuation:gate_checkpoint
@@ -580,7 +580,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                          reports 1. The control resume runs last, so the
                          checks below read a session settled at ordinal 73. *)
                       let run_context ~goal (system_prompt, initial_messages) =
-                        match Keeper_turn_driver.run_named
+                        match Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
                           ~base_path ~goal
                           ~system_prompt ~tools:[tool] ~agent_core_tools:[tool]
@@ -783,7 +783,7 @@ let test_blank_success_requires_fresh_conversation () =
                 (fun () ->
                   Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
                   let run () =
-                    Keeper_turn_driver.run_named
+                    Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-fixture"
                       ~base_path
@@ -1814,6 +1814,53 @@ let test_fixed_sections_at_capacity_are_refused () =
   | Ok _ -> fail "fixed sections filled the declared capacity"
 ;;
 
+(* The projection keys an Antigravity usage report as the completion hook
+   keys the turn: the CLI's own turn count, the identity built from it, the
+   conversation-cumulative scope, and the inclusive input (100 exclusive +
+   50 cache read). The Keeper's claim counter (turn_count) is not the key.
+   The report names the conversation, whether this turn resumed it, and the
+   CLI's own total. *)
+let test_stream_usage_is_keyed_by_the_clis_turn () =
+  let reports = ref [] in
+  let report (report : Keeper_client_usage_report.t) =
+    reports :=
+      ( ( report.official_turn
+        , report.response_id
+        , report.model
+        , Runtime_usage_scope.to_string report.usage_scope )
+      , ( report.conversation_id
+        , Keeper_usage_resolution.position_to_string report.position
+        , report.vendor_total_tokens )
+      , ( report.usage.input_tokens
+        , report.usage.output_tokens
+        , report.usage.cache_read_input_tokens ) )
+      :: !reports
+  in
+  Keeper_antigravity_runtime.For_testing.report_stream_usage
+    ~turn_count:2
+    ~position:Keeper_usage_resolution.Resumed
+    ~report
+    (Runtime_antigravity.Usage_reported
+       { conversation_id = "conversation-1"
+       ; model = "gemini-fixture"
+       ; num_turns = 73
+       ; usage =
+           { input_tokens = 100
+           ; output_tokens = 7
+           ; thinking_tokens = 3
+           ; cache_read_tokens = 50
+           ; total_tokens = 107
+           }
+       });
+  match !reports with
+  | [ ( (73, "conversation-1:ordinal:73", "gemini-fixture", "conversation_cumulative")
+      , ("conversation-1", "resumed", Some 107)
+      , (150, 7, 50) ) ]
+    -> ()
+  | reports ->
+    failf "expected one report keyed by the CLI turn, got %d" (List.length reports)
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
@@ -1896,6 +1943,10 @@ let () =
               "fixed sections at capacity are refused"
               `Quick
               test_fixed_sections_at_capacity_are_refused
+          ; test_case
+              "stream usage is keyed by the CLI's turn"
+              `Quick
+              test_stream_usage_is_keyed_by_the_clis_turn
         ] )
     ]
 ;;

@@ -299,6 +299,7 @@ let handle_tool_execute_typed
              | Docker | Micro_vm ->
                Error
                  (Keeper_sandbox_shell_ir_target.target_error
+                    ~class_:Tool_result.Runtime_failure
                     "typed Shell IR guest dispatch requires a turn sandbox factory (no factory provided)"))
           | Remote_ssh_profile ->
             if sandbox_profile = Remote_ssh
@@ -477,11 +478,7 @@ let handle_tool_execute_typed
           [ "typed", `Bool true; "cmd", `String cmd_for_log ]
           @ dispatched_model_location_fields ()
         in
-        let typed_error_json
-              ?(class_ = Tool_result.Runtime_failure)
-              ?(extra_fields = [])
-              msg
-          =
+        let typed_error_json ~class_ ?(extra_fields = []) msg =
           Keeper_tool_execution.failure
             ~class_
             ~effect_disposition:Tool_result.Proven_pre_effect
@@ -602,6 +599,7 @@ let handle_tool_execute_typed
            | Error err ->
              authorized
                (typed_error_json
+                  ~class_:Tool_result.Runtime_failure
                   ~extra_fields:[ "error", `String "github_identity_snapshot_unavailable" ]
                   ("GitHub identity snapshot unavailable: " ^ err))
            | Ok github_secret_files ->
@@ -687,7 +685,7 @@ let handle_tool_execute_typed
              opposite.
 
              Since #32662 no multi-stage call reaches here: [Argv] and
-             [Script] both lower to one [Simple]. The stage traversal is
+             [Command] both lower to one [Simple]. The stage traversal is
              {!Keeper_tooling.Shell_costume.ir_keeps_a_shell}'s answer for
              the whole [Shell_ir.t] type, and only its own tests still take
              it. Kept because the predicate is about the type, not about
@@ -797,7 +795,14 @@ let handle_tool_execute_typed
                   "execute stream end callback failed keeper=%s: %s"
                   meta.name
                   (Printexc.to_string exn));
-            authorized (typed_error_json diagnostic)
+            (* The gate, parser and complexity checks judge only the Shell IR
+               masc builds. An argv command is a Simple node with literal
+               arguments; a script is an opaque [-c] argument of its shell.
+               Pipes and redirects are allowed here, so this IR cannot
+               produce these refusals. One firing is masc's own fault:
+               Runtime_failure. Path_reject instead judges the cwd and argv
+               path operands supplied by the caller, not script contents. *)
+            authorized (typed_error_json ~class_:Tool_result.Runtime_failure diagnostic)
           | Error (Keeper_tooling.Execute_shell_ir.Cannot_parse reason) ->
             let reason_tag = Keeper_tooling.Execute_shell_ir.parse_reason_tag reason in
             (* Parity with gate_reject/path_reject, which have always carried
@@ -823,7 +828,9 @@ let handle_tool_execute_typed
                   meta.name
                   (Printexc.to_string exn));
             authorized
-              (typed_error_json (Printf.sprintf "Cannot parse command: %s" reason_tag))
+              (typed_error_json
+                 ~class_:Tool_result.Runtime_failure
+                 (Printf.sprintf "Cannot parse command: %s" reason_tag))
           | Error (Keeper_tooling.Execute_shell_ir.Too_complex reason) ->
             let reason_tag = Keeper_tooling.Execute_shell_ir.too_complex_reason_tag reason in
             (* Parity with gate_reject/path_reject, which have always carried
@@ -850,6 +857,7 @@ let handle_tool_execute_typed
                   (Printexc.to_string exn));
             authorized
               (typed_error_json
+                 ~class_:Tool_result.Runtime_failure
                  (Printf.sprintf
                     "Command too complex: %s. %s."
                     reason_tag
@@ -876,6 +884,7 @@ let handle_tool_execute_typed
                   (Printexc.to_string exn));
             authorized
               (typed_error_json
+                 ~class_:Tool_result.Policy_rejection
                  ~extra_fields:[ "blocked_cmd", `String cmd_for_log ]
                  e)
           | Ok result ->
@@ -968,6 +977,7 @@ let handle_tool_execute_typed
                  (Keeper_execute_output_files.error_to_string detail);
                authorized
                  (Keeper_tool_execution.failure
+                    ~class_:Tool_result.Runtime_failure
                     ~effect_disposition:Tool_result.Proven_post_effect
                     (error_json
                        ~fields:
@@ -1028,6 +1038,7 @@ let handle_tool_execute_typed
                     Keeper_tool_execution.of_tool_result result
                   | Error _ ->
                     Keeper_tool_execution.failure
+                      ~class_:Tool_result.Runtime_failure
                       ~effect_disposition:Tool_result.Proven_post_effect
                       (error_json
                          ~fields:
@@ -1054,9 +1065,9 @@ let handle_tool_execute_with_outcome
   =
   (* No key pre-check: [Keeper_tool_execute_typed_input.of_json] is the one
      admission door, and its errors name the field that was wrong. A second
-     key list here is a copy that diverges — #29813 advertised [script] in
-     the schema while this function still refused it, so every
-     schema-conformant script call bounced before the parser could read it. *)
+     key list here is a copy that diverges from the schema, and every
+     schema-conformant call it did not know would bounce before the parser
+     could read it (#29813). *)
   handle_tool_execute_typed
     ~turn_sandbox_factory
     ~config

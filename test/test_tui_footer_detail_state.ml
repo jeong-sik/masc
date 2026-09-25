@@ -104,7 +104,8 @@ let render_path = "bin/masc_tui_render.ml"
    this list with its two renderers, and until it does its footer is the bug
    again. *)
 let renderers =
-  [ "render_planning_list"
+  [ "render_board_list"
+  ; "render_planning_list"
   ; "render_planning_detail"
   ; "render_schedule_list"
   ; "render_schedule_detail"
@@ -133,6 +134,39 @@ let test_the_verdict_pane_names_the_keys_that_answer () =
   check bool "the fitter reads the pair as pinned" true
     (Masc_tui_footer.item_is_pinned "y / x:agree / overrule")
 
+(* Board scopes keys like the four above but reads its detail footer from
+   [footer_hints_board_read], which builds its own list from the layout on
+   screen. So it does not join [detail_surfaces] -- [footer_hints
+   ~detail_open:true Board] is a footer Board never draws -- and its two
+   halves are pinned here instead. [render_board_list] is in [renderers]; the
+   read renderer is not, because it never calls [footer_hints]. *)
+let test_the_board_list_names_no_key_it_refuses () =
+  let list_hints = Keys.footer_hints ~detail_open:false Masc_tui_types.Board in
+  check bool "Board scopes at least one key to a state" true
+    (Keys.has_detail_scoped_keys Masc_tui_types.Board);
+  List.iter
+    (fun key ->
+      check bool ("the Board list does not advertise " ^ key) false
+        (contains list_hints key))
+    [ "[ / ]"; "z:"; "h/l" ];
+  List.iter
+    (fun key ->
+      check bool ("the Board list still advertises " ^ key) true
+        (contains list_hints key))
+    [ "Right / Enter"; "Left / Esc"; "w:write"; "v / V:vote"; "s:sort" ]
+
+(* Scoping moved the keys, it did not delete them: a caller that names no
+   state still reads all three, which is what the cheat sheet does. The open
+   post's own footer is built by [footer_hints_board_read] from the layout on
+   screen and is pinned in test_tui_keys. *)
+let test_the_table_still_carries_them () =
+  let both = Keys.footer_hints Masc_tui_types.Board in
+  List.iter
+    (fun key ->
+      check bool ("naming no state still reads " ^ key) true
+        (contains both key))
+    [ "[ / ]"; "z:"; "h/l" ]
+
 let test_every_renderer_says_which_state_it_draws () =
   List.iter
     (fun binding_name ->
@@ -157,6 +191,10 @@ let () =
             test_each_state_is_shorter_than_naming_both
         ; test_case "omitting the state keeps the old reading" `Quick
             test_omitting_the_state_keeps_the_old_reading
+        ; test_case "the Board list names no key it refuses" `Quick
+            test_the_board_list_names_no_key_it_refuses
+        ; test_case "the table still carries the scoped keys" `Quick
+            test_the_table_still_carries_them
         ] )
     ; ( "renderers",
         [ test_case "every renderer says which state it draws" `Quick

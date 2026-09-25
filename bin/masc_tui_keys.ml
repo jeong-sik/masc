@@ -517,17 +517,24 @@ let for_surface = function
       ; b Act "w" "write" ~help:"write a post"
       ; board_vote_key
       ; board_reply_key
-      ; b Navigate "[ / ]" "previous / next post"
+      (* Three keys below answer only while a post is open, and the table said
+         so in prose the footer cannot read. The list footer named them and
+         the dispatcher refused all three there: [[ / ]] steps the open post
+         ([step_board_read] returns on [Board_list]), [z] and [h/l] want a
+         detail pane beside the list. *)
+      ; b Navigate "[ / ]" "previous / next post" ~detail:Detail_only
           ~help:"while reading, open the post before or after this one"
       ; b Navigate "s" "sort" ~help:"cycle hot / trending / recent / updated / discussed"
       ; b Search "f / F" "next / previous hearth"
           ~help:"move forward or backward through all hearths"
       ; b Search "H" "choose hearth" ~help:"search hearth names and choose directly"
-      ; b Navigate "z" "wide detail" ~help:"hide or show the post list while reading"
+      ; b Navigate "z" "wide detail" ~detail:Detail_only
+          ~help:"hide or show the post list while reading"
       ; board_copy_key
       ; b Navigate "Ctrl-W" "pane"
           ~help:"cycle the post list, the detail pane, and the Activity pane when it is drawn"
-      ; b Navigate "h/l" "pane" ~help:"focus the post list or detail pane"
+      ; b Navigate "h/l" "pane" ~detail:Detail_only
+          ~help:"focus the post list or detail pane"
         (* Beside [f], not instead of it: [f] narrows the list to one hearth,
            this jumps the cursor to a post without changing what is listed. *)
       ; b Navigate "PgUp/PgDn" "detail page"

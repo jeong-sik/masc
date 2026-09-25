@@ -14,6 +14,7 @@
 val run_named_with_masc_tools :
   runtime_id:string ->
   ?keeper_name:string ->
+  walk_owner:Keeper_turn_driver.walk_owner ->
   goal:string ->
   ?goal_blocks:Agent_core.Types.content_block list ->
   base_path:string ->

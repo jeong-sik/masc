@@ -1791,7 +1791,11 @@ let test_release_checksums_include_team_presets () =
   assert_contains
     "release checksum walks every team preset manifest"
     workflow
-    "for m in presets/*/manifest.txt"
+    "for m in presets/*/manifest.txt";
+  assert_contains
+    "release checksum covers each team preset manifest itself"
+    workflow
+    "sha256sum \"$m\""
 ;;
 
 let () =

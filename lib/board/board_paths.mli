@@ -9,6 +9,11 @@ val board_base_path : unit -> string
 val board_masc_dir : unit -> string
 type persisted_file = Posts | Comments | Reactions | Sub_boards | Votes
 val file_path : workspace_masc_dir:string -> persisted_file -> string
+val posts_file : workspace_masc_dir:string -> string
+(** [file_path ~workspace_masc_dir Posts]. The shared blob store's maintenance
+    pass takes this to read every workspace's posts
+    ([Tool_blob_maintenance.run ~board_posts_file]); that library sits below
+    Board and does not repeat the name. *)
 val store_file_path : Board_types.store -> persisted_file -> string
 (** Bound stores use their captured workspace for every load. Standalone stores
     use the current configured workspace. *)

@@ -69,8 +69,7 @@ let call_count t = List.length t.rev_order
    dashboard/src/components/tool-call-shared.ts. *)
 let subject_keys =
   [ "argv" (* Execute: the command that ran, without a shell *)
-  ; "script" (* Execute: the command line a shell ran *)
-  ; "command"
+  ; "command" (* Execute: the command line a shell ran *)
   ; "cmd"
   ; "file_path" (* Read / Edit / Write *)
   ; "pattern" (* Grep: what it looked for, before where it looked *)

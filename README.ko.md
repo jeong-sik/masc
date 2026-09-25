@@ -76,13 +76,13 @@ masc setup --base-path "$HOME/masc-workspace"
 
 ### 공개 바이너리
 
-[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.37.0)에
+[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.39.0)에
 첨부된 설치 스크립트를 받습니다. 선택한 릴리스의 자산을 검증하고 설치합니다.
 
-> Installation target: v0.37.0 (check tag availability on GitHub Releases).
+> Installation target: v0.39.0 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.37.0
+TAG=v0.39.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
@@ -90,7 +90,11 @@ bash /tmp/masc-install.sh --version "$TAG"
 
 선택 사항: 실행 전에 스크립트를 읽으려면 `less /tmp/masc-install.sh`를 실행하세요. `q`를 눌러 나간 다음 위의 `bash` 설치 명령을 실행합니다.
 
-재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다. `export PATH=...`에는 설치 옵션을 붙이지 마세요.
+재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다.
+
+설치 스크립트는 기본으로 `~/.local/bin`에 설치하고 셸 `PATH`에 추가할지 묻습니다.
+그 질문을 건너뛰었다면 `export PATH="$HOME/.local/bin:$PATH"`를 실행하세요
+(이 명령에는 설치 옵션을 붙이지 않습니다).
 
 설치 스크립트는 `SHA256SUMS`를 필수로 검증하고 릴리스 실행 파일을 설치한 뒤, 처음 한 번 설정 마법사를 돌립니다(`--no-wizard`로 건너뜁니다).
 마법사는 방향키와 체크박스로 여러 모델 연결을 선택합니다.
@@ -99,34 +103,47 @@ bash /tmp/masc-install.sh --version "$TAG"
 키를 읽습니다. `--provider <id>`로 기존 프로바이더를 선택할 수 있습니다.
 기본 `imp`는 Docker를 설치·시작한 뒤 `masc setup`으로 이미지를 준비하고 실행합니다.
 
-각 릴리스는 Intel Mac, `masc-browser-host`, 바이너리와 일치하는
-대시보드 번들을 포함하고 `--force` 재설치에서 기존 설정을 보존합니다.
+각 릴리스는 macOS(Apple Silicon, Intel)와 Linux(x86_64, arm64)용 `masc`,
+`masc-tui`, `masc-browser-host`와 바이너리와 일치하는 대시보드 번들을 제공하고
+([플랫폼 표](docs/INSTALL.ko.md)), 설치 스크립트는 `--force` 재설치에서 기존 설정을 보존합니다.
 macOS 설치기는 Python과 실행 라이브러리를 함께 제공하므로 MASC 설치에 Homebrew가 필요하지 않습니다. Apple Silicon은 macOS 14 이상, Intel은 macOS 15 이상이 필요합니다. 플랫폼별 준비물, 설치 파일,
 첫 실행과 업그레이드는 [설치 가이드](docs/INSTALL.ko.md)에 정리했습니다.
 
 ### 소스에서
 
-Git, opam, C 개발 도구, Node.js 22와 Corepack을 먼저 설치합니다. Native
-라이브러리와 재현 가능한 빌드 절차는 [Release workflow](.github/workflows/release.yml)를
-참고합니다. 체크아웃에서 대시보드를 쓰려면 아래 frontend 빌드도 필요합니다.
+Git, opam, C 개발 도구, Node.js 22, Corepack과 native 라이브러리를 먼저 설치합니다.
+
+- Debian/Ubuntu: `pkg-config m4 libgmp-dev libssl-dev libzstd-dev
+  libsqlite3-dev libpq-dev libev-dev libffi-dev zlib1g-dev libncurses-dev
+  libprotobuf-dev protobuf-compiler`. `protoc`는 proto3 `optional`을 이해해야 합니다.
+  Ubuntu 22.04 패키지의 3.12는 이를 지원하지 않으므로 더 새로운
+  [upstream protoc](https://github.com/protocolbuffers/protobuf/releases)를 `PATH` 앞쪽에
+  둡니다(릴리스 빌드는 25.1 사용, [`scripts/build-linux-release.sh`](scripts/build-linux-release.sh) 참고).
+- macOS(Homebrew): `flock gmp libpq openssl@3 zstd protobuf`를 설치하고,
+  [Release workflow](.github/workflows/release.yml)의 macOS 단계처럼 `openssl@3`와
+  `libpq`에 맞춰 `PKG_CONFIG_PATH`, `CPATH`, `LIBRARY_PATH`를 export합니다.
+
+체크아웃에서 대시보드를 쓰려면 아래 frontend 빌드도 필요합니다.
 코딩 에이전트는 [저장소 실행 프로토콜](docs/constitution.xml)에 따라 CI에서 빌드합니다.
 
 ```bash
 git clone https://github.com/jeong-sik/masc.git
 cd masc
 opam init --bare
-opam switch create . ocaml-base-compiler.5.5.1
+opam switch create . ocaml-base-compiler.5.5.1 --no-install
 eval "$(opam env)"
 scripts/opam-pin-external-deps.sh
-opam install . --deps-only
+opam install ./masc.opam --deps-only --locked
 opam exec -- dune build bin/main_eio.exe bin/masc_tui.exe
 corepack enable
 corepack prepare pnpm@10.31.0 --activate
-(cd dashboard && pnpm install --frozen-lockfile)
 scripts/build-dashboard-if-needed.sh --force
 ```
 
-컴파일러와 Dune 버전은 `dune-project`에 고정돼 있습니다. 첫 빌드는 몇 분
+`--no-install`은 pin 스크립트가 opam-repository에 없는 의존성을 등록하기 전에
+switch가 의존성을 풀려다 실패하지 않게 합니다. 컴파일러 버전은 `dune-project`에
+고정돼 있고, `--locked`는 CI가 쓰는 정확한 Dune과 라이브러리 버전을
+`masc.opam.locked`에서 설치합니다. 첫 빌드는 몇 분
 걸립니다. Dune은 두 프로그램을 `_build/default/bin/main_eio.exe`(서버와
 CLI)와 `_build/default/bin/masc_tui.exe`(TUI)에 둡니다. `masc`는 자기 옆이나
 `PATH`에서 `masc-tui`라는 이름으로 TUI를 찾기 때문에, 이름을 붙여 주기 전까지
@@ -137,6 +154,11 @@ mkdir -p ~/.local/bin
 ln -sf "$PWD/_build/default/bin/main_eio.exe" ~/.local/bin/masc
 ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 ```
+
+대신 `scripts/install-local-build.sh`를 쓰면 `masc`, `masc-tui`, `masc-browser-host`를
+한 번에 빌드해 `~/.local/bin`에 복사합니다. `eval "$(opam env)"`를 적용한 셸에서 실행하세요. 이 스크립트는 등록된
+Firefox browser-lane host도 새 빌드로 다시 설치하고, 그 작업 공간에서 실행 중인 host 프로세스를
+종료합니다. 확장은 새 사본으로 다시 연결합니다.
 
 `./quickstart.sh`는 `~/masc-quickstart` 아래에 작업 공간을 만들고, 서버를
 띄우고, MCP bearer를 `.masc/config/mcp-client.env`에 씁니다. Keeper는 띄우지
@@ -495,6 +517,13 @@ masc/
 `CHANGELOG.md`가 소스 릴리스 이력을 적고, 바이너리의 정답은 GitHub
 Releases입니다.
 1.0 전에는 API와 설정이 바뀔 수 있습니다.
+
+마일스톤(살아 있는 규칙은 `ROADMAP.md`의 "Release lane rules"):
+
+- `0.y.0`이 사용자에게 보이는 train을 열고 `0.y.z`가 안정화합니다. 현재 라인은
+  `dune-project`의 `version`입니다.
+- `1.0.0`은 TUI, MCP 작업 공간, 릴리스 증거가 단서 없이 성립할 때만 엽니다.
+- `v2.*` 태그는 과거 기록이며 현재 라인을 정하지 않습니다.
 
 ## 라이선스
 

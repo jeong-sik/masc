@@ -33,7 +33,7 @@ bisect-ppx-report is not installed in the active opam switch.
 
 Install/pin the repo test dependencies with bisect support before measuring:
   scripts/opam-pin-external-deps.sh --with-bisect
-  opam install . --deps-only --with-test
+  opam install ./masc.opam --deps-only --with-test
 
 CI does this through the setup/pin dependency actions with --with-bisect.
 EOF

@@ -1059,15 +1059,19 @@ let github_hosts_path t = Filename.concat t.gh_config_dir "hosts.yml"
 
 let github_identity_intent t =
   let run = runner ~timeout_sec:(preflight_timeout_sec t) t in
-  let status, _stdout, _stderr =
-    Masc_exec.Sandbox_target.status_tuple
-      (run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
-         ~argv:[ "test"; "-s"; github_hosts_path t ]
-         ~env:[||] ~cwd:(Some (workspace_root t)))
-  in
-  match status with
-  | Unix.WEXITED 1 -> No_login_configured
-  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Login_provisioned
+  (* Matched rather than collapsed with [status_tuple]: that helper turns a
+     transport failure into [WEXITED 1], which is this probe's "no login"
+     answer, so an endpoint that never ran [test] would skip the identity
+     preflight (#38890). Only a probe that ran and found no file says so. *)
+  match
+    run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+      ~argv:[ "test"; "-s"; github_hosts_path t ]
+      ~env:[||] ~cwd:(Some (workspace_root t))
+  with
+  | Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 1; _ } -> No_login_configured
+  | Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _; _ }
+  | Masc_exec.Sandbox_target.Transport_failed _ -> Login_provisioned
 ;;
 
 let whitespace_tokens line =

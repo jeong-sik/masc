@@ -282,7 +282,14 @@ let test_status_reads_the_keeper_name_only () =
   Alcotest.(check string)
     "the keeper name reaches its instructions"
     "alias status instructions"
-    (status_instructions_with ~name config)
+    (status_instructions_with ~name config);
+  (match status_json_with ~name config with
+   | `Assoc fields ->
+     Alcotest.(check bool) "status omits invented handoff count" false
+       (List.mem_assoc "handoff_count_total" fields);
+     Alcotest.(check bool) "status omits unwritten handoff age" false
+       (List.mem_assoc "last_handoff_ago_s" fields)
+   | _ -> Alcotest.fail "status response was not an object")
 
 let test_keeper_surface_uses_the_name_verbatim () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->

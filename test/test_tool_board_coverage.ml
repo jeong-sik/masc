@@ -243,6 +243,11 @@ let json_member_list json key =
   | `List values -> values
   | _ -> Alcotest.failf "expected list field %s" key
 
+let json_lacks_field json key =
+  match json with
+  | `Assoc fields -> not (List.mem_assoc key fields)
+  | _ -> false
+
 (* RFC-0393: keeper-ness is a registry lookup, not a name shape. With no
    registered keeper, the old wrapper spelling is an ordinary agent name —
    nothing is recovered from the string. *)
@@ -319,7 +324,9 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   Alcotest.(check int) "post reaction count" 1
     (json_member_int post_summary "count");
   Alcotest.(check bool) "post reaction selected" true
-    (json_member_bool post_summary "has_reacted");
+    (json_member_bool post_summary "reacted");
+  Alcotest.(check bool) "post reaction has one selection field" true
+    (json_lacks_field post_summary "has_reacted");
   let comment_reactions =
     Server_utils.board_reactions_for_comment ~voter:(Some "reactor") ~comment_id
   in
@@ -334,7 +341,9 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   Alcotest.(check string) "comment reaction emoji" "👏"
     (json_member_string comment_summary "emoji");
   Alcotest.(check bool) "comment reaction selected" true
-    (json_member_bool comment_summary "has_reacted")
+    (json_member_bool comment_summary "reacted");
+  Alcotest.(check bool) "comment reaction has one selection field" true
+    (json_lacks_field comment_summary "has_reacted")
 
 let test_inline_board_post_author_rewrites_caller_claim () =
   let args =
@@ -451,6 +460,236 @@ let test_post_create_metadata_payload () =
     Yojson.Safe.Util.(json |> member "post_kind" |> to_string);
   Alcotest.(check string) "source meta kept" "keeper_autonomy"
     Yojson.Safe.Util.(json |> member "meta" |> member "source" |> to_string)
+
+let test_post_create_typed_attachments () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let base =
+    [ "content", `String "Typed attachments"
+    ; "author", `String "tester"
+    ]
+  in
+  let post attachments =
+    dispatch_result "masc_board_post"
+      (make_args (base @ [ "attachments", `List attachments ]))
+  in
+  let image =
+    `Assoc
+      [ "kind", `String "image"
+      ; "url", `String "https://cdn.example.test/image.png"
+      ]
+  in
+  let result = post [ image ] in
+  Alcotest.(check bool) "HTTPS image accepted" true (Tool_result.is_success result);
+  let stored =
+    Yojson.Safe.Util.
+      (Tool_result.data result |> member "meta" |> member "attachments")
+  in
+  Alcotest.(check bool)
+    "typed image stored and read"
+    true
+    (Yojson.Safe.equal stored (`List [ image ]));
+  let blob =
+    match
+      Tool_blob_store.put
+        (Tool_blob_store.create ~base_path:_test_base_path)
+        ~bytes:"attachment bytes"
+        ~mime:"application/octet-stream"
+    with
+    | Tool_output.Stored reference -> reference
+    | Tool_output.Inline _ -> Alcotest.fail "artifact was not stored"
+  in
+  let artifact =
+    `Assoc
+      [ "kind", `String "external_link"
+      ; "sha256", `String blob.sha256
+      ]
+  in
+  let artifact_result = post [ artifact ] in
+  Alcotest.(check bool)
+    "existing artifact accepted"
+    true
+    (Tool_result.is_success artifact_result);
+  let stored_artifact =
+    Yojson.Safe.Util.
+      (Tool_result.data artifact_result |> member "meta" |> member "attachments")
+  in
+  (match stored_artifact with
+   | `List [ `Assoc fields ] ->
+     (match List.assoc_opt "artifact" fields with
+      | Some json ->
+        (match Tool_output.normalized_artifact_ref_of_json json with
+         | Tool_output.Decoded_normalized_artifact_ref reference ->
+           Alcotest.(check string) "stored artifact hash" blob.sha256 reference.sha256
+         | _ -> Alcotest.fail "stored artifact lacks canonical reference")
+      | None -> Alcotest.fail "stored artifact missing")
+   | _ -> Alcotest.fail "stored attachment list malformed");
+  let store = Tool_blob_store.create ~base_path:_test_base_path in
+  let child =
+    Tool_blob_store.put_durable store ~bytes:"manifest child" ~mime:"text/plain"
+  in
+  let structured_content =
+    `Assoc [ "output_artifact", Tool_output.normalized_artifact_ref_to_json child ]
+  in
+  let manifest =
+    Tool_blob_store.put_durable store
+      ~bytes:
+        (Tool_output.artifact_manifest_to_json
+           ~content:"manifest child" ~structured_content
+         |> Yojson.Safe.to_string)
+      ~mime:Tool_output.artifact_manifest_mime
+  in
+  let manifest_result =
+    post
+      [ `Assoc
+          [ "kind", `String "external_link"
+          ; "sha256", `String manifest.sha256
+          ]
+      ]
+  in
+  Alcotest.(check bool) "canonical manifest accepted" true
+    (Tool_result.is_success manifest_result);
+  let stored_manifest =
+    Yojson.Safe.Util.
+      (Tool_result.data manifest_result |> member "meta" |> member "attachments")
+  in
+  (match stored_manifest with
+   | `List [ `Assoc fields ] ->
+     (match List.assoc_opt "artifact" fields with
+      | Some json ->
+        (match Tool_output.normalized_artifact_ref_of_json json with
+         | Tool_output.Decoded_normalized_artifact_ref reference ->
+           Alcotest.(check string) "manifest MIME survives Board post"
+             Tool_output.artifact_manifest_mime reference.mime
+         | _ -> Alcotest.fail "manifest reference is malformed")
+      | None -> Alcotest.fail "manifest attachment missing")
+   | _ -> Alcotest.fail "manifest attachment list malformed");
+  List.iter
+    (fun url ->
+      let unsafe =
+        post
+          [ `Assoc
+              [ "kind", `String "image"
+              ; "url", `String url
+              ]
+          ]
+      in
+      Alcotest.(check bool) ("unsafe URL rejected: " ^ url) false
+        (Tool_result.is_success unsafe);
+      check_failure_class
+        "unsafe URL is workflow rejection"
+        (Some "workflow_rejection")
+        unsafe)
+    [ "javascript:alert(1)"; "data:image/png;base64,AAA"; "http://example.test/a.png" ];
+  let missing =
+    post
+      [ `Assoc
+          [ "kind", `String "image"
+          ; "sha256", `String (String.make 64 'f')
+          ]
+      ]
+  in
+  Alcotest.(check bool) "missing artifact rejected" false
+    (Tool_result.is_success missing);
+  Alcotest.(check bool) "missing artifact named" true
+    (String_util.contains_substring
+       (Tool_result.message missing)
+       "artifact not found");
+  let youtube_artifact =
+    post
+      [ `Assoc
+          [ "kind", `String "youtube"
+          ; "sha256", `String blob.sha256
+          ]
+      ]
+  in
+  Alcotest.(check bool) "youtube artifact rejected" false
+    (Tool_result.is_success youtube_artifact);
+  Alcotest.(check bool) "youtube rejection asks for url" true
+    (String_util.contains_substring
+       (Tool_result.message youtube_artifact)
+       "kind youtube needs url");
+  (* The same missing artifact as above, on a post that fails its own title
+     check: the title is reported, so no blob was looked up for it. Before the
+     reorder this said "artifact not found". *)
+  let blank_title =
+    dispatch_result "masc_board_post"
+      (make_args
+         (base
+          @ [ "title", `String "   "
+            ; "attachments",
+              `List
+                [ `Assoc
+                    [ "kind", `String "image"
+                    ; "sha256", `String (String.make 64 'f')
+                    ]
+                ]
+            ]))
+  in
+  Alcotest.(check bool) "blank title rejected" false
+    (Tool_result.is_success blank_title);
+  Alcotest.(check bool) "title checked before artifact lookup" true
+    (String_util.contains_substring
+       (Tool_result.message blank_title)
+       "Title must not be empty");
+  let raw =
+    dispatch_result "masc_board_post"
+      (make_args
+         (base @
+          [ "meta", `Assoc [ "attachments", `List [ image ] ] ]))
+  in
+  Alcotest.(check bool) "raw meta attachments rejected" false
+    (Tool_result.is_success raw)
+
+(* The bound is inclusive: an artifact exactly [max_artifact_bytes] long is
+   read and recorded, one byte over is refused with its size. Production
+   passes Tool_blob_store.max_served_bytes, the HTTP route's limit. *)
+let test_attachment_artifact_read_bound () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let payload = "twelve bytes" in
+  let blob =
+    match
+      Tool_blob_store.put
+        (Tool_blob_store.create ~base_path:_test_base_path)
+        ~bytes:payload
+        ~mime:"application/octet-stream"
+    with
+    | Tool_output.Stored reference -> reference
+    | Tool_output.Inline _ -> Alcotest.fail "artifact was not stored"
+  in
+  let entries =
+    [ { Board_tool_attachment.kind = Board_tool_attachment.Image
+      ; source = Board_tool_attachment.Artifact_sha256 blob.sha256
+      }
+    ]
+  in
+  let resolve max_artifact_bytes =
+    Board_tool_attachment.resolve
+      ~base_path:_test_base_path
+      ~max_artifact_bytes
+      entries
+  in
+  let size = String.length payload in
+  (match resolve (size - 1) with
+   | Error (Board_tool_attachment.Artifact_too_large { index; bytes; maximum }) ->
+     Alcotest.(check int) "refused entry index" 0 index;
+     Alcotest.(check int) "refused size" size bytes;
+     Alcotest.(check int) "refused bound" (size - 1) maximum
+   | Error error ->
+     Alcotest.failf "one byte over: unexpected error %s"
+       (Board_tool_attachment.error_to_string error)
+   | Ok _ -> Alcotest.fail "one byte over the bound was accepted");
+  match resolve size with
+  | Ok [ Board_tool_attachment.Artifact { kind = Board_tool_attachment.Image; reference } ] ->
+    Alcotest.(check int) "recorded size" size reference.Tool_output.bytes;
+    Alcotest.(check string) "recorded hash" blob.sha256 reference.Tool_output.sha256
+  | Ok _ -> Alcotest.fail "exact bound resolved to an unexpected shape"
+  | Error error ->
+    Alcotest.failf "exact bound refused: %s"
+      (Board_tool_attachment.error_to_string error)
 
 (* Regression guard: board_post must return STRUCTURED [data] (`Assoc), not a
    `String that embeds stringified JSON. The `String form double-encodes the
@@ -2551,6 +2790,10 @@ let () =
           Alcotest.test_case "create success" `Quick test_post_create_success;
           Alcotest.test_case "create structured payload" `Quick
             test_post_create_metadata_payload;
+          Alcotest.test_case "create typed attachments" `Quick
+            test_post_create_typed_attachments;
+          Alcotest.test_case "attachment artifact read bound" `Quick
+            test_attachment_artifact_read_bound;
           Alcotest.test_case "create data is structured not double-encoded" `Quick
             test_post_create_data_is_structured;
           Alcotest.test_case "projection failure preserves primary effect" `Quick

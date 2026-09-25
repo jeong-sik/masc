@@ -191,7 +191,8 @@ val initialize_owner_state_blocking
     (Store_quarantine_refused _)] and nothing is moved aside. *)
 
 val activate_owner_state
-  :  sw:Eio.Switch.t
+  :  ?boot_stage:(string -> unit)
+  -> sw:Eio.Switch.t
   -> clock:float Eio.Time.clock_ty Eio.Resource.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> domain_mgr:[> Eio.Domain_manager.ty ] Eio.Domain_manager.t
@@ -203,7 +204,9 @@ val activate_owner_state
     persistence ownership, then immediately start the affine Keeper token.
     Current request writers use a disjoint staging namespace, so forensic
     cleanup cannot hold readiness. Readiness remains an explicit transport
-    commit after its required surfaces are installed. *)
+    commit after its required surfaces are installed. [boot_stage] is the
+    optional release-smoke timing observer; direct test/stdio callers may
+    omit it. *)
 
 val mark_owner_state_ready
   :  unit

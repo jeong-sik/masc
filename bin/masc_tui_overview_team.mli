@@ -17,6 +17,10 @@ type group =
       (** Alive ([Running], [Draining], [Restarting]) and holds a Claimed or
           InProgress task. *)
   | Idle  (** Alive with no such task. *)
+  | Alive_unread
+      (** Alive, and the backlog was not read (not yet, or the read failed):
+          whether it holds a task is unknown, so it is neither [Working] nor
+          [Idle]. *)
   | No_phase
       (** Not paused, no phase in the briefing, and no item above info
           severity names the Keeper: where it is is unknown. Drawn as one
@@ -44,6 +48,7 @@ type detail =
       (** The first held Claimed/InProgress task in backlog order, how many
           more it holds, and how many of its tasks wait on a verifier. *)
   | No_open_task of { awaiting : int }
+  | Tasks_unread  (** An [Alive_unread] Keeper's row. *)
 
 type row = {
   keeper : Masc_tui_types.overview_keeper;
@@ -53,7 +58,8 @@ type row = {
 
 type t = {
   rows : row list;
-      (** Needs_you, then Working, then Idle; by name inside a band. *)
+      (** Needs_you, then Working, then Alive_unread, then Idle; by name
+          inside a band. *)
   no_phase : (string * int) list;
       (** [No_phase] Keeper names, by name, with the open tasks each still
           holds. *)
@@ -72,9 +78,12 @@ type t = {
 
 val project :
   keepers:Masc_tui_types.overview_keeper list ->
-  tasks:Tui_decode.task list ->
+  tasks:Masc_tui_overview_tasks.rows_reading ->
   attention:Masc_tui_types.attention_item list ->
   t
+(** [tasks] is the backlog reading the Overview's Tasks block draws. A
+    reading that is not [Rows_read] names no task: alive Keepers go to
+    [Alive_unread], and the held counts and [other_holders] are empty. *)
 
 val drawn_rows : t -> int
 (** Rows the block draws below its title: one per [rows] entry, one for the

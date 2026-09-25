@@ -114,6 +114,8 @@ status: reference
   점수가 아니라 이 무리와 이름이다. 막힌 줄의 설명은 그 Keeper 를 `Attention_keeper` 로
   가리키는 info 가 아닌 첫 Attention 문장을 그대로 싣는다. Keeper 가 아닌
   담당자(MCP client 등)가 잡은 Task 는 "held outside the fleet" 한 줄로 센다.
+  backlog 를 아직 못 읽었거나 읽기에 실패했으면, 살아 있는 Keeper 를 일하는 중과 쉬는 중으로
+  나누지 않고 "tasks unread" 로 그린다.
   `/cost` 로 켜면 Keeper 줄마다 최근 24시간 비용·토큰을, 제목에 합계를 싣는다
   (`/api/v1/dashboard/keeper-costs`). 모르는 비용은 `$0.00` 으로 그리지 않는다. 기본은
   꺼져 있고, 꺼져 있으면 읽지도 않는다.

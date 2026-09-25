@@ -322,7 +322,7 @@ let overview_team (state : state) =
   | Some overview ->
       Some
         (Overview_team.project ~keepers:overview.ov_keeper_rows
-           ~tasks:state.tasks ~attention:overview.ov_attention_items)
+           ~tasks:state.task_reading ~attention:overview.ov_attention_items)
 
 let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview_pulls
 
@@ -374,8 +374,8 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
       match row.group with
       | Overview_team.Needs_you -> ("!", Theme.bad ())
       | Overview_team.Working -> ("\xe2\x97\x8f", Theme.info ())
-      | Overview_team.Idle | Overview_team.No_phase | Overview_team.Paused
-      | Overview_team.Stopped ->
+      | Overview_team.Idle | Overview_team.Alive_unread | Overview_team.No_phase
+      | Overview_team.Paused | Overview_team.Stopped ->
           ("\xc2\xb7", Ansi.dim)
     in
     let age =
@@ -401,6 +401,8 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
       | Overview_team.No_open_task { awaiting } ->
           Printf.sprintf "%sno open task%s%s" Ansi.dim Ansi.reset
             (awaiting_tail awaiting)
+      | Overview_team.Tasks_unread ->
+          Printf.sprintf "%stasks unread%s" (Theme.warn ()) Ansi.reset
     in
     (* The Keeper's PR, ahead of the detail so a narrow row keeps it: its
        number and one glyph for its checks, "+N" for more. *)
@@ -473,6 +475,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
         | n -> Some (Printf.sprintf "%d %s" n label))
       [ (Overview_team.Needs_you, "need you")
       ; (Overview_team.Working, "working")
+      ; (Overview_team.Alive_unread, "alive (tasks unread)")
       ; (Overview_team.Idle, "idle")
       ; (Overview_team.No_phase, "no phase")
       ; (Overview_team.Paused, "paused")

@@ -81,7 +81,12 @@ let attention =
     }
   ]
 
-let team = Team.project ~keepers:fleet ~tasks ~attention
+(* Every case below projects over a backlog that was read, except the one
+   that is about a backlog that was not. *)
+let project ~keepers ~tasks ~attention =
+  Team.project ~keepers ~tasks:(Masc_tui_overview_tasks.Rows_read tasks) ~attention
+
+let team = project ~keepers:fleet ~tasks ~attention
 
 let names rows = List.map (fun (row : Team.row) -> row.keeper.okp_name) rows
 
@@ -111,14 +116,16 @@ let test_a_stuck_row_carries_the_attention_sentence_and_held_work () =
          "tui-developer: runtime_blocked (Keeper turn failed 2 consecutive cycle(s))"
          summary;
        check int "holds nothing" 0 held
-   | Team.Phase_word _ | Team.Working_on _ | Team.No_open_task _ ->
+   | Team.Phase_word _ | Team.Working_on _ | Team.No_open_task _
+   | Team.Tasks_unread ->
        fail "a failing Keeper named by an attention item carries its sentence");
   match detail_of "stuck-fixture-keeper" with
   | Team.Blocker { summary; held; _ } ->
       check string "no registry phase, but named by attention"
         "stuck-fixture-keeper: keepalive_stopped" summary;
       check int "the three tasks it stopped holding are said" 3 held
-  | Team.Phase_word _ | Team.Working_on _ | Team.No_open_task _ ->
+  | Team.Phase_word _ | Team.Working_on _ | Team.No_open_task _
+  | Team.Tasks_unread ->
       fail "a phase-less Keeper that attention names needs the operator"
 
 let test_a_working_row_names_its_first_task () =
@@ -127,14 +134,14 @@ let test_a_working_row_names_its_first_task () =
       check string "first held task in backlog order" "task-1519" task.id;
       check int "one more in progress" 1 more;
       check int "one waiting on a verifier" 1 awaiting
-  | Team.Blocker _ | Team.Phase_word _ | Team.No_open_task _ ->
+  | Team.Blocker _ | Team.Phase_word _ | Team.No_open_task _ | Team.Tasks_unread ->
       fail "a running Keeper holding tasks is working"
 
 (* An item about something else that happens to carry a Keeper's name as its
    id is not about that Keeper; the join is on the typed target. *)
 let test_only_keeper_targets_join () =
   let only_board =
-    Team.project
+    project
       ~keepers:[ keeper "tui-developer" (phase "failing") ]
       ~tasks:[]
       ~attention:[ List.nth attention 3 ]
@@ -153,7 +160,7 @@ let test_work_held_outside_the_fleet_is_counted () =
 
 let test_an_unreadable_phase_stays_visible () =
   let odd =
-    Team.project
+    project
       ~keepers:[ keeper "x" (Types.Keeper_phase_unreadable "hibernating") ]
       ~tasks:[] ~attention:[]
   in
@@ -174,7 +181,7 @@ let test_a_stuck_row_prefers_the_blocker_sentence () =
     }
   in
   let team =
-    Team.project
+    project
       ~keepers:[ keeper "goo-yang-bong" (phase "failing") ]
       ~tasks:[] ~attention:[ item ]
   in
@@ -200,7 +207,7 @@ module Panel = struct
   let attention = [ a1; a2; b1; c1; o1 ]
 
   let team =
-    Team.project
+    project
       ~keepers:
         [ keeper "stuck-a" (phase "failing")
         ; keeper "run-b" (phase "running")
@@ -252,7 +259,7 @@ let test_settle_reaches_the_rows_the_final_budget_draws () =
    raises a "<name>: paused" item for it. That is the operator's own stop. *)
 let test_a_paused_keeper_without_a_phase_stays_paused () =
   let team =
-    Team.project
+    project
       ~keepers:
         [ keeper ~ago:None ~paused:(Some true) "lane-smith"
             Types.Keeper_phase_absent
@@ -270,7 +277,7 @@ let test_a_paused_keeper_without_a_phase_stays_paused () =
 
 let test_paused_wins_over_a_stuck_phase () =
   let team =
-    Team.project
+    project
       ~keepers:[ keeper ~paused:(Some true) "x" (phase "failing") ]
       ~tasks:[]
       ~attention:[ keeper_item "x" "x: runtime_blocked" ]
@@ -288,7 +295,7 @@ let info_item name summary : Types.attention_item =
    severity. It is not a stop and not a cause. *)
 let test_an_info_item_is_not_a_blocker () =
   let phase_less =
-    Team.project
+    project
       ~keepers:[ keeper "stuck-fixture-keeper" Types.Keeper_phase_absent ]
       ~tasks:[]
       ~attention:[ info_item "stuck-fixture-keeper" "stuck-fixture-keeper has 3 external messages waiting" ]
@@ -299,7 +306,7 @@ let test_an_info_item_is_not_a_blocker () =
     [ ("stuck-fixture-keeper", 0) ] phase_less.no_phase;
   check (list (pair string int)) "not stopped" [] phase_less.stopped;
   let failing =
-    Team.project
+    project
       ~keepers:[ keeper "x" (phase "failing") ]
       ~tasks:[]
       ~attention:
@@ -319,7 +326,7 @@ let test_an_info_item_is_not_a_blocker () =
    briefing said nothing about. *)
 let test_paused_stopped_and_no_phase_are_counted_apart () =
   let team =
-    Team.project
+    project
       ~keepers:
         [ keeper ~paused:(Some true) "by-flag" (phase "running")
         ; keeper "by-phase" (phase "paused")
@@ -341,6 +348,39 @@ let test_paused_stopped_and_no_phase_are_counted_apart () =
   check int "stopped count" 2 (Team.count team Team.Stopped);
   check int "no-phase count" 1 (Team.count team Team.No_phase);
   check int "one row per name line" 3 (Team.drawn_rows team)
+
+(* A backlog that failed to read is not an empty backlog. Read as one, every
+   alive Keeper draws "no open task" under an "idle" count while the GOALS
+   line above the block says "active work unread" (audit of fe6315aa69,
+   2026-09-26). An alive Keeper whose holdings were not read is neither
+   working nor idle. *)
+let test_an_unread_backlog_is_not_an_idle_fleet () =
+  let unread reading =
+    Team.project ~keepers:fleet ~tasks:reading ~attention
+  in
+  List.iter
+    (fun (label, reading) ->
+      let team = unread reading in
+      check int (label ^ ": nobody is idle") 0 (Team.count team Team.Idle);
+      check int (label ^ ": nobody is working") 0 (Team.count team Team.Working);
+      check (list string) (label ^ ": the alive Keepers say their tasks are unread")
+        [ "glossary-maniac"; "won-chik" ]
+        (names
+           (List.filter
+              (fun (row : Team.row) ->
+                match row.detail with
+                | Team.Tasks_unread -> row.group = Team.Alive_unread
+                | Team.Blocker _ | Team.Phase_word _ | Team.Working_on _
+                | Team.No_open_task _ ->
+                    false)
+              team.rows));
+      check int (label ^ ": a stuck Keeper still needs you") 2
+        (Team.count team Team.Needs_you);
+      check (list (pair string int)) (label ^ ": no holder is named from rows never read")
+        [] team.other_holders)
+    [ ("unavailable", Masc_tui_overview_tasks.Rows_unavailable "backlog.json: parse error")
+    ; ("not read yet", Masc_tui_overview_tasks.Rows_unread)
+    ]
 
 let () =
   run "tui_overview_team"
@@ -374,5 +414,7 @@ let () =
             test_paused_stopped_and_no_phase_are_counted_apart
         ; test_case "an info item is not a blocker" `Quick
             test_an_info_item_is_not_a_blocker
+        ; test_case "an unread backlog is not an idle fleet" `Quick
+            test_an_unread_backlog_is_not_an_idle_fleet
         ] )
     ]

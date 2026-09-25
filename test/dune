@@ -4299,6 +4299,7 @@
   masc
   masc_types
   masc_tui_types
+  masc_tui_overview_tasks
   masc_tui_overview_team))
 
 (test

@@ -1,13 +1,14 @@
 module Types = Masc_tui_types
 module Tui_decode = Masc.Tui_decode
 
-type group = Needs_you | Working | Idle | No_phase | Paused | Stopped
+type group = Needs_you | Working | Idle | Alive_unread | No_phase | Paused | Stopped
 
 type detail =
   | Blocker of { summary : string; item : Types.attention_item; held : int }
   | Phase_word of { word : string; held : int }
   | Working_on of { task : Tui_decode.task; more : int; awaiting : int }
   | No_open_task of { awaiting : int }
+  | Tasks_unread
 
 type row = { keeper : Types.overview_keeper; group : group; detail : detail }
 
@@ -73,13 +74,26 @@ let stuck ~attention ~holding ~word name =
   | Some item -> blocker ~holding item
   | None -> Phase_word { word; held = held holding }
 
-let alive holding =
-  match holding.working with
-  | task :: rest ->
-      ( Working,
-        Working_on { task; more = List.length rest; awaiting = holding.awaiting }
-      )
-  | [] -> (Idle, No_open_task { awaiting = holding.awaiting })
+(* The backlog rows the holdings are counted from. A backlog not read yet, or
+   one that failed to read, names no row, so every count taken from it is
+   zero; [alive] says such a Keeper's holdings are unread rather than empty,
+   and the held counts elsewhere are drawn only above zero. *)
+let rows_of = function
+  | Masc_tui_overview_tasks.Rows_read tasks -> tasks
+  | Masc_tui_overview_tasks.Rows_unread | Masc_tui_overview_tasks.Rows_unavailable _ ->
+      []
+
+let alive ~tasks holding =
+  match tasks with
+  | Masc_tui_overview_tasks.Rows_unread | Masc_tui_overview_tasks.Rows_unavailable _ ->
+      (Alive_unread, Tasks_unread)
+  | Masc_tui_overview_tasks.Rows_read _ -> (
+      match holding.working with
+      | task :: rest ->
+          ( Working,
+            Working_on { task; more = List.length rest; awaiting = holding.awaiting }
+          )
+      | [] -> (Idle, No_open_task { awaiting = holding.awaiting }))
 
 (* Where a Keeper is drawn: on a row of its own, or by name on the no-phase,
    the paused or the stopped line. *)
@@ -89,7 +103,7 @@ type placement =
   | Paused_name
   | Stopped_name
 
-let classify ~attention ~holding (keeper : Types.overview_keeper) =
+let classify ~tasks ~attention ~holding (keeper : Types.overview_keeper) =
   let name = keeper.okp_name in
   match (keeper.okp_paused, keeper.okp_phase) with
   | Some true, _ ->
@@ -103,7 +117,7 @@ let classify ~attention ~holding (keeper : Types.overview_keeper) =
       | Tui_decode.Phase_stuck ->
           On_row (Needs_you, stuck ~attention ~holding ~word name)
       | Tui_decode.Phase_alive ->
-          let group, detail = alive holding in
+          let group, detail = alive ~tasks holding in
           On_row (group, detail)
       | Tui_decode.Phase_paused -> Paused_name
       | Tui_decode.Phase_stopped -> Stopped_name)
@@ -120,20 +134,22 @@ let classify ~attention ~holding (keeper : Types.overview_keeper) =
 let band = function
   | Needs_you -> 0
   | Working -> 1
-  | Idle -> 2
-  | No_phase -> 3
-  | Paused -> 4
-  | Stopped -> 5
+  | Alive_unread -> 2
+  | Idle -> 3
+  | No_phase -> 4
+  | Paused -> 5
+  | Stopped -> 6
 
 let by_name names = List.sort (fun (left, _) (right, _) -> String.compare left right) names
 
-let project ~keepers ~tasks ~attention =
+let project ~keepers ~tasks:reading ~attention =
+  let tasks = rows_of reading in
   let rows, no_phase, paused, stopped =
     List.fold_left
       (fun (rows, no_phase, paused, stopped) (keeper : Types.overview_keeper) ->
         let holding = holding_of ~tasks keeper.okp_name in
         let entry = (keeper.okp_name, held holding) in
-        match classify ~attention ~holding keeper with
+        match classify ~tasks:reading ~attention ~holding keeper with
         | On_row (group, detail) ->
             ({ keeper; group; detail } :: rows, no_phase, paused, stopped)
         | No_phase_name -> (rows, entry :: no_phase, paused, stopped)
@@ -183,7 +199,7 @@ let count t group =
   | No_phase -> List.length t.no_phase
   | Paused -> List.length t.paused
   | Stopped -> List.length t.stopped
-  | Needs_you | Working | Idle ->
+  | Needs_you | Working | Idle | Alive_unread ->
       List.length (List.filter (fun row -> row.group = group) t.rows)
 
 let drawn_items t ~rows =
@@ -192,7 +208,7 @@ let drawn_items t ~rows =
   |> List.filter_map (fun row ->
          match row.detail with
          | Blocker { item; _ } -> Some item
-         | Phase_word _ | Working_on _ | No_open_task _ -> None)
+         | Phase_word _ | Working_on _ | No_open_task _ | Tasks_unread -> None)
 
 (* Removes the one instance each drawn row carries, by identity: a second
    item naming the same Keeper is a different item even when its words are

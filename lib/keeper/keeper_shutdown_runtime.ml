@@ -117,6 +117,20 @@ let holds_boot_fence ~operations (operation : Keeper_shutdown_types.t) =
      | Replay_overtaken _ | Replay_deferred _ -> false)
 ;;
 
+(* An operator asked for this stop or purge. When the boot replay could not
+   finish it, the Keeper stays fenced for this process instead of autobooting
+   against that instruction; the WARN names the stage, and the next boot
+   replays again. A supervisor cleanup was nobody's instruction, so its
+   Keeper boots. *)
+let keeps_fence_after_unfinished_replay (operation : Keeper_shutdown_types.t) =
+  Option.is_some (Keeper_shutdown_types.boot_replay operation)
+  &&
+  match operation.cleanup_intent.reason with
+  | Operator_stop_retain_meta | Operator_stop_remove_meta | Dashboard_keeper_purge _ ->
+    true
+  | Supervisor_cleanup -> false
+;;
+
 type ownerless_restore_policy =
   | Require_removal_evidence of Keeper_shutdown_types.t
   | Restore_corrupt_fence
@@ -660,7 +674,7 @@ let log_boot_replay_outcome (operation : Keeper_shutdown_types.t) =
   match operation.phase with
   | Blocked { stage; detail } ->
     Log.Keeper.warn
-      "boot recovery left a shutdown blocked at a replayable stage; the Keeper may boot and the next boot replays it: keeper=%s operation=%s intent=%s stage=%s detail=%s"
+      "boot recovery left a shutdown blocked at a replayable stage; the next boot replays it (an operator stop or purge keeps the Keeper fenced until then): keeper=%s operation=%s intent=%s stage=%s detail=%s"
       operation.keeper_name
       (Operation_id.to_string operation.operation_id)
       (cleanup_reason_label operation.cleanup_intent.reason)
@@ -817,8 +831,9 @@ let recover_operation
         | Error (Keeper_shutdown_finalize.Finalization_blocked blocked)
           when not (Keeper_shutdown_types.requires_admission_fence blocked) ->
           (* A replayable stage: the next boot replays it. Returning it as
-             recovered lets the caller release admission so the Keeper boots
-             now instead of staying fenced for this whole process. *)
+             recovered lets the caller decide the fence: a supervisor cleanup
+             releases it so the Keeper boots now; an operator stop or purge
+             keeps it ([keeps_fence_after_unfinished_replay]). *)
           log_boot_replay_outcome blocked;
           Ok blocked
         | Error error -> Error (Keeper_shutdown_finalize.error_to_string error))
@@ -913,7 +928,9 @@ let recover_operation_with_corrupt_owner_fence
        below applies to it. *)
     Ok observed
   | Ok recovered ->
-    if Keeper_shutdown_types.requires_admission_fence recovered
+    if
+      Keeper_shutdown_types.requires_admission_fence recovered
+      || keeps_fence_after_unfinished_replay recovered
     then Ok recovered
     else
       let keeper_name, successor_operation_id =

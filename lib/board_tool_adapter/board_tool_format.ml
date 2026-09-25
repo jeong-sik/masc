@@ -367,10 +367,11 @@ let judgment_arg args =
   | None -> value_of "judgement"
 ;;
 
-let normalize_board_post_meta args =
+let normalize_board_post_meta ?(attachments = []) args =
   let base_fields =
     match Option.value ~default:(`Null) (Json_util.assoc_member_opt "meta" args) with
-    | `Assoc fields -> fields
+    | `Assoc fields ->
+      List.filter (fun (key, _) -> not (String.equal key "attachments")) fields
     | `Null -> []
     | other ->
       (* RFC-0093 Phase B Step 3: split permissive `_ -> []` into typed
@@ -391,6 +392,15 @@ let normalize_board_post_meta args =
     match judgment_arg args with
     | Some judgment -> assoc_replace "judgment" judgment base_fields
     | None -> base_fields
+  in
+  let base_fields =
+    match attachments with
+    | [] -> base_fields
+    | entries ->
+      assoc_replace
+        "attachments"
+        (`List (List.map Board_tool_attachment.to_json entries))
+        base_fields
   in
   if Stdlib.List.length base_fields = 0 then None else Some (`Assoc base_fields)
 ;;

@@ -652,10 +652,10 @@ let tool_execute_typed_exec_args ?(argv = []) ~cwd program =
     ]
 
 
-let tool_execute_script_args ~cwd script =
+let tool_execute_command_args ~cwd script =
   `Assoc
     [
-      ("script", `String script);
+      ("command", `String script);
       ("cwd", `String cwd);
       ("timeout_sec", `Float 5.0);
     ]
@@ -1375,7 +1375,7 @@ let test_execute_missing_image_without_factory_fails_closed () =
       ~turn_sandbox_factory:None
       ~config
       ~meta
-      ~args:(tool_execute_script_args ~cwd:playground "ls lib/ | head -20")
+      ~args:(tool_execute_command_args ~cwd:playground "ls lib/ | head -20")
       ()
   in
   Alcotest.(check (option bool)) "Docker request did not run on Host" None
@@ -1410,7 +1410,7 @@ let test_execute_outside_playground_rejects_before_image_preflight () =
       ~turn_sandbox_factory:(Some factory)
       ~config
       ~meta
-      ~args:(tool_execute_script_args ~cwd "ls lib/ | head -20")
+      ~args:(tool_execute_command_args ~cwd "ls lib/ | head -20")
       ()
   in
   Alcotest.(check (option bool)) "legacy ok omitted" None
@@ -2180,7 +2180,7 @@ let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
   let raw =
     Keeper_tool_execute_runtime.handle_tool_execute ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
       ~args:
-        (tool_execute_script_args ~cwd:playground "ls lib/ | head -20")
+        (tool_execute_command_args ~cwd:playground "ls lib/ | head -20")
       ()
   in
   Alcotest.(check (option bool)) "safe pipeline is allowed" (Some true)
@@ -2241,7 +2241,9 @@ let test_execute_blocks_file_redirect_before_docker () =
    | Some false | None -> ());
   Alcotest.(check (option string))
     "typed boundary error"
-    (Some "cmd is not a field of this tool; the shell form is named script")
+    (Some
+       "$.cmd is not a supported typed Execute field; accepted: argv, command, \
+        shell, cwd, timeout_sec, intent")
     (parse_string_field raw "error");
   Alcotest.(check bool) "docker was not invoked" false
     (Sys.file_exists log_path)

@@ -50,8 +50,7 @@ let persist ~keeper_name json =
       let* width, height = match Keeper_image_dimensions.image_dimensions bytes with
         | Some (width,height) when width > 0 && height > 0 -> Ok (width,height)
         | _ -> Error "invalid screenshot dimensions" in
-      let* handle = Keeper_vision_tool.store_artifact
-          ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name) bytes in
+      let* handle = Keeper_vision_tool.store_frame ~keeper_name bytes in
       Ok (`Assoc (client_fields @ observation_fields @ ["artifact", `String (Multimodal.Vision_artifact_store.to_string handle);
         "media_type", `String mime; "tabId", `Int tab_id; "url", `String url;
         "title", `String title; "width", `Int width; "height", `Int height;

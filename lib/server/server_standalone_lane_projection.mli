@@ -25,8 +25,7 @@ type lane_configuration =
                 was rejected they cannot be put back in file order, and the
                 slot editor moves and drops by position. *)
       ; declared_cli_slots : string list
-            (** [cli_slots] in file order, including verifier candidates
-                rejected by judgement admission. *)
+            (** [cli_slots] in declaration order, including rejected clients. *)
       ; admission_error : string option
       }
   | Unconfigured of string

@@ -361,8 +361,6 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
       ; cli_slots =
           (if String.equal lane_id "hitl_auto_judge"
            then [ "antigravity_subscription.gemini-3-7-flash-high" ]
-           else if String.equal lane_id "verifier_exact"
-           then [ "verifier-cli-good" ]
            else [])
       ; dropped_slots =
           (if String.equal lane_id "librarian_exact"
@@ -376,9 +374,7 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
            else [ "slot" ])
       ; declared_cli_slots =
           (if String.equal lane_id "hitl_auto_judge"
-           then [ "antigravity_subscription.gemini-3-7-flash-high" ]
-           else if String.equal lane_id "verifier_exact"
-           then [ "verifier-cli-rejected"; "verifier-cli-good" ]
+           then [ "antigravity_subscription.gemini-3-7-flash-high"; "cli-backup" ]
            else [])
       ; admission_error = None
       }
@@ -427,6 +423,18 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
     (match field "hitl_auto_judge" "dropped_slots" with
      | `List [] -> true
      | _ -> false);
+  check bool "the declared CLI order survives the observation" true
+    (field "hitl_auto_judge" "declared_cli_slots"
+     = `List
+         [ `String "antigravity_subscription.gemini-3-7-flash-high"
+         ; `String "cli-backup"
+         ]);
+  (* The editor reads the writer's rule: an official-client append to the
+     workspace curator is refused, so the lane says it has no CLI tail. *)
+  check bool "a lane that walks a CLI tail says so" true
+    (field "hitl_auto_judge" "supports_cli_tail" = `Bool true);
+  check bool "the workspace curator has no CLI tail" true
+    (field "workspace_curator_exact" "supports_cli_tail" = `Bool false);
   (* RFC cli-runtimes-as-lane-slots: the declared cli suffix is on the wire,
      and a lane whose only slots are cli ones is ready, not degraded. *)
   check bool
@@ -434,12 +442,6 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
     true
     (match field "hitl_auto_judge" "cli_slots" with
      | `List [ `String "antigravity_subscription.gemini-3-7-flash-high" ] -> true
-     | _ -> false);
-  check bool
-    "verifier retains a rejected CLI declaration for the editor"
-    true
-    (match field "verifier_exact" "declared_cli_slots" with
-     | `List [ `String "verifier-cli-rejected"; `String "verifier-cli-good" ] -> true
      | _ -> false);
   check string
     "a cli-only lane is ready"

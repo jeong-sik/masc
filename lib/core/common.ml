@@ -90,6 +90,13 @@ let fresh_config_root_keeper_seed_target rel =
 let masc_dir_from_base_path ~base_path =
   Filename.concat base_path masc_dirname
 
+(* The one literal for the directory that holds every non-default cluster's
+   workspace ([<base>/.masc/clusters/<name>]). Workspace path resolution,
+   backend setup and blob maintenance all read it from here, so the three
+   cannot disagree about where clusters live (#38996). *)
+let clusters_dir_from_base_path ~base_path =
+  Filename.concat (masc_dir_from_base_path ~base_path) "clusters"
+
 (* Default-cluster keeper OUTPUT dir for callers holding only [base_path].
    Low-level on purpose: the cluster-aware [Workspace.keepers_runtime_dir]
    cannot be called from workspace-internal or accountability modules without a

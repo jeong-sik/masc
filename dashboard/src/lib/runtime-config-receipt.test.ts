@@ -54,6 +54,31 @@ describe('runtimeConfigCommitReceiptNotice', () => {
     expect(superseded).toContain('Skill catalog 최신 커밋 유지 (#9)')
   })
 
+  it('says when a commit left the exact-output registry unpublished', () => {
+    const applied = runtimeConfigCommitReceiptNotice(committedRuntimeTomlConfigFixture(baseConfig))
+    const unpublished = runtimeConfigCommitReceiptNotice(
+      committedRuntimeTomlConfigFixture(baseConfig, {
+        exactOutputRegistry: { status: 'unpublished', requires_restart: true },
+      }),
+    )
+
+    const kept = runtimeConfigCommitReceiptNotice(
+      committedRuntimeTomlConfigFixture(baseConfig, {
+        exactOutputRegistry: {
+          status: 'kept',
+          requires_restart: false,
+          next_boot_publishes: false,
+          reason: 'catalog read failed',
+        },
+      }),
+    )
+
+    expect(applied).toContain('Exact registry 적용됨')
+    expect(unpublished).toContain('Exact registry 미게시 · 재시작 필요')
+    expect(unpublished).not.toContain('Exact registry 적용됨')
+    expect(kept).toContain('다음 부팅 때 게시되지 않음 (catalog read failed)')
+  })
+
   it('shows unconfirmed durability without claiming durable storage', () => {
     const notice = runtimeConfigCommitReceiptNotice(
       committedRuntimeTomlConfigFixture(baseConfig, { durability: 'unconfirmed' }),

@@ -9,18 +9,18 @@ module Layout = Masc_tui_layout
    [board_read_pane]'s data flow -- view, line count, scroll projection --
    closely enough to judge what a refresh tick does to the reader's scroll,
    without linking the pane out of the executable. *)
-let comment_line_count = function
+let comment_line_count_of_view = function
   | Detail.Ready comments -> List.length comments
   | Detail.Absent | Detail.Loading | Detail.Failed _ -> 1
 
 let project_view_scroll view ~terminal_rows ~body_line_count scroll =
-  let comment_count = comment_line_count view in
+  let comment_line_count = comment_line_count_of_view view in
   let allocation =
     Layout.allocate_board_read ~terminal_rows ~body_line_count
-      ~comment_count
+      ~comment_line_count
   in
   Layout.project_board_read_scroll ~body_line_count
-    ~body_rows:allocation.body_rows ~comment_count
+    ~body_rows:allocation.body_rows ~comment_line_count
     ~comment_rows:allocation.comment_rows scroll
 
 let started = function

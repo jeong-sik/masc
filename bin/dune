@@ -556,6 +556,13 @@
  (wrapped false)
  (modules masc_tui_scroll))
 
+; The choose-one-of-N list the pickers share: cursor, typed filter, window.
+(library
+ (name masc_tui_pick_list)
+ (wrapped false)
+ (modules masc_tui_pick_list)
+ (libraries masc_tui_scroll masc_tui_message_layout))
+
 (library
  (name masc_tui_rows)
  (wrapped false)
@@ -880,6 +887,7 @@
   masc.masc_tool_blob_store
   masc.masc_types
   masc.string_util
+  masc_tui_message_layout
   yojson))
 
 (library
@@ -921,7 +929,8 @@
 (library
  (name masc_tui_layout)
  (wrapped false)
- (modules masc_tui_layout))
+ (modules masc_tui_layout)
+ (libraries masc_tui_message_layout))
 
 (library
  (name masc_tui_render_schedule)
@@ -1194,13 +1203,22 @@
  (name masc_tui_keeper_config)
  (wrapped false)
  (modules masc_tui_keeper_config)
- (libraries yojson masc_tui_theme masc.string_util))
+ (libraries yojson masc masc_tui_theme masc.string_util))
 
 (library
  (name masc_tui_keeper_sandbox)
  (wrapped false)
  (modules masc_tui_keeper_sandbox)
  (libraries yojson masc_tui_theme masc_tui_message_layout))
+
+;; The Keeper GitHub tab. Own library so the rows -- one where the stored and
+;; effective readings agree, one each where they differ -- have a test that
+;; reads them.
+(library
+ (name masc_tui_github_identity)
+ (wrapped false)
+ (modules masc_tui_github_identity)
+ (libraries yojson))
 
 (library
  (name masc_tui_csi)
@@ -1231,7 +1249,9 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries digestif mtime.clock.os masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries digestif mtime.clock.os masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+  masc_tui_overview_tasks
+  masc_tui_machine_live
   masc_tui_connector_unbind
   ;; [sch_last_wake_status] is the schedule contract's wake_status.
   masc.masc_schedule
@@ -1257,6 +1277,9 @@
   masc.masc_goal
   masc.masc_types
   masc.time_codec
+  ;; [Standalone_lane.t] is what the lane pick, the lane run views and the
+  ;; slot editor carry.
+  masc.runtime
   masc_tui_acting
   masc_tui_composer
   masc_tui_audio_device
@@ -1424,7 +1447,15 @@
  (name masc_tui_msx_tick)
  (wrapped false)
  (modules masc_tui_msx_tick)
- (libraries masc_tui_types yojson base64 threads))
+ (libraries masc_tui_types masc_tui_machine_live yojson base64 threads))
+
+;; The spectator's typed read of GET /api/v1/lane-addons/live: one route for
+;; every machine with a screen (MSX and DOS). Pure decoding, no I/O.
+(library
+ (name masc_tui_machine_live)
+ (wrapped false)
+ (modules masc_tui_machine_live)
+ (libraries yojson base64))
 
 ; The primitives every surface draws through. Its own library so the
 ; direction is enforced rather than agreed to: nothing here may reach back
@@ -1555,6 +1586,7 @@
  (modules masc_tui_overview_goals)
  (libraries
   masc
+  masc_tui_overview_tasks
   masc.masc_goal
   masc_types
   masc_tui_types
@@ -1590,6 +1622,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_pick_list
   masc_tui_repository_pulls
   digestif
   masc.string_util
@@ -1659,6 +1692,7 @@
   masc_tui_interactive
   masc_tui_msx
   masc_tui_msx_tick
+  masc_tui_machine_live
   masc_tui_terminal_profile
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
@@ -1719,6 +1753,7 @@
   masc_tui_keeper_control
   masc_tui_keeper_config
   masc_tui_keeper_sandbox
+  masc_tui_github_identity
   masc_tui_markdown
   masc_tui_graphics
   masc_tui_image_ref
@@ -1907,6 +1942,7 @@
  (modules masc_tui_msx)
  (libraries
   masc_tui_types
+  masc_tui_machine_live
   masc_tui_interactive
   masc_tui_ansi
   masc_tui_graphics

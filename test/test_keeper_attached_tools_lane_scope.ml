@@ -71,7 +71,13 @@ let tool_names tools =
 
 (* No descriptors, so the only difference between the two shapes is the one
    under test. *)
-let with_bundle ?(history = []) ?(attached = true) ?(with_loader = true) f =
+let with_bundle
+      ?(history = [])
+      ?(attached = true)
+      ?(with_loader = true)
+      ?skills
+      f
+  =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -85,22 +91,48 @@ let with_bundle ?(history = []) ?(attached = true) ?(with_loader = true) f =
     ~registry_root:dir
   @@ fun registry ->
   let meta = make_meta () in
-  (* No skills, so the bundle carries no composition tools and the only
-     difference between the two shapes is the one under test. *)
-  let snapshot =
-    match Skill_source_config.parse_text "" with
-    | Error _ -> failf "an empty skill source config must parse"
-    | Ok config ->
-      (match Skill_catalog_snapshot.configured ~config [] with
-       | Ok snapshot -> snapshot
-       | Error _ -> failf "an empty skill snapshot must build")
+  (* No skills unless a case passes a snapshot and its catalog, so the bundle
+     carries no composition tools and the only difference between the two
+     shapes is the one under test. A Skill-bearing bundle is refused without a
+     frozen activation context, so a case with skills gets one, built from the
+     same snapshot the catalog came from. *)
+  let snapshot, skill_catalog, skill_activation_context =
+    match skills with
+    | None ->
+      let snapshot =
+        match Skill_source_config.parse_text "" with
+        | Error _ -> failf "an empty skill source config must parse"
+        | Ok config ->
+          (match Skill_catalog_snapshot.configured ~config [] with
+           | Ok snapshot -> snapshot
+           | Error _ -> failf "an empty skill snapshot must build")
+      in
+      snapshot, Keeper_skill_catalog.empty, None
+    | Some (snapshot, catalog) ->
+      let trace_id = meta.Keeper_meta_contract.runtime.trace_id in
+      let context =
+        match
+          Keeper_skill_activation_recorder.make
+            ~trace_id
+            ~runtime_id:(fun () -> Some "test.runtime")
+            ~turn_ref:
+              (Ids.Turn_ref.make
+                 ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
+                 ~absolute_turn:1)
+            ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision snapshot)
+            ~task_selection:Keeper_task_skill_turn.empty
+        with
+        | Ok context -> context
+        | Error error -> fail (Keeper_skill_activation_recorder.error_to_string error)
+      in
+      snapshot, catalog, Some context
   in
   let capability_surface =
     Keeper_capability_surface.create
       ~tool_deny:[]
       ~sandbox_profile:Masc.Keeper_types_profile.Docker
       ~skill_names:None
-      ~global_skill_catalog:Keeper_skill_catalog.empty
+      ~global_skill_catalog:skill_catalog
       ~skill_inventory:(Keeper_skill_inventory.of_snapshot snapshot)
       ~task_skills:[]
   in
@@ -132,6 +164,7 @@ let with_bundle ?(history = []) ?(attached = true) ?(with_loader = true) f =
           }
       ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"test")
       ?identity_surface
+      ?skill_activation_context
       ~capability_surface
       ()
   in
@@ -266,6 +299,113 @@ let test_a_builtin_that_declares_deferral_leaves_the_request () =
       "the lanes that cannot widen a turn still get them as schemas"
       true
       (List.for_all (fun n -> List.mem n sent) declared_deferrable))
+;;
+
+(* A Skill composition declares [defer_loading] in its composition block, not
+   in a [config/tools] file. Two compositions over the same node tool, one
+   declaring deferral and one not, so the declaration is the only thing that
+   separates them. *)
+let composition_skill_document ~name ~defer_line =
+  Printf.sprintf
+    "---\nname: %s\ndescription: Read the Keeper lane status.\n---\n\nComposition fixture.\n\n```toml composition\n[[compositions]]\nname = \"%s\"\nexecution = \"inline\"\n%s\n[[compositions.nodes]]\nid = \"lane\"\ntool = \"keeper_lane_status\"\n[compositions.nodes.input]\nkind = \"literal\"\nvalue = {}\n```\n"
+    name
+    name
+    defer_line
+;;
+
+let composition_skill_snapshot documents =
+  let config_text =
+    {|[skills]
+resource-read-max-bytes = 65536
+[[skills.sources]]
+id = "composition-fixture"
+anchor = "base-path"
+path = "skills"
+access = "read-write"
+|}
+  in
+  let skill_config =
+    match Skill_source_config.parse_text config_text with
+    | Ok config -> config
+    | Error _ -> fail "composition Skill source fixture was rejected"
+  in
+  let source =
+    match skill_config.Skill_source_config.sources with
+    | [ source ] -> source
+    | _ -> fail "composition Skill fixture must have one source"
+  in
+  let scan : Skill_catalog_snapshot.source_scan =
+    { source =
+        Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source
+    ; observation =
+        Skill_catalog_snapshot.Source_ready
+          { resolved_path = "/workspace/skills"; candidates = List.length documents }
+    ; candidates =
+        List.map
+          (fun (directory, source_text) ->
+             Skill_catalog_snapshot.Candidate_document { directory; source_text })
+          documents
+    }
+  in
+  let snapshot =
+    match Skill_catalog_snapshot.configured ~config:skill_config [ scan ] with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "composition Skill snapshot fixture was rejected"
+  in
+  match Keeper_skill_catalog.of_snapshot snapshot with
+  | catalog, [] -> snapshot, catalog
+  | _, diagnostic :: _ ->
+    failf
+      "composition fixture was rejected as a skill: %s"
+      (Keeper_skill_catalog.error_to_string diagnostic.error)
+;;
+
+let composition_tool_name catalog name =
+  match
+    List.find_map
+      (fun (skill : Keeper_skill_catalog.skill) ->
+         match skill.surface with
+         | Keeper_skill_catalog.Composition entry
+           when String.equal entry.Keeper_tool_composition_catalog.name name ->
+           Some (Keeper_tool_composition_catalog.tool_name entry)
+         | Keeper_skill_catalog.Composition _ | Keeper_skill_catalog.Instruction -> None)
+      (Keeper_skill_catalog.skills catalog)
+  with
+  | Some tool_name -> tool_name
+  | None -> failf "composition %S is not in the fixture catalog" name
+;;
+
+let test_a_composition_that_declares_deferral_leaves_the_request () =
+  let ((_, skill_catalog) as skills) =
+    composition_skill_snapshot
+      [ ( "lane-deferred"
+        , composition_skill_document ~name:"lane-deferred" ~defer_line:"defer_loading = true" )
+      ; "lane-loaded", composition_skill_document ~name:"lane-loaded" ~defer_line:""
+      ]
+  in
+  let deferred = composition_tool_name skill_catalog "lane-deferred" in
+  let loaded = composition_tool_name skill_catalog "lane-loaded" in
+  with_bundle ~skills (fun bundle ->
+    let sent = tool_names bundle.Keeper_tools_agent_core.tools in
+    let listed = tool_names bundle.Keeper_tools_agent_core.agent_core_tools in
+    let held = listing_deferred_names bundle in
+    check
+      bool
+      "both compositions reach the bundle, or this proves nothing"
+      true
+      (List.mem deferred sent && List.mem loaded sent);
+    check
+      bool
+      "the composition that declared deferral is not sent as a schema"
+      false
+      (List.mem deferred listed);
+    check bool "and the listing names it" true (List.mem deferred held);
+    check
+      bool
+      "the composition that declared nothing is sent as a schema"
+      true
+      (List.mem loaded listed);
+    check bool "and the listing does not name it" false (List.mem loaded held))
 ;;
 
 (* [Keeper_run_tools_setup] compares the bundle against what the descriptor
@@ -510,6 +650,10 @@ let () =
             "holds back a built-in that declares deferral"
             `Quick
             test_a_builtin_that_declares_deferral_leaves_the_request
+        ; test_case
+            "holds back a Skill composition that declares deferral"
+            `Quick
+            test_a_composition_that_declares_deferral_leaves_the_request
         ; test_case
             "does not report a declared tool this conversation ran as held"
             `Quick

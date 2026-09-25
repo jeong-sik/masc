@@ -8,4 +8,5 @@ let of_string = function
   | "on_demand" -> Some On_demand
   | "autonomous" -> Some Autonomous
   | _ -> None
+let all = [ Manual; On_demand; Autonomous ]
 let to_yojson mode = `String (to_string mode)

@@ -9,6 +9,7 @@ type lane_configuration =
               in file order once a sibling was rejected, so an editor that
               moves or drops one slot needs this to say where the slot sits. *)
       ; declared_cli_slots : string list
+          (** [cli_slots] in source order, including any client admission rejected. *)
       ; admission_error : string option
       }
   | Unconfigured of string
@@ -793,6 +794,10 @@ let lane_json
       , `List (List.map (fun slot -> `String slot) declared_slots) )
     ; ( "declared_cli_slots"
       , `List (List.map (fun slot -> `String slot) declared_cli_slots) )
+      (* Whether an append of an official-client slot can land here. The
+         writer refuses it for a lane that cannot walk a CLI tail, so the
+         editor reads the same rule rather than offering a pick that fails. *)
+    ; "supports_cli_tail", `Bool (Runtime.exact_lane_supports_cli_tail spec.lane)
     ; "admission_error", json_string_opt admission_error
     ; "status", `String status
     ; "retained_run_count", `Int (List.length runs)
@@ -858,7 +863,7 @@ let live_lane_configuration registry lane_id =
      position, so it reads this. *)
   let declared_slots, declared_cli_slots =
     match Runtime_exact_output_registry.declared_lane registry ~lane_id with
-    | Some declared -> declared.Runtime_schema.slot_ids, declared.Runtime_schema.cli_slot_ids
+    | Some declared -> declared.Runtime_schema.slot_ids, declared.cli_slot_ids
     | None -> [], []
   in
   (* Publication keeps declared-but-inadmissible slots as typed observations;

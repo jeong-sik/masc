@@ -474,10 +474,9 @@ let for_surface = function
           ~help:"open the standalone lane's exact runs"
       ; b Act "a" "append slot"
           ~help:"add a candidate to this lane's walk order"
-      ; b Act "s" "slots"
-          ~help:"edit HTTP and CLI slots together: a adds, x drops, J/K \
-                 reorders within each transport group, d opens the selected HTTP \
-                 provider where exact-body-timeout-s lives; HTTP runs before CLI"
+      ; b Act "s" "providers"
+          ~help:"edit declared HTTP and CLI provider slots: a adds, x drops, \
+                 J/K reorders within each group, Esc closes; HTTP runs before CLI"
         (* The lane detail spent four rows on the file's shape and on this
            key, the same two sentences under every lane. They are here, where
            the key is. *)
@@ -1136,18 +1135,21 @@ let footer_hints_board_read ~focus_posts ~split =
        ; b Meta "Tab" "next"
        ])
 
-let footer_hints_fusion_detail ~position =
-  Printf.sprintf "%s  %s"
-    (hints_of_bindings
-       ([ b Navigate "j/k" "scroll"
-        ; b Navigate "PgUp/PgDn" "page"
-        ; fusion_caller_key
-        ; fusion_board_key
-        ; b Act "Y" "copy"
-        ; b Act "Esc" "back" ~help:"Left or Esc returns to the run list"
-        ]
-        @ listing_meta))
-    position
+(* The scroll position is not here. It is not a key and it cannot be looked
+   up, so it travels to the footer as its own argument
+   ([Masc_tui_footer.line]'s [?position]) rather than as two spaces on the end
+   of this string -- spelled that way the fitter read it as one more key item
+   and gave it up first, and on this surface it was never drawn. *)
+let footer_hints_fusion_detail =
+  hints_of_bindings
+    ([ b Navigate "j/k" "scroll"
+     ; b Navigate "PgUp/PgDn" "page"
+     ; fusion_caller_key
+     ; fusion_board_key
+     ; b Act "Y" "copy"
+     ; b Act "Esc" "back" ~help:"Left or Esc returns to the run list"
+     ]
+     @ listing_meta)
 
 (* Lanes sub-modes ([lanes_mode] owns overview/list/detail/notice —
    masc_tui_types.ml). The overview footer stays [for_surface Lanes]; these
@@ -1161,18 +1163,15 @@ let footer_hints_lanes_run_list =
      ]
      @ listing_meta)
 
-let footer_hints_lanes_run_detail ~position =
-  let hints =
-    hints_of_bindings
-      ([ b Navigate "j/k" "compare" ~help:"scroll Input and Output together"
-       ; b Navigate "PgUp/PgDn" "page" ~help:"page both evidence panes"
-       ; b Act "Left / Esc" "back" ~help:"back to the run list"
-       ]
-       @ listing_meta)
-  in
-  match position with
-  | None -> hints
-  | Some position -> hints ^ "  " ^ position
+(* The position travels as [Masc_tui_footer.line]'s [?position], for the
+   reason spelled over [footer_hints_fusion_detail]. *)
+let footer_hints_lanes_run_detail =
+  hints_of_bindings
+    ([ b Navigate "j/k" "compare" ~help:"scroll Input and Output together"
+     ; b Navigate "PgUp/PgDn" "page" ~help:"page both evidence panes"
+     ; b Act "Left / Esc" "back" ~help:"back to the run list"
+     ]
+     @ listing_meta)
 
 let footer_hints_git_changes =
   hints_of_bindings

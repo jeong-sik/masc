@@ -36,7 +36,8 @@ flowchart LR
 ## 공통 확장 경계
 
 패키지 `lane.toml`은 id, revision, title, image, command와 실제 worker 자원 한도를 선언한다.
-observe와 derive는 역할이며 성숙도 순서가 아니다. v0는 state/act를 제공한다고 주장하지 않는다.
+observe와 derive는 역할이며 성숙도 순서가 아니다. v0는 state를 제공한다고 주장하지 않는다. act는 `lane.toml`의
+`contributions=["act"]`와 `lane_act` 도구로 이미 출하한다(예: `dos-world`·`quiz-grader`).
 worker의 MCP는 전송 규약이다. 제품의 추가 단위는 도구 목록이 아니라 관측·관계·시간·표현이다.
 코어가 도메인 의미를 해석하지 않고 공통 row/coverage를 검사하고 표시한다.
 

@@ -58,12 +58,22 @@ let log_schedule_dispatch (dispatch : Schedule_runner.dispatch_result) =
       error
 ;;
 
-let log_schedule_hold_started (signal : Schedule_runner.wake_signal) =
-  Log.Server.info
-    "schedule_runner: occurrence=%s schedule_id=%s held: its target has not \
-     consumed the previous occurrence yet"
-    (Schedule_occurrence_id.to_string signal.occurrence_id)
-    signal.schedule_id
+let log_schedule_hold_started ({ signal; reason } : Schedule_runner.held) =
+  match reason with
+  | Schedule_runner.Previous_occurrence_unconsumed ->
+    Log.Server.info
+      "schedule_runner: occurrence=%s schedule_id=%s held: its target has not \
+       consumed the previous occurrence yet"
+      (Schedule_occurrence_id.to_string signal.occurrence_id)
+      signal.schedule_id
+  | Schedule_runner.Target_intake_fenced { target; fence_owner } ->
+    Log.Server.info
+      "schedule_runner: occurrence=%s schedule_id=%s held: target keeper=%s \
+       refuses intake while operation=%s holds its shutdown fence"
+      (Schedule_occurrence_id.to_string signal.occurrence_id)
+      signal.schedule_id
+      target
+      fence_owner
 ;;
 
 let wake_enqueue_counts_of_dispatches dispatches =
@@ -140,8 +150,11 @@ let run_schedule_runner_tick ~clock config ~previously_held =
           result;
         record_schedule_runner_tick_outcome "ok";
         List.iter log_schedule_dispatch result.dispatches;
-        List.iter log_schedule_hold_started
-          (Schedule_runner.newly_held ~previous:previously_held result.held);
+        let newly_held =
+          Schedule_runner.newly_held ~previous:previously_held result.held
+        in
+        List.iter log_schedule_hold_started newly_held;
+        Server_schedule_consumers.resume_fenced_owners config ~newly_held result.held;
         if result.Schedule_runner.emitted <> []
            || result.rescheduled > 0
            || result.dispatches <> []
@@ -495,6 +508,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       if Runtime_startup_state.requires_setup () then Runtime_startup_state.await_available ();
       Runtime_provider_usage_read.read_all
         ~mgr:Posix_spawn_process_mgr.mgr
+        ~net:env#net
         ~clock
         ~cwd:Eio.Path.(Eio.Stdenv.fs env / config.base_path));
   (* Metrics flush fiber: drains write queue every 500ms, batches file appends.

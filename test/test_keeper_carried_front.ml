@@ -184,6 +184,31 @@ let test_an_unanswered_record_does_not_seed_the_front () =
   check source "turn 10 supplied the response" (Front.Turn_record { turn = 10 }) src
 ;;
 
+(* A projection that carried no durable atom (a Gate-only floor, an overflow
+   retry) still reports its attempted range as an [After_history] window. That
+   attempt becomes the accepted boundary only when a response joins it. *)
+let test_an_unanswered_empty_attempt_does_not_seed_the_front () =
+  let empty_attempt ~turn ~total_atoms =
+    { (record ~turn ~finish:None ~response_observed:false None) with
+      Turn_record.model_input_window =
+        Some
+          { transmitted_atoms = 0
+          ; total_atoms
+          ; measurement = Wire_shape
+          ; model_input_front =
+              Model_input_front.After_history (recorded_digest (total_atoms - 1))
+          }
+    }
+  in
+  let first_atom, src =
+    seed (of_records [ record ~turn:10 (Some (30, 100)); empty_attempt ~turn:12 ~total_atoms:110 ])
+  in
+  check int "the last response-observed front survives" 70 first_atom;
+  check source "turn 10 supplied the response" (Front.Turn_record { turn = 10 }) src;
+  check bool "an empty attempt alone seeds nothing" true
+    (Option.is_none (of_records [ empty_attempt ~turn:12 ~total_atoms:110 ]))
+;;
+
 let test_a_later_unanswered_attempt_does_not_replace_the_same_turns_response () =
   let attempted = record ~turn:12 ~finish:None (Some (5, 110)) in
   let record =
@@ -892,6 +917,8 @@ let () =
             test_a_response_survives_its_runtime_leaving_the_catalog
         ; test_case "an unanswered record does not seed" `Quick
             test_an_unanswered_record_does_not_seed_the_front
+        ; test_case "an unanswered empty attempt does not seed" `Quick
+            test_an_unanswered_empty_attempt_does_not_seed_the_front
         ; test_case "same-turn unanswered attempt does not replace response"
             `Quick
             test_a_later_unanswered_attempt_does_not_replace_the_same_turns_response

@@ -1308,7 +1308,7 @@ let test_appended_gate_reference_is_inside_the_window () =
            | Error _ -> fail "the projected observation did not seed the same history")))
 ;;
 
-let test_gate_only_floor_emits_no_durable_front () =
+let test_gate_only_floor_observes_an_empty_durable_range () =
   let observed = ref None in
   let history =
     List.init 3 (fun index ->
@@ -1337,7 +1337,23 @@ let test_gate_only_floor_emits_no_durable_front () =
      check bool "the Gate atom remains at the floor" true
        (last.Agent_core.Types.content = marker.content)
    | [] -> fail "the capacity floor removed the Gate atom");
-  check (option reject) "a Gate-only suffix has no durable front" None !observed
+  (* The Gate reference is not a durable atom, so the attempt carried none of
+     the offered history: a typed zero observation witnessed by the last
+     offered atom. It is an attempted range only; it seeds a later turn only
+     once a successful response joins it to the TurnRecord
+     (test_keeper_carried_front "an unanswered empty attempt does not seed"). *)
+  match !observed with
+  | None -> fail "a Gate-only floor must still report its empty attempted range"
+  | Some reading ->
+    check int "no durable atom rides with the Gate reference" 0 reading.transmitted_atoms;
+    check int "the offered history is counted in its own coordinate"
+      (List.length history) reading.total_atoms;
+    check bool "the front witnesses the end of the offered history" true
+      (reading.model_input_front
+       = Model_input_front.After_history
+           (Option.get
+              (Runtime_model_input_tail_window.atom_opening_digest
+                 history (List.length history - 1))))
 ;;
 
 let carried_front_history () =
@@ -1858,9 +1874,9 @@ let () =
               `Quick
               test_appended_gate_reference_is_inside_the_window
           ; test_case
-              "a Gate-only floor emits no durable front"
+              "a Gate-only floor observes an empty durable range"
               `Quick
-              test_gate_only_floor_emits_no_durable_front
+              test_gate_only_floor_observes_an_empty_durable_range
           ; test_case
               "a seeded start matches the Agent Core carried range"
               `Quick

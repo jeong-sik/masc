@@ -88,3 +88,7 @@ val window_text : scroll:int -> height:int -> int -> string
 (** Where a window of [height] rows from [scroll] stands in a list of [count]:
     ["first-last/count"], counted from one, [0/count] with no rows to show
     them in, and [0/0] for an empty list. *)
+
+val window_reading : noun:string -> scroll:int -> height:int -> int -> string
+(** A window with its counted item named, such as ["rows 1-10/60"]. A new
+    reading site must supply its noun instead of assembling one afterward. *)

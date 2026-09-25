@@ -555,16 +555,42 @@ let detail_field label value = "    " ^ detail_label label ^ value
    printed \x0A (#37017) -- and wrapped at spaces, so a word is not cut in two
    at the pane's edge. A blank line stays a blank row: it is a paragraph break,
    not an absence. *)
-let detail_claim_lines ~inner_width claim =
-  Message_layout.wrap_body ~max_cells:inner_width
-    ~sanitize:Terminal_text.single_line claim
-  |> List.map (fun line -> if String.equal line "" then "" else "    " ^ line)
+let detail_claim_lines ?state ~inner_width claim =
+  let wrap () =
+    let lines =
+      Message_layout.wrap_body ~max_cells:inner_width
+        ~sanitize:Terminal_text.single_line claim
+      |> List.map (fun line -> if String.equal line "" then "" else "    " ^ line)
+    in
+    let count = List.length lines in
+    Option.iter
+      (fun (state : state) ->
+        state.memory_fact_claim_wrap <- Some (claim, inner_width, lines, count))
+      state;
+    lines, count
+  in
+  match state with
+  | Some state ->
+      (match state.memory_fact_claim_wrap with
+       | Some (source, width, lines, count)
+         when source == claim && width = inner_width -> lines, count
+       | Some _ | None -> wrap ())
+  | None -> wrap ()
 
-let memory_fact_detail_lines ~cols (row : memory_fact_row) =
+type fact_detail_parts = {
+  heading : string;
+  claim_lines : string list;
+  claim_line_count : int;
+  other_lines : string list;
+}
+
+let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
   let inner_width = max 30 (cols - 6) in
   match row with
   | Memory_row_fact fact ->
-      let claim_lines = detail_claim_lines ~inner_width fact.mf_claim in
+      let claim_lines, claim_line_count =
+        detail_claim_lines ?state ~inner_width fact.mf_claim
+      in
       let history =
         (* The retrieval count, its day count and its last clock are one
            reading: the server derives all three from the same list of
@@ -593,9 +619,12 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
         |> List.mapi (fun index line ->
              (if index = 0 then history_prefix else String.make prefix_width ' ') ^ line)
       in
-      [ Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
-      @ claim_lines
-      @ [ (* The word comes from [Keeper_memory_os_types.category], a closed
+      { heading =
+          Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset
+      ; claim_lines
+      ; claim_line_count
+      ; other_lines =
+        [ (* The word comes from [Keeper_memory_os_types.category], a closed
              set this build spells itself, so it is printed rather than
              escaped: there is no wire text left in it to escape. *)
           detail_field "Category:"
@@ -613,26 +642,63 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
                (memory_fact_age_label fact.mf_first_seen)
                (memory_fact_age_label fact.mf_last_seen))
         ]
-      @ history_lines
-      @ [ detail_field "Memory ID:" (Terminal_text.single_line fact.mf_memory_id) ]
+        @ history_lines
+        @ [ detail_field "Memory ID:" (Terminal_text.single_line fact.mf_memory_id) ]
+      }
   | Memory_row_source_fact fact ->
-      let claim_lines = detail_claim_lines ~inner_width fact.msf_claim in
-      [ Printf.sprintf "  %s%sSource-Bound Fact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
-      @ claim_lines
-      @ [ detail_field "Bound Path:" (Terminal_text.single_line fact.msf_path)
+      let claim_lines, claim_line_count =
+        detail_claim_lines ?state ~inner_width fact.msf_claim
+      in
+      { heading =
+          Printf.sprintf "  %s%sSource-Bound Fact Detail%s" Ansi.bold
+            (Theme.info ()) Ansi.reset
+      ; claim_lines
+      ; claim_line_count
+      ; other_lines =
+        [ detail_field "Bound Path:" (Terminal_text.single_line fact.msf_path)
         ; detail_field "File SHA:"
             (Printf.sprintf "%s · %sFirst Seen:%s %s" 
                (Terminal_text.single_line fact.msf_sha256)
                (Theme.recede ()) Ansi.reset
                (memory_fact_age_label fact.msf_first_seen))
         ]
+      }
   | Memory_row_invalidation row ->
-      [ Printf.sprintf "  %s%sDropped / Invalidated Fact%s" Ansi.bold (Theme.bad ()) Ansi.reset
-      ; detail_field "Reason:" (Terminal_text.single_line row.mi_reason)
-      ; detail_field "Source Path:" (Terminal_text.single_line row.mi_source_path)
-      ; detail_field "Dropped At:"
-          (memory_fact_age_label row.mi_invalidated_at ^ " ago")
-      ]
+      { heading =
+          Printf.sprintf "  %s%sDropped / Invalidated Fact%s" Ansi.bold
+            (Theme.bad ()) Ansi.reset
+      ; claim_lines = []
+      ; claim_line_count = 0
+      ; other_lines =
+        [ detail_field "Reason:" (Terminal_text.single_line row.mi_reason)
+        ; detail_field "Source Path:" (Terminal_text.single_line row.mi_source_path)
+        ; detail_field "Dropped At:"
+            (memory_fact_age_label row.mi_invalidated_at ^ " ago")
+        ]
+      }
+
+let fact_detail_line_count parts =
+  1 + parts.claim_line_count + List.length parts.other_lines
+
+let first_lines count lines =
+  let rec collect remaining kept = function
+    | _ when remaining <= 0 -> List.rev kept
+    | [] -> List.rev kept
+    | line :: rest -> collect (remaining - 1) (line :: kept) rest
+  in
+  collect count [] lines
+
+let fact_detail_prefix parts count =
+  if count <= 0 then []
+  else
+    let claim_kept = min parts.claim_line_count (count - 1) in
+    parts.heading
+    :: (first_lines claim_kept parts.claim_lines
+       @ first_lines (count - 1 - claim_kept) parts.other_lines)
+
+let memory_fact_detail_lines ~cols row =
+  let parts = memory_fact_detail_parts ~cols row in
+  fact_detail_prefix parts (fact_detail_line_count parts)
 
 (* The fleet header above the sort row: the Total, Ordinary and Librarian
    readings, each wrapped to the frame. Its row count depends on the width, so
@@ -850,16 +916,22 @@ let render_memory_body ~cols ~budget (state : state)
        push_divider ();
        List.iter (push_styled ~style:(Theme.recede ())) lines)
 
+(* How many fact rows the list keeps before the detail below it takes any.
+   Enough to read the cursor against its neighbours -- one row above, one
+   below, and the room a filter leaves when it lands the cursor near an
+   edge. One of these rows goes to the window reading when the list
+   overflows, the way it does on every other reading pane. Under this the
+   browser stops being one. *)
+let memory_fact_list_floor_rows = 5
+
 let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   let total = List.length rows in
   let cursor = max 0 (min cursor (total - 1)) in
-  let detail_lines =
-    match List.nth_opt rows cursor with
-    | None -> []
-    | Some row -> memory_fact_detail_lines ~cols row
+  let detail =
+    Option.map (memory_fact_detail_parts ~state ~cols) (List.nth_opt rows cursor)
   in
-  let detail_rows =
-    match detail_lines with [] -> 0 | lines -> 1 + List.length lines
+  let total_detail_lines =
+    Option.fold ~none:0 ~some:fact_detail_line_count detail
   in
   let store_error_rows =
     match state.memory_facts with
@@ -878,14 +950,49 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
      divider. Input asks for the target cursor because wrapped details can
      change the height on every movement. The search row is counted from
      [memory_search_query], the same value the renderer draws it from. *)
-  let fixed_rows =
+  let chrome_rows =
     4
     + (if Option.is_some state.memory_facts then 1 else 0)
     + (if String.trim (memory_search_query state) <> "" then 1 else 0)
-    + detail_rows + store_error_rows
+    + store_error_rows
     + (if Option.is_some state.memory_facts_error then 2 else 0)
   in
-  let room = max 1 (budget - fixed_rows) in
+  (* The detail is as tall as the fact under the cursor, and a fact can be
+     any length. On the live store at thirty rows one fact filled fifteen of
+     them and the list fell to its floor of one: a browser of 254 facts
+     showing one row, whose height then moved on every [j] as the next fact
+     wrapped to a different depth. The list keeps this many rows before the
+     detail takes any, and what the detail then loses is one keypress away --
+     [Enter] opens the whole fact in an overlay that owns the terminal. *)
+  let room_below_chrome = max 1 (budget - chrome_rows) in
+  let detail_row_budget =
+    min (if total_detail_lines = 0 then 0 else 1 + total_detail_lines)
+      (max 0 (room_below_chrome - memory_fact_list_floor_rows))
+  in
+  let detail_lines =
+    match detail with
+    | None -> []
+    | Some parts ->
+      let kept = max 0 (detail_row_budget - 1) in
+      (* The detail also needs its divider. With no line left after that,
+         even the folded marker would exceed the rows reserved for it. *)
+      if kept = 0 then []
+      else if kept >= total_detail_lines then
+        fact_detail_prefix parts total_detail_lines
+      else
+        (* The last row it can draw says what is under the fold, in the
+           window the list below and the other reading panes draw. *)
+        fact_detail_prefix parts (kept - 1)
+        @ [ Printf.sprintf "      [fact %s \xc2\xb7 Enter for the whole fact]"
+              (Masc_tui_scroll.window_text ~scroll:0
+                 ~height:(kept - 1) total_detail_lines) ]
+  in
+  (* A budgeted detail that drew nothing also spends no divider. Returning
+     that row to the list keeps tiny viewports full. *)
+  let detail_rows =
+    match detail_lines with [] -> 0 | lines -> 1 + List.length lines
+  in
+  let room = max 1 (room_below_chrome - detail_rows) in
   let overflowing = total > room in
   let height = if overflowing then max 1 (room - 1) else room in
   let scroll =

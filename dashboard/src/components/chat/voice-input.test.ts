@@ -16,7 +16,7 @@ const mockedFetch = vi.mocked(fetchWithTimeout)
 function lastCall(): [string, RequestInit, number] {
   const call = mockedFetch.mock.calls.at(-1)
   if (!call) throw new Error('fetchWithTimeout was not called')
-  return call as [string, RequestInit, number]
+  return [call[0], call[1], call[2]]
 }
 
 /** Cast the request headers to a plain record so strict indexing type-checks. */

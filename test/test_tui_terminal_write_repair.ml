@@ -25,18 +25,18 @@ let test_idle_console_write_forces_invalidated_frame () =
     (fun () ->
       let schedule = Render_schedule.create ~min_interval_ns:16_000_000L () in
       check_render "initial frame"
-        (Render_schedule.take schedule ~now_ns:0L);
+        (Render_schedule.take ~input_pending:false schedule ~now_ns:0L);
       Console_sink.For_testing.set_writer (Some (fun _ -> ()));
       Console_sink.set_after_write_observer (Some Repair.note);
       Console_sink.write "idle diagnostic";
       Repair.request_repaint schedule;
       check_render "console write preempts an otherwise idle schedule"
-        (Render_schedule.take schedule ~now_ns:1L);
+        (Render_schedule.take ~input_pending:false schedule ~now_ns:1L);
       check bool "the forced frame observes cache damage" true
         (Repair.consume_damage ());
       Repair.request_repaint schedule;
       check_idle "consumed damage leaves no repaint work"
-        (Render_schedule.take schedule ~now_ns:2L))
+        (Render_schedule.take ~input_pending:false schedule ~now_ns:2L))
 
 let test_redirected_stderr_disables_terminal_observation () =
   let saved_stderr = Unix.dup Unix.stderr in

@@ -77,18 +77,59 @@ function keeperTraceNameFromEvent(event: SSEEvent, fallback: string): string {
 
 // Per-turn cache observability (RFC-0382). Two sources with different
 // semantics, shown side by side and never merged: `cache_read_tokens` is
-// usage-reported by cloud providers; `cache_n`/`prompt_n` are wire timings
-// (llama-server, Ollama) — KV-reused vs freshly prefilled prompt tokens.
+// usage-reported by cloud providers and rides keeper_turn_complete;
+// `cache_n`/`prompt_n` are wire timings (llama-server, Ollama) — KV-reused vs
+// freshly prefilled prompt tokens — and ride only keeper_turn_observation,
+// one event per provider request. A Keeper turn can make several requests, so
+// the timings are summed per keeper until that turn's keeper_turn_complete.
+interface KvReuseSum {
+  keeperTurnId: number
+  cacheN: number
+  promptN: number
+}
+
+const kvReuseByKeeper = new Map<string, KvReuseSum>()
+
+export function _resetKvReuseForTests(): void {
+  kvReuseByKeeper.clear()
+}
+
+function recordTurnObservation(event: SSEEvent): void {
+  const keeperName = event.name
+  const keeperTurnId = asNumber(event.keeper_turn_id)
+  const cacheN = asNumber(event.cache_n)
+  const promptN = asNumber(event.prompt_n)
+  if (!keeperName || keeperTurnId == null || cacheN == null || promptN == null) return
+  const current = kvReuseByKeeper.get(keeperName)
+  // One Keeper turn runs at a time per keeper; a new turn id replaces a sum
+  // whose turn never reached keeper_turn_complete.
+  if (current && current.keeperTurnId === keeperTurnId) {
+    current.cacheN += cacheN
+    current.promptN += promptN
+  } else {
+    kvReuseByKeeper.set(keeperName, { keeperTurnId, cacheN, promptN })
+  }
+}
+
+function takeKvReuse(event: SSEEvent): KvReuseSum | null {
+  const keeperName = event.name
+  const turn = asNumber(event.turn)
+  if (!keeperName || turn == null) return null
+  const sum = kvReuseByKeeper.get(keeperName)
+  if (!sum || sum.keeperTurnId !== turn) return null
+  kvReuseByKeeper.delete(keeperName)
+  return sum
+}
+
 function turnCacheSuffix(event: SSEEvent): string {
   const parts: string[] = []
   const cacheRead = asNumber(event.cache_read_tokens)
   if (cacheRead != null && cacheRead > 0) parts.push(`캐시 read ${cacheRead}tok`)
-  const cacheN = asNumber(event.cache_n)
-  const promptN = asNumber(event.prompt_n)
-  if (cacheN != null && promptN != null) {
-    const seen = cacheN + promptN
-    const pct = seen > 0 ? ` (${Math.round((cacheN / seen) * 100)}%)` : ''
-    parts.push(`KV 재사용 ${cacheN}/${seen}tok${pct}`)
+  const kv = takeKvReuse(event)
+  if (kv) {
+    const seen = kv.cacheN + kv.promptN
+    const pct = seen > 0 ? ` (${Math.round((kv.cacheN / seen) * 100)}%)` : ''
+    parts.push(`KV 재사용 ${kv.cacheN}/${seen}tok${pct}`)
   }
   return parts.length > 0 ? ` · ${parts.join(' · ')}` : ''
 }
@@ -431,6 +472,9 @@ function handleEvent(event: SSEEvent): void {
       // the event is only a change trigger, never the source of truth, so a
       // missed/duplicated event self-heals on the next change or route visit.
       void refreshFusionRuns()
+      break
+    case 'keeper_turn_observation':
+      recordTurnObservation(event)
       break
     case 'keeper_turn_complete':
       {

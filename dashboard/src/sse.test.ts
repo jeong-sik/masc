@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   _resetJournalForTests,
+  _resetKvReuseForTests,
   journal,
   normalizeSSEDispatchType,
   recordServerPushEvent,
@@ -255,5 +256,58 @@ describe('server-push Agent Core typed-payload handlers', () => {
       payload: { from_agent: 'alpha', to_agent: 'beta', reason: 'load' },
     })
     expect(lastJournalEntry()?.text).toBe('Handoff requested · alpha→beta · load')
+  })
+})
+
+describe('keeper turn KV reuse', () => {
+  beforeEach(() => {
+    _resetJournalForTests()
+    _resetKvReuseForTests()
+  })
+
+  function observe(turn: number, keeperTurnId: number, cacheN: number | null, promptN: number | null) {
+    recordServerPushEvent({
+      type: 'keeper_turn_observation',
+      name: 'sangsu',
+      turn,
+      keeper_turn_id: keeperTurnId,
+      cache_n: cacheN,
+      prompt_n: promptN,
+    })
+  }
+
+  function complete(turn: number) {
+    recordServerPushEvent({
+      type: 'keeper_turn_complete',
+      name: 'sangsu',
+      turn,
+      input_tokens: 10,
+      output_tokens: 5,
+      tool_calls_made: 1,
+    })
+    return journal.value[0]?.text ?? ''
+  }
+
+  it('sums the request timings of one Keeper turn onto its turn line', () => {
+    observe(1, 42, 1741, 26)
+    observe(2, 42, 1767, 40)
+    expect(journal.value).toHaveLength(0)
+    expect(complete(42)).toContain('KV 재사용 3508/3574tok (98%)')
+  })
+
+  it('leaves the suffix off when no request reported wire timings', () => {
+    observe(1, 42, null, null)
+    expect(complete(42)).not.toContain('KV 재사용')
+  })
+
+  it('does not attach timings from another Keeper turn', () => {
+    observe(1, 41, 100, 10)
+    expect(complete(42)).not.toContain('KV 재사용')
+  })
+
+  it('shows a sum once', () => {
+    observe(1, 42, 100, 10)
+    expect(complete(42)).toContain('KV 재사용 100/110tok')
+    expect(complete(42)).not.toContain('KV 재사용')
   })
 })

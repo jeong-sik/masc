@@ -254,7 +254,10 @@ let test_turn_complete_carries_both_cache_counts () =
   | Some p ->
     check int "input" 3_716_155 (int_field p "input_tokens");
     check int "cache reads" 3_556_362 (int_field p "cache_read_tokens");
-    check int "cache writes" 159_783 (int_field p "cache_creation_tokens")
+    check int "cache writes" 159_783 (int_field p "cache_creation_tokens");
+    (* Wire timings ride keeper_turn_observation only. *)
+    check_absent_field p "cache_n";
+    check_absent_field p "prompt_n"
 
 let test_native_decode_rate_uses_current_field_only () =
   let timings : Agent_core.Types.inference_timings =

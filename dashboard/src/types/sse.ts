@@ -30,6 +30,7 @@ export type SSEEventType =
   | 'keeper_tool_call_evidence_committed'
   | 'keeper_turn_complete'
   | 'masc/keeper_turn_complete'
+  | 'keeper_turn_observation'
   // RFC-0266 Phase 4: fusion run-status transitions pushed to the dashboard.
   | 'fusion_run_status'
   | 'internal_agent_runs_changed'
@@ -212,6 +213,9 @@ export interface SSEEvent {
   cache_read_tokens?: number | null
   cache_n?: number | null
   prompt_n?: number | null
+  // keeper_turn_observation: the Keeper turn this provider request belongs
+  // to; `turn` on that event is the Agent Core request ordinal.
+  keeper_turn_id?: number
   // Agent Core bridge payload (generic container for Event_bus events).
   payload?: Record<string, unknown> | string
   // Wall-clock time attached to runtime events such as masc/task_claimed.

@@ -16,14 +16,14 @@ let require_ok label = function Ok x -> x | Error _ -> fail label
    leaves the process, so the value only has to be positive and finite. *)
 let exact_body_timeout_s = 180.0
 
-let openrouter_binding ?reasoning_effort () =
+let openrouter_binding ?(enable_thinking = true) ?reasoning_effort () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.OpenAI_compat
     ~provider_id:"openrouter"
     ~model_id:"z-ai/glm-5.3-flash"
     ~base_url:"https://openrouter.ai/api/v1"
     ~request_path:"/chat/completions"
-    ~enable_thinking:true
+    ~enable_thinking
     ?reasoning_effort
     ~connect_timeout_s:180.
     ()
@@ -64,7 +64,6 @@ slots = ["openrouter.probe"]
 [runtime.exact_output_lanes.board_attention_exact]
 slots = ["openrouter.probe"]
 max_output_tokens = 4096
-thinking = false
 [providers.openrouter]
 protocol = "openai-compatible-http"
 endpoint = "https://openrouter.ai/api/v1"
@@ -224,18 +223,69 @@ let test_declared_lane_budget_reaches_serialized_request () =
      = `Null)
 ;;
 
-(* The model declares thinking-support, so every slot's catalog default is
-   thinking on. The Board Attention lane declares [thinking = false] and its
-   admitted handle carries that choice; the Librarian lane declares nothing
-   and keeps the catalog default. The shared slot itself is not changed. *)
+(* One declared target, published straight into the registry with one lane,
+   so a lane's [thinking] is checked against the slot's own capabilities. *)
+let publish_thinking_lane ~binding ~thinking =
+  let target : Resolver.declared_target =
+    { target_ref = "openrouter.probe"
+    ; binding
+    ; credential = Resolver.Credential_not_declared
+    ; body_timeout_s = Some exact_body_timeout_s } in
+  let snapshot = Resolver.load_resolver_snapshot
+      ~io:{ getenv = (fun _ -> Ok None) }
+      ~catalog:(Resolver.Embedded_with_targets [ target ]) ()
+    |> require_ok "resolver snapshot" in
+  Registry.publish
+    ~lanes:
+      [ { Runtime_schema.id = "board_attention_exact"
+        ; slot_ids = [ target.target_ref ]
+        ; cli_slot_ids = []
+        ; max_output_tokens = None
+        ; thinking } ]
+    snapshot
+
+let with_unpublished f =
+  Fun.protect ~finally:(fun () ->
+    match Registry.unpublish () with Ok () | Error _ -> ()) f
+
+(* The slot declares thinking off with an effort its ladder accepts. The lane
+   that declares [thinking = true] sends it on; the lane with no [thinking]
+   keeps the slot's own off. *)
 let test_declared_lane_thinking_reaches_request_config () =
-  with_runtime @@ fun load ->
-  let enable_thinking target = (EO.projection_target target).config.enable_thinking in
-  check (option bool) "a lane that declares thinking = false sends it" (Some false)
-    (enable_thinking (load ~lane_id:"board_attention_exact" "low"));
-  check (option bool) "a lane with no thinking keeps the slot's default" (Some true)
-    (enable_thinking (load "low"))
-;;
+  with_unpublished @@ fun () ->
+  let binding () =
+    openrouter_binding ~enable_thinking:false
+      ~reasoning_effort:Llm_provider.Reasoning_effort.Low () in
+  let enable_thinking thinking =
+    let registry = publish_thinking_lane ~binding:(binding ()) ~thinking
+      |> require_ok "published registry" in
+    match Registry.resolve_lane registry ~lane_id:"board_attention_exact" with
+    | Ok { selected_slots = [ slot ]; _ } ->
+      (EO.projection_target slot.admitted_target).config.enable_thinking
+    | _ -> fail "expected one admitted slot" in
+  check (option bool) "a lane that declares thinking = true sends it" (Some true)
+    (enable_thinking (Some true));
+  check (option bool) "a lane with no thinking keeps the slot's own" (Some false)
+    (enable_thinking None)
+
+(* glm-5.3-flash on OpenRouter makes reasoning mandatory: its effort ladder
+   has no [none]. A lane that asks it for thinking = false would publish and
+   then refuse every request, so publication refuses it and names the slot. *)
+let test_lane_thinking_the_slot_cannot_carry_is_refused () =
+  with_unpublished @@ fun () ->
+  match
+    publish_thinking_lane
+      ~binding:(openrouter_binding ~reasoning_effort:Llm_provider.Reasoning_effort.Low ())
+      ~thinking:(Some false)
+  with
+  | Error (Registry.Lane_thinking_not_encodable { lane_id; slot_id; thinking; _ } as error) ->
+    Printf.eprintf "refusal: %s\n%!" (Registry.publication_error_to_string error);
+    check string "names the lane" "board_attention_exact" lane_id;
+    check string "names the slot" "openrouter.probe" slot_id;
+    check bool "names the setting" false thinking
+  | Error error ->
+    failf "a different publication error: %s" (Registry.publication_error_to_string error)
+  | Ok _ -> fail "a lane whose slot cannot turn thinking off was published"
 
 let () =
   Eio_main.run @@ fun env ->
@@ -254,4 +304,6 @@ let () =
         test_case "the declared lane budget is the serialized max_tokens" `Quick
           test_declared_lane_budget_reaches_serialized_request;
         test_case "the declared lane thinking reaches the request config" `Quick
-          test_declared_lane_thinking_reaches_request_config ] ]
+          test_declared_lane_thinking_reaches_request_config;
+        test_case "a lane thinking the slot cannot carry is refused at publication" `Quick
+          test_lane_thinking_the_slot_cannot_carry_is_refused ] ]

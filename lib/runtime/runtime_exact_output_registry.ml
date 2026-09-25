@@ -95,6 +95,12 @@ type publication_error =
       ; slot_id : string
       ; cause : Exact_output.target_ref_error
       }
+  | Lane_thinking_not_encodable of
+      { lane_id : string
+      ; slot_id : string
+      ; thinking : bool
+      ; rejection : Llm_provider.Complete_common.thinking_control_request_rejection
+      }
   | Required_lane_unavailable of { lane_id : string }
   | Resolver_snapshot_rejected of Exact_output.resolver_snapshot_error
 
@@ -198,6 +204,38 @@ let admit_lane_slots resolver_snapshot admitted_by_id
   | slot_ids, _ -> loop 1 String_set.empty admitted_by_id [] [] slot_ids
 ;;
 
+(* A lane's [thinking] is refused here, where the lane is published, when a
+   slot's model cannot carry it: a reasoning-effort ladder without [none]
+   cannot turn thinking off, and a row with no thinking control cannot turn it
+   on. Admitting it would publish a lane that refuses every request it makes. *)
+let validate_lane_thinking (lane : Runtime_schema.exact_output_lane_decl) slots =
+  match lane.thinking with
+  | None -> Ok ()
+  | Some thinking ->
+    let rec loop = function
+      | [] -> Ok ()
+      | (slot : admitted_slot) :: rest ->
+        let projected =
+          Exact_output.projection_target
+            (Exact_output.admitted_target_with_enable_thinking
+               slot.admitted_target
+               thinking)
+        in
+        (match
+           Llm_provider.Complete_common.thinking_control_request_rejection
+             ?anthropic_thinking_control:projected.anthropic_thinking_control
+             ~caps:projected.capabilities
+             projected.config
+         with
+         | None -> loop rest
+         | Some rejection ->
+           Error
+             (Lane_thinking_not_encodable
+                { lane_id = lane.id; slot_id = slot.slot_id; thinking; rejection }))
+    in
+    loop slots
+;;
+
 let admit_lanes ~admitted_by_id resolver_snapshot lanes =
   let rec loop position seen admitted_by_id admitted_lanes rejected_slots = function
     | [] -> Ok (List.rev admitted_lanes, List.rev rejected_slots)
@@ -210,6 +248,7 @@ let admit_lanes ~admitted_by_id resolver_snapshot lanes =
         let* slots, admitted_by_id, lane_rejected_slots =
           admit_lane_slots resolver_snapshot admitted_by_id lane
         in
+        let* () = validate_lane_thinking lane slots in
         loop
           (position + 1)
           (String_set.add lane.id seen)
@@ -592,6 +631,28 @@ let publication_error_to_string = function
       "exact-output lane %S slot %d (%S): %s"
       lane_id
       position
+      slot_id
+      detail
+  | Lane_thinking_not_encodable { lane_id; slot_id; thinking; rejection } ->
+    let detail =
+      match rejection with
+      | Llm_provider.Complete_common.Enable_not_declared ->
+        "the model declares no thinking control"
+      | Llm_provider.Complete_common.Enable_not_encodable ->
+        "the model's thinking control cannot turn thinking on"
+      | Llm_provider.Complete_common.Disable_not_encodable ->
+        "the model's thinking control cannot turn thinking off"
+      | Llm_provider.Complete_common.Disable_outside_effort_ladder _ ->
+        "the model's reasoning-effort ladder has no none, so thinking cannot be \
+         turned off"
+      | Llm_provider.Complete_common.Request_control_invalid _ ->
+        "the model's request control refuses the setting"
+    in
+    Printf.sprintf
+      "exact-output lane %S cannot send thinking = %b on slot %S: %s; remove \
+       thinking from the lane or the slot from its slots"
+      lane_id
+      thinking
       slot_id
       detail
   | Required_lane_unavailable { lane_id } ->

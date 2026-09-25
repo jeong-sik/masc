@@ -166,7 +166,9 @@ val admitted_target_with_max_tokens : admitted_target -> int -> admitted_target
 
 val admitted_target_with_enable_thinking : admitted_target -> bool -> admitted_target
 (** Rebuild an admitted target with its request [enable_thinking] set to the
-    lane's choice, leaving the binding identity untouched. The flag reaches
+    lane's choice. The target identity still names the slot's declared
+    binding, including its catalog [enable_thinking]; the lane's choice lives
+    in the request body and therefore in the plan fingerprint. The flag reaches
     the wire only where the model's thinking control can carry it. *)
 
 val selected_target_identity : selected_target -> target_identity

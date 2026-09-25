@@ -199,7 +199,7 @@ prepare_live_environment() {
     exit 1
   fi
   printf '[images.base.docker]\nreference = "%s"\ndigest = "%s"\n\n[images.ocaml]\n' \
-    "${base_image}" "${base_digest}" > "${CONFIG_DIR}/sandbox-images.toml"
+    "${base_image}" "${base_digest}" > "${CONFIG_DIR}/sandbox-image-builds.toml"
   declare_requested_runtimes
   if [[ -z "${PORT}" ]]; then
     PORT="$(harness_pick_free_port)"

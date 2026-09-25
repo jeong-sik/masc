@@ -416,7 +416,7 @@ def run(args):
             if not re.fullmatch(r'sha256:[0-9a-f]{64}', image_digest):
                 raise SmokeError(f'the image store reported no sha256 digest for {args.image}: {image_digest!r}')
             store = 'docker' if args.backend == 'docker' else 'nerdctl_kata'
-            (base / '.masc' / 'config' / 'sandbox-images.toml').write_text(
+            (base / '.masc' / 'config' / 'sandbox-image-builds.toml').write_text(
                 f'[images.base.{store}]\nreference = "{args.image}"\ndigest = "{image_digest}"\n')
             if args.backend == 'nerdctl_kata':
                 source = Path(args.guest_shim).resolve(strict=True)

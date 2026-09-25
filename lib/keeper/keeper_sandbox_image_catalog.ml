@@ -239,7 +239,8 @@ let resolve t ~name ~store =
      | Some promotion -> Resolved promotion.current
      | None -> Not_built_on_host { name; store })
 
-let file_name = Common.sandbox_image_catalog_file_name
+let shipped_file_name = "sandbox-images.toml"
+let file_name = "sandbox-image-builds.toml"
 
 type load_error =
   | Unreadable of { path : string; detail : string }

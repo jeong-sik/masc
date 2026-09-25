@@ -2,7 +2,7 @@
 
     A Keeper names an image by a short name ([base], [ocaml]). The catalog
     repository's [config/sandbox-images.toml] supplies the names. The host's
-    [sandbox-images.toml] stores only promoted builds: for each name and image
+    [sandbox-image-builds.toml] stores only promoted builds: for each name and image
     store, the current tag and digest, plus the one it replaced. A registry
     is not involved, and a digest is only true where that image was built.
 
@@ -100,8 +100,15 @@ type resolution =
 
 val resolve : t -> name:string -> store:store -> resolution
 
+val shipped_file_name : string
+(** ["sandbox-images.toml"]: the image names, embedded from [config/] and read
+    from the binary. *)
+
 val file_name : string
-(** ["sandbox-images.toml"], directly under the config root. *)
+(** ["sandbox-image-builds.toml"], directly under the config root: this
+    host's promoted builds. A different name from {!shipped_file_name}, so the
+    config root's copy of the shipped names never stands where the builds
+    file is read. *)
 
 type load_error =
   | Unreadable of { path : string; detail : string }

@@ -75,6 +75,9 @@ type turn_settlement =
         (** The lane an earlier turn deferred to, when this turn ran it. *)
   ; degraded_retry_deferred : Keeper_error_classify.degraded_retry option
         (** The lane this turn leaves for a later one. *)
+  ; spend : Keeper_turn_spend.attempt list
+        (** What each dispatched attempt reported about its spend, on either
+            outcome: a failed turn and a lost attempt spent too. *)
   }
 
 (** The settlement of a turn that ended before

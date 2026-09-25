@@ -1,0 +1,14 @@
+### Fixed
+
+- Only `verifier_exact`'s `cli_slots` were reference-checked when
+  `runtime.toml` loaded. A typo'd id on any other exact-output lane
+  (`librarian_exact`, `hitl_auto_judge`, `board_attention_exact`) loaded
+  fine and then failed every `Keeper_lane_cli_oneshot` attempt at run time
+  with a misleading "is not an official-client runtime" message, 192 times
+  in one server log for a single stray id. Every declared lane's `cli_slots`
+  is now checked at load: an id that names no configured runtime, or one
+  that names a provider-dispatched (HTTP) runtime instead of an official
+  client, is refused with a message naming the lane, the key and the id.
+  `keeper_lane_cli_oneshot.ml`'s run-time failure now also distinguishes
+  "no such runtime" from "not an official client" as separate typed cases,
+  instead of folding both into one.

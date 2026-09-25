@@ -1193,7 +1193,7 @@ let test_model_without_wall_clock_ceiling_leaves_it_unset () =
 
 let test_exact_output_lane_config_is_ordered_and_rejects_duplicates () =
   let valid =
-    "[runtime.exact_output_lanes.auxiliary_exact]\nslots = [\"slot-b\", \"slot-a\"]\n"
+    "[runtime.exact_output_lanes.librarian_exact]\nslots = [\"slot-b\", \"slot-a\"]\n"
   in
   (match Runtime_toml.parse_string valid with
    | Error _ -> fail "valid exact-output lane must parse"
@@ -1204,7 +1204,7 @@ let test_exact_output_lane_config_is_ordered_and_rejects_duplicates () =
           [ "slot-b"; "slot-a" ] lane.slot_ids
       | _ -> fail "exactly one exact-output lane must parse"));
   let duplicate =
-    "[runtime.exact_output_lanes.auxiliary_exact]\nslots = [\"slot-a\", \"slot-a\"]\n"
+    "[runtime.exact_output_lanes.librarian_exact]\nslots = [\"slot-a\", \"slot-a\"]\n"
   in
   match Runtime_toml.parse_string duplicate with
   | Error _ -> ()
@@ -1274,7 +1274,7 @@ let test_exact_output_lane_cli_slots_parse_in_order () =
 
 let test_exact_output_lane_rejects_unknown_key () =
   let config =
-    "[runtime.exact_output_lanes.auxiliary_exact]\n\
+    "[runtime.exact_output_lanes.librarian_exact]\n\
      slots = [\"slot-a\"]\n\
      slost = [\"slot-b\"]\n"
   in
@@ -1285,9 +1285,27 @@ let test_exact_output_lane_rejects_unknown_key () =
          (fun (error : Runtime_toml.parse_error) ->
             String.equal
               error.path
-              "runtime.exact_output_lanes.auxiliary_exact.slost")
+              "runtime.exact_output_lanes.librarian_exact.slost")
          errors)
   | Ok _ -> fail "unknown exact-output lane key must fail config parsing"
+
+(* The standalone-lane projection draws one row per [Standalone_lane.t], so a
+   table under any other name published and then showed nowhere. *)
+let test_exact_output_lane_rejects_unknown_lane_id () =
+  let config =
+    "[runtime.exact_output_lanes.librarain_exact]\n\
+     slots = [\"slot-a\"]\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Error errors ->
+    check bool "unknown exact-output lane id is named" true
+      (List.exists
+         (fun (error : Runtime_toml.parse_error) ->
+            String.equal
+              error.path
+              "runtime.exact_output_lanes.librarain_exact")
+         errors)
+  | Ok _ -> fail "unknown exact-output lane id must fail config parsing"
 
 (* The routing rebirth (RFC-0206) dropped the lane strategy ADT — a lane is
    ordered by construction — but a [strategy = "ordered"] line survived in the
@@ -4895,7 +4913,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
   in
   ignore
     (Exact_output_fixture.publish_registry
-       ~lane_id:"auxiliary_exact"
+       ~lane_id:"librarian_exact"
        ~slot_ids:[ "slot-a" ]
        snapshot
       : Runtime_exact_output_registry.t);
@@ -4923,7 +4941,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
        [runtime]\n\
        default = \"%s\"\n\
        \n\
-       [runtime.exact_output_lanes.auxiliary_exact]\n\
+       [runtime.exact_output_lanes.librarian_exact]\n\
        slots = [\"%s\"]\n\
        max_output_tokens = 4096\n"
       default
@@ -4986,7 +5004,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
       (not (after_degraded == stable_registry));
     check bool "degraded save leaves optional lane without admitted slots" true
       (lane_has_no_admitted_slots
-         ~lane_id:"auxiliary_exact"
+         ~lane_id:"librarian_exact"
          after_degraded);
     check bool "degraded save does not synthesize HITL lane" true
       (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_degraded);
@@ -5008,7 +5026,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
            (after_write_failure == after_degraded);
          check bool "write failure preserves no-admitted lane" true
            (lane_has_no_admitted_slots
-              ~lane_id:"auxiliary_exact"
+              ~lane_id:"librarian_exact"
               after_write_failure);
          check bool "write failure does not synthesize HITL lane" true
            (lane_is_unconfigured
@@ -5024,7 +5042,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     check bool "valid save republishes the registry" true
       (not (replaced == after_degraded));
     check (list string) "valid save commits registry slots" [ "slot-b" ]
-      (slots_exn ~lane_id:"auxiliary_exact" replaced);
+      (slots_exn ~lane_id:"librarian_exact" replaced);
     check bool "valid save does not synthesize HITL lane" true
       (lane_is_unconfigured ~lane_id:"hitl_auto_judge" replaced))
 
@@ -5958,6 +5976,8 @@ let () =
             test_exact_output_lane_cli_slots_parse_in_order;
           test_case "exact-output lane rejects unknown keys" `Quick
             test_exact_output_lane_rejects_unknown_key;
+          test_case "exact-output lane rejects unknown lane ids" `Quick
+            test_exact_output_lane_rejects_unknown_lane_id;
           test_case "lane rejects unknown keys" `Quick
             test_lane_rejects_unknown_key;
           test_case "repo runtime.toml loads through runtime parser" `Quick

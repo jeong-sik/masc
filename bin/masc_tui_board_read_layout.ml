@@ -23,7 +23,7 @@ let get cache ~source ~render =
       cache.retained <- Some (source, rows);
       rows
 
-let body_count rows = Array.length rows.body
-let comment_count rows = Array.length rows.comments
+let body_line_count rows = Array.length rows.body
+let comment_line_count rows = Array.length rows.comments
 let body_line rows index = rows.body.(index)
 let comment_line rows index = rows.comments.(index)

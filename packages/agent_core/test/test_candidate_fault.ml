@@ -39,7 +39,7 @@ let expected_of_api_error (api : Llm_provider.Retry.api_error)
      | Llm_provider.Retry.Unknown_invalid_request ->
        Llm_provider.Candidate_fault.Unattributed)
   | Llm_provider.Retry.NetworkError _ ->
-    Llm_provider.Candidate_fault.Binding Llm_provider.Candidate_fault.Credential
+    Llm_provider.Candidate_fault.Unknown_after_dispatch
   | Llm_provider.Retry.Timeout _ ->
     Llm_provider.Candidate_fault.Binding Llm_provider.Candidate_fault.Deadline
 ;;

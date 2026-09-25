@@ -2456,37 +2456,6 @@ type identity_provider =
       }
   | Identity_unreadable of { idp_id: string; idp_problem: string }
 
-(** The providers a key can act on, in the order the screen numbers them.
-    Both the renderer and the key handler read this, so the number an
-    operator sees and the provider a keypress starts cannot drift apart. *)
-(* Case-insensitive substring, read rather than rebuilt.
-
-   This used to take a lowercase copy of the haystack and then a [String.sub]
-   of it at every position it tried. The row search calls it once per row per
-   keystroke, so on a twenty-thousand-line file a single keypress asked the
-   allocator for the file again and then for a slice per character of it.
-
-   Folding case per byte the way [String.lowercase_ascii] does -- ASCII A-Z
-   and nothing else, so a UTF-8 continuation byte is left alone -- keeps the
-   same answers without the copies. *)
-let lowercase_byte c =
-  if c >= 'A' && c <= 'Z' then Char.unsafe_chr (Char.code c + 32) else c
-
-let lowercase_contains ~needle haystack =
-  let n = String.length needle and h = String.length haystack in
-  if n = 0 then true
-  else if n > h then false
-  else
-    let rec matches_at i k =
-      k >= n
-      || Char.equal
-           (lowercase_byte (String.unsafe_get haystack (i + k)))
-           (lowercase_byte (String.unsafe_get needle k))
-         && matches_at i (k + 1)
-    in
-    let rec at i = i + n <= h && (matches_at i 0 || at (i + 1)) in
-    at 0
-
 (** Whether a query names this provider.
 
     Both the label and the id, because they diverge and an operator knows
@@ -2494,7 +2463,8 @@ let lowercase_contains ~needle haystack =
     names say "googlesheets_". Matching one would make the other a query
     that finds nothing while the row is right there. *)
 let identity_names ~query (id, label) =
-  lowercase_contains ~needle:query label || lowercase_contains ~needle:query id
+  Masc_tui_pick_list.lowercase_contains ~needle:query label
+  || Masc_tui_pick_list.lowercase_contains ~needle:query id
 
 (** Which Keeper a connected client is acting for, where that is a reading
     its row does not already carry.
@@ -2520,6 +2490,9 @@ let clients_act_for_others rows =
            ~keeper_name:row.Tui_decode.cr_keeper_name))
     rows
 
+(** The providers a key can act on, in the order the screen numbers them.
+    Both the renderer and the key handler read this, so the number an
+    operator sees and the provider a keypress starts cannot drift apart. *)
 let identity_connectable ?(query = "") providers =
   List.filter_map
     (function
@@ -6019,11 +5992,11 @@ type state = {
   mutable runtime_surface_scroll: int;
   mutable runtime_detail_target: runtime_detail_target option;
   mutable runtime_detail_scroll: int;
-  (* The lane a fallback is being added to, and where the picker sits in the
-     runtime catalogue. Both are cleared when the picker closes: a cursor kept
-     across visits opens the list part-way down for no reason the reader gave. *)
-  mutable runtime_lane_pick: runtime_lane_pick option;
-  mutable runtime_lane_pick_cursor: int;
+  (* The lane a fallback is being added to, with where the picker sits in
+     the runtime catalogue and the filter typed over it. One value, so a
+     closed picker has no cursor to leave behind: the next one opens on the
+     first row with no filter. *)
+  mutable runtime_lane_pick: (runtime_lane_pick * Masc_tui_pick_list.t) option;
   mutable runtime_lane_notice: runtime_lane_notice option;
   (* Per list: whether it was read back after the last lane write. *)
   mutable runtime_surface_lane_freshness: runtime_lane_list_freshness;
@@ -6631,6 +6604,7 @@ type text_input_target =
   | Text_voice_wizard
   | Text_palette
   | Text_row_search
+  | Text_runtime_picker_filter
   | Text_identity_app_form
   | Text_identity_filter
   | Text_github_token
@@ -6681,6 +6655,13 @@ let text_input_target (state : state) ~compact_viewport =
   then Some Text_ask_answer
   else if state.palette_open then Some Text_palette
   else if Option.is_some state.search then Some Text_row_search
+  (* The runtime picker's filter, after [/]: its letter keys (j/k, e) are
+     the filter's text until Esc, and so are the Runtime surface's. *)
+  else if (state.view = Runtime || state.view = Lanes) && not compact_viewport
+          && (match state.runtime_lane_pick with
+              | Some (_, list) -> Option.is_some list.Masc_tui_pick_list.query
+              | None -> false)
+  then Some Text_runtime_picker_filter
   else if state.view = Connectors && not compact_viewport
           && Option.is_some (Option.bind (browser_lane_on_screen state) (fun view -> view.Browser_lane_view.url_draft))
   then Some Text_browser_url
@@ -6711,6 +6692,7 @@ let quit_key_allowed_for = function
       ( Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
       | Text_voice_wizard | Text_palette | Text_row_search
+      | Text_runtime_picker_filter
       | Text_identity_app_form | Text_identity_filter | Text_github_token
       | Text_board_draft ) ->
       false
@@ -8014,7 +7996,6 @@ let create_state
   runtime_detail_target = None;
   runtime_detail_scroll = 0;
   runtime_lane_pick = None;
-  runtime_lane_pick_cursor = 0;
   runtime_lane_notice = None;
   runtime_surface_lane_freshness = Lane_list_read;
   standalone_lanes_lane_freshness = Lane_list_read;
@@ -8906,7 +8887,8 @@ let palette_starts_with ~needle haystack =
     ~prefix:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
 
-let palette_contains ~needle haystack = lowercase_contains ~needle haystack
+let palette_contains ~needle haystack =
+  Masc_tui_pick_list.lowercase_contains ~needle haystack
 
 (* Memory already trims its filter; count and cursor search must use that
    same query. Other surfaces keep their literal-space search semantics. *)
@@ -9295,7 +9277,34 @@ type runtime_picker_projection = {
   rlp_already : string list;
   rlp_providers : string list;
   rlp_choices : Tui_decode.runtime_option list;
+      (* The window the picker draws, of the list its filter keeps. *)
+  rlp_selected_row : int option;
+      (* The cursor's row in [rlp_choices]; [None] when nothing is drawn. *)
+  rlp_total : int;
+      (* The catalogue before the filter: zero is an unread catalogue, not an
+         empty match. *)
+  rlp_summary : string;
+      (* The header's count and filter, from [Masc_tui_pick_list.summary]. *)
+  rlp_filter : string option;
+      (* The filter being typed, if one is. *)
 }
+
+(* How many runtimes the picker draws at once, and so how far PgUp/PgDn move
+   it. The listing under it gives these rows up while it is open. *)
+let runtime_picker_page = 3
+
+(* The text a runtime's picker row draws before its notes, made terminal
+   safe here, and the text the typed filter matches: the operator filters by
+   exactly what they read. *)
+let runtime_picker_label (runtime : Tui_decode.runtime_option) =
+  Tui_decode.sanitize_terminal_text
+    (Printf.sprintf "%s   %s / %s" runtime.Tui_decode.ro_id
+       runtime.Tui_decode.ro_provider runtime.Tui_decode.ro_model)
+
+(* The picker opens on the first row with no filter, and closing it drops
+   both. *)
+let open_runtime_lane_pick (state : state) pick =
+  state.runtime_lane_pick <- Some (pick, Masc_tui_pick_list.closed)
 
 (* A conversation lane's candidates as the runtime surface last resolved
    them. *)
@@ -9355,18 +9364,47 @@ let lane_picker_existing_slots (state : state) = function
         | Some id -> [ id ]
         | None -> []))
 
+(* The picker's whole list, ordered so the candidate a lane actually needs is
+   at the top, with the ids it already holds. Computed in both the key handler
+   and the renderer from the same snapshot rather than stored: a cached order
+   and a re-read snapshot drift, and the cursor would then point at a
+   different runtime than the one drawn. *)
+let runtime_picker_rows (state : state) pick =
+  let already = lane_picker_existing_slots state pick in
+  let providers = already |> List.filter_map (fun id ->
+    state.runtime_catalog
+    |> List.find_opt (fun runtime -> String.equal runtime.Tui_decode.ro_id id)
+    |> Option.map (fun runtime -> runtime.Tui_decode.ro_provider)) in
+  ( already, providers,
+    runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog )
+
+(* The one row the picker draws when it has no rows: the catalogue is unread,
+   or it is read and the filter keeps none of it. The two need different
+   actions, so they read differently. *)
+let runtime_picker_empty_note picker =
+  if picker.rlp_total = 0 then "  (runtime catalogue unread)"
+  else
+    Printf.sprintf "  (no runtime among %d matches the filter)" picker.rlp_total
+
+(* The keys the picker's header names, around the verb its Enter carries.
+   While the filter is typed, letters are the filter's, so the header names
+   only the keys that still act. *)
+let runtime_picker_keys enter = function
+  | None -> Printf.sprintf "j/k move, PgUp/PgDn page, %s, e cancel" enter
+  | Some _ -> Printf.sprintf "\xe2\x86\x91/\xe2\x86\x93 move, %s, Esc clear filter" enter
 let runtime_picker_projection (state : state) =
-  Option.map (fun pick ->
-    let already = lane_picker_existing_slots state pick in
-    let providers = already |> List.filter_map (fun id ->
-      state.runtime_catalog
-      |> List.find_opt (fun runtime -> String.equal runtime.Tui_decode.ro_id id)
-      |> Option.map (fun runtime -> runtime.Tui_decode.ro_provider)) in
-    let choices = runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog
-      |> List.filteri (fun i _ -> i >= state.runtime_lane_pick_cursor && i < state.runtime_lane_pick_cursor + 3)
+  Option.map (fun (pick, list) ->
+    let already, providers, catalog = runtime_picker_rows state pick in
+    let view =
+      Masc_tui_pick_list.view ~page:runtime_picker_page ~label:runtime_picker_label
+        catalog list
     in
     { rlp_lane = runtime_lane_pick_name pick; rlp_pick = pick; rlp_already = already;
-      rlp_providers = providers; rlp_choices = choices })
+      rlp_providers = providers; rlp_choices = view.Masc_tui_pick_list.rows;
+      rlp_selected_row = view.Masc_tui_pick_list.selected_row;
+      rlp_total = view.Masc_tui_pick_list.total;
+      rlp_summary = Masc_tui_pick_list.summary view;
+      rlp_filter = view.Masc_tui_pick_list.filter })
     state.runtime_lane_pick
 
 (* The one-line prompt the lane editor puts above the Runtime rows: a name

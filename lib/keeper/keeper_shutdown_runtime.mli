@@ -36,7 +36,12 @@ val retry_completion :
 (** Restore admission from owner-addressable durable inventory. A Keeper with
     any corrupt payload is fenced once. A current operation that still requires
     a fence owns admission long enough to recover; otherwise the deterministic
-    [corrupt_owner_fences] entry owns it. Corrupt records remain explicit. *)
+    [corrupt_owner_fences] entry owns it. Corrupt records remain explicit.
+    A [Blocked] operation at a replayable stage
+    ({!Keeper_shutdown_types.failure_stage_boot_replay}) is fenced too when it
+    is its Keeper's newest operation and no sibling holds the fence, so the
+    Keeper does not autoboot ahead of the replay. If that fence cannot be
+    taken, the operation is left out of [operations] for this boot and logged. *)
 val restore_inventory_admission :
   config:Workspace.config ->
   Keeper_shutdown_store.inventory_entry list ->
@@ -62,7 +67,11 @@ val submit_dormant :
 
 (** Recover operations left by an earlier server process. Must run before
     Keeper autoboot so a stopped Keeper cannot acquire a replacement lane
-    ahead of settlement. Returns one explicit result per durable operation. *)
+    ahead of settlement. Returns one explicit result per durable operation.
+    A replayable [Blocked] operation is replayed to completion, closed as
+    [Superseded (Boot_replay_abandoned _)] with a warning when a later
+    operation or Keeper state overtook it, or left [Blocked] with fresh
+    evidence and a warning; the last two release admission. *)
 val recover_at_boot :
   config:Workspace.config ->
   (Keeper_shutdown_types.t, string) result list

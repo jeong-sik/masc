@@ -19,6 +19,8 @@ val invalid_sha256_to_string : invalid_sha256 -> string
 type fetch_error =
   | Invalid_sha256 of invalid_sha256
   | Owned_read_failed of Fs_compat.owned_regular_file_read_error
+  | Too_large of { path : string; actual : int; maximum : int }
+  | Invalid_max_bytes of int
   | Integrity_mismatch of {
       path : string;
       expected : string;
@@ -146,6 +148,19 @@ val fetch : t -> sha256:string -> (string option, fetch_error) result
     validated path is absent. The owned-file read validates the no-follow
     parent chain and [lstat]/[fstat] identity before and after descriptor I/O.
     Read and content-integrity failures remain typed. Cancellation propagates. *)
+
+val fetch_bounded :
+  t -> sha256:string -> max_bytes:int -> (string option, fetch_error) result
+(** Validate the digest while reading at most [max_bytes] through one owned
+    descriptor. An oversized file returns [Too_large] before whole-file
+    allocation. Negative bounds return [Invalid_max_bytes]. This does not
+    populate the snapshot cache used by {!fetch_range}. *)
+
+val max_served_bytes : int
+(** Largest artifact the HTTP artifact routes materialise in one response.
+    A writer that records a reference for a reader behind those routes — a
+    Board attachment, which the dashboard opens only through them — refuses
+    anything larger, so every accepted reference is one the reader can open. *)
 
 type range =
   { content : string

@@ -37,7 +37,9 @@
 # full file list (re-read past gh's 100-file cap).
 # test/dune exception (R1 §5): test/dune does not
 # count when the PR's own change to it and every main change to it since the
-# check start only add lines, and `git merge-tree` of PR head and main is clean.
+# check start only add lines, `git merge-tree` of PR head and main is clean, and
+# the merged tree's test/dune declares no test name twice (leader c-f17dc594:
+# add-only + clean merge still breaks dune when both sides add the same name).
 #
 # Usage:
 #   queue-ledger.sh --git-dir DIR [--repo O/R] [--limit N] [--format tsv|md]
@@ -134,6 +136,20 @@ run_counts() { # run head
   printf '%s\n' "$jobs" | grep -qx success && echo yes || echo no
 }
 
+# stdin: a dune file. Succeeds when no name from `(name X)` or `(names a b c)`
+# appears twice. Comments (`;` to end of line) are dropped; a stanza may span lines.
+# `(alias (name runtest) ...)` stanzas are skipped: dune merges aliases, so a
+# repeated alias name is legal. Names inside `(include x.inc)` files are not read.
+# An empty name list fails: a tree we could not read must not grant the exemption.
+dune_names_unique() {
+  local names
+  names=$(sed 's/;.*//' | tr '\n' ' ' |
+    sed -E 's/\(alias[[:space:]]+\(name[[:space:]]+[^()]*\)//g' |
+    grep -oE '\((name|names)[[:space:]]+[^()]*\)' |
+    sed -E 's/^\((name|names)[[:space:]]+//; s/\)$//' | tr -s ' \t' '\n' | grep .) || return 1
+  [ -z "$(sort <<<"$names" | uniq -d)" ]
+}
+
 # Files the PR touches that main changed after <since>; test/dune dropped per R1 §5.
 stale_files() { # since files head
   local changed hit
@@ -148,8 +164,11 @@ stale_files() { # since files head
     mb=$(git -C "$gitdir" merge-base "$3" origin/main) && [ -n "$mb" ] || return 1
     pr_diff=$(git -C "$gitdir" diff "$mb" "$3" -- test/dune) || return 1
     main_diff=$(git -C "$gitdir" diff "$base_c" origin/main -- test/dune) || return 1
+    local tree merged
     if ! grep -q '^-[^-]' <<<"$pr_diff" && ! grep -q '^-[^-]' <<<"$main_diff" &&
-       git -C "$gitdir" merge-tree --write-tree "$3" origin/main >/dev/null 2>&1; then
+       tree=$(git -C "$gitdir" merge-tree --write-tree "$3" origin/main 2>/dev/null) &&
+       merged=$(git -C "$gitdir" show "${tree%%$'\n'*}:test/dune") &&
+       dune_names_unique <<<"$merged"; then
       hit=$(printf '%s\n' "$hit" | grep -vx 'test/dune' || true)
     fi
   fi

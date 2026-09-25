@@ -110,8 +110,18 @@ let first_vision_runtime_id ~now : (string, string) result =
 let vision_store_dir ~keeper_name =
   Filename.concat (Config_dir_resolver.keepers_dir ()) (keeper_name ^ ".vision")
 
-let store_artifact ~dir bytes =
-  Eio_guard.run_in_systhread ~label:"vision-artifact-store" (fun () -> Store.store ~dir bytes)
+let frames_dir ~keeper_name =
+  Store.frames_dir ~dir:(vision_store_dir ~keeper_name)
+
+let store_frame ~keeper_name bytes =
+  let dir = frames_dir ~keeper_name in
+  Eio_guard.run_in_systhread ~label:"vision-artifact-store" (fun () ->
+    Store.store ~auto_prune:true ~dir bytes)
+
+let store_kept ~keeper_name bytes =
+  let dir = vision_store_dir ~keeper_name in
+  Eio_guard.run_in_systhread ~label:"vision-artifact-store" (fun () ->
+    Store.store ~auto_prune:false ~dir bytes)
 
 let load_artifact ~dir handle =
   Eio_guard.run_in_systhread ~label:"vision-artifact-load" (fun () -> Store.load ~dir handle)
@@ -959,20 +969,33 @@ let handle_with_outcome
                   ~detail:msg
                   "invalid_media_type"
               | Ok media_type ->
-                run_vision
-                  ?base_path
-                  ?complete
-                  ?tool_use_id
-                  ?trace_id
-                  ?runtime_id
-                  ~sw
-                  ~clock
-                  ~net
-                  ~query
-                  ~media_type
-                  ~bytes
-                  ()
-                |> execution_of_vision_outcome))))
+                (match
+                   run_vision
+                     ?base_path
+                     ?complete
+                     ?tool_use_id
+                     ?trace_id
+                     ?runtime_id
+                     ~sw
+                     ~clock
+                     ~net
+                     ~query
+                     ~media_type
+                     ~bytes
+                     ()
+                 with
+                 | Vo_ok _ as outcome ->
+                   (* A frame's handle is the Keeper's only durable reference.
+                      Keep the verified bytes before reporting a successful
+                      analysis, even if rotation removed the frame meanwhile. *)
+                   (match store_kept ~keeper_name:meta.name bytes with
+                    | Ok _ -> execution_of_vision_outcome outcome
+                    | Error detail ->
+                      failed
+                        ~failure_class:Tool_result.Runtime_failure
+                        ~detail
+                        "artifact_store_failed")
+                 | outcome -> execution_of_vision_outcome outcome)))))
 
 let handle ?base_path ?complete ?tool_use_id ?trace_id ?sw ?clock ?net ~meta ~args () =
   (handle_with_outcome

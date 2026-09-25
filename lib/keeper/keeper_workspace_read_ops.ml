@@ -36,11 +36,36 @@ let validate_rg_inputs ~pattern:_ ~file_type =
   | Ok () -> Ok ()
 ;;
 
+let rg_type_list_max_bytes = 1_000_000
+
+let rg_type_names listing =
+  String.split_on_char '\n' listing
+  |> List.filter_map (fun line ->
+    match String.index_opt line ':' with
+    | Some index when index > 0 -> Some (String.sub line 0 index)
+    | Some _ | None -> None)
+;;
+
+(* The failed rg and this inventory run on the same backend, so custom types
+   from that backend's config are included. An incomplete or unavailable
+   inventory cannot prove that the caller's type is invalid. *)
+let rg_error_class ~status ~file_type ~read_type_list =
+  match status with
+  | Unix.WEXITED 2 when not (String.equal file_type "") ->
+    (match read_type_list () with
+     | Some listing when String.length listing < rg_type_list_max_bytes ->
+       (match rg_type_names listing with
+        | _ :: _ as names when not (List.mem file_type names) -> Tool_result.Policy_rejection
+        | [] | _ :: _ -> Tool_result.Runtime_failure)
+     | Some _ | None -> Tool_result.Runtime_failure)
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Tool_result.Runtime_failure
+;;
+
 type read_target_result =
   | Read_target of string
   | Declared_read_target of string
     (* An endpoint path under the endpoint's declared roots (#38593). *)
-  | Read_target_error of string
+  | Read_target_error of Keeper_alerting_path.path_refusal
 
 let try_handle_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -53,8 +78,9 @@ let try_handle_with_outcome
   let containment_check target =
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target
   in
-  let path_error e =
+  let path_error ~class_ e =
     Keeper_tool_execution.failure
+      ~class_
       (error_json
          ~fields:[ "ok", `Bool false; "op", `String op; "path", `String raw_path ]
          e)
@@ -84,7 +110,9 @@ let try_handle_with_outcome
        with
        | Ok (Some endpoint_path) -> Declared_read_target endpoint_path
        | Ok None -> Read_target_error refusal
-       | Error e -> Read_target_error e)
+       | Error endpoint_error ->
+         Read_target_error
+           (Keeper_alerting_path.endpoint_unresolved ~tree_refusal:refusal ~endpoint_error))
   in
   (* TEL-OK: read-op adapter delegates to Keeper_tooling.Execute_shell_ir/Exec_dispatch or the
      sandbox read runner; execution telemetry stays with those runtime paths. *)
@@ -108,11 +136,19 @@ let try_handle_with_outcome
         | None -> []
         | Some path -> [ "path", `String path ]
     in
+    (* This module builds the command: one rg with literal arguments, no cwd
+       change and no redirect. The gate refuses only pipes and redirects, and
+       the path check reads only cwd, redirects and a few programs' operands,
+       so neither judges anything the caller named; if one fires, this module
+       or a policy changed. *)
     match dispatch_host_shell_ir ~workdir ir with
     | Error (Gate_reject diagnostic) ->
-      Keeper_tool_execution.failure (error_json ~fields diagnostic)
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Runtime_failure
+        (error_json ~fields diagnostic)
     | Error (Cannot_parse reason) ->
       Keeper_tool_execution.failure
+        ~class_:Tool_result.Runtime_failure
         (error_json
            ~fields
            (Printf.sprintf
@@ -120,6 +156,7 @@ let try_handle_with_outcome
               (Keeper_tooling.Execute_shell_ir.parse_reason_tag reason)))
     | Error (Too_complex reason) ->
       Keeper_tool_execution.failure
+        ~class_:Tool_result.Runtime_failure
         (error_json
            ~fields
            (Printf.sprintf
@@ -129,6 +166,7 @@ let try_handle_with_outcome
                  (Keeper_tooling.Subset_rewrite.of_reason reason))))
     | Error (Path_reject e) ->
       Keeper_tool_execution.failure
+        ~class_:Tool_result.Runtime_failure
         (error_json ~fields:[ "blocked_cmd", `String cmd ] e)
     | Ok result -> on_ok result
   in
@@ -146,16 +184,20 @@ let try_handle_with_outcome
       && not (Sys.file_exists target)
     then
       Error
-        (sandbox_read_error ~target
-           (Printf.sprintf
-              "path_not_found: %s (host path does not exist; list your \
-               workspace root to see what is actually there before searching)"
-              target))
+        ( Tool_result.Policy_rejection
+        , sandbox_read_error ~target
+            (Printf.sprintf
+               "path_not_found: %s (host path does not exist; list your \
+                workspace root to see what is actually there before searching)"
+               target) )
     else
+      (* An admitted path the backend cannot map, or a backend command that
+         failed, is not claimed as the caller's: a declared endpoint path maps
+         only through the endpoint's configuration. *)
       match
         Keeper_sandbox_read_runner.container_path_of_host ~config ~meta ~host_path:target
       with
-      | Error e -> Error (sandbox_read_error ~target e)
+      | Error e -> Error (Tool_result.Runtime_failure, sandbox_read_error ~target e)
       | Ok cpath -> (
           match
             Keeper_sandbox_read_runner.run_command_with_status
@@ -163,7 +205,7 @@ let try_handle_with_outcome
               ~ok_exit_codes ~config ~meta ~command_argv:(command_argv cpath)
               ~max_bytes ~timeout_sec ()
           with
-          | Error msg -> Error (sandbox_read_error ~target msg)
+          | Error msg -> Error (Tool_result.Runtime_failure, sandbox_read_error ~target msg)
           | Ok payload -> Ok payload)
   in
   let host_search_workdir target =
@@ -207,7 +249,7 @@ let try_handle_with_outcome
                     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
                     ()
                 with
-                | Error response -> Keeper_tool_execution.failure response
+                | Error (class_, response) -> Keeper_tool_execution.failure ~class_ response
                 | Ok (st, out) ->
                   let is_ok =
                     match st with
@@ -234,10 +276,27 @@ let try_handle_with_outcome
                   in
                   if is_ok
                   then Keeper_tool_execution.success_data payload
-                  else Keeper_tool_execution.failure (Yojson.Safe.to_string payload))
+                  else
+                    (* Preserve rg's own error payload. A missing --type can
+                       be established from this backend's type inventory;
+                       other exit-2 causes stay unclassified as caller errors. *)
+                    Keeper_tool_execution.failure
+                      ~class_:(rg_error_class ~status:st ~file_type ~read_type_list:(fun () ->
+                        match
+                          Keeper_sandbox_read_runner.run_command_with_status
+                            ?turn_sandbox_factory
+                            ~config ~meta ~command_argv:[ "rg"; "--type-list" ]
+                            ~max_bytes:rg_type_list_max_bytes
+                            ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
+                            ()
+                        with
+                        | Ok (Unix.WEXITED 0, listing) -> Some listing
+                        | Ok _ | Error _ -> None))
+                      (Yojson.Safe.to_string payload))
            in
            match read_target () with
-           | Read_target_error e -> path_error e
+           | Read_target_error refusal ->
+             path_error ~class_:refusal.Keeper_alerting_path.failure_class refusal.message
            (* A declared endpoint path names the endpoint's file, so it is
               searched only there; the host rg below never sees one. *)
            | Declared_read_target target -> rg_in_sandbox target
@@ -246,7 +305,9 @@ let try_handle_with_outcome
            else
              let rg_available = Keeper_tool_execute_path.shell_command_available "rg" in
              if not rg_available then
-               path_error "rg executable not found; Grep requires rg"
+               path_error
+                 ~class_:Tool_result.Dependency_unavailable
+                 "rg executable not found; Grep requires rg"
              else
                let argv =
                  [ "-n"; "-m"; string_of_int limit ]
@@ -261,7 +322,9 @@ let try_handle_with_outcome
                in
                (match Masc_exec.Exec_program.of_string "rg" with
                 | Error (`Unknown executable) ->
-                  path_error (Printf.sprintf "invalid executable: %S" executable)
+                  path_error
+                    ~class_:Tool_result.Runtime_failure
+                    (Printf.sprintf "invalid executable: %S" executable)
                 | Ok bin ->
                   let ir = Keeper_tooling.Execute_shell_ir.simple_bin bin argv in
                   run_host_shell_ir
@@ -305,6 +368,19 @@ let try_handle_with_outcome
                    in
                    if is_ok
                    then Keeper_tool_execution.success_data payload
-                   else Keeper_tool_execution.failure (Yojson.Safe.to_string payload))))))
+                   else
+                     Keeper_tool_execution.failure
+                       ~class_:(rg_error_class ~status:result.status ~file_type ~read_type_list:(fun () ->
+                         let type_list_ir =
+                           Keeper_tooling.Execute_shell_ir.simple_bin bin [ "--type-list" ]
+                         in
+                         match
+                           dispatch_host_shell_ir
+                             ~workdir:(host_search_workdir target)
+                             type_list_ir
+                         with
+                         | Ok result when result.status = Unix.WEXITED 0 -> Some result.stdout
+                         | Ok _ | Error _ -> None))
+                       (Yojson.Safe.to_string payload))))))
   | _ -> None
 ;;

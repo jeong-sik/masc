@@ -239,6 +239,31 @@ status: reference
   [Keeper_unified_prompt](../../lib/keeper/keeper_unified_prompt.mli),
   [Keeper_prompt](../../lib/keeper/keeper_prompt.mli)
 
+**Ask (질문)**
+: Keeper가 운영자에게 묻는 durable 질문 묶음. `masc_ask`가 만들고,
+  `masc_ask_status`·`masc_ask_withdraw`가 조회·철회하며, 답변은 별도 wake로
+  Keeper에게 돌아간다. 한 ask는 질문 여러 개를 담고, 각 질문은 선택지·자유 텍스트
+  또는 둘 다를 받는다. 질문 id(`q1`, `q2`, ...)와 선택지 id(`c1`, `c2`, ...)는
+  모델이 이름 짓지 않고 위치로 붙는다 — 한 ask 안에서만 유일하면 되고, 나중에
+  어떤 도구도 그 id를 다시 받지 않는다(#38585). 답이 Keeper에게 도달할 때는
+  각 id가 이미 헤더와 라벨로 되돌아가 있고, `masc_ask_status`는 id를 그 옆에
+  함께 적는다. TUI의 자유 텍스트 편집은 같은 q1이 두 ask에 있을 수 있어 ask id로
+  묶는다. **Board Interest**와 달리 사람의 답을 기다리는 일방향 요청이고,
+  **Schedule**의 미래 실행 예약과도 다르다.
+  → [mcp_tool_runtime_ask](../../lib/mcp_tool_runtime_ask.ml),
+  [Keeper_ask](../../lib/keeper/keeper_ask.mli)
+
+**Latched Reason (durable latch 까닭)**
+: Keeper가 durable pause에 들어간 typed 까닭
+  (`Keeper_latched_reason.t`). 현재는 `Operator_paused of { operator_actor }` 하나뿐이고,
+  `operator_actor`는 `Grpc_directive`·`Keeper_down` 둘 중 하나다. 일반적인 turn·
+  provider·task 실패는 관측으로만 남고 이 latch를 만들지 못한다 — 실패는 스케줄링
+  게이트가 아니라 증거다. 폐기되거나 알 수 없는 latch 문자열은 명시적으로 거절한다.
+  **Turn Configuration Error**처럼 registry가 기록하는 실행 실패 원인과는 다른
+  층이다 — 이쪽은 typed lifecycle latch이고, 저쪽은 turn이 typed 구성 오류로
+  끝난 실패 관측이다.
+  → [Keeper_latched_reason](../../lib/keeper_runtime/keeper_latched_reason.mli)
+
 **Board Interest**
 : Keeper가 직접 지목되지 않은 Board post와 comment를
   의미 판정 대상으로 받을 수 있는 주제 선언. `board_interests = []`이면 이
@@ -505,6 +530,8 @@ status: reference
     풀리는 때와, 뒤 후보 가운데 풀리는 순간 앞으로 올라오는 후보가 더 일찍 풀리는 때
     중 빠른 쪽까지다(`walk_rest`). 실패만 한 후보는 기다리게 하지 않는다
     (`Keeper_turn_driver.demote_unavailable_candidates`, RFC-0458 §3.4).
+    실패 증거를 적은 Keeper(recorder)는 다음 사이클에 자기가 표시한 후보를
+    강등하지 않고 선언 자리에서 다시 부른다(RFC-0458 §3.4 rule 5, #38327).
   - 차단 강등: 낡은 blocker를 "이전 차단"으로 낮춰 보여준다. 감추지 않는다
     (`agent-roster.ts`).
   → [Keeper_turn_driver.demote_unavailable_candidates](../../lib/keeper/keeper_turn_driver.ml)
@@ -616,6 +643,28 @@ status: reference
   단위를 분류한다.
   → [Tool_result](../../lib/tool_types/tool_result.mli)
 
+**Recorded Call Outcome (기록된 호출 결말)**
+: 영속된 tool-call 레코드(JSONL 원장)가 그 호출이 어떻게 끝났다고 말하는지를 읽는
+  셋째 닫힌 분류(`Tool_result.recorded_call_outcome` = `Recorded_succeeded`·
+  `Recorded_deferred`·`Recorded_failed`·`Recorded_unsettled`·`Recorded_malformed`).
+  원장을 읽는 모든 자리는 이 분류를 거친다 — 대시보드 tool 품질, Keeper 최근 행동,
+  런타임 신뢰 타임라인, 도구 호출 파일 변경(`dashboard_http_tool_quality`·
+  `keeper_own_recent_actions`·`keeper_runtime_trust_timeline`·
+  `keeper_tool_call_file_change`). 레코드의 Execution Disposition이 권위이고,
+  disposition이 없는 레코드에서만 Tool Call Outcome(`wire_outcome`)을 읽는다 —
+  typed dispatch 경로를 거치지 않은 호출은 응답 관측만 남긴다. 커밋된 효과의 결과가
+  모델에 닿기 전 실패한 레코드는 `Recorded_succeeded`다 — 효과는 일어났다.
+  `Recorded_deferred`는 독자적인 경우로 남는다: 호출은 받아들여졌으나 효과가 아직
+  일어나지 않았으므로 성공도 실패도 아니다. `Recorded_unsettled`는 `wire_outcome`이
+  `unknown`이거나 disposition·wire_outcome 어느 쪽도 적지 않은 레코드 — 아직 결말이
+  없다는 뜻이며, 실패도 malformed도 아니다(bench의 `tool_outcomes.sh`가 이 경우를
+  실패 대신 '미정'으로 세는 근거, #38721). `Recorded_malformed`는 JSON 타입이
+  틀렸거나 엄격 디코더가 거절하는 철자, 또는 객체가 아닌 레코드 — 생산자와 읽는 쪽의
+  스키마 불일치다. Tool Call Outcome(외부 wire 투영)·Execution Disposition(실행의
+  권위 분류)과 다른 단위다: 이 둘이 호출의 실행을 말할 때, 이 분류는 그 실행이
+  원장에 **남긴 기록**을 말한다.
+  → [Tool_result](../../lib/tool_types/tool_result.mli)
+
 **Execution ID (실행 식별자)**
 : 이름이 같은 서로 다른 정체성이 여럿이다. 문장에 어느 것인지 함께 적는다.
   (1) **Tool execution id** — `Ids.Execution_id.t` (RFC-0233). 도구 실행마다 dispatch
@@ -656,7 +705,7 @@ status: reference
   → [Runtime.media_failover](../../lib/runtime/runtime.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
 
 **Lane**
-: 모델이 도는 Keeper의 exact-output 작업을 위한 고정 실행 경로. 다섯
+: 모델이 도는 exact-output 작업을 위한 고정 실행 경로. 다섯
   (`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`)은
   닫힌 타입 `Standalone_lane.t` 하나다. `Standalone_lane.all`이 열거하고 `to_id`가
   이름을 적는다. `Runtime.exact_lane`은 이 타입을 그대로 쓴다. 실행 기록의
@@ -679,11 +728,23 @@ status: reference
 **Runtime Candidate Order (런타임 후보 순서)**
 : Keeper turn이 배정된 runtime이 실패했을 때 시도할 runtime 후보의 순서 있는 목록.
   `[runtime.lanes.<이름>]` 표가 이름을 붙이고 `Runtime_lane.t`(`{id; candidates}`)가
-  그 값이다. TUI 화면은 "runtime candidate order"로 읽는다.
+  그 값이다. TUI 화면은 "runtime candidate order"로 읽는다. RFC-0457부터 Keeper를
+  특정 lane에 배정할 수 있고, 배정된 Keeper는 그 lane의 후보 순서를 따른다.
   `[runtime].media_failover`(vision fleet)와
   exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
   런타임 후보 순서와 별개 축이다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
+
+**Max Prompt Bytes (최대 프롬프트 바이트)**
+: MASC 가 클라이언트의 첫 턴에 심는 history(프롬프트)의 바이트 상한
+  (`[models.<이름>].max-prompt-bytes`, `Runtime_schema.model.max_prompt_bytes`).
+  클라이언트는 자기 컨텍스트 창을 스스로 소유하고, 상한을 넘는 seed는 typed
+  terminal로 거절한다 — 이 상한이 없으면 keeper는 그 거절로 한도를 한 번에
+  29분 걸리는 시도마다 하나씩 배워야 했다(2026-08-24). Codex 모델에 선언된
+  10 MiB(10485760)는 MASC 추정이 아니라 app-server가 요구하는 벤더 자체 한도다
+  (#38740). **닫힌 quota 창**(provider 가 매기는 사용량)과는 다른 층이다 — 이쪽은
+  MASC 가 보내는 프롬프트 크기의 상한이고, 저쪽은 provider 측 사용량 제한이다.
+  → [Runtime_schema.model](../../lib/runtime/runtime_schema.mli)
 
 **Attempt Dispatch (시도 파견 여부)**
 : Keeper turn 실행 중 후보 순서(`Runtime Candidate Order`)의 각 런타임 후보를 시도할 때,
@@ -796,14 +857,27 @@ status: reference
   권한 검사가 아니라 차례를 정하는 장치다.
   → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli)
 
+**MSX Lane**
+: 서버 안에 사는 MSX 기계 하나. Keeper 는 `masc_msx_*` 도구로 같은 기계에 키를
+  넣고 화면을 읽는다. DOS Lane과 같은 축의 공유 머신으로, Lane Add-on의
+  `msx_capture` 원천이 이 머신을 관측한다.
+  → [Msx_lane](../../lib/msx_lane/msx_lane.mli)
+
+**Browser Lane**
+: 서버가 관리하는 브라우저 세션. Keeper 는 `masc_browser_*` 도구로 탭을 읽고
+  조작한다. Lane Add-on의 `browser_document` 원천이 이 세션을 관측한다.
+  → [Browser_lane](../../lib/browser_lane/browser_lane.ml)
+
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
   DOS Lane의 머신, Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러
-  Lane 행을 제공할 수 있고, 패키지 worker는 관측 계산만 격리한다. attach·detach와
-  Add-on 장애는 기존 Keeper의 권한·도구·진행 중 작업을 축소하지 않으며, 추가 근거는
-  활용·보류·무시할 수 있다. 원천 어댑터는 `snapshot_file`·`msx_capture`·`dos_capture`·
-  `lane_output`·`browser_document`이고, 코어는 도메인 의미를 해석하지 않고 공통 row/coverage를
-  검사·표시한다.
+  Lane 행을 제공할 수 있다. 패키지는 `lane.toml`의 `contributions`로 observe·derive·act
+  기여를 선언하며, act 기여 패키지(예: `dos-world`·`quiz-grader`)는 `lane_act` 도구로
+  조치를 출하한다 — 즉 이 레이어는 관측뿐 아니라 조치(act)까지 포함한다. 패키지 worker는
+  그 계산을 격리한다. attach·detach와 Add-on 장애는 기존 Keeper의 권한·도구·진행 중
+  작업을 축소하지 않으며, 추가 근거는 활용·보류·무시할 수 있다. 원천 어댑터는
+  `snapshot_file`·`msx_capture`·`dos_capture`·`lane_output`·`browser_document`이고,
+  코어는 도메인 의미를 해석하지 않고 공통 row/coverage를 검사·표시한다.
   → [설계 계약](../design/lane-addon-v0.md),
   [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),
   [Lane_addon_sources](../../lib/lane_addon/lane_addon_sources.ml)
@@ -839,9 +913,13 @@ status: reference
 **Exact-output route**
 : Librarian, Workspace memory curator, HITL auto judge, Board attention 같은 단독
   모델 작업의 목적별 실행 경로(`Agent_core.Exact_output`). 설정은 API slot과 후속 CLI
-  후보 순서를 선언한다(`exact_output_lane_decl`). 도구를 쓰지 않고 단일 완결 응답을
-  받아 도메인 검증기가 유효성을 판정하며, 일반 턴 failover인 Runtime Candidate Order와
-  구분된다.
+  후보 순서를 선언한다(`exact_output_lane_decl`). 대부분의 exact route는 도구를 쓰지
+  않고 단일 완결 응답을 받아 도메인 검증기가 유효성을 판정하며, 일반 턴 failover인
+  Runtime Candidate Order와 구분된다. 단 **verifier_exact은 예외로 도구를 호출한다** —
+  판정(verdict)을 `report_review_verdict` 도구 호출 한 번으로 낸다
+  (`lib/task/anti_rationalization.ml`: "The verdict channel is the
+  report_review_verdict tool call, so every slot needs a tool-calling model"). 이 lane의
+  모든 slot은 도구 호출이 가능한 모델이어야 한다.
   - **슬롯 전진 조건 (타임아웃 및 컨텍스트 초과)**: 슬롯 전진은 공통적으로 이 슬롯에서
     발송이 한 번이었을 때(`receipt_dispatch_count = 1`)만 허용된다. 요청이 wire로 나간
     뒤 바인딩의 헤더 기한(`connect_timeout_s`, `Http_operation`) 또는 전체 기한
@@ -1377,10 +1455,13 @@ status: reference
   sandbox-relative path를 사용한다.
 
 **Sandbox Target (샌드박스 실행 타깃)**
-: Keeper의 `Execute` 도구가 셸 명령을 격리 실행하는 환경 추상화(`Sandbox_target.t`).
+: Keeper의 `Execute` 도구가 명령을 격리 실행하는 환경 추상화(`Sandbox_target.t`).
   `Host`·`Docker`·`Micro_vm`·`Ssh`·`Delegated`의 닫힌 variant로 표현된다. 각 타깃은
   명령의 표준 입출력과 종료 상태를 `run_outcome`(`Ran`·`Transport_failed`)으로
   전달하여, 원격 런타임 전송 장애와 명령의 자체 실패를 명확히 분리한다.
+  호출 페이로드는 `argv`(셸 없이 그대로 실행하는 프로세스 벡터)와 `command`(셸에
+  넘기는 한 줄) 중 정확히 하나만 받는다.
+  → [config/tools/tool_execute.toml](../../config/tools/tool_execute.toml)
 
 **Endpoint Allowed Paths (엔드포인트 허용 경로)**
 : SSH 샌드박스 타깃(`Sandbox_target.Ssh`, `Exec_ssh_endpoint.t`)에서 명령이 접근할 수 있는
@@ -1396,9 +1477,17 @@ status: reference
     링크를 해석하지 않고 순수 어휘(lexical prefix)로만 비교한다. 그래서 추가 루트 아래에서
     밖을 가리키는 심볼릭 링크는 이 검사가 막지 못한다. 엔드포인트가 이 머신이면 추가 루트는 링크를
     풀어 보는 작업 디렉터리(`workdir`)보다 느슨하고, 실제 경계는 엔드포인트 계정의 권한이다. 기본값은 빈 목록(`[]`)이다.
+  - **읽기 확장**: #38631 부터 `Read`와 읽기 전용 검색은 이 선언 루트를 Execute 가 이름 짓는
+    방식과 같이 엔드포인트 자기 경로로 읽는다(`Keeper_sandbox_remote_lane.declared_endpoint_path`).
+    판정 순서는 **자기 트리 먼저** — Keeper 작업 디렉터리 안 경로는 그 뜻을 그대로 두고, 그 밖에서
+    거절된 절대 경로만 선언 루트와 대조한다. Docker·MicroVM Keeper는 루트를 선언하지 않으므로
+    언제나 `None`이다. 엔드포인트 경로(`Declared_endpoint_file`)인데 이 Keeper 의 읽기가 원격 레인을
+    타지 않으면 `declared_endpoint_path_needs_remote_lane: …` 오류 문장으로 거절한다. 쓰기는 여전히 Keeper 의
+    playground 안에만 머문다.
   → [Sandbox_target](../../lib/exec/sandbox_target.mli),
   [Exec_policy_paths](../../lib/exec_policy/exec_policy_paths.mli),
-  [Exec_ssh_endpoint](../../lib/runtime/exec_ssh_endpoint.mli)
+  [Exec_ssh_endpoint](../../lib/runtime/exec_ssh_endpoint.mli),
+  [Keeper_sandbox_remote_lane](../../lib/keeper/keeper_sandbox_remote_lane.mli)
 
 **Worktree**
 : 한 repository 안에서 branch 작업을 격리하는 Git worktree.
@@ -1437,6 +1526,17 @@ status: reference
   TUI와 대시보드의 표시 전용(display only)이며, 커미터가 작성자 이름을 임의
   지정할 수 있으므로 권한(authority)이나 실행 증명으로 삼지 않는다.
   → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli)
+
+**Disposable Build Volume (일회용 빌드 볼륨)**
+: Apple container 샌드박스에서 Keeper의 `_build` 출력이 놓이는, Keeper마다 하나씩
+  할당되는 일회용(disposable) 볼륨(RFC-keeper-build-output-returns-to-a-disposable-volume,
+  #38563 착지). 체크아웃이 놓이는 work volume(`work_volume_guest_root`)과 분리된
+  `/masc-build`(`build_volume_guest_root`)에 마운트된다. 일회용이라는 말 그대로
+  게스트를 재시작할 때마다 `recreate_apple_build_volume`가 지우고 새로 만들어 빈
+  상태로 시작하므로, 매번 콜드 빌드 한 번을 치르는 대신 재시작 사이에 쌓인 빌드
+  산출물이 다음 세션으로 새지 않는다. `container volume create`는 멱등이 아니므로
+  존재 여부를 probe로 가리고, probe 결과가 애매하면 추측으로 지우지 않고 거절한다.
+  → [Keeper_sandbox_microvm](../../lib/keeper/keeper_sandbox_microvm.mli)
 
 ## Continuity
 
@@ -1488,6 +1588,23 @@ status: reference
   → [Keeper_types.working_context](../../lib/keeper_types/keeper_types.mli)
   이 저장점은 **Checkpoint Load**(위 Core 항목)가 읽고, **Checkpoint Purge**(아래
   항목)가 LLM 없이 재작성한다.
+
+**Store Boot Policy (영속 store 부팅 정책)**
+: durable per-keeper store가 이번 빌드로 디코딩되지 않을 때 부팅이 어떻게
+  행동할지를 store 타입이 짊어지는 닫힌 분류
+  (`Keeper_store_boot_reconcile`의 `refuse_boot`·`degrade_typed`,
+  RFC-0420·RFC-0444 §2.4). `Refuse_boot`(keeper meta·current Memory OS snapshot):
+  없으면 Keeper가 다른 Keeper로, 또는 빈 기억으로 뜨고 잃은 것을 덮어쓰므로
+  부팅을 거절한다. `Degrade_typed`(goal store): 모든 쓰는 쪽이 못 읽는 store를
+  거절하고 어떤 읽는 쪽도 빈 목록으로 바꾸지 않으므로, Keeper는 task·board·
+  schedule로 돌고 파일은 아무것도 덮어쓰지 않는다 — `examine`이 읽고 못 읽으면
+  INFO 한 줄만 남긴다. 절차는 `examine`(읽기만, 파일 생성·이름변경 없음) →
+  `admit`(부팅 진행 여부) → `quarantine`(운영자가
+  `--accept-store-quarantine`로 받아들인 뒤에만 옆으로 옮김) 순서다.
+  새 store 생성자는 컴파일러가 정책을 묻게 한다. **경계**: Board 판정의
+  `Quarantined`(Board Attention Quarantine)와 이름이 겹치지만 다른 층위다 —
+  여기서 격리는 부팅 단계에서 store 파일을 옆으로 옮기는 운영자 결정이다.
+  → [Keeper_store_boot_reconcile](../../lib/keeper/keeper_store_boot_reconcile.mli)
 
 **Checkpoint Purge (체크포인트 청소)**
 : 멈춘 Keeper의 canonical AGENT_CORE checkpoint를 LLM 없이 두 닫힌 규칙으로 줄이는

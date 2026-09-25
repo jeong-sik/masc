@@ -1082,8 +1082,21 @@ let retry_delay_sec (runtime : runtime) = function
     runtime.retry_interval_sec
 ;;
 
+(* A retry that only waits the pulse joins the shared timer. One that must
+   wait out a resting slot arms its own: joining the shared timer would fire
+   it at the pulse, inside the rest, and arming the shared timer with the
+   rest would hold back every serving key and sweep that joins after it. A
+   key reviewed twice is still one review at a time ([claim_review]). *)
 let schedule_retry (runtime : runtime) key ~delay_sec =
-  schedule_retry_scope runtime ~delay_sec (Targets [ key ])
+  if Float.compare delay_sec runtime.retry_interval_sec > 0
+  then (
+    Eio.Switch.check runtime.sw;
+    Eio.Fiber.fork_daemon ~sw:runtime.sw (fun () ->
+      Eio.Time.sleep runtime.clock delay_sec;
+      request_review runtime key;
+      `Stop_daemon);
+    Armed_timer)
+  else schedule_retry_scope runtime ~delay_sec (Targets [ key ])
 ;;
 
 let schedule_sweep_retry (runtime : runtime) =

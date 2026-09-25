@@ -701,10 +701,6 @@ let test_system_llm_authority_helpers_are_typed () =
     Alcotest.(check string) "typed rejection reason" "missing evidence" reason
   | Masc_domain.Verdict_approved -> Alcotest.fail "reject must remain a rejection"
 
-(* Audit U2 (2026-09-12) and its Codex review: the Board sentence is
-   projected from the scheduler's answer, not from the attempt's request. A
-   timer this stall armed names the lane interval; a timer it joined, or one
-   already holding its key, names no number it does not hold. *)
 (* A retryable review waits the maintenance pulse, and longer only while the
    slot that refused it rests after a provider rate limit: a retry inside
    that rest would send the whole review to a slot that just refused it. The
@@ -722,6 +718,10 @@ let test_retry_waits_out_a_resting_slot () =
        (Masc.Keeper_turn_driver.Path_resting
           { release_at = 1010.0; walk_promotes_at_release = false }))
 
+(* Audit U2 (2026-09-12) and its Codex review: the Board sentence is
+   projected from the scheduler's answer, not from the attempt's request. A
+   timer this stall armed names the lane interval; a timer it joined, or one
+   already holding its key, names no number it does not hold. *)
 let test_system_llm_retry_disposition_is_typed () =
   let module For_testing = CA.For_testing in
   (match For_testing.retry_request_of_evaluator_retryable (Some true) with

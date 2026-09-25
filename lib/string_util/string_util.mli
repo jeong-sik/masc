@@ -129,6 +129,14 @@ val utf8_suffix : max_bytes:int -> string -> string
     Returns [""] when [max_bytes <= 0]. The tail-side counterpart of
     {!utf8_prefix}. *)
 
+val utf8_complete_prefix : string -> string
+(** [utf8_complete_prefix s]: [s] without a last character that is cut off,
+    for a head whose next byte is gone. [s] comes back unchanged when its last
+    character is whole, or when its last bytes are not the lead byte and
+    continuations of one UTF-8 character. The head-side counterpart of
+    {!utf8_suffix}: {!utf8_prefix} needs the byte after the cut, this does
+    not. *)
+
 val trim_nonempty : string -> string option
 (** [trim_nonempty s] trims whitespace and returns [Some s] if non-empty,
     [None] otherwise. SSOT for the per-module [trim_nonempty] helpers. *)

@@ -74,7 +74,10 @@ type wake_admission =
   | Wake_skipped of wake_skip_reason
 (** Checked once per wake, before any partition I/O, from the Keeper meta the
     heartbeat reads before dispatch. A paused, absent, or unreadable meta skips
-    the whole drain for that wake and leaves the ledger untouched. *)
+    the whole drain for that wake and leaves the ledger untouched. A committed
+    resume re-wakes the worker
+    ([Keeper_board_attention_worker_wake.request_after_resume]), so Board work
+    recorded during the pause drains after resume. *)
 
 type fatal_stage =
   | Registration

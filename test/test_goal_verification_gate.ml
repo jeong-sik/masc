@@ -222,7 +222,7 @@ let test_update_is_not_gated_by_b1 () =
   match
     Goal_store.upsert_goal config ~id:goal.id ~title:"Renamed" ()
   with
-  | Ok (_, `updated) -> ()
+  | Ok (_, `updated _) -> ()
   | Ok (_, `created) -> fail "an existing id must update, not create"
   | Error error -> fail ("ungated update rejected: " ^ Goal_store.write_error_to_string error)
 ;;
@@ -990,9 +990,13 @@ let test_verifying_repeat_rearms_a_missing_proof_request () =
   (* Simulate the crash window: the phase is Verifying but the ledger never
      recorded the proof request. *)
   (match
-     Goal_store.upsert_goal config ~id:goal_id ~phase:Goal_phase.Verifying ()
+     Goal_store.update_goal_if_phase config ~goal_id
+       ~expected_phase:Goal_phase.Executing
+       (fun goal -> { goal with Goal_store.phase = Goal_phase.Verifying })
    with
-   | Ok _ -> ()
+   | Ok (Goal_store.Goal_updated _) -> ()
+   | Ok (Goal_store.Goal_phase_mismatch phase) ->
+     fail ("test setup: goal was not Executing but " ^ Goal_phase.to_string phase)
    | Error error -> fail (Goal_store.write_error_to_string error));
   (* Creation writes no ledger row, so the wedge starts with none at all —
      the same hole the handler re-arms, reached without a row to empty. *)
@@ -1195,6 +1199,59 @@ let test_stale_proof_request_cannot_consume_revised_criterion () =
   check string "changed criterion returns to execution" "executing" (stored_phase config goal_id)
 ;;
 
+(* A criterion edit takes a Verifying goal back to Executing. That move goes
+   into goal_events.jsonl like every other phase move, naming the phase it
+   left and why. *)
+let goal_phase_events config =
+  let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
+  if not (Sys.file_exists path) then []
+  else
+    In_channel.with_open_bin path In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.map Yojson.Safe.from_string
+    |> List.filter (fun event ->
+      Yojson.Safe.Util.member "event_type" event = `String "goal_phase")
+;;
+
+let test_criterion_edit_records_its_phase_move () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "A phase move by edit is recorded" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  ignore (must_succeed "change target"
+    (dispatch ctx ~name:"masc_goal_upsert"
+      [ "id", `String goal_id; "target_value", `String "300" ]));
+  check string "changed criterion returns to execution" "executing"
+    (stored_phase config goal_id);
+  let edit_moves =
+    List.filter
+      (fun event ->
+        let payload = Yojson.Safe.Util.member "payload" event in
+        Yojson.Safe.Util.member "goal_id" event = `String goal_id
+        && Yojson.Safe.Util.member "cause" payload = `String "criterion_edit")
+      (goal_phase_events config)
+  in
+  match edit_moves with
+  | [ event ] ->
+    let payload = Yojson.Safe.Util.member "payload" event in
+    check string "the phase it moved to" "executing"
+      Yojson.Safe.Util.(payload |> member "phase" |> to_string);
+    check string "the phase it left" "verifying"
+      Yojson.Safe.Util.(payload |> member "previous_phase" |> to_string)
+  | moves -> failf "expected one criterion_edit phase event, got %d" (List.length moves)
+;;
+
+let test_criterion_edit_on_executing_goal_records_no_phase_move () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "An edit that moves nothing records nothing" in
+  ignore (must_succeed "change target"
+    (dispatch ctx ~name:"masc_goal_upsert"
+      [ "id", `String goal_id; "target_value", `String "300" ]));
+  check int "no goal_phase event" 0 (List.length (goal_phase_events config))
+;;
+
 let test_proof_replay_preserves_evidence_and_rejects_different_run () =
   with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
@@ -1276,6 +1333,10 @@ let () =
             test_proof_verdict_requires_a_pending_request
         ; test_case "stale proof cannot consume a revised criterion" `Quick
             test_stale_proof_request_cannot_consume_revised_criterion
+        ; test_case "criterion edit records its phase move" `Quick
+            test_criterion_edit_records_its_phase_move
+        ; test_case "criterion edit on an executing goal records no phase move" `Quick
+            test_criterion_edit_on_executing_goal_records_no_phase_move
         ; test_case "proof replay retains evidence and rejects another run" `Quick
             test_proof_replay_preserves_evidence_and_rejects_different_run
         ; test_case "recovered Goal cannot authorize edits or deletion" `Quick

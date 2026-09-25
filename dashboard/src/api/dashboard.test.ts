@@ -2310,6 +2310,7 @@ describe('fetchDashboardGate', () => {
             slot_id: 'glm-coding.glm-5-turbo',
             updated_by: 'vincent',
             updated_at: '2026-08-27T05:00:00Z',
+            offered: true,
           },
         ],
         keeper_exact_lanes_state: { state: 'ready' },
@@ -2367,6 +2368,7 @@ describe('fetchDashboardGate', () => {
           slot_id: 'glm-coding.glm-5-turbo',
           updated_by: 'vincent',
           updated_at: '2026-08-27T05:00:00Z',
+          offered: true,
         }],
         keeper_exact_lanes_state: { state: 'ready' },
         hitl: gateHitl,
@@ -2669,6 +2671,7 @@ describe('fetchDashboardGate', () => {
       task_id: null,
       goal_id: null,
       goal_ids: [],
+      phase: 'queued',
       summary_status: 'not_requested',
       exact_attempt: { state: 'unbound' },
       summary_attempt_disposition: { code: 'ready' },
@@ -2683,6 +2686,7 @@ describe('fetchDashboardGate', () => {
             tool_name: 'fs_write',
             input_hash: 'b'.repeat(64),
             sequence: 4,
+            phase: 'queued',
             summary_status: { status: 'failed', reason: 'x', retryable: true },
             exact_attempt: { state: 'unbound' },
             summary_attempt_disposition: { code: 'ready' },
@@ -4033,6 +4037,7 @@ describe('runtime.toml raw config API', () => {
           applied_keys: [],
           preempted_keys: [],
         },
+        exact_output_registry: { status: 'applied', requires_restart: false, targets: 'runtime_bindings' },
         ...application,
         skills: {
           state: 'published',
@@ -4225,7 +4230,42 @@ describe('runtime.toml raw config API', () => {
     await expect(saveRuntimeTomlConfig('[runtime]\n')).rejects.toThrow(/적용 영수증/)
   })
 
-  it.each(['routing', 'keeper_overlay'] as const)(
+  it.each([
+    [{ status: 'unpublished', requires_restart: true }, 'unpublished'],
+    [{ status: 'kept', requires_restart: false, next_boot_publishes: false, reason: 'catalog read failed' }, 'kept'],
+    [{ status: 'kept', requires_restart: false, reason: 'catalog read failed' }, undefined],
+    [{ status: 'applied', requires_restart: false, targets: 'replacement_catalog' }, 'applied'],
+    [{ status: 'applied', requires_restart: false }, undefined],
+    [{ status: 'kept', requires_restart: false }, undefined],
+    [{ status: 'applied', requires_restart: true, targets: 'runtime_bindings' }, undefined],
+    [{ status: 'unpublished', requires_restart: false }, undefined],
+    [{ status: 'future', requires_restart: false }, undefined],
+  ] as const)(
+    'decodes the exact-output registry row %o only when status and restart agree',
+    async (exactOutputRegistry, expected) => {
+      const payload = committedPayload({
+        ok: true,
+        path: '/tmp/.masc/config/runtime.toml',
+        file_name: 'runtime.toml',
+        source_text: '[runtime]\n',
+        provider_protocols: providerProtocols,
+        application: { exact_output_registry: exactOutputRegistry },
+      })
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })))
+
+      if (expected === undefined) {
+        await expect(saveRuntimeTomlConfig('[runtime]\n')).rejects.toThrow(/적용 영수증/)
+      } else {
+        const result = await saveRuntimeTomlConfig('[runtime]\n')
+        expect(result.application.exact_output_registry.status).toBe(expected)
+      }
+    },
+  )
+
+  it.each(['routing', 'keeper_overlay', 'exact_output_registry'] as const)(
     'rejects a committed write response without %s application evidence',
     async (missingField) => {
       const payload = committedPayload({
@@ -4670,6 +4710,22 @@ describe('fetchRuntimeProviders', () => {
           unavailable_assignments: [
             { keeper_name: 'budgettest', runtime_id: 'mimo.mimo-v2.5-pro' },
           ],
+          status_reasons: ['missing_agent_core_catalog_models', 'exact_slot_body_deadline_absent'],
+          exact_slot_body_deadline_gaps: [
+            {
+              lane_id: 'librarian_exact',
+              slot_id: 'glm-coding.glm-5',
+              provider_id: 'glm-coding',
+              missing_key: 'exact-body-timeout-s',
+              message: 'librarian_exact slot glm-coding.glm-5',
+            },
+          ],
+          exact_lanes_emptied_by_body_deadline_gaps: ['librarian_exact'],
+          exact_output_registry_stale: {
+            reason: 'required exact-output lane "hitl_summary" has no admitted target',
+            kept_since_commit: '12',
+            message: 'kept since commit 12',
+          },
           next_action: 'Add a row for each to the AGENT_CORE embedded catalog.',
         },
         config_path: '/tmp/masc-test/runtime.toml',
@@ -4759,6 +4815,20 @@ describe('fetchRuntimeProviders', () => {
     expect(result.startup_degradation?.missing_catalog_models[0]?.provider_label).toBe('openai_compat')
     expect(result.startup_degradation?.disabled_runtime_ids).toEqual(['mimo.mimo-v2.5-pro'])
     expect(result.startup_degradation?.unavailable_assignments[0]?.keeper_name).toBe('budgettest')
+    expect(result.startup_degradation?.status_reasons).toEqual([
+      'missing_agent_core_catalog_models',
+      'exact_slot_body_deadline_absent',
+    ])
+    expect(result.startup_degradation?.exact_slot_body_deadline_gaps?.[0]).toEqual({
+      lane_id: 'librarian_exact',
+      slot_id: 'glm-coding.glm-5',
+      provider_id: 'glm-coding',
+      message: 'librarian_exact slot glm-coding.glm-5',
+    })
+    expect(result.startup_degradation?.exact_lanes_emptied_by_body_deadline_gaps).toEqual([
+      'librarian_exact',
+    ])
+    expect(result.startup_degradation?.exact_output_registry_stale?.kept_since_commit).toBe('12')
   })
 
   it('preserves thinking-control wires without duplicating the server enum', async () => {

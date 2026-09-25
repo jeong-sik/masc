@@ -1143,7 +1143,12 @@ let split_keeper_reply_chunks (text : string) : string list =
     done;
     if !start < len then
       chunks := String.sub text !start (len - !start) :: !chunks;
-    List.rev !chunks |> List.filter (fun chunk -> String.trim chunk <> "")
+    (* Every chunk is kept, whitespace-only ones included: [push] never makes
+       an empty one, and the joined chunks must equal [text]. Dropping the
+       "\n" chunk between "첫 문단입니다." and "\n둘째" turned a paragraph
+       break into a line break, and Discord and Slack post the joined deltas
+       as the reply. *)
+    List.rev !chunks
 
 let notify_closed on_closed =
   match on_closed with
@@ -3298,6 +3303,12 @@ let live_event_is_new ~replayed = function
   | Some seq -> not (Hashtbl.mem replayed seq)
 ;;
 
+let operation_heartbeat_decision = function
+  | Some (Keeper_owner.Chat_operation.Queued | Running _) -> `Send_comment
+  | Some (Succeeded _ | Failed _ | Cancelled _) -> `Finish_stream
+  | None -> `Retain_idle_timeout
+;;
+
 (* Everything a reconnect replays, or nothing. Reads the journal, projects it
    with the keeper's current redaction snapshot, and keeps every failure
    inside this function — missing, unreadable, corrupt, or a journaled event
@@ -3514,11 +3525,69 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                  ~code
                  ()));
          finish ());
-      Eio.Promise.await finished))
+      (* A queued operation has no journal events until its Keeper gets the
+         slot. Keep the HTTP stream alive during that silence, so a healthy
+         queue does not trip the TUI's per-chunk idle bound.
+         Check the exact durable operation before every comment: if it has
+         settled without a wire terminal, closing this stream lets the TUI
+         reconcile the terminal from the authoritative operation record.
+         The comment proves only transport liveness, not model progress. *)
+      let rec heartbeat () =
+        Eio.Time.sleep clock Server_mcp_transport_http_headers.sse_ping_interval_s;
+        if !closed || Httpun.Body.Writer.is_closed writer then finish ()
+        else if Option.is_none (Eio.Promise.peek finished) then (
+          let state =
+            match
+              Keeper_owner_registry.exact_operation
+                ~base_path ~keeper_name:payload.name payload.request_id
+            with
+            | Ok (Some operation) -> Some operation.state
+            | Ok None -> None
+            | Error error ->
+              Log.Keeper.warn
+                "keeper chat heartbeat could not read operation=%s: %s"
+                operation_id
+                (Keeper_owner_registry.command_error_to_string error);
+              None
+            | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+            | exception exn ->
+              Log.Keeper.warn
+                "keeper chat heartbeat operation read raised operation=%s: %s"
+                operation_id (Printexc.to_string exn);
+              None
+          in
+          match operation_heartbeat_decision state with
+          | `Send_comment ->
+            if keeper_stream_send_raw writer mutex closed ": keepalive\n\n"
+            then heartbeat ()
+            else finish ()
+          | `Finish_stream ->
+            (* The live sink may be writing this operation's terminal at the
+               same moment. If the close wins, the client sees a stream that
+               ended after acceptance without a terminal: the same case as a
+               terminal the wire never carried, settled from the operation
+               record, so the race changes no outcome. *)
+            finish ()
+          | `Retain_idle_timeout ->
+            (* Preserve the existing idle/reconnect path while operation
+               authority is unreadable, without a rapid close/re-POST loop.
+               A comment here would hold the stream open with nothing able to
+               end it if the operation settled without a wire terminal.
+               Cost: with no write, a departed client goes unnoticed. This
+               fiber and its live sink stay until the store is readable
+               again (the next check then writes a comment, which fails, or
+               closes) or [finished] resolves, as every stream did before
+               this heartbeat existed. *)
+            heartbeat ())
+      in
+      Eio.Fiber.first
+        (fun () -> Eio.Promise.await finished)
+        heartbeat))
 
 (** Build routes for MCP server *)
 
 module For_testing = struct
+  let operation_heartbeat_decision = operation_heartbeat_decision
   let persist_batch_user_rows = persist_batch_user_rows
   let operation_execution_of_outcome = operation_execution_of_outcome
   let parse_request = parse_keeper_chat_stream_request

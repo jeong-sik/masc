@@ -306,6 +306,36 @@ let test_mcp_tool_bridge_error () =
   | Ok _ -> Alcotest.fail "expected Error"
 ;;
 
+let test_convert_tools_skips_malformed_schema () =
+  let good : Mcp.mcp_tool =
+    { name = "good"
+    ; description = "Converts"
+    ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
+    }
+  in
+  let bad : Mcp.mcp_tool =
+    { name = "bad"; description = "Schema is not an object"; input_schema = `List [] }
+  in
+  let call_fn_for (_ : Mcp.mcp_tool) _input : Types.tool_result =
+    Ok { content = "ok"; content_blocks = None; _meta = None }
+  in
+  let tools, skipped =
+    Mcp.convert_tools ~server_name:"test-server" ~call_fn_for [ good; bad ]
+  in
+  Alcotest.(check (list string))
+    "good tool kept"
+    [ "good" ]
+    (List.map (fun (t : Tool.t) -> t.schema.name) tools);
+  Alcotest.(check (list string))
+    "bad tool reported skipped"
+    [ "bad" ]
+    (List.map (fun (s : Mcp.skipped_tool) -> s.tool_name) skipped);
+  List.iter
+    (fun (s : Mcp.skipped_tool) ->
+       Alcotest.(check bool) "skip carries a diagnostic" true (String.length s.detail > 0))
+    skipped
+;;
+
 (* ── agent-core tool -> agent_core mcp_tool conversion ─────────────────────────── *)
 
 let test_mcp_tool_of_agent_core_tool () =
@@ -515,6 +545,10 @@ let () =
     ; ( "tool_bridge"
       , [ test_case "mcp_tool_to_agent_core_tool" `Quick test_mcp_tool_to_agent_core_tool
         ; test_case "bridge error propagation" `Quick test_mcp_tool_bridge_error
+        ; test_case
+            "malformed schema skips only that tool"
+            `Quick
+            test_convert_tools_skips_malformed_schema
         ] )
     ; ( "sdk_bridge"
       , [ test_case "mcp_tool_of_agent_core_tool" `Quick test_mcp_tool_of_agent_core_tool

@@ -62,6 +62,11 @@ val submit
     counted rather than escaping. Outcomes and per-keeper state are exported as
     metrics. *)
 
+val has_waiting : base_path:string -> keeper_name:string -> bool
+(** Whether a unit waits behind the running one as the latest snapshot. A
+    unit that loops between rounds reads this to end itself so the waiting
+    unit runs next (RFC-0467). Reading it registers nothing. *)
+
 type purge_cancel_error =
   | Purge_already_in_progress
   | Purge_cancel_wrong_domain

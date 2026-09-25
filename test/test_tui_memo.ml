@@ -137,12 +137,14 @@ let test_every_writable_extension_reads_its_own_memo_back () =
   List.iter
     (fun extension ->
       match Lsp_process_manager.memo_line ~path:("a" ^ extension) written with
-      | Error refusal ->
+      | Error error ->
         (* JSON has no comment; the writer says so and there is nothing to read. *)
-        (match refusal with
-         | Lsp_process_manager.No_comment_syntax _ -> ()
-         | Lsp_process_manager.Extension_unknown ext ->
-           Alcotest.failf "the writer does not know %s" ext)
+        (match error with
+         | Lsp_process_manager.Unwritable (Lsp_process_manager.No_comment_syntax _) -> ()
+         | Lsp_process_manager.Unwritable (Lsp_process_manager.Extension_unknown ext) ->
+           Alcotest.failf "the writer does not know %s" ext
+         | Lsp_process_manager.Breaks_comment why ->
+           Alcotest.failf "%s refused a plain memo: %s" extension why)
       | Ok line ->
         let path = "a" ^ extension in
         Alcotest.(check (list found))

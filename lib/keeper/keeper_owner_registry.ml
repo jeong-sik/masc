@@ -804,6 +804,11 @@ let exact_operation ~base_path ~keeper_name operation_id =
     Keeper_owner.exact_operation owner operation_id)
 ;;
 
+let has_newer_original_queued ~base_path ~keeper_name ~operation_id =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.has_newer_original_queued owner ~operation_id)
+;;
+
 type interactive_target = Observed_turn_token of Keeper_interrupt_token.t | Direct_operation_id of Keeper_owner.Chat_operation.Operation_id.t
 let submit_interactive_operation ~base_path ~keeper_name ~operation_id ~source ~input ~control_token ~target =
   let result =

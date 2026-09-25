@@ -26,11 +26,29 @@ function skillApplicationNotice(application: CommittedRuntimeSkillApplication): 
   }
 }
 
+function exactOutputRegistryApplicationNotice(
+  application: CommittedRuntimeTomlConfig['application']['exact_output_registry'],
+): string {
+  switch (application.status) {
+    case 'applied':
+      return application.targets === 'runtime_bindings'
+        ? 'Exact registry 적용됨'
+        : 'Exact registry 적용됨 · 대체 카탈로그 target 이라 provider 필드는 반영 안 됨'
+    case 'unpublished':
+      return 'Exact registry 미게시 · 재시작 필요'
+    case 'kept':
+      return `Exact registry 이전 상태 유지 · 지금 파일로는 다음 부팅 때 게시되지 않음 (${application.reason})`
+  }
+}
+
 export function runtimeConfigCommitReceiptNotice(receipt: CommittedRuntimeTomlConfig): string {
   const keeperOverlay = receipt.application.keeper_overlay
   const runtimeNotice = keeperOverlay.requires_restart
     ? `${routingApplicationNotice(receipt.application.routing)} · Keeper 설정 ${keeperOverlay.pending_keys.length}개 재시작 대기`
     : routingApplicationNotice(receipt.application.routing)
+  const exactOutputRegistryNotice = exactOutputRegistryApplicationNotice(
+    receipt.application.exact_output_registry,
+  )
   const durabilityNotice = receipt.commit.durability === 'durable'
     ? '파일 내구성 확인됨'
     : '파일 교체됨 · 디렉터리 동기화 미확인'
@@ -39,6 +57,7 @@ export function runtimeConfigCommitReceiptNotice(receipt: CommittedRuntimeTomlCo
     `커밋 #${receipt.commit.order}`,
     runtimeNotice,
     skillApplicationNotice(receipt.application.skills),
+    exactOutputRegistryNotice,
     durabilityNotice,
   ].join(' · ')
 }

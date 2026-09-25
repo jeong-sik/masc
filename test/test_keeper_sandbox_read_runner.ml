@@ -25,10 +25,6 @@ module Calls = struct
 end
 
 module Mock_backend = struct
-  let should_route_read ~meta:_ =
-    Calls.push "should_route_read";
-    true
-
   let container_path_of_host ~config:_ ~meta:_ ~host_path =
     Calls.push ("container_path:" ^ host_path);
     Ok ("/container" ^ host_path)
@@ -95,20 +91,12 @@ module Runner = Keeper_sandbox_read_runner.Make (Mock_backend)
 
 let test_route_labels_match_sandbox_runner () =
   Alcotest.(check string)
-    "host via"
-    (Keeper_sandbox_runner.route_label Keeper_sandbox_runner.Host)
-    Runner.host_via;
-  Alcotest.(check string)
     "backend via"
     (Keeper_sandbox_runner.route_label Keeper_sandbox_runner.Sandbox_backend)
     Runner.backend_via
 
 let test_mock_backend_forwards_read_contract () =
   Calls.reset ();
-  Alcotest.(check bool)
-    "should route"
-    true
-    (Runner.should_route_read ~meta);
   Alcotest.(check (result string string))
     "container path"
     (Ok "/container/host/file.txt")
@@ -129,8 +117,7 @@ let test_mock_backend_forwards_read_contract () =
      |> Result.map_error Keeper_sandbox_read_backend.read_error_to_string);
   Alcotest.(check (list string))
     "events"
-    [ "should_route_read"
-    ; "container_path:/host/file.txt"
+    [ "container_path:/host/file.txt"
     ; "read_file:/host/file.txt:128:2.5"
     ]
     (Calls.events ())

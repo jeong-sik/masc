@@ -12,7 +12,11 @@ type t
 
 val create : min_interval_ns:int64 -> unit -> t
 val request : t -> request -> unit
-val take : t -> now_ns:int64 -> decision
+val take : input_pending:bool -> t -> now_ns:int64 -> decision
+(** The first input frame renders when its already-buffered bytes have been
+    handled; later input frames keep the minimum interval. [input_pending]
+    also coalesces a buffered burst until it drains or the deadline arrives.
+    Background updates keep the same interval. *)
 val input_timeout_seconds : t -> now_ns:int64 -> maximum:float -> float
 val normalize_keeper_detail_scroll :
   line_count:int -> content_height:int -> int -> int
@@ -412,14 +416,30 @@ val fusion_row :
     where it used to be unbounded in the header and cut at fourteen in the
     row. *)
 
-val task_list_sidebar_label : title:string -> task_id:string -> string
-(** A Tasks list row beside the task detail. The id goes after the title
-    because the frame folds a label from the middle: titles that share an
-    opening and an ending draw the same row, and the id at the end is what
-    parts them. *)
+val sidebar_row_label : about:string -> apart:string option -> string
+(** A list pane's row label: what the row is about, then the value that parts
+    it from its neighbours. The parting value goes last because the pane
+    folds a label from the middle and keeps its tail.
+
+    Every index that parts its rows asks this one, so a row reads the same
+    way whichever pane draws it. [None] is a row with nothing to be parted
+    by, and it keeps its subject alone. *)
 
 val fusion_sidebar_label :
   status:string -> time:string -> keeper:string -> run_id:string -> string
+
+val task_history_sidebar_label : task_id:string -> apart:string option -> string
+(** A Task Review or Verdicts list row. Both lists hold a task once per
+    submission, so the id alone draws the same row many times over. [apart]
+    is the value that parts this row from its siblings: it must hold still
+    while the reader looks at it, and it must be the row's own value rather
+    than a reading of one. A row with nothing to part it keeps the id
+    alone. *)
+
+val verdict_sidebar_labels : (string * string) list -> string list
+(** Task id and local clock for each Verdicts row. Rows whose displayed
+    clock is identical receive a snapshot-local ordinal, so two verdicts
+    recorded in the same second do not read as the same row. *)
 
 val fusion_pipeline_diagram :
   ?glyph_done:string ->
@@ -642,6 +662,12 @@ val schedule_hold_reading : due:string -> string
     since when its held occurrence has been due, and that it waits for the
     target Keeper to take the previous wake. [due] is already formatted. *)
 
+val schedule_fence_hold_reading :
+  due:string -> target:string -> fence_owner:string -> string
+(** The same reading for a schedule held because its target Keeper is
+    shutting down: it names the Keeper and the shutdown operation instead of
+    the previous wake. *)
+
 val schedule_hold_as_of_tag : checked:string -> string
 (** The short form of a hold the runner has not read again since [checked]:
     the time the hold was seen, in place of since when it has been due. It
@@ -652,3 +678,9 @@ val schedule_hold_as_of_reading : checked:string -> string
     previous wake as of [checked]. Drawn instead of {!schedule_hold_reading}
     when the runner status beside the list is not [ok], because a failed tick
     does not re-read the hold (#38411). [checked] is already formatted. *)
+
+val schedule_fence_hold_as_of_reading :
+  checked:string -> target:string -> fence_owner:string -> string
+(** The fence hold ({!schedule_fence_hold_reading}) drawn as of [checked],
+    for the same failed-tick reason as {!schedule_hold_as_of_reading}.
+    [checked] is already formatted. *)

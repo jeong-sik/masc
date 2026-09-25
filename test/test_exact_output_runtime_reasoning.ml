@@ -226,14 +226,14 @@ let test_declared_lane_budget_reaches_serialized_request () =
 (* One declared target, published straight into the registry with one lane,
    so a lane's [thinking] is checked against the slot's own capabilities. *)
 let publish_thinking_lane ~binding ~thinking =
-  let target : Resolver.declared_target =
+  let target : EO.declared_target =
     { target_ref = "openrouter.probe"
     ; binding
-    ; credential = Resolver.Credential_not_declared
+    ; credential = EO.Credential_not_declared
     ; body_timeout_s = Some exact_body_timeout_s } in
-  let snapshot = Resolver.load_resolver_snapshot
+  let snapshot = EO.load_resolver_snapshot
       ~io:{ getenv = (fun _ -> Ok None) }
-      ~catalog:(Resolver.Embedded_with_targets [ target ]) ()
+      ~catalog:(EO.Embedded_with_targets [ target ]) ()
     |> require_ok "resolver snapshot" in
   Registry.publish
     ~lanes:

@@ -2168,6 +2168,10 @@ let runtime_state () = Atomic.get loaded_state_ref
 
 let get_default_runtime () = (runtime_state ()).default_runtime
 let get_runtimes () = (runtime_state ()).runtimes
+
+let get_default_and_runtimes () =
+  let state = runtime_state () in
+  state.default_runtime, state.runtimes
 let get_runtime_ids () = runtime_ids (runtime_state ()).runtimes
 let startup_degradation () = (runtime_state ()).startup_degradation
 let startup_degraded () = Option.is_some (startup_degradation ())

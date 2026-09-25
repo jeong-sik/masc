@@ -258,12 +258,17 @@ let usage_scope_json ~scope_label (scope, providers) : Yojson.Safe.t =
 ;;
 
 let build ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t =
-  let default = Runtime.get_default_runtime () in
-  let runtimes = Runtime.get_runtimes () in
-  let scopes = usage_scopes runtimes in
+  (* One read of the loaded state: a reload between two reads could pair a
+     default runtime with a list that no longer holds it, and its scope with
+     no label. The default is grouped too; [usage_scopes] adds a provider to a
+     scope once, so it is not counted twice. *)
+  let default, runtimes = Runtime.get_default_and_runtimes () in
+  let scopes = usage_scopes (Option.to_list default @ runtimes) in
   (* This document can be read without authentication in non-strict mode.
      Keep account homes and credential-file paths in typed internal scopes;
-     expose only response-local, consistent join keys. *)
+     expose only response-local, consistent join keys. Every row below is
+     drawn from the same snapshot [scopes] was, so the missing branch is an
+     invariant violation, not a reload race. *)
   let public_scope_labels =
     List.mapi (fun index (scope, _) -> scope, Printf.sprintf "account:%d" (index + 1)) scopes
   in

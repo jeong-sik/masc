@@ -2540,6 +2540,8 @@
 
 (include stanzas/test_dos_tools.inc)
 
+(include stanzas/test_machine_checkpoint.inc)
+
 (include stanzas/test_msx_frame_route.inc)
 
 (include stanzas/test_lane_addon_live_route.inc)
@@ -5590,6 +5592,7 @@
 (include stanzas/test_keeper_turn_boundaries.inc)
 (include stanzas/test_keeper_context_core_history.inc)
 (include stanzas/test_keeper_turn_fragments.inc)
+(include stanzas/test_keeper_turn_spend.inc)
 
 (include stanzas/test_keeper_clear_admission.inc)
 (include stanzas/test_keeper_librarian_progress.inc)
@@ -6221,6 +6224,7 @@
  (modules test_browser_bidi_downloads_reply_window)
  (libraries masc alcotest eio eio.mock))
 (include stanzas/test_browser_webdriver.inc)
+(include stanzas/test_browser_cdp.inc)
 (include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)
@@ -6283,7 +6287,7 @@
   %{workspace_root}/bin/masc_tui.ml
   %{workspace_root}/bin/masc_tui_types.ml
   %{workspace_root}/bin/masc_tui_render.ml)
- (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
+ (libraries alcotest ast_grep compiler-libs.common masc masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
 
 
 (rule

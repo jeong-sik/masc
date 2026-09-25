@@ -27,6 +27,11 @@ type t = {
         is the only commit field that operators should use as binary-build
         identity in this module. *)
   binary_commit_source : string option;
+  ocaml_dos_core : Dos_lane.core;
+    (** The DOS core linked into this binary. [binary_commit] names only the
+        masc sources: two builds of one commit can link different cores —
+        the vendored copy or an older opam install — and only this field
+        tells them apart. *)
   source_fingerprint : string option;
     (** SHA-256 identity of the exact Dune link action and dependency bytes
         bound to this executable by a validated provenance sidecar. *)

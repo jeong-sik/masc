@@ -4847,7 +4847,9 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         if reference not in detail:
             raise AssertionError(f"Board detail omitted its stable link: {detail!r}")
         copy_reference(process, master_fd, output, reference)
-        wide = send_and_wait(process, master_fd, output, b"z", b"z:wide")
+        # The label is where the key goes, so the wide detail offers the list
+        # back rather than the width it already has.
+        wide = send_and_wait(process, master_fd, output, b"z", b"z:list")
         wide_frame = frame_containing(wide, reference)
         if b"Board (3)" in wide_frame:
             raise AssertionError(
@@ -11664,6 +11666,122 @@ def run_pause_offers_channel_unbind_regression(executable: str) -> None:
     )
 
 
+def run_keeper_runtime_picker_filter_regression(executable: str) -> None:
+    """The Keeper runtime picker is walked without holding an arrow key.
+
+    Keepers, U lists the declared lanes and then the whole catalogue. End and
+    Home jump, [/] narrows the list to the typed text across both groups, and
+    Esc drops the filter before it closes the picker. While the filter is
+    open [q] and [d] are letters: neither quits nor resets the Keeper to the
+    default. Enter assigns the row the filter left under the cursor.
+    """
+    filter_cursor = "\u258f".encode()
+
+    def selected_row(output: bytearray) -> bytes:
+        for row in screen_text(bytes(output)).split(b"\n"):
+            is_picker_row = b"[LANE]" in row or b"[MODEL]" in row
+            if is_picker_row and row.lstrip(b"\xe2\x94\x82 ").startswith(b"> "):
+                return row
+        raise AssertionError(f"no picker row is selected: {bytes(output)!r}")
+
+    def expect_selected(process: subprocess.Popen[bytes], master_fd: int,
+                        output: bytearray, target: bytes) -> None:
+        drain_until_quiet(process, master_fd, output)
+        row = selected_row(output)
+        if target not in row:
+            raise AssertionError(f"expected {target!r} under the cursor, got {row!r}")
+
+    def fixtures() -> HttpFixtures:
+        served = keeper_runtime_http_fixtures()
+        served[RUNTIME_RESOLVED_PATH] = runtime_resolved_response()
+        served["/api/v1/keepers/alpha/config"] = (200, {
+            "config_revision": {
+                "manifest": {"state": "missing"},
+                "runtime_assignment": {"state": "runtime_config_missing"},
+            },
+        })
+        return served
+
+    requests: HttpRequests = []
+
+    # Every assignment written, as (keeper, runtime id); [d]'s reset to the
+    # default is one with no runtime id.
+    def assignments() -> list[tuple[str | None, str | None]]:
+        return [
+            (body.get("keeper_name"), body.get("runtime_id"))
+            for body in (
+                json.loads(raw) for path, raw in requests
+                if path == "/api/v1/runtime/config/assignment"
+            )
+        ]
+
+    def interact(process: subprocess.Popen[bytes], master_fd: int,
+                 _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        # Three declared lanes, then five runtimes.
+        send_and_wait(process, master_fd, output, b"U",
+                      "8 of 8 \u00b7 / filter".encode())
+        expect_selected(process, master_fd, output, b"primary")
+        os.write(master_fd, b"\x1b[F")
+        expect_selected(process, master_fd, output, b"runtime-e")
+        os.write(master_fd, b"\x1b[H")
+        expect_selected(process, master_fd, output, b"primary")
+        # One wheel notch is one row: the shared list steps on the wheel, and
+        # nothing else here moves the picker a second time.
+        os.write(master_fd, b"\x1b[<65;5;5M")
+        expect_selected(process, master_fd, output, b"degraded")
+        os.write(master_fd, b"\x1b[<64;5;5M")
+        expect_selected(process, master_fd, output, b"primary")
+
+        send_and_wait(process, master_fd, output, b"/",
+                      b"filter: " + filter_cursor + b" 8 of 8")
+        # "-d" is in the unobserved lane's route and in runtime-d: one list.
+        send_and_wait(process, master_fd, output, b"-d",
+                      b"filter: -d" + filter_cursor + b" 2 of 8")
+        expect_selected(process, master_fd, output, b"unobserved")
+        send_and_wait(process, master_fd, output, b"q",
+                      b"(no lane or runtime among 8 matches the filter)")
+        send_and_wait(process, master_fd, output, b"d",
+                      b"filter: -dqd" + filter_cursor + b" 0 of 8")
+        send_and_wait(process, master_fd, output, b"\x7f\x7f",
+                      b"filter: -d" + filter_cursor + b" 2 of 8")
+        os.write(master_fd, b"\x1b[B")
+        expect_selected(process, master_fd, output, b"runtime-d")
+        # Esc drops the filter and keeps runtime-d under the cursor.
+        send_and_wait(process, master_fd, output, b"\x1b",
+                      "8 of 8 \u00b7 / filter".encode())
+        expect_selected(process, master_fd, output, b"runtime-d")
+        if assignments():
+            raise AssertionError(
+                f"typing into the filter sent an assignment: {assignments()!r}"
+            )
+
+        # The filter again, then Enter: runtime-e is assigned to alpha.
+        send_and_wait(process, master_fd, output, b"/model-e",
+                      b"filter: model-e" + filter_cursor + b" 1 of 8")
+        send_and_wait(process, master_fd, output, b"\r", b"MASC Keepers")
+        deadline = time.monotonic() + 3.0
+        while not assignments() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if assignments() != [("alpha", "runtime-e")]:
+            raise AssertionError(f"assignment posts: {assignments()!r}")
+
+        # A second picker opens with no filter, and Esc closes it.
+        send_and_wait(process, master_fd, output, b"U",
+                      "8 of 8 \u00b7 / filter".encode())
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="Keeper runtime picker filters across lanes and runtimes",
+        interact=interact,
+        http_fixtures=fixtures(),
+        http_requests=requests,
+    )
+
+
 def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
     """Beside the acting pane the row is 92 cells; a strip wider than that
     used to be cut from the right, so the Keeper detail's Runs tab and
@@ -14879,6 +14997,7 @@ def run_keyboard_regression(executable: str) -> None:
     run_tab_strip_keeps_current_entry_regression(executable)
     run_keeper_unbind_all_channels_regression(executable)
     run_pause_offers_channel_unbind_regression(executable)
+    run_keeper_runtime_picker_filter_regression(executable)
     run_activity_logs_tab_pane_regression(executable)
     changes_navigation_fixtures = keeper_runtime_http_fixtures()
     changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()

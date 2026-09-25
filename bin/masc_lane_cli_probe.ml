@@ -139,6 +139,7 @@ let () =
       let detail = Masc.Keeper_lane_cli_oneshot.failure_to_string failure in
       bump
         (match failure with
+         | Masc.Keeper_lane_cli_oneshot.Unknown_runtime _ -> "unknown_runtime"
          | Masc.Keeper_lane_cli_oneshot.Not_an_official_client _ -> "not_an_official_client"
          | Masc.Keeper_lane_cli_oneshot.Execution_failed _ -> "execution_failed"
          | Masc.Keeper_lane_cli_oneshot.Invalid_json_output _ -> "invalid_json_output"

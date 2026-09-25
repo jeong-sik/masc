@@ -1358,7 +1358,7 @@ status: reference
   대시보드의 turn record 디코더 목록(`TURN_PROMPT_BLOCK_IDS`)에서 빠지면
   그 Keeper의 전체 turn record가 거부되므로, id 추가·변경은 decode 경로
   양쪽을 함께 고쳐야 한다(#38923).
-  → [Prompt_block_id](../../lib/prompt_block_id.mli)
+  → [Prompt_block_id](../../lib/types/prompt_block_id.mli)
 
 **HITL Delivery Occasion (HITL 전달 계기)**
 : 승인된 HITL 결정을 Keeper 에게 전달할 때, 그 전달이 왜 일어나는지를 가리키는 닫힌 세 값

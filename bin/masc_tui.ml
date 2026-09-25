@@ -2150,7 +2150,7 @@ type async_msg =
   (* Its own message rather than a field on the stance one: the two come from
      different endpoints and one failing must not blank the other. *)
   | Keeper_gate_settings_loaded of
-      (((string * string) list * (string * string) list), string) result
+      (((string * string) list * (string * (string * string)) list), string) result
   | Keeper_tool_modes_loaded of
       ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result
       * Approval.Listing_order.ticket

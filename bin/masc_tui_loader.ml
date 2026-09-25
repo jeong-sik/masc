@@ -1227,7 +1227,7 @@ let load_dashboard_gate ~(host : string) ~(port : int) :
 
 (** Load the durable per-keeper Gate settings. *)
 let load_keeper_gate_settings ~(host : string) ~(port : int) :
-    ((string * string) list * (string * string) list, string) result =
+    ((string * string) list * (string * (string * string)) list, string) result =
   match fetch_keeper_gate_settings ~host ~port with
   | Error err -> Error ("keeper Gate settings load failed: " ^ err)
   | Ok json -> Tui_decode.decode_keeper_gate_settings json

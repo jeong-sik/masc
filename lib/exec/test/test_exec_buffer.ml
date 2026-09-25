@@ -99,12 +99,13 @@ let test_cut_between_characters () =
   Exec_buffer.add_string b ("가" ^ "0123456789" ^ "나");
   check_eq "render" "가\n...(truncated 10 bytes)...\n나" (Exec_buffer.render b)
 
-(* Bytes that are not UTF-8 are kept: a run of continuation bytes longer
-   than a cut can leave, and a head of continuation bytes with no lead. *)
-let test_non_utf8_bytes_are_kept () =
-  let b = Exec_buffer.create ~head_cap:2 ~tail_cap:4 in
-  Exec_buffer.add_string b ("\x80\x80" ^ "0123456789" ^ "\x80\x80\x80\x80");
-  check_eq "render" "\x80\x80\n...(truncated 10 bytes)...\n\x80\x80\x80\x80"
+(* Binary output: a head of continuation bytes with no lead in reach is not
+   a cut character and stays; a tail's leading continuation bytes go, and the
+   marker counts them with the elided ones. *)
+let test_binary_output_is_counted () =
+  let b = Exec_buffer.create ~head_cap:2 ~tail_cap:5 in
+  Exec_buffer.add_string b ("\x80\x80" ^ "0123456789" ^ "\x80\x80\x80\x80z");
+  check_eq "render" "\x80\x80\n...(truncated 14 bytes)...\nz"
     (Exec_buffer.render b)
 
 (* Every cut of valid UTF-8 renders valid UTF-8, whatever the caps and
@@ -162,7 +163,7 @@ let () =
   test_cut_inside_hangul ();
   test_cut_inside_emoji ();
   test_cut_between_characters ();
-  test_non_utf8_bytes_are_kept ();
+  test_binary_output_is_counted ();
   test_every_cut_renders_valid_utf8 ();
   test_negative_caps_rejected ();
   test_add_bytes_oob ();

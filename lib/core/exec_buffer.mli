@@ -43,18 +43,14 @@ val render : t -> string
     remain byte-identical to the raw stream.
 
     When truncation occurs, the head drops a trailing character the cut
-    left incomplete and the tail drops the continuation bytes of one whose
-    lead byte was cut off, so CJK and emoji output is never split mid-byte.
-    [N] counts those bytes with the elided ones, so it can exceed
-    [bytes_dropped] by up to six. Bytes that are not UTF-8 are kept. *)
+    left incomplete ({!String_util.utf8_complete_prefix}) and the tail drops
+    its leading continuation bytes ({!String_util.utf8_suffix}), so CJK and
+    emoji output is never split mid-byte. [N] counts those bytes with the
+    elided ones, so it can exceed [bytes_dropped]: by at most six for UTF-8
+    output, and by a tail's whole leading run of continuation bytes for
+    binary output. *)
 
 val max_render_bytes : head_cap:int -> tail_cap:int -> int
 (** Upper bound for [render], including the largest truncation marker on this
     platform. Caps must be nonnegative and their sum must leave room for the
     marker within [max_int]. Useful when a second transport bounds a capture. *)
-
-val utf8_truncate : string -> int -> string
-(** [utf8_truncate s max_bytes] returns the prefix of [s] that fits
-    within [max_bytes], breaking only at UTF-8 character boundaries.
-    Returns [s] unchanged if it already fits.  Safe for CJK, emoji,
-    and other multi-byte sequences. *)

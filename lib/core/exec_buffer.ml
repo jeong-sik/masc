@@ -88,41 +88,6 @@ let add_bytes t buf off len =
 let add_string t s =
   add_bytes_inner t (Bytes.unsafe_of_string s) 0 (String.length s)
 
-(** Walk backwards from [pos] to find the start of the last complete
-    UTF-8 character that begins at or before [pos].  Continuation
-    bytes have the bit pattern 10xxxxxx (0x80..0xBF); a leading byte
-    never matches, so the scan stops as soon as one is found. *)
-(** Length of the UTF-8 character whose leading byte is at position [i].
-    0xxxxxxx → 1 byte (ASCII)
-    110xxxxx → 2 bytes
-    1110xxxx → 3 bytes
-    11110xxx → 4 bytes *)
-let utf8_char_len s i =
-  let b = Char.code s.[i] in
-  if b land 0x80 = 0 then 1
-  else if b land 0xE0 = 0xC0 then 2
-  else if b land 0xF0 = 0xE0 then 3
-  else 4
-
-let utf8_find_char_start s pos =
-  let rec loop i =
-    if i <= 0 then 0
-    else if Char.code s.[i] land 0xC0 <> 0x80 then i
-    else loop (i - 1)
-  in
-  loop (min pos (String.length s - 1))
-
-(** Truncate [s] to at most [max_bytes], breaking only at UTF-8
-    character boundaries.  Returns [s] unchanged if it already fits. *)
-let utf8_truncate s max_bytes =
-  let len = String.length s in
-  if len <= max_bytes then s
-  else
-    let boundary = utf8_find_char_start s (max_bytes - 1) in
-    let char_end = boundary + utf8_char_len s boundary in
-    if char_end <= max_bytes then String.sub s 0 char_end
-    else String.sub s 0 boundary
-
 let head t = Buffer.contents t.head_buf
 
 let tail t =
@@ -136,49 +101,6 @@ let tail t =
     if second > 0 then
       Bytes.blit t.tail_ring 0 out first second;
     Bytes.unsafe_to_string out
-
-(* The longest UTF-8 sequence. A cut splits at most this many bytes minus
-   one off either side of the character it lands in. *)
-let utf8_max_char_bytes = 4
-
-let is_utf8_continuation c = Char.code c land 0xC0 = 0x80
-
-(* Length of the sequence a lead byte opens; [None] for a byte that opens
-   none (a continuation byte, or 0xF8..0xFF). *)
-let utf8_lead_length c =
-  let b = Char.code c in
-  if b land 0x80 = 0 then Some 1
-  else if b land 0xE0 = 0xC0 then Some 2
-  else if b land 0xF0 = 0xE0 then Some 3
-  else if b land 0xF8 = 0xF0 then Some 4
-  else None
-
-(* Bytes at the end of [s], a stream prefix, that begin a character the
-   cut left incomplete. 0 when the last character is whole, or when the
-   bytes are not a UTF-8 lead and its continuations. *)
-let utf8_split_suffix_length s =
-  let len = String.length s in
-  let lowest_lead = max 0 (len - (utf8_max_char_bytes - 1)) in
-  let rec scan i =
-    if i < lowest_lead then 0
-    else if is_utf8_continuation s.[i] then scan (i - 1)
-    else
-      match utf8_lead_length s.[i] with
-      | Some n when i + n > len -> len - i
-      | Some _ | None -> 0
-  in
-  scan (len - 1)
-
-(* Bytes at the start of [s], a stream suffix, that continue a character
-   whose lead byte was cut off. 0 when the run of continuation bytes is
-   longer than a cut can leave, since such bytes are not UTF-8. *)
-let utf8_split_prefix_length s =
-  let len = String.length s in
-  let rec count i =
-    if i < len && is_utf8_continuation s.[i] then count (i + 1) else i
-  in
-  let run = count 0 in
-  if run < utf8_max_char_bytes then run else 0
 
 let truncation_marker dropped = Printf.sprintf "\n...(truncated %d bytes)...\n" dropped
 
@@ -214,12 +136,12 @@ let render t =
        The split bytes go into the marker's count with the dropped ones. *)
     let head_raw = head t in
     let tail_raw = tail t in
-    let head_split = utf8_split_suffix_length head_raw in
-    let tail_split = utf8_split_prefix_length tail_raw in
-    let head_s = String.sub head_raw 0 (String.length head_raw - head_split) in
+    let head_s = String_util.utf8_complete_prefix head_raw in
     let tail_s =
-      String.sub tail_raw tail_split (String.length tail_raw - tail_split)
+      String_util.utf8_suffix ~max_bytes:(String.length tail_raw) tail_raw
     in
+    let head_split = String.length head_raw - String.length head_s in
+    let tail_split = String.length tail_raw - String.length tail_s in
     head_s
     ^ truncation_marker (bytes_dropped t + head_split + tail_split)
     ^ tail_s

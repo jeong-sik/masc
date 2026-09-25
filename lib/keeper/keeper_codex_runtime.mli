@@ -21,7 +21,6 @@ val run :
   accepts_image_input:bool ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
-  ?official_client_original_turn:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
@@ -69,9 +68,10 @@ val run :
 
     It reports [Whole_input_transmitted] only on a [Start], the one branch
     that injects the history into the thread. A [Resume] reports
-    [Held_by_client_session]: MASC injects the current Keeper instructions and
-    developer context before the new turn, but the app-server holds the prior
-    conversation, so its full model input cannot be measured here. *)
+    [Held_by_client_session]: the thread holds the conversation, and MASC sends
+    only the per-turn context in front of the goal
+    ({!Keeper_official_client_host.resume_prompt}), so its full model input
+    cannot be measured here. *)
 
 module For_testing : sig
   val note_transport_uncertainty : Keeper_provider_attempt_effect.t Atomic.t -> unit
@@ -101,18 +101,11 @@ module For_testing : sig
   val recovery_failure_of_client_error :
     Runtime_codex_app_server.error -> Keeper_official_client_session_store.recovery_failure
 
-  (** A Gate continuation's resume that overflowed after a tool effect is
-      [Vendor_session_full Activity_observed]; everything else is
+  (** A Gate continuation's resume that overflowed is [Vendor_session_full],
+      [Activity_observed] when a tool effect came first and
+      [No_activity_observed] otherwise; everything else is
       {!recovery_failure_of_client_error}. *)
   val recovery_failure_of_attempt :
     thread_mode:Runtime_codex_app_server.thread_mode -> gate_continuation:bool ->
     Runtime_codex_app_server.error -> Keeper_official_client_session_store.recovery_failure
-
-  (** Once the shrink sequence has returned an error, a Gate continuation's
-      [Input_rejected Bootstrap_floor_exceeded] recovery on a resumed session is
-      re-recorded [Vendor_session_full No_activity_observed]; anything else is
-      left as it is. *)
-  val conclude_exhausted_gate_resume :
-    gate_continuation:bool -> base_path:string -> keeper_name:string -> runtime_id:string ->
-    unit -> unit
 end

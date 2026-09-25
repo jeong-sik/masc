@@ -1251,6 +1251,7 @@
  (modules masc_tui_types)
  (libraries digestif mtime.clock.os masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   masc_tui_overview_tasks
+  masc_tui_machine_live
   masc_tui_connector_unbind
   ;; [sch_last_wake_status] is the schedule contract's wake_status.
   masc.masc_schedule
@@ -1443,7 +1444,15 @@
  (name masc_tui_msx_tick)
  (wrapped false)
  (modules masc_tui_msx_tick)
- (libraries masc_tui_types yojson base64 threads))
+ (libraries masc_tui_types masc_tui_machine_live yojson base64 threads))
+
+;; The spectator's typed read of GET /api/v1/lane-addons/live: one route for
+;; every machine with a screen (MSX and DOS). Pure decoding, no I/O.
+(library
+ (name masc_tui_machine_live)
+ (wrapped false)
+ (modules masc_tui_machine_live)
+ (libraries yojson base64))
 
 ; The primitives every surface draws through. Its own library so the
 ; direction is enforced rather than agreed to: nothing here may reach back
@@ -1680,6 +1689,7 @@
   masc_tui_interactive
   masc_tui_msx
   masc_tui_msx_tick
+  masc_tui_machine_live
   masc_tui_terminal_profile
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
@@ -1929,6 +1939,7 @@
  (modules masc_tui_msx)
  (libraries
   masc_tui_types
+  masc_tui_machine_live
   masc_tui_interactive
   masc_tui_ansi
   masc_tui_graphics

@@ -226,6 +226,90 @@ let test_masc_accept_rejected_provider_record_does_not_reparse_detail () =
     surface.KSB.blocker_class
 ;;
 
+(* ── Agent_core agent_error decision (#38940 review) ────────────── *)
+
+(* Every [Agent_core.Error.agent_error] constructor is decided here, on the
+   live path: [classify_masc_internal_error] is what turns a core error into a
+   typed internal error, and so into a runtime blocker. The match below has no
+   catch-all, so a constructor added to agent core fails to compile until
+   someone decides whether it reaches the operator as a typed internal error
+   ([true]) or only through the turn receipt ([false]). The test then holds
+   the live function to that decision. *)
+let reaches_typed_internal_error : Agent_core.Error.agent_error -> bool = function
+  | Agent_core.Error.TerminalToolEffectFailed _
+  | Agent_core.Error.TerminalToolDurabilityFailed _ -> true
+  | Agent_core.Error.UnrecognizedStopReason _
+  | Agent_core.Error.ToolRoundLimitExceeded _
+  | Agent_core.Error.HookExecutionFailed _
+  | Agent_core.Error.GuardrailViolation _
+  | Agent_core.Error.TripwireViolation _
+  | Agent_core.Error.InputRequired _ -> false
+;;
+
+let one_of_each_agent_error : Agent_core.Error.agent_error list =
+  let module E = Agent_core.Error in
+  let invocation =
+    Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"tool-durable"
+      ~turn:3
+      ~schedule:
+        { planned_index = 1
+        ; batch_index = 0
+        ; batch_size = 1
+        ; execution_mode = Agent_core.Tool_contract.Serial
+        }
+      ~completion:
+        (Agent_core.Tool_contract.Terminal_after_success
+           Agent_core.Tool_contract.Effect_outcome_unknown)
+  in
+  [ E.UnrecognizedStopReason { reason = "abrupt" }
+  ; E.ToolRoundLimitExceeded { rounds = 9; limit = 8 }
+  ; E.HookExecutionFailed
+      { hook_name = "post_tool_use"
+      ; stage = "execute"
+      ; tool_name = Some "Execute"
+      ; tool_use_id = Some "tool-1"
+      ; detail = "hook failed"
+      }
+  ; E.TerminalToolEffectFailed
+      { tool_use_id = "tool-terminal"
+      ; effect_disposition = E.proven_post_terminal_effect
+      ; detail = "terminal effect failed"
+      }
+  ; E.TerminalToolDurabilityFailed
+      { invocation
+      ; effect_disposition = E.unknown_terminal_effect
+      ; detail = "receipt persistence failed"
+      }
+  ; E.GuardrailViolation { validator = "content_filter"; reason = "toxic" }
+  ; E.TripwireViolation { tripwire = "disallow_shell"; reason = "exec detected" }
+  ; E.InputRequired
+      { request_id = "req-1"
+      ; participant_name = Some "user"
+      ; question = "What should I do?"
+      ; schema = None
+      ; timeout_s = None
+      ; created_at = 0.0
+      }
+  ]
+;;
+
+let test_agent_errors_follow_their_decision () =
+  List.iter
+    (fun agent_error ->
+       let expected = reaches_typed_internal_error agent_error in
+       let actual =
+         Option.is_some
+           (KTD.classify_masc_internal_error (Agent_core.Error.Agent agent_error))
+       in
+       check
+         bool
+         (Agent_core.Error.to_string (Agent_core.Error.Agent agent_error))
+         expected
+         actual)
+    one_of_each_agent_error
+;;
+
 (* ── Runner ────────────────────────────────────────────────────── *)
 
 let () =
@@ -251,6 +335,10 @@ let () =
             test_provider_timeout_detail_without_code_does_not_map_to_turn_timeout
         ; test_case "provider runtime detail is not reparsed" `Quick
             test_masc_accept_rejected_provider_record_does_not_reparse_detail
+        ] )
+    ; ( "agent_error_decision"
+      , [ test_case "every agent_error follows its decision" `Quick
+            test_agent_errors_follow_their_decision
         ] )
     ]
 ;;

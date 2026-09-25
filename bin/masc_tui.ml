@@ -5752,34 +5752,13 @@ let launch_lanes_load state ~mailbox =
     let port = state.port in
     state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
     let standalone_generation = state.standalone_lanes_generation in
-    let enqueue_result result =
-      enqueue_async mailbox
-        (Standalone_lanes_loaded
-           ( standalone_generation
-           , Result.map_error
-               (fun detail -> "standalone lanes load failed: " ^ detail)
-               result ))
-    in
-    let run () =
-      let standalone_result =
-        try Masc_tui_loader.load_standalone_lanes ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_result standalone_result
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.standalone_lanes_inflight <- false;
-              enqueue_result (Error detail))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.standalone_lanes_inflight <- false;
-        enqueue_result (Error "Eio switch is unavailable")
+    Masc_tui_async_read.launch
+      ~on_not_run:(fun () -> state.standalone_lanes_inflight <- false)
+      ~subject:"standalone lanes"
+      ~deliver:(fun result ->
+        enqueue_async mailbox
+          (Standalone_lanes_loaded (standalone_generation, result)))
+      (fun () -> Masc_tui_loader.load_standalone_lanes ~host ~port)
   end
 
 (* A re-read that has to happen: a write's read-back, or the operator's [r].

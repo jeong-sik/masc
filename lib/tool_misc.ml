@@ -305,6 +305,14 @@ let dispatch ctx ~name ~args : Tool_result.result option =
            ~who:ctx.agent_name args)
   | Some Tool_schemas_misc.Misc_dos_peek ->
       Some (Tool_misc_dos_lane.handle_peek ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_dos_save ->
+      Some
+        (Tool_misc_dos_lane.handle_save ~tool_name:name ~start_time:start
+           ~base_path:ctx.config.base_path ~who:ctx.agent_name args)
+  | Some Tool_schemas_misc.Misc_dos_restore ->
+      Some
+        (Tool_misc_dos_lane.handle_restore ~tool_name:name ~start_time:start
+           ~base_path:ctx.config.base_path ~agent_name:ctx.agent_name args)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -357,6 +365,9 @@ let is_read_only = function
   | Tool_schemas_misc.Misc_dos_click
   | Tool_schemas_misc.Misc_dos_type
   | Tool_schemas_misc.Misc_dos_step
+  (* Saving writes a named slot; restoring replaces the shared machine. *)
+  | Tool_schemas_misc.Misc_dos_save
+  | Tool_schemas_misc.Misc_dos_restore
   (* Starting and stopping the automation browser changes its lifecycle. *)
   | Tool_schemas_misc.Misc_browser_session
   | Tool_schemas_misc.Misc_ask

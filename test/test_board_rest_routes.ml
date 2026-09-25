@@ -21,6 +21,11 @@ open Alcotest
 
 module Http = Masc.Http_server_eio
 
+(* Fixture tick for create and modify: the runner's floor tick, below every
+   interval these fixtures declare, so the runner-tick check never refuses one
+   of them. *)
+let runner_tick_sec = 1.0
+
 let () = Mirage_crypto_rng_unix.use_default ()
 
 let runtime_toml =
@@ -306,7 +311,7 @@ let test_schedule_cancel_actor_is_the_authenticated_caller () =
   in
   let schedule =
     match
-      Schedule_service.create config ~now:100.0 ~schedule_id:"sched-http-auth"
+      Schedule_service.create config ~runner_tick_sec ~now:100.0 ~schedule_id:"sched-http-auth"
         ~requested_at:100.0 ~requested_by:actor ~scheduled_by:actor
         ~due_at:200.0
         ~payload:
@@ -382,7 +387,7 @@ let test_schedule_cancel_with_a_worker_credential_is_not_the_operator () =
   in
   let schedule =
     match
-      Schedule_service.create config ~now:100.0 ~schedule_id:"sched-http-worker"
+      Schedule_service.create config ~runner_tick_sec ~now:100.0 ~schedule_id:"sched-http-worker"
         ~requested_at:100.0 ~requested_by:operator ~scheduled_by:operator
         ~due_at:200.0
         ~payload:

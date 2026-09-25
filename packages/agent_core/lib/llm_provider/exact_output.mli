@@ -339,6 +339,10 @@ type success =
           or, on Ollama, it reported zero for both the prompt and the output
           count.
 
+          [cost_usd] is [None] for all current HTTP wire parsers, including
+          OpenAI-compatible responses that report a provider cost. This field
+          carries token counts only; [None] does not establish zero cost.
+
           It is not the flow's cost. An earlier candidate the caller rejected
           semantically keeps its own [success], and so its own usage, in
           [prior_rejections]. An earlier attempt that failed after the

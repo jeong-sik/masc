@@ -1525,10 +1525,11 @@ streaming = true
 max-output-tokens = 128000
 
 [glm-coding.glm-5-3]
-# The deployment has carried these three since before this table existed, and
-# an empty binding does not mean "defaults" — it means whatever the runtime
-# falls back to. #37039 measured that shape on another lane: a runtime that
-# declares no capacity takes max_int and sends the whole history every turn.
+# The marks are read only by a turn with no Librarian continuity, which a
+# Keeper turn on a trace always has (Keeper_turn_driver_try_provider
+# .evict_at_turn_boundary); such a turn starts at the absorbed point or the
+# turn boundary. RFC keeper-context-window-in-tokens §13.2 removes the marks
+# once its §13.7 preconditions hold.
 context-high-water-tokens = 100000
 context-low-water-tokens = 70000
 max-concurrent = 4

@@ -8,7 +8,7 @@
   ocaml-dos.cpu86core
   ocaml-dos.core-identity
   yojson
-  unix
+  masc.time_compat
   masc.masc_random_id
   masc.machine_live_publication
   masc.machine_checkpoint

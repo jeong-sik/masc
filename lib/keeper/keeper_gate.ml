@@ -855,6 +855,14 @@ let auto_judge_drain_blocker_to_string = function
     "Auto Judge retry could not start because Gate mode changed to always_allow"
 ;;
 
+(* Declared before [auto_judge_drain_outcome] and [auto_judge_owner_failure]
+   so those records stay the last definitions of the shared [blocker] and
+   [keeper_name] labels. *)
+type auto_judge_owner_blocker =
+  { keeper_name : string
+  ; blocker : auto_judge_drain_blocker
+  }
+
 type auto_judge_drain_outcome =
   { started_ids : string list
   ; failures : (string * string) list
@@ -870,17 +878,21 @@ type auto_judge_owner_failure =
 type auto_judge_workspace_drain_report =
   { started_ids : string list
   ; failures : auto_judge_owner_failure list
+  ; blockers : auto_judge_owner_blocker list
   }
 
 let drain_auto_judge_owners_with ~drain_owner owners =
-  let started_ids, failures =
+  let started_ids, failures, blockers =
     List.fold_left
-      (fun (started_ids, failures) (base_path, keeper_name) ->
+      (fun (started_ids, failures, blockers) (base_path, keeper_name) ->
          match drain_owner ~base_path ~keeper_name with
          | Error operator_detail ->
            ( started_ids
-           , { keeper_name; approval_id = None; operator_detail } :: failures )
-         | Ok (owner_started_ids, owner_failures) ->
+           , ({ keeper_name; approval_id = None; operator_detail }
+              : auto_judge_owner_failure)
+             :: failures
+           , blockers )
+         | Ok (owner_started_ids, owner_failures, owner_blocker) ->
            let started_ids = List.rev_append owner_started_ids started_ids in
            let failures =
              List.fold_left
@@ -893,12 +905,22 @@ let drain_auto_judge_owners_with ~drain_owner owners =
                failures
                owner_failures
            in
-           started_ids, failures)
-      ([], [])
+           (* The owner's typed blocker is why its drain stopped short; the
+              operator report carries it so a stalled owner is explained
+              rather than showing only a started count (#25979). *)
+           let blockers =
+             match owner_blocker with
+             | None -> blockers
+             | Some blocker ->
+               ({ keeper_name; blocker } : auto_judge_owner_blocker) :: blockers
+           in
+           started_ids, failures, blockers)
+      ([], [], [])
       owners
   in
   { started_ids = List.rev started_ids
   ; failures = List.rev failures
+  ; blockers = List.rev blockers
   }
 ;;
 
@@ -1423,7 +1445,7 @@ and drain_auto_judges ~base_path =
               drain_auto_judge_owner_queue ~base_path ~keeper_name ()
               |> Result.map
                    (fun (outcome : auto_judge_drain_outcome) ->
-                      outcome.started_ids, outcome.failures)
+                      outcome.started_ids, outcome.failures, outcome.blocker)
               |> Result.map_error
                    Keeper_approval_queue.storage_error_to_string)
             auto_judge_owners))
@@ -1830,6 +1852,7 @@ type operator_recovery_report =
   { started_ids : string list
   ; queued : int
   ; failures : auto_judge_owner_failure list
+  ; blockers : auto_judge_owner_blocker list
   }
 
 let request_operator_auto_judge_recovery ~base_path =
@@ -1865,6 +1888,7 @@ let request_operator_auto_judge_recovery ~base_path =
                { started_ids = drain_report.started_ids
                ; queued
                ; failures = drain_report.failures
+               ; blockers = drain_report.blockers
                })))
 ;;
 
@@ -2317,6 +2341,7 @@ module For_testing = struct
   type owner_drain_outcome =
     { started_ids : string list
     ; failures : (string * string) list
+    ; blocker : auto_judge_drain_blocker option
     }
 
   let drain_auto_judge_owners_with ~drain_owner owners =
@@ -2324,7 +2349,7 @@ module For_testing = struct
       ~drain_owner:(fun ~base_path ~keeper_name ->
         drain_owner ~base_path ~keeper_name
         |> Result.map (fun (outcome : owner_drain_outcome) ->
-          outcome.started_ids, outcome.failures))
+          outcome.started_ids, outcome.failures, outcome.blocker))
       owners
   ;;
 

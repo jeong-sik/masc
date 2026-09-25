@@ -92,3 +92,16 @@ val window_text : scroll:int -> height:int -> int -> string
 val window_reading : noun:string -> scroll:int -> height:int -> int -> string
 (** A window with its counted item named, such as ["rows 1-10/60"]. A new
     reading site must supply its noun instead of assembling one afterward. *)
+
+val position_row : scroll:int -> height:int -> ?hint:string -> int -> string option
+(** The ["[lines a-b/n]"] row under a window of [height] rows from [scroll]
+    over [count], followed by [hint] when there is one; [None] when there is
+    nothing to say. The one builder of that row: three surfaces wrote their
+    own, each beside its own height sum, and one missing the overflow row
+    would put the window's last row under the reading (#38744).
+
+    Without a hint the row is drawn only when the rows overflow, which is the
+    row {!content_height} takes off with [~overflow_takes_row:true]. With a
+    hint there is always something to say, so the row is drawn at every
+    count and is part of the chrome: [~overflow_takes_row:false]. The row is
+    plain text; the surface dresses it. *)

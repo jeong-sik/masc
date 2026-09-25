@@ -229,6 +229,45 @@ let test_list_events_filters_keeper_and_pages () =
     | _ -> fail "expected one paged event")
 ;;
 
+(* A poll may add a second call with the same millisecond, keeper, turn,
+   tool and file. Its outcome can sort ahead of an older row, but the older
+   row's context source id must still name that row after the page shifts. *)
+let test_event_id_survives_same_millisecond_insertion () =
+  with_temp_dir (fun base_dir ->
+    let codebase = "github.com_other_repo" in
+    let ingest ~outcome ~summary =
+      Ide_bridge.ingest_tool_event
+        ~base_path:base_dir ~codebase ~tool_name:"execute" ~keeper_id:"k1"
+        ~turn_id:"t1" ~outcome ~typed_outcome:"progress" ~latency_ms:1
+        ~summary ~file_path:(Some "lib/runtime.ml") ~timestamp_ms:1000L ()
+    in
+    let events () = Ide_bridge.list_events ~base_path:base_dir ~codebase () in
+    ingest ~outcome:"success" ~summary:"older output";
+    let older_id =
+      match events () with
+      | [ row ] -> json_string "event_id" row
+      | rows -> Alcotest.failf "expected one row, got %d" (List.length rows)
+    in
+    ingest ~outcome:"failure" ~summary:"newer output";
+    let rows = events () in
+    (match rows with
+     | first :: _ ->
+       check string "new row sorts ahead at the same millisecond" "newer output"
+         (json_string "summary" first)
+     | [] -> Alcotest.fail "the page lost both rows");
+    let row_with summary =
+      match List.find_opt (fun row -> String.equal (json_string "summary" row) summary) rows with
+      | Some row -> row
+      | None -> Alcotest.failf "missing %s" summary
+    in
+    let newer_id = json_string "event_id" (row_with "newer output") in
+    check int "opaque SHA-256 length" 64 (String.length older_id);
+    check string "older row keeps its id after insertion" older_id
+      (json_string "event_id" (row_with "older output"));
+    check bool "different outcome and output have distinct ids" true
+      (not (String.equal older_id newer_id)))
+;;
+
 let test_list_events_merges_kinds_newest_first () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
@@ -782,6 +821,8 @@ let () =
         ] )
     ; ( "read"
       , [ test_case "filters keeper and pages" `Quick test_list_events_filters_keeper_and_pages
+        ; test_case "event id survives same-millisecond insertion" `Quick
+            test_event_id_survives_same_millisecond_insertion
         ; test_case "merges kinds newest first" `Quick test_list_events_merges_kinds_newest_first
         ; test_case "reads across segments" `Quick test_list_events_reads_across_segments
         ] )

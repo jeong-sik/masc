@@ -222,9 +222,10 @@ function normalizeKeeperSettingRows<T>(
 
 function normalizeKeeperExactLanePreference(raw: unknown): KeeperExactLanePreference | null {
   if (!isRecord(raw)) return null
-  if (!hasExactKeys(raw, ['keeper_name', 'lane_id', 'slot_id', 'updated_by', 'updated_at'])) {
+  if (!hasExactKeys(raw, ['keeper_name', 'lane_id', 'slot_id', 'updated_by', 'updated_at', 'offered'])) {
     return null
   }
+  if (typeof raw.offered !== 'boolean') return null
   const keeperName = typeof raw.keeper_name === 'string' ? raw.keeper_name.trim() : ''
   const laneId = typeof raw.lane_id === 'string' ? raw.lane_id.trim() : ''
   const slotId = typeof raw.slot_id === 'string' ? raw.slot_id.trim() : ''
@@ -235,6 +236,7 @@ function normalizeKeeperExactLanePreference(raw: unknown): KeeperExactLanePrefer
     slot_id: slotId,
     updated_by: typeof raw.updated_by === 'string' ? raw.updated_by : '',
     updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : '',
+    offered: raw.offered,
   }
 }
 

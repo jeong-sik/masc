@@ -11,7 +11,7 @@
 #      (a queued workflow has no check-runs yet; this catches it)
 #   5. the body file is non-empty (no evidence-free approvals)
 #   6. no account has an open CHANGES_REQUESTED on the PR -- except this
-#      account's own one when --replace-own-cr names exactly that review id
+#      account's own one when --replaces <review id> names exactly that review id
 # Skips (exit 0, no write) if this account already APPROVED that exact SHA.
 #
 # The caller passes the SLOT line because a lane shell cannot read the Board.
@@ -20,9 +20,11 @@
 #
 # Usage:
 #   approve-guard.sh --repo O/R --pr N --head SHA40 --slot 'SLOT: #N head SHA40' --body FILE
-#                    [--replace-own-cr REVIEW_ID]
+#                    [--replaces REVIEW_ID]
 #   approve-guard.sh --check ...   # evaluate only, never writes (safe probe)
 # Exit: 0 approved/skipped/would-approve, 2 refused (reasons on stderr), 1 infra error.
+# The old --replace-own-cr spelling is retired: refusing unknown flags (exit 1)
+# keeps a stale lane from approving under rules it did not read.
 # Env: GUARD_GH overrides the gh binary (tests use a fake).
 # Needs only bash + gh: every JSON read uses gh's built-in --jq and the POST uses
 # gh -f/-F fields, so a lane without a standalone jq binary can still approve.
@@ -30,7 +32,7 @@
 # error stops the guard with exit 1 instead of turning into false refusals.
 set -u
 GH="${GUARD_GH:-gh}"
-check_only=0; repo=""; pr=""; head=""; slot=""; body=""; replace_cr=""
+check_only=0; repo=""; pr=""; head=""; slot=""; body=""; replaces=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --check) check_only=1; shift ;;
@@ -39,7 +41,7 @@ while [ $# -gt 0 ]; do
     --head) head="${2-}"; shift 2 ;;
     --slot) slot="${2-}"; shift 2 ;;
     --body) body="${2-}"; shift 2 ;;
-    --replace-own-cr) replace_cr="${2-}"; shift 2 ;;
+    --replaces) replaces="${2-}"; shift 2 ;;
     *) echo "approve-guard: unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -72,8 +74,8 @@ if [[ "$slot" =~ ^SLOT:\ \#([0-9]+)\ head\ ([0-9a-f]{40})$ ]]; then
 else
   refuse "--slot is not exactly 'SLOT: #<n> head <40-hex>'"
 fi
-if [ -n "$replace_cr" ] && ! [[ "$replace_cr" =~ ^[1-9][0-9]*$ ]]; then
-  refuse "--replace-own-cr must be a review id (digits), got '${replace_cr}'"
+if [ -n "$replaces" ] && ! [[ "$replaces" =~ ^[1-9][0-9]*$ ]]; then
+  refuse "--replaces must be a review id (digits), got '${replaces}'"
 fi
 if [ "$check_only" -eq 0 ]; then
   [ -n "$body" ] && [ -s "$body" ] || refuse "--body file missing or empty"
@@ -136,7 +138,7 @@ me="$(gh_json user '.login')" || exit 1
 # This account's own change request would be replaced by the approval, but the
 # account is shared by several lanes and the guard cannot tell which lane wrote
 # it (#38168: one lane's approval silently lifted another lane's valid CR). So
-# the caller must name that review id with --replace-own-cr; knowing the id is
+# the caller must name that review id with --replaces; knowing the id is
 # the proof the review was read, and the footer records it. A named id that is
 # not this account's open CR refuses too: the caller's view is out of date.
 revs="$(gh_json "repos/${repo}/pulls/${pr}/reviews?per_page=100" '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") | [.user.login, (.id|tostring), .state] | @tsv')" || exit 1
@@ -146,14 +148,14 @@ while IFS=$'\t' read -r who rid rstate; do
   [ -n "${who:-}" ] && [ "$rstate" = "CHANGES_REQUESTED" ] || continue
   if [ "$who" != "$me" ]; then
     refuse "open CHANGES_REQUESTED from ${who} (review ${rid}); the merge stays blocked until ${who} approves or the review is dismissed"
-  elif [ "$rid" = "$replace_cr" ]; then
+  elif [ "$rid" = "$replaces" ]; then
     replaced="$rid"
   else
-    refuse "open CHANGES_REQUESTED from ${me} (review ${rid}) is this account's own, and the account is shared: read it, then pass --replace-own-cr ${rid} to replace it"
+    refuse "open CHANGES_REQUESTED from ${me} (review ${rid}) is this account's own, and the account is shared: read it, then pass --replaces ${rid} to replace it"
   fi
 done <<<"$revs"
-if [ -n "$replace_cr" ] && [ "$replaced" != "$replace_cr" ]; then
-  refuse "--replace-own-cr ${replace_cr} does not name an open CHANGES_REQUESTED from ${me}"
+if [ -n "$replaces" ] && [ "$replaced" != "$replaces" ]; then
+  refuse "--replaces ${replaces} does not name an open CHANGES_REQUESTED from ${me}"
 fi
 [ ${#reasons[@]} -eq 0 ] || finish_refused
 

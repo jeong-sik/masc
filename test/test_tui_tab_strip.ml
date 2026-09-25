@@ -38,24 +38,29 @@ let keeper_tabs current =
     [ "Info"; "Sandbox"; "Settings"; "Secrets"; "GitHub"; "Identity"; "Channels"
     ; "Automation"; "Runs" ]
 
-let cut = "\xe2\x80\xa6"
+(* The marks the strip draws, asked of the strip rather than respelled, so a
+   test cannot pin a notation the renderer has moved on from. *)
+let hidden_before = Masc_tui_ansi.hidden_before_mark
+let hidden_after = Masc_tui_ansi.hidden_after_mark
+let held_back_left = "\xe2\x80\xb9"
+let held_back_right = "\xe2\x80\xba"
 
 let test_the_last_entry_stays_on_the_row () =
   let drawn = plain ~width:40 (keeper_tabs "Runs") in
   Alcotest.(check bool) "the current entry is drawn" true
     (contains "\xe2\x96\xb8Runs" drawn);
-  Alcotest.(check bool) "the cut is on the left" true
-    (String.length drawn >= 3 && String.equal (String.sub drawn 0 3) cut);
-  Alcotest.(check bool) "nothing is cut on the right" false
-    (String.equal (String.sub drawn (String.length drawn - 3) 3) cut);
+  Alcotest.(check bool) "the entries before it are counted on the left" true
+    (contains (hidden_before 6) drawn);
+  Alcotest.(check bool) "nothing is held back on the right" false
+    (contains held_back_right drawn);
   Alcotest.(check bool) "and the row is not overrun" true (cells drawn <= 40)
 
 let test_the_first_entry_keeps_its_left_edge () =
   let drawn = plain ~width:40 (keeper_tabs "Info") in
   Alcotest.(check bool) "starts on the current entry" true
     (String.length drawn >= 4 && String.equal (String.sub drawn 0 4) "\xe2\x96\xb8I");
-  Alcotest.(check bool) "the cut is on the right" true
-    (String.equal (String.sub drawn (String.length drawn - 3) 3) cut)
+  Alcotest.(check bool) "the entries after it are counted on the right" true
+    (contains (hidden_after 5) drawn)
 
 (* What the width means. The window is seeded with the current entry, so a
    strip narrower than that one entry used to draw it anyway and hand the
@@ -96,9 +101,8 @@ let test_a_middle_entry_keeps_both_neighbours () =
   let drawn = plain ~width:40 (keeper_tabs "GitHub") in
   Alcotest.(check bool) "the neighbour before" true (contains "Secrets  \xe2\x96\xb8GitHub" drawn);
   Alcotest.(check bool) "the neighbour after" true (contains "\xe2\x96\xb8GitHub  Identity" drawn);
-  Alcotest.(check bool) "cut on both sides" true
-    (String.equal (String.sub drawn 0 3) cut
-     && String.equal (String.sub drawn (String.length drawn - 3) 3) cut)
+  Alcotest.(check bool) "counted on both sides" true
+    (contains (hidden_before 3) drawn && contains (hidden_after 3) drawn)
 
 (* The property under the three shapes above: whichever entry is current
    and however narrow the row, the current entry is on it, and the strip
@@ -108,7 +112,11 @@ let test_the_current_entry_is_always_on_the_row () =
   List.iter
     (fun (label, _) ->
       let tabs = keeper_tabs label in
-      let alone = cells ("\xe2\x96\xb8" ^ label) + (2 * (cells cut + 2)) in
+      let alone =
+        cells ("\xe2\x96\xb8" ^ label)
+        + cells (hidden_before 8) + 2
+        + cells (hidden_after 8) + 2
+      in
       for width = alone to 90 do
         let drawn = plain ~width tabs in
         Alcotest.(check bool)
@@ -126,7 +134,8 @@ let test_a_strip_that_fits_is_unchanged () =
   let whole = plain ~width:200 tabs in
   Alcotest.(check string) "exactly wide enough draws every entry" whole
     (plain ~width:(cells whole) tabs);
-  Alcotest.(check bool) "no cut mark" false (contains cut whole)
+  Alcotest.(check bool) "nothing is held back" false
+    (contains held_back_left whole || contains held_back_right whole)
 
 (* The Runtime header kept a private [tab] helper that drew this strip's two
    styles by hand. It matched only while nobody changed either one. *)
@@ -156,6 +165,69 @@ let test_an_unread_tab_carries_its_name_alone () =
   (* Zero is a reading too, where something measured it. *)
   Alcotest.(check string) "measured zero" "All runtimes (0)"
     (Masc_tui_ansi.tab_entry_label "All runtimes" (Some "0"))
+
+(* What the marks are for. A bare mark says entries were held back and
+   leaves the reader unable to tell whether one is past the edge or five --
+   on the Keeper detail's nine tabs at eighty columns, two sit before the
+   window and three after, and "]" is how a reader walks to them.
+
+   Read as a sum rather than as two literals: whatever the width and whatever
+   entry the cursor is on, the entries on the row plus the two counts are the
+   whole list. A pair of expected strings would pin one window and let the
+   arithmetic drift on every other. *)
+let count_in drawn mark_of =
+  let rec scan hidden =
+    if hidden > 8 then None
+    else if contains (mark_of hidden) drawn then Some hidden
+    else scan (hidden + 1)
+  in
+  scan 1
+
+let test_the_marks_count_what_is_off_the_row () =
+  let labels =
+    [ "Info"; "Sandbox"; "Settings"; "Secrets"; "GitHub"; "Identity"
+    ; "Channels"; "Automation"; "Runs" ]
+  in
+  List.iter
+    (fun current ->
+      for width = 30 to 90 do
+        let tabs = keeper_tabs current in
+        let drawn = plain ~width tabs in
+        let on_the_row =
+          List.length
+            (List.filter (fun (label, _) -> contains label drawn) tabs)
+        in
+        let before = Option.value ~default:0 (count_in drawn hidden_before) in
+        let after = Option.value ~default:0 (count_in drawn hidden_after) in
+        Alcotest.(check int)
+          (Printf.sprintf "%s at %d cells: shown and held back are the nine"
+             current width)
+          9
+          (on_the_row + before + after)
+      done)
+    labels
+
+(* The surface ring above the detail and the detail's own tabs draw the same
+   two marks. They used to spell them apart -- the ring counted, the tabs
+   drew a bare ellipsis -- and both are on the screen at once. *)
+let test_the_surface_ring_draws_the_same_marks () =
+  let prim = "bin/masc_tui_render_prim.ml" in
+  List.iter
+    (fun callee ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the ring asks for %s" callee)
+        true
+        (Ast_grep.count_calls_in_value_binding ~module_path:prim
+           ~binding_name:"surface_strip" ~callee
+         > 0))
+    [ "hidden_before_mark"; "hidden_after_mark" ];
+  List.iter
+    (fun needle ->
+      Alcotest.(check int)
+        (Printf.sprintf "the ring does not spell %S itself" needle)
+        0
+        (Ast_grep.count_exact_string_literals ~module_path:prim ~needle))
+    [ "%s\xe2\x80\xb9%d%s "; " %s%d\xe2\x80\xba%s" ]
 
 let test_both_strips_ask_the_same_helper () =
   let render = "bin/masc_tui_render.ml" in
@@ -201,6 +273,10 @@ let () =
             test_a_strip_that_fits_is_unchanged
         ; Alcotest.test_case "an unread tab carries its name alone" `Quick
             test_an_unread_tab_carries_its_name_alone
+        ; Alcotest.test_case "the marks count what is off the row" `Quick
+            test_the_marks_count_what_is_off_the_row
+        ; Alcotest.test_case "the surface ring draws the same marks" `Quick
+            test_the_surface_ring_draws_the_same_marks
         ; Alcotest.test_case "both strips ask the same helper" `Quick
             test_both_strips_ask_the_same_helper
         ] )

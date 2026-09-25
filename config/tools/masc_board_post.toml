@@ -28,7 +28,32 @@ description = "Author name. Auto-filled from caller's agent_name when omitted."
 [[params]]
 name = "meta"
 type = "object"
-description = "Optional structured operational metadata"
+description = "Optional structured operational metadata. Do not put attachments here; use attachments."
+
+[[params]]
+name = "attachments"
+type = "array"
+description = "Optional typed attachments. Each entry has kind and exactly one of url (absolute HTTPS) or sha256 (an existing artifact)."
+
+[params.items]
+type = "object"
+
+[[params.items.params]]
+name = "kind"
+type = "string"
+required = true
+enum = ["image", "video", "youtube", "external_link"]
+description = "How the attachment is shown"
+
+[[params.items.params]]
+name = "url"
+type = "string"
+description = "Absolute HTTPS URL; omit when sha256 is set"
+
+[[params.items.params]]
+name = "sha256"
+type = "string"
+description = "Existing artifact content hash; omit when url is set"
 
 [[params]]
 name = "sources"
@@ -153,6 +178,31 @@ type = "object"
 description = """
 Optional structured LLM judgment metadata. Use summary or \
 reason to preserve why you posted/classified it this way"""
+
+[[keeper_projection.params]]
+name = "attachments"
+type = "array"
+description = "Optional typed attachments. Each entry has kind and exactly one of url (absolute HTTPS) or sha256 (existing artifact)."
+
+[keeper_projection.params.items]
+type = "object"
+
+[[keeper_projection.params.items.params]]
+name = "kind"
+type = "string"
+required = true
+enum = ["image", "video", "youtube", "external_link"]
+description = "How the attachment is shown"
+
+[[keeper_projection.params.items.params]]
+name = "url"
+type = "string"
+description = "Absolute HTTPS URL; omit when sha256 is set"
+
+[[keeper_projection.params.items.params]]
+name = "sha256"
+type = "string"
+description = "Existing artifact content hash; omit when url is set"
 
 [[keeper_projection.params]]
 name = "sources"

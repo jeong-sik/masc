@@ -572,11 +572,9 @@ let build_timeline ?(load_chat = fun ~agent_name:_ -> ([] : chat_line list))
    [Tool_schemas_agent_timeline], beside every other surface's. *)
 let schemas : Masc_domain.tool_schema list = Tool_schemas_agent_timeline.schemas
 
-(* RFC-0189 PR-1b.13 — typed result. Caller-input violation
-   ("agent_name is required") tagged [Workflow_rejection]; success
-   carries the [build_timeline] [Yojson.Safe.t] envelope as
-   [~data:json] first-class (drops the [Yojson.Safe.to_string]
-   round-trip). *)
+(* RFC-0189 PR-1b.13 — typed result. Success carries the [build_timeline]
+   [Yojson.Safe.t] envelope as [~data:json] first-class (drops the
+   [Yojson.Safe.to_string] round-trip). *)
 
 let handle_agent_timeline ?load_chat ~tool_name ~start_time (ctx : context) args
   : Tool_result.result
@@ -586,7 +584,6 @@ let handle_agent_timeline ?load_chat ~tool_name ~start_time (ctx : context) args
     error_result_typed
       ~tool_name
       ~start_time
-      ~failure_class:Tool_result.Workflow_rejection
       ~code:Validation_error
       "agent_name is required"
   else

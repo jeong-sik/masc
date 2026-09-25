@@ -95,7 +95,6 @@ let degraded_keeper_dashboard_row
       ; ("primary_model", `String (Keeper_meta_contract.runtime_id_of_meta m))
       ; ("active_model", `String (Keeper_status_runtime.active_model_of_meta m))
       ; ("active_model_label", `String (Keeper_status_runtime.active_model_label_of_meta m))
-      ; ("last_model_used_label", `String (Keeper_status_runtime.active_model_label_of_meta m))
      ])
 
 let invalid_profile_dashboard_row ~keeper_name error =
@@ -360,9 +359,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
           let last_turn_ago_s =
             Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.usage.last_turn_ts
           in
-          let last_handoff_ago_s =
-            Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.last_handoff_ts
-          in
           let last_proactive_ago_s =
             Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.proactive_rt.last_ts
           in
@@ -373,7 +369,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
              to avoid showing misleading staleness when agent is actually active *)
           let meta_activity_ts =
             List.fold_left max 0.0
-              [ m.runtime.usage.last_turn_ts; m.runtime.proactive_rt.last_ts; m.runtime.last_handoff_ts;
+              [ m.runtime.usage.last_turn_ts; m.runtime.proactive_rt.last_ts;
                 created_ts ]
           in
           let latest_tool_activity = latest_keeper_tool_activity m.name in
@@ -436,7 +432,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
              | Some row -> [ ("runtime_blocker_summary", `String (pending_approval_summary row)) ]
              | None -> [])
           in
-          let trace_history_count = List.length m.runtime.trace_history in
           let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
           (* Cap metrics lines to avoid O(n) slowdown as keepers accumulate turns.
              [series_points] is both the read and output bound. *)
@@ -718,7 +713,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   (Option.map Keeper_id.Task_id.to_string m.current_task_id) );
               ("created_at", `String m.created_at);
               ("updated_at", `String m.updated_at);
-              ("trace_history_count", `Int trace_history_count);
               ( "active_goals_tree",
                 if (not compact) && include_goals then
                   match Goal_store.list_goals_result config () with
@@ -799,11 +793,9 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   (fun age_s -> `Float (age_s /. Masc_time_constants.hour))
                   keeper_age_s );
               ("last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s);
-              ("last_handoff_ago_s", Json_util.float_opt_to_json last_handoff_ago_s);
               ("last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s);
               ("last_visible_proactive_ago_s", Json_util.float_opt_to_json last_visible_proactive_ago_s);
               ("last_activity_ago_s", Json_util.float_opt_to_json last_activity_ago_s);
-              ("handoff_count_total", `Int trace_history_count);
               ("total_turns", `Int m.runtime.usage.total_turns);
               ("total_input_tokens", `Int m.runtime.usage.total_input_tokens);
               ("total_output_tokens", `Int m.runtime.usage.total_output_tokens);

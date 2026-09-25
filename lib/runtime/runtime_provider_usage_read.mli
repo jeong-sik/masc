@@ -7,10 +7,14 @@
     operator projection only: routing and admission do not read it.
 
     Codex answers [account/rateLimits/read] after account admission, with no
-    thread or turn. *)
+    thread or turn. A provider that declares [usage-read] in runtime.toml is
+    asked with one HTTP GET to that URL, authenticated with the key its HTTP
+    runtime was built with, and the answer is decoded by the declared shape.
+    runtime.toml refuses [usage-read] on an official-client protocol. *)
 
 val read_timeout_s : float
-(** The bound on one read: an account admission and one request. *)
+(** The bound on one read: a Codex account admission and one request, or one
+    whole HTTP GET. *)
 
 val read_codex :
   mgr:_ Eio.Process.mgr ->
@@ -21,13 +25,51 @@ val read_codex :
   (unit, string) result
 (** Read one Codex account and record its windows under [scope]. *)
 
+type http_error
+(** Why one HTTP read recorded nothing. *)
+
+val http_error_to_string : http_error -> string
+(** Names the failure without the response body or the key. *)
+
+type http_read =
+  { credential : Llm_provider.Provider_config.credential_source * Llm_provider.Secret.t
+    (** The credential source and key of the runtime's materialized HTTP
+        execution: the key its quota scope was derived from at load. *)
+  ; usage_read : Runtime_schema.usage_read
+  }
+
+type how =
+  | Codex of Runtime_execution.codex_app_server
+  | Http of http_read
+
+type readable =
+  { scope : Runtime_quota_window.scope
+  ; how : how
+  }
+
+val read_scopes :
+  codex:(scope:Runtime_quota_window.scope ->
+         Runtime_execution.codex_app_server ->
+         (unit, string) result) ->
+  fetch:(api_key:Llm_provider.Secret.t -> string -> (string, http_error) result) ->
+  readable list ->
+  unit
+(** Read each scope in order with [codex] or [fetch] (one GET of the
+    declared URL), decode, and record.  A failed or raising read is logged
+    with its scope (and shape) and does not stop the scopes after it; only
+    {!Eio.Cancel.Cancelled} is re-raised.  A read that states no windows logs
+    one info line.  An HTTP read with an empty key fails without a request. *)
+
 val read_all :
   mgr:_ Eio.Process.mgr ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
   unit
-(** Read every configured account that can answer, once each. A failed read
-    is logged and leaves that scope as it was. *)
+(** Read every configured account that can answer, once per quota scope. A
+    failed read is logged with its scope (and shape for an HTTP read) and
+    leaves that scope as it was; neither the response body nor the key is
+    logged. *)
 
 type background =
   | Started  (** A read was forked on the server's root switch. *)

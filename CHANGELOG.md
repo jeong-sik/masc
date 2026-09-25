@@ -24,7 +24,7 @@
   `exact-body-timeout-s` to every such provider. `cli_slots` are not affected,
   and neither is a deployment whose `AGENT_CORE_MODEL_CATALOG` names a
   replacement catalog, whose `[[targets]]` rows keep their own `body_timeout_s`
-  (#38779).
+  (#38849).
 - HTTP callers must send attachments in top-level `attachments` rather than `meta.attachments`. The raw metadata carrier now returns a bad-request error. `http:`, `javascript:`, and `data:` attachment URLs are refused (#38835).
 - A `youtube` attachment must use `url`; `youtube` with `sha256` is refused. An artifact attachment over 32 MiB is refused when the post is written, because the dashboard can open artifacts only up to that size (#38835).
 - Old untyped attachment metadata, including HTTPS entries, displays a failure card. Artifact downloads require an Admin token and return exact bytes. The whole-body HTTP readers return 413 for artifacts over 32 MiB (#38835).
@@ -202,7 +202,7 @@
   The seed `runtime.toml` and the setup wizard declare `exact-body-timeout-s`
   on every HTTP provider, because `--setup-lanes` can put any of them in an
   exact slot, and selecting a connection an older setup wrote now adds the key
-  to it (#38779).
+  to it (#38849).
 - The Fusion run detail, the Lanes run detail, the Keeper chat pane and the
   Task Verdicts detail now keep the scroll position on their footer. It was
   spelled onto the end of the key hints, so the fitter read it as a key item
@@ -307,6 +307,13 @@
   after the bars started in two columns. The percentage is now written to three
   digits and the wide suffix's numbers are measured at `max_value`, so the axis
   comes off the gauge rather than off the row (#38945).
+- When an official client turn (Codex app server, Antigravity CLI, Claude Code)
+  ends in an error, its tool observations and turn-end line are now recorded,
+  so the Librarian reads that turn like any other instead of skipping it
+  (#38809).
+- Board read in the TUI shows a failed post-detail load once, with the whole
+  error, in both read layouts; the loader no longer reports the same failure
+  twice in different words (#38877).
 
 ### Performance
 
@@ -316,6 +323,9 @@
   (#38567).
 - Fewer disk syncs when installing a new version: tool and MCP assets the
   binary rebuilds on every boot are no longer fsynced one by one (#38954).
+- Reading a small window of a large tool-output artifact no longer reads the
+  whole file on the first uncached read, and a missing artifact file fails at
+  once instead of after a full read attempt (#38956).
 
 ### Documentation
 

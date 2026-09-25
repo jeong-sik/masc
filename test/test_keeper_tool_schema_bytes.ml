@@ -298,7 +298,20 @@ open Alcotest
    the whole DOS machine saved under a name and put back after a server
    restart, which took a 133-million-step 삼국지3 hotseat game with it
    (#38981). No headroom. *)
-let ceiling_bytes = 123_093
+(* 2026-09-25: 123,620 across 141 tools (+527 over the 123,093 above), measured
+   by this suite on a clean origin/main checkout (6b62091a40); the suite
+   passes at this value on 7c89bffab2. No commit after the entry above touches
+   lib/tool_schemas*, so
+   main was already this wide when that entry was written from a local
+   measurement; nothing is added here. Where the 527 bytes came from was not
+   traced. No headroom. *)
+(* 2026-09-25: +389 rendered bytes, the production renderer's rules replayed
+   on the two changed files (not a CI reading). masc_board_curation_submit's
+   tag_suggestions (+167) and answer_matches (+196) and keeper_spawn's argv
+   (+26) now declare their items. Gemini refused every Antigravity request
+   that carried an array without items, and #38588 made this deferred tool
+   part of every such request. No headroom. *)
+let ceiling_bytes = 124_009
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

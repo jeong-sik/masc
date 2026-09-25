@@ -416,11 +416,14 @@ val fusion_row :
     where it used to be unbounded in the header and cut at fourteen in the
     row. *)
 
-val task_list_sidebar_label : title:string -> task_id:string -> string
-(** A Tasks list row beside the task detail. The id goes after the title
-    because the frame folds a label from the middle: titles that share an
-    opening and an ending draw the same row, and the id at the end is what
-    parts them. *)
+val sidebar_row_label : about:string -> apart:string option -> string
+(** A list pane's row label: what the row is about, then the value that parts
+    it from its neighbours. The parting value goes last because the pane
+    folds a label from the middle and keeps its tail.
+
+    Every index that parts its rows asks this one, so a row reads the same
+    way whichever pane draws it. [None] is a row with nothing to be parted
+    by, and it keeps its subject alone. *)
 
 val fusion_sidebar_label :
   status:string -> time:string -> keeper:string -> run_id:string -> string

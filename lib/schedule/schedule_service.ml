@@ -69,6 +69,7 @@ let due_not_before_now ~now ~due_at =
 let create
   config
   ~now
+  ~runner_tick_sec
   ?schedule_id:provided_schedule_id
   ?requested_at
   ?expires_at
@@ -86,12 +87,13 @@ let create
     make_request ~schedule_id ?requested_at ?expires_at ~requested_by
       ~scheduled_by ~due_at ~payload ~source ?recurrence ()
   in
-  Schedule_store.insert_request config request |> map_store
+  Schedule_store.insert_request config ~runner_tick_sec request |> map_store
 ;;
 
 let update
       config
       ~now
+      ~runner_tick_sec
       ~schedule_id
       ?requested_at
       ?expires_at
@@ -107,7 +109,7 @@ let update
     make_request ~schedule_id ?requested_at ?expires_at ~requested_by
       ~scheduled_by ~due_at ~payload ~source ?recurrence ()
   in
-  Schedule_store.update_request config ~now request |> map_store
+  Schedule_store.update_request config ~now ~runner_tick_sec request |> map_store
 ;;
 
 let cancel config ~schedule_id =

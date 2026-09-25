@@ -563,8 +563,8 @@ let sandbox_image_test_digest = "sha256:" ^ String.make 64 '0'
 
 (* The image the live sandbox suites look for in the host's Docker store and
    promote as [base] in each run's catalog; build it with
-   [masc sandbox-image --tag masc-sandbox:general]. *)
-let live_sandbox_image_tag = "masc-sandbox:general"
+   [masc sandbox-image --tag masc-sandbox-test:ci]. *)
+let live_sandbox_image_tag = "masc-sandbox-test:ci"
 
 let write_sandbox_image_catalog
     ?(store = Masc.Keeper_sandbox_image_catalog.Docker_daemon)

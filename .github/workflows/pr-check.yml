@@ -360,7 +360,7 @@ jobs:
       - name: Build the Keeper sandbox image the sandboxed suites read through
         # Four suites read a file through a Keeper's Docker sandbox. Without the
         # image the read answers "image_not_found: keeper sandbox image
-        # masc-sandbox:general is not available" and the suite is red for a
+        # masc-sandbox-test:ci is not available" and the suite is red for a
         # reason the pull request had no part in. test.yml builds it before it
         # runs anything; this lane did not, so one suite had two verdicts
         # depending on which lane ran it. Measured on main 2026-09-10 by
@@ -383,8 +383,8 @@ jobs:
         # build time, so nothing has to be compiled or linked to print it.
         run: |
           set -euo pipefail
-          docker build -t masc-sandbox:general - < sandbox-images/base/Dockerfile
-          docker image inspect masc-sandbox:general --format '{{.Id}}'
+          docker build -t masc-sandbox-test:ci - < sandbox-images/base/Dockerfile
+          docker image inspect masc-sandbox-test:ci --format '{{.Id}}'
 
       - name: Run the tests this pull request edits
         # The script holds the budget: every suite it selects runs, and one the

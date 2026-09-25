@@ -29,6 +29,8 @@ type error =
   | Unreadable of string
   | Held_by of string
   | Guest_fault of string
+  | Unsaveable of string
+  | Checkpoint_refused of Machine_checkpoint.error
 
 let error_to_string = function
   | No_machine -> "no DOS machine is loaded: call masc_dos_load first"
@@ -42,6 +44,8 @@ let error_to_string = function
   | Guest_fault message ->
     "the program ran something this machine does not implement, and stopped there: "
     ^ message
+  | Unsaveable message -> "the machine cannot be checkpointed right now, so nothing was written: " ^ message
+  | Checkpoint_refused e -> Machine_checkpoint.error_to_string e
 ;;
 
 (* The core runs about 24 million instructions a second on this hardware
@@ -79,7 +83,7 @@ type core = {
    one, so a SHA bumped alone turns that test red with the new digest in its
    message. Read the digest of a commit from its build:
    _build/default/lib/identity/dos_core_identity.ml. *)
-let pinned_core_source_digest = "6db10f3513d3bfa0505c660962c53773"
+let pinned_core_source_digest = "2a711d6932bbb72699645a40e835f8a1"
 
 let core =
   { source_digest = Dos_core_identity.source_digest
@@ -190,7 +194,8 @@ let running f =
   in
   (match result with
    | Ok _ | Error (Unreadable _ | Guest_fault _) -> mark_change ()
-   | Error (No_machine | Invalid_request _ | Held_by _) -> publish_stable ());
+   | Error (No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _) ->
+     publish_stable ());
   result
 ;;
 
@@ -213,7 +218,8 @@ let with_control ~who f =
       (match result with
        | Ok _ | Error (Unreadable _ | Guest_fault _) -> ()
          (* the call ran: the machine may have moved *)
-       | Error (No_machine | Invalid_request _ | Held_by _) -> st.controller <- before);
+       | Error (No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _) ->
+         st.controller <- before);
       result)
 ;;
 
@@ -798,6 +804,159 @@ let type_text ~who ~text ~steps =
          | Ok resolved ->
            let ran = press_resolved st ~who ~keys:resolved ~budget in
            ran_then_kept st ran))
+;;
+
+(* ---------- checkpoints ---------- *)
+
+(* The lane's part of a checkpoint: what the machine bytes do not carry. The
+   machine bytes are Dos_snapshot's and carry their own format; this number
+   covers the meta beside them. Bump it by hand when [checkpoint_meta] changes
+   shape or meaning -- a checkpoint of any other number is refused, and
+   nothing reads an old one. *)
+let checkpoint_format = 1
+
+let checkpoint_meta st ~who : Yojson.Safe.t =
+  `Assoc
+    [ ("program", `String st.program)
+    ; ("saves", `String (Filename.basename st.saves_dir))
+    ; ("steps", `Int st.steps)
+    ; ("saved_by", `String who)
+    ; ("ledger", `List (List.rev_map entry_json st.entries))
+    ]
+;;
+
+let save ~who ~dir ~slot =
+  with_machine (fun st ->
+    let header =
+      { Machine_checkpoint.machine = Machine_checkpoint.Dos
+      ; format = checkpoint_format
+      ; core = Dos_core_identity.source_digest
+      }
+    in
+    match Dos_snapshot.save st.m with
+    | Error e -> Error (Unsaveable (Dos_snapshot.save_error_to_string e))
+    | Ok machine_bytes ->
+      (match
+         Machine_checkpoint.write ~dir slot header ~meta:(checkpoint_meta st ~who)
+           ~machine_bytes
+       with
+       | Ok () -> Ok (observe st)
+       | Error message -> Error (Unreadable message)))
+;;
+
+type restored_meta = {
+  saved_program : string;
+  saved_saves : string;
+  saved_steps : int;
+  saved_ledger : entry list;  (* oldest first *)
+}
+
+(* Every field the lane wrote, or the checkpoint is corrupt: a missing step
+   count is not zero and a missing ledger is not empty. *)
+let meta_of_json json =
+  let corrupt message = Error (Checkpoint_refused (Machine_checkpoint.Corrupt message)) in
+  let field name =
+    match json with
+    | `Assoc fields -> List.assoc_opt name fields
+    | _ -> None
+  in
+  let entry_of = function
+    | `Assoc fields ->
+      (match
+         ( List.assoc_opt "step" fields
+         , List.assoc_opt "who" fields
+         , List.assoc_opt "key" fields )
+       with
+       | Some (`Int at_step), Some (`String who), Some (`String key_name) ->
+         Some { at_step; who; key_name }
+       | _ -> None)
+    | _ -> None
+  in
+  match field "program", field "saves", field "steps", field "ledger" with
+  | Some (`String program), Some (`String saves), Some (`Int steps), Some (`List items) ->
+    let ledger = List.filter_map entry_of items in
+    let rec ordered previous = function
+      | [] -> true
+      | e :: rest -> e.at_step >= previous && e.at_step <= steps && ordered e.at_step rest
+    in
+    if List.length ledger <> List.length items then corrupt "a ledger line does not read"
+    else if not (ordered 0 ledger) then corrupt "the ledger does not fit the saved step count"
+    else if escapes saves || String.equal saves "" then corrupt "the saves name is a path"
+    else Ok { saved_program = program; saved_saves = saves; saved_steps = steps; saved_ledger = ledger }
+  | _ -> corrupt "the lane's fields are missing"
+;;
+
+let restore ~who ~dir ~slot ~ledger_dir ~saves_dir_of ~announce =
+  locked (fun () ->
+    match Option.map (refuse_other ~who) !state with
+    | Some (Error e) -> Error e
+    | Some (Ok ()) | None ->
+      (* Everything is read and checked before anything changes: a refused
+         restore leaves the machine, its ledger and its controller as they
+         were. *)
+      match
+        Machine_checkpoint.read ~dir slot ~machine:Machine_checkpoint.Dos
+          ~format:checkpoint_format
+      with
+      | Error (Machine_checkpoint.Unreadable message) -> Error (Unreadable message)
+      | Error e -> Error (Checkpoint_refused e)
+      | Ok { Machine_checkpoint.meta; machine_bytes; header = _ } ->
+        match meta_of_json meta with
+        | Error e -> Error e
+        | Ok meta ->
+          match Dos_snapshot.restore machine_bytes with
+          | Error (Dos_snapshot.Wrong_format { saved; supported }) ->
+            Error
+              (Checkpoint_refused
+                 (Machine_checkpoint.Other_format { saved; expected = supported }))
+          | Error ((Dos_snapshot.Not_a_snapshot | Dos_snapshot.Corrupt _) as e) ->
+            Error
+              (Checkpoint_refused
+                 (Machine_checkpoint.Corrupt (Dos_snapshot.error_to_string e)))
+          | Ok m ->
+            let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
+            let lines =
+              String.concat ""
+                (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") meta.saved_ledger)
+            in
+            match
+              mkdir_p ledger_dir;
+              write_atomically ~dir:ledger_dir "ledger.jsonl" lines
+            with
+            | exception Sys_error message -> Error (Unreadable message)
+            | () ->
+              (* The saves directory keeps what is on disk. The restored
+                 machine's files are taken as already kept, so nothing is
+                 written back until the guest writes again: an older
+                 checkpoint never overwrites a newer save a game made after
+                 it. *)
+              let kept = Hashtbl.create 16 in
+              List.iter
+                (fun name ->
+                  Option.iter (Hashtbl.replace kept name) (Dos_machine.read_mounted m name))
+                (Dos_machine.mounted_names m);
+              let st =
+                { m
+                ; steps = meta.saved_steps
+                ; program = meta.saved_program
+                ; ledger_path
+                ; entries = List.rev meta.saved_ledger
+                ; saves_dir = saves_dir_of meta.saved_saves
+                ; kept
+                ; controller = Some who
+                ; incarnation = Random_id.uuid_v7 ()
+                }
+              in
+              state := Some st;
+              mark_change ();
+              announce ();
+              Ok (observe st))
+;;
+
+let checkpoints ~dir =
+  match Machine_checkpoint.list ~dir with
+  | Ok listed -> Ok listed
+  | Error message -> Error (Unreadable message)
 ;;
 
 (* ---------- introspection ---------- *)

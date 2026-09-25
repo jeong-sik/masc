@@ -298,14 +298,14 @@ open Alcotest
    the whole DOS machine saved under a name and put back after a server
    restart, which took a 133-million-step 삼국지3 hotseat game with it
    (#38981). No headroom. *)
-(* 2026-09-25: 123,650, computed, not yet a CI reading. The 123,093 above was
-   pinned by #38941, but #38976 then broke the test build on main (fixed by
-   #39032), so this suite did not run on main for the commits after it. The
-   first full run after the fix, #39025's run 36124105584, measured 123,620
-   with that PR's two description trims (-30 bytes), which puts main at about
-   123,650. This PR's own CI run selects this suite and prints main's exact
-   figure; the ceiling is set to that reading with no headroom. *)
-let ceiling_bytes = 123_650
+(* 2026-09-25: 123,620 across 141 tools (+527 over the 123,093 above), measured
+   by this suite on a clean origin/main checkout (6b62091a40); the suite
+   passes at this value on 7c89bffab2. No commit after the entry above touches
+   lib/tool_schemas*, so
+   main was already this wide when that entry was written from a local
+   measurement; nothing is added here. Where the 527 bytes came from was not
+   traced. No headroom. *)
+let ceiling_bytes = 123_620
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

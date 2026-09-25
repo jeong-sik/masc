@@ -15,6 +15,10 @@ val of_json : ?home_dir:string -> Yojson.Safe.t -> (t, error) result
 (** [home_dir] resolves an explicit current-user [~/] Antigravity reference;
     ordinary HTTP File references must already be absolute. No files are read. *)
 type rendered = { runtime_id:string; runtime_toml:string }
+val setup_exact_body_timeout_s : float
+(** The [exact-body-timeout-s] setup writes on an HTTP provider it points the
+    exact-output lanes at: on a connection it renders, and on an existing
+    provider [--setup-lanes] selects that declares none (#38779). *)
 val model_id : t -> string
 val render : t -> rendered
 val render_json : rendered -> Yojson.Safe.t

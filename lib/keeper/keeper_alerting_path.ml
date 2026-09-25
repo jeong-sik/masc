@@ -20,6 +20,79 @@ let rejection_to_telemetry (r : keeper_path_rejection) : unit =
     ()
 ;;
 
+(* A path is refused for its spelling, or because the keeper's own roots are
+   unusable. Only the second is not the caller's to fix, so a tool surface
+   that reports a refusal takes its class from here rather than from the
+   message. *)
+let failure_class_of_rejection : keeper_path_rejection -> Tool_result.tool_failure_class
+  = function
+  | Path_required
+  | Invalid_lexical_endpoint
+  | Invalid_normalized_path_projection _
+  | Outside_sandbox _ -> Tool_result.Policy_rejection
+  | Sandbox_roots_normalized_empty _ -> Tool_result.Runtime_failure
+;;
+
+type path_refusal =
+  { failure_class : Tool_result.tool_failure_class
+  ; message : string
+  }
+
+let refusal_of_rejection rejection =
+  { failure_class = failure_class_of_rejection rejection
+  ; message = rejection_to_user_message rejection
+  }
+;;
+
+type caller_cwd_refusal =
+  | Missing_cwd of { cwd : string; read_hint : string option }
+  | Cwd_is_file of { cwd : string }
+
+let caller_refusal reason =
+  let message =
+    match reason with
+    | Missing_cwd { cwd; read_hint = None } ->
+      Printf.sprintf "cwd_not_directory: %s (directory does not exist)" cwd
+    | Missing_cwd { cwd; read_hint = Some hint } ->
+      Printf.sprintf
+        "cwd_not_directory: %s (directory does not exist; Read will not create cwd);%s"
+        cwd hint
+    | Cwd_is_file { cwd } ->
+      Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd
+  in
+  { failure_class = Tool_result.Policy_rejection; message }
+
+type owned_read_target_failure =
+  | Caller_cwd_rejected of Fs_compat.owned_directory_chain_rejection
+  | Caller_cwd_missing of { cwd : string }
+  | Default_cwd_rejected of Fs_compat.owned_directory_chain_rejection
+  | Default_cwd_missing of { cwd : string }
+
+let owned_read_target_refusal = function
+  | Caller_cwd_rejected rejection ->
+    { failure_class = Tool_result.Policy_rejection
+    ; message = Fs_compat.owned_directory_chain_rejection_to_string rejection
+    }
+  | Caller_cwd_missing { cwd } ->
+    { failure_class = Tool_result.Policy_rejection
+    ; message = "cwd_not_directory: " ^ cwd
+    }
+  | Default_cwd_rejected rejection ->
+    { failure_class = Tool_result.Runtime_failure
+    ; message = Fs_compat.owned_directory_chain_rejection_to_string rejection
+    }
+  | Default_cwd_missing { cwd } ->
+    { failure_class = Tool_result.Runtime_failure
+    ; message = "cwd_not_directory: " ^ cwd
+    }
+
+let endpoint_unresolved ~tree_refusal ~endpoint_error =
+  { failure_class = Tool_result.Runtime_failure
+  ; message =
+      Printf.sprintf "%s (the keeper's tree also refused the path: %s)"
+        endpoint_error tree_refusal.message
+  }
+
 let project_root_of_config (config : Workspace.config) : string =
   let base = config.base_path in
   if Filename.basename base = Common.masc_dirname then Filename.dirname base else base

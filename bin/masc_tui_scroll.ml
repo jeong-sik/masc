@@ -75,3 +75,6 @@ let window_text ~scroll ~height count =
   else
     let first = max 0 (min scroll (count - 1)) in
     Printf.sprintf "%d-%d/%d" (first + 1) (min count (first + height)) count
+
+let window_reading ~noun ~scroll ~height count =
+  noun ^ " " ^ window_text ~scroll ~height count

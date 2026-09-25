@@ -3,6 +3,7 @@ import hashlib
 import json
 import shutil
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -303,6 +304,99 @@ def test_run_populates_context(tmp_path):
     assert ctx.metadata["masc_state"] == "Succeeded"
     assert ctx.metadata["tool_calls"] == 17
     assert ctx.metadata["duplicate_tool_calls"] == 2
+
+
+LEDGER = "/opt/masc-bench/base/.masc/tool_calls"
+TRACES = "/opt/masc-bench/base/.masc/traces"
+LEDGER_ROW = '{"record_kind":"tool_call","tool":"Read","input":{"path":"/app/a.py"}}\n'
+TRACE = '{"session_id":"s1","messages":[{"role":"assistant","content":"done"}]}'
+
+
+def run_in(tmp_path, env):
+    from harbor.models.agent.context import AgentContext
+
+    logs = tmp_path / "agent"
+    ctx = AgentContext()
+    asyncio.run(make_agent(logs).run("do the task", env, ctx))
+    return logs, ctx
+
+
+def remote_records(tmp_path):
+    ledger = tmp_path / "remote-ledger"
+    (ledger / "2026-09").mkdir(parents=True)
+    (ledger / "2026-09" / "24.jsonl").write_text(LEDGER_ROW)
+    traces = tmp_path / "remote-traces"
+    (traces / "s1").mkdir(parents=True)
+    (traces / "s1" / "trace-s1.json").write_text(TRACE)
+    return {LEDGER: ledger, TRACES: traces}
+
+
+def test_run_keeps_the_ledger_and_the_traces(tmp_path):
+    logs, ctx = run_in(tmp_path, FakeEnv(remote_dirs=remote_records(tmp_path)))
+
+    assert (logs / "masc" / "tool_calls" / "2026-09" / "24.jsonl").read_text() == LEDGER_ROW
+    assert (logs / "masc" / "traces" / "s1" / "trace-s1.json").read_text() == TRACE
+    assert ctx.metadata["masc_state"] == "Succeeded"
+
+
+def test_an_episode_that_wrote_no_records_copies_nothing(tmp_path):
+    env = FakeEnv()
+
+    logs, ctx = run_in(tmp_path, env)
+
+    assert env.downloads == []
+    assert not (logs / "masc").exists()
+    assert ctx.metadata["masc_state"] == "Succeeded"
+
+
+class LedgerCopyFails(FakeEnv):
+    async def download_dir(self, src, dst):
+        if src == LEDGER:
+            Path(dst).mkdir(parents=True)
+            (Path(dst) / "partial.jsonl").write_text("incomplete")
+            raise OSError("container already removed")
+        await super().download_dir(src, dst)
+
+
+def test_a_failed_copy_keeps_the_other_record_and_the_result(tmp_path):
+    env = LedgerCopyFails(remote_dirs=remote_records(tmp_path))
+
+    logs, ctx = run_in(tmp_path, env)
+
+    assert (logs / "masc" / "traces" / "s1" / "trace-s1.json").read_text() == TRACE
+    assert not (logs / "masc" / "tool_calls").exists()
+    assert not list((logs / "masc").glob(".tool_calls-*"))
+    assert ctx.metadata["masc_state"] == "Succeeded"
+    assert (logs / "result.json").exists()
+
+
+class LedgerCopyStalls(FakeEnv):
+    def __init__(self, remote_dirs):
+        super().__init__(remote_dirs=remote_dirs)
+        self.ledger_started = asyncio.Event()
+
+    async def download_dir(self, src, dst):
+        if src == LEDGER:
+            self.ledger_started.set()
+            await asyncio.Event().wait()
+        await super().download_dir(src, dst)
+
+
+def test_stalled_ledger_copy_does_not_delay_trace_or_result(tmp_path, monkeypatch):
+    import agents.masc_agent as m
+
+    monkeypatch.setattr(m, "RESULT_RECOVERY_TIMEOUT_SEC", 0.05)
+    monkeypatch.setattr(m, "RECOVERY_TOTAL_TIMEOUT_SEC", 0.1)
+    env = LedgerCopyStalls(remote_records(tmp_path))
+
+    started = time.monotonic()
+    logs, ctx = run_in(tmp_path, env)
+
+    assert time.monotonic() - started < 0.5
+    assert env.ledger_started.is_set()
+    assert (logs / "masc" / "traces" / "s1" / "trace-s1.json").read_text() == TRACE
+    assert (logs / "result.json").exists()
+    assert ctx.metadata["masc_state"] == "Succeeded"
 
 
 def test_claude_code_lane_env_uses_oauth_token(tmp_path, monkeypatch):
@@ -786,3 +880,34 @@ def test_the_interrupted_report_is_bounded_after_the_time_is_up(tmp_path):
                 if "--interrupted" in c or "cat /opt/masc-bench/result.json" in c]
     assert recovery and all(
         kw.get("timeout_sec") == m.RESULT_RECOVERY_TIMEOUT_SEC for kw in recovery)
+
+
+class InterruptedReportStalls(EpisodeRunsUntilCancelled):
+    def __init__(self):
+        super().__init__()
+        self.report_started = False
+
+    async def exec(self, command, **kw):
+        if "collect_result.sh" in command:
+            self.report_started = True
+            await asyncio.Event().wait()
+        return await super().exec(command, **kw)
+
+
+def test_interrupted_recovery_has_one_total_deadline(tmp_path, monkeypatch):
+    import agents.masc_agent as m
+    from harbor.models.agent.context import AgentContext
+
+    monkeypatch.setattr(m, "RESULT_RECOVERY_TIMEOUT_SEC", 0.05)
+    monkeypatch.setattr(m, "RECOVERY_TOTAL_TIMEOUT_SEC", 0.1)
+    env = InterruptedReportStalls()
+
+    async def go():
+        await asyncio.wait_for(
+            make_agent(tmp_path).run("task", env, AgentContext()), timeout=0.01)
+
+    started = time.monotonic()
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(go())
+    assert env.report_started
+    assert time.monotonic() - started < 0.5

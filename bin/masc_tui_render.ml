@@ -14682,8 +14682,8 @@ let render_prompt_registry (state : state) =
     Printf.sprintf "%s%s%s%s · %s%s"
       Ansi.dim count_text
       held_back_note
-      Ansi.reset
-      (if state.prompts_show_fragments then "낮부 조각 포함" else "주 프롬프트")
+      Ansi.dim
+      (if state.prompts_show_fragments then "내부 조각 포함" else "주 프롬프트")
       Ansi.reset
   in
   box_line buf cols

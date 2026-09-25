@@ -403,6 +403,12 @@
   directory as not a file, instead of `remote_ssh_read_failed ... head: cannot
   open` with `runtime_failure`. The read script checks the path on the
   endpoint and exits with its own code for each case (#38778, refs #27742).
+- A keeper whose chat lane is fed without end no longer loses autonomous
+  turns without bound: consecutive refusals of the turn slot by a chat
+  holder become deferral debt, and at three the freed slot is left open
+  for the autonomous lane instead of being offered to the queued chat
+  turn first. A chat turn can be delayed by at most those forfeited
+  releases (#38963).
 
 ### Performance
 

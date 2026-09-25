@@ -900,6 +900,8 @@ let test_token_usage_of_this_turn_reaches_the_result () =
          | Some (Runtime_codex_app_server.Thread_count { last = Runtime_codex_app_server.Context_estimate _; _ })
          | Some Runtime_codex_app_server.Thread_count_replaced
          | None -> fail "the turn's request frame was not kept as its count");
+        check (option int) "the frame's model window" (Some 272000)
+          result.model_context_window;
         check string "text still lands" "MASC_SUBSCRIPTION_OK" result.text)
 ;;
 
@@ -5075,8 +5077,30 @@ let test_production_keeper_reports_codex_token_usage () =
                             cache.cache_read_input_tokens)
                          context.cache);
                     check (option int) "its final output" (Some 80) context.output_tokens
-                  | None -> fail "the newest request's occupancy was dropped")
-               | None -> fail "production turn recorded no runtime observation")))
+                  | None -> fail "the newest request's occupancy was dropped");
+                 check (option int) "the client's model window" (Some 272000)
+                   observation.Runtime_observation.reported_context_window
+               | None -> fail "production turn recorded no runtime observation");
+              let rows =
+                Keeper_types_support.keeper_turn_record_store
+                  (Workspace.default_config base_path) "codex-production-fixture"
+                |> fun store -> Dated_jsonl.read_recent store 1
+              in
+              (match rows with
+               | [json] ->
+                 (match Turn_record.of_json json with
+                  | Ok record ->
+                    check (option int) "record keeps MASC's shaping ceiling"
+                      (Some result.max_context) record.context_window;
+                    check (option int) "recorded provider model window"
+                      (Some 272000) record.provider_context_window;
+                    (* The window's occupancy is the newest request's count
+                       (1200 in + 80 out), never the thread total (9000). *)
+                    check (option int) "the record's input is the request's" (Some 1200)
+                      record.usage.input_tokens;
+                    check (option int) "and its output" (Some 80) record.usage.output_tokens
+                  | Error detail -> fail detail)
+               | _ -> fail "production turn did not persist one record")))
 ;;
 
 (* The raw rows the cost ledger holds under [base_path], as (scope, input)

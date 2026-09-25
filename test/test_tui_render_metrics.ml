@@ -140,6 +140,28 @@ let test_calculate_kpis_empty () =
   check bool "no fabricated latency" false (contains output "0.82")
 ;;
 
+(* The fleet row draws how many keepers are configured and how many are
+   paused. It used to draw the unpaused ones and leave the reader to
+   subtract, and the subtraction is where the bug was: the count skipped a
+   declared keeper as well as a paused one, so every declared keeper sat
+   inside the difference a reader reads as paused. A declared keeper is not
+   paused -- [Tui_decode.keeper_of_declaration] writes [k_paused = false] and
+   is the only place a keeper with that origin is built. *)
+let make_declared_keeper name : Decode.keeper =
+  { (make_keeper name) with k_origin = Decode.Declared_keeper [] }
+;;
+
+let test_a_declared_keeper_is_not_counted_as_paused () =
+  let state = make_state () in
+  state.keepers <-
+    [ make_keeper "persisted"
+    ; make_keeper ~paused:true "stopped"
+    ; make_declared_keeper "declared" ];
+  let kpis = Render_metrics.calculate_kpis state in
+  check int "three are configured" 3 kpis.total_keepers;
+  check int "one of them is paused" 1 kpis.paused_keepers
+;;
+
 let test_calculate_kpis_populated () =
   let state = make_state () in
   state.keepers <- [ make_keeper "running"; make_keeper ~paused:true "idle" ];
@@ -150,7 +172,7 @@ let test_calculate_kpis_populated () =
       { Decode.ktr_chat_control_token = None; ktr_keeper_name = "unknown"; ktr_state = Keeper_turn_unavailable "owner unavailable" } ];
   state.keeper_turns_observed_at <- Some 100.;
   let kpis = Render_metrics.calculate_kpis state in
-  check int "unpaused is a configuration count" 1 kpis.unpaused_keepers;
+  check int "paused is a configuration count" 1 kpis.paused_keepers;
   let turns = Option.get kpis.turns in
   check int "only actual running owners count as running" 1 turns.running;
   check int "idle is distinct" 1 turns.idle;
@@ -433,7 +455,7 @@ let test_pulse_roster_waits_for_the_local_read () =
   state.local_workspace <- Types.Local_workspace_read;
   state.keepers <- [ make_keeper "alpha"; make_keeper ~paused:true "beta" ];
   check bool "a read roster is counted" true
-    (contains (pulse ()) "2 configured · 1 unpaused")
+    (contains (pulse ()) "2 configured · 1 paused")
 ;;
 
 let test_section_pills_line () =
@@ -934,6 +956,8 @@ let () =
     [ ( "kpis"
       , [ test_case "calculate_kpis_empty" `Quick test_calculate_kpis_empty
         ; test_case "calculate_kpis_populated" `Quick test_calculate_kpis_populated
+        ; test_case "a declared keeper is not counted as paused" `Quick
+            test_a_declared_keeper_is_not_counted_as_paused
         ; test_case "retained task outcomes and observation scope" `Quick test_retained_task_outcomes
         ; test_case "assignee work and daily flow" `Quick test_assignee_work_and_daily_flow
         ; test_case "assignee rows capped" `Quick test_assignee_rows_capped

@@ -175,6 +175,7 @@ let verify_readback ~endpoint ~config ~meta ~file_name ~expected_bytes =
 let write_through_endpoint ~endpoint ~config ~meta ~file_name ~content =
   let execution =
     Keeper_tool_filesystem_remote_write.handle_with_endpoint
+      ~declared_root_writes:Keeper_tool_filesystem_remote_write.Refuse_declared_roots
       ~endpoint
       ~config
       ~meta

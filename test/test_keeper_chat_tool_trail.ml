@@ -21,23 +21,23 @@ let test_subject_argv () =
 ;;
 
 (* Execute takes argv or a shell line, and 376 of the fleet's Execute calls in
-   one day carried the line. Without [script] in the subject keys the row fell
-   through to the whole-object rendering, and the path inside the line then met
-   the path-tail shortener: a keeper's command read as a JSON fragment ending
-   in a directory name. *)
-let test_subject_script () =
+   one day carried the line. Without the line's key in the subject keys the row
+   fell through to the whole-object rendering, and the path inside the line then
+   met the path-tail shortener: a keeper's command read as a JSON fragment
+   ending in a directory name. *)
+let test_subject_command () =
   check_subject
     "a shell line renders as the line that ran"
-    ~args:{|{"script":"rg -n prompt_fingerprint lib/ | head -20","cwd":".","timeout_sec":60}|}
+    ~args:{|{"command":"rg -n prompt_fingerprint lib/ | head -20","cwd":".","timeout_sec":60}|}
     (Some "rg -n prompt_fingerprint lib/ | head -20")
 ;;
 
 (* argv keeps its place: a call that carries both is not one the schema
    accepts, and the direct form is the one that names a program. *)
-let test_subject_argv_wins_over_script () =
+let test_subject_argv_wins_over_command () =
   check_subject
-    "argv is read before script"
-    ~args:{|{"argv":["git","status"],"script":"git status"}|}
+    "argv is read before command"
+    ~args:{|{"argv":["git","status"],"command":"git status"}|}
     (Some "git status")
 ;;
 
@@ -368,8 +368,8 @@ let () =
     "keeper_chat_tool_trail"
     [ ( "subject"
       , [ Alcotest.test_case "argv" `Quick test_subject_argv
-        ; Alcotest.test_case "script" `Quick test_subject_script
-        ; Alcotest.test_case "argv before script" `Quick test_subject_argv_wins_over_script
+        ; Alcotest.test_case "command" `Quick test_subject_command
+        ; Alcotest.test_case "argv before command" `Quick test_subject_argv_wins_over_command
         ; Alcotest.test_case "file_path" `Quick test_subject_file_path
         ; Alcotest.test_case "pattern before path" `Quick test_subject_pattern_before_path
         ; Alcotest.test_case "unknown keys" `Quick test_subject_absent_keys

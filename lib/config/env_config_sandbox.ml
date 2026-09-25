@@ -201,6 +201,10 @@ module Runtime = struct
     get_string ~default:"256g" "MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE"
   ;;
 
+  let microvm_build_volume_size () =
+    get_string ~default:"128g" "MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE"
+  ;;
+
   (* Measured 2026-09-02 on the keeper image: dune and ocaml live in the opam
      switch, off the shim's fixed default PATH. The value is written into the
      guest's shim config as [path=], so it is the host's statement about the

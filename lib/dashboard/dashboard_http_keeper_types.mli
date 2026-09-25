@@ -63,7 +63,6 @@ val source_health_fields :
 val nonempty_string_opt : string -> string option
 val take_list : int -> 'a list -> 'a list
 val percentile_sorted_float : float array -> float -> float
-val keeper_cost_metric_row_is_event : Yojson.Safe.t -> bool
 val keeper_decisions_dashboard_surface : string
 
 (** {1 K2 decisions feed helpers} *)

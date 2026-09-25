@@ -930,9 +930,6 @@ val input_capacity_disposition_to_string : input_capacity_disposition -> string
 
 val candidate_rejection_disposition_to_string : candidate_rejection_disposition -> string
 
-(** The typed admission refusal, including its nested wire cause. *)
-val admission_error_to_string : admission_error -> string
-
 (** e.g. ["provider refused (http_status=429 refusal=rate_limited)"],
     ["completion failed (network_error:dns_failure, not sent)"]. *)
 val execution_error_cause_to_string : execution_error_cause -> string

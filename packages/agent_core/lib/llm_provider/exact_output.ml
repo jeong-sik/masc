@@ -2320,8 +2320,6 @@ let candidate_rejection_disposition_to_string
   | Request_preparation_failed -> "request preparation failed"
 ;;
 
-let admission_error_to_string : admission_error -> string = admission_error_reason
-
 let http_error_kind_to_string : Http_client.http_error -> string = function
   | Http_client.HttpError { code; body = _; retry_after_header = _ } ->
     Printf.sprintf "http_status=%d" code

@@ -132,22 +132,16 @@ type BoardPostMeta = Record<string, unknown> & {
   judgment?: unknown
 }
 
-/**
- * RFC-0000 §3.1 board attachment carrier — the wire shape of one entry in
- * `meta.attachments` (OCaml `Board_attachment_meta`). `kind` is a closed set.
- */
+/** Decoded Board attachment written through the typed post argument. */
 export type BoardAttachmentKind = 'image' | 'video' | 'youtube' | 'external_link'
 
+export type BoardAttachmentSource =
+  | { kind: 'url'; url: string; name?: string; sizeBytes?: number; width?: number | null; height?: number | null }
+  | { kind: 'artifact'; sha256: string; bytes: number; mime: string }
+
 export interface BoardAttachment {
-  id: string
   kind: BoardAttachmentKind
-  origin_url: string
-  origin_name: string
-  origin_size_bytes: number
-  mime_type: string
-  width: number | null
-  height: number | null
-  created_at: number
+  source: BoardAttachmentSource
 }
 
 /**

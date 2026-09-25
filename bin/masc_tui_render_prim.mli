@@ -125,7 +125,14 @@ val search_marker_styled : Masc_tui_types.state -> string
 
 val footer_line :
   ?status:Masc_tui_footer.status_item list ->
+  ?position:string ->
   Masc_tui_types.state -> max_cells:int -> hints:string -> string
+(** [position] is where a scrolling surface stands in what it is scrolling.
+    It is separate from [hints] because the fitter gives up key items from
+    the back, and a position is the one item on the row that [?] cannot
+    recover; kept with the keys that cannot be dropped. Use the footer when
+    the detail has no spare content row; list panes with a window-reading row
+    keep their position in the body. *)
 
 val keeper_split_threshold_cols : int
 
@@ -201,6 +208,10 @@ val coordinator_status_row :
     style covers [status] alone; the badge keeps its own colour. *)
 
 val count_frame_lines : Buffer.t -> int
+(** The rows a buffer holds, for a surface that lays the rest of its height
+    out around a block it has already drawn. A last line with no newline after
+    it counts as a row: the terminal draws it, and a footer is written that
+    way. *)
 
 val slash_hint_text : restore:string -> string -> string option
 (** What the slash word at the start of a draft is -- the command it names,
@@ -277,10 +288,6 @@ val boxed_surface_chrome_rows : int
 
 val selected_ask_question :
   Masc_tui_types.state -> Masc.Tui_decode.ask_question option
-
-val rows_drawn : Buffer.t -> int
-(** The rows a block has drawn into its own buffer, for a surface that lays
-    the rest of its height out around it. *)
 
 val draw_ask_question :
   Buffer.t ->
@@ -412,6 +419,11 @@ val fusion_run_state_text :
 
 val fusion_run_progress_text :
   Masc_tui_types.Tui_decode.fusion_run_stage -> string
+
+val sidebar_row_lead_cells : int
+(** What a list index spends before a row's label: the caret the cursor wears
+    and a space each side. The room a label folds to is the frame's inner
+    width less this, which is what a width check has to compare against. *)
 
 val fusion_run_clock : Masc_tui_types.Tui_decode.fusion_run -> string
 

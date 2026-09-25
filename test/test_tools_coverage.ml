@@ -646,7 +646,9 @@ let test_masc_board_post_schema_supports_judgment () =
       Alcotest.(check bool) "has classification_reason" true
         (List.mem_assoc "classification_reason" props);
       Alcotest.(check bool) "has judgment" true
-        (List.mem_assoc "judgment" props)
+        (List.mem_assoc "judgment" props);
+      Alcotest.(check bool) "has typed attachments" true
+        (List.mem_assoc "attachments" props)
   | None -> Alcotest.fail "masc_board_post missing properties"
 
 (* ============================================================ *)

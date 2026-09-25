@@ -104,6 +104,30 @@ type antigravity_cli_options =
   }
 [@@deriving show, eq]
 
+type usage_read_shape =
+  | Openrouter_key
+  | Zai_quota_limit
+  | Kimi_coding_usages
+  | Ollama_usage
+[@@deriving show, eq]
+
+let all_usage_read_shapes =
+  [ Openrouter_key; Zai_quota_limit; Kimi_coding_usages; Ollama_usage ]
+;;
+
+let usage_read_shape_to_string = function
+  | Openrouter_key -> "openrouter-key"
+  | Zai_quota_limit -> "zai-quota-limit"
+  | Kimi_coding_usages -> "kimi-coding-usages"
+  | Ollama_usage -> "ollama-usage"
+;;
+
+type usage_read =
+  { shape : usage_read_shape
+  ; url : string
+  }
+[@@deriving show, eq]
+
 type provider =
   { id : string
   ; enabled : bool
@@ -149,6 +173,7 @@ type provider =
   ; antigravity_cli : antigravity_cli_options option
     (** Typed [antigravity-cli] process options. Present exactly for providers
         using that protocol; absent for every other transport. *)
+  ; usage_read : usage_read option
   }
 [@@deriving show, eq]
 

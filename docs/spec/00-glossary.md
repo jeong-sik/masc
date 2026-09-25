@@ -239,6 +239,31 @@ status: reference
   [Keeper_unified_prompt](../../lib/keeper/keeper_unified_prompt.mli),
   [Keeper_prompt](../../lib/keeper/keeper_prompt.mli)
 
+**Ask (질문)**
+: Keeper가 운영자에게 묻는 durable 질문 묶음. `masc_ask`가 만들고,
+  `masc_ask_status`·`masc_ask_withdraw`가 조회·철회하며, 답변은 별도 wake로
+  Keeper에게 돌아간다. 한 ask는 질문 여러 개를 담고, 각 질문은 선택지·자유 텍스트
+  또는 둘 다를 받는다. 질문 id(`q1`, `q2`, ...)와 선택지 id(`c1`, `c2`, ...)는
+  모델이 이름 짓지 않고 위치로 붙는다 — 한 ask 안에서만 유일하면 되고, 나중에
+  어떤 도구도 그 id를 다시 받지 않는다(#38585). 답이 Keeper에게 도달할 때는
+  각 id가 이미 헤더와 라벨로 되돌아가 있고, `masc_ask_status`는 id를 그 옆에
+  함께 적는다. TUI의 자유 텍스트 편집은 같은 q1이 두 ask에 있을 수 있어 ask id로
+  묶는다. **Board Interest**와 달리 사람의 답을 기다리는 일방향 요청이고,
+  **Schedule**의 미래 실행 예약과도 다르다.
+  → [mcp_tool_runtime_ask](../../lib/mcp_tool_runtime_ask.ml),
+  [Keeper_ask](../../lib/keeper/keeper_ask.mli)
+
+**Latched Reason (durable latch 까닭)**
+: Keeper가 durable pause에 들어간 typed 까닭
+  (`Keeper_latched_reason.t`). 현재는 `Operator_paused of { operator_actor }` 하나뿐이고,
+  `operator_actor`는 `Grpc_directive`·`Keeper_down` 둘 중 하나다. 일반적인 turn·
+  provider·task 실패는 관측으로만 남고 이 latch를 만들지 못한다 — 실패는 스케줄링
+  게이트가 아니라 증거다. 폐기되거나 알 수 없는 latch 문자열은 명시적으로 거절한다.
+  **Turn Configuration Error**처럼 registry가 기록하는 실행 실패 원인과는 다른
+  층이다 — 이쪽은 typed lifecycle latch이고, 저쪽은 turn이 typed 구성 오류로
+  끝난 실패 관측이다.
+  → [Keeper_latched_reason](../../lib/keeper_runtime/keeper_latched_reason.mli)
+
 **Board Interest**
 : Keeper가 직접 지목되지 않은 Board post와 comment를
   의미 판정 대상으로 받을 수 있는 주제 선언. `board_interests = []`이면 이
@@ -505,6 +530,8 @@ status: reference
     풀리는 때와, 뒤 후보 가운데 풀리는 순간 앞으로 올라오는 후보가 더 일찍 풀리는 때
     중 빠른 쪽까지다(`walk_rest`). 실패만 한 후보는 기다리게 하지 않는다
     (`Keeper_turn_driver.demote_unavailable_candidates`, RFC-0458 §3.4).
+    실패 증거를 적은 Keeper(recorder)는 다음 사이클에 자기가 표시한 후보를
+    강등하지 않고 선언 자리에서 다시 부른다(RFC-0458 §3.4 rule 5, #38327).
   - 차단 강등: 낡은 blocker를 "이전 차단"으로 낮춰 보여준다. 감추지 않는다
     (`agent-roster.ts`).
   → [Keeper_turn_driver.demote_unavailable_candidates](../../lib/keeper/keeper_turn_driver.ml)
@@ -685,6 +712,17 @@ status: reference
   exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
   런타임 후보 순서와 별개 축이다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
+
+**Max Prompt Bytes (최대 프롬프트 바이트)**
+: MASC 가 클라이언트의 첫 턴에 심는 history(프롬프트)의 바이트 상한
+  (`[models.<이름>].max-prompt-bytes`, `Runtime_schema.model.max_prompt_bytes`).
+  클라이언트는 자기 컨텍스트 창을 스스로 소유하고, 상한을 넘는 seed는 typed
+  terminal로 거절한다 — 이 상한이 없으면 keeper는 그 거절로 한도를 한 번에
+  29분 걸리는 시도마다 하나씩 배워야 했다(2026-08-24). Codex 모델에 선언된
+  10 MiB(10485760)는 MASC 추정이 아니라 app-server가 요구하는 벤더 자체 한도다
+  (#38740). **닫힌 quota 창**(provider 가 매기는 사용량)과는 다른 층이다 — 이쪽은
+  MASC 가 보내는 프롬프트 크기의 상한이고, 저쪽은 provider 측 사용량 제한이다.
+  → [Runtime_schema.model](../../lib/runtime/runtime_schema.mli)
 
 **Attempt Dispatch (시도 파견 여부)**
 : Keeper turn 실행 중 후보 순서(`Runtime Candidate Order`)의 각 런타임 후보를 시도할 때,
@@ -1417,9 +1455,17 @@ status: reference
     링크를 해석하지 않고 순수 어휘(lexical prefix)로만 비교한다. 그래서 추가 루트 아래에서
     밖을 가리키는 심볼릭 링크는 이 검사가 막지 못한다. 엔드포인트가 이 머신이면 추가 루트는 링크를
     풀어 보는 작업 디렉터리(`workdir`)보다 느슨하고, 실제 경계는 엔드포인트 계정의 권한이다. 기본값은 빈 목록(`[]`)이다.
+  - **읽기 확장**: #38631 부터 `Read`와 읽기 전용 검색은 이 선언 루트를 Execute 가 이름 짓는
+    방식과 같이 엔드포인트 자기 경로로 읽는다(`Keeper_sandbox_remote_lane.declared_endpoint_path`).
+    판정 순서는 **자기 트리 먼저** — Keeper 작업 디렉터리 안 경로는 그 뜻을 그대로 두고, 그 밖에서
+    거절된 절대 경로만 선언 루트와 대조한다. Docker·MicroVM Keeper는 루트를 선언하지 않으므로
+    언제나 `None`이다. 엔드포인트 경로(`Declared_endpoint_file`)인데 이 Keeper 의 읽기가 원격 레인을
+    타지 않으면 `declared_endpoint_path_needs_remote_lane: …` 오류 문장으로 거절한다. 쓰기는 여전히 Keeper 의
+    playground 안에만 머문다.
   → [Sandbox_target](../../lib/exec/sandbox_target.mli),
   [Exec_policy_paths](../../lib/exec_policy/exec_policy_paths.mli),
-  [Exec_ssh_endpoint](../../lib/runtime/exec_ssh_endpoint.mli)
+  [Exec_ssh_endpoint](../../lib/runtime/exec_ssh_endpoint.mli),
+  [Keeper_sandbox_remote_lane](../../lib/keeper/keeper_sandbox_remote_lane.mli)
 
 **Worktree**
 : 한 repository 안에서 branch 작업을 격리하는 Git worktree.

@@ -87,17 +87,37 @@ let typed_exec_command_present input =
   | None -> false
 ;;
 
-let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_text =
+let route_evidence_json_of_tool_io
+      ~max_output_len
+      ~tool_name
+      ~input
+      ~output_text
+      ~execution_evidence
+  =
   let route_text = route_text_for_evidence output_text in
   let parsed_output =
     match parse_tool_output_json_sanitized route_text with
     | Ok json -> Some json
     | Error _ -> None
   in
-  let route_json =
+  let output_route_json =
     match parsed_output with
     | Some json -> route_candidate_of_output json
     | None -> None
+  in
+  (* A completed Execute keeps [via] and [sandbox_profile] in its execution
+     evidence, which the model does not read (#39035); its output keeps
+     [status]. No route field is in both, so reading the two objects is one
+     record rather than a choice between sources. *)
+  let route_json =
+    match output_route_json, execution_evidence with
+    | None, None -> None
+    | Some json, None | None, Some json -> Some json
+    | Some output, Some evidence ->
+      Some
+        (`Assoc
+            (Option.value ~default:[] (assoc_opt output)
+             @ Option.value ~default:[] (assoc_opt evidence)))
   in
   let command_present =
     Option.is_some (Json_util.assoc_string_opt "cmd" input)

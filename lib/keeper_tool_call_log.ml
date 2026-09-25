@@ -178,12 +178,27 @@ let action_radius_json_for_call =
 
 ;;
 
-let route_evidence_json_of_tool_io ~tool_name ~input ~output_text =
+let route_evidence_json_of_tool_io ~tool_name ~input ~output_text ~execution_evidence =
   Keeper_tool_call_log_route_evidence.route_evidence_json_of_tool_io
     ~max_output_len
     ~tool_name
     ~input
     ~output_text
+    ~execution_evidence
+;;
+
+let execution_evidence_metadata_key = "masc.execution_evidence"
+
+let execution_evidence_metadata fields =
+  `Assoc [ execution_evidence_metadata_key, `Assoc fields ]
+;;
+
+let execution_evidence_of_metadata = function
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt execution_evidence_metadata_key fields with
+     | Some (`Assoc _ as evidence) -> Some evidence
+     | Some _ | None -> None)
+  | Some _ | None -> None
 ;;
 
 type store_state =
@@ -696,6 +711,7 @@ let log_call
       ?typed_result
       ?disposition
       ?file_change_evidence
+      ?execution_evidence
       ?(artifact_refs = [])
       ?composition_tool
       ?skill_reference
@@ -912,6 +928,14 @@ let log_call
             , Keeper_file_change_evidence.to_yojson evidence ) ]
         | None -> []
       in
+      let safe_execution_evidence =
+        Option.map Observability_redact.redact_json_value execution_evidence
+      in
+      let execution_evidence_field =
+        match safe_execution_evidence with
+        | Some evidence -> [ "execution_evidence", evidence ]
+        | None -> []
+      in
       let composition_fields =
         [ "composition_tool", composition_tool
         ; "composition_run_id", composition_run_id
@@ -1023,7 +1047,11 @@ let log_call
       in
       let route_evidence_field =
         match
-          route_evidence_json_of_tool_io ~tool_name ~input:safe_input ~output_text
+          route_evidence_json_of_tool_io
+            ~tool_name
+            ~input:safe_input
+            ~output_text
+            ~execution_evidence:safe_execution_evidence
         with
         | Some evidence -> [ "route_evidence", evidence ]
         | None -> []
@@ -1059,6 +1087,7 @@ let log_call
            @ typed_result_fields
            @ artifact_ref_fields
            @ file_change_evidence_field
+           @ execution_evidence_field
            @ composition_fields
            @ skill_reference_field
            @ composition_execution_field

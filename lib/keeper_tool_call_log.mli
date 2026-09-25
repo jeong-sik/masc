@@ -148,6 +148,7 @@ val route_evidence_json_of_tool_io :
   tool_name:string ->
   input:Yojson.Safe.t ->
   output_text:string ->
+  execution_evidence:Yojson.Safe.t option ->
   Yojson.Safe.t option
 (** [route_evidence_json_of_tool_io] extracts first-class route proof from a
     keeper tool call. Descriptor-backed calls always include descriptor route
@@ -155,9 +156,20 @@ val route_evidence_json_of_tool_io :
     [backend], [sandbox], evaluation-only [eval_tags], and policy labels.
     Runtime route/status fields such as [via], [sandbox_profile],
     [network_mode], [status], and redacted command/cwd/path are added when
-    present. Composition surface tools are not descriptor-backed; their
-    RFC-0386 [tool_kind] is picked up from the tool's own result payload when
-    present. *)
+    present, from the output or, for a completed Execute, from its
+    [execution_evidence]. Composition surface tools are not descriptor-backed;
+    their RFC-0386 [tool_kind] is picked up from the tool's own result payload
+    when present. *)
+
+val execution_evidence_metadata : (string * Yojson.Safe.t) list -> Yojson.Safe.t
+(** Tool-result metadata carrying a completed Execute's audit fields (shell
+    receipts, sandbox labels, a captured stream's output completeness). The
+    metadata reaches the tool-call hook and never the provider, so these fields
+    are recorded without being sent to the model (#39035). *)
+
+val execution_evidence_of_metadata : Yojson.Safe.t option -> Yojson.Safe.t option
+(** The audit object {!execution_evidence_metadata} put in tool-result
+    metadata, or [None] when the metadata carries none. *)
 
 val init : ?cluster_name:string -> base_path:string -> unit -> unit
 (** [init ?cluster_name ~base_path ()] creates the cluster-aware Dated_jsonl
@@ -223,6 +235,7 @@ val log_call :
   ?disposition:
     (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition ->
   ?file_change_evidence:Keeper_file_change_evidence.t ->
+  ?execution_evidence:Yojson.Safe.t ->
   ?artifact_refs:Tool_output.artifact_ref list ->
   ?composition_tool:string ->
   ?skill_reference:Skill_reference.t ->
@@ -283,6 +296,10 @@ val log_call :
     typed plan executor; readers must not reconstruct them from [tool_use_id]
     or tool-name strings. [file_change_evidence] is producer-owned typed data,
     persisted independently of the truncated opaque [output] preview.
+    [execution_evidence] is a completed Execute's audit object from
+    {!execution_evidence_of_metadata}, recorded as [execution_evidence] after
+    the same secret redaction as [input]; the model's [output] carries only the
+    unusual parts of it.
     Explicit [artifact_refs] and [typed_result]'s retained artifacts require a
     synchronous append even without a callback; an unavailable store or failed
     append raises rather than losing their receipt in the preview queue.

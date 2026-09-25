@@ -205,6 +205,7 @@ val make_hooks :
   ?on_tool_executed:(tool_name:string ->
                      input:Yojson.Safe.t ->
                      output_text:string ->
+                     execution_evidence:Yojson.Safe.t option ->
                      success:bool ->
                      duration_ms:float -> provider:string ->
                      typed_outcome:Keeper_tool_outcome.t option -> unit) ->

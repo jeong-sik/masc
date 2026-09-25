@@ -238,9 +238,11 @@ let make_hooks
         fun ~response:_ -> ())
     ?(on_tool_executed :
         tool_name:string -> input:Yojson.Safe.t -> output_text:string ->
+        execution_evidence:Yojson.Safe.t option ->
         success:bool -> duration_ms:float -> provider:string ->
         typed_outcome:Keeper_tool_outcome.t option -> unit =
-        fun ~tool_name:_ ~input:_ ~output_text:_ ~success:_ ~duration_ms:_ ~provider:_ ~typed_outcome:_ -> ())
+        fun ~tool_name:_ ~input:_ ~output_text:_ ~execution_evidence:_ ~success:_
+          ~duration_ms:_ ~provider:_ ~typed_outcome:_ -> ())
     ?tool_result_commit_required
     ?on_tool_result_ready
     ?(trajectory_acc : Trajectory.accumulator option)
@@ -598,12 +600,17 @@ let make_hooks
            outcome comes from the result's [_meta] instead -- the
            [Tool_outcome_declaration] the handler attached to its result -- so a
            tool that declares [Progress] is read as such and one that declares
-           nothing stays [None]; nothing is reconstructed from content. *)
-        let output_text, typed_outcome =
+           nothing stays [None]; nothing is reconstructed from content.
+           A completed Execute's audit fields travel the same way: the model
+           reads [content], the ledger row also gets [execution_evidence]
+           (#39035). *)
+        let output_text, typed_outcome, execution_evidence =
           match output with
           | Ok { Agent_core.Types.content; _meta; _ } ->
-            content, Keeper_tool_outcome_metadata.declared _meta
-          | Error { Agent_core.Types.message; _ } -> (message, None)
+            ( content
+            , Keeper_tool_outcome_metadata.declared _meta
+            , Keeper_tool_call_log.execution_evidence_of_metadata _meta )
+          | Error { Agent_core.Types.message; _ } -> (message, None, None)
         in
         let input_keys = tool_input_keys_for_log input in
         let outcome, out_len = match output with
@@ -743,6 +750,7 @@ let make_hooks
              ?disposition:
                (Keeper_tool_call_log.consume_disposition ~invocation ())
              ?file_change_evidence
+             ?execution_evidence
              ~artifact_refs:(retained_artifacts @ Keeper_tool_call_log.peek_file_change_artifact_refs ~invocation ())
              ~duration_ms
              ~model:(current_keeper_model !meta_ref)
@@ -859,6 +867,7 @@ let make_hooks
              ~tool_name
              ~input
              ~output_text
+             ~execution_evidence
              ~success:(outcome = Tool_result.Ok)
              ~duration_ms:summary.duration_ms
              ~provider:summary.provider

@@ -65,8 +65,8 @@ let parse_error_to_string = function
     Printf.sprintf "%s.%s is not a string" (dotted path) field
   | Invalid_reference { path; value } ->
     Printf.sprintf
-      "%s.reference %S is not repository:tag (a lowercase repository, a tag of \
-       letters, digits, '_', '.', '-', no digest)"
+      "%s.reference %S is not repository:tag (a tag after the last ':', \
+       letters, digits, '.', '_', '-', '/', ':' only, not starting with '-')"
       (dotted path) value
   | Shipped_build { name } ->
     Printf.sprintf "shipped image %S contains a host build" name
@@ -93,85 +93,27 @@ let name_error ~field value =
           from sandbox-images.toml; the catalog says which build that name is."
          field value)
 
-(* OCI's limit on a tag's length. *)
-let max_tag_length = 128
-
-(* Docker's path component is an alphanumeric word followed by zero or more
-   separator + word pairs. A separator is '.', '_', '__', or one or more '-'.
-   Checking components separately also rejects empty components and '..'. *)
-let lower_alnum = function 'a' .. 'z' | '0' .. '9' -> true | _ -> false
-
-let valid_path_component component =
-  let length = String.length component in
-  let rec word i =
-    if i < length && lower_alnum component.[i] then word (i + 1)
-    else if i = length then true
-    else separator i
-  and separator i =
-    let next =
-      match component.[i] with
-      | '.' -> i + 1
-      | '_' when i + 1 < length && component.[i + 1] = '_' -> i + 2
-      | '_' -> i + 1
-      | '-' ->
-        let rec dashes j =
-          if j < length && component.[j] = '-' then dashes (j + 1) else j
-        in
-        dashes i
-      | _ -> length
-    in
-    next < length && lower_alnum component.[next] && word next
-  in
-  length > 0 && lower_alnum component.[0] && word 0
-
-let valid_registry_host host =
-  let labels = String.split_on_char '.' host in
-  let valid_label label =
-    let length = String.length label in
-    length > 0
-    && lower_alnum label.[0]
-    && lower_alnum label.[length - 1]
-    && String.for_all (fun c -> lower_alnum c || c = '-') label
-  in
-  List.for_all valid_label labels
-
-let valid_registry_component component =
-  match String.split_on_char ':' component with
-  | [ host ] -> valid_registry_host host
-  | [ host; port ] ->
-    valid_registry_host host
-    && String.length port > 0
-    && String.for_all (function '0' .. '9' -> true | _ -> false) port
-  | _ -> false
-
-let valid_repository repository =
-  match String.split_on_char '/' repository with
-  | [] -> false
-  | [ component ] -> valid_path_component component
-  | first :: rest ->
-    let registry =
-      String.contains first ':' || String.contains first '.' || String.equal first "localhost"
-    in
-    (if registry then valid_registry_component first else valid_path_component first)
-    && List.for_all valid_path_component rest
-
-(* [repository:tag]. The tag is the part after the last ':', and cannot hold
-   '/', which distinguishes it from a registry port. The repository follows
-   Docker's component and optional registry grammar. A digest reference is
-   refused: a catalog entry names a build by its tag. *)
+(* [repository:tag], checked only as far as the value's two uses need: it is
+   written between TOML quotes and passed as one argv word to an image
+   store's CLI. So: no leading '-' (it would read as a flag), only characters
+   that need no quoting, and a nonempty tag after the last ':' that holds no
+   '/' (so a registry port is not taken for a tag). '@' is not allowed, which
+   refuses a digest reference. Whether the image exists is the store's answer
+   at promote, not this parser's. *)
 let valid_reference value =
+  let safe = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | '-' | '/' | ':' -> true
+    | _ -> false
+  in
   match String.rindex_opt value ':' with
   | None -> false
   | Some colon ->
-    let repository = String.sub value 0 colon in
     let tag = String.sub value (colon + 1) (String.length value - colon - 1) in
-    let tag_start = function 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true | _ -> false in
-    let tag_char c = tag_start c || (match c with '.' | '-' -> true | _ -> false) in
-    valid_repository repository
+    colon > 0
+    && value.[0] <> '-'
     && String.length tag > 0
-    && String.length tag <= max_tag_length
-    && tag_start tag.[0]
-    && String.for_all tag_char tag
+    && (not (String.contains tag '/'))
+    && String.for_all safe value
 
 let is_reference = valid_reference
 
@@ -260,7 +202,8 @@ let resolve t ~name ~store =
      | Some pin -> Resolved pin
      | None -> Not_built_on_host { name; store })
 
-let file_name = Common.sandbox_image_catalog_file_name
+let shipped_file_name = "sandbox-images.toml"
+let file_name = "sandbox-image-builds.toml"
 
 type load_error =
   | Unreadable of { path : string; detail : string }

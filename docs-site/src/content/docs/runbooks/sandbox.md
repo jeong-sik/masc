@@ -34,10 +34,11 @@ start.
 
 ## The sandbox image
 
-MASC ships no image. A Keeper names one in `sandbox_image` by its name in the
-host's image catalog, `<base-path>/.masc/config/sandbox-images.toml`: `base`
-for a Keeper that builds nothing, `ocaml` for one that builds MASC. The catalog
-records, per image store (Docker's, or a microVM runtime's own), which build
+MASC ships no image. A Keeper names one in `sandbox_image` by a name the
+binary ships in `config/sandbox-images.toml`: `base` for a Keeper that builds
+nothing, `ocaml` for one that builds MASC. This host's builds for those names
+are in `<base-path>/.masc/config/sandbox-image-builds.toml`, which records, per
+image store (Docker's, or a microVM runtime's own), which build
 each name is on this host. `masc setup` builds `base` and promotes it when the
 catalog has no `base` build for the store it sets up.
 

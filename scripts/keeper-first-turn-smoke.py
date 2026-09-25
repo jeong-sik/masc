@@ -412,7 +412,7 @@ def run(args):
             # A Keeper names a catalog image; this host's catalog makes the
             # image under test the build `base` starts from.
             store = 'docker' if args.backend == 'docker' else 'nerdctl_kata'
-            (base / '.masc' / 'config' / 'sandbox-images.toml').write_text(
+            (base / '.masc' / 'config' / 'sandbox-image-builds.toml').write_text(
                 f'[images.base.{store}]\nreference = "{args.image}"\n')
             if args.backend == 'nerdctl_kata':
                 source = Path(args.guest_shim).resolve(strict=True)

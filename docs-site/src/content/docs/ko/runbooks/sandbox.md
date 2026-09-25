@@ -34,9 +34,10 @@ Keeper 가 띄울 microVM 런타임이 없습니다.
 ## 샌드박스 이미지
 
 MASC 는 이미지를 같이 배송하지 않습니다. Keeper 는 `sandbox_image` 에 이미지
-이름을 적습니다. 이름은 이 호스트의 이미지 목록
-`<base-path>/.masc/config/sandbox-images.toml` 에 있는 것이어야 합니다. 아무것도
-빌드하지 않는 Keeper 는 `base`, MASC 를 빌드하는 Keeper 는 `ocaml` 입니다. 목록은
+이름을 적습니다. 이름은 바이너리에 든 `config/sandbox-images.toml` 에 있는 것이어야
+합니다. 아무것도 빌드하지 않는 Keeper 는 `base`, MASC 를 빌드하는 Keeper 는
+`ocaml` 입니다. 이 호스트의 빌드 목록
+`<base-path>/.masc/config/sandbox-image-builds.toml` 은
 이미지 저장소(Docker, 또는 microVM 런타임마다 따로 있는 저장소)별로 각 이름이 이
 호스트에서 어떤 빌드인지 적어 둡니다. `masc setup` 은 설정하는 저장소에 `base`
 빌드가 목록에 없으면 빌드해서 목록에 올립니다(promote).

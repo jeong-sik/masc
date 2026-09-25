@@ -3255,7 +3255,7 @@ let sandbox_image_change_catalog ~base_path change =
   let ( let* ) = Result.bind in
   let config_root = sandbox_image_config_root base_path in
   let* shipped =
-    match Embedded_config.read Keeper_sandbox_image_catalog.file_name with
+    match Embedded_config.read Keeper_sandbox_image_catalog.shipped_file_name with
     | Some shipped -> Ok shipped
     | None ->
       Error "sandbox-image: missing embedded config/sandbox-images.toml"
@@ -3327,8 +3327,8 @@ let sandbox_image_promote_exit base_path runtime name reference =
        else
          Error
            (Printf.sprintf
-              "sandbox-image: %S is not repository:tag (a lowercase repository and \
-               a tag; not a digest reference, not starting with '-')"
+              "sandbox-image: %S is not repository:tag (a tag after the last ':'; \
+               not a digest reference, not starting with '-')"
               reference)
      in
      let* runtime = runtime in

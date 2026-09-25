@@ -95,7 +95,7 @@ sys.exit(int(os.environ['TEST_EXIT']))
 
 
 class SandboxImageCatalogCliTest(unittest.TestCase):
-    """promote records a tag the chosen store holds in <base>/.masc/config/sandbox-images.toml."""
+    """promote records a tag the chosen store holds in <base>/.masc/config/sandbox-image-builds.toml."""
 
     def run_cli(self, root, base, *args, inspect_exit=0, config_dir=None):
         env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ.get('PATH', ''),
@@ -137,7 +137,7 @@ sys.exit(0)
             self.install_fake_stores(root, 'container')
             base = root / 'workspace'
             (base / '.masc' / 'config').mkdir(parents=True)
-            catalog = base / '.masc' / 'config' / 'sandbox-images.toml'
+            catalog = base / '.masc' / 'config' / 'sandbox-image-builds.toml'
 
             first = self.run_cli(root, base, 'promote', 'base', general, '--runtime', 'apple_container')
             self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
@@ -185,7 +185,7 @@ sys.exit(0)
             self.install_fake_stores(root, 'nerdctl', 'msb')
             base = root / 'workspace'
             (base / '.masc' / 'config').mkdir(parents=True)
-            catalog = base / '.masc' / 'config' / 'sandbox-images.toml'
+            catalog = base / '.masc' / 'config' / 'sandbox-image-builds.toml'
 
             kata = self.run_cli(root, base, 'promote', 'base', 'masc-sandbox:kata',
                                 '--runtime', 'nerdctl_kata')
@@ -217,8 +217,8 @@ sys.exit(0)
                                   '--runtime', 'apple_container', config_dir=config_dir)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn('[images.base.apple_container]',
-                          (config_dir / 'sandbox-images.toml').read_text())
-            self.assertFalse((base / '.masc' / 'config' / 'sandbox-images.toml').exists())
+                          (config_dir / 'sandbox-image-builds.toml').read_text())
+            self.assertFalse((base / '.masc' / 'config' / 'sandbox-image-builds.toml').exists())
 
 if __name__ == '__main__':
     unittest.main()

@@ -60,16 +60,9 @@ let first_path_segment rel =
   | Some i -> String.sub rel 0 i
   | None -> rel
 
-(* The sandbox image name catalog ships inside the binary and is read from
-   there every time. The config root's file of the same name holds this
-   host's promoted builds, and its parser refuses a name with no build, so a
-   copy of the shipped names there makes a fresh host's catalog unreadable. *)
-let sandbox_image_catalog_file_name = "sandbox-images.toml"
-
 let seeds_into_fresh_config_root rel =
   let first_segment = first_path_segment rel in
   (not (String.equal (Filename.basename rel) "dune"))
-  && (not (String.equal rel sandbox_image_catalog_file_name))
   && (not (String.equal first_segment keepers_runtime_dirname))
   && not (String.equal first_segment default_keepers_dirname)
 

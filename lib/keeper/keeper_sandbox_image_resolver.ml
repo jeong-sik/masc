@@ -65,7 +65,7 @@ let resolve ~config_root ~store declared =
   | Some name when String.equal (String.trim name) "" -> Error Not_declared
   | Some name ->
     let loaded =
-      match Embedded_config.read Catalog.file_name with
+      match Embedded_config.read Catalog.shipped_file_name with
       | None ->
         Error
           (Catalog.Unreadable

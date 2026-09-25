@@ -42,10 +42,6 @@ val default_keepers_dirname : string
 (** Config-tree directory holding the roster a fresh workspace starts with.
     Distinct from {!keepers_runtime_dirname}, which is where it lands. *)
 
-val sandbox_image_catalog_file_name : string
-(** The shipped sandbox image name catalog, embedded from [config/], and the
-    config root's file of this host's promoted builds. *)
-
 val seeds_into_fresh_config_root : string -> bool
 (** Whether a distribution config asset may be written into a fresh runtime
     config root {b verbatim}. Takes an asset path relative to the embedded
@@ -56,10 +52,8 @@ val seeds_into_fresh_config_root : string -> bool
     [false] for keeper manifests — the roster is declared per workspace, and the
     shipped examples autoboot into a sandbox the host may not have — for
     {!default_keepers_dirname}, which seeds under a different name and so is
-    routed through {!fresh_config_root_keeper_seed_target}, for [dune], a
-    build input rather than runtime config, and for
-    {!sandbox_image_catalog_file_name}, whose shipped copy is read from the
-    binary and whose config-root copy holds builds, not names. *)
+    routed through {!fresh_config_root_keeper_seed_target}, and for [dune], a
+    build input rather than runtime config. *)
 
 val fresh_config_root_keeper_seed_target : string -> string option
 (** Where a {!default_keepers_dirname} asset lands in a fresh config root:

@@ -273,6 +273,22 @@ let test_unparsable_start_has_no_duration () =
     ]
 ;;
 
+(* A start after [now] is a clock that ran backwards: it has no duration, not a
+   zero one. A start at or before [now] measures from it. *)
+let test_backwards_clock_has_no_duration () =
+  match D.parse_iso8601_opt now with
+  | None -> failwith "fixture timestamp must parse"
+  | Some started_at ->
+    let status = D.InProgress { assignee = owner; started_at = now } in
+    (match Workspace_task_classify.task_duration_ms_since ~now:(started_at -. 1.0) status with
+     | None -> ()
+     | Some ms -> failwith (Printf.sprintf "a start after now must have no duration, got %dms" ms));
+    (match Workspace_task_classify.task_duration_ms_since ~now:(started_at +. 2.0) status with
+     | Some 2000 -> ()
+     | Some ms -> failwith (Printf.sprintf "two seconds after the start must read 2000ms, got %dms" ms)
+     | None -> failwith "a start before now must have a duration")
+;;
+
 (* A verdict is not an agent action. There is no [task_action] constructor for it,
    so the string surface must refuse "approve"/"reject" by naming the authority
    rather than reporting an unknown action — an agent that asks is told why. *)
@@ -577,6 +593,7 @@ let () =
   test_verification_preserves_original_start_time ();
   test_awaiting_metrics_use_original_start_time ();
   test_unparsable_start_has_no_duration ();
+  test_backwards_clock_has_no_duration ();
   test_verdict_is_not_an_agent_action ();
   test_verdict_requires_authority_and_reason ();
   test_verdict_rejects_stale_verification_id ();

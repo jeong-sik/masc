@@ -99,6 +99,12 @@ val next_actions_hint
     lands in the same average as a real one, so callers emit no duration. *)
 val task_started_at_unix : Masc_domain.task_status -> float option
 
+(** Milliseconds from the start of the work in [status] to [now]. [None] when
+    there is no start ({!task_started_at_unix}) or the start lies after
+    [now]: a clock that ran backwards has no duration to report, and a zero
+    in its place would land in the same average as a real one. *)
+val task_duration_ms_since : now:float -> Masc_domain.task_status -> int option
+
 val task_transition_details
   :  from_status:Masc_domain.task_status
   -> to_status:Masc_domain.task_status

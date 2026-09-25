@@ -670,9 +670,7 @@ let transition_task_outcome_r
                 kind
                 detail);
           let phase_duration_ms () =
-            Option.map
-              (fun started_at -> max 0 (int_of_float ((now_ts -. started_at) *. 1000.0)))
-              (task_started_at_unix task.task_status)
+            task_duration_ms_since ~now:now_ts task.task_status
           in
           let duration_ms =
             if completes_task
@@ -1054,13 +1052,9 @@ let commit_verdict_r
                          ~to_status:new_status
                          ?notes:(if notes = "" then None else Some notes)
                          ?duration_ms:
-                           (Option.map
-                              (fun started_at ->
-                                 max
-                                   0
-                                   (int_of_float
-                                      ((Time_compat.now () -. started_at) *. 1000.0)))
-                              (task_started_at_unix task.task_status))
+                           (task_duration_ms_since
+                              ~now:(Time_compat.now ())
+                              task.task_status)
                          ()
                      in
                      match base with

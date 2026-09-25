@@ -223,6 +223,13 @@ let task_started_at_unix status =
   | Masc_domain.Cancelled _ -> None
 ;;
 
+let task_duration_ms_since ~now status =
+  Option.bind (task_started_at_unix status) (fun started_at ->
+    if now >= started_at
+    then Some (int_of_float ((now -. started_at) *. 1000.0))
+    else None)
+;;
+
 let task_transition_details
       ~from_status
       ~to_status

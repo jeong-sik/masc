@@ -957,25 +957,25 @@ let test_execute_summary_is_the_first_command_line () =
     "argv joins onto one line"
     (Some "git status")
     (execute_summary approved_execute_input);
-  let script text =
+  let command text =
     `Assoc
       [ "schema", `String "masc.keeper_gate.request.v1"
-      ; "input", `Assoc [ "script", `String text; "cwd", `String "/repo" ]
+      ; "input", `Assoc [ "command", `String text; "cwd", `String "/repo" ]
       ; "cwd", `String "/repo"
       ]
   in
   Alcotest.check
     summary
-    "a script is named by its first command, blank lines skipped"
+    "a multi-line command is named by its first line, blank lines skipped"
     (Some "cd repos/masc && git log --oneline -8 -- test/dune")
     (execute_summary
-       (script "\n  cd repos/masc && git log --oneline -8 -- test/dune\n  dune build\n"));
+       (command "\n  cd repos/masc && git log --oneline -8 -- test/dune\n  dune build\n"));
   let long_line = "echo " ^ String.make 300 'a' in
   Alcotest.check
     summary
     "the line is not cut by the store"
     (Some long_line)
-    (execute_summary (script (long_line ^ "\nsecond")))
+    (execute_summary (command (long_line ^ "\nsecond")))
 ;;
 
 let test_network_read_summary_is_the_leaf_argument () =

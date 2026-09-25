@@ -121,12 +121,6 @@ let percentile_sorted_float (sorted : float array) (p : float) : float =
     let frac = rank -. Float.of_int lo in
     sorted.(lo) *. (1.0 -. frac) +. sorted.(hi) *. frac
 
-let keeper_cost_metric_row_is_event (json : Yojson.Safe.t) : bool =
-  match Keeper_metrics_record.kind_of_json json with
-  | Some Keeper_metrics_record.Turn -> true
-  | Some Keeper_metrics_record.Heartbeat
-  | None -> false
-
 let keeper_decisions_dashboard_surface = "/api/v1/dashboard/keeper-decisions"
 
 let k2_feed_limit limit = max 1 (min 200 limit)

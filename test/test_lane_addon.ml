@@ -39,7 +39,7 @@ let fake_output : Types.output = {
                complete=true; detail=None}];
 }
 
-let make_backend () =
+let make_backend ?observe_step () =
   let state = { calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
                 recovery=ref [] } in
   let backend : Runtime.For_testing.backend = {
@@ -52,8 +52,9 @@ let make_backend () =
         action_schema = (fun () -> None);
         act = (fun ~arguments:_ -> Error "read-only fixture");
         observe = (fun ~binding:_ ~sources:_ ->
-          Hashtbl.replace state.calls instance_id
-            (1 + Option.value ~default:0 (Hashtbl.find_opt state.calls instance_id));
+          let call = 1 + Option.value ~default:0 (Hashtbl.find_opt state.calls instance_id) in
+          Hashtbl.replace state.calls instance_id call;
+          Option.iter (fun step -> step call) observe_step;
           match package.id with
           | "hang" -> Eio.Promise.await released; Error "observer stopped"
           | "error" -> Error "observation unavailable"
@@ -115,7 +116,7 @@ let detach config id = ignore (unwrap (dispatch config Runtime.Detach ["instance
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 let await_phase clock config id expected = await clock (fun () -> phase (instance config id) = expected)
-let with_fixture ?acquire f =
+let with_fixture ?acquire ?observe_step f =
   let dir = Filename.temp_file "lane-runtime-" ".fixture" in
   Sys.remove dir; Unix.mkdir dir 0o700;
   Fun.protect ~finally:(fun () -> remove_tree dir) (fun () ->
@@ -126,7 +127,7 @@ let with_fixture ?acquire f =
           Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
               Runtime.For_testing.reset ();
-              let state, backend = make_backend () in
+              let state, backend = make_backend ?observe_step () in
               let backend = match acquire with None -> backend | Some acquire -> {backend with acquire} in
               Runtime.For_testing.with_backend backend (fun () ->
                 f env sw (Workspace.default_config dir) dir state))))))
@@ -387,7 +388,109 @@ let test_capture_cannot_rewrite_detach_failure () =
     detach config id;
     await_phase clock config id "detached")
 
+(* An observer bound to the workspace machine. The fake backend's capture
+   answers without reading the machine; only the wake path is under test. *)
+let attach_machine_watcher config dir =
+  unwrap (dispatch config Runtime.Attach
+    ["manifest_path",`String (manifest dir "machine-observer");"run_id",`String "machine";
+     "binding",`Assoc ["sources",`List [`Assoc
+       ["kind",`String "msx_capture";"source_id",`String "machine"]]]])
+  |> text "instance_id"
+
+(* Hold the second capture after a route wakes the watcher. A second route
+   notification must now remain visible as pending or coalesced, with no timing
+   guess about how long the worker needs to finish its capture. *)
+let with_held_second_observation f =
+  let entered, enter = Eio.Promise.create () in
+  let released, release = Eio.Promise.create () in
+  let release_sent = ref false in
+  let release_once () =
+    if not !release_sent then (release_sent := true; Eio.Promise.resolve release ())
+  in
+  let observe_step call =
+    if call = 2 then (Eio.Promise.resolve enter (); Eio.Promise.await released)
+  in
+  with_fixture ~observe_step (fun env sw config dir state ->
+    Fun.protect ~finally:release_once (fun () ->
+      f env sw config dir state ~entered ~release:release_once))
+
+let check_no_extra_machine_wake config id =
+  let current = instance config id in
+  check bool "no second observation is pending" false
+    (member "observation_pending" current |> Yojson.Safe.Util.to_bool);
+  check Alcotest.int "no second wake was coalesced" 0
+    (int "coalesced_wakes" current)
+
+let test_human_press_wakes_machine_watchers_once () =
+  with_held_second_observation (fun env _sw config dir _state ~entered ~release ->
+    let clock = Eio.Stdenv.clock env in
+    let msx = function Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
+    ignore (msx (Msx_lane.load ~ledger_dir:(Filename.concat dir "machine") ~roms_dir:None
+      ~cart_path:None ~disk_path:None));
+    Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ())) (fun () ->
+      let id = attach_machine_watcher config dir in
+      let sequence () = int "observation_seq" (instance config id) in
+      await clock (fun () -> sequence () = 1);
+      let press body =
+        fst (Server_routes_http_routes_msx.press_response ~config ~who:"operator" ~body) in
+      check bool "a key the machine lacks is refused" true
+        (press {|{"keys":["not-a-key"]}|} = `Bad_request);
+      check bool "a human press is accepted" true (press {|{"keys":["space"]}|} = `OK);
+      Eio.Promise.await entered;
+      check_no_extra_machine_wake config id;
+      release ();
+      await clock (fun () -> sequence () = 2);
+      check Alcotest.int "one accepted press is one observation, the refusal none" 2 (sequence ());
+      detach config id;
+      await_phase clock config id "detached"))
+
+let test_human_load_wakes_machine_watchers_once () =
+  with_held_second_observation (fun env _sw config dir _state ~entered ~release ->
+    let clock = Eio.Stdenv.clock env in
+    ignore (Msx_lane.eject ());
+    Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ())) (fun () ->
+      let id = attach_machine_watcher config dir in
+      let sequence () = int "observation_seq" (instance config id) in
+      await clock (fun () -> sequence () = 1);
+      let load body =
+        fst (Server_routes_http_routes_msx.load_response ~config
+          ~agent_name:"operator" ~body) in
+      check bool "a missing cartridge is refused" true
+        (load {|{"roms_dir":"","cart":"missing.rom"}|} = `Bad_request);
+      check bool "a human BIOS-only load is accepted" true
+        (load {|{"roms_dir":""}|} = `OK);
+      Eio.Promise.await entered;
+      check_no_extra_machine_wake config id;
+      release ();
+      await clock (fun () -> sequence () = 2);
+      check Alcotest.int "one accepted load is one observation, the refusal none" 2
+        (sequence ());
+      detach config id;
+      await_phase clock config id "detached"))
+
+let test_activity_from_another_domain_reaches_the_owner () =
+  with_fixture (fun env _sw config dir _state ->
+    let clock = Eio.Stdenv.clock env in
+    let id = attach_machine_watcher config dir in
+    let sequence () = int "observation_seq" (instance config id) in
+    await clock (fun () -> sequence () = 1);
+    let caller_owned_root =
+      Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
+        let owned = Eio_context.root_switch_on_current_domain () in
+        Runtime.notify_activity ~config ~activity:Lane_addon_sources.Msx_changed;
+        owned) in
+    check bool "the notification came from off the owner domain" false caller_owned_root;
+    await clock (fun () -> sequence () = 2);
+    detach config id;
+    await_phase clock config id "detached")
+
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "a human MSX press wakes machine watchers exactly once" `Quick
+    test_human_press_wakes_machine_watchers_once;
+  test_case "a human MSX load wakes machine watchers exactly once" `Quick
+    test_human_load_wakes_machine_watchers_once;
+  test_case "activity from another domain is delivered on the owner domain" `Quick
+    test_activity_from_another_domain_reaches_the_owner;
   test_case "a capture yielding to detach preserves cleanup ownership" `Quick
     test_capture_cannot_rewrite_detach_failure;
   test_case "activity probes exact file captures while explicit observes remain stateful" `Quick

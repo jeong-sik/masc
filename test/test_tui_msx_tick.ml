@@ -10,14 +10,17 @@ let inline ?(width = 1) ?(height = 1) revision rgb =
 let retained ?(width = 1) ?(height = 1) revision =
   `Assoc (["kind", `String "retained"] @ reference ~width ~height revision)
 let frame ?(width = 1) ?(height = 1) ?(player = "alice") number pixels =
-  `Assoc ["loaded", `Bool true; "number", `Int number; "width", `Int width;
+  `Assoc ["loaded", `Bool true; "number", `Int number;
+    "change_count", `Int number; "incarnation", `String "msx-test";
+    "width", `Int width;
     "height", `Int height; "mode", `String "GRAPHIC4";
     "cartridge", `Null; "disk", `String "game.dsk";
     "players", `List [`Assoc ["who", `String player]]; "pixels", pixels]
 let auth token = ["Authorization", "Bearer " ^ token; "X-MASC-Agent", "operator"]
 let known body = Yojson.Safe.Util.member "known_pixels" (Yojson.Safe.from_string body)
 let require = function Ok value -> value | Error e -> fail e
-let loaded = function Some frame -> frame | None -> fail "no frame"
+let loaded = function Some frame, Some _ -> frame | None, None -> fail "no frame"
+  | Some _, None | None, Some _ -> fail "frame and mark disagree"
 let failure = function Error _ -> () | Ok _ -> fail "failure returned a successful frame"
 let fetch ?(host = "localhost") ?(port = 8935) ?(headers = auth "a") cache request =
   Client.fetch cache ~host ~port ~headers ~request
@@ -29,11 +32,15 @@ let test_retained_metadata () =
     Ok (frame 1 (inline tag "rgb"))) |> require |> loaded in
   let allocated = Gc.allocated_bytes () in
   for number = 2 to 101 do
-    let current = fetch cache (fun ~body ->
+    let observation = fetch cache (fun ~body ->
       check bool "advertise exact pixels" true (known body = `Assoc (reference tag));
-      Ok (frame ~player:"bob" number (retained tag))) |> require |> loaded in
+      Ok (frame ~player:"bob" number (retained tag))) |> require in
+    check (option int) "tick mark follows its frame" (Some number)
+      (Option.map (fun (mark : Masc_tui_machine_live.mark) -> mark.count) (snd observation));
+    let current = loaded observation in
     check int "clock is fresh" number current.msx_number;
-    check (list string) "players are fresh" ["bob"] current.msx_players;
+    check (option (list string)) "players are fresh" (Some ["bob"])
+      (Option.map (fun (m : Masc_tui_types.msx_meta) -> m.msx_players) current.msx_meta);
     check bool "retained pixels reuse immutable decoded bytes" true (current.msx_rgb == initial.msx_rgb)
   done;
   Printf.printf "100 retained MSX tick client responses allocate %.0f bytes (includes test assertions)\n%!"
@@ -48,7 +55,7 @@ let test_retained_metadata () =
     Ok (frame ~width:2 103 (retained ~width:2 (revision 'b')))) |> require |> loaded in
   check bool "changed pixels are then retained" true (changed.msx_rgb == repeated.msx_rgb);
   check bool "ejection clears display" true
-    ((fetch cache (fun ~body:_ -> Ok (`Assoc ["loaded", `Bool false])) |> require) = None);
+    ((fetch cache (fun ~body:_ -> Ok (`Assoc ["loaded", `Bool false])) |> require) = (None, None));
   failure (fetch cache (fun ~body ->
     check bool "ejection clears advertised pixels" true (known body = `Null);
     Ok (frame 104 (retained tag))))
@@ -58,6 +65,10 @@ let test_rejected_responses () =
   let bad_responses =
     [ Error "HTTP 401"; Error "HTTP 503"; Error "connection closed";
       Ok (`List []); Ok (`Assoc ["loaded", `Bool true]);
+      Ok (`Assoc ["loaded", `Bool true; "number", `Int 2; "width", `Int 1;
+        "height", `Int 1; "mode", `String "GRAPHIC4"; "cartridge", `Null;
+        "disk", `Null; "players", `List [];
+        "pixels", inline tag "rgb"]);
       Ok (frame 2 (retained (revision 'b')));
       Ok (frame ~width:2 2 (retained tag));
       Ok (frame 2 (inline tag "too long"));

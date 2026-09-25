@@ -118,10 +118,13 @@ let edit_message ?clock ~token ~channel_id ~message_id ~content () =
 
 (* Truncate a string to [max_len], appending "…" when truncated.
    Separate from [truncate] above which truncates to Discord message
-   limit with redaction. *)
+   limit with redaction. The kept prefix is at most [max_len - 1] bytes and
+   ends between UTF-8 characters: Discord answers 400 to a body that is not
+   valid UTF-8 ([Discord_rest_client.split_at_codepoint]), so a byte cut
+   inside a Hangul syllable lost the whole code or mermaid embed. *)
 let truncate_to ~max_len s =
   if String.length s <= max_len then s
-  else String.sub s 0 (max_len - 1) ^ "…"
+  else String_util.utf8_prefix ~max_bytes:(max_len - 1) s ^ "…"
 
 (* ── Rich block delivery helpers ─────────────────────────────────── *)
 

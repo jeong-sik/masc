@@ -152,6 +152,12 @@ val exact_operation
   -> Keeper_chat_operation.Operation_id.t
   -> (Keeper_chat_operation.t option, command_error) result
 
+val has_newer_original_queued
+  :  base_path:string
+  -> keeper_name:string
+  -> operation_id:Keeper_chat_operation.Operation_id.t
+  -> (bool, command_error) result
+
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
 val direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, command_error) result
 val defer_direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->

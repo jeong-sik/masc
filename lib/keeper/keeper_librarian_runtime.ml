@@ -590,6 +590,7 @@ let cli_failure_shows_size (failure : Keeper_lane_cli_oneshot.failure) =
   match failure with
   | Keeper_lane_cli_oneshot.Invalid_json_output _
   | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> true
+  | Keeper_lane_cli_oneshot.Unknown_runtime _
   | Keeper_lane_cli_oneshot.Not_an_official_client _
   | Keeper_lane_cli_oneshot.Execution_failed _ -> false
 ;;
@@ -659,18 +660,35 @@ let fit_continuity ~capacity ~base_path ~keeper_id ~input prepared =
     if memory_fits then pass_fits (Continuity_state_pass continuity) else Ok false)
 ;;
 
+(* The librarian's flow callbacks all answer [Ok ()], so its callback error
+   type is empty and the renderer's callback arms are unreachable by type,
+   not by a label that stands in for a lost cause. *)
+type no_callback_error = |
+
+let no_callback_error_to_string : no_callback_error -> string = function
+  | _ -> .
+;;
+
 (* Whether the walk sent a generation request, over every slot it visited.
    Reading the slot that ended the walk only reported "none" for a walk whose
    earlier slot sent its request, failed and advanced (#38450). A token-count
    measurement is not a generation request and is not counted. *)
-let exact_execution_error ~semantic_rejections error =
+let exact_execution_error
+      ~semantic_rejections
+      (error : no_callback_error Exact_output.flow_execution_error)
+  =
   let outward_effect =
     let evidence, _ = flow_evidence_and_final_verdict error in
     match Exact_output.flow_evidence_generation_dispatch evidence with
     | Exact_output.No_generation_dispatch -> No_outward_effect
     | Exact_output.Generation_dispatch_started -> Outward_effect_started
   in
-  let detail = Keeper_exact_flow_detail.flow_execution_error_detail error in
+  let detail =
+    Exact_output.flow_execution_error_to_string
+      ~callback_error_to_string:no_callback_error_to_string
+      ~raw_response_to_string:Keeper_exact_flow_detail.raw_response_excerpt
+      error
+  in
   { outward_effect
   ; walk_shows_size =
       walk_shows_size_flow error

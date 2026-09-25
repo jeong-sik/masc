@@ -293,6 +293,21 @@ let utf8_prefix ~max_bytes s =
     if len <= max_bytes then s
     else String.sub s 0 (utf8_char_boundary s max_bytes)
 
+(* Walk forward from the byte cut past continuation bytes (0b10xxxxxx). The
+   walk also runs when [s] already fits: a ring-buffer tail can begin inside a
+   character that the ring overwrote. Valid UTF-8 never starts with a
+   continuation byte, so such input comes back unchanged. *)
+let utf8_suffix ~max_bytes s =
+  if max_bytes <= 0 then ""
+  else
+    let len = String.length s in
+    let rec first_boundary i =
+      if i < len && (Char.code s.[i] land 0xC0) = 0x80 then first_boundary (i + 1)
+      else i
+    in
+    let start = first_boundary (max 0 (len - max_bytes)) in
+    if start = 0 then s else String.sub s start (len - start)
+
 (* U+FFFD REPLACEMENT CHARACTER: what Unicode designates for a malformed
    sequence a decoder had to give up on. *)
 let utf8_replacement_char = "\xEF\xBF\xBD"

@@ -114,19 +114,27 @@ let test_remote_ssh_keeper_reaches_ssh_dispatch_branch () =
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
   setup @@ fun ~config ~meta ~playground ->
   with_dispatch_override @@ fun () ->
-  let raw =
-    Keeper_tool_execute_runtime.handle_tool_execute ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:None
+  let outcome =
+    Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:None
       ~config ~meta ~args:(args ~cwd:playground) ()
   in
+  let raw = outcome.raw_output in
   let fields =
     match Yojson.Safe.from_string raw with
     | `Assoc fields -> fields
     | _ -> fail ("execute response is not an object: " ^ raw)
   in
+  let evidence_fields =
+    match Keeper_tool_call_log.execution_evidence_of_metadata outcome.metadata with
+    | Some (`Assoc fields) -> fields
+    | Some _ | None -> fail ("completed Execute carried no execution evidence: " ^ raw)
+  in
   check bool "remote_ssh keeper dispatches" true
     (List.assoc_opt "ok" fields = Some (`Bool true));
   check bool "dispatch went through the SSH branch" true
-    (List.assoc_opt "via" fields = Some (`String "remote_ssh"))
+    (List.assoc_opt "via" evidence_fields = Some (`String "remote_ssh"));
+  check bool "the route label is evidence, not model text" true
+    (List.assoc_opt "via" fields = None)
 ;;
 
 let () =

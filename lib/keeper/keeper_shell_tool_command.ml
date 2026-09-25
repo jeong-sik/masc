@@ -119,7 +119,7 @@ let caller ~(dispatch : dispatch) ~(descriptor : Keeper_tool_descriptor.t)
   match dispatch ~descriptor ~args:args_json with
   | None ->
     Sandbox_target.Transport_failed
-      { output_files = None; reason = "shell command: the tool runtime returned no execution"
+      { failure = Sandbox_target.Lane_unavailable; output_files = None; reason = "shell command: the tool runtime returned no execution"
       ; stdout = ""
       ; stderr = "shell command: the tool runtime returned no execution"
       }

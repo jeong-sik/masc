@@ -44,11 +44,14 @@ let append_script = "set -e; d=$(dirname \"$1\"); mkdir -p \"$d\"; cat >> \"$1\"
    script that writes checks, on the endpoint and against the directory it
    writes in, that it is physically under one of the roots given after the
    target ([$2]...), each root resolved the same way:
-   - the deepest existing ancestor is checked before [mkdir -p], so no
-     directory is created through a link;
-   - the script then [cd]s into the directory, checks where it is, and names
-     the file only as [./name] from there, so every later step acts on the
-     directory the check saw;
+   - the script [cd]s into the deepest existing ancestor and checks where it
+     is; each missing directory is then made as [./part] of the checked
+     directory, entered, and checked again, so a link swapped in after a
+     check cannot make a directory outside the roots; [cd -P] enters
+     [./part] from the directory the shell is in, where a logical [cd] would
+     look [$PWD/part] up again from [/];
+   - the file is named only as [./name] from the last checked directory, so
+     every later step acts on the directory the check saw;
    - a captured path carries a marker through [$(...)], which would otherwise
      drop a trailing newline from a name, and the target's directory and
      name are split by parameter expansion, which keeps it;
@@ -79,16 +82,24 @@ let declared_root_prelude =
     ; "}"
     ; "refuse() { printf '%s\\n' \"$1\" >&2; exit " ^ escape ^ "; }"
     ; "unresolved() { printf '%s\\n' \"$1\" >&2; exit " ^ unresolved ^ "; }"
+    ; "check_here() {"
+    ; "  p=$(pwd -P && echo .); p=${p%??}"
+    ; "  under_root \"$p\" \"$@\" || refuse resolves_outside_declared_roots"
+    ; "}"
     ; "any=0; for r in \"$@\"; do if phys \"$r\"; then any=1; fi; done"
     ; "[ \"$any\" = 1 ] || unresolved declared_root_unavailable"
     ; "d=${t%/*}; [ -n \"$d\" ] || d=/; b=${t##*/}"
     ; "a=$d; while [ ! -d \"$a\" ]; do a=${a%/*}; [ -n \"$a\" ] || a=/; done"
-    ; "phys \"$a\" || unresolved directory_unavailable"
-    ; "under_root \"$phys_out\" \"$@\" || refuse resolves_outside_declared_roots"
-    ; "mkdir -p \"$d\""
-    ; "cd \"$d\""
-    ; "p=$(pwd -P && echo .); p=${p%??}"
-    ; "under_root \"$p\" \"$@\" || refuse resolves_outside_declared_roots"
+    ; "cd -P \"$a\" || unresolved directory_unavailable"
+    ; "check_here \"$@\""
+    ; "rest=${d#\"$a\"}; rest=${rest#/}"
+    ; "while [ -n \"$rest\" ]; do"
+    ; "  case \"$rest\" in */*) part=${rest%%/*}; rest=${rest#*/};; *) part=$rest; rest=;; esac"
+    ; "  case \"$part\" in ''|.|..) refuse invalid_directory_component;; esac"
+    ; "  [ -d \"./$part\" ] || mkdir \"./$part\""
+    ; "  cd -P \"./$part\""
+    ; "  check_here \"$@\""
+    ; "done"
     ; "if [ -L \"./$b\" ]; then refuse target_is_symbolic_link; fi"
     ; "if [ -d \"./$b\" ]; then refuse target_is_directory; fi"
     ]
@@ -101,7 +112,23 @@ let declared_root_overwrite_script =
      mv -f -T \"$w\" \"./$b\""
 ;;
 
-let declared_root_append_script = declared_root_prelude ^ "\ncat >> \"./$b\""
+(* Append never opens the target by name for writing: [>>] would follow a
+   link put at [./name] after the prelude's check, and would write into an
+   inode that a hard link shares with a file outside the roots. The current
+   bytes are copied beside it with [cp -P], which copies a link as a link and
+   is then refused, the tail is appended to the copy, and [mv -T] renames it
+   over the name, as Overwrite does. The appended file is a new inode with the
+   old mode; a writer holding the old file open keeps writing to the old
+   inode. *)
+let declared_root_append_script =
+  declared_root_prelude
+  ^ "\nw=$(mktemp ./.masc-write.XXXXXX); \
+     if [ -e \"./$b\" ] || [ -L \"./$b\" ]; then \
+     cp -P -p --remove-destination \"./$b\" \"$w\"; \
+     if [ -L \"$w\" ]; then rm -f \"$w\"; refuse target_is_symbolic_link; fi; \
+     else chmod 0644 \"$w\"; fi; \
+     cat >> \"$w\"; mv -f -T \"$w\" \"./$b\""
+;;
 
 (* A patch source that is not a regular file exits with this code, chosen
    here, so the handler tells "nothing to patch" from a failed [cat]. *)

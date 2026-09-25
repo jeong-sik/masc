@@ -74,7 +74,9 @@ val declared_root_write_argv :
     target is neither a symbolic link nor a directory. It exits
     {!declared_root_unresolved_exit} when no root, or a directory on the way,
     can be resolved. The roots are resolved when it runs: a root that is itself
-    a link is followed, and a file with other hard links is the same file. *)
+    a link is followed. Both modes rename a new file over the target, Append
+    after copying the current bytes into it, so neither writes into an inode
+    the target shares through a hard link. *)
 
 val declared_root_escape_exit : int
 val declared_root_unresolved_exit : int

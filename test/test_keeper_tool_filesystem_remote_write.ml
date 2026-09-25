@@ -546,13 +546,18 @@ let test_declared_root_escape_is_refused_as_the_callers () =
 
 (* The declared-root payloads, run here as the endpoint would run them,
    against real symbolic links. *)
-let run_payload ~stdin argv =
+let run_payload ?env ~stdin argv =
   match argv with
   | "sh" :: rest ->
     let stdin_path = Filename.temp_file "masc-declared-" ".stdin" in
     save stdin_path stdin;
     let fd = Unix.openfile stdin_path [ Unix.O_RDONLY ] 0 in
-    let pid = Unix.create_process "sh" (Array.of_list ("sh" :: rest)) fd Unix.stdout Unix.stderr in
+    let args = Array.of_list ("sh" :: rest) in
+    let pid =
+      match env with
+      | None -> Unix.create_process "sh" args fd Unix.stdout Unix.stderr
+      | Some env -> Unix.create_process_env "sh" args env fd Unix.stdout Unix.stderr
+    in
     Unix.close fd;
     let _, status = Unix.waitpid [] pid in
     Sys.remove stdin_path;
@@ -612,6 +617,102 @@ let test_declared_payload_does_not_follow_a_link_out_of_the_root () =
           ~endpoint_path:(Filename.concat root "absent/f.txt")
           ~roots:[ Filename.concat root "absent" ])
      = Unix.WEXITED Keeper_tool_filesystem_remote_write.declared_root_unresolved_exit)
+;;
+
+let executable_on_path name =
+  let dirs = String.split_on_char ':' (Option.value ~default:"" (Sys.getenv_opt "PATH")) in
+  match
+    List.find_opt
+      (fun dir ->
+        let candidate = Filename.concat dir name in
+        Sys.file_exists candidate && not (Sys.is_directory candidate))
+      dirs
+  with
+  | Some dir -> Filename.concat dir name
+  | None -> fail (name ^ " is not on PATH")
+;;
+
+(* An environment whose PATH runs [command] through a shim: the shim runs
+   [swap], a shell line, then the real [command]. The payload's first
+   [command] after its check is where the test changes the tree under it. *)
+let env_with_shim ~command ~swap =
+  let dir = temp_dir () in
+  let shim = Filename.concat dir command in
+  save shim
+    (Printf.sprintf "#!/bin/sh\n%s\nexec %s \"$@\"\n" swap
+       (Filename.quote (executable_on_path command)));
+  Unix.chmod shim 0o755;
+  let path = dir ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH") in
+  Array.append
+    [| "PATH=" ^ path |]
+    (Array.of_list
+       (List.filter
+          (fun binding -> not (String.starts_with ~prefix:"PATH=" binding))
+          (Array.to_list (Unix.environment ()))))
+;;
+
+(* What the endpoint's tree looks like can change between the payload's
+   check and its write. A file outside the root keeps its bytes, and no
+   directory appears there, whichever moment the change lands at. *)
+let test_declared_payload_does_not_write_through_a_later_link () =
+  let root = temp_dir () in
+  let app = Filename.concat root "app" in
+  let outside = Filename.concat root "outside" in
+  Unix.mkdir app 0o700;
+  Unix.mkdir outside 0o700;
+  let victim = Filename.concat outside "out.txt" in
+  save victim "original";
+  let payload ?env mode path content =
+    run_payload ?env ~stdin:content
+      (Keeper_tool_filesystem_remote_write.declared_root_write_argv ~mode
+         ~endpoint_path:(Filename.concat app path) ~roots:[ app ])
+  in
+  let escaped = Unix.WEXITED Keeper_tool_filesystem_remote_write.declared_root_escape_exit in
+  let overwrite = Keeper_tool_filesystem_remote_write.Replace_whole in
+  let append = Keeper_tool_filesystem_remote_write.Append_tail in
+  let q = Filename.quote in
+  (* A hard link shares its inode with a file outside the root, so an append
+     in place would change the outside bytes. *)
+  let shared = Filename.concat outside "shared.txt" in
+  save shared "original";
+  Unix.link shared (Filename.concat app "hard.txt");
+  check bool "append to a hard link" true (payload append "hard.txt" "+x" = Unix.WEXITED 0);
+  check string "the hard-linked outside file keeps its bytes" "original" (read_file shared);
+  check string "the name holds the appended bytes" "original+x"
+    (read_file (Filename.concat app "hard.txt"));
+  (* The target turns into a link after the check, before the append. *)
+  let grow = Filename.concat app "grow.txt" in
+  save grow "original";
+  let env =
+    env_with_shim ~command:"mktemp"
+      ~swap:
+        (Printf.sprintf "[ -L %s ] || { rm -f %s; ln -s %s %s; }" (q grow) (q grow) (q victim)
+           (q grow))
+  in
+  check bool "append to a target that turned into a link" true
+    (payload ~env append "grow.txt" "+x" = escaped);
+  check string "the link's target keeps its bytes" "original" (read_file victim);
+  check bool "no temporary file is left" false
+    (Array.exists
+       (fun name -> String.starts_with ~prefix:".masc-write." name)
+       (Sys.readdir app));
+  (* A directory on the way is swapped for a link while the missing ones are
+     made under it. *)
+  let sub = Filename.concat app "sub" in
+  let moved = Filename.concat app "sub.moved" in
+  Unix.mkdir sub 0o700;
+  let env =
+    env_with_shim ~command:"mkdir"
+      ~swap:
+        (Printf.sprintf "[ -L %s ] || { mv %s %s; ln -s %s %s; }" (q sub) (q sub) (q moved)
+           (q outside) (q sub))
+  in
+  check bool "a new directory under a directory swapped for a link" true
+    (payload ~env overwrite "sub/new/deep.txt" "d" = Unix.WEXITED 0);
+  check bool "no directory appears outside the root" false
+    (Sys.file_exists (Filename.concat outside "new"));
+  check string "the bytes land in the directory that was checked" "d"
+    (read_file (Filename.concat moved "new/deep.txt"))
 ;;
 
 (* An approval is spent only on the Gate input it was given. Replay rebuilds
@@ -685,6 +786,8 @@ let () =
               test_declared_root_escape_is_refused_as_the_callers
           ; test_case "the declared payload does not follow a link out of the root" `Quick
               test_declared_payload_does_not_follow_a_link_out_of_the_root
+          ; test_case "the declared payload does not write through a later link" `Quick
+              test_declared_payload_does_not_write_through_a_later_link
           ; test_case "patch without a source is a workflow rejection" `Quick
               test_patch_without_a_source_is_a_workflow_rejection
           ; test_case "endpoint failure is a runtime failure" `Quick

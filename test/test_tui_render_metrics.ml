@@ -516,14 +516,24 @@ let test_transport_block_reads_the_feed () =
   check bool "the feed, count after the state word" true
     (contains text "Runtime event feed: live 85");
   state.observer <-
-    Types.Observer_closed { reason = "eof"; at = 0.; events = 3 };
+    Types.Observer_closed_after_live { reason = "eof"; at = 0.; events = 3 };
   let closed =
     String.concat "\n"
       (List.map Masc_tui_theme.strip_sgr
          (Render_metrics.render_section_fleet ~cols:160 state))
   in
   check bool "a closed feed keeps its count and says why" true
-    (contains closed "Runtime event feed: closed 3 (eof)")
+    (contains closed "Runtime event feed: closed 3 (eof)");
+  state.observer <-
+    Types.Observer_closed_before_answer
+      { reason = "connection refused"; at = 0. };
+  let refused =
+    String.concat "\n"
+      (List.map Masc_tui_theme.strip_sgr
+         (Render_metrics.render_section_fleet ~cols:160 state))
+  in
+  check bool "a feed refused while opening has no count, only why" true
+    (contains refused "Runtime event feed: failed to open (connection refused)")
 ;;
 
 (* The TUI session block is where this process's own log is read. The log is

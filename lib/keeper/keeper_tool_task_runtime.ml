@@ -856,19 +856,13 @@ let handle_keeper_task_tool_with_outcome
           { scope_excluded_count
           ; _
           } ->
-        (* No goal narrows the claim pool any more, so nothing can have been
-           excluded for being outside one. The field stays until its readers
-           are retired with the rest of the scope surface. *)
-        let all_goals_excluded = false in
         Some
           ( "typed_outcome"
           , Keeper_tool_outcome.to_json
               (Keeper_tool_outcome.No_progress
                  { reason =
                      Keeper_tool_outcome.No_eligible_tasks
-                       { scope_excluded_count
-                       ; all_goals_excluded
-                       }
+                       { scope_excluded_count }
                  }) )
       | Workspace.Claim_next_no_unclaimed ->
         Some

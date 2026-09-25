@@ -61,7 +61,7 @@ Use the repository's focused validation wrapper.
 let configured_snapshot ~source_id ~anchor ~path documents =
   let config_text =
     Printf.sprintf
-      "[skills]\nresource-read-max-bytes = 65536\n[[skills.sources]]\nid = %S\nanchor = %S\npath = %S\naccess = \"read-only\"\n"
+      "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = %S\nanchor = %S\npath = %S\naccess = \"read-only\"\n"
       source_id
       anchor
       path
@@ -351,7 +351,7 @@ let test_projection_names_equal_turn_surface_authority () =
        check bool "composition schema bytes are exact and positive" true
          (Option.value ~default:0 composition.tool_schema_bytes > 0)
      | profiles -> failf "expected two Skill profiles, got %d" (List.length profiles));
-    check (option int) "resource bound follows frozen snapshot" (Some 65536)
+    check (option int) "resource bound follows frozen snapshot" (Some 16384)
       surface.skill_resource_read_max_bytes;
     check string
       "surface names the frozen Skill snapshot"
@@ -933,7 +933,7 @@ let test_runtime_capability_suppression_is_explicit_and_empty () =
 let shadowed_guide_snapshot () =
   let config_text =
     "[skills]\n\
-     resource-read-max-bytes = 65536\n\
+     resource-read-max-bytes = 16384\n\
      [[skills.sources]]\n\
      id = \"primary-catalog\"\n\
      anchor = \"base-path\"\n\

@@ -28,34 +28,37 @@ memory `feedback_keeper-reaction-chain-break-analysis-2026-05-04` 의 9 terminat
 ### 3.1 SSE 채널
 
 ```
-GET /api/dashboard/execute-output/<keeper_id>?since_ms=<ts>
+GET /api/dashboard/execute-output/<keeper_id>
 Accept: text/event-stream
 ```
 
-이벤트:
+첫 이벤트는 `snapshot`(완료된 작업이 없으면 `no_task`)이고, 그 뒤로 live 이벤트가 이어져요.
 
 ```json
-{
-  "kind": "snapshot" | "line",
-  "ts_ms": 1777981200000,
-  "keeper_id": "sangsu",
-  "lines": [ShellLine...]    // kind=snapshot
-  "line": ShellLine           // kind=line (single)
-}
+{ "kind": "snapshot", "keeper_id": "sangsu", "lines": [ShellLine...], "last_seq": 1042, ... }
+{ "kind": "task_opened", "keeper_id": "sangsu", "seq": 1043, "task_id": "..." }
+{ "kind": "line", "keeper_id": "sangsu", "seq": 1044, "line": ShellLine }
+{ "kind": "task_closed", "keeper_id": "sangsu", "seq": 1045, "status": {...} }
+{ "kind": "gap", "keeper_id": "sangsu", "missing_from_seq": 1046, "missing_to_seq": 1070, "missing_count": 25 }
 ```
+
+- 서버는 keeper마다 번호 붙은 로그 하나를 둬요. `line`, `task_opened`, `task_closed`가 한 번호 체계를 나눠 써요.
+- live 이벤트는 snapshot의 `last_seq` 다음 번호부터 시작해요. 그래서 같은 줄이 두 번 오지 않아요.
+- 구독자가 로그 보관 한도보다 뒤처지면, 서버에서도 사라진 번호 범위를 `gap` 한 번으로 알리고 가장 오래 남은 번호부터 이어가요.
 
 ### 3.2 ShellLine
 
 ```json
 {
+  "seq": 1044,
   "ts_ms": 1777981200123,
-  "stream": "stdout" | "stderr" | "cmd" | "system",
+  "stream": "stdout" | "stderr",
   "text": "...",
-  "ansi": true | false           // ANSI escape sequences 보존 여부
+  "ansi": false
 }
 ```
 
-ring buffer 크기: 5000 lines (env `MASC_EXECUTE_OUTPUT_RING_BUFFER=5000`).
+로그 보관 한도: keeper마다 이벤트 5000개(`Dashboard_execute_output.event_log_capacity`).
 
 ### 3.3 Drawer client
 

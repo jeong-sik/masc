@@ -208,6 +208,10 @@ val coordinator_status_row :
     style covers [status] alone; the badge keeps its own colour. *)
 
 val count_frame_lines : Buffer.t -> int
+(** The rows a buffer holds, for a surface that lays the rest of its height
+    out around a block it has already drawn. A last line with no newline after
+    it counts as a row: the terminal draws it, and a footer is written that
+    way. *)
 
 val slash_hint_text : restore:string -> string -> string option
 (** What the slash word at the start of a draft is -- the command it names,
@@ -284,10 +288,6 @@ val boxed_surface_chrome_rows : int
 
 val selected_ask_question :
   Masc_tui_types.state -> Masc.Tui_decode.ask_question option
-
-val rows_drawn : Buffer.t -> int
-(** The rows a block has drawn into its own buffer, for a surface that lays
-    the rest of its height out around it. *)
 
 val draw_ask_question :
   Buffer.t ->

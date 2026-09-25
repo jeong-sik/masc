@@ -43,7 +43,7 @@ let reads_prim ~binding_name ~fields =
    That second row used to be spelled as a literal ["\\n"]: backslash and n,
    printed to the operator as those two characters, because a real newline
    would have drawn a row nobody had counted. The surface draws the block into
-   a buffer and reads its height back with [rows_drawn], so a row it draws is
+   a buffer and reads its height back with [count_frame_lines], so a row it draws is
    a row it counted. A height declared beside the drawing instead of read off
    it is how the footer floats a row: the rows above the queue were once
    subtracted twice, in [boxed_surface_chrome_rows] and again as the Gate lane
@@ -58,7 +58,7 @@ let test_the_detail_height_is_read_off_the_line_it_draws () =
   Alcotest.(check int) "the surface builds the detail line once" 1
     (calls "approval_detail_line");
   Alcotest.(check int) "and reads every block's height off what it drew" 4
-    (calls "rows_drawn")
+    (calls "count_frame_lines")
 
 (* A window reading is a position, not a key. The footer fitter reads the
    hints as key items and gives them up from the back, so a reading packed

@@ -1529,7 +1529,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
             ask_block (fun b -> draw_ask_context b cols ~row:selected)
           in
           let plan =
-            Ask_layout.plan ~budget ~spent:(rows_drawn buf)
+            Ask_layout.plan ~budget ~spent:(count_frame_lines buf)
               ~question_heights:(List.map snd question_blocks)
               ~question_cursor:state.ask_question_cursor
               ~context_height:why_rows ~other_asks:(count - 1)
@@ -1584,7 +1584,8 @@ let draw_ask_questions buf cols (state : state) ~budget =
    the width of the pane, so at eighty columns the two cannot share a row.
 
    Built here rather than inline so the surface draws it into the block it
-   then measures with [rows_drawn], which is where its height comes from.
+   then measures with [count_frame_lines], which is where its height comes
+   from.
    Until 2026-08-31 the second row was spelled as a literal ["\\n"] --
    backslash and n, printed as those two characters -- because a real newline
    would have drawn a row nobody counted. *)
@@ -1968,7 +1969,7 @@ let render_approvals (state : state) =
      row, and the last row here is the footer: it floated two rows above the
      composer at every terminal height, and the queue drew two blank rows in
      place of two approvals. *)
-  let head_rows = rows_drawn buf in
+  let head_rows = count_frame_lines buf in
   (* The rows under the queue: the frame's closing row, the selected row's
      detail, the metadata rows, and the payload row beneath them. Drawn now so
      their height is the same measured fact -- a metadata row that breaks into
@@ -1984,7 +1985,9 @@ let render_approvals (state : state) =
   let footer_buf = Buffer.create 256 in
   Buffer.add_string footer_buf
     (footer_line state ~max_cells:cols ~hints:(question_hints state));
-  let around_rows = head_rows + rows_drawn below_buf + rows_drawn footer_buf in
+  let around_rows =
+    head_rows + count_frame_lines below_buf + count_frame_lines footer_buf
+  in
   (* What the questions may spend. The block is drawn last, and a surface that
      overruns loses its final rows, so an unbudgeted question list does not
      push the approval queue off the screen -- it pushes itself off, cursor and
@@ -1995,7 +1998,7 @@ let render_approvals (state : state) =
      fact rather than a second estimate that can disagree with the drawing. *)
   let ask_buf = Buffer.create 1024 in
   draw_ask_questions ask_buf cols state ~budget:ask_budget;
-  let ask_rows = rows_drawn ask_buf in
+  let ask_rows = count_frame_lines ask_buf in
   let approval_body_rows = max 1 (rows - around_rows - ask_rows) in
 
   let approvals_error =

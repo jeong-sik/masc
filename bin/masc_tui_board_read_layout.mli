@@ -20,8 +20,13 @@ val get : t -> source:source -> render:(unit -> string list * string list) -> ro
 (** Exact immutable source equality; refreshed equal data can reuse rows, while
     edits, role changes, width or styling changes replace them. Failed rendering
     never publishes a partial result. *)
-val body_count : rows -> int
-val comment_count : rows -> int
+val body_line_count : rows -> int
+val comment_line_count : rows -> int
+(** How many wrapped rows each half holds. A comment becomes an identity row,
+    a timestamp row and one row per wrapped line, so this is never the number
+    of comments -- the Board header draws that beside the post, and a reader
+    who meets both numbers has to be told which is which. *)
+
 val body_line : rows -> int -> string
 val comment_line : rows -> int -> string
 (** Indexed access to the selected viewport, independent of scroll depth. *)

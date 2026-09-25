@@ -8,6 +8,8 @@ trace.csexp
 *.merlin
 .merlin
 _opam/
+# Dune generates this local vendor package stub; it is not an opam source package.
+/ocaml-msx.opam
 
 # Editor
 .vscode/

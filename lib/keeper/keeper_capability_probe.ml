@@ -524,7 +524,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
      | Some rt ->
        (match rt.Runtime.execution with
         | Runtime_execution.Agent_core _ | Runtime_execution.Claude_code _
-        | Runtime_execution.Codex_app_server _ ->
+        | Runtime_execution.Codex_app_server _ | Runtime_execution.Muse_cli _ ->
           Error (Not_antigravity_lane (Runtime_execution.label rt.Runtime.execution))
         | Runtime_execution.Antigravity_cli exec ->
           let schemas =

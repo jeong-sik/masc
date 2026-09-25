@@ -721,7 +721,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled
-        ?official_client_continuation ?required_native_posture ~runtime_id ~keeper_name
+        ~official_client_continuation ~required_native_posture ~runtime_id ~keeper_name
         ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt ~tools ~initial_messages
         ~model_input_projection ~on_transmitted_model_input ~hooks ~context_injector
         ~context ?terminal_effect_state ?on_model_input_window_observation ?carried_front_seed

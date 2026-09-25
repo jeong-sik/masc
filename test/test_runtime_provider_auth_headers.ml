@@ -1494,7 +1494,8 @@ let agent_core_provider_config_or_fail runtime =
   | Runtime_execution.Agent_core provider_config -> provider_config
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Muse_cli _ ->
     fail "expected Agent Core runtime"
 
 let test_dispatch_rejects_missing_declared_env_credential () =
@@ -2226,7 +2227,8 @@ is-default = true
             | Ok (Runtime_execution.Agent_core config) -> config
             | Ok (Runtime_execution.Codex_app_server _
                  | Runtime_execution.Claude_code _
-                 | Runtime_execution.Antigravity_cli _) ->
+                 | Runtime_execution.Antigravity_cli _
+                 | Runtime_execution.Muse_cli _) ->
               fail "HTTP binding selected an official client"
             | Error message -> failf "binding failed: %s" message)
          | _ -> fail "expected one declared binding"

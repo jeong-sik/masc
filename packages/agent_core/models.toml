@@ -2240,6 +2240,37 @@ supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true
 
+# Meta Models
+[[models]]
+# Meta Model API, Standard tier. Every fact dev.meta.ai (checked 2026-09-25):
+# /docs/models (window 1,048,576; text/image/video/audio*/PDF in, text out;
+# muse-spark-1.3 the documented default), /docs/quickstart (base URL,
+# MODEL_API_KEY), /docs/protocols/chat-completions (SSE stream flag),
+# /docs/tool-calling (tool_calls array, parallel default true, tool_choice
+# "auto" ONLY -- "none"/"required"/named are HTTP 400), /docs/pricing-rate-limits
+# (Standard: $1.25 in / $4.25 out / $0.15 cached per 1M). reasoning_effort
+# levels exist (models page) but the wire transport is unprobed, so no
+# reasoning fields -- supports_reasoning stays the preset's false and effort
+# steering waits for a live probe. Caching is priced but server-side with no
+# client knob, so no supports_prompt_caching (the preset's false, as on the
+# DeepSeek rows); the multipliers below still bill cache reads right.
+provider_name = "muse"
+id_prefix = "muse-spark-1.3"
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_image_input = true
+supports_native_streaming = true
+input_per_million = 1.25
+output_per_million = 4.25
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.12
+
 # Cohere Command Models
 [[models]]
 id_prefix = "command-r-plus"

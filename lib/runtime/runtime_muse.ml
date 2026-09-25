@@ -429,11 +429,13 @@ let terminate_spawned_process ~clock proc =
        Log.Runtime_agent.debug "Muse termination signal failed: %s" (Printexc.to_string exn));
     try
       Eio.Time.with_timeout_exn clock process_termination_grace_s (fun () ->
+        (* See read_body: the fold already decided the outcome; this await only reaps. *)
         Eio.Process.await proc |> ignore)
     with
     | Eio.Time.Timeout ->
       (try
          Eio.Process.signal proc Sys.sigkill;
+         (* See above: the turn already ended; this await only reaps the kill. *)
          Eio.Process.await proc |> ignore
        with
        | EioCancel.Cancelled _ as exn -> raise exn
@@ -799,6 +801,7 @@ let serve_usage ~mgr ~clock ~cwd config =
                Log.Runtime_agent.debug
                  "Muse serve stdin close failed: %s"
                  (Printexc.exn_slot_name exn));
+            (* See above: the usage answer is already in hand; this await only reaps. *)
             (try Eio.Process.await proc |> ignore with
              | Eio.Cancel.Cancelled _ as exn -> raise exn
              | exn ->

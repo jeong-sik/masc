@@ -14,7 +14,8 @@ let persist ~base_dir ~keeper_name ~operation_id ~resumed_from ~settlement
       (* The captured native turn distinguishes attempts; JSON framing preserves
          arbitrary provider identifiers without ambiguous string concatenation. *)
       let client = match checkpoint.client_kind with
-        | Codex -> "codex" | Claude_code -> "claude_code" | Antigravity -> "antigravity" in
+        | Codex -> "codex" | Claude_code -> "claude_code" | Antigravity -> "antigravity"
+        | Muse -> "muse" in
       let canonical = Yojson.Safe.to_string (`List (List.map (fun s -> `String s)
         [client; checkpoint.runtime_id; checkpoint.session_id; checkpoint.turn_id])) in
       let* continuation_id = Keeper_chat_delivery_identity.Request_id.of_string

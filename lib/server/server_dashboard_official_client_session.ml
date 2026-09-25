@@ -18,6 +18,7 @@ let client_kind_to_string = function
   | Keeper_official_client_session_store.Codex -> "codex"
   | Claude_code -> "claude_code"
   | Antigravity -> "antigravity"
+  | Muse -> "muse"
 ;;
 
 let failure_to_string =

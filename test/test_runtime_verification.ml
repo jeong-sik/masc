@@ -472,6 +472,7 @@ let test_a_queued_readiness_run_ends_at_the_declared_timeout () =
     | Runtime_execution.Agent_core provider_cfg -> provider_cfg
     | Runtime_execution.Antigravity_cli _
     | Runtime_execution.Claude_code _
+    | Runtime_execution.Muse_cli _
     | Runtime_execution.Codex_app_server _ -> fail "the fixture binding is an HTTP runtime"
   in
   let clock = env#clock in

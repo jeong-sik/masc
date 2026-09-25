@@ -36,7 +36,7 @@ let empty_wake_enqueue_counts =
 type last_success =
   { finished_at : float
   ; held_at : float
-  ; held : Schedule_runner.wake_signal list
+  ; held : Schedule_runner.held list
   }
 
 type snapshot =
@@ -57,6 +57,7 @@ type snapshot =
 
 type held_occurrence =
   { signal : Schedule_runner.wake_signal
+  ; reason : Schedule_runner.hold_reason
   ; observed_at : float
   }
 
@@ -223,11 +224,13 @@ let held_occurrence snapshot ~schedule_instance_id ~schedule_id =
   | None -> None
   | Some { held_at; held; _ } ->
     List.find_opt
-      (fun (signal : Schedule_runner.wake_signal) ->
+      (fun ({ signal; _ } : Schedule_runner.held) ->
          String.equal signal.schedule_instance_id schedule_instance_id
          && String.equal signal.schedule_id schedule_id)
       held
-    |> Option.map (fun signal -> { signal; observed_at = held_at })
+    |> Option.map
+         (fun ({ signal; reason } : Schedule_runner.held) ->
+            { signal; reason; observed_at = held_at })
 ;;
 
 let last_success_at snapshot =
@@ -339,12 +342,13 @@ let snapshot_to_yojson ?now ?stale_after_sec snapshot =
            | None -> []
            | Some { held; _ } ->
              List.map
-               (fun (signal : Schedule_runner.wake_signal) ->
+               (fun ({ signal; reason } : Schedule_runner.held) ->
                   `Assoc
                     [ ( "occurrence_id"
                       , `String (Schedule_occurrence_id.to_string signal.occurrence_id) )
                     ; "schedule_id", `String signal.schedule_id
                     ; "due_at", `Float signal.due_at
+                    ; "reason", Schedule_runner.hold_reason_to_json reason
                     ])
                held) )
     ; ( "stale_after_sec"

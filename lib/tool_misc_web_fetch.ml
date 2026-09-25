@@ -609,7 +609,6 @@ let cache_store key response now =
     Atomic_util.update cache_entries (fun current ->
       Cache_by_key.add key { response; expires_at = now +. ttl } current)
 
-(** Redact transport error detail before the " for " suffix *)
 (* RFC-0189 PR-1b.8 — typed fetch-failure variant. Each arm carries
    the data needed to render an operator-facing message AND a
    [tool_failure_class] tag. This SSOT keeps message formatting (in

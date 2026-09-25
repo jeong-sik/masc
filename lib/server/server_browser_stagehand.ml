@@ -342,9 +342,10 @@ let start ~sw ~env ~base_path =
       Log.Server.info "browser-lane: stagehand has no [browser.stagehand]"
     | Ok { Browser_configuration.stagehand = Some config; _ } ->
       let clock = Eio.Stdenv.clock env in
-      let model =
-        Browser_stagehand_model.create ~net:(Eio.Stdenv.net env) ~clock
-          ~resolve_lane:Browser_stagehand_model.published_lane
+      (* [base_path] is where the lane's official-client CLI slots run. *)
+      let model params =
+        Browser_stagehand_model.create ~net:(Eio.Stdenv.net env) ~clock ~base_path
+          ~resolve_lane:Browser_stagehand_model.published_lane params
       in
       let backend =
         Browser_stagehand_backend.create ~sw ~clock

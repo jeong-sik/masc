@@ -853,11 +853,6 @@ let for_surface = function
           ~help:"available / async runs / receipts / usage / all tools"
       ; b Navigate "J/K" "Skill" ~help:"select a published Skill"
       ; b Navigate "[ / ]" "Keeper" ~help:"change the effective Keeper surface"
-      (* [J/K] selects a published Skill and [e] edits it; this reads what the
-         retained coverage saw of it, drawn under its row. The table named the
-         two that write and not the one that reads. *)
-      ; b Act "Enter" "evidence"
-          ~help:"read the selected Skill's retained evidence under its row"
       ; b Act "c / C" "new Skill"
           ~help:"open $EDITOR on a template for a new Skill; c starts an \
                  instruction Skill, C starts a composition Skill"

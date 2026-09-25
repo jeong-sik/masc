@@ -217,7 +217,10 @@ type stream_event =
       { turn_id : string
       ; model : string
       }
-  | Text_delta of string
+  | Text_delta of
+      { item_id : string option
+      ; delta : string
+      }
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -1141,6 +1144,19 @@ let item_delta_notification ~method_ ~thread_id ~turn_id params =
   else Ok delta
 ;;
 
+(* The agentMessage item an [item/agentMessage/delta] belongs to. It only
+   tells two assistant messages of one turn apart in the live stream, so it
+   stays optional for the reason [item_delta_notification] gives: a frame
+   that omits it or sends it blank streams its delta and names no item. *)
+let agent_message_item_id params =
+  match params with
+  | `Assoc fields ->
+    (match List.assoc_opt "itemId" fields with
+     | Some (`String item_id) when String.trim item_id <> "" -> Some item_id
+     | Some _ | None -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+;;
+
 (* One [TokenUsageBreakdown] of a [thread/tokenUsage/updated] frame. *)
 let token_usage_breakdown stage usage_fields name =
   let* breakdown_json = required_member stage name usage_fields in
@@ -1279,7 +1295,9 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     Error (Unsupported_server_request method_)
   | Notification { method_ = "item/agentMessage/delta" as method_; params } ->
     let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params in
-    emit_stream_event on_stream_event (Text_delta delta);
+    emit_stream_event
+      on_stream_event
+      (Text_delta { item_id = agent_message_item_id params; delta });
     let seen_fallback =
       match seen_fallback with
       | None -> Some delta

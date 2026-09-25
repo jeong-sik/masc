@@ -41,6 +41,8 @@ let enter_atom_count_exceptions =
     "Keeper detail", 0
   ; (* A roster with a cursor and nothing the cursor opens. *)
     "Config / Runtime / Clients", 0
+  ; (* A scrolling reading, not a row list. *)
+    "Config / Tools", 0
   ; (* Two readings a Keeper detail drills into: [j/k] scrolls the text and
        there is no row under a cursor for Enter to open. *)
     "Keepers / Logs", 0
@@ -516,7 +518,7 @@ let test_schedule_update_form_preserves_exact_editable_definition () =
    can drift to any footer at all without a test noticing. *)
 let test_tools_footer_carries_the_keeper_axis () =
   check str "tools names the effective Keeper switch"
-    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [ / ]:Keeper  Enter:evidence  c / C:new Skill  e:edit Skill  Esc:config  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [ / ]:Keeper  c / C:new Skill  e:edit Skill  Esc:config  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Tools)
 
 let test_resources_footer_steps_through_detail () =
@@ -534,6 +536,18 @@ let test_resources_footer_steps_through_detail () =
   check str "the text names scrolling without a row search"
     ("j/k:scroll text" ^ tail ^ meta)
     (Masc_tui_keys.footer_hints_resources ~detail_focus:true)
+
+(* Changes drew a literal in the renderer, and a literal names a fixed set at
+   every width. It named eight of the fourteen keys this surface answers and
+   left out [Left / Esc] -- the way back to the keeper the surface was opened
+   from -- so the only exit an operator could read was [q], which leaves the
+   terminal. The row search went with it, on a surface that has rows for it. *)
+let test_changes_footer_names_the_way_back_and_the_search () =
+  check str "the Changes footer is the table's"
+    "j/k:move  [ / ]:keeper  PgUp/PgDn:page  Home/End:top/bottom  \
+     Right / Enter:written diff  Left / Esc:back  d:tree diff  v:view code  \
+     o:editor  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Changes)
 
 let test_repositories_footer_offers_code_and_git_changes () =
   check str "repositories names the Code and Git changes paths"
@@ -3073,6 +3087,8 @@ let () =
             test_system_logs_footer_names_browser_controls
         ; Alcotest.test_case "Tools carries the Keeper axis" `Quick
             test_tools_footer_carries_the_keeper_axis
+        ; Alcotest.test_case "Changes names the way back and the search" `Quick
+            test_changes_footer_names_the_way_back_and_the_search
         ; Alcotest.test_case "Resources steps through detail" `Quick
             test_resources_footer_steps_through_detail
         ; Alcotest.test_case "Lanes opens standalone runs" `Quick

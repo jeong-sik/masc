@@ -521,7 +521,11 @@ status: reference
   `Retry_after_observed`의 retry class 중 공급자 자체 과부하(HTTP 529, CapacityExhausted 풀)는
   MASC 자체의 슬롯 대기가 아니라 시도한 런타임 후보의 실패(Server_error와 같은 층위)로 분류되며,
   클래스 라벨은 `provider_capacity`다(#38290). 이 실패는 다음 런타임 후보로 walk하며 503 과 같이
-  다음 후보로 넘기고 이 후보를 뒤로 미룬다.
+  다음 후보로 넘기고 이 후보를 뒤로 미룬다. 영수증 `fallback_reason`과 이벤트 에러 `variant`도
+  같은 조건을 같은 `provider_capacity` 이름으로 적는다(#38858). 이 조건의 runtime blocker class 는
+  만드는 곳이 없어 지웠다.
+  `capacity_backpressure`라는 글자는 다른 개념인 provider `timeout_phase`(용량·슬롯을 기다리다
+  끝난 timeout 단계) 라벨로만 남는다. 원문 문자열로 거르는 질의는 필드를 구분해야 한다.
   `ECONNRESET`은 요청을 보낸 뒤(`sent`) 발생한 연결 단절로, 연결 수립 전 거부(`connection_refused`)와
   구분되는 `connection_reset`으로 기록된다(#38518). 재시도 가능 여부·Librarian 크기 판정 제외 등
   처리 정책은 `connection_refused`와 같으나 wire 및 운영자 요약 라벨이 분리된다.
@@ -633,6 +637,10 @@ status: reference
     `Not_reported_since_start`로 명시한다.
   - **TTL 부재**: `resets_at` 시각이 지나도 자동으로 삭제되거나 만료되지 않으며, 더 새로운
     보고가 올 때까지 마지막 수신 기록을 유지한다.
+  - **직접 읽기**: 턴이 없어도 창을 알 수 있게, 서버는 시작할 때 계정마다 한 번 제공자에게
+    직접 묻는다. Codex 는 `account/rateLimits/read`(#38671), `usage-read` 를 선언한 HTTP
+    provider 는 그 URL 로 GET 한 번이다(#38706). `usage-read.refresh-s` 를 선언한 계정은
+    읽기가 끝날 때마다 그 초 뒤에 다시 묻는다(#39144).
   - **Usage Scope와의 구분**: 위의 Usage Scope(MASC가 집계하는 토큰 수의 범위)와 다른 축이다 —
     이쪽은 모델 제공자가 wire로 알려준 자기 계정의 5시간·7일 한도 창이다.
   → [Runtime_provider_usage_window](../../lib/runtime/runtime_provider_usage_window.mli)

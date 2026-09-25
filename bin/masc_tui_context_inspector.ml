@@ -141,11 +141,17 @@ type forecast =
   }
 
 type reading =
-  { turn : (selection, string) result
-  ; provider_input : (provider_input, string) result
-  ; response : (response_turn, string) result
-  ; forecast : (forecast, string) result
-  }
+  | Request_failed of string
+  | Turn_read_failed of
+      { detail : string
+      ; forecast : (forecast, string) result
+      }
+  | Turn_read of
+      { selection : selection
+      ; provider_input : (provider_input, string) result
+      ; response : (response_turn, string) result
+      ; forecast : (forecast, string) result
+      }
 
 type tab =
   | Composition

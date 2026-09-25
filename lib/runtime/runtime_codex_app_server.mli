@@ -195,7 +195,14 @@ type stream_event =
       { turn_id : string
       ; model : string
       }
-  | Text_delta of string
+  | Text_delta of
+      { item_id : string option
+      ; delta : string
+      }
+      (** One [item/agentMessage/delta]. [item_id] is its [itemId], the
+          agentMessage item the piece belongs to, so a reader can tell two
+          assistant messages of one turn apart. [None] when the frame omits
+          it or sends it blank; the delta still streams (#28010). *)
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string

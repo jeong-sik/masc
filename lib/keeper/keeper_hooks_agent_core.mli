@@ -202,6 +202,8 @@ val make_hooks :
   ?current_runtime_attempt:(unit -> (string * string * int) option) ->
   ?current_attempt_usage:(unit -> attempt_usage option) ->
   ?on_after_turn_response:(response:Agent_core.Types.api_response -> unit) ->
+  ?on_agent_core_response_usage:(response_id:string -> ordinal:int -> model:string ->
+                                 Agent_core.Types.api_usage option -> unit) ->
   ?on_tool_executed:(tool_name:string ->
                      input:Yojson.Safe.t ->
                      output_text:string ->

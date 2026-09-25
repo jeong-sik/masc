@@ -343,10 +343,17 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
     ~on_usage_report ~position on_event =
   (* The thread's running count, reported under the app-server turn id (the
      identity the completion hook also writes for a Codex turn) and the
-     thread it counts. The app-server's own total is kept: an overflow reset
-     reports zero counts with the window size there. *)
-  let report_usage ~thread_id ~turn_id ~model
-      (thread_total : Runtime_codex_app_server.token_usage) =
+     thread it counts. The app-server's own total is kept beside it; for a
+     context-window fill it is the window Codex wrote in place of the count. *)
+  let report_usage ~thread_id ~turn_id ~model (frame : Runtime_codex_app_server.frame_usage) =
+    let count, vendor_total_tokens =
+      match frame with
+      | Runtime_codex_app_server.Counted { thread_total; last = _ } ->
+        ( Keeper_client_usage_report.Running_count (api_usage_of_token_usage thread_total)
+        , thread_total.total_tokens )
+      | Runtime_codex_app_server.Context_window_filled { context_window } ->
+        Keeper_client_usage_report.Count_replaced, context_window
+    in
     Option.iter
       (fun report ->
          report
@@ -356,8 +363,8 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
            ; conversation_id = thread_id
            ; position
            ; usage_scope = Runtime_usage_scope.Conversation_cumulative
-           ; usage = api_usage_of_token_usage thread_total
-           ; vendor_total_tokens = Some thread_total.total_tokens
+           ; count
+           ; vendor_total_tokens = Some vendor_total_tokens
            })
       on_usage_report
   in
@@ -367,8 +374,8 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
       (function
         | Runtime_codex_app_server.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
-        | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; thread_total } ->
-          report_usage ~thread_id ~turn_id ~model thread_total
+        | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
+          report_usage ~thread_id ~turn_id ~model frame
         | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
         | Turn_finished _ -> ())
@@ -460,8 +467,8 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
             server_name
         | Runtime_codex_app_server.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
-        | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; thread_total } ->
-          report_usage ~thread_id ~turn_id ~model thread_total
+        | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
+          report_usage ~thread_id ~turn_id ~model frame
         | Runtime_codex_app_server.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text

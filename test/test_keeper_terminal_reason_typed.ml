@@ -1200,6 +1200,7 @@ max-concurrent = 1
         { result = Ok result
         ; degraded_retry_applied = Some applied_lane
         ; degraded_retry_deferred = None
+        ; spend = []
         }
       in
       let observation = Masc.Keeper_world_observation.observe

@@ -276,7 +276,7 @@ let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~
            ; conversation_id = session_id
            ; position
            ; usage_scope = Runtime_usage_scope.Turn_total
-           ; usage = api_usage_of_turn_usage usage
+           ; count = Keeper_client_usage_report.Running_count (api_usage_of_turn_usage usage)
            ; vendor_total_tokens = None
            })
       on_usage_report

@@ -2175,6 +2175,7 @@ let run_turn
            ~receipt_runtime_observation_ref
            ~receipt_lane_attempt_index_ref
            ~receipt_response_text_present_ref
+           ~spend:(s.Keeper_run_tools.spend_attempts ())
            ()
        in
        (* RFC-0233 PR-3: TurnRecord — same per-keeper-turn cadence as the

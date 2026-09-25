@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import select
+import shutil
 import signal
 import socket
 import struct
@@ -17817,6 +17818,188 @@ def lanes_press_selects_the_lane_under_the_pointer(
     os.write(master_fd, b"q")
 
 
+KEEPER_SETTINGS_PATH = "/api/v1/keepers/alpha/config"
+KEEPER_SETTINGS_REVISION = {
+    "manifest": {"state": "sha256", "value": "a" * 64},
+    "runtime_assignment": {
+        "state": "runtime_config_present",
+        "source_revision": "b" * 64,
+        "assignment": {"state": "assigned", "runtime_id": "anthropic.claude-opus-5"},
+    },
+}
+ACTIVATION_VALUES = b"manual | on_demand | autonomous"
+
+
+def keeper_settings_fixture() -> RequestHttpResponse:
+    """GET answers the settings snapshot; POST answers as the server does.
+
+    The same path serves both, so the fixture tells them apart by the body.
+    A POST carrying a value outside the closed activation set gets the
+    server's own 400 (keeper_turn_up_args.ml), so main's behaviour -- send,
+    then show the refusal -- is what the red run records.
+    """
+
+    def resolve(body: bytes) -> HttpResponse:
+        if not body:
+            return 200, {
+                "config_revision": KEEPER_SETTINGS_REVISION,
+                "activation_mode": "manual",
+                "input_policy": "small",
+                "max_context_override": None,
+                "sandbox_profile": "docker",
+                "network_mode": "none",
+                "prompt": {"instructions": "be exact"},
+                "execution": {"selected_runtime_id": "anthropic.claude-opus-5"},
+                "skills": {"names": None},
+                "workspace": {"mention_targets": ["@alpha"], "board_interests": []},
+            }
+        mode = json.loads(body).get("activation_mode")
+        if mode not in (None, "manual", "on_demand", "autonomous"):
+            # Keeper_turn_up_args.parse refuses before any write, and the
+            # route answers with error_json: {"error": <sentence>}.
+            return 400, {
+                "error": "activation_mode must be manual, on_demand, or autonomous"
+            }
+        return 200, {
+            "runtime_sync": "lane_restarted",
+            "config_write": {
+                "revision": KEEPER_SETTINGS_REVISION,
+                "applied": True,
+                "warnings": [],
+            },
+        }
+
+    return RequestHttpResponse(resolve)
+
+
+@contextmanager
+def activation_editor_script(value: str) -> Iterator[tuple[str, str]]:
+    """An $EDITOR that sets activation_mode to [value] and saves (exit 0).
+
+    It is the operator's `e`, one edit, `:w`: every buffer it is handed is
+    copied to seen.<n> first, so the scenario can count how many times the
+    editor opened and read what each opening showed. A second opening gets
+    the same edit applied again -- an operator who saves without fixing.
+    """
+    workdir = tempfile.mkdtemp(prefix="masc-tui-activation-editor-")
+    path = os.path.join(workdir, "editor.sh")
+    with open(path, "w", encoding="utf-8") as script:
+        script.write(
+            "#!/bin/sh\n"
+            f'n=$(ls "{workdir}" | grep -c "^seen\\.")\n'
+            f'cp "$1" "{workdir}/seen.$n"\n'
+            f"sed 's/\"activation_mode\": \"[a-z_]*\"/\"activation_mode\": \"{value}\"/' "
+            '"$1" > "$1.new" && mv "$1.new" "$1"\n'
+        )
+    os.chmod(path, 0o755)
+    try:
+        yield path, workdir
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def editor_buffers(workdir: str) -> list[bytes]:
+    names = sorted(
+        (name for name in os.listdir(workdir) if name.startswith("seen.")),
+        key=lambda name: int(name.split(".", 1)[1]),
+    )
+    buffers = []
+    for name in names:
+        with open(os.path.join(workdir, name), "rb") as handle:
+            buffers.append(handle.read())
+    return buffers
+
+
+def activation_settings_interaction(
+    requests: HttpRequests, workdir: str, *, value: str
+) -> Interaction:
+    """`e` on the Keepers list, activation_mode set to [value], `:w`.
+
+    A value outside the closed set must never reach the wire: the editor
+    opens again with the operator's text and the allowed values above it,
+    and saving that same text again closes it with the reason on the status
+    line -- not a loop the operator can only escape with :cq. A valid value
+    is sent once, as the only changed field.
+    """
+
+    def settings_posts() -> list[bytes]:
+        return [body for path, body in requests if path == KEEPER_SETTINGS_PATH]
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Keepers")
+        wait_for_output(process, master_fd, output, b"alpha", start=0, timeout=5.0)
+        drain_until_quiet(process, master_fd, output)
+        start = len(output)
+        os.write(master_fd, b"e")
+        if value == "autonomous":
+            body = wait_for_http_request(
+                process, master_fd, output, requests, path=KEEPER_SETTINGS_PATH
+            )
+            patch = json.loads(body)
+            if patch.get("activation_mode") != "autonomous":
+                raise AssertionError(f"valid activation was not sent: {patch!r}")
+            if set(patch) != {"expected_config_revision", "activation_mode"}:
+                raise AssertionError(f"patch carried more than the edit: {patch!r}")
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                b"alpha: changed settings applied",
+                start=start,
+                timeout=5.0,
+            )
+            if len(editor_buffers(workdir)) != 1:
+                raise AssertionError("a valid edit reopened the editor")
+        else:
+            wait_for_output(
+                process, master_fd, output, ACTIVATION_VALUES, start=start, timeout=10.0
+            )
+            drain_until_quiet(process, master_fd, output)
+            buffers = editor_buffers(workdir)
+            posts = settings_posts()
+            if posts:
+                raise AssertionError(
+                    f"an activation outside the closed set reached the wire: {posts!r}"
+                )
+            if len(buffers) != 2:
+                raise AssertionError(
+                    f"the editor should open twice (edit, then the refusal), "
+                    f"opened {len(buffers)} time(s): {buffers!r}"
+                )
+            first, second = buffers
+            if b"//" in first:
+                raise AssertionError(f"the first opening carried a refusal: {first!r}")
+            if ACTIVATION_VALUES not in second or f'"{value}"'.encode() not in second:
+                raise AssertionError(
+                    f"the reopened editor did not name the value and the allowed set: {second!r}"
+                )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def run_keeper_settings_activation_regression(executable: str) -> None:
+    for value in ("auto", "autonomous"):
+        requests: HttpRequests = []
+        fixtures = keeper_runtime_http_fixtures()
+        fixtures[KEEPER_SETTINGS_PATH] = keeper_settings_fixture()
+        with activation_editor_script(value) as (editor, workdir):
+            run_terminal_scenario(
+                executable,
+                description=f"Keeper settings activation_mode {value!r} then :w",
+                interact=activation_settings_interaction(requests, workdir, value=value),
+                http_fixtures=fixtures,
+                http_requests=requests,
+                extra_env={"EDITOR": editor},
+            )
+
+
 def run_keeper_lanes_regression(executable: str) -> None:
     fixtures = keeper_runtime_http_fixtures()
     gate = GatedHttpResponse(
@@ -19023,6 +19206,11 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     ScenarioFamily("runtime", "Runtime regression", (run_runtime_regression,)),
     ScenarioFamily("resources", "Resources regression", (run_resources_regression,)),
     ScenarioFamily("keepers-lanes", "Keepers/Lanes regression", (run_keeper_lanes_regression,)),
+    ScenarioFamily(
+        "keeper-settings-activation",
+        "Keeper settings activation regression",
+        (run_keeper_settings_activation_regression,),
+    ),
     ScenarioFamily("board-json", "Board JSON regression", (run_board_json_regression,)),
     ScenarioFamily("code-memo", "Code memo regression", (run_code_memo_regression,)),
     ScenarioFamily("memory-journal", "Memory journal regression", (run_memory_journal_regression,)),

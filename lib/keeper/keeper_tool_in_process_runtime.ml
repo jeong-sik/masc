@@ -2423,7 +2423,9 @@ let handle_masc_fusion_status ~config ~(meta : keeper_meta) ~args () =
 ;;
 
 (* Image files use the existing sandbox Read boundary before entering the
-   same per-Keeper artifact/vision path as browser screenshots and uploads. *)
+   same per-Keeper artifact/vision path as browser screenshots and uploads.
+   The bytes come from the raw prefix read, not Read's line window: an image
+   is a byte prefix, and the window is text that a remote lane rewrites. *)
 let handle_analyze_image_with_outcome ?complete ?config ?turn_sandbox_factory
     ?tool_use_id ?trace_id
     ?sw ?clock ?net ~(meta : keeper_meta) ~args () =
@@ -2445,7 +2447,7 @@ let handle_analyze_image_with_outcome ?complete ?config ?turn_sandbox_factory
        | Some (`String query), Some config, Some _, Some _, Some _ when String.trim query <> "" ->
            let prepared =
              let ( let* ) = Result.bind in
-             let* bytes = Keeper_tool_filesystem_runtime.read_sandbox_bytes
+             let* bytes = Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
                  ?turn_sandbox_factory ~config ~meta ~path
                  ~max_bytes:(Keeper_vision_tool.max_image_bytes () + 1)
                  ()

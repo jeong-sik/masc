@@ -46,20 +46,6 @@ val handle_read_file_with_outcome :
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t
 
-val read_sandbox_bytes :
-  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
-  ?cwd:string ->
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  path:string -> max_bytes:int -> unit ->
-  (string, string) result
-(** Resolve like Read, enforce this Keeper's containment, and read binary bytes
-    through the existing sandbox runner. Never falls back to a host read. A
-    remote Keeper's path under its endpoint's declared roots
-    ({!Keeper_sandbox_remote_lane.declared_endpoint_path_of_args}) is the
-    endpoint's own path: it skips the host containment check and is read as
-    itself, the endpoint account being its boundary as for Execute. *)
-
 val read_complete_sandbox_bytes :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
@@ -223,4 +209,10 @@ val read_sandbox_raw_prefix :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
   path:string -> ?cwd:string -> max_bytes:int -> unit -> (string, string) result
-(** Contained raw binary prefix, bounded before endpoint or Docker capture. *)
+(** Contained raw binary prefix, bounded before endpoint or Docker capture.
+    Resolves like Read and never falls back to a host read. The bytes are the
+    file's own: unlike Read's line window, nothing rewrites paths in them. A
+    remote Keeper's path under its endpoint's declared roots
+    ({!Keeper_sandbox_remote_lane.declared_endpoint_path_of_args}) is the
+    endpoint's own path: it skips the host containment check and is read as
+    itself, the endpoint account being its boundary as for Execute. *)

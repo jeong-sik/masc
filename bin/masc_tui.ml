@@ -17947,26 +17947,43 @@ and is loaded on demand through keeper_skill.
             ~keeper_name:keeper.k_name
         with
         | Error detail -> report_action state "error" detail
-        | Ok (observed, stem) -> (
-          match
-            Masc_tui_editor.roundtrip ~restore:restore_terminal
-              ~reenter:reenter_terminal stem
-          with
-          | Error abort ->
-              report_editor_abort state
-                ~action:(keeper.k_name ^ " settings")
-                ~cancelled:(keeper.k_name ^ ": settings unchanged")
-                abort
-          | Ok edited -> (
-            match Yojson.Safe.from_string edited with
-            | exception Yojson.Json_error detail ->
-                report_action state "error" ("settings are not JSON: " ^ detail)
-            | edited_json -> (
+        | Ok (observed, stem) ->
+          (* A refusal the operator can fix reopens the editor with the reason
+             on top instead of dropping the edit on one status line. Saving
+             the reopened text unchanged is the operator declining to fix it,
+             so that ends the loop with the reason reported: :w alone must
+             never be a way to get stuck in the editor. *)
+          let rec edit_round stem =
+            match
+              Masc_tui_editor.roundtrip ~restore:restore_terminal
+                ~reenter:reenter_terminal stem
+            with
+            | Error abort ->
+                report_editor_abort state
+                  ~action:(keeper.k_name ^ " settings")
+                  ~cancelled:(keeper.k_name ^ ": settings unchanged")
+                  abort
+            | Ok edited ->
+              let reopen reason =
+                if String.equal edited stem then
+                  report_action state "error"
+                    (keeper.k_name ^ ": " ^ reason ^ " (settings unchanged)")
+                else
+                  edit_round
+                    (Masc_tui_keeper_config.reopened_stem ~reason edited)
+              in
+              (match Yojson.Safe.from_string edited with
+               | exception Yojson.Json_error detail ->
+                   reopen ("settings are not JSON: " ^ detail)
+               | edited_json -> apply_edit ~reopen edited_json)
+          and apply_edit ~reopen edited_json =
               match
                 Masc_tui_keeper_config.patch_of_edit ~before:observed
                   ~after:edited_json
               with
-              | Error detail -> report_action state "error" detail
+              | Error (Masc_tui_keeper_config.Fix_in_editor reason) -> reopen reason
+              | Error (Masc_tui_keeper_config.Cannot_send detail) ->
+                  report_action state "error" detail
               | Ok (`Assoc []) ->
                   report_action state "system"
                     (keeper.k_name ^ ": no settings changed")
@@ -18007,7 +18024,9 @@ and is loaded on demand through keeper_skill.
                       state.keeper_config_view <- None;
                       state.keeper_config_view_error <- None;
                       launch_keeper_config_view state
-                        ~mailbox:async_messages keeper.k_name)))))))
+                        ~mailbox:async_messages keeper.k_name))
+          in
+          edit_round stem))
   in
   (* Set the sandbox backend (sandbox_profile) in place from the Sandbox tab,
      without the $EDITOR JSON round-trip. Each key names an absolute backend, so

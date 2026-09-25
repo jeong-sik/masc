@@ -71,6 +71,7 @@ val serve :
     multiple HTTP servers. *)
 
 val serve_h2_connection :
+  ?streams:Server_h2_stream_registry.t ->
   sw:Eio.Switch.t ->
   h2_request_handler:(request_sw:Eio.Switch.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
   h2_error_handler:
@@ -80,8 +81,13 @@ val serve_h2_connection :
   unit
 (** Run H2 connection I/O and a separate request scope. I/O completion or
     failure cancels pending requests and their children, including response
-    producers, without waiting for an occupied CPU pool. Per-stream reset is
-    enforced by h2's response state; it does not cancel a running computation. *)
+    producers, without waiting for an occupied CPU pool.
+
+    Each request stream runs under its own switch in [streams] (a fresh
+    registry when omitted), and [h2_request_handler] receives that stream
+    switch as [request_sw]. A peer RST_STREAM releases the stream's entry and
+    cancels its work and children at once; a finished response releases the
+    entry when its work returns. Siblings and the connection keep running. *)
 
 val serve_h2 :
   sw:Eio.Switch.t ->

@@ -2,7 +2,7 @@
 
 val dispatch_request :
   sw:Eio.Switch.t -> H2.Reqd.t -> (unit -> unit) -> unit
-(** Schedule request work on the connection's request switch. The callback
+(** Schedule deferred request work on [sw], the request stream's switch. The callback
     yields before running, keeps transport access on this domain, and reports
     handler exceptions to its own stream. Cancellation propagates. *)
 

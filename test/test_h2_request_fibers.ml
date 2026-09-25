@@ -3,7 +3,7 @@ module Helpers = Server_h2_gateway_helpers
 
 type dispatch = Inline_reader | Request_fibers
 
-let with_connection dispatch handler run =
+let with_connection ?streams dispatch handler run =
   Eio_main.run (fun env ->
     Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 (fun () ->
       Eio.Switch.run (fun sw ->
@@ -35,7 +35,7 @@ let with_connection dispatch handler run =
                 H2_eio.Server.create_connection_handler ~sw:conn_sw
                   ~request_handler:(handler ~request_sw:conn_sw) ~error_handler addr server_flow
               | Request_fibers ->
-                Server_bootstrap_http.serve_h2_connection ~sw:conn_sw
+                Server_bootstrap_http.serve_h2_connection ?streams ~sw:conn_sw
                   ~h2_request_handler:handler ~h2_error_handler:error_handler addr server_flow)) in
           let closing = ref false in
           let client = H2_eio.Client.create_connection ~sw
@@ -187,6 +187,49 @@ let test_reset_does_not_break_siblings () =
     check bool "reset stream receives no delayed response" false
       (Eio.Promise.is_resolved slow))
 
+(* RFC 9113 RST_STREAM with CANCEL (0x8) for one client stream. *)
+let rst_stream_frame stream_id =
+  let frame = Bytes.of_string "\000\000\004\003\000\000\000\000\000\000\000\000\008" in
+  Bytes.set_int32_be frame 5 (Int32.of_int stream_id);
+  Bytes.to_string frame
+
+let test_reset_releases_stream_scopes () =
+  let held_streams = 32 in
+  let streams = Server_h2_stream_registry.create () in
+  let admitted = ref 0 and cancelled = ref 0 in
+  let all_admitted, admit_all = Eio.Promise.create () in
+  let all_cancelled, cancel_all = Eio.Promise.create () in
+  let handler ~request_sw:_ _ reqd =
+    match (H2.Reqd.request reqd).target with
+    | "/hold" ->
+      incr admitted;
+      if !admitted = held_streams then Eio.Promise.resolve admit_all ();
+      (try Eio.Fiber.await_cancel () with Eio.Cancel.Cancelled _ as exn ->
+         incr cancelled;
+         if !cancelled = held_streams then Eio.Promise.resolve cancel_all ();
+         raise exn)
+    | "/fast" -> Helpers.h2_respond_json ~compress:false reqd "alive"
+    | path -> failf "unexpected path %s" path in
+  with_connection ~streams Request_fibers handler
+    (fun ~env:_ ~client ~client_flow ~release:_ ~close_client:_ ~server:_ ->
+    (* The client numbers its streams 1, 3, 5, ... in request order. *)
+    let stream_ids = List.init held_streams (fun index ->
+      ignore (request client "/hold");
+      (2 * index) + 1) in
+    Eio.Promise.await all_admitted;
+    check int "every held request owns a stream scope" held_streams
+      (Server_h2_stream_registry.active_streams streams);
+    List.iter (fun stream_id -> Eio.Flow.copy_string (rst_stream_frame stream_id) client_flow)
+      stream_ids;
+    (* PING is read after every RST_STREAM, so its ACK proves they were seen. *)
+    ping client;
+    check int "reset streams leave no scope behind" 0
+      (Server_h2_stream_registry.active_streams streams);
+    Eio.Promise.await all_cancelled;
+    check int "every reset stream cancelled its work" held_streams !cancelled;
+    check string "connection keeps serving after the resets" "alive"
+      (snd (await_reply (request client "/fast"))))
+
 let test_connection_closes_pending_work () =
   let admitted, admit = Eio.Promise.create () in
   let cancelled, mark_cancelled = Eio.Promise.create () in
@@ -240,6 +283,7 @@ let () = run "H2 request fibers" ["connection progress", [
   test_case "GET preserves PING and WINDOW_UPDATE" `Quick (fun () -> test_multiplexed_progress `GET);
   test_case "POST completion preserves PING and WINDOW_UPDATE" `Quick (fun () -> test_multiplexed_progress `POST);
   test_case "RST_STREAM isolates delayed response" `Quick test_reset_does_not_break_siblings;
+  test_case "RST_STREAM releases stream scopes and fibers" `Quick test_reset_releases_stream_scopes;
   test_case "disconnect cancels requests and child fibers" `Quick test_connection_closes_pending_work;
   test_case "handler failure stays on its stream" `Quick test_handler_error_is_stream_local;
 ]]

@@ -199,7 +199,24 @@ let serve ~sw ~clock ~socket ~addr_label ~request_handler =
   accept_loop 0.05
 ;;
 
-let serve_h2_connection ~sw ~h2_request_handler ~h2_error_handler client_addr flow =
+exception Request_without_header_block
+
+let serve_h2_connection
+      ?(streams = Server_h2_stream_registry.create ())
+      ~sw
+      ~h2_request_handler
+      ~h2_error_handler
+      client_addr
+      flow
+  =
+  let frames =
+    Server_h2_frame_tap.wrap
+      ~on_peer_reset:(fun stream_id ->
+        Server_h2_stream_registry.peer_reset streams ~stream_id)
+      ~on_response_end:(fun stream_id ->
+        Server_h2_stream_registry.response_ended streams ~stream_id)
+      flow
+  in
   let request_scope, publish_scope = Eio.Promise.create () in
   Eio.Fiber.first
     (fun () ->
@@ -210,9 +227,12 @@ let serve_h2_connection ~sw ~h2_request_handler ~h2_error_handler client_addr fl
       let request_sw = Eio.Promise.await request_scope in
       H2_eio.Server.create_connection_handler ~sw
         ~request_handler:(fun addr reqd ->
-          Server_h2_gateway_helpers.dispatch_request ~sw:request_sw reqd (fun () ->
-            h2_request_handler ~request_sw addr reqd))
-        ~error_handler:h2_error_handler client_addr flow)
+          match Server_h2_frame_tap.request_stream frames with
+          | Some stream_id ->
+            Server_h2_stream_registry.dispatch streams ~sw:request_sw ~stream_id reqd
+              (fun stream_sw -> h2_request_handler ~request_sw:stream_sw addr reqd)
+          | None -> H2.Reqd.report_exn reqd Request_without_header_block)
+        ~error_handler:h2_error_handler client_addr (Server_h2_frame_tap.socket frames))
 ;;
 
 let serve_h2 ~sw ~clock ~socket ~addr_label ~h2_request_handler ~h2_error_handler =

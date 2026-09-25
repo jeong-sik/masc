@@ -21,8 +21,9 @@ val make_request_handler :
   H2.Reqd.t ->
   unit
 (** [sw] retains the server lifetime for durable MCP work and shared
-    producers. [request_sw] belongs to this connection and is cancelled when
-    connection I/O ends; body completions and SSE producers use that scope.
+    producers. [request_sw] belongs to this request stream and is cancelled
+    when the peer resets the stream or connection I/O ends; body completions
+    and SSE producers use that scope.
     The client address was ['a] while this handler discarded it, which is also
     how the per-client-IP limit the H1 ingress applies went missing on this
     transport. It is named now because the handler charges that bucket. *)

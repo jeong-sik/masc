@@ -226,6 +226,35 @@ let test_page_verbs_take_turns () =
   check bool "and runs once the first has ended" true (Eio.Promise.is_resolved listed)
 ;;
 
+(* A sentence whose caller leaves while it still waits for the verb slot sent
+   nothing, so the session is not retired on its account. *)
+let test_a_queued_caller_leaves_the_session_open () =
+  with_backend
+  @@ fun h ->
+  ignore (data (Backend.execute h.backend open_));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  Eio.Switch.run
+  @@ fun sw ->
+  let instruct = Lane.Page_instruct { tab_id = 0; instruction = "click Buy" } in
+  let first_leave, first_left = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    try
+      Eio.Switch.run (fun caller ->
+        Eio.Fiber.fork ~sw:caller (fun () -> ignore (Backend.execute h.backend instruct));
+        Eio.Promise.await first_leave;
+        Eio.Switch.fail caller Exit)
+    with
+    | Exit -> ());
+  h.settle ();
+  leave_during h instruct;
+  h.settle ();
+  check bool "the queued caller's leaving stopped nothing" false (the_session h).stopped;
+  check bool "the session is still open" true (is_open h);
+  Eio.Promise.resolve first_left ();
+  h.settle ();
+  check bool "the sentence that began retires the session when its caller leaves" true (the_session h).stopped
+;;
+
 let test_close_does_not_wait_forever () =
   with_backend ~configure:(fun behaviour -> behaviour.close_answers <- false)
   @@ fun h ->
@@ -265,6 +294,7 @@ let () =
       test_case "close waits for the runtime only so long" `Quick test_close_does_not_wait_forever;
       test_case "tab ids do not cross sessions" `Quick test_tab_ids_do_not_cross_sessions;
       test_case "page verbs take turns" `Quick test_page_verbs_take_turns;
+      test_case "a caller who leaves while queued leaves the session open" `Quick test_a_queued_caller_leaves_the_session_open;
       test_case "status reports why a session ended" `Quick test_status_reports_an_ended_session;
       test_case "status reports an answer the session could not deliver" `Quick test_status_reports_an_undelivered_answer;
     ];

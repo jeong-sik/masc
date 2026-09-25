@@ -167,16 +167,22 @@ let status t =
    session's one-call slot alone allows: a click would land on a page its
    guard never checked. The automation lane holds its session lock for a
    whole verb the same way. *)
-let page t verb =
+let page t ~began verb =
   Eio.Semaphore.acquire t.verbs;
   (* fun-protect-finally-ok: [Eio.Semaphore.release] does not suspend; the
      slot comes back on return, exception and cancellation, and unlike
      [Eio.Mutex] the semaphore is not poisoned by an exception. *)
   Fun.protect ~finally:(fun () -> Eio.Semaphore.release t.verbs) (fun () ->
     match t.state with
-    | Open opened -> Executor.execute ~tabs:t.tabs ~call:(t.call opened.session) verb
+    | Open opened ->
+      began ();
+      Executor.execute ~tabs:t.tabs ~call:(t.call opened.session) verb
     | Closed | Opening | Closing -> no_session)
 ;;
+
+(* Whether a page verb got the verb slot and began sending: a caller that
+   leaves while still queued sent nothing, so no call of its is abandoned. *)
+type verb_progress = Queued | Began
 
 (* A verb's exception answers its own request instead of failing the switch
    every request is served on. Cancellation passes through. *)
@@ -222,6 +228,7 @@ let serve t { verb; reply; caller_left } =
   | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _ | Browser_lane.Page_instruct _
   | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ ->
     let requested_session = match t.state with Open opened -> Some opened | Closed | Opening | Closing -> None in
+    let progress = ref Queued in
     (* A caller that leaves cancels the call it asked for; the session then
        holds it as abandoned until the runtime answers it or the sentence
        session is retired below. *)
@@ -230,10 +237,13 @@ let serve t { verb; reply; caller_left } =
          ~watcher:(fun () ->
            Eio.Promise.await caller_left;
            None)
-         (fun () -> Some (guarded (fun () -> page t verb)))
+         (fun () -> Some (guarded (fun () -> page t ~began:(fun () -> progress := Began) verb)))
      with
      | Some answer -> Eio.Promise.resolve reply answer
-     | None -> if is_sentence verb then retire_sentence_session t requested_session)
+     | None ->
+       (match !progress with
+        | Began when is_sentence verb -> retire_sentence_session t requested_session
+        | Began | Queued -> ()))
 ;;
 
 let create ~sw ~clock ~open_session ~call ~pid ~log =

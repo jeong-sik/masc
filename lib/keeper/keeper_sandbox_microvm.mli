@@ -391,6 +391,176 @@ val ensure_work_volume_for
   -> timeout_sec:float
   -> ([ `Created | `Already_present | `Ensured ], string) result
 
+(** {2 The build volume (RFC-keeper-build-output-returns-to-a-disposable-volume)}
+
+    [Apple_container] only. Msb's and nerdctl's named work volumes are host
+    directories -- deleting a file inside either returns host disk
+    immediately, with no VM disk image in between, so the problem this
+    section exists for does not occur there (see the implementation for the
+    measurement). Apple's is a sparse virtio-blk image with no discard/unmap
+    exposed to the guest (measured 2026-09-24: [fstrim] as root answers
+    "Operation not permitted"), so a guest [rm -rf _build] frees nothing on
+    the host. A keeper's [_build] on its own disposable volume, apart from
+    {!work_volume_guest_root} where the checkout lives, means that volume can
+    be deleted and recreated -- zero data-loss risk, since it holds nothing
+    but derived build output -- to reclaim that host space. *)
+
+val build_volume_guest_root : string
+(** [/masc-build], distinct from {!work_volume_guest_root}. *)
+
+val build_volume_name : keeper_name:string -> (string, string) result
+(** [masc-keeper-build-<keeper_name>], or an error when the name carries
+    anything outside [A-Za-z0-9._-]. *)
+
+val build_volume_mount_args : volume_name:string -> string list
+
+(** What [_build] is right now, as far as the plan cares. *)
+type build_link_state =
+  | Build_absent
+  | Build_symlink of string
+  | Build_real_directory
+
+type build_link_plan =
+  | Link_create of string
+  | Link_retarget of string
+  | Link_already_correct
+  | Link_refused_real_directory
+
+val build_link_target : playground_relative:string -> (string, string) result
+(** The checkout's [_build] target inside {!build_volume_guest_root}: the
+    playground-relative path with its [/] segments flattened to [:], since
+    dune's [_build] symlink has no parent directory the guest can [mkdir -p]
+    through. A segment already containing [:] is refused rather than let two
+    checkouts collide onto one build directory. *)
+
+val plan_build_link : target:string -> build_link_state -> build_link_plan
+(** Deciding is separate from acting so the refusal is testable. A real
+    [_build] is never deleted to install a link -- it holds output this
+    module did not create; the caller reports {!Link_refused_real_directory}
+    and the checkout keeps building on the unified work volume. Retargeting a
+    stale symlink is different: removing a symlink loses no data. *)
+
+val apple_build_volume_delete_argv : volume_name:string -> string list
+
+val recreate_apple_build_volume
+  :  volume_name:string
+  -> size:string
+  -> timeout_sec:float
+  -> ([ `Created | `Already_present ], string) result
+(** Delete the volume if present, then create it with
+    {!apple_volume_create_argv}. [container volume create] is not idempotent,
+    so existence is settled by a [container volume] probe rather than by
+    reading its "already exists" message. Called once per fresh guest boot
+    (RFC-keeper-build-output-returns-to-a-disposable-volume): [_build] is
+    entirely derived, so
+    starting the volume empty every time costs one cold build and is the
+    only host-disk reclaim path that exists -- Apple's virtio-blk exposes
+    no discard, and `container volume` has no attach/detach to swap the
+    volume under a running guest. A probe failure refuses rather than
+    guesses; deleting on an ambiguous answer risks a volume this call did
+    not create the record for. *)
+
+(** {3 Finding checkouts and their [_build] state inside the guest}
+
+    A [Micro_vm] keeper's tree is [Endpoint_owned]
+    ({!Keeper_types_profile_sandbox.tree_location_of_profile}): the host
+    keeps only a bookkeeping bundle, and a host-side file operation on it
+    would silently miss the tree. So the walk, the [_build] state read, and
+    the symlink itself all run inside the guest over
+    [container exec]. Only the decision ({!plan_build_link}) stays host-side
+    and pure. *)
+
+val build_root_scan_depth : int
+(** How far below the keeper's work root a checkout is looked for. Observed
+    layouts: depth 1 ([polisher/masc-t362]), depth 2
+    ([lane-smith/repos/wt-370]). *)
+
+val build_root_marker : string
+(** [dune-project]: the marker for the build output this addresses.
+    [_build] is dune's name and dune's alone; other ecosystems' output
+    directories ([node_modules], [target], [dist]) are not handled here
+    (measured: npm deletes and replaces a [node_modules] symlink on every
+    install, defeating a symlink outright). *)
+
+val build_output_dir_name : string
+
+val build_scan_argv_for
+  :  Keeper_microvm_backend.t
+  -> container_name:string
+  -> keeper_work_root:string
+  -> uid:int
+  -> gid:int
+  -> string list
+(** One [find | while] exec, cwd the keeper's work root: reports every
+    checkout's [_build] state without changing any of it. [find] without
+    [-L] does not descend through a symlink, so an installed link is never
+    walked into. [_build] and [.git] are pruned rather than descended -- one
+    measured [_build] held 61,602 entries. Runs as the keeper's own uid:gid,
+    the owner of everything under the work root. *)
+
+type build_scan_row =
+  { checkout : string
+  ; state : build_link_state
+  }
+
+val build_scan_rows_of_output : string -> build_scan_row list
+(** Parses {!build_scan_argv_for}'s stdout. An unrecognized line is dropped,
+    not raised on -- the scan is read-only, so a malformed line costs one
+    missed checkout, not a crashed turn. *)
+
+type build_link_row =
+  { checkout : string
+  ; target : string option
+  ; plan : build_link_plan
+  }
+
+val build_link_rows_of_scan : build_scan_row list -> build_link_row list
+(** Every scanned checkout's target and plan, decided purely
+    ({!plan_build_link}) -- touches no guest state; only
+    {!build_link_apply_argv_for} does. *)
+
+val build_link_refusal_message : checkout:string -> string
+(** The message a caller reports for a row whose plan is
+    {!Link_refused_real_directory}: real build output this module did not
+    create, left in place rather than deleted. *)
+
+val build_link_actions : build_link_row list -> (string * string) list
+(** The [(checkout, target)] pairs that actually need a guest command --
+    input to {!build_link_apply_argv_for}. A row already correct, or
+    refused, needs none. *)
+
+val build_link_targets : build_link_row list -> string list
+(** Every target that must exist before a build runs: the targets of
+    {!build_link_actions} and of rows already linked. A fresh boot recreates
+    the build volume empty, so an already-correct link dangles until its
+    target is created again -- input to {!build_target_mkdir_argv}. *)
+
+val build_link_apply_argv_for
+  :  Keeper_microvm_backend.t
+  -> container_name:string
+  -> keeper_work_root:string
+  -> uid:int
+  -> gid:int
+  -> actions:(string * string) list
+  -> string list
+(** [ln -sfn] for every action, in one exec, as the keeper's own uid:gid.
+    [-f] makes each one atomic -- a stale link is replaced without a
+    separate unlink, and [ln] refuses outright rather than clobber a real,
+    non-empty directory, so a checkout that grew real build output between
+    the scan and this call is left alone rather than silently adopted.
+    Dynamic values travel as positional arguments after the script, never
+    interpolated into the script text. *)
+
+val build_target_mkdir_argv : container_name:string -> targets:string list -> string list
+(** [mkdir -p -m 0777] for every target, run as root inside the guest.
+    Necessary because dune does not create the directory a [_build] symlink
+    points at -- it [lstat]s [_build], sees the link, and opens
+    [_build/.lock] straight away, and the host cannot create the target
+    either since it lives inside the build volume's ext4 image. [-m] applies
+    only to newly created directories, since Apple Container's user
+    namespace refuses even guest root changing an existing one's mode. One
+    command for every target; idempotent. *)
+
 val work_volume_search_argv_for :
   Keeper_microvm_backend.t -> container_name:string -> string list option
 (** For nerdctl, add search permission on the root-owned work volume before

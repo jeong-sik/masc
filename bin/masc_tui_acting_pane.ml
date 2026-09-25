@@ -260,12 +260,6 @@ let age_text ~now at = Layout.clamped_elapsed_text (now -. at)
 
 let last_event_text ~now at = "last event " ^ age_text ~now at
 
-let compact_count n =
-  let thousand = 1_000 and million = 1_000_000 in
-  if n >= million then Printf.sprintf "%.1fM" (float_of_int n /. float_of_int million)
-  else if n >= thousand then
-    Printf.sprintf "%.1fk" (float_of_int n /. float_of_int thousand)
-  else string_of_int n
 
 (* Input and output as two parts, for the focus block. The input part is what
    a turn re-sends on every call, so it is what makes a twelve-call turn read
@@ -278,21 +272,21 @@ let compact_count n =
 let tokens_text = function
   | None, None -> ""
   | Some i, Some o ->
-    "in " ^ compact_count i ^ " · out " ^ compact_count o
-  | Some n, None | None, Some n -> compact_count n ^ " tok"
+    "in " ^ Layout.compact_count i ^ " · out " ^ Layout.compact_count o
+  | Some n, None | None, Some n -> Layout.compact_count n ^ " tok"
 
 let tokens_sum_text = function
   | None, None -> ""
-  | Some i, Some o -> compact_count (i + o) ^ " tok"
-  | Some n, None | None, Some n -> compact_count n ^ " tok"
+  | Some i, Some o -> Layout.compact_count (i + o) ^ " tok"
+  | Some n, None | None, Some n -> Layout.compact_count n ^ " tok"
 
 (* The same sum without its unit, for the fleet row's column: the heading
    above it already says what the figure counts, and repeating "tok" on every
    row cost four of the nine cells the column has. *)
 let tokens_sum_figure = function
   | None, None -> ""
-  | Some i, Some o -> compact_count (i + o)
-  | Some n, None | None, Some n -> compact_count n
+  | Some i, Some o -> Layout.compact_count (i + o)
+  | Some n, None | None, Some n -> Layout.compact_count n
 
 let calls_text n = Masc_tui_message_layout.count_noun n "call"
 let files_text n = Masc_tui_message_layout.count_noun n "file"

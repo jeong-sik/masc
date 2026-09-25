@@ -998,6 +998,38 @@ let microvm_work_volume ~backend ~keeper_name ~timeout_sec =
      | Ok _ -> Ok volume_name)
 ;;
 
+(** The build volume (RFC-keeper-build-output-returns-to-a-disposable-volume),
+    `Apple_container` only: `msb` and `nerdctl`
+    back their named work volumes with a host directory, so a guest [rm -rf
+    _build] already returns host disk immediately there and this volume is
+    not provisioned for them -- [None], not a refusal, since its absence
+    costs a `Micro_vm` keeper on those backends nothing. On Apple, absence
+    is a refusal like {!microvm_work_volume}'s: a guest that cannot get the
+    volume this RFC's disk-reclaim path depends on does not start rather
+    than fall back to writing `_build` onto the unified work volume, which
+    is exactly the unbounded growth this exists to bound. Recreated, not
+    merely ensured: this runs only on a fresh [container run] (never on
+    adoption of an already-running guest, the same boundary
+    {!microvm_work_volume} keeps its own volume across), so "fresh boot"
+    and "empty build volume" coincide by construction, and every guest
+    restart is the host-disk reclaim this RFC exists for. *)
+let microvm_build_volume ~backend ~keeper_name ~timeout_sec =
+  match (backend : Keeper_microvm_backend.t) with
+  | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok None
+  | Keeper_microvm_backend.Apple_container ->
+    (match Keeper_sandbox_microvm.build_volume_name ~keeper_name with
+     | Error message -> Error ("microvm_build_volume_unnamed: " ^ message)
+     | Ok volume_name ->
+       (match
+          Keeper_sandbox_microvm.recreate_apple_build_volume
+            ~volume_name
+            ~size:(Env_config_sandbox.Runtime.microvm_build_volume_size ())
+            ~timeout_sec
+        with
+        | Error _ as err -> err
+        | Ok _ -> Ok (Some volume_name)))
+;;
+
 let microvm_shim_host_dir (t : t) =
   Config_dir_resolver.microvm_shim_dir ~base_path:t.config.base_path
 ;;
@@ -1044,6 +1076,9 @@ let prepare_microvm_shim_dir (t : t) =
 
 type microvm_guest_provisions =
   { work_volume_name : string
+  ; build_volume_name : string option
+        (** [Some] on `Apple_container`; [None] on backends whose
+            work volume already returns host disk on a guest delete. *)
   ; shim_host_dir : string
   }
 
@@ -1053,9 +1088,12 @@ let microvm_guest_provisions (t : t) ~backend ~timeout_sec =
   match microvm_work_volume ~backend ~keeper_name:t.meta.name ~timeout_sec with
   | Error _ as err -> err
   | Ok work_volume_name ->
-    (match prepare_microvm_shim_dir t with
+    (match microvm_build_volume ~backend ~keeper_name:t.meta.name ~timeout_sec with
      | Error _ as err -> err
-     | Ok shim_host_dir -> Ok { work_volume_name; shim_host_dir })
+     | Ok build_volume_name ->
+       (match prepare_microvm_shim_dir t with
+        | Error _ as err -> err
+        | Ok shim_host_dir -> Ok { work_volume_name; build_volume_name; shim_host_dir }))
 ;;
 
 (** Boot invariant (RFC-0052), fail-closed:
@@ -1147,6 +1185,89 @@ let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~backend ~container_nam
       (Printf.sprintf
          "microvm_keeper_work_root_failed: %s: %s"
          root
+         (Keeper_sandbox_runtime.docker_failure_output_for_log out))
+;;
+
+(** Point every checkout's [_build] under the keeper's work root at its
+    build volume (RFC-keeper-build-output-returns-to-a-disposable-volume),
+    `Apple_container` only. Best-effort: unlike
+    {!ensure_microvm_keeper_work_root}, a failure here does not fail the
+    turn. The keeper has a tree either way -- a checkout this cannot link
+    keeps writing to the unified work volume, which is correct, just not
+    disposable, the same fallback {!Keeper_sandbox_microvm.plan_build_link}
+    takes for a checkout occupied by real output. Logged, not surfaced, because there
+    is no caller decision for an operator or a keeper to make from inside a
+    turn; the volume-provisioning refusal in {!microvm_guest_provisions}
+    (which does fail the boot) is where a genuinely unusable build volume
+    is reported.
+
+    Run once per guest adoption, not every turn: {!microvm_remote_endpoint} already
+    memoizes {!ensure_microvm_keeper_work_root} the same way, and doing
+    this scan on every tool call inside a turn would be an exec per call
+    for a guest whose checkouts rarely change mid-turn. The gap this
+    leaves: a checkout the keeper creates after this guest's first
+    adoption keeps writing to the unified work volume until the guest
+    restarts. *)
+let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
+  match (backend : Keeper_microvm_backend.t) with
+  | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> ()
+  | Keeper_microvm_backend.Apple_container ->
+    let keeper_work_root = Keeper_sandbox_microvm.keeper_work_root ~keeper_name:t.meta.name in
+    let scan =
+      Keeper_sandbox_microvm.build_scan_argv_for
+        backend
+        ~container_name
+        ~keeper_work_root
+        ~uid:t.uid
+        ~gid:t.gid
+    in
+    (match run_argv_with_status ?timeout_sec scan with
+     | Unix.WEXITED 0, stdout ->
+       let rows =
+         Keeper_sandbox_microvm.build_link_rows_of_scan
+           (Keeper_sandbox_microvm.build_scan_rows_of_output stdout)
+       in
+       List.iter
+         (fun (row : Keeper_sandbox_microvm.build_link_row) ->
+           match row.plan with
+           | Link_refused_real_directory ->
+             Log.Keeper.warn
+               "%s"
+               (Keeper_sandbox_microvm.build_link_refusal_message ~checkout:row.checkout)
+           | Link_already_correct | Link_create _ | Link_retarget _ -> ())
+         rows;
+       let actions = Keeper_sandbox_microvm.build_link_actions rows in
+       (* Already-correct links need their target too: a fresh boot recreates
+          the build volume empty while the work volume keeps the links. *)
+       (match Keeper_sandbox_microvm.build_link_targets rows with
+        | [] -> ()
+        | _ :: _ as targets ->
+          let mkdir = Keeper_sandbox_microvm.build_target_mkdir_argv ~container_name ~targets in
+          (match run_argv_with_status ?timeout_sec mkdir, actions with
+           | (Unix.WEXITED 0, _), [] -> ()
+           | (Unix.WEXITED 0, _), _ :: _ ->
+             let apply =
+               Keeper_sandbox_microvm.build_link_apply_argv_for
+                 backend
+                 ~container_name
+                 ~keeper_work_root
+                 ~uid:t.uid
+                 ~gid:t.gid
+                 ~actions
+             in
+             (match run_argv_with_status ?timeout_sec apply with
+              | Unix.WEXITED 0, _ -> ()
+              | _, out ->
+                Log.Keeper.warn
+                  "microvm_build_link_apply_failed: %s"
+                  (Keeper_sandbox_runtime.docker_failure_output_for_log out))
+           | (_, out), _ ->
+             Log.Keeper.warn
+               "microvm_build_link_mkdir_failed: %s"
+               (Keeper_sandbox_runtime.docker_failure_output_for_log out)))
+     | _, out ->
+       Log.Keeper.warn
+         "microvm_build_scan_failed: %s"
          (Keeper_sandbox_runtime.docker_failure_output_for_log out))
 ;;
 
@@ -1490,6 +1611,15 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                    beside its config. *)
                 @ Keeper_sandbox_microvm.work_volume_mount_args
                     ~volume_name:provisions.work_volume_name
+                (* Derived build output, on its own disposable volume
+                   so it can be deleted and recreated without
+                   touching the checkout above -- absent on backends whose
+                   work volume already returns host disk on a guest
+                   delete. *)
+                @ (match provisions.build_volume_name with
+                   | Some volume_name ->
+                     Keeper_sandbox_microvm.build_volume_mount_args ~volume_name
+                   | None -> [])
                 @ Keeper_sandbox_microvm.shim_mount_args
                     ~host_dir:provisions.shim_host_dir)
              ~image
@@ -1558,6 +1688,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                     ~container_name
                 with
                 | Ok () ->
+                  ensure_microvm_build_links ?timeout_sec t ~backend ~container_name;
                   mark_microvm_work_root_ready container_name;
                   adopt github_identity
                 | Error detail ->
@@ -2137,6 +2268,7 @@ let microvm_remote_endpoint ?timeout_sec (t : t) =
             ensure_microvm_keeper_work_root ?timeout_sec t ~backend ~container_name
           with
           | Ok () ->
+            ensure_microvm_build_links ?timeout_sec t ~backend ~container_name;
             mark_microvm_work_root_ready container_name;
             Ok ()
           | Error _ as err -> err)

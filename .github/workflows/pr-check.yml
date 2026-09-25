@@ -24,7 +24,7 @@ name: PR check
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -35,6 +35,7 @@ concurrency:
 
 jobs:
   tla:
+    if: github.event.pull_request.draft == false
     name: TLA model check
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -86,6 +87,7 @@ jobs:
   # they run now. The diff guards need the base commit present, hence
   # fetch-depth: 0.
   lint:
+    if: github.event.pull_request.draft == false
     name: lint suite
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -188,6 +190,7 @@ jobs:
         run: bash scripts/ci/run-lint-suite.sh advisory
 
   check:
+    if: github.event.pull_request.draft == false
     name: dune build @check
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -423,6 +426,7 @@ jobs:
   # critical path, and as a job it runs beside it. The switch setup is the same
   # composite actions, so the duplication is five lines.
   release-check:
+    if: github.event.pull_request.draft == false
     name: dune build --profile release @check
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -481,6 +485,7 @@ jobs:
   # load; RFC-0428 carries those numbers and the suite waits on that decision.
   # The type-check does not need to wait for it.
   dashboard-types:
+    if: github.event.pull_request.draft == false
     name: dashboard typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 15

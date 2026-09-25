@@ -3,11 +3,11 @@
 
     The public descriptor exposes one command SSOT: exactly one of a non-empty
     [argv] process vector, run without a shell with every token verbatim, or
-    [script] — one command line handed as [-c] text to the shell named by
+    [command] — one command line handed as [-c] text to the shell named by
     [shell]. Pipes, redirections, [;]/[&&] sequencing and [FOO=1] prefixes are
-    shell syntax inside [script]; the schema carries no object form for them.
+    shell syntax inside [command]; the schema carries no object form for them.
 
-    Accepted fields: argv, script, shell, cwd, timeout_sec. This sentence is
+    Accepted fields: argv, command, shell, cwd, timeout_sec, intent. This sentence is
     the contract line checked by scripts/check-execute-async-surface.sh —
     update both together.
 

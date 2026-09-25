@@ -390,11 +390,19 @@ val checkpoints : dir:string -> (Machine_checkpoint.listed list, error) result
 
 (** {2 Autosave}
 
-    One fixed slot, offered back, never resumed on its own. *)
+    A fixed slot, offered back, never resumed on its own. *)
 
 val autosave_slot : Machine_checkpoint.slot
 (** The one name autosave writes to. Parsed once from a literal that always
     validates, so every caller shares this value instead of the string. *)
+
+val autosave_prev_slot : Machine_checkpoint.slot
+(** Where an incarnation's first autosave moves whatever {!autosave_slot}
+    already held, before writing its own state there. That file is the
+    previous incarnation's own last save -- a fresh {!load} or {!restore}'s
+    first autosave must not erase it silently. Listed and restorable like any
+    other slot ({!checkpoints}, {!restore}); nothing offers it back on its
+    own the way {!lookup_autosave} offers {!autosave_slot}. *)
 
 type autosave_status = { program : string; steps : int; saved_by : string; saved_at : float }
 

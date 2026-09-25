@@ -1068,6 +1068,53 @@ let test_every_tool_that_moves_the_guest_autosaves () =
   saves "click" "masc_dos_click" [ ("x", `Int 1); ("y", `Int 1); ("buttons", `Int 1) ]
 ;;
 
+(* Reads a slot's step count through [Machine_checkpoint] directly, the way
+   [Dos_lane.lookup_autosave] reads [autosave_slot] -- never through
+   [masc_dos_restore], which would itself start a new incarnation and make
+   "the same incarnation's second autosave" a different scenario than the one
+   being checked. *)
+let steps_in_slot ~base_path slot_name =
+  match Machine_checkpoint.slot_of_string slot_name with
+  | Error message -> fail message
+  | Ok slot ->
+    (match
+       Machine_checkpoint.read_meta ~dir:(checkpoints_dir ~base_path) slot
+         ~machine:Machine_checkpoint.Dos ~format:Dos_lane.checkpoint_format
+     with
+     | Error e -> fail (Machine_checkpoint.error_to_string e)
+     | Ok { meta; _ } ->
+       (match member "steps" meta with
+        | Some (`Int n) -> n
+        | _ -> fail "the checkpoint's meta names no step count"))
+;;
+
+(* A restart looks like a fresh [masc_dos_load]: a new incarnation in memory,
+   [autosaved_once] starting false again, and the previous incarnation's
+   autosave still on disk at the one slot everything writes to. Its first
+   write must not silently replace that file -- it belongs to a machine this
+   incarnation never touched. *)
+let test_a_fresh_load_preserves_the_previous_incarnations_autosave () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    let stepped = dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] in
+    let steps_before_restart = int_field "steps" stepped in
+    let prev_file = Filename.concat (checkpoints_dir ~base_path) "autosave-prev.ckpt" in
+    check bool "no autosave-prev before a restart" false (Sys.file_exists prev_file);
+    let reloaded = load ~base_path "echo.com" in
+    check bool "the reload succeeds" true (is_completed reloaded);
+    check bool "the previous incarnation's autosave moved to autosave-prev" true
+      (Sys.file_exists prev_file);
+    check bool "the new incarnation's own load autosaved too" true (autosave_saved reloaded);
+    check int "autosave-prev holds the step count from before the restart"
+      steps_before_restart (steps_in_slot ~base_path "autosave-prev");
+    (* A second autosave by the same (new) incarnation is its own history
+       replacing its own history: [autosave-prev] does not move again. *)
+    ignore (dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1_000) ] : Tool_result.result);
+    check int "and a later autosave by the same incarnation leaves it alone"
+      steps_before_restart (steps_in_slot ~base_path "autosave-prev"))
+;;
+
 (* A call refused before anything ran leaves the previous autosave as it was.
    The boot's file is removed first, so a write by a refused call would show
    up as a file that should not be there, not as an unchanged one. *)
@@ -1257,6 +1304,8 @@ let () =
         ; test_case "autosave after a step" `Quick test_autosave_written_after_a_successful_step
         ; test_case "every tool that moves the guest autosaves" `Quick
             test_every_tool_that_moves_the_guest_autosaves
+        ; test_case "a fresh load preserves the previous incarnation's autosave" `Quick
+            test_a_fresh_load_preserves_the_previous_incarnations_autosave
         ; test_case "autosave skips a refusal" `Quick test_a_refused_call_writes_no_autosave
         ; test_case "a fault keeps the last good autosave" `Quick
             test_a_fault_leaves_the_last_good_autosave

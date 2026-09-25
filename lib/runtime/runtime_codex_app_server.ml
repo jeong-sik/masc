@@ -1140,7 +1140,14 @@ let item_delta_notification ~method_ ~thread_id ~turn_id params =
   else Ok delta
 ;;
 
-(* One [TokenUsageBreakdown] of a [thread/tokenUsage/updated] frame. *)
+(* One [TokenUsageBreakdown] of a [thread/tokenUsage/updated] frame. Its
+   counts nest: cached input is part of the input, reasoning is part of the
+   output, and nothing is output or written to the cache without input
+   (rust-v0.156.1; measured 2026-09-25 over 64,410 breakdowns, 62,946 with
+   cached input and 60,187 with reasoning: none broke these). A breakdown
+   that breaks them is a shape this reading does not know, such as an
+   estimate or a fill that gained a count besides its total. Read as a
+   request, it would put a count nobody sent in the usage ledger. *)
 let token_usage_breakdown stage usage_fields name =
   let* breakdown_json = required_member stage name usage_fields in
   let* breakdown = assoc_at stage breakdown_json in
@@ -1153,6 +1160,19 @@ let token_usage_breakdown stage usage_fields name =
     match List.assoc_opt "cacheWriteInputTokens" breakdown with
     | None -> Ok 0
     | Some _ -> required_count stage "cacheWriteInputTokens" breakdown
+  in
+  let* () =
+    if cached_input_tokens > input_tokens
+    then
+      protocol_error stage (Printf.sprintf "%S counts more cached input than input" name)
+    else if reasoning_output_tokens > output_tokens
+    then protocol_error stage (Printf.sprintf "%S counts more reasoning than output" name)
+    else if input_tokens = 0 && (output_tokens > 0 || cache_write_input_tokens > 0)
+    then
+      protocol_error
+        stage
+        (Printf.sprintf "%S counts output or cache writes without input" name)
+    else Ok ()
   in
   Ok
     { input_tokens

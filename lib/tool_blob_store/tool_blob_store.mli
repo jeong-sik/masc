@@ -170,11 +170,9 @@ val fetch_range :
     read. The validation cache is bounded, so an evicted or changed snapshot
     is revalidated before any bytes are returned, preserving {!fetch}'s
     content-address integrity without hashing the whole artifact on every
-    page. The cold read takes the window and the digest through two
-    descriptors; it admits the pair only when both descriptors report an
-    equal snapshot, and otherwise revalidates through one whole-file read
-    (#38972). Bounds and filesystem failures remain typed. Cancellation
-    propagates. *)
+    page. The cold read takes the window and the digest from one owned
+    descriptor, so the bytes it returns are the bytes it hashed (#38972).
+    Bounds and filesystem failures remain typed. Cancellation propagates. *)
 
 module For_testing : sig
   val put_file_durable
@@ -188,17 +186,18 @@ module For_testing : sig
       blocking job and must not perform Eio effects. *)
 
   val fetch_range
-    :  between_reads:(unit -> unit)
+    :  after_window_read:(unit -> unit)
     -> t
     -> sha256:string
     -> offset:int
     -> max_bytes:int
     -> (range option, fetch_error) result
   (** The production {!fetch_range} with a fault-injection boundary on the
-      cold path, after the window read and before the digest read. It runs
-      only when the snapshot cache holds no entry for the shard and the
-      window read found the shard. It runs in the calling fiber, not in a
-      blocking job. *)
+      cold path: after the window has been read and before the digest
+      decides whether it is admitted. It runs only when the snapshot cache
+      holds no entry for the shard and the read found the shard, in the
+      calling fiber, not in a blocking job. A test rewrites the shard here to
+      stand in for a put that lands between reading and admitting. *)
 
   val validated_snapshot
     :  t

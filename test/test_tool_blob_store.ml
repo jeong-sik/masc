@@ -458,16 +458,22 @@ let test_fetch_range_cold_validates_without_materialising () =
              "warm fetch_range failed: %s"
              (B.fetch_error_to_string error)))
 
-let test_fetch_range_cold_does_not_pair_a_window_with_another_states_digest () =
-  (* #38972. The cold read takes the window through one descriptor and the
-     digest through a second. The [between_reads] seam swaps the shard between
-     the two, without a race: the window is read from corrupt bytes C, then
-     the payload P is restored, so the digest covers P and matches the
-     address. The two descriptors report different snapshots, so the pair
-     must not be admitted. The call must return P's window from one
-     consistent re-read, and C's snapshot must never become the cached
-     validated state. Removing the snapshot comparison serves C's window as
-     verified and caches C, which this test catches. *)
+let shard_path_of store sha256 =
+  Filename.concat
+    (Filename.concat (B.root_dir store) (String.sub sha256 0 2))
+    sha256
+
+let test_fetch_range_cold_returns_only_bytes_it_hashed () =
+  (* #38972. A put that repairs a corrupt address (temp+rename) can land
+     while a cold range read is in flight. The shard holds corrupt bytes C
+     when the read starts; the [after_window_read] seam restores the payload
+     P after the window has been read and before the digest admits it. The
+     invariant is "the bytes returned are the bytes hashed": the call either
+     reports that the state it read does not match the address, or returns a
+     window of a state that does — never C's window as verified — and C's
+     snapshot never becomes the cached validated state. The earlier cold
+     branch read the window and hashed through two opens, so the digest
+     covered P while the window came from C; it served C and cached C. *)
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
       let payload = String.make 8_192 'p' in
@@ -475,11 +481,7 @@ let test_fetch_range_cold_does_not_pair_a_window_with_another_states_digest () =
       match B.put store ~bytes:payload ~mime:"text/plain" with
       | O.Inline _ -> Alcotest.fail "put returned Inline"
       | O.Stored { sha256; _ } ->
-        let path =
-          Filename.concat
-            (Filename.concat (B.root_dir store) (String.sub sha256 0 2))
-            sha256
-        in
+        let path = shard_path_of store sha256 in
         let write bytes =
           match Fs_compat.save_file_atomic path bytes with
           | Ok () -> ()
@@ -496,11 +498,6 @@ let test_fetch_range_cold_does_not_pair_a_window_with_another_states_digest () =
           | Ok None -> Alcotest.fail "fixture shard is missing"
           | Error _ -> Alcotest.fail "fixture shard is unreadable"
         in
-        let is_cached expected =
-          match B.For_testing.validated_snapshot store ~sha256 with
-          | Some cached -> Fs_compat.equal_owned_regular_file_snapshot cached expected
-          | None -> false
-        in
         write corrupt;
         let corrupt_snapshot = snapshot_now () in
         Alcotest.(check bool)
@@ -508,24 +505,24 @@ let test_fetch_range_cold_does_not_pair_a_window_with_another_states_digest () =
           true
           (Option.is_none (B.For_testing.validated_snapshot store ~sha256));
         let swaps = ref 0 in
-        let between_reads () =
+        let after_window_read () =
           incr swaps;
           write payload
         in
         (match
            B.For_testing.fetch_range
-             ~between_reads
+             ~after_window_read
              store
              ~sha256
              ~offset:0
              ~max_bytes:64
          with
+         | Error (B.Integrity_mismatch _) -> ()
          | Ok (Some range) ->
            Alcotest.(check string)
-             "the window comes from the state that was hashed"
+             "a returned window belongs to a state whose digest matches the address"
              (String.sub payload 0 64)
-             range.content;
-           Alcotest.(check int) "total bytes" 8_192 range.total_bytes
+             range.content
          | Ok None -> Alcotest.fail "fetch_range returned None"
          | Error error ->
            Alcotest.failf
@@ -533,13 +530,78 @@ let test_fetch_range_cold_does_not_pair_a_window_with_another_states_digest () =
              (B.fetch_error_to_string error));
         Alcotest.(check int) "the seam ran once, on the cold path" 1 !swaps;
         Alcotest.(check bool)
-          "the unhashed corrupt state is not cached as validated"
+          "the corrupt state is not cached as validated"
           false
-          (is_cached corrupt_snapshot);
-        Alcotest.(check bool)
-          "the cache holds the state the re-read validated"
-          true
-          (is_cached (snapshot_now ())))
+          (match B.For_testing.validated_snapshot store ~sha256 with
+           | Some cached ->
+             Fs_compat.equal_owned_regular_file_snapshot cached corrupt_snapshot
+           | None -> false);
+        (* The repaired shard serves the next page. *)
+        match B.fetch_range store ~sha256 ~offset:64 ~max_bytes:64 with
+        | Ok (Some range) ->
+          Alcotest.(check string)
+            "the next read serves the repaired payload"
+            (String.sub payload 64 64)
+            range.content
+        | Ok None -> Alcotest.fail "next fetch_range returned None"
+        | Error error ->
+          Alcotest.failf
+            "next fetch_range failed: %s"
+            (B.fetch_error_to_string error))
+
+let test_range_with_sha256_window_is_a_slice_of_the_hashed_bytes () =
+  (* The single-descriptor read copies the window out while the whole file
+     streams through a 64 KiB buffer, so the window arithmetic is the new
+     risk: windows that start inside a chunk, cross a chunk boundary, fill
+     exactly one chunk, run past EOF, start at or past EOF, or are empty. *)
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let size = 200_000 in
+      let payload = String.init size (fun i -> Char.chr ((i * 7 + (i / 251)) mod 256)) in
+      match B.put store ~bytes:payload ~mime:"application/octet-stream" with
+      | O.Inline _ -> Alcotest.fail "put returned Inline"
+      | O.Stored { sha256; _ } ->
+        let path = shard_path_of store sha256 in
+        List.iter
+          (fun (offset, max_bytes) ->
+             let label = Printf.sprintf "offset %d, max %d" offset max_bytes in
+             match
+               Fs_compat.load_owned_regular_file_range_with_sha256
+                 ~ownership_root:dir
+                 ~offset
+                 ~max_bytes
+                 path
+             with
+             | Ok (Some (observed : Fs_compat.owned_regular_file_range_digest)) ->
+               let start = min offset size in
+               Alcotest.(check string)
+                 (label ^ ": window")
+                 (String.sub payload start (min max_bytes (size - start)))
+                 observed.content;
+               Alcotest.(check string)
+                 (label ^ ": digest covers the whole file")
+                 sha256
+                 observed.sha256;
+               Alcotest.(check int)
+                 (label ^ ": snapshot size")
+                 size
+                 observed.snapshot.file_size
+             | Ok None -> Alcotest.failf "%s: shard missing" label
+             | Error error ->
+               Alcotest.failf
+                 "%s: %s"
+                 label
+                 (Fs_compat.owned_regular_file_read_error_to_string error))
+          [ 0, 64
+          ; 65_530, 20
+          ; 65_536, 65_536
+          ; 131_000, 70_000
+          ; 199_990, 64
+          ; size, 64
+          ; size + 5, 64
+          ; 0, 0
+          ; 0, size
+          ])
 
 let test_idempotent_put () =
   (* Same content twice = same sha = same path, no error. *)
@@ -1747,8 +1809,10 @@ let () =
             test_fetch_range_miss_returns_none_fast;
           Alcotest.test_case "cold fetch range validates without materialising" `Quick
             test_fetch_range_cold_validates_without_materialising;
-          Alcotest.test_case "cold fetch range never pairs a window with another state's digest" `Quick
-            test_fetch_range_cold_does_not_pair_a_window_with_another_states_digest;
+          Alcotest.test_case "cold fetch range returns only bytes it hashed" `Quick
+            test_fetch_range_cold_returns_only_bytes_it_hashed;
+          Alcotest.test_case "range digest window is a slice of the hashed bytes" `Quick
+            test_range_with_sha256_window_is_a_slice_of_the_hashed_bytes;
           Alcotest.test_case "fetch miss = None" `Quick test_fetch_miss;
           Alcotest.test_case "idempotent put" `Quick test_idempotent_put;
           Alcotest.test_case "put writes an address again only after fetch finds it gone" `Quick

@@ -1001,24 +1001,14 @@ let load_owned_regular_file ~ownership_root path =
   |> Result.map (Option.map (fun contents -> contents.content))
 ;;
 
-type owned_regular_file_digest =
-  { sha256 : string
-  ; snapshot : owned_regular_file_snapshot
-  }
-
-let sha256_owned_regular_file_with_snapshot_blocking ~ownership_root path =
+let sha256_owned_regular_file_blocking ~ownership_root path =
   load_owned_regular_file_blocking_with ~ownership_root
     ~read_descriptor:(fun ~path fd descriptor ->
       try
         (* Fixed I/O buffer; file size does not determine memory allocation. *)
         let buffer = Bytes.create 65536 in
         let rec feed context remaining =
-          if remaining = 0
-          then
-            Ok
-              { sha256 = Digestif.SHA256.(to_hex (get context))
-              ; snapshot = owned_regular_file_snapshot_of_stats descriptor
-              }
+          if remaining = 0 then Ok Digestif.SHA256.(to_hex (get context))
           else match Unix.read fd buffer 0 (min remaining (Bytes.length buffer)) with
             | 0 -> owned_file_error (Filesystem_identity_changed { path })
             | count -> feed (Digestif.SHA256.feed_bytes context ~off:0 ~len:count buffer) (remaining - count)
@@ -1031,22 +1021,14 @@ let sha256_owned_regular_file_with_snapshot_blocking ~ownership_root path =
     path
 ;;
 
-let sha256_owned_regular_file_with_snapshot ~ownership_root path =
+let sha256_owned_regular_file ~ownership_root path =
   with_fs_or_fallback ~path
-    ~fallback:(fun () ->
-      sha256_owned_regular_file_with_snapshot_blocking ~ownership_root path)
+    ~fallback:(fun () -> sha256_owned_regular_file_blocking ~ownership_root path)
     (fun _fs ->
       let result = Eio_unix.run_in_systhread ~label:(labelled "fs-compat-hash-owned-file" path)
-        (fun () ->
-          sha256_owned_regular_file_with_snapshot_blocking ~ownership_root path) in
+        (fun () -> sha256_owned_regular_file_blocking ~ownership_root path) in
       Eio.Fiber.check ();
       result)
-;;
-
-let sha256_owned_regular_file ~ownership_root path =
-  sha256_owned_regular_file_with_snapshot ~ownership_root path
-  |> Result.map
-       (Option.map (fun (digest : owned_regular_file_digest) -> digest.sha256))
 ;;
 
 type owned_regular_file_prefix =
@@ -1148,6 +1130,92 @@ let load_owned_regular_file_range
          Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-range" path) (fun () ->
            load_owned_regular_file_range_blocking
              ~ownership_root ~offset ~max_bytes path)
+       in
+       Eio.Fiber.check ();
+       result)
+;;
+
+(* One descriptor serves both the window and the whole-file digest, so the
+   bytes returned are the bytes hashed by construction (#38972): there is no
+   second open whose file state could differ. The digest streams through a
+   fixed buffer; only the window is copied out, so memory is bounded by
+   [max_bytes] plus the buffer, never by the file size. *)
+type owned_regular_file_range_digest =
+  { content : string
+  ; sha256 : string
+  ; snapshot : owned_regular_file_snapshot
+  }
+
+let load_owned_regular_file_range_with_sha256_blocking
+    ~ownership_root ~offset ~max_bytes path =
+  if offset < 0 || max_bytes < 0
+  then
+    owned_file_operation_error
+      ~path
+      Read_contents
+      (Invalid_argument "offset and max_bytes must be non-negative")
+  else
+    load_owned_regular_file_blocking_with
+      ~ownership_root
+      ~read_descriptor:(fun ~path fd descriptor ->
+        let size = descriptor.Unix.st_size in
+        let window_start = min offset size in
+        let window_stop = window_start + min max_bytes (size - window_start) in
+        let window = Bytes.create (window_stop - window_start) in
+        try
+          let buffer = Bytes.create 65536 in
+          let rec feed context position =
+            if position = size
+            then
+              Ok
+                { content = Bytes.to_string window
+                ; sha256 = Digestif.SHA256.(to_hex (get context))
+                ; snapshot = owned_regular_file_snapshot_of_stats descriptor
+                }
+            else
+              match
+                Unix.read fd buffer 0 (min (size - position) (Bytes.length buffer))
+              with
+              | 0 -> owned_file_error (Filesystem_identity_changed { path })
+              | count ->
+                let chunk_stop = position + count in
+                let copy_start = max position window_start in
+                let copy_stop = min chunk_stop window_stop in
+                if copy_start < copy_stop
+                then
+                  Bytes.blit
+                    buffer
+                    (copy_start - position)
+                    window
+                    (copy_start - window_start)
+                    (copy_stop - copy_start);
+                feed
+                  (Digestif.SHA256.feed_bytes context ~off:0 ~len:count buffer)
+                  chunk_stop
+              | exception Unix.Unix_error (Unix.EINTR, _, _) -> feed context position
+          in
+          feed Digestif.SHA256.empty 0
+        with
+        | Eio.Cancel.Cancelled _ as cancellation ->
+          reraise_current cancellation
+        | cause -> owned_file_operation_error ~path Read_contents cause)
+      path
+;;
+
+let load_owned_regular_file_range_with_sha256
+    ~ownership_root ~offset ~max_bytes path =
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () ->
+      load_owned_regular_file_range_with_sha256_blocking
+        ~ownership_root ~offset ~max_bytes path)
+    (fun _fs ->
+       let result =
+         Eio_unix.run_in_systhread
+           ~label:(labelled "fs-compat-load-owned-range-digest" path)
+           (fun () ->
+              load_owned_regular_file_range_with_sha256_blocking
+                ~ownership_root ~offset ~max_bytes path)
        in
        Eio.Fiber.check ();
        result)

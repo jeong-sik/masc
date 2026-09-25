@@ -1215,14 +1215,16 @@ let complete_stream_http
         Error err
       | Ok (Error err) ->
         (* agent-core boundary: a glm request rejection arrives as a non-200 whose body is
-           glm's structured error envelope. Promote a code-1261 context
-           overflow to the typed [ProviderFailure Context_overflow] here, while
-           the provider identity is still known — downstream classification
-           ([Retry.classify_error]) is provider-agnostic and would flatten it
-           into [InvalidRequest Unknown_invalid_request], cutting consumers off
-           from their compaction/shrink recovery. The promotion parses the
-           envelope's documented [code] field ([Backend_glm.check_glm_error]),
-           never message prose. *)
+           glm's structured error envelope. Promote a context overflow or a
+           quota exhaustion to its typed [ProviderFailure] here, while the
+           provider identity is still known — downstream classification
+           ([Retry.classify_error]) is provider-agnostic and would read the
+           status alone: an overflow as [InvalidRequest], cutting consumers off
+           from compaction/shrink recovery, and a quota exhaustion's 429 as a
+           rate limit. The promotion parses the envelope's documented [code]
+           field ([Backend_glm.check_glm_error]), never message prose, through
+           the same rule the sync seam uses
+           ([Backend_glm.provider_failure_of_glm_error]). *)
         let err =
           match http_codec with
           | Provider_http_codec.Glm_chat ->
@@ -1231,15 +1233,13 @@ let complete_stream_http
                 refusal whose body the caller's window cut has none to read
                 and keeps the classification the status alone supports. *)
              | Http_client.HttpError { body = Http_client.Received body; _ } ->
-               (match Backend_glm.check_glm_error body with
-                | Some
-                    { Backend_glm.error_class = Backend_glm.Glm_context_overflow
-                    ; message
-                    ; _
-                    } ->
-                  Http_client.ProviderFailure
-                    { kind = Http_client.Context_overflow { limit = None }; message }
-                | Some _ | None -> err)
+               (match
+                  Option.bind
+                    (Backend_glm.check_glm_error body)
+                    Backend_glm.provider_failure_of_glm_error
+                with
+                | Some failure -> failure
+                | None -> err)
              | Http_client.HttpError { body = Http_client.Not_received_in_window; _ }
              | Http_client.NetworkError _
              | Http_client.TimeoutError _

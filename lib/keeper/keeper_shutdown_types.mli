@@ -93,7 +93,12 @@ type failure_stage =
   | Task_settlement
   | Pending_confirm_cleanup
   | Approval_summary_retirement
+  | Meta_read
+      (** Finalization could not read the Keeper metadata it settles tasks
+          against. Nothing was settled by this attempt. *)
   | Meta_update
+      (** Cleanup preparation could not apply or validate metadata after
+          every owned task was settled. *)
   | Meta_remove
   | Session_remove
   | Registry_unregister
@@ -102,6 +107,28 @@ type failure =
   { stage : failure_stage
   ; detail : string
   }
+
+(** Where boot recovery resumes a [Blocked] operation whose stage does not
+    hold the admission fence. *)
+type blocked_replay =
+  | Replay_unsettled_tasks
+      (** Resume [Finalizing_tasks] with the owned tasks that already carry
+          this operation's release receipt; settle the rest. *)
+  | Replay_settled_tasks
+      (** Resume [Finalizing_tasks] with every owned task settled; the
+          failure came after settlement returned all of them. *)
+
+(** Why boot recovery closed a replayable [Blocked] operation instead of
+    replaying it. Each one means the operation's snapshot no longer describes
+    the Keeper, so replaying it would act on a later state. *)
+type boot_replay_abandonment =
+  | Newer_operation of Operation_id.t
+      (** A later shutdown operation exists for the same Keeper. *)
+  | Keeper_trace_changed
+      (** The Keeper metadata carries a different trace: it ran after the
+          operation blocked. *)
+  | Keeper_claimed_new_tasks of Keeper_id.Task_id.t list
+      (** The Keeper actively owns tasks the operation never snapshotted. *)
 
 type lane_outcome =
   | Lane_completed
@@ -191,6 +218,14 @@ type supersession =
           tool calls may or may not have landed. The durable record must say
           which of the two an operator signed off on, and the prior phase is
           overwritten by [Superseded], so the turn is carried here. *)
+  | Boot_replay_abandoned of
+      { blocked : failure
+      ; abandonment : boot_replay_abandonment
+      }
+      (** Boot recovery found a replayable [Blocked] operation whose snapshot
+          was overtaken ({!boot_replay_abandonment}) and closed it with a
+          warning instead of replaying it. [blocked] is the failure it
+          carried. *)
 
 type phase =
   | Prepared
@@ -251,6 +286,17 @@ type invariant_error =
 val schema_version : int
 val requires_admission_fence : t -> bool
 val failure_stage_requires_admission_fence : failure_stage -> bool
+(** [true] exactly when {!failure_stage_boot_replay} is [None]. *)
+
+val failure_stage_boot_replay : failure_stage -> blocked_replay option
+(** [None] for a stage that mutated durable Keeper state; the operation keeps
+    the admission fence and is not replayed. *)
+
+val boot_replay : t -> blocked_replay option
+(** The replay for a [Blocked] operation at a replayable stage; [None] for
+    every other phase. *)
+
+val boot_replay_abandonment_to_string : boot_replay_abandonment -> string
 val cleanup_reason_label : cleanup_reason -> string
 val meta_disposition_of_cleanup_reason : cleanup_reason -> meta_disposition
 val completion_action_to_string : completion_action -> string

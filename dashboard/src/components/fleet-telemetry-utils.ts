@@ -141,7 +141,6 @@ export function uniqueStrings(values: Array<string | null | undefined>): string[
 function keeperModel(keeper: Keeper): string {
   const evidence = [
     keeper.active_model_label,
-    keeper.last_model_used_label,
     keeper.active_model,
     keeper.last_model_used,
     keeper.primary_model,

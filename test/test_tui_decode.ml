@@ -1,5 +1,26 @@
 open Masc
 
+(* The saved-app reply's scope count picks the TUI notice: 0 says the
+   service's own list will be asked for. A reply without [scopes] used to
+   count as 0 and so told the operator something the server never said. *)
+let test_decode_oauth_client_saved_reads_scopes_and_refuses_their_absence () =
+  let decode text =
+    Tui_decode.decode_oauth_client_saved (Yojson.Safe.from_string text)
+  in
+  let result = Alcotest.(result int string) in
+  Alcotest.check result "two scopes" (Ok 2)
+    (decode {|{"provider":"github","scopes":["repo","read:org"]}|});
+  Alcotest.check result "saved with none" (Ok 0)
+    (decode {|{"provider":"github","scopes":[]}|});
+  Alcotest.(check bool) "no scopes field is refused" true
+    (Result.is_error (decode {|{"provider":"github"}|}));
+  Alcotest.(check bool) "scopes that are not a list are refused" true
+    (Result.is_error (decode {|{"provider":"github","scopes":"repo"}|}));
+  Alcotest.(check bool) "a non-string scope after a valid scope is refused" true
+    (Result.is_error (decode {|{"provider":"github","scopes":["repo",null]}|}));
+  Alcotest.(check bool) "a reply that is not an object is refused" true
+    (Result.is_error (decode {|[]|}))
+
 (* #38205, #38411: a schedule row carries the occurrence the runner is holding
    back and when the runner read it. The hold is read, not guessed: the key is
    always sent and null is "not held"; an object must name the occurrence, its
@@ -13,6 +34,7 @@ let test_decode_schedule_runner_hold_reads_a_held_row () =
             [ "occurrence_id", `String "occ-2"
             ; "due_at", `Float 260.0
             ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+            ; "reason", `Assoc [ "kind", `String "previous_occurrence_unconsumed" ]
             ; "observed_at", `Float 275.5
             ; "observed_at_iso", `String "1970-01-01T00:04:35Z"
             ] )
@@ -22,9 +44,56 @@ let test_decode_schedule_runner_hold_reads_a_held_row () =
   | Ok (Some hold) ->
       Alcotest.(check string) "occurrence" "occ-2" hold.Tui_decode.srh_occurrence_id;
       Alcotest.(check string) "due" "1970-01-01T00:04:20Z" hold.Tui_decode.srh_due_at_iso;
+      Alcotest.(check bool) "reason" true
+        (hold.Tui_decode.srh_reason = Tui_decode.Hold_previous_wake_untaken);
       Alcotest.(check (float 0.0)) "seen" 275.5 hold.Tui_decode.srh_observed_at
   | Ok None -> Alcotest.fail "a held row decoded as not held"
   | Error err -> Alcotest.fail err
+
+(* #34642: a schedule held on its target's shutdown fence names that fence,
+   and a reason the TUI does not know is refused rather than read as the
+   previous-wake hold. The seen-time is carried like any other hold. *)
+let test_decode_schedule_runner_hold_reads_a_fence_hold_and_refuses_unknown_reasons () =
+  let hold reason =
+    `Assoc
+      [ ( "runner_hold"
+        , `Assoc
+            [ "occurrence_id", `String "occ-3"
+            ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+            ; "reason", reason
+            ; "observed_at", `Float 275.5
+            ] )
+      ]
+  in
+  (match
+     Tui_decode.decode_schedule_runner_hold
+       (hold
+          (`Assoc
+            [ "kind", `String "target_intake_fenced"
+            ; "target", `String "analyst"
+            ; "fence_owner", `String "shutdown-1"
+            ]))
+   with
+   | Ok (Some { srh_reason = Hold_target_shutdown_fenced { target; fence_owner }; _ }) ->
+       Alcotest.(check string) "target" "analyst" target;
+       Alcotest.(check string) "fence owner" "shutdown-1" fence_owner
+   | Ok _ -> Alcotest.fail "a fence hold decoded as another reason"
+   | Error err -> Alcotest.fail err);
+  Alcotest.(check bool) "an unknown reason is refused" true
+    (Result.is_error
+       (Tui_decode.decode_schedule_runner_hold
+          (hold (`Assoc [ "kind", `String "cooling_down" ]))));
+  Alcotest.(check bool) "a missing reason is refused" true
+    (Result.is_error
+       (Tui_decode.decode_schedule_runner_hold
+          (`Assoc
+            [ ( "runner_hold"
+              , `Assoc
+                  [ "occurrence_id", `String "occ-3"
+                  ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+                  ; "observed_at", `Float 275.5
+                  ] )
+            ])))
 
 let test_decode_schedule_runner_hold_reads_not_held_and_refuses_bad_shapes () =
   let decode hold = Tui_decode.decode_schedule_runner_hold (`Assoc hold) in
@@ -46,6 +115,7 @@ let test_decode_schedule_runner_hold_reads_not_held_and_refuses_bad_shapes () =
             , `Assoc
                 [ "occurrence_id", `String "occ-2"
                 ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+                ; "reason", `Assoc [ "kind", `String "previous_occurrence_unconsumed" ]
                 ] )
           ]));
   Alcotest.(check bool) "and so is a null time" true
@@ -55,6 +125,7 @@ let test_decode_schedule_runner_hold_reads_not_held_and_refuses_bad_shapes () =
             , `Assoc
                 [ "occurrence_id", `String "occ-2"
                 ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+                ; "reason", `Assoc [ "kind", `String "previous_occurrence_unconsumed" ]
                 ; "observed_at", `Null
                 ] )
           ]));
@@ -73,6 +144,7 @@ let test_decode_schedule_runner_hold_refuses_a_time_no_clock_can_draw () =
            , `Assoc
                [ "occurrence_id", `String "occ-2"
                ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+               ; "reason", `Assoc [ "kind", `String "previous_occurrence_unconsumed" ]
                ; "observed_at", `Float observed_at
                ] )
          ])
@@ -120,6 +192,7 @@ let test_schedule_hold_reads_as_of_its_time_unless_the_runner_is_ok () =
   let hold =
     { Tui_decode.srh_occurrence_id = "occ-2"
     ; srh_due_at_iso = "1970-01-01T00:04:20Z"
+    ; srh_reason = Tui_decode.Hold_previous_wake_untaken
     ; srh_observed_at = 275.5
     }
   in
@@ -543,6 +616,55 @@ let test_terminal_text_keeps_the_tags_that_spell_a_flag () =
      a function nothing draws through. *)
   Alcotest.(check string) "the terminal sanitizer keeps the flag too" scotland
     (Tui_decode.sanitize_terminal_text scotland)
+
+(* The hand-kept list stopped at the tag block. Default_Ignorable_Code_Point
+   also holds the word joiner family, the Hangul fillers and the variation
+   selectors. The only selector kept is VS15/VS16 right after a text-default
+   emoji. Anywhere else -- after a letter, after an ideograph, behind another
+   selector -- it can hide bytes under one glyph, so it is drawn. *)
+let test_terminal_text_escapes_every_default_ignorable () =
+  let word_joiner = "\xe2\x81\xa0" (* U+2060 *) in
+  let invisible_plus = "\xe2\x81\xa4" (* U+2064 *) in
+  let hangul_filler = "\xe3\x85\xa4" (* U+3164 *) in
+  let soft_hyphen = "\xc2\xad" (* U+00AD *) in
+  let vs16 = "\xef\xb8\x8f" (* U+FE0F *) in
+  let vs17 = "\xf3\xa0\x84\x80" (* U+E0100 *) in
+  let vs18 = "\xf3\xa0\x84\x81" (* U+E0101 *) in
+  let heart = "\xe2\x9d\xa4" (* U+2764 *) in
+  let ideograph = "\xe8\x91\x9b" (* U+845B *) in
+  Alcotest.(check string) "the word joiner is drawn" "a\\u2060b"
+    (Tui_decode.escape_invisible ("a" ^ word_joiner ^ "b"));
+  Alcotest.(check string) "invisible plus is drawn" "a\\u2064b"
+    (Tui_decode.escape_invisible ("a" ^ invisible_plus ^ "b"));
+  Alcotest.(check string) "the Hangul filler is drawn" "\\u3164"
+    (Tui_decode.escape_invisible hangul_filler);
+  Alcotest.(check string) "the soft hyphen is drawn" "a\\u00ADb"
+    (Tui_decode.escape_invisible ("a" ^ soft_hyphen ^ "b"));
+  Alcotest.(check string) "one selector keeps the emoji form" (heart ^ vs16)
+    (Tui_decode.escape_invisible (heart ^ vs16));
+  Alcotest.(check string) "an ideographic selector is drawn even after an ideograph"
+    (ideograph ^ "\\U000E0100")
+    (Tui_decode.escape_invisible (ideograph ^ vs17));
+  Alcotest.(check string) "VS1 after an ideograph is drawn"
+    ("\xe4\xb8\x80" ^ "\\uFE00")
+    (Tui_decode.escape_invisible ("\xe4\xb8\x80" (* U+4E00 *) ^ "\xef\xb8\x80" (* U+FE00 *)));
+  Alcotest.(check string) "one ideographic selector after a letter is drawn"
+    "a\\U000E0100"
+    (Tui_decode.escape_invisible ("a" ^ vs17));
+  Alcotest.(check string) "an emoji selector after a letter is drawn"
+    "a\\uFE0F"
+    (Tui_decode.escape_invisible ("a" ^ vs16));
+  Alcotest.(check string) "a keycap keeps its emoji selector"
+    ("1" ^ vs16)
+    (Tui_decode.escape_invisible ("1" ^ vs16));
+  Alcotest.(check string) "a run of selectors behind one letter is drawn"
+    "a\\U000E0100\\U000E0101\\U000E0100"
+    (Tui_decode.escape_invisible ("a" ^ vs17 ^ vs18 ^ vs17));
+  Alcotest.(check string) "a second emoji selector is drawn"
+    (heart ^ vs16 ^ "\\uFE0F")
+    (Tui_decode.escape_invisible (heart ^ vs16 ^ vs16));
+  Alcotest.(check string) "a selector with no base is drawn" "\\U000E0100"
+    (Tui_decode.escape_invisible vs17)
 
 let test_preview_line_marks_breaks_and_escapes_the_rest () =
   let mark = "\xe2\x8f\x8e" in
@@ -5854,7 +5976,7 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
       (match
          List.find_opt
            (fun (lane : Tui_decode.standalone_lane) ->
-             String.equal lane.sl_lane_id "board_attention_exact")
+             Standalone_lane.equal lane.sl_lane Standalone_lane.Board_attention)
            snapshot.Tui_decode.sls_lanes
        with
        | Some lane -> Ok lane.Tui_decode.sl_configuration_state
@@ -5924,10 +6046,8 @@ let test_a_lane_configuration_clause_carries_its_own_subject () =
     ; Tui_decode.Lane_registry_unavailable
     ]
 
-(* The lane detail's last two lines belong to the lane. They used to be picked
-   by comparing the id with four lanes' spellings, and Workspace curator, with
-   no branch, drew the words meant for a lane the TUI does not know. Read
-   through the decoder, as the Lanes screen reads them. *)
+(* The lane detail's last two lines belong to the lane: every lane has its
+   own pair. Read through the decoder, as the Lanes screen reads them. *)
 let test_every_lane_draws_its_own_answer () =
   let snapshot =
     `Assoc
@@ -5952,26 +6072,12 @@ let test_every_lane_draws_its_own_answer () =
   | Ok decoded ->
     let lanes = decoded.Tui_decode.sls_lanes in
     let known = List.map Tui_decode.standalone_lane_answer lanes in
-    let unknown_id id =
-      match lanes with
-      | lane :: _ -> Tui_decode.standalone_lane_answer { lane with sl_lane_id = id }
-      | [] -> Alcotest.fail "the snapshot decoded no lane"
-    in
-    let unknown = unknown_id "retired_lane_exact" in
     let pair (answer : Tui_decode.standalone_lane_answer) =
       answer.sla_output_meaning, answer.sla_evidence
     in
     Alcotest.(check int) "five lanes, five different answers"
       (List.length Standalone_lane.all)
       (List.length (List.sort_uniq compare (List.map pair known)));
-    List.iter2
-      (fun (lane : Tui_decode.standalone_lane) answer ->
-        Alcotest.(check bool)
-          (lane.sl_lane_id ^ " is not drawn as an unknown lane")
-          false
-          (String.equal answer.Tui_decode.sla_output_meaning
-             unknown.sla_output_meaning))
-      lanes known;
     (* Both lines keep the heads the lane detail is read by. *)
     List.iter
       (fun (answer : Tui_decode.standalone_lane_answer) ->
@@ -5979,11 +6085,35 @@ let test_every_lane_draws_its_own_answer () =
           (String.starts_with ~prefix:"Output meaning: " answer.sla_output_meaning);
         Alcotest.(check bool) "the second line says what the record keeps" true
           (String.starts_with ~prefix:"Evidence: " answer.sla_evidence))
-      (unknown :: known);
-    Alcotest.(check bool) "an unknown lane names its id" true
-      (String_util.contains_substring unknown.sla_evidence "retired_lane_exact");
-    Alcotest.(check bool) "and the id is escaped for the terminal" false
-      (String.contains (unknown_id "retired\027[31m").sla_evidence '\027')
+      known
+
+(* A lane row is read into [Standalone_lane.t] as it is decoded, so a row
+   whose id no lane has refuses the snapshot. *)
+let test_decode_standalone_lanes_refuses_an_unknown_lane_id () =
+  let snapshot =
+    `Assoc
+      [ "schema", `String "masc.standalone_llm_lanes.v2"
+      ; "generated_at", `String "2026-08-27T00:00:00Z"
+      ; "observed_at_unix", `Float 20.
+      ; "observation_only", `Bool true
+      ; "exact_run_projection_count", `Int 1
+      ; "exact_run_source_total", `Int 1
+      ; "exact_run_projection_truncated", `Bool false
+      ; ( "lanes"
+        , `List
+            (standalone_lane_json "retired_lane_exact" "Retired"
+             :: List.map
+                  (fun lane ->
+                    let id = Standalone_lane.to_id lane in
+                    standalone_lane_json id id)
+                  Standalone_lane.all) )
+      ]
+  in
+  match Tui_decode.decode_standalone_lanes_snapshot snapshot with
+  | Ok _ -> Alcotest.fail "a lane id no lane has decoded"
+  | Error detail ->
+    Alcotest.(check bool) "the error names the id" true
+      (String_util.contains_substring detail "retired_lane_exact")
 
 (* The start of the newest run. The fixture has carried it since this suite
    was written and the decoder read it into an underscore, so the field
@@ -6012,22 +6142,22 @@ let test_decode_standalone_lane_keeps_the_run_start () =
           ]
       ]
   in
-  let find id lanes =
+  let find target lanes =
     match
       List.find_opt
         (fun (lane : Tui_decode.standalone_lane) ->
-          String.equal lane.sl_lane_id id)
+          Standalone_lane.equal lane.sl_lane target)
         lanes
     with
     | Some lane -> lane
-    | None -> Alcotest.failf "%s missing from the snapshot" id
+    | None -> Alcotest.failf "%s missing from the snapshot" (Standalone_lane.to_id target)
   in
   match Tui_decode.decode_standalone_lanes_snapshot json with
   | Error detail -> Alcotest.failf "decode failed: %s" detail
   | Ok snapshot ->
     (match
-       ( find "board_attention_exact" snapshot.sls_lanes
-       , find "verifier_exact" snapshot.sls_lanes )
+       ( find Standalone_lane.Board_attention snapshot.sls_lanes
+       , find Standalone_lane.Verifier snapshot.sls_lanes )
      with
      | running, never_ran ->
        Alcotest.(check (option (float 0.001)))
@@ -6088,7 +6218,7 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
         match
           List.find_opt
             (fun (lane : Tui_decode.standalone_lane) ->
-              String.equal lane.sl_lane_id "verifier_exact")
+              Standalone_lane.equal lane.sl_lane Standalone_lane.Verifier)
             snapshot.sls_lanes
         with
         | Some lane -> lane
@@ -6128,7 +6258,7 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
       (match
          List.find_opt
            (fun (lane : Tui_decode.standalone_lane) ->
-              String.equal lane.sl_lane_id "board_attention_exact")
+              Standalone_lane.equal lane.sl_lane Standalone_lane.Board_attention)
            snapshot.sls_lanes
        with
        | Some lane -> Ok lane.sl_jev
@@ -9267,6 +9397,27 @@ let test_decode_librarian_page_keeps_the_server_cursor () =
       Alcotest.(check (option (pair (float 0.0) string))) "next cursor"
         (Some (42.5, "judge-older")) page.Tui_decode.lrp_next
 
+(* The unknown row sits after the Librarian row in one order and before it in
+   the other. Both pages must be refused and name the unknown id. *)
+let test_decode_librarian_page_refuses_an_unknown_lane_in_any_order () =
+  let librarian =
+    `Assoc [ "run_id", `String "lib-1"; "lane", `String "librarian_exact" ]
+  in
+  let unknown =
+    `Assoc [ "run_id", `String "old-1"; "lane", `String "retired_lane_exact" ]
+  in
+  let page runs = `Assoc [ "has_more", `Bool false; "runs", `List runs ] in
+  List.iter
+    (fun (label, runs) ->
+       match Tui_decode.decode_librarian_run_page (page runs) with
+       | Ok _ -> Alcotest.failf "%s: a page with an unknown lane must not decode" label
+       | Error detail ->
+           Alcotest.(check bool) (label ^ ": names the unknown id") true
+             (Astring.String.is_infix ~affix:"retired_lane_exact" detail))
+    [ "unknown after Librarian", [ librarian; unknown ]
+    ; "unknown before Librarian", [ unknown; librarian ]
+    ]
+
 let lane_run_summary_json ?(lane = "librarian_exact") ?(status = "succeeded")
     ?(completion = true) ?failure run_id =
   let completion_fields =
@@ -9302,7 +9453,7 @@ let test_decode_lane_run_page_filters_to_one_lane () =
             ] )
       ]
   in
-  match Tui_decode.decode_lane_run_page ~lane:"librarian_exact" listing with
+  match Tui_decode.decode_lane_run_page ~lane:Standalone_lane.Librarian listing with
   | Error detail -> Alcotest.fail detail
   | Ok page ->
       Alcotest.(check (option int)) "retained total comes from server"
@@ -9315,6 +9466,27 @@ let test_decode_lane_run_page_filters_to_one_lane () =
       Alcotest.(check (option (pair (float 0.0) string))) "next cursor"
         (Some (100., "lib-2")) page.Tui_decode.lrpg_next
 
+(* A run's lane is read into [Standalone_lane.t] as it is decoded. The server
+   writes it from the same type, so a run whose lane no lane has refuses the
+   page instead of being dropped by the lane filter. *)
+let test_decode_lane_run_page_refuses_an_unknown_lane () =
+  let listing =
+    `Assoc
+      [ "total", `Int 2
+      ; "has_more", `Bool false
+      ; ( "runs"
+        , `List
+            [ lane_run_summary_json "lib-1"
+            ; lane_run_summary_json ~lane:"retired_lane_exact" "old-1"
+            ] )
+      ]
+  in
+  match Tui_decode.decode_lane_run_page ~lane:Standalone_lane.Librarian listing with
+  | Ok _ -> Alcotest.fail "a run whose lane no lane has decoded"
+  | Error detail ->
+    Alcotest.(check bool) "the error names the lane" true
+      (String_util.contains_substring detail "retired_lane_exact")
+
 let test_decode_lane_run_page_running_run_has_no_completion_fields () =
   let listing =
     `Assoc
@@ -9323,7 +9495,7 @@ let test_decode_lane_run_page_running_run_has_no_completion_fields () =
                             ~completion:false "lib-live" ]
       ]
   in
-  match Tui_decode.decode_lane_run_page ~lane:"librarian_exact" listing with
+  match Tui_decode.decode_lane_run_page ~lane:Standalone_lane.Librarian listing with
   | Error detail -> Alcotest.fail detail
   | Ok page ->
       (match page.Tui_decode.lrpg_runs with
@@ -9349,7 +9521,7 @@ let test_decode_exact_lane_failure_keeps_reason () =
             ] )
       ]
   in
-  match Tui_decode.decode_lane_run_page ~lane:"librarian_exact" listing with
+  match Tui_decode.decode_lane_run_page ~lane:Standalone_lane.Librarian listing with
   | Error detail -> Alcotest.fail detail
   | Ok { Tui_decode.lrpg_runs = [ run ]; _ } ->
     (match run.Tui_decode.lrs_failure with
@@ -9374,7 +9546,7 @@ let test_decode_lane_run_status_is_typed () =
             ] )
       ]
   in
-  match Tui_decode.decode_lane_run_page ~lane:"librarian_exact" listing with
+  match Tui_decode.decode_lane_run_page ~lane:Standalone_lane.Librarian listing with
   | Error detail -> Alcotest.fail detail
   | Ok page ->
       (match page.Tui_decode.lrpg_runs with
@@ -9419,7 +9591,7 @@ let test_decode_verifier_lane_summary_keeps_subject_and_verdict () =
                 ] ] )
       ]
   in
-  match Tui_decode.decode_lane_run_page ~lane:(Standalone_lane.to_id Standalone_lane.Verifier) listing with
+  match Tui_decode.decode_lane_run_page ~lane:Standalone_lane.Verifier listing with
   | Error detail -> Alcotest.fail detail
   | Ok page ->
     (match page.Tui_decode.lrpg_runs with
@@ -9496,7 +9668,8 @@ let test_decode_lane_run_detail_carries_prompt_and_output () =
       (detail.Tui_decode.lrd_run_kind = Tui_decode.Lane_run_exact_output);
     Alcotest.(check (option string)) "exact detail has no subject" None
       detail.Tui_decode.lrd_subject_id;
-    Alcotest.(check string) "lane" "board_attention_exact" detail.Tui_decode.lrd_lane;
+    Alcotest.(check string) "lane" "board_attention_exact"
+      (Standalone_lane.to_id detail.Tui_decode.lrd_lane);
       Alcotest.(check (option (float 0.0))) "elapsed" (Some 0.5)
         detail.Tui_decode.lrd_elapsed_s;
       (match detail.Tui_decode.lrd_input_payload with
@@ -9755,12 +9928,30 @@ let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
          tool.lrt_duration_ms
      | _ -> Alcotest.fail "verifier tool evidence must decode to one tool")
 
+(* The run detail reads its lane the way the run page does, so a run whose
+   lane no lane has refuses the detail. *)
+let test_decode_lane_run_detail_refuses_an_unknown_lane () =
+  let detail =
+    match lane_run_detail_json "retired-1" with
+    | `Assoc [ "run", `Assoc fields ] ->
+      `Assoc
+        [ ( "run"
+          , `Assoc (("lane", `String "retired_lane_exact") :: List.remove_assoc "lane" fields) )
+        ]
+    | _ -> Alcotest.fail "the run detail fixture changed shape"
+  in
+  match Tui_decode.decode_lane_run_detail detail with
+  | Ok _ -> Alcotest.fail "a run whose lane no lane has decoded"
+  | Error message ->
+    Alcotest.(check bool) "the error names the lane" true
+      (String_util.contains_substring message "retired_lane_exact")
+
 let test_lane_detail_distinguishes_null_missing_and_unavailable () =
   let make ~availability ~output =
     match lane_run_detail_json "recorded-null" with
     | `Assoc [ "run", `Assoc fields ] ->
       `Assoc [ "run", `Assoc
-        (("lane", `String "payload_fixture")
+        (("lane", `String (Standalone_lane.to_id Standalone_lane.Librarian))
          :: ("payload_availability", availability)
          :: output
          @ (fields
@@ -10246,9 +10437,9 @@ let test_decode_execute_gate_row_leads_with_the_command () =
     (Some "git clone --depth 1 https://github.com/jeong-sik/masc")
     preview
 
-let test_decode_execute_gate_row_shows_the_script_line () =
-  (* The script form carries the command line whole; the row shows it as
-     written rather than falling back to the serialized envelope. *)
+let test_decode_execute_gate_row_shows_the_command_line () =
+  (* The command form carries the line whole; the row shows it as written
+     rather than falling back to the serialized envelope. *)
   let preview =
     decoded_execute_preview
       ~preview:"{\"schema\":\"masc.keeper_gate.request.v1\"}"
@@ -10258,13 +10449,13 @@ let test_decode_execute_gate_row_shows_the_script_line () =
              ( "input",
                `Assoc
                  [ ("cwd", `String ".");
-                   ("script", `String "uname -a && id && pwd");
+                   ("command", `String "uname -a && id && pwd");
                  ] );
            ])
   in
   Alcotest.check
     Alcotest.(option string)
-    "the row shows the script line"
+    "the row shows the command line"
     (Some "uname -a && id && pwd")
     preview
 
@@ -11583,6 +11774,10 @@ let test_tool_approval_mode_unknown_word_fails () =
 
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_oauth_client_saved",
+      [ Alcotest.test_case "reads scopes and refuses their absence" `Quick
+          test_decode_oauth_client_saved_reads_scopes_and_refuses_their_absence
+      ] );
     ( "decode_tool_approval_mode_overrides",
       [ Alcotest.test_case "the wire word becomes the mode" `Quick
           test_tool_approval_mode_overrides_are_typed
@@ -11767,6 +11962,8 @@ let () =
           `Quick test_a_lane_configuration_clause_carries_its_own_subject;
         Alcotest.test_case "every lane draws its own answer" `Quick
           test_every_lane_draws_its_own_answer;
+        Alcotest.test_case "standalone lanes refuse an unknown lane id" `Quick
+          test_decode_standalone_lanes_refuses_an_unknown_lane_id;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
         Alcotest.test_case "memory fact refuses an unknown category" `Quick
@@ -11819,6 +12016,8 @@ let () =
       [
         Alcotest.test_case "page filters to one lane and keeps the cursor" `Quick
           test_decode_lane_run_page_filters_to_one_lane;
+        Alcotest.test_case "lane run page refuses an unknown lane" `Quick
+          test_decode_lane_run_page_refuses_an_unknown_lane;
         Alcotest.test_case "running run has no completion fields" `Quick
           test_decode_lane_run_page_running_run_has_no_completion_fields;
         Alcotest.test_case "exact failure keeps code and detail" `Quick
@@ -11855,6 +12054,8 @@ let () =
           test_goal_run_decision_uses_evaluated_verdict_independently_of_settlement;
         Alcotest.test_case "lane detail distinguishes null, missing and unavailable output" `Quick
           test_lane_detail_distinguishes_null_missing_and_unavailable;
+        Alcotest.test_case "lane run detail refuses an unknown lane" `Quick
+          test_decode_lane_run_detail_refuses_an_unknown_lane;
       ] );
     ( "decode_fusion",
       [
@@ -12037,6 +12238,8 @@ let () =
           test_terminal_text_keeps_the_joiner_inside_an_emoji
       ; Alcotest.test_case "keeps the tags that spell a flag" `Quick
           test_terminal_text_keeps_the_tags_that_spell_a_flag
+      ; Alcotest.test_case "escapes every default-ignorable" `Quick
+          test_terminal_text_escapes_every_default_ignorable
       ; Alcotest.test_case "is idempotent and single-line" `Quick
           test_terminal_text_is_idempotent_and_single_line
       ; Alcotest.test_case "preview marks breaks and escapes the rest" `Quick
@@ -12197,6 +12400,8 @@ let () =
           test_decode_latest_librarian_input_requires_actual_input;
         Alcotest.test_case "Librarian page keeps the server cursor" `Quick
           test_decode_librarian_page_keeps_the_server_cursor;
+        Alcotest.test_case "Librarian page refuses an unknown lane in any order"
+          `Quick test_decode_librarian_page_refuses_an_unknown_lane_in_any_order;
       ] );
     ( "server_identity",
       [
@@ -12267,8 +12472,8 @@ let () =
           test_decode_gate_block_reason_and_retry_contract;
         Alcotest.test_case "an execute row leads with the command" `Quick
           test_decode_execute_gate_row_leads_with_the_command;
-        Alcotest.test_case "an execute row shows the script line" `Quick
-          test_decode_execute_gate_row_shows_the_script_line;
+        Alcotest.test_case "an execute row shows the command line" `Quick
+          test_decode_execute_gate_row_shows_the_command_line;
         Alcotest.test_case "an execute row carries where it would run" `Quick
           test_decode_execute_gate_row_carries_where_it_would_run;
         Alcotest.test_case "another operation has no execution site" `Quick
@@ -12354,6 +12559,8 @@ let () =
           test_decode_schedule_runner_hold_reads_a_held_row
       ; Alcotest.test_case "reads not held and refuses bad shapes" `Quick
           test_decode_schedule_runner_hold_reads_not_held_and_refuses_bad_shapes
+      ; Alcotest.test_case "reads a fence hold and refuses unknown reasons" `Quick
+          test_decode_schedule_runner_hold_reads_a_fence_hold_and_refuses_unknown_reasons
       ; Alcotest.test_case "refuses a time no clock can draw" `Quick
           test_decode_schedule_runner_hold_refuses_a_time_no_clock_can_draw
       ; Alcotest.test_case "reads the list's runner status" `Quick

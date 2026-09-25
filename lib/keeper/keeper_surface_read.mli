@@ -56,9 +56,12 @@ type connector_bindings = { slack : string list; discord : string list }
       never match; the description of the tool says so.
     - [before]: the cursor the page was loaded with; [None] for the
       newest page.
-    - Blank [surface] is an error JSON, not a default lane.
-    - With [~bindings] (task-1596) a provably wrong label is refused
-      with [{"error": …}] — see [connector_bindings]. *)
+    - A blank [surface] is refused ([Error]), not read as a default lane.
+    - With [~bindings] (task-1596) a provably wrong label is refused — see
+      [connector_bindings].
+
+    [Error] carries the refusal sentence. Every refusal is a label the
+    caller named and can correct. *)
 val respond :
   ?bindings:connector_bindings ->
   surface:string ->
@@ -67,7 +70,7 @@ val respond :
   has_more:bool ->
   notes:(string * string) list ->
   Keeper_chat_store.chat_message list ->
-  string
+  (string, string) result
 (** [notes] (RFC-0229 P1) are keeper-scoped (not lane-scoped): they
     annotate matching roster entries, and a noted speaker absent from
     the loaded rows still appears as a note-only participant (zero

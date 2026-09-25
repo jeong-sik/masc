@@ -5,26 +5,26 @@
 
     @since 2.260.0 *)
 
+(* The status is read back with the codec that wrote it
+   ([Exec_core.process_status_of_json]) and classified by the module that
+   owns the timeout convention ([Process_eio.exit_reason_of_status]). Matching
+   the kind strings here had drifted from the producer: it looked for
+   "signaled" and "timeout", which no tool output writes, so a signal and a
+   timeout both fell to "unknown_error". *)
 let classify_process_status (json : Yojson.Safe.t) : string option =
   match Json_util.assoc_member_opt "status" json with
-  | Some (`Assoc _ as status) ->
-    let kind = Safe_ops.json_string_opt "kind" status |> Option.value ~default:"unknown" in
+  | None -> None
+  | Some status ->
     let op = Safe_ops.json_string_opt "op" json |> Option.value ~default:"tool" in
-    begin match kind with
-    | "timeout" ->
-      Some (Printf.sprintf "%s_timeout" op)
-    | "signaled" ->
-      let signal = Safe_ops.json_int ~default:(-1) "signal" status in
-      Some (Printf.sprintf "%s_signaled_%d" op signal)
-    | "stopped" ->
-      let signal = Safe_ops.json_int ~default:(-1) "signal" status in
-      Some (Printf.sprintf "%s_stopped_%d" op signal)
-    | "exit" ->
-      let code = Safe_ops.json_int ~default:0 "code" status in
-      if code = 0 then None else Some (Printf.sprintf "%s_exit_%d" op code)
-    | _ -> None
-    end
-  | _ -> None
+    (match Exec_core.process_status_of_json status with
+     | Error _ -> Some (Printf.sprintf "%s_status_unreadable" op)
+     | Ok status ->
+       (match Process_eio.exit_reason_of_status status with
+        | Process_eio.Completed 0 -> None
+        | Process_eio.Completed code -> Some (Printf.sprintf "%s_exit_%d" op code)
+        | Process_eio.Timed_out -> Some (Printf.sprintf "%s_timeout" op)
+        | Process_eio.Signaled signal -> Some (Printf.sprintf "%s_signaled_%d" op signal)
+        | Process_eio.Stopped signal -> Some (Printf.sprintf "%s_stopped_%d" op signal)))
 
 let classify_failure_output (output : string) : string =
   if String.length output = 0 then "empty_output"

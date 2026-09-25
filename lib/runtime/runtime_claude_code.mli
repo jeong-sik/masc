@@ -152,6 +152,7 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
+  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -196,6 +197,18 @@ type stream_event =
       (** The client reported a [compact_boundary]: it summarised the
           conversation during this turn, so the copies the session held of
           earlier prompts are no longer there as sent. *)
+  | Usage_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model : string
+      ; usage : turn_usage
+      }
+      (** The turn's spend from the result frame of [session_id] ([turn_id]
+          is its [uuid]),
+          emitted once the frame is known to be this session's and before it
+          decides whether the turn succeeded, so a failed turn still reports
+          it. Absent when the frame carries no usage or no model response was
+          measured. *)
   | Turn_finished of { text : string }
 
 val dynamic_tool_bytes : dynamic_tool list -> int

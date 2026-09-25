@@ -837,7 +837,7 @@ let test_usage_windows_are_reported_without_changing_the_turn () =
     | Runtime_claude_code.Usage_windows_reported report -> reports := report :: !reports
     | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Conversation_compacted
-    | Turn_finished _ -> ()
+    | Usage_reported _ | Turn_finished _ -> ()
   in
   with_fixture
     [ Emit rate_limit_with_windows
@@ -893,6 +893,84 @@ let test_quota_after_native_tool_records_effect () =
         ()
       | Error error -> fail (Runtime_claude_code.error_to_string error)
       | Ok _ -> fail "post-native-tool quota rejection was reported as completion")
+;;
+
+(* The quota refusal ends a turn that already ran a tool and paid for the
+   model response that asked for it. The result frame carries that spend,
+   and it is reported before the frame is judged a quota refusal. *)
+let quota_result_with_usage =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-quota-usage-1","result":"not inspected","api_error_status":429,"terminal_reason":"api_error","usage":{"input_tokens":5000,"output_tokens":30,"cache_read_input_tokens":4000}}|}
+;;
+
+let test_quota_refusal_still_reports_the_turns_spend () =
+  let reported = ref [] in
+  let on_stream_event = function
+    | Runtime_claude_code.Usage_reported { turn_id; model; usage; _ } ->
+      reported :=
+        (turn_id, model, usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens)
+        :: !reported
+    | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
+    | Conversation_compacted | Turn_finished _ -> ()
+  in
+  with_fixture
+    [ Emit native_tool_assistant
+    ; Emit native_tool_result
+    ; Emit rate_limit_rejected
+    ; Emit quota_result_with_usage
+    ]
+    (fun path ->
+      (match run_fixture ~on_stream_event path with
+       | Error (Runtime_claude_code.Quota_blocked _) -> ()
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok _ -> fail "quota refusal was reported as completion");
+      match !reported with
+      | [ ("turn-quota-usage-1", "claude-fixture", 5000, 30, 4000) ] -> ()
+      | reports ->
+        failf "expected the result frame's usage reported once, got %d reports"
+          (List.length reports))
+;;
+
+(* A refusal before any model response has no model to attribute a spend
+   to, so nothing is reported (the runtime logs it). *)
+let test_quota_refusal_before_any_response_reports_no_spend () =
+  let reported = ref 0 in
+  let on_stream_event = function
+    | Runtime_claude_code.Usage_reported _ -> incr reported
+    | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
+    | Conversation_compacted | Turn_finished _ -> ()
+  in
+  with_fixture [ Emit rate_limit_rejected; Emit quota_result_with_usage ] (fun path ->
+    (match run_fixture ~on_stream_event path with
+     | Error (Runtime_claude_code.Quota_blocked _) -> ()
+     | Error error -> fail (Runtime_claude_code.error_to_string error)
+     | Ok _ -> fail "quota refusal was reported as completion");
+    check int "no usage report without a model response" 0 !reported)
+;;
+
+(* A result frame naming another session is a protocol error, and what it
+   carries is not this turn's spend: nothing is reported. *)
+let test_result_of_another_session_reports_no_spend () =
+  let reported = ref 0 in
+  let on_stream_event = function
+    | Runtime_claude_code.Usage_reported _ -> incr reported
+    | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
+    | Conversation_compacted | Turn_finished _ -> ()
+  in
+  with_fixture
+    [ Emit native_tool_assistant
+    ; Emit native_tool_result
+    ; Emit
+        {|{"type":"result","subtype":"success","is_error":false,"session_id":"another-session","uuid":"turn-foreign-1","result":"MASC_CLAUDE_OK","api_error_status":null,"usage":{"input_tokens":700,"output_tokens":9}}|}
+    ]
+    (fun path ->
+      (match run_fixture ~on_stream_event path with
+       | Error (Runtime_claude_code.Protocol_error _) -> ()
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok _ -> fail "a foreign result completed the turn");
+      check int "no usage report for another session's frame" 0 !reported)
 ;;
 
 let test_rejected_rate_limit_overrides_success_flag () =
@@ -1021,7 +1099,8 @@ let test_api_diagnostic_preserves_native_effects () =
                 (function
                   | Runtime_claude_code.Native_tool_started _ | Native_tool_finished _ ->
                     true
-                  | Turn_started _ | Usage_windows_reported _ | Conversation_compacted -> false
+                  | Turn_started _ | Usage_windows_reported _ | Conversation_compacted
+                  | Usage_reported _ -> false
                   | Text_delta _
                   | Dynamic_tool_started _
                   | Dynamic_tool_finished _
@@ -2180,6 +2259,12 @@ let () =
             test_quota_is_structurally_classified
         ; test_case "quota after native tool records effect" `Quick
             test_quota_after_native_tool_records_effect
+        ; test_case "quota refusal still reports the turn's spend" `Quick
+            test_quota_refusal_still_reports_the_turns_spend
+        ; test_case "quota refusal before any response reports no spend" `Quick
+            test_quota_refusal_before_any_response_reports_no_spend
+        ; test_case "result of another session reports no spend" `Quick
+            test_result_of_another_session_reports_no_spend
         ; test_case "usage windows are reported without changing the turn" `Quick
             test_usage_windows_are_reported_without_changing_the_turn
         ; test_case

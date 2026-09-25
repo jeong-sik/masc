@@ -2904,6 +2904,8 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "dos_type" "masc_dos_type" ~readonly:false
   ; masc_misc_descriptor "dos_peek" "masc_dos_peek" ~readonly:true
   ; masc_misc_descriptor "dos_pass" "masc_dos_pass" ~readonly:false
+  ; masc_misc_descriptor "dos_save" "masc_dos_save" ~readonly:false
+  ; masc_misc_descriptor "dos_restore" "masc_dos_restore" ~readonly:false
   ; masc_misc_descriptor "dashboard" "masc_dashboard"
        ~readonly:true
   ; cluster_descriptor

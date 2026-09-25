@@ -1360,12 +1360,18 @@ let test_metrics_is_an_overview_child () =
   Alcotest.(check bool) "Dashboard documents the [m] hop" true
     (List.mem "m" overview_keys)
 
-(* The strip drops the Approvals entry when nothing is waiting. "Nothing is
-   waiting" is a reading, and with the server unreachable nobody took it: the
-   confirm queue, the held calls and the questions all failed, every other
+(* The strip dropped the Approvals entry when nothing was waiting. "Nothing
+   is waiting" is a reading, and with the server unreachable nobody took it:
+   the confirm queue, the held calls and the questions all failed, every other
    surface drew "(load failed)", and this entry simply left the ring -- so the
    screen that holds the operator's decisions was the only one that read as
-   settled. The entry now stands until a reading says the lists are empty. *)
+   settled.
+
+   Approvals is now a Work child (RFC-tui-measured-operator-home), so the stop
+   that leads to it is Work and it stands whatever was read. What must still
+   not read as settled is the reading itself: it is current only once every
+   list came back, and the Dashboard's approvals count marks it with "?"
+   until then. *)
 let approvals_reading_is_current state =
   state.approval_snapshot <-
     Some
@@ -1381,28 +1387,41 @@ let approvals_reading_is_current state =
     Some { Masc.Tui_decode.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
   state.asks_error <- None
 
-let approvals_in_ring state =
-  List.exists (fun (surface, _) -> surface = Approvals) (visible_surface_ring state)
+let approvals_home_in_ring state =
+  let home = surface_ring_family state Approvals in
+  List.exists (fun (surface, _) -> surface = home) (visible_surface_ring state)
 
-let test_the_ring_keeps_approvals_until_a_reading_empties_it () =
+let test_approvals_stay_reachable_and_unread_until_a_reading_empties_it () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Overview;
-  Alcotest.(check bool) "before any reading the entry stands" true
-    (approvals_in_ring state);
+  Alcotest.(check bool) "Approvals is reached through Work" true
+    (surface_ring_family state Approvals = Planning);
+  Alcotest.(check bool) "before any reading Work stands" true
+    (approvals_home_in_ring state);
+  Alcotest.(check bool) "before any reading nothing reads as settled" false
+    (approvals_reading_current state);
   approvals_reading_is_current state;
-  Alcotest.(check bool) "a reading with nothing in it drops the entry" false
-    (approvals_in_ring state);
+  Alcotest.(check bool) "a reading with nothing in it is current" true
+    (approvals_reading_current state);
+  Alcotest.(check bool) "and Work still stands" true
+    (approvals_home_in_ring state);
   state.keeper_tool_approvals_error <- Some "held calls poll failed";
-  Alcotest.(check bool) "a failed held-calls poll keeps it" true
-    (approvals_in_ring state);
+  Alcotest.(check bool) "a failed held-calls poll is not current" false
+    (approvals_reading_current state);
+  Alcotest.(check bool) "a failed held-calls poll keeps Work" true
+    (approvals_home_in_ring state);
   state.keeper_tool_approvals_error <- None;
   state.asks_error <- Some "questions poll failed";
-  Alcotest.(check bool) "a failed questions poll keeps it" true
-    (approvals_in_ring state);
+  Alcotest.(check bool) "a failed questions poll is not current" false
+    (approvals_reading_current state);
+  Alcotest.(check bool) "a failed questions poll keeps Work" true
+    (approvals_home_in_ring state);
   state.asks_error <- None;
   state.approval_snapshot <- None;
-  Alcotest.(check bool) "an unread confirm queue keeps it" true
-    (approvals_in_ring state)
+  Alcotest.(check bool) "an unread confirm queue is not current" false
+    (approvals_reading_current state);
+  Alcotest.(check bool) "an unread confirm queue keeps Work" true
+    (approvals_home_in_ring state)
 
 let test_browser_lanes_highlight_config () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
@@ -2938,8 +2957,9 @@ let () =
         ; Alcotest.test_case "chat help names the Memory cycle" `Quick
             test_chat_help_names_memory_cycle
         ; Alcotest.test_case
-            "the ring keeps Approvals until a reading empties it" `Quick
-            test_the_ring_keeps_approvals_until_a_reading_empties_it
+            "Approvals stay reachable and unread until a reading empties them"
+            `Quick
+            test_approvals_stay_reachable_and_unread_until_a_reading_empties_it
         ; Alcotest.test_case "chat help names the voice keys" `Quick
             test_chat_help_names_the_voice_keys
         ; Alcotest.test_case "a searchable surface does not also bind n" `Quick

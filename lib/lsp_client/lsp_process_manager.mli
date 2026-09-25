@@ -120,10 +120,21 @@ val memo_line_refusal_to_string : memo_line_refusal -> string
     reader looks for them, so the two agree on every file by construction. *)
 val memo_markers_of_path : string -> (Ide_memo.markers, memo_line_refusal) result
 
+type memo_line_error =
+  | Unwritable of memo_line_refusal  (** the file takes no memo at all *)
+  | Breaks_comment of string
+      (** the text would leave the comment it is written in: a block
+          comment's closer or opener ({!Ide_memo.breaks_comment}), or in
+          OCaml a double quote or a quoted-string opener, which the lexer
+          reads as a string inside the comment. The reason names which. *)
+
+val memo_line_error_to_string : memo_line_error -> string
+
 (** The one comment line a memo becomes in the file at [path], or why it
     cannot become one there. The tool that writes it and the projection that
-    records the call both spell it here. *)
-val memo_line : path:string -> Ide_memo.t -> (string, memo_line_refusal) result
+    records the call both spell it here, so neither writes a line that turns
+    the rest of the file into comment, string or code. *)
+val memo_line : path:string -> Ide_memo.t -> (string, memo_line_error) result
 
 (** Language → command mapping. Returns [(executable, argv)] or [None]. *)
 val command_for_lang : string -> (string * string list) option

@@ -555,6 +555,60 @@ let test_filesystem_root_initialization_requires_current_marker () =
       check bool "current root marker initializes root" true
         (Workspace_utils.root_is_initialized cfg))
 
+(* An absent document, a blank one and a broken one send an operator to three
+   different places, so the read keeps them apart instead of answering all
+   three with an empty object (#29562). *)
+let test_filesystem_read_json_doc_keeps_absence_apart () =
+  Eio_main.run @@ fun env ->
+  let scratch = Filename.temp_dir "workspace-utils-read-json-doc" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let root = Filename.concat scratch Common.masc_dirname in
+      Unix.mkdir root 0o700;
+      let backend_config : Backend_types.config =
+        { base_path = root
+        ; node_id = "test-node"
+        ; cluster_name = "default"
+        ; pubsub_max_messages = 1000
+        }
+      in
+      let cfg : Workspace_utils.config =
+        { base_path = scratch
+        ; workspace_path = scratch
+        ; lock_expiry_minutes = 30
+        ; backend_config
+        ; backend =
+            Workspace_utils.FileSystem
+              (Backend.FileSystem.create ~fs:(Eio.Stdenv.fs env) backend_config)
+        }
+      in
+      let path = Filename.concat (Workspace_utils.masc_root_dir cfg) "doc.json" in
+      let read () = Workspace_utils.read_json_doc cfg path in
+      (match read () with
+       | Ok None -> ()
+       | Ok (Some _) -> fail "an absent file read as a document"
+       | Error error ->
+         failf "an absent file read as a failure: %s"
+           (Workspace_utils.json_doc_error_to_string error));
+      write_file path "  \n";
+      (match read () with
+       | Error Workspace_utils.Json_doc_blank -> ()
+       | Ok None -> fail "a blank file read as absent"
+       | Ok (Some _) -> fail "a blank file read as a document"
+       | Error (Workspace_utils.Json_doc_unreadable _ | Workspace_utils.Json_doc_unparsable _) ->
+         fail "a blank file read as a broken one");
+      write_file path "{\"tasks\": [";
+      (match read () with
+       | Error (Workspace_utils.Json_doc_unparsable _) -> ()
+       | Ok None -> fail "a broken file read as absent"
+       | Ok (Some _) -> fail "a broken file read as a document"
+       | Error (Workspace_utils.Json_doc_unreadable _ | Workspace_utils.Json_doc_blank) ->
+         fail "a broken file was not reported as unparsable");
+      write_file path "{\"version\": 2}";
+      check bool "a present document reads as itself" true
+        (read () = Ok (Some (`Assoc [ ("version", `Int 2) ]))))
+
 let test_list_dir_prefers_backend_for_memory_keys () =
   let scratch = Filename.temp_dir "workspace-utils-list-dir-memory" "" in
   Fun.protect
@@ -592,9 +646,10 @@ let test_memory_commit_distinguishes_local_mirror_failure () =
         string
         "authoritative memory backend contains the committed value"
         (Yojson.Safe.to_string json)
-        (Workspace_utils.read_json_result cfg path
-         |> Result.get_ok
-         |> Yojson.Safe.to_string);
+        (match Workspace_utils.read_json_doc cfg path with
+         | Ok (Some committed) -> Yojson.Safe.to_string committed
+         | Ok None -> fail "authoritative memory backend lost the committed value"
+         | Error error -> fail (Workspace_utils.json_doc_error_to_string error));
       match Workspace_utils.write_json_result cfg path json with
       | Ok () -> fail "aggregate result hid the local mirror failure"
       | Error _ -> ())
@@ -810,6 +865,8 @@ let () =
         test_memory_root_initialization_requires_current_marker;
       test_case "filesystem root initialization requires current marker" `Quick
         test_filesystem_root_initialization_requires_current_marker;
+      test_case "read_json_doc keeps absence apart" `Quick
+        test_filesystem_read_json_doc_keeps_absence_apart;
       test_case "list_dir prefers backend for memory keys" `Quick
         test_list_dir_prefers_backend_for_memory_keys;
       test_case "memory commit distinguishes local mirror failure" `Quick

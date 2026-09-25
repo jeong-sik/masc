@@ -24,7 +24,6 @@ class SandboxImageCliTest(unittest.TestCase):
             capture.write_text('''import json, os, pathlib, sys
 args = sys.argv[2:]
 if args[:2] == ['image', 'inspect']:
-    sys.stdout.write(os.environ.get('TEST_INSPECT_OUTPUT', ''))
     sys.exit(int(os.environ['TEST_INSPECT_EXIT']))
 recipe = sys.stdin.read() if args[-1] == '-' else pathlib.Path(args[args.index('-f') + 1]).read_text()
 pathlib.Path(os.environ['TEST_RECEIPT']).write_text(json.dumps({'command': pathlib.Path(sys.argv[1]).name, 'args': args, 'recipe': recipe}))
@@ -96,13 +95,11 @@ sys.exit(int(os.environ['TEST_EXIT']))
 
 
 class SandboxImageCatalogCliTest(unittest.TestCase):
-    """promote and rollback record builds in <base>/.masc/config/sandbox-images.toml."""
+    """promote records a tag the chosen store holds in <base>/.masc/config/sandbox-images.toml."""
 
-    def run_cli(self, root, base, *args, inspect_output='', inspect_exit=0,
-                config_dir=None):
+    def run_cli(self, root, base, *args, inspect_exit=0, config_dir=None):
         env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ.get('PATH', ''),
-                   TEST_RECEIPT=str(root / 'receipt.json'), TEST_EXIT='0',
-                   TEST_INSPECT_EXIT=str(inspect_exit), TEST_INSPECT_OUTPUT=inspect_output)
+                   TEST_INSPECT_EXIT=str(inspect_exit))
         env.pop('MASC_TEST_FAKE_DOCKER_PATH', None)
         env.pop('MASC_CONFIG_DIR', None)
         if config_dir is not None:
@@ -111,103 +108,116 @@ class SandboxImageCatalogCliTest(unittest.TestCase):
         return subprocess.run([BINARY, 'sandbox-image', subcommand, '--base-path', str(base), *rest],
                               env=env, text=True, capture_output=True)
 
-    def install_fake_container(self, root):
+    def install_fake_stores(self, root, *commands):
+        """Each command answers `image inspect` with TEST_INSPECT_EXIT: 0 holds the tag, 1 does not."""
         capture = root / 'capture.py'
         capture.write_text('''import os, sys
 args = sys.argv[2:]
 if args[:2] == ['image', 'inspect']:
-    sys.stdout.write(os.environ.get('TEST_INSPECT_OUTPUT', ''))
     sys.exit(int(os.environ['TEST_INSPECT_EXIT']))
 sys.exit(0)
 ''')
-        fake = root / 'container'
-        fake.write_text('#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' '
-                        + shlex.quote(str(capture)) + ' "$0" "$@"\n')
-        fake.chmod(0o755)
+        for command in commands:
+            fake = root / command
+            fake.write_text('#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' '
+                            + shlex.quote(str(capture)) + ' "$0" "$@"\n')
+            fake.chmod(0o755)
 
     @staticmethod
-    def inspect(digest):
-        return json.dumps([{'configuration': {'descriptor': {'digest': digest}}}])
+    def builds(catalog):
+        """The host file without its comment header: store tables and their tags."""
+        return [line for line in catalog.read_text().splitlines()
+                if line and not line.startswith('#')]
 
-    def test_promote_then_rollback_on_apple_container(self):
-        digest_a = 'sha256:' + 'a' * 64
-        digest_b = 'sha256:' + 'b' * 64
-        inspect = self.inspect
+    def test_promote_replaces_the_tag_and_an_earlier_tag_goes_back(self):
+        general = 'masc-sandbox:general'
+        newer = 'masc-sandbox-base:20260925T0900Z-11112222'
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            self.install_fake_container(root)
+            self.install_fake_stores(root, 'container')
             base = root / 'workspace'
             (base / '.masc' / 'config').mkdir(parents=True)
             catalog = base / '.masc' / 'config' / 'sandbox-images.toml'
 
-            first = self.run_cli(root, base, 'promote', 'base', 'masc-sandbox:general',
-                                 '--runtime', 'apple_container', inspect_output=inspect(digest_a))
+            first = self.run_cli(root, base, 'promote', 'base', general, '--runtime', 'apple_container')
             self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
-            text = catalog.read_text()
-            self.assertIn('[images.base.apple_container]', text)
-            self.assertIn('reference = "masc-sandbox:general"', text)
-            self.assertIn(digest_a, text)
-            self.assertNotIn('[images.ocaml]', text, 'host file contains builds only')
+            self.assertEqual(self.builds(catalog),
+                             ['[images.base.apple_container]', f'reference = "{general}"'],
+                             'host file holds builds only, one tag per store')
 
-            second = self.run_cli(root, base, 'promote', 'base', 'masc-sandbox-base:20260925T0900Z-11112222',
-                                  '--runtime', 'apple_container', inspect_output=inspect(digest_b))
+            second = self.run_cli(root, base, 'promote', 'base', newer, '--runtime', 'apple_container')
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
-            self.assertIn('previous = { reference = "masc-sandbox:general"', catalog.read_text())
+            self.assertEqual(self.builds(catalog),
+                             ['[images.base.apple_container]', f'reference = "{newer}"'])
 
-            before_rollback = catalog.read_text()
-            missing = self.run_cli(root, base, 'rollback', 'base',
-                                   '--runtime', 'apple_container', inspect_exit=1)
-            self.assertNotEqual(missing.returncode, 0)
-            self.assertIn('cannot inspect previous build', missing.stderr)
-            self.assertEqual(catalog.read_text(), before_rollback)
+            before = catalog.read_text()
+            absent = self.run_cli(root, base, 'promote', 'base', 'masc-sandbox-base:absent',
+                                  '--runtime', 'apple_container', inspect_exit=1)
+            self.assertNotEqual(absent.returncode, 0, 'a tag the store does not hold was promoted')
+            self.assertIn('the apple_container image store did not report', absent.stderr)
+            self.assertEqual(catalog.read_text(), before)
 
-            changed = self.run_cli(root, base, 'rollback', 'base',
-                                   '--runtime', 'apple_container', inspect_output=inspect(digest_b))
-            self.assertNotEqual(changed.returncode, 0)
-            self.assertIn('changed digest', changed.stderr)
-            self.assertEqual(catalog.read_text(), before_rollback)
+            silent = self.run_cli(root, base, 'promote', 'base', 'masc-sandbox-base:unasked',
+                                  '--runtime', 'apple_container', inspect_exit=3)
+            self.assertNotEqual(silent.returncode, 0, 'a store that did not answer was taken as yes')
+            self.assertIn('could not ask the apple_container image store', silent.stderr)
+            self.assertEqual(catalog.read_text(), before)
 
-            back = self.run_cli(root, base, 'rollback', 'base',
-                                '--runtime', 'apple_container', inspect_output=inspect(digest_a))
+            back = self.run_cli(root, base, 'promote', 'base', general, '--runtime', 'apple_container')
             self.assertEqual(back.returncode, 0, back.stdout + back.stderr)
-            self.assertIn('reference = "masc-sandbox:general"\ndigest = "' + digest_a, catalog.read_text())
+            self.assertEqual(self.builds(catalog),
+                             ['[images.base.apple_container]', f'reference = "{general}"'])
 
             unknown = self.run_cli(root, base, 'promote', 'rust', 'masc-sandbox-rust:x',
-                                   '--runtime', 'apple_container', inspect_output=inspect(digest_a))
+                                   '--runtime', 'apple_container')
             self.assertNotEqual(unknown.returncode, 0)
             self.assertIn('no image "rust"', unknown.stderr)
 
             # `--` ends the options, so the flag-shaped value reaches the reference check.
             flag = self.run_cli(root, base, 'promote', '--runtime', 'apple_container', '--',
-                                'base', '--privileged:x', inspect_output=inspect(digest_a))
+                                'base', '--privileged:x')
             self.assertNotEqual(flag.returncode, 0, 'a flag-shaped reference was promoted')
             self.assertIn('is not repository:tag', flag.stderr)
+
+    def test_promote_asks_each_microvm_runtime_its_own_store(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.install_fake_stores(root, 'nerdctl', 'msb')
+            base = root / 'workspace'
+            (base / '.masc' / 'config').mkdir(parents=True)
+            catalog = base / '.masc' / 'config' / 'sandbox-images.toml'
+
+            kata = self.run_cli(root, base, 'promote', 'base', 'masc-sandbox:kata',
+                                '--runtime', 'nerdctl_kata')
+            self.assertEqual(kata.returncode, 0, kata.stdout + kata.stderr)
+            # msb builds nothing, and a tag it loaded is promoted the same way.
+            loaded = self.run_cli(root, base, 'promote', 'base', 'masc-sandbox:loaded',
+                                  '--runtime', 'microsandbox')
+            self.assertEqual(loaded.returncode, 0, loaded.stdout + loaded.stderr)
+            self.assertEqual(self.builds(catalog),
+                             ['[images.base.nerdctl_kata]', 'reference = "masc-sandbox:kata"',
+                              '[images.base.microsandbox]', 'reference = "masc-sandbox:loaded"'])
+
+            before = catalog.read_text()
+            missing = self.run_cli(root, base, 'promote', 'base', 'masc-sandbox:not-loaded',
+                                   '--runtime', 'microsandbox', inspect_exit=1)
+            self.assertNotEqual(missing.returncode, 0, 'a tag msb does not hold was promoted')
+            self.assertIn('the microsandbox image store did not report', missing.stderr)
+            self.assertEqual(catalog.read_text(), before)
 
     def test_promote_writes_the_catalog_the_server_reads_under_masc_config_dir(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            self.install_fake_container(root)
+            self.install_fake_stores(root, 'container')
             base = root / 'workspace'
             (base / '.masc' / 'config').mkdir(parents=True)
             config_dir = root / 'elsewhere'
             config_dir.mkdir()
             result = self.run_cli(root, base, 'promote', 'base', 'masc-sandbox:general',
-                                  '--runtime', 'apple_container',
-                                  inspect_output=self.inspect('sha256:' + 'c' * 64),
-                                  config_dir=config_dir)
+                                  '--runtime', 'apple_container', config_dir=config_dir)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn('[images.base.apple_container]',
                           (config_dir / 'sandbox-images.toml').read_text())
-            self.assertFalse((base / '.masc' / 'config' / 'sandbox-images.toml').exists())
-
-    def test_rollback_without_a_previous_build_changes_nothing(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            base = root / 'workspace'
-            (base / '.masc' / 'config').mkdir(parents=True)
-            result = self.run_cli(root, base, 'rollback', 'base', '--runtime', 'apple_container')
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('no previous build', result.stderr)
             self.assertFalse((base / '.masc' / 'config' / 'sandbox-images.toml').exists())
 
 if __name__ == '__main__':

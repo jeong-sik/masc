@@ -39,6 +39,23 @@ val require_int : Yojson.Safe.t -> string -> (int, string) result
 val require_float : Yojson.Safe.t -> string -> (float, string) result
 val require_bool : Yojson.Safe.t -> string -> (bool, string) result
 
+(** {1 Optional field extraction (Result-returning)}
+
+    Absent, present, and present-but-unreadable are three answers, where
+    [get_*] folds the last two into [None]. A missing field is [Ok None]; a
+    readable one is [Ok (Some v)]; anything else, [`Null] included, is
+    [Error] naming [key], so a caller can fall back on absence without also
+    falling back on a value that was written wrong. [json] that is not an
+    object is [Error] too. *)
+
+val optional_float : Yojson.Safe.t -> string -> (float option, string) result
+(** [optional_float json key] reads a number, widening [`Int] to float. *)
+
+val optional_nonblank_string :
+  Yojson.Safe.t -> string -> (string option, string) result
+(** [optional_nonblank_string json key] reads a string that is not blank
+    after [String.trim], returned trimmed. A blank string is [Error]. *)
+
 (** Construction helpers *)
 
 val json_string_list : string list -> Yojson.Safe.t

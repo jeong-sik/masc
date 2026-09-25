@@ -43,6 +43,17 @@ let enter_atom_count_exceptions =
     "Config / Runtime / Clients", 0
   ; (* A scrolling reading, not a row list. *)
     "Config / Tools", 0
+  ; (* Two readings a Keeper detail drills into: [j/k] scrolls the text and
+       there is no row under a cursor for Enter to open. *)
+    "Keepers / Logs", 0
+  ; (* Its rows are calls, read by scrolling; Home and End reach the ends.
+       Nothing opens one further. *)
+    "Keepers / Calls", 0
+  ; (* A cursor with no Enter, the way Clients has one: [b / u] bind and
+       unbind the transport under it, and binding is not opening. It joined
+       this list when the sheet started naming the screen (#39055); until
+       then the screen had no section and this check never asked. *)
+    "Connectors", 0
   ; (* The second is the history overlay's, which [footer_hints_code] drops
        from the panes that have no commits. *)
     "Workspace / Code", 2
@@ -113,6 +124,35 @@ let test_the_runtime_picker_names_its_paging () =
         true (holds needle))
     [ "j/k:move"; "PgUp/PgDn:page"; "Home/End:top/bottom"; "Enter:choose"
     ; "d:use the default"; "Esc:back" ]
+
+(* Every screen the ring or a drill-down can put up has keys, and the sheet is
+   where an operator looks them up: [?] opens on the section for the screen
+   they are standing on. The sheet's list of screens was written beside the
+   table's and nothing tied the two together, so four screens had bindings the
+   sheet never built a section for -- Connectors, whose [B], [Ctrl-O] and
+   [b / u] are the least guessable keys in the product, and the three Keeper
+   drill-downs. On those screens [?] opened on Global and named no section for
+   where the reader was. *)
+let test_every_surface_with_keys_has_a_sheet_section () =
+  let missing =
+    List.filter
+      (fun surface ->
+        not
+          (List.exists
+             (fun (_, listed) -> listed = surface)
+             Masc_tui_keys.help_surfaces))
+      every_surface
+  in
+  let name surface =
+    match Masc_tui_keys.for_surface surface with
+    | binding :: _ -> binding.Masc_tui_keys.key
+    | [] -> "(no keys)"
+  in
+  Alcotest.(check int)
+    (Printf.sprintf
+       "every screen with keys has a sheet section (missing, by first key: %s)"
+       (String.concat " | " (List.map name missing)))
+    0 (List.length missing)
 
 let test_no_surface_repeats_a_key () =
   List.iter
@@ -2992,6 +3032,8 @@ let () =
             test_every_surface_answers
         ; Alcotest.test_case "the runtime picker names its paging" `Quick
             test_the_runtime_picker_names_its_paging
+        ; Alcotest.test_case "every surface with keys has a sheet section"
+            `Quick test_every_surface_with_keys_has_a_sheet_section
         ; Alcotest.test_case "no surface repeats a key" `Quick
             test_no_surface_repeats_a_key
         ; Alcotest.test_case "one spelling per key" `Quick

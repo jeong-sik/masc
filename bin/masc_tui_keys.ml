@@ -1262,6 +1262,15 @@ let help_surfaces : (string * surface) list =
   ; "Keepers", Keepers Keeper_list
   ; "Keeper detail", Keepers Keeper_detail
   ; "Chat", Keepers Keeper_message
+  (* Three screens a Keeper detail drills into, each with keys of its own and
+     no section until now: [?] there opened on Global and named no section for
+     the screen the reader was standing on. Named the way their titles read
+     ("Keepers > <keeper> > logs"), which is also how Schedules is named
+     below. The runtime picker earns its own: [d] follows [runtime].default
+     and [/] narrows the list, and neither is guessable. *)
+  ; "Keepers / Logs", Keepers Keeper_logs
+  ; "Keepers / Calls", Keepers Keeper_calls
+  ; "Keepers / Runtime", Keepers Keeper_runtime_pick
   ; "Lanes", Lanes
   ; "Config / Runtime / Clients", Clients
   ; "Board", Board
@@ -1286,6 +1295,10 @@ let help_surfaces : (string * surface) list =
   ; "Config / Resources", Resources
   ; "Config / Tools", Tools
   ; "Activity / Logs", System_logs
+  (* Its keys are the least guessable on the product -- [B] opens the Browser
+     Lane, [Ctrl-O] previews a tab, [b / u] bind and unbind a channel -- and
+     the sheet built no section for them at all. *)
+  ; "Connectors", Connectors
   ]
 
 let entries bindings =

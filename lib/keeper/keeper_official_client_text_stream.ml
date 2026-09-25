@@ -34,9 +34,10 @@ let starts_new_message t ~message =
    Antigravity ends each response step with its own "\n", so that stream
    needs one more; a stream already ending in a blank line needs none. *)
 let break_after shown =
-  let ends_with suffix = String.ends_with ~suffix (Buffer.contents shown) in
-  if ends_with paragraph_break then ""
-  else if ends_with "\n" then "\n"
+  let length = Buffer.length shown in
+  let newline_at i = i >= 0 && Char.equal (Buffer.nth shown i) '\n' in
+  if newline_at (length - 1) && newline_at (length - 2) then ""
+  else if newline_at (length - 1) then "\n"
   else paragraph_break
 ;;
 

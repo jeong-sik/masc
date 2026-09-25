@@ -424,6 +424,44 @@ let issue_stagehand ~verb ~timeout_sec =
      | None -> execute verb
      | Some timeout_sec -> Watched_work.run (fun () -> execute verb)
          ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out))
+(* The lanes whose browser the server owns; sessions and navigation belong
+   to them, and the live browser belongs to the operator. *)
+type server_lane = Server_automation | Server_stagehand
+
+let server_lane_of_name : Lane_name.t -> server_lane option = function
+  | Lane_name.Automation -> Some Server_automation
+  | Lane_name.Stagehand -> Some Server_stagehand
+  | Lane_name.Live -> None
+;;
+
+let server_lane_name = function
+  | Server_automation -> Lane_name.Automation
+  | Server_stagehand -> Lane_name.Stagehand
+;;
+
+let server_lanes_expected =
+  String.concat " or " (List.map (fun lane -> Lane_name.to_wire (server_lane_name lane)) [ Server_automation; Server_stagehand ])
+;;
+
+let server_lane_refused = "lane must be " ^ server_lanes_expected
+
+(* A wire lane name as a server lane, or why not. Models often reach for live
+   here, since the read tools default to it, so that refusal says whose
+   browser it is. *)
+let parse_server_lane raw =
+  match Lane_name.of_wire raw with
+  | Some Lane_name.Live -> Error ("the live browser belongs to the operator; " ^ server_lane_refused)
+  | Some ((Lane_name.Automation | Lane_name.Stagehand) as name) ->
+    Option.to_result ~none:server_lane_refused (server_lane_of_name name)
+  | None -> Error server_lane_refused
+;;
+
+let issue_server_lane lane ~verb ~timeout_sec =
+  match lane with
+  | Server_automation -> issue_automation ~verb ~timeout_sec
+  | Server_stagehand -> issue_stagehand ~verb ~timeout_sec:(Some timeout_sec)
+;;
+
 let issue_for ~target ~verb ~timeout_sec =
   match target with
   | Live_client client -> issue_live client ~verb ~timeout_sec

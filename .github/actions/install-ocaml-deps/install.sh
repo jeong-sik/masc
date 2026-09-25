@@ -60,7 +60,7 @@ run_opam_install_attempt() {
   # commit is regenerated on a 5.5.0 switch, so the flag comes back with it --
   # and this install step is what proves the regenerated lock resolves.
   timeout --signal=TERM --kill-after=60s "${INSTALL_TIMEOUT_MINUTES}m" \
-    opam install . --deps-only --locked "${install_args[@]}" --yes &
+    opam install ./masc.opam --deps-only --locked "${install_args[@]}" --yes &
   opam_pid=$!
   (
     while kill -0 "${opam_pid}" 2>/dev/null; do

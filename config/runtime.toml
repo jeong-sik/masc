@@ -130,8 +130,9 @@ max_output_tokens = 8192
 # Answers the Stagehand browser extension's llm.generate
 # (RFC-browser-lane-stagehand §3.7). Stagehand's system_prompt goes to the
 # system slot, so a slot whose model takes no system prompt is refused when
-# the lane is resolved. This bridge currently executes HTTP exact slots only;
-# Stagehand's usage field is optional, but the CLI tail is not wired here yet.
+# the lane is resolved. The lane may also declare cli_slots (subscription
+# official clients); they run as one-shots after the HTTP slots and answer
+# without usage, which Stagehand's protocol leaves optional.
 [runtime.exact_output_lanes.browser_stagehand_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
 max_output_tokens = 8192
@@ -221,6 +222,13 @@ path = "/models"
 type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
 
+# Usage windows for the operator view, read once at server start with no
+# model call. Undocumented endpoint; Ollama's own client calls it. The decoder
+# supports the observed session/weekly shape and reports other shapes as errors.
+[providers.ollama_cloud.usage-read]
+shape = "ollama-usage"
+url = "https://ollama.com/api/usage"
+
 [providers.deepseek]
 display-name = "DeepSeek API"
 protocol = "openai-compatible-http"
@@ -263,6 +271,12 @@ path = "/models"
 type = "env"
 key = "ZAI_API_KEY"
 
+# Usage windows for the operator view, read once at server start with no
+# model call. Undocumented endpoint; Z.AI's own coding plugin calls it.
+[providers.glm-coding.usage-read]
+shape = "zai-quota-limit"
+url = "https://api.z.ai/api/monitor/usage/quota/limit"
+
 [providers.kimi_coding]
 display-name = "Kimi For Coding Subscription"
 protocol = "openai-compatible-http"
@@ -277,6 +291,12 @@ exact-body-timeout-s = 1200.0
 [providers.kimi_coding.credentials]
 type = "env"
 key = "KIMI_API_KEY"
+
+# Usage windows for the operator view, read once at server start with no
+# model call. Undocumented endpoint; Kimi's own CLI calls it.
+[providers.kimi_coding.usage-read]
+shape = "kimi-coding-usages"
+url = "https://api.kimi.com/coding/v1/usages"
 
 [providers.ollama]
 display-name = "Local Ollama"
@@ -2426,6 +2446,12 @@ path = "/models"
 [providers.openrouter.credentials]
 type = "env"
 key = "OPENROUTER_API_KEY"
+
+# Usage windows for the operator view, read once at server start with no
+# model call. Documented at openrouter.ai/docs/api-reference/limits.
+[providers.openrouter.usage-read]
+shape = "openrouter-key"
+url = "https://openrouter.ai/api/v1/key"
 
 # OpenRouter identifies the calling app by these two headers and attributes
 # usage to it. Both were accepted (HTTP 200) on all twelve probed models.

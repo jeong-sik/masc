@@ -12,6 +12,20 @@ let test_rejects_non_names () =
   List.iter (fun raw -> check (option lane) (Printf.sprintf "%S" raw) None (Lane_name.of_wire raw))
     [ ""; "Live"; " live"; "automation "; "chromium" ]
 
+(* The server lanes: live is refused with whose browser it is, a non-name
+   with the names that serve, and the two server lanes are read. *)
+let test_server_lane () =
+  let server = function
+    | Ok lane -> Lane_name.to_wire (Browser_lane.server_lane_name lane)
+    | Error detail -> "refused: " ^ detail
+  in
+  check string "automation" "automation" (server (Browser_lane.parse_server_lane "automation"));
+  check string "stagehand" "stagehand" (server (Browser_lane.parse_server_lane "stagehand"));
+  check string "live names its owner" ("refused: the live browser belongs to the operator; " ^ Browser_lane.server_lane_refused)
+    (server (Browser_lane.parse_server_lane "live"));
+  check string "a non-name lists the server lanes" ("refused: " ^ Browser_lane.server_lane_refused)
+    (server (Browser_lane.parse_server_lane "chromium"))
+
 let lane_param (schema : Masc_domain.tool_schema) =
   Yojson.Safe.Util.(schema.input_schema |> member "properties" |> member "lane")
 
@@ -71,6 +85,7 @@ let () =
     "wire", [
       test_case "every lane round-trips" `Quick test_round_trip;
       test_case "a non-name is refused" `Quick test_rejects_non_names;
+      test_case "server lanes refuse live with its owner" `Quick test_server_lane;
     ];
     "tool schemas", [ test_case "lane enums follow the backends" `Quick test_tool_enums ];
   ]

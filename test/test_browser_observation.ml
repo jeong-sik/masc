@@ -132,7 +132,7 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
       let roots = row |> member "artifact_refs" |> to_list in
       check int "root is independent of truncated output" 1 (List.length roots);
       check bool "long preview is truncated" true (String.length (row |> member "output" |> to_string) < String.length original);
-      let sweep = match Tool_blob_maintenance.run ~base_path:base ~mode:Observe_only with
+      let sweep = match Tool_blob_maintenance.run ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~base_path:base ~mode:Observe_only with
         | Ok report -> report | Error error -> fail (Tool_blob_maintenance.error_to_string error) in
       let distinct_roots = [result; bound_scene; generic_regions]
         |> List.map (fun result -> (retained_reference result).Tool_output.sha256)

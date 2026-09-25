@@ -238,6 +238,59 @@ let test_all_unreported_cost_leaves_total_unknown () =
           ^ Yojson.Safe.to_string other));
   check int "tokens are still counted" 3000 (int_field "total_tokens" aggregate)
 
+(* #38718: a turn row the window may hold but whose ts_unix or latency_ms
+   has a shape the writer never produces was dropped without a count, so
+   the sum beside it read as exact. It is counted apart now. A row whose
+   time places it before the window start is outside it and counts nowhere,
+   whatever its latency. *)
+let test_unread_turn_rows_are_counted () =
+  let ts = Unix.gettimeofday () -. 1.0 in
+  let before_window = ts -. 7200.0 in
+  let with_field key value fields = (key, value) :: List.remove_assoc key fields in
+  let aggregate =
+    run_keeper_aggregate ~prefix:"keeper_cost_unread_rows" ~keeper_name:"odd"
+      [ turn_row ~ts ~cost:(`Float 0.25) ~latency_ms:100 ~total_tokens:10
+      ; with_field "ts_unix" (`String "yesterday")
+          (turn_row ~ts ~cost:(`Float 1.0) ~latency_ms:100 ~total_tokens:10)
+      ; with_field "latency_ms" (`Float 1.5)
+          (turn_row ~ts ~cost:(`Float 1.0) ~latency_ms:100 ~total_tokens:10)
+      ; turn_row ~ts:before_window ~cost:(`Float 9.0) ~latency_ms:100
+          ~total_tokens:10
+      ; with_field "latency_ms" (`Float 1.5)
+          (turn_row ~ts:before_window ~cost:(`Float 9.0) ~latency_ms:100
+             ~total_tokens:10)
+      ]
+  in
+  let read = Yojson.Safe.Util.member "metrics_read" aggregate in
+  check int "an unplaceable row and an in-window row with no latency" 2
+    (int_field "unread_turn_rows" read);
+  check int "only the readable in-window turn is a sample" 1
+    (int_field "sample_count" aggregate);
+  check (float 0.0001) "the sum covers that turn only" 0.25
+    (float_field "total_cost_usd" aggregate)
+
+(* A row whose kind this build cannot read -- another schema, or no
+   record_kind -- may have been a turn, so it is counted with the turn rows
+   that did not read; a heartbeat is not a turn and counts nowhere. *)
+let test_rows_of_an_unreadable_kind_are_counted () =
+  let ts = Unix.gettimeofday () -. 1.0 in
+  let with_field key value fields = (key, value) :: List.remove_assoc key fields in
+  let turn = turn_row ~ts ~cost:(`Float 0.25) ~latency_ms:100 ~total_tokens:10 in
+  let aggregate =
+    run_keeper_aggregate ~prefix:"keeper_cost_unread_kind" ~keeper_name:"kinds"
+      [ turn
+      ; with_field "schema" (`String "keeper.metrics.v0") turn
+      ; List.remove_assoc "record_kind" turn
+      ; Keeper_metrics_record.fields Keeper_metrics_record.Heartbeat
+        @ [ ("ts_unix", `Float ts) ]
+      ]
+  in
+  let read = Yojson.Safe.Util.member "metrics_read" aggregate in
+  check int "another schema and no kind are counted" 2
+    (int_field "unread_turn_rows" read);
+  check int "the readable turn is the one sample" 1
+    (int_field "sample_count" aggregate)
+
 let row_with ~ts ~latency_ms ~cost ~usage =
   Keeper_metrics_record.fields Keeper_metrics_record.Turn
   @ [ ("ts_unix", `Float ts); ("channel", `String "turn"); ("latency_ms", `Int latency_ms) ]
@@ -385,7 +438,7 @@ let test_unreadable_usage_is_unread () =
 
 (* #38364: the window is read by day file, not as the last N lines. *)
 
-let window_minutes = 24 * 60
+let default_window_minutes = 24 * 60
 
 (* Write [rows] straight into the day file their own [ts_unix] names, so a
    row can land in yesterday's file as the writer would have put it. *)
@@ -409,7 +462,7 @@ let write_dated_rows config keeper_name rows =
       close_out out)
     rows
 
-let aggregate_of_workspace ?(now_ts = Unix.gettimeofday ()) ~prefix ~keeper_name write =
+let aggregate_of_workspace ?(now_ts = Unix.gettimeofday ()) ?(window_minutes = default_window_minutes) ~prefix ~keeper_name write =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Masc_test_deps.init_eio_clock env;
@@ -455,7 +508,7 @@ let seconds_per_day = 86_400.0
    below lands in the day file its timestamp names, whatever the clock. *)
 let fixed_now = 1_789_992_000.0
 
-let start_of_window now = now -. (float_of_int window_minutes *. 60.0)
+let start_of_window now = now -. (float_of_int default_window_minutes *. 60.0)
 
 let () =
   assert (Float.rem fixed_now seconds_per_day = seconds_per_day /. 2.0)
@@ -480,6 +533,44 @@ let test_the_window_start_day_file_is_read () =
   check int "the start, the edge turn and today's turn count" 3
     (int_field "sample_count" aggregate);
   check int "the turn before the start does not" 1110 (int_field "total_tokens" aggregate)
+
+(* An unknown kind in the start day's file is still outside a shorter
+   window when its own time can place it. An unreadable time remains a
+   possible in-window turn and must still be counted. *)
+let test_unread_kind_respects_the_window_before_classification () =
+  let now = fixed_now in
+  let outside = now -. 7200.0 in
+  let row ts = turn_row ~ts ~cost:(`Float 0.25) ~latency_ms:100 ~total_tokens:10 in
+  let missing_kind = List.remove_assoc "record_kind" (row outside) in
+  let unknown_schema =
+    ("schema", `String "keeper.metrics.v0") :: List.remove_assoc "schema" (row outside)
+  in
+  let aggregate =
+    aggregate_of_workspace ~now_ts:now ~window_minutes:60
+      ~prefix:"keeper_cost_outside_unknown_kind" ~keeper_name:"outside-kind"
+      (fun config ->
+        write_dated_rows config "outside-kind"
+          [ outside, Yojson.Safe.to_string (`Assoc missing_kind)
+          ; outside, Yojson.Safe.to_string (`Assoc unknown_schema)
+          ])
+  in
+  check int "readable times place both unknown kinds outside the window" 0
+    (int_field "unread_turn_rows" (metrics_read aggregate));
+  check int "no outside row is a sample" 0 (int_field "sample_count" aggregate);
+  let unplaceable =
+    ("ts_unix", `String "unreadable") :: List.remove_assoc "ts_unix" (row (now -. 1.0))
+    |> List.remove_assoc "record_kind"
+  in
+  let uncertain =
+    aggregate_of_workspace ~now_ts:now ~window_minutes:60
+      ~prefix:"keeper_cost_unknown_kind_unknown_time" ~keeper_name:"uncertain-kind"
+      (fun config ->
+        write_dated_rows config "uncertain-kind"
+          [ now -. 1.0, Yojson.Safe.to_string (`Assoc unplaceable) ])
+  in
+  check int "an unknown kind with unreadable time remains a possible turn" 1
+    (int_field "unread_turn_rows" (metrics_read uncertain))
+;;
 
 (* A row that is not JSON may have been a turn; the count says the sums
    beside it are a floor. *)
@@ -559,6 +650,8 @@ let () =
             test_a_busy_window_counts_every_turn;
           test_case "the window start's day file is read" `Quick
             test_the_window_start_day_file_is_read;
+          test_case "unknown kinds outside the window are not counted" `Quick
+            test_unread_kind_respects_the_window_before_classification;
           test_case "malformed rows are counted" `Quick test_malformed_rows_are_counted;
           test_case "an unreadable store is a failure" `Quick
             test_an_unreadable_store_is_a_failure;
@@ -579,5 +672,9 @@ let () =
             test_int_cost_is_reported_and_missing_cost_is_unread;
           test_case "unreadable usage is unread" `Quick
             test_unreadable_usage_is_unread;
+          test_case "unread turn rows are counted" `Quick
+            test_unread_turn_rows_are_counted;
+          test_case "rows of an unreadable kind are counted" `Quick
+            test_rows_of_an_unreadable_kind_are_counted;
         ] );
     ]

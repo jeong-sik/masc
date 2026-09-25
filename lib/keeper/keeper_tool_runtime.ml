@@ -346,11 +346,10 @@ let handle_in_process ctx descriptor args =
          ~args)
   | Tool_surface_read ->
     Some
-      (Keeper_tool_execution.success
-         (Keeper_tool_in_process_runtime.handle_surface_read
-            ~config:ctx.config
-            ~meta:ctx.meta
-            ~args))
+      (Keeper_tool_in_process_runtime.handle_surface_read_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~args)
   | Tool_surface_post ->
     Some
       (Keeper_tool_in_process_runtime.handle_surface_post_with_outcome

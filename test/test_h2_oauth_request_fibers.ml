@@ -89,7 +89,10 @@ let with_gateway run =
                 run ~client ~client_flow ~reader_ready ~release;
                 release ();
                 closing := true;
-                Eio.Flow.close client_flow;
+                (* The client reader keeps a read in flight on [client_flow],
+                   and Eio defers close(2) until it finishes. shutdown reaches
+                   the server at once; [sw] closes the FD. *)
+                Eio.Flow.shutdown client_flow `All;
                 Eio.Promise.await_exn server))))
 
 let open_request ~meth client path =

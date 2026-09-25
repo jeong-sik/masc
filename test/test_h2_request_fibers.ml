@@ -42,10 +42,14 @@ let with_connection ?streams dispatch handler run =
             ~config:{ H2.Config.default with initial_window_size = 65535l }
             ~error_handler:(fun _ -> if not !closing then fail "unexpected H2 connection error")
             client_flow in
+          (* The H2 client's reader fiber always has a read in flight on
+             [client_flow]. Eio defers close(2) until that read finishes, so
+             closing would never reach the server. shutdown reaches the peer
+             at once and ends the in-flight read; [sw] closes the FD. *)
           let close_client () =
             if not !closing then (
               closing := true;
-              Eio.Flow.close client_flow) in
+              Eio.Flow.shutdown client_flow `All) in
           run ~env ~client ~client_flow ~release ~close_client ~server;
           release ();
           close_client ();

@@ -180,7 +180,10 @@ type stream_event =
       { turn_id : string
       ; model : string
       }
-  | Text_delta of string
+  | Text_delta of
+      { message_id : string option
+      ; text : string
+      }
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -1186,7 +1189,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
            | Api_error_diagnostic -> ()
            | Model_response ->
              texts_rev := text :: !texts_rev;
-             emit_stream_event on_stream_event (Text_delta text))
+             emit_stream_event on_stream_event (Text_delta { message_id; text }))
         | Assistant_native_tool observation ->
           native_tool_attempted := true;
           Option.iter

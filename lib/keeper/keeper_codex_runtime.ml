@@ -384,18 +384,24 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
     let next_tool_index = ref 1 in
     let tool_indexes = Hashtbl.create 8 in
     let native_tool_indexes = Hashtbl.create 8 in
-    let streamed_text = Buffer.create 256 in
+    (* Each agentMessage item is one assistant message; a commentary item and
+       the final answer after it are two. *)
+    let text_stream = Keeper_official_client_text_stream.create ~equal:String.equal () in
+    let emit_text text =
+      emit
+        (Agent_core.Types.ContentBlockDelta
+           { index = 0; delta = Agent_core.Types.TextDelta text })
+    in
     Some
       (function
         | Runtime_codex_app_server.Turn_started { turn_id; model } ->
           emit (Agent_core.Types.MessageStart { id = turn_id; model; usage = None })
-        | Runtime_codex_app_server.Text_delta text ->
-          Buffer.add_string streamed_text text;
-          emit
-            (Agent_core.Types.ContentBlockDelta
-               { index = 0; delta = Agent_core.Types.TextDelta text })
+        | Runtime_codex_app_server.Text_delta { item_id; delta } ->
+          emit_text
+            (Keeper_official_client_text_stream.forward text_stream ~message:item_id delta)
         | Runtime_codex_app_server.Dynamic_tool_started
             { call_id; tool_name; arguments } ->
+          Keeper_official_client_text_stream.tool_row text_stream;
           let index = !next_tool_index in
           incr next_tool_index;
           Hashtbl.replace tool_indexes call_id index;
@@ -470,20 +476,9 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
         | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
           report_usage ~thread_id ~turn_id ~model frame
         | Runtime_codex_app_server.Turn_finished { text } ->
-          let streamed = Buffer.contents streamed_text in
-          if String.starts_with ~prefix:streamed text
-          then begin
-            let suffix_length = String.length text - String.length streamed in
-            if suffix_length > 0
-            then
-              emit
-                (Agent_core.Types.ContentBlockDelta
-                   { index = 0
-                   ; delta =
-                       Agent_core.Types.TextDelta
-                         (String.sub text (String.length streamed) suffix_length)
-                   })
-          end;
+          Option.iter
+            emit_text
+            (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
           emit
             (Agent_core.Types.MessageDelta
                { stop_reason = Some Agent_core.Types.EndTurn; usage = None });

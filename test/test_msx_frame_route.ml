@@ -50,6 +50,13 @@ let test_retained_tick () =
         let first_status, first = Route.tick_response
             ~body:{|{"frames":1,"pixel_response":"retained"}|} in
         check bool "first tick succeeds" true (first_status = `OK);
+        (match Lane.current_publication (), member "change_count" first,
+               member "incarnation" first with
+         | Lane.Stable mark, Some (`Int count), Some (`String incarnation) ->
+             check int "tick includes its machine change count" mark.count count;
+             check string "tick includes its machine incarnation"
+               mark.incarnation incarnation
+         | _ -> fail "tick omitted its change mark");
         assert_pixels_kind "inline" first;
         let before = frame_number first in
         let status, next = Route.tick_response ~body:(retained_request first) in
@@ -60,7 +67,7 @@ let test_retained_tick () =
           (List.mem_assoc "rgb_base64" (pixels_object next));
         (match Lane.step_frame ~frames:1 with
          | Error error -> fail (Lane.error_to_string error)
-         | Ok (snapshot, ledger) ->
+         | Ok (snapshot, ledger, _) ->
              ignore (Lane.step ~frames:1);
              check int "captured frame remains at its own atomic step" (before + 2) snapshot.number;
              check bool "captured ledger is immutable" true (ledger = []));

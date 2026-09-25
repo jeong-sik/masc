@@ -343,7 +343,8 @@ let prepare_tick_pixels (frame : Msx_lane.frame) =
       Mutex.protect tick_pixels_mutex (fun () -> tick_pixels := Some pixels);
       pixels
 
-let tick_frame_json pixel_response (frame : Msx_lane.frame) entries =
+let tick_frame_json pixel_response (frame : Msx_lane.frame) entries
+    (mark : Msx_lane.change_mark) =
   let pixel_fields = match pixel_response with
     | Full_frame -> ["rgb_base64", `String (frame_rgb_base64 frame.rgb)]
     | Retained_pixels known ->
@@ -357,6 +358,7 @@ let tick_frame_json pixel_response (frame : Msx_lane.frame) entries =
            else fields @ ["rgb_base64", `String pixels.encoded])] in
   `Assoc
     (["loaded", `Bool true; "number", `Int frame.number;
+      "change_count", `Int mark.count; "incarnation", `String mark.incarnation;
       "width", `Int frame.width; "height", `Int frame.height;
       "mode", `String frame.mode;
       "cartridge", (match frame.cartridge with Some s -> `String s | None -> `Null);
@@ -378,7 +380,8 @@ let tick_response ~body =
        domain. The worker owns both emulation and the frame's serialization. *)
     match Executor_pool_ref.submit_strict (fun () ->
       match Msx_lane.step_frame ~frames with
-      | Ok (frame, entries) -> `OK, tick_frame_json pixel_response frame entries
+      | Ok (frame, entries, mark) ->
+        `OK, tick_frame_json pixel_response frame entries mark
       | Error Msx_lane.No_machine -> `OK, `Assoc ["loaded", `Bool false]
       | Error (Msx_lane.Invalid_request _ as e) ->
         error `Bad_request (Msx_lane.error_to_string e)

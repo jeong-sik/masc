@@ -1631,7 +1631,7 @@ type runtime_mode =
    takes it as its first candidate, which is how the lane comes to exist. *)
 type runtime_lane_pick =
   | Pick_conversation_lane of string
-  | Pick_exact_lane of string
+  | Pick_exact_lane of Standalone_lane.t
   | Pick_new_lane of string
   | Pick_media_failover
       (* Appends to [\[runtime\].media_failover]. The route takes its whole
@@ -1642,7 +1642,8 @@ type runtime_lane_pick =
          one runtime, the one a keeper with no assignment walks. *)
 
 let runtime_lane_pick_name = function
-  | Pick_conversation_lane lane | Pick_exact_lane lane | Pick_new_lane lane -> lane
+  | Pick_conversation_lane lane | Pick_new_lane lane -> lane
+  | Pick_exact_lane lane -> Standalone_lane.to_id lane
   | Pick_media_failover -> "[runtime].media_failover"
   | Pick_route_default -> "[runtime].default"
 ;;
@@ -1751,8 +1752,8 @@ type planning_mode =
     along so Left/Esc from a run returns to the list it came from. *)
 type lanes_mode =
   | Lanes_overview
-  | Lanes_run_list of string
-  | Lanes_run_detail of string * string
+  | Lanes_run_list of Standalone_lane.t
+  | Lanes_run_detail of Standalone_lane.t * string
   | Lanes_measurement_detail of string
 
 module Measurement = struct
@@ -5066,15 +5067,34 @@ type runtime_config_reading = {
    RGB plus what to title it. The spectator downsamples the pixels itself. *)
 type msx_menu_mode = Boot_game | Change_disk
 
+(* One row of the MSX load menu. The highlight is kept as the row itself, not
+   its position: rows come and go while the menu is open (the DOS watch row
+   follows an asynchronous read), and a position would then name whatever row
+   moved into it -- a cartridge load in place of a watch. *)
+type msx_menu_entry =
+  | Menu_watch of Masc_tui_machine_live.source
+  | Menu_load of string
+  | Menu_swap_disk of string
+
+(* A DOS live read belongs to the view and server port that asked for it.
+   A reopened screen may start a fresh read while an old one is still ending. *)
+type machine_live_request = { live_view : unit ref; live_port : int }
+
+type msx_meta = {
+  msx_mode : string;
+  msx_cartridge : string option;
+  msx_disk : string option;
+  msx_players : string list;  (* who pressed within the server's window, newest first *)
+}
+
+(* [msx_meta] is [None] for a frame read through the live route, which names
+   no mode, media or players; the next tick answer carries them again. *)
 type msx_frame = {
   msx_number : int;
   msx_width : int;
   msx_height : int;
   msx_rgb : string;
-  msx_mode : string;
-  msx_cartridge : string option;
-  msx_disk : string option;
-  msx_players : string list;  (* who pressed within the server's window, newest first *)
+  msx_meta : msx_meta option;
 }
 
 (* A container-log read that has been asked for and not answered. The keeper and
@@ -5124,7 +5144,7 @@ type local_intervention =
    [\[runtime\].media_failover]. Both are an ordered list of runtime ids that
    something walks in turn, and neither is a conversation lane. *)
 type slot_editor_target =
-  | Exact_lane_slots of string
+  | Exact_lane_slots of Standalone_lane.t
   | Media_failover_slots
 
 (* The slot editor: what it was opened on, and where its cursor sits in that
@@ -5136,7 +5156,7 @@ type slot_editor =
   }
 
 let slot_editor_target_name = function
-  | Exact_lane_slots lane -> lane
+  | Exact_lane_slots lane -> Standalone_lane.to_id lane
   | Media_failover_slots -> "[runtime].media_failover"
 ;;
 
@@ -5375,16 +5395,28 @@ type state = {
      the last frame the server handed it and when it last asked. *)
   mutable msx_frame: msx_frame option;
   mutable msx_last_poll_ns: int64;
+  (* Which machine the spectator shows. The menu picks it. *)
+  mutable machine_source: Masc_tui_machine_live.source;
+  (* The last live read of each machine. [msx_live] is [Showing] the picture
+     [msx_frame] holds, with its change mark, whether a live read or a tick
+     answer drew it: the tick returns its picture and mark from one snapshot,
+     so the next live read sends that mark as [since]. *)
+  mutable msx_live: Masc_tui_machine_live.view;
+  mutable dos_live: Masc_tui_machine_live.view;
+  mutable dos_live_in_flight: machine_live_request option;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
      game, so its keys never reach the emulator. [msx_carts] is the inventory
-     the [/carts] poll cached; [msx_menu_index] is the highlighted row. *)
+     the [/carts] poll cached. [msx_menu_selected] is the highlighted row:
+     [None] until the menu has a row to highlight, then the row itself, kept
+     even after an asynchronous read removes it -- Enter then picks nothing
+     rather than the row that moved into its place. *)
   mutable msx_menu_open: bool;
   mutable msx_notice: string option;
   mutable msx_menu_mode: msx_menu_mode;
   mutable msx_carts: string list;
-  mutable msx_menu_index: int;
+  mutable msx_menu_selected: msx_menu_entry option;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -5645,11 +5677,12 @@ type state = {
      screen showing it would be state nobody can see. *)
   mutable followed_from: (surface * string option) option;
   mutable keeper_cursor: int;
-  (* The runtime picker: the keeper it is choosing for, its cursor into the
-     dispatchable catalogue, and the catalogue itself with where every keeper
-     points today. Loaded when the picker opens; absent otherwise. *)
+  (* The runtime picker: the keeper it is choosing for, its cursor and typed
+     filter over the declared lanes and the dispatchable catalogue, and the
+     catalogue itself with where every keeper points today. Loaded when the
+     picker opens; absent otherwise. *)
   mutable runtime_pick_keeper: string option;
-  mutable runtime_pick_cursor: int;
+  mutable runtime_pick_list: Masc_tui_pick_list.t;
   mutable runtime_catalog: Tui_decode.runtime_option list;
   (* The Overview's own read of the same catalogue, kept apart from the
      picker's [runtime_catalog] so a refresh behind the Overview never moves
@@ -6605,6 +6638,7 @@ type text_input_target =
   | Text_palette
   | Text_row_search
   | Text_runtime_picker_filter
+  | Text_keeper_runtime_picker_filter
   | Text_identity_app_form
   | Text_identity_filter
   | Text_github_token
@@ -6662,6 +6696,11 @@ let text_input_target (state : state) ~compact_viewport =
               | Some (_, list) -> Option.is_some list.Masc_tui_pick_list.query
               | None -> false)
   then Some Text_runtime_picker_filter
+  (* The Keeper runtime picker's filter, after [/]: [d] and the letters the
+     surfaces read are the filter's text until Esc. *)
+  else if state.view = Keepers Keeper_runtime_pick && not compact_viewport
+          && Option.is_some state.runtime_pick_list.Masc_tui_pick_list.query
+  then Some Text_keeper_runtime_picker_filter
   else if state.view = Connectors && not compact_viewport
           && Option.is_some (Option.bind (browser_lane_on_screen state) (fun view -> view.Browser_lane_view.url_draft))
   then Some Text_browser_url
@@ -6692,7 +6731,7 @@ let quit_key_allowed_for = function
       ( Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
       | Text_voice_wizard | Text_palette | Text_row_search
-      | Text_runtime_picker_filter
+      | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
       | Text_identity_app_form | Text_identity_filter | Text_github_token
       | Text_board_draft ) ->
       false
@@ -7692,11 +7731,15 @@ let create_state
   msx_open = false;
   msx_frame = None;
   msx_last_poll_ns = 0L;
+  machine_source = Masc_tui_machine_live.Msx;
+  msx_live = Masc_tui_machine_live.Unread;
+  dos_live = Masc_tui_machine_live.Unread;
+  dos_live_in_flight = None;
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;
   msx_carts = [];
-  msx_menu_index = 0;
+  msx_menu_selected = None;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;
@@ -7802,7 +7845,7 @@ let create_state
   followed_from = None;
   keeper_cursor = 0;
   runtime_pick_keeper = None;
-  runtime_pick_cursor = 0;
+  runtime_pick_list = Masc_tui_pick_list.closed;
   runtime_catalog = [];
   overview_quota = Quota_unread;
   overview_providers = Providers_unread;
@@ -8769,6 +8812,22 @@ let surface_body_rows (state : state) ~terminal_rows =
      - agenda_chrome_rows state)
 ;;
 
+(* The three layouts the Board read surface draws in. Both the pane split and
+   the [z] key read this one answer: spelled as a pair of booleans it admitted
+   a state no screen draws -- a split that is also wide -- and each reader
+   rebuilt it from [cols] and the flag on its own, so the footer could name a
+   pane the frame had not laid out. *)
+type board_read_layout =
+  | Board_read_split (* the post list sits beside the open post *)
+  | Board_read_wide (* the open post owns the screen and [z] gives the list back *)
+  | Board_read_one_pane (* no room for two panes, so [z] has nowhere to go *)
+
+let board_read_layout ~cols ~wide =
+  if cols < Masc_tui_roster_pane.threshold_cols then Board_read_one_pane
+  else if wide then Board_read_wide
+  else Board_read_split
+;;
+
 let standalone_lanes_chrome ~row_count ~error ~truncated =
   let evidence_rows = match row_count with None -> 1 | Some count -> count in
   let stale_error_row =
@@ -9335,13 +9394,13 @@ let swap_candidates order i j =
    is an append the server applies to the declared order, never a write of
    this list. A lane being created has no candidates yet. *)
 let lane_picker_existing_slots (state : state) = function
-  | Pick_exact_lane name ->
+  | Pick_exact_lane lane ->
     (match state.standalone_lanes with
      | None -> []
      | Some snapshot ->
          snapshot.Tui_decode.sls_lanes
          |> List.find_opt (fun (row : Tui_decode.standalone_lane) ->
-              String.equal row.Tui_decode.sl_lane_id name)
+              Standalone_lane.equal row.Tui_decode.sl_lane lane)
          |> Option.map (fun row ->
               row.Tui_decode.sl_admitted_slots @ row.Tui_decode.sl_cli_slots
               @ row.Tui_decode.sl_dropped_slots)
@@ -9396,7 +9455,8 @@ let runtime_picker_projection (state : state) =
   Option.map (fun (pick, list) ->
     let already, providers, catalog = runtime_picker_rows state pick in
     let view =
-      Masc_tui_pick_list.view ~page:runtime_picker_page ~label:runtime_picker_label
+      Masc_tui_pick_list.view ~page:runtime_picker_page
+        ~window:Masc_tui_pick_list.Opens_at_cursor ~label:runtime_picker_label
         catalog list
     in
     { rlp_lane = runtime_lane_pick_name pick; rlp_pick = pick; rlp_already = already;
@@ -9601,13 +9661,13 @@ type slot_editor_row =
 let slot_editor_rows (state : state) =
   match state.slot_editor with
   | None -> []
-  | Some { se_target = Exact_lane_slots lane_id; _ } ->
+  | Some { se_target = Exact_lane_slots target_lane; _ } ->
     (match state.standalone_lanes with
      | None -> []
      | Some snapshot ->
        snapshot.Tui_decode.sls_lanes
        |> List.find_opt (fun (lane : Tui_decode.standalone_lane) ->
-            String.equal lane.Tui_decode.sl_lane_id lane_id)
+            Standalone_lane.equal lane.Tui_decode.sl_lane target_lane)
        |> Option.map (fun (lane : Tui_decode.standalone_lane) ->
             List.map
               (fun slot ->
@@ -9876,6 +9936,85 @@ let runtime_pick_badge_cells =
   max
     (Masc_tui_message_layout.display_width runtime_pick_lane_badge)
     (Masc_tui_message_layout.display_width runtime_pick_model_badge)
+
+(* The words a picker row draws before its facts: the kind badge, the target
+   and the route. The renderer draws these and the typed filter matches their
+   join, so the operator filters by what they read. The facts are left out:
+   which of them a row keeps depends on the terminal's width. *)
+type runtime_pick_columns = {
+  rpc_badge : string;
+  rpc_target : string;
+  rpc_route : string;
+}
+
+let runtime_pick_columns item =
+  let single_line = Tui_decode.sanitize_terminal_text in
+  match item with
+  | Pick_lane lane ->
+      (* A lane's route is its candidates by model, the provider prefix
+         dropped: the target column already says it is a lane. *)
+      let chain =
+        String.concat " \xe2\x86\x92 "
+          (List.map
+             (fun id ->
+                match String.split_on_char '.' id with
+                | [ _prov; model ] -> model
+                | _ -> id)
+             lane.Tui_decode.rrl_runtime_ids)
+      in
+      { rpc_badge = runtime_pick_lane_badge;
+        rpc_target = single_line lane.Tui_decode.rrl_id;
+        rpc_route = single_line chain }
+  | Pick_model option ->
+      { rpc_badge = runtime_pick_model_badge;
+        rpc_target = single_line option.Tui_decode.ro_id;
+        rpc_route =
+          single_line
+            (option.Tui_decode.ro_provider ^ " / " ^ option.Tui_decode.ro_model) }
+
+let runtime_pick_label item =
+  let columns = runtime_pick_columns item in
+  String.concat "  " [ columns.rpc_badge; columns.rpc_target; columns.rpc_route ]
+
+(* The rows above the picker's list: the filter and count, then the column
+   header -- or, in its place, why there are no rows. *)
+let keeper_runtime_picker_status_rows = 2
+
+(* How many rows the picker's list draws, and so how far PgUp/PgDn move it.
+   The key handler and the renderer both read it, so a page key moves exactly
+   the rows on screen. *)
+let keeper_runtime_picker_page (state : state) ~terminal_rows =
+  max 1
+    (surface_body_rows state ~terminal_rows
+     - Masc_tui_frame.chrome_rows
+     - keeper_runtime_picker_status_rows)
+
+let keeper_runtime_picker_view (state : state) ~terminal_rows =
+  Masc_tui_pick_list.view
+    ~page:(keeper_runtime_picker_page state ~terminal_rows)
+    ~window:Masc_tui_pick_list.Follows_cursor ~label:runtime_pick_label
+    (runtime_picker_items state) state.runtime_pick_list
+
+(* The count line, with the keys that still act while a filter is typed:
+   letters are the filter's then, so the footer's [d] and [j/k] are not. *)
+let keeper_runtime_picker_summary view =
+  match view.Masc_tui_pick_list.filter with
+  | None -> Masc_tui_pick_list.summary view
+  | Some _ ->
+      Masc_tui_pick_list.summary view
+      ^ " \xe2\x80\x94 \xe2\x86\x91/\xe2\x86\x93 move, Enter choose, Esc clear filter"
+
+(* The row in place of the column header when there are no rows; [None]
+   while there are. An unread catalogue is waited for and an empty match is
+   typed away, so they read differently. *)
+let keeper_runtime_picker_empty_note view =
+  if view.Masc_tui_pick_list.total = 0 then
+    Some "  (loading runtime catalogue\xe2\x80\xa6)"
+  else if view.Masc_tui_pick_list.shown = 0 then
+    Some
+      (Printf.sprintf "  (no lane or runtime among %d matches the filter)"
+         view.Masc_tui_pick_list.total)
+  else None
 
 (* Everything in the row that is not one of the two columns and not the facts:
    the cursor mark, the kind badge, and the two-space gap on each side of the

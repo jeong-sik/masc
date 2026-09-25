@@ -30,6 +30,10 @@ type operation_projection =
   ; terminal_count : int
   ; interrupted_count : int
   ; store_unavailable : bool
+  ; autonomous_owed_slot : bool
+        (* Owner-fiber-local debt, stamped at publish time: the slot the
+           deferral debt cap holds open for the autonomous lane. Not a
+           count. Store queries cannot know it, so it rides the projection. *)
   }
 
 type operation_interrupt_result =
@@ -398,6 +402,7 @@ let operation_projection_equal
   && Int.equal left.terminal_count right.terminal_count
   && Int.equal left.interrupted_count right.interrupted_count
   && Bool.equal left.store_unavailable right.store_unavailable
+  && Bool.equal left.autonomous_owed_slot right.autonomous_owed_slot
 ;;
 
 let turn_in_flight_equal (left : turn_in_flight option) (right : turn_in_flight option) =
@@ -414,8 +419,26 @@ let shutdown_operation_id_equal =
   Option.equal Keeper_shutdown_types.Operation_id.equal
 ;;
 
+(* RFC-0373 direction 2: consecutive losses of the turn slot to the chat lane
+   become a value the next admission decision reads. The debt counts releases
+   the autonomous lane asked for and did not get while a chat turn held the
+   slot, resets to zero the moment an autonomous turn is admitted, and at
+   [autonomous_deferral_debt_cap] the admission stops handing a freed slot to
+   the queued chat first: the handoff leaves the slot free, which is the owed
+   release signal the autonomous lane needs to take it. The cap is 3 -- one
+   less than the 5 consecutive cycles RFC-0373 measured a single 16.3-minute
+   chat hold to cost -- and it can delay a chat turn by at most the forfeited
+   releases. Owner-fiber-local like [autonomous_lost_slot]. *)
+let autonomous_deferral_debt_cap = 3
+;;
+
 let publish_operation_projection t next =
   let previous = Atomic.get t.operation_projection in
+  (* The debt mark is owner-fiber-local and lives here, not in the store, so
+     every published snapshot is stamped with the state at its own publish
+     moment. A later publish without the mark therefore also clears it, and
+     readers can never see a stale admission promise. *)
+  let next = { next with autonomous_owed_slot = !(t.autonomous_deferral_debt) >= autonomous_deferral_debt_cap } in
   if not (operation_projection_equal previous next)
   then (
     Atomic.set t.operation_projection next;
@@ -468,19 +491,6 @@ let turn_lane_to_string = function
   | Autonomous -> "autonomous"
   | Chat_operation -> "chat_operation"
   | Maintenance -> "maintenance"
-;;
-
-(* RFC-0373 direction 2: consecutive losses of the turn slot to the chat lane
-   become a value the next admission decision reads. The debt counts releases
-   the autonomous lane asked for and did not get while a chat turn held the
-   slot, resets to zero the moment an autonomous turn is admitted, and at
-   [autonomous_deferral_debt_cap] the admission stops handing a freed slot to
-   the queued chat first: the handoff leaves the slot free, which is the owed
-   release signal the autonomous lane needs to take it. The cap is 3 -- one
-   less than the 5 consecutive cycles RFC-0373 measured a single 16.3-minute
-   chat hold to cost -- and it can delay a chat turn by at most the forfeited
-   releases. Owner-fiber-local like [autonomous_lost_slot]. *)
-let autonomous_deferral_debt_cap = 3
 ;;
 
 let autonomous_block_kind = function
@@ -757,6 +767,9 @@ let operation_projection_of_inventory ~has_claimable_queued ~next_runtime_retry_
   ; terminal_count = inventory.terminal_count
   ; interrupted_count = inventory.interrupted_count
   ; store_unavailable = false
+  ; (* The debt mark is not a store fact: publish_operation_projection
+       stamps each published snapshot with the owner-fiber-local state. *)
+    autonomous_owed_slot = false
   }
 ;;
 

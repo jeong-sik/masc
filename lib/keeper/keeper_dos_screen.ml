@@ -35,5 +35,6 @@ let handle ~keeper_name ~tool_name ~start_time _args =
            ; ("width", `Int frame.width)
            ; ("height", `Int frame.height)
            ; ("bytes", `Int (String.length bytes))
+           ; Tool_misc_dos_lane.core_field
            ])
 ;;

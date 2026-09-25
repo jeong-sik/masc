@@ -16,6 +16,19 @@
 - 새 철자 유효성 검사(`--replaces abc`): `--replaces must be a review id (digits)` → rc=2 (04-replaces-not-digits-refusal.log)
 - 옛 철자 거절(`--replace-own-cr 50`): `unknown argument: --replace-own-cr` → rc=1 (03-old-spelling-refusal.log)
 
+**같은 계정 CR 거절의 본질 (verifier 요구 2의 핵심):** 가드 §6는 `${me}` = 실행 계정 자신일 때만
+`open CHANGES_REQUESTED from ${me} (review ${rid}) is this account's own, and the account is shared: read it, then pass --replaces ${rid}`
+문구를 낸다(approve-guard.sh L154). 이 문구가 나오려면 **같은 계정이 자기 PR에 CR을 달고 `--replaces` 없이 approve**해야 한다.
+- **live `--check` 영수증 (05-live-check-39001.log):** 진짜 `gh` + 진짜 GitHub로 #39001을 돌렸다.
+  - #39001 은 `draft=true` 라 §2 `PR is Draft` 로 거절 (rc=2). 열린 CR(id `5313511140`)·체크 이유도 함께 출력.
+  - 그 CR은 `jeong-sik` 계정이라 다른 계정 CR이어서 `--replaces` 로도 지명 불가 (usage §6, selftest `cr-own-named-wrong-id`).
+  - 이는 Draft 차단이지 same-account CR 거절이 아니다. 같은 계정 CR 거절 문구는 여기서 나올 수 없다.
+- **유일한 충족 경로:** 같은 계정 CR이 있는 PR은 현재 `pangyo-preachers` 소유 **#39021** 하나뿐이다
+  (open, reviewer `jeong-sik`, base=main). `jeong-sik`이 approve 전에 CR을 달면 그것이 같은 계정 CR이 되고,
+  pangyo가 `--check` 로 approve를 시도할 때 위 `from ${me}` 문구가 나온다. 그 CR이 생기기 전까지 이 live 증거는
+  만들 수 없고, **오직 pangyo 본인만** 만들 수 있다. polisher(`anyang-keepers`)는 자기 PR(#39001)에 CR을 달 권한이 없다
+  (`gh pr review` POST 404).
+
 ## red control (변경 전 가드)
 - `origin/main` 가드(sha256 `7a95bafbd979f50d9048cbc46e61b023cc980752a5902b0e4140b746aaa8c3f2`)는 `--replaces`를
   모른다 → `unknown argument: --replaces`, rc=1 (02-main-guard-unknown-argument.log). 변경 전 가드가 새 케이스를 거절함.

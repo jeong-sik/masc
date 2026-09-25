@@ -136,6 +136,26 @@ let observer_sse_auth_token_from_request request =
   observer_sse_auth_credential_from_request request
   |> token_of_request_auth_credential
 
+let ide_lsp_upgrade_path = "/api/v1/ide/lsp"
+
+(* The IDE language-server socket is opened by a browser WebSocket, which
+   cannot set request headers, so its upgrade GET carries the bearer in the
+   token query parameter, the same admission the observer streams above
+   use. A credential header still wins, and only that exact path reads the
+   query. *)
+let token_bound_auth_token_from_request request =
+  match request_auth_credential_from_request request with
+  | Parsed_credential token -> Some token
+  | Malformed_credential _ -> None
+  | Absent_credential ->
+      (match request.Httpun.Request.meth with
+       | `GET
+         when String.equal
+                (Http_server_eio.Request.path request)
+                ide_lsp_upgrade_path ->
+           trim_opt (query_param request "token")
+       | _ -> None)
+
 let agent_from_request request =
   let hdr key = Httpun.Headers.get request.Httpun.Request.headers key in
   let qp key = query_param request key in
@@ -1121,7 +1141,7 @@ let authorize_token_bound_permission_request ~base_path ~permission request :
             ; message = "HTTP mutation requires bearer token auth (require_token=true)."
             }))
   else
-    match auth_token_from_request request with
+    match token_bound_auth_token_from_request request with
     | None ->
         Error
           (Masc_domain.Auth

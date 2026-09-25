@@ -38,6 +38,7 @@ import type {
 import {
   activeKeeperName,
   keeperActionErrors,
+  keeperChatHistoryHydration,
   keeperHydrating,
   keeperProbing,
   keeperRecovering,
@@ -364,6 +365,7 @@ const hydratedChatKeepers = new Set<string>()
 /** Test-only: reset the once-per-keeper hydration guard. */
 export function _resetChatHydrationForTests(): void {
   hydratedChatKeepers.clear()
+  keeperChatHistoryHydration.value = {}
 }
 
 async function fetchAndMergeKeeperChatHistory(keeperName: string): Promise<void> {
@@ -394,9 +396,16 @@ export async function hydrateKeeperChatHistory(
     // when chat history is empty so a keeper panel can still join recently
     // fetched tool rows from the rail/inspector.
     void hydrateKeeperToolOutputs(keeperName)
+    setRecordValue(keeperChatHistoryHydration, keeperName, 'hydrated')
   } catch (err) {
     // Allow a later mount to retry instead of caching the failure.
     hydratedChatKeepers.delete(keeperName)
+    // A failed first hydration is settled, not pending: the error banner
+    // explains the empty transcript. Keep an earlier success as-is so a
+    // failed forced re-hydration does not demote an authoritative history.
+    if (keeperChatHistoryHydration.value[keeperName] !== 'hydrated') {
+      setRecordValue(keeperChatHistoryHydration, keeperName, 'failed')
+    }
     const message = err instanceof Error ? err.message : `Failed to load chat history for ${keeperName}`
     console.warn(`[keeper] chat history hydration failed for ${keeperName}:`, message)
     setRecordValue(keeperActionErrors, keeperName, `이전 대화 불러오기 실패: ${message}`)

@@ -435,6 +435,33 @@ let test_utf8_prefix_korean_boundary () =
   check bool "boundary cut drops only the split character" true
     (String.equal boundary_cut (String.sub message 0 49))
 
+(* [utf8_suffix] is the tail-side cut: a ring buffer keeps the last N bytes of
+   Execute output, and N bytes back from the end of a line of Hangul is the
+   middle of a syllable two times in three. *)
+let test_utf8_suffix_hangul_tail () =
+  let hangul = String.concat "" (List.init 100 (fun _ -> "\xea\xb0\x80")) in
+  check bool "a byte cut splits a character" false
+    (String_util.is_valid_utf8
+       (String.sub hangul (String.length hangul - 50) 50));
+  let tail = String_util.utf8_suffix ~max_bytes:50 hangul in
+  check bool "the tail decodes" true (String_util.is_valid_utf8 tail);
+  check int "the tail keeps every whole character that fits" 48
+    (String.length tail);
+  check bool "the tail is the end of the input" true
+    (String.ends_with ~suffix:tail hangul)
+
+let test_utf8_suffix_skips_a_partial_first_character () =
+  (* The last two bytes of one syllable, then two whole syllables: the shape
+     a ring tail has once the ring overwrote the syllable's first byte. *)
+  let ring_tail = "\xb0\x80\xea\xb0\x80\xeb\x82\x98" in
+  check string "the partial character goes, the whole ones stay"
+    "\xea\xb0\x80\xeb\x82\x98"
+    (String_util.utf8_suffix ~max_bytes:64 ring_tail);
+  check string "valid input that fits comes back as is" korean_title
+    (String_util.utf8_suffix ~max_bytes:64 korean_title);
+  check string "no budget, nothing kept" ""
+    (String_util.utf8_suffix ~max_bytes:0 korean_title)
+
 let () =
   run "string_util"
     [ ( "utf8_char_boundary",
@@ -512,4 +539,8 @@ let () =
       ( "utf8_boundary",
         [ test_case "is_valid_utf8 basics" `Quick test_is_valid_utf8_basic;
           test_case "Korean 50-byte cut regression" `Quick
-            test_utf8_prefix_korean_boundary ] ) ]
+            test_utf8_prefix_korean_boundary;
+          test_case "utf8_suffix cuts a Hangul tail between characters" `Quick
+            test_utf8_suffix_hangul_tail;
+          test_case "utf8_suffix skips a partial first character" `Quick
+            test_utf8_suffix_skips_a_partial_first_character ] ) ]

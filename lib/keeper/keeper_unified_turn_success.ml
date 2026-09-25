@@ -753,7 +753,12 @@ let handle
       ~turn:keeper_turn_id
       ~tool_calls_made:(Keeper_agent_result.tool_call_count result)
       ~total_turns:updated_meta.runtime.usage.total_turns
-      ~usage_resolution);
+      ~usage_resolution
+      ~wire_prompt_tokens:
+        (Option.map
+           (fun (tokens : Keeper_agent_result.wire_prompt_tokens) ->
+             tokens.cache_n, tokens.prompt_n)
+           result.wire_prompt_tokens));
   (* Every terminal outcome has consumed a keeper turn id. *)
   let updated_meta =
     persist_terminal_turn_meta

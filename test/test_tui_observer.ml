@@ -211,6 +211,40 @@ let test_a_turn_observation_names_the_call_and_the_completed_count () =
     [ "observation(largo,call=1157,completed=718)" ]
     (List.map summary (decode_all [ turn_observation_frame ]))
 
+(* The settle carries the cache counts beside the input they are part of.
+   Figures are e-masc-the-leader's turn 1853 (2026-09-25). A frame without
+   them, or with nulls, reads as not reported -- never as zero -- and a count
+   of the wrong shape is a frame this build cannot read. *)
+let cached_turn_complete_frame cache_fields =
+  "data: {\"type\":\"keeper_turn_complete\",\"name\":\"e-masc-the-leader\",\
+   \"turn\":1853,\"input_tokens\":3716155,\"output_tokens\":6622," ^ cache_fields
+  ^ "\"ts_unix\":1790000000.0}\n\n"
+
+let settle_cache_counts frame =
+  match decode_all [ frame ] with
+  | [ Observer.Event (Observer.Keeper_turn_complete t) ] ->
+    Ok (t.Observer.tc_cache_read_tokens, t.Observer.tc_cache_creation_tokens)
+  | [ Observer.Undecodable reason ] -> Error reason
+  | events -> failf "expected one event, got %d" (List.length events)
+
+let test_a_settle_keeps_its_cache_counts_apart_from_absent () =
+  let counts = result (pair (option int) (option int)) string in
+  check counts "both counts reported"
+    (Ok (Some 3_556_362, Some 159_783))
+    (settle_cache_counts
+       (cached_turn_complete_frame
+          "\"cache_read_tokens\":3556362,\"cache_creation_tokens\":159783,"));
+  check counts "absent is not reported" (Ok (None, None))
+    (settle_cache_counts (cached_turn_complete_frame ""));
+  check counts "null is not reported" (Ok (None, None))
+    (settle_cache_counts
+       (cached_turn_complete_frame
+          "\"cache_read_tokens\":null,\"cache_creation_tokens\":null,"));
+  check counts "a count of the wrong shape is unreadable"
+    (Error "keeper_turn_complete carries a non-integer cache_read_tokens")
+    (settle_cache_counts
+       (cached_turn_complete_frame "\"cache_read_tokens\":\"3556362\","))
+
 let test_keeper_events_decode_by_name () =
   check (list string)
     "heartbeat, bare heartbeat, settlement, keeper tool call with and without \
@@ -728,5 +762,7 @@ let () =
             test_a_frame_this_cannot_read_says_why
         ; test_case "a turn observation names the call and the completed count"
             `Quick test_a_turn_observation_names_the_call_and_the_completed_count
+        ; test_case "a settle keeps its cache counts apart from absent" `Quick
+            test_a_settle_keeps_its_cache_counts_apart_from_absent
         ] )
     ]

@@ -168,6 +168,17 @@ let librarian_reserve entry f =
          Replace_latest))
 ;;
 
+let has_waiting ~base_path ~keeper_name =
+  let key = entry_key ~base_path ~keeper_name in
+  match Stdlib.Mutex.protect registry_mu (fun () -> Hashtbl.find_opt entries key) with
+  | None -> false
+  | Some entry ->
+    Stdlib.Mutex.protect entry.state_mu (fun () ->
+      match entry.librarian_drain with
+      | Some drain -> Option.is_some drain.latest
+      | None -> false)
+;;
+
 let librarian_drain_is_active entry drain =
   Stdlib.Mutex.protect entry.state_mu (fun () ->
     match entry.librarian_drain with

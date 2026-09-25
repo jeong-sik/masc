@@ -120,10 +120,16 @@ let message_json (msg : Masc_domain.message) =
   `Assoc base
 ;;
 
+(* The cut moves back to a UTF-8 character boundary so a Korean message does
+   not reach the mention inbox ending in U+FFFD. The full text stays in the
+   message's [body]. *)
 let snippet text =
   let text = String.trim text in
   let max_len = 160 in
-  if String.length text <= max_len then text else String.sub text 0 (max_len - 3) ^ "..."
+  let suffix = "..." in
+  if String.length text <= max_len
+  then text
+  else String_util.utf8_prefix ~max_bytes:(max_len - String.length suffix) text ^ suffix
 ;;
 
 let mention_matches ?me mentions =

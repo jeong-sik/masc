@@ -442,6 +442,16 @@ let prepare_agent_setup
               (Keeper_skill_catalog.error_to_string diagnostic))
          selected.diagnostic)
     task_skill_selection.selected;
+  List.iter
+    (fun (row : Keeper_task_skill_turn.unprojectable) ->
+       Log.Keeper.warn
+         "Task Skill unavailable this turn for keeper=%s snapshot_revision=%s reference=%s task_ids=%s error=%s"
+         meta.name
+         snapshot_rev
+         (Skill_reference.to_yojson row.reference |> Yojson.Safe.to_string)
+         (String.concat "," row.task_ids)
+         (Keeper_skill_catalog.error_to_string row.error))
+    task_skill_selection.unprojectable;
   let capability_surface =
     Keeper_capability_surface.create
       ~tool_deny:profile_defaults.Keeper_types_profile.tool_deny

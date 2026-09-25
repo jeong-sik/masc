@@ -3,10 +3,6 @@ type error =
       { reference : Skill_reference.t
       ; error : Skill_catalog_snapshot.reference_resolution_error
       }
-  | Projection_failed of
-      { reference : Skill_reference.t
-      ; error : Keeper_skill_catalog.error
-      }
 
 type selected =
   { reference : Skill_reference.t
@@ -15,7 +11,16 @@ type selected =
   ; task_ids : string list
   }
 
-type t = { selected : selected list }
+type unprojectable =
+  { reference : Skill_reference.t
+  ; error : Keeper_skill_catalog.error
+  ; task_ids : string list
+  }
+
+type t =
+  { selected : selected list
+  ; unprojectable : unprojectable list
+  }
 
 type partition =
   { instructions : selected list
@@ -24,24 +29,37 @@ type partition =
 
 type Agent_core.Error.carrier += Task_skill_resolution_error of error
 
+(* Only a reference the frozen snapshot does not hold stops the turn. A held
+   entry the catalog cannot project is a known Skill that is unavailable this
+   turn (docs/SKILLS-FLOW.md section 2a); today that is an instruction body
+   over the inline read boundary (#39138). Failing setup for it would stop
+   every turn of a Keeper whose current or held Task pins one, including turns
+   about other Tasks. *)
 let resolve_with_task_ids ~snapshot ~task_ids references =
-  let rec loop resolved = function
-    | [] -> Ok { selected = List.rev resolved }
+  let rec loop resolved unprojectable = function
+    | [] -> Ok { selected = List.rev resolved; unprojectable = List.rev unprojectable }
     | reference :: rest ->
       (match Skill_catalog_snapshot.resolve_reference snapshot reference with
        | Error error -> Error (Reference_resolution_failed { reference; error })
        | Ok entry ->
          (match Keeper_skill_catalog.project_entry_or_fallback snapshot entry with
           | Keeper_skill_catalog.Projected skill ->
-            loop ({ reference; skill; diagnostic = None; task_ids } :: resolved) rest
+            loop
+              ({ reference; skill; diagnostic = None; task_ids } :: resolved)
+              unprojectable
+              rest
           | Keeper_skill_catalog.Frozen_instruction { skill; diagnostic } ->
             loop
               ({ reference; skill; diagnostic = Some diagnostic; task_ids } :: resolved)
+              unprojectable
               rest
           | Keeper_skill_catalog.Entry_unavailable error ->
-            Error (Projection_failed { reference; error })))
+            loop
+              resolved
+              ({ reference; error; task_ids } :: unprojectable)
+              rest))
   in
-  loop [] references
+  loop [] [] references
 ;;
 
 let resolve ~snapshot references =
@@ -52,31 +70,45 @@ let resolve_for_task ~snapshot ~task_id references =
   resolve_with_task_ids ~snapshot ~task_ids:[ task_id ] references
 ;;
 
-let empty = { selected = [] }
+let empty = { selected = []; unprojectable = [] }
 
-let merge selections =
-  let add selected candidate =
+(* One row per exact reference, carrying every Task id that pinned it. *)
+let merge_rows ~reference ~task_ids ~with_task_ids rows =
+  let add merged candidate =
     match
       List.find_opt
-        (fun known -> Skill_reference.equal known.reference candidate.reference)
-        selected
+        (fun known -> Skill_reference.equal (reference known) (reference candidate))
+        merged
     with
-    | None -> selected @ [ candidate ]
+    | None -> merged @ [ candidate ]
     | Some known ->
-      let merged =
-        { known with
-          task_ids =
-            List.sort_uniq String.compare (known.task_ids @ candidate.task_ids)
-        }
+      let merged_task_ids =
+        List.sort_uniq String.compare (task_ids known @ task_ids candidate)
       in
       List.map
         (fun existing ->
-           if Skill_reference.equal existing.reference candidate.reference
-           then merged
+           if Skill_reference.equal (reference existing) (reference candidate)
+           then with_task_ids known merged_task_ids
            else existing)
-        selected
+        merged
   in
-  { selected = List.fold_left add [] (List.concat_map (fun t -> t.selected) selections) }
+  List.fold_left add [] rows
+;;
+
+let merge selections =
+  { selected =
+      merge_rows
+        ~reference:(fun (row : selected) -> row.reference)
+        ~task_ids:(fun (row : selected) -> row.task_ids)
+        ~with_task_ids:(fun (row : selected) task_ids -> { row with task_ids })
+        (List.concat_map (fun t -> t.selected) selections)
+  ; unprojectable =
+      merge_rows
+        ~reference:(fun (row : unprojectable) -> row.reference)
+        ~task_ids:(fun (row : unprojectable) -> row.task_ids)
+        ~with_task_ids:(fun (row : unprojectable) task_ids -> { row with task_ids })
+        (List.concat_map (fun t -> t.unprojectable) selections)
+  }
 ;;
 
 let resolve_observations ~snapshot ~current_task ~held_task_skills =
@@ -111,7 +143,6 @@ let error_code = function
   | Reference_resolution_failed
       { error = Skill_catalog_snapshot.Content_revision_mismatch _; _ } ->
     "task_skill_content_revision_mismatch"
-  | Projection_failed _ -> "task_skill_projection_failed"
 ;;
 
 let reference_json reference =
@@ -134,11 +165,6 @@ let error_to_string = function
       (reference_json reference)
       (Skill_reference.content_revision_to_string requested)
       (Skill_reference.content_revision_to_string observed)
-  | Projection_failed { reference; error } ->
-    Printf.sprintf
-      "Task Skill cannot be projected from the frozen snapshot: reference=%s error=%s"
-      (reference_json reference)
-      (Keeper_skill_catalog.error_to_string error)
 ;;
 
 let core_error error =
@@ -185,7 +211,7 @@ let skills selection = List.map (fun selected -> selected.skill) selection.selec
 
 let task_ids_for_reference selection reference =
   selection.selected
-  |> List.find_map (fun selected ->
+  |> List.find_map (fun (selected : selected) ->
        if Skill_reference.equal selected.reference reference
        then Some selected.task_ids
        else None)
@@ -195,11 +221,11 @@ let task_ids_for_reference selection reference =
 let executable_selection ~projection selection =
   let selected =
     List.filter
-      (fun selected ->
+      (fun (selected : selected) ->
          Keeper_skill_catalog.exact_is_executable projection selected.reference)
       selection.selected
   in
-  { selected }
+  { selection with selected }
 ;;
 
 (* One computation feeds every surface that advertises a turn's per-task
@@ -262,6 +288,12 @@ let exact_task_surfaces
               List.mem task_id selected.task_ids)
          |> List.map (fun (selected : selected) -> selected.skill)
        in
-       task_id, Keeper_skill_catalog.exact_surfaces projection ~task)
+       let unavailable =
+         selection.unprojectable
+         |> List.filter (fun (row : unprojectable) -> List.mem task_id row.task_ids)
+         |> List.map (fun (row : unprojectable) ->
+              Keeper_skill_catalog.unprojectable_exact_surface row.reference row.error)
+       in
+       task_id, Keeper_skill_catalog.exact_surfaces projection ~task @ unavailable)
     task_ids
 ;;

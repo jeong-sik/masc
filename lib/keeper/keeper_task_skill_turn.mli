@@ -5,10 +5,8 @@ type error =
       { reference : Skill_reference.t
       ; error : Skill_catalog_snapshot.reference_resolution_error
       }
-  | Projection_failed of
-      { reference : Skill_reference.t
-      ; error : Keeper_skill_catalog.error
-      }
+      (** The only admission error: the exact reference names no entry of
+          the frozen snapshot. *)
 
 type selected = private
   { reference : Skill_reference.t
@@ -17,7 +15,20 @@ type selected = private
   ; task_ids : string list
   }
 
-type t = private { selected : selected list }
+type unprojectable = private
+  { reference : Skill_reference.t
+  ; error : Keeper_skill_catalog.error
+  ; task_ids : string list
+  }
+(** A Task reference that resolved to a snapshot entry the catalog cannot
+    project ({!Keeper_skill_catalog.Entry_unavailable}), such as an
+    instruction body over the inline read boundary. The Skill is known, so it
+    is shown unavailable with [error] as its reason; the turn still runs. *)
+
+type t = private
+  { selected : selected list
+  ; unprojectable : unprojectable list
+  }
 
 type partition = private
   { instructions : selected list
@@ -47,7 +58,8 @@ val resolve_observations :
 
 val empty : t
 val merge : t list -> t
-(** Preserve Task order while deduplicating identical exact references. *)
+(** Preserve Task order while deduplicating identical exact references, in
+    both [selected] and [unprojectable]. *)
 
 val error_code : error -> string
 val error_to_string : error -> string
@@ -85,4 +97,6 @@ val exact_task_surfaces :
     [sandbox_profile] and [skill_names] are the same inputs the executable bundle passes to
     {!Keeper_capability_surface.create}, which builds this projection too, so
     prompt, bundle, and preview consumers share one computation without
-    breaking the turn-boundary freeze. *)
+    breaking the turn-boundary freeze. Each task's [unprojectable] references
+    follow its projected ones as unavailable rows carrying their catalog
+    error. *)

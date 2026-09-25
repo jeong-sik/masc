@@ -302,6 +302,113 @@ let test_denied_node_tool_withholds_task_composition_from_prompt () =
   | _ -> fail "a withheld Task composition was still advertised as callable"
 ;;
 
+(* An instruction body over the inline read boundary projects as
+   [Entry_unavailable] (#39138). Turn setup fails the turn on any Task Skill
+   resolution Error, so an Error here would stop every turn of a Keeper
+   holding the Task, held Tasks included. The snapshot holds the Skill, so it
+   is a known Skill that is unavailable: the selection resolves, the readable
+   Skill stays selected, and the prompt row names the size refusal. *)
+let test_oversized_task_skill_is_unavailable_not_a_failed_turn () =
+  let config = config (source_row ~id:"only" ~path:"skills") in
+  let oversized_body = String.make (Common.max_tool_result_wire_bytes + 1) 'x' in
+  let skill_snapshot =
+    snapshot
+      config
+      [ [ "guide", document ~name:"guide" ~description:"guide" "GUIDE"
+        ; "huge", document ~name:"huge" ~description:"huge" oversized_body
+        ]
+      ]
+  in
+  let source_id =
+    match config.sources with
+    | [ source ] -> source.id
+    | _ -> fail "expected one source"
+  in
+  let guide_reference =
+    exact_reference skill_snapshot ~source_id ~package_id:"guide" ~name:"guide"
+  in
+  let huge_reference =
+    exact_reference skill_snapshot ~source_id ~package_id:"huge" ~name:"huge"
+  in
+  let held_task_skills =
+    [ { Inputs.held_task_id = "task-held"
+      ; held_skills = [ huge_reference; guide_reference ]
+      }
+    ]
+  in
+  let selection =
+    match
+      Selection.resolve_observations
+        ~snapshot:skill_snapshot
+        ~current_task:Inputs.No_current_task
+        ~held_task_skills
+    with
+    | Ok selection -> selection
+    | Error error ->
+      failf
+        "a pinned oversized Skill failed the turn's Task Skill resolution: %s"
+        (Selection.error_to_string error)
+  in
+  check
+    (list string)
+    "the readable Task Skill stays selected"
+    [ "guide" ]
+    (List.map
+       (fun (selected : Selection.selected) -> selected.skill.name)
+       selection.Selection.selected);
+  let reason =
+    match selection.Selection.unprojectable with
+    | [ { Selection.reference
+        ; error =
+            (Masc.Keeper_skill_catalog.Body_too_large_to_read
+               { skill; bytes; max_bytes } as error)
+        ; task_ids
+        }
+      ] ->
+      check bool "the unavailable row is the pinned reference" true
+        (Reference.equal reference huge_reference);
+      check string "the size refusal names the Skill" "huge" skill;
+      check int "the refusal carries the inline read boundary"
+        Common.max_tool_result_wire_bytes max_bytes;
+      check bool "the refused body is over that boundary" true (bytes > max_bytes);
+      check (list string) "the row keeps the Task that pinned it" [ "task-held" ] task_ids;
+      Masc.Keeper_skill_catalog.error_to_string error
+    | _ -> fail "the oversized Task Skill was not kept as one typed unavailable row"
+  in
+  match
+    Selection.exact_task_surfaces
+      ~snapshot:skill_snapshot
+      ~tool_deny:[]
+      ~sandbox_profile:Masc.Keeper_types_profile.Docker
+      ~skill_names:None
+      ~selection
+      ~current_task:Inputs.No_current_task
+      ~held_task_skills
+  with
+  | [ ( "task-held"
+      , [ { Masc.Keeper_skill_catalog.reference = readable
+          ; availability = Masc.Keeper_skill_catalog.Instruction_tool
+          }
+        ; { Masc.Keeper_skill_catalog.reference = unavailable
+          ; availability = Masc.Keeper_skill_catalog.Exact_unavailable { diagnostic }
+          }
+        ] ) ] ->
+    check bool "the readable Skill is offered through keeper_skill" true
+      (Reference.equal readable guide_reference);
+    check bool "the oversized Skill is listed on its Task" true
+      (Reference.equal unavailable huge_reference);
+    check string "the prompt row gives the size refusal as the reason" reason diagnostic
+  | surfaces ->
+    failf
+      "the Task's prompt surface did not list the oversized Skill as unavailable: %s"
+      (Yojson.Safe.to_string
+         (`List
+            (List.concat_map
+               (fun (_, entries) ->
+                  List.map Masc.Keeper_skill_catalog.exact_surface_to_yojson entries)
+               surfaces)))
+;;
+
 let test_shadow_reference_selects_shadow_not_effective_winner () =
   let config =
     config
@@ -1057,6 +1164,8 @@ let () =
             test_keeper_name_selection_filters_prompt_and_activation_task_views
         ; test_case "denied node tool withholds Task composition from prompt" `Quick
             test_denied_node_tool_withholds_task_composition_from_prompt
+        ; test_case "oversized Task Skill is unavailable, not a failed turn" `Quick
+            test_oversized_task_skill_is_unavailable_not_a_failed_turn
         ; test_case "held shadow composition collision is exact" `Quick
             test_held_shadow_composition_wins_with_exact_collision_evidence
         ; test_case "malformed exact composition falls back" `Quick

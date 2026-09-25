@@ -3528,22 +3528,18 @@ let launch_tools_load ?(force = true) state ~mailbox =
     (* The skills catalog (usage + flows) is a separate read and must not
        delay the tool list: a slow catalog costs its own section, not the
        screen. *)
-    let run_catalog () =
-      let result =
-        try Masc_tui_loader.load_skills_catalog ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Skills_catalog_loaded (generation, result))
-    in
+    (* No subject: the Tools renderer names this failure ("Skill catalog
+       read failed"), so the cause arrives unlabelled and is labelled once
+       there. *)
+    Masc_tui_async_read.launch
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Skills_catalog_loaded (generation, result)))
+      (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port);
     (match Eio_context.get_switch_opt () with
-     | Some sw ->
-         Eio.Fiber.fork_daemon ~sw (fun () -> run_catalog (); `Stop_daemon);
-         Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
      | None ->
          let error = Error "Eio switch is unavailable" in
          enqueue_async mailbox (Tools_loaded (generation, keeper, error));
-         enqueue_async mailbox (Skills_catalog_loaded (generation, error));
          enqueue_async mailbox (Tools_async_observation_loaded (generation, error)))
   end
 

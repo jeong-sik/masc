@@ -601,4 +601,16 @@ module For_testing : sig
 
   val accept_no_progress_should_try_next : Agent_core.Error.t -> bool
 
+  val lane_should_retry :
+    is_last:bool ->
+    allow_retry:bool ->
+    allow_accept_no_progress_retry:bool ->
+    Agent_core.Error.t ->
+    bool
+  (** The lane walk's whole advance decision after an attempt error: every
+      [should_try_next] predicate in its order, then the HTTP fallback through
+      [Runtime_attempt_fsm.should_try_next]. The route/walk agreement test
+      calls this instead of re-typing the predicate chain, so a predicate
+      added to the chain is part of the comparison without a test edit. *)
+
 end

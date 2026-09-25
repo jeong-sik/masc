@@ -302,7 +302,7 @@ let test_repeated_exact_dynamic_tool_call_aborts_the_turn () =
           to the hand-built stop below, which never goes through the host. *)
        check string "repeated tool" "effect" tool_name;
        check int "repeat count" 3 repeated_count
-     | Some (Terminal_tool_boundary _) ->
+     | Some (Queued_chat_operation | Terminal_tool_boundary _) ->
        fail "ordinary repeated tool produced a terminal-tool stop"
      | None -> fail "reordered object did not produce a typed host stop");
     check (option string) "host stop is not a terminal error" None !terminal_error)
@@ -350,7 +350,7 @@ let test_scoped_boundary_spans_official_attempts () =
         ~on_tool_boundary:(fun () ->
           incr boundary_calls;
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution) ~tool_calls:!calls)
+            ~repetition_execution:(Some execution) ~tool_calls:!calls ())
         (fun _ -> incr executions;
           Ok { Agent_core.Types.content = "same-output"; content_blocks = None; _meta = None })
       in
@@ -395,7 +395,7 @@ let test_moving_output_input_loop_aborts_at_input_threshold () =
           calls := observation :: !calls)
         ~on_tool_boundary:(fun () ->
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution) ~tool_calls:!calls)
+            ~repetition_execution:(Some execution) ~tool_calls:!calls ())
         (fun _input ->
           Ok { Agent_core.Types.content =
                  Printf.sprintf "appended line %d" (!appended + 1)
@@ -466,7 +466,7 @@ let test_autonomous_official_boundary_stops_execute_loop_without_scope () =
             ~on_tool_boundary:(fun () ->
               incr boundary_calls;
               Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-                ~repetition_execution:None ~tool_calls:!calls)
+                ~repetition_execution:None ~tool_calls:!calls ())
             (fun _input ->
               incr executions;
               Ok { Agent_core.Types.content = output_text !executions; content_blocks = None; _meta = None })
@@ -484,7 +484,7 @@ let test_autonomous_official_boundary_stops_execute_loop_without_scope () =
          | Some (Repeated_tool_call { tool_name; repeated_count }) ->
            check string (label ^ " repeated tool") "Execute" tool_name;
            check int (label ^ " repeat count") stops_at repeated_count
-         | Some (Terminal_tool_boundary _) ->
+         | Some (Queued_chat_operation | Terminal_tool_boundary _) ->
            fail (label ^ " produced a terminal-tool stop instead of a repeat stop")
          | None ->
            fail
@@ -519,7 +519,7 @@ let test_scoped_boundary_error_stops_immediately () =
             { scoped_observation with input_fingerprint = Some "invalid-hash" })
         ~on_tool_boundary:(fun () ->
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution) ~tool_calls:[])
+            ~repetition_execution:(Some execution) ~tool_calls:[] ())
         (fun _ -> Ok { Agent_core.Types.content = "effect returned"; content_blocks = None; _meta = None })
       in
       let result = tool.call ~call_id:"invalid-scope-observation" (`Assoc []) in
@@ -713,6 +713,52 @@ let test_repeated_tool_host_stop_is_a_checkpoint_yield () =
   | _ -> fail "host stop was not projected as a repeated-tool checkpoint yield"
 ;;
 
+let test_queued_chat_yields_after_settled_official_tool () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let queued = ref false in
+    let handed_off = ref false in
+    let boundary_calls = ref 0 in
+    let tool, terminal_error =
+      one_dynamic_tool ~active
+        ~on_result_handoff:(fun ~invocation:_ ~content:_ -> handed_off := true)
+        ~on_tool_boundary:(fun () ->
+          incr boundary_calls;
+          check bool "tool result handed off before queue decision" true !handed_off;
+          Keeper_agent_run.For_testing.official_client_tool_boundary
+            ~repetition_execution:None
+            ~yield_requested:(fun () ->
+              if !queued
+              then Ok (Some Keeper_agent_run.{ reason = Operation_queued })
+              else Ok None)
+            ~tool_calls:[] ())
+        (fun _ ->
+          queued := true;
+          Ok { Agent_core.Types.content = "settled result"; content_blocks = None; _meta = None })
+    in
+    let result = tool.call ~call_id:"queued-after-tool" (`Assoc []) in
+    check bool "tool succeeded" true result.success;
+    check string "settled content remains intact" "settled result" result.content;
+    check int "one boundary decision" 1 !boundary_calls;
+    check (option string) "queue stop is not terminal failure" None !terminal_error;
+    match result.abort_turn with
+    | Some Queued_chat_operation ->
+      (match
+         Host.host_stop_result
+           ~runtime_id:"official-client-runtime"
+           ~model:"official-client-model"
+           ~session_id:"session-queued"
+           ~turn_id:"turn-queued"
+           ~turns_used:1
+           ~latency_ms:None
+           ~request_context:None
+           Queued_chat_operation
+       with
+       | Ok { stop_reason = Runtime_agent.Yielded_to_operation_queued _; _ } -> ()
+       | Ok _ | Error _ -> fail "queued chat lost its typed continuation stop")
+    | Some (Repeated_tool_call _ | Terminal_tool_boundary _) | None ->
+      fail "queued chat did not stop the official-client turn after its tool")
+;;
+
 let test_terminal_post_effect_failure_aborts_the_official_client_turn () =
   with_active_raw_trace (fun ~path:_ ~active ->
     let state = ref Masc.Keeper_tools_agent_core.Terminal_effect_open in
@@ -758,7 +804,7 @@ let test_terminal_post_effect_failure_aborts_the_official_client_turn () =
               (Terminal_completed | Durable_stimulus_deferred)
           ; _
           })
-    | Some (Repeated_tool_call _)
+    | Some (Queued_chat_operation | Repeated_tool_call _)
     | None ->
       fail "post-effect terminal failure did not close the official-client loop")
 ;;
@@ -977,7 +1023,7 @@ let test_ordinary_post_effect_failure_aborts_the_official_client_turn () =
           }) ->
       ()
     | Some (Terminal_tool_boundary _)
-    | Some (Repeated_tool_call _)
+    | Some (Queued_chat_operation | Repeated_tool_call _)
     | None ->
       fail "ordinary post-effect failure remained provider-retryable")
 ;;
@@ -1028,7 +1074,7 @@ let test_terminal_external_deferral_keeps_the_turn_going () =
     let result = tool.call ~call_id:"terminal-deferred" (`Assoc []) in
     match result.abort_turn with
     | None -> ()
-    | Some (Terminal_tool_boundary _) | Some (Repeated_tool_call _) ->
+    | Some (Queued_chat_operation | Terminal_tool_boundary _ | Repeated_tool_call _) ->
       fail "a parked external effect ended the turn")
 ;;
 
@@ -1057,7 +1103,7 @@ let test_terminal_generic_deferral_keeps_durable_stimulus_stop () =
           { outcome = Durable_stimulus_deferred; tool_name = "effect" }) ->
       ()
     | Some (Terminal_tool_boundary _)
-    | Some (Repeated_tool_call _)
+    | Some (Queued_chat_operation | Repeated_tool_call _)
     | None ->
       fail "generic deferral did not retain its durable-stimulus terminal stop")
 ;;
@@ -2655,6 +2701,10 @@ let () =
             "repeated host stop is a checkpoint yield"
             `Quick
             test_repeated_tool_host_stop_is_a_checkpoint_yield
+        ; test_case
+            "queued chat yields after a settled official tool"
+            `Quick
+            test_queued_chat_yields_after_settled_official_tool
         ; test_case
             "host stop carries request context, not spend"
             `Quick

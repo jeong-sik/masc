@@ -165,6 +165,8 @@ type _ command =
       -> (Keeper_meta_contract.keeper_meta option, error) result command
   | Exact_operation :
       Operation_id.t -> (Chat_operation.t option, error) result command
+  | Has_newer_original_queued :
+      Operation_id.t -> (bool, error) result command
   | Direct_checkpoint : Operation_id.t ->
       (Keeper_semantic_execution.gate_checkpoint option, error) result command
   | Defer_direct_checkpoint :
@@ -553,6 +555,7 @@ let answer : type response. response command -> answer = function
   | Exact_projection -> In_its_drain_step
   | Apply_meta _ -> In_its_drain_step
   | Exact_operation _ -> In_its_drain_step
+  | Has_newer_original_queued _ -> In_its_drain_step
   | Direct_checkpoint _ -> In_its_drain_step
   | Defer_direct_checkpoint _ -> In_its_drain_step
   | Resume_direct_checkpoint _ -> In_its_drain_step
@@ -1446,6 +1449,14 @@ let start
           in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Has_newer_original_queued operation_id, resolve) ->
+          let response =
+            run_operation_read t ~label:"read newer original Keeper chat" (fun () ->
+              Chat_operation_store.has_newer_original_queued
+                t.operation_store ~operation_id)
+          in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
         | Command (Direct_checkpoint operation_id, resolve) ->
           let response = run_operation_read t ~label:"read direct cooperative checkpoint" (fun () ->
             Chat_operation_store.direct_checkpoint t.operation_store ~operation_id) in
@@ -2074,6 +2085,8 @@ let resume_direct_runtime_retry t ~operation_id ~observed =
   request t (Resume_direct_runtime_retry {operation_id; observed})
 
 let exact_operation t operation_id = request t (Exact_operation operation_id)
+let has_newer_original_queued t ~operation_id =
+  request t (Has_newer_original_queued operation_id)
 let restart_interrupted_operations t = t.restart_interrupted
 let pause_and_interrupt ?expected_control_token t target = request t (Pause_and_interrupt {target; expected_control_token})
 let interrupt_turn = pause_and_interrupt

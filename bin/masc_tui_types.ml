@@ -1631,7 +1631,7 @@ type runtime_mode =
    takes it as its first candidate, which is how the lane comes to exist. *)
 type runtime_lane_pick =
   | Pick_conversation_lane of string
-  | Pick_exact_lane of string
+  | Pick_exact_lane of Standalone_lane.t
   | Pick_new_lane of string
   | Pick_media_failover
       (* Appends to [\[runtime\].media_failover]. The route takes its whole
@@ -1642,7 +1642,8 @@ type runtime_lane_pick =
          one runtime, the one a keeper with no assignment walks. *)
 
 let runtime_lane_pick_name = function
-  | Pick_conversation_lane lane | Pick_exact_lane lane | Pick_new_lane lane -> lane
+  | Pick_conversation_lane lane | Pick_new_lane lane -> lane
+  | Pick_exact_lane lane -> Standalone_lane.to_id lane
   | Pick_media_failover -> "[runtime].media_failover"
   | Pick_route_default -> "[runtime].default"
 ;;
@@ -1751,8 +1752,8 @@ type planning_mode =
     along so Left/Esc from a run returns to the list it came from. *)
 type lanes_mode =
   | Lanes_overview
-  | Lanes_run_list of string
-  | Lanes_run_detail of string * string
+  | Lanes_run_list of Standalone_lane.t
+  | Lanes_run_detail of Standalone_lane.t * string
   | Lanes_measurement_detail of string
 
 module Measurement = struct
@@ -5143,7 +5144,7 @@ type local_intervention =
    [\[runtime\].media_failover]. Both are an ordered list of runtime ids that
    something walks in turn, and neither is a conversation lane. *)
 type slot_editor_target =
-  | Exact_lane_slots of string
+  | Exact_lane_slots of Standalone_lane.t
   | Media_failover_slots
 
 (* The slot editor: what it was opened on, and where its cursor sits in that
@@ -5155,7 +5156,7 @@ type slot_editor =
   }
 
 let slot_editor_target_name = function
-  | Exact_lane_slots lane -> lane
+  | Exact_lane_slots lane -> Standalone_lane.to_id lane
   | Media_failover_slots -> "[runtime].media_failover"
 ;;
 
@@ -9370,13 +9371,13 @@ let swap_candidates order i j =
    is an append the server applies to the declared order, never a write of
    this list. A lane being created has no candidates yet. *)
 let lane_picker_existing_slots (state : state) = function
-  | Pick_exact_lane name ->
+  | Pick_exact_lane lane ->
     (match state.standalone_lanes with
      | None -> []
      | Some snapshot ->
          snapshot.Tui_decode.sls_lanes
          |> List.find_opt (fun (row : Tui_decode.standalone_lane) ->
-              String.equal row.Tui_decode.sl_lane_id name)
+              Standalone_lane.equal row.Tui_decode.sl_lane lane)
          |> Option.map (fun row ->
               row.Tui_decode.sl_admitted_slots @ row.Tui_decode.sl_cli_slots
               @ row.Tui_decode.sl_dropped_slots)
@@ -9636,13 +9637,13 @@ type slot_editor_row =
 let slot_editor_rows (state : state) =
   match state.slot_editor with
   | None -> []
-  | Some { se_target = Exact_lane_slots lane_id; _ } ->
+  | Some { se_target = Exact_lane_slots target_lane; _ } ->
     (match state.standalone_lanes with
      | None -> []
      | Some snapshot ->
        snapshot.Tui_decode.sls_lanes
        |> List.find_opt (fun (lane : Tui_decode.standalone_lane) ->
-            String.equal lane.Tui_decode.sl_lane_id lane_id)
+            Standalone_lane.equal lane.Tui_decode.sl_lane target_lane)
        |> Option.map (fun (lane : Tui_decode.standalone_lane) ->
             List.map
               (fun slot ->

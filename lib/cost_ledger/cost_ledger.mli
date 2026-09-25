@@ -23,8 +23,7 @@ type source =
     [scope] says what that count covers: one provider request, one
     official-client turn, or the conversation so far. Raw rows of different
     scopes do not add up to a spend; a conversation-cumulative row repeats
-    every earlier turn. A raw row written before rows carried a scope reads
-    as [Usage_scope_unavailable]: the row never said.
+    every earlier turn. A raw row without a scope does not decode.
 
     [Resolved_delta] is one Keeper turn's spend, resolved from those
     observations. *)

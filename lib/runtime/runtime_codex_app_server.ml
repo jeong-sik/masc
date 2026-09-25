@@ -137,6 +137,7 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
+  | Queued_chat_operation
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
@@ -382,6 +383,8 @@ let error_to_string = function
       "Codex app-server stopped after repeated tool call: tool=%s count=%d"
       tool_name
       repeated_count
+  | Stopped_by_host Queued_chat_operation ->
+    "Codex app-server stopped for a queued chat operation"
   | Stopped_by_host (Terminal_tool_boundary { tool_name; _ }) ->
     Printf.sprintf "Codex app-server stopped at terminal tool boundary: tool=%s" tool_name
   | Turn_interrupted -> "Codex app-server turn was interrupted"

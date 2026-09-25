@@ -2540,6 +2540,8 @@
 
 (include stanzas/test_dos_tools.inc)
 
+(include stanzas/test_machine_checkpoint.inc)
+
 (include stanzas/test_msx_frame_route.inc)
 
 (include stanzas/test_lane_addon_live_route.inc)
@@ -3544,7 +3546,7 @@
 (test
  (name test_tui_lane_slot_reach)
  (modules test_tui_lane_slot_reach)
- (libraries alcotest masc masc_tui_types))
+ (libraries alcotest masc masc.runtime masc_tui_types))
 
 ; Its own anchor, under the other suite that links only the state vocabulary,
 ; so two pull requests adding a suite do not both land on the head of this
@@ -4464,6 +4466,14 @@
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input)))
 
+; The default runtest alias already runs this scenario in the keyboard walk.
+; The focused alias gives edited-contract PRs that one consumer without
+; repeating the walk in every full test run.
+(rule
+ (alias runtest-test_tui_context_inspector)
+ (deps test_tui_context_inspector.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_context_inspector.py} %{dep:../bin/masc_tui.exe})))
+
 (rule
  (alias runtest-test_tui_fixture_shutdown)
  (deps test_tui_fixture_shutdown.py test_tui_keyboard_input.py)
@@ -4744,6 +4754,22 @@
  (deps (alias runtest-test_tui_keyboard_input-msx-size)))
 
 (rule
+ (alias runtest-test_tui_keyboard_input-dos-live)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   dos-live)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-dos-live)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-cli-base-path)
  (deps
   test_tui_keyboard_input.py
@@ -5009,6 +5035,22 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-keepers-lanes)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-keeper-settings-activation)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   keeper-settings-activation)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-keeper-settings-activation)))
 
 (rule
  (alias runtest-test_tui_keyboard_input-board-json)
@@ -5369,6 +5411,7 @@
   alcotest
   astring
   masc
+  masc.runtime
   masc_tui_answering
   masc_tui_message_layout))
 
@@ -6200,18 +6243,26 @@
 (test
  (name test_tui_msx_load)
  (modules test_tui_msx_load)
- (libraries alcotest unix masc_tui_types masc_tui_interactive masc_tui_msx))
+ (libraries alcotest unix masc_tui_types masc_tui_machine_live masc_tui_interactive
+   masc_tui_msx))
+
+; The spectator's typed read of GET /api/v1/lane-addons/live: every answer
+; shape, the malformed ones, and what a read does to the drawn view.
+(test
+ (name test_tui_machine_live)
+ (modules test_tui_machine_live)
+ (libraries alcotest yojson base64 masc_tui_machine_live))
 
 (test
  (name test_tui_msx_tick)
  (modules test_tui_msx_tick)
- (libraries masc_test_deps))
+ (libraries masc_test_deps masc_tui_machine_live))
 
 (test
  (name test_tui_msx_graphics)
  (modules test_tui_msx_graphics)
  (libraries alcotest unix masc_tui_types masc_tui_interactive masc_tui_graphics
-   masc_tui_msx masc_tui_ansi))
+   masc_tui_msx masc_tui_ansi masc_tui_machine_live))
 
 (test
  (name test_tui_interactive)

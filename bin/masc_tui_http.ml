@@ -81,7 +81,6 @@ let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
 let fusion_runs_path = "/api/v1/dashboard/fusion-runs"
 let fusion_config_path = "/api/v1/runtime/config/fusion"
 let runtime_probe_path = "/api/v1/dashboard/runtime-probe"
-let msx_frame_path = "/api/v1/msx/frame"
 let msx_press_path = "/api/v1/msx/press"
 let msx_carts_path = "/api/v1/msx/carts"
 let msx_load_path = "/api/v1/msx/load"
@@ -488,14 +487,27 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:false ~status_code ~body
 
-(* The workspace MSX frame (RFC-0439 §3.7). [None] on any of: transport error,
-   non-object body, [loaded:false], or a payload that does not decode -- the
-   spectator treats all of them as "nothing to watch right now". *)
-let fetch_msx_frame ~(host : string) ~(port : int) :
-    Masc_tui_types.msx_frame option =
-  match get_json ~host ~port ~path:msx_frame_path with
-  | Error _ -> None
-  | Ok json -> Masc_tui_msx_tick.frame_of_json json
+(* One live read of a workspace machine's screen (RFC machine-spectating-
+   goes-through-lanes §2.1). A transport error, a refusal and a body that does
+   not decode are all [Error]: none of them says the machine is absent. The
+   message goes to the screen, so it is made terminal-safe here.
+
+   A changed DOS answer is about 1.2 MB of JSON around 921 KB of pixels.
+   Parsing it and decoding the base64 are pure work, so they run on a system
+   thread and the UI domain keeps drawing and reading keys meanwhile; the
+   request itself stays on the fiber, where the Eio client runs. *)
+let fetch_machine_live ~(host : string) ~(port : int)
+    (source : Masc_tui_machine_live.source) ~(since : Masc_tui_machine_live.mark option) :
+    (Masc_tui_machine_live.answer, string) result =
+  let result =
+    match http_get ~host ~port ~path:(Masc_tui_machine_live.path source ~since) with
+    | Error _ as error -> error
+    | Ok (status_code, body) ->
+        Eio_guard.run_in_systhread ~label:"tui-machine-live-decode" (fun () ->
+          Result.bind (decode_json ~allow_empty:false ~status_code ~body)
+            (Masc_tui_machine_live.decode source))
+  in
+  Result.map_error Masc.Tui_decode.sanitize_terminal_text result
 
 (** POST a JSON body and parse the JSON response. *)
 let post_json_with_timeout ~timeout_sec ~(host : string) ~(port : int)
@@ -618,7 +630,8 @@ let post_msx_checkpoint ~host ~port ~restore ~slot =
    Only validated pixels are retained; every tick supplies fresh metadata. *)
 let msx_tick_cache = Masc_tui_msx_tick.create ()
 
-let tick_msx ~(host : string) ~(port : int) : (Masc_tui_types.msx_frame option, string) result =
+let tick_msx ~(host : string) ~(port : int) :
+    (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result =
   let headers = auth_headers () in
   let request ~body =
     match http_post_with_timeout ~timeout_sec:(request_timeout_sec ()) ~headers
@@ -1189,7 +1202,7 @@ let fetch_measurement_artifact ~host ~port ~sha256 =
           Error ("Measurement artifact response is not JSON: " ^ detail)))
 
 (** One server-filtered page, with the exact continuation cursor retained. *)
-let fetch_lane_runs ?before ~(host : string) ~(port : int) ~(lane : string) () :
+let fetch_lane_runs ?before ~(host : string) ~(port : int) ~(lane : Standalone_lane.t) () :
     (Masc.Tui_decode.lane_run_page, string) result =
   let open Result.Syntax in
   let cursor = match before with
@@ -1201,7 +1214,7 @@ let fetch_lane_runs ?before ~(host : string) ~(port : int) ~(lane : string) () :
     Printf.sprintf
       "/api/v1/dashboard/exact-lane-runs?limit=%d&lane=%s%s"
       lane_run_list_limit
-      (percent_encode_path_segment lane) cursor
+      (percent_encode_path_segment (Standalone_lane.to_id lane)) cursor
   in
   let* listing = get_json ~host ~port ~path in
   Masc.Tui_decode.decode_lane_run_page ~lane listing
@@ -1703,7 +1716,7 @@ let set_runtime_lane_slots ~(host : string) ~(port : int) ~(lane : string)
 
 (* The routing API names a standalone lane's walk order "exact/<name>", which
    keeps its names apart from conversation-lane ids. *)
-let exact_lane_route name = "exact/" ^ name
+let exact_lane_route lane = "exact/" ^ Standalone_lane.to_id lane
 
 let post_runtime_lane_action ~host ~port fields =
   match
@@ -1766,10 +1779,10 @@ let rename_runtime_lane ~(host : string) ~(port : int) ~(lane : string)
     a declared slot the registry did not admit stays, and a slot another
     writer added in between is kept. The server refuses an id the lane already
     declares. *)
-let append_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
+let append_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane.t)
       ~(runtime_id : string) : (unit, string) result =
   post_runtime_lane_action ~host ~port
-    [ "lane", `String (exact_lane_route name)
+    [ "lane", `String (exact_lane_route lane)
     ; "action", `String "append"
     ; "runtime_id", `String runtime_id
     ]
@@ -1781,15 +1794,15 @@ type exact_slot_move =
   | Move_slot_down
 
 (** POST /api/v1/runtime/config/routing with [action = "drop"]: take
-    [runtime_id] out of the standalone lane [name]. Only the one id is sent,
+    [runtime_id] out of the standalone lane [lane]. Only the one id is sent,
     for the reason the append gives -- this caller can see the slots the
     registry admitted, and an order rebuilt from that view would delete every
     declared slot it rejected. The server refuses a slot the lane does not
     declare, and its last one. *)
-let drop_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
+let drop_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane.t)
       ~(runtime_id : string) : (unit, string) result =
   post_runtime_lane_action ~host ~port
-    [ "lane", `String (exact_lane_route name)
+    [ "lane", `String (exact_lane_route lane)
     ; "action", `String "drop"
     ; "runtime_id", `String runtime_id
     ]
@@ -1798,10 +1811,10 @@ let drop_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
     [runtime_id] with its neighbour in the lane's declared order. Sent as one
     id and a direction for the same reason as the drop. The server refuses a
     slot already at the end the move heads for. *)
-let move_exact_lane_slot ~(host : string) ~(port : int) ~(name : string)
+let move_exact_lane_slot ~(host : string) ~(port : int) ~(lane : Standalone_lane.t)
       ~(runtime_id : string) ~(move : exact_slot_move) : (unit, string) result =
   post_runtime_lane_action ~host ~port
-    [ "lane", `String (exact_lane_route name)
+    [ "lane", `String (exact_lane_route lane)
     ; "action", `String "move"
     ; "runtime_id", `String runtime_id
     ; ( "direction"

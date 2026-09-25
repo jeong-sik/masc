@@ -128,12 +128,12 @@ type durable_stimulus_summary =
   ; kinds : Keeper_event_queue.stimulus_payload list
   }
 
-type autonomous_yield_reason =
+type yield_reason =
   | Operation_queued
   | Durable_stimulus_waiting of durable_stimulus_summary
 
-type autonomous_yield_request =
-  { reason : autonomous_yield_reason }
+type yield_request =
+  { reason : yield_reason }
 
 let durable_stimulus_summary ~now (pending : Keeper_event_queue.t) =
   let stimuli = Keeper_event_queue.to_list pending in
@@ -179,7 +179,7 @@ let runtime_yield_reason request =
     Runtime_agent.Durable_stimulus_waiting
 ;;
 
-let person_queued_probe ~turn_kind ~autonomous_yield_requested =
+let person_queued_probe ~turn_kind ~yield_requested =
   match turn_kind with
   | Turn_record.Direct -> None
   | Turn_record.Autonomous ->
@@ -190,7 +190,7 @@ let person_queued_probe ~turn_kind ~autonomous_yield_requested =
          | Ok (Some { reason = Durable_stimulus_waiting _ })
          | Ok None
          | Error _ -> false)
-      autonomous_yield_requested
+      yield_requested
 ;;
 
 (* Constitution exception (named bound + rationale): loop detection is
@@ -353,7 +353,7 @@ let repeated_tool_call_input ~threshold tool_calls =
    scope contributes only its latched observation failure; it is not what
    makes the boundary exist (#34083). *)
 let official_client_tool_boundary
-      ~repetition_execution ?autonomous_yield_requested ~tool_calls () =
+      ~repetition_execution ?yield_requested ~tool_calls () =
   match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
   | Some error ->
     Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
@@ -370,7 +370,7 @@ let official_client_tool_boundary
       Ok (Option.map (fun (tool_name, repeated_count) ->
         Keeper_official_client_host.Repeated_tool_call { tool_name; repeated_count }) repeated)
     in
-    (match autonomous_yield_requested with
+    (match yield_requested with
      | None -> repetition_stop ()
      | Some requested ->
        (match requested () with
@@ -656,7 +656,7 @@ let native_tool_boundary
       ~terminal_effect_state
       ~tool_calls
       ~assistant_turn_texts
-      ~autonomous_yield_requested
+      ~yield_requested
   =
   (match
      tool_boundary_before_repetition ~repetition_execution
@@ -723,7 +723,7 @@ let native_tool_boundary
                       (Runtime_agent.Repeated_assistant_text
                          { repeated_count })))))
      in
-     (match autonomous_yield_requested with
+     (match yield_requested with
       | None -> repeated_loop_decision ()
       | Some requested ->
         (match requested () with
@@ -845,7 +845,7 @@ let run_turn
       ?continuation_channel
       ?hitl_resolution
       ?on_gate_deferred
-      ?autonomous_yield_requested
+      ?yield_requested
       ?on_checkpoint_stage
       ()
   : Keeper_agent_result.turn_settlement
@@ -1531,7 +1531,7 @@ let run_turn
          let on_official_client_tool_boundary () =
            match
              official_client_tool_boundary ~repetition_execution
-               ?autonomous_yield_requested
+               ?yield_requested
                ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
                ()
            with
@@ -1555,7 +1555,7 @@ let run_turn
                        ~terminal_effect_state:(s.terminal_effect_state ())
                        ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
                        ~assistant_turn_texts:s.acc.assistant_turn_texts
-                       ~autonomous_yield_requested
+                       ~yield_requested
                    with
                    | Ok (Runtime_agent.Yield (Runtime_agent.Repeated_tool_call _)) as decision ->
                      record_repetition_judged ();
@@ -1577,7 +1577,7 @@ let run_turn
             settled tool result whose continuation can be retained. Applying the
             pre-first-token abort to it would fail that operation instead. *)
          let person_queued_probe =
-           person_queued_probe ~turn_kind ~autonomous_yield_requested
+           person_queued_probe ~turn_kind ~yield_requested
          in
          let checkpoint_sidecar =
                 ctx_work.checkpoint.Agent_core.Checkpoint.working_context

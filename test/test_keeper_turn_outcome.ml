@@ -925,7 +925,7 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
       ~terminal_effect_state:Masc.Keeper_tools_agent_core.Terminal_effect_open
       ~tool_calls:calls
       ~assistant_turn_texts:[]
-      ~autonomous_yield_requested:(Some requested)
+      ~yield_requested:(Some requested)
   in
   (match native (live_call () :: run_2_starts_from) with
    | Ok (Runtime_agent.Yield
@@ -1077,10 +1077,10 @@ let test_repeated_assistant_text_boundary () =
 
 let test_autonomous_yield_boundary_contract () =
   let module F = Masc.Keeper_agent_run.For_testing in
-  let chat : Masc.Keeper_agent_run.autonomous_yield_request =
+  let chat : Masc.Keeper_agent_run.yield_request =
     { reason = Masc.Keeper_agent_run.Operation_queued }
   in
-  let durable_stimulus : Masc.Keeper_agent_run.autonomous_yield_request =
+  let durable_stimulus : Masc.Keeper_agent_run.yield_request =
     { reason =
         Masc.Keeper_agent_run.Durable_stimulus_waiting
           { pending_count = 1
@@ -1161,7 +1161,7 @@ let test_claimed_direct_input_waits_for_resumable_tool_boundary () =
   in
   let probe turn_kind =
     Masc.Keeper_agent_run.For_testing.person_queued_probe
-      ~turn_kind ~autonomous_yield_requested:(Some requested)
+      ~turn_kind ~yield_requested:(Some requested)
   in
   check bool "claimed direct input has no pre-first-token abort" true
     (Option.is_none (probe Turn_record.Direct));

@@ -8,4 +8,4 @@ val request :
   turn:turn ->
   base_path:string ->
   keeper_name:string ->
-  (Keeper_agent_run.autonomous_yield_request option, string) result
+  (Keeper_agent_run.yield_request option, string) result

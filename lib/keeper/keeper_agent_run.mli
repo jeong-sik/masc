@@ -42,12 +42,12 @@ type durable_stimulus_summary = {
     that a yield happened, not what it yielded to — which cannot distinguish
     healthy cooperation from a keeper that never finishes a turn. *)
 
-type autonomous_yield_reason =
+type yield_reason =
   | Operation_queued
   | Durable_stimulus_waiting of durable_stimulus_summary
 
-type autonomous_yield_request = {
-  reason : autonomous_yield_reason;
+type yield_request = {
+  reason : yield_reason;
 }
 
 val durable_stimulus_summary
@@ -73,7 +73,7 @@ val terminal_effect_boundary_decision
 module For_testing : sig
   val person_queued_probe :
     turn_kind:Turn_record.turn_kind ->
-    autonomous_yield_requested:(unit -> (autonomous_yield_request option, string) result) option ->
+    yield_requested:(unit -> (yield_request option, string) result) option ->
     (unit -> bool) option
   val native_tool_boundary :
     keeper_name:string ->
@@ -81,7 +81,7 @@ module For_testing : sig
     terminal_effect_state:Keeper_tools_agent_core.terminal_effect_state ->
     tool_calls:Keeper_agent_result.tool_call_detail list ->
     assistant_turn_texts:string list ->
-    autonomous_yield_requested:(unit -> (autonomous_yield_request option, string) result) option ->
+    yield_requested:(unit -> (yield_request option, string) result) option ->
     (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
   val tool_boundary_before_repetition :
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
@@ -89,7 +89,7 @@ module For_testing : sig
     (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
   val official_client_tool_boundary :
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
-    ?autonomous_yield_requested:(unit -> (autonomous_yield_request option, string) result) ->
+    ?yield_requested:(unit -> (yield_request option, string) result) ->
     tool_calls:Keeper_agent_result.tool_call_detail list ->
     unit ->
     (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result
@@ -140,7 +140,7 @@ module For_testing : sig
     -> unit
 
   val runtime_yield_reason
-    :  autonomous_yield_request
+    :  yield_request
     -> Runtime_agent.cooperative_yield_reason
 
   (** Native AGENT_CORE evaluates these detectors on both Direct and
@@ -309,8 +309,8 @@ val run_turn
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> ?on_gate_deferred:(string -> unit)
-  -> ?autonomous_yield_requested:
-       (unit -> (autonomous_yield_request option, string) result)
+  -> ?yield_requested:
+       (unit -> (yield_request option, string) result)
        (* Evaluated after a settled tool result on either runtime path. A
           direct turn may yield to a newer queued person only with its
           resumable checkpoint. Snapshot failures remain explicit errors. *)

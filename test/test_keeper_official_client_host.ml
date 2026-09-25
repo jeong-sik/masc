@@ -726,7 +726,7 @@ let test_queued_chat_yields_after_settled_official_tool () =
           check bool "tool result handed off before queue decision" true !handed_off;
           Keeper_agent_run.For_testing.official_client_tool_boundary
             ~repetition_execution:None
-            ~autonomous_yield_requested:(fun () ->
+            ~yield_requested:(fun () ->
               if !queued
               then Ok (Some Keeper_agent_run.{ reason = Operation_queued })
               else Ok None)

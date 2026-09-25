@@ -271,7 +271,7 @@ let hitl_replay_yield_request ~base_path ~keeper_name =
         pending
     in
     Option.iter
-      (fun (request : Keeper_agent_run.autonomous_yield_request) ->
+      (fun (request : Keeper_agent_run.yield_request) ->
          match request.reason with
          | Keeper_agent_run.Operation_queued -> ()
          | Keeper_agent_run.Durable_stimulus_waiting summary ->
@@ -342,7 +342,7 @@ let connector_attention_waiting ~base_path ~keeper_name =
       connector_attention_preemption_request ~now:(Time_compat.now ()) pending
     in
     Option.iter
-      (fun (request : Keeper_agent_run.autonomous_yield_request) ->
+      (fun (request : Keeper_agent_run.yield_request) ->
          match request.reason with
          | Keeper_agent_run.Operation_queued -> ()
          | Keeper_agent_run.Durable_stimulus_waiting summary ->
@@ -1083,7 +1083,7 @@ let run_keeper_cycle
                            ; deferred_runtime_lane
                            ; on_deferred_runtime_consumed
                            }
-                           ~autonomous_yield_requested:
+                           ~yield_requested:
                              (autonomous_yield_request_for_wake
                                 ~wake
                                 ~base_path:config.base_path

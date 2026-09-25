@@ -1825,6 +1825,11 @@ type approval_observation = {
   ao_result: (approval_snapshot, string) result;
 }
 
+type keeper_spend_reply =
+  { asked_at_generation : int
+  ; reply : (overview_spend_reading, string) result
+  }
+
 type http_scoped_surface_results = {
   http_transport: (Tui_decode.transport_health, string) result option;
   http_approvals: approval_observation option;
@@ -1854,6 +1859,7 @@ type http_scoped_surface_results = {
   http_repository_pulls:
     (overview_pulls_reading, string) result
     option;
+  http_keeper_spend: keeper_spend_reply option;
   (* [None] off the Overview, the one surface that draws the GOALS section. *)
   http_overview_goals: (Tui_decode.overview_goal list, string) result option;
 }
@@ -2033,6 +2039,10 @@ type async_msg =
      for somebody else must be dropped, not filed under whoever is open. *)
   | Memory_facts_loaded of
       string * (Masc.Tui_decode.memory_fact_snapshot, string) result
+  | All_memory_facts_loaded of
+      (Masc.Tui_decode.memory_fact_snapshot * string option, string) result
+      (** The "all keepers" merge and, when some keepers could not be read,
+          which ones. *)
   | Repository_changes_loaded of
       Masc.Tui_decode.repository_change_scope
       * (Masc.Tui_decode.repository_change_snapshot, string) result
@@ -2150,7 +2160,7 @@ type async_msg =
   (* Its own message rather than a field on the stance one: the two come from
      different endpoints and one failing must not blank the other. *)
   | Keeper_gate_settings_loaded of
-      (((string * string) list * (string * string) list), string) result
+      (((string * string) list * Masc.Tui_decode.keeper_exact_lane_first list), string) result
   | Keeper_tool_modes_loaded of
       ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result
       * Approval.Listing_order.ticket
@@ -5472,119 +5482,31 @@ let launch_memory_facts_load state ~mailbox ~keeper_name =
 let launch_all_memory_facts_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
-  let keepers =
-    match state.memory_health with
-    | Some h -> h.Tui_decode.mhs_keepers
-    | None -> []
-  in
   let run () =
-    if keepers = [] then
+    match state.memory_health with
+    | None ->
+      (* Without the health read there is no keeper list to merge. An empty
+         "all keepers" view would read as memory that is empty. *)
       enqueue_async mailbox
-        (Memory_facts_loaded
-           ( "*",
-             Ok
-               { Tui_decode.mfs_keeper = "*"
-               ; mfs_ordinary =
-                   Tui_decode.Memory_store_present
-                     { Tui_decode.mos_revision = 1
-                     ; mos_updated_at = Unix.gettimeofday ()
-                     ; mos_facts = []
-                     }
-               ; mfs_source =
-                   Tui_decode.Memory_store_present
-                     { Tui_decode.mss_revision = 1
-                     ; mss_updated_at = Unix.gettimeofday ()
-                     ; mss_facts = []
-                     ; mss_invalidations = []
-                     }
-               ; mfs_events_read_error = None
-               } ))
-    else
-      let all_ord_facts = ref [] in
-      let all_src_facts = ref [] in
-      let all_invals = ref [] in
-      let all_event_read_errors = ref [] in
-      List.iter
-        (fun (k : Tui_decode.memory_keeper_health) ->
-          let keeper_name = k.Tui_decode.mkh_keeper_id in
-          match
-            try Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name with
-            | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | _ -> Error "failed"
-          with
-          | Ok snap ->
-              (match snap.Tui_decode.mfs_events_read_error with
-               | None -> ()
-               | Some detail ->
-                 all_event_read_errors :=
-                   Printf.sprintf "%s: %s" keeper_name detail
-                   :: !all_event_read_errors);
-              (match snap.Tui_decode.mfs_ordinary with
-               | Tui_decode.Memory_store_present store ->
-                   let tagged =
-                     List.map
-                       (fun (f : Tui_decode.memory_fact) ->
-                         { f with
-                           Tui_decode.mf_origin =
-                             if String.starts_with ~prefix:(keeper_name ^ " · ") f.Tui_decode.mf_origin then
-                               f.Tui_decode.mf_origin
-                             else Printf.sprintf "%s · %s" keeper_name f.Tui_decode.mf_origin
-                         })
-                       store.Tui_decode.mos_facts
-                   in
-                   all_ord_facts := !all_ord_facts @ tagged
-               | _ -> ());
-              (match snap.Tui_decode.mfs_source with
-               | Tui_decode.Memory_store_present store ->
-                   let tagged_src =
-                     List.map
-                       (fun (f : Tui_decode.memory_source_fact) ->
-                         { f with
-                           Tui_decode.msf_path =
-                             if String.starts_with ~prefix:(keeper_name ^ ":") f.Tui_decode.msf_path then
-                               f.Tui_decode.msf_path
-                             else Printf.sprintf "%s:%s" keeper_name f.Tui_decode.msf_path
-                         })
-                       store.Tui_decode.mss_facts
-                   in
-                   let tagged_inv =
-                     List.map
-                       (fun (inv : Tui_decode.memory_invalidation) ->
-                         { inv with
-                           Tui_decode.mi_source_path =
-                             if String.starts_with ~prefix:(keeper_name ^ ":") inv.Tui_decode.mi_source_path then
-                               inv.Tui_decode.mi_source_path
-                             else Printf.sprintf "%s:%s" keeper_name inv.Tui_decode.mi_source_path
-                         })
-                       store.Tui_decode.mss_invalidations
-                   in
-                   all_src_facts := !all_src_facts @ tagged_src;
-                   all_invals := !all_invals @ tagged_inv
-               | _ -> ())
-          | Error _ -> ())
-        keepers;
-      let combined =
-        { Tui_decode.mfs_keeper = "*"
-        ; mfs_ordinary =
-            Tui_decode.Memory_store_present
-              { Tui_decode.mos_revision = 1
-              ; mos_updated_at = Unix.gettimeofday ()
-              ; mos_facts = !all_ord_facts
-              }
-        ; mfs_source =
-            Tui_decode.Memory_store_present
-              { Tui_decode.mss_revision = 1
-              ; mss_updated_at = Unix.gettimeofday ()
-              ; mss_facts = !all_src_facts
-              ; mss_invalidations = !all_invals
-              }
-        ; mfs_events_read_error =
-            (match List.rev !all_event_read_errors with
-             | [] -> None
-             | errors -> Some (String.concat "; " errors))
-        }
+        (All_memory_facts_loaded
+           (Error "keeper list not read yet (memory health has not loaded)"))
+    | Some health ->
+      let loads =
+        List.map
+          (fun (k : Tui_decode.memory_keeper_health) ->
+            let keeper_name = k.Tui_decode.mkh_keeper_id in
+            ( keeper_name,
+              try Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn -> Error (Printexc.to_string exn) ))
+          health.Tui_decode.mhs_keepers
       in
-      enqueue_async mailbox (Memory_facts_loaded ("*", Ok combined))
+      (* One message: the merged facts and the keepers missing from them
+         travel together, so the handler never has to keep one answer across
+         another. *)
+      enqueue_async mailbox
+        (All_memory_facts_loaded
+           (Ok (Tui_decode.merge_keeper_memory_facts ~now:(Unix.gettimeofday ()) loads)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -5593,7 +5515,7 @@ let launch_all_memory_facts_load state ~mailbox =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Memory_facts_loaded ("*", Error "Eio switch is unavailable"))
+        (All_memory_facts_loaded (Error "Eio switch is unavailable"))
 
 let open_all_fleet_memory state ~mailbox =
   state.memory_facts_keeper <- Some "*";
@@ -7972,6 +7894,18 @@ let handle_runtime_lane_edit state ~mailbox edit =
             Masc_tui_http.remove_runtime_lane ~host ~port ~lane)
   | Masc_tui_types.Refuse_lane_edit notice -> state.runtime_lane_notice <- Some notice
 
+(* The Keeper runtime picker has no close key of its own: Esc closes it,
+   after dropping a filter. The shared list already steps on the wheel. *)
+let keeper_runtime_picker_action (list : Masc_tui_pick_list.t) key =
+  Masc_tui_pick_list.action_of_key ~close_keys:[] list key
+
+(* Back to the Keeper list, with the picker's cursor and filter dropped: a
+   picker opened again starts at the top with no filter. *)
+let close_keeper_runtime_pick state =
+  state.runtime_pick_keeper <- None;
+  state.runtime_pick_list <- Masc_tui_pick_list.closed;
+  state.view <- Keepers Keeper_list
+
 let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
   let host = server_peer_host in
   let port = state.port in
@@ -8006,6 +7940,31 @@ let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
       enqueue_async mailbox
         (Runtime_assignment_set
            (keeper_name, runtime_id, Error "Eio switch is unavailable"))
+
+(* One key on the Keeper runtime picker, read against the list it draws: the
+   declared lanes, then the whole catalogue. Enter assigns the row under the
+   cursor to the Keeper the picker was opened for; Esc with no filter closes
+   it. *)
+let keeper_runtime_pick_key state ~mailbox ~terminal_rows key =
+  match keeper_runtime_picker_action state.runtime_pick_list key with
+  | None -> ()
+  | Some action -> (
+      match
+        Masc_tui_pick_list.apply
+          ~page:(Masc_tui_types.keeper_runtime_picker_page state ~terminal_rows)
+          ~label:Masc_tui_types.runtime_pick_label
+          (Masc_tui_types.runtime_picker_items state)
+          state.runtime_pick_list action
+      with
+      | Masc_tui_pick_list.Stay list -> state.runtime_pick_list <- list
+      | Masc_tui_pick_list.Chosen item ->
+          (match state.runtime_pick_keeper with
+           | Some keeper_name ->
+               launch_runtime_assignment_set state ~mailbox ~keeper_name
+                 ~runtime_id:(Some (Masc_tui_types.runtime_pick_item_id item))
+           | None -> ());
+          close_keeper_runtime_pick state
+      | Masc_tui_pick_list.Dismissed -> close_keeper_runtime_pick state)
 
 let inflight_for state keeper_name =
   Option.map (fun entry -> entry.sent_request)
@@ -9902,13 +9861,21 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.patch_modal_path <- Some target_path;
       launch_repository_changes_diff_load state ~mailbox
         ~scope:Tui_decode.Repository_change_project ~path:target_path
-  | Masc_tui_command.Toggle_burn_hud ->
+  | Masc_tui_command.Toggle_cost ->
       Buffer.clear state.msg_input;
-      state.burn_hud_visible <- not state.burn_hud_visible;
-      let status_str = if state.burn_hud_visible then "shown" else "hidden" in
-      let cost = Masc_tui_types.fleet_total_cost_usd state in
+      let visible, generation =
+        Masc_tui_types.toggle_cost_visibility ~visible:state.cost_visible
+          ~generation:state.cost_generation
+      in
+      state.cost_visible <- visible;
+      state.cost_generation <- generation;
+      (* Hidden, spend stops being read, so a reading kept from before would
+         come back as a number nobody observed since. Shown again, it starts
+         unread and the next refresh fills it. *)
+      state.overview_spend <- Overview_spend_unread;
       notice ~kind:Notice_reply
-        (Printf.sprintf "Fleet cost in the tab row: %s ($%.4f so far)" status_str cost)
+        (if state.cost_visible then "Cost on the Overview Team block: shown"
+         else "Cost on the Overview Team block: hidden")
   | Masc_tui_command.Open_link_preview url_opt ->
       Buffer.clear state.msg_input;
       let all_urls = Masc_tui_types.conversation_urls state in
@@ -10647,6 +10614,17 @@ let apply_repository_pulls_load state = function
   | Ok reading -> state.overview_pulls <- reading
   | Error err -> state.overview_pulls <- Overview_pulls_failed err
 
+(* A failed read replaces the last good one, as the pull requests do: a
+   spend drawn after the reading that said so stopped arriving would be a
+   number nobody observed. *)
+let apply_keeper_spend_load state ~generation result =
+  (* A response from before an off/on cycle cannot certify the new reading,
+     even if it arrives after the operator turns spend back on. *)
+  if Masc_tui_types.cost_reply_is_current ~visible:state.cost_visible
+       ~current_generation:state.cost_generation ~reply_generation:generation
+  then
+    state.overview_spend <- Masc_tui_keeper_spend.reading_of_load result
+
 (* A failed read replaces the last good one, as the quota reading does: goals
    drawn after the read that listed them stopped arriving would be rows nobody
    observed this refresh. *)
@@ -10840,7 +10818,8 @@ let refresh_status results =
   | _ -> Masc_tui_types.Degraded
 
 let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
-    ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
+    ~board_hearth ~system_log_level ~cost_generation
+    ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
   (* Metrics draws the transport and the Overview reads its queue pressure,
      so a refresh on another surface does not spend a request on it. [None]
@@ -10901,6 +10880,16 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn -> Error (Printexc.to_string exn))
   in
+  let http_keeper_spend =
+    when_needed needs.needs_keeper_spend (fun () ->
+        match Masc_tui_loader.load_keeper_spend ~host ~port with
+        | reply -> { asked_at_generation = cost_generation; reply }
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception exn ->
+            { asked_at_generation = cost_generation
+            ; reply = Error (Printexc.to_string exn)
+            })
+  in
   let http_overview_goals =
     when_needed needs.needs_overview_goals (fun () ->
         match Masc_tui_loader.load_overview_goals ~host ~port with
@@ -10919,11 +10908,13 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   ; http_keeper_roster
   ; http_runtime_quota
   ; http_repository_pulls
+  ; http_keeper_spend
   ; http_overview_goals
   }
 
 let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
-    ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
+    ~board_hearth ~system_log_level ~cost_generation
+    ~(needs : Masc_tui_types.surface_needs) =
   (* A process can disappear and another bind the same endpoint between two
      successful ticks. The compact /health identity is therefore revalidated
      on every refresh rather than inferred from connection failure. It goes
@@ -10947,7 +10938,7 @@ let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
          still decides whether the panel renders, only the fetch is
          unconditional. Targeted scoped refreshes keep their own needs. *)
       load_http_scoped_surfaces ~host ~port ~approval_ticket:None
-        ~board_sort ~board_hearth ~system_log_level
+        ~board_sort ~board_hearth ~system_log_level ~cost_generation
         ~needs:{ needs with needs_asks = true }
     in
     Refresh_surfaces
@@ -10966,6 +10957,10 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
   Option.iter (apply_runtime_quota_load state) results.http_runtime_quota;
   Option.iter (apply_repository_pulls_load state) results.http_repository_pulls;
+  Option.iter
+    (fun { asked_at_generation; reply } ->
+       apply_keeper_spend_load state ~generation:asked_at_generation reply)
+    results.http_keeper_spend;
   Option.iter (apply_overview_goals_load state) results.http_overview_goals
 
 (* This is a current reading, not a last-known cache. A failed probe makes
@@ -11280,6 +11275,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         ~scoped_refresh_inflight:!scoped_refresh_inflight
         ~keeper_pane_drawn:
           (not (Masc_tui_render.acting_pane_suppressed state))
+        ~cost_shown:state.cost_visible
         state.view
     in
     (* The chat pane's history comes down its own generation-guarded path, not
@@ -11341,11 +11337,13 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        is in the payload whether or not the tail is. *)
     if not was_booting then launch_schedules_load state ~mailbox;
 
+    let cost_generation = state.cost_generation in
     let run_refresh () =
       try
         enqueue_async mailbox
           (Http_refresh_done
              (load_http_surfaces ~host ~port ~approval_ticket
+                ~cost_generation
                 ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -11369,6 +11367,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
           (fun () ->
              apply_http_refresh_outcome state
                (load_http_surfaces ~host ~port ~approval_ticket
+                  ~cost_generation
                   ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -11393,11 +11392,13 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
        match state.msg_target_keeper_name with
        | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
        | None -> ());
+    let cost_generation = state.cost_generation in
     let run_refresh () =
       try
         enqueue_async mailbox
           (Http_scoped_refresh_done
              (load_http_scoped_surfaces ~host ~port
+                ~cost_generation
                 ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -11421,6 +11422,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
           (fun () ->
              apply_http_scoped_surfaces state
                (load_http_scoped_surfaces ~host ~port
+                  ~cost_generation
                   ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -12866,7 +12868,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
         | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
-        | Masc_tui_command.Toggle_burn_hud | Masc_tui_command.Open_changes
+        | Masc_tui_command.Toggle_cost | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane
          | Masc_tui_command.Show_acting_pane_tab _
          | Masc_tui_command.Acting_pane_tab_unknown _
@@ -15007,14 +15009,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              (Printf.sprintf "%s Gate change failed: %s" (gate_lane_label lane) detail))
   | Keeper_gate_settings_loaded result ->
       (match result with
-       | Ok (modes, judges) ->
+       | Ok (modes, exact_lanes) ->
            state.keeper_gate_modes <- modes;
-           state.keeper_gate_judges <- judges
-       | Error _ ->
+           state.keeper_exact_lane_firsts <- exact_lanes;
+           state.keeper_gate_settings_unread <- None
+       | Error detail ->
            (* Keep the last known settings rather than showing every Keeper as
               following the workspace, which is the looser reading and the one
-              an operator would act on. *)
-           ())
+              an operator would act on. The pane says the read failed: before
+              the first successful read, the "last known" values are the
+              defaults. *)
+           state.keeper_gate_settings_unread <- Some detail)
   | Keeper_tool_modes_loaded (result, ticket) ->
       (* Dropped when a press has opened since the fetch went out -- it
          describes the stance from before that press, including a press that
@@ -15446,10 +15451,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.runtime_catalog <- runtimes;
           state.runtime_lanes <- lanes;
           state.runtime_assignments <- assignments;
-          state.runtime_catalog_error <- None;
-          let count = List.length (Masc_tui_types.runtime_picker_items state) in
-          if state.runtime_pick_cursor >= count then
-            state.runtime_pick_cursor <- max 0 (count - 1)
+          state.runtime_catalog_error <- None
       | Error detail -> state.runtime_catalog_error <- Some detail)
   | Runtime_assignment_set (keeper_name, runtime_id, result) -> (
       match result with
@@ -15723,6 +15725,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.memory_health <- Some snapshot;
           state.memory_health_error <- None
       | Error detail -> state.memory_health_error <- Some detail)
+  | All_memory_facts_loaded result ->
+      if Option.equal String.equal state.memory_facts_keeper (Some "*") then (
+        match result with
+        | Ok (snapshot, unread) ->
+            state.memory_facts <- Some snapshot;
+            state.memory_facts_error <- unread
+        | Error detail -> state.memory_facts_error <- Some detail)
   | Memory_facts_loaded (keeper_name, result) ->
       (* Only the keeper the browser is still open on: a late answer for a
          browser that closed, or for the keeper the reader already left,
@@ -16851,6 +16860,7 @@ let main
     ref
       (Masc_tui_types.surface_needs
          ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state))
+         ~cost_shown:state.cost_visible
          state.view)
   in
   let input_reader = create_input_reader () in
@@ -17897,26 +17907,43 @@ and is loaded on demand through keeper_skill.
             ~keeper_name:keeper.k_name
         with
         | Error detail -> report_action state "error" detail
-        | Ok (observed, stem) -> (
-          match
-            Masc_tui_editor.roundtrip ~restore:restore_terminal
-              ~reenter:reenter_terminal stem
-          with
-          | Error abort ->
-              report_editor_abort state
-                ~action:(keeper.k_name ^ " settings")
-                ~cancelled:(keeper.k_name ^ ": settings unchanged")
-                abort
-          | Ok edited -> (
-            match Yojson.Safe.from_string edited with
-            | exception Yojson.Json_error detail ->
-                report_action state "error" ("settings are not JSON: " ^ detail)
-            | edited_json -> (
+        | Ok (observed, stem) ->
+          (* A refusal the operator can fix reopens the editor with the reason
+             on top instead of dropping the edit on one status line. Saving
+             the reopened text unchanged is the operator declining to fix it,
+             so that ends the loop with the reason reported: :w alone must
+             never be a way to get stuck in the editor. *)
+          let rec edit_round stem =
+            match
+              Masc_tui_editor.roundtrip ~restore:restore_terminal
+                ~reenter:reenter_terminal stem
+            with
+            | Error abort ->
+                report_editor_abort state
+                  ~action:(keeper.k_name ^ " settings")
+                  ~cancelled:(keeper.k_name ^ ": settings unchanged")
+                  abort
+            | Ok edited ->
+              let reopen reason =
+                if String.equal edited stem then
+                  report_action state "error"
+                    (keeper.k_name ^ ": " ^ reason ^ " (settings unchanged)")
+                else
+                  edit_round
+                    (Masc_tui_keeper_config.reopened_stem ~reason edited)
+              in
+              (match Yojson.Safe.from_string edited with
+               | exception Yojson.Json_error detail ->
+                   reopen ("settings are not JSON: " ^ detail)
+               | edited_json -> apply_edit ~reopen edited_json)
+          and apply_edit ~reopen edited_json =
               match
                 Masc_tui_keeper_config.patch_of_edit ~before:observed
                   ~after:edited_json
               with
-              | Error detail -> report_action state "error" detail
+              | Error (Masc_tui_keeper_config.Fix_in_editor reason) -> reopen reason
+              | Error (Masc_tui_keeper_config.Cannot_send detail) ->
+                  report_action state "error" detail
               | Ok (`Assoc []) ->
                   report_action state "system"
                     (keeper.k_name ^ ": no settings changed")
@@ -17957,7 +17984,9 @@ and is loaded on demand through keeper_skill.
                       state.keeper_config_view <- None;
                       state.keeper_config_view_error <- None;
                       launch_keeper_config_view state
-                        ~mailbox:async_messages keeper.k_name)))))))
+                        ~mailbox:async_messages keeper.k_name))
+          in
+          edit_round stem))
   in
   (* Set the sandbox backend (sandbox_profile) in place from the Sandbox tab,
      without the $EDITOR JSON round-trip. Each key names an absolute backend, so
@@ -18577,6 +18606,9 @@ and is loaded on demand through keeper_skill.
                   Option.map
                     (fun (pick, list) -> (pick, Masc_tui_pick_list.type_text list text))
                     state.runtime_lane_pick
+            | Some Text_keeper_runtime_picker_filter ->
+                state.runtime_pick_list <-
+                  Masc_tui_pick_list.type_text state.runtime_pick_list text
             | Some Text_row_search ->
                 let longer =
                   Option.value state.search ~default:"" ^ text
@@ -20456,6 +20488,19 @@ and is loaded on demand through keeper_skill.
                        ~existing:already
                  | Masc_tui_pick_list.Dismissed ->
                      state.runtime_lane_pick <- None))
+       | Some k
+         when state.view = Keepers Keeper_runtime_pick
+              && (Option.is_some (keeper_runtime_picker_action state.runtime_pick_list k)
+                  || text_input_target state ~compact_viewport
+                     = Some Text_keeper_runtime_picker_filter) ->
+           (* The Keeper runtime picker: arrows or j/k step, PgUp/PgDn page,
+              Home/End jump, [/] types a filter over the drawn lanes and
+              runtimes, Enter assigns, and Esc drops the filter and then
+              closes. While the filter is typed it holds every key, so [d]
+              and the quit key are letters in it. [d] outside a filter is its
+              own arm below. *)
+           let terminal_rows, _ = get_terminal_size () in
+           keeper_runtime_pick_key state ~mailbox:async_messages ~terminal_rows k
        | Some "e" | Some "E"
          when state.view = Runtime
               && state.runtime_mode = Masc_tui_types.Runtime_lanes
@@ -21954,8 +21999,12 @@ and is loaded on demand through keeper_skill.
                   "No web links found in this conversation to preview.")
        | Some "\023"
          when state.view = Board
-              && terminal_columns >= keeper_split_threshold_cols
-              && not state.board_detail_wide ->
+              && (match
+                    board_read_layout ~cols:terminal_columns
+                      ~wide:state.board_detail_wide
+                  with
+                  | Board_read_split -> true
+                  | Board_read_wide | Board_read_one_pane -> false) ->
            (match state.board_mode with
             | Board_read _ -> (
                 match state.board_focus with
@@ -22134,9 +22183,18 @@ and is loaded on demand through keeper_skill.
                 end)
        | Some ("z" | "Z") when state.view = Board ->
            (match state.board_mode with
-            | Board_read _ ->
-                state.board_detail_wide <- not state.board_detail_wide;
-                state.board_focus <- Right_pane
+            | Board_read _ -> (
+                (* On one pane the two layouts draw the same screen, so the
+                   footer does not offer [z] and pressing it must not leave
+                   the flag set for the next widening. *)
+                match
+                  board_read_layout ~cols:terminal_columns
+                    ~wide:state.board_detail_wide
+                with
+                | Board_read_one_pane -> ()
+                | Board_read_split | Board_read_wide ->
+                    state.board_detail_wide <- not state.board_detail_wide;
+                    state.board_focus <- Right_pane)
             | Board_list | Board_compose -> ())
        | Some (("o" | "O" | "l") as sandbox_log_key)
          when state.view = Keepers Keeper_detail
@@ -22170,7 +22228,13 @@ and is loaded on demand through keeper_skill.
                   | Keepers Keeper_detail | Resources -> true
                   | Board ->
                       (match state.board_mode with
-                       | Board_read _ -> not state.board_detail_wide
+                       | Board_read _ -> (
+                           match
+                             board_read_layout ~cols:terminal_columns
+                               ~wide:state.board_detail_wide
+                           with
+                           | Board_read_split -> true
+                           | Board_read_wide | Board_read_one_pane -> false)
                        | Board_list | Board_compose -> false)
                   | Code -> Option.is_some (Masc_tui_fetched.current_key state.code_file)
                   | Overview | Acting | Metrics | Keepers _ | Lanes | Clients
@@ -22853,10 +22917,8 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail ->
                 state.view <- Keepers Keeper_list;
                 state.detail_scroll <- 0
-            | Keepers Keeper_runtime_pick ->
-                state.runtime_pick_keeper <- None;
-                state.runtime_pick_cursor <- 0;
-                state.view <- Keepers Keeper_list
+            (* The picker's own arm takes Esc. *)
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_logs ->
                 state.view <- Keepers Keeper_detail;
                 state.keeper_detail_focus <- Right_pane;
@@ -23520,12 +23582,8 @@ and is loaded on demand through keeper_skill.
                    in
                    state.system_logs_cursor <- cursor;
                    state.system_logs_scroll <- scroll)
-            | Keepers Keeper_runtime_pick ->
-                let count =
-                  List.length (Masc_tui_types.runtime_picker_items state)
-                in
-                if state.runtime_pick_cursor < count - 1 then
-                  state.runtime_pick_cursor <- state.runtime_pick_cursor + 1
+            (* The picker's own arm takes these keys. *)
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_message -> ())
        | Some ("k" | "up" | "wheel-up") when state.repository_changes_open ->
            (match state.repository_changes_diff_path with
@@ -23866,9 +23924,8 @@ and is loaded on demand through keeper_skill.
                    in
                    state.system_logs_cursor <- cursor;
                    state.system_logs_scroll <- scroll)
-            | Keepers Keeper_runtime_pick ->
-                if state.runtime_pick_cursor > 0 then
-                  state.runtime_pick_cursor <- state.runtime_pick_cursor - 1
+            (* The picker's own arm takes these keys. *)
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_message -> ())
        (* Enter starts the provider the arrows are on. The digits below still
           work for the first nine; past that a number is no longer a key, so
@@ -24017,25 +24074,8 @@ and is loaded on demand through keeper_skill.
                         launch_code_file_load state ~mailbox:async_messages
                           ~path:node.Masc.Tui_decode.wt_path
                   | None -> ())
-            | Keepers Keeper_runtime_pick ->
-                (match state.runtime_pick_keeper with
-                 | Some keeper_name ->
-                     let items = Masc_tui_types.runtime_picker_items state in
-                     (match
-                        List.nth_opt items state.runtime_pick_cursor
-                      with
-                      | Some item ->
-                          let target_id =
-                            Masc_tui_types.runtime_pick_item_id item
-                          in
-                          launch_runtime_assignment_set state
-                            ~mailbox:async_messages ~keeper_name
-                            ~runtime_id:(Some target_id);
-                          state.runtime_pick_keeper <- None;
-                          state.runtime_pick_cursor <- 0;
-                          state.view <- Keepers Keeper_list
-                      | None -> ())
-                 | None -> state.view <- Keepers Keeper_list)
+            (* The picker's own arm takes Enter. *)
+            | Keepers Keeper_runtime_pick -> ()
             | Overview ->
                 (* Only under task focus: Enter while the events own j/k would
                    open whatever row the cursor happens to rest on. Under task
@@ -24368,7 +24408,7 @@ and is loaded on demand through keeper_skill.
               now, not the last visit. *)
            let keeper = List.nth state.keepers state.keeper_cursor in
            state.runtime_pick_keeper <- Some keeper.k_name;
-           state.runtime_pick_cursor <- 0;
+           state.runtime_pick_list <- Masc_tui_pick_list.closed;
            launch_runtime_catalog_load state ~mailbox:async_messages;
            state.view <- Keepers Keeper_runtime_pick
        | Some "d" | Some "D"
@@ -24377,10 +24417,8 @@ and is loaded on demand through keeper_skill.
             | Some keeper_name ->
                 launch_runtime_assignment_set state ~mailbox:async_messages
                   ~keeper_name ~runtime_id:None;
-                state.runtime_pick_keeper <- None;
-                state.runtime_pick_cursor <- 0;
-                state.view <- Keepers Keeper_list
-            | None -> state.view <- Keepers Keeper_list)
+                close_keeper_runtime_pick state
+            | None -> close_keeper_runtime_pick state)
        | Some "d" when state.repository_changes_open -> (
            match state.repository_changes_diff_path with
            | Some _ -> ()
@@ -25389,15 +25427,24 @@ and is loaded on demand through keeper_skill.
         Masc_tui_types.surface_needs
           ~keeper_pane_drawn:
             (not (Masc_tui_render.acting_pane_suppressed state))
+          ~cost_shown:state.cost_visible
           state.view
       in
+      let cost_retry =
+        needed.needs_keeper_spend
+        && Masc_tui_types.cost_refresh_needed ~visible:state.cost_visible
+             state.overview_spend
+      in
       if
-        needed <> !drawn_needs
+        (needed <> !drawn_needs || cost_retry)
         && not !http_refresh_inflight
         && not !http_scoped_refresh_inflight
       then begin
         let delta =
           Masc_tui_types.surface_needs_delta ~previous:!drawn_needs ~next:needed
+        in
+        let delta =
+          { delta with needs_keeper_spend = delta.needs_keeper_spend || cost_retry }
         in
         drawn_needs := needed;
         if Masc_tui_types.surface_needs_any delta then

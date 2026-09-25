@@ -71,11 +71,14 @@ let input_timeout_seconds schedule ~now_ns ~maximum =
        if Int64.compare remaining_ns 0L <= 0 then 0.0
        else min maximum (Int64.to_float remaining_ns /. 1_000_000_000.0))
 
+(* The shared clamp, not a second copy of it. This was written out here --
+   the floor on both inputs, the maximum, the clamp -- and read the same as
+   [Masc_tui_scroll.normalize] four lines above its own definition. A scroll
+   rule kept in two places is a rule that can differ in one of them, and the
+   count of views that clamp their own scroll is what an enumeration of the
+   ones without a window reading has to walk (#38623). *)
 let normalize_keeper_detail_scroll ~line_count ~content_height scroll =
-  let line_count = max 0 line_count in
-  let content_height = max 0 content_height in
-  let maximum_scroll = max 0 (line_count - content_height) in
-  max 0 (min scroll maximum_scroll)
+  Masc_tui_scroll.normalize ~count:line_count ~height:content_height scroll
 
 (* A repeated action writes the same line again and again — six manual
    refreshes spent six of the eleven event rows saying one thing. Consecutive

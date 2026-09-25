@@ -264,20 +264,18 @@ type recovery_outcome =
   | Recovery_absent
   | Recovery_unparseable of string
 
-(* Parse the [.last-good] recovery file. [read_json_result] folds file-read
-   failure and JSON failure into one [Error message]; a mirror that exists but
-   yields no state is reported as [Recovery_unparseable] either way. *)
+(* Parse the [.last-good] recovery file. A mirror that exists but yields no
+   state — unreadable, unparsable, blank, or not a state — is reported as
+   [Recovery_unparseable] either way. *)
 let load_recovery config : recovery_outcome =
-  let recovery = recovery_path config in
-  if Workspace_utils.path_exists config recovery then (
-    match Workspace_utils.read_json_result config recovery with
-    | Ok recovery_json ->
-      (match state_of_yojson recovery_json with
-       | Ok state -> Recovery_loaded state
-       | Error parse_err -> Recovery_unparseable parse_err)
-    | Error read_err -> Recovery_unparseable read_err)
-  else
-    Recovery_absent
+  match Workspace_utils.read_json_doc config (recovery_path config) with
+  | Ok None -> Recovery_absent
+  | Ok (Some recovery_json) ->
+    (match state_of_yojson recovery_json with
+     | Ok state -> Recovery_loaded state
+     | Error parse_err -> Recovery_unparseable parse_err)
+  | Error read_err ->
+    Recovery_unparseable (Workspace_utils.json_doc_error_to_string read_err)
 ;;
 
 let absent_primary_message path =
@@ -293,20 +291,18 @@ type primary_failure =
   | Primary_absent
   | Primary_unparseable of string
 
-(* [read_json_result] folds file-read failure and JSON failure into one
-   [Error message], so an existing-but-broken primary surfaces as
-   [Primary_unparseable] rather than being silently swallowed. *)
+(* An existing-but-broken primary — unreadable, unparsable, blank, or not a
+   state — surfaces as [Primary_unparseable] rather than being silently
+   swallowed; only a primary that does not exist is [Primary_absent]. *)
 let load_primary config : (state, primary_failure) Result.t =
-  let path = schedules_path config in
-  if not (Workspace_utils.path_exists config path)
-  then Error Primary_absent
-  else (
-    match Workspace_utils.read_json_result config path with
-    | Ok json ->
-      (match state_of_yojson json with
-       | Ok state -> Ok state
-       | Error parse_err -> Error (Primary_unparseable parse_err))
-    | Error read_err -> Error (Primary_unparseable read_err))
+  match Workspace_utils.read_json_doc config (schedules_path config) with
+  | Ok None -> Error Primary_absent
+  | Ok (Some json) ->
+    (match state_of_yojson json with
+     | Ok state -> Ok state
+     | Error parse_err -> Error (Primary_unparseable parse_err))
+  | Error read_err ->
+    Error (Primary_unparseable (Workspace_utils.json_doc_error_to_string read_err))
 ;;
 
 let primary_failure_message ~path = function
@@ -315,9 +311,8 @@ let primary_failure_message ~path = function
 ;;
 
 (* Total load that distinguishes an uninitialised store from a corrupt one and
-   from a primary removed out-of-band. [read_json_result] folds file-read failure
-   and parse failure into a single [Error message], so an existing-but-broken
-   primary surfaces here rather than being silently swallowed.
+   from a primary removed out-of-band. An existing-but-broken primary surfaces
+   here rather than being silently swallowed.
 
    The absent-primary branch consults the [.last-good] mirror for the same reason
    the present-but-unparseable branch does: [write_state] writes both files, so

@@ -1943,11 +1943,10 @@ wrong. The list reads `.masc/keepers/` below `--base-path`, with no server
 involved, so an empty list with no error means the directory is empty.
 
 **Tasks panel prints `task backlog unavailable`.** The message carries the full
-path, but it does not tell you whether the file is missing or malformed. A
-missing key currently reads back as an empty JSON object, so an absent
-`.masc/tasks/backlog.json` surfaces as the schema complaint
-`backlog must contain exactly one tasks list, last_updated string, and positive
-version`. Check that the path exists before treating it as a schema problem.
+path and says which case it is: `no backlog at <path>` when
+`.masc/tasks/backlog.json` does not exist, `backlog decode failed for <path>`
+when it exists but does not match the schema, and `backlog read failed for
+<path>` when it is blank, unparsable or unreadable.
 
 **A surface says `(not loaded yet)`.** Nothing has been read for it: the
 request is still out, or the surface was opened before a server was reachable.

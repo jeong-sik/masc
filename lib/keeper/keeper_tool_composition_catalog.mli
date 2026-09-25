@@ -12,6 +12,7 @@ type expected_value =
   | Table_value
   | Table_array_value
   | Array_value
+  | Bool_value
 
 (** Why an [enum] member cannot be offered to a model. A provider that
     cannot carry [enum] gets the members written unquoted into the parameter's
@@ -155,6 +156,11 @@ type entry = private
             submission: the broker never replays a worker closure after a
             crash, so the bound plan lives exactly as long as the run. *)
   ; plan : Keeper_tool_plan.t
+  ; loading : Tool_definition_toml.loading
+        (** [defer_loading = true] in the composition block: the tool is held
+            back from an Agent Core request until [keeper_tool_search] names
+            it, as a tool file's declaration does. Absent or [false] is
+            [Always_loaded]; any other value is a load error. *)
   }
 
 type t
@@ -197,9 +203,8 @@ val cancel_tool_kind : Keeper_tool_descriptor.tool_kind
     cancel controls: exactly when one of them is [Async]. The controls address
     the durable request id an async composition hands back, and nothing else
     on a Keeper surface mints one, so on a surface without an async entry they
-    are schemas with nothing to act on; on a surface with one they are how its
-    result is read, and are placed with their schemas rather than behind the
-    deferred-tool listing. *)
+    are schemas with nothing to act on. Where they are built, their own
+    [config/tools/<name>.toml] still decides whether they are deferred. *)
 val requires_async_controls : entry list -> bool
 
 (** The ad-hoc plan tool's name. It lives here beside the catalog's own tool

@@ -934,6 +934,7 @@ let attempt_runtime_candidates
                 | Keeper_runtime_failure_route.Refusal_body_not_received
                 | Keeper_runtime_failure_route.Generation_repeated
                 | Keeper_runtime_failure_route.Attempt_rejected
+                | Keeper_runtime_failure_route.Admission
                 | Keeper_runtime_failure_route.Provider_reported_failure
                 | Keeper_runtime_failure_route.Request_refused
                 | Keeper_runtime_failure_route.Provider_wire_defect )
@@ -1570,7 +1571,6 @@ let run_named
     ?on_request_wire_observation
     ?on_request_attribution
     ?official_client_continuation
-    ?official_client_original_turn
     ?official_task_reference
     ?official_client_composed_context
     ?on_official_client_tool_boundary
@@ -2249,7 +2249,6 @@ let run_named
             ~terminal_effect_state
             ?official_client_continuation
             ?official_task_reference
-            ?official_client_original_turn
             ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->

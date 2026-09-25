@@ -310,7 +310,20 @@ export function extractApiError(err: unknown, fallbackMessage: string): ApiError
   return { message: fallbackMessage, status: null, path: null, timeout: false }
 }
 
-export async function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+/** A consumer keeps the deadline and caller abort connected through body read. */
+export function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: number): Promise<Response>
+export function fetchWithTimeout<T>(
+  path: string,
+  init: RequestInit,
+  timeoutMs: number,
+  consume: (response: Response) => Promise<T>,
+): Promise<T>
+export async function fetchWithTimeout<T>(
+  path: string,
+  init: RequestInit,
+  timeoutMs: number,
+  consume?: (response: Response) => Promise<T>,
+): Promise<Response | T> {
   const controller = new AbortController()
   const upstreamSignal = init.signal
   const abortFromUpstream = () => controller.abort()
@@ -325,11 +338,12 @@ export async function fetchWithTimeout(path: string, init: RequestInit, timeoutM
   }
 
   try {
-    return await fetch(path, {
+    const response = await fetch(path, {
       ...init,
       cache: init.cache ?? 'no-store',
       signal: controller.signal,
     })
+    return consume ? await consume(response) : response
   } catch (err) {
     if (isAbortError(err)) {
       if (upstreamSignal?.aborted) {

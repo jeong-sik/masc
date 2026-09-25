@@ -415,6 +415,68 @@ describe('RuntimeHealthSnapshot', () => {
     expect(container.textContent).toContain('next: Add a row for each to the AGENT_CORE embedded catalog.')
   })
 
+  it('names exact-output gaps and a kept registry next to missing catalog models', async () => {
+    apiMocks.fetchRuntimeProviders.mockResolvedValueOnce({
+      ...providerPayload(),
+      startup_degradation: {
+        schema: 'masc.runtime_startup_degradation.v1',
+        status: 'degraded',
+        degraded: true,
+        operator_action_required: true,
+        terminal_reason: 'missing_agent_core_catalog_models',
+        message: 'runtime catalog degraded boot',
+        config_path: '/tmp/masc-test/runtime.toml',
+        configured_default_runtime_id: 'glm-coding.glm-5-turbo',
+        missing_catalog_model_count: 1,
+        missing_catalog_models: [
+          {
+            runtime_id: 'mimo.mimo-v2.5',
+            provider_id: 'mimo',
+            provider_label: 'openai_compat',
+            model_id: 'mimo-v2.5',
+          },
+        ],
+        disabled_runtime_ids: ['mimo.mimo-v2.5'],
+        unavailable_assignments: [],
+        status_reasons: [
+          'missing_agent_core_catalog_models',
+          'exact_slot_body_deadline_absent',
+          'exact_output_registry_stale',
+        ],
+        exact_slot_body_deadline_gaps: [
+          {
+            lane_id: 'librarian_exact',
+            slot_id: 'ollama_cloud.kimi',
+            provider_id: 'ollama_cloud',
+            message: null,
+          },
+        ],
+        exact_lanes_emptied_by_body_deadline_gaps: ['librarian_exact'],
+        exact_output_registry_stale: {
+          reason: 'catalog read failed',
+          kept_since_commit: '12',
+          message: null,
+        },
+        next_action: 'Add a row for each to the AGENT_CORE embedded catalog.',
+      },
+    })
+    const { RuntimeHealthSnapshot } = await import('./runtime-health-snapshot')
+
+    render(h(RuntimeHealthSnapshot, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runtime startup degraded') ?? false,
+      'startup degradation warning',
+    )
+
+    const alert = container.textContent ?? ''
+    expect(alert).toContain('missing catalog: mimo.mimo-v2.5')
+    expect(alert).toContain(
+      'exact slots without exact-body-timeout-s: librarian_exact/ollama_cloud.kimi (ollama_cloud)',
+    )
+    expect(alert).toContain('exact lanes unavailable: librarian_exact')
+    expect(alert).toContain('exact registry kept since commit 12: catalog read failed')
+  })
+
   it('uses force=1 when the operator clicks Live probe', async () => {
     const { RuntimeHealthSnapshot } = await import('./runtime-health-snapshot')
 

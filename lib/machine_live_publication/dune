@@ -1,0 +1,7 @@
+(include_subdirs no)
+
+(library
+ (name machine_live_publication)
+ (public_name masc.machine_live_publication)
+ (wrapped false)
+ (modules machine_live_publication))

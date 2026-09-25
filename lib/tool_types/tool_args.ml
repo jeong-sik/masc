@@ -11,8 +11,8 @@
 
     {b Error response format}:
     [error_response] and [ok_response] are serialized boundary helpers only.
-    New tool handlers returning [Tool_result.result] must use [error_result],
-    [error_result_typed], or [ok_result] so typed payloads never depend on
+    New tool handlers returning [Tool_result.result] must use
+    [error_result_typed] or [ok_result] so typed payloads never depend on
     parsing the human-readable message.
 
     TODO(M-2): Unify the existing error response formats across tool modules:
@@ -54,6 +54,7 @@ type error_code =
   | Conflict              (** Resource state conflict (e.g. already claimed) *)
   | Rate_limited          (** Too many requests *)
   | Timeout               (** Operation timed out *)
+  | External_service_unavailable (** An external service or transport is unavailable *)
   | Not_implemented       (** Feature exists in schema but not in runtime *)
   | Internal_error        (** Unexpected server-side failure *)
   | Precondition_failed   (** Required precondition not met (e.g. workspace not session-bound) *)
@@ -68,10 +69,20 @@ let error_code_to_string = function
   | Conflict -> "conflict"
   | Rate_limited -> "rate_limited"
   | Timeout -> "timeout"
+  | External_service_unavailable -> "external_service_unavailable"
   | Not_implemented -> "not_implemented"
   | Internal_error -> "internal_error"
   | Precondition_failed -> "precondition_failed"
   | Unavailable -> "goal_store_unavailable"
+
+let failure_class_of_error_code : error_code -> Tool_result.tool_failure_class =
+  function
+  | Validation_error | Not_found | Auth_required | Permission_denied ->
+    Tool_result.Policy_rejection
+  | Conflict | Precondition_failed -> Tool_result.Workflow_rejection
+  | Rate_limited | Timeout | External_service_unavailable | Unavailable ->
+    Tool_result.Dependency_unavailable
+  | Internal_error | Not_implemented -> Tool_result.Runtime_failure
 
 (** {1 Raw JSON String Builders}
 
@@ -127,24 +138,12 @@ let ok_assoc fields : Yojson.Safe.t =
     Handlers should use these directly — the dispatch boundary no longer
     needs [wrap_result] conversion. *)
 
-(** [Tool_result.result] error from a plain message string. *)
-let error_result ?tool_name ?start_time msg =
-  let tool_name = Option.value ~default:"" tool_name in
-  let start_time = Option.value ~default:(Time_compat.now ()) start_time in
-  Tool_result.error
-    ~failure_class:Tool_result.Workflow_rejection
-    ~tool_name
-    ~start_time
-    msg
-
-(** [Tool_result.result] error with machine-readable error code.
-    [~failure_class] defaults to [Runtime_failure]; pass it explicitly when
-    the caller-input rejection is a [Policy_rejection] or [Workflow_rejection]
-    so the typed envelope is used without losing the failure classification. *)
+(** [Tool_result.result] error with machine-readable error code. The class
+    is {!failure_class_of_error_code}[ code], so the code and the class the
+    envelope carries cannot disagree (#27742). *)
 let error_result_typed
       ?tool_name
       ?start_time
-      ?(failure_class = Tool_result.Runtime_failure)
       ~code
       msg
   =
@@ -158,7 +157,7 @@ let error_result_typed
   let start_time = Option.value ~default:(Time_compat.now ()) start_time in
   Tool_result.make_err
     ~tool_name
-    ~class_:failure_class
+    ~class_:(failure_class_of_error_code code)
     ~start_time
     ~data
     (Yojson.Safe.to_string data)
@@ -174,8 +173,7 @@ let ok_result ?tool_name ?start_time fields =
     Use these for required parameters instead of [get_string args key ""].
     Returns [Ok value] on success, [Error message] on missing/empty input.
     The error is deliberately opaque text; callers needing typed fields must
-    construct them explicitly with [error_result_typed].  Combine with [let*!]
-    for early-return chaining. *)
+    construct them explicitly with [error_result_typed]. *)
 
 (** Required non-empty string. Trims whitespace. *)
 let get_string_required args key =
@@ -185,18 +183,6 @@ let get_string_required args key =
       if not (String.equal trimmed "") then Ok trimmed
       else Error (Printf.sprintf "%s must not be empty" key)
   | None -> Error (Printf.sprintf "%s is required" key)
-
-(** Monadic bind for [('a, string) Result.t] → [Tool_result.result].
-    Chains required field extractions with early error return. *)
-let ( let*! ) r f =
-  match r with
-  | Ok v -> f v
-  | Error e ->
-    Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
-      ~tool_name:""
-      ~start_time:(Time_compat.now ())
-      e
 
 (** {1 Structured Field Validation}
 
@@ -255,7 +241,7 @@ let validation_error_assoc (errors : field_error list) : Yojson.Safe.t =
   let field_errors = List.map field_error_to_yojson errors in
   error_assoc
     [
-      ("error_code", `String "validation_error");
+      ("error_code", `String (error_code_to_string Validation_error));
       ("field_errors", `List field_errors);
       ("message", `String (Printf.sprintf "%d field error(s)" (List.length errors)));
     ]
@@ -263,14 +249,13 @@ let validation_error_assoc (errors : field_error list) : Yojson.Safe.t =
 let validation_error_response errors =
   validation_error_assoc errors |> Yojson.Safe.to_string
 
-(** Convenience: [Tool_result.result] validation error. *)
 let validation_error_result ?tool_name ?start_time errors =
   let data = validation_error_assoc errors in
   let tool_name = Option.value ~default:"" tool_name in
   let start_time = Option.value ~default:(Time_compat.now ()) start_time in
   Tool_result.make_err
     ~tool_name
-    ~class_:Tool_result.Runtime_failure
+    ~class_:(failure_class_of_error_code Validation_error)
     ~start_time
     ~data
     (Yojson.Safe.to_string data)

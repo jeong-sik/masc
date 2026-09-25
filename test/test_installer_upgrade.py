@@ -192,6 +192,88 @@ curl() {
     def test_explicit_reset_replaces_config_and_team_and_runs_wizard(self):
         self.exercise(reset=True)
 
+    def run_seed_team(self, base, manifest, checksums):
+        # seed_team as the installer defines it, with the network and the
+        # release checksums replaced by the manifest and hashes given here.
+        script = f'''set -euo pipefail
+BASE_PATH={base}
+REPO=fixture/repo
+VERSION=v0.0.0
+DRY_RUN=0
+RESET_CONFIG=0
+WIZARD_SANDBOX=""
+MASC_INSTALL_CONFIG_FETCH_TIMEOUT_S=1
+MASC_INSTALL_CURL_RETRIES=0
+PARTIAL_FILES=()
+log() {{ printf '%s\\n' "$*"; }}
+warn() {{ printf 'warn: %s\\n' "$*" >&2; }}
+die() {{ echo "$*" >&2; exit 1; }}
+verify_checksum() {{
+  case " {checksums} " in *" $2 "*) echo "verified $2" ;; *) die "no checksum entry for $2 in SHA256SUMS" ;; esac
+}}
+curl() {{
+  local output="" url=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in -o) output="$2"; shift 2 ;; --max-time|--retry) shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac
+  done
+  case "$url" in
+    */manifest.txt) printf '%s\\n' {manifest} > "$output" ;;
+    *) echo fetched > "$output" ;;
+  esac
+}}
+'''
+        script += 'seed_team() {' + section('seed_team() {', '\nif [ -n "$TEAM" ]; then')
+        script += '\nseed_team classic\n'
+        return subprocess.run(['bash', '-c', script], text=True, capture_output=True)
+
+    def test_team_manifest_must_carry_a_release_checksum(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            result = self.run_seed_team(base, "keepers/a.toml", "presets/classic/keepers/a.toml")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('no checksum entry for presets/classic/manifest.txt', result.stderr)
+            self.assertFalse((base / '.masc/config/keepers').exists())
+
+    def test_team_manifest_path_escaping_the_config_is_refused_before_mkdir(self):
+        for rel in ('../evil/x.toml', '/tmp/x.toml', 'a/../../x.toml', "'a b.toml'"):
+            with self.subTest(rel=rel), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                result = self.run_seed_team(base, rel, "presets/classic/manifest.txt")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('manifest has an unsafe path', result.stderr)
+                self.assertFalse((base / '.masc/evil').exists())
+                self.assertEqual(sorted(p.name for p in (base / '.masc/config').iterdir()), [])
+
+    def test_team_manifest_path_through_a_symlink_is_refused(self):
+        # A clean manifest path must not follow an existing link under the
+        # config directory out of it.
+        for link in ('keepers', 'keepers/a.toml', 'keepers/a.toml.partial'):
+            with self.subTest(link=link), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                config = base / '.masc/config'
+                outside = base / 'outside'
+                outside.mkdir()
+                (config / 'keepers').mkdir(parents=True)
+                if link == 'keepers':
+                    (config / 'keepers').rmdir()
+                    (config / 'keepers').symlink_to(outside)
+                else:
+                    (config / link).symlink_to(outside / 'a.toml')
+                result = self.run_seed_team(
+                    base, "keepers/a.toml", "presets/classic/manifest.txt presets/classic/keepers/a.toml")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('path crosses a symlink', result.stderr)
+                self.assertEqual(list(outside.iterdir()), [])
+
+    def test_team_manifest_verified_then_files_seeded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            result = self.run_seed_team(
+                base, "keepers/a.toml", "presets/classic/manifest.txt presets/classic/keepers/a.toml")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('verified presets/classic/manifest.txt', result.stdout)
+            self.assertEqual((base / '.masc/config/keepers/a.toml').read_text(), 'fetched\n')
+
 
 if __name__ == '__main__':
     unittest.main()

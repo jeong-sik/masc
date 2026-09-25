@@ -308,7 +308,6 @@ val run_named :
      transmitted:Keeper_official_client_host.transmitted_model_input ->
      unit) ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
-  ?official_client_original_turn:Keeper_semantic_execution.official_client_checkpoint ->
   ?official_task_reference:Keeper_official_task_reference.t ->
   ?official_client_composed_context:
     (unit -> Keeper_official_client_host.composed_context option) ->

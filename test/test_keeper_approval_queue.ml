@@ -5950,7 +5950,9 @@ let test_cancelled_audit_observation_preserves_committed_allow () =
          1
          (metadata |> member "gate" |> member "audit_receipts" |> to_list |> List.length);
        let failed =
-         Masc.Keeper_tool_execution.failure "effect failed after authorization"
+         Masc.Keeper_tool_execution.failure
+           ~class_:Tool_result.Runtime_failure
+           "effect failed after authorization"
          |> Masc.Keeper_tool_execution.with_gate_authorization authorization
        in
        Alcotest.(check bool)

@@ -70,6 +70,9 @@ type ctx =
   ; agent_cell : Agent_core.Agent.t option ref
   ; agent_name : string
   ; all_tool_names : string list
+  ; deferred_tool_names : string list
+        (** Built tools held back from the request until [keeper_tool_search]
+            names them. Empty when the turn places no listing. *)
   ; compute_tool_surface :
       turn:int -> current_tool_choice:Agent_core.Types.tool_choice option -> unit ->
       string list * turn_lane
@@ -354,6 +357,48 @@ let guard_repetition_before_turn_params repetition_execution hook event =
   | None -> hook event
 ;;
 
+(* The [Skills] block for one round. [deferred] is fixed when the run's tools
+   are built, but [keeper_tool_search] extends the running agent's tool set
+   and the loaded tool stays there for the rest of the run
+   ([Keeper_identity_tool_search.load_found]). A composition is therefore
+   still to be loaded only while it is deferred and absent from [on_the_wire];
+   splitting on [deferred] alone kept telling the model to search for a tool it
+   already held, every round after the load. *)
+let skill_compositions_block ~compositions ~deferred ~on_the_wire =
+  let to_load, on_turn =
+    List.partition
+      (fun name ->
+         List.exists (String.equal name) deferred
+         && not (List.exists (String.equal name) on_the_wire))
+      compositions
+  in
+  let on_turn_line =
+    match on_turn with
+    | [] -> []
+    | _ ->
+      [ Printf.sprintf
+          "[Skills] %d composition tools on this turn — each is one call whose \
+           reads run in parallel: %s"
+          (List.length on_turn)
+          (String.concat ", " on_turn)
+      ]
+  in
+  let to_load_line =
+    match to_load with
+    | [] -> []
+    | _ ->
+      [ Printf.sprintf
+          "[Skills] %d more composition tools load by name through \
+           keeper_tool_search: %s"
+          (List.length to_load)
+          (String.concat ", " to_load)
+      ]
+  in
+  match on_turn_line @ to_load_line with
+  | [] -> None
+  | lines -> Some (String.concat "\n" lines)
+;;
+
 let assemble_hooks
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
@@ -406,6 +451,7 @@ let assemble_hooks
   let built_tools = ctx.tools in
   let turn_agent_cell = ctx.agent_cell in
   let all_tool_names = ctx.all_tool_names in
+  let deferred_tool_names = ctx.deferred_tool_names in
   let initial_schema_filter, initial_turn_lane =
     compute_tool_surface
       ~turn:(start_turn_count + 1)
@@ -805,24 +851,29 @@ let assemble_hooks
                    prefix: that function answers [None] for a name that is not
                    a composition tool, so the choice is a declared fact rather
                    than a guess about spelling. *)
-                (match
-                   List.filter
-                     (fun tool_name ->
-                       Option.is_some
-                         (Keeper_tool_composition_catalog
-                          .skill_source_of_tool_name
-                            tool_name))
-                     all_tool_names
-                 with
-                 | [] -> ()
-                 | compositions ->
-                   record_block
-                     Prompt_block_id.Skill_compositions
-                     (Printf.sprintf
-                        "[Skills] %d composition tools on this turn — each is \
-                         one call whose reads run in parallel: %s"
-                        (List.length compositions)
-                        (String.concat ", " compositions)));
+                (* A deferred composition is built but not on the request:
+                   naming it as on this turn sent the model straight to a call
+                   Agent Core refuses. Without an agent nothing can have been
+                   loaded yet -- the loader refuses when the cell is empty
+                   ([Keeper_identity_tool_search.load]) -- so the declared
+                   deferral is the whole answer there. *)
+                Option.iter
+                  (record_block Prompt_block_id.Skill_compositions)
+                  (skill_compositions_block
+                     ~compositions:
+                       (List.filter
+                          (fun tool_name ->
+                            Option.is_some
+                              (Keeper_tool_composition_catalog
+                               .skill_source_of_tool_name
+                                 tool_name))
+                          all_tool_names)
+                     ~deferred:deferred_tool_names
+                     ~on_the_wire:
+                       (match !turn_agent_cell with
+                        | Some agent ->
+                          Agent_core.Tool_set.names (Agent_core.Agent.tools agent)
+                        | None -> []));
                 let schema_filter, computed_turn_lane =
                   compute_tool_surface
                     ~turn

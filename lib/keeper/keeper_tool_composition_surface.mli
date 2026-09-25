@@ -119,9 +119,13 @@ val make_tools
   -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
   -> ?on_externalization_error:(Tool_bridge.externalization_error -> unit)
   -> unit
-  -> Agent_core.Tool.t list
+  -> (Agent_core.Tool.t * Tool_definition_toml.loading) list
 (** Production materialization consumes the same immutable authority as direct
-    dispatch. Its descriptor set cannot be supplied independently. *)
+    dispatch. Its descriptor set cannot be supplied independently.
+
+    Each tool comes with its declared loading: a Skill composition's
+    [defer_loading] from its composition block, the Skill reader's and the
+    request controls' from their own [config/tools/<name>.toml]. *)
 
 module Compatibility : sig
   val make_tools
@@ -165,7 +169,7 @@ module Compatibility : sig
     -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
     -> ?on_externalization_error:(Tool_bridge.externalization_error -> unit)
     -> unit
-    -> Agent_core.Tool.t list
+    -> (Agent_core.Tool.t * Tool_definition_toml.loading) list
 end
 (** Explicit compatibility adapter for tests that supply a descriptor list
     without an enclosing Keeper turn. *)

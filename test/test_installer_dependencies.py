@@ -85,6 +85,21 @@ class PortableBootstrap(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('pass --force', result.stderr)
 
+    def test_rosetta_shell_selects_apple_silicon_build(self):
+        # Under Rosetta 2 `uname -m` says x86_64; the CPU is still arm64, so the
+        # arm64 build and its macOS 14 minimum apply.
+        (self.bin / 'uname').write_text('#!/bin/sh\ncase "$1" in -m) echo x86_64 ;; *) echo Darwin ;; esac\n')
+        (self.bin / 'sysctl').write_text('#!/bin/sh\n[ "$2" = sysctl.proc_translated ] && echo 1\n')
+        (self.bin / 'sysctl').chmod(0o755)
+        result = self.run_installer(['--dry-run', '--version', 'v9.9.9'], TEST_MACOS_VERSION='14.0')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('platform: masc-macos-arm64', result.stdout + result.stderr)
+
+    def test_version_without_v_prefix_is_normalized(self):
+        result = self.run_installer(['--dry-run', '--version', '9.9.9'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('version: v9.9.9', result.stdout + result.stderr)
+
     def test_old_macos_fails_before_download(self):
         result = self.run_installer(['--version', 'v9.9.9'], TEST_MACOS_VERSION='13.6')
         self.assertNotEqual(result.returncode, 0)

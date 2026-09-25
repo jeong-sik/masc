@@ -185,12 +185,18 @@ connect-timeout-s = 600.0
 # headers and the full response body. It does not change connect-timeout-s
 # or ordinary Keeper per-call deadlines, and no value is inferred from the
 # connect deadline. Every HTTP provider an Exact-output lane names must
-# declare it: connect-timeout-s ends at the response headers, so a plan
-# without a body deadline is refused at admission (Missing_deadline, #36979).
-# Bootstrap applies it to AGENT_CORE targets derived from these bindings.
-# The deployment operator owns the value in the resolved runtime.toml's
-# [providers.<id>] table. Saving that file does not rebuild existing Exact
-# targets: the value takes effect when server bootstrap rebuilds the registry.
+# declare it: connect-timeout-s ends at the response headers and does not
+# bound the body. Without this key such a slot is left out of its lane at
+# boot and named in the startup report, and a save that adds one is refused,
+# naming lane, slot and provider (#38779).
+# Boot and every save through the server apply it to the AGENT_CORE targets
+# derived from these bindings. The deployment operator owns the value in the
+# resolved runtime.toml's [providers.<id>] table. A save rebuilds the Exact
+# registry with the write, and its response says what happened under
+# application.exact_output_registry: "applied" (rebuilt now), "unpublished"
+# (no registry is running; the next boot publishes one), or "kept" (neither the
+# saved text nor the file it replaced rebuilds one; the old registry keeps
+# serving, and the next boot will not publish one until the file is fixed).
 # Each visited Exact candidate retains its own deadline. Their HTTP wait can
 # accumulate across sequential candidates; this is not a deadline for the
 # whole Librarian pass, its CLI tail, or Memory processing.
@@ -206,10 +212,23 @@ path = "/models"
 type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
 
+# Usage windows for the operator view, read once at server start with no
+# model call. Undocumented endpoint; Ollama's own client calls it. The decoder
+# supports the observed session/weekly shape and reports other shapes as errors.
+[providers.ollama_cloud.usage-read]
+shape = "ollama-usage"
+url = "https://ollama.com/api/usage"
+
 [providers.deepseek]
 display-name = "DeepSeek API"
 protocol = "openai-compatible-http"
 endpoint = "https://api.deepseek.com"
+# Setup can point the exact-output lanes at this provider. Without this key
+# such a slot is left out at boot and reported, and a save adding one is
+# refused (#38779).
+# 1200 s is the value ollama_cloud and glm-coding use for their exact slots;
+# see the ollama_cloud comment for what it bounds.
+exact-body-timeout-s = 1200.0
 
 [providers.deepseek.healthcheck]
 path = "/models"
@@ -242,19 +261,43 @@ path = "/models"
 type = "env"
 key = "ZAI_API_KEY"
 
+# Usage windows for the operator view, read once at server start with no
+# model call. Undocumented endpoint; Z.AI's own coding plugin calls it.
+[providers.glm-coding.usage-read]
+shape = "zai-quota-limit"
+url = "https://api.z.ai/api/monitor/usage/quota/limit"
+
 [providers.kimi_coding]
 display-name = "Kimi For Coding Subscription"
 protocol = "openai-compatible-http"
 endpoint = "https://api.kimi.com/coding/v1"
+# Setup can point the exact-output lanes at this provider. Without this key
+# such a slot is left out at boot and reported, and a save adding one is
+# refused (#38779).
+# 1200 s is the value ollama_cloud and glm-coding use for their exact slots;
+# see the ollama_cloud comment for what it bounds.
+exact-body-timeout-s = 1200.0
 
 [providers.kimi_coding.credentials]
 type = "env"
 key = "KIMI_API_KEY"
 
+# Usage windows for the operator view, read once at server start with no
+# model call. Undocumented endpoint; Kimi's own CLI calls it.
+[providers.kimi_coding.usage-read]
+shape = "kimi-coding-usages"
+url = "https://api.kimi.com/coding/v1/usages"
+
 [providers.ollama]
 display-name = "Local Ollama"
 protocol = "ollama-http"
 endpoint = "http://localhost:11434"
+# Setup can point the exact-output lanes at this provider. Without this key
+# such a slot is left out at boot and reported, and a save adding one is
+# refused (#38779).
+# 1200 s is the value ollama_cloud and glm-coding use for their exact slots;
+# see the ollama_cloud comment for what it bounds.
+exact-body-timeout-s = 1200.0
 
 [providers.ollama.healthcheck]
 path = "/api/tags"
@@ -2381,6 +2424,12 @@ Respond with ONLY the requested JSON object, no prose and no code fences.
 display-name = "OpenRouter"
 protocol = "openai-compatible-http"
 endpoint = "https://openrouter.ai/api/v1"
+# Setup can point the exact-output lanes at this provider. Without this key
+# such a slot is left out at boot and reported, and a save adding one is
+# refused (#38779).
+# 1200 s is the value ollama_cloud and glm-coding use for their exact slots;
+# see the ollama_cloud comment for what it bounds.
+exact-body-timeout-s = 1200.0
 
 [providers.openrouter.healthcheck]
 path = "/models"
@@ -2388,6 +2437,12 @@ path = "/models"
 [providers.openrouter.credentials]
 type = "env"
 key = "OPENROUTER_API_KEY"
+
+# Usage windows for the operator view, read once at server start with no
+# model call. Documented at openrouter.ai/docs/api-reference/limits.
+[providers.openrouter.usage-read]
+shape = "openrouter-key"
+url = "https://openrouter.ai/api/v1/key"
 
 # OpenRouter identifies the calling app by these two headers and attributes
 # usage to it. Both were accepted (HTTP 200) on all twelve probed models.

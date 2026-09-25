@@ -779,11 +779,12 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
       (* The highlight names the task this detail shows, not the cursor: a
-         todo task opened from the palette or a link has no row here, and
-         the row the cursor last rested on would be a different task. *)
+         done or cancelled task opened from the palette or a link has no row
+         here, and the row the cursor last rested on would be a different
+         task. *)
       write_list_sidebar_selection left_buf ~rows ~cols:left_cols
         ~title:"Tasks" ~focused:false
-        (* [Overview_tasks.rows] drops what is done, cancelled or still todo.
+        (* [Overview_tasks.work_rows] drops what is done or cancelled.
            A filter is not a page: what it left out is a different kind of
            row, not more of these, so there is no second number to draw. *)
         ~holding:None

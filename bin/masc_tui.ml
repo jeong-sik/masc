@@ -2015,6 +2015,10 @@ type msx_poll_state = Poll_idle | Poll_pending of msx_poll_request | Poll_failed
 let msx_pending_poll = ref Poll_idle
 let invalidate_msx_poll () = msx_poll_view := ref ()
 
+(* A DOS read changes nothing on the server. The current view owns one read;
+   reopening may start another without waiting for an old view's HTTP timeout.
+   Only the owning request may clear its state slot or draw its answer. *)
+
 type async_msg =
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
@@ -2023,7 +2027,9 @@ type async_msg =
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
       * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Keeper_control.deletion_inventory, string) result
-  | Msx_frame_loaded of msx_poll_request * (Masc_tui_types.msx_frame option, string) result
+  | Msx_frame_loaded of msx_poll_request
+      * (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result
+  | Dos_live_loaded of machine_live_request * (Masc_tui_machine_live.answer, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
      on every one of these rather than read from the state at delivery: the
      roster cursor moves under a refresh, and a transcript that took several
@@ -2117,7 +2123,7 @@ type async_msg =
   (* Keyed by the lane / run they answer for: an answer that lands after the
      operator left the list or the run is not this view's answer. *)
   | Lane_runs_loaded of
-      string * int * (float * string) option *
+      Standalone_lane.t * int * (float * string) option *
       (Masc.Tui_decode.lane_run_page, string) result
   | Lane_run_detail_loaded of
       string * int * (Masc.Tui_decode.lane_run_detail, string) result
@@ -3348,6 +3354,34 @@ let launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn -> enqueue_async mailbox
            (Msx_frame_loaded (request, Error (Printexc.to_string exn))))
+;;
+
+let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
+  let current_view = !msx_poll_view in
+  match state.dos_live_in_flight with
+  | Some pending when pending.live_view == current_view && pending.live_port = state.port -> ()
+  | Some _ | None ->
+    let request = { live_view = !msx_poll_view; live_port = state.port } in
+    state.dos_live_in_flight <- Some request;
+    let since = Masc_tui_machine_live.since state.dos_live in
+    let run () =
+      let result =
+        try
+          Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:request.live_port
+            Masc_tui_machine_live.Dos ~since
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Dos_live_loaded (request, result))
+    in
+    (try
+       match Eio_context.get_switch_opt () with
+       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+       | None -> enqueue_async mailbox (Dos_live_loaded (request, Error "Eio switch is unavailable"))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> enqueue_async mailbox (Dos_live_loaded (request, Error (Printexc.to_string exn))))
 ;;
 
 let launch_keeper_turns_load state ~mailbox =
@@ -6383,7 +6417,7 @@ let launch_clients_load state ~mailbox =
           (Clients_loaded (generation, Error "Eio switch is unavailable"))
   end
 
-let launch_lane_runs_load ?before state ~mailbox ~lane_id =
+let launch_lane_runs_load ?before state ~mailbox ~(lane : Standalone_lane.t) =
   state.lane_runs_generation <- state.lane_runs_generation + 1;
   let generation = state.lane_runs_generation in
   state.lane_runs_loading <- true;
@@ -6391,11 +6425,11 @@ let launch_lane_runs_load ?before state ~mailbox ~lane_id =
   let port = state.port in
   let run () =
     let result =
-      try Masc_tui_http.fetch_lane_runs ?before ~host ~port ~lane:lane_id () with
+      try Masc_tui_http.fetch_lane_runs ?before ~host ~port ~lane () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Lane_runs_loaded (lane_id, generation, before, result))
+    enqueue_async mailbox (Lane_runs_loaded (lane, generation, before, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -6404,7 +6438,7 @@ let launch_lane_runs_load ?before state ~mailbox ~lane_id =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Lane_runs_loaded (lane_id, generation, before, Error "Eio switch is unavailable"))
+        (Lane_runs_loaded (lane, generation, before, Error "Eio switch is unavailable"))
 
 let launch_lane_run_detail_load state ~mailbox ~run_id =
   state.lane_run_detail_generation <- state.lane_run_detail_generation + 1;
@@ -6431,17 +6465,17 @@ let launch_lane_run_detail_load state ~mailbox ~run_id =
 (* Opening a standalone lane's runs drops the previous lane's list so a stale
    answer can never draw under the new heading. *)
 let open_lane_run_list state ~mailbox (lane : Tui_decode.standalone_lane) =
-  state.lanes_mode <- Lanes_run_list lane.sl_lane_id;
+  state.lanes_mode <- Lanes_run_list lane.sl_lane;
   state.lane_runs <- None;
   state.lane_runs_error <- None;
   state.lane_runs_next <- None;
   state.lane_runs_total <- None;
   state.lane_runs_cursor <- 0;
   state.lane_runs_scroll <- 0;
-  launch_lane_runs_load state ~mailbox ~lane_id:lane.sl_lane_id
+  launch_lane_runs_load state ~mailbox ~lane:lane.sl_lane
 
-let open_lane_run_detail state ~mailbox ~lane_id ~run_id =
-  state.lanes_mode <- Lanes_run_detail (lane_id, run_id);
+let open_lane_run_detail state ~mailbox ~(lane : Standalone_lane.t) ~run_id =
+  state.lanes_mode <- Lanes_run_detail (lane, run_id);
   state.lane_run_detail <- None;
   state.lane_run_detail_error <- None;
   state.lane_run_detail_scroll <- 0;
@@ -7953,12 +7987,12 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
             | Masc_tui_types.Pick_conversation_lane lane ->
                 Masc_tui_http.set_runtime_lane_slots ~host ~port ~lane
                   ~runtime_ids:(existing @ [ runtime_id ])
-            | Masc_tui_types.Pick_exact_lane name ->
+            | Masc_tui_types.Pick_exact_lane lane ->
                 (* Only the one slot is sent: the server appends it to the order
                    the file declares, so a declared slot the registry dropped is
                    kept. [existing] is used above only to refuse an id the lane
                    already names. *)
-                Masc_tui_http.append_exact_lane_slot ~host ~port ~name ~runtime_id
+                Masc_tui_http.append_exact_lane_slot ~host ~port ~lane ~runtime_id
             | Masc_tui_types.Pick_new_lane lane ->
                 Masc_tui_http.create_runtime_lane ~host ~port ~lane
                   ~runtime_ids:[ runtime_id ]
@@ -7989,9 +8023,9 @@ let handle_slot_edit state ~mailbox edit =
       launch_runtime_lane_write state ~mailbox ~written (fun ~host ~port ->
         match request, target with
         | Masc_tui_types.Drop_declared_slot, Masc_tui_types.Exact_lane_slots lane ->
-            Masc_tui_http.drop_exact_lane_slot ~host ~port ~name:lane ~runtime_id:slot
+            Masc_tui_http.drop_exact_lane_slot ~host ~port ~lane ~runtime_id:slot
         | Masc_tui_types.Move_declared_slot move, Masc_tui_types.Exact_lane_slots lane ->
-            Masc_tui_http.move_exact_lane_slot ~host ~port ~name:lane ~runtime_id:slot
+            Masc_tui_http.move_exact_lane_slot ~host ~port ~lane ~runtime_id:slot
               ~move:
                 (match move with
                  | Masc_tui_types.Move_up -> Masc_tui_http.Move_slot_up
@@ -8056,6 +8090,18 @@ let handle_runtime_lane_edit state ~mailbox edit =
             Masc_tui_http.remove_runtime_lane ~host ~port ~lane)
   | Masc_tui_types.Refuse_lane_edit notice -> state.runtime_lane_notice <- Some notice
 
+(* The Keeper runtime picker has no close key of its own: Esc closes it,
+   after dropping a filter. The shared list already steps on the wheel. *)
+let keeper_runtime_picker_action (list : Masc_tui_pick_list.t) key =
+  Masc_tui_pick_list.action_of_key ~close_keys:[] list key
+
+(* Back to the Keeper list, with the picker's cursor and filter dropped: a
+   picker opened again starts at the top with no filter. *)
+let close_keeper_runtime_pick state =
+  state.runtime_pick_keeper <- None;
+  state.runtime_pick_list <- Masc_tui_pick_list.closed;
+  state.view <- Keepers Keeper_list
+
 let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
   let host = server_peer_host in
   let port = state.port in
@@ -8090,6 +8136,31 @@ let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
       enqueue_async mailbox
         (Runtime_assignment_set
            (keeper_name, runtime_id, Error "Eio switch is unavailable"))
+
+(* One key on the Keeper runtime picker, read against the list it draws: the
+   declared lanes, then the whole catalogue. Enter assigns the row under the
+   cursor to the Keeper the picker was opened for; Esc with no filter closes
+   it. *)
+let keeper_runtime_pick_key state ~mailbox ~terminal_rows key =
+  match keeper_runtime_picker_action state.runtime_pick_list key with
+  | None -> ()
+  | Some action -> (
+      match
+        Masc_tui_pick_list.apply
+          ~page:(Masc_tui_types.keeper_runtime_picker_page state ~terminal_rows)
+          ~label:Masc_tui_types.runtime_pick_label
+          (Masc_tui_types.runtime_picker_items state)
+          state.runtime_pick_list action
+      with
+      | Masc_tui_pick_list.Stay list -> state.runtime_pick_list <- list
+      | Masc_tui_pick_list.Chosen item ->
+          (match state.runtime_pick_keeper with
+           | Some keeper_name ->
+               launch_runtime_assignment_set state ~mailbox ~keeper_name
+                 ~runtime_id:(Some (Masc_tui_types.runtime_pick_item_id item))
+           | None -> ());
+          close_keeper_runtime_pick state
+      | Masc_tui_pick_list.Dismissed -> close_keeper_runtime_pick state)
 
 let inflight_for state keeper_name =
   Option.map (fun entry -> entry.sent_request)
@@ -8913,10 +8984,56 @@ let msx_surface_current () =
   S.current ()
 ;;
 
+let render_spectator (state : Masc_tui_types.state) =
+  match state.machine_source with
+  | Masc_tui_machine_live.Msx ->
+      Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
+        ~connection:state.connection_status ~live:state.msx_live state.msx_frame
+        (msx_surface_current ())
+  | Masc_tui_machine_live.Dos ->
+      Masc_tui_msx.render_live ~write:write_to_terminal ~connection:state.connection_status
+        Masc_tui_machine_live.Dos state.dos_live
+;;
+
+(* A live read names no mode, media or players. Keep the last tick metadata
+   only within the same incarnation, so a keypress does not briefly erase the
+   title while a replacement machine never inherits its predecessor's name. *)
+let msx_frame_of_live ~previous_live ~previous_frame
+    (view : Masc_tui_machine_live.view) =
+  match view with
+  | Masc_tui_machine_live.Showing ({ time = Masc_tui_machine_live.Frame number; _ } as p) ->
+      let meta =
+        match previous_live, previous_frame with
+        | Masc_tui_machine_live.Showing old, Some frame
+          when String.equal old.mark.incarnation p.mark.incarnation -> frame.msx_meta
+        | _ -> None
+      in
+      (view, Some { Masc_tui_types.msx_number = number; msx_width = p.width;
+                    msx_height = p.height; msx_rgb = p.rgb; msx_meta = meta })
+  | Masc_tui_machine_live.Showing { time = Masc_tui_machine_live.Untimed; _ } ->
+      (Masc_tui_machine_live.Failed "an MSX answer carried no frame number", None)
+  | Masc_tui_machine_live.Unread | Masc_tui_machine_live.Not_loaded
+  | Masc_tui_machine_live.Failed _ -> (view, None)
+;;
+
+(* A read of the MSX screen through the live route, asked with the counter
+   of the picture drawn from the last one. An unchanged answer leaves the
+   frame alone. *)
 let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
-  state.msx_frame <-
-    Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
-  msx_surface_frame := state.msx_frame;
+  let result =
+    Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
+      Masc_tui_machine_live.Msx ~since:(Masc_tui_machine_live.since state.msx_live)
+  in
+  (match Masc_tui_machine_live.advance state.msx_live result with
+   | None -> ()
+   | Some view ->
+       let view, frame =
+         msx_frame_of_live ~previous_live:state.msx_live
+           ~previous_frame:state.msx_frame view
+       in
+       state.msx_live <- view;
+       state.msx_frame <- frame;
+       msx_surface_frame := frame);
   (* An explicit fresh observation can rearm polling after a lost tick reply.
      It cannot settle an outstanding request whose result has yet to arrive. *)
   match !msx_pending_poll with
@@ -8935,7 +9052,7 @@ let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
    The menu, not the spectator, is what this opens. The [&] key and the
    palette's "go MSX" both land here, so the two doors stay one door -- which
    is why the menu goes in the function rather than at the key. *)
-let open_msx_screen (state : Masc_tui_types.state) =
+let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
   invalidate_msx_poll ();
   (* The spectator takes ownership from any image preview. A pending async
      preview must not keep its old surface alive underneath the game. *)
@@ -8950,7 +9067,10 @@ let open_msx_screen (state : Masc_tui_types.state) =
   state.msx_carts <-
     Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port;
   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-  Masc_tui_msx.open_menu ~write:write_to_terminal state
+  Masc_tui_msx.open_menu ~write:write_to_terminal state;
+  (* A first DOS read may carry a full screen. Let the menu accept keys while
+     the read is in flight, and redraw its watch row when it arrives. *)
+  launch_dos_live_poll state ~mailbox
 
 (* Where a reference lands, and what it opens when it gets there.
 
@@ -14891,19 +15011,50 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                   if state.msx_menu_open then
                     Masc_tui_msx.render_menu ~write:write_to_terminal ~status:notice state
                   else
-                    Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                      ~connection:state.connection_status state.msx_frame (msx_surface_current ())
-            | Ok frame ->
+                    render_spectator state
+            | Ok (frame, mark) ->
                 msx_pending_poll := Poll_idle;
                 if request.poll_view == !msx_poll_view && request.poll_port = state.port
                    && state.msx_open && not state.msx_menu_open then begin
                   state.msx_frame <- frame;
+                  state.msx_live <-
+                    (match frame, mark with
+                     | Some frame, Some mark ->
+                       Masc_tui_machine_live.Showing
+                         { width = frame.msx_width; height = frame.msx_height
+                         ; rgb = frame.msx_rgb; mark
+                         ; time = Masc_tui_machine_live.Frame frame.msx_number }
+                     | None, None -> Masc_tui_machine_live.Not_loaded
+                     | Some _, None | None, Some _ ->
+                       Masc_tui_machine_live.Failed "MSX tick mark and picture disagree");
                   msx_surface_frame := frame;
                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-                  Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                    ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+                  render_spectator state
                 end)
        | Poll_pending _ | Poll_idle | Poll_failed -> ())
+  | Dos_live_loaded (request, result) ->
+      (match state.dos_live_in_flight with
+       | Some pending when pending == request ->
+           state.dos_live_in_flight <- None;
+           let watching_dos =
+             match state.machine_source with
+             | Masc_tui_machine_live.Dos -> true
+             | Masc_tui_machine_live.Msx -> false
+           in
+           if request.live_view == !msx_poll_view && request.live_port = state.port
+              && state.msx_open && (state.msx_menu_open || watching_dos) then
+             (* An unchanged answer draws nothing and decodes no pixels. The
+                read also discovers the DOS watch row while the menu is open. *)
+             (match Masc_tui_machine_live.advance state.dos_live result with
+              | None -> ()
+              | Some view ->
+                  state.dos_live <- view;
+                  if state.msx_menu_open then
+                    Masc_tui_msx.render_menu ~write:write_to_terminal state
+                  else render_spectator state)
+           else if state.msx_open && state.msx_menu_open then
+             launch_dos_live_poll state ~mailbox
+       | Some _ | None -> ())
   | Keeper_chat_control_received (keeper_name, generation, token) ->
       if generation = keeper_chat_control_generation state keeper_name then begin
         (* [false] means no control was pending for this generation and
@@ -15467,10 +15618,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.runtime_catalog <- runtimes;
           state.runtime_lanes <- lanes;
           state.runtime_assignments <- assignments;
-          state.runtime_catalog_error <- None;
-          let count = List.length (Masc_tui_types.runtime_picker_items state) in
-          if state.runtime_pick_cursor >= count then
-            state.runtime_pick_cursor <- max 0 (count - 1)
+          state.runtime_catalog_error <- None
       | Error detail -> state.runtime_catalog_error <- Some detail)
   | Runtime_assignment_set (keeper_name, runtime_id, result) -> (
       match result with
@@ -15943,10 +16091,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 (min state.clients_surface_cursor
                    (List.length snapshot.Masc.Tui_decode.cls_clients - 1))
         | Error detail -> state.clients_surface_error <- Some detail)
-  | Lane_runs_loaded (lane_id, generation, before, result) ->
+  | Lane_runs_loaded (lane, generation, before, result) ->
       (match state.lanes_mode with
        | Lanes_run_list open_lane | Lanes_run_detail (open_lane, _)
-         when String.equal open_lane lane_id
+         when Standalone_lane.equal open_lane lane
            && generation = state.lane_runs_generation
            && state.lane_runs_loading ->
            state.lane_runs_loading <- false;
@@ -17931,26 +18079,43 @@ and is loaded on demand through keeper_skill.
             ~keeper_name:keeper.k_name
         with
         | Error detail -> report_action state "error" detail
-        | Ok (observed, stem) -> (
-          match
-            Masc_tui_editor.roundtrip ~restore:restore_terminal
-              ~reenter:reenter_terminal stem
-          with
-          | Error abort ->
-              report_editor_abort state
-                ~action:(keeper.k_name ^ " settings")
-                ~cancelled:(keeper.k_name ^ ": settings unchanged")
-                abort
-          | Ok edited -> (
-            match Yojson.Safe.from_string edited with
-            | exception Yojson.Json_error detail ->
-                report_action state "error" ("settings are not JSON: " ^ detail)
-            | edited_json -> (
+        | Ok (observed, stem) ->
+          (* A refusal the operator can fix reopens the editor with the reason
+             on top instead of dropping the edit on one status line. Saving
+             the reopened text unchanged is the operator declining to fix it,
+             so that ends the loop with the reason reported: :w alone must
+             never be a way to get stuck in the editor. *)
+          let rec edit_round stem =
+            match
+              Masc_tui_editor.roundtrip ~restore:restore_terminal
+                ~reenter:reenter_terminal stem
+            with
+            | Error abort ->
+                report_editor_abort state
+                  ~action:(keeper.k_name ^ " settings")
+                  ~cancelled:(keeper.k_name ^ ": settings unchanged")
+                  abort
+            | Ok edited ->
+              let reopen reason =
+                if String.equal edited stem then
+                  report_action state "error"
+                    (keeper.k_name ^ ": " ^ reason ^ " (settings unchanged)")
+                else
+                  edit_round
+                    (Masc_tui_keeper_config.reopened_stem ~reason edited)
+              in
+              (match Yojson.Safe.from_string edited with
+               | exception Yojson.Json_error detail ->
+                   reopen ("settings are not JSON: " ^ detail)
+               | edited_json -> apply_edit ~reopen edited_json)
+          and apply_edit ~reopen edited_json =
               match
                 Masc_tui_keeper_config.patch_of_edit ~before:observed
                   ~after:edited_json
               with
-              | Error detail -> report_action state "error" detail
+              | Error (Masc_tui_keeper_config.Fix_in_editor reason) -> reopen reason
+              | Error (Masc_tui_keeper_config.Cannot_send detail) ->
+                  report_action state "error" detail
               | Ok (`Assoc []) ->
                   report_action state "system"
                     (keeper.k_name ^ ": no settings changed")
@@ -17991,7 +18156,9 @@ and is loaded on demand through keeper_skill.
                       state.keeper_config_view <- None;
                       state.keeper_config_view_error <- None;
                       launch_keeper_config_view state
-                        ~mailbox:async_messages keeper.k_name)))))))
+                        ~mailbox:async_messages keeper.k_name))
+          in
+          edit_round stem))
   in
   (* Set the sandbox backend (sandbox_profile) in place from the Sandbox tab,
      without the $EDITOR JSON round-trip. Each key names an absolute backend, so
@@ -18311,8 +18478,7 @@ and is loaded on demand through keeper_skill.
           if state.msx_menu_open then
             Masc_tui_msx.render_menu ~write:write_to_terminal state
           else
-            Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-              ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+            render_spectator state
       end;
       if state.msx_open && not state.msx_menu_open then begin
         let now_ns = Mtime_clock.elapsed_ns () in
@@ -18322,10 +18488,13 @@ and is loaded on demand through keeper_skill.
           >= 0
         then begin
           state.msx_last_poll_ns <- now_ns;
-          (* The poll advances the machine a step and reads the frame it lands
-             on (RFC-0439 §3.2): a game flows while it is watched, even when no
-             keeper is pressing. A plain read would freeze between presses. *)
-          launch_msx_poll state ~mailbox:async_messages
+          (* The MSX poll advances the machine a step and reads the frame it
+             lands on (RFC-0439 §3.2): a game flows while it is watched, even
+             when no keeper is pressing. The DOS screen is only read, with the
+             counter of the picture already drawn. *)
+          match state.machine_source with
+          | Masc_tui_machine_live.Msx -> launch_msx_poll state ~mailbox:async_messages
+          | Masc_tui_machine_live.Dos -> launch_dos_live_poll state ~mailbox:async_messages
         end
       end;
       let guarding_before_read =
@@ -18437,8 +18606,7 @@ and is loaded on demand through keeper_skill.
              if state.msx_menu_open then
                Masc_tui_msx.render_menu ~write:write_to_terminal state
              else
-               Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                 ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+               render_spectator state
            end;
            (match state.browser_viewport with
             | Some (shot, bytes) -> draw_browser_viewport state shot bytes
@@ -18543,11 +18711,19 @@ and is loaded on demand through keeper_skill.
       (* Menu decisions, game input and closing own a new view. Pure size or
          non-game input keeps the snapshot current; completion renders using
          the geometry the UI owns at that later instant. *)
-      (match msx_key with
-       | Some _ when state.msx_menu_open -> invalidate_msx_poll ()
-       | Some ("esc" | "f6" | "f7" | "f8") -> invalidate_msx_poll ()
-       | Some name when Option.is_some (msx_server_key name) -> invalidate_msx_poll ()
-       | Some _ | None -> ());
+      (* On the DOS screen only Esc closes the view; every other key is a
+         repaint, and disowning the DOS read in flight there would drop its
+         answer, so keys typed steadily would freeze the picture. *)
+      (match msx_key, state.machine_source with
+       | Some _, (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos)
+         when state.msx_menu_open -> invalidate_msx_poll ()
+       | Some "esc", (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos) ->
+           invalidate_msx_poll ()
+       | Some ("f6" | "f7" | "f8"), Masc_tui_machine_live.Msx -> invalidate_msx_poll ()
+       | Some name, Masc_tui_machine_live.Msx when Option.is_some (msx_server_key name) ->
+           invalidate_msx_poll ()
+       | Some _, (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos)
+       | None, (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos) -> ());
       (match msx_key with
       | None -> ()
       | Some name when state.msx_menu_open -> (
@@ -18558,24 +18734,31 @@ and is loaded on demand through keeper_skill.
           | Masc_tui_msx.Stay -> ()
           | Closed ->
               state.msx_menu_open <- false;
-              if Option.is_some state.msx_frame then begin
+              let loaded =
+                match state.machine_source, state.dos_live with
+                | Masc_tui_machine_live.Msx, _ -> Option.is_some state.msx_frame
+                | Masc_tui_machine_live.Dos, Masc_tui_machine_live.Showing _ -> true
+                | Masc_tui_machine_live.Dos,
+                  (Masc_tui_machine_live.Unread | Masc_tui_machine_live.Not_loaded
+                  | Masc_tui_machine_live.Failed _) -> false
+              in
+              if loaded then begin
                 (* A game is loaded underneath: fall back to watching it, and
                    poll at once so the next tick refreshes it (parity with the
                    Watch arm). *)
                 state.msx_last_poll_ns <- 0L;
-                Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+                render_spectator state
               end
               else begin
                 state.msx_open <- false;
                 invalidate_frame_for_resize frame_presenter render_schedule
               end
-          | Watch ->
+          | Watch source ->
               state.msx_menu_open <- false;
+              state.machine_source <- source;
               (* Poll at once so the spectator opens on a fresh frame. *)
               state.msx_last_poll_ns <- 0L;
-              Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+              render_spectator state
           | (Load cart | Swap_disk cart) as choice -> (
               state.msx_notice <- None;
               match
@@ -18587,14 +18770,23 @@ and is loaded on demand through keeper_skill.
               | Ok () ->
                   (match choice with Swap_disk _ -> state.msx_notice <- Some "Disk changed; backup: before-disk-change" | _ -> ());
                   state.msx_menu_open <- false;
+                  state.machine_source <- Masc_tui_machine_live.Msx;
                   observe_msx_frame state;
                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-                  Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+                  render_spectator state
               | Error message ->
                   (* Stay in the menu and say why, so the human can pick again. *)
                   Masc_tui_msx.render_menu ~write:write_to_terminal
                     ~status:((match choice with Swap_disk _ -> "disk change failed: " | _ -> "load failed: ") ^ message) state))
+      | Some name
+        when (match state.machine_source with
+              | Masc_tui_machine_live.Dos -> true
+              | Masc_tui_machine_live.Msx -> false)
+             && not (List.mem name [ "esc"; "+"; "="; "-"; "_" ]) ->
+          (* The DOS screen is watched, not driven: a key that is not the
+             spectator's own (leave, size) repaints and never reaches the MSX
+             machine -- not as a game key, a checkpoint or a disk change. *)
+          render_spectator state
       | Some "f8" ->
           state.msx_carts <- Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port;
           Masc_tui_msx.open_menu ~write:write_to_terminal ~mode:Masc_tui_types.Change_disk state
@@ -18607,8 +18799,7 @@ and is loaded on demand through keeper_skill.
             | Error message -> "Checkpoint failed: " ^ message);
           observe_msx_frame state;
           state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-          Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-            ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+          render_spectator state
       | Some "esc" ->
           (* esc closes the spectator; consume returns false and owes a repaint. *)
           if not (Masc_tui_msx.consume ~write:write_to_terminal state "esc")
@@ -18620,8 +18811,7 @@ and is loaded on demand through keeper_skill.
              terminal draws the cached frame and never reach the machine. *)
           Masc_tui_msx.adjust_size
             (if String.equal size_key "-" || String.equal size_key "_" then -1.0 else 1.0);
-          Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                ~connection:state.connection_status state.msx_frame (msx_surface_current ()))
+          render_spectator state)
       | Some name -> (
           (* A game key: send it to the shared server machine (RFC-0439 §3.3),
              then re-fetch so the human sees the result of their own press
@@ -18636,8 +18826,7 @@ and is loaded on demand through keeper_skill.
                | Ok _ | Error _ -> ());
               observe_msx_frame ~clear_notice:true state;
               state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-              Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+              render_spectator state
           (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)
           | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name)));
       let key =
@@ -18743,6 +18932,9 @@ and is loaded on demand through keeper_skill.
                   Option.map
                     (fun (pick, list) -> (pick, Masc_tui_pick_list.type_text list text))
                     state.runtime_lane_pick
+            | Some Text_keeper_runtime_picker_filter ->
+                state.runtime_pick_list <-
+                  Masc_tui_pick_list.type_text state.runtime_pick_list text
             | Some Text_row_search ->
                 let longer =
                   Option.value state.search ~default:"" ^ text
@@ -20413,7 +20605,7 @@ and is loaded on demand through keeper_skill.
                  | Some (_, Masc_tui_types.Palette_hide_browser_lane) ->
                      hide_browser_lane state
                  | Some (_, Masc_tui_types.Palette_msx) ->
-                     open_msx_screen state
+                     open_msx_screen state ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_lane_addons) ->
                      launch_lane_addons state ~mailbox:async_messages
                        Masc_tui_lane_addons.Inspect
@@ -20625,6 +20817,19 @@ and is loaded on demand through keeper_skill.
                        ~existing:already
                  | Masc_tui_pick_list.Dismissed ->
                      state.runtime_lane_pick <- None))
+       | Some k
+         when state.view = Keepers Keeper_runtime_pick
+              && (Option.is_some (keeper_runtime_picker_action state.runtime_pick_list k)
+                  || text_input_target state ~compact_viewport
+                     = Some Text_keeper_runtime_picker_filter) ->
+           (* The Keeper runtime picker: arrows or j/k step, PgUp/PgDn page,
+              Home/End jump, [/] types a filter over the drawn lanes and
+              runtimes, Enter assigns, and Esc drops the filter and then
+              closes. While the filter is typed it holds every key, so [d]
+              and the quit key are letters in it. [d] outside a filter is its
+              own arm below. *)
+           let terminal_rows, _ = get_terminal_size () in
+           keeper_runtime_pick_key state ~mailbox:async_messages ~terminal_rows k
        | Some "e" | Some "E"
          when state.view = Runtime
               && state.runtime_mode = Masc_tui_types.Runtime_lanes
@@ -20744,7 +20949,7 @@ and is loaded on demand through keeper_skill.
                 state.slot_editor <-
                   Some
                     { Masc_tui_types.se_target =
-                        Masc_tui_types.Exact_lane_slots lane.Masc.Tui_decode.sl_lane_id
+                        Masc_tui_types.Exact_lane_slots lane.Masc.Tui_decode.sl_lane
                     ; se_cursor = 0
                     };
                 Masc_tui_types.dismiss_runtime_lane_notice state;
@@ -20761,7 +20966,7 @@ and is loaded on demand through keeper_skill.
             | None -> ()
             | Some lane ->
                 Masc_tui_types.open_runtime_lane_pick state
-                  (Masc_tui_types.Pick_exact_lane lane.Masc.Tui_decode.sl_lane_id);
+                  (Masc_tui_types.Pick_exact_lane lane.Masc.Tui_decode.sl_lane);
                 Masc_tui_types.dismiss_runtime_lane_notice state;
                 state.lanes_action_error <- None;
                 launch_runtime_catalog_load state ~mailbox:async_messages)
@@ -21486,8 +21691,8 @@ and is loaded on demand through keeper_skill.
                open_selected_resource state ~mailbox:async_messages)
        | Some "]" when state.view = Lanes ->
            (match state.lanes_mode, state.lane_runs_next, state.lane_runs_loading with
-            | Lanes_run_list lane_id, Some before, false ->
-              launch_lane_runs_load ~before state ~mailbox:async_messages ~lane_id
+            | Lanes_run_list lane, Some before, false ->
+              launch_lane_runs_load ~before state ~mailbox:async_messages ~lane
             | _ -> ())
        | Some (("[" | "]") as bracket) when state.view = Tools ->
            cycle_tools_keeper state ~mailbox:async_messages
@@ -22039,7 +22244,7 @@ and is loaded on demand through keeper_skill.
        | Some "?" ->
            state.help_open <- true;
            state.help_scroll <- 0
-      | Some "&" -> open_msx_screen state
+      | Some "&" -> open_msx_screen state ~mailbox:async_messages
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0;
@@ -22123,8 +22328,12 @@ and is loaded on demand through keeper_skill.
                   "No web links found in this conversation to preview.")
        | Some "\023"
          when state.view = Board
-              && terminal_columns >= keeper_split_threshold_cols
-              && not state.board_detail_wide ->
+              && (match
+                    board_read_layout ~cols:terminal_columns
+                      ~wide:state.board_detail_wide
+                  with
+                  | Board_read_split -> true
+                  | Board_read_wide | Board_read_one_pane -> false) ->
            (match state.board_mode with
             | Board_read _ -> (
                 match state.board_focus with
@@ -22303,9 +22512,18 @@ and is loaded on demand through keeper_skill.
                 end)
        | Some ("z" | "Z") when state.view = Board ->
            (match state.board_mode with
-            | Board_read _ ->
-                state.board_detail_wide <- not state.board_detail_wide;
-                state.board_focus <- Right_pane
+            | Board_read _ -> (
+                (* On one pane the two layouts draw the same screen, so the
+                   footer does not offer [z] and pressing it must not leave
+                   the flag set for the next widening. *)
+                match
+                  board_read_layout ~cols:terminal_columns
+                    ~wide:state.board_detail_wide
+                with
+                | Board_read_one_pane -> ()
+                | Board_read_split | Board_read_wide ->
+                    state.board_detail_wide <- not state.board_detail_wide;
+                    state.board_focus <- Right_pane)
             | Board_list | Board_compose -> ())
        | Some (("o" | "O" | "l") as sandbox_log_key)
          when state.view = Keepers Keeper_detail
@@ -22339,7 +22557,13 @@ and is loaded on demand through keeper_skill.
                   | Keepers Keeper_detail | Resources -> true
                   | Board ->
                       (match state.board_mode with
-                       | Board_read _ -> not state.board_detail_wide
+                       | Board_read _ -> (
+                           match
+                             board_read_layout ~cols:terminal_columns
+                               ~wide:state.board_detail_wide
+                           with
+                           | Board_read_split -> true
+                           | Board_read_wide | Board_read_one_pane -> false)
                        | Board_list | Board_compose -> false)
                   | Code -> Option.is_some (Masc_tui_fetched.current_key state.code_file)
                   | Overview | Acting | Metrics | Keepers _ | Lanes | Clients
@@ -22880,9 +23104,9 @@ and is loaded on demand through keeper_skill.
              | Lanes ->
                 launch_lanes_reread state ~mailbox:async_messages;
                 (match state.lanes_mode with
-                 | Lanes_run_list lane_id ->
+                 | Lanes_run_list lane ->
                      launch_lane_runs_load state ~mailbox:async_messages
-                       ~lane_id
+                       ~lane
                  | Lanes_run_detail (_, run_id) ->
                      launch_lane_run_detail_load state ~mailbox:async_messages
                        ~run_id
@@ -23022,10 +23246,8 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail ->
                 state.view <- Keepers Keeper_list;
                 state.detail_scroll <- 0
-            | Keepers Keeper_runtime_pick ->
-                state.runtime_pick_keeper <- None;
-                state.runtime_pick_cursor <- 0;
-                state.view <- Keepers Keeper_list
+            (* The picker's own arm takes Esc. *)
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_logs ->
                 state.view <- Keepers Keeper_detail;
                 state.keeper_detail_focus <- Right_pane;
@@ -23109,8 +23331,8 @@ and is loaded on demand through keeper_skill.
                      state.measurement_report <- None;
                      state.lane_run_detail_error <- None;
                      state.lane_run_detail_scroll <- 0
-                 | Lanes_run_detail (lane_id, _) ->
-                     state.lanes_mode <- Lanes_run_list lane_id;
+                 | Lanes_run_detail (lane, _) ->
+                     state.lanes_mode <- Lanes_run_list lane;
                      state.lane_run_detail <- None;
                      state.lane_run_detail_error <- None;
                      state.lane_run_detail_scroll <- 0
@@ -23291,8 +23513,8 @@ and is loaded on demand through keeper_skill.
                      state.measurement_report <- None;
                      state.lane_run_detail_error <- None;
                      state.lane_run_detail_scroll <- 0
-                 | Lanes_run_detail (lane_id, _) ->
-                     state.lanes_mode <- Lanes_run_list lane_id;
+                 | Lanes_run_detail (lane, _) ->
+                     state.lanes_mode <- Lanes_run_list lane;
                      state.lane_run_detail <- None;
                      state.lane_run_detail_error <- None;
                      state.lane_run_detail_scroll <- 0
@@ -23689,12 +23911,8 @@ and is loaded on demand through keeper_skill.
                    in
                    state.system_logs_cursor <- cursor;
                    state.system_logs_scroll <- scroll)
-            | Keepers Keeper_runtime_pick ->
-                let count =
-                  List.length (Masc_tui_types.runtime_picker_items state)
-                in
-                if state.runtime_pick_cursor < count - 1 then
-                  state.runtime_pick_cursor <- state.runtime_pick_cursor + 1
+            (* The picker's own arm takes these keys. *)
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_message -> ())
        | Some ("k" | "up" | "wheel-up") when state.repository_changes_open ->
            (match state.repository_changes_diff_path with
@@ -24035,9 +24253,8 @@ and is loaded on demand through keeper_skill.
                    in
                    state.system_logs_cursor <- cursor;
                    state.system_logs_scroll <- scroll)
-            | Keepers Keeper_runtime_pick ->
-                if state.runtime_pick_cursor > 0 then
-                  state.runtime_pick_cursor <- state.runtime_pick_cursor - 1
+            (* The picker's own arm takes these keys. *)
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_message -> ())
        (* Enter starts the provider the arrows are on. The digits below still
           work for the first nine; past that a number is no longer a key, so
@@ -24186,25 +24403,8 @@ and is loaded on demand through keeper_skill.
                         launch_code_file_load state ~mailbox:async_messages
                           ~path:node.Masc.Tui_decode.wt_path
                   | None -> ())
-            | Keepers Keeper_runtime_pick ->
-                (match state.runtime_pick_keeper with
-                 | Some keeper_name ->
-                     let items = Masc_tui_types.runtime_picker_items state in
-                     (match
-                        List.nth_opt items state.runtime_pick_cursor
-                      with
-                      | Some item ->
-                          let target_id =
-                            Masc_tui_types.runtime_pick_item_id item
-                          in
-                          launch_runtime_assignment_set state
-                            ~mailbox:async_messages ~keeper_name
-                            ~runtime_id:(Some target_id);
-                          state.runtime_pick_keeper <- None;
-                          state.runtime_pick_cursor <- 0;
-                          state.view <- Keepers Keeper_list
-                      | None -> ())
-                 | None -> state.view <- Keepers Keeper_list)
+            (* The picker's own arm takes Enter. *)
+            | Keepers Keeper_runtime_pick -> ()
             | Overview ->
                 (* Only under task focus: Enter while the events own j/k would
                    open whatever row the cursor happens to rest on. Under task
@@ -24234,7 +24434,7 @@ and is loaded on demand through keeper_skill.
                  | None -> ())
             | Lanes ->
                 (match state.lanes_mode with
-                 | Lanes_run_list lane_id ->
+                 | Lanes_run_list lane ->
                      (match state.lane_runs with
                       | Some runs ->
                           (match
@@ -24242,7 +24442,7 @@ and is loaded on demand through keeper_skill.
                            with
                            | Some (run : Tui_decode.lane_run_summary) ->
                                open_lane_run_detail state
-                                 ~mailbox:async_messages ~lane_id
+                                 ~mailbox:async_messages ~lane
                                  ~run_id:run.lrs_run_id
                            | None -> ())
                       | None -> ())
@@ -24537,7 +24737,7 @@ and is loaded on demand through keeper_skill.
               now, not the last visit. *)
            let keeper = List.nth state.keepers state.keeper_cursor in
            state.runtime_pick_keeper <- Some keeper.k_name;
-           state.runtime_pick_cursor <- 0;
+           state.runtime_pick_list <- Masc_tui_pick_list.closed;
            launch_runtime_catalog_load state ~mailbox:async_messages;
            state.view <- Keepers Keeper_runtime_pick
        | Some "d" | Some "D"
@@ -24546,10 +24746,8 @@ and is loaded on demand through keeper_skill.
             | Some keeper_name ->
                 launch_runtime_assignment_set state ~mailbox:async_messages
                   ~keeper_name ~runtime_id:None;
-                state.runtime_pick_keeper <- None;
-                state.runtime_pick_cursor <- 0;
-                state.view <- Keepers Keeper_list
-            | None -> state.view <- Keepers Keeper_list)
+                close_keeper_runtime_pick state
+            | None -> close_keeper_runtime_pick state)
        | Some "d" when state.repository_changes_open -> (
            match state.repository_changes_diff_path with
            | Some _ -> ()
@@ -25344,7 +25542,7 @@ and is loaded on demand through keeper_skill.
                 (match state.lanes_mode, selected_standalone_lane state with
                  | Lanes_overview, Some lane ->
                    let section =
-                     "runtime.exact_output_lanes." ^ lane.Tui_decode.sl_lane_id
+                     "runtime.exact_output_lanes." ^ Standalone_lane.to_id lane.Tui_decode.sl_lane
                    in
                    state.view <- Config;
                    state.config_pane <- Config_runtime;

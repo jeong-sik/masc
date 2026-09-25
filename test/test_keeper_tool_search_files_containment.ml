@@ -97,52 +97,9 @@ let parse_field raw field =
 let parse_bool_field raw field =
   Yojson.Safe.from_string raw |> Json.member field |> Json.to_bool_option
 
-let write_executable path content =
-  ignore (Fs_compat.save_file_atomic path content);
-  Unix.chmod path 0o755
-
 let normalize_realpath path =
   try Unix.realpath path with
   | _ -> path
-
-let test_shell_command_available_uses_path_without_shell () =
-  let dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Exec_tap.disable ();
-      cleanup_dir dir)
-    (fun () ->
-       let tool_name = "probe;not-shell" in
-       write_executable
-         (Filename.concat dir tool_name)
-         "#!/bin/sh\nexit 0\n";
-       let captured = ref [] in
-       Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
-       with_env "PATH" dir @@ fun () ->
-       Alcotest.(check bool)
-         "probe found on PATH"
-         true
-         (Keeper_tool_execute_path.shell_command_available tool_name);
-       Alcotest.(check int) "no process execution" 0 (List.length !captured))
-
-let test_shell_command_available_rejects_empty_path_segment_cwd () =
-  let dir = temp_dir () in
-  let cwd = Sys.getcwd () in
-  Fun.protect
-    ~finally:(fun () ->
-      Sys.chdir cwd;
-      cleanup_dir dir)
-    (fun () ->
-       let tool_name = "cwd-only-probe" in
-       write_executable
-         (Filename.concat dir tool_name)
-         "#!/bin/sh\nexit 0\n";
-       Sys.chdir dir;
-       with_env "PATH" (String.make 1 Executable_path.search_path_separator) @@ fun () ->
-       Alcotest.(check bool)
-         "empty PATH entry not cwd"
-         false
-         (Keeper_tool_execute_path.shell_command_available tool_name))
 
 (* ── Tests ───────────────────────────────────────────────────────── *)
 
@@ -187,8 +144,7 @@ let test_docker_keeper_blocks_rg_outside () =
 let test_docker_keeper_rg_file_path_uses_parent_workdir () =
   setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
-  if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
-  else (
+  (
     let file_path = Filename.concat playground "demo.ml" in
     ignore (Fs_compat.save_file_atomic file_path "let run_named = true\n");
     let raw =
@@ -224,8 +180,7 @@ let test_docker_keeper_rg_file_path_uses_parent_workdir () =
 let test_docker_keeper_rg_invalid_type_surfaces_stderr () =
   setup ~keeper_name:"garnet" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
-  if not (Keeper_tool_execute_path.shell_command_available "rg") then ()
-  else (
+  (
     let file_path = Filename.concat playground "demo.ml" in
     ignore (Fs_compat.save_file_atomic file_path "let run_named = true\n");
     let execution =
@@ -666,10 +621,6 @@ let () =
     [
       ( "containment",
         [
-          Alcotest.test_case "shell command probe uses PATH without shell"
-            `Quick test_shell_command_available_uses_path_without_shell;
-          Alcotest.test_case "shell command probe skips empty PATH cwd"
-            `Quick test_shell_command_available_rejects_empty_path_segment_cwd;
           Alcotest.test_case "docker keeper blocks rg outside" `Quick
             test_docker_keeper_blocks_rg_outside;
           Alcotest.test_case "docker keeper rg file path uses parent workdir"

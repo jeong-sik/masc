@@ -260,6 +260,17 @@ status: reference
   → [mcp_tool_runtime_ask](../../lib/mcp_tool_runtime_ask.ml),
   [Keeper_ask](../../lib/keeper/keeper_ask.mli)
 
+**Activation Mode (활성화 모드)**
+: Keeper가 스스로 일을 시작할지 말지를 결정하는 소유자 정책(`Keeper_activation_mode.t`).
+  닫힌 세 값이다 — `manual`(운영자만 깨운다), `on_demand`(특정 조건에서만),
+  `autonomous`(스스로 판단해 움직인다). 명시적으로 요청된 작업(예: operator가
+  직접 본인에게 복귀)은 이 mode와 무관하게 유효하고, 이 mode가 바꾸는 것은
+  "Keeper가 먼저 나서는가"다. TUI 설정 편집기(`e`)는 닫힌 집합 밖의 값을
+  서버로 보기 전에 거절하고 편집기를 다시 열어 허용 값을 보여 준다(#39007).
+  **다른 것**: Gate(`Keeper_gate_mode.t`)는 바깥 효과를 어떻게 판정하는가이고,
+  `Skill Activation`은 Skill 본문 읽기 사건이다. 셋은 서로 다른 축이다.
+  → [Keeper_activation_mode](../../lib/keeper/keeper_activation_mode.mli)
+
 **Latched Reason (durable latch 까닭)**
 : Keeper가 durable pause에 들어간 typed 까닭
   (`Keeper_latched_reason.t`). 현재는 `Operator_paused of { operator_actor }` 하나뿐이고,
@@ -1338,6 +1349,16 @@ status: reference
   답을 기다리며, `Yolo`로 꺼도 Gate로 가는 바깥 작업은 Gate가 따로 판정한다.
   도구 승인의 `Auto`와 Gate의 `Auto_judge`도 다른 값이다.
   → [Keeper_tool_approval_mode](../../lib/keeper/keeper_tool_approval_mode.mli)
+
+**Prompt Block (프롬프트 블록)**
+: Keeper Prompt를 조립할 때 쓰는 구조화된 입력 조각(`Prompt_block_id.t`).
+  `system`·`worldview`·`constitution`·`identity`·`workspace`·`role`과 같은
+  슬롯 각각이 하나의 block id를 가지며, 최근 추가된 `skill_compositions`는
+  Keeper가 composition 도구를 갖고 있을 때 매 턴 실린다. block id 하나가
+  대시보드의 turn record 디코더 목록(`TURN_PROMPT_BLOCK_IDS`)에서 빠지면
+  그 Keeper의 전체 turn record가 거부되므로, id 추가·변경은 decode 경로
+  양쪽을 함께 고쳐야 한다(#38923).
+  → [Prompt_block_id](../../lib/prompt_block_id.mli)
 
 **HITL Delivery Occasion (HITL 전달 계기)**
 : 승인된 HITL 결정을 Keeper 에게 전달할 때, 그 전달이 왜 일어나는지를 가리키는 닫힌 세 값

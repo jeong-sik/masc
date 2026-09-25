@@ -34,7 +34,7 @@ val cost_event_payload
   -> input_tokens:int
   -> output_tokens:int
   -> cost_usd:float
-  -> ?usage_projection:Cost_ledger.usage_projection
+  -> usage_projection:Cost_ledger.usage_projection
   -> ?response_id:string
   -> ?runtime_attempt:(string * string * int)
   -> ?cache_creation_input_tokens:int
@@ -56,7 +56,7 @@ val emit_cost_event
   -> input_tokens:int
   -> output_tokens:int
   -> cost_usd:float
-  -> ?usage_projection:Cost_ledger.usage_projection
+  -> usage_projection:Cost_ledger.usage_projection
   -> ?response_id:string
   -> ?runtime_attempt:(string * string * int)
   -> ?cache_creation_input_tokens:int

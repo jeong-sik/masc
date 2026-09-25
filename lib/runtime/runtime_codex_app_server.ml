@@ -176,8 +176,9 @@ type stream_event =
       }
   | Usage_windows_reported of Runtime_provider_usage_window.report
   | Usage_reported of
-      { model : string
-      ; usage : token_usage
+      { turn_id : string
+      ; model : string
+      ; thread_total : token_usage
       }
   | Turn_finished of { text : string }
 
@@ -1088,6 +1089,30 @@ let item_delta_notification ~method_ ~thread_id ~turn_id params =
    costs). A frame that is ours but malformed is a protocol error: these
    counts reach the usage ledger, and a half-read breakdown would be a number
    nobody sent. *)
+(* One [TokenUsageBreakdown] of a [thread/tokenUsage/updated] frame. *)
+let token_usage_breakdown stage usage_fields name =
+  let* breakdown_json = required_member stage name usage_fields in
+  let* breakdown = assoc_at stage breakdown_json in
+  let* input_tokens = required_count stage "inputTokens" breakdown in
+  let* cached_input_tokens = required_count stage "cachedInputTokens" breakdown in
+  let* output_tokens = required_count stage "outputTokens" breakdown in
+  let* reasoning_output_tokens = required_count stage "reasoningOutputTokens" breakdown in
+  let* total_tokens = required_count stage "totalTokens" breakdown in
+  let* cache_write_input_tokens =
+    match List.assoc_opt "cacheWriteInputTokens" breakdown with
+    | None -> Ok 0
+    | Some _ -> required_count stage "cacheWriteInputTokens" breakdown
+  in
+  Ok
+    { input_tokens
+    ; cached_input_tokens
+    ; cache_write_input_tokens
+    ; output_tokens
+    ; reasoning_output_tokens
+    ; total_tokens
+    }
+;;
+
 let token_usage_notification ~thread_id ~turn_id params =
   let stage = "thread/tokenUsage/updated" in
   let* fields = assoc_at stage params in
@@ -1098,27 +1123,9 @@ let token_usage_notification ~thread_id ~turn_id params =
   else
     let* usage_json = required_member stage "tokenUsage" fields in
     let* usage_fields = assoc_at stage usage_json in
-    let* last_json = required_member stage "last" usage_fields in
-    let* last = assoc_at stage last_json in
-    let* input_tokens = required_count stage "inputTokens" last in
-    let* cached_input_tokens = required_count stage "cachedInputTokens" last in
-    let* output_tokens = required_count stage "outputTokens" last in
-    let* reasoning_output_tokens = required_count stage "reasoningOutputTokens" last in
-    let* total_tokens = required_count stage "totalTokens" last in
-    let* cache_write_input_tokens =
-      match List.assoc_opt "cacheWriteInputTokens" last with
-      | None -> Ok 0
-      | Some _ -> required_count stage "cacheWriteInputTokens" last
-    in
-    Ok
-      (Some
-         { input_tokens
-         ; cached_input_tokens
-         ; cache_write_input_tokens
-         ; output_tokens
-         ; reasoning_output_tokens
-         ; total_tokens
-         })
+    let* last = token_usage_breakdown stage usage_fields "last" in
+    let* thread_total = token_usage_breakdown stage usage_fields "total" in
+    Ok (Some (last, thread_total))
 ;;
 
 (* Codex MCP requests include approvals and forms, independently of shell
@@ -1374,18 +1381,23 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
     in
     Ok (text, seen_usage)
   | Notification { method_ = "thread/tokenUsage/updated"; params } ->
-    let* usage = token_usage_notification ~thread_id ~turn_id params in
-    (* Codex core sends this after every model response of the turn, so each
-       frame is one request's spend. It is reported here, where it is read,
-       so a turn that later fails, is interrupted or times out still leaves
-       the requests it already paid for. [seen_usage] keeps only the newest
-       frame for the turn result. *)
+    let* frame = token_usage_notification ~thread_id ~turn_id params in
+    (* A frame is not one response. Codex core sends it after a response and
+       again on a rate-limit update, a usage-limit refusal, a compaction or a
+       retried request, carrying the unchanged [last] (rust-v0.156.1;
+       measured 2026-09-25: 211 repeats in 11,815 Keeper frames). [total] is
+       the thread's running count, so a repeat reports the same count and
+       adds nothing to a spend resolved from it. That count is reported
+       here, where it is read, so a turn that later fails still leaves what
+       it spent. [seen_usage] keeps [last], the newest request, for the turn
+       result's context occupancy. *)
     Option.iter
-      (fun usage -> emit_stream_event on_stream_event (Usage_reported { model; usage }))
-      usage;
+      (fun (_last, thread_total) ->
+         emit_stream_event on_stream_event (Usage_reported { turn_id; model; thread_total }))
+      frame;
     let seen_usage =
-      match usage with
-      | Some _ -> usage
+      match frame with
+      | Some (last, _thread_total) -> Some last
       | None -> seen_usage
     in
     await_turn_terminal

@@ -309,6 +309,7 @@ let test_stream_events_preserve_available_wire_data () =
            ; Usage_reported
                { model = "gemini-fixture"
                ; usage = { input_tokens = 100; output_tokens = 7; _ }
+               ; _
                }
            ; Turn_finished { text = "MASC_ANTIGRAVITY_OK\n" }
            ] -> ()
@@ -345,6 +346,7 @@ let test_answer_pieces_reach_the_reader_and_the_result_adds_nothing () =
            ; Usage_reported
                { model = "gemini-fixture"
                ; usage = { input_tokens = 100; output_tokens = 7; _ }
+               ; _
                }
            ; Turn_finished { text = "PONG\n" }
            ] -> ()
@@ -375,6 +377,7 @@ let test_an_empty_piece_is_not_forwarded () =
            ; Usage_reported
                { model = "gemini-fixture"
                ; usage = { input_tokens = 100; output_tokens = 7; _ }
+               ; _
                }
            ; Turn_finished { text = "PONG\n" }
            ] -> ()
@@ -420,6 +423,7 @@ let test_stream_events_preserve_exact_native_tool_steps () =
            ; Usage_reported
                { model = "gemini-fixture"
                ; usage = { input_tokens = 100; output_tokens = 7; _ }
+               ; _
                }
            ; Turn_finished { text = "MASC_ANTIGRAVITY_OK\n" }
            ] -> ()
@@ -535,7 +539,7 @@ let test_transmitted_prompt_survives_provider_rejection () =
 let test_refused_result_still_reports_usage () =
   let reported = ref [] in
   let on_stream_event = function
-    | Runtime_antigravity.Usage_reported { model; usage } ->
+    | Runtime_antigravity.Usage_reported { model; usage; _ } ->
       reported := (model, usage.input_tokens, usage.cache_read_tokens) :: !reported
     | Turn_started _ | Text_delta _ | Native_tool_started _ | Native_tool_finished _
     | Turn_finished _ -> ()

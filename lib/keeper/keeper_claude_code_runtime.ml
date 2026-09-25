@@ -264,10 +264,14 @@ let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
    are ignored as before. *)
 let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
     ~on_usage_report on_event =
-  let report_usage ~model usage =
+  (* The result frame's uuid is the response identity the completion hook
+     also writes for a Claude Code turn. *)
+  let report_usage ~turn_id ~model usage =
     Option.iter
       (fun report ->
-         report ~official_turn:turn_count ~model (api_usage_of_turn_usage usage))
+         report ~official_turn:turn_count ~response_id:turn_id ~model
+           ~usage_scope:Runtime_usage_scope.Turn_total
+           (api_usage_of_turn_usage usage))
       on_usage_report
   in
   match on_event, raw_trace_run, on_native_action with
@@ -276,7 +280,8 @@ let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~
       (function
         | Runtime_claude_code.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
-        | Runtime_claude_code.Usage_reported { model; usage } -> report_usage ~model usage
+        | Runtime_claude_code.Usage_reported { turn_id; model; usage } ->
+          report_usage ~turn_id ~model usage
         | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Turn_finished _ -> ())
   | _ ->
@@ -362,7 +367,8 @@ let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~
             observation.identity
         | Runtime_claude_code.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
-        | Runtime_claude_code.Usage_reported { model; usage } -> report_usage ~model usage
+        | Runtime_claude_code.Usage_reported { turn_id; model; usage } ->
+          report_usage ~turn_id ~model usage
         | Runtime_claude_code.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text

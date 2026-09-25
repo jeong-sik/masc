@@ -309,6 +309,10 @@ let read_usage_after_quota_refusal ~keeper_name ~runtime_id ~clock ~cwd config =
          "Codex usage not read after a quota refusal: no server root switch")
 ;;
 
+(* OpenAI counting, as Backend_openai_parse reads the API wire: the input
+   count already includes the cached prefix and the output count already
+   includes reasoning, so both copy across and the cache fields fill the
+   canonical record's cache slots. *)
 let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
   : Agent_core.Types.api_usage
   =
@@ -325,10 +329,14 @@ let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
    other events are ignored as before. *)
 let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
     ~on_usage_report on_event =
-  let report_usage ~model usage =
+  (* The thread's running count, reported under the app-server turn id: the
+     identity the completion hook also writes for a Codex turn. *)
+  let report_usage ~turn_id ~model thread_total =
     Option.iter
       (fun report ->
-         report ~official_turn:turn_count ~model (api_usage_of_token_usage usage))
+         report ~official_turn:turn_count ~response_id:turn_id ~model
+           ~usage_scope:Runtime_usage_scope.Conversation_cumulative
+           (api_usage_of_token_usage thread_total))
       on_usage_report
   in
   match on_event, raw_trace_run, on_native_action with
@@ -337,7 +345,8 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
       (function
         | Runtime_codex_app_server.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
-        | Runtime_codex_app_server.Usage_reported { model; usage } -> report_usage ~model usage
+        | Runtime_codex_app_server.Usage_reported { turn_id; model; thread_total } ->
+          report_usage ~turn_id ~model thread_total
         | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
         | Turn_finished _ -> ())
@@ -429,7 +438,8 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
             server_name
         | Runtime_codex_app_server.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
-        | Runtime_codex_app_server.Usage_reported { model; usage } -> report_usage ~model usage
+        | Runtime_codex_app_server.Usage_reported { turn_id; model; thread_total } ->
+          report_usage ~turn_id ~model thread_total
         | Runtime_codex_app_server.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text
@@ -696,10 +706,6 @@ let recovery_failure_of_attempt ~thread_mode ~gate_continuation error =
    check first if writes start failing. If Codex closes it, [Native_read]
    leaves a keeper with no write path at all, and the posture is what has to
    change; a note about which tool to reach for would then be wrong. *)
-(* OpenAI counting, as Backend_openai_parse reads the API wire: the input
-   count already includes the cached prefix and the output count already
-   includes reasoning, so both copy across and the cache fields fill the
-   canonical record's cache slots. *)
 let native_posture_note = function
   | Runtime_native_tools.Native_read ->
     [ "Your built-in file edits run under a read-only sandbox in this session, \
@@ -1279,8 +1285,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             ~latency_ms:
               (Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
               (* A host stop ends the turn from inside a tool call, before
-                 the app-server's thread/tokenUsage/updated for this turn has
-                 arrived, so there is no count to report here. *)
+                 the app-server's thread/tokenUsage/updated for the response
+                 that asked for it arrives. Frames of earlier responses in
+                 the turn were already reported on the stream. *)
             ~request_context:None
             stop
         in

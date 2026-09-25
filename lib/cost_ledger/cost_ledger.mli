@@ -17,7 +17,20 @@ type source =
   | Manual_cli
   | Auto_trajectory of inference_identity
 
-type usage_projection = Raw_observation | Resolved_delta
+(** What a row's counts are.
+
+    [Raw_observation scope] is a count exactly as a runtime reported it, and
+    [scope] says what that count covers: one provider request, one
+    official-client turn, or the conversation so far. Raw rows of different
+    scopes do not add up to a spend; a conversation-cumulative row repeats
+    every earlier turn. A raw row written before rows carried a scope reads
+    as [Usage_scope_unavailable]: the row never said.
+
+    [Resolved_delta] is one Keeper turn's spend, resolved from those
+    observations. *)
+type usage_projection =
+  | Raw_observation of Runtime_usage_scope.t
+  | Resolved_delta
 
 type usage =
   | Usage_missing

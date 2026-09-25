@@ -422,9 +422,14 @@ let test_refused_turn_reports_its_spend_to_the_keeper () =
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        let reports = ref [] in
-       let on_official_client_usage_report ~official_turn:_ ~model
+       let on_official_client_usage_report ~official_turn:_ ~response_id ~model ~usage_scope
            (usage : Agent_core.Types.api_usage) =
-         reports := (model, usage.input_tokens, usage.output_tokens) :: !reports
+         reports :=
+           ( response_id
+           , model
+           , Runtime_usage_scope.to_string usage_scope
+           , (usage.input_tokens, usage.output_tokens) )
+           :: !reports
        in
        with_fixture
          [ Emit (assistant ~turn_id:"quota-usage" "partial answer")
@@ -439,9 +444,11 @@ let test_refused_turn_reports_its_spend_to_the_keeper () =
              with
              | Error _ -> ()
              | Ok _ -> fail "quota refusal completed the turn");
-            check (list (triple string int int)) "the refused turn's spend, once"
-              [ "claude-fixture", 9000, 30 ]
-              (List.rev !reports)))
+            match List.rev !reports with
+            | [ ("turn-quota-usage", "claude-fixture", "turn_total", (9000, 30)) ] -> ()
+            | reports ->
+              failf "expected the refused turn's total reported once, got %d reports"
+                (List.length reports)))
 ;;
 
 (* Claude Code 2.1.280, 2026-09-23: one client turn of two provider requests.

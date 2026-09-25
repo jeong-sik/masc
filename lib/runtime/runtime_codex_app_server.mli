@@ -171,13 +171,16 @@ type stream_event =
           for the operator projection only; nothing that routes or retries
           reads it. *)
   | Usage_reported of
-      { model : string
-      ; usage : token_usage
+      { turn_id : string
+      ; model : string
+      ; thread_total : token_usage
       }
-      (** One [thread/tokenUsage/updated] frame for this turn: the [last]
-          breakdown, which is one model response's spend. Emitted when the
-          frame is read, before the turn's outcome is known, so a turn that
-          ends in an error still reports what it already spent. *)
+      (** One [thread/tokenUsage/updated] frame for this turn: its [total]
+          breakdown, the thread's running count. A frame is not one
+          response; the app-server repeats it on rate-limit updates,
+          refusals, compaction and retries, and a repeat carries the same
+          count. Emitted when the frame is read, before the turn's outcome is
+          known, so a turn that ends in an error still reports its count. *)
   | Turn_finished of { text : string }
 
 type history_role =

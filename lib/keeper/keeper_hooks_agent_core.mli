@@ -94,7 +94,7 @@ val cost_event_payload :
   input_tokens:int ->
   output_tokens:int ->
   cost_usd:float ->
-  ?usage_projection:Cost_ledger.usage_projection ->
+  usage_projection:Cost_ledger.usage_projection ->
   ?response_id:string ->
   ?runtime_attempt:(string * string * int) ->
   ?cache_creation_input_tokens:int ->
@@ -121,7 +121,7 @@ val emit_cost_event :
   input_tokens:int ->
   output_tokens:int ->
   cost_usd:float ->
-  ?usage_projection:Cost_ledger.usage_projection ->
+  usage_projection:Cost_ledger.usage_projection ->
   ?response_id:string ->
   ?runtime_attempt:(string * string * int) ->
   ?cache_creation_input_tokens:int ->
@@ -131,6 +131,15 @@ val emit_cost_event :
   ?telemetry:Agent_core.Types.inference_telemetry -> unit -> unit
 (** Append a structured cost-ledger event to [costs/YYYY-MM/DD.jsonl]. *)
 
+type attempt_usage =
+  { usage_report : Runtime_execution.usage_report
+  ; client_reported : bool
+        (** A usage report of this attempt reached
+            [emit_client_usage_report]. *)
+  }
+(** How the dispatched attempt's usage becomes visible, read by [AfterTurn]
+    to decide whether its response still needs a raw row. *)
+
 val emit_client_usage_report :
   trajectory_acc:Trajectory.accumulator option ->
   agent_name:string ->
@@ -138,13 +147,16 @@ val emit_client_usage_report :
   keeper_turn_id:int ->
   ?runtime_attempt:(string * string * int) ->
   official_turn:int ->
+  response_id:string ->
   model:string ->
+  usage_scope:Runtime_usage_scope.t ->
   Agent_core.Types.api_usage ->
   unit
 (** Append one raw cost-ledger row for a usage report an official client
-    sent on its own stream. [official_turn] is the client turn the report
-    belongs to. Writes nothing without a trajectory accumulator, as
-    [AfterTurn] does. *)
+    sent on its own stream, under the scope the client reports in.
+    [official_turn] is the client turn the report belongs to and
+    [response_id] the client's identity for it. Writes nothing without a
+    trajectory accumulator, as [AfterTurn] does. *)
 
 val broadcast_resolved_turn_complete :
   keeper_name:string ->
@@ -188,7 +200,7 @@ val make_hooks :
   on_after_turn_ordinal:(int -> unit) ->
   ?on_tool_stream_observation:(tool_stream_observation -> unit) ->
   ?current_runtime_attempt:(unit -> (string * string * int) option) ->
-  ?current_usage_report:(unit -> Runtime_execution.usage_report option) ->
+  ?current_attempt_usage:(unit -> attempt_usage option) ->
   ?on_after_turn_response:(response:Agent_core.Types.api_response -> unit) ->
   ?on_tool_executed:(tool_name:string ->
                      input:Yojson.Safe.t ->

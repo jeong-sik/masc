@@ -344,10 +344,16 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
                       emit (Agent_core.Types.ContentBlockStop { index }))
                    (Hashtbl.find_opt native_tool_indexes identity))
               observation.identity
-          | Runtime_antigravity.Usage_reported { model; usage } ->
+          | Runtime_antigravity.Usage_reported { conversation_id; model; num_turns; usage } ->
+            (* Keyed as the completion hook keys an Antigravity turn: the
+               CLI's own turn count and the identity built from it. *)
             Option.iter
               (fun report ->
-                 report ~official_turn:turn_count ~model
+                 report
+                   ~official_turn:num_turns
+                   ~response_id:(provider_turn_identity ~conversation_id ~num_turns)
+                   ~model
+                   ~usage_scope:Runtime_usage_scope.Conversation_cumulative
                    (api_usage_of_antigravity_usage usage))
               on_usage_report
           | Runtime_antigravity.Turn_finished { text = _ } ->
@@ -1231,6 +1237,17 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
 ;;
 
 module For_testing = struct
+  let report_stream_usage ~turn_count ~report event =
+    (stream_projection
+       ~keeper_name:"test"
+       ~raw_trace_run:None
+       ~turn_count
+       ~on_native_action:None
+       ~on_usage_report:(Some report)
+       None).on_runtime_event
+      event
+  ;;
+
   let capacity_bounded_model_input_projection =
     capacity_bounded_model_input_projection
   ;;

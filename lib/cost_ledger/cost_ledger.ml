@@ -8,7 +8,9 @@ type source =
   | Manual_cli
   | Auto_trajectory of inference_identity
 
-type usage_projection = Raw_observation | Resolved_delta
+type usage_projection =
+  | Raw_observation of Runtime_usage_scope.t
+  | Resolved_delta
 
 type usage =
   | Usage_missing
@@ -112,17 +114,38 @@ let source_to_string = function
 ;;
 
 let usage_projection_to_string = function
-  | Raw_observation -> "raw_observation"
+  | Raw_observation _ -> "raw_observation"
   | Resolved_delta -> "resolved_delta"
+;;
+
+let usage_scope_field = "usage_scope"
+
+(* A raw row carries the scope of its counts. One written before rows did
+   has no [usage_scope] field and reads as unavailable, the same reading
+   [Turn_record] gives a row that never stated its scope; it is not guessed.
+   A present value this build does not know is a decode error. *)
+let raw_observation_scope_of_fields fields =
+  match List.assoc_opt usage_scope_field fields with
+  | None -> Ok Runtime_usage_scope.Usage_scope_unavailable
+  | Some (`String wire) ->
+    (match Runtime_usage_scope.of_string wire with
+     | Some scope -> Ok scope
+     | None -> invalid usage_scope_field "must name a runtime usage scope")
+  | Some _ -> invalid usage_scope_field "must be a string"
 ;;
 
 let usage_projection_of_fields fields source =
   let* projection = required_string fields "usage_projection" in
   match projection with
-  | "resolved_delta" -> Ok Resolved_delta
+  | "resolved_delta" ->
+    (match List.assoc_opt usage_scope_field fields with
+     | None | Some `Null -> Ok Resolved_delta
+     | Some _ -> invalid usage_scope_field "must be null for resolved_delta")
   | "raw_observation" ->
     (match source with
-     | Auto_trajectory _ -> Ok Raw_observation
+     | Auto_trajectory _ ->
+       let* scope = raw_observation_scope_of_fields fields in
+       Ok (Raw_observation scope)
      | Manual_cli ->
        invalid "usage_projection" "must be resolved_delta for manual_cli")
   | _ -> invalid "usage_projection" "must be raw_observation or resolved_delta"
@@ -215,6 +238,7 @@ let reserved_fields =
   ; "cost_usd"
   ; "usage_missing"
   ; "usage_projection"
+  ; "usage_scope"
   ; "timestamp"
   ; "ts_unix"
   ; "source"
@@ -253,6 +277,10 @@ let to_json ?(extra_fields = []) row =
      ; "cost_usd", cost_usd
      ; "usage_missing", `Bool usage_missing
      ; "usage_projection", `String (usage_projection_to_string row.usage_projection)
+     ; ( usage_scope_field
+       , match row.usage_projection with
+         | Raw_observation scope -> `String (Runtime_usage_scope.to_string scope)
+         | Resolved_delta -> `Null )
      ; "timestamp", `String row.timestamp
      ; "source", `String (source_to_string row.source)
      ; "trace_id", trace_id

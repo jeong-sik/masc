@@ -86,6 +86,7 @@ let payload
     ~keeper_turn_id:1
     ~agent_core_turn_ordinal:0
     ~model:"test-model"
+    ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
     ~input_tokens
     ~output_tokens
     ~cost_usd
@@ -135,7 +136,7 @@ let test_trusted_tokens_positive_cost_unchanged () =
   let p =
     H.cost_event_payload ~agent_name:"test_agent" ~task_id:None
       ~trace_id:"test-trace" ~keeper_turn_id:1 ~agent_core_turn_ordinal:0
-      ~model:"test-model"
+      ~model:"test-model" ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
       ~input_tokens:100 ~output_tokens:50 ~cost_usd:0.0042
       ~usage_trust:Trust.Usage_trusted ()
   in
@@ -244,6 +245,7 @@ let test_native_decode_rate_uses_current_field_only () =
       ~keeper_turn_id:1
       ~agent_core_turn_ordinal:0
       ~model:"test-model"
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
       ~input_tokens:10
       ~output_tokens:5
       ~cost_usd:0.0
@@ -297,6 +299,7 @@ let test_timings_cache_fields_land_on_payload () =
       ~keeper_turn_id:1
       ~agent_core_turn_ordinal:0
       ~model:"qwen3.8-27b"
+      ~usage_projection:(Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
       ~input_tokens:26
       ~output_tokens:512
       ~cost_usd:0.0
@@ -318,7 +321,7 @@ let test_response_and_settlement_accounting () =
       ~usage_missing:missing ()
   in
   let raw = response "reply-1" ~creation:20 ~read:70 ~input:100 ~missing:false
-      Cost_ledger.Raw_observation in
+      (Cost_ledger.Raw_observation Runtime_usage_scope.Per_request) in
   check string "raw observation links to the exact response" "reply-1"
     (string_field raw "response_id");
   check int "cache writes are newly processed input too" 30
@@ -338,18 +341,89 @@ let test_response_and_settlement_accounting () =
     (int_field raw "lane_attempt_index");
   check string "settlement is never disguised as another response" "resolved_delta"
     (string_field settled "usage_projection");
+  check string "a raw row says what its counts cover" "per_request"
+    (string_field raw "usage_scope");
+  check_null_field settled "usage_scope";
   let missing = response "reply-2" ~creation:0 ~read:0 ~input:0 ~missing:true
-      Cost_ledger.Raw_observation in
+      (Cost_ledger.Raw_observation Runtime_usage_scope.Per_request) in
   check string "missing usage still has response identity" "reply-2"
     (string_field missing "response_id");
   check_null_field missing "non_cached_input_tokens";
   let invalid = response "reply-3" ~creation:40 ~read:70 ~input:100 ~missing:false
-      Cost_ledger.Raw_observation in
+      (Cost_ledger.Raw_observation Runtime_usage_scope.Per_request) in
   check_null_field invalid "non_cached_input_tokens";
   let cached = response "reply-4" ~creation:0 ~read:100 ~input:100 ~missing:false
-      Cost_ledger.Raw_observation in
+      (Cost_ledger.Raw_observation Runtime_usage_scope.Per_request) in
   check int "fully cached input is a reported zero" 0
     (int_field cached "non_cached_input_tokens")
+
+(* A raw row keeps the scope of its counts through the wire. *)
+let raw_row scope =
+  { Cost_ledger.agent = "keeper"
+  ; task_id = None
+  ; model = "model"
+  ; usage = Cost_ledger.Usage_reported { input_tokens = 900; output_tokens = 7; cost_usd = 0.0 }
+  ; usage_projection = Cost_ledger.Raw_observation scope
+  ; timestamp = "2026-09-25T00:00:00Z"
+  ; ts_unix = 1790294400.0
+  ; source =
+      Cost_ledger.Auto_trajectory
+        { trace_id = "trace"; keeper_turn_id = 3; agent_core_turn_ordinal = 1 }
+  }
+;;
+
+let decoded_projection json =
+  match Cost_ledger.of_json json with
+  | Ok row -> row.Cost_ledger.usage_projection
+  | Error error -> failf "cost row: %s" (Cost_ledger.decode_error_to_string error)
+;;
+
+let without_field key = function
+  | `Assoc fields -> `Assoc (List.remove_assoc key fields)
+  | json -> json
+;;
+
+let test_raw_rows_carry_their_scope () =
+  List.iter
+    (fun scope ->
+       match decoded_projection (Cost_ledger.to_json (raw_row scope)) with
+       | Cost_ledger.Raw_observation decoded ->
+         check string "scope survives the wire"
+           (Runtime_usage_scope.to_string scope)
+           (Runtime_usage_scope.to_string decoded)
+       | Cost_ledger.Resolved_delta -> fail "a raw row decoded as a resolved delta")
+    Runtime_usage_scope.all
+;;
+
+(* A raw row written before rows carried a scope never said what its counts
+   cover. It reads as unavailable, not as a guessed scope and not as an
+   unreadable row. *)
+let test_a_raw_row_without_a_scope_reads_as_unavailable () =
+  let historical =
+    without_field "usage_scope"
+      (Cost_ledger.to_json (raw_row Runtime_usage_scope.Per_request))
+  in
+  match decoded_projection historical with
+  | Cost_ledger.Raw_observation Runtime_usage_scope.Usage_scope_unavailable -> ()
+  | Cost_ledger.Raw_observation scope ->
+    failf "a row without a scope read as %s" (Runtime_usage_scope.to_string scope)
+  | Cost_ledger.Resolved_delta -> fail "a raw row decoded as a resolved delta"
+;;
+
+(* A resolved delta is one Keeper turn's spend; a scope on it is a row this
+   build did not write. *)
+let test_a_resolved_row_with_a_scope_is_rejected () =
+  let resolved =
+    match Cost_ledger.to_json { (raw_row Runtime_usage_scope.Per_request) with
+                                usage_projection = Cost_ledger.Resolved_delta } with
+    | `Assoc fields ->
+      `Assoc (("usage_scope", `String "turn_total") :: List.remove_assoc "usage_scope" fields)
+    | json -> json
+  in
+  match Cost_ledger.of_json resolved with
+  | Error _ -> ()
+  | Ok _ -> fail "a resolved row carrying a scope was accepted"
+;;
 
 let () =
   run "cost_token_decouple"
@@ -384,5 +458,13 @@ let () =
             test_native_decode_rate_uses_current_field_only;
           test_case "timings cache_n/prompt_n land on payload" `Quick
             test_timings_cache_fields_land_on_payload;
+        ] );
+      ( "usage-scope",
+        [
+          test_case "raw rows carry their scope" `Quick test_raw_rows_carry_their_scope;
+          test_case "a raw row without a scope reads as unavailable" `Quick
+            test_a_raw_row_without_a_scope_reads_as_unavailable;
+          test_case "a resolved row with a scope is rejected" `Quick
+            test_a_resolved_row_with_a_scope_is_rejected;
         ] );
     ]

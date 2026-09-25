@@ -59,7 +59,7 @@ let assemble_cost_event_payload
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
-    ?(usage_projection = Cost_ledger.Raw_observation)
+    ~(usage_projection : Cost_ledger.usage_projection)
     ?response_id
     ?runtime_attempt
     ?(cache_creation_input_tokens : int = 0)
@@ -149,20 +149,20 @@ let assemble_cost_event_payload
   in
   let attempt_fields =
     match usage_projection, runtime_attempt with
-    | Cost_ledger.Raw_observation, Some (run_id, runtime_id, index) ->
+    | Cost_ledger.Raw_observation _, Some (run_id, runtime_id, index) ->
         [ "routing_run_id", `String run_id
         ; "runtime_id", `String runtime_id
         ; "lane_attempt_index", `Int index ]
-    | Cost_ledger.Raw_observation, None | Cost_ledger.Resolved_delta, _ ->
+    | Cost_ledger.Raw_observation _, None | Cost_ledger.Resolved_delta, _ ->
         [ "routing_run_id", `Null; "runtime_id", `Null; "lane_attempt_index", `Null ]
   in
   let response_id =
     match usage_projection, response_id with
-    | Cost_ledger.Raw_observation, Some id ->
+    | Cost_ledger.Raw_observation _, Some id ->
         (match String_util.trim_nonempty id with
          | Some id -> `String id
          | None -> `Null)
-    | Cost_ledger.Raw_observation, None | Cost_ledger.Resolved_delta, _ -> `Null
+    | Cost_ledger.Raw_observation _, None | Cost_ledger.Resolved_delta, _ -> `Null
   in
   let telemetry_fields = match telemetry with
     | Some t ->
@@ -247,7 +247,7 @@ let cost_event_payload
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
-    ?(usage_projection = Cost_ledger.Raw_observation)
+    ~(usage_projection : Cost_ledger.usage_projection)
     ?response_id
     ?runtime_attempt
     ?(cache_creation_input_tokens : int = 0)
@@ -287,7 +287,7 @@ let emit_cost_event
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
-    ?(usage_projection = Cost_ledger.Raw_observation)
+    ~(usage_projection : Cost_ledger.usage_projection)
     ?response_id
     ?runtime_attempt
     ?(cache_creation_input_tokens : int = 0)

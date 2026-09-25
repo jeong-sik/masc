@@ -166,13 +166,18 @@ let usage_missing_of_usage = function
   | None -> true
   | Some usage -> not (usage_has_tokens usage)
 
+type attempt_usage =
+  { usage_report : Runtime_execution.usage_report
+  ; client_reported : bool
+  }
+
 (* One usage report an official client sent on its own stream while the
-   turn runs ([Runtime_execution.Client_usage_stream]). The row is the same
-   raw observation [AfterTurn] writes for an AGENT_CORE response, keyed by the
-   official turn the client is running. It is written when the report
-   arrives, so a turn that later fails keeps what it already paid for.
-   Without a trajectory accumulator no row is written, the same rule
-   [AfterTurn] follows. *)
+   turn runs ([Runtime_execution.Client_usage_stream]). The row is a raw
+   observation under the scope the client reports it in, keyed by the
+   official turn the client is running and the client's own identity for it.
+   It is written when the report arrives, so a turn that later fails keeps
+   what the client already reported. Without a trajectory accumulator no row
+   is written, the same rule [AfterTurn] follows. *)
 let emit_client_usage_report
     ~(trajectory_acc : Trajectory.accumulator option)
     ~agent_name
@@ -180,7 +185,9 @@ let emit_client_usage_report
     ~keeper_turn_id
     ?runtime_attempt
     ~official_turn
+    ~response_id
     ~model
+    ~usage_scope
     (usage : Agent_core.Types.api_usage)
   =
   match trajectory_acc with
@@ -194,6 +201,8 @@ let emit_client_usage_report
       ~keeper_turn_id
       ~agent_core_turn_ordinal:official_turn
       ~model
+      ~usage_projection:(Cost_ledger.Raw_observation usage_scope)
+      ~response_id
       ?runtime_attempt
       ~input_tokens:usage.input_tokens
       ~output_tokens:usage.output_tokens
@@ -225,7 +234,7 @@ let make_hooks
     ~(on_after_turn_ordinal : int -> unit)
     ?(on_tool_stream_observation : tool_stream_observation -> unit = fun _ -> ())
     ?(current_runtime_attempt = fun () -> None)
-    ?(current_usage_report = fun () -> None)
+    ?(current_attempt_usage = fun () -> None)
     ?(on_after_turn_response :
         response:Agent_core.Types.api_response -> unit =
         fun ~response:_ -> ())
@@ -455,18 +464,36 @@ let make_hooks
               any turn and the tool timeline disappeared. Adopt the turn the
               runtime already assigns here; [round] derives from it. *)
            Trajectory.set_turn acc turn;
-           (* An official client reports its usage on its own stream, which
-              already wrote this turn's rows through
-              [emit_client_usage_report]; this response only repeats it.
-              [None] is a turn with no dispatched attempt, which keeps the row
+           (* An AGENT_CORE response is one provider request, and this is
+              where its usage is seen. An official client reports usage on
+              its own stream: once a report of this attempt reached the ledger
+              through [emit_client_usage_report], this response only repeats
+              it. When none did (a host stop ends the turn before the client
+              reports; a result without usage), this row is what records
+              that the attempt's usage is missing, under no scope. [None] is
+              a turn with no dispatched attempt and keeps the per-request row
               [AfterTurn] always wrote. *)
-           (match current_usage_report () with
-            | Some Runtime_execution.Client_usage_stream -> ()
-            | Some Runtime_execution.Each_agent_core_response
-            | None ->
+           let raw_projection =
+             match current_attempt_usage () with
+             | Some { usage_report = Runtime_execution.Client_usage_stream
+                    ; client_reported = true
+                    } -> None
+             | Some { usage_report = Runtime_execution.Client_usage_stream
+                    ; client_reported = false
+                    } ->
+               Some
+                 (Cost_ledger.Raw_observation
+                    Runtime_usage_scope.Usage_scope_unavailable)
+             | Some { usage_report = Runtime_execution.Each_agent_core_response; _ }
+             | None -> Some (Cost_ledger.Raw_observation Runtime_usage_scope.Per_request)
+           in
+           (match raw_projection with
+            | None -> ()
+            | Some usage_projection ->
               emit_cost_event ~masc_root:acc.masc_root
                 ~agent_name:meta.name ~task_id:acc.task_id
                 ~trace_id ~keeper_turn_id ~agent_core_turn_ordinal:turn ~model
+                ~usage_projection
                 ~response_id:response.id
                 ?runtime_attempt:(current_runtime_attempt ())
                 ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok

@@ -54,7 +54,8 @@ type agent_setup =
       runtime_id:string -> official_turn:int ->
       identity:Runtime_native_tools.action_identity -> tool_name:string -> unit
   ; observe_official_client_usage_report :
-      official_turn:int -> model:string -> Agent_core.Types.api_usage -> unit
+      official_turn:int -> response_id:string -> model:string ->
+      usage_scope:Runtime_usage_scope.t -> Agent_core.Types.api_usage -> unit
   ; acc : hook_accumulator
   ; all_tool_names : string list
   ; skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list
@@ -555,16 +556,20 @@ let assemble_hooks
     in
     let usage_attempt = ref None in
     let usage_report_of_attempt = ref None in
+    let client_reported_in_attempt = ref false in
     let on_runtime_attempt (attempt : Keeper_turn_driver.runtime_attempt) =
       usage_attempt := Some (attempt.routing_run_id, attempt.runtime_id, attempt.lane_attempt_index);
       usage_report_of_attempt := Some attempt.usage_report;
+      client_reported_in_attempt := false;
       (* An official-client handoff belongs only to the runtime that produced
          it. A failover candidate must receive the Skill result itself before
          one of its actions can complete that activation's evidence. *)
       Skill_delivery_state.begin_runtime_attempt skill_delivery_state;
       ctx.on_runtime_attempt attempt
     in
-    let observe_official_client_usage_report ~official_turn ~model usage =
+    let observe_official_client_usage_report ~official_turn ~response_id ~model ~usage_scope
+        usage =
+      client_reported_in_attempt := true;
       Keeper_hooks_agent_core.emit_client_usage_report
         ~trajectory_acc
         ~agent_name:(!meta_ref).name
@@ -572,7 +577,9 @@ let assemble_hooks
         ~keeper_turn_id
         ?runtime_attempt:!usage_attempt
         ~official_turn
+        ~response_id
         ~model
+        ~usage_scope
         usage
     in
     let base_hooks =
@@ -585,7 +592,13 @@ let assemble_hooks
         ~on_after_turn_ordinal:(fun turn -> final_agent_core_turn_ordinal_ref := Some turn)
         ?on_tool_stream_observation:ctx.on_tool_stream_observation
         ~current_runtime_attempt:(fun () -> !usage_attempt)
-        ~current_usage_report:(fun () -> !usage_report_of_attempt)
+        ~current_attempt_usage:(fun () ->
+          Option.map
+            (fun usage_report ->
+               { Keeper_hooks_agent_core.usage_report
+               ; client_reported = !client_reported_in_attempt
+               })
+            !usage_report_of_attempt)
         ~on_after_turn_response:
           (fun ~response ->
              Keeper_run_tools_hook_accumulator.record_assistant_turn_text

@@ -139,7 +139,9 @@ type stream_event =
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Usage_reported of
-      { model : string
+      { conversation_id : string
+      ; model : string
+      ; num_turns : int
       ; usage : usage
       }
   | Turn_finished of { text : string }
@@ -830,7 +832,9 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
          (* The result event is the only usage the CLI reports, and it comes
             on a failed turn too. It is reported here, before the turn is
             judged, so a turn that ends in an error still reports it. *)
-         emit_stream_event on_stream_event (Usage_reported { model; usage });
+         emit_stream_event
+           on_stream_event
+           (Usage_reported { conversation_id = expected; model; num_turns; usage });
          Ok { state with result = Some (status, response, error, num_turns, usage) }))
 ;;
 

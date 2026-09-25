@@ -3,19 +3,21 @@
     A Keeper names an image by a short name ([base], [ocaml]). The catalog
     repository's [config/sandbox-images.toml] supplies the names. The host's
     [sandbox-images.toml] stores only promoted builds: for each name and image
-    store, the current tag and digest, plus the one it replaced. A registry
-    is not involved, and a digest is only true where that image was built.
+    store, the one tag that name starts from. A registry is not involved.
 
     {v
     [images.ocaml.apple_container]      # built and promoted on this host
     reference = "masc-sandbox-ocaml:20260924T1130Z-3f9a1c07"
-    digest    = "sha256:…"
-    previous  = { reference = "…", digest = "sha256:…" }
     v}
 
+    A tag names one build: [masc sandbox-image] refuses a tag its store
+    already has. So a new build always arrives under a new reference, and a
+    running guest is told apart from the promoted build by its reference
+    alone. Going back is a promote of an earlier tag the store still has.
+
     RFC keeper-sandbox-images-have-versions (#38699) §2.3. Parsing is strict:
-    an unknown key, a store this runtime does not know, or a malformed digest
-    is an error, not a default. *)
+    an unknown key or a store this runtime does not know is an error, not a
+    default. *)
 
 type store =
   | Docker_daemon
@@ -31,9 +33,6 @@ type pinned = private
   { reference : string
         (** [repository:tag]: a lowercase repository and a tag, never a
             digest reference and never starting with ['-']. *)
-  ; digest : string
-        (** [sha256:<64 lowercase hex>], as the store reports it for a
-            running guest. *)
   }
 (** Only {!parse} and {!promote} make one, so a [pinned] is always valid. *)
 
@@ -51,14 +50,9 @@ val is_reference : string -> bool
     hands a reference to an image store's CLI checks it first, so a value
     shaped like a flag never reaches that argv. *)
 
-type promotion =
-  { current : pinned
-  ; previous : pinned option  (** What [current] replaced, kept for a rollback. *)
-  }
-
 type entry =
   { name : string
-  ; promoted : (store * promotion) list  (** Empty until this host builds one. *)
+  ; promoted : (store * pinned) list  (** Empty until this host builds one. *)
   }
 
 type t
@@ -80,7 +74,6 @@ type parse_error =
   | Unknown_store of { image : string; store : string }
   | Missing_field of { path : string list; field : string }
   | Expected_string of { path : string list; field : string }
-  | Invalid_digest of { path : string list; value : string }
   | Invalid_reference of { path : string list; value : string }
       (** Not [repository:tag] as {!pinned} describes it. *)
   | Shipped_build of { name : string }
@@ -128,21 +121,17 @@ val load_for_change :
 type change_error =
   | No_such_image of { name : string; known : string list }
   | Invalid_pin of parse_error
-  | Nothing_to_roll_back of { name : string; store : store }
 
 val change_error_to_string : change_error -> string
 
 val promote :
-  t -> name:string -> store:store -> reference:string -> digest:string ->
-  (t, change_error) result
-(** Make [reference]/[digest] the current build of [name] for [store], and
-    keep the build it replaces as [previous]. Promoting the current build
-    again changes nothing. The name must already be in the catalog: names
-    come from the repository, builds from the host. *)
-
-val rollback : t -> name:string -> store:store -> (t, change_error) result
-(** Swap the current build with [previous]. A second rollback undoes the
-    first. *)
+  t -> name:string -> store:store -> reference:string -> (t, change_error) result
+(** Make [reference] the build [name] starts from on [store], in place of
+    the one it had. Promoting the current build again changes nothing, and
+    promoting an earlier tag is how a name goes back to it. The name must
+    already be in the catalog: names come from the repository, builds from
+    the host. Whether [store] holds [reference] is the caller's question;
+    the catalog cannot ask a store. *)
 
 val to_toml : t -> string
 (** The host file, containing only promoted store tables. Unbuilt names are
@@ -156,10 +145,10 @@ type save_error =
       (** The target was not replaced. *)
   | Written_but_durability_unconfirmed of { path : string; detail : string }
       (** Rename happened but parent sync failed. Inspect the file before a
-          retry, especially before another rollback. *)
+          retry, especially before another promote. *)
   | Saved_but_unlock_failed of { path : string; detail : string }
       (** The new catalog was written. Lock release failed afterward; inspect
-          the file before retrying, particularly before another rollback. *)
+          the file before retrying, particularly before another promote. *)
 
 val save_error_to_string : save_error -> string
 

@@ -1553,17 +1553,23 @@ status: reference
 
 **Shutdown Admission Fence (종료 진입 차단막)**
 : 종료 작업 진행 중인 Keeper의 재부팅을 막아 원장 정합성을 지키는 진입 차단 술어(`Keeper_shutdown_types.requires_admission_fence`).
-  - **단계별 차단막 해제 규칙 (#31738·#38569)**: 과거에는 `Blocked` 상태의 종료 작업에 대해 실패 단계와
+  - **단계별 차단막 해제 규칙 (#31738·#38569·#38859)**: 과거에는 `Blocked` 상태의 종료 작업에 대해 실패 단계와
     무관하게 차단막을 영구 유지하여, 영속 상태가 전혀 파괴되지 않은 Keeper도 수동 교체(`Superseded`) 없이는
-    영구히 재부팅할 수 없는 결함이 있었다. 현재는 실패 단계(`failure_stage`)를 검사하여 영속 상태 변경 전에
-    실패한 단계는 차단막을 해제하고 즉시 재시도(`retryable`)를 허용한다:
-    1. **해제 대상 (`retryable`, 차단막 없음)**: 영속 상태를 변경하기 전의 읽기·초기화·멱등 정리 단계
-       (`Task_discovery`·`Record_persist`·`Meta_update`·`Pending_confirm_cleanup`).
+    영구히 재부팅할 수 없는 결함이 있었다. 현재는 실패 단계(`failure_stage`)를 `failure_stage_boot_replay`로
+    분류한다:
+    1. **부팅 재실행 대상 (부팅 사이에는 차단막 없음)**: 메타데이터·세션·레지스트리를 건드리기 전의 단계.
+       `Task_discovery`·`Record_persist`·`Meta_read`는 `Replay_unsettled_tasks`(이 작업의 반환 영수증이 있는
+       태스크만 정산된 것으로 보고 나머지를 정산), `Meta_update`·`Pending_confirm_cleanup`은
+       `Replay_settled_tasks`(태스크 정산이 끝난 뒤에만 나오므로 모든 소유 태스크를 정산된 것으로 보고 재개).
     2. **유지 대상 (`fenced`, 차단막 유지)**: 키퍼의 영속 상태(태스크 소유권, 레인, 메타데이터, 세션, 레지스트리)가
        반쯤 철거된 단계(`Turn_cancel`·`Lane_cancel`·`Turn_join`·`Lane_join`·`Record_update`·`Unhandled_worker`·
        `Task_settlement`·`Approval_summary_retirement`·`Meta_remove`·`Session_remove`·`Registry_unregister`).
-  - **영속 복구**: 재시작 시 디스크에 이미 기록된 `Blocked` 레코드라도 해제 대상 단계에 머물러 있다면 차단막을
-    세우지 않고 다음 부팅에서 종료 작업을 안전하게 재실행한다.
+  - **부팅 재실행**: 부팅 복구는 재실행 대상 `Blocked` 레코드가 그 Keeper의 가장 새 작업이고 차단막을 잡은 형제가
+    없으면 차단막을 세우고 `Finalizing_tasks`에서 다시 실행해 운영자 의도(stop·purge 등)를 끝낸다. 더 새 작업이
+    있거나(`Newer_operation`), Keeper trace가 바뀌었거나(`Keeper_trace_changed`), 스냅숏에 없는 태스크를
+    잡았으면(`Keeper_claimed_new_tasks`) 재실행하지 않고 `Superseded (Boot_replay_abandoned _)`로 닫은 뒤 WARN을
+    남기고 회수한다. 소유자·메타데이터·backlog를 지금 읽을 수 없거나 재실행이 다시 재실행 대상 단계에서 막히면
+    새 증거로 `Blocked`에 남기고 WARN을 남긴 뒤 차단막을 풀어 Keeper가 부팅하게 하고, 다음 부팅에 다시 시도한다.
   → [Keeper_shutdown_types](../../lib/keeper/keeper_shutdown_types.mli)
 
 **Boot Meta Failure Cause (부팅 메타 실패 사유)**

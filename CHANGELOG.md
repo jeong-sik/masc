@@ -21,7 +21,7 @@
   send it, so a TUI from this release refuses its planning snapshot and the
   Goals view does not load (#38509).
 - Apple-container microVM Keepers now create a build volume at boot (default size 128g, set with `MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE`). If the volume cannot be created, the Keeper refuses to boot. A `_build` linked to the volume is emptied at every boot. A `_build` that is already a real directory in the checkout is left in place and is not reclaimed; delete it to move that Keeper onto the volume (#38563).
-- A `Blocked` shutdown record already on disk at a released stage (`Task_discovery`, `Record_persist`, `Meta_update`, `Pending_confirm_cleanup`) no longer holds the admission fence: the Keeper boots again on the next start and the shutdown is retried. Records at every other stage keep the fence as before (#38569).
+- A `Blocked` shutdown record already on disk at a released stage (`Task_discovery`, `Record_persist`, `Meta_update`, `Pending_confirm_cleanup`) no longer holds the admission fence: the Keeper boots again on the next start. This release does not replay or remove such a record; it stays on disk. Records at every other stage keep the fence as before (#38569).
 - A Keeper whose TOML says `sandbox_profile = "docker"` or `"microvm"` must
   also name its image in `sandbox_image`. One that names none no longer boots
   on `masc-sandbox:general` without saying so: boot and `masc_keeper_up`
@@ -614,7 +614,7 @@
 - A WebFetch that fails in transport names curl's cause, such as
   `curl exit 6 (could not resolve host)`, instead of the single word `curl`.
   The URL still stays out of the message (#38568).
-- A Keeper whose shutdown failed before it mutated anything durable is no longer permanently unbootable. The admission fence now follows the failure stage: `Task_discovery`, `Record_persist`, `Meta_update` and `Pending_confirm_cleanup` are retryable, while every stage from `Task_settlement` onward keeps the fence. It used to fence every `Blocked` shutdown, so only an operator supersession could free a Keeper that had not been torn down at all (#38569).
+- A Keeper whose shutdown failed before it mutated anything durable is no longer permanently unbootable. The admission fence now follows the failure stage: `Task_discovery`, `Record_persist`, `Meta_update` and `Pending_confirm_cleanup` no longer hold it, while every stage from `Task_settlement` onward keeps the fence. It used to fence every `Blocked` shutdown, so only an operator supersession could free a Keeper that had not been torn down at all (#38569).
 - An exact-output request without a body deadline is refused at plan
   admission even when a connect deadline is declared. The connect deadline
   ends when the response headers arrive, so such a request read a stalled

@@ -71,4 +71,7 @@ val set
   -> lane_id:string
   -> string option
   -> (t option, string) result
-(** Set or clear one exact owner. Returns the canonical stored row. *)
+(** Set or clear one exact owner. Returns the canonical stored row. Refuses
+    a lane that reads no preference — whether unknown or published for
+    another flow — with the ids {!apply} actually reads as the accepted
+    set. *)

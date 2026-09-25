@@ -20,12 +20,50 @@ val of_string : string -> handle
 (** Re-wrap a handle string read back from a checkpoint. No I/O; integrity is
     verified later by {!load} (a wrong string fails closed there). *)
 
-val store : dir:string -> string -> (handle, string) result
-(** [store ~dir bytes] writes [bytes] to a content-addressed file under [dir] and
+val frames_dir : dir:string -> string
+(** The only frame subdirectory name used for storage and read fallback. *)
+
+type prune_result =
+  { deleted_count : int
+  ; reclaimed_bytes : int
+  ; remaining_count : int
+  ; remaining_bytes : int
+  }
+
+val default_max_entries : int
+(** Default limit on retained artifacts per vision store directory (500). *)
+
+val default_max_bytes : int
+(** Default limit on total retained bytes per vision store directory (20 MB). *)
+
+val prune
+  :  ?max_entries:int
+  -> ?max_bytes:int
+  -> dir:string
+  -> unit
+  -> (prune_result, string) result
+(** [prune ?max_entries ?max_bytes ~dir ()] prunes canonical artifact files
+    (64-char lowercase-hex SHA-256) under [dir], evicting oldest files first
+    (by mtime) until both [max_entries] and [max_bytes] are satisfied.
+    Non-canonical files and subdirectories are never removed. A zero limit is
+    allowed here for an explicit cleanup; negative limits return [Error]. *)
+
+val store
+  :  auto_prune:bool
+  -> ?max_entries:int
+  -> ?max_bytes:int
+  -> dir:string
+  -> string
+  -> (handle, string) result
+(** [store ~auto_prune ?max_entries ?max_bytes ~dir bytes] writes [bytes] to a content-addressed file under [dir] and
     returns its handle. Idempotent: identical bytes map to the same handle and
     file. A re-store compares a bounded owned regular-file read, skipping the atomic write
     only on an exact match. Missing or different content is written again.
-    [Error msg] when the required directory creation or write fails. *)
+    When [auto_prune] is true and a new file is written, triggers
+    a bounded prune pass. A zero entry limit, a byte limit smaller than the
+    new frame, or any negative limit returns [Error] before writing, so a
+    successful store cannot immediately rotate away its own handle.
+    [Error msg] also covers required directory creation or write failure. *)
 
 type load_error =
   | Malformed_handle of string
@@ -36,7 +74,8 @@ type load_error =
 val load_error_to_string : load_error -> string
 
 val load : dir:string -> handle -> (string, load_error) result
-(** [load ~dir h] reads the bytes for [h]. [Error] (never a silent empty success)
+(** [load ~dir h] reads the bytes for [h]. Checks [dir] directly, falling back
+    to [dir/frames] if present. [Error] (never a silent empty success)
     if: [h] is not a canonical 64-char lowercase-hex handle (rejected before any
     filesystem access, so a forged "../" handle cannot read outside [dir]); the
     file is absent; or the stored bytes do not hash back to [h] (corruption). *)

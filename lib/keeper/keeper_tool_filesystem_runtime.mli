@@ -32,7 +32,7 @@ val resolve_read_file_cwd :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string option ->
-  (string, string) result
+  (string, Keeper_alerting_path.path_refusal) result
 (** The directory a Read resolves its path against: the Keeper's read root
     without [cwd], else [cwd] projected and confined. Whether it exists is
     asked of the filesystem that holds the tree

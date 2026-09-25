@@ -609,12 +609,6 @@ let cache_store key response now =
     Atomic_util.update cache_entries (fun current ->
       Cache_by_key.add key { response; expires_at = now +. ttl } current)
 
-(** Redact transport error detail before the " for " suffix *)
-let redact_transport_error_detail message =
-  match String.index_opt message ' ' with
-  | Some idx -> String.sub message 0 idx
-  | None -> message
-
 (* RFC-0189 PR-1b.8 — typed fetch-failure variant. Each arm carries
    the data needed to render an operator-facing message AND a
    [tool_failure_class] tag. This SSOT keeps message formatting (in
@@ -622,7 +616,7 @@ let redact_transport_error_detail message =
    [fetch_failure_class]) co-located with construction — no
    substring re-classification downstream. *)
 type fetch_failure =
-  | Transport_error of string   (* raw transport-layer detail, already redacted *)
+  | Transport_error of string   (* the transport cause, without the URL *)
   | Http_status of int          (* upstream returned a non-2xx HTTP status *)
   | No_http_status              (* protocol level: status line missing *)
   | Invalid_redirect of string  (* redirect target is not a typed HTTP(S) URL *)
@@ -720,8 +714,11 @@ let default_http_fetch ~timeout_sec ~headers ~max_response_bytes url =
         ~max_response_bytes
         request_url
     with
-    | Error detail ->
-        Error (Transport_error (redact_transport_error_detail detail))
+    | Error failure ->
+        (* The cause, not the first word of the operator text: a bare
+           "curl" does not let the model tell a host that never resolves
+           from a failure that passes. The URL stays out; the caller sent it. *)
+        Error (Transport_error (Tool_local_runtime_http.transport_failure_cause failure))
     | Ok response when redirect_status response.http_status -> (
         match response.redirect_url with
         | None | Some "" ->
@@ -763,8 +760,8 @@ let with_http_get_for_test http_get f =
             ; downloaded_bytes = Some (String.length body)
             ; body
             }
-      | Error detail ->
-          Error (Transport_error (redact_transport_error_detail detail)))
+      | Error failure ->
+          Error (Transport_error (Tool_local_runtime_http.transport_failure_cause failure)))
     f
 
 (** Main fetch implementation *)

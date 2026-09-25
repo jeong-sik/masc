@@ -28,6 +28,7 @@
   board_tool_sub_board)
  (modules
   board_tool
+  board_tool_attachment
   board_tool_curation
   board_tool_dispatch
   board_tool_format
@@ -39,7 +40,9 @@
   board_tool_sub_board)
  (libraries
   eio
+  eio.unix
   re
+  uri
   time_compat
   yojson
   ; Board_tool_schemas reads config/tools/masc_board_*.toml from the

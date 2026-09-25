@@ -2191,6 +2191,9 @@ default = "test_provider.test_model"
 display-name = "Test Provider"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1"
+# The routing test appends this runtime to an exact lane; a save adding a
+# slot whose provider declares no exact-body-timeout-s is refused (#38779).
+exact-body-timeout-s = 120.0
 [models.test_model]
 api-name = "test-model"
 max-context = 8192
@@ -2255,6 +2258,13 @@ let test_execution_trust_uses_narrow_keeper_projection () =
     | [ full_row ] -> full_row
     | rows -> failf "expected one full Keeper row, got %d" (List.length rows)
   in
+  (match full_row with
+   | `Assoc fields ->
+     check bool "dashboard omits invented handoff count" false
+       (List.mem_assoc "handoff_count_total" fields);
+     check bool "dashboard omits unwritten handoff age" false
+       (List.mem_assoc "last_handoff_ago_s" fields)
+   | _ -> fail "Keeper dashboard row was not an object");
   let full_row_field key =
     Option.value ~default:`Null (Json_util.assoc_member_opt key full_row)
   in
@@ -2773,8 +2783,12 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
     expected
   in
   ignore (check_surfaces ~phase:"executing" ~proof_state:"idle");
-  let _, pending = get_ok (Result.map_error Goal_store.write_error_to_string
-    (Lib.Workspace_goals.request_current_proof config ~goal_id)) in
+  let _, pending =
+    match Lib.Workspace_goals.request_current_proof config ~goal_id with
+    | Ok requested -> requested
+    | Error (Lib.Workspace_goals.Store error) -> fail (Goal_store.write_error_to_string error)
+    | Error (Lib.Workspace_goals.Refused { message; _ }) -> fail message
+  in
   let request_id, criterion = match pending.Goal_verification.completion with
     | Goal_verification.Proof_pending pending -> pending.request_id, pending.criterion
     | _ -> fail "request did not persist pending proof"
@@ -5682,6 +5696,11 @@ let test_direct_assignment_intervening_write_fences_keeper_config_post () =
 let test_direct_assignment_route_surfaces_runtime_lock_release_warning () =
   with_direct_assignment_model_catalog @@ fun () ->
   with_test_env @@ fun ~env:_ ~sw ~config ->
+  (* A known registry state: none published, so the commit response has one
+     right answer for its exact-output row. *)
+  (match Runtime_exact_output_registry.unpublish () with
+   | Ok () -> ()
+   | Error error -> fail (Runtime_exact_output_registry.publication_error_to_string error));
   let name = "direct-assignment-release-warning" in
   prepare_config_sync_keeper ~sw config name;
   let runtime_path =
@@ -5726,6 +5745,14 @@ let test_direct_assignment_route_surfaces_runtime_lock_release_warning () =
     "runtime_config_lock_release_unconfirmed"
     (json |> member "commit" |> member "warnings" |> index 0
      |> member "code" |> to_string);
+  (* Every commit response says what happened to the exact-output registry,
+     apart from routing: routing always applies, the registry only when one is
+     published (#38779). *)
+  let exact = json |> member "application" |> member "exact_output_registry" in
+  check string "a commit with no published registry reports it unpublished" "unpublished"
+    (exact |> member "status" |> to_string);
+  check bool "an unpublished registry is reported as needing a restart" true
+    (exact |> member "requires_restart" |> to_bool);
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)

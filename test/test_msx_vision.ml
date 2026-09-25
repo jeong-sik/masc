@@ -73,7 +73,7 @@ let test_keeper_capture () =
       let json = match result.data with Some d -> d | None -> fail result.raw_output in
       let open Yojson.Safe.Util in
       let handle = json |> member "artifact" |> to_string in
-      let dir = Keeper_vision_tool.vision_store_dir ~keeper_name:meta.name in
+      let dir = Keeper_vision_tool.frames_dir ~keeper_name:meta.name in
       let png = match Multimodal.Vision_artifact_store.load ~dir
         (Multimodal.Vision_artifact_store.of_string handle) with
         | Ok bytes -> bytes | Error e -> fail (Multimodal.Vision_artifact_store.load_error_to_string e) in
@@ -106,7 +106,7 @@ let test_keeper_capture () =
       let again = screen () in
       check string "unchanged frame deduplicates artifact" handle
         (Option.get again.data |> member "artifact" |> to_string);
-      let other_dir = Keeper_vision_tool.vision_store_dir ~keeper_name:"another-player" in
+      let other_dir = Keeper_vision_tool.frames_dir ~keeper_name:"another-player" in
       check bool "not stored for another Keeper" false (Sys.file_exists (Filename.concat other_dir handle));
       Sys.remove (Filename.concat dir handle);
       Unix.rmdir dir;

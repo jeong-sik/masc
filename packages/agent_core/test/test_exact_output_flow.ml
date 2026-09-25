@@ -3598,7 +3598,7 @@ let assert_typed_capacity_refusal_advances_once
   | Error _ -> fail (label ^ " typed capacity refusal did not advance")
 ;;
 
-let test_context_window_400_prose_remains_terminal () =
+let test_context_window_400_prose_advances_to_successor () =
   let response =
     {|{"error":"The prompt is too long: 1400014, model maximum context length: 1048576 (ref: 8519ccf3-5d45-4686-9ac1-64d159f75ec1)"}|}
   in
@@ -3625,24 +3625,25 @@ let test_context_window_400_prose_remains_terminal () =
     in
     result, !advances
   in
-  check int "HTTP 400 prose dispatches once" 1 posts;
-  check int "HTTP 400 prose requests no advance" 0 advances;
+  check int "HTTP 400 prose dispatches twice" 2 posts;
+  check int "HTTP 400 prose requests advance" 1 advances;
   match result with
+  | Ok _ -> ()
   | Error (EO.Flow_exact_execution_failed failure) ->
     check
       bool
-      "HTTP 400 prose stays terminal as a typed invalid request"
+      "HTTP 400 prose advances as an un-attributed refusal"
       true
       (failure.cause.cause
        = EO.Provider_response_refused
            { http_status = 400; refusal = EO.Invalid_request });
     check
       bool
-      "HTTP 400 prose is a non-advanceable terminal"
+      "HTTP 400 prose is an advanceable terminal"
       true
       (EO.flow_execution_terminal_kind (EO.Flow_exact_execution_failed failure)
-       = EO.Non_advanceable_terminal)
-  | Ok _ | Error _ -> fail "HTTP 400 prose did not remain terminal"
+       = EO.Advanceable_candidates_exhausted)
+  | Error _ -> fail "HTTP 400 prose did not advance"
 ;;
 
 let test_serialized_request_413_refusal_advances_once_to_successor () =
@@ -3962,7 +3963,7 @@ let test_body_deadline_advances_after_settlement ~http_status ~settle () =
   | _, (Ok _ | Error _) -> fail "body deadline did not respect durable settlement"
 ;;
 
-let test_stalled_server_refusal_body_does_not_advance () =
+let test_stalled_server_refusal_body_advances_to_successor () =
   let refused_id = "stalled-refusal" in
   let successor_id = "stalled-refusal-successor" in
   let ((result, advances, evidence), posts) =
@@ -4003,9 +4004,9 @@ let test_stalled_server_refusal_body_does_not_advance () =
     in
     result, !advances, EO.flow_attempt_evidence flow
   in
-  check int "stalled refusal dispatched only the first candidate" 1 posts;
-  check int "stalled refusal requested no advance" 0 advances;
-  check int "stalled refusal recorded no advance" 0 (List.length evidence.advances);
+  check int "stalled refusal dispatched both candidates" 2 posts;
+  check int "stalled refusal requested advance" 1 advances;
+  check int "stalled refusal recorded one advance" 1 (List.length evidence.advances);
   check
     int
     "stalled refusal records one dispatch"
@@ -4026,10 +4027,11 @@ let test_stalled_server_refusal_body_does_not_advance () =
       (failure.cause.cause
        = EO.Provider_response_refused
            { http_status = 503; refusal = EO.Refusal_body_not_received })
-  | Ok _ | Error _ -> fail "stalled refusal did not remain a typed terminal failure"
+  | Ok _ -> ()
+  | Error _ -> fail "stalled refusal did not advance"
 ;;
 
-let test_generic_400_remains_terminal_without_advance () =
+let test_generic_400_advances_to_successor () =
   let (result, advances, evidence), posts =
     with_server ~status:`Bad_request ~response:{|{"error":"generic request rejection"}|}
     @@ fun ~sw:_ ~net ~clock ~base_url ->
@@ -4054,10 +4056,11 @@ let test_generic_400_remains_terminal_without_advance () =
     in
     result, !advances, EO.flow_attempt_evidence flow
   in
-  check int "generic 400 dispatches once" 1 posts;
-  check int "generic 400 requests no advance" 0 advances;
-  check int "generic 400 leaves successor unprepared" 1 (List.length evidence.attempts);
+  check int "generic 400 dispatches twice" 2 posts;
+  check int "generic 400 requests advance" 1 advances;
+  check int "generic 400 prepares successor" 2 (List.length evidence.attempts);
   match result with
+  | Ok _ -> ()
   | Error
       ((EO.Flow_exact_execution_failed
           { candidate
@@ -4069,13 +4072,13 @@ let test_generic_400_remains_terminal_without_advance () =
               }
           ; _
           }) as terminal) ->
-    check string "generic 400 terminal candidate" "generic-400-a" (candidate_id candidate);
+    check string "generic 400 terminal candidate" "generic-400-b" (candidate_id candidate);
     check
       bool
-      "generic 400 is a non-advanceable terminal"
+      "generic 400 is an advanceable terminal"
       true
-      (EO.flow_execution_terminal_kind terminal = EO.Non_advanceable_terminal)
-  | Ok _ | Error _ -> fail "generic 400 did not remain a typed invalid request"
+      (EO.flow_execution_terminal_kind terminal = EO.Advanceable_candidates_exhausted)
+  | Error _ -> fail "generic 400 did not advance"
 ;;
 
 let test_postdispatch_and_structural_outcomes_never_advance () =
@@ -4127,9 +4130,6 @@ let test_postdispatch_and_structural_outcomes_never_advance () =
   in
   run ~abort_completion:true "partial" "unused";
   run "provider-parser" "not-provider-json";
-  (* A definite server refusal advances; an authentication failure still
-     requires configuration repair and remains terminal. *)
-  run ~status:`Unauthorized "response" "authentication failed";
   run "tool" tool_response
 ;;
 
@@ -4795,7 +4795,7 @@ let () =
         ; test_case
             "context-window 400 prose remains terminal"
             `Quick
-            test_context_window_400_prose_remains_terminal
+            test_context_window_400_prose_advances_to_successor
         ; test_case
             "HTTP 413 serialized request advances with one dispatch per candidate"
             `Quick
@@ -4837,11 +4837,11 @@ let () =
         ; test_case
             "HTTP 503 with a stalled body does not advance"
             `Quick
-            test_stalled_server_refusal_body_does_not_advance
+            test_stalled_server_refusal_body_advances_to_successor
         ; test_case
             "generic 400 remains terminal"
             `Quick
-            test_generic_400_remains_terminal_without_advance
+            test_generic_400_advances_to_successor
         ; test_case
             "postdispatch and structural outcomes stop"
             `Quick

@@ -1,4 +1,5 @@
 module Observer = Masc_tui_observer
+module Message_layout = Masc_tui_message_layout
 
 type filter =
   | Turns
@@ -310,7 +311,7 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
         detail
   in
   { at
-  ; keeper = Option.value ~default:"-" e.Observer.agent
+  ; keeper = Option.value ~default:Masc_tui_theme.Glyph.no_value e.Observer.agent
   ; glyph
   ; label
   ; detail
@@ -319,7 +320,7 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
 let keeper_of_event ~traces (event : Observer.event) =
   match event with
   | Observer.Agent_core e -> (
-      let by_agent = Option.value ~default:"-" e.Observer.agent in
+      let by_agent = Option.value ~default:Masc_tui_theme.Glyph.no_value e.Observer.agent in
       match e.Observer.correlation with
       | None -> by_agent
       | Some correlation -> (
@@ -416,9 +417,13 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
          one part that can be missing. *)
       let tokens =
         match (t.Observer.tc_input_tokens, t.Observer.tc_output_tokens) with
-        | Some i, Some o -> Printf.sprintf "in %d out %d" i o
-        | Some i, None -> Printf.sprintf "in %d" i
-        | None, Some o -> Printf.sprintf "out %d" o
+        | Some i, Some o ->
+            Printf.sprintf "in %s out %s" (Message_layout.compact_count i)
+              (Message_layout.compact_count o)
+        | Some i, None ->
+            Printf.sprintf "in %s" (Message_layout.compact_count i)
+        | None, Some o ->
+            Printf.sprintf "out %s" (Message_layout.compact_count o)
         | None, None -> ""
       in
       let cost =
@@ -812,9 +817,13 @@ let row_of_chunk chunk =
   let tools_text = chunk_tools_text tools in
   let tokens =
     match chunk.ck_tokens with
-    | Some i, Some o -> Printf.sprintf " \xc2\xb7 in %d out %d" i o
-    | Some i, None -> Printf.sprintf " \xc2\xb7 in %d" i
-    | None, Some o -> Printf.sprintf " \xc2\xb7 out %d" o
+    | Some i, Some o ->
+        Printf.sprintf " \xc2\xb7 in %s out %s" (Message_layout.compact_count i)
+          (Message_layout.compact_count o)
+    | Some i, None ->
+        Printf.sprintf " \xc2\xb7 in %s" (Message_layout.compact_count i)
+    | None, Some o ->
+        Printf.sprintf " \xc2\xb7 out %s" (Message_layout.compact_count o)
     | None, None -> ""
   in
   let cost =

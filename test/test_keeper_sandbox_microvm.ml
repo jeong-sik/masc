@@ -1350,6 +1350,447 @@ let error_exn = function
   | Error e -> e
 ;;
 
+(* ── The build volume (RFC-keeper-build-output-returns-to-a-disposable-volume)
+   A volume holding only derived output can be deleted and recreated with
+   zero data-loss risk, which is what host disk reclaim needs and the work
+   volume holding the checkout cannot offer. Apple_container only; see the
+   .mli. *)
+
+let test_build_volume_name_is_keeper_scoped () =
+  Alcotest.(check string)
+    "one volume per keeper"
+    "masc-keeper-build-lane-smith"
+    (ok_exn (M.build_volume_name ~keeper_name:"lane-smith"));
+  Alcotest.(check string)
+    "dots are container-safe"
+    "masc-keeper-build-edgar.a.poe"
+    (ok_exn (M.build_volume_name ~keeper_name:"edgar.a.poe"))
+;;
+
+let test_build_volume_name_refuses_unsafe_names () =
+  (* A name reaching [container] as an argument and a state directory is
+     refused rather than escaped. *)
+  List.iter
+    (fun name -> ignore (error_exn (M.build_volume_name ~keeper_name:name) : string))
+    [ ""; "../escape"; "has space"; "semi;colon"; "slash/inside" ]
+;;
+
+let test_build_volume_mount_targets_the_guest_root () =
+  Alcotest.(check bool)
+    "volume is mounted at the documented guest root"
+    true
+    (adjacent
+       ~flag:"--volume"
+       ~value:("masc-keeper-build-polisher:" ^ M.build_volume_guest_root)
+       (M.build_volume_mount_args ~volume_name:"masc-keeper-build-polisher"))
+;;
+
+let test_apple_build_volume_delete_argv_names_the_volume () =
+  let argv = M.apple_build_volume_delete_argv ~volume_name:"masc-keeper-build-x" in
+  Alcotest.(check bool) "goes through container" true (contains "container" argv);
+  Alcotest.(check bool) "deletes a volume" true (adjacent ~flag:"volume" ~value:"delete" argv);
+  Alcotest.(check bool) "names it" true (contains "masc-keeper-build-x" argv)
+;;
+
+(* The build volume goes through the same [container volume] probe and
+   sized create as the work volume; only the error code differs. A fake
+   [container] on PATH records every call and keeps the volume's existence
+   in a marker file, so the delete-then-create order and the create's [-s]
+   are read off the log, and a probe fault (inspect exit 2) must be
+   reported under each volume's own code. A create that fails must come
+   back as [microvm_build_volume_create_failed], both when the volume was
+   absent and when it was deleted first. *)
+let test_recreate_apple_build_volume_shares_the_work_volume_commands () =
+  with_eio_fs @@ fun () ->
+  let context = Eio_context.snapshot_state () in
+  let dir = temp_dir "apple-build-volume-cli-" in
+  let cli = Filename.concat dir "container" in
+  let log = Filename.concat dir "calls" in
+  let marker = Filename.concat dir "present" in
+  let volume_name = "masc-keeper-build-fixture" in
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_context.restore_state context;
+      Unix.putenv "PATH" previous_path;
+      List.iter (fun p -> if Sys.file_exists p then Unix.unlink p) [ cli; log; marker ];
+      Unix.rmdir dir)
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let install ?(create_exit = 0) ~inspect_absent_exit () =
+    let oc = open_out cli in
+    Printf.fprintf
+      oc
+      "#!/bin/sh\n\
+       printf '%%s\\n' \"$*\" >> %s\n\
+       case \"$*\" in\n\
+       'volume inspect %s') [ -e %s ] && exit 0; exit %d;;\n\
+       'volume list --format json') printf '[]\\n'; exit 0;;\n\
+       'volume delete %s') rm -f %s; exit 0;;\n\
+       'volume create -s 128g %s') [ %d -eq 0 ] || exit %d; : > %s; exit 0;;\n\
+       *) exit 99;;\n\
+       esac\n"
+      (Filename.quote log)
+      volume_name
+      (Filename.quote marker)
+      inspect_absent_exit
+      volume_name
+      (Filename.quote marker)
+      volume_name
+      create_exit
+      create_exit
+      (Filename.quote marker);
+    close_out oc;
+    Unix.chmod cli 0o755;
+    if Sys.file_exists log then Unix.unlink log
+  in
+  let calls () =
+    let ic = open_in log in
+    let text = In_channel.input_all ic in
+    close_in ic;
+    text
+  in
+  install ~inspect_absent_exit:1 ();
+  close_out (open_out marker);
+  (match M.recreate_apple_build_volume ~volume_name ~size:"128g" ~timeout_sec:5.0 with
+   | Ok `Created -> ()
+   | Ok `Already_present -> Alcotest.fail "a present build volume must be recreated"
+   | Error message -> Alcotest.failf "recreate failed: %s" message);
+  Alcotest.(check string)
+    "delete, then the work volume's probe and sized create"
+    (String.concat
+       ""
+       [ "volume inspect masc-keeper-build-fixture\n"
+       ; "volume delete masc-keeper-build-fixture\n"
+       ; "volume inspect masc-keeper-build-fixture\n"
+       ; "volume list --format json\n"
+       ; "volume create -s 128g masc-keeper-build-fixture\n"
+       ])
+    (calls ());
+  install ~inspect_absent_exit:2 ();
+  if Sys.file_exists marker then Unix.unlink marker;
+  let expect_error ~prefix = function
+    | Error message ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%S starts with %S" message prefix)
+        true
+        (String.starts_with ~prefix message)
+    | Ok _ -> Alcotest.fail "an ambiguous probe must not be read as a volume"
+  in
+  expect_error
+    ~prefix:"microvm_build_volume_probe_failed: "
+    (M.recreate_apple_build_volume ~volume_name ~size:"128g" ~timeout_sec:5.0);
+  expect_error
+    ~prefix:"microvm_work_volume_probe_failed: "
+    (M.ensure_work_volume_for
+       Masc.Keeper_microvm_backend.Apple_container
+       ~volume_name
+       ~size:"128g"
+       ~timeout_sec:5.0);
+  (* Any non-zero create exit; 3 is distinct from the probe's 1 and 2. *)
+  let failing_create_exit = 3 in
+  install ~create_exit:failing_create_exit ~inspect_absent_exit:1 ();
+  if Sys.file_exists marker then Unix.unlink marker;
+  expect_error
+    ~prefix:"microvm_build_volume_create_failed: "
+    (M.recreate_apple_build_volume ~volume_name ~size:"128g" ~timeout_sec:5.0);
+  Alcotest.(check string)
+    "absent: recreate's probe, ensure's probe, then the failing create, no delete"
+    (String.concat
+       ""
+       [ "volume inspect masc-keeper-build-fixture\n"
+       ; "volume list --format json\n"
+       ; "volume inspect masc-keeper-build-fixture\n"
+       ; "volume list --format json\n"
+       ; "volume create -s 128g masc-keeper-build-fixture\n"
+       ])
+    (calls ());
+  install ~create_exit:failing_create_exit ~inspect_absent_exit:1 ();
+  close_out (open_out marker);
+  expect_error
+    ~prefix:"microvm_build_volume_create_failed: "
+    (M.recreate_apple_build_volume ~volume_name ~size:"128g" ~timeout_sec:5.0);
+  Alcotest.(check string)
+    "present: delete, probe, then the failing create"
+    (String.concat
+       ""
+       [ "volume inspect masc-keeper-build-fixture\n"
+       ; "volume delete masc-keeper-build-fixture\n"
+       ; "volume inspect masc-keeper-build-fixture\n"
+       ; "volume list --format json\n"
+       ; "volume create -s 128g masc-keeper-build-fixture\n"
+       ])
+    (calls ())
+;;
+
+let test_plan_build_link_never_deletes_real_build_output () =
+  let target = "/masc-build/masc-t362" in
+  Alcotest.(check bool)
+    "absent -> create"
+    true
+    (M.plan_build_link ~target M.Build_absent = M.Link_create target);
+  Alcotest.(check bool)
+    "correct link -> no work"
+    true
+    (M.plan_build_link ~target (M.Build_symlink target) = M.Link_already_correct);
+  Alcotest.(check bool)
+    "stale link -> retarget (removing a symlink loses no data)"
+    true
+    (M.plan_build_link ~target (M.Build_symlink "/masc-build/old") = M.Link_retarget target);
+  (* The one that matters: a real directory holds output this module did not
+     create, so it is reported and left alone. *)
+  Alcotest.(check bool)
+    "real directory -> refused, never deleted"
+    true
+    (M.plan_build_link ~target M.Build_real_directory = M.Link_refused_real_directory)
+;;
+
+let test_build_link_target_is_flat_and_unique_per_checkout () =
+  Alcotest.(check string)
+    "top-level checkout"
+    "/masc-build/masc-t362"
+    (ok_exn (M.build_link_target ~playground_relative:"masc-t362"));
+  Alcotest.(check string)
+    "nested checkout flattens"
+    "/masc-build/repos:wt-370"
+    (ok_exn (M.build_link_target ~playground_relative:"repos/wt-370"));
+  Alcotest.(check bool)
+    "siblings do not collide"
+    false
+    (String.equal
+       (ok_exn (M.build_link_target ~playground_relative:"repos/wt-370"))
+       (ok_exn (M.build_link_target ~playground_relative:"repos/wt-370-landing")))
+;;
+
+let test_build_link_target_refuses_ambiguous_paths () =
+  ignore (error_exn (M.build_link_target ~playground_relative:"repos:wt/a") : string);
+  ignore (error_exn (M.build_link_target ~playground_relative:"repos//wt") : string);
+  ignore (error_exn (M.build_link_target ~playground_relative:"") : string)
+;;
+
+let test_build_scan_argv_runs_as_the_keeper_in_the_work_root () =
+  let argv =
+    M.build_scan_argv_for
+      Backend.Apple_container
+      ~container_name:"masc-keeper-vm-polisher-abc"
+      ~keeper_work_root:"/masc-work/polisher"
+      ~uid:501
+      ~gid:20
+  in
+  Alcotest.(check bool) "goes through container exec" true (contains "exec" argv);
+  Alcotest.(check bool)
+    "runs as the keeper, whose tree it is -- not root"
+    true
+    (adjacent ~flag:"--user" ~value:"501:20" argv);
+  Alcotest.(check bool)
+    "cwd is the keeper's work root"
+    true
+    (adjacent ~flag:"-w" ~value:"/masc-work/polisher" argv);
+  let script =
+    match List.rev argv with
+    | script :: "-c" :: "sh" :: _ -> script
+    | _ -> Alcotest.fail "scan is not a sh -c script"
+  in
+  List.iter
+    (fun needle ->
+      Alcotest.(check bool)
+        (needle ^ " is in the scan")
+        true
+        (Astring.String.is_infix ~affix:needle script))
+    [ "find ."; "_build"; ".git"; "dune-project"; "readlink" ]
+;;
+
+let test_build_scan_rows_of_output_parses_the_three_shapes () =
+  Alcotest.(check bool)
+    "absent"
+    true
+    (M.build_scan_rows_of_output "masc-t362\tabsent"
+     = [ { M.checkout = "masc-t362"; state = M.Build_absent } ]);
+  Alcotest.(check bool)
+    "real"
+    true
+    (M.build_scan_rows_of_output "repos/wt-370\treal"
+     = [ { M.checkout = "repos/wt-370"; state = M.Build_real_directory } ]);
+  Alcotest.(check bool)
+    "symlink carries its current target"
+    true
+    (M.build_scan_rows_of_output "masc-t362\tsymlink\t/masc-build/masc-t362"
+     = [ { M.checkout = "masc-t362"; state = M.Build_symlink "/masc-build/masc-t362" } ]);
+  Alcotest.(check bool)
+    "an unrecognized line is dropped, not raised on"
+    true
+    (M.build_scan_rows_of_output "garbage" = [])
+;;
+
+let test_build_scan_rows_of_output_skips_blank_and_malformed_lines () =
+  let raw =
+    "masc-t362\tabsent\n\nrepos/wt-370\treal\ngarbage-line\nlane-smith\tsymlink\t/masc-build/lane-smith\n"
+  in
+  let rows = M.build_scan_rows_of_output raw in
+  Alcotest.(check int) "three valid rows; blank and garbage lines dropped" 3 (List.length rows);
+  Alcotest.(check (list string))
+    "checkouts in order"
+    [ "masc-t362"; "repos/wt-370"; "lane-smith" ]
+    (List.map (fun (r : M.build_scan_row) -> r.checkout) rows)
+;;
+
+let test_build_link_rows_of_scan_decides_purely () =
+  let rows =
+    M.build_link_rows_of_scan
+      [ { M.checkout = "masc-t362"; state = M.Build_absent }
+      ; { M.checkout = "repos/wt-370"; state = M.Build_symlink "/masc-build/repos:wt-370" }
+      ; { M.checkout = "repos/wt-370-stale"; state = M.Build_symlink "/masc-build/old" }
+      ; { M.checkout = "occupied"; state = M.Build_real_directory }
+      ]
+  in
+  let plan_for checkout =
+    (List.find (fun (r : M.build_link_row) -> String.equal r.checkout checkout) rows).plan
+  in
+  Alcotest.(check bool)
+    "absent creates"
+    true
+    (match plan_for "masc-t362" with
+     | M.Link_create _ -> true
+     | _ -> false);
+  Alcotest.(check bool)
+    "an already-correct link is a no-op"
+    true
+    (plan_for "repos/wt-370" = M.Link_already_correct);
+  Alcotest.(check bool)
+    "a stale link retargets -- removing a symlink loses no data"
+    true
+    (match plan_for "repos/wt-370-stale" with
+     | M.Link_retarget _ -> true
+     | _ -> false);
+  (* The one that matters: real build output is refused, never deleted. *)
+  Alcotest.(check bool)
+    "real output is refused"
+    true
+    (plan_for "occupied" = M.Link_refused_real_directory)
+;;
+
+let test_build_link_refusal_message_names_the_checkout () =
+  let message = M.build_link_refusal_message ~checkout:"repos/wt-370" in
+  Alcotest.(check bool)
+    "names the checkout's _build"
+    true
+    (Astring.String.is_infix ~affix:"repos/wt-370/_build" message);
+  Alcotest.(check bool)
+    "says it was left alone, not deleted"
+    true
+    (Astring.String.is_infix ~affix:"rather than deleted" message)
+;;
+
+let test_build_link_actions_only_includes_create_and_retarget () =
+  let rows =
+    [ { M.checkout = "a"; target = Some "/masc-build/a"; plan = M.Link_create "/masc-build/a" }
+    ; { M.checkout = "b"; target = Some "/masc-build/b"; plan = M.Link_retarget "/masc-build/b" }
+    ; { M.checkout = "c"; target = Some "/masc-build/c"; plan = M.Link_already_correct }
+    ; { M.checkout = "d"; target = None; plan = M.Link_refused_real_directory }
+    ]
+  in
+  Alcotest.(check bool)
+    "only create and retarget produce a guest action, in row order"
+    true
+    (M.build_link_actions rows = [ "a", "/masc-build/a"; "b", "/masc-build/b" ])
+;;
+
+let test_build_link_targets_include_already_correct_links () =
+  let rows =
+    [ { M.checkout = "a"; target = Some "/masc-build/a"; plan = M.Link_create "/masc-build/a" }
+    ; { M.checkout = "b"; target = Some "/masc-build/b"; plan = M.Link_retarget "/masc-build/b" }
+    ; { M.checkout = "c"; target = Some "/masc-build/c"; plan = M.Link_already_correct }
+    ; { M.checkout = "d"; target = None; plan = M.Link_refused_real_directory }
+    ]
+  in
+  Alcotest.(check (list string))
+    "a fresh build volume is empty, so an already-correct link needs its target made too"
+    [ "/masc-build/a"; "/masc-build/b"; "/masc-build/c" ]
+    (M.build_link_targets rows)
+;;
+
+let test_build_link_apply_argv_carries_positional_pairs () =
+  let argv =
+    M.build_link_apply_argv_for
+      Backend.Apple_container
+      ~container_name:"masc-keeper-vm-polisher-abc"
+      ~keeper_work_root:"/masc-work/polisher"
+      ~uid:501
+      ~gid:20
+      ~actions:[ "masc-t362", "/masc-build/masc-t362"; "repos/wt-370", "/masc-build/repos:wt-370" ]
+  in
+  Alcotest.(check bool) "goes through container exec" true (contains "exec" argv);
+  Alcotest.(check bool)
+    "runs as the keeper, whose tree it is -- not root"
+    true
+    (adjacent ~flag:"--user" ~value:"501:20" argv);
+  Alcotest.(check bool)
+    "cwd is the keeper's work root"
+    true
+    (adjacent ~flag:"-w" ~value:"/masc-work/polisher" argv);
+  Alcotest.(check bool)
+    "every pair travels as positional args, checkout then target, in order"
+    true
+    (match List.rev argv with
+     | t2 :: c2 :: t1 :: c1 :: _name :: _script :: "-c" :: "sh" :: _ ->
+       String.equal c1 "masc-t362"
+       && String.equal t1 "/masc-build/masc-t362"
+       && String.equal c2 "repos/wt-370"
+       && String.equal t2 "/masc-build/repos:wt-370"
+     | _ -> false);
+  let script =
+    match List.rev argv with
+    | _ :: _ :: _ :: _ :: _name :: script :: "-c" :: "sh" :: _ -> script
+    | _ -> Alcotest.fail "apply is not a sh -c script with a $0 placeholder before the pairs"
+  in
+  Alcotest.(check bool)
+    "ln -sfn is in the apply script -- atomic, and refuses a real directory"
+    true
+    (Astring.String.is_infix ~affix:"ln -sfn" script)
+;;
+
+let test_build_link_apply_argv_with_no_actions_is_still_a_valid_script () =
+  let argv =
+    M.build_link_apply_argv_for
+      Backend.Apple_container
+      ~container_name:"masc-keeper-vm-polisher-abc"
+      ~keeper_work_root:"/masc-work/polisher"
+      ~uid:501
+      ~gid:20
+      ~actions:[]
+  in
+  Alcotest.(check bool)
+    "no positional pairs beyond the $0 placeholder"
+    true
+    (match List.rev argv with
+     | "masc-build-link" :: _script :: "-c" :: "sh" :: _ -> true
+     | _ -> false)
+;;
+
+let test_build_target_mkdir_argv_runs_as_root_for_every_target () =
+  (* dune does not create the directory a _build symlink points at -- it
+     lstats _build, sees the link, and opens _build/.lock straight away
+     ("Error: open(_build/.lock): No such file or directory"). The host
+     cannot create it either, since it lives inside the volume's ext4 image.
+     So the guest creates as root with a mode that lets the keeper write. *)
+  let argv =
+    M.build_target_mkdir_argv
+      ~container_name:"masc-keeper-vm-polisher-abc"
+      ~targets:[ "/masc-build/masc-t362"; "/masc-build/repos:wt-370" ]
+  in
+  Alcotest.(check bool) "goes through container exec" true (contains "exec" argv);
+  Alcotest.(check bool) "names the guest" true (contains "masc-keeper-vm-polisher-abc" argv);
+  Alcotest.(check bool) "creates as root" true (adjacent ~flag:"--user" ~value:"0:0" argv);
+  Alcotest.(check bool) "mkdir -p, so repeating is safe" true (adjacent ~flag:"mkdir" ~value:"-p" argv);
+  Alcotest.(check bool) "explicit mode" true (adjacent ~flag:"-m" ~value:"0777" argv);
+  Alcotest.(check bool)
+    "both targets are created in one command"
+    true
+    (contains "/masc-build/masc-t362" argv && contains "/masc-build/repos:wt-370" argv)
+;;
+
 let test_volume_create_argv_carries_a_size () =
   let argv = M.apple_volume_create_argv ~volume_name:"masc-keeper-work-x" ~size:"64g" in
   Alcotest.(check bool) "goes through container" true (contains "container" argv);
@@ -2327,6 +2768,44 @@ let () =
             test_volume_probe_confirms_exit_one_against_the_listing
         ; Alcotest.test_case "ambiguity is never read as absence" `Quick
             test_volume_probe_refuses_to_guess
+        ] )
+    ; ( "build volume"
+      , [ Alcotest.test_case "build volume is named and mounted at its root" `Quick
+            test_build_volume_name_is_keeper_scoped
+        ; Alcotest.test_case "build volume name refuses unsafe names" `Quick
+            test_build_volume_name_refuses_unsafe_names
+        ; Alcotest.test_case "build volume mount targets the guest root" `Quick
+            test_build_volume_mount_targets_the_guest_root
+        ; Alcotest.test_case "apple build volume delete argv names the volume" `Quick
+            test_apple_build_volume_delete_argv_names_the_volume
+        ; Alcotest.test_case "recreate shares the work volume's commands" `Quick
+            test_recreate_apple_build_volume_shares_the_work_volume_commands
+        ; Alcotest.test_case "plan never deletes real build output" `Quick
+            test_plan_build_link_never_deletes_real_build_output
+        ; Alcotest.test_case "build link target is flat and unique per checkout" `Quick
+            test_build_link_target_is_flat_and_unique_per_checkout
+        ; Alcotest.test_case "build link target refuses ambiguous paths" `Quick
+            test_build_link_target_refuses_ambiguous_paths
+        ; Alcotest.test_case "build scan argv runs as the keeper in the work root" `Quick
+            test_build_scan_argv_runs_as_the_keeper_in_the_work_root
+        ; Alcotest.test_case "build scan rows of output parses the three shapes" `Quick
+            test_build_scan_rows_of_output_parses_the_three_shapes
+        ; Alcotest.test_case "build scan rows of output skips blank and malformed lines" `Quick
+            test_build_scan_rows_of_output_skips_blank_and_malformed_lines
+        ; Alcotest.test_case "build link rows of scan decides purely" `Quick
+            test_build_link_rows_of_scan_decides_purely
+        ; Alcotest.test_case "build link refusal message names the checkout" `Quick
+            test_build_link_refusal_message_names_the_checkout
+        ; Alcotest.test_case "build link actions only includes create and retarget" `Quick
+            test_build_link_actions_only_includes_create_and_retarget
+        ; Alcotest.test_case "build link targets include already-correct links" `Quick
+            test_build_link_targets_include_already_correct_links
+        ; Alcotest.test_case "build link apply argv carries positional pairs" `Quick
+            test_build_link_apply_argv_carries_positional_pairs
+        ; Alcotest.test_case "build link apply argv with no actions is still a valid script" `Quick
+            test_build_link_apply_argv_with_no_actions_is_still_a_valid_script
+        ; Alcotest.test_case "build target mkdir argv runs as root for every target" `Quick
+            test_build_target_mkdir_argv_runs_as_root_for_every_target
         ] )
     ; ( "guest env"
       , [ Alcotest.test_case "env follows the config mount" `Quick

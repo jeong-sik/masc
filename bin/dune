@@ -1275,7 +1275,6 @@
   masc.sse_wire
   masc_tui_task_flow
   masc_tui_usage_trend
-  masc_tui_overview_tasks
   masc_tui_runtime_config_view
   masc_tui_frame
   masc_tui_image_preview

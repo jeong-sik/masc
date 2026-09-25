@@ -87,7 +87,7 @@ val resolve_keeper_confined_write_path
   -> meta:Keeper_meta_contract.keeper_meta
   -> endpoint:Keeper_alerting_path.confined_path_endpoint
   -> raw_path:string
-  -> (Keeper_alerting_path.confined_path, string) result
+  -> (Keeper_alerting_path.confined_path, Keeper_alerting_path.path_refusal) result
 
 (** Resolve a write target in the Keeper's deterministic logical namespace.
     Relative paths are always rooted at that Keeper's playground. Absolute
@@ -100,7 +100,7 @@ val resolve_keeper_read_path
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> raw_path:string
-  -> (string, string) result
+  -> (string, Keeper_alerting_path.path_refusal) result
 
 (** Resolve a caller-declared [cwd] against the read boundary WITHOUT the
     logical-path projection: no container-root rewrite and no playground
@@ -110,7 +110,7 @@ val resolve_keeper_read_cwd
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> raw_path:string
-  -> (string, string) result
+  -> (string, Keeper_alerting_path.path_refusal) result
 
 (** [resolve_keeper_read_cwd] for the execute/write boundary. The successful
     result retains the resolver's opaque root-capability witness until the
@@ -134,7 +134,7 @@ val resolve_projected_keeper_read_path
   -> meta:Keeper_meta_contract.keeper_meta
   -> raw_for_error:string
   -> projected_path:string
-  -> (string, string) result
+  -> (string, Keeper_alerting_path.path_refusal) result
 
 val keeper_agent_sender : meta:Keeper_meta_contract.keeper_meta -> string
 

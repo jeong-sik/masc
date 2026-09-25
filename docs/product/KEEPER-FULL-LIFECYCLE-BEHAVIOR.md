@@ -53,7 +53,7 @@ path. Neither authority belongs in the Keeper roster or Keeper count.
 Keeper configuration contains no model or provider policy. Runtime assignment is the only routing SSOT.
 
 Librarian, judgment, board-attention, and other ordinary LLM
-sub-lanes accept any general text Runtime in a frozen declared order. Different
+sub-lanes accept any general text Runtime in a frozen candidate order declared in configuration. Different
 lanes may use different first slots for load distribution. Runtime order is
 never inferred from price, tier, provider name, or error prose.
 

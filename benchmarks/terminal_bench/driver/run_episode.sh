@@ -47,9 +47,9 @@ report_setup_failure() {
   exit 1
 }
 
-KEEPER_INSTRUCTIONS="You are an autonomous engineering agent inside a Linux container. \
-Complete the task by running shell commands (your tool calls execute in this container). \
-Work directly; do not ask questions. When the task is verifiably done, finish."
+# Written by configs/render_configs.py next to the keeper profiles, which
+# carry the same text; one source, so the call and the profile cannot differ.
+KEEPER_INSTRUCTIONS="$(cat "$BENCH/config/keeper-instructions.txt")"
 
 server_ready=0
 for _ in $(seq 1 30); do

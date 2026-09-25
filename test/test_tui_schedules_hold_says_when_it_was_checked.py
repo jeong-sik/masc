@@ -42,6 +42,7 @@ def fixtures_with_hold(runner_status: str):
         "occurrence_id": HELD_ID.decode(),
         "due_at": float(calendar.timegm((2026, 8, 25, 9, 40, 0))),
         "due_at_iso": "2026-08-25T09:40:00Z",
+        "reason": {"kind": "previous_occurrence_unconsumed"},
         "observed_at": float(calendar.timegm((2026, 8, 25, 9, 45, 30))),
         "observed_at_iso": "2026-08-25T09:45:30Z",
     }

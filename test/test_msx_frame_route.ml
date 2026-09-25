@@ -50,9 +50,9 @@ let test_retained_tick () =
         let first_status, first = Route.tick_response
             ~body:{|{"frames":1,"pixel_response":"retained"}|} in
         check bool "first tick succeeds" true (first_status = `OK);
-        (match Lane.current_mark (), member "change_count" first,
+        (match Lane.current_publication (), member "change_count" first,
                member "incarnation" first with
-         | Some mark, Some (`Int count), Some (`String incarnation) ->
+         | Lane.Stable mark, Some (`Int count), Some (`String incarnation) ->
              check int "tick includes its machine change count" mark.count count;
              check string "tick includes its machine incarnation"
                mark.incarnation incarnation

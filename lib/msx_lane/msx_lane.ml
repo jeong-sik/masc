@@ -654,6 +654,10 @@ let step_frame ~frames =
     | Error _ as error -> error
     | Ok () ->
         advance st frames;
+        (* Close the run here, not in [with_machine]'s finally, so the mark
+           returned with these pixels is the one a spectator reads next.
+           The publication is then [Stable], and the finally leaves it. *)
+        mark_change ();
         let mark = { count = !change_count; incarnation = st.incarnation } in
         Ok (frame_of st, List.rev st.entries, mark))
 ;;

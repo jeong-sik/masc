@@ -3136,7 +3136,8 @@ let render_board_read (state : state) (list_post : board_post) =
         (Masc_tui_keys.footer_hints_board_read
            ~focus_posts:(state.board_focus = Left_pane)
            ~split:
-             (cols >= keeper_split_threshold_cols && not state.board_detail_wide))
+             (cols >= keeper_split_threshold_cols && not state.board_detail_wide)
+           ~wide:state.board_detail_wide)
   in
   if cols < keeper_split_threshold_cols || state.board_detail_wide then begin
     let scroll = board_read_pane state list_post ~rows ~cols buf in

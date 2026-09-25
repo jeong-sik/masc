@@ -4846,7 +4846,9 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         if reference not in detail:
             raise AssertionError(f"Board detail omitted its stable link: {detail!r}")
         copy_reference(process, master_fd, output, reference)
-        wide = send_and_wait(process, master_fd, output, b"z", b"z:wide")
+        # The label is where the key goes, so the wide detail offers the list
+        # back rather than the width it already has.
+        wide = send_and_wait(process, master_fd, output, b"z", b"z:list")
         wide_frame = frame_containing(wide, reference)
         if b"Board (3)" in wide_frame:
             raise AssertionError(

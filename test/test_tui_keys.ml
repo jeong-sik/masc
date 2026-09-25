@@ -665,7 +665,10 @@ let test_board_read_footer_carries_the_post_keys () =
   let list = Masc_tui_keys.footer_hints Board in
   List.iter
     (fun split ->
-      let read = Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~split in
+      let read =
+        Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~split
+          ~wide:(not split)
+      in
       List.iter
         (fun key ->
           Alcotest.(check bool) (Printf.sprintf "read footer (split=%b) names %s" split key) true
@@ -678,7 +681,29 @@ let test_board_read_footer_carries_the_post_keys () =
     [ false; true ];
   Alcotest.(check bool) "j/k names what it moves" true
     (holds "j/k:posts"
-       (Masc_tui_keys.footer_hints_board_read ~focus_posts:true ~split:true))
+       (Masc_tui_keys.footer_hints_board_read ~focus_posts:true ~split:true
+          ~wide:false))
+
+(* [z] goes both ways, so its label is where it goes. Drawn as "wide" in either
+   state it named the screen the operator was already on: live at two hundred
+   columns, a wide detail's footer offered to widen it. *)
+let test_the_wide_key_names_where_it_goes () =
+  let holds needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec scan i = i + n <= h && (String.equal (String.sub haystack i n) needle || scan (i + 1)) in
+    scan 0
+  in
+  let hints ~wide =
+    Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~split:(not wide) ~wide
+  in
+  Alcotest.(check bool) "a split detail offers the wide one" true
+    (holds "z:wide" (hints ~wide:false));
+  Alcotest.(check bool) "and does not offer the list it already draws" false
+    (holds "z:list" (hints ~wide:false));
+  Alcotest.(check bool) "a wide detail offers the list back" true
+    (holds "z:list" (hints ~wide:true));
+  Alcotest.(check bool) "and does not offer the width it already has" false
+    (holds "z:wide" (hints ~wide:true))
 
 let test_fusion_historical_evidence_is_a_selectable_board_reference () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
@@ -2909,6 +2934,8 @@ let () =
             test_detail_tab_bindings_cover_the_live_keys
         ; Alcotest.test_case "board compose footers are projected" `Quick
             test_board_compose_footers_are_projected
+        ; Alcotest.test_case "the wide key names where it goes" `Quick
+            test_the_wide_key_names_where_it_goes
         ; Alcotest.test_case "key atoms read the table notation" `Quick
             test_key_atoms_read_the_table_notation
         ; Alcotest.test_case "detail tab strip projects the table" `Quick

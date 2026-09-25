@@ -162,7 +162,11 @@ val footer_hints_resources : detail_focus:bool -> string
 (** The Resources footer, with [j/k] relabelled for the focused pane. All
     other keys still project from {!for_surface}. *)
 
-val footer_hints_board_read : focus_posts:bool -> split:bool -> string
+val footer_hints_board_read :
+  focus_posts:bool -> split:bool -> wide:bool -> string
+(** [wide] is the detail-owns-the-screen state, which is what [z] toggles: the
+    key's label names where it goes, so it reads "list" from a wide detail and
+    "wide" from a split one. *)
 (** The Board read footer. [focus_posts] is whether j/k moves the post list
     beside the open post rather than scrolling it; [split] is whether that
     list is on screen, which is when h/l and Ctrl-W have a pane to reach. The

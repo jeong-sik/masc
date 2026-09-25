@@ -1118,7 +1118,7 @@ let cancels_two_press ~input_seen ~key ~second_press =
    [K] and [B] answer in the detail as they do on the list (masc_tui.ml
    matches them under [Fusion_detail]); the footer left them out, and a body
    row said "K Keeper · B Board" in its own notation instead. *)
-let footer_hints_board_read ~focus_posts ~split =
+let footer_hints_board_read ~focus_posts ~split ~wide =
   hints_of_bindings
     ([ b Navigate "j/k" (if focus_posts then "posts" else "scroll")
      ; b Navigate "[/]" "post"
@@ -1126,7 +1126,10 @@ let footer_hints_board_read ~focus_posts ~split =
      ]
      @ (if split then [ b Navigate "h/l" "pane"; b Navigate "Ctrl-W" "switch" ]
         else [])
-     @ [ b Navigate "z" "wide"
+     (* The label is where the key goes, and [z] goes both ways. Drawn as
+        "wide" in either state it named the screen an operator was already
+        looking at: on a wide detail the footer offered to widen it. *)
+     @ [ b Navigate "z" (if wide then "list" else "wide")
        ; board_vote_key
        ; board_reply_key
        ; board_copy_key

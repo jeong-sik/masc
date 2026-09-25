@@ -1001,14 +1001,24 @@ let load_owned_regular_file ~ownership_root path =
   |> Result.map (Option.map (fun contents -> contents.content))
 ;;
 
-let sha256_owned_regular_file_blocking ~ownership_root path =
+type owned_regular_file_digest =
+  { sha256 : string
+  ; snapshot : owned_regular_file_snapshot
+  }
+
+let sha256_owned_regular_file_with_snapshot_blocking ~ownership_root path =
   load_owned_regular_file_blocking_with ~ownership_root
     ~read_descriptor:(fun ~path fd descriptor ->
       try
         (* Fixed I/O buffer; file size does not determine memory allocation. *)
         let buffer = Bytes.create 65536 in
         let rec feed context remaining =
-          if remaining = 0 then Ok Digestif.SHA256.(to_hex (get context))
+          if remaining = 0
+          then
+            Ok
+              { sha256 = Digestif.SHA256.(to_hex (get context))
+              ; snapshot = owned_regular_file_snapshot_of_stats descriptor
+              }
           else match Unix.read fd buffer 0 (min remaining (Bytes.length buffer)) with
             | 0 -> owned_file_error (Filesystem_identity_changed { path })
             | count -> feed (Digestif.SHA256.feed_bytes context ~off:0 ~len:count buffer) (remaining - count)
@@ -1021,14 +1031,22 @@ let sha256_owned_regular_file_blocking ~ownership_root path =
     path
 ;;
 
-let sha256_owned_regular_file ~ownership_root path =
+let sha256_owned_regular_file_with_snapshot ~ownership_root path =
   with_fs_or_fallback ~path
-    ~fallback:(fun () -> sha256_owned_regular_file_blocking ~ownership_root path)
+    ~fallback:(fun () ->
+      sha256_owned_regular_file_with_snapshot_blocking ~ownership_root path)
     (fun _fs ->
       let result = Eio_unix.run_in_systhread ~label:(labelled "fs-compat-hash-owned-file" path)
-        (fun () -> sha256_owned_regular_file_blocking ~ownership_root path) in
+        (fun () ->
+          sha256_owned_regular_file_with_snapshot_blocking ~ownership_root path) in
       Eio.Fiber.check ();
       result)
+;;
+
+let sha256_owned_regular_file ~ownership_root path =
+  sha256_owned_regular_file_with_snapshot ~ownership_root path
+  |> Result.map
+       (Option.map (fun (digest : owned_regular_file_digest) -> digest.sha256))
 ;;
 
 type owned_regular_file_prefix =

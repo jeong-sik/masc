@@ -166,6 +166,22 @@ val sha256_owned_regular_file
     descriptor. The same parent-chain, identity and before/after snapshot checks
     as {!load_owned_regular_file_with_snapshot} apply; no file-size allocation. *)
 
+type owned_regular_file_digest =
+  { sha256 : string
+  ; snapshot : owned_regular_file_snapshot
+  }
+
+val sha256_owned_regular_file_with_snapshot
+  :  ownership_root:string
+  -> string
+  -> (owned_regular_file_digest option, owned_regular_file_read_error) result
+(** {!sha256_owned_regular_file} plus the snapshot of the descriptor it hashed.
+    A digest proves nothing about bytes read through a different descriptor:
+    a caller that pairs this digest with such bytes must first check
+    {!equal_owned_regular_file_snapshot} on the two snapshots, and treat a
+    mismatch as "the file changed between the reads" rather than as a
+    validated pair. *)
+
 type owned_regular_file_prefix =
   { content : string
   ; file_size : int

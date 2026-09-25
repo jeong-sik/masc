@@ -458,6 +458,89 @@ let test_fetch_range_cold_validates_without_materialising () =
              "warm fetch_range failed: %s"
              (B.fetch_error_to_string error)))
 
+let test_fetch_range_cold_does_not_pair_a_window_with_another_states_digest () =
+  (* #38972. The cold read takes the window through one descriptor and the
+     digest through a second. The [between_reads] seam swaps the shard between
+     the two, without a race: the window is read from corrupt bytes C, then
+     the payload P is restored, so the digest covers P and matches the
+     address. The two descriptors report different snapshots, so the pair
+     must not be admitted. The call must return P's window from one
+     consistent re-read, and C's snapshot must never become the cached
+     validated state. Removing the snapshot comparison serves C's window as
+     verified and caches C, which this test catches. *)
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let payload = String.make 8_192 'p' in
+      let corrupt = String.make 8_192 'c' in
+      match B.put store ~bytes:payload ~mime:"text/plain" with
+      | O.Inline _ -> Alcotest.fail "put returned Inline"
+      | O.Stored { sha256; _ } ->
+        let path =
+          Filename.concat
+            (Filename.concat (B.root_dir store) (String.sub sha256 0 2))
+            sha256
+        in
+        let write bytes =
+          match Fs_compat.save_file_atomic path bytes with
+          | Ok () -> ()
+          | Error error -> Alcotest.failf "failed to write fixture: %s" error
+        in
+        let snapshot_now () =
+          match
+            Fs_compat.load_owned_regular_file_with_snapshot
+              ~ownership_root:dir
+              path
+          with
+          | Ok (Some (contents : Fs_compat.owned_regular_file_contents)) ->
+            contents.snapshot
+          | Ok None -> Alcotest.fail "fixture shard is missing"
+          | Error _ -> Alcotest.fail "fixture shard is unreadable"
+        in
+        let is_cached expected =
+          match B.For_testing.validated_snapshot store ~sha256 with
+          | Some cached -> Fs_compat.equal_owned_regular_file_snapshot cached expected
+          | None -> false
+        in
+        write corrupt;
+        let corrupt_snapshot = snapshot_now () in
+        Alcotest.(check bool)
+          "the range cache starts cold for this address"
+          true
+          (Option.is_none (B.For_testing.validated_snapshot store ~sha256));
+        let swaps = ref 0 in
+        let between_reads () =
+          incr swaps;
+          write payload
+        in
+        (match
+           B.For_testing.fetch_range
+             ~between_reads
+             store
+             ~sha256
+             ~offset:0
+             ~max_bytes:64
+         with
+         | Ok (Some range) ->
+           Alcotest.(check string)
+             "the window comes from the state that was hashed"
+             (String.sub payload 0 64)
+             range.content;
+           Alcotest.(check int) "total bytes" 8_192 range.total_bytes
+         | Ok None -> Alcotest.fail "fetch_range returned None"
+         | Error error ->
+           Alcotest.failf
+             "fetch_range failed: %s"
+             (B.fetch_error_to_string error));
+        Alcotest.(check int) "the seam ran once, on the cold path" 1 !swaps;
+        Alcotest.(check bool)
+          "the unhashed corrupt state is not cached as validated"
+          false
+          (is_cached corrupt_snapshot);
+        Alcotest.(check bool)
+          "the cache holds the state the re-read validated"
+          true
+          (is_cached (snapshot_now ())))
+
 let test_idempotent_put () =
   (* Same content twice = same sha = same path, no error. *)
   with_temp_dir (fun dir ->
@@ -1664,6 +1747,8 @@ let () =
             test_fetch_range_miss_returns_none_fast;
           Alcotest.test_case "cold fetch range validates without materialising" `Quick
             test_fetch_range_cold_validates_without_materialising;
+          Alcotest.test_case "cold fetch range never pairs a window with another state's digest" `Quick
+            test_fetch_range_cold_does_not_pair_a_window_with_another_states_digest;
           Alcotest.test_case "fetch miss = None" `Quick test_fetch_miss;
           Alcotest.test_case "idempotent put" `Quick test_idempotent_put;
           Alcotest.test_case "put writes an address again only after fetch finds it gone" `Quick

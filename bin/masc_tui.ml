@@ -17781,6 +17781,11 @@ and is loaded on demand through keeper_skill.
                   report_action state "error"
                     (Printf.sprintf "SKILL.md is too large: %d bytes (maximum %d)"
                        bytes max_bytes)
+                | Error (Masc.Keeper_skill_catalog.Body_too_large_to_read { bytes; max_bytes }) ->
+                  report_action state "error"
+                    (Printf.sprintf
+                       "SKILL.md body is %d bytes; Keepers read at most %d bytes"
+                       bytes max_bytes)
                 | Error (Masc.Keeper_skill_catalog.Invalid_document error) ->
                   report_action state "error" (Masc.Keeper_skill_catalog.error_to_string error)
                 | Ok _ ->

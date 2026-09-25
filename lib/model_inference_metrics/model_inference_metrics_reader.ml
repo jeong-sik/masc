@@ -77,7 +77,7 @@ let read_cost_entries_dated ~base_path ~since_unix
       (function
         | Dated_jsonl.Parsed json ->
           (match Cost_ledger.of_json json with
-           | Ok { usage_projection = Cost_ledger.Raw_observation; _ } -> ()
+           | Ok { usage_projection = Cost_ledger.Raw_observation _; _ } -> ()
            | Ok _ | Error _ ->
              (match parse_cost_entry json ~since_unix with
               | Ok entry -> entries := entry :: !entries

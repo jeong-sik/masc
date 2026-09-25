@@ -132,6 +132,8 @@ type misc_operation =
   | Misc_dos_type
   | Misc_dos_peek
   | Misc_dos_pass
+  | Misc_dos_save
+  | Misc_dos_restore
 [@@deriving enumerate]
 (** Closed vocabulary routed by [Tool_misc.dispatch]. *)
 

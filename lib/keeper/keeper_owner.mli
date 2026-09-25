@@ -33,6 +33,13 @@ type operation_projection =
   ; terminal_count : int
   ; interrupted_count : int
   ; store_unavailable : bool
+  ; autonomous_owed_slot : bool
+      (** The slot the deferral debt cap holds open for the autonomous lane,
+          sampled at this snapshot's publish: a read the operation store
+          cannot answer, so the Owner threads it with the inventory. An
+          autonomous turn admitted into such a slot must not hand it back
+          because [has_claimable_queued] is true -- the chat queued behind
+          the cap is exactly what the slot was bought against. *)
   }
 
 type operation_interrupt_result =
@@ -338,6 +345,11 @@ val exact_operation
   :  t
   -> Chat_operation.Operation_id.t
   -> (Chat_operation.t option, error) result
+
+val has_newer_original_queued
+  :  t
+  -> operation_id:Chat_operation.Operation_id.t
+  -> (bool, error) result
 
 (** The running operations {!start} settled as [Interrupted_by_restart], as
     they were read before settlement. The registry leaves a failure row in the

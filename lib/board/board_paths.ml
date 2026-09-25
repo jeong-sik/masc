@@ -21,6 +21,8 @@ let file_path ~workspace_masc_dir file =
     | Votes -> "board_votes.jsonl" in
   Filename.concat workspace_masc_dir filename
 
+let posts_file ~workspace_masc_dir = file_path ~workspace_masc_dir Posts
+
 let store_file_path (store : Board_types.store) file =
   let workspace_masc_dir = match store.workspace_masc_dir with
     | Some workspace -> workspace

@@ -2949,6 +2949,17 @@ val decode_memory_fact_snapshot :
     [mfs_events_read_error] keeps a sidecar read failure distinct from an empty
     event history. *)
 
+val merge_keeper_memory_facts :
+  now:float ->
+  (string * (memory_fact_snapshot, string) result) list ->
+  memory_fact_snapshot * string option
+(** Merge per-keeper fact listings into the "all keepers" view ([mfs_keeper =
+    "*"]). Each fact is tagged with its keeper. The second value names every
+    keeper that could not be read -- a failed load, or a store answering
+    [Memory_store_read_error] -- as ["N of M keepers not read: ..."]; [None]
+    when all were read. [Memory_store_absent] is a keeper with no memory yet,
+    not a failure. *)
+
 val decode_harness_snapshot :
   Yojson.Safe.t -> (harness_snapshot, string) result
 

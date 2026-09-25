@@ -14,6 +14,7 @@
  (flags :standard -open Masc -w +33)
  (libraries
   masc.workspace_connection
+  masc.keeper_tool_name
   masc.owner_process_identity
   masc
   masc.fs_compat

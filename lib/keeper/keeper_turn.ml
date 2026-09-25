@@ -249,8 +249,8 @@ type invocation_surface =
   | Keeper_delegate
 
 let invocation_tool_name = function
-  | Direct_message -> "masc_keeper_msg"
-  | Keeper_delegate -> "masc_keeper_delegate"
+  | Direct_message -> Keeper_tool_name.(to_string Keeper_msg)
+  | Keeper_delegate -> Keeper_tool_name.(to_string Keeper_delegate)
 ;;
 
 let invocation_turn_type = function

@@ -7,7 +7,6 @@
 open Alcotest
 open Keeper_sandbox_image_catalog
 
-let digest c = "sha256:" ^ String.make 64 c
 let apple = Microvm Keeper_microvm_backend.Apple_container
 let ocaml_now = "masc-sandbox-ocaml:20260924T1130Z-3f9a1c07"
 let ocaml_before = "masc-sandbox-ocaml:20260921T0517Z-9b04e6d1"
@@ -29,23 +28,19 @@ let promoted_ocaml =
 
 [images.ocaml.apple_container]
 reference = "%s"
-digest = "%s"
-previous = { reference = "%s", digest = "%s" }
 |}
-    ocaml_now (digest 'a') ocaml_before (digest 'b')
+    ocaml_now
 
 let host_promoted_ocaml =
   Printf.sprintf
     {|[images.ocaml.apple_container]
 reference = "%s"
-digest = "%s"
-previous = { reference = "%s", digest = "%s" }
 |}
-    ocaml_now (digest 'a') ocaml_before (digest 'b')
+    ocaml_now
 
 (* [pinned] is private, so expectations are spelt as text. *)
 let describe = function
-  | Resolved p -> Printf.sprintf "Resolved %s %s" p.reference p.digest
+  | Resolved p -> Printf.sprintf "Resolved %s" p.reference
   | Unknown_image { name; known } ->
     Printf.sprintf "Unknown_image %s [%s]" name (String.concat ";" known)
   | Not_built_on_host { name; store } ->
@@ -56,8 +51,7 @@ let resolves label expected catalog ~name ~store =
 
 let test_a_promoted_name_resolves_for_its_store () =
   let catalog = parsed promoted_ocaml in
-  resolves "apple_container" ("Resolved " ^ ocaml_now ^ " " ^ digest 'a') catalog ~name:"ocaml"
-    ~store:apple;
+  resolves "apple_container" ("Resolved " ^ ocaml_now) catalog ~name:"ocaml" ~store:apple;
   resolves "docker has nothing built" "Not_built_on_host ocaml docker" catalog ~name:"ocaml"
     ~store:Docker_daemon
 
@@ -69,16 +63,13 @@ let test_an_unknown_name_lists_the_known_ones () =
   resolves "rust" "Unknown_image rust [base;ocaml]" (parsed promoted_ocaml) ~name:"rust"
     ~store:apple
 
-let test_previous_is_kept () =
+let test_a_store_holds_one_tag () =
   match entries (parsed promoted_ocaml) with
   | [ base; ocaml ] ->
     check int "base has no builds" 0 (List.length base.promoted);
-    (match ocaml.promoted with
-     | [ (store, promotion) ] ->
-       check string "store" "apple_container" (store_to_string store);
-       check (option string) "previous" (Some ocaml_before)
-         (Option.map (fun p -> p.reference) promotion.previous)
-     | _ -> fail "one promotion expected")
+    check (list (pair string string)) "ocaml's one build"
+      [ "apple_container", ocaml_now ]
+      (List.map (fun (store, pin) -> (store_to_string store, pin.reference)) ocaml.promoted)
   | _ -> fail "two entries expected"
 
 let test_an_empty_catalog_knows_no_names () =
@@ -94,25 +85,20 @@ let test_every_store_spelling_round_trips () =
 let error = testable (fun fmt e -> Format.pp_print_string fmt (parse_error_to_string e)) ( = )
 let store_path = [ "images"; "ocaml"; "apple_container" ]
 let one_store body = "[images.ocaml.apple_container]\n" ^ body
-let with_reference r = one_store (Printf.sprintf "reference = \"%s\"\ndigest = \"%s\"\n" r (digest 'a'))
+let with_reference r = one_store (Printf.sprintf "reference = \"%s\"\n" r)
 
 let test_malformed_catalogs_are_refused () =
-  let pinned_body = Printf.sprintf "reference = \"x:y\"\ndigest = \"%s\"\n" (digest 'a') in
+  let pinned_body = "reference = \"x:y\"\n" in
   check error "unknown top-level key" (Unknown_key { path = []; key = "image" })
     (refused "top" "[image.base]\n");
   check error "misspelt field" (Unknown_key { path = store_path; key = "tag" })
     (refused "field" (one_store (pinned_body ^ "tag = \"z\"\n")));
   check error "unknown store" (Unknown_store { image = "ocaml"; store = "podman" })
     (refused "store" ("[images.ocaml.podman]\n" ^ pinned_body));
-  check error "uppercase digest"
-    (Invalid_digest { path = store_path; value = "sha256:" ^ String.make 64 'A' })
-    (refused "digest"
-       (one_store (Printf.sprintf "reference = \"x:y\"\ndigest = \"sha256:%s\"\n" (String.make 64 'A'))));
-  check error "missing digest" (Missing_field { path = store_path; field = "digest" })
-    (refused "missing" (one_store "reference = \"x:y\"\n"));
-  check error "half a previous"
-    (Missing_field { path = store_path @ [ "previous" ]; field = "digest" })
-    (refused "previous" (one_store (pinned_body ^ "previous = { reference = \"x:z\" }\n")));
+  check error "missing reference" (Missing_field { path = store_path; field = "reference" })
+    (refused "missing" (one_store ""));
+  check error "reference is not a string" (Expected_string { path = store_path; field = "reference" })
+    (refused "not a string" (one_store "reference = 1\n"));
   check error "store is not a table" (Expected_table { path = store_path })
     (refused "scalar" "[images.ocaml]\napple_container = \"x:y\"\n");
   (match refused "syntax" "[images.base\n" with
@@ -128,7 +114,7 @@ let test_names_are_words_joined_by_single_dashes () =
 
 (* A reference goes into a runtime's argv. Without a tag it would mean
    "latest", with a leading '-' it would read as a flag, and a digest
-   reference is not a tag. *)
+   reference names no tag. *)
 let test_references_are_repository_and_tag () =
   List.iter
     (fun value ->
@@ -159,37 +145,49 @@ let current catalog name store =
   | Resolved p -> Some p.reference
   | Unknown_image _ | Not_built_on_host _ -> None
 
+(* The lines the host file holds besides its comment header. *)
+let body_lines text =
+  String.split_on_char '\n' text
+  |> List.filter (fun line -> line <> "" && not (String.starts_with ~prefix:"#" line))
+
 let test_to_toml_writes_only_host_builds () =
   let catalog = parsed promoted_ocaml in
   let host = parsed (to_toml catalog) in
   check (list string) "host file lists only built names" [ "ocaml" ]
     (List.map (fun entry -> entry.name) (entries host));
   check bool "host builds round-trip" true
-    (entries host = List.filter (fun entry -> entry.promoted <> []) (entries catalog))
+    (entries host = List.filter (fun entry -> entry.promoted <> []) (entries catalog));
+  check (list string) "a build is its store table and its tag"
+    [ "[images.ocaml.apple_container]"; Printf.sprintf "reference = %S" ocaml_now ]
+    (body_lines (to_toml catalog))
 
-let test_promote_keeps_what_it_replaced () =
+(* A promote puts one tag in place of another and keeps nothing of the one it
+   replaced; going back is a promote of the earlier tag. *)
+let test_promote_replaces_the_reference () =
   let next_ref = "masc-sandbox-ocaml:20260925T0900Z-11112222" in
   let next =
     changed "promote"
-      (promote (parsed promoted_ocaml) ~name:"ocaml" ~store:apple ~reference:next_ref
-         ~digest:(digest 'c'))
+      (promote (parsed promoted_ocaml) ~name:"ocaml" ~store:apple ~reference:next_ref)
   in
   check (option string) "current" (Some next_ref) (current next "ocaml" apple);
-  let back = changed "rollback" (rollback next ~name:"ocaml" ~store:apple) in
-  check (option string) "rolled back" (Some ocaml_now) (current back "ocaml" apple);
-  check (option string) "rolling back twice returns" (Some next_ref)
-    (current (changed "again" (rollback back ~name:"ocaml" ~store:apple)) "ocaml" apple);
+  check (list string) "the file holds the new tag only"
+    [ "[images.ocaml.apple_container]"; Printf.sprintf "reference = %S" next_ref ]
+    (body_lines (to_toml next));
+  let back =
+    changed "promote the earlier tag" (promote next ~name:"ocaml" ~store:apple ~reference:ocaml_now)
+  in
+  check (option string) "back on the earlier tag" (Some ocaml_now) (current back "ocaml" apple);
+  check bool "going back leaves the catalog as it was" true
+    (entries back = entries (parsed promoted_ocaml));
   check bool "promoting the current build again changes nothing" true
     (entries next
-     = entries
-         (changed "same"
-            (promote next ~name:"ocaml" ~store:apple ~reference:next_ref ~digest:(digest 'c'))))
+     = entries (changed "same" (promote next ~name:"ocaml" ~store:apple ~reference:next_ref)))
 
 let test_first_promotion_and_other_stores () =
   let next =
     changed "base on docker"
       (promote (parsed promoted_ocaml) ~name:"base" ~store:Docker_daemon
-         ~reference:"masc-sandbox:general" ~digest:(digest 'd'))
+         ~reference:"masc-sandbox:general")
   in
   check (option string) "docker" (Some "masc-sandbox:general") (current next "base" Docker_daemon);
   check (option string) "apple untouched" None (current next "base" apple);
@@ -197,18 +195,12 @@ let test_first_promotion_and_other_stores () =
 
 let test_changes_are_refused_with_reasons () =
   let catalog = parsed promoted_ocaml in
-  (match promote catalog ~name:"rust" ~store:apple ~reference:"r:1" ~digest:(digest 'a') with
+  (match promote catalog ~name:"rust" ~store:apple ~reference:"r:1" with
    | Error (No_such_image { name = "rust"; known = [ "base"; "ocaml" ] }) -> ()
    | _ -> fail "an unknown name was promoted");
-  (match promote catalog ~name:"base" ~store:apple ~reference:"r:1" ~digest:"sha256:short" with
-   | Error (Invalid_pin (Invalid_digest _)) -> ()
-   | _ -> fail "a bad digest was promoted");
-  (match promote catalog ~name:"base" ~store:apple ~reference:"-v" ~digest:(digest 'a') with
-   | Error (Invalid_pin (Invalid_reference _)) -> ()
-   | _ -> fail "a flag was promoted as a reference");
-  match rollback catalog ~name:"base" ~store:apple with
-  | Error (Nothing_to_roll_back _) -> ()
-  | _ -> fail "rolled back a name with no build"
+  match promote catalog ~name:"base" ~store:apple ~reference:"-v" with
+  | Error (Invalid_pin (Invalid_reference _)) -> ()
+  | _ -> fail "a flag was promoted as a reference"
 
 let with_dir f =
   let dir = Filename.temp_file "masc-image-catalog-" ".d" in
@@ -235,6 +227,25 @@ let saved label = function
   | Ok () -> ()
   | Error e -> fail (label ^ ": " ^ save_error_to_string e)
 
+(* A store table holds its tag and nothing else. A digest, or a record of the
+   build a promote replaced, is a key the catalog does not use, refused like
+   any other, in the host file as much as in text. *)
+let test_a_store_table_holds_only_its_tag () =
+  let with_digest =
+    one_store (Printf.sprintf "reference = \"x:y\"\ndigest = \"sha256:%s\"\n" (String.make 64 'a'))
+  in
+  check error "a digest key" (Unknown_key { path = store_path; key = "digest" })
+    (refused "digest" with_digest);
+  check error "a previous key" (Unknown_key { path = store_path; key = "previous" })
+    (refused "previous" (one_store "reference = \"x:y\"\nprevious = { reference = \"x:z\" }\n"));
+  with_dir (fun config_root ->
+    write_catalog config_root with_digest;
+    match load ~config_root ~shipped:shipped_names with
+    | Error (Invalid { error = refusal; _ }) ->
+      check error "the host file" (Unknown_key { path = store_path; key = "digest" }) refusal
+    | Error (Unreadable _ as e) -> fail (load_error_to_string e)
+    | Ok _ -> fail "a host file with a digest loaded")
+
 let test_load_reads_the_config_root () =
   with_dir (fun config_root ->
     (match load ~config_root ~shipped:shipped_names with
@@ -256,8 +267,7 @@ let test_new_shipped_names_reach_an_existing_host () =
     check (list string) "names" [ "base" ] (List.map (fun e -> e.name) (entries catalog));
     let next =
       changed "promote"
-        (promote catalog ~name:"base" ~store:apple ~reference:"masc-sandbox:general"
-           ~digest:(digest 'e'))
+        (promote catalog ~name:"base" ~store:apple ~reference:"masc-sandbox:general")
     in
     saved "first save" (save ~config_root ~expected:snapshot next);
     let expanded = shipped_names in
@@ -268,7 +278,7 @@ let test_new_shipped_names_reach_an_existing_host () =
         ~name:"ocaml" ~store:apple;
       let new_build =
         changed "promote newly shipped name"
-          (promote loaded ~name:"ocaml" ~store:apple ~reference:ocaml_now ~digest:(digest 'a'))
+          (promote loaded ~name:"ocaml" ~store:apple ~reference:ocaml_now)
       in
       let _, latest_snapshot = for_change "new name" ~config_root ~shipped:expanded in
       saved "save new name" (save ~config_root ~expected:latest_snapshot new_build)
@@ -277,15 +287,14 @@ let test_new_shipped_names_reach_an_existing_host () =
 let test_host_and_shipped_catalogs_keep_their_own_roles () =
   with_dir (fun config_root ->
     write_catalog config_root
-      (Printf.sprintf "[images.rogue.docker]\nreference = \"r:1\"\ndigest = \"%s\"\n" (digest 'a'));
+      "[images.rogue.docker]\nreference = \"r:1\"\n";
     (match load ~config_root ~shipped:shipped_names with
      | Ok catalog ->
        check (list string) "orphan is visible" [ "rogue" ]
          (List.map (fun entry -> entry.name) (orphaned_builds catalog));
        resolves "orphan cannot resolve" "Unknown_image rogue [base;ocaml]" catalog
          ~name:"rogue" ~store:Docker_daemon;
-       (match promote catalog ~name:"rogue" ~store:Docker_daemon ~reference:"r:2"
-                ~digest:(digest 'b') with
+       (match promote catalog ~name:"rogue" ~store:Docker_daemon ~reference:"r:2" with
         | Error (No_such_image _) -> ()
         | _ -> fail "orphan was promoted");
        check (list string) "orphan is preserved for an operator" [ "rogue" ]
@@ -314,8 +323,7 @@ let test_removed_shipped_name_does_not_stop_other_images_or_erase_build () =
       (List.map (fun entry -> entry.name) (orphaned_builds catalog));
     let next =
       changed "promote active name"
-        (promote catalog ~name:"base" ~store:apple ~reference:"masc-sandbox:general"
-           ~digest:(digest 'c'))
+        (promote catalog ~name:"base" ~store:apple ~reference:"masc-sandbox:general")
     in
     saved "save active and orphaned builds" (save ~config_root ~expected:snapshot next);
     let reloaded, _ = for_change "after save" ~config_root ~shipped in
@@ -324,7 +332,7 @@ let test_removed_shipped_name_does_not_stop_other_images_or_erase_build () =
     check (list string) "orphan survives save" [ "ocaml" ]
       (List.map (fun entry -> entry.name) (orphaned_builds reloaded));
     let restored, _ = for_change "restored name" ~config_root ~shipped:shipped_names in
-    check (option string) "restored name gets its previous build" (Some ocaml_now)
+    check (option string) "restored name gets its build back" (Some ocaml_now)
       (current restored "ocaml" apple))
 
 let test_a_stale_writer_writes_nothing () =
@@ -334,12 +342,11 @@ let test_a_stale_writer_writes_nothing () =
     let second, second_seen = for_change "second" ~config_root ~shipped:shipped_names in
     saved "first writer"
       (save ~config_root ~expected:first_seen
-         (changed "a" (rollback first ~name:"ocaml" ~store:apple)));
+         (changed "a" (promote first ~name:"ocaml" ~store:apple ~reference:ocaml_before)));
     (match
        save ~config_root ~expected:second_seen
          (changed "b"
-            (promote second ~name:"base" ~store:apple ~reference:"masc-sandbox:general"
-               ~digest:(digest 'f')))
+            (promote second ~name:"base" ~store:apple ~reference:"masc-sandbox:general"))
      with
      | Error (Changed_since_read _) -> ()
      | Ok () -> fail "the stale writer overwrote the first change"
@@ -354,7 +361,9 @@ let test_parent_sync_failure_reports_written_file () =
   with_dir (fun config_root ->
     write_catalog config_root host_promoted_ocaml;
     let before, snapshot = for_change "before sync failure" ~config_root ~shipped:shipped_names in
-    let after = changed "rollback" (rollback before ~name:"ocaml" ~store:apple) in
+    let after =
+      changed "promote" (promote before ~name:"ocaml" ~store:apple ~reference:ocaml_before)
+    in
     let write path content =
       Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
         ~sync_parent:(fun parent -> raise (Unix.Unix_error (Unix.EIO, "fsync", parent)))
@@ -376,11 +385,13 @@ let test_concurrent_saves_do_not_both_accept_the_same_snapshot () =
     write_catalog config_root host_promoted_ocaml;
     let first, _ = for_change "first" ~config_root ~shipped:shipped_names in
     let second, stale_expected = for_change "second" ~config_root ~shipped:shipped_names in
-    let first_next = changed "rollback" (rollback first ~name:"ocaml" ~store:apple) in
+    let first_next =
+      changed "promote ocaml" (promote first ~name:"ocaml" ~store:apple ~reference:ocaml_before)
+    in
     let second_next =
       changed "promote"
         (promote second ~name:"base" ~store:apple
-           ~reference:"masc-sandbox:general" ~digest:(digest 'f'))
+           ~reference:"masc-sandbox:general")
     in
     let path = Filename.concat config_root file_name in
     let lock_path = path ^ ".lock" in
@@ -456,7 +467,7 @@ let () =
             test_a_name_with_no_build_is_not_built_on_host
         ; test_case "an unknown name lists the known ones" `Quick
             test_an_unknown_name_lists_the_known_ones
-        ; test_case "previous is kept" `Quick test_previous_is_kept
+        ; test_case "a store holds one tag" `Quick test_a_store_holds_one_tag
         ; test_case "an empty catalog knows no names" `Quick test_an_empty_catalog_knows_no_names
         ; test_case "every store spelling round-trips" `Quick test_every_store_spelling_round_trips
         ] )
@@ -466,12 +477,14 @@ let () =
             test_names_are_words_joined_by_single_dashes
         ; test_case "references are repository and tag" `Quick
             test_references_are_repository_and_tag
+        ; test_case "a store table holds only its tag" `Quick
+            test_a_store_table_holds_only_its_tag
         ; test_case "the shipped catalog promotes nothing" `Quick
             test_the_shipped_catalog_promotes_nothing
         ] )
     ; ( "change"
       , [ test_case "to_toml writes only host builds" `Quick test_to_toml_writes_only_host_builds
-        ; test_case "promote keeps what it replaced" `Quick test_promote_keeps_what_it_replaced
+        ; test_case "promote replaces the reference" `Quick test_promote_replaces_the_reference
         ; test_case "first promotion and other stores" `Quick test_first_promotion_and_other_stores
         ; test_case "changes are refused with reasons" `Quick test_changes_are_refused_with_reasons
         ] )

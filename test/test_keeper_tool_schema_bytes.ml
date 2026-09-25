@@ -311,7 +311,14 @@ open Alcotest
    (+26) now declare their items. Gemini refused every Antigravity request
    that carried an array without items, and #38588 made this deferred tool
    part of every such request. No headroom. *)
-let ceiling_bytes = 124_009
+(* 2026-09-26: 124,762 across 142 tools (+753), read from this suite in CI run
+   36201205757 on 9705e7b85b (this PR merged with origin/main 0f0b000159).
+   masc_goal_measure records one evidence-backed observation per Goal; its
+   evidence parameter names the four Evidence Reference forms it accepts,
+   since a free-form string is refused. The 753 also carries whatever main
+   added after the computed +389 above, which was not a CI reading; that part
+   was not separated. No headroom. *)
+let ceiling_bytes = 124_762
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

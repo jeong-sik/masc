@@ -18,6 +18,12 @@ val owner_of_string : string -> (owner, string) result
     empties it before each launch. *)
 val server_profile : masc_root:string -> string
 
+(** Where the browser keeps its data: masc's own profile, made fresh for
+    each launch, or one the operator named in [browser.stagehand]. *)
+type profile = Server_profile of string | Operator_profile of string
+
+val profile_path : profile -> string
+
 (** [argv ~chrome ~profile ~extension_id ~headless].
 
     [--remote-debugging-port=0] lets Chrome pick a free port and write it to
@@ -25,8 +31,11 @@ val server_profile : masc_root:string -> string
     [--enable-unsafe-extension-debugging] lets CDP load the extension.
     [--remote-allow-origins] admits the extension's own websocket and nothing
     else: the extension connects back to the CDP URL it is given, with its
-    [chrome-extension://<id>] origin, while masc's client sends no origin. *)
-val argv : chrome:string -> profile:string -> extension_id:string -> headless:bool -> string list
+    [chrome-extension://<id>] origin, while masc's client sends no origin.
+    A server profile also gets a mock Keychain and a basic password store,
+    so a fresh profile asks macOS nothing; an operator's profile keeps its
+    own. *)
+val argv : chrome:string -> profile:profile -> extension_id:string -> headless:bool -> string list
 
 (** The name of the file Chrome writes its debugging port and browser
     websocket path into, inside the profile. *)

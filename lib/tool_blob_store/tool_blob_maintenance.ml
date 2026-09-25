@@ -505,9 +505,11 @@ let live_references ~base_path ~board_posts_file =
        | _ -> scan_entry path references)
   in
   let open Result.Syntax in
-  let* cluster_snapshot, cluster_roots = observe_cluster_workspaces ~base_path in
+  (* INTENDED RED control for #38996: the guard is gone but the scan reads
+     only .masc, as before #38919. Do not merge. *)
+  let* cluster_snapshot, _cluster_roots = observe_cluster_workspaces ~base_path in
   let* references =
-    Common.masc_dir_from_base_path ~base_path :: cluster_roots
+    [ Common.masc_dir_from_base_path ~base_path ]
     |> List.concat_map (fun workspace_masc_dir ->
       workspace_sources ~board_posts_file ~workspace_masc_dir)
     |> List.fold_left

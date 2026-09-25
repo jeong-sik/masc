@@ -382,7 +382,7 @@ let fetch_range_with ~after_window_read t ~sha256 ~offset ~max_bytes =
 ;;
 
 let fetch_range t ~sha256 ~offset ~max_bytes =
-  fetch_range_with ~after_window_read:ignore t ~sha256 ~offset ~max_bytes
+  fetch_range_with ~after_window_read:(fun () -> ()) t ~sha256 ~offset ~max_bytes
 ;;
 
 (* Whether a put writes an address this process already wrote. The model

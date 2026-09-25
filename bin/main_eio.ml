@@ -3351,8 +3351,8 @@ let sandbox_image_promote_exit base_path runtime name reference =
        else
          Error
            (Printf.sprintf
-              "sandbox-image: %S is not repository:tag (a lowercase repository and \
-               a tag; not a digest reference, not starting with '-')"
+              "sandbox-image: %S is not repository:tag (a tag after the last ':'; \
+               not a digest reference, not starting with '-')"
               reference)
      in
      let* runtime = runtime in

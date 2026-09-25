@@ -160,6 +160,35 @@ type wire_tool = {
   wt_session_turn : int option;
 }
 
+(** A settled turn's input count, and how much of it was new.
+    [Input_split] when the settle carries a cache read above zero and cache
+    counts that add up: [fresh] is the input less the cache reads (the cache
+    writes plus the uncached rest), [cached] the cache reads. [Input_whole]
+    otherwise: no cache counts, a zero read, or counts where the remainder
+    falls below the cache writes. *)
+type turn_input =
+  | Input_whole of int
+  | Input_split of { fresh : int; cached : int }
+
+val turn_input :
+  input:int -> cache_read:int option -> cache_creation:int option -> turn_input
+
+val turn_input_of_settle : Observer.keeper_turn_complete -> turn_input option
+(** [None] when the settle carries no input count. *)
+
+val turn_input_total : turn_input -> int
+(** The whole input again, cache reads included. *)
+
+val fresh_input_text : int -> string
+(** [in 160.4k new] *)
+
+val cached_input_text : int -> string
+(** [3.56M cached] *)
+
+val turn_input_text : turn_input -> string
+(** [in 160.4k new · 3.56M cached] for a split input, [in 73.9k] for a whole
+    one. *)
+
 (** What the agent-core loop last said about this record's provider call:
     one was asked for, started, or came back. *)
 type turn_marker =
@@ -187,7 +216,7 @@ type chunk = {
           with nothing after it is a provider call in flight: the model has
           the turn. A CLI lane sends no markers, so this stays [None] and the
           pane says nothing about what that keeper is doing between calls. *)
-  ck_tokens : int option * int option;
+  ck_tokens : turn_input option * int option;
   ck_cost_usd : float option;
   ck_calls : int option;
 }

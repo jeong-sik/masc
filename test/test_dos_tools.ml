@@ -1,4 +1,4 @@
-(* DOS lane tools — the seven tools through Tool_misc.dispatch.
+(* DOS lane tools — the lane's tools through Tool_misc.dispatch.
 
    The machine needs no image from outside: the tests assemble a COM program
    of their own, so CI carries no game. What they pin: the no-machine
@@ -792,7 +792,9 @@ let test_read_only_classification () =
   check bool "load changes the machine" false (read_only "masc_dos_load");
   check bool "press changes the machine" false (read_only "masc_dos_press");
   check bool "click changes the machine" false (read_only "masc_dos_click");
-  check bool "step changes the machine" false (read_only "masc_dos_step")
+  check bool "step changes the machine" false (read_only "masc_dos_step");
+  check bool "save writes a slot" false (read_only "masc_dos_save");
+  check bool "restore replaces the machine" false (read_only "masc_dos_restore")
 ;;
 
 let test_every_tool_is_declared () =
@@ -807,7 +809,205 @@ let test_every_tool_is_declared () =
          | None -> fail (name ^ " registers no schema")))
     [ "masc_dos_load"; "masc_dos_eject"; "masc_dos_screen"; "masc_dos_step";
       "masc_dos_press"; "masc_dos_click"; "masc_dos_type"; "masc_dos_peek";
-      "masc_dos_pass" ]
+      "masc_dos_pass"; "masc_dos_save"; "masc_dos_restore" ]
+;;
+
+(* ---------- checkpoints ---------- *)
+
+(* Echoes every key it is given and asks for the next one, forever: a program
+   whose screen is the history of its input, so two runs that took the same
+   keys from the same state show the same text.
+
+   org 0x100: wait: mov ah,0 / int 16h / or ax,ax / jz wait
+              mov dl,al / mov ah,2 / int 21h / jmp wait *)
+let echo_com = "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\x88\xc2\xb4\x02\xcd\x21\xeb\xf0"
+
+let save_as ?(agent = "dos-test") ~base_path slot =
+  dispatch ~base_path ~agent "masc_dos_save" [ ("slot", `String slot) ]
+;;
+
+let restore_as ?(agent = "dos-test") ~base_path slot =
+  dispatch ~base_path ~agent "masc_dos_restore" [ ("slot", `String slot) ]
+;;
+
+let mark () =
+  match Dos_lane.current_publication () with
+  | Dos_lane.Stable m | Dos_lane.Running m -> m
+  | Dos_lane.No_screen -> fail "no machine is published"
+;;
+
+let ledger_keys () = List.map (fun e -> e.Dos_lane.key_name) (Dos_lane.ledger ())
+
+let ledger_file ~base_path =
+  Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos") "ledger.jsonl"
+;;
+
+(* The contract the whole feature stands on: load, play, save, eject,
+   restore, play on -- and the machine is where it would have been had the
+   eject never happened. Screen, step count, CS:IP and ledger all agree. *)
+let test_a_restored_machine_plays_on_as_if_never_stopped () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    let play_rest () =
+      ignore (press_as ~base_path "dos-test" "b");
+      press_as ~base_path "dos-test" "c"
+    in
+    boot ~base_path "echo.com";
+    ignore (press_as ~base_path "dos-test" "a");
+    let direct = play_rest () in
+    let direct_ledger = ledger_keys () in
+    eject ();
+    boot ~base_path "echo.com";
+    ignore (press_as ~base_path "dos-test" "a");
+    let saved = save_as ~base_path "mid" in
+    check bool "save succeeds" true (is_completed saved);
+    check string "and names its slot" "mid" (string_field "slot" saved);
+    eject ();
+    let restored = restore_as ~base_path "mid" in
+    check bool "restore succeeds with no machine loaded" true (is_completed restored);
+    check bool "the saved screen is back" true
+      (contains "a" (string_field "screen_text" restored));
+    let resumed = play_rest () in
+    check string "the same screen" (string_field "screen_text" direct)
+      (string_field "screen_text" resumed);
+    check int "the same step count" (int_field "steps" direct) (int_field "steps" resumed);
+    check string "the same CS:IP" (string_field "cs_ip" direct) (string_field "cs_ip" resumed);
+    check (list string) "the same ledger" direct_ledger (ledger_keys ()))
+;;
+
+(* Anyone may save -- it moves nothing -- but a restore replaces the machine,
+   so it asks what a load asks: the controller free or the caller's. A
+   refused restore changes nothing. *)
+let test_restore_needs_the_controller () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~agent:"liu-bei" ~base_path "echo.com";
+    let watched = save_as ~agent:"cao-cao" ~base_path "watched" in
+    check bool "a watcher may save" true (is_completed watched);
+    check (option string) "and the holder keeps the controller" (Some "liu-bei")
+      (controller watched);
+    let before = mark () in
+    let refused = restore_as ~agent:"cao-cao" ~base_path "watched" in
+    check bool "another player's restore is refused" false (is_completed refused);
+    check bool "naming the holder" true (contains "liu-bei" (Tool_result.message refused));
+    let after = mark () in
+    check string "the machine is the same one" before.Dos_lane.incarnation
+      after.Dos_lane.incarnation;
+    check int "and did not change" before.Dos_lane.count after.Dos_lane.count;
+    ignore (dispatch ~base_path ~agent:"liu-bei" "masc_dos_pass" []);
+    let taken = restore_as ~agent:"cao-cao" ~base_path "watched" in
+    check bool "with the controller free it restores" true (is_completed taken);
+    check (option string) "and the restorer holds it" (Some "cao-cao") (controller taken))
+;;
+
+(* A restore is a new history even when it installs the same bytes twice:
+   an observer holding the old incarnation must see the machine was
+   replaced, and the change count moves. *)
+let test_a_restore_is_a_new_incarnation () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    ignore (save_as ~base_path "same");
+    let loaded = mark () in
+    ignore (restore_as ~base_path "same");
+    let first = mark () in
+    ignore (restore_as ~base_path "same");
+    let second = mark () in
+    check bool "the restore is not the loaded machine" true
+      (loaded.Dos_lane.incarnation <> first.Dos_lane.incarnation);
+    check bool "restoring the same slot again is another one" true
+      (first.Dos_lane.incarnation <> second.Dos_lane.incarnation);
+    check bool "the count rises" true
+      (first.Dos_lane.count > loaded.Dos_lane.count
+       && second.Dos_lane.count > first.Dos_lane.count))
+;;
+
+(* The ledger is the replay record, so a restore puts back the checkpoint's
+   ledger -- the keys pressed after the save belong to a history that no
+   longer exists -- and the next key continues it, in memory and on disk. *)
+let test_the_ledger_continues_from_the_checkpoint () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    ignore (press_as ~base_path "dos-test" "a");
+    ignore (save_as ~base_path "after-a");
+    ignore (press_as ~base_path "dos-test" "x");
+    ignore (press_as ~base_path "dos-test" "y");
+    ignore (restore_as ~base_path "after-a");
+    check (list string) "the checkpoint's ledger" [ "a" ] (ledger_keys ());
+    ignore (press_as ~base_path "dos-test" "b");
+    check (list string) "continued" [ "a"; "b" ] (ledger_keys ());
+    let lines =
+      In_channel.with_open_bin (ledger_file ~base_path) In_channel.input_all
+      |> String.split_on_char '\n'
+      |> List.filter (fun l -> l <> "")
+      |> List.map (fun l ->
+        match Yojson.Safe.from_string l with
+        | `Assoc fields ->
+          (match List.assoc_opt "key" fields with Some (`String k) -> k | _ -> fail l)
+        | _ -> fail l)
+    in
+    check (list string) "and the file says the same" [ "a"; "b" ] lines)
+;;
+
+(* A restore does not write the saves directory. A game may have saved after
+   the checkpoint; putting the older machine back must not put its older
+   save file over the newer one. The directory changes again only when the
+   guest writes. *)
+let test_a_restore_leaves_the_saves_directory () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com) ];
+    ignore (load ~base_path "quest");
+    let kept = Filename.concat (saves_of ~base_path "quest") "SAVE.DAT" in
+    check string "the game saved" "NEW$" (In_channel.with_open_bin kept In_channel.input_all);
+    ignore (save_as ~base_path "early");
+    write_file kept "LATER$";
+    let restored = restore_as ~base_path "early" in
+    check bool "restored" true (is_completed restored);
+    check string "the newer save is still there" "LATER$"
+      (In_channel.with_open_bin kept In_channel.input_all);
+    ignore (dispatch ~base_path "masc_dos_step" [ ("steps", `Int 10_000) ]);
+    check string "and a run that writes nothing leaves it" "LATER$"
+      (In_channel.with_open_bin kept In_channel.input_all))
+;;
+
+(* What the caller can get wrong is refused before anything changes: a name
+   that is not a slot, a slot never saved, a file that is not a DOS
+   checkpoint. With no slot the tool lists what there is. *)
+let test_restore_refusals_and_listing () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    ignore (save_as ~base_path "kept");
+    let before = mark () in
+    let unchanged name result =
+      check bool (name ^ " is refused") false (is_completed result);
+      check string (name ^ " changes nothing") before.Dos_lane.incarnation
+        (mark ()).Dos_lane.incarnation
+    in
+    unchanged "a path" (restore_as ~base_path "../kept");
+    unchanged "a slot never saved" (restore_as ~base_path "never");
+    let dir =
+      Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos")
+        "checkpoints"
+    in
+    write_file (Filename.concat dir "junk.ckpt") "not a checkpoint";
+    unchanged "a file that is not a checkpoint" (restore_as ~base_path "junk");
+    check bool "a save to a path is refused" false
+      (is_completed (save_as ~base_path "a/b"));
+    let listing = dispatch ~base_path "masc_dos_restore" [] in
+    check bool "no slot lists" true (is_completed listing);
+    match member "checkpoints" (Tool_result.data listing) with
+    | Some (`List rows) ->
+      let slots = List.map (fun r -> match member "slot" r with Some (`String s) -> s | _ -> "") rows in
+      check (list string) "every slot" [ "junk"; "kept" ] slots;
+      (match rows with
+       | [ junk; kept ] ->
+         check bool "the broken one says why" true (member "unreadable" junk <> None);
+         check bool "the good one names its core" true
+           (member "core" kept = Some (`String Dos_core_identity.source_digest))
+       | _ -> fail "two rows")
+    | _ -> fail "no checkpoints list")
 ;;
 
 let () =
@@ -853,6 +1053,13 @@ let () =
         ; test_case "peek" `Quick test_peek_reads_the_text_page
         ; test_case "read-only" `Quick test_read_only_classification
         ; test_case "declared" `Quick test_every_tool_is_declared
+        ; test_case "checkpoint round trip" `Quick
+            test_a_restored_machine_plays_on_as_if_never_stopped
+        ; test_case "restore needs the controller" `Quick test_restore_needs_the_controller
+        ; test_case "restore is a new incarnation" `Quick test_a_restore_is_a_new_incarnation
+        ; test_case "ledger continues" `Quick test_the_ledger_continues_from_the_checkpoint
+        ; test_case "restore leaves saves" `Quick test_a_restore_leaves_the_saves_directory
+        ; test_case "restore refusals and listing" `Quick test_restore_refusals_and_listing
         ] )
     ]
 ;;

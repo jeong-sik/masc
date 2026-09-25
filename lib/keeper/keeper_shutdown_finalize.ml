@@ -930,7 +930,7 @@ let run ~config ~entry ?successor_operation_id operation =
   match operation.phase with
   | Joined_idle ->
     (match read_operation_meta ~config operation with
-     | Error detail -> block ~config operation Meta_update detail
+     | Error detail -> block ~config operation Meta_read detail
      | Ok meta ->
        (match settle_tasks ~config ~meta operation [] with
         | Error _ as error -> error
@@ -949,7 +949,7 @@ let run ~config ~entry ?successor_operation_id operation =
               | _ -> Error Unsupported_phase))))
   | Finalizing_tasks settled_task_ids ->
     (match read_operation_meta ~config operation with
-     | Error detail -> block ~config operation Meta_update detail
+     | Error detail -> block ~config operation Meta_read detail
      | Ok meta ->
        (match settle_tasks ~config ~meta operation settled_task_ids with
         | Error _ as error -> error
@@ -982,6 +982,73 @@ let run ~config ~entry ?successor_operation_id operation =
   | Owner_absent _
   | Operator_absence_acknowledged _
   | Superseded _ -> Error Unsupported_phase
+;;
+
+type replay_plan =
+  | Replay_resume of Keeper_id.Task_id.t list
+  | Replay_abandon of boot_replay_abandonment
+  | Replay_unavailable of string
+
+(* Read-only: the plan names where [run] resumes and never writes. The trace
+   and task checks are the same ones [run] applies (read_operation_meta and
+   settle_tasks' unexpected-ownership check), taken before the operation
+   leaves [Blocked] so a Keeper that ran after the block is closed as
+   overtaken instead of settled against a snapshot it no longer matches. *)
+let plan_blocked_replay ~config operation replay =
+  match
+    Keeper_owner_registry.get
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:operation.keeper_name
+  with
+  | Error error -> Replay_unavailable (Keeper_owner_registry.lookup_error_to_string error)
+  | Ok owner ->
+    (match Keeper_owner.exact_projection owner with
+     | Error error -> Replay_unavailable (Keeper_owner.error_to_string error)
+     | Ok { meta = None; _ } -> Replay_unavailable "Keeper metadata is absent"
+     | Ok { meta = Some meta; _ } ->
+       if not (Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id)
+       then Replay_abandon Keeper_trace_changed
+       else (
+         match
+           Keeper_current_task_reconcile.owned_active_tasks_snapshot_for_meta_strict
+             ~config
+             ~meta
+         with
+         | Error detail -> Replay_unavailable detail
+         | Ok snapshot ->
+           let new_task_ids =
+             List.filter_map
+               (fun (owned : Keeper_current_task_reconcile.owned_active_task) ->
+                  if task_id_mem owned.task_id operation.owned_task_ids
+                  then None
+                  else Some owned.task_id)
+               snapshot.tasks
+           in
+           (match new_task_ids with
+            | _ :: _ -> Replay_abandon (Keeper_claimed_new_tasks new_task_ids)
+            | [] ->
+              let receipted_task_ids =
+                List.filter
+                  (fun task_id ->
+                     match find_task snapshot.backlog_tasks task_id with
+                     | Some task -> task_has_operation_receipt operation task
+                     | None -> false)
+                  operation.owned_task_ids
+              in
+              let still_owned =
+                List.exists
+                  (fun (owned : Keeper_current_task_reconcile.owned_active_task) ->
+                     task_id_mem owned.task_id operation.owned_task_ids)
+                  snapshot.tasks
+              in
+              (* A settled-stage record whose Keeper still owns one of the
+                 snapshotted tasks did not come from a completed settlement;
+                 treating it as settled would leave that task claimed by a
+                 stopped Keeper. Settle from the receipts instead. *)
+              (match replay, still_owned with
+               | Replay_settled_tasks, false -> Replay_resume operation.owned_task_ids
+               | Replay_settled_tasks, true
+               | Replay_unsettled_tasks, (true | false) -> Replay_resume receipted_task_ids))))
 ;;
 
 module For_testing = struct

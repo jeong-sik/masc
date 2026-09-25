@@ -428,7 +428,7 @@ let run_tool_blob_maintenance base_path delete_previous_candidates =
              else Tool_blob_maintenance.Observe_only
            in
            (match
-              Tool_blob_maintenance.run
+              Tool_blob_maintenance.run ~board_posts_file:Masc_board_handlers.Board_paths.posts_file
                 ~base_path:canonical_base_path
                 ~mode
             with
@@ -438,6 +438,13 @@ let run_tool_blob_maintenance base_path delete_previous_candidates =
                 canonical_base_path
                 (Tool_blob_maintenance.error_to_string error)
             | Ok report ->
+              List.iter
+                (fun path ->
+                   Printf.eprintf
+                     "tool blob maintenance: skipped regular file under clusters: %s\n"
+                     path)
+                report.skipped_cluster_files;
+              flush stderr;
               Yojson.Safe.to_channel
                 stdout
                 (`Assoc
@@ -446,6 +453,10 @@ let run_tool_blob_maintenance base_path delete_previous_candidates =
                   ; "blobs_observed", `Int report.blobs_observed
                   ; "candidates_recorded", `Int report.candidates_recorded
                   ; "deleted", `Int report.deleted
+                  ; ( "skipped_cluster_files"
+                    , `List
+                        (List.map (fun path -> `String path) report.skipped_cluster_files)
+                    )
                   ]);
               output_char stdout '\n';
               flush stdout;

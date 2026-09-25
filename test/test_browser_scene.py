@@ -19,6 +19,8 @@ server=http.server.ThreadingHTTPServer(('127.0.0.1',0),H);threading.Thread(targe
 with socket.socket() as sock:sock.bind(('127.0.0.1',0));driver_port=sock.getsockname()[1]
 log=(a.out/'driver.log').open('wb');driver=subprocess.Popen([a.driver,'--host','127.0.0.1','--port',str(driver_port),'--websocket-port','0'],stdout=log,stderr=log)
 base=f'http://127.0.0.1:{driver_port}';sid=None;checks=[]
+# How long a wait for browser state lasts, and how often it looks again.
+SETTLE_S=10;POLL_S=.05
 def call(method,path,body=None):
  req=urllib.request.Request(base+path,data=None if body is None else json.dumps(body).encode(),method=method,headers={'Content-Type':'application/json'})
  try:
@@ -42,12 +44,12 @@ def check(name,condition,seen=None):
  # why.
  assert condition,(name if seen is None else f"{name} -- saw {seen!r}");checks.append(name)
 try:
- deadline=time.monotonic()+10
+ deadline=time.monotonic()+SETTLE_S
  while True:
   try:call('GET','/status');break
   except (urllib.error.URLError,ConnectionError):
    if time.monotonic()>deadline:raise
-   time.sleep(.05)
+   time.sleep(POLL_S)
  caps=call('POST','/session',{'capabilities':{'alwaysMatch':{'browserName':'firefox','moz:firefoxOptions':{'binary':a.browser,'args':['-headless']}}}});sid=caps['sessionId']
  call('POST','/session/'+sid+'/url',{'url':f'http://127.0.0.1:{server.server_port}/'})
  before=js('return document.documentElement.outerHTML;');start=time.monotonic();s=observe();elapsed=(time.monotonic()-start)*1000
@@ -112,8 +114,12 @@ try:
  wheel_png=call('GET','/session/'+sid+'/screenshot')
  js('return {url:location.href,title:document.title};')
  js(scene+"\nreturn browserScene({mode:'viewport'});")
- positions=js("return {messages:document.querySelector('#messages').scrollTop,sidebar:document.querySelector('#sidebar').scrollTop,root:scrollY,trusted:wheelTrusted};")
- check('native wheel scroll is trusted and targets the nested pane',positions['messages']>0 and positions['sidebar']==0 and positions['root']==0 and positions['trusted'])
+ # A native wheel can land after its action returns (#36399): read the panes
+ # again until the targeted one moves or the wait runs out.
+ wheel_positions="return {messages:document.querySelector('#messages').scrollTop,sidebar:document.querySelector('#sidebar').scrollTop,root:scrollY,trusted:wheelTrusted};"
+ wheel_deadline=time.monotonic()+SETTLE_S;positions=js(wheel_positions)
+ while positions['messages']==0 and time.monotonic()<wheel_deadline:time.sleep(POLL_S);positions=js(wheel_positions)
+ check('native wheel scroll is trusted and targets the nested pane',positions['messages']>0 and positions['sidebar']==0 and positions['root']==0 and positions['trusted'],positions)
  # Exercise negative scroll positions used by reverse-flow chat timelines.
  js("const p=document.querySelector('#messages');p.style.display='flex';p.style.flexDirection='column-reverse';for(const n of p.children)n.style.flexShrink='0';p.scrollTop=0;")
  viewport=js(scene+"\nreturn browserScene({mode:'viewport'});")
@@ -235,7 +241,7 @@ try:
  redirect_receipt=act(redirect_source,redirect_link,action='follow_link')
  # Test-only bounded observation: never replay the navigation or use a
  # screenshot as a loading barrier. Keep the first pending result/error.
- redirect_deadline=time.monotonic()+10
+ redirect_deadline=time.monotonic()+SETTLE_S
  first_redirect_observation=None;redirect_attempts=0;redirect_errors=[]
  while True:
   redirect_attempts+=1
@@ -249,7 +255,7 @@ try:
    redirect_errors.append(str(error))
   if time.monotonic()>=redirect_deadline:
    raise AssertionError({'redirect_wait_exhausted':True,'attempts':redirect_attempts,'first_observation':first_redirect_observation,'errors':redirect_errors})
-  time.sleep(.05)
+  time.sleep(POLL_S)
  (a.out/'redirect-stable.png').write_bytes(base64.b64decode(call('GET','/session/'+sid+'/screenshot'),validate=True))
  check('HTTP302 final observation differs from original href',redirect_receipt['destinationUrl'].endswith('/redirect') and redirected['url'].endswith('/canonical'))
  check('redirect recovery reads actual destination content',any(n['text']=='Copy exact text: 별빛🙂 café' for n in redirected['nodes']))

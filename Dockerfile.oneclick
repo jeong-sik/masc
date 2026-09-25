@@ -39,7 +39,7 @@ RUN opam repository set-url default https://opam.ocaml.org \
     && chmod +x scripts/opam-pin-external-deps.sh \
     && scripts/opam-pin-external-deps.sh --with-compact-protocol
 RUN ok=0; for attempt in 1 2 3; do \
-      if opam install . --deps-only -y; then ok=1; break; fi; \
+      if opam install ./masc.opam --deps-only -y; then ok=1; break; fi; \
       echo "opam deps-only attempt ${attempt} failed; retrying" >&2; sleep 15; \
     done; [ "$ok" = 1 ] || { echo "opam deps-only failed after 3 attempts" >&2; exit 1; }
 

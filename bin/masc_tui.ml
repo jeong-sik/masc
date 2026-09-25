@@ -7978,6 +7978,18 @@ let handle_runtime_lane_edit state ~mailbox edit =
             Masc_tui_http.remove_runtime_lane ~host ~port ~lane)
   | Masc_tui_types.Refuse_lane_edit notice -> state.runtime_lane_notice <- Some notice
 
+(* The Keeper runtime picker has no close key of its own: Esc closes it,
+   after dropping a filter. The shared list already steps on the wheel. *)
+let keeper_runtime_picker_action (list : Masc_tui_pick_list.t) key =
+  Masc_tui_pick_list.action_of_key ~close_keys:[] list key
+
+(* Back to the Keeper list, with the picker's cursor and filter dropped: a
+   picker opened again starts at the top with no filter. *)
+let close_keeper_runtime_pick state =
+  state.runtime_pick_keeper <- None;
+  state.runtime_pick_list <- Masc_tui_pick_list.closed;
+  state.view <- Keepers Keeper_list
+
 let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
   let host = server_peer_host in
   let port = state.port in
@@ -8012,6 +8024,31 @@ let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
       enqueue_async mailbox
         (Runtime_assignment_set
            (keeper_name, runtime_id, Error "Eio switch is unavailable"))
+
+(* One key on the Keeper runtime picker, read against the list it draws: the
+   declared lanes, then the whole catalogue. Enter assigns the row under the
+   cursor to the Keeper the picker was opened for; Esc with no filter closes
+   it. *)
+let keeper_runtime_pick_key state ~mailbox ~terminal_rows key =
+  match keeper_runtime_picker_action state.runtime_pick_list key with
+  | None -> ()
+  | Some action -> (
+      match
+        Masc_tui_pick_list.apply
+          ~page:(Masc_tui_types.keeper_runtime_picker_page state ~terminal_rows)
+          ~label:Masc_tui_types.runtime_pick_label
+          (Masc_tui_types.runtime_picker_items state)
+          state.runtime_pick_list action
+      with
+      | Masc_tui_pick_list.Stay list -> state.runtime_pick_list <- list
+      | Masc_tui_pick_list.Chosen item ->
+          (match state.runtime_pick_keeper with
+           | Some keeper_name ->
+               launch_runtime_assignment_set state ~mailbox ~keeper_name
+                 ~runtime_id:(Some (Masc_tui_types.runtime_pick_item_id item))
+           | None -> ());
+          close_keeper_runtime_pick state
+      | Masc_tui_pick_list.Dismissed -> close_keeper_runtime_pick state)
 
 let inflight_for state keeper_name =
   Option.map (fun entry -> entry.sent_request)
@@ -15452,10 +15489,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.runtime_catalog <- runtimes;
           state.runtime_lanes <- lanes;
           state.runtime_assignments <- assignments;
-          state.runtime_catalog_error <- None;
-          let count = List.length (Masc_tui_types.runtime_picker_items state) in
-          if state.runtime_pick_cursor >= count then
-            state.runtime_pick_cursor <- max 0 (count - 1)
+          state.runtime_catalog_error <- None
       | Error detail -> state.runtime_catalog_error <- Some detail)
   | Runtime_assignment_set (keeper_name, runtime_id, result) -> (
       match result with
@@ -18602,6 +18636,9 @@ and is loaded on demand through keeper_skill.
                   Option.map
                     (fun (pick, list) -> (pick, Masc_tui_pick_list.type_text list text))
                     state.runtime_lane_pick
+            | Some Text_keeper_runtime_picker_filter ->
+                state.runtime_pick_list <-
+                  Masc_tui_pick_list.type_text state.runtime_pick_list text
             | Some Text_row_search ->
                 let longer =
                   Option.value state.search ~default:"" ^ text
@@ -20480,6 +20517,19 @@ and is loaded on demand through keeper_skill.
                        ~pick ~runtime ~existing:already
                  | Masc_tui_pick_list.Dismissed ->
                      state.runtime_lane_pick <- None))
+       | Some k
+         when state.view = Keepers Keeper_runtime_pick
+              && (Option.is_some (keeper_runtime_picker_action state.runtime_pick_list k)
+                  || text_input_target state ~compact_viewport
+                     = Some Text_keeper_runtime_picker_filter) ->
+           (* The Keeper runtime picker: arrows or j/k step, PgUp/PgDn page,
+              Home/End jump, [/] types a filter over the drawn lanes and
+              runtimes, Enter assigns, and Esc drops the filter and then
+              closes. While the filter is typed it holds every key, so [d]
+              and the quit key are letters in it. [d] outside a filter is its
+              own arm below. *)
+           let terminal_rows, _ = get_terminal_size () in
+           keeper_runtime_pick_key state ~mailbox:async_messages ~terminal_rows k
        | Some "e" | Some "E"
          when state.view = Runtime
               && state.runtime_mode = Masc_tui_types.Runtime_lanes
@@ -21978,8 +22028,12 @@ and is loaded on demand through keeper_skill.
                   "No web links found in this conversation to preview.")
        | Some "\023"
          when state.view = Board
-              && terminal_columns >= keeper_split_threshold_cols
-              && not state.board_detail_wide ->
+              && (match
+                    board_read_layout ~cols:terminal_columns
+                      ~wide:state.board_detail_wide
+                  with
+                  | Board_read_split -> true
+                  | Board_read_wide | Board_read_one_pane -> false) ->
            (match state.board_mode with
             | Board_read _ -> (
                 match state.board_focus with
@@ -22158,9 +22212,18 @@ and is loaded on demand through keeper_skill.
                 end)
        | Some ("z" | "Z") when state.view = Board ->
            (match state.board_mode with
-            | Board_read _ ->
-                state.board_detail_wide <- not state.board_detail_wide;
-                state.board_focus <- Right_pane
+            | Board_read _ -> (
+                (* On one pane the two layouts draw the same screen, so the
+                   footer does not offer [z] and pressing it must not leave
+                   the flag set for the next widening. *)
+                match
+                  board_read_layout ~cols:terminal_columns
+                    ~wide:state.board_detail_wide
+                with
+                | Board_read_one_pane -> ()
+                | Board_read_split | Board_read_wide ->
+                    state.board_detail_wide <- not state.board_detail_wide;
+                    state.board_focus <- Right_pane)
             | Board_list | Board_compose -> ())
        | Some (("o" | "O" | "l") as sandbox_log_key)
          when state.view = Keepers Keeper_detail
@@ -22194,7 +22257,13 @@ and is loaded on demand through keeper_skill.
                   | Keepers Keeper_detail | Resources -> true
                   | Board ->
                       (match state.board_mode with
-                       | Board_read _ -> not state.board_detail_wide
+                       | Board_read _ -> (
+                           match
+                             board_read_layout ~cols:terminal_columns
+                               ~wide:state.board_detail_wide
+                           with
+                           | Board_read_split -> true
+                           | Board_read_wide | Board_read_one_pane -> false)
                        | Board_list | Board_compose -> false)
                   | Code -> Option.is_some (Masc_tui_fetched.current_key state.code_file)
                   | Overview | Acting | Metrics | Keepers _ | Lanes | Clients
@@ -22877,10 +22946,8 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail ->
                 state.view <- Keepers Keeper_list;
                 state.detail_scroll <- 0
-            | Keepers Keeper_runtime_pick ->
-                state.runtime_pick_keeper <- None;
-                state.runtime_pick_cursor <- 0;
-                state.view <- Keepers Keeper_list
+            (* The picker's own arm takes Esc. *)
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_logs ->
                 state.view <- Keepers Keeper_detail;
                 state.keeper_detail_focus <- Right_pane;
@@ -23544,12 +23611,8 @@ and is loaded on demand through keeper_skill.
                    in
                    state.system_logs_cursor <- cursor;
                    state.system_logs_scroll <- scroll)
-            | Keepers Keeper_runtime_pick ->
-                let count =
-                  List.length (Masc_tui_types.runtime_picker_items state)
-                in
-                if state.runtime_pick_cursor < count - 1 then
-                  state.runtime_pick_cursor <- state.runtime_pick_cursor + 1
+            (* The picker's own arm takes these keys. *)
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_message -> ())
        | Some ("k" | "up" | "wheel-up") when state.repository_changes_open ->
            (match state.repository_changes_diff_path with
@@ -23890,9 +23953,8 @@ and is loaded on demand through keeper_skill.
                    in
                    state.system_logs_cursor <- cursor;
                    state.system_logs_scroll <- scroll)
-            | Keepers Keeper_runtime_pick ->
-                if state.runtime_pick_cursor > 0 then
-                  state.runtime_pick_cursor <- state.runtime_pick_cursor - 1
+            (* The picker's own arm takes these keys. *)
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_message -> ())
        (* Enter starts the provider the arrows are on. The digits below still
           work for the first nine; past that a number is no longer a key, so
@@ -24041,25 +24103,8 @@ and is loaded on demand through keeper_skill.
                         launch_code_file_load state ~mailbox:async_messages
                           ~path:node.Masc.Tui_decode.wt_path
                   | None -> ())
-            | Keepers Keeper_runtime_pick ->
-                (match state.runtime_pick_keeper with
-                 | Some keeper_name ->
-                     let items = Masc_tui_types.runtime_picker_items state in
-                     (match
-                        List.nth_opt items state.runtime_pick_cursor
-                      with
-                      | Some item ->
-                          let target_id =
-                            Masc_tui_types.runtime_pick_item_id item
-                          in
-                          launch_runtime_assignment_set state
-                            ~mailbox:async_messages ~keeper_name
-                            ~runtime_id:(Some target_id);
-                          state.runtime_pick_keeper <- None;
-                          state.runtime_pick_cursor <- 0;
-                          state.view <- Keepers Keeper_list
-                      | None -> ())
-                 | None -> state.view <- Keepers Keeper_list)
+            (* The picker's own arm takes Enter. *)
+            | Keepers Keeper_runtime_pick -> ()
             | Overview ->
                 (* Only under task focus: Enter while the events own j/k would
                    open whatever row the cursor happens to rest on. Under task
@@ -24392,7 +24437,7 @@ and is loaded on demand through keeper_skill.
               now, not the last visit. *)
            let keeper = List.nth state.keepers state.keeper_cursor in
            state.runtime_pick_keeper <- Some keeper.k_name;
-           state.runtime_pick_cursor <- 0;
+           state.runtime_pick_list <- Masc_tui_pick_list.closed;
            launch_runtime_catalog_load state ~mailbox:async_messages;
            state.view <- Keepers Keeper_runtime_pick
        | Some "d" | Some "D"
@@ -24401,10 +24446,8 @@ and is loaded on demand through keeper_skill.
             | Some keeper_name ->
                 launch_runtime_assignment_set state ~mailbox:async_messages
                   ~keeper_name ~runtime_id:None;
-                state.runtime_pick_keeper <- None;
-                state.runtime_pick_cursor <- 0;
-                state.view <- Keepers Keeper_list
-            | None -> state.view <- Keepers Keeper_list)
+                close_keeper_runtime_pick state
+            | None -> close_keeper_runtime_pick state)
        | Some "d" when state.repository_changes_open -> (
            match state.repository_changes_diff_path with
            | Some _ -> ()

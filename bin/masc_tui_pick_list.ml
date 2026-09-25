@@ -156,14 +156,22 @@ type 'a view =
   ; filter : string option
   }
 
-let view ~page ~label items t =
+type window =
+  | Opens_at_cursor
+  | Follows_cursor
+
+let view ~page ~window ~label items t =
   let page = max 1 page in
   let kept = List.map snd (narrowed ~label t.query items) in
   let shown = List.length kept in
   let cursor = clamp ~count:shown t.cursor in
-  (* The window opens at the cursor and stops a page short of the end, so
-     the last page is always full and the cursor is always inside it. *)
-  let top = max 0 (min cursor (shown - page)) in
+  (* Either way the window stops a page short of the end, so the last page is
+     always full and the cursor is always inside it. *)
+  let top =
+    match window with
+    | Opens_at_cursor -> max 0 (min cursor (shown - page))
+    | Follows_cursor -> max 0 (cursor - page + 1)
+  in
   let rows = List.filteri (fun index _ -> index >= top && index < top + page) kept in
   { rows
   ; selected_row = (if shown = 0 then None else Some (cursor - top))

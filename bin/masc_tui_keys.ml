@@ -453,7 +453,9 @@ let for_surface = function
       ; b Act "Esc" "back" ~help:"back; during a turn, interrupt it"
       ]
   | Keepers Keeper_runtime_pick ->
-      [ b Navigate "j/k" "move"
+      [ b Navigate "j/k" "move" ~help:"move; PgUp/PgDn page, Home/End jump"
+      ; b Navigate "/" "filter"
+          ~help:"type to narrow the lanes and runtimes; Esc drops the filter"
       ; b Act "Enter" "choose"
       ; b Act "d" "use the default"
           ~help:"drop this Keeper's own binding and follow [runtime].default"
@@ -1118,16 +1120,29 @@ let cancels_two_press ~input_seen ~key ~second_press =
    [K] and [B] answer in the detail as they do on the list (masc_tui.ml
    matches them under [Fusion_detail]); the footer left them out, and a body
    row said "K Keeper · B Board" in its own notation instead. *)
-let footer_hints_board_read ~focus_posts ~split =
+let footer_hints_board_read ~focus_posts ~(layout : board_read_layout) =
+  let pane_keys =
+    match layout with
+    | Board_read_split -> [ b Navigate "h/l" "pane"; b Navigate "Ctrl-W" "switch" ]
+    | Board_read_wide | Board_read_one_pane -> []
+  in
+  (* The label is where the key goes, and [z] goes both ways. Drawn as "wide"
+     in either state it named the screen an operator was already looking at:
+     on a wide detail the footer offered to widen it. On one pane there is no
+     second layout to reach, and the key is not drawn. *)
+  let width_key =
+    match layout with
+    | Board_read_split -> [ b Navigate "z" "wide" ]
+    | Board_read_wide -> [ b Navigate "z" "list" ]
+    | Board_read_one_pane -> []
+  in
   hints_of_bindings
     ([ b Navigate "j/k" (if focus_posts then "posts" else "scroll")
      ; b Navigate "[/]" "post"
      ; b Navigate "PgUp/PgDn" "page"
      ]
-     @ (if split then [ b Navigate "h/l" "pane"; b Navigate "Ctrl-W" "switch" ]
-        else [])
-     @ [ b Navigate "z" "wide"
-       ; board_vote_key
+     @ pane_keys @ width_key
+     @ [ board_vote_key
        ; board_reply_key
        ; board_copy_key
        ; b Act "Left / Esc" "back"

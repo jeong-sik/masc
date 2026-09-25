@@ -556,7 +556,7 @@ let run_spawned ~mgr ~clock ~cwd ~prompt_file ~schema_file config ~session_mode 
                | Some (Turn_finished { text }) ->
                  answer := Some text;
                  outcome := Some (Ok `Terminal)
-               | Some _ | None -> ()))
+               | Some _ | None -> ())))
     done;
     let exit_detail () =
       let tail = String.trim (Buffer.contents stderr_tail) in

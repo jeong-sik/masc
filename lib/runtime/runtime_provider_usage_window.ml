@@ -18,6 +18,7 @@ type source =
   | Zai_quota_limit_read
   | Kimi_coding_usages_read
   | Ollama_usage_read
+  | Muse_usage_read
 
 type window =
   { limit_id : string option

@@ -724,9 +724,9 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture
         ~official_client_continuation ~required_native_posture ~runtime_id ~keeper_name
         ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt ~tools ~initial_messages
         ~model_input_projection ~on_transmitted_model_input ~hooks ~context_injector
-        ~context ?terminal_effect_state ?on_model_input_window_observation ?carried_front_seed
-        ?librarian_front ?on_carried_front ~turn_start ?on_official_client_tool_boundary
-        ?on_official_client_result_handoff ?on_native_action ~on_usage_report ~event_bus
+        ~context ~terminal_effect_state ~on_model_input_window_observation ~carried_front_seed
+        ~librarian_front ~on_carried_front ~turn_start ~on_official_client_tool_boundary
+        ~on_official_client_result_handoff ~on_native_action ~on_usage_report ~event_bus
         ~raw_trace ~on_event ~config)
   in
   { result

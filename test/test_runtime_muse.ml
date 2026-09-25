@@ -166,7 +166,7 @@ let test_command_pins_default_argv () =
 let test_command_pins_full_argv () =
   let config =
     Runtime_muse.
-      { (default_config ()) with
+      { (default_config ~cwd:"/tmp/base") with
         model = Some "muse-spark-1.3"
       ; reasoning_effort = Some Effort_high
       ; approval_mode = Never
@@ -189,7 +189,7 @@ let test_command_pins_full_argv () =
 ;;
 
 let test_blank_model_is_rejected () =
-  let config = Runtime_muse.{ (default_config ()) with model = Some "  " } in
+  let config = Runtime_muse.{ (default_config ~cwd:"/tmp/base") with model = Some "  " } in
   match
     Runtime_muse.command ~prompt_file:"/tmp/p.txt" ~schema_file:None ~images:[]
       ~session_mode:Runtime_muse.Start config

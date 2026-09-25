@@ -399,6 +399,65 @@ let test_fetch_miss () =
       | Error error ->
           Alcotest.failf "fetch failed: %s" (B.fetch_error_to_string error))
 
+let test_fetch_range_miss_returns_none_fast () =
+  (* A range read on a nonexistent shard must not fall into whole-file
+     materialisation. The cold path opens the descriptor for the bounded
+     range first, so absence is reported as [Ok None] without reading any
+     file contents. *)
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let missing = String.make 64 '0' in
+      match B.fetch_range store ~sha256:missing ~offset:0 ~max_bytes:64 with
+      | Ok None -> ()
+      | Ok (Some _) ->
+        Alcotest.fail "expected None for nonexistent shard"
+      | Error error ->
+        Alcotest.failf
+          "fetch_range on missing shard returned an error: %s"
+          (B.fetch_error_to_string error))
+
+let test_fetch_range_cold_validates_without_materialising () =
+  (* Cold-cache read of a large artifact: the streaming digest path must
+     validate the content address and return the requested window without
+     loading the whole file into memory. We verify behaviour, not
+     allocation: the range content and total must be exact, and the
+     snapshot cache must be populated so a second page is served by
+     bounded I/O. *)
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let size = 1_048_576 in
+      let payload = String.init size (fun i -> Char.chr (i mod 251)) in
+      match B.put store ~bytes:payload ~mime:"application/octet-stream" with
+      | O.Inline _ -> Alcotest.fail "put returned Inline"
+      | O.Stored { sha256; _ } ->
+        (* Reopen so the snapshot cache is cold. *)
+        let cold = B.create ~base_path:dir in
+        (match B.fetch_range cold ~sha256 ~offset:0 ~max_bytes:1024 with
+         | Ok (Some first) ->
+           Alcotest.(check int) "cold range reports total bytes" size
+             first.total_bytes;
+           Alcotest.(check string) "cold range returns exact prefix"
+             (String.sub payload 0 1024)
+             first.content
+         | Ok None ->
+           Alcotest.fail "cold fetch_range returned None"
+         | Error error ->
+           Alcotest.failf
+             "cold fetch_range failed: %s"
+             (B.fetch_error_to_string error));
+        (* Second page hits the now-warm cache: bounded read only. *)
+        (match B.fetch_range cold ~sha256 ~offset:1024 ~max_bytes:512 with
+         | Ok (Some second) ->
+           Alcotest.(check string) "warm range returns exact window"
+             (String.sub payload 1024 512)
+             second.content
+         | Ok None ->
+           Alcotest.fail "warm fetch_range returned None"
+         | Error error ->
+           Alcotest.failf
+             "warm fetch_range failed: %s"
+             (B.fetch_error_to_string error)))
+
 let test_idempotent_put () =
   (* Same content twice = same sha = same path, no error. *)
   with_temp_dir (fun dir ->
@@ -1601,6 +1660,10 @@ let () =
             test_put_then_fetch_bounded_ranges;
           Alcotest.test_case "changed range snapshot revalidates digest" `Quick
             test_fetch_range_revalidates_changed_snapshot;
+          Alcotest.test_case "fetch range miss = None without content read" `Quick
+            test_fetch_range_miss_returns_none_fast;
+          Alcotest.test_case "cold fetch range validates without materialising" `Quick
+            test_fetch_range_cold_validates_without_materialising;
           Alcotest.test_case "fetch miss = None" `Quick test_fetch_miss;
           Alcotest.test_case "idempotent put" `Quick test_idempotent_put;
           Alcotest.test_case "put writes an address again only after fetch finds it gone" `Quick

@@ -119,14 +119,24 @@ let apply ~base_path ~keeper_name ~lane_id
   match preference with
   | None -> Ok resolved
   | Some preference ->
-    let+ selected_slots =
-      prefer
-        ~slots:resolved.selected_slots
-        ~slot_id_of:(fun (slot : Runtime_exact_output_registry.selected_slot) ->
-          slot.slot_id)
-        ~preferred:preference.slot_id
-    in
-    { resolved with Runtime_exact_output_registry.selected_slots }
+    (* The preference only reorders. A slot the lane stopped offering (removed
+       from runtime.toml, or left out at boot) leaves the declared order in
+       place: refusing here would fail this Keeper's lane on every pass until
+       an operator cleared the row, while the declared order is still a lane
+       the registry admitted. The stale row is logged each time it is read. *)
+    (match
+       prefer
+         ~slots:resolved.selected_slots
+         ~slot_id_of:(fun (slot : Runtime_exact_output_registry.selected_slot) ->
+           slot.slot_id)
+         ~preferred:preference.slot_id
+     with
+     | Ok selected_slots -> Ok { resolved with Runtime_exact_output_registry.selected_slots }
+     | Error detail ->
+       Log.Keeper.warn ~keeper_name
+         "exact-lane preference ignored; lane=%s walks its declared order: %s"
+         lane_id detail;
+       Ok resolved)
 ;;
 
 let validate_admitted_slot ~lane_id ~slot_id =

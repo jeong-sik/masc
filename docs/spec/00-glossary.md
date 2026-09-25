@@ -531,8 +531,7 @@ status: reference
   판정·Board attention)과 Keeper 걸음이 같은 오류에 같은 답을 하도록 둘 다 이 판정 하나를
   읽는다(#38913). 값은 셋이다.
   - `Binding of binding_fact`: 이 바인딩의 사정이라, 다음 후보가 같은 입력을 받아도 된다.
-    사정은 열둘이다 — `Credential`(401·403. 지금 코드는 전송 오류 `NetworkError`도 이 값으로
-    읽는다), `Account`(402), `Model_absent`(404), `Rate_limit`(429), `Capacity`(529),
+    사정은 열둘이다 — `Credential`(401·403), `Account`(402), `Model_absent`(404), `Rate_limit`(429), `Capacity`(529),
     `Server`(5xx), `Window`(창 초과, 또는 창에서 멈춘 빈 답), `Body_limit`(413),
     `Admission`(보내기 전에 이 바인딩이 준비된 요청을 받지 않음: 선언된 입력 용량 초과,
     입력을 잴 수 없음, 준비된 요청 거절), `Deadline`(보낸 뒤 헤더·전체 기한 초과),
@@ -540,8 +539,10 @@ status: reference
     본문이 기한 안에 오지 않음).
   - `Unattributed`: 거절은 왔지만, 누구의 사정인지 응답이 기계가 읽는 꼴로 말하지 않는다.
     기록에도 모른다고 남긴다.
-  - `Unknown_after_dispatch`: 보냈고 결과를 모른다. 다시 보내도 되는지는 이 판정이 아니라
-    걸음의 효과 규칙이 정한다.
+  - `Unknown_after_dispatch`: 결과를 모르거나 이 바인딩의 사정으로 가를 수 없다. 이름과 달리
+    보냈는지 모르는 전송 오류(`NetworkError`, #38931)와 보내기 전 배선 실패(`Not_dispatched`
+    타임아웃·`AcceptRejected`·`ProviderTerminal`·`ProviderFailure`)도 이 값이다. 다시 보내도
+    되는지는 이 판정이 아니라 걸음의 효과 규칙이 정한다.
   판정은 누구의 사정인지만 답하고, 다음 후보로 넘길지는 걸음이 정한다 — exact 걸음은
   Exact-output route의 슬롯 전진 조건이, Keeper 걸음은 `lane_should_retry`의 predicate가
   정한다. 공식 클라이언트가 만드는 provider 오류(`Llm_provider.Error.provider_error`)는 이
@@ -986,10 +987,9 @@ status: reference
     바인딩의 사정으로 실패했다 — 헤더 기한(`connect_timeout_s`, `Http_operation`)이나 전체
     기한(`body_timeout_s`, `Wall_clock`) 안에 응답 헤더가 오지 않음(#38437); 2xx 헤더는
     왔지만 전체 기한 안에 본문이 끝나지 않음(`Response_body_deadline_exceeded`, 원문 응답과
-    provider trace가 남지 않았을 때); 응답으로 온 제공자 거절(Candidate Fault가 모든 거절을
-    `Binding`이나 `Unattributed`로 읽으므로 413·429·402·529·5xx·창 초과(#38454)·401·403·
-    404·이유를 기계가 읽을 수 없는 거절·본문이 기한 안에 오지 않은 거절이 모두 넘어간다,
-    #38913); 답이 JSON으로 읽히지 않음(`Invalid_json_output`); content가 비었음(답을 content
+    provider trace가 남지 않았을 때); 응답으로 온 제공자 거절 가운데 Candidate Fault가
+    `Binding`이나 `Unattributed`로 읽는 것(413·429·402·529·5xx·창 초과(#38454)·401·403·
+    404·이유를 기계가 읽을 수 없는 거절·본문이 기한 안에 오지 않은 거절, #38913); 답이 JSON으로 읽히지 않음(`Invalid_json_output`); content가 비었음(답을 content
     밖 필드에 둠, `Missing_output`). 그 밖에는 넘기지 않는다 — 보낸 뒤의 다른 기한 종류
     (`Queue`·`First_token`·`Capacity_backpressure`·`Non_streaming_body`·`Stream_body`·
     `Stream_idle`·`Provider_step`·`Cli_stdout_idle`·`Unknown_timeout`)와 보낸 뒤 결과를

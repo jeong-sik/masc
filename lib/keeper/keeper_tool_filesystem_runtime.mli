@@ -32,7 +32,7 @@ val resolve_read_file_cwd :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string option ->
-  (string, string) result
+  (string, Keeper_alerting_path.path_refusal) result
 (** The directory a Read resolves its path against: the Keeper's read root
     without [cwd], else [cwd] projected and confined. Whether it exists is
     asked of the filesystem that holds the tree
@@ -45,20 +45,6 @@ val handle_read_file_with_outcome :
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t
-
-val read_sandbox_bytes :
-  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
-  ?cwd:string ->
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  path:string -> max_bytes:int -> unit ->
-  (string, string) result
-(** Resolve like Read, enforce this Keeper's containment, and read binary bytes
-    through the existing sandbox runner. Never falls back to a host read. A
-    remote Keeper's path under its endpoint's declared roots
-    ({!Keeper_sandbox_remote_lane.declared_endpoint_path_of_args}) is the
-    endpoint's own path: it skips the host containment check and is read as
-    itself, the endpoint account being its boundary as for Execute. *)
 
 val read_complete_sandbox_bytes :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
@@ -106,6 +92,22 @@ val approved_write_of_gate_input : Yojson.Safe.t -> (approved_write, string) res
 (** Strict decode of a stored [filesystem_write] Gate input. An input with no
     string [requested_target] or with an effect this module cannot reproduce
     is an error, never a guess. *)
+
+val declared_root_write_gate_input :
+  endpoint:Exec_ssh_endpoint.t ->
+  requested_target:string ->
+  mode:Keeper_tool_write_mode.t ->
+  content_source:Keeper_write_content.t ->
+  content:string ->
+  patch:Keeper_tool_filesystem_remote_write.patch_request option ->
+  Yojson.Safe.t
+(** The [filesystem_write] Gate input for a write to an endpoint path under a
+    declared root (#38593). Its effect names the operation as a host write
+    does, so {!approved_write_of_gate_input} decodes it to the same target and
+    mode, and carries the endpoint's name and its whole configuration as
+    {!Exec_ssh_endpoint.to_toml} writes it. Replay rebuilds the input from the configuration current
+    then, so a changed endpoint yields a different input and the old approval
+    does not apply. *)
 
 val write_call_summary : requested_target:string -> string option
 (** The one line a write approval is about: the path it would write. This is
@@ -207,4 +209,10 @@ val read_sandbox_raw_prefix :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
   path:string -> ?cwd:string -> max_bytes:int -> unit -> (string, string) result
-(** Contained raw binary prefix, bounded before endpoint or Docker capture. *)
+(** Contained raw binary prefix, bounded before endpoint or Docker capture.
+    Resolves like Read and never falls back to a host read. The bytes are the
+    file's own: unlike Read's line window, nothing rewrites paths in them. A
+    remote Keeper's path under its endpoint's declared roots
+    ({!Keeper_sandbox_remote_lane.declared_endpoint_path_of_args}) is the
+    endpoint's own path: it skips the host containment check and is read as
+    itself, the endpoint account being its boundary as for Execute. *)

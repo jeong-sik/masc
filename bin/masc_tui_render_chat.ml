@@ -3281,6 +3281,12 @@ let render_keeper_message (state : state) =
       Message_layout.scroll_hint ~scrolled_back:scroll
         ~older_exist:state.msg_older_exist
     in
+    (* Beside the keys, not among them. The fitter gives up key items from the
+       back, and this is the one item on the row that [?] cannot recover. *)
+    let scroll_position =
+      Message_layout.scroll_position ~scrolled_back:scroll
+        ~older_exist:state.msg_older_exist
+    in
     let return_hint () =
       match state.msg_return with
       | Keeper_chat_return_list -> "Esc:list"
@@ -3411,7 +3417,8 @@ let render_keeper_message (state : state) =
           ~escape_hint ~leave_hint
     in
     Buffer.add_string chat_buf
-      (footer_line state ~max_cells:chat_cols ~hints:footer_hints);
+      (footer_line state ~max_cells:chat_cols ?position:scroll_position
+         ~hints:footer_hints);
 
     let input_column =
       Message_layout.input_cursor_column ~terminal_cols:chat_cols

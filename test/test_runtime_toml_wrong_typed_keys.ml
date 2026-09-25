@@ -49,6 +49,10 @@ type case =
   ; refusal_names : string
   }
 
+let with_credentials usage_read =
+  "[providers.p.credentials]\ntype = \"env\"\nkey = \"P_KEY\"\n\n" ^ usage_read
+;;
+
 let provider_case label extra refusal_names =
   { label
   ; toml =
@@ -108,6 +112,67 @@ let cases =
       "[providers.p.capabilities]\nsupports-inline-tools = 1"
       "providers.p.capabilities.supports-inline-tools: supports-inline-tools must be a \
        boolean"
+  ; provider_case
+      "providers.p.usage-read.shape = 1"
+      (with_credentials "[providers.p.usage-read]\nshape = 1\nurl = \"https://example.invalid/usage\"")
+      "providers.p.usage-read.shape: shape must be a string"
+  ; provider_case
+      "providers.p.usage-read.shape unknown"
+      (with_credentials
+         "[providers.p.usage-read]\nshape = \"openrouter\"\nurl = \"https://example.invalid/usage\"")
+      "providers.p.usage-read.shape: unknown shape \"openrouter\" — expected one of \
+       openrouter-key, zai-quota-limit, kimi-coding-usages, ollama-usage"
+  ; provider_case
+      "providers.p.usage-read.url http"
+      (with_credentials
+         "[providers.p.usage-read]\nshape = \"ollama-usage\"\nurl = \"http://example.invalid/usage\"")
+      "providers.p.usage-read.url: url must be an absolute https:// URL"
+  ; provider_case
+      "providers.p.usage-read.url relative"
+      (with_credentials "[providers.p.usage-read]\nshape = \"ollama-usage\"\nurl = \"/api/usage\"")
+      "providers.p.usage-read.url: url must be an absolute https:// URL"
+  ; provider_case
+      "providers.p.usage-read.url missing"
+      (with_credentials "[providers.p.usage-read]\nshape = \"ollama-usage\"")
+      "providers.p.usage-read.url: missing required field 'url'"
+  ; provider_case
+      "providers.p.usage-read.url on another host"
+      (with_credentials
+         "[providers.p.usage-read]\nshape = \"ollama-usage\"\nurl = \"https://usage.example.test/usage\"")
+      "providers.p.usage-read.url: url host \"usage.example.test\" must be the provider endpoint host \"example.invalid\""
+  ; provider_case
+      "providers.p.usage-read without credentials"
+      "[providers.p.usage-read]\nshape = \"ollama-usage\"\nurl = \"https://example.invalid/usage\""
+      "providers.p.usage-read: usage-read needs the provider's [credentials]"
+  ; { label = "providers.p.usage-read on codex-app-server"
+    ; toml =
+        config
+          ~provider_lines:
+            "protocol = \"codex-app-server\"\ncommand = \"/usr/bin/true\"\n\
+             is-non-interactive = true\n\
+             [providers.p.usage-read]\nshape = \"ollama-usage\"\n\
+             url = \"https://example.invalid/usage\""
+          ~model_lines:""
+    ; refusal_names =
+        "providers.p.usage-read: usage-read is only for an API-key HTTP provider"
+    }
+  ; { label = "providers.p.usage-read on claude-code"
+    ; toml =
+        config
+          ~provider_lines:
+            "protocol = \"claude-code\"\ncommand = \"/usr/bin/true\"\n\
+             is-non-interactive = true\n\
+             [providers.p.usage-read]\nshape = \"ollama-usage\"\n\
+             url = \"https://example.invalid/usage\""
+          ~model_lines:""
+    ; refusal_names =
+        "providers.p.usage-read: usage-read is only for an API-key HTTP provider"
+    }
+  ; provider_case
+      "providers.p.usage-read unknown key"
+      (with_credentials
+         "[providers.p.usage-read]\nshape = \"ollama-usage\"\nurl = \"https://example.invalid/usage\"\nmethod = \"GET\"")
+      "providers.p.usage-read.method: unknown usage-read key \"method\""
   ; model_case
       "models.m.api-name = 1"
       "api-name = 1"
@@ -180,8 +245,41 @@ let test_of_case { label; toml; refusal_names } =
       (String_util.contains_substring errors refusal_names))
 ;;
 
+(* A well-formed [usage-read] reaches the provider record as its variant. *)
+let test_usage_read_parses_to_the_shape () =
+  let toml =
+    config
+      ~provider_lines:
+        (well_typed_provider ^ "\n"
+         ^ with_credentials
+             "[providers.p.usage-read]\nshape = \"zai-quota-limit\"\n\
+              url = \"https://example.invalid/api/monitor/usage/quota/limit\"")
+      ~model_lines:""
+  in
+  match Runtime_toml.parse_string toml with
+  | Error errors ->
+    failf
+      "expected the config to load: %s"
+      (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) -> e.message) errors))
+  | Ok config ->
+    let provider = List.find (fun (p : Runtime_schema.provider) -> p.id = "p") config.providers in
+    check bool "usage_read" true
+      (Option.equal
+         Runtime_schema.equal_usage_read
+         provider.usage_read
+         (Some
+            { Runtime_schema.shape = Zai_quota_limit
+            ; url = "https://example.invalid/api/monitor/usage/quota/limit"
+            }))
+;;
+
 let () =
   run
     "runtime_toml_wrong_typed_keys"
-    [ "a wrong-typed leaf is a refusal that names the key", List.map test_of_case cases ]
+    [ "a wrong-typed leaf is a refusal that names the key", List.map test_of_case cases
+    ; ( "usage-read"
+      , [ test_case "a declared usage-read parses to its shape" `Quick
+            test_usage_read_parses_to_the_shape
+        ] )
+    ]
 ;;

@@ -171,7 +171,13 @@ let test_owned_upload_staging () = with_upload_context (fun config meta -> fixtu
   let result = Masc.Keeper_browser_upload.with_staged_paths
     ~read_file:(fun ~host_path:_ ~max_bytes -> Ok (String.make max_bytes 'x'))
     ~config ~meta ~paths:["payload.bin"] (fun _ -> invoked := true) in
-  check bool "oversized files are refused" true (Result.is_error result);
+  (match result with
+   | Error (Masc.Keeper_browser_upload.File_too_large message) ->
+     check string "oversized file keeps its caller-correctable cause"
+       (Printf.sprintf "upload file exceeds %d bytes: payload.bin"
+          Masc.Keeper_browser_upload.max_file_bytes)
+       message
+   | Error _ | Ok _ -> fail "oversized file lost its typed cause");
   check bool "oversized bytes never reach browser" false !invoked))
 let test_upload_lease_failures () =
   let failing = ref false in
@@ -204,7 +210,9 @@ let test_upload_lease_cancellation () = Eio_main.run (fun _ ->
     (fun () -> match Lane.Upload_lease.with_staged_files ~files:["payload.bin",(fun () -> Ok "bytes")]
        (fun staged -> paths := staged; Lane.Upload_lease.claim ~owner ~paths:staged;
          Eio.Promise.resolve resolve (); Eio.Fiber.await_cancel ()) with
-       | Ok () -> () | Error error -> fail error)
+       | Ok () -> ()
+       | Error (Lane.Upload_lease.Snapshot_failed message) -> fail message
+       | Error (Lane.Upload_lease.Read_failed _) -> fail "unexpected upload reader failure")
     (fun () -> Eio.Promise.await claimed);
   List.iter (fun path -> check bool "cancelled callback retains claimed bytes" true (Sys.file_exists path)) !paths;
   Lane.Upload_lease.release_owner owner;

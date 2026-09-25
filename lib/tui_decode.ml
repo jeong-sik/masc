@@ -11979,11 +11979,33 @@ let decode_async_request_observation json =
   | _ -> Error (Printf.sprintf "unknown async inventory status %S" status)
 ;;
 
+type schedule_hold_reason =
+  | Hold_previous_wake_untaken
+  | Hold_target_shutdown_fenced of
+      { target : string
+      ; fence_owner : string
+      }
+
 type schedule_runner_hold =
   { srh_occurrence_id : string
   ; srh_due_at_iso : string
+  ; srh_reason : schedule_hold_reason
   ; srh_observed_at : float
   }
+
+let decode_schedule_hold_reason hold =
+  match member "reason" hold with
+  | `Assoc _ as reason ->
+    let* kind = required_string_field reason "kind" in
+    (match kind with
+     | "previous_occurrence_unconsumed" -> Ok Hold_previous_wake_untaken
+     | "target_intake_fenced" ->
+       let* target = required_string_field reason "target" in
+       let* fence_owner = required_string_field reason "fence_owner" in
+       Ok (Hold_target_shutdown_fenced { target; fence_owner })
+     | unknown -> Error (Printf.sprintf "unknown runner hold reason %S" unknown))
+  | bad -> field_type_error "runner_hold.reason" "an object" bad
+;;
 
 (* 9999-12-31T23:59:59Z. The hold's time is drawn through [Unix.localtime],
    which fails with EOVERFLOW far above this (from 1e17 on macOS, measured),
@@ -12001,6 +12023,7 @@ let decode_schedule_runner_hold row =
   | `Assoc _ ->
     let* srh_occurrence_id = required_string_field hold "occurrence_id" in
     let* srh_due_at_iso = required_string_field hold "due_at_iso" in
+    let* srh_reason = decode_schedule_hold_reason hold in
     let* observed_at = required_nullable_float_field hold "observed_at" in
     let* srh_observed_at =
       match observed_at with
@@ -12010,7 +12033,7 @@ let decode_schedule_runner_hold row =
       | Some _ | None ->
         Error "runner_hold observed_at must be a time from 1970 to the end of year 9999"
     in
-    Ok (Some { srh_occurrence_id; srh_due_at_iso; srh_observed_at })
+    Ok (Some { srh_occurrence_id; srh_due_at_iso; srh_reason; srh_observed_at })
   | bad -> field_type_error "runner_hold" "an object or null" bad
 ;;
 

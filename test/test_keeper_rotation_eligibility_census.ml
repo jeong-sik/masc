@@ -444,7 +444,8 @@ let route_claim = function
           | Keeper_runtime_failure_route.Provider_reported_failure
           | Keeper_runtime_failure_route.Request_refused
           | Keeper_runtime_failure_route.Provider_wire_defect
-          | Keeper_runtime_failure_route.Server_error_not_transient )
+          | Keeper_runtime_failure_route.Server_error_not_transient
+          | Keeper_runtime_failure_route.Context_window_exceeded )
       } -> Walk_rotates
   | Keeper_runtime_failure_route.Rotate_now
       { rotate =

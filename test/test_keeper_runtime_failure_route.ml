@@ -484,8 +484,8 @@ let test_response_observed_per_class () =
     ; rotate KFR.Request_refused
     ; rotate KFR.Provider_wire_defect
     ; rotate KFR.Server_error_not_transient
+    ; rotate KFR.Context_window_exceeded
     ; terminal KFR.Deterministic_request
-    ; terminal KFR.Context_overflow
     ; terminal KFR.Session_claim_refused
     ; terminal KFR.Transcript_refused
     ; terminal KFR.Protocol_error
@@ -677,8 +677,8 @@ let test_route_resumes_on_same_path_per_class () =
     ; "", rotate KFR.Request_refused
     ; "", rotate KFR.Provider_wire_defect
     ; "", rotate KFR.Server_error_not_transient
+    ; "", rotate KFR.Context_window_exceeded
     ; "", terminal KFR.Deterministic_request
-    ; "", terminal KFR.Context_overflow
     ; "", terminal KFR.Session_claim_refused
     ; "", terminal KFR.Transcript_refused
     ; "", terminal KFR.Contract_violation
@@ -711,12 +711,9 @@ let test_route_resumes_on_same_path_per_class () =
    - [Retry_after_observed] is exempt: the route reports a wait hint, and
      whether the walk rests on the same candidate or rotates is decided by
      [Runtime_attempt_fsm.should_try_next], not by the route.
-   The one known disagreement is pinned by name: a typed [ContextOverflow]
-   ([Binding Window]) advances the walk, while the route keeps the typed
-   terminal [Context_overflow] it had before the RFC walk. That is a defect,
-   not a design choice (#38984); fixing it turns the pinned list into [[]]. A new
-   disagreement fails the test, and so does closing the pinned one, so the
-   allow-list cannot go stale. Each row also pins its route class so a class
+   No row may disagree. The last one, a typed [ContextOverflow]
+   ([Binding Window]) that advanced the walk while the route stayed terminal,
+   closed with #38984, so the expected list is [[]] and any disagreement fails. Each row also pins its route class so a class
    cannot move silently. A new [Retry.api_error] constructor stops
    [Candidate_fault.of_api_error] from compiling, which is where this table
    has to grow. *)
@@ -781,7 +778,7 @@ let test_candidate_fault_route_agreement () =
       , retry KFR.Server_error )
     ; ( "ContextOverflow"
       , Llm_provider.Retry.ContextOverflow { message = "too large"; limit = None }
-      , terminal KFR.Context_overflow )
+      , rotate KFR.Context_window_exceeded )
     ; ( "Request_body_refused_by_provider"
       , invalid_request
           (Llm_provider.Retry.Request_body_refused_by_provider { status = 413 })
@@ -825,8 +822,8 @@ let test_candidate_fault_route_agreement () =
       rows
   in
   Alcotest.(check (list string))
-    "route and walk disagree only on the pinned rows"
-    [ "ContextOverflow" ]
+    "route and walk agree on every row"
+    []
     disagreements
 
 let () =

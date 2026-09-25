@@ -761,6 +761,24 @@ let test_a_turn_on_a_keeper_that_is_not_running_stops_moving () =
        ~constructors:[ "Masc_tui_keeper_mark.Left_open" ]
      > 0)
 
+(* The TURN cell counts from the open turn when there is one. Counted from
+   the last recorded turn alone, a failing keeper's cell counts from the
+   failure: "failing 7m45s" beside a moving mark read as the work in
+   progress. [Masc_tui_keeper_mark.turn_clock] says which instant wins, and
+   test_tui_keeper_mark pins it; the row has to ask it and draw the open case
+   rather than parse the recorded timestamp on its own. *)
+let test_the_turn_cell_counts_from_the_open_turn () =
+  Alcotest.(check bool) "the row asks which turn its clock counts" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"keeper_row_content"
+       ~callee:"Masc_tui_keeper_mark.turn_clock"
+     > 0);
+  Alcotest.(check bool) "the row draws the open turn's clock" true
+    (Ast_grep.count_constructors_in_value_binding ~module_path:render
+       ~binding_name:"keeper_row_content"
+       ~constructors:[ "Masc_tui_keeper_mark.Open_turn_started" ]
+     > 0)
+
 (* The preview's em dash once appeared as double-encoded UTF-8. Running
    marks belong to Masc_tui_answering and are exercised as rendered rows by
    test_tui_answering, including their terminal-cell width. *)
@@ -1157,6 +1175,8 @@ let () =
             test_project_changes_use_the_requested_workspace_root
         ; Alcotest.test_case "a turn on a keeper that is not running stops"
             `Quick test_a_turn_on_a_keeper_that_is_not_running_stops_moving
+        ; Alcotest.test_case "the turn cell counts from the open turn"
+            `Quick test_the_turn_cell_counts_from_the_open_turn
         ; Alcotest.test_case "why a lane cannot admit is the detail pane's"
             `Quick test_why_a_lane_cannot_admit_is_the_detail_panes_to_say
         ; Alcotest.test_case "visible navigation glyphs are not mojibake"

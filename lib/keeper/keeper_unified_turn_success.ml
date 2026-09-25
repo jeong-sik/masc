@@ -13,7 +13,7 @@ let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime
    turn cost no longer needs a usage-trust classification. *)
 let turn_cost (resolution : Keeper_usage_resolution.t) =
   match resolution.delta with
-  | Some delta -> Option.value ~default:0.0 delta.cost_usd
+  | Some delta -> Keeper_usage_resolution.reported_cost_usd delta
   | None -> 0.0
 ;;
 
@@ -416,7 +416,7 @@ let emit_resolved_cost_event
     ~model:result.model_used
     ~input_tokens:usage.input_tokens
     ~output_tokens:usage.output_tokens
-    ~cost_usd:(Option.value ~default:0.0 usage.cost_usd)
+    ~cost_usd:(Keeper_usage_resolution.reported_cost_usd usage)
     ~cache_creation_input_tokens:usage.cache_creation_input_tokens
     ~cache_read_input_tokens:usage.cache_read_input_tokens
     ~usage_missing

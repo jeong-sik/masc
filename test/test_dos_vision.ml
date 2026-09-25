@@ -56,7 +56,8 @@ let test_keeper_screen_carries_the_frame () =
         (match (screen ()).disposition with Tool_result.Failed _ -> true | _ -> false);
       (match
          Dos_lane.load ~who:"dos-player" ~ledger_dir:(Filename.concat base "dos")
-           ~saves_dir:(Filename.concat base "saves") ~program_name:"HELLO.COM"
+           ~saves_dir:(Filename.concat base "saves")
+           ~checkpoint_dir:(Filename.concat base "checkpoints") ~program_name:"HELLO.COM"
            ~program_bytes:hello_com ~files:[] ~announce:ignore
        with
        | Ok _ -> ()

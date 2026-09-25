@@ -25,6 +25,10 @@ FROM debian:bookworm-slim
 #     (keeper_sandbox_remote_checkouts.ml). Without it the probe exits 127 and
 #     the Keeper reports its workspace as unreadable.
 #
+# jq, file, xxd, time, make, iproute2, bind9-dnsutils, python3-yaml, python3-pip,
+# python3-venv: the commands Keepers reached for and did not find, counted over
+# 93,111 Execute records (2026-09-10..24). file alone was called by 12 keepers.
+#
 # PDF/SVG: ReportLab, CairoSVG and Poppler create and inspect real documents.
 # Nanum fonts retain Korean glyphs in rendered output. Pillow handles raster
 # images; Pandoc and Impress produce and render slides; FFmpeg handles media.
@@ -38,6 +42,7 @@ RUN apt-get update \
        bash \
        ca-certificates \
        curl \
+       file \
        findutils \
        ffmpeg \
        fontconfig \
@@ -46,14 +51,23 @@ RUN apt-get update \
        pandoc \
        poppler-utils \
        gh \
+       iproute2 \
+       jq \
        git \
        less \
+       make \
        procps \
        python3 \
        python3-cairosvg \
+       python3-pip \
        python3-pil \
        python3-reportlab \
+       python3-venv \
+       python3-yaml \
        ripgrep \
+       time \
+       xxd \
+       bind9-dnsutils \
   && rm -rf /var/lib/apt/lists/*
 
 # The container runs as the host operator's uid, which has no entry here. Give

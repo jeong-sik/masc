@@ -8,9 +8,9 @@ Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
 `bin/masc_tui_types.ml`: Overview, Activity, Keepers, Lanes, Memory,
-Approvals, Board, Planning, Fusion, Workspace, Config. Approvals keeps its
-stop while something waits or its reading is not current, and leaves the ring
-only once a reading says every list is empty.
+Approvals, Board, Planning, Fusion, Workspace, Config. Approvals leaves the ring
+only when a current reading shows nothing waiting and it is not the current
+view; while the queue cannot be read (server unreachable, first load) it stays.
 Additional surfaces hang off parents instead of holding Tab stops:
 Planning's `v` cycles through Task Review and Task Verdicts, then back to Goals;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
@@ -495,9 +495,9 @@ For TOML package installations, open `/addons` from the composer or choose
 covers configuration editing, connections, Skills, actions and cross-Lane evidence.
 
 Standalone execution lanes only. Keeper lifecycle and turn-cycle facts live on
-Keepers, so this surface no longer repeats a second Keeper table. It hangs
-off Runtime rather than holding a Tab stop: `p` on Runtime walks keeper
-lanes, all runtimes, and then this surface. From the lane overview, `p` or
+Keepers, so this surface no longer repeats a second Keeper table. It holds
+its own Tab stop between Keepers and Memory, and Runtime also reaches it: `p`
+on Runtime walks keeper lanes, all runtimes, and then this surface. From the lane overview, `p` or
 `Esc` returns to Runtime; inside the run list and run detail, `Esc` first
 backs out one drill-down level as before. The palette keeps `go Lanes`.
 

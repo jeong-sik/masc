@@ -232,8 +232,7 @@ let api_error_retry_after (api : Llm_provider.Retry.api_error) =
    well. The rich per-class comments from the previous hand-written match
    live on the [rotate_class] / [retry_class] / [terminal_class] type
    declarations and the .mli docstrings. *)
-let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
-  let exhaust_failure = exhaust ~err ~provenance:Agent_core_api_error in
+let route_of_api_error (api : Llm_provider.Retry.api_error) =
   (* Intended, not a pass-through: the wait hint belongs to the source
      constructor and the class belongs to [Candidate_fault], so every
      [observe_retry] arm forwards whatever hint the constructor carried
@@ -374,7 +373,7 @@ let route_of_error_family ~boundary (err : Agent_core.Error.t) : route =
     exhaust ~err ~provenance:(provenance_for_boundary boundary provenance) terminal
   in
   match err with
-  | Agent_core.Error.Api api -> route_of_api_error ~err api
+  | Agent_core.Error.Api api -> route_of_api_error api
   | Agent_core.Error.Provider p -> route_of_provider_error ~err p
   | Agent_core.Error.Mcp _ ->
     exhaust_failure Agent_core_mcp_error Protocol_error

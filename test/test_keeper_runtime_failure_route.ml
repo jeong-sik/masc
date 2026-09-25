@@ -730,10 +730,6 @@ let test_candidate_fault_route_agreement () =
     KFR.Retry_after_observed { retry_class; retry_after }
   in
   let rotate rotate = KFR.Rotate_now { rotate } in
-  let terminal terminal =
-    KFR.Exhausted_visible_alive
-      { terminal; provenance = KFR.Agent_core_api_error; detail = "" }
-  in
   let invalid_request reason = Llm_provider.Retry.InvalidRequest { message = "refused"; reason } in
   let input_capacity =
     Llm_provider.Retry.InputCapacity

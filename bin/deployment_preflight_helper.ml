@@ -428,7 +428,7 @@ let run_tool_blob_maintenance base_path delete_previous_candidates =
              else Tool_blob_maintenance.Observe_only
            in
            (match
-              Tool_blob_maintenance.run
+              Tool_blob_maintenance.run ~board_posts_file:Masc_board_handlers.Board_paths.posts_file
                 ~base_path:canonical_base_path
                 ~mode
             with

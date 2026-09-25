@@ -18,19 +18,26 @@
     unreferenced in the new complete scan. The offline deployment helper runs
     it only while holding the BasePath process lease, so two complete offline
     scans are required. A malformed reference, scan failure, candidate-store
-    failure, or unlink failure aborts visibly. Because the blob store is shared across clusters
-    while several consumers are cluster-aware, any non-empty
-    [<base>/.masc/clusters] tree currently disables maintenance fail-closed
-    until cross-cluster writer quiescence has one coordination owner. *)
+    failure, or unlink failure aborts visibly.
+
+    The blob store is one per BasePath while the consumers are per cluster:
+    each writes under its cluster's workspace root, [<base>/.masc] for the
+    default cluster and [<base>/.masc/clusters/<name>] for the others. The
+    scan therefore reads the same consumer registry in every workspace, and a
+    hash is live when any workspace references it (#38919). Every entry under
+    [clusters] must be an owned directory: a symlink, a regular file or a
+    special file rejects the pass ([Cluster_workspace_rejected]) instead of
+    being skipped, and so does a cluster set that changes while the scan runs.
+    Both leave the candidate snapshot untouched and delete nothing. *)
 
 type mode =
   | Observe_only
   | Delete_previous_candidates
 
 type error =
-  | Clustered_durable_roots_uncoordinated of
+  | Cluster_workspace_rejected of
       { path : string
-      ; entries : int
+      ; reason : string
       }
   | Durable_source_stat_failed of
       { path : string
@@ -83,4 +90,12 @@ type report =
 
 val error_to_string : error -> string
 val candidate_snapshot_path : base_path:string -> string
-val run : base_path:string -> mode:mode -> (report, error) result
+val run :
+  base_path:string ->
+  board_posts_file:(workspace_masc_dir:string -> string) ->
+  mode:mode ->
+  (report, error) result
+(** [board_posts_file ~workspace_masc_dir] names the Board posts file of one
+    workspace. Production passes [Board_paths.file_path ~workspace_masc_dir
+    Posts] ([Masc_board_handlers.Board_paths.posts_file]); this library sits
+    below Board, so it takes the name instead of repeating it. *)

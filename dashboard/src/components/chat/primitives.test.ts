@@ -175,6 +175,16 @@ describe('ChatTranscript', () => {
     resetToolCallOutputs()
   })
 
+  it('renders a loading state instead of the empty card while hydrating with zero entries', () => {
+    render(html`<${ChatTranscript} keeperName="sangsu" entries=${[]} emptyText="empty" hydrating=${true} />`, container)
+    expect(container.querySelector('[data-chat-transcript-loading]')?.getAttribute('aria-busy')).toBe('true')
+    expect(container.querySelector('[data-chat-transcript-empty]')).toBeNull()
+
+    render(html`<${ChatTranscript} keeperName="sangsu" entries=${[]} emptyText="empty" hydrating=${false} />`, container)
+    expect(container.querySelector('[data-chat-transcript-loading]')).toBeNull()
+    expect(container.querySelector('[data-chat-transcript-empty]')?.textContent).toContain('empty')
+  })
+
   it('surfaces tool output joined by execution_id in the collapsed preview', () => {
     recordToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_x', output: 'context window 42%' })])
     render(

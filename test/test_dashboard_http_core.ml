@@ -1,5 +1,10 @@
 module Types = Masc_domain
 
+(* Fixture tick for create and modify: the runner's floor tick, below every
+   interval these fixtures declare, so the runner-tick check never refuses one
+   of them. *)
+let runner_tick_sec = 1.0
+
 let () = Mirage_crypto_rng_unix.use_default ()
 
 module Lib = Masc
@@ -1805,7 +1810,7 @@ let test_schedule_exact_lookup_found_matches_the_dashboard_fixture () =
     | Ok request -> request
     | Error msg -> fail msg
   in
-  (match Schedule_store.insert_request config request with
+  (match Schedule_store.insert_request config ~runner_tick_sec request with
    | Ok _ -> ()
    | Error _ -> fail "the fixture schedule could not be inserted");
   (match Schedule_store.refresh_due config ~now:201.0
@@ -1880,7 +1885,7 @@ let test_schedule_exact_lookup_carries_the_wake_history () =
     | Ok request -> request
     | Error msg -> fail msg
   in
-  (match Schedule_store.insert_request config request with
+  (match Schedule_store.insert_request config ~runner_tick_sec request with
    | Ok _ -> ()
    | Error _ -> fail "the fixture schedule could not be inserted");
   let occurrence now =
@@ -1955,7 +1960,7 @@ let test_schedule_page_can_be_scoped_to_one_target () =
         ()
     with
     | Ok request ->
-      (match Schedule_store.insert_request config request with
+      (match Schedule_store.insert_request config ~runner_tick_sec request with
        | Ok _ -> ()
        | Error _ -> fail ("could not insert " ^ schedule_id))
     | Error msg -> fail msg
@@ -2041,7 +2046,7 @@ let test_schedule_page_counts_retained_wakes () =
         ()
     with
     | Ok request ->
-      (match Schedule_store.insert_request config request with
+      (match Schedule_store.insert_request config ~runner_tick_sec request with
        | Ok _ -> ()
        | Error _ -> fail ("could not insert " ^ schedule_id))
     | Error msg -> fail msg
@@ -2372,6 +2377,7 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
          { Masc.Keeper_gate.started_ids = [ "approval-1" ]
          ; queued = 1
          ; failures = []
+         ; blockers = []
          })
   in
   check string "completed status" "completed"
@@ -2393,6 +2399,17 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
                ; operator_detail = "worker unavailable"
                }
              ]
+         ; blockers =
+             [ { keeper_name = "keeper-b"
+               ; blocker =
+                   Masc.Keeper_gate.Drain_owner_at_capacity [ "approval-3" ]
+               }
+             ; { keeper_name = "keeper-a"
+               ; blocker =
+                   Masc.Keeper_gate.Drain_start_failed
+                     ("approval-1", "worker unavailable")
+               }
+             ]
          })
   in
   check string "partial status" "partial"
@@ -2406,6 +2423,23 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
      |> index 0
      |> member "keeper_name"
      |> to_string);
+  (* #25979: an owner that started nothing still says why it is blocked. *)
+  let capacity_blocker = partial |> member "recovery_blockers" |> index 0 in
+  check string "blocked owner" "keeper-b"
+    (capacity_blocker |> member "keeper_name" |> to_string);
+  check string "blocker kind" "owner_at_capacity"
+    (capacity_blocker |> member "kind" |> to_string);
+  check (list string) "blocker approval ids" [ "approval-3" ]
+    (capacity_blocker |> member "approval_ids" |> to_list |> List.map to_string);
+  check bool "capacity blocker has no reason" true
+    (capacity_blocker |> member "reason" = `Null);
+  let start_blocker = partial |> member "recovery_blockers" |> index 1 in
+  check string "start failure kind" "start_failed"
+    (start_blocker |> member "kind" |> to_string);
+  check string "start failure reason" "worker unavailable"
+    (start_blocker |> member "reason" |> to_string);
+  check int "completed has no blockers" 0
+    (completed |> member "recovery_blockers" |> to_list |> List.length);
   let failed =
     json
       (Server_routes_http_routes_dashboard.For_testing.Recovery_failed

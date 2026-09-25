@@ -189,6 +189,44 @@ let test_serializes_within_keeper () =
     (List.rev !order)
 ;;
 
+(* RFC-0467: [has_waiting] is true exactly while a unit waits behind the
+   running one. Reading it registers no lane entry, and the waiting unit,
+   once it runs, sees nothing behind itself. *)
+let test_has_waiting_reads_the_latest_slot () =
+  Lane.For_testing.reset ();
+  let keeper_name = "k-waiting" in
+  Alcotest.(check bool) "no entry: nothing waits" false
+    (Lane.has_waiting ~base_path ~keeper_name);
+  Alcotest.(check (option int)) "reading registered no entry" None
+    (Lane.For_testing.pending ~base_path ~keeper_name);
+  let seen_by_second = ref None in
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun sw ->
+      Lane.init ~sw;
+      let started, set_started = Eio.Promise.create () in
+      let release, set_release = Eio.Promise.create () in
+      let (_ : Lane.outcome) =
+        Lane.submit ~base_path ~keeper_name (fun () ->
+          Eio.Promise.resolve set_started ();
+          Eio.Promise.await release)
+      in
+      Eio.Promise.await started;
+      Alcotest.(check bool) "a running unit alone: nothing waits" false
+        (Lane.has_waiting ~base_path ~keeper_name);
+      let (_ : Lane.outcome) =
+        Lane.submit ~base_path ~keeper_name (fun () ->
+          seen_by_second := Some (Lane.has_waiting ~base_path ~keeper_name))
+      in
+      Alcotest.(check bool) "a unit behind the running one waits" true
+        (Lane.has_waiting ~base_path ~keeper_name);
+      Eio.Promise.resolve set_release ();
+      Lane.For_testing.await_idle ~base_path ~keeper_name;
+      Alcotest.(check bool) "the lane drained: nothing waits" false
+        (Lane.has_waiting ~base_path ~keeper_name)));
+  Alcotest.(check (option bool)) "the waiting unit ran and saw nothing behind it"
+    (Some false) !seen_by_second
+;;
+
 (* A unit for one keeper does not block a unit for another keeper. *)
 let test_independent_across_keepers () =
   Lane.For_testing.reset ();
@@ -779,6 +817,8 @@ let () =
             "librarian saturation coalesces latest"
             `Quick
             test_librarian_saturation_coalesces_latest
+        ; Alcotest.test_case "has_waiting reads the latest slot" `Quick
+            test_has_waiting_reads_the_latest_slot
         ; Alcotest.test_case "releases on raise" `Quick test_releases_on_raise
         ; Alcotest.test_case "releases on cancel" `Quick test_releases_on_cancel
         ; Alcotest.test_case

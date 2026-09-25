@@ -1,8 +1,8 @@
 (** Small JSON / string utility helpers for the dashboard HTTP surface. *)
 
-(** Trim [text], then truncate to [max_chars] characters with a
-    trailing ["..."] suffix when over budget. Returns
-    [(preview, truncated)]. *)
+(** Trim [text], then truncate to at most [max_chars] bytes, cut at a
+    UTF-8 character boundary, with a trailing ["..."] suffix when over
+    budget. Returns [(preview, truncated)]. *)
 val compact_preview : max_chars:int -> string -> string * bool
 
 (** [`Assoc] field-by-key with [`Null] fallback on miss or

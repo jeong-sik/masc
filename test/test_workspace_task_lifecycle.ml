@@ -246,8 +246,47 @@ let test_awaiting_metrics_use_original_start_time () =
          ; verification_id = "vrf-metrics"
          })
   in
-  if Float.compare expected actual <> 0
-  then failwith "awaiting metrics must use the original producer start time"
+  match actual with
+  | Some actual when Float.compare expected actual = 0 -> ()
+  | Some _ | None -> failwith "awaiting metrics must use the original producer start time"
+;;
+
+(* #26575: a start that does not parse has no duration. It used to read as
+   [now], so the completion metric reported a 0 ms task. *)
+let test_unparsable_start_has_no_duration () =
+  let unparsable = "not-a-timestamp" in
+  List.iter
+    (fun (label, status) ->
+       match Workspace_task_classify.task_started_at_unix status with
+       | None -> ()
+       | Some _ -> failwith (label ^ ": an unparsable start must not yield a start time"))
+    [ "claimed", D.Claimed { assignee = owner; claimed_at = unparsable }
+    ; "in_progress", D.InProgress { assignee = owner; started_at = unparsable }
+    ; ( "awaiting_verification"
+      , D.AwaitingVerification
+          { assignee = owner
+          ; started_at = unparsable
+          ; submitted_at = now
+          ; intent = Complete_task
+          ; verification_id = "vrf-unparsable"
+          } )
+    ]
+;;
+
+(* A start after [now] is a clock that ran backwards: it has no duration, not a
+   zero one. A start at or before [now] measures from it. *)
+let test_backwards_clock_has_no_duration () =
+  match D.parse_iso8601_opt now with
+  | None -> failwith "fixture timestamp must parse"
+  | Some started_at ->
+    let status = D.InProgress { assignee = owner; started_at = now } in
+    (match Workspace_task_classify.task_duration_ms_since ~now:(started_at -. 1.0) status with
+     | None -> ()
+     | Some ms -> failwith (Printf.sprintf "a start after now must have no duration, got %dms" ms));
+    (match Workspace_task_classify.task_duration_ms_since ~now:(started_at +. 2.0) status with
+     | Some 2000 -> ()
+     | Some ms -> failwith (Printf.sprintf "two seconds after the start must read 2000ms, got %dms" ms)
+     | None -> failwith "a start before now must have a duration")
 ;;
 
 (* A verdict is not an agent action. There is no [task_action] constructor for it,
@@ -553,6 +592,8 @@ let () =
   test_done_has_no_non_verification_lane ();
   test_verification_preserves_original_start_time ();
   test_awaiting_metrics_use_original_start_time ();
+  test_unparsable_start_has_no_duration ();
+  test_backwards_clock_has_no_duration ();
   test_verdict_is_not_an_agent_action ();
   test_verdict_requires_authority_and_reason ();
   test_verdict_rejects_stale_verification_id ();

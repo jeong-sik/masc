@@ -13,6 +13,8 @@ type 'session opened =
   ; release : unit Eio.Promise.u
   ; stopped : unit Eio.Promise.t
   ; ended : string option ref  (* the first reason the session stopped working *)
+  ; abandoned_answers : int ref  (* replies to calls whose caller had left, so far *)
+  ; abandoned_answered : Eio.Condition.t  (* broadcast on each such reply *)
   }
 
 type 'session state = Closed | Opening | Open of 'session opened | Closing
@@ -42,6 +44,11 @@ let backend_name = "chromium-stagehand"
 (* The runtime is asked to close before its browser stops. The browser stops
    either way, so its answer is waited for only this long. *)
 let close_answer_wait_s = 5.
+
+(* How long a sentence whose caller left may stay unanswered before its
+   session is retired: the extension's own deadline for the sentence, counted
+   from when the caller left, which is after the call was sent. *)
+let abandoned_sentence_wait_s = float_of_int (Wire.timeout_ms Wire.sentence_timeout) /. 1000.
 
 let answered data = Browser_lane.Answered (`Assoc [ "ok", `Bool true; "data", data ])
 
@@ -83,9 +90,18 @@ let run_session t ~headless ~opened ~resolve_opened =
      status keeps the reason, and the next open starts a new one instead of
      reusing a session every page verb would find gone. *)
   let release_on_end = ref (fun () -> ()) in
+  let abandoned_answers = ref 0 and abandoned_answered = Eio.Condition.create () in
   let log event =
     note_end ended event;
     (match !ended with Some _ -> !release_on_end () | None -> ());
+    (match event with
+     | Session.Abandoned_call_ended _ ->
+       incr abandoned_answers;
+       Eio.Condition.broadcast abandoned_answered
+     | Session.Runtime_ready _ | Session.Model_request_refused _ | Session.Model_failed _
+     | Session.Unsupported_request _ | Session.Unsupported_notification _ | Session.Extension_log _
+     | Session.Malformed_message _ | Session.Unexpected_response _ | Session.Reply_not_delivered _
+     | Session.Malformed_cdp_event _ | Session.Worker_detached | Session.Connection_ended _ -> ());
     t.log event
   in
   let stopped, resolve_stopped = Eio.Promise.create () in
@@ -109,7 +125,7 @@ let run_session t ~headless ~opened ~resolve_opened =
         let released, release = Eio.Promise.create () in
         Executor.Tabs.forget_pages t.tabs;
         t.last_end <- None;
-        t.state <- Open { session; release; stopped; ended };
+        t.state <- Open { session; release; stopped; ended; abandoned_answers; abandoned_answered };
         release_on_end := (fun () -> release_session release);
         (* An end that came between attach and now. *)
         (match !ended with Some _ -> !release_on_end () | None -> ());
@@ -225,17 +241,43 @@ let is_sentence = function
   | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _ -> false
 ;;
 
-(* A sentence whose caller left can remain Abandoned if the extension never
-   replies. The stopped browser drops that session; a later open starts a
-   fresh one. Match the session captured before the call so a late cleanup
-   cannot close a newer session. *)
+(* A sentence whose caller left stays Abandoned in the session until the
+   extension replies, and every page verb is refused before effect meanwhile.
+   The session is shared by every caller, so one caller leaving does not stop
+   it: the reply usually comes by the extension's own deadline. Only a
+   sentence still unanswered once that deadline has passed retires the
+   session: its browser stops and a later open starts a fresh one. Match the
+   session captured before the call so a late cleanup cannot close a newer
+   session. *)
 let retire_sentence_session t expected =
-  match expected, t.state with
-  | Some expected, Open current when expected == current ->
+  match t.state with
+  | Open current when expected == current ->
     t.state <- Closing;
     release_session current.release;
     Eio.Promise.await current.stopped
-  | (Some _ | None), (Closed | Opening | Closing | Open _) -> ()
+  | Closed | Opening | Closing | Open _ -> ()
+;;
+
+let retire_unanswered_sentence t expected =
+  match expected with
+  | None -> ()
+  | Some expected ->
+    let answers_before = !(expected.abandoned_answers) in
+    let answered () =
+      Eio.Condition.loop_no_mutex expected.abandoned_answered (fun () ->
+        if !(expected.abandoned_answers) = answers_before then None else Some ())
+    in
+    (match
+       Eio.Fiber.first
+         (fun () ->
+           answered ();
+           `Answered)
+         (fun () ->
+           t.sleep abandoned_sentence_wait_s;
+           `Unanswered)
+     with
+     | `Answered -> ()
+     | `Unanswered -> retire_sentence_session t expected)
 ;;
 
 let serve t { verb; reply; caller_left } =
@@ -254,8 +296,8 @@ let serve t { verb; reply; caller_left } =
     let requested_session = match t.state with Open opened -> Some opened | Closed | Opening | Closing -> None in
     let progress = ref Queued in
     (* A caller that leaves cancels the call it asked for; the session then
-       holds it as abandoned until the runtime answers it or the sentence
-       session is retired below. *)
+       holds it as abandoned until the runtime answers it, or until the
+       sentence's session is retired below for want of an answer. *)
     (match
        Watched_work.run
          ~watcher:(fun () ->
@@ -266,7 +308,7 @@ let serve t { verb; reply; caller_left } =
      | Some answer -> Eio.Promise.resolve reply answer
      | None ->
        (match !progress with
-        | Began when is_sentence verb -> retire_sentence_session t requested_session
+        | Began when is_sentence verb -> retire_unanswered_sentence t requested_session
         | Began | Queued -> ()))
 ;;
 

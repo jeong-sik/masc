@@ -457,15 +457,17 @@ let manager config =
                      action_mutex = Eio.Mutex.create ();
                      configuration_status = `Null; configuration_nudge = (fun () -> ()) } in
       Hashtbl.add managers root m; m
-let notify_activity ~config ~activity =
-  if Eio_context.root_switch_on_current_domain () then
-    let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
-    match Hashtbl.find_opt managers root with
-    | None -> ()
-    | Some m -> Hashtbl.iter (fun _ e ->
-        if e.running && not e.stopping
-          && Lane_addon_sources.interested e.refresh_interest activity
-        then wake ~request:Refresh_sources e) m.entries
+(* Entries and their wake promises belong to the root-switch owner domain. A
+   caller on the HTTP serving domain or a pool worker is carried there, like
+   [dispatch], instead of being dropped. *)
+let notify_activity ~config ~activity = Eio_context.run_on_owner_domain (fun () ->
+  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  match Hashtbl.find_opt managers root with
+  | None -> ()
+  | Some m -> Hashtbl.iter (fun _ e ->
+      if e.running && not e.stopping
+        && Lane_addon_sources.interested e.refresh_interest activity
+      then wake ~request:Refresh_sources e) m.entries)
 let find m args = let* id = text args "instance_id" in
   match Hashtbl.find_opt m.entries id with Some e -> Ok e | None -> Error "unknown active instance"
 let historical m =

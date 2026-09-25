@@ -625,7 +625,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
         active_model: 'gpt-5.4',
         active_model_label: 'openai:gpt-5.4',
         last_model_used: 'gpt-5.4',
-        last_model_used_label: 'openai:gpt-5.4',
         metrics_series: [
           {
             ts_unix: 10,
@@ -651,7 +650,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
       runtime_canonical: 'primary',
       selected_runtime_canonical: 'primary',
       active_model_label: null,
-      last_model_used_label: null,
     })
     expect(keeper?.primary_model).toBeUndefined()
     expect(keeper?.active_model).toBeUndefined()

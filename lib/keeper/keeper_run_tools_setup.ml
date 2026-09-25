@@ -918,6 +918,11 @@ let prepare_agent_setup
     ; agent_cell
     ; agent_name
     ; all_tool_names
+    ; deferred_tool_names =
+        (match keeper_listing with
+         | Keeper_tools_agent_core.No_listing -> []
+         | Keeper_tools_agent_core.Listing { deferred_builtin_names } ->
+           deferred_builtin_names)
     ; compute_tool_surface
     ; record_tool_assignment
     ; config

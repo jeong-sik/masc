@@ -635,8 +635,10 @@ type exact_lane = Standalone_lane.t =
 val exact_lane_supports_cli_tail : exact_lane -> bool
 (** Whether this exact lane can walk official-client [cli_slots] when HTTP
     provider slots are absent or exhausted. Verifier uses the managed tool-call
-    runner and its typed verdict callback. [Browser_stagehand] answers through
-    AGENT_CORE only because its bridge has no official-client executor. *)
+    runner and its typed verdict callback. [Browser_stagehand] walks its
+    [cli_slots] as official-client one-shots after its HTTP slots; see
+    {!Browser_stagehand_model} for the one request shape a one-shot cannot
+    carry. *)
 
 val verifier_runtime_admission : t -> (unit, string) result
 (** The one answer to "can this runtime judge a completion review?", used by
@@ -1224,7 +1226,7 @@ val set_exact_output_lane_slots :
     (inline, or through dotted keys) is refused rather than declared twice, and
     so is a slot the lane already declares as a CLI slot, and a binding whose
     provider is an official client, which can only be a CLI slot — on
-    [Workspace_curator] or [Browser_stagehand], which walk no CLI tail, no list at all. An empty
+    [Workspace_curator], which walks no CLI tail, no list at all. An empty
     [slots] is this writer's own floor: it names the whole catalog order.
     Taking the last catalog slot off a lane that keeps a CLI slot is
     {!drop_exact_output_lane_slot}. *)
@@ -1242,7 +1244,7 @@ val append_exact_output_lane_slot :
     client (Codex app-server, Antigravity CLI, Claude Code) goes to
     [cli_slots]; every other id goes to [slots], where the registry admits or
     reports it when it publishes the lane. An official client is refused on
-    [Workspace_curator] or [Browser_stagehand]: those lanes walk no CLI tail, and their runners refuse a
+    [Workspace_curator]: that lane walks no CLI tail, and its runs refuse a
     lane declaring one. A lane table this creates for a CLI slot declares
     [cli_slots] alone; the parser reads an absent [slots] as empty. Declared
     slots

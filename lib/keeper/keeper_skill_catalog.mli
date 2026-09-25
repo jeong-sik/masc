@@ -151,12 +151,16 @@ val parse_skill : directory:string -> string -> (skill, error) result
 
 type authored_source_error =
   | Source_too_large of { bytes : int; max_bytes : int }
+  | Body_too_large_to_read of { bytes : int; max_bytes : int }
+      (** The parsed body exceeds {!Common.max_tool_result_wire_bytes}, the
+          inline tool-result boundary [keeper_skill] reads it through. *)
   | Invalid_document of error
 
 val validate_authored_source :
   directory:string -> string -> (skill, authored_source_error) result
 (** Apply the editor's source-size limit and {!parse_skill} to proposed document
-    bytes. This neither publishes a Skill nor proves its execution succeeds. *)
+    bytes, then refuse a body no Keeper could read back. This neither publishes
+    a Skill nor proves its execution succeeds. *)
 
 val partition_documents :
   (string * string) list -> t * rejected_document list

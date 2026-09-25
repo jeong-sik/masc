@@ -288,6 +288,30 @@ let test_oversized_candidate_is_never_written () =
   check string "original survives" original persisted
 ;;
 
+(* keeper_skill returns the body as one inline tool result. A body over that
+   boundary would publish and then fail every read, so it is refused while
+   the author still holds the source. *)
+let test_unreadable_body_is_never_written () =
+  with_workspace @@ fun base_path ->
+  let skill_path, original, reference, refresh =
+    setup base_path ~access:"read-write"
+  in
+  let unreadable =
+    skill_text "Too long to read." (String.make (Common.max_tool_result_wire_bytes + 1) 'x')
+  in
+  (match Editor.save ~base_path ~reference ~source_text:unreadable ~refresh with
+   | Error (Editor.Validation_failed _) -> ()
+   | Error error -> fail ("wrong error: " ^ Editor.error_to_string error)
+   | Ok _ -> fail "a body no Keeper can read was written");
+  let persisted =
+    let channel = open_in_bin skill_path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr channel)
+      (fun () -> really_input_string channel (in_channel_length channel))
+  in
+  check string "original survives" original persisted
+;;
+
 let test_saved_but_unpublished_is_explicit () =
   with_workspace @@ fun base_path ->
   let skill_path, _, reference, _ = setup base_path ~access:"read-write" in
@@ -1168,6 +1192,8 @@ let () =
             test_composition_preview_exposes_validated_flow
         ; test_case "external edit conflicts" `Quick test_external_edit_causes_revision_conflict
         ; test_case "read-only source rejects save" `Quick test_read_only_source_rejects_save
+        ; test_case "unreadable body is never written" `Quick
+            test_unreadable_body_is_never_written
         ; test_case "oversized candidate is never written" `Quick
             test_oversized_candidate_is_never_written
         ; test_case "saved but unpublished is explicit" `Quick

@@ -338,10 +338,9 @@ let unavailable_to_string = Goal_store_unavailable.to_string
 
 (* {2 Reading a file with its errno}
 
-   The shared read chain ([Workspace_utils.read_json_result] →
-   [Safe_ops.read_file_safe] → [Fs_compat.load_file]) renders every failure
-   to a sentence and reads a missing or blank file as [`Assoc []], so neither
-   [Unreadable of Unix.error] nor the absent/blank split can come out of it.
+   The shared read chain ([Workspace_utils.read_json_doc] →
+   [Safe_ops.read_file_result] → [Fs_compat.load_file]) renders every read
+   failure to a sentence, so [Unreadable of Unix.error] cannot come out of it.
    The store opens the file itself. The read is inline on the calling
    fiber: goals.json holds the current set only (97 rows ≈ 40 KB on
    2026-09-08), well under the reads that measured on the main domain

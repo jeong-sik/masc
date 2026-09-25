@@ -20,11 +20,14 @@
     Verbatim extract from [Server_dashboard_http]; the parent
     retains 9 single-line value aliases. *)
 
+(* [max_chars] is a byte budget for the kept text. The cut moves back to a
+   UTF-8 character boundary: a receipt error message is often Korean model
+   output, and a split syllable reached the dashboard as U+FFFD. *)
 let compact_preview ~max_chars text =
   let text = String.trim text in
   if String.length text <= max_chars
   then text, false
-  else String.sub text 0 max_chars ^ "...", true
+  else String_util.utf8_prefix ~max_bytes:max_chars text ^ "...", true
 ;;
 
 let json_member key = function

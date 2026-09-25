@@ -192,39 +192,69 @@ let test_non_object_input_is_rejected () =
    approval. Unlike the write path nothing is reconstructed: the Gate request
    wraps the arguments with execution context instead of re-encoding them.
 
-   The submitting handler upserts the resolved [cwd] into the arguments before
-   wrapping them (keeper_tool_execute_runtime.ml), so every approved execute
-   carries it twice: once inside [input] and once in the envelope. This fixture
-   reproduces that shape — 130 of 130 pending [tool_execute] entries in the
-   2026-07-28 store had [input.cwd], with no exceptions. A fixture without it
-   passes assertions the producer can never satisfy. *)
+   The fixture is built by the producer itself rather than a hand-written
+   copy of its shape: a hand-written fixture kept these cases green even if
+   the producer stopped upserting the resolved [cwd] into the arguments
+   (#26143), while live approvals then replayed nowhere. *)
 let approved_execute_input =
-  `Assoc
-    [ "schema", `String "masc.keeper_gate.request.v1"
-    ; ( "input"
-      , `Assoc
-          [ "argv", `List [ `String "git"; `String "status" ]
-          ; "timeout_sec", `Int 30
-          ; "cwd", `String "/repo"
-          ] )
-    ; "cwd", `String "/repo"
-    ; "sandbox_profile", `String "docker"
-    ; "sandbox_target", `String "docker:masc"
-    ]
+  Masc.Keeper_tool_execute_runtime.execute_gate_input
+    ~input:
+      (`Assoc
+         [ "argv", `List [ `String "git"; `String "status" ]
+         ; "timeout_sec", `Int 30
+         ])
+    ~cwd:"/repo"
+    ~sandbox_profile:"docker"
+    ~sandbox_target:"docker:masc"
 ;;
 
 let test_execute_args_are_the_approved_arguments () =
   Alcotest.check
     result_json
-    "the approved arguments are replayed verbatim"
+    "the approved arguments are replayed verbatim, with the approved cwd"
     (Ok
        (`Assoc
-          [ "argv", `List [ `String "git"; `String "status" ]
+          [ "cwd", `String "/repo"
+          ; "argv", `List [ `String "git"; `String "status" ]
           ; "timeout_sec", `Int 30
-          ; "cwd", `String "/repo"
           ]))
     (Masc.Keeper_tool_execute_runtime.replay_args_of_gate_input
        approved_execute_input)
+;;
+
+(* Producer -> decoder round trip. The resolved [cwd] replaces whatever the
+   model wrote, so replay carries the approved directory rather than the
+   stale request. Re-submitting the replayed arguments under the same cwd and
+   sandbox rebuilds the identical Gate input, which is what lets the
+   canonical-input match spend the approval instead of failing it. *)
+let test_execute_gate_input_round_trips () =
+  let producer args =
+    Masc.Keeper_tool_execute_runtime.execute_gate_input
+      ~input:args
+      ~cwd:"/approved"
+      ~sandbox_profile:"docker"
+      ~sandbox_target:"docker:masc"
+  in
+  let submitted =
+    producer
+      (`Assoc
+         [ "argv", `List [ `String "ls" ]
+         ; "cwd", `String "/requested-by-model"
+         ])
+  in
+  match Masc.Keeper_tool_execute_runtime.replay_args_of_gate_input submitted with
+  | Error detail -> Alcotest.fail detail
+  | Ok replayed ->
+    Alcotest.check
+      json
+      "replayed arguments name the resolved cwd, not the requested one"
+      (`Assoc [ "cwd", `String "/approved"; "argv", `List [ `String "ls" ] ])
+      replayed;
+    Alcotest.check
+      json
+      "re-submitting the replayed arguments rebuilds the approved Gate input"
+      submitted
+      (producer replayed)
 ;;
 
 (* The approved [cwd] is part of the effect the operator authorized, so it
@@ -958,11 +988,11 @@ let test_execute_summary_is_the_first_command_line () =
     (Some "git status")
     (execute_summary approved_execute_input);
   let command text =
-    `Assoc
-      [ "schema", `String "masc.keeper_gate.request.v1"
-      ; "input", `Assoc [ "command", `String text; "cwd", `String "/repo" ]
-      ; "cwd", `String "/repo"
-      ]
+    Masc.Keeper_tool_execute_runtime.execute_gate_input
+      ~input:(`Assoc [ "command", `String text ])
+      ~cwd:"/repo"
+      ~sandbox_profile:"docker"
+      ~sandbox_target:"docker:masc"
   in
   Alcotest.check
     summary
@@ -1135,6 +1165,10 @@ let () =
             "approved cwd is replayed"
             `Quick
             test_approved_cwd_is_replayed
+        ; Alcotest.test_case
+            "producer round trip keeps the resolved cwd"
+            `Quick
+            test_execute_gate_input_round_trips
         ; Alcotest.test_case
             "approval-time envelope is not replayed"
             `Quick

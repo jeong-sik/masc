@@ -1352,7 +1352,7 @@ let test_undeclared_endpoint_root_stays_refused () =
        (Keeper_sandbox_read_backend.container_path_of_host ~config ~meta
           ~host_path:"/app/drift_monitor/windowing.py"));
   match
-    Masc.Keeper_tool_filesystem_runtime.read_sandbox_bytes ~config ~meta
+    Masc.Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ~config ~meta
       ~path:"/app/drift_monitor/windowing.py" ~max_bytes:4096 ()
   with
   | Ok _ -> Alcotest.fail "an undeclared endpoint path was read"
@@ -1380,7 +1380,7 @@ sandbox_profile = "remote_ssh"
     from 0
   in
   match
-    Masc.Keeper_tool_filesystem_runtime.read_sandbox_bytes ~config ~meta
+    Masc.Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ~config ~meta
       ~path:"/app/drift_monitor/windowing.py" ~max_bytes:4096 ()
   with
   | Ok _ -> Alcotest.fail "a path no endpoint could declare was read"
@@ -1398,7 +1398,7 @@ let test_read_of_a_declared_path_asks_the_endpoint_for_that_path () =
     let frame_path = Filename.concat base ("frame-" ^ string_of_int (Hashtbl.hash (cwd, path))) in
     with_fake_ssh (fake_ssh_recording_script ~frame_path) @@ fun () ->
     match
-      Masc.Keeper_tool_filesystem_runtime.read_sandbox_bytes ?cwd ~config ~meta ~path
+      Masc.Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ?cwd ~config ~meta ~path
         ~max_bytes:4096 ()
     with
     | Error message -> Alcotest.fail message
@@ -1408,15 +1408,43 @@ let test_read_of_a_declared_path_asks_the_endpoint_for_that_path () =
        | Error error -> Alcotest.fail error
        | Ok (request, _stdin) -> request.argv)
   in
-  let window path =
-    Keeper_sandbox_read_backend.read_window_argv ~start_line:1 ~max_bytes:4096 ~path
-  in
+  let prefix path = [ "head"; "-c"; "4096"; path ] in
   Alcotest.(check (list string)) "an absolute declared path"
-    (window "/app/drift_monitor/windowing.py")
+    (prefix "/app/drift_monitor/windowing.py")
     (read ~path:"/app/drift_monitor/windowing.py" ());
   Alcotest.(check (list string)) "a relative path under a declared cwd"
-    (window "/app/data/reference_embeddings.npy")
+    (prefix "/app/data/reference_embeddings.npy")
     (read ~cwd:"/app" ~path:"data/reference_embeddings.npy" ())
+
+(* analyze_image reads a generated image through this prefix. The endpoint's
+   bytes come back as they are, even when they spell the keeper's remote
+   root: the text reads map that root to the host's, which is right for
+   Read's lines and corrupts an image. *)
+let test_raw_prefix_keeps_remote_bytes_that_spell_the_workspace_root () =
+  let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> []) in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  let bytes = "\137PNG /srv/masc/playground/remote-reader\n" in
+  let script =
+    Printf.sprintf "#!/bin/sh\ncat >/dev/null 2>/dev/null &\nprintf '%%b' %s\nprintf '%%s' %s >&2\nexit 0\n"
+      (Filename.quote "\\0211PNG /srv/masc/playground/remote-reader\\n")
+      (Filename.quote
+         (Exec_ssh_protocol.render_trailer
+            { v = Exec_ssh_protocol.newest
+            ; exit = Some 0
+            ; signal = None
+            ; timed_out = false
+            ; shim_error = None
+            ; observed_syscalls = []
+            }))
+  in
+  with_fake_ssh script @@ fun () ->
+  match
+    Masc.Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ~config ~meta
+      ~path:"shot.png" ~max_bytes:4096 ()
+  with
+  | Error message -> Alcotest.fail message
+  | Ok content -> Alcotest.(check string) "the endpoint's bytes, unchanged" bytes content
 
 let test_sandbox_container_label_args_include_owner_scope () =
   let args =
@@ -2782,7 +2810,7 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
 let test_transport_failure_is_error_not_empty () =
   let outcome =
     Masc_exec.Sandbox_target.Transport_failed
-      { output_files = None; reason = "remote_ssh_version_error: trailer carries v=2"
+      { failure = Masc_exec.Sandbox_target.Lane_unavailable; output_files = None; reason = "remote_ssh_version_error: trailer carries v=2"
       ; stdout = ""
       ; stderr = "remote_ssh_version_error"
       }
@@ -3013,6 +3041,8 @@ let run_tests ~clock () =
             test_own_tree_translates_even_under_a_declared_root;
           Alcotest.test_case "read of a declared path asks the endpoint for that path"
             `Quick test_read_of_a_declared_path_asks_the_endpoint_for_that_path;
+          Alcotest.test_case "raw prefix keeps remote bytes that spell the workspace root"
+            `Quick test_raw_prefix_keeps_remote_bytes_that_spell_the_workspace_root;
         ] );
       ( "run_command",
         [

@@ -270,6 +270,8 @@ export function resolveActiveIdeRepositoryId(
 }
 
 export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
+  const routeView = computed(() => viewFromRoute(route.value.params.view))
+  const onCodeTab = computed(() => route.value.tab === 'code')
   const documentStore = createCodeDocumentStore({
     file_path: activeIdeFile.value,
     language: DEFAULT_LANGUAGE_ID,
@@ -711,7 +713,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     // Load blame & diff conditionally on view tab to prevent over-fetching.
     // Use the same route normalization as IdeShell so legacy aliases such as
     // "merge" do not silently suppress the diff fetch.
-    const currentView = viewFromRoute(route.value.params.view)
+    const currentView = routeView.value
     const isBlameView = currentView === 'blame'
     const isDiffView = isDiffEditorView(currentView)
 
@@ -763,8 +765,14 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   // Re-run fetches on navigation-signal changes. Reading the signals
   // synchronously inside runWorkspaceFetches registers them as effect
   // dependencies (activeIdeFile, activeKeeperName, activeRepositoryId),
-  // so the effect re-fires exactly when they change.
+  // so the effect re-fires exactly when they change. The route is read only
+  // through the two computeds, which notify when their value changes: a
+  // route change that toggles find, a layer or the rails leaves both alone,
+  // and used to refetch the tree and file (twice, once per navigate and once
+  // per hashchange). The store outlives the code tab, so on any other tab
+  // it does not fetch; returning to the code tab fetches afresh.
   const disposeEffect = effect(() => {
+    if (!onCodeTab.value) return
     runWorkspaceFetches()
   })
 

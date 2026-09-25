@@ -19,8 +19,18 @@ SOURCE_MODULES = (
     "bin/masc_tui_render_prim.ml",
 )
 
+TAB_NAMES = (
+    b"Info", b"Sandbox", b"Settings", b"Secrets", b"GitHub", b"Identity",
+    b"Channels", b"Automation", b"Runs",
+)
+
 CURRENT = b"\xe2\x96\xb8"
-CUT = b"\xe2\x80\xa6"
+# What a strip draws where it is holding entries back, with how many it holds
+# on that side. Both are spelled in masc_tui_ansi.ml (hidden_before_mark and
+# hidden_after_mark); a test outside OCaml has to repeat them, so it repeats
+# the glyph alone and reads the count from the row.
+HELD_BEFORE = b"\xe2\x80\xb9"
+HELD_AFTER = b"\xe2\x80\xba"
 
 
 def run(executable: str) -> None:
@@ -38,9 +48,22 @@ def run(executable: str) -> None:
         rows = h.screen_rows(
             bytes(output[: output.rfind(h.FRAME_END) + len(h.FRAME_END)]))
         title = rows[h.screen_row_of(rows, CURRENT + b"Runs")]
-        if CUT not in title or b"Info" in title:
+        # Runs is the last of the nine, so nothing is held back past it and
+        # the only mark belongs at the near end.
+        if HELD_BEFORE not in title or b"Info" in title:
             raise AssertionError(
                 f"the Keeper detail strip did not cut its far end to keep Runs: {title!r}")
+        if HELD_AFTER in title:
+            raise AssertionError(
+                f"Runs is the last tab and the strip claimed entries past it: {title!r}")
+        # The count says how many, which is the number of [ presses back to
+        # the first tab. Nine tabs, five drawn beside Runs, four held.
+        held = int(title.split(HELD_BEFORE)[1].split(b" ")[0])
+        drawn = len([name for name in TAB_NAMES if name in title])
+        if held + drawn != len(TAB_NAMES):
+            raise AssertionError(
+                f"the strip drew {drawn} tabs and claimed {held} held, of "
+                f"{len(TAB_NAMES)}: {title!r}")
         h.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         # Config: p walks the panes, and every pane name must arrive whole.
         # "prompts" and "presets" are eight cells, one more than the six-cell

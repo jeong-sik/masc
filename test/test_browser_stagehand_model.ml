@@ -100,8 +100,14 @@ let with_provider behavior f =
   f ~net ~clock server
 ;;
 
-let generate ~net ~clock resolved params =
-  Model.create ~net ~clock ~resolve_lane:(fun () -> Ok resolved) params
+let generate ?cli_runner ~net ~clock resolved params =
+  Model.create
+    ?cli_runner
+    ~net
+    ~clock
+    ~base_path:(Sys.getcwd ())
+    ~resolve_lane:(fun () -> Ok resolved)
+    params
 ;;
 
 let test_recorded_params_parse () =
@@ -240,6 +246,7 @@ let test_unserved_requests_are_refused () =
       Model.create
         ~net:(Eio.Stdenv.net env)
         ~clock:(Eio.Stdenv.clock env)
+        ~base_path:(Sys.getcwd ())
         ~resolve_lane:never_resolved
         params
     with
@@ -309,9 +316,94 @@ let test_lane_admits_only_system_prompt_slots () =
       ()
   in
   match Model.admit_lane with_cli with
-  | Error (Model.Cli_slots_declared [ cli ]) ->
-    Alcotest.(check string) "the declared cli slot" F.cli_primary_runtime cli
-  | Error _ | Ok _ -> Alcotest.fail "a lane that declares cli_slots must be refused"
+  | Ok { Model.cli_slots = [ cli ]; http_slots = [ _ ]; refused_slots = [] } ->
+    Alcotest.(check string) "the declared cli slot is kept" F.cli_primary_runtime cli
+  | Ok _ -> Alcotest.fail "the lane keeps its HTTP slot and its one cli slot"
+  | Error refusal ->
+    Alcotest.failf
+      "a lane that declares cli_slots was refused: %s"
+      (Model.refusal_to_string (Model.Lane_refused refusal))
+;;
+
+(* A subscription CLI slot answers when no HTTP slot can: the lane's only HTTP
+   slot takes no system prompt, so the request goes straight to the CLI tail.
+   The one-shot gets Stagehand's system prompt as its own argument and the
+   user text as its prompt; its answer carries no usage. *)
+let test_cli_slot_answers () =
+  let _, _, act = Lazy.force recorded_params in
+  let expected_system = U.(act |> member "system_prompt" |> to_string) in
+  let expected_user =
+    U.(act |> member "messages" |> index 0 |> member "content" |> member "text" |> to_string)
+  in
+  let calls = ref [] in
+  let cli_runner : Keeper_lane_cli_oneshot.runner =
+    fun ~runtime_id ~system_prompt ~output_schema:_ ~prompt ->
+    calls := (runtime_id, system_prompt, prompt) :: !calls;
+    Ok (Yojson.Safe.to_string answer)
+  in
+  F.with_official_client_runtimes
+  @@ fun () ->
+  with_provider (F.Reply (openai_body ~usage:""))
+  @@ fun ~net ~clock server ->
+  let resolved =
+    resolved_lane
+      ~cli_slot_ids:[ F.cli_primary_runtime ]
+      ~base_url:server.base_url
+      ~system_prompt:false
+      ()
+  in
+  (match generate ~cli_runner ~net ~clock resolved act with
+   | Error { Browser_stagehand_wire.message; _ } ->
+     Alcotest.failf "a lane with a cli slot refused the act request: %s" message
+   | Ok (`Assoc fields) ->
+     Alcotest.(check bool)
+       "structured content is the cli answer"
+       true
+       (match List.assoc_opt "structured_content" fields with
+        | Some content -> Yojson.Safe.equal answer content
+        | None -> false);
+     Alcotest.(check bool) "no usage key" false (List.mem_assoc "usage" fields)
+   | Ok _ -> Alcotest.fail "the answer is not an object");
+  Alcotest.(check int) "no HTTP provider call" 0 (F.post_count server);
+  match !calls with
+  | [ (runtime_id, system_prompt, prompt) ] ->
+    Alcotest.(check string) "the cli slot ran" F.cli_primary_runtime runtime_id;
+    Alcotest.(check string) "Stagehand's system prompt" expected_system system_prompt;
+    Alcotest.(check bool)
+      "the prompt starts with the user text"
+      true
+      (String.length prompt >= String.length expected_user
+       && String.equal expected_user (String.sub prompt 0 (String.length expected_user)))
+  | calls -> Alcotest.failf "expected one cli call, got %d" (List.length calls)
+;;
+
+(* A failed HTTP slot hands the request to the CLI tail. *)
+let test_cli_slot_follows_failed_http_slot () =
+  let _, progress, _ = Lazy.force recorded_params in
+  let cli_runner : Keeper_lane_cli_oneshot.runner =
+    fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+    Ok (Yojson.Safe.to_string answer)
+  in
+  F.with_official_client_runtimes
+  @@ fun () ->
+  with_provider (F.Reply_with (fun _ _ -> `Internal_server_error, {|{"error":"down"}|}))
+  @@ fun ~net ~clock server ->
+  let resolved =
+    resolved_lane
+      ~cli_slot_ids:[ F.cli_primary_runtime ]
+      ~base_url:server.base_url
+      ~system_prompt:true
+      ()
+  in
+  match generate ~cli_runner ~net ~clock resolved progress with
+  | Error { Browser_stagehand_wire.message; _ } ->
+    Alcotest.failf "the cli tail did not answer after the HTTP slot failed: %s" message
+  | Ok result ->
+    Alcotest.(check int) "the HTTP slot was tried once" 1 (F.post_count server);
+    Alcotest.(check bool)
+      "structured content is the cli answer"
+      true
+      (Yojson.Safe.equal answer (U.member "structured_content" result))
 ;;
 
 let test_provider_failure_is_a_refusal () =
@@ -352,6 +444,11 @@ let () =
             "a provider failure is a refusal"
             `Quick
             test_provider_failure_is_a_refusal
+        ; Alcotest.test_case "a cli slot answers" `Quick test_cli_slot_answers
+        ; Alcotest.test_case
+            "a cli slot follows a failed HTTP slot"
+            `Quick
+            test_cli_slot_follows_failed_http_slot
         ] )
     ]
 ;;

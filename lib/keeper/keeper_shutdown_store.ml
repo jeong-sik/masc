@@ -281,6 +281,20 @@ let finalization_evidence_to_json evidence =
     ]
 ;;
 
+let boot_replay_abandonment_to_json = function
+  | Newer_operation operation_id ->
+    `Assoc
+      [ "kind", `String "newer_operation"
+      ; "operation_id", `String (Operation_id.to_string operation_id)
+      ]
+  | Keeper_trace_changed -> `Assoc [ "kind", `String "keeper_trace_changed" ]
+  | Keeper_claimed_new_tasks task_ids ->
+    `Assoc
+      [ "kind", `String "keeper_claimed_new_tasks"
+      ; "task_ids", task_ids_to_json task_ids
+      ]
+;;
+
 let supersession_to_json = function
   | Operator_blocked_purge_released { actor } ->
     `Assoc
@@ -297,6 +311,12 @@ let supersession_to_json = function
       [ "kind", `String "operator_reconciliation_accepted"
       ; "actor", `String actor
       ; "unreconciled_turn", active_turn_to_json unreconciled_turn
+      ]
+  | Boot_replay_abandoned { blocked; abandonment } ->
+    `Assoc
+      [ "kind", `String "boot_replay_abandoned"
+      ; "blocked", failure_to_json blocked
+      ; "abandonment", boot_replay_abandonment_to_json abandonment
       ]
 ;;
 
@@ -643,6 +663,26 @@ let finalization_evidence_of_json json =
     }
 ;;
 
+let boot_replay_abandonment_of_json json =
+  let* kind = string "kind" json in
+  match kind with
+  | "newer_operation" ->
+    let* operation_id_wire = string "operation_id" json in
+    let* operation_id =
+      Operation_id.of_string operation_id_wire
+      |> Result.map_error (fun e -> Decode_error e)
+    in
+    Ok (Newer_operation operation_id)
+  | "keeper_trace_changed" -> Ok Keeper_trace_changed
+  | "keeper_claimed_new_tasks" ->
+    let* task_ids = task_ids_field_of_json "task_ids" json in
+    Ok (Keeper_claimed_new_tasks task_ids)
+  | value ->
+    Error
+      (Decode_error
+         (Printf.sprintf "unknown shutdown boot replay abandonment: %S" value))
+;;
+
 let supersession_of_json json =
   let* kind = string "kind" json in
   match kind with
@@ -657,6 +697,12 @@ let supersession_of_json json =
     let* turn_json = assoc "unreconciled_turn" json in
     let* unreconciled_turn = active_turn_of_json turn_json in
     Ok (Operator_reconciliation_accepted { actor; unreconciled_turn })
+  | "boot_replay_abandoned" ->
+    let* blocked_json = assoc "blocked" json in
+    let* blocked = failure_of_json blocked_json in
+    let* abandonment_json = assoc "abandonment" json in
+    let* abandonment = boot_replay_abandonment_of_json abandonment_json in
+    Ok (Boot_replay_abandoned { blocked; abandonment })
   | value ->
     Error
       (Decode_error

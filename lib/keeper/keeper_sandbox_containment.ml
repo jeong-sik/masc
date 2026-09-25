@@ -8,8 +8,7 @@ let check_target ~config ~sandbox_roots ~target =
       ~raw_path:target
   with
   | Ok _ -> Ok ()
-  | Error rejection ->
-    Error (Keeper_alerting_path.rejection_to_user_message rejection)
+  | Error rejection -> Error (Keeper_alerting_path.refusal_of_rejection rejection)
 
 (* task-634 / #26289 (operator decision, ask938aaf519a5c543e: read_superset)
    — the READ authority widens to the same objective roots the exec

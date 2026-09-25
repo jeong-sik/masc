@@ -81,7 +81,8 @@ fi
 if [[ -n "${OPAM_SWITCH_PREFIX:-}" \
       && "${OPAM_SWITCH_PREFIX%/}" != "${active_opam_prefix%/}" ]]; then
   echo "[opam-pin] ERROR: split opam environment: switch ${active_opam_switch} uses ${active_opam_prefix} but OPAM_SWITCH_PREFIX=${OPAM_SWITCH_PREFIX}" >&2
-  echo "[opam-pin] repair: eval \"\$(opam env --switch=${required_ocaml_version} --set-switch)\"" >&2
+  echo "[opam-pin] repair (local switch, as in README): eval \"\$(opam env --switch=${REPO_ROOT} --set-switch)\"" >&2
+  echo "[opam-pin] repair (named switch): eval \"\$(opam env --switch=${required_ocaml_version} --set-switch)\"" >&2
   exit 1
 fi
 # A switch on the wrong compiler must not be pinned into, so pinning still
@@ -94,7 +95,8 @@ fi
 ocaml_version_drift=false
 if [[ "${active_ocaml_version}" != "${required_ocaml_version}" ]]; then
   echo "[opam-pin] ERROR: OCaml ${active_ocaml_version:-unknown} detected; MASC requires exactly ${required_ocaml_version}" >&2
-  echo "[opam-pin] repair: eval \"\$(opam env --switch=${required_ocaml_version} --set-switch)\"" >&2
+  echo "[opam-pin] repair (local switch, as in README): eval \"\$(opam env --switch=${REPO_ROOT} --set-switch)\"" >&2
+  echo "[opam-pin] repair (named switch): eval \"\$(opam env --switch=${required_ocaml_version} --set-switch)\"" >&2
   if ${check_only}; then
     ocaml_version_drift=true
     echo "[opam-pin] continuing to the pin comparison; the switch below is the drifted one" >&2

@@ -92,7 +92,7 @@ def main():
     fixtures = Path(__file__).parent / 'fixtures/release-evidence'
     runtime = (fixtures / 'runtime.toml').read_text()
     runtime += '\n[runtime.exact_output_lanes.verifier_exact]\nslots = ["goal_fixture.proof"]\n'
-    runtime += f'\n[providers.goal_fixture]\nprotocol = "openai-compatible-http"\nendpoint = "http://127.0.0.1:{provider.server_port}/v1"\n[models.proof]\napi-name = "goal-fixture"\nmax-context = 131072\ntools-support = true\nstreaming = true\n[goal_fixture.proof]\n'
+    runtime += f'\n[providers.goal_fixture]\nprotocol = "openai-compatible-http"\nendpoint = "http://127.0.0.1:{provider.server_port}/v1"\nexact-body-timeout-s = 120.0\n[models.proof]\napi-name = "goal-fixture"\nmax-context = 131072\ntools-support = true\nstreaming = true\n[goal_fixture.proof]\n'
     (config / 'runtime.toml').write_text(runtime)
     env = {k: v for k, v in os.environ.items() if k in ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'USER', 'SHELL']}
     env.update(MASC_ADMIN_TOKEN=token, MASC_BASE_PATH=str(base), MASC_GRPC_ENABLED='0', MASC_WS_ENABLED='0', MASC_KEEPER_AUTONOMOUS_ENABLED='false')

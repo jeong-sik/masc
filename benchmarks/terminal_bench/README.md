@@ -99,6 +99,11 @@ CPU 24개가 필요하다. CPU 가 16개인 Mac 에서는 로컬 docker 로 동�
   `ok`·`error`·`unknown` 밖인 줄도 성공으로 세지 않고 읽을 수 없는 줄로 본다.
 - `aggregate.py` CSV 끝에 `failed_tool_calls` 와 `failed_by_tool`(`도구=실패 수` 를 `;` 로)
   칸이 붙는다.
+- 원장은 trial 의 `agent/masc/tool_calls/` 에, agent-core trace(대화 전체, Keeper 의 마지막 답 포함)는
+  `agent/masc/traces/` 에 복사된다. 컨테이너는 trial 과 함께 지워지므로, Keeper 가 무엇을 읽고
+  고치고 돌렸는지, 멈출 때 뭐라고 했는지는 여기서만 볼 수 있다. `result.json` 의 `final` 은 그 답을
+  `outcome_ref` 로만 가리킨다. 기록이 없으면 복사하지 않고, 하나가 실패해도 다른 하나와 결과 기록은
+  그대로 남는다. `results/` 는 git 에 올라가지 않는다.
 
 ## arm
 

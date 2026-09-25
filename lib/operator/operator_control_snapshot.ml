@@ -269,10 +269,6 @@ let keepers_json
                       Keeper_status_metrics.age_seconds_opt
                         ~now_ts meta.runtime.usage.last_turn_ts
                     in
-                    let last_handoff_ago_s =
-                      Keeper_status_metrics.age_seconds_opt
-                        ~now_ts meta.runtime.last_handoff_ts
-                    in
                     let last_proactive_ago_s =
                       Keeper_status_metrics.age_seconds_opt
                         ~now_ts meta.runtime.proactive_rt.last_ts
@@ -283,7 +279,6 @@ let keepers_json
                         0.0
                         [ meta.runtime.usage.last_turn_ts
                         ; meta.runtime.proactive_rt.last_ts
-                        ; meta.runtime.last_handoff_ts
                         ; created_ts
                         ]
                     in
@@ -400,7 +395,6 @@ let keepers_json
                          ; ( "keeper_snapshot_interval_s"
                            , `Float keeper_snapshot_interval_s )
                          ; "last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s
-                         ; "last_handoff_ago_s", Json_util.float_opt_to_json last_handoff_ago_s
                          ; "last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s
                          ; "last_activity_ago_s", Json_util.float_opt_to_json last_activity_ago_s
                          ; "last_model_used", `String (Keeper_status_runtime.active_model_of_meta meta)

@@ -258,7 +258,6 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
           ("models", `List []);
           ("active_model", `Null);
           ("active_model_label", `Null);
-          ("last_model_used_label", `Null);
           ("verify", `Bool false);
         ]
       in

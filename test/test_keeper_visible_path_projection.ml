@@ -5,6 +5,7 @@ module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_sandbox_control = Masc.Keeper_sandbox_control
 module Keeper_tool_filesystem_runtime = Masc.Keeper_tool_filesystem_runtime
 module Keeper_tool_shared_runtime = Masc.Keeper_tool_shared_runtime
+module Keeper_alerting_path = Masc.Keeper_alerting_path
 
 (* [Keeper_tool_filesystem_runtime.handle_read_file] / [handle_file_write]
    (the bare string-returning wrappers) were retired: they had zero
@@ -455,7 +456,9 @@ let test_visible_scratch_read_resolves_to_private_storage () =
       ~raw_path:"scratch/README.md"
   with
   | Ok path -> Alcotest.(check string) "resolved path" target path
-  | Error e -> Alcotest.fail ("visible scratch path should resolve: " ^ e)
+  | Error refusal ->
+    Alcotest.fail
+      ("visible scratch path should resolve: " ^ refusal.Keeper_alerting_path.message)
 ;;
 
 let test_absolute_playground_path_is_allowed () =
@@ -471,7 +474,10 @@ let test_absolute_playground_path_is_allowed () =
    with
    | Ok path ->
      Alcotest.(check string) "resolved private path" target path
-   | Error e -> Alcotest.fail ("playground-internal path should resolve: " ^ e))
+   | Error refusal ->
+     Alcotest.fail
+       ("playground-internal path should resolve: "
+        ^ refusal.Keeper_alerting_path.message))
 ;;
 
 let test_relative_path_does_not_depend_on_project_root_allowlist () =
@@ -485,7 +491,10 @@ let test_relative_path_does_not_depend_on_project_root_allowlist () =
       ~raw_path:"scratch/README.md"
   with
   | Ok path -> Alcotest.(check string) "relative path stays in playground" target path
-  | Error e -> Alcotest.fail ("relative path should resolve in playground: " ^ e)
+  | Error refusal ->
+    Alcotest.fail
+      ("relative path should resolve in playground: "
+       ^ refusal.Keeper_alerting_path.message)
 ;;
 
 let test_relative_parent_escape_is_rejected () =
@@ -497,7 +506,13 @@ let test_relative_parent_escape_is_rejected () =
       ~meta
       ~raw_path:"../outside.txt"
   with
-  | Error _ -> ()
+  | Error refusal ->
+    (* An escape is the caller's path to correct, so a tool reports it as a
+       policy rejection rather than a runtime failure. *)
+    Alcotest.(check string)
+      "refusal class"
+      "policy_rejection"
+      (Tool_result.tool_failure_class_to_string refusal.Keeper_alerting_path.failure_class)
   | Ok path -> Alcotest.failf "relative parent escape resolved unexpectedly: %s" path
 ;;
 

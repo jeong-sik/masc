@@ -144,8 +144,8 @@ let with_runtime f =
 
 (* The frozen exact target for this binding, read through the resolver's own
    types so the wire and the typed preflight verdict are both visible. The
-   slot declaration is the one the server builds at boot
-   ([Server_runtime_bootstrap.exact_output_targets_of_runtimes]): the binding,
+   slot declaration is the one the server builds at boot and on every config
+   commit ([Runtime.exact_output_targets]): the binding,
    carrying the thinking support its model row declares. *)
 let exact_view (keeper : PC.t) =
   let declared : Resolver.declared_target =

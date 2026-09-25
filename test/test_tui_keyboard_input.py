@@ -10434,6 +10434,9 @@ def standalone_lane_fixture(
         "configuration_state": "ready",
         "declared_slots": ["glm-coding.glm-5-turbo"],
         "declared_cli_slots": [],
+        # Runtime.exact_lane_supports_cli_tail: the workspace curator refuses
+        # a run whose lane declares an official-client slot.
+        "supports_cli_tail": lane_id != "workspace_curator_exact",
         "admitted_slots": ["glm-coding.glm-5-turbo"],
         # The projection writes both declared lists and their admission
         # readings. Omitting any list fails the row decode, and the

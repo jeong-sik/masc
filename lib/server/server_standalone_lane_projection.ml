@@ -794,6 +794,10 @@ let lane_json
       , `List (List.map (fun slot -> `String slot) declared_slots) )
     ; ( "declared_cli_slots"
       , `List (List.map (fun slot -> `String slot) declared_cli_slots) )
+      (* Whether an append of an official-client slot can land here. The
+         writer refuses it for a lane that cannot walk a CLI tail, so the
+         editor reads the same rule rather than offering a pick that fails. *)
+    ; "supports_cli_tail", `Bool (Runtime.exact_lane_supports_cli_tail spec.lane)
     ; "admission_error", json_string_opt admission_error
     ; "status", `String status
     ; "retained_run_count", `Int (List.length runs)

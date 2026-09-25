@@ -9363,6 +9363,38 @@ let runtime_picker_projection (state : state) =
       rlp_providers = providers; rlp_choices = choices })
     state.runtime_lane_pick
 
+(* Whether a pick can land on its target. An exact lane that does not walk a
+   CLI tail -- the server projects [Runtime.exact_lane_supports_cli_tail] as
+   [sl_supports_cli_tail] -- has its official-client append refused by the
+   runtime writer, so the picker draws that candidate disabled and Enter on it
+   sends nothing. A lane row this TUI has not read leaves the verdict to the
+   server, which refuses with its own sentence. *)
+type runtime_pick_availability =
+  | Pick_available
+  | Pick_refused of string
+
+let runtime_pick_availability (state : state) pick (runtime : Tui_decode.runtime_option) =
+  match pick, runtime.Tui_decode.ro_exact_slot_group with
+  | Pick_exact_lane name, Tui_decode.Exact_cli_slots ->
+    let lane =
+      Option.bind state.standalone_lanes (fun snapshot ->
+        List.find_opt
+          (fun (row : Tui_decode.standalone_lane) ->
+             String.equal row.Tui_decode.sl_lane_id name)
+          snapshot.Tui_decode.sls_lanes)
+    in
+    (match lane with
+     | Some { Tui_decode.sl_supports_cli_tail = false; _ } ->
+       Pick_refused
+         (Printf.sprintf
+            "%s walks HTTP slots only; %s is an official client (CLI tail)"
+            name runtime.Tui_decode.ro_id)
+     | Some { Tui_decode.sl_supports_cli_tail = true; _ } | None -> Pick_available)
+  | Pick_exact_lane _, Tui_decode.Exact_http_slots
+  | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
+      | Pick_route_default )
+    , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots) ) -> Pick_available
+
 (* The one-line prompt the lane editor puts above the Runtime rows: a name
    being typed for a new lane or for a rename, or the lane a second [D] would
    remove. *)

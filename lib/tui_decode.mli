@@ -1609,6 +1609,9 @@ type standalone_lane = {
           and drops by position, so it reads this one. *)
   sl_declared_cli_slots : string list;
       (** [cli_slots] in source order, including any client rejected at admission. *)
+  sl_supports_cli_tail : bool;
+      (** Whether this lane walks a [cli_slots] tail; an official-client append
+          to a lane that does not is refused by the runtime writer. *)
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;

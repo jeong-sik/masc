@@ -5648,15 +5648,27 @@ let render_exact_lane_provider_editor (state : state) editor =
               | Tui_decode.Exact_http_slots -> "HTTP tail"
               | Tui_decode.Exact_cli_slots -> "CLI tail"
             in
-            box_line buf cols
-              (Printf.sprintf "  %s [%s] %s · %s / %s%s"
-                 (if offset = 0 then ">" else " ")
-                 destination
-                 (Terminal_text.single_line runtime.ro_id)
-                 (Terminal_text.single_line runtime.ro_provider)
-                 (Terminal_text.single_line runtime.ro_model)
-                 (if List.mem runtime.ro_id picker.rlp_already
-                  then "  (already declared)" else "")))
+            let line note =
+              Printf.sprintf "  %s [%s] %s · %s / %s%s"
+                (if offset = 0 then ">" else " ")
+                destination
+                (Terminal_text.single_line runtime.ro_id)
+                (Terminal_text.single_line runtime.ro_provider)
+                (Terminal_text.single_line runtime.ro_model)
+                note
+            in
+            match
+              Masc_tui_types.runtime_pick_availability state
+                picker.Masc_tui_types.rlp_pick runtime
+            with
+            | Masc_tui_types.Pick_refused _ ->
+              box_line_styled buf cols ~style:(Theme.recede ())
+                (line "  (unavailable: this lane has no CLI tail)")
+            | Masc_tui_types.Pick_available ->
+              box_line buf cols
+                (line
+                   (if List.mem runtime.ro_id picker.rlp_already
+                    then "  (already declared)" else "")))
    | None ->
      (* Reserve a key line and the frame bottom; at least the selected row
         stays visible on a short terminal. The ordinal places the moving
@@ -5923,6 +5935,13 @@ let render_lanes_overview (state : state) =
          List.iteri
            (fun offset (runtime : Masc.Tui_decode.runtime_option) ->
               let note =
+                match
+                  Masc_tui_types.runtime_pick_availability state
+                    picker.Masc_tui_types.rlp_pick runtime
+                with
+                | Masc_tui_types.Pick_refused _ ->
+                  "  (unavailable: this lane has no CLI tail)"
+                | Masc_tui_types.Pick_available ->
                 if List.exists (String.equal runtime.ro_id) picker.rlp_already
                 then "  (already a slot)"
                 else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers

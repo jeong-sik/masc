@@ -336,6 +336,7 @@ let idle_lane ~lane_id : Tui_decode.standalone_lane =
   ; sl_dropped_slots = []
   ; sl_declared_slots = []
   ; sl_declared_cli_slots = []
+  ; sl_supports_cli_tail = true
   ; sl_admission_error = None
   ; sl_retained_run_count = 0
   ; sl_running_count = 0

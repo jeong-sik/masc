@@ -629,8 +629,71 @@ def run_cli_editor(executable: str) -> None:
     )
 
 
+def run_curator_cli_refused(executable: str) -> None:
+    """The workspace curator walks HTTP slots only. The lane projection says
+    so (supports_cli_tail), the picker draws an official client disabled, and
+    Enter on it posts nothing; an HTTP candidate in the same picker still
+    appends."""
+    store = LaneStore()
+    new_cli = "aaa_cli.fixture"
+    store.body["runtimes"].append({
+        **h.runtime_resolved_runtime(new_cli, "Official client", "model"),
+        "exact_slot_group": "cli_slots",
+    })
+    curator = store.exact_lane("workspace_curator_exact")
+    if curator["supports_cli_tail"] is not False:
+        raise AssertionError("the fixture's curator row claims a CLI tail")
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    requests: h.HttpRequests = []
+
+    def exact_posts() -> list[dict]:
+        return [json.loads(body) for path, body in requests if path == ROUTING_PATH]
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        h.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, b"j", b"HITL")
+        h.send_and_wait(process, fd, output, b"j", b"Librarian")
+        h.send_and_wait(process, fd, output, b"j", b"Workspace Curator")
+        h.send_and_wait(process, fd, output, b"s", b"MASC Lanes / Providers")
+        h.send_and_wait(process, fd, output, b"a",
+                        b"> [CLI tail] aaa_cli.fixture")
+        h.send_and_wait(process, fd, output, b"\r",
+                        b"workspace_curator_exact walks HTTP slots only")
+        # The refusal is drawn from the state alone; give a stray write the
+        # time a real one takes to reach the fixture before judging.
+        time.sleep(0.5)
+        if exact_posts():
+            raise AssertionError(f"a CLI pick on the curator posted: {exact_posts()!r}")
+        h.send_and_wait(process, fd, output, b"j", b"> [HTTP tail] runtime-a")
+        os.write(fd, b"\r")
+        deadline = time.monotonic() + 5.0
+        while not exact_posts():
+            if time.monotonic() > deadline:
+                raise AssertionError("the HTTP pick on the curator posted nothing")
+            time.sleep(0.05)
+        expected = [{"lane": "exact/workspace_curator_exact", "action": "append",
+                     "runtime_id": "runtime-a"}]
+        if exact_posts() != expected:
+            raise AssertionError(f"curator posts {exact_posts()!r}, expected {expected!r}")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="Workspace curator picker refuses official-client candidates",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
     run_exact(os.path.abspath(sys.argv[1]))
     run_cli_editor(os.path.abspath(sys.argv[1]))
+    run_curator_cli_refused(os.path.abspath(sys.argv[1]))
     print("runtime lane editor: PASS")

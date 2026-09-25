@@ -429,6 +429,12 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
          [ `String "antigravity_subscription.gemini-3-7-flash-high"
          ; `String "cli-backup"
          ]);
+  (* The editor reads the writer's rule: an official-client append to the
+     workspace curator is refused, so the lane says it has no CLI tail. *)
+  check bool "a lane that walks a CLI tail says so" true
+    (field "hitl_auto_judge" "supports_cli_tail" = `Bool true);
+  check bool "the workspace curator has no CLI tail" true
+    (field "workspace_curator_exact" "supports_cli_tail" = `Bool false);
   (* RFC cli-runtimes-as-lane-slots: the declared cli suffix is on the wire,
      and a lane whose only slots are cli ones is ready, not degraded. *)
   check bool

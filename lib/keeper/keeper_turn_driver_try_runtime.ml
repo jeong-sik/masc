@@ -119,8 +119,7 @@ let attempt_rejected_should_try_next error =
     (match Llm_provider.Candidate_fault.of_api_error api with
      | Llm_provider.Candidate_fault.Binding
          ( Admission
-         | Refusal_unread
-         | Body_limit )
+         | Refusal_unread )
      | Llm_provider.Candidate_fault.Unattributed -> true
      | Llm_provider.Candidate_fault.Binding
          ( Credential
@@ -131,7 +130,8 @@ let attempt_rejected_should_try_next error =
          | Server
          | Window
          | Deadline
-         | Output_dialect )
+         | Output_dialect
+         | Body_limit (* INTENDED RED probe, task-1753: never merge *) )
      | Llm_provider.Candidate_fault.Unknown_after_dispatch -> false)
   | None -> false
 ;;

@@ -827,6 +827,48 @@ let test_empty_success_after_a_tool_step_carries_diagnostics () =
        | Ok _ -> fail "blank SUCCESS after a tool step was admitted")
 ;;
 
+(* A Korean stderr line longer than the byte budget must come back cut at a
+   character boundary, never with a torn Hangul character at its head
+   (#39090 made String_util the SSOT for that rule). *)
+let index_of_substring hay needle =
+  let n = String.length hay and m = String.length needle in
+  let rec go i =
+    if i + m > n then None
+    else if String.sub hay i m = needle then Some i
+    else go (i + 1)
+  in
+  go 0
+;;
+
+let test_empty_success_stderr_tail_cuts_at_a_character_boundary () =
+  let korean =
+    "안녕하세요 검증 메시지입니다 " ^ String.concat "" (List.init 40 (fun _ -> "토큰"))
+  in
+  assert (String.length korean > 200);
+  with_fixture
+    ~stderr_line:korean
+    [ init (); result ~response:"" () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Turn_failed detail) ->
+         let rest =
+           match index_of_substring detail "stderr tail: " with
+           | Some i -> String.sub detail (i + String.length "stderr tail: ")
+                        (String.length detail - i - String.length "stderr tail: ")
+           | None -> fail "no stderr tail in the failure detail"
+         in
+         check bool "tail kept the last characters" true
+           (String_util.contains_substring rest "토큰");
+         check bool "tail dropped the line's head" true
+           (not (String_util.contains_substring rest "안녕하세요"));
+         check bool "tail cut at a character boundary" true
+           (String.is_valid_utf_8 rest);
+         check bool "tail stayed within the byte budget" true
+           (String.length rest <= 200 + 1 (* closing paren *))
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "blank SUCCESS with a Korean stderr was admitted")
+;;
+
 let test_duplicate_keys_fail_closed () =
   let duplicate =
     {|{"event":"init","event":"init","conversation_id":"conversation-1","init":{"model":"gemini-fixture","cwd":"/tmp","permission_mode":"always-proceed"}}|}

@@ -51,17 +51,18 @@ let stderr_tail_bytes = 8192
    that answered blank, how far the trajectory got, and the CLI's own last
    words on stderr — the split between a model that ended a tool-only turn
    without a reply and a vendor that dressed a quota or auth refusal up as a
-   successful empty result. *)
+   successful empty result. The stderr byte budget bounds what reaches the
+   session log and the dashboard. *)
 let empty_success_detail_prefix = "successful result response has no deliverable content"
 
 let empty_success_stderr_bytes = 200
 
 let empty_success_detail ~model ~tool_steps stderr =
   let trimmed = String.trim stderr in
-  let len = String.length trimmed in
+  (* Cut at a UTF-8 character boundary — String_util is the SSOT for that
+     rule (#39090), so a Korean stderr line never breaks mid-character. *)
   let stderr_tail =
-    if len <= empty_success_stderr_bytes then trimmed
-    else String.sub trimmed (len - empty_success_stderr_bytes) empty_success_stderr_bytes
+    String_util.utf8_suffix ~max_bytes:empty_success_stderr_bytes trimmed
   in
   if stderr_tail = "" then
     Printf.sprintf "%s (model=%s, tool_steps=%d, stderr=<empty>)"

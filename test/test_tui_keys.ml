@@ -104,6 +104,26 @@ let test_every_surface_answers () =
         (Masc_tui_keys.for_surface surface <> []))
     every_surface
 
+(* The runtime picker claims its own keys through [Masc_tui_pick_list], and
+   the page and edge pairs were carried inside [j/k]'s help rather than
+   declared. Help prose reaches the sheet and never the footer, so on this
+   screen the two pairs were on no footer at all. *)
+let test_the_runtime_picker_names_its_paging () =
+  let hints = Masc_tui_keys.footer_hints (Keepers Keeper_runtime_pick) in
+  let holds needle =
+    let n = String.length needle and h = String.length hints in
+    let rec scan i =
+      i + n <= h && (String.equal (String.sub hints i n) needle || scan (i + 1))
+    in
+    scan 0
+  in
+  List.iter
+    (fun needle ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the runtime picker footer names %S" needle)
+        true (holds needle))
+    [ "j/k:move"; "PgUp/PgDn:page"; "Enter:choose"; "d:default"; "Esc:back" ]
+
 (* Every screen the ring or a drill-down can put up has keys, and the sheet is
    where an operator looks them up: [?] opens on the section for the screen
    they are standing on. The sheet's list of screens was written beside the
@@ -2998,6 +3018,8 @@ let () =
             `Quick test_every_enter_atom_exception_names_a_sheet_surface
         ; Alcotest.test_case "every surface answers" `Quick
             test_every_surface_answers
+        ; Alcotest.test_case "the runtime picker names its paging" `Quick
+            test_the_runtime_picker_names_its_paging
         ; Alcotest.test_case "every surface with keys has a sheet section"
             `Quick test_every_surface_with_keys_has_a_sheet_section
         ; Alcotest.test_case "no surface repeats a key" `Quick

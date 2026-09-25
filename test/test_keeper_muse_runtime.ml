@@ -35,7 +35,7 @@ let test_usage_event_reports_turn_total () =
        check int "input" 10 usage.Agent_core.Types.input_tokens;
        check int "output" 3 usage.Agent_core.Types.output_tokens;
        check int "cache read" 2 usage.Agent_core.Types.cache_read_input_tokens
-     | Keeper_client_usage_report.Count_replaced _ ->
+     | Keeper_client_usage_report.Count_replaced ->
        fail "a running turn must not replace the count")
   | _ -> fail "one usage event reports exactly once"
 ;;

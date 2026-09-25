@@ -423,11 +423,17 @@ let test_refused_turn_reports_its_spend_to_the_keeper () =
     (fun () ->
        let reports = ref [] in
        let on_official_client_usage_report (report : Keeper_client_usage_report.t) =
+         let usage =
+           match report.count with
+           | Keeper_client_usage_report.Running_count usage -> usage
+           | Keeper_client_usage_report.Count_replaced ->
+             Alcotest.fail "a Claude Code count was reported as replaced"
+         in
          reports :=
            ( report.response_id
            , report.model
            , Runtime_usage_scope.to_string report.usage_scope
-           , (report.usage.input_tokens, report.usage.output_tokens) )
+           , (usage.input_tokens, usage.output_tokens) )
            :: !reports
        in
        with_fixture

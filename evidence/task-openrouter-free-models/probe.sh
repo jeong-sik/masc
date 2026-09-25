@@ -19,6 +19,17 @@
 #
 # Output: probe-<slug>-<case>.json per request and status.txt, one line per
 # request: <id> <case> <http> <verdict>. Paste status.txt into the PR.
+#
+# Account limits: GET /api/v1/key is read before the first and after the last
+# request, and its `limit` and `free_model_daily_requests` are written raw to
+# status.txt ("key-before" / "key-after"). The PR quotes these values, not the
+# docs table, whose numbers did not survive extraction (Board p-e1e984f7).
+#
+# A 429 is split by origin. With error.metadata.provider_code the provider was
+# congested (provider_429): the request is retried once after 10 s and the
+# retry decides the case. Without it the account's free limit is spent
+# (platform_429): the probe stops, and every case not yet run is written as
+# "unmeasured", never as a failure.
 set -u
 cd "$(dirname "$0")"
 : "${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY}"
@@ -39,6 +50,20 @@ post() { # out-file json-body -> prints http code
     -H 'HTTP-Referer: https://github.com/jeong-sik/masc' -H 'X-Title: MASC' -d "$2"
 }
 
+key_read() { # label
+  printf '%s %s\n' "$1" "$(curl -s -m 30 -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+    https://openrouter.ai/api/v1/key | jq -c '{limit: .data.limit, limit_remaining: .data.limit_remaining, free_model_daily_requests: .data.free_model_daily_requests}')" \
+    | tee -a status.txt
+}
+
+origin_429() { # file -> provider_429 | platform_429
+  if jq -e '.error.metadata.provider_code // empty' "$1" >/dev/null 2>&1; then
+    echo provider_429
+  else
+    echo platform_429
+  fi
+}
+
 verdict() { # case file http
   local f=$2 http=$3
   if [ "$http" != 200 ]; then
@@ -53,6 +78,8 @@ verdict() { # case file http
 }
 
 : > status.txt
+key_read key-before
+stopped=""
 for id in "${ids[@]}"; do
   slug=$(printf '%s' "$id" | tr '/:.' '---')
   choice='"required"'
@@ -64,7 +91,25 @@ for id in "${ids[@]}"; do
       toolcall) body="{\"model\":\"$id\",\"max_tokens\":512,\"tool_choice\":$choice,\"tools\":$TOOLS,\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Seoul right now? Use the tool.\"}]}" ;;
       nothink) body="{\"model\":\"$id\",\"reasoning_effort\":\"none\",\"max_tokens\":200,\"messages\":[{\"role\":\"user\",\"content\":\"What is 17*23? Answer with the number.\"}]}" ;;
     esac
+    if [ -n "$stopped" ]; then
+      printf '%s %s - unmeasured (probe stopped: %s)\n' "$id" "$case" "$stopped" | tee -a status.txt
+      continue
+    fi
     http=$(post "$f" "$body")
-    printf '%s %s %s %s\n' "$id" "$case" "$http" "$(verdict "$case" "$f" "$http")" | tee -a status.txt
+    note=""
+    if [ "$http" = 429 ]; then
+      origin=$(origin_429 "$f")
+      if [ "$origin" = provider_429 ]; then
+        sleep 10
+        http=$(post "$f" "$body")
+        note=" [provider_429 on first try; this is the retry]"
+      else
+        stopped="platform_429 at $id $case"
+        printf '%s %s 429 platform_429 (account free limit) — stopping\n' "$id" "$case" | tee -a status.txt
+        continue
+      fi
+    fi
+    printf '%s %s %s %s%s\n' "$id" "$case" "$http" "$(verdict "$case" "$f" "$http")" "$note" | tee -a status.txt
   done
 done
+key_read key-after

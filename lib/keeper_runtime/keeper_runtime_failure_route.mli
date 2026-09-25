@@ -82,7 +82,8 @@ type rotate_class =
           deterministic *)
   | Admission
       (** this binding's own pre-dispatch admission refused the prepared
-          request (RFC-38531 §3.2: [InputCapacity] and [Json_parse_error] are
+          request (RFC-one-slot-fault-judgment-for-every-walk.md §3.2:
+          [InputCapacity] and [Json_parse_error] are
           both [Admission], a fact about this candidate's binding, not the
           request); the driver's [attempt_rejected_should_try_next] /
           [candidate_access_should_try_next] move the lane to its next

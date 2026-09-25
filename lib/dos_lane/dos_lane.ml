@@ -99,6 +99,40 @@ let state : machine option ref = ref None
 let lock = Mutex.create ()
 let locked f = Mutex.protect lock f
 
+type change_mark = { count : int; incarnation : string }
+
+(* The machine change counter a spectator compares against, one per process,
+   written only while holding [lock]. It is not [steps]: a guest fault raises
+   out of the core before [steps] moves, so a faulting run can leave [steps]
+   where it was while the attempt still happened. [running] marks every
+   completed run, including a guest fault, in one place. A call refused
+   before running leaves the count alone. A load also marks when it installs
+   the new machine, an eject marks when it drops it, and nothing resets the
+   count, so one value never names two screens while the server runs.
+
+   [published] also records when a run holds the lock. A spectator may answer
+   unchanged from a Stable mark, but a Running mark must wait for the final
+   frame even when its count matches [since]. *)
+let change_count = ref 0
+type 'mark publication = 'mark Machine_live_publication.t =
+  | No_screen
+  | Stable of 'mark
+  | Running of 'mark
+type published_state = change_mark publication
+let published : published_state Atomic.t = Atomic.make No_screen
+
+let publish make =
+  Atomic.set published
+    (match !state with
+     | None -> No_screen
+     | Some st -> make { count = !change_count; incarnation = st.incarnation })
+;;
+
+let publish_stable () = publish (fun mark -> Stable mark)
+let publish_running () = publish (fun mark -> Running mark)
+let mark_change () = incr change_count; publish_stable ()
+let current_publication () = Atomic.get published
+
 let with_machine f =
   locked (fun () ->
     match !state with
@@ -120,10 +154,21 @@ let with_machine f =
    raises rather than misbehave quietly), or the ledger file will not take a
    line. Both come back as errors, not exceptions out of the tool. *)
 let running f =
-  match f () with
-  | result -> result
-  | exception Cpu86.Unsupported message -> Error (Guest_fault message)
-  | exception Sys_error message -> Error (Unreadable message)
+  publish_running ();
+  let result =
+    match f () with
+    | result -> result
+    | exception Cpu86.Unsupported message -> Error (Guest_fault message)
+    | exception Sys_error message -> Error (Unreadable message)
+    | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      mark_change ();
+      Printexc.raise_with_backtrace exn backtrace
+  in
+  (match result with
+   | Ok _ | Error (Unreadable _ | Guest_fault _) -> mark_change ()
+   | Error (No_machine | Invalid_request _ | Held_by _) -> publish_stable ());
+  result
 ;;
 
 let refuse_other st ~who =
@@ -476,6 +521,7 @@ let load ~who ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announ
           ; controller = Some who; incarnation = Random_id.uuid_v7 () }
         in
         state := Some st;
+        mark_change ();
         let booted =
           running (fun () ->
             let ran = advance st ~budget:boot_steps ~until_ready:true in
@@ -498,6 +544,7 @@ let eject ~who ~announce () =
        | Error e -> Error e
        | Ok () ->
          state := None;
+         mark_change ();
          announce ();
          Ok ()))
 ;;
@@ -554,6 +601,28 @@ let capture_with_identity () =
       ; input_count = List.length st.entries
       ; input_ledger = st.entries
       })
+;;
+
+type live =
+  | Nothing_loaded
+  | Unchanged of change_mark
+  | Changed of change_mark * frame
+
+(* Compare and copy under one lock hold, so the count, the incarnation and the
+   pixels always describe the same machine state. An unchanged answer renders
+   nothing. *)
+let live ~since =
+  locked (fun () ->
+    match !state with
+    | None -> Nothing_loaded
+    | Some st ->
+      let mark = { count = !change_count; incarnation = st.incarnation } in
+      (match since with
+       | Some seen when seen.count = mark.count
+                        && String.equal seen.incarnation mark.incarnation -> Unchanged mark
+       | Some _ | None ->
+         let width, height = Dos_machine.frame_dims st.m in
+         Changed (mark, { width; height; rgb = Dos_machine.frame_rgb st.m })))
 ;;
 
 let step ~who ~steps ~until_ready =

@@ -1738,7 +1738,7 @@ let candidate_fault_of_provider_refusal : provider_refusal -> Candidate_fault.t 
   | Not_found -> Binding Model_absent
   | Context_overflow -> Binding Window
   | Input_capacity -> Binding Admission
-  | Network_error -> Binding Credential
+  | Network_error -> Unknown_after_dispatch
   | Timeout -> Binding Deadline
 ;;
 

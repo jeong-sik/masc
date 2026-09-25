@@ -637,7 +637,10 @@ let test_fusion_footer_pins_the_shared_list_projection () =
    neither, and a body row named them in its own notation. Both footers now
    read the same two bindings. *)
 let test_fusion_detail_footer_names_the_caller_and_board_keys () =
-  let detail = Masc_tui_keys.footer_hints_fusion_detail ~position:"1-40/47" in
+  (* The window the renderer drew is no longer spelled into this string; it
+     travels as [Masc_tui_footer.line]'s [?position] so the fitter keeps it
+     with the pinned keys. *)
+  let detail = Masc_tui_keys.footer_hints_fusion_detail in
   let holds needle haystack =
     let n = String.length needle and h = String.length haystack in
     let rec scan i = i + n <= h && (String.equal (String.sub haystack i n) needle || scan (i + 1)) in
@@ -753,14 +756,17 @@ let test_lanes_run_list_footer_names_the_drill_down () =
 
 (* [compare], not [scroll]: #32270 stacked Input and Output into one list that
    one scroll walks, so the two panes move together and the key's name says
-   which of the two it does. *)
-let test_lanes_run_detail_footer_appends_the_scroll_position () =
-  check str "the stacked run detail footer carries the window it drew"
-    "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit  4-23/60"
-    (Masc_tui_keys.footer_hints_lanes_run_detail ~position:(Some "4-23/60"));
-  check str "the split panes name their own windows, so the footer does not"
+   which of the two it does.
+
+   The window the stacked list drew is not in this string. It reaches the row
+   as [Masc_tui_footer.line]'s [?position], which the fitter keeps with the
+   pinned keys -- spelled here it was one more item to give up from the back,
+   and it went first. The split panes name their own windows in their titles
+   and pass none. *)
+let test_lanes_run_detail_footer_names_its_keys_alone () =
+  check str "the stacked run detail footer is keys and the shared tail"
     "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit"
-    (Masc_tui_keys.footer_hints_lanes_run_detail ~position:None)
+    Masc_tui_keys.footer_hints_lanes_run_detail
 
 let test_overview_footer_projects_by_focus () =
   (* The retired literal said "j/k:events  t:tasks  q:quit  r:refresh
@@ -3020,8 +3026,8 @@ let () =
             test_keeper_runs_selection_survives_a_shorter_list
         ; Alcotest.test_case "Lanes run list names the drill-down" `Quick
             test_lanes_run_list_footer_names_the_drill_down
-        ; Alcotest.test_case "Lanes run detail appends the scroll position" `Quick
-            test_lanes_run_detail_footer_appends_the_scroll_position
+        ; Alcotest.test_case "Lanes run detail names its keys alone" `Quick
+            test_lanes_run_detail_footer_names_its_keys_alone
         ; Alcotest.test_case "Overview footer projects by focus" `Quick
             test_overview_footer_projects_by_focus
         ; Alcotest.test_case "System logs owns only real filter keys" `Quick

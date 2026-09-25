@@ -45,9 +45,11 @@ function fireChord(
   manager: ReturnType<typeof createKeyboardShortcutManager>,
   chordKey: string,
   modifiers: { meta?: boolean; shift?: boolean; ctrl?: boolean } = {},
+  code?: string,
 ): boolean {
   return manager.dispatch({
     key: chordKey,
+    code,
     metaKey: modifiers.meta ?? false,
     ctrlKey: modifiers.ctrl ?? false,
     shiftKey: modifiers.shift ?? false,
@@ -97,19 +99,21 @@ describe('useKeeperPinShortcuts', () => {
     pinKeeper('b')
     pinKeeper('c') // post-seed order: [c, b, a]; slot-2 = b
 
-    const matched = fireChord(manager, '2', { meta: true, shift: true })
+    // A browser reports Shift+2 as key '@' on a US layout; the chord
+    // matches on the physical key.
+    const matched = fireChord(manager, '@', { meta: true, shift: true }, 'Digit2')
 
     expect(matched).toBe(true)
     expect(pinnedKeepers.value.entries.map(e => e.keeperName)).toEqual(['b', 'c', 'a'])
   })
 
-  it('Mod+Shift+Backspace dispatch unpins the head entry', async () => {
+  it('Mod+Shift+0 dispatch unpins the head entry', async () => {
     const manager = createKeyboardShortcutManager({ platform: 'mac' })
     await mountHost(manager)
     pinKeeper('a')
     pinKeeper('b') // head = b
 
-    const matched = fireChord(manager, 'Backspace', { meta: true, shift: true })
+    const matched = fireChord(manager, ')', { meta: true, shift: true }, 'Digit0')
 
     expect(matched).toBe(true)
     expect(pinnedKeepers.value.entries.map(e => e.keeperName)).toEqual(['a'])

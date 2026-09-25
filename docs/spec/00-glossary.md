@@ -912,6 +912,31 @@ status: reference
   조작한다. Lane Add-on의 `browser_document` 원천이 이 세션을 관측한다.
   → [Browser_lane](../../lib/browser_lane/browser_lane.ml)
 
+**Machine Change Mark (기계 변경 표식)**
+: MSX Lane·DOS Lane 기계의 화면이 바뀌었는지 싸게 묻기 위한 표식. 변경 횟수(`count`)와
+  기계 정체(`incarnation`)의 한 쌍이다(`change_mark`). 관전자는 지난번에 읽은 쌍을
+  `GET /api/v1/lane-addons/live?source_kind=msx_capture|dos_capture&since=<count>&incarnation=<id>`
+  에 넘긴다. 쌍이 그대로면 화면 없이 `state: "unchanged"`만, 바뀌었으면 `"changed"`와 새 쌍과
+  화면(`rgb8`)을, 기계가 없으면 `"no_machine"`을 받는다. `since`와 `incarnation`은 함께만 쓴다.
+  이 라우트는 읽기 권한만 요구하고 Lane 저장소에 아무것도 쓰지 않는다(#38733).
+  - `count`: 기계를 돌리거나 갈아 끼운 호출마다 오른다. 프레임을 돌린 호출은 도중에 실패해도
+    올리고, DOS에서 첫 명령에서 fault가 나 `steps`가 그대로인 실행도 올린다. load·eject(MSX는
+    restore·change_disk도)도 올린다. 돌리기 전에 거절된 호출과 DOS의 `pass`는 올리지 않는다.
+    서버가 떠 있는 동안에는 되돌아가지 않지만, 재시작하면 0부터 다시 센다.
+  - `incarnation`: 기계를 새로 올릴 때마다 새로 받는 정체(MSX는 load·restore 성공, DOS는
+    load). 읽기와 시간 진행은 바꾸지 않는다. `count`만으로는 재시작 전후의 두 화면을 가를 수
+    없으므로 `unchanged`는 두 값이 모두 같을 때만 나온다.
+  - 게시 상태(`Machine_live_publication.t`)는 닫힌 셋 — `No_screen`·`Stable of mark`·
+    `Running of mark` — 이고 두 기계가 같은 규칙을 쓴다. 기계 잠금 없이 읽는다. `Stable`일
+    때만 곧바로 `unchanged`로 답할 수 있다. `Running`은 지금 프레임이 기계를 바꾸는 중이라는
+    뜻이라, 마지막 표식이 `since`와 같아도 기계 잠금을 잡고 끝난 화면을 읽는다.
+  - 이름 경계: 여기의 `Running`은 기계가 도는 중이라는 게시 상태이고, Schedule의 `Running`
+    상태와 다른 값이다. 라우트 이름의 `live`도 Turn Row Source의 `live`(이 pane이 연 요청의
+    SSE stream)와 다른 말이다.
+  → [Machine_live_publication](../../lib/machine_live_publication/machine_live_publication.mli),
+  [Msx_lane](../../lib/msx_lane/msx_lane.mli), [Dos_lane](../../lib/dos_lane/dos_lane.mli),
+  [lane-addons 라우트](../../lib/server/server_routes_http_routes_lane_addons.mli)
+
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
   DOS Lane의 머신, Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러
@@ -1148,11 +1173,23 @@ status: reference
     due 발화는 재시도 실패로 튕기지 않고 단 1회 수락(`accepted`)되어 해당 Keeper의
     durable 큐에 대기한다(#38523). 다음 턴이 깨어날 때 stimulus로 읽히며, 새 발화가
     이전 대기를 대체하여 큐에는 스케줄당 최대 1건만 유지된다.
+  - 보류(hold): due가 된 발화를 이번 tick에 보내지 않고 두는 것. 상태 값이 아니다 — 예약은
+    `Due`에 머물고 다음 tick에 다시 판정된다. 이유는 닫힌 둘(`Schedule_runner.hold_reason`)이고
+    wire `kind`로 적힌다. `previous_occurrence_unconsumed`는 대상 Keeper가 같은 예약의 이전
+    발화를 아직 가져가지 않은 경우로, `Interval` 예약에만 생긴다. `target_intake_fenced`는
+    종료 작업이 대상 Keeper의 입력 차단막(`Keeper_shutdown_intake_fence`)을 쥐고 있는 경우로,
+    `target`과 차단막을 쥔 종료 작업 id(`fence_owner`)를 함께 적는다. 둘 다 해당하면 차단막
+    쪽을 적는다. 차단막은 모든 durable 입력을 거절하므로 위의 미기동·정지 대상 수락도 여기서는
+    일어나지 않는다. 막힌 예약을 보내지 않는 까닭은, 보내면 예약이 `Running`이 되는데 종료
+    작업이 끝나도 `Running` 예약은 취소할 수 없기 때문이다. 이 보류를 본 tick은 Keeper마다 한
+    번, 차단막을 쥔 종료 작업에게 마무리를 이 프로세스에서 다시 돌려 달라고 청한다. 이
+    프로세스에서 다시 돌릴 수 없으면 그 종료 단계를 처음 보류할 때만 로그에 남긴다(#38620).
+    `/health`, 대시보드 예약 행, TUI가 보류 이유를 보여 준다.
   - 노트는 `schedule_id`에 매이고 append-only다. terminal 전이 뒤에도 남는다 —
     상태가 아니라 이력이다.
   - 상태는 `Scheduled`·`Due`·`Running`·`Succeeded`·`Failed`·`Cancelled`·`Expired`,
     반복은 `One_shot`·`Interval`·`Daily`·`Cron`이다.
-  → [Schedule_domain](../../lib/schedule/schedule_domain.mli) · [Schedule_store](../../lib/schedule/schedule_store.mli)
+  → [Schedule_domain](../../lib/schedule/schedule_domain.mli) · [Schedule_store](../../lib/schedule/schedule_store.mli) · [Schedule_runner](../../lib/schedule/schedule_runner.mli)
 
 **Fusion**
 : 여러 독립 판단을 비동기로 수집하고 하나의 결론으로 합성하는 실행. 패널 구성원
@@ -1438,8 +1475,8 @@ status: reference
   - **SKILL.md 격리 (`recovery_id`)**: 원본 `SKILL.md`는 삭제되지 않고 고유 복구 식별자(`recovery_id`)가
     부여된 격리 디렉터리로 이동(`recovery_disposition`)되어 비상 복구 가능성을 보존한다.
   - **패키지 폴더 처분 (`package_directory`)**: `SKILL.md` 이동 후 남겨진 패키지 폴더를 닫힌 네 가지
-    상태로 판정하여 처리한다(#38594·#38616). 과거에는 빈 폴더를 방치하여 동일한 패키지 ID로
-    재생성할 때 영구히 `Package_already_exists` 거절을 받는 결함이 있었다.
+    상태로 판정하여 처리한다(#38594·#38616). 빈 폴더를 남겨 두면 같은 패키지 ID로 다시 만들 때
+    `Package_already_exists`로 거절되므로, 빈 폴더는 지운다.
     1. `Package_directory_removed` (wire: `{"kind": "removed"}`): 빈 패키지 폴더가 `rmdir`로 완전히
        제거되어 동일한 ID로 새 Skill 생성이 즉시 가능함.
     2. `Package_directory_kept_non_empty` (wire: `{"kind": "kept_non_empty"}`): 폴더 내에 부속
@@ -1603,10 +1640,10 @@ status: reference
 
 **Shutdown Admission Fence (종료 진입 차단막)**
 : 종료 작업 진행 중인 Keeper의 재부팅을 막아 원장 정합성을 지키는 진입 차단 술어(`Keeper_shutdown_types.requires_admission_fence`).
-  - **단계별 차단막 해제 규칙 (#31738·#38569)**: 과거에는 `Blocked` 상태의 종료 작업에 대해 실패 단계와
-    무관하게 차단막을 영구 유지하여, 영속 상태가 전혀 파괴되지 않은 Keeper도 수동 교체(`Superseded`) 없이는
-    영구히 재부팅할 수 없는 결함이 있었다. 현재는 실패 단계(`failure_stage`)를 검사하여 영속 상태 변경 전에
-    실패한 단계는 차단막을 해제하고 즉시 재시도(`retryable`)를 허용한다:
+  - **단계별 차단막 해제 규칙 (#31738·#38569)**: `Blocked` 상태의 종료 작업은 실패 단계(`failure_stage`)에
+    따라 차단막을 유지할지가 갈린다. 영속 상태를 바꾸기 전에 실패한 단계는 차단막을 해제하고 즉시
+    재시도(`retryable`)를 허용하므로, 영속 상태가 망가지지 않은 Keeper는 수동 교체(`Superseded`) 없이
+    다시 부팅된다:
     1. **해제 대상 (`retryable`, 차단막 없음)**: 영속 상태를 변경하기 전의 읽기·초기화·멱등 정리 단계
        (`Task_discovery`·`Record_persist`·`Meta_update`·`Pending_confirm_cleanup`).
     2. **유지 대상 (`fenced`, 차단막 유지)**: 키퍼의 영속 상태(태스크 소유권, 레인, 메타데이터, 세션, 레지스트리)가

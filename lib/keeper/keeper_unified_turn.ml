@@ -1146,11 +1146,13 @@ let run_keeper_cycle
                   [Keeper_agent_run_receipt.finalize] -- a phase-gate or
                   pre-dispatch end -- and then no lane was run or left behind
                   either. *)
-               let degraded_retry_applied, degraded_retry_deferred =
+               let degraded_retry_applied, degraded_retry_deferred, attempt_spend =
                  match turn_state.degraded_retry_settled with
                  | Some (settled : Keeper_agent_run.turn_settlement) ->
-                   settled.degraded_retry_applied, settled.degraded_retry_deferred
-                 | None -> None, None
+                   ( settled.degraded_retry_applied
+                   , settled.degraded_retry_deferred
+                   , settled.spend )
+                 | None -> None, None, []
                in
                (match run_result with
                 | Error err when EC.is_input_required_error err ->
@@ -1410,9 +1412,7 @@ let run_keeper_cycle
                     Keeper_turn_spend.resolve
                       ~cursor:meta.runtime.usage_cursor
                       ~observed_at:(Time_compat.now ())
-                      (match turn_state.degraded_retry_settled with
-                       | Some (settled : Keeper_agent_run.turn_settlement) -> settled.spend
-                       | None -> [])
+                      attempt_spend
                   in
                   let updated_meta =
                     Keeper_unified_metrics.with_attempt_spend
@@ -1546,6 +1546,7 @@ let run_keeper_cycle
                       ~degraded_retry_applied
                       ~degraded_retry_deferred
                       ~keeper_turn_id
+                      ~spend:attempt_spend
                       execution_outcome
                   in
                   (match success with

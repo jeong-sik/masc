@@ -994,6 +994,7 @@ let run_keeper_invocation_turn_admitted_inner
                     ~degraded_retry_applied:settlement.Keeper_agent_run.degraded_retry_applied
                     ~degraded_retry_deferred:settlement.Keeper_agent_run.degraded_retry_deferred
                     ~keeper_turn_id
+                    ~spend:settlement.Keeper_agent_run.spend
                     execution_outcome
                 with
                 | Keeper_unified_turn_success.Completed updated_meta -> updated_meta

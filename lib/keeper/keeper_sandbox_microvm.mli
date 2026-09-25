@@ -514,6 +514,12 @@ val build_link_actions : build_link_row list -> (string * string) list
     input to {!build_link_apply_argv_for}. A row already correct, or
     refused, needs none. *)
 
+val build_link_targets : build_link_row list -> string list
+(** Every target that must exist before a build runs: the targets of
+    {!build_link_actions} and of rows already linked. A fresh boot recreates
+    the build volume empty, so an already-correct link dangles until its
+    target is created again -- input to {!build_target_mkdir_argv}. *)
+
 val build_link_apply_argv_for
   :  Keeper_microvm_backend.t
   -> container_name:string

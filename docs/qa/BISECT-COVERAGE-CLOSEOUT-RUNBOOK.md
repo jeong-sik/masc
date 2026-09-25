@@ -13,7 +13,7 @@ setup:
 
 ```bash
 scripts/opam-pin-external-deps.sh --with-bisect
-opam install . --deps-only --with-test
+opam install ./masc.opam --deps-only --with-test
 scripts/coverage_percent.sh --fail-under 100
 ```
 

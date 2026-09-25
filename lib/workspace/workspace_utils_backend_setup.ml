@@ -342,7 +342,7 @@ let backend_config_for base_path =
   let backend_base_path =
     match cluster_segment with
     | None -> masc_root
-    | Some seg -> Filename.concat (Filename.concat masc_root "clusters") seg
+    | Some seg -> Filename.concat (Common.clusters_dir_from_base_path ~base_path) seg
   in
   {
     Backend_types.base_path = backend_base_path;

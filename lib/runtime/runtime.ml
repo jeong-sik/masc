@@ -1139,14 +1139,13 @@ type exact_lane = Standalone_lane.t =
   | Verifier
   | Browser_stagehand
 
-(* [Server_workspace_memory_curator.execute] and [Browser_stagehand_model]
-   refuse a run whose lane declares any CLI slot, so [false] here is that
-   refusal read in advance. The two are tied by these comments alone; making a
-   CLI slot on such a lane unloadable would leave one rule and let that
-   refusal go. *)
+(* [Server_workspace_memory_curator.execute] refuses a run whose lane declares
+   any CLI slot, so [false] here is that refusal read in advance. The two are
+   tied by these comments alone; making a CLI slot on such a lane unloadable
+   would leave one rule and let that refusal go. *)
 let exact_lane_supports_cli_tail = function
-  | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true
-  | Workspace_curator | Browser_stagehand -> false
+  | Librarian | Hitl_auto_judge | Board_attention | Verifier | Browser_stagehand -> true
+  | Workspace_curator -> false
 ;;
 
 (* [verifier_exact] is the one exact-output lane whose slot ids are read

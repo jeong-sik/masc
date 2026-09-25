@@ -235,11 +235,22 @@ type forecast =
   }
 
 type reading =
-  { turn : (selection, string) result
-  ; provider_input : (provider_input, string) result
-  ; response : (response_turn, string) result
-  ; forecast : (forecast, string) result
-  }
+  | Request_failed of string
+      (** The whole inspector request could not start. Keep its cause once. *)
+  | Turn_read_failed of
+      { detail : string
+      ; forecast : (forecast, string) result
+      }
+      (** The turn-dependent reads cannot start. The independently fetched
+          next-request forecast remains visible. *)
+  | Turn_read of
+      { selection : selection
+      ; provider_input : (provider_input, string) result
+      ; response : (response_turn, string) result
+      ; forecast : (forecast, string) result
+      }
+      (** Once the turn is known, its provider input and response may each
+          fail independently. *)
 
 type tab =
   | Composition

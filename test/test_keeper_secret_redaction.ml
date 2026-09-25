@@ -427,6 +427,27 @@ let test_stream_emits_bounded_unterminated_output () =
   Alcotest.(check string) "streaming preserves ordinary bytes" input
     (emitted ^ trailing)
 
+(* A 9,000-byte line of Hangul crosses the first bounded flush at byte 8,192;
+   the old cut kept 4,096 bytes, the middle of a syllable. Each emitted piece
+   reaches its reader as a separate string, so each one must decode. *)
+let test_stream_bounded_flush_keeps_characters_whole () =
+  let hangul = String.concat "" (List.init 3_000 (fun _ -> "\xea\xb0\x80")) in
+  let state = R.create_stream_state R.empty in
+  let pieces = List.init 3 (fun _ -> R.redact_stream_chunk state hangul) in
+  let trailing = R.redact_stream_finish state in
+  Alcotest.(check bool) "the line streams before finish" true
+    (List.exists (fun piece -> String.length piece > 0) pieces);
+  List.iteri
+    (fun index piece ->
+       Alcotest.(check bool)
+         (Printf.sprintf "piece %d decodes as UTF-8" index)
+         true
+         (String_util.is_valid_utf8 piece))
+    (pieces @ [ trailing ]);
+  Alcotest.(check string) "no byte is lost across the pieces"
+    (String.concat "" [ hangul; hangul; hangul ])
+    (String.concat "" pieces ^ trailing)
+
 let test_stream_emits_carriage_return_progress () =
   let state = R.create_stream_state R.empty in
   let emitted = R.redact_stream_chunk state "step 1\rstep 2\rpartial" in
@@ -510,6 +531,8 @@ let () =
             `Quick test_identity_key_is_visible_with_the_switch_off;
           Alcotest.test_case "bounds unterminated stream buffering" `Quick
             test_stream_emits_bounded_unterminated_output;
+          Alcotest.test_case "bounded flush keeps characters whole" `Quick
+            test_stream_bounded_flush_keeps_characters_whole;
           Alcotest.test_case "streams carriage-return progress" `Quick
             test_stream_emits_carriage_return_progress;
           Alcotest.test_case "redacts a secret crossing a bounded flush" `Quick

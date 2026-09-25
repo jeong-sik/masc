@@ -1227,7 +1227,7 @@ let load_dashboard_gate ~(host : string) ~(port : int) :
 
 (** Load the durable per-keeper Gate settings. *)
 let load_keeper_gate_settings ~(host : string) ~(port : int) :
-    ((string * string) list * (string * string) list, string) result =
+    ((string * string) list * Tui_decode.keeper_exact_lane_first list, string) result =
   match fetch_keeper_gate_settings ~host ~port with
   | Error err -> Error ("keeper Gate settings load failed: " ^ err)
   | Ok json -> Tui_decode.decode_keeper_gate_settings json
@@ -1328,6 +1328,15 @@ let load_repository_pulls ~(host : string) ~(port : int) :
   match Masc_tui_http.fetch_repository_pulls ~host ~port with
   | Error err -> Error ("pull requests load failed: " ^ err)
   | Ok json -> Repository_pulls.decode_reading json
+
+(* Each Keeper's spend over the server's default window; the title draws the
+   window the answer names. A Keeper row the decoder cannot read is counted,
+   and that Keeper is drawn unknown. *)
+let load_keeper_spend ~(host : string) ~(port : int) :
+    (overview_spend_reading, string) result =
+  match Masc_tui_http.fetch_keeper_costs ~host ~port with
+  | Error err -> Error ("keeper spend load failed: " ^ err)
+  | Ok json -> Masc_tui_keeper_spend.decode_reading json
 
 (* The Overview's GOALS section. A phase this build does not know refuses the
    whole reading: a goal dropped from the list, or drawn under a phase it is

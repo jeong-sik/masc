@@ -301,13 +301,21 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
-let run_fixture ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
+let run_fixture ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
     ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?wall_clock_ceiling_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
     ?on_prompt_sent ?(prompt = "Return the fixture marker")
     ?(images = []) ?(native = Runtime_native_tools.codex_default) path =
-  Eio_main.run (fun env ->
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let previous_pool = Domain_pool_ref.get () in
+    Eio.Switch.on_release sw (fun () ->
+      match previous_pool with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some pool -> Domain_pool_ref.set pool);
+    if worker_pool then
+      Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 env#domain_mgr)
+    else Domain_pool_ref.clear_for_tests ();
     let clock = Eio.Stdenv.clock env in
     let config =
       { (Runtime_codex_app_server.default_config ()) with
@@ -348,7 +356,7 @@ let run_fixture ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = []
       ?on_prompt_sent
       config
       ~prompt
-      ~images)
+      ~images))
 ;;
 
 let test_dispatch_validation_is_process_free () =
@@ -380,7 +388,8 @@ let native_command_completed =
   {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":2,"item":{"type":"commandExecution","id":"native-command-1","command":"pwd","commandActions":[],"cwd":"/tmp","status":"completed","aggregatedOutput":"/tmp"}}}|}
 ;;
 
-let test_dynamic_tool_callback () =
+let test_dynamic_tool_callback ?(worker_pool = false) () =
+  let owner = Domain.self () in
   let call_id = ref None in
   let arguments = ref `Null in
   let stream_events = ref [] in
@@ -395,6 +404,8 @@ let test_dynamic_tool_callback () =
           ]
     ; call =
         (fun ~call_id:id input ->
+          check bool "tool callback remains on the protocol owner" true
+            (Domain.self () = owner);
           call_id := Some id;
           arguments := input;
           { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
@@ -413,6 +424,7 @@ let test_dynamic_tool_callback () =
     (fun path ->
        match
          run_fixture
+           ~worker_pool
            ~dynamic_tools:[ tool ]
            ~on_stream_event:(fun event -> stream_events := event :: !stream_events)
            path
@@ -428,7 +440,7 @@ let test_dynamic_tool_callback () =
          let open Runtime_codex_app_server in
          (match List.rev !stream_events with
           | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
-            ; Text_delta "MASC_"
+            ; Text_delta { item_id = Some "message-1"; delta = "MASC_" }
             ; Dynamic_tool_started
                 { call_id = "call-1"; tool_name = "masc_probe"; arguments }
             ; Dynamic_tool_finished { call_id = "call-1" }
@@ -476,7 +488,7 @@ let test_native_command_events_stay_distinct_from_dynamic_tools () =
                ; tool_name = Some "commandExecution"
                ; origin = Runtime_native_tools.Built_in
                }
-           ; Text_delta "MASC_"
+           ; Text_delta { item_id = Some "message-1"; delta = "MASC_" }
            ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
            ] -> ()
          | _ -> fail "Codex native command activity was projected as a MASC tool")
@@ -693,6 +705,11 @@ let test_developer_context_preserves_authority_and_history () =
                 | Resume _ -> "thread/resume" in
               check string "stable policy remains separate" "stable policy"
                 (request thread_method |> member "developerInstructions" |> to_string);
+              check string "only a resume asks Codex to leave the past turns out"
+                (match thread_mode with
+                 | Runtime_codex_app_server.Start -> "null"
+                 | Resume _ -> "true")
+                (Yojson.Safe.to_string (request thread_method |> member "excludeTurns"));
               let items = request "thread/inject_items" |> member "items" |> to_list in
               check (list string) "context retains developer authority; resume omits history"
                 expected_roles (List.map (fun j -> member "role" j |> to_string) items);
@@ -1021,9 +1038,15 @@ let test_truncated_token_usage_of_this_turn_fails_closed () =
       | Ok _ -> fail "a half-read breakdown was admitted")
 ;;
 
-let test_prompt_transmission_boundary () =
+let test_prompt_transmission_boundary ?(worker_pool = false) () =
+  let run_fixture = run_fixture ~worker_pool in
+  let owner = Domain.self () in
   let sent = ref 0 in
-  let report () = incr sent in
+  let report () =
+    check bool "transmission callback remains on the protocol owner" true
+      (Domain.self () = owner);
+    incr sent
+  in
   let missing = Filename.temp_file "missing-codex-" ".sh" in
   Sys.remove missing;
   check bool "missing client fails" true
@@ -1041,9 +1064,12 @@ let test_prompt_transmission_boundary () =
      | Ok _ -> fail "incomplete turn input completed");
     check int "incomplete write emits no input" 0 !sent);
   let captured = Filename.temp_file "codex-transmitted-input-" ".jsonl" in
+  (* Exercise escaping and multibyte text across a pipe-sized request; the
+     child capture must decode to these exact bytes. *)
+  let transmitted_prompt = String.make 65_536 '"' ^ "한글 👩‍💻\n\\marker" in
   Fun.protect ~finally:(fun () -> Sys.remove captured) (fun () ->
     with_fixture ~capture_path:captured lines (fun path ->
-      let result = run_fixture ~prompt:"transmission-marker" ~on_prompt_sent:report path in
+      let result = run_fixture ~prompt:transmitted_prompt ~on_prompt_sent:report path in
       check bool "complete turn succeeds" true (Result.is_ok result);
       check int "complete write emits once" 1 !sent;
       let open Yojson.Safe.Util in
@@ -1054,7 +1080,7 @@ let test_prompt_transmission_boundary () =
         |> List.find (fun json -> json |> member "method" = `String "turn/start") in
       let text = request |> member "params" |> member "input" |> to_list
         |> List.hd |> member "text" |> to_string in
-      check string "client received exact turn input" "transmission-marker" text));
+      check string "client received exact turn input" transmitted_prompt text));
   with_fixture [ init_result; account_chatgpt; thread_result; turn_result; turn_failed ]
     (fun path ->
       (match run_fixture ~on_prompt_sent:report path with
@@ -1663,8 +1689,12 @@ let test_error_notification_reads_usage_limit () =
 let test_usage_frames_report_the_thread_count_before_a_usage_limit_ends_the_turn () =
   let reported = ref [] in
   let on_stream_event = function
-    | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; thread_total } ->
+    | Runtime_codex_app_server.Usage_reported
+        { thread_id; turn_id; model; frame = Runtime_codex_app_server.Counted { thread_total; _ } } ->
       reported := (thread_id ^ "/" ^ turn_id, model, thread_total.input_tokens) :: !reported
+    | Runtime_codex_app_server.Usage_reported
+        { frame = Runtime_codex_app_server.Context_window_filled _; _ } ->
+      fail "a counted frame was read as a fill"
     | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
     | Usage_windows_reported _ | Turn_finished _ -> ()
@@ -2164,6 +2194,94 @@ let test_wall_clock_ceiling_bounds_a_tool_item_that_never_completes () =
            (seconds > tool_item_idle_window_s && seconds <= tool_item_ceiling_s)
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "an item that never completes let the turn finish")
+;;
+
+let test_worker_encoding_wait_is_bounded () =
+  let captured = Filename.temp_file "codex-worker-wait-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove captured) (fun () ->
+    with_fixture ~capture_path:captured
+      [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
+      (fun path ->
+        Eio_main.run @@ fun env ->
+        Eio.Switch.run @@ fun sw ->
+        let clock = Eio.Stdenv.clock env in
+        let previous_pool = Domain_pool_ref.get () in
+        Eio.Switch.on_release sw (fun () ->
+          match previous_pool with
+          | None -> Domain_pool_ref.clear_for_tests ()
+          | Some pool -> Domain_pool_ref.set pool);
+        let pool = Domain_pool.create ~sw ~domain_count:1 env#domain_mgr in
+        Domain_pool_ref.set pool;
+        let started, announce_started = Eio.Promise.create () in
+        let release, release_worker = Eio.Promise.create () in
+        let held = Domain_pool.submit_cpu_async ~sw pool (fun () ->
+          Eio.Promise.resolve announce_started ();
+          Eio.Promise.await release) in
+        (* Release before the switch joins the held job, including on a
+           failed assertion or cancellation. The outer test watchdog detects
+           an unbounded queue wait; it is longer than both admission windows
+           and the two process cleanup grace periods. *)
+        Fun.protect ~finally:(fun () -> Eio.Promise.resolve release_worker ())
+          (fun () -> Eio.Time.with_timeout_exn clock 10.0 (fun () ->
+            Eio.Promise.await started;
+            List.iter
+              (fun (name, admission_timeout_s, wall_clock_ceiling_s) ->
+                let sent = ref 0 in
+                let config =
+                  { (Runtime_codex_app_server.default_config ()) with
+                    cli_path = path; admission_timeout_s; wall_clock_ceiling_s;
+                    timeout_s = None }
+                in
+                let outcome = Runtime_codex_app_server.run_turn
+                    ~mgr:(Eio.Stdenv.process_mgr env) ~clock
+                    ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+                    ~on_prompt_sent:(fun () -> incr sent)
+                    config ~prompt:"fixture" ~images:[] in
+                (match outcome with
+                 | Error (Runtime_codex_app_server.Timeout
+                            { seconds; turn_accepted = false }) ->
+                   (match wall_clock_ceiling_s with
+                    | None ->
+                      check (float 0.001) (name ^ ": admission bound")
+                        admission_timeout_s seconds
+                    | Some ceiling ->
+                      check bool (name ^ ": wall-clock cap bounds the wait")
+                        true (seconds > 0.0 && seconds <= ceiling))
+                 | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+                 | Ok _ -> fail (name ^ ": occupied worker admitted a turn"));
+                check int (name ^ ": no prompt transmission callback") 0 !sent;
+                check string (name ^ ": no request reached the child") ""
+                  (In_channel.with_open_bin captured In_channel.input_all))
+              [ "admission", 0.3, None; "wall-clock", 2.0, Some 0.3 ]));
+        Eio.Promise.await_exn held))
+;;
+
+let test_worker_rejects_invalid_developer_instructions () =
+  let captured = Filename.temp_file "codex-invalid-worker-input-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove captured) (fun () ->
+    with_fixture ~capture_path:captured
+      [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
+      (fun path ->
+        let sent = ref 0 in
+        (match run_fixture ~worker_pool:true
+                 ~developer_instructions:"invalid-\xff"
+                 ~on_prompt_sent:(fun () -> incr sent) path with
+         | Error (Runtime_codex_app_server.Spawn_failed detail) ->
+           check string "worker exception keeps the offending field"
+             (Printexc.to_string (Failure
+                "codex app-server stdin: refusing invalid UTF-8 payload (field params.developerInstructions)"))
+             detail
+         | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+         | Ok _ -> fail "invalid UTF-8 was sent to the client");
+        check int "rejected encoding has no transmission callback" 0 !sent;
+        let methods =
+          In_channel.with_open_bin captured In_channel.input_lines
+          |> List.map (fun line ->
+            Yojson.Safe.from_string line
+            |> Yojson.Safe.Util.member "method" |> Yojson.Safe.Util.to_string)
+        in
+        check (list string) "the invalid thread request was never written"
+          [ "initialize"; "initialized"; "account/read" ] methods))
 ;;
 
 let test_no_deadline_keeps_handshake_bounded () =
@@ -2998,7 +3116,7 @@ candidates = ["projection.http", "codex.codex"]
                                        ())
                                 else None
                               in
-                              let result = (Keeper_agent_run.run_turn
+                              let settlement = Keeper_agent_run.run_turn
                                 ?trajectory_acc
                                 ~config
                                 ~meta
@@ -3027,11 +3145,11 @@ candidates = ["projection.http", "codex.codex"]
                                      ~detail:"test fixture has no Skill publication")
                                 ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
                                 ~runtime_id
-                                ()).Keeper_agent_run.result in
+                                () in
                               (* Read while the turn's runtime catalog is
                                  still the published one. *)
-                              after_turn ();
-                              result))))))
+                              after_turn settlement;
+                              settlement.Keeper_agent_run.result))))))
 ;;
 
 let run_production_keeper_turn_with_predecessor ~http_requests ~base_path ~trace_id
@@ -3073,7 +3191,8 @@ let test_production_turn_records_its_keeper_as_the_failure_recorder () =
       (fun cli_path ->
         let trace_id = "recorder-trace" in
         let result =
-          run_production_keeper_turn_with_projection ~write_cost_ledger:false ~after_turn:read_mark
+          run_production_keeper_turn_with_projection ~write_cost_ledger:false
+            ~after_turn:(fun _settlement -> read_mark ())
             ~dynamic_context_for_tools:None ~http_requests:None ~base_path ~trace_id
             ~user_message:"Start the turn." ~cli_path ~model:"gpt-fixture"
             ~turn_instructions:None
@@ -3684,6 +3803,113 @@ let test_keeper_projects_codex_live_stream () =
               {|{"marker":"from-codex"}|}
               arguments
           | _ -> fail "Keeper did not preserve the Codex live event sequence"))
+;;
+
+(* A commentary item and the final answer after it: two agentMessage items,
+   each under its own itemId. The final answer streams "완" and completes as
+   "완료", so the end of the turn still owes "료". *)
+let commentary_delta =
+  {|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"commentary-1","delta":"확인할게요."}}|}
+;;
+
+let commentary_completed =
+  {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":1,"item":{"type":"agentMessage","id":"commentary-1","text":"확인할게요.","phase":"commentary"}}}|}
+;;
+
+let final_answer_delta =
+  {|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"message-1","delta":"완"}}|}
+;;
+
+let final_answer_completed =
+  {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":2,"item":{"type":"agentMessage","id":"message-1","text":"완료","phase":"final_answer"}}}|}
+;;
+
+let two_message_turn_completed =
+  {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[{"type":"agentMessage","id":"commentary-1","text":"확인할게요.","phase":"commentary"},{"type":"agentMessage","id":"message-1","text":"완료","phase":"final_answer"}],"status":"completed"}}}|}
+;;
+
+let streamed_text events =
+  List.filter_map
+    (function
+      | Agent_core.Types.ContentBlockDelta { delta = Agent_core.Types.TextDelta text; _ } ->
+        Some text
+      | _ -> None)
+    events
+  |> String.concat ""
+;;
+
+(* Every chat surface appends the stream's text deltas, so the two items
+   read "확인할게요.완료" until a break went between them. The recorded
+   reply is the final answer alone, and the suffix it adds continues the
+   last item, not the whole stream. *)
+let test_keeper_separates_codex_agent_messages () =
+  let stream_events = ref [] in
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; commentary_delta
+    ; commentary_completed
+    ; final_answer_delta
+    ; final_answer_completed
+    ; two_message_turn_completed
+    ]
+    (fun cli_path ->
+       match
+         run_keeper_turn
+           ~on_event:(fun event -> stream_events := event :: !stream_events)
+           ~cli_path
+           ~model:"gpt-fixture"
+           ()
+       with
+       | Error error -> fail (Agent_core.Error.to_string error)
+       | Ok result ->
+         let events = List.rev !stream_events in
+         let open Agent_core.Types in
+         (match events with
+          | [ MessageStart { id = "turn-1"; model = "gpt-fixture"; usage = None }
+            ; ContentBlockDelta { index = 0; delta = TextDelta "확인할게요." }
+            ; ContentBlockDelta { index = 0; delta = TextDelta "\n\n완" }
+            ; ContentBlockDelta { index = 0; delta = TextDelta "료" }
+            ; MessageDelta { stop_reason = Some EndTurn; usage = None }
+            ; MessageStop
+            ] -> ()
+          | _ -> fail "Keeper did not stream the two Codex items apart");
+         check string "each item once, apart" "확인할게요.\n\n완료" (streamed_text events);
+         check string "Keeper response" "완료" (keeper_response_text result))
+;;
+
+(* [itemId] stays optional on an agentMessage delta (#28010): a frame that
+   omits it or sends it blank still streams, and names no item. *)
+let test_agent_message_delta_without_item_id_streams () =
+  let stream_events = ref [] in
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; {|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"","delta":"MASC_"}}|}
+    ; {|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","delta":"SUBSCRIPTION_OK"}}|}
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+       match
+         run_fixture
+           ~on_stream_event:(fun event -> stream_events := event :: !stream_events)
+           path
+       with
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ ->
+         let open Runtime_codex_app_server in
+         (match List.rev !stream_events with
+          | [ Turn_started _
+            ; Text_delta { item_id = None; delta = "MASC_" }
+            ; Text_delta { item_id = None; delta = "SUBSCRIPTION_OK" }
+            ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
+            ] -> ()
+          | _ -> fail "an agentMessage delta without an itemId did not stream unnamed"))
 ;;
 
 let test_keeper_preserves_typed_history_on_codex_wire () =
@@ -4876,10 +5102,10 @@ let raw_cost_rows ~base_path =
   |> List.sort compare
 ;;
 
-let run_cost_ledger_turn ~base_path ~trace_id ~cli_path =
+let run_cost_ledger_turn ?(after_turn = ignore) ~base_path ~trace_id ~cli_path () =
   run_production_keeper_turn_with_projection
     ~write_cost_ledger:true
-    ~after_turn:ignore
+    ~after_turn
     ~dynamic_context_for_tools:None
     ~http_requests:None
     ~base_path
@@ -4937,6 +5163,50 @@ let test_production_keeper_takes_a_compaction_estimate_as_occupancy () =
                  fail "the estimate's occupancy was dropped")))
 ;;
 
+(* The usage limit fails the turn after the thread already counted two
+   responses. What it spent still travels out of the turn: its attempt, with
+   one reading for its thread holding the newest count, not one per frame. *)
+let test_production_keeper_carries_a_failed_turns_spend_out () =
+  let base_path = temp_workspace "masc-codex-production-failed-spend-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result; account_chatgpt; thread_result; turn_result
+         ; token_usage_updated; second_token_usage_updated; second_token_usage_updated
+         ; usage_limit_terminal
+         ]
+         (fun cli_path ->
+            let spend = ref [] in
+            (match
+               run_cost_ledger_turn
+                 ~after_turn:(fun settlement -> spend := settlement.Keeper_agent_run.spend)
+                 ~base_path
+                 ~trace_id:"codex-failed-spend-1"
+                 ~cli_path
+                 ()
+             with
+             | Error _ -> ()
+             | Ok _ -> fail "usage limit did not fail the production turn");
+            match !spend with
+            | [ { Keeper_turn_spend.readings = [ reading ]; runtime_id; _ } ] ->
+              check string "the attempt's runtime" "codex.codex" runtime_id;
+              check (option int) "the thread's newest count" (Some 11000)
+                (Option.map
+                   (fun (sample : Keeper_usage_resolution.sample) -> sample.input_tokens)
+                   reading.observation);
+              (match reading.basis with
+               | Keeper_usage_resolution.Conversation_counter
+                   { conversation_id = "thread-1"; runtime_id = "codex.codex"; _ } -> ()
+               | Keeper_usage_resolution.Conversation_counter _
+               | Keeper_usage_resolution.Per_request
+               | Keeper_usage_resolution.Turn_total
+               | Keeper_usage_resolution.Unavailable ->
+                 fail "the reading is not keyed by its thread")
+            | attempts ->
+              failf "expected one attempt with one reading, got %d attempts" (List.length attempts)))
+;;
+
 let test_production_keeper_ledgers_codex_spend_of_a_failed_turn () =
   let base_path = temp_workspace "masc-codex-production-failed-cost-" in
   Fun.protect
@@ -4948,7 +5218,7 @@ let test_production_keeper_ledgers_codex_spend_of_a_failed_turn () =
          ; usage_limit_terminal
          ]
          (fun cli_path ->
-            (match run_cost_ledger_turn ~base_path ~trace_id:"codex-failed-cost-1" ~cli_path with
+            (match run_cost_ledger_turn ~base_path ~trace_id:"codex-failed-cost-1" ~cli_path () with
              | Error _ -> ()
              | Ok _ -> fail "usage limit did not fail the production turn");
             check (list (pair string (option int))) "every frame's thread count, as reported"
@@ -4996,7 +5266,7 @@ let test_production_keeper_ledgers_each_codex_response_once () =
          ; item_completed; token_usage_updated; turn_completed
          ]
          (fun cli_path ->
-            (match run_cost_ledger_turn ~base_path ~trace_id:"codex-once-cost-1" ~cli_path with
+            (match run_cost_ledger_turn ~base_path ~trace_id:"codex-once-cost-1" ~cli_path () with
              | Error error -> fail (Agent_core.Error.to_string error)
              | Ok _ -> ());
             check (list (pair string (option int))) "the one frame, written once"
@@ -5017,7 +5287,7 @@ let test_production_keeper_marks_a_codex_turn_that_reported_no_usage () =
          ; item_completed; turn_completed
          ]
          (fun cli_path ->
-            (match run_cost_ledger_turn ~base_path ~trace_id:"codex-unreported-cost-1" ~cli_path with
+            (match run_cost_ledger_turn ~base_path ~trace_id:"codex-unreported-cost-1" ~cli_path () with
              | Error error -> fail (Agent_core.Error.to_string error)
              | Ok _ -> ());
             check (list (pair string (option int))) "one row saying the usage is missing"
@@ -5814,7 +6084,10 @@ let () =
         ] )
     ; ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
-        ; test_case "prompt transmission boundary" `Quick test_prompt_transmission_boundary
+        ; test_case "prompt transmission boundary" `Quick
+            (fun () -> test_prompt_transmission_boundary ())
+        ; test_case "worker encoded prompt transmission boundary" `Quick
+            (fun () -> test_prompt_transmission_boundary ~worker_pool:true ())
         ; test_case
             "probe stops before thread"
             `Quick
@@ -5919,6 +6192,14 @@ let () =
             `Quick
             test_wall_clock_ceiling_bounds_a_tool_item_that_never_completes
         ; test_case
+            "worker encoding wait shares dispatch bounds"
+            `Quick
+            test_worker_encoding_wait_is_bounded
+        ; test_case
+            "worker rejects invalid developer instructions before writing"
+            `Quick
+            test_worker_rejects_invalid_developer_instructions
+        ; test_case
             "no deadline keeps handshake bounded"
             `Quick
             test_no_deadline_keeps_handshake_bounded
@@ -5974,7 +6255,10 @@ let () =
             "dispatch validation is process-free"
             `Quick
             test_dispatch_validation_is_process_free
-        ; test_case "dynamic tool callback" `Quick test_dynamic_tool_callback
+        ; test_case "dynamic tool callback" `Quick
+            (fun () -> test_dynamic_tool_callback ())
+        ; test_case "worker encoded dynamic tool callback" `Quick
+            (fun () -> test_dynamic_tool_callback ~worker_pool:true ())
         ; test_case
             "token usage of this turn reaches the result"
             `Quick
@@ -6069,6 +6353,14 @@ let () =
             `Quick
             test_keeper_projects_codex_live_stream
         ; test_case
+            "Keeper streams two Codex agentMessage items apart"
+            `Quick
+            test_keeper_separates_codex_agent_messages
+        ; test_case
+            "agentMessage delta without itemId still streams"
+            `Quick
+            test_agent_message_delta_without_item_id_streams
+        ; test_case
             "Keeper preserves typed history on Codex wire"
             `Quick
             test_keeper_preserves_typed_history_on_codex_wire
@@ -6116,6 +6408,10 @@ let () =
             "production Keeper takes a compaction estimate as occupancy"
             `Quick
             test_production_keeper_takes_a_compaction_estimate_as_occupancy
+        ; test_case
+            "production Keeper carries a failed turn's spend out"
+            `Quick
+            test_production_keeper_carries_a_failed_turns_spend_out
         ; test_case
             "production Keeper ledgers Codex spend of a failed turn"
             `Quick

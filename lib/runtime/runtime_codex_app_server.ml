@@ -216,7 +216,10 @@ type stream_event =
       { turn_id : string
       ; model : string
       }
-  | Text_delta of string
+  | Text_delta of
+      { item_id : string option
+      ; delta : string
+      }
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -235,7 +238,7 @@ type stream_event =
       { thread_id : string
       ; turn_id : string
       ; model : string
-      ; thread_total : token_usage
+      ; frame : frame_usage
       }
   | Turn_finished of { text : string }
 
@@ -1140,6 +1143,19 @@ let item_delta_notification ~method_ ~thread_id ~turn_id params =
   else Ok delta
 ;;
 
+(* The agentMessage item an [item/agentMessage/delta] belongs to. It only
+   tells two assistant messages of one turn apart in the live stream, so it
+   stays optional for the reason [item_delta_notification] gives: a frame
+   that omits it or sends it blank streams its delta and names no item. *)
+let agent_message_item_id params =
+  match params with
+  | `Assoc fields ->
+    (match List.assoc_opt "itemId" fields with
+     | Some (`String item_id) when String.trim item_id <> "" -> Some item_id
+     | Some _ | None -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+;;
+
 (* One [TokenUsageBreakdown] of a [thread/tokenUsage/updated] frame. *)
 let token_usage_breakdown stage usage_fields name =
   let* breakdown_json = required_member stage name usage_fields in
@@ -1271,7 +1287,9 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
     Error (Unsupported_server_request method_)
   | Notification { method_ = "item/agentMessage/delta" as method_; params } ->
     let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params in
-    emit_stream_event on_stream_event (Text_delta delta);
+    emit_stream_event
+      on_stream_event
+      (Text_delta { item_id = agent_message_item_id params; delta });
     let seen_fallback =
       match seen_fallback with
       | None -> Some delta
@@ -1450,16 +1468,18 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
        here, where it is read, so a turn that later fails still leaves what
        it spent. [seen_usage] folds the turn's frames: the newest [last]
        for the turn result's context occupancy, [total] for its spend. *)
+    let frame =
+      Option.map
+        (fun (last, thread_total) -> frame_usage_of_breakdowns ~last ~thread_total)
+        frame
+    in
     Option.iter
-      (fun (_last, thread_total) ->
-         emit_stream_event
-           on_stream_event
-           (Usage_reported { thread_id; turn_id; model; thread_total }))
+      (fun frame ->
+         emit_stream_event on_stream_event (Usage_reported { thread_id; turn_id; model; frame }))
       frame;
     let seen_usage =
       match frame with
-      | Some (last, thread_total) ->
-        Some (fold_turn_usage seen_usage (frame_usage_of_breakdowns ~last ~thread_total))
+      | Some frame -> Some (fold_turn_usage seen_usage frame)
       | None -> seen_usage
     in
     await_turn_terminal
@@ -1623,10 +1643,17 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
       , false )
     | Resume { thread_id } ->
       ( "thread/resume"
+      (* [excludeTurns]: the reply is read for the thread id and the model only
+         (parse_thread_response). Without it Codex returns every past turn in
+         [thread.turns], and a long thread's reply outgrew the 8 MiB line limit
+         (masc-pro-builder, 2026-09-20 13:11Z: Buffer_limit_exceeded on
+         resume); the next turn started a fresh thread. The flag changes the
+         reply, not the history the model sees. *)
       , [ "threadId", `String thread_id
         ; "cwd", `String protocol_cwd
         ; "approvalPolicy", `String approval_policy
         ; "permissions", `String permissions_profile
+        ; "excludeTurns", `Bool true
         ]
         @ optional_field "model" config.model
         @ optional_field "developerInstructions" config.developer_instructions
@@ -1947,19 +1974,28 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
     in
     let receive_phase = ref Awaiting_admission in
     let send json =
-      let payload = Yojson.Safe.to_string json in
-      (* The child decodes stdin as UTF-8 and exits on an invalid sequence,
-         which loses every in-flight turn and leaves the producer unnamed.
-         Refuse the write instead: the child survives and the field is named. *)
-      if not (String_util.is_valid_utf8 payload)
-      then
-        failwith
-          (Printf.sprintf
-             "codex app-server stdin: refusing invalid UTF-8 payload (field %s)"
-             (Option.value (invalid_utf8_field json) ~default:"<unknown>"));
       with_idle_timeout clock
         (Runtime_wall_clock.cap_window wall_clock (Some config.admission_timeout_s))
         (fun () ->
+          (* Encoding and its worker queue wait share the write's admission
+             and wall-clock bounds. Await the immutable payload before the
+             owner writes, preserving protocol order and callback ownership. *)
+          let payload =
+            Domain_pool_ref.submit_cpu_or_inline (fun () ->
+              let payload = Yojson.Safe.to_string json in
+              (* The child decodes stdin as UTF-8 and exits on an invalid sequence,
+                 which loses every in-flight turn and leaves the producer unnamed.
+                 Refuse the write instead: the child survives and the field is named. *)
+              if not (String_util.is_valid_utf8 payload)
+              then
+                failwith
+                  (Printf.sprintf
+                     "codex app-server stdin: refusing invalid UTF-8 payload (field %s)"
+                     (match invalid_utf8_field json with
+                      | Some field -> field
+                      | None -> "<unknown>"));
+              payload)
+          in
           Eio.Flow.copy_string payload stdin_w;
           Eio.Flow.copy_string "\n" stdin_w)
     in

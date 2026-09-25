@@ -453,11 +453,25 @@ let for_surface = function
       ; b Act "Esc" "back" ~help:"back; during a turn, interrupt it"
       ]
   | Keepers Keeper_runtime_pick ->
-      [ b Navigate "j/k" "move" ~help:"move; PgUp/PgDn page, Home/End jump"
+      (* The picker claims its own keys through [Masc_tui_pick_list], page and
+         edge among them, and the table carried both inside [j/k]'s help
+         instead of declaring them. Prose there reaches the sheet and never
+         the footer.
+
+         Only the page pair is declared: measured through the fitter at
+         eighty cells, declaring both costs [d] and [/] their place, and [d]
+         is the one key this screen exists for. [d]'s label is shortened in
+         the same breath -- with "use the default" spelled out it did not fit
+         beside the page pair either, and its help still says what it drops
+         and what it follows. The edge pair stays in the help until #39082
+         decides what this screen owes a guard that reads help for key
+         names. *)
+      [ b Navigate "j/k" "move" ~help:"move; Home/End jump to the top or bottom"
+      ; b Navigate "PgUp/PgDn" "page"
       ; b Navigate "/" "filter"
           ~help:"type to narrow the lanes and runtimes; Esc drops the filter"
       ; b Act "Enter" "choose"
-      ; b Act "d" "use the default"
+      ; b Act "d" "default"
           ~help:"drop this Keeper's own binding and follow [runtime].default"
       ; b Act "Esc" "back"
       ]
@@ -1278,6 +1292,15 @@ let help_surfaces : (string * surface) list =
   ; "Keepers", Keepers Keeper_list
   ; "Keeper detail", Keepers Keeper_detail
   ; "Chat", Keepers Keeper_message
+  (* Three screens a Keeper detail drills into, each with keys of its own and
+     no section until now: [?] there opened on Global and named no section for
+     the screen the reader was standing on. Named the way their titles read
+     ("Keepers > <keeper> > logs"), which is also how Schedules is named
+     below. The runtime picker earns its own: [d] follows [runtime].default
+     and [/] narrows the list, and neither is guessable. *)
+  ; "Keepers / Logs", Keepers Keeper_logs
+  ; "Keepers / Calls", Keepers Keeper_calls
+  ; "Keepers / Runtime", Keepers Keeper_runtime_pick
   ; "Lanes", Lanes
   ; "Config / Runtime / Clients", Clients
   ; "Board", Board
@@ -1302,6 +1325,10 @@ let help_surfaces : (string * surface) list =
   ; "Config / Resources", Resources
   ; "Config / Tools", Tools
   ; "Activity / Logs", System_logs
+  (* Its keys are the least guessable on the product -- [B] opens the Browser
+     Lane, [Ctrl-O] previews a tab, [b / u] bind and unbind a channel -- and
+     the sheet built no section for them at all. *)
+  ; "Connectors", Connectors
   ]
 
 let entries bindings =

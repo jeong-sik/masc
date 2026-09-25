@@ -358,17 +358,26 @@ let tool_observations messages =
 let current_memory ~keepers_dir ~keeper_name =
   match
     Domain_pool_ref.submit_io_or_inline (fun () ->
-      Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)
+      Keeper_memory_os_current.read_classified ~keepers_dir ~keeper_id:keeper_name)
   with
-  | Error detail -> Error (Memory_snapshot_unreadable detail)
-  | Ok current ->
-    let input, expected_revision =
-      match current with
-      | None -> None, None
-      | Some snapshot ->
-        Some { Keeper_librarian.facts = snapshot.facts }, Some snapshot.revision
-    in
-    Ok (input, expected_revision)
+  | Io_unreadable { detail } -> Error (Memory_snapshot_unreadable detail)
+  | No_snapshot -> Ok (None, None)
+  | Readable snapshot ->
+    Ok (Some { Keeper_librarian.facts = snapshot.facts }, Some snapshot.revision)
+  | Undecodable { rejection } ->
+    (* A decode rejection is the one failure the write path can recover: the
+       commit below re-reads under the store lock and the quarantine branch in
+       [update_locked_with_error] moves the undecodable bytes aside, then the
+       replacement writes a fresh revision-1 snapshot. Feeding the empty
+       current in with no expected revision is what routes the pass through
+       that branch instead of skipping the write and leaving the keeper
+       wedged (#32461). An I/O failure above stays a hard stop: replacing a
+       store the build could not even read would destroy state blindly. *)
+    Log.Keeper.warn
+      ~keeper_name
+      "librarian routing undecodable current snapshot into write-path quarantine: %s"
+      rejection;
+    Ok (None, None)
 ;;
 
 let write_progress ~write ~keepers_dir ~keeper_name progress outcome =

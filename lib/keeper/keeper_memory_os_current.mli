@@ -99,6 +99,17 @@ type t =
   ; change : change
   }
 
+(** Classified outcome of one snapshot read so callers can tell a decode
+    rejection apart from a filesystem failure without matching on message
+    text. [Undecodable] is the state the write-path quarantine recovers;
+    [Io_unreadable] leaves the file untouched and must not trigger a
+    replacement write. *)
+type read_classified =
+  | No_snapshot
+  | Readable of t
+  | Undecodable of { rejection : string }
+  | Io_unreadable of { detail : string }
+
 (** Identity of one selected durable completed-turn range. Boundary row
     identities distinguish restarted histories that reuse atom numbers and
     checkpoint digests. *)
@@ -248,6 +259,15 @@ val list_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 
 val read_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> (t option, string) result
+
+val read_classified :
+  keepers_dir:string -> keeper_id:string -> read_classified
+(** The same read as [read_for_keepers_dir] with the failure mode kept as a
+    variant instead of flattened to one message. Callers that must route a
+    decode rejection into the write-path quarantine (the librarian durable
+    consumer) use this so an undecodable snapshot reaches
+    [update_locked_with_error] and is moved aside, instead of being skipped
+    forever because no writer ran. *)
 
 val read_with_snapshot_sha256 :
   keepers_dir:string -> keeper_id:string -> ((t * string) option, string) result

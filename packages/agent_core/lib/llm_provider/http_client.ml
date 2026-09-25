@@ -2950,16 +2950,15 @@ let read_sse_line reader =
   let line = Eio.Buf_read.take_while (fun ch -> ch <> '\n' && ch <> '\r') reader in
   match Eio.Buf_read.peek_char reader with
   | None -> if String.equal line "" then raise End_of_file else line
-  | Some '\n' ->
-    Eio.Buf_read.char '\n' reader;
+  | Some terminator ->
+    (* [take_while] stopped, so [terminator] is LF or CR. *)
+    Eio.Buf_read.char terminator reader;
+    (if Char.equal terminator '\r'
+     then
+       match Eio.Buf_read.peek_char reader with
+       | Some '\n' -> Eio.Buf_read.char '\n' reader
+       | Some _ | None -> ());
     line
-  | Some '\r' ->
-    Eio.Buf_read.char '\r' reader;
-    (match Eio.Buf_read.peek_char reader with
-     | Some '\n' -> Eio.Buf_read.char '\n' reader
-     | Some _ | None -> ());
-    line
-  | Some _ -> assert false
 ;;
 
 let strip_initial_utf8_bom line =

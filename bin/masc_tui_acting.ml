@@ -191,6 +191,62 @@ let turn_detail = function
   | Some turn -> turn_number_text turn
   | None -> ""
 
+(* A turn's input count holds everything the turn sent, cache reads
+   included. On a cached runtime that is mostly the cache read back:
+   e-masc-the-leader's turn 1853 (2026-09-25) sent 3,716,155 tokens, 3,556,362
+   of them cache reads, and the row said "in 3.72M" as if all of it were new.
+
+   The split is drawn only from counts that add up. The input less the cache
+   reads is what the turn processed fresh: the cache writes plus the uncached
+   rest, so it can be no smaller than the cache writes. Counts that break that
+   keep the whole figure; a split drawn from them would be a guess. So does a
+   cache read of zero: the server's usage sample holds 0 for a runtime that
+   never reports its cache, so on the wire a zero and an unreported read are
+   the same value, and "new" would claim what nobody measured. *)
+type turn_input =
+  | Input_whole of int
+  | Input_split of { fresh : int; cached : int }
+
+let turn_input ~input ~cache_read ~cache_creation =
+  match (cache_read, cache_creation) with
+  | Some cached, Some creation ->
+      let fresh = input - cached in
+      if cached > 0 && creation >= 0 && fresh >= creation then
+        Input_split { fresh; cached }
+      else Input_whole input
+  | Some _, None | None, (Some _ | None) -> Input_whole input
+
+let turn_input_of_settle (t : Observer.keeper_turn_complete) =
+  Option.map
+    (fun input ->
+      turn_input ~input ~cache_read:t.Observer.tc_cache_read_tokens
+        ~cache_creation:t.Observer.tc_cache_creation_tokens)
+    t.Observer.tc_input_tokens
+
+let turn_input_total = function
+  | Input_whole n -> n
+  | Input_split { fresh; cached } -> fresh + cached
+
+let fresh_input_text fresh = "in " ^ Message_layout.compact_count fresh ^ " new"
+let cached_input_text cached = Message_layout.compact_count cached ^ " cached"
+
+let turn_input_text = function
+  | Input_whole n -> "in " ^ Message_layout.compact_count n
+  | Input_split { fresh; cached } ->
+      fresh_input_text fresh ^ " \xc2\xb7 " ^ cached_input_text cached
+
+(* A whole input keeps the row's old "in N out M"; a split one already
+   joins its parts with dots, so the output takes one too. *)
+let settle_tokens_text = function
+  | Some (Input_whole i), Some o ->
+      Printf.sprintf "in %s out %s" (Message_layout.compact_count i)
+        (Message_layout.compact_count o)
+  | Some (Input_split _ as input), Some o ->
+      turn_input_text input ^ " \xc2\xb7 out " ^ Message_layout.compact_count o
+  | Some input, None -> turn_input_text input
+  | None, Some o -> "out " ^ Message_layout.compact_count o
+  | None, None -> ""
+
 (* The keeper turn a provider call belongs to, as the keeper's hook reports
    it: [total_turns] keeper turns had completed when the call ran, so the
    call is inside turn [total_turns + 1] -- the registry's own definition of
@@ -416,15 +472,7 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
          ahead of them is always there to hang it off, and the turn is the
          one part that can be missing. *)
       let tokens =
-        match (t.Observer.tc_input_tokens, t.Observer.tc_output_tokens) with
-        | Some i, Some o ->
-            Printf.sprintf "in %s out %s" (Message_layout.compact_count i)
-              (Message_layout.compact_count o)
-        | Some i, None ->
-            Printf.sprintf "in %s" (Message_layout.compact_count i)
-        | None, Some o ->
-            Printf.sprintf "out %s" (Message_layout.compact_count o)
-        | None, None -> ""
+        settle_tokens_text (turn_input_of_settle t, t.Observer.tc_output_tokens)
       in
       let cost =
         match t.Observer.tc_cost_usd with
@@ -603,7 +651,7 @@ type chunk = {
   ck_ledger_tools : chunk_tool list;  (** oldest-first, from the keeper ledger *)
   ck_settled : bool;
   ck_marker : (turn_marker * float) option;
-  ck_tokens : int option * int option;
+  ck_tokens : turn_input option * int option;
   ck_cost_usd : float option;
   ck_calls : int option;
 }
@@ -778,7 +826,7 @@ let apply_member chunk ~at member =
       { chunk with
         ck_turn
       ; ck_settled = true
-      ; ck_tokens = (t.Observer.tc_input_tokens, t.Observer.tc_output_tokens)
+      ; ck_tokens = (turn_input_of_settle t, t.Observer.tc_output_tokens)
       ; ck_cost_usd = t.Observer.tc_cost_usd
       ; ck_calls = t.Observer.tc_tool_calls
       }
@@ -817,14 +865,9 @@ let row_of_chunk chunk =
   let tools_text = chunk_tools_text tools in
   let tokens =
     match chunk.ck_tokens with
-    | Some i, Some o ->
-        Printf.sprintf " \xc2\xb7 in %s out %s" (Message_layout.compact_count i)
-          (Message_layout.compact_count o)
-    | Some i, None ->
-        Printf.sprintf " \xc2\xb7 in %s" (Message_layout.compact_count i)
-    | None, Some o ->
-        Printf.sprintf " \xc2\xb7 out %s" (Message_layout.compact_count o)
     | None, None -> ""
+    | ((Some _, (Some _ | None)) | (None, Some _)) as tokens ->
+        " \xc2\xb7 " ^ settle_tokens_text tokens
   in
   let cost =
     match chunk.ck_cost_usd with

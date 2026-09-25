@@ -96,7 +96,7 @@ jobs:
           pin-flags: --with-compact-protocol --with-bisect
 
       - name: Install OCaml dependencies
-        run: opam install . --deps-only --with-test -y
+        run: opam install ./masc.opam --deps-only --with-test -y
 
       - name: Build native host
         run: opam exec -- dune build --release bin/masc_browser_host.exe test/test_browser_bidi_peer.exe

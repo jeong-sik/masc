@@ -531,8 +531,7 @@ status: reference
   판정·Board attention)과 Keeper 걸음이 같은 오류에 같은 답을 하도록 둘 다 이 판정 하나를
   읽는다(#38913). 값은 셋이다.
   - `Binding of binding_fact`: 이 바인딩의 사정이라, 다음 후보가 같은 입력을 받아도 된다.
-    사정은 열둘이다 — `Credential`(401·403. 지금 코드는 전송 오류 `NetworkError`도 이 값으로
-    읽는다), `Account`(402), `Model_absent`(404), `Rate_limit`(429), `Capacity`(529),
+    사정은 열둘이다 — `Credential`(401·403), `Account`(402), `Model_absent`(404), `Rate_limit`(429), `Capacity`(529),
     `Server`(5xx), `Window`(창 초과, 또는 창에서 멈춘 빈 답), `Body_limit`(413),
     `Admission`(보내기 전에 이 바인딩이 준비된 요청을 받지 않음: 선언된 입력 용량 초과,
     입력을 잴 수 없음, 준비된 요청 거절), `Deadline`(보낸 뒤 헤더·전체 기한 초과),
@@ -540,14 +539,18 @@ status: reference
     본문이 기한 안에 오지 않음).
   - `Unattributed`: 거절은 왔지만, 누구의 사정인지 응답이 기계가 읽는 꼴로 말하지 않는다.
     기록에도 모른다고 남긴다.
-  - `Unknown_after_dispatch`: 보냈고 결과를 모른다. 다시 보내도 되는지는 이 판정이 아니라
-    걸음의 효과 규칙이 정한다.
+  - `Unknown_after_dispatch`: 결과를 모르거나 이 바인딩의 사정으로 가를 수 없다. 이름과 달리
+    보냈는지 모르는 전송 오류(`NetworkError`, #38931)와 보내기 전 배선 실패(`Not_dispatched`
+    타임아웃·`AcceptRejected`·`ProviderTerminal`·`ProviderFailure`)도 이 값이다. 다시 보내도
+    되는지는 이 판정이 아니라 걸음의 효과 규칙이 정한다.
   판정은 누구의 사정인지만 답하고, 다음 후보로 넘길지는 걸음이 정한다 — exact 걸음은
   Exact-output route의 슬롯 전진 조건이, Keeper 걸음은 `lane_should_retry`의 predicate가
   정한다. 공식 클라이언트가 만드는 provider 오류(`Llm_provider.Error.provider_error`)는 이
-  판정 밖이다(#38776). 영수증에 적히는 Failure Route는 이 판정을 읽지 않고 따로 분류한다 —
-  #38913은 `InputCapacity`·`Json_parse_error`를 route의 `admission` 회전으로 옮겨 걸음과
-  답을 맞췄다. `Window`는 이 바인딩의 context window이고, Provider Usage Window(사용량 한도
+  판정 밖이다(#38776). 영수증에 적히는 Failure Route도 API 오류(`Retry.api_error`)의 class를
+  이 판정에서 끌어온다(#38958) — route와 걸음이 같은 사실표를 읽어서,
+  `Retry.Attempt_rejected`(보내기 전 이 후보 자신의 정책 거절)·`InputCapacity`·`Json_parse_error`는
+  모두 `Binding Admission`이고 route class는 `admission`이다. 원래 오류에서는 `retry_after`
+  힌트만 읽는다. `Window`는 이 바인딩의 context window이고, Provider Usage Window(사용량 한도
   창)와 다른 창이다. 한국어 이름의 "사정"은 탓이 아니다 — 429·529는 누구의 잘못도 아니고
   그 후보의 형편이다.
   → [Candidate_fault](../../packages/agent_core/lib/llm_provider/candidate_fault.mli) ·
@@ -916,6 +919,22 @@ status: reference
   권한 검사가 아니라 차례를 정하는 장치다.
   → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli)
 
+**기계 체크포인트 (Machine Checkpoint)**
+: 공유 기계 하나를 통째로 이름 붙여 디스크에 남긴 파일. CPU·메모리·화면·열린 파일과
+  키 기록(ledger)이 다 들어 있어서, 서버를 다시 켜도 그 순간부터 이어서 할 수 있다.
+  게임 메뉴로 하는 저장과 다르다. 게임마다 메뉴가 없어도 되고, 저장한 뒤로 한 일까지
+  남는다. 지금은 DOS Lane 이 `masc_dos_save`·`masc_dos_restore` 로 쓴다.
+  파일 머리에 어느 기계인지, 형식 번호, 만든 코어의 digest 가 적힌다. 기계나 형식
+  번호가 다르면 읽지 않는다. 코어 digest 는 보여 주기만 하고 비교하지 않는다.
+  되살리면 새 incarnation 이 되고, 조종권은 되살린 사람이 쥔다.
+  → [Machine_checkpoint](../../lib/machine_checkpoint/machine_checkpoint.mli),
+  [Dos_lane.restore](../../lib/dos_lane/dos_lane.mli)
+
+**슬롯 (Slot)**
+: 기계 체크포인트에 붙이는 이름. 영문자·숫자·`_`·`-` 로 1~64자이고, 경로가 될 수
+  없다. Keeper 끼리 같은 이름 공간을 쓴다. 같은 이름에 다시 저장하면 덮어쓴다.
+  → [Machine_checkpoint.slot_of_string](../../lib/machine_checkpoint/machine_checkpoint.mli)
+
 **MSX Lane**
 : 서버 안에 사는 MSX 기계 하나. Keeper 는 `masc_msx_*` 도구로 같은 기계에 키를
   넣고 화면을 읽는다. DOS Lane과 같은 축의 공유 머신으로, Lane Add-on의
@@ -926,6 +945,31 @@ status: reference
 : 서버가 관리하는 브라우저 세션. Keeper 는 `masc_browser_*` 도구로 탭을 읽고
   조작한다. Lane Add-on의 `browser_document` 원천이 이 세션을 관측한다.
   → [Browser_lane](../../lib/browser_lane/browser_lane.ml)
+
+**Machine Change Mark (기계 변경 표식)**
+: MSX Lane·DOS Lane 기계의 화면이 바뀌었는지 싸게 묻기 위한 표식. 변경 횟수(`count`)와
+  기계 정체(`incarnation`)의 한 쌍이다(`change_mark`). 관전자는 지난번에 읽은 쌍을
+  `GET /api/v1/lane-addons/live?source_kind=msx_capture|dos_capture&since=<count>&incarnation=<id>`
+  에 넘긴다. 쌍이 그대로면 화면 없이 `state: "unchanged"`만, 바뀌었으면 `"changed"`와 새 쌍과
+  화면(`rgb8`)을, 기계가 없으면 `"no_machine"`을 받는다. `since`와 `incarnation`은 함께만 쓴다.
+  이 라우트는 읽기 권한만 요구하고 Lane 저장소에 아무것도 쓰지 않는다(#38733).
+  - `count`: 기계를 돌리거나 갈아 끼운 호출마다 오른다. 프레임을 돌린 호출은 도중에 실패해도
+    올리고, DOS에서 첫 명령에서 fault가 나 `steps`가 그대로인 실행도 올린다. load·eject(MSX는
+    restore·change_disk도)도 올린다. 돌리기 전에 거절된 호출과 DOS의 `pass`는 올리지 않는다.
+    서버가 떠 있는 동안에는 되돌아가지 않지만, 재시작하면 0부터 다시 센다.
+  - `incarnation`: 기계를 새로 올릴 때마다 새로 받는 정체(MSX는 load·restore 성공, DOS는
+    load). 읽기와 시간 진행은 바꾸지 않는다. `count`만으로는 재시작 전후의 두 화면을 가를 수
+    없으므로 `unchanged`는 두 값이 모두 같을 때만 나온다.
+  - 게시 상태(`Machine_live_publication.t`)는 닫힌 셋 — `No_screen`·`Stable of mark`·
+    `Running of mark` — 이고 두 기계가 같은 규칙을 쓴다. 기계 잠금 없이 읽는다. `Stable`일
+    때만 곧바로 `unchanged`로 답할 수 있다. `Running`은 지금 프레임이 기계를 바꾸는 중이라는
+    뜻이라, 마지막 표식이 `since`와 같아도 기계 잠금을 잡고 끝난 화면을 읽는다.
+  - 이름 경계: 여기의 `Running`은 기계가 도는 중이라는 게시 상태이고, Schedule의 `Running`
+    상태와 다른 값이다. 라우트 이름의 `live`도 Turn Row Source의 `live`(이 pane이 연 요청의
+    SSE stream)와 다른 말이다.
+  → [Machine_live_publication](../../lib/machine_live_publication/machine_live_publication.mli),
+  [Msx_lane](../../lib/msx_lane/msx_lane.mli), [Dos_lane](../../lib/dos_lane/dos_lane.mli),
+  [lane-addons 라우트](../../lib/server/server_routes_http_routes_lane_addons.mli)
 
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
@@ -986,10 +1030,9 @@ status: reference
     바인딩의 사정으로 실패했다 — 헤더 기한(`connect_timeout_s`, `Http_operation`)이나 전체
     기한(`body_timeout_s`, `Wall_clock`) 안에 응답 헤더가 오지 않음(#38437); 2xx 헤더는
     왔지만 전체 기한 안에 본문이 끝나지 않음(`Response_body_deadline_exceeded`, 원문 응답과
-    provider trace가 남지 않았을 때); 응답으로 온 제공자 거절(Candidate Fault가 모든 거절을
-    `Binding`이나 `Unattributed`로 읽으므로 413·429·402·529·5xx·창 초과(#38454)·401·403·
-    404·이유를 기계가 읽을 수 없는 거절·본문이 기한 안에 오지 않은 거절이 모두 넘어간다,
-    #38913); 답이 JSON으로 읽히지 않음(`Invalid_json_output`); content가 비었음(답을 content
+    provider trace가 남지 않았을 때); 응답으로 온 제공자 거절 가운데 Candidate Fault가
+    `Binding`이나 `Unattributed`로 읽는 것(413·429·402·529·5xx·창 초과(#38454)·401·403·
+    404·이유를 기계가 읽을 수 없는 거절·본문이 기한 안에 오지 않은 거절, #38913); 답이 JSON으로 읽히지 않음(`Invalid_json_output`); content가 비었음(답을 content
     밖 필드에 둠, `Missing_output`). 그 밖에는 넘기지 않는다 — 보낸 뒤의 다른 기한 종류
     (`Queue`·`First_token`·`Capacity_backpressure`·`Non_streaming_body`·`Stream_body`·
     `Stream_idle`·`Provider_step`·`Cli_stdout_idle`·`Unknown_timeout`)와 보낸 뒤 결과를
@@ -1098,6 +1141,29 @@ status: reference
   `Board_post_updated`는 실제 편집 저장이 성공한 뒤 발행한다. 게시글 ID와
   `content_updated_at`이 같은 편집은 한 사건이며, 뒤의 편집은 새 사건이다.
 
+**Board Attachment (게시판 첨부)**
+: Board 글에 붙는 타입이 정해진 참조 하나(`Board_tool_attachment`). 글쓰기 시점에
+  종류(`kind`)와 정확히 하나의 출처 — 절대 HTTPS `url` 또는 기존 아티팩트의 `sha256` —
+  를 적는다(#38835). Keeper 도구 경로와 HTTP 경로가 같은 입력을 쓰고, 게시 처리기가
+  유일한 작성자다. 저장 wire 형식은 `_blob` 래퍼로 기록해 durable 정리가 자식 참조를
+  따라가게 한다.
+  - `kind`는 읽는 쪽이 어떻게 보여 줄지 정한다: `image`·`video`·`youtube`·`external_link`.
+    아티팩트를 가리키는 참조는 대시보드가 바이트를 불러온 뒤 `image`는 이미지,
+    `video`는 영상으로 보여 주고, 그 외는 다운로드를 둔다(미디어 종류는 해시마다
+    저장되지 않아 요소가 직접 감지한다). `youtube`는 `url`만 허용한다 — 저장된
+    아티팩트는 유튜브 영상이 아니다.
+  - 출처 둘은 동시에 쓰지 않고, 둘 다 없으면 거절한다. `http:`·`javascript:`·
+    `data:` URL과 형식이 맞지 않는 항목은 받지 않는다. 아티팩트 참조는
+    쓰기 전에 기존 Tool_blob_store에서 바이트를 확인하고, 지정된 상한
+    (`max_served_bytes`, HTTP 아티팩트 라우트와 같은 32 MiB)을 넘으면
+    `Artifact_too_large`로 거절해 대시보드에서 열 수 없는 카드가 남지 않게 한다.
+  - 이름 경계: 첨부는 글쓰기 입력의 최상위 `attachments` 인자에 적는다. Artifact(실행
+    산출물)는 이 첨부보다 넓은 개념 — Board Attachment는 그 넓은 개념을 가리키는
+    하나의 용도일 뿐이다.
+  → [Board_tool_attachment](../../lib/board_tool_adapter/board_tool_attachment.mli),
+  [Board_tool_format](../../lib/board_tool_adapter/board_tool_format.mli),
+  [Tool_blob_store](../../lib/tool_blob_store/tool_blob_store.mli)
+
 **Karma**
 : 다른 에이전트가 내 글이나 댓글에 준 upvote 한 번마다 생기는 `karma_event`의 합.
   Board 안의 개념이고 별도 도메인이 아니다. 자기 upvote, downvote, 지워진 대상에 준
@@ -1187,11 +1253,23 @@ status: reference
     due 발화는 재시도 실패로 튕기지 않고 단 1회 수락(`accepted`)되어 해당 Keeper의
     durable 큐에 대기한다(#38523). 다음 턴이 깨어날 때 stimulus로 읽히며, 새 발화가
     이전 대기를 대체하여 큐에는 스케줄당 최대 1건만 유지된다.
+  - 보류(hold): due가 된 발화를 이번 tick에 보내지 않고 두는 것. 상태 값이 아니다 — 예약은
+    `Due`에 머물고 다음 tick에 다시 판정된다. 이유는 닫힌 둘(`Schedule_runner.hold_reason`)이고
+    wire `kind`로 적힌다. `previous_occurrence_unconsumed`는 대상 Keeper가 같은 예약의 이전
+    발화를 아직 가져가지 않은 경우로, `Interval` 예약에만 생긴다. `target_intake_fenced`는
+    종료 작업이 대상 Keeper의 입력 차단막(`Keeper_shutdown_intake_fence`)을 쥐고 있는 경우로,
+    `target`과 차단막을 쥔 종료 작업 id(`fence_owner`)를 함께 적는다. 둘 다 해당하면 차단막
+    쪽을 적는다. 차단막은 모든 durable 입력을 거절하므로 위의 미기동·정지 대상 수락도 여기서는
+    일어나지 않는다. 막힌 예약을 보내지 않는 까닭은, 보내면 예약이 `Running`이 되는데 종료
+    작업이 끝나도 `Running` 예약은 취소할 수 없기 때문이다. 이 보류를 본 tick은 Keeper마다 한
+    번, 차단막을 쥔 종료 작업에게 마무리를 이 프로세스에서 다시 돌려 달라고 청한다. 이
+    프로세스에서 다시 돌릴 수 없으면 그 종료 단계를 처음 보류할 때만 로그에 남긴다(#38620).
+    `/health`, 대시보드 예약 행, TUI가 보류 이유를 보여 준다.
   - 노트는 `schedule_id`에 매이고 append-only다. terminal 전이 뒤에도 남는다 —
     상태가 아니라 이력이다.
   - 상태는 `Scheduled`·`Due`·`Running`·`Succeeded`·`Failed`·`Cancelled`·`Expired`,
     반복은 `One_shot`·`Interval`·`Daily`·`Cron`이다.
-  → [Schedule_domain](../../lib/schedule/schedule_domain.mli) · [Schedule_store](../../lib/schedule/schedule_store.mli)
+  → [Schedule_domain](../../lib/schedule/schedule_domain.mli) · [Schedule_store](../../lib/schedule/schedule_store.mli) · [Schedule_runner](../../lib/schedule/schedule_runner.mli)
 
 **Fusion**
 : 여러 독립 판단을 비동기로 수집하고 하나의 결론으로 합성하는 실행. 패널 구성원
@@ -1477,8 +1555,8 @@ status: reference
   - **SKILL.md 격리 (`recovery_id`)**: 원본 `SKILL.md`는 삭제되지 않고 고유 복구 식별자(`recovery_id`)가
     부여된 격리 디렉터리로 이동(`recovery_disposition`)되어 비상 복구 가능성을 보존한다.
   - **패키지 폴더 처분 (`package_directory`)**: `SKILL.md` 이동 후 남겨진 패키지 폴더를 닫힌 네 가지
-    상태로 판정하여 처리한다(#38594·#38616). 과거에는 빈 폴더를 방치하여 동일한 패키지 ID로
-    재생성할 때 영구히 `Package_already_exists` 거절을 받는 결함이 있었다.
+    상태로 판정하여 처리한다(#38594·#38616). 빈 폴더를 남겨 두면 같은 패키지 ID로 다시 만들 때
+    `Package_already_exists`로 거절되므로, 빈 폴더는 지운다.
     1. `Package_directory_removed` (wire: `{"kind": "removed"}`): 빈 패키지 폴더가 `rmdir`로 완전히
        제거되어 동일한 ID로 새 Skill 생성이 즉시 가능함.
     2. `Package_directory_kept_non_empty` (wire: `{"kind": "kept_non_empty"}`): 폴더 내에 부속
@@ -1642,17 +1720,23 @@ status: reference
 
 **Shutdown Admission Fence (종료 진입 차단막)**
 : 종료 작업 진행 중인 Keeper의 재부팅을 막아 원장 정합성을 지키는 진입 차단 술어(`Keeper_shutdown_types.requires_admission_fence`).
-  - **단계별 차단막 해제 규칙 (#31738·#38569)**: 과거에는 `Blocked` 상태의 종료 작업에 대해 실패 단계와
+  - **단계별 차단막 해제 규칙 (#31738·#38569·#38859)**: 과거에는 `Blocked` 상태의 종료 작업에 대해 실패 단계와
     무관하게 차단막을 영구 유지하여, 영속 상태가 전혀 파괴되지 않은 Keeper도 수동 교체(`Superseded`) 없이는
-    영구히 재부팅할 수 없는 결함이 있었다. 현재는 실패 단계(`failure_stage`)를 검사하여 영속 상태 변경 전에
-    실패한 단계는 차단막을 해제하고 즉시 재시도(`retryable`)를 허용한다:
-    1. **해제 대상 (`retryable`, 차단막 없음)**: 영속 상태를 변경하기 전의 읽기·초기화·멱등 정리 단계
-       (`Task_discovery`·`Record_persist`·`Meta_update`·`Pending_confirm_cleanup`).
+    영구히 재부팅할 수 없는 결함이 있었다. 현재는 실패 단계(`failure_stage`)를 `failure_stage_boot_replay`로
+    분류한다:
+    1. **부팅 재실행 대상 (부팅 사이에는 차단막 없음)**: 메타데이터·세션·레지스트리를 건드리기 전의 단계.
+       `Task_discovery`·`Record_persist`·`Meta_read`는 `Replay_unsettled_tasks`(이 작업의 반환 영수증이 있는
+       태스크만 정산된 것으로 보고 나머지를 정산), `Meta_update`·`Pending_confirm_cleanup`은
+       `Replay_settled_tasks`(태스크 정산이 끝난 뒤에만 나오므로 모든 소유 태스크를 정산된 것으로 보고 재개).
     2. **유지 대상 (`fenced`, 차단막 유지)**: 키퍼의 영속 상태(태스크 소유권, 레인, 메타데이터, 세션, 레지스트리)가
        반쯤 철거된 단계(`Turn_cancel`·`Lane_cancel`·`Turn_join`·`Lane_join`·`Record_update`·`Unhandled_worker`·
        `Task_settlement`·`Approval_summary_retirement`·`Meta_remove`·`Session_remove`·`Registry_unregister`).
-  - **영속 복구**: 재시작 시 디스크에 이미 기록된 `Blocked` 레코드라도 해제 대상 단계에 머물러 있다면 차단막을
-    세우지 않고 다음 부팅에서 종료 작업을 안전하게 재실행한다.
+  - **부팅 재실행**: 부팅 복구는 재실행 대상 `Blocked` 레코드가 그 Keeper의 가장 새 작업이고 차단막을 잡은 형제가
+    없으면 차단막을 세우고 `Finalizing_tasks`에서 다시 실행해 운영자 의도(stop·purge 등)를 끝낸다. 더 새 작업이
+    있거나(`Newer_operation`), Keeper trace가 바뀌었거나(`Keeper_trace_changed`), 스냅숏에 없는 태스크를
+    잡았으면(`Keeper_claimed_new_tasks`) 재실행하지 않고 `Superseded (Boot_replay_abandoned _)`로 닫은 뒤 WARN을
+    남기고 회수한다. 소유자·메타데이터·backlog를 지금 읽을 수 없거나 재실행이 다시 재실행 대상 단계에서 막히면
+    새 증거로 `Blocked`에 남기고 WARN을 남긴 뒤 차단막을 풀어 Keeper가 부팅하게 하고, 다음 부팅에 다시 시도한다.
   → [Keeper_shutdown_types](../../lib/keeper/keeper_shutdown_types.mli)
 
 **Boot Meta Failure Cause (부팅 메타 실패 사유)**

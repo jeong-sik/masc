@@ -664,10 +664,10 @@ let test_board_read_footer_carries_the_post_keys () =
   in
   let list = Masc_tui_keys.footer_hints Board in
   List.iter
-    (fun split ->
+    (fun (layout : Masc_tui_types.board_read_layout) ->
+      let split = layout = Masc_tui_types.Board_read_split in
       let read =
-        Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~split
-          ~wide:(not split)
+        Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~layout
       in
       List.iter
         (fun key ->
@@ -678,32 +678,45 @@ let test_board_read_footer_carries_the_post_keys () =
         [ "v / V:vote"; "c:reply"; "Y:copy link" ];
       Alcotest.(check bool) (Printf.sprintf "the pane keys follow the split (%b)" split) split
         (holds "Ctrl-W:switch" read))
-    [ false; true ];
+    [ Masc_tui_types.Board_read_wide
+    ; Masc_tui_types.Board_read_split
+    ; Masc_tui_types.Board_read_one_pane
+    ];
   Alcotest.(check bool) "j/k names what it moves" true
     (holds "j/k:posts"
-       (Masc_tui_keys.footer_hints_board_read ~focus_posts:true ~split:true
-          ~wide:false))
+       (Masc_tui_keys.footer_hints_board_read ~focus_posts:true
+          ~layout:Masc_tui_types.Board_read_split))
 
 (* [z] goes both ways, so its label is where it goes. Drawn as "wide" in either
    state it named the screen the operator was already on: live at two hundred
-   columns, a wide detail's footer offered to widen it. *)
+   columns, a wide detail's footer offered to widen it. Below the split width
+   both layouts draw one pane, so the key crosses to nothing and is not
+   offered at all. *)
 let test_the_wide_key_names_where_it_goes () =
   let holds needle haystack =
     let n = String.length needle and h = String.length haystack in
     let rec scan i = i + n <= h && (String.equal (String.sub haystack i n) needle || scan (i + 1)) in
     scan 0
   in
-  let hints ~wide =
-    Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~split:(not wide) ~wide
+  let hints layout =
+    Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~layout
   in
+  let split = hints Masc_tui_types.Board_read_split in
+  let wide = hints Masc_tui_types.Board_read_wide in
+  let one_pane = hints Masc_tui_types.Board_read_one_pane in
   Alcotest.(check bool) "a split detail offers the wide one" true
-    (holds "z:wide" (hints ~wide:false));
+    (holds "z:wide" split);
   Alcotest.(check bool) "and does not offer the list it already draws" false
-    (holds "z:list" (hints ~wide:false));
+    (holds "z:list" split);
   Alcotest.(check bool) "a wide detail offers the list back" true
-    (holds "z:list" (hints ~wide:true));
+    (holds "z:list" wide);
   Alcotest.(check bool) "and does not offer the width it already has" false
-    (holds "z:wide" (hints ~wide:true))
+    (holds "z:wide" wide);
+  (* One pane draws the same screen either way, so the key has nowhere to
+     go and the footer keeps the row for a key that does something. *)
+  Alcotest.(check bool) "one pane offers no width key" false (holds "z:" one_pane);
+  Alcotest.(check bool) "one pane offers no pane keys" false (holds "Ctrl-W" one_pane);
+  Alcotest.(check bool) "one pane still reads the post" true (holds "[/]:post" one_pane)
 
 let test_fusion_historical_evidence_is_a_selectable_board_reference () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in

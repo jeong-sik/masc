@@ -3129,23 +3129,23 @@ let render_board_read (state : state) (list_post : board_post) =
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let layout =
+    Masc_tui_types.board_read_layout ~cols ~wide:state.board_detail_wide
+  in
   let buf = Buffer.create 4096 in
   let footer =
     footer_line state ~max_cells:cols
       ~hints:
         (Masc_tui_keys.footer_hints_board_read
-           ~focus_posts:(state.board_focus = Left_pane)
-           ~split:
-             (cols >= keeper_split_threshold_cols && not state.board_detail_wide)
-           ~wide:state.board_detail_wide)
+           ~focus_posts:(state.board_focus = Left_pane) ~layout)
   in
-  if cols < keeper_split_threshold_cols || state.board_detail_wide then begin
+  match layout with
+  | Board_read_wide | Board_read_one_pane ->
     let scroll = board_read_pane state list_post ~rows ~cols buf in
     Buffer.add_string buf footer;
     finish_surface state ~clamped:(Board_read scroll)
       ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
-  end
-  else begin
+  | Board_read_split ->
     let left_cols = keeper_roster_pane_cols in
     let right_cols = cols - left_cols in
     let left_buf = Buffer.create 1024 in
@@ -3159,7 +3159,6 @@ let render_board_read (state : state) (list_post : board_post) =
     Buffer.add_string buf footer;
     finish_surface state ~clamped:(Board_read scroll)
       ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
-  end
 
 (* The lifecycle as a rail, not a single word. The phase says where the goal
    is; it never said what the stages are or which way they run, so "what does

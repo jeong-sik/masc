@@ -21954,8 +21954,12 @@ and is loaded on demand through keeper_skill.
                   "No web links found in this conversation to preview.")
        | Some "\023"
          when state.view = Board
-              && terminal_columns >= keeper_split_threshold_cols
-              && not state.board_detail_wide ->
+              && (match
+                    board_read_layout ~cols:terminal_columns
+                      ~wide:state.board_detail_wide
+                  with
+                  | Board_read_split -> true
+                  | Board_read_wide | Board_read_one_pane -> false) ->
            (match state.board_mode with
             | Board_read _ -> (
                 match state.board_focus with
@@ -22134,9 +22138,18 @@ and is loaded on demand through keeper_skill.
                 end)
        | Some ("z" | "Z") when state.view = Board ->
            (match state.board_mode with
-            | Board_read _ ->
-                state.board_detail_wide <- not state.board_detail_wide;
-                state.board_focus <- Right_pane
+            | Board_read _ -> (
+                (* On one pane the two layouts draw the same screen, so the
+                   footer does not offer [z] and pressing it must not leave
+                   the flag set for the next widening. *)
+                match
+                  board_read_layout ~cols:terminal_columns
+                    ~wide:state.board_detail_wide
+                with
+                | Board_read_one_pane -> ()
+                | Board_read_split | Board_read_wide ->
+                    state.board_detail_wide <- not state.board_detail_wide;
+                    state.board_focus <- Right_pane)
             | Board_list | Board_compose -> ())
        | Some (("o" | "O" | "l") as sandbox_log_key)
          when state.view = Keepers Keeper_detail
@@ -22170,7 +22183,13 @@ and is loaded on demand through keeper_skill.
                   | Keepers Keeper_detail | Resources -> true
                   | Board ->
                       (match state.board_mode with
-                       | Board_read _ -> not state.board_detail_wide
+                       | Board_read _ -> (
+                           match
+                             board_read_layout ~cols:terminal_columns
+                               ~wide:state.board_detail_wide
+                           with
+                           | Board_read_split -> true
+                           | Board_read_wide | Board_read_one_pane -> false)
                        | Board_list | Board_compose -> false)
                   | Code -> Option.is_some (Masc_tui_fetched.current_key state.code_file)
                   | Overview | Acting | Metrics | Keepers _ | Lanes | Clients

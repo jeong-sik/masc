@@ -32,7 +32,7 @@ val resolve_read_file_cwd :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string option ->
-  (string, string) result
+  (string, Keeper_alerting_path.path_refusal) result
 (** The directory a Read resolves its path against: the Keeper's read root
     without [cwd], else [cwd] projected and confined. Whether it exists is
     asked of the filesystem that holds the tree
@@ -106,6 +106,22 @@ val approved_write_of_gate_input : Yojson.Safe.t -> (approved_write, string) res
 (** Strict decode of a stored [filesystem_write] Gate input. An input with no
     string [requested_target] or with an effect this module cannot reproduce
     is an error, never a guess. *)
+
+val declared_root_write_gate_input :
+  endpoint:Exec_ssh_endpoint.t ->
+  requested_target:string ->
+  mode:Keeper_tool_write_mode.t ->
+  content_source:Keeper_write_content.t ->
+  content:string ->
+  patch:Keeper_tool_filesystem_remote_write.patch_request option ->
+  Yojson.Safe.t
+(** The [filesystem_write] Gate input for a write to an endpoint path under a
+    declared root (#38593). Its effect names the operation as a host write
+    does, so {!approved_write_of_gate_input} decodes it to the same target and
+    mode, and carries the endpoint's name and its whole configuration as
+    {!Exec_ssh_endpoint.to_toml} writes it. Replay rebuilds the input from the configuration current
+    then, so a changed endpoint yields a different input and the old approval
+    does not apply. *)
 
 val write_call_summary : requested_target:string -> string option
 (** The one line a write approval is about: the path it would write. This is

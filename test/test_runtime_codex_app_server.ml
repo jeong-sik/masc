@@ -135,13 +135,22 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
   let read_request ?(expect_version = false) () =
-    output_string output "IFS= read -r request\n";
+    output_string output "IFS= read -r request || exit 98\n";
     if expect_version
     then
       output_string output
         (Printf.sprintf
            "printf '%%s' \"$request\" | grep -F %s >/dev/null || exit 97\n"
            (shell_quote (Printf.sprintf {|"version":"%s"|} Runtime_build_version.current)));
+    Option.iter
+      (fun capture_path ->
+         output_string
+           output
+           ("printf '%s\\n' \"$request\" >> " ^ shell_quote capture_path ^ "\n"))
+      capture_path
+  in
+  let capture_request () =
+    output_string output "IFS= read -r request || exit 98\n";
     Option.iter
       (fun capture_path ->
          output_string
@@ -163,7 +172,7 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture
   if close_before_turn then output_string output "exec 0<&-\n";
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 2) ^ "\n");
   if close_before_turn then output_string output "exit 62\n";
-  read_request ();
+  capture_request ();
   let remaining_lines =
     if inject_items then (
       (* Acknowledge thread/inject_items before reading/capturing turn/start.
@@ -992,7 +1001,7 @@ let test_metadata_listing_pages_without_turn () =
 let test_rate_limits_read_without_turn () =
   let capture = Filename.temp_file "masc-rate-limits-capture-" ".jsonl" in
   Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
-    with_fixture ~capture_path:capture [init_result; account_chatgpt;
+    with_fixture ~close_before_turn:true ~capture_path:capture [init_result; account_chatgpt;
       {|{"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000},"secondary":null},"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000},"secondary":{"usedPercent":64,"windowDurationMins":10080,"resetsAt":1790800000}},"codex_other":{"primary":{"usedPercent":3,"windowDurationMins":300}}}}}|}]
       (fun path ->
         let outcome = Eio_main.run (fun env ->
@@ -4353,27 +4362,22 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
        check string "start config includes current context"
          (system_prompt ^ "\n\n" ^ posture_note ^ "\n\n" ^ envelope dynamic_context)
          start_instructions;
-       let current_prefix = "UPDATED_SYSTEM_PROMPT\n\n" ^ posture_note ^ "\n\n" ^ envelope "UPDATED_CONTEXT" in
-       check bool "resume replaces instructions and current context" true
-         (String.starts_with ~prefix:current_prefix resume_instructions);
-       let external_snapshot = resume_instructions |> String.split_on_char '\n'
-         |> List.find_map (fun line -> match Yojson.Safe.from_string line with
-           | `Assoc fields as json when List.assoc_opt "schema" fields =
-               Some (`String "masc.official-client-canonical-context.v1") -> Some json
-           | _ -> None | exception Yojson.Json_error _ -> None)
-         |> function Some value -> value | None -> fail "missing external canonical snapshot" in
-       let exact_messages = `List (List.map Keeper_official_client_context_codec.to_json native_history) in
-       check string "native exchange and completed effect receipt remain exact"
-         (Yojson.Safe.to_string exact_messages)
-         (Yojson.Safe.Util.member "messages" external_snapshot |> Yojson.Safe.to_string);
-       let expected_digest = exact_messages |> Yojson.Safe.to_string
-         |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+       (* The thread holds the conversation, so the resumed instructions name
+          only the current system prompt; the per-turn context rides in front
+          of the goal (checked below). *)
+       check string "resume sends the current instructions and no conversation"
+         ("UPDATED_SYSTEM_PROMPT\n\n" ^ posture_note)
+         resume_instructions;
+       let expected_digest =
+         `List (List.map Keeper_official_client_context_codec.to_json native_history)
+         |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
        (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"codex-fixture" with
         | Ok (Some {context_frontier=Some frontier; _}) ->
-          check string "durable frontier matches transmitted snapshot" expected_digest frontier.snapshot_sha256;
+          check string "durable frontier names the canonical history MASC held"
+            expected_digest frontier.snapshot_sha256;
           check int "frontier records all canonical messages" 4 frontier.message_count;
-          check bool "frontier records replaceable channel" true
-            (frontier.delivery = Keeper_official_client_session_store.Replaced_configuration);
+          check bool "frontier records that the thread holds the conversation" true
+            (frontier.delivery = Keeper_official_client_session_store.Held_by_vendor_session);
           check bool "only settled vendor turn acknowledges context" true
             (frontier.acknowledged_turn = Some {session_id="thread-1";turn_id="turn-2"})
         | Ok _ -> fail "missing durable context frontier"
@@ -4417,7 +4421,9 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
         | Absent | Invalid | Duplicate ->
           fail "dynamic context lost its typed provenance");
        check string "start prompt stays exact" goal (turn_prompt start_capture);
-       check string "resume prompt stays exact" goal (turn_prompt resume_capture))
+       check string "resume prompt carries the current context in front of the goal"
+         ("SYSTEM:\n" ^ envelope "UPDATED_CONTEXT" ^ "\n\n" ^ goal)
+         (turn_prompt resume_capture))
 ;;
 
 (* A changed tool surface must not RESUME the settled thread. It used to be
@@ -4582,6 +4588,33 @@ let test_production_keeper_dispatches_codex_runtime () =
               assert_official_client_turn_boundary
                 ~base_path
                 ~trace_id:"codex-production-trace-1"))
+;;
+
+(* An official-client turn that fails never reaches finalize. Its input is
+   already a fragment of its turn, so it still leaves the line that names the
+   turn; without it no Librarian round would read that input. *)
+let test_production_keeper_failed_turn_leaves_its_end_line () =
+  let base_path = temp_workspace "masc-codex-production-failed-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result; account_chatgpt; thread_result; turn_result; turn_failed ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn
+                ~base_path
+                ~trace_id:"codex-production-failed-1"
+                ~user_message:"This turn fails at the provider."
+                ~cli_path
+                ~model:"gpt-fixture"
+                ~turn_instructions:None
+            with
+            | Ok _ -> fail "the fixture turn was expected to fail"
+            | Error _ ->
+              assert_official_client_turn_boundary
+                ~base_path
+                ~trace_id:"codex-production-failed-1"))
 ;;
 
 (* The host reads the runtime's count into the turn's usage: reported, per
@@ -5631,6 +5664,10 @@ let () =
             "production Keeper dispatches Codex runtime"
             `Quick
             test_production_keeper_dispatches_codex_runtime
+        ; test_case
+            "production Keeper failed turn leaves its end line"
+            `Quick
+            test_production_keeper_failed_turn_leaves_its_end_line
         ; test_case
             "production Keeper reports Codex token usage"
             `Quick

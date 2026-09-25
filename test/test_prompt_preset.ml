@@ -73,11 +73,15 @@ budgettest = "openai.gpt"
 display-name = "RunPod"
 protocol = "openai-compatible-http"
 endpoint = "https://runpod.example/v1"
+# Both providers back exact-output slots below; a save adding a slot whose
+# provider declares no exact-body-timeout-s is refused (#38779).
+exact-body-timeout-s = 120.0
 
 [providers.openai]
 display-name = "OpenAI"
 protocol = "openai-compatible-http"
 endpoint = "https://api.openai.example/v1"
+exact-body-timeout-s = 120.0
 
 [models.qwen]
 api-name = "qwen"

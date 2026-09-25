@@ -21,7 +21,6 @@ val run :
   accepts_image_input:bool ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
-  ?official_client_original_turn:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
@@ -61,25 +60,27 @@ val run :
     history this turn carried. Without it the turn record is written with no
     window and no input composition, which is what [/context] reads.
 
-    Both modes carry the carried range, not the whole history
-    ({!Keeper_official_client_host.carried_start_range}): a [Start] injects
-    it into the new thread, a [Resume] sends it as the canonical snapshot in
-    [developerInstructions]. The range starts where the last answered
-    request's range did ([carried_front_seed]), at the turn's Librarian
-    position ([librarian_front]) when that is later, else at [turn_start].
-    [on_carried_front] reports the front each composition cut, before the
-    write, as on the Claude Code lane. When an overflow retry reaches the
-    zero-history floor, no carried front is reported because no conversation
-    atom is transmitted.
+    A [Start] carries the carried range, not the whole history
+    ({!Keeper_official_client_host.carried_start_range}), and injects it into
+    the new thread; a [Resume] sends none of the history. The range starts
+    where the last answered request's range did ([carried_front_seed]), at the
+    turn's Librarian position ([librarian_front]) when that is later, else at
+    [turn_start]. [on_carried_front] reports the front each [Start]
+    composition cut, before the write, as on the Claude Code lane; a [Resume]
+    reports none. When an overflow retry reaches the zero-history floor, no
+    carried front is reported because no conversation atom is transmitted.
 
     [on_transmitted_model_input] fires once per attempt, after context injection
     is acknowledged and the complete turn/start input is written. Required
     rather than optional: a lane that reports nothing is what wrote every
     turn's input attribution on this lane as zero (masc#32995).
 
-    It reports [Whole_input_transmitted] with the carried range in both
-    modes, since both write it. On a [Resume] the app-server also holds the
-    thread's own prior conversation, which this report does not measure. *)
+    It reports [Whole_input_transmitted] only on a [Start], the one branch
+    that injects the history into the thread. A [Resume] reports
+    [Held_by_client_session]: the thread holds the conversation, and MASC sends
+    only the per-turn context in front of the goal
+    ({!Keeper_official_client_host.resume_prompt}), so its full model input
+    cannot be measured here. *)
 
 module For_testing : sig
   val note_transport_uncertainty : Keeper_provider_attempt_effect.t Atomic.t -> unit
@@ -109,20 +110,13 @@ module For_testing : sig
   val recovery_failure_of_client_error :
     Runtime_codex_app_server.error -> Keeper_official_client_session_store.recovery_failure
 
-  (** A Gate continuation's resume that overflowed after a tool effect is
-      [Vendor_session_full Activity_observed]; everything else is
+  (** A Gate continuation's resume that overflowed is [Vendor_session_full],
+      [Activity_observed] when a tool effect came first and
+      [No_activity_observed] otherwise; everything else is
       {!recovery_failure_of_client_error}. *)
   val recovery_failure_of_attempt :
     thread_mode:Runtime_codex_app_server.thread_mode -> gate_continuation:bool ->
     Runtime_codex_app_server.error -> Keeper_official_client_session_store.recovery_failure
-
-  (** Once the shrink sequence has returned an error, a Gate continuation's
-      [Input_rejected Bootstrap_floor_exceeded] recovery on a resumed session is
-      re-recorded [Vendor_session_full No_activity_observed]; anything else is
-      left as it is. *)
-  val conclude_exhausted_gate_resume :
-    gate_continuation:bool -> base_path:string -> keeper_name:string -> runtime_id:string ->
-    unit -> unit
 
   val carried_projection
     :  capacity_bytes:int
@@ -137,8 +131,8 @@ module For_testing : sig
     -> runtime_id:string
     -> Agent_core.Types.message list
     -> (Agent_core.Types.message list, Agent_core.Error.t) result
-  (** The history an attempt carries in either mode: the carried range,
-      cut again by a declared ceiling when there is one. *)
+  (** The history a [Start] carries: the carried range, cut again by a
+      declared ceiling when there is one. *)
 
   val unbounded_capacity_bytes : int
   (** [capacity_bytes] for a runtime that declares no max-prompt-bytes. *)

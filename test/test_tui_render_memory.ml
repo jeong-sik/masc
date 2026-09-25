@@ -86,9 +86,12 @@ let test_detail_names_the_use_record () =
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-1"
     ; mf_events =
-        { mfe_retrieved_count = 4
-        ; mfe_retrieved_distinct_days = 2
-        ; mfe_last_retrieved_at = Some (Unix.gettimeofday () -. 7200.0)
+        { mfe_retrieval =
+            Decode.Retrieved
+              { count = 4
+              ; distinct_days = 2
+              ; last_at = Unix.gettimeofday () -. 7200.0
+              }
         ; mfe_retracted_count = 1
         ; mfe_revised_from = [ "mem-0" ]
         }
@@ -101,10 +104,47 @@ let test_detail_names_the_use_record () =
   match List.find_opt (fun line -> contains "History:" line) lines with
   | None -> fail "the detail has no History line"
   | Some line ->
-    check bool "retrieval count and days" true (contains "Retrieved 4 · 2 days" line);
+    check bool "retrieval count and days" true (contains "Retrieved 4 on 2 days" line);
     check bool "last retrieval as an age" true (contains "last 2h" line);
     check bool "past retractions and predecessors" true
       (contains "Retracted 1 · Revised from 1" line)
+;;
+
+(* A fact nobody has read draws "Never retrieved" once, with no count, day
+   count or clock beside it: the day count and the clock are computed from
+   the count, so a zero count has nothing more to say.
+
+   The two counts after it keep their zeros: they are measured, and a hidden
+   measured zero reads as "not measured". *)
+let test_a_fact_nobody_read_says_so_once () =
+  let fact : Decode.memory_fact =
+    { mf_claim = "the deploy needs assets"
+    ; mf_category = Cat.Lesson
+    ; mf_origin = "authored"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_memory_id = "mem-2"
+    ; mf_events =
+        { mfe_retrieval = Decode.Never_retrieved
+        ; mfe_retracted_count = 0
+        ; mfe_revised_from = []
+        }
+    }
+  in
+  let lines =
+    Render_memory.memory_fact_detail_lines ~cols:120 (Types.Memory_row_fact fact)
+    |> List.map Masc_tui_theme.strip_sgr
+  in
+  match List.find_opt (fun line -> contains "History:" line) lines with
+  | None -> fail "the detail has no History line"
+  | Some line ->
+    check bool "the unread reading is one clause" true
+      (contains "Never retrieved" line);
+    check bool "it does not also count to zero" false (contains "Retrieved 0" line);
+    check bool "nor spell a day count" false (contains "0 days" line);
+    check bool "nor a clock" false (contains "last never" line);
+    check bool "the measured zeros stay" true
+      (contains "Retracted 0 · Revised from 0" line)
 ;;
 
 let test_detail_lines () =
@@ -1801,6 +1841,8 @@ let () =
         ; test_case "invalidation_row" `Quick test_invalidation_row_line
         ; test_case "rows_and_header_share_one_grid" `Quick test_rows_and_header_share_one_grid
         ; test_case "detail_names_the_use_record" `Quick test_detail_names_the_use_record
+        ; test_case "a fact nobody read says so once" `Quick
+            test_a_fact_nobody_read_says_so_once
         ] )
     ; ( "detail_lines"
       , [ test_case "detail_lines_bounded" `Quick test_detail_lines

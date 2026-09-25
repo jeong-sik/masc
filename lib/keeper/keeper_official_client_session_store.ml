@@ -710,21 +710,9 @@ let context_frontier_to_yojson = function
 let context_frontier_of_yojson = function
   | `Null -> Ok None
   | `Assoc fields ->
-    (* Absent held context is unrecorded provenance, never a held copy: nothing
-       is known to be in the vendor session, so a resume re-sends every carried
-       context. *)
-    let held_fields, fields = List.partition (fun (name, _) ->
-      String.equal name "held_context") fields in
-    let* held_context = match held_fields with
-      | [] -> Ok []
-      | [ (_, `List items) ] ->
-        List.fold_right (fun item acc ->
-          let* held = held_context_of_yojson item in
-          let* rest = acc in
-          Ok (held :: rest)) items (Ok [])
-      | _ -> Error "invalid context frontier held context" in
     (match List.sort compare fields with
      | ["acknowledged_turn", acknowledged; "delivery", `String delivery;
+        "held_context", `List held_items;
         "message_count", `Int message_count; "snapshot_sha256", `String snapshot_sha256]
        when message_count >= 0 && valid_sha256 snapshot_sha256 ->
        let* delivery = match delivery with
@@ -732,6 +720,11 @@ let context_frontier_of_yojson = function
          | "canonical_source_guard" -> Ok Canonical_source_guard
          | "held_by_vendor_session" -> Ok Held_by_vendor_session
          | _ -> Error "invalid context frontier delivery" in
+       let* held_context =
+         List.fold_right (fun item acc ->
+           let* held = held_context_of_yojson item in
+           let* rest = acc in
+           Ok (held :: rest)) held_items (Ok []) in
        let* acknowledged_turn = settlement_opt_of_yojson acknowledged in
        Ok (Some {snapshot_sha256; message_count; delivery; acknowledged_turn; held_context})
      | _ -> Error "invalid context frontier fields")

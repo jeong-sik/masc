@@ -1706,6 +1706,41 @@ let test_held_context_is_read_only_from_the_acknowledged_frontier () =
     check bool "a compacted session holds nothing" true
       (held_context_for_resume (plan compacted) ~expected:(Some compacted) = []))
 
+(* A frontier that names no held context does not load: it is not read as
+   "nothing held". *)
+let test_frontier_without_held_context_does_not_load () =
+  with_workspace "masc-held-context-required-" (fun base_path ->
+    let keeper_name = "held-required" in
+    let frontier = Some { snapshot_sha256 = String.make 64 'a'; message_count = 1;
+      delivery = Held_by_vendor_session; acknowledged_turn = None; held_context = [] } in
+    let _claimed = claim_with_context_frontier ~context_frontier:frontier ~base_path
+      ~keeper_name ~expected:None ~client_kind:Claude_code ~owner_epoch
+      ~runtime_id:"claude.default" ~tool_surface_sha256:empty_surface ~updated_at:1.
+      |> Result.get_ok in
+    check bool "the written binding loads" true
+      (Result.is_ok (load ~base_path ~keeper_name));
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    let stripped =
+      match Yojson.Safe.from_file state_path with
+      | `Assoc fields ->
+        `Assoc
+          (List.map
+             (fun (name, value) ->
+                match name, value with
+                | "context_frontier", `Assoc frontier_fields ->
+                  ( name
+                  , `Assoc
+                      (List.filter
+                         (fun (field, _) -> not (String.equal field "held_context"))
+                         frontier_fields) )
+                | _ -> name, value)
+             fields)
+      | _ -> fail "session binding is not an object"
+    in
+    Yojson.Safe.to_file state_path stripped;
+    check bool "a frontier without held context is refused" true
+      (Result.is_error (load ~base_path ~keeper_name)))
+
 let test_changed_canonical_source_claims_a_fresh_session () =
   with_workspace "masc-context-fresh-" (fun base_path ->
     let keeper_name = "fresh" in
@@ -1874,6 +1909,8 @@ let () =
       , [ test_case "context frontier acknowledgement" `Quick test_context_frontier_is_acknowledged_only_by_settlement
         ; test_case "held context from the acknowledged frontier" `Quick
             test_held_context_is_read_only_from_the_acknowledged_frontier
+        ; test_case "frontier without held context does not load" `Quick
+            test_frontier_without_held_context_does_not_load
         ; test_case "retry previous keeps the guarded conversation" `Quick
             test_retry_previous_keeps_the_guarded_conversation
         ; test_case "retry previous from an in-flight turn keeps the conversation" `Quick

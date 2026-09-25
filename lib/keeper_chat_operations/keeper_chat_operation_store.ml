@@ -832,6 +832,21 @@ let decode_semantic stmt =
     Error (Integrity_error "semantic execution index and record disagree")
   else Ok execution
 ;;
+
+let semantic_get_with_db db id =
+  with_statement db ~operation:"lookup semantic execution"
+    "SELECT scope_key, revision, phase, record_json FROM semantic_executions WHERE scope_key = ?"
+    (fun stmt ->
+      let* () = bind_text db stmt ~operation:"bind semantic identity" 1 (scope_key id) in
+      let rc = Sqlite3.step stmt in
+      if rc = Sqlite3.Rc.DONE then Ok None
+      else if rc = Sqlite3.Rc.ROW then
+          let* current = decode_semantic stmt in
+          let* () = expect_done db stmt ~operation:"complete semantic lookup" in
+          Ok (Some current)
+      else Error (Store_unavailable (sqlite_error db "lookup semantic execution" rc)))
+;;
+
 let semantic_rows db ~active_only =
   with_statement db ~operation:"read semantic executions"
     "SELECT scope_key, revision, phase, record_json FROM semantic_executions ORDER BY scope_key"
@@ -1176,6 +1191,43 @@ let claimable_queued_with_db db ~now =
 let has_claimable_queued store ~now =
   let* () = ensure_open store in
   claimable_queued_with_db store.db ~now |> Result.map Option.is_some
+
+(* A direct turn may hand its slot to a later person's original input, but a
+   yielded continuation must not make the next turn yield back to it. The
+   operations table does not delete rows or VACUUM, so its insertion rowid
+   keeps admission order even when queue priority or a checkpoint changes
+   sequence. Wall-clock created_at can repeat or move backwards. A queued
+   operation with a semantic execution has already been claimed and is a
+   continuation, regardless of its current queue position. *)
+let has_newer_original_queued store ~operation_id =
+  let* () = ensure_open store in
+  let* running = operation_or_unknown store.db operation_id in
+  match running.Operation.state with
+  | Operation.Queued | Operation.Succeeded _ | Operation.Failed _
+  | Operation.Cancelled _ -> Error (Not_running operation_id)
+  | Operation.Running _ ->
+    with_statement store.db ~operation:"read newer original chat operations"
+      ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' "
+       ^ "AND rowid > (SELECT rowid FROM operations WHERE operation_id = ?) "
+       ^ "AND NOT EXISTS (SELECT 1 FROM operation_batch_members b "
+       ^ "WHERE b.operation_id = operations.operation_id AND b.execution_id <> b.operation_id) "
+       ^ "ORDER BY sequence")
+      (fun statement ->
+        let* () = bind_text store.db statement ~operation:"bind running admission identity"
+          1 (Id.to_string operation_id) in
+        let rec read () =
+          let rc = Sqlite3.step statement in
+          if rc = Sqlite3.Rc.DONE then Ok false
+          else if rc = Sqlite3.Rc.ROW then
+            let* candidate = decode_operation statement in
+            let* execution = semantic_get_with_db store.db
+              (Keeper_execution_scope_id.direct_operation candidate.operation_id) in
+            (match execution with Some _ -> read () | None -> Ok true)
+          else Error (Store_unavailable
+            (sqlite_error store.db "read newer original chat operations" rc))
+        in
+        read ())
+;;
 
 (* The wake scheduled at defer time rides the process's pool switch and dies
    with it, and the Owner never polls: after a restart, a persisted future
@@ -1530,19 +1582,6 @@ let semantic_error_to_string = function
 ;;
 let semantic_store_result result = Result.map_error (fun error -> Semantic_store_error error) result
 
-let semantic_get_with_db db id =
-  with_statement db ~operation:"lookup semantic execution"
-    "SELECT scope_key, revision, phase, record_json FROM semantic_executions WHERE scope_key = ?"
-    (fun stmt ->
-      let* () = bind_text db stmt ~operation:"bind semantic identity" 1 (scope_key id) in
-      let rc = Sqlite3.step stmt in
-      if rc = Sqlite3.Rc.DONE then Ok None
-      else if rc = Sqlite3.Rc.ROW then
-          let* current = decode_semantic stmt in
-          let* () = expect_done db stmt ~operation:"complete semantic lookup" in
-          Ok (Some current)
-      else Error (Store_unavailable (sqlite_error db "lookup semantic execution" rc)))
-;;
 let semantic_get store id =
   let* () = ensure_open store |> semantic_store_result in
   semantic_get_with_db store.db id |> semantic_store_result

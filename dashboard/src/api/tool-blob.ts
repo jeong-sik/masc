@@ -7,7 +7,8 @@
  * inline — no streaming. Suitable for tool outputs up to a few MB.
  */
 
-import { get } from './core'
+import { ApiRequestError, authHeaders, fetchWithTimeout, get } from './core'
+import { DEFAULT_GET_TIMEOUT_MS } from '../config/constants'
 
 interface ToolBlobResponse {
   sha256: string
@@ -28,4 +29,27 @@ export async function fetchToolBlob(
   opts: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<ToolBlobResponse> {
   return get<ToolBlobResponse>(`/api/v1/artifacts/${encodeURIComponent(sha256)}`, opts)
+}
+
+/** Retrieve exact bytes with an operator token. A plain link cannot carry
+ * the Dashboard's Authorization header, and the JSON endpoint cannot safely
+ * carry arbitrary binary media. */
+export async function fetchToolBlobBytes(
+  sha256: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<ArrayBuffer> {
+  const path = `/api/v1/artifact-bytes/${encodeURIComponent(sha256)}`
+  return fetchWithTimeout(
+    path,
+    { headers: authHeaders(), signal: opts.signal },
+    DEFAULT_GET_TIMEOUT_MS,
+    async response => {
+      if (!response.ok) {
+        throw new ApiRequestError({
+          method: 'GET', path, status: response.status, statusText: response.statusText,
+        })
+      }
+      return response.arrayBuffer()
+    },
+  )
 }

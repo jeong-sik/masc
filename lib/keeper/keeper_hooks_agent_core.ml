@@ -166,6 +166,51 @@ let usage_missing_of_usage = function
   | None -> true
   | Some usage -> not (usage_has_tokens usage)
 
+type attempt_usage =
+  | Agent_core_attempt
+  | Client_stream_attempt of { reported : bool }
+
+(* One usage report an official client sent on its own stream while the
+   turn runs ([Runtime_execution.Client_usage_stream]). The row is a raw
+   observation under the scope the client reports it in, keyed by the
+   official turn the client is running and the client's own identity for it.
+   It is written when the report arrives, so a turn that later fails keeps
+   what the client already reported. Without a trajectory accumulator no row
+   is written, the same rule [AfterTurn] follows. *)
+let emit_client_usage_report
+    ~(trajectory_acc : Trajectory.accumulator option)
+    ~agent_name
+    ~trace_id
+    ~keeper_turn_id
+    ?runtime_attempt
+    (report : Keeper_client_usage_report.t)
+  =
+  let usage = report.usage in
+  match trajectory_acc with
+  | None -> ()
+  | Some acc ->
+    emit_cost_event
+      ~masc_root:acc.masc_root
+      ~agent_name
+      ~task_id:acc.task_id
+      ~trace_id
+      ~keeper_turn_id
+      ~agent_core_turn_ordinal:report.official_turn
+      ~model:report.model
+      ~usage_projection:(Cost_ledger.Raw_observation report.usage_scope)
+      ~response_id:report.response_id
+      ~conversation:(report.conversation_id, report.position)
+      ?vendor_total_tokens:report.vendor_total_tokens
+      ?runtime_attempt
+      ~input_tokens:usage.input_tokens
+      ~output_tokens:usage.output_tokens
+      ~cost_usd:(agent_core_reported_cost usage)
+      ~usage_missing:(usage_missing_of_usage (Some usage))
+      ~cache_creation_input_tokens:usage.cache_creation_input_tokens
+      ~cache_read_input_tokens:usage.cache_read_input_tokens
+      ~usage_trust:(classify_usage_trust ~usage ())
+      ()
+
 type tool_stream_observation =
   | Runtime_attempt_started of
       { runtime_id : string
@@ -187,6 +232,7 @@ let make_hooks
     ~(on_after_turn_ordinal : int -> unit)
     ?(on_tool_stream_observation : tool_stream_observation -> unit = fun _ -> ())
     ?(current_runtime_attempt = fun () -> None)
+    ?(current_attempt_usage = fun () -> None)
     ?(on_after_turn_response :
         response:Agent_core.Types.api_response -> unit =
         fun ~response:_ -> ())
@@ -416,18 +462,47 @@ let make_hooks
               any turn and the tool timeline disappeared. Adopt the turn the
               runtime already assigns here; [round] derives from it. *)
            Trajectory.set_turn acc turn;
-           emit_cost_event ~masc_root:acc.masc_root
-             ~agent_name:meta.name ~task_id:acc.task_id
-             ~trace_id ~keeper_turn_id ~agent_core_turn_ordinal:turn ~model
-             ~response_id:response.id
-             ?runtime_attempt:(current_runtime_attempt ())
-             ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
-             ~cost_usd:cost_usd_for_event ~usage_missing
-             ~cache_creation_input_tokens:raw_cache_creation_input_tokens
-             ~cache_read_input_tokens:raw_cache_read_input_tokens
-             ~usage_trust
-             ?telemetry:response.telemetry
-             ();
+           (* An AGENT_CORE response is one provider request, and this is
+              where its usage is seen. An official client reports usage on
+              its own stream through [emit_client_usage_report]: a response
+              that carries usage after such a report only repeats it. A
+              response without usage (a host stop, which ends the turn before
+              the client reports on the response that asked for it; a result
+              without usage) gets a row that records the missing usage under
+              no scope, whether or not earlier reports of the attempt arrived.
+              A count this hook cannot place ([None]: no dispatched attempt;
+              a client response no report preceded) is written under no
+              scope rather than a guessed one. *)
+           let raw_projection =
+             match current_attempt_usage () with
+             | Some (Client_stream_attempt { reported = true }) when not usage_missing -> None
+             | Some (Client_stream_attempt _) | None ->
+               Some
+                 (Cost_ledger.Raw_observation
+                    Runtime_usage_scope.Usage_scope_unavailable)
+             | Some Agent_core_attempt ->
+               Some
+                 (Cost_ledger.Raw_observation
+                    (if usage_missing
+                     then Runtime_usage_scope.Usage_scope_unavailable
+                     else Runtime_usage_scope.Per_request))
+           in
+           (match raw_projection with
+            | None -> ()
+            | Some usage_projection ->
+              emit_cost_event ~masc_root:acc.masc_root
+                ~agent_name:meta.name ~task_id:acc.task_id
+                ~trace_id ~keeper_turn_id ~agent_core_turn_ordinal:turn ~model
+                ~usage_projection
+                ~response_id:response.id
+                ?runtime_attempt:(current_runtime_attempt ())
+                ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
+                ~cost_usd:cost_usd_for_event ~usage_missing
+                ~cache_creation_input_tokens:raw_cache_creation_input_tokens
+                ~cache_read_input_tokens:raw_cache_read_input_tokens
+                ~usage_trust
+                ?telemetry:response.telemetry
+                ());
            (* 남김없이: persist THIS turn's reasoning (full, untruncated) every
               turn. The prior single post-run capture (Keeper_agent_run) saved
               only the final turn's thinking; turns 1..N-1 were merely counted

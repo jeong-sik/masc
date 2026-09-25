@@ -212,7 +212,6 @@ const KEEPER_RELATIVE_AGE_FIELDS = new Set<string>([
   'keeper_age_s',
   'last_activity_ago_s',
   'last_turn_ago_s',
-  'last_handoff_ago_s',
   'last_proactive_ago_s',
 ])
 

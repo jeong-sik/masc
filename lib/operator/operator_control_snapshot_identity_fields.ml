@@ -29,6 +29,5 @@ let keeper_runtime_identity_fields (meta : Keeper_meta_contract.keeper_meta) =
   ; "primary_model", `String runtime_id
   ; "active_model", `String active_model
   ; "active_model_label", `String active_model_label
-  ; "last_model_used_label", `String active_model_label
   ]
 ;;

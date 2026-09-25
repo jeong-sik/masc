@@ -684,19 +684,20 @@ let schedule_signal_rows_and_errors config limit =
 
 (* The runner's own hold, read from the same [held] list [/health] reports.
    A held occurrence has no signal and no wake yet, so nothing else on the row
-   can say the schedule is waiting for its target to take the previous one.
-   [observed_at] is when the successful tick that saw it decided to hold it.
+   can say why the schedule is waiting. [observed_at] is when the successful
+   tick that saw it decided to hold it.
    Ticks that fail keep the list without looking again, so this says when the
    hold was last known to stand; whether it is still being checked is the
    page's [schedule_runner.status] (#38411). *)
 let schedule_runner_hold_dashboard_json = function
   | None -> `Null
-  | Some ({ signal; observed_at } : Schedule_runner_status.held_occurrence) ->
+  | Some ({ signal; reason; observed_at } : Schedule_runner_status.held_occurrence) ->
     `Assoc
       [ ( "occurrence_id"
         , `String (Schedule_occurrence_id.to_string signal.occurrence_id) )
       ; "due_at", `Float signal.due_at
       ; "due_at_iso", unix_iso_json signal.due_at
+      ; "reason", Schedule_runner.hold_reason_to_json reason
       ; "observed_at", `Float observed_at
       ; "observed_at_iso", unix_iso_json observed_at
       ]

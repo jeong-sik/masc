@@ -12,6 +12,7 @@ type expected_value =
   | Table_value
   | Table_array_value
   | Array_value
+  | Bool_value
 
 (** Why an [enum] member cannot be offered to a model. A provider that
     cannot carry [enum] gets the members written unquoted into the parameter's
@@ -155,6 +156,11 @@ type entry = private
             submission: the broker never replays a worker closure after a
             crash, so the bound plan lives exactly as long as the run. *)
   ; plan : Keeper_tool_plan.t
+  ; loading : Tool_definition_toml.loading
+        (** [defer_loading = true] in the composition block: the tool is held
+            back from an Agent Core request until [keeper_tool_search] names
+            it, as a tool file's declaration does. Absent or [false] is
+            [Always_loaded]; any other value is a load error. *)
   }
 
 type t

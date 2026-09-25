@@ -4578,13 +4578,23 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
          [ field ~style:(Theme.warn ()) "Held"
              (match Tui_decode.schedule_hold_reading ~freshness ~runner hold with
               | Tui_decode.Hold_current ->
-                  Render_schedule.schedule_hold_reading
-                    ~due:
-                      (Terminal_text.short_timestamp
-                         hold.Tui_decode.srh_due_at_iso)
+                  let due =
+                    Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso
+                  in
+                  (match hold.Tui_decode.srh_reason with
+                   | Tui_decode.Hold_previous_wake_untaken ->
+                       Render_schedule.schedule_hold_reading ~due
+                   | Tui_decode.Hold_target_shutdown_fenced { target; fence_owner } ->
+                       Render_schedule.schedule_fence_hold_reading
+                         ~due ~target ~fence_owner)
               | Tui_decode.Hold_as_of checked ->
-                  Render_schedule.schedule_hold_as_of_reading
-                    ~checked:(Terminal_text.short_timestamp_of_unix checked))
+                  let checked = Terminal_text.short_timestamp_of_unix checked in
+                  (match hold.Tui_decode.srh_reason with
+                   | Tui_decode.Hold_previous_wake_untaken ->
+                       Render_schedule.schedule_hold_as_of_reading ~checked
+                   | Tui_decode.Hold_target_shutdown_fenced { target; fence_owner } ->
+                       Render_schedule.schedule_fence_hold_as_of_reading
+                         ~checked ~target ~fence_owner))
          ; field "Held id" hold.Tui_decode.srh_occurrence_id
          ])
   @ schedule_turn_rows ~field row

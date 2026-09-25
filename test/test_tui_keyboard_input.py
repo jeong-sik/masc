@@ -11674,7 +11674,9 @@ def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
         drain_until_quiet(process, master_fd, output)
         rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
         title = rows[screen_row_of(rows, b"\xe2\x96\xb8Runs")]
-        if b"\xe2\x80\xa6" not in title or b"Info" in title:
+        # The cut end carries the count it holds back (Masc_tui_ansi
+        # hidden_before_mark, "\xe2\x80\xb9N"), not a bare ellipsis (#38713).
+        if b"\xe2\x80\xb9" not in title or b"Info" in title:
             raise AssertionError(
                 f"the Keeper detail strip did not cut its far end to keep Runs: {title!r}"
             )

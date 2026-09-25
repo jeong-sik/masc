@@ -453,7 +453,13 @@ let for_surface = function
       ; b Act "Esc" "back" ~help:"back; during a turn, interrupt it"
       ]
   | Keepers Keeper_runtime_pick ->
-      [ b Navigate "j/k" "move" ~help:"move; PgUp/PgDn page, Home/End jump"
+      (* The picker claims its own keys through [Masc_tui_pick_list], page and
+         edge among them, and the table carried those two inside [j/k]'s help
+         instead of declaring them. Prose there reaches the sheet and never
+         the footer. *)
+      [ b Navigate "j/k" "move"
+      ; b Navigate "PgUp/PgDn" "page"
+      ; b Navigate "Home/End" "top/bottom"
       ; b Navigate "/" "filter"
           ~help:"type to narrow the lanes and runtimes; Esc drops the filter"
       ; b Act "Enter" "choose"

@@ -255,7 +255,14 @@ let install_operator_token ~base_path ~host ~port =
    reason reaches the operator through [refusal]. *)
 let failed_refresh : (string * string) option ref = ref None
 
-let refresh_failure () = Option.map snd !failed_refresh
+(* The failure is news only while the bearer it failed to replace is still
+   the one held. Once [masc login] or another masc-tui left a bearer this
+   client adopted, the old reason is about a bearer no longer sent, and a
+   later refusal of the new one must not carry it. *)
+let refresh_failure () =
+  match !failed_refresh, !operator_token_cell with
+  | Some (failed, why), Some held when String.equal failed held -> Some why
+  | Some _, _ | None, _ -> None
 
 let refresh_operator_token ~sent =
   match !credential_workspace with

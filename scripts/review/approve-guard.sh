@@ -4,10 +4,13 @@
 # Refuses unless ALL of these hold at call time (task-1718, goal-1790241464021):
 #   1. --head is a 40-hex SHA and --slot is exactly "SLOT: #<pr> head <same sha>"
 #   2. the PR is open, not draft, base == main, and its head is still that SHA
-#   3. every check-run on that SHA is completed+success (none -> refuse)
-#   4. every GitHub Actions workflow run for that SHA is completed+success
+#   3. the newest check-run of every name on that SHA is completed+success
+#      (none -> refuse)
+#   4. the newest run of every GitHub Actions workflow for that SHA is
+#      completed+success
 #      (a queued workflow has no check-runs yet; this catches it)
 #   5. the body file is non-empty (no evidence-free approvals)
+#   6. no other account has an open CHANGES_REQUESTED on the PR
 # Skips (exit 0, no write) if this account already APPROVED that exact SHA.
 #
 # The caller passes the SLOT line because a lane shell cannot read the Board.
@@ -77,7 +80,14 @@ IFS=$'\t' read -r st draft base cur merged <<<"$pr_row"
 [ "$cur" = "$head" ] || refuse "head moved: PR head is ${cur}"
 
 # ---- 3. check-runs on this exact SHA ----
+# One SHA can carry several check-runs of one name: a Draft-time suite whose
+# jobs were skipped, then the suite that ran after ready_for_review; or a
+# failed run followed by a re-run. The API returns every suite's rows, not one
+# per name, so only the newest check-run of each name (the highest id; ids
+# grow with creation) says what that check thinks of this SHA now.
+# sort+awk rather than an associative array: lanes may run bash 3.2.
 runs="$(gh_json "repos/${repo}/commits/${head}/check-runs?per_page=100" '.check_runs[] | [.name, .status, (.conclusion // "none"), (.id|tostring)] | @tsv')" || exit 1
+runs="$(printf '%s\n' "$runs" | sort -t "$(printf '\t')" -k1,1 -k4,4nr | awk -F '\t' 'NF && !seen[$1]++')"
 n_runs=0; run_ids=()
 while IFS=$'\t' read -r name status concl id; do
   [ -n "${name:-}" ] || continue
@@ -89,9 +99,15 @@ done <<<"$runs"
 [ "$n_runs" -gt 0 ] || refuse "no check-runs on ${head} (empty is not green)"
 
 # ---- 4. workflow runs on this exact SHA (catches queued workflows) ----
-wf="$(gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" '.workflow_runs[] | [.name, .status, (.conclusion // "none"), (.id|tostring)] | @tsv')" || exit 1
+# One SHA can carry several runs of one workflow: a run cancelled by a
+# concurrency group, or a failed run followed by a reopen or a dispatch that
+# passed. Only the newest run of each workflow says what that workflow thinks
+# of this SHA now -- the same rule section 3 applies per check name.
+# sort+awk rather than an associative array: lanes may run bash 3.2.
+wf="$(gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" '.workflow_runs[] | [(.workflow_id|tostring), (.run_number|tostring), .name, .status, (.conclusion // "none"), (.id|tostring)] | @tsv')" || exit 1
+wf="$(printf '%s\n' "$wf" | sort -t "$(printf '\t')" -k1,1 -k2,2nr | awk -F '\t' 'NF && !seen[$1]++')"
 wf_ids=()
-while IFS=$'\t' read -r name status concl id; do
+while IFS=$'\t' read -r _wid _num name status concl id; do
   [ -n "${name:-}" ] || continue
   wf_ids+=("$id")
   if [ "$status" != "completed" ] || [ "$concl" != "success" ]; then
@@ -101,9 +117,28 @@ done <<<"$wf"
 [ ${#wf_ids[@]} -gt 0 ] || refuse "no workflow runs for ${head}"
 [ ${#reasons[@]} -eq 0 ] || finish_refused
 
-# ---- 5. idempotence: already approved this SHA? ----
+# ---- 5. open change requests ----
 me="$(gh_json user '.login')" || exit 1
 [ -n "$me" ] || { echo "approve-guard: gh api user returned no login; cannot check for a duplicate approval" >&2; exit 1; }
+# GitHub decides each account's stance by that account's newest review in
+# APPROVED, CHANGES_REQUESTED or DISMISSED; a later COMMENTED does not lift a
+# change request. Another account's open change request blocks the merge, so an
+# APPROVE over it is noise that reads like a green light (#38810, 2026-09-24).
+# This account's own change request is replaced by the approval, but the
+# account is shared by several lanes, so the caller is told to read it first.
+revs="$(gh_json "repos/${repo}/pulls/${pr}/reviews?per_page=100" '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") | [.user.login, (.id|tostring), .state] | @tsv')" || exit 1
+revs="$(printf '%s\n' "$revs" | sort -t "$(printf '\t')" -k1,1 -k2,2nr | awk -F '\t' 'NF && !seen[$1]++')"
+while IFS=$'\t' read -r who rid rstate; do
+  [ -n "${who:-}" ] && [ "$rstate" = "CHANGES_REQUESTED" ] || continue
+  if [ "$who" = "$me" ]; then
+    echo "note: ${me} has open CHANGES_REQUESTED review ${rid}; this approval replaces it. The account is shared: read that review before approving." >&2
+  else
+    refuse "open CHANGES_REQUESTED from ${who} (review ${rid}); the merge stays blocked until ${who} approves or the review is dismissed"
+  fi
+done <<<"$revs"
+[ ${#reasons[@]} -eq 0 ] || finish_refused
+
+# ---- 6. idempotence: already approved this SHA? ----
 dup="$(gh_json "repos/${repo}/pulls/${pr}/reviews?per_page=100" ".[] | select(.user.login == \"${me}\" and .state == \"APPROVED\" and .commit_id == \"${head}\") | .id")" || exit 1
 if [ -n "$dup" ]; then
   echo "SKIP #${pr}: ${me} already APPROVED ${head} (review $(echo "$dup" | head -n1))"
@@ -117,7 +152,7 @@ if [ "$check_only" -eq 1 ]; then
   exit 0
 fi
 
-# ---- 6. write, then read back ----
+# ---- 7. write, then read back ----
 if ! resp="$({ cat "$body"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/${repo}/pulls/${pr}/reviews" \
     -f event=APPROVE -f "commit_id=${head}" -F body=@- \
     --jq '[(.id|tostring), .state, .commit_id] | @tsv' 2>&1)"; then

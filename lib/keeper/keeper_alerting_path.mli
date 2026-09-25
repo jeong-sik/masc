@@ -32,6 +32,17 @@ type caller_cwd_refusal =
 
 val caller_refusal : caller_cwd_refusal -> path_refusal
 
+(** The owned-read resolver keeps the typed filesystem refusal and the cwd
+    origin together. No arbitrary message can claim a caller-correctable
+    rejection. *)
+type owned_read_target_failure =
+  | Caller_cwd_rejected of Fs_compat.owned_directory_chain_rejection
+  | Caller_cwd_missing of { cwd : string }
+  | Default_cwd_rejected of Fs_compat.owned_directory_chain_rejection
+  | Default_cwd_missing of { cwd : string }
+
+val owned_read_target_refusal : owned_read_target_failure -> path_refusal
+
 (** The keeper's tree refused a path, and the endpoint whose declared roots
     might hold it could not be resolved. The endpoint is the operator's
     configuration, so this is a [Runtime_failure] and its error leads the

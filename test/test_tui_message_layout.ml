@@ -45,6 +45,130 @@ let twelve_o_clock : Layout.timeline_bucket =
 
 let notice_room_at_eighty_columns = 55
 
+let test_ascii_columns_keep_unicode_boundaries () =
+  let ascii = String.init 95 (fun i -> Char.chr (i + 0x20)) in
+  let styled = "\027[38;2;90;120;180m" ^ ascii ^ "\027[0m" in
+  List.iter
+    (fun text ->
+      check int "every printable ASCII byte is one cell" 95
+        (Layout.display_width text);
+      check string "a fitting column preserves its styles and padding"
+        (text ^ "   ") (Layout.fit_width text 98);
+      check string "an exact column preserves all bytes" text
+        (Layout.fit_width text 95))
+    [ ascii; styled ];
+  check string "cutting a styled column resets before the cut mark"
+    "\027[31mabc\027[0m…" (Layout.fit_width "\027[31mabcdef\027[0m" 4);
+  check string "cutting printable ASCII keeps its exact cell prefix"
+    (String.sub ascii 0 79 ^ "…") (Layout.fit_width ascii 80);
+  List.iter
+    (fun (text, cells, prefix) ->
+      check int "mixed column width" cells (Layout.display_width text);
+      check string "a cut keeps the ASCII base with its Unicode continuation"
+        prefix (Layout.take_cells text (cells - 1));
+      check int "mixed columns still fit" (cells + 2)
+        (Layout.display_width (Layout.fit_width text (cells + 2))))
+    [ "Ae\xcc\x81Z", 3, "Ae\xcc\x81"
+    ; "A1\xef\xb8\x8f\xe2\x83\xa3Z", 4, "A1\xef\xb8\x8f\xe2\x83\xa3"
+    ; "A한Z", 4, "A한"
+    ; "A\r\nZ", 2, "A\r\n"
+    ; "A\xffZ", 3, "A\xff"
+    ];
+  check int "an unfinished CSI is not swallowed" 4
+    (Layout.display_width "a\027[31")
+
+(* Explicit clusters and cell widths exercise both ends of printable ASCII
+   runs without deriving expected values from the layout under test. Under
+   Uucp's terminal width policy, U+0600 (Cf), U+0301/U+094D (Mn) and ZWJ (Cf)
+   occupy zero cells; U+093E (Mc) occupies one. Controls are clamped to zero. *)
+let test_mixed_ascii_cluster_boundaries () =
+  let fixtures =
+    [ "prepend and combining", [ "\xd8\x80a", 1; "b", 1; "c", 1; "d\xcc\x81", 1; "한", 2 ]
+    ; "keycap", [ "한", 2; "a", 1; "b", 1; "1\xef\xb8\x8f\xe2\x83\xa3", 2; "Z", 1 ]
+    ; "text selector", [ "한", 2; "a", 1; "b", 1; "1\xef\xb8\x8e", 1; "Z", 1 ]
+    ; "joiner", [ "a", 1; "b", 1; "c\xe2\x80\x8d", 1; "👩‍💻", 2; "Z", 1 ]
+    ; "spacing mark", [ "a", 1; "b", 1; "c\xe0\xa4\xbe", 2; "Z", 1 ]
+    ; "short runs", [ "한", 2; "a", 1; "국", 2; "b", 1; "c", 1; "어", 2 ]
+    ; "two runs", [ "가", 2; "a", 1; "b", 1; "c", 1; "나", 2; "d", 1; "e", 1; "f\xcc\x81", 1; "다", 2 ]
+    ; "hangul and flag", [ "각", 2; "a", 1; "b", 1; "c", 1; "🇰🇷", 2; "d", 1; "e", 1; "f", 1; "한", 2 ]
+    ; "controls", [ "a", 1; "b", 1; "c", 1; "\r\n", 0; "d", 1; "e", 1; "f", 1; "\t", 0; "Z", 1 ]
+    ; "leading combining", [ "\xcc\x81", 0; "a", 1; "b", 1; "c", 1; "한", 2 ]
+    ; "trailing ASCII", [ "한", 2; "a", 1; "b", 1; "c", 1 ]
+    ; "emoji context resets", [ "👩", 2; "a", 1; "b", 1; "c\xe2\x80\x8d", 1; "👩", 2 ]
+    ; "regional indicator context resets", [ "🇰", 1; "a", 1; "b", 1; "c", 1; "🇰🇷", 2; "🇺", 1 ]
+    ; "Indic context resets", [ "क्", 1; "a", 1; "b", 1; "c", 1; "क", 1 ]
+    ]
+  in
+  List.iter
+    (fun (name, clusters) ->
+      let text = String.concat "" (List.map fst clusters) in
+      let cells = List.fold_left (fun cells (_, width) -> cells + width) 0 clusters in
+      check int (name ^ ": width") cells (Layout.display_width text);
+      for budget = 0 to cells + 1 do
+        let rec take remaining = function
+          | (cluster, width) :: rest when width <= remaining ->
+              cluster ^ take (remaining - width) rest
+          | _ -> ""
+        in
+        let expected = take budget clusters in
+        check string (name ^ ": prefix") expected (Layout.take_cells text budget);
+        if budget > 0 then begin
+          let prefix, tail = Layout.split_at_cells text budget in
+          check string (name ^ ": wrap boundary") expected prefix;
+          check string (name ^ ": wrap preserves bytes") text (prefix ^ tail)
+        end
+      done)
+    fixtures;
+  let styled = "\027[31m한abc1\xef\xb8\x8f\xe2\x83\xa3Z\027[0m" in
+  check string "styled cut keeps the keycap whole"
+    "\027[31m한abc1\xef\xb8\x8f\xe2\x83\xa3" (Layout.take_cells styled 7);
+  check string "styled narrow cut stops before the keycap"
+    "\027[31m한abc" (Layout.take_cells styled 6);
+  let malformed = "abc1\xef\xb8\x8f\xe2\x83\xa3\xff" in
+  check int "malformed range keeps scalar widths throughout" 5
+    (Layout.display_width malformed)
+
+(* Observe equal-cell rows, including mixed runs, short runs and no ASCII.
+   These are batch CPU/allocation readings with harness overhead, not terminal
+   response latency or a comparison against an earlier implementation. Keep
+   correctness assertions outside the measured loop and impose no time gate. *)
+let test_column_layout_observations () =
+  let ascii = String.init 120 (fun i -> Char.chr (Char.code 'a' + i mod 26)) in
+  let iterations = 2_000 in
+  let observe case operation text apply =
+    ignore (Sys.opaque_identity (apply (Sys.opaque_identity text)));
+    let allocated_before = Gc.allocated_bytes () in
+    let started = Sys.time () in
+    for _ = 1 to iterations do
+      ignore (Sys.opaque_identity (apply (Sys.opaque_identity text)))
+    done;
+    let elapsed = Sys.time () -. started in
+    let allocated = Gc.allocated_bytes () -. allocated_before in
+    Printf.printf
+      "layout observation case=%s operation=%s iterations=%d input_bytes=%d cpu_us/op=%.3f allocated_bytes/op=%.1f (includes harness)\n%!"
+      case operation iterations (String.length text)
+      (elapsed *. 1_000_000. /. float_of_int iterations)
+      (allocated /. float_of_int iterations)
+  in
+  List.iter
+    (fun (case, text) ->
+      check int (case ^ ": fixture occupies 120 cells") 120
+        (Layout.display_width text);
+      check int (case ^ ": padded row occupies 128 cells") 128
+        (Layout.display_width (Layout.fit_width text 128));
+      check int (case ^ ": clipped row occupies 80 cells") 80
+        (Layout.display_width (Layout.fit_width text 80));
+      observe case "display_width" text Layout.display_width;
+      observe case "fit_padded" text (fun row -> Layout.fit_width row 128);
+      observe case "fit_clipped" text (fun row -> Layout.fit_width row 80))
+    [ "ascii", ascii
+    ; "ansi", "\027[38;2;90;120;180m" ^ ascii ^ "\027[0m"
+    ; "late_unicode", String.sub ascii 0 118 ^ "한"
+    ; "leading_box", "│" ^ String.sub ascii 0 119
+    ; "short_mixed", String.concat "" (List.init 24 (fun _ -> "ab한c"))
+    ; "unicode", String.concat "" (List.init 60 (fun _ -> "한"))
+    ]
+
 let test_a_load_failure_keeps_its_address_at_eighty_columns () =
   let err =
     "overview load failed: (http://127.0.0.1:8935/api/overview GET failed: connect backoff)"
@@ -2801,6 +2925,12 @@ let () =
             `Quick test_a_load_failure_keeps_its_address_at_eighty_columns
         ; test_case "terminal cell width and UTF-8 fit" `Quick
             test_terminal_cell_width_and_fit
+        ; test_case "ASCII columns preserve Unicode and ANSI boundaries" `Quick
+            test_ascii_columns_keep_unicode_boundaries
+        ; test_case "column CPU and allocation observations" `Quick
+            test_column_layout_observations
+        ; test_case "mixed ASCII retains Unicode cluster boundaries" `Quick
+            test_mixed_ascii_cluster_boundaries
         ; test_case "an emoji cluster with VS16, ZWJ, or a skin tone is two cells"
             `Quick test_emoji_cluster_is_two_cells
         ; test_case "the scroll hint says how far back" `Quick

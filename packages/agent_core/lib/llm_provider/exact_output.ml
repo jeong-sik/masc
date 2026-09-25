@@ -155,6 +155,7 @@ type success =
   ; output : Yojson.Safe.t
   ; provenance : plan_provenance
   ; raw_response : raw_response
+  ; usage : Types.api_usage option
   }
 
 type flow_candidate_identity =
@@ -1863,6 +1864,10 @@ let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
       in
       record_provider_trace receipt provider_trace;
       publish ();
+      (* The wire's response parser already read the usage report when it
+         built [outcome.response], from the same parse that produced the
+         output; the body is not read a second time for it. *)
+      let usage = Types.usage_of_response outcome.response in
       (match outcome.output with
        | Exec.Json_output { value; _ } ->
          Ok
@@ -1871,6 +1876,7 @@ let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
            ; output = value
            ; provenance = ready.provenance
            ; raw_response = raw_response evidence
+           ; usage
            }
        | Exec.Text_output text ->
          (match ready.provenance.actual_assurance, Plan.response_format ready.plan with
@@ -1883,6 +1889,7 @@ let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
                  ; output = value
                  ; provenance = ready.provenance
                  ; raw_response = raw_response evidence
+                 ; usage
                  }
              with
              | Yojson.Json_error _ ->

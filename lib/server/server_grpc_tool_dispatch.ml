@@ -1,15 +1,9 @@
 (* TEL-OK: pure fail-closed JSON shape gate. Its sole production callback is
    [Mcp_server_eio_execute.execute_tool_eio], which owns request, audit, and
    tool-span telemetry; rejected input performs no tool action. *)
-type error =
-  { code : Masc.Mcp_error_code.t
-  ; message : string
-  }
-
-let error_code error = error.code
-let error_message error = error.message
-
-let dispatch ~dispatch arguments_json =
+let dispatch ~dispatch arguments_json
+  : (_, Masc_grpc_types.tool_dispatch_error) result
+  =
   let parsed =
     if String.equal arguments_json ""
     then Ok (`Assoc [])
@@ -22,12 +16,13 @@ let dispatch ~dispatch arguments_json =
   match parsed with
   | Error () ->
     Error
-      { code = Masc.Mcp_error_code.Invalid_params
+      { Masc_grpc_types.code = Masc.Mcp_error_code.Invalid_params
       ; message = "Invalid params: expected object"
       }
   | Ok arguments ->
     (match dispatch arguments with
      | Ok _ as result -> result
      | Error message ->
-       Error { code = Masc.Mcp_error_code.Internal_error; message })
+       Error
+         { Masc_grpc_types.code = Masc.Mcp_error_code.Internal_error; message })
 ;;

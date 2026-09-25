@@ -105,7 +105,12 @@ val walk
     erase their preceding failure evidence. [Error failures] carries every
     slot's failure in walk order when all of them failed; an empty
     [cli_slots] is [Error []] — the caller distinguishes "nothing declared"
-    from "declared and exhausted" by the list it passed in. *)
+    from "declared and exhausted" by the list it passed in.
+
+    An accepted CLI answer carries no token usage: [runner] returns the
+    answer text alone. Usage of an exact call is the [usage] field of
+    {!Agent_core.Exact_output.success}, which only an API slot's exact
+    execution produces. *)
 
 val prompt_with_schema :
   requirement:Agent_core.Exact_output.output_requirement -> prompt:string -> string

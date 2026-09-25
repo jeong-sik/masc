@@ -327,6 +327,37 @@ type success =
   ; output : Yojson.Safe.t
   ; provenance : plan_provenance
   ; raw_response : raw_response
+  ; usage : Types.api_usage option
+      (** The token usage of this one attempt, as the wire's own response
+          parser read it in the same parse of the body that [output] comes
+          from. Its meaning is {!Types.api_usage}'s: [input_tokens] is the
+          inclusive prompt total on every wire, the Anthropic exclusive count
+          already normalized.
+
+          [Some] carries exactly what that parser read, and the parsers fill
+          a count the body left out with 0 (#38669). On the OpenAI-compatible
+          and Gemini wires an empty usage object is [Some] of all zeros, so a
+          0 here may mean "not reported". The Anthropic parser instead fails
+          the response when its input or output count is missing. [None]
+          means the parser produced no usage: the body had no usage report,
+          or, on Ollama, it reported zero for both the prompt and the output
+          count.
+
+          [cost_usd] is [None] for all current HTTP wire parsers, including
+          OpenAI-compatible responses that report a provider cost. This field
+          carries token counts only; [None] does not establish zero cost.
+
+          It is not the flow's cost. An earlier candidate the caller rejected
+          semantically keeps its own [success], and so its own usage, in
+          [prior_rejections]. An earlier attempt that failed after the
+          provider answered (invalid JSON output, a normalization failure)
+          carries no typed usage although the provider may have billed it.
+          Summing this field over a flow therefore undercounts.
+
+          A [success] exists only for an HTTP exact execution: an executor
+          outside AGENT_CORE, such as an official-client CLI slot, never
+          produces one, so no usage reaches a caller through this record for
+          such a slot. *)
   }
 
 (** Provider-neutral identity for one caller-labelled candidate in a frozen

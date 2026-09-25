@@ -1,6 +1,8 @@
 import { authHeaders } from './core'
 
 export interface ExecuteOutputLine {
+  /** This line's number in the keeper's output log. */
+  seq?: number
   ts_ms?: number
   stream: 'stdout' | 'stderr' | 'cmd' | 'system' | string
   text: string
@@ -8,7 +10,7 @@ export interface ExecuteOutputLine {
 }
 
 export interface ExecuteOutputStreamEvent {
-  type: 'snapshot' | 'no_task' | 'error' | string
+  type: 'snapshot' | 'no_task' | 'line' | 'task_opened' | 'task_closed' | 'gap' | 'error' | string
   kind?: string
   keeper: string
   keeper_id?: string
@@ -16,6 +18,14 @@ export interface ExecuteOutputStreamEvent {
   task_count?: number
   lines?: ExecuteOutputLine[]
   line?: ExecuteOutputLine
+  /** Log number of a `line`, `task_opened` or `task_closed` event. */
+  seq?: number
+  /** `snapshot`: newest log number the snapshot covers; live events continue after it. */
+  last_seq?: number
+  /** `gap`: log numbers this viewer missed because the server no longer keeps them. */
+  missing_from_seq?: number
+  missing_to_seq?: number
+  missing_count?: number
   since_stdout?: number
   since_stderr?: number
   stdout_since?: string

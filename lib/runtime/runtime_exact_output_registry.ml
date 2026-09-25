@@ -20,6 +20,9 @@ type admitted_lane =
     (* The lane's declared output budget, carried verbatim. [None] means the
        declaration named none, and the lane's requests carry no [max_tokens]
        of their own. *)
+  ; thinking : bool option
+    (* The lane's thinking choice, carried verbatim. [None] leaves each slot's
+       catalog [enable_thinking] as it is. *)
   }
 
 type rejected_slot =
@@ -215,6 +218,7 @@ let admit_lanes ~admitted_by_id resolver_snapshot lanes =
            ; slots
            ; cli_slots = lane.cli_slot_ids
            ; max_output_tokens = lane.max_output_tokens
+           ; thinking = lane.thinking
            }
            :: admitted_lanes)
           (List.rev_append lane_rejected_slots rejected_slots)
@@ -491,6 +495,14 @@ let resolve_lane registry ~lane_id =
                    slot.admitted_target
                    max_tokens
                | None -> slot.admitted_target
+             in
+             let admitted_target =
+               match lane.thinking with
+               | Some enable_thinking ->
+                 Exact_output.admitted_target_with_enable_thinking
+                   admitted_target
+                   enable_thinking
+               | None -> admitted_target
              in
              ({ slot_id = slot.slot_id; admitted_target } : selected_slot))
           lane.slots

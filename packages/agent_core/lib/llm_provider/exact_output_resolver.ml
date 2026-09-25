@@ -955,6 +955,22 @@ let admitted_target_with_max_tokens (admitted : admitted_target) max_tokens =
   }
 ;;
 
+(* The lane's thinking choice, applied the same way as its output budget: a
+   per-lane fact on the lane's own admitted handle, never written back into
+   the cached target. It sets the request's [enable_thinking] and nothing
+   else; a model whose thinking the wire cannot switch
+   ([thinking-control-format = "none"]) keeps answering as it does, and a
+   [Capabilities.Reasoning_effort] ladder without [none] refuses an explicit
+   disable at request validation. *)
+let admitted_target_with_enable_thinking (admitted : admitted_target) enable_thinking =
+  { admitted with
+    target =
+      { admitted.target with
+        config = { admitted.target.config with enable_thinking = Some enable_thinking }
+      }
+  }
+;;
+
 let projection_target (admitted : admitted_target) =
   let target = admitted.target in
   { config = target.config

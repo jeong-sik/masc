@@ -111,6 +111,15 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # provider's default applies. The model's catalog max_output_tokens is what
 # the model can emit, not a request budget, and is never sent in its place.
 # 8192 tokens bounds a large structured judgment.
+#
+# thinking is optional too: true or false sends that enable_thinking on every
+# HTTP slot of the lane; absent keeps each slot's catalog default (the model's
+# thinking-support). It only reaches the wire where the model's thinking
+# control can carry it (GLM sends thinking.type = disabled); a model with
+# thinking-control-format = "none" answers as before. Turning it off is a
+# trade: no reasoning tokens and no answer stranded in the reasoning field,
+# against whatever judgment quality the reasoning bought.
+# thinking = false
 [runtime.exact_output_lanes.librarian_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
 max_output_tokens = 8192

@@ -338,6 +338,12 @@ type exact_output_lane_decl =
             provider's default applies (or, on a wire that requires the
             field, the catalog maximum). The catalog's [max_output_tokens]
             is a validation bound and is never sent in its place. *)
+  ; thinking : bool option
+        (** [thinking] — [Some flag] sends [enable_thinking = flag] on every
+            HTTP slot of the lane. [None] leaves each slot's catalog default
+            (the model's [thinking-support]). The flag reaches the wire only
+            where the model's thinking control can carry it; a model with
+            [thinking-control-format = "none"] answers as it did. *)
   }
 [@@deriving show, eq]
 

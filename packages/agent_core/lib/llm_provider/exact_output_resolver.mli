@@ -163,6 +163,12 @@ val admitted_target_with_max_tokens : admitted_target -> int -> admitted_target
     output budget, leaving the binding identity untouched. A lane declares its
     own budget; the catalog's [max_output_tokens] is a validation bound and
     must not be sent as the request budget. *)
+
+val admitted_target_with_enable_thinking : admitted_target -> bool -> admitted_target
+(** Rebuild an admitted target with its request [enable_thinking] set to the
+    lane's choice, leaving the binding identity untouched. The flag reaches
+    the wire only where the model's thinking control can carry it. *)
+
 val selected_target_identity : selected_target -> target_identity
 val selected_target_catalog_generation : selected_target -> catalog_generation
 val selected_target_catalog_evidence : selected_target -> catalog_evidence

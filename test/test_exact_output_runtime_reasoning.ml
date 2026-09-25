@@ -64,6 +64,7 @@ slots = ["openrouter.probe"]
 [runtime.exact_output_lanes.board_attention_exact]
 slots = ["openrouter.probe"]
 max_output_tokens = 4096
+thinking = false
 [providers.openrouter]
 protocol = "openai-compatible-http"
 endpoint = "https://openrouter.ai/api/v1"
@@ -223,6 +224,19 @@ let test_declared_lane_budget_reaches_serialized_request () =
      = `Null)
 ;;
 
+(* The model declares thinking-support, so every slot's catalog default is
+   thinking on. The Board Attention lane declares [thinking = false] and its
+   admitted handle carries that choice; the Librarian lane declares nothing
+   and keeps the catalog default. The shared slot itself is not changed. *)
+let test_declared_lane_thinking_reaches_request_config () =
+  with_runtime @@ fun load ->
+  let enable_thinking target = (EO.projection_target target).config.enable_thinking in
+  check (option bool) "a lane that declares thinking = false sends it" (Some false)
+    (enable_thinking (load ~lane_id:"board_attention_exact" "low"));
+  check (option bool) "a lane with no thinking keeps the slot's default" (Some true)
+    (enable_thinking (load "low"))
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -238,4 +252,6 @@ let () =
         test_case "low and high survive the actual request serializer" `Quick
           test_explicit_effort_reaches_serialized_request;
         test_case "the declared lane budget is the serialized max_tokens" `Quick
-          test_declared_lane_budget_reaches_serialized_request ] ]
+          test_declared_lane_budget_reaches_serialized_request;
+        test_case "the declared lane thinking reaches the request config" `Quick
+          test_declared_lane_thinking_reaches_request_config ] ]

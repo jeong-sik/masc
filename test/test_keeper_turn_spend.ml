@@ -549,6 +549,23 @@ let test_an_earlier_thread_of_the_winner_is_beside_the_turn () =
     (List.map reading_name resolution.other_readings)
 ;;
 
+(* An attempt between two others that counted nothing leaves no reading and
+   moves nothing: the winner is still the last attempt's last reading. *)
+let test_an_empty_attempt_in_between_changes_nothing () =
+  let t = observe started (report ~conversation_id:"thread-1" (counted ~input:100 ~output:10)) in
+  let t = second_attempt t in
+  let t =
+    observe
+      (Keeper_turn_spend.start_attempt t ~routing_run_id:"run-1" ~runtime_id:"codex" ~lane_attempt_index:2)
+      (report ~conversation_id:"thread-3" (counted ~input:30 ~output:3))
+  in
+  let resolution = resolve_turn t in
+  check (option string) "the last attempt's reading" (Some "2/0")
+    (Option.map reading_name resolution.turn_reading);
+  check (list string) "the first attempt's" [ "0/0" ]
+    (List.map reading_name resolution.other_readings)
+;;
+
 let test_a_winner_that_read_nothing_has_no_turn_reading () =
   let t = observe started (report (counted ~input:100 ~output:10)) in
   let resolution = resolve_turn (second_attempt t) in
@@ -600,6 +617,8 @@ let () =
             test_an_earlier_thread_of_the_winner_is_beside_the_turn
         ; test_case "a winner that read nothing has no turn reading" `Quick
             test_a_winner_that_read_nothing_has_no_turn_reading
+        ; test_case "an empty attempt in between changes nothing" `Quick
+            test_an_empty_attempt_in_between_changes_nothing
         ] )
     ; ( "failed turn"
       , [ test_case "a failed turn's spend joins the totals" `Quick

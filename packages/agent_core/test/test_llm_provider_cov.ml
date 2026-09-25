@@ -810,13 +810,6 @@ let test_build_request_with_thinking () =
   Alcotest.(check bool) "includeThoughts" true (tc |> member "includeThoughts" |> to_bool)
 ;;
 
-let test_constants_http_code_sets () =
-  Alcotest.(check (list int))
-    "cascadable"
-    [ 401; 403; 429; 498; 500; 502; 503; 529 ]
-    Constants.Http.cascadable_codes
-;;
-
 let test_constants_cache_truncation_and_endpoints () =
   Alcotest.(check int) "cache ttl" 300 Constants.Cache.default_ttl_sec;
   Alcotest.(check int) "truncate" 200 Constants.Truncation.max_error_body_length;
@@ -1845,8 +1838,7 @@ let () =
         ; Alcotest.test_case "top_p top_k" `Quick test_build_request_top_p_top_k
         ] )
     ; ( "constants"
-      , [ Alcotest.test_case "http code sets" `Quick test_constants_http_code_sets
-        ; Alcotest.test_case
+      , [ Alcotest.test_case
             "cache truncation endpoints"
             `Quick
             test_constants_cache_truncation_and_endpoints

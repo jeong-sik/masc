@@ -187,9 +187,6 @@ type binding_verdict =
   | Unbound_connector
   | Unknown_label of string list  (* distinct labels present on this page *)
 
-let error_json message =
-  Yojson.Safe.to_string (`Assoc [ ("error", `String message) ])
-
 (* Exactly the labels this page carries, in the exact-trimmed form the
    lane filter compares — the hint must name labels that would really
    have matched. *)
@@ -273,28 +270,22 @@ let respond_unverified ~surface ~limit ~has_more ~notes
          ]
         @ opt_float_field "oldest_ts" (page_oldest_ts messages)))
 
-(* The tool entry: blank surface stays an error, then — only when the
-   runtime supplied binding knowledge — a label that can be proven
-   wrong is refused with the post-shaped error JSON instead of a
-   silent zero-row page. Without [bindings] the projection is exactly
-   the pure one the tests and REST reuse already pin down. *)
+(* The tool entry: a blank surface is refused, then — only when the
+   runtime supplied binding knowledge — a label that can be proven wrong is
+   refused instead of answered with a silent zero-row page. Without
+   [bindings] the projection is exactly the pure one the tests and REST
+   reuse already pin down. *)
 let respond ?bindings ~surface ~limit ~before ~has_more ~notes
-    (messages : Store.chat_message list) : string =
+    (messages : Store.chat_message list) : (string, string) result =
   let surface = String.trim surface in
   if surface = "" then
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ( "error",
-            `String
-              "surface is required. Use a lane label shown in Connected \
-               Surfaces or chat history; this tool reads that connected lane, \
-               not a connector-wide channel registry."
-          );
-        ])
+    Error
+      "surface is required. Use a lane label shown in Connected \
+       Surfaces or chat history; this tool reads that connected lane, \
+       not a connector-wide channel registry."
   else
     match bindings with
-    | None -> respond_unverified ~surface ~limit ~has_more ~notes messages
+    | None -> Ok (respond_unverified ~surface ~limit ~has_more ~notes messages)
     | Some bindings ->
         (match
            classify_surface ~bindings
@@ -302,12 +293,12 @@ let respond ?bindings ~surface ~limit ~before ~has_more ~notes
              ~page_labels:(page_labels messages) surface
          with
          | None ->
-             respond_unverified ~surface ~limit ~has_more ~notes messages
+             Ok (respond_unverified ~surface ~limit ~has_more ~notes messages)
          | Some Unbound_connector ->
-             error_json
+             Error
                (Printf.sprintf "surface %s is not connected: %s" surface
                   (unbound_connector_hint bindings))
          | Some (Unknown_label labels) ->
-             error_json
+             Error
                (Printf.sprintf "surface %s matches no lane on this page: %s"
                   surface (unknown_label_hint labels)))

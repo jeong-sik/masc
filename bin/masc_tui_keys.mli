@@ -168,18 +168,21 @@ val footer_hints_board_read : focus_posts:bool -> split:bool -> string
     list is on screen, which is when h/l and Ctrl-W have a pane to reach. The
     vote, reply and copy keys are the Board surface list's own bindings. *)
 
-val footer_hints_fusion_detail : position:string -> string
-(** The Fusion detail footer. Separate from {!footer_hints} because it appends
-    the window the renderer drew, which the static per-surface table cannot
-    know. *)
+val footer_hints_fusion_detail : string
+(** The Fusion detail footer. Separate from {!footer_hints} because the
+    surface is a drill-down the static per-surface table does not name. The
+    window the renderer drew travels beside these as
+    {!Masc_tui_footer.line}'s [?position], not on the end of this string: the
+    fitter gives up key items from the back, and a position is the one item
+    on the row that [?] cannot recover. *)
 
 val footer_hints_lanes_run_list : string
 (** The Lanes run-list footer: the drill-down under a standalone lane row. *)
 
-val footer_hints_lanes_run_detail : position:string option -> string
-(** The Lanes run-detail footer, with the window the stacked Input/Output list
-    drew appended the way the Fusion detail footer does; [None] where the two
-    split panes' titles already name theirs. *)
+val footer_hints_lanes_run_detail : string
+(** The Lanes run-detail footer. The window the stacked Input/Output list drew
+    travels the way the Fusion detail footer's does; the split panes name
+    theirs in their own titles and pass none. *)
 
 (** The Lanes lane-notice footer. The pane is static, so it keeps only the
     way back plus the shared tail. *)

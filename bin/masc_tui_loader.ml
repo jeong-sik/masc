@@ -1114,7 +1114,7 @@ let load_board_list ~(host : string) ~(port : int)
 let load_board_post ~(host : string) ~(port : int) ~(post_id : string) :
     (board_post * board_comment list, string) result =
   match fetch_board_post ~host ~port ~post_id with
-  | Error err -> Error (Printf.sprintf "board post load failed: %s" err)
+  | Error err -> Error err
   | Ok json ->
       let post_json =
         match Yojson.Safe.Util.member "post" json with

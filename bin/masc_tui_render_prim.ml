@@ -2779,7 +2779,10 @@ let render_diff_surface (state : state) (ds : diff_surface) =
     + (List.length ds.ds_context_lines * diff_surface_rows_per_context_line)
     + if Option.is_some ds.ds_error then diff_surface_error_rows else 0
   in
-  let content_height = max 1 (rows - chrome_rows) in
+  let content_height =
+    Masc_tui_scroll.content_height ~rows ~chrome:chrome_rows ~count:total
+      ~preview_keep:None ~overflow_takes_row:false
+  in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min ds.ds_scroll max_scroll) in
   let diff_rows_window = Rows.of_list ~first:scroll ~height:content_height diff_rows in
@@ -2807,10 +2810,12 @@ let render_diff_surface (state : state) (ds : diff_surface) =
       | Some row ->
           box_line_span buf cols (tree_diff_row_span ~width:(framed_inner_width cols) row)
     done;
-  box_line_styled buf cols ~style:(Theme.recede ())
-    (if total > content_height then
-       Printf.sprintf "[lines %s]  %s" (Masc_tui_scroll.window_text ~scroll ~height:content_height total) ds.ds_esc_hint
-     else "  " ^ ds.ds_esc_hint);
+  (* The status line carries the esc hint at every count, so it is one of
+     the fixed chrome rows above and the reading needs no row of its own. *)
+  Option.iter
+    (box_line_styled buf cols ~style:(Theme.recede ()))
+    (Masc_tui_scroll.position_row ~scroll ~height:content_height
+       ~hint:ds.ds_esc_hint total);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:ds.ds_footer_hints);

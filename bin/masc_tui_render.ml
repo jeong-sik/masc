@@ -11210,7 +11210,12 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
      and the row [finish_surface] then dropped was the footer, so the diff was
      the one screen that did not say how to leave it. *)
   let chrome_rows = count_frame_lines buf + listing_rows_below_the_body in
-  let content_height = max 1 (rows - chrome_rows) in
+  (* The position row carries the esc hint at every count, so it is one of
+     [listing_rows_below_the_body] and needs no row of its own. *)
+  let content_height =
+    Masc_tui_scroll.content_height ~rows ~chrome:chrome_rows ~count:total
+      ~preview_keep:None ~overflow_takes_row:false
+  in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.changes_diff_scroll max_scroll) in
   let diff_rows_window = Rows.of_list ~first:scroll ~height:content_height diff_rows in
@@ -11227,10 +11232,10 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
       | None -> box_empty buf cols
       | Some row -> box_line_span buf cols (diff_row_span ~width:(framed_inner_width cols) row)
     done;
-  if total > content_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[lines %s]  esc closes" (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
-  else box_line_styled buf cols ~style:(Theme.recede ()) "  esc closes";
+  Option.iter
+    (box_line_styled buf cols ~style:(Theme.recede ()))
+    (Masc_tui_scroll.position_row ~scroll ~height:content_height
+       ~hint:"esc closes" total);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Left / Esc:back  o:open in editor  q:quit");
@@ -16184,13 +16189,9 @@ let overlay_window_height ~rows ~count =
    nothing when every row fits. The row's height is the one
    [overlay_window_height] took off. *)
 let overlay_window_row ~scroll ~height count =
-  if count > height then
-    Some
-      (Theme.recede ()
-      ^ Printf.sprintf "  [lines %s]"
-          (Masc_tui_scroll.window_text ~scroll ~height count)
-      ^ Ansi.reset)
-  else None
+  Option.map
+    (fun row -> Theme.recede () ^ row ^ Ansi.reset)
+    (Masc_tui_scroll.position_row ~scroll ~height count)
 
 (* The sheet's rows and the viewport that shows them, at this width. One
    answer for the two readers -- the keypress that bounds the scroll and the
@@ -16289,9 +16290,10 @@ let patch_modal_viewport (state : state) =
   (* The column heading and the divider under it open the body. *)
   let heading_rows = 2 in
   ( total
-  , max 1
-      (Masc_tui_types.surface_body_rows state ~terminal_rows
-       - surface_chrome_rows - heading_rows) )
+  , Masc_tui_scroll.content_height
+      ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
+      ~chrome:(surface_chrome_rows + heading_rows) ~count:total
+      ~preview_keep:None ~overflow_takes_row:true )
 
 let render_patch_modal (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -16319,10 +16321,7 @@ let render_patch_modal (state : state) =
     ~title:
       (screen_title " MASC Patch review" ^ "  " ^ Ansi.bold
        ^ Terminal_text.single_line path_label ^ Ansi.reset)
-    ~hints:
-      (Printf.sprintf
-         "[lines %s]  e:edit  j/k:scroll  d/u:page  g/G:top/bottom  Esc/q:close"
-         (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
+    ~hints:"e:edit  j/k:scroll  d/u:page  g/G:top/bottom  Esc/q:close"
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.recede ())
         "  old   new     diff preview (syntax colored)";
@@ -16335,7 +16334,7 @@ let render_patch_modal (state : state) =
                   Printf.sprintf "   (diff load error: %s)" (Terminal_text.single_line e)
               | None, None -> "   (no pending patch diff loaded)")
            ^ Ansi.reset)
-      else
+      else begin
         let width = framed_inner_width cols in
         List.iteri
           (fun index row ->
@@ -16344,7 +16343,11 @@ let render_patch_modal (state : state) =
                 (fit_width
                    (Masc_tui_span.render (tree_diff_row_span ~width row))
                    width))
-          diff_rows)
+          diff_rows
+      end;
+      (* The window's position is a body row, as on the other overlays, and
+         [patch_modal_viewport] took its row off when the diff overflows. *)
+      Option.iter c.push (overlay_window_row ~scroll ~height:content_height total))
 
 (* The link preview overlay, through the same contract. The title names the
    site, so the footer carries only keys. *)

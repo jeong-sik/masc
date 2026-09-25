@@ -119,4 +119,11 @@ module For_testing : sig
     Keeper_shutdown_types.t ->
     exn ->
     unit
+
+  val stop_is_on_record :
+    before:Keeper_shutdown_types.t ->
+    after:Keeper_shutdown_types.t ->
+    bool
+  (** Whether a re-drive that stopped left the stop already on record: the same
+      recorded reason, or, for a phase with no reason, the same revision. *)
 end

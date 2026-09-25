@@ -809,28 +809,48 @@ let redrive_walk ~(config : Workspace.config) (operation : Keeper_shutdown_types
 (* What the durable record says stopped the operation. A re-drive that stops
    again leaves either the same record or a new reason; only a new reason is
    news. The first stop was already logged as an error by the walk that made
-   it, so a repeat of it on every held tick is logged at info. *)
+   it, so a repeat of it on every held tick is logged at info.
+
+   A phase that carries no reason (a delivered purge whose release failed, a
+   walk that failed before it could record anything) is compared by its
+   durable revision: an unchanged revision means the walk left the record as
+   it found it, so the stop is the one already on record. *)
+type recorded_stop =
+  | Stopped_delivering_completion of string
+  | Stopped_blocked of string
+  | No_recorded_stop of { revision : int }
+
 let recorded_stop (operation : Keeper_shutdown_types.t) =
-  let detail =
-    match operation.phase with
-    | Finalized { completion = Completion_delivery_failed { detail; _ }; _ } -> Some detail
-    | Blocked { detail; _ } -> Some detail
-    | Finalized
-        { completion =
-            (Completion_not_requested | Completion_pending _ | Completion_delivered _)
-        ; _
-        }
-    | Prepared
-    | Joining_lanes
-    | Joined_idle
-    | Finalizing_tasks _
-    | Cleanup_ready _
-    | Reconciliation_required _
-    | Owner_absent _
-    | Operator_absence_acknowledged _
-    | Superseded _ -> None
-  in
-  phase_to_string operation.phase, detail
+  match operation.phase with
+  | Finalized { completion = Completion_delivery_failed { detail; _ }; _ } ->
+    Stopped_delivering_completion detail
+  | Blocked { detail; _ } -> Stopped_blocked detail
+  | Finalized
+      { completion =
+          (Completion_not_requested | Completion_pending _ | Completion_delivered _)
+      ; _
+      }
+  | Prepared
+  | Joining_lanes
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Owner_absent _
+  | Operator_absence_acknowledged _
+  | Superseded _ -> No_recorded_stop { revision = operation.revision }
+;;
+
+let stop_is_on_record ~(before : Keeper_shutdown_types.t) ~(after : Keeper_shutdown_types.t) =
+  match recorded_stop before, recorded_stop after with
+  | Stopped_delivering_completion before_detail, Stopped_delivering_completion after_detail
+  | Stopped_blocked before_detail, Stopped_blocked after_detail ->
+    String.equal before_detail after_detail
+  | No_recorded_stop before_record, No_recorded_stop after_record ->
+    Int.equal before_record.revision after_record.revision
+  | Stopped_delivering_completion _, (Stopped_blocked _ | No_recorded_stop _)
+  | Stopped_blocked _, (Stopped_delivering_completion _ | No_recorded_stop _)
+  | No_recorded_stop _, (Stopped_delivering_completion _ | Stopped_blocked _) -> false
 ;;
 
 let log_redrive_stop ~config (before : Keeper_shutdown_types.t) detail =
@@ -841,11 +861,7 @@ let log_redrive_stop ~config (before : Keeper_shutdown_types.t) detail =
         ~keeper_name:before.keeper_name
         before.operation_id
     with
-    | Ok after ->
-      let before_phase, before_detail = recorded_stop before in
-      let after_phase, after_detail = recorded_stop after in
-      String.equal before_phase after_phase
-      && Option.equal String.equal before_detail after_detail
+    | Ok after -> stop_is_on_record ~before ~after
     | Error _ -> false
   in
   if same_stop
@@ -978,4 +994,5 @@ let recover_at_boot ~config =
 
 module For_testing = struct
   let persist_unhandled_failure = persist_unhandled_failure
+  let stop_is_on_record = stop_is_on_record
 end

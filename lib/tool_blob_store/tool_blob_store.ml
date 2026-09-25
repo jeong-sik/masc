@@ -306,6 +306,49 @@ let fetch_range t ~sha256 ~offset ~max_bytes =
     let cached =
       Validated_file_map.find_opt path (Atomic.get validated_file_snapshots)
     in
+    (* Cold-cache admission: stream the whole-file digest through a fixed
+       buffer (never materialising the file), and read the caller's window in
+       the same breath.  A nonexistent shard fails fast here — the range read
+       opens the descriptor first — instead of falling into a whole-file
+       materialising read. *)
+    let validate_and_read_cold () =
+      match
+        Fs_compat.load_owned_regular_file_range
+          ~ownership_root:t.ownership_root
+          ~offset
+          ~max_bytes
+          path
+      with
+      | Error error ->
+        forget_written path;
+        Error (Owned_read_failed error)
+      | Ok None ->
+        remove_validated_snapshot path;
+        forget_written path;
+        Ok None
+      | Ok (Some { content; snapshot }) ->
+        (match
+           Fs_compat.sha256_owned_regular_file
+             ~ownership_root:t.ownership_root
+             path
+         with
+         | Error error ->
+           forget_written path;
+           Error (Owned_read_failed error)
+         | Ok None ->
+           remove_validated_snapshot path;
+           forget_written path;
+           Ok None
+         | Ok (Some actual) ->
+           if String.equal sha256 actual
+           then (
+             cache_validated_snapshot path snapshot;
+             Ok (Some { content; total_bytes = snapshot.file_size }))
+           else (
+             remove_validated_snapshot path;
+             forget_written path;
+             Error (Integrity_mismatch { path; expected = sha256; actual })))
+    in
     let validate_whole_snapshot () =
       match fetch t ~sha256 with
       | Error _ as error -> error
@@ -314,7 +357,7 @@ let fetch_range t ~sha256 ~offset ~max_bytes =
         Ok (Some (range_of_bytes ~offset ~max_bytes bytes))
     in
     (match cached with
-     | None -> validate_whole_snapshot ()
+     | None -> validate_and_read_cold ()
      | Some { snapshot = validated_snapshot; _ } ->
        (match
           Fs_compat.load_owned_regular_file_range

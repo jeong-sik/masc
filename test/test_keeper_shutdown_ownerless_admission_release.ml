@@ -1205,6 +1205,49 @@ let test_ownerless_retain_with_meta_present_still_fails () =
       (load_operation_exn ~config operation = operation))
 ;;
 
+(* A re-drive that stops again is logged as an error only when the durable
+   record says something new. The record is compared by its typed reason, and a
+   phase with no reason by its revision: a walk that rewrote the record and
+   then failed without a reason is news even inside the same phase. *)
+let test_redrive_stop_on_record_is_typed () =
+  let name = "redrive-stop-on-record" in
+  let finalized completion =
+    Finalized { (finalized_after_removal_evidence name) with completion }
+  in
+  let base =
+    make_operation
+      ~keeper_name:name
+      ~phase:(finalized (Completion_pending Dashboard_keeper_purged))
+      ~cleanup_intent:{ reason = Operator_stop_remove_meta; remove_session = true }
+  in
+  let at ~revision phase = { base with revision; phase } in
+  let delivery_failed detail =
+    finalized (Completion_delivery_failed { action = Dashboard_keeper_purged; detail })
+  in
+  let on_record label expected ~before ~after =
+    check bool label expected
+      (Keeper_shutdown_runtime.For_testing.stop_is_on_record ~before ~after)
+  in
+  on_record "the same delivery failure rewritten is on record" true
+    ~before:(at ~revision:1 (delivery_failed "queue unreadable"))
+    ~after:(at ~revision:2 (delivery_failed "queue unreadable"));
+  on_record "a new delivery failure is news" false
+    ~before:(at ~revision:1 (delivery_failed "queue unreadable"))
+    ~after:(at ~revision:2 (delivery_failed "queue locked"));
+  on_record "the same detail under another reason is news" false
+    ~before:(at ~revision:1 (delivery_failed "queue unreadable"))
+    ~after:(at ~revision:2 (Blocked { stage = Record_update; detail = "queue unreadable" }));
+  on_record "a failed release that wrote nothing is on record" true
+    ~before:(at ~revision:3 (finalized (Completion_delivered Dashboard_keeper_purged)))
+    ~after:(at ~revision:3 (finalized (Completion_delivered Dashboard_keeper_purged)));
+  on_record "a walk that rewrote the record and stopped without a reason is news" false
+    ~before:(at ~revision:1 (Finalizing_tasks []))
+    ~after:(at ~revision:2 (Finalizing_tasks []));
+  on_record "a walk that newly records a reason is news" false
+    ~before:(at ~revision:1 (Finalizing_tasks []))
+    ~after:(at ~revision:2 (Blocked { stage = Task_settlement; detail = "backlog locked" }))
+;;
+
 let () =
   Alcotest.run
     "keeper_shutdown_ownerless_admission_release"
@@ -1287,6 +1330,10 @@ let () =
             "corrupt sibling does not hide ownerless operator-retain"
             `Quick
             test_corrupt_sibling_does_not_hide_ownerless_operator_retain
+        ; Alcotest.test_case
+            "re-drive stop on record is compared by typed reason and revision"
+            `Quick
+            test_redrive_stop_on_record_is_typed
         ] )
     ]
 ;;

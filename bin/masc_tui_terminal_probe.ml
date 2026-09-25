@@ -381,6 +381,24 @@ let complete decoder =
           && Option.is_some decoder.background))
 ;;
 
+let holds_incomplete_sequence decoder =
+  match decoder.mode with
+  (* Bytes sit in [pending] across an idle read, waiting for the rest of a
+     sequence that may be a reply or a paste start. *)
+  | Paste_prefix _ | Osc_candidate _ | Csi_private | Csi_window | Apc_prefix
+  | Apc _ -> true
+  (* [Escape] is flushed by [next] as soon as input runs dry, and the
+     passthrough states replay each byte as it arrives: nothing is held. *)
+  | Normal | Escape | Paste _ | Osc_passthrough _ | Apc_passthrough _ -> false
+;;
+
+let discard_incomplete_sequence decoder =
+  if holds_incomplete_sequence decoder then begin
+    Buffer.clear decoder.pending;
+    decoder.mode <- Normal
+  end
+;;
+
 let unread_replay decoder =
   let replay = Buffer.contents decoder.replay in
   String.sub replay decoder.replay_position

@@ -110,14 +110,32 @@ let split_chunk_lines chunk =
     in
     List.map strip_trailing_cr lines)
 
+(* One row carries at most [max_line_bytes]. A longer line continues in the
+   next row instead of losing its tail, cut between characters. The streamed
+   path already delivers a long unterminated record as several bounded pieces
+   ([Keeper_secret_redaction.redact_stream_chunk]), each its own row, so a
+   completed entry now shows the same text a live tail showed. A row with no
+   character boundary in its first [max_line_bytes] bytes is not UTF-8, and
+   the byte cut stands so the split always advances. *)
+let row_texts line =
+  let len = String.length line in
+  let rec loop acc start =
+    if len - start <= max_line_bytes
+    then List.rev (String.sub line start (len - start) :: acc)
+    else (
+      let byte_cut = start + max_line_bytes in
+      let cut =
+        let boundary = String_util.utf8_char_boundary line byte_cut in
+        if boundary > start then boundary else byte_cut
+      in
+      loop (String.sub line start (cut - start) :: acc) cut)
+  in
+  loop [] 0
+
 let output_lines_for_chunk ~ts_ms ~stream chunk =
   split_chunk_lines chunk
-  |> List.map (fun text ->
-    { ts_ms
-    ; stream
-    ; text = Exec_buffer.utf8_truncate text max_line_bytes
-    ; ansi = false
-    })
+  |> List.concat_map (fun line ->
+    row_texts line |> List.map (fun text -> { ts_ms; stream; text; ansi = false }))
 
 let output_lines_for_entry (entry : entry) =
   let ts_ms = ts_ms_of_unix entry.generated_at in
@@ -305,9 +323,14 @@ let add_stream_chunks entries select =
   List.iter
     (fun entry -> Exec_buffer.add_string buffer (select entry))
     entries;
-  ( Exec_buffer.tail buffer
+  (* Once older output is dropped, the ring's first byte can be the middle of
+     a character. Start at the next character and count the skipped bytes as
+     dropped, so [bytes_dropped] still covers everything not shown. *)
+  let ring_tail = Exec_buffer.tail buffer in
+  let tail = String_util.utf8_suffix ~max_bytes:retained_stream_bytes ring_tail in
+  ( tail
   , Exec_buffer.total_bytes buffer
-  , Exec_buffer.bytes_dropped buffer )
+  , Exec_buffer.bytes_dropped buffer + (String.length ring_tail - String.length tail) )
 
 let snapshot ~keeper_name =
   let keeper, entries, lines = snapshot_state keeper_name in

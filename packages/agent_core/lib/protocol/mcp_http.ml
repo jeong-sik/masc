@@ -73,22 +73,16 @@ let connect_and_load_managed ~sw ~net (spec : http_spec)
   let* client = connect ~sw ~net { base_url = spec.base_url; headers = spec.headers } in
   let* () = initialize client in
   let* mcp_tools = list_tools client in
-  let* tools =
-    List.fold_right
-      (fun (mt : Mcp.mcp_tool) acc ->
-         let* tools = acc in
-         match
-           Mcp.mcp_tool_to_agent_core_tool_result mt ~call_fn:(fun input ->
-             call_tool client ~name:mt.name ~arguments:input)
-         with
-         | Ok tool_ -> Ok (tool_ :: tools)
-         | Error detail ->
-           Error (Error.Config (InvalidConfig { field = "mcp.http.tools"; detail })))
+  let tools, skipped_tools =
+    Mcp.convert_tools
+      ~server_name:spec.name
+      ~call_fn_for:(fun (mt : Mcp.mcp_tool) input ->
+        call_tool client ~name:mt.name ~arguments:input)
       mcp_tools
-      (Ok [])
   in
   Ok
     { Mcp.tools
+    ; skipped_tools
     ; name = spec.name
     ; transport =
         Http

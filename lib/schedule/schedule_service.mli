@@ -20,6 +20,7 @@ val service_error_to_string : service_error -> string
 val create :
   Workspace_utils.config ->
   now:float ->
+  runner_tick_sec:float ->
   ?schedule_id:string ->
   ?requested_at:float ->
   ?expires_at:float ->
@@ -40,6 +41,7 @@ val create :
 val update :
   Workspace_utils.config ->
   now:float ->
+  runner_tick_sec:float ->
   schedule_id:string ->
   ?requested_at:float ->
   ?expires_at:float ->

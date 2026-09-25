@@ -514,7 +514,7 @@ let run_spawned ~mgr ~clock ~cwd ~prompt_file ~schema_file config ~session_mode 
         let line =
           if Float.is_infinite span
           then Eio.Buf_read.line reader
-          else Eio.Time.with_timeout clock span (fun () -> Eio.Buf_read.line reader)
+          else Eio.Time.with_timeout_exn clock span (fun () -> Eio.Buf_read.line reader)
         in
         Ok (`Line line)
       with
@@ -728,7 +728,7 @@ let serve_usage ~mgr ~clock ~cwd config =
             let line =
               if Float.is_infinite span
               then Eio.Buf_read.line reader
-              else Eio.Time.with_timeout clock span (fun () -> Eio.Buf_read.line reader)
+              else Eio.Time.with_timeout_exn clock span (fun () -> Eio.Buf_read.line reader)
             in
             parse_json ~stage line
           with

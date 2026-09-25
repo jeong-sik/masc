@@ -300,7 +300,7 @@ let repeat_of readables scope =
        match readable.how with
        | Http http when Runtime_quota_window.scope_equal readable.scope scope ->
          Option.map (fun period -> period, http) (repeat_period http)
-       | Http _ | Codex _ -> None)
+       | Http _ | Codex _ | Muse _ -> None)
     readables
 ;;
 
@@ -323,7 +323,7 @@ let refresh_readables ~clock ~fetch ~catalogue =
       (fun (readable : readable) ->
          match readable.how with
          | Http http -> Option.map (fun period -> readable.scope, period) (repeat_period http)
-         | Codex _ -> None)
+         | Codex _ | Muse _ -> None)
       (catalogue ())
   in
   Eio.Fiber.List.iter

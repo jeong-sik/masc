@@ -42,8 +42,11 @@ val render : t -> string
     present when [bytes_dropped > 0] so golden tests on small outputs
     remain byte-identical to the raw stream.
 
-    When truncation occurs, both head and tail are trimmed to UTF-8
-    character boundaries so CJK and emoji output is never split mid-byte. *)
+    When truncation occurs, the head drops a trailing character the cut
+    left incomplete and the tail drops the continuation bytes of one whose
+    lead byte was cut off, so CJK and emoji output is never split mid-byte.
+    [N] counts those bytes with the elided ones, so it can exceed
+    [bytes_dropped] by up to six. Bytes that are not UTF-8 are kept. *)
 
 val max_render_bytes : head_cap:int -> tail_cap:int -> int
 (** Upper bound for [render], including the largest truncation marker on this

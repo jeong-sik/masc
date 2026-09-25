@@ -137,6 +137,49 @@ let tail t =
       Bytes.blit t.tail_ring 0 out first second;
     Bytes.unsafe_to_string out
 
+(* The longest UTF-8 sequence. A cut splits at most this many bytes minus
+   one off either side of the character it lands in. *)
+let utf8_max_char_bytes = 4
+
+let is_utf8_continuation c = Char.code c land 0xC0 = 0x80
+
+(* Length of the sequence a lead byte opens; [None] for a byte that opens
+   none (a continuation byte, or 0xF8..0xFF). *)
+let utf8_lead_length c =
+  let b = Char.code c in
+  if b land 0x80 = 0 then Some 1
+  else if b land 0xE0 = 0xC0 then Some 2
+  else if b land 0xF0 = 0xE0 then Some 3
+  else if b land 0xF8 = 0xF0 then Some 4
+  else None
+
+(* Bytes at the end of [s], a stream prefix, that begin a character the
+   cut left incomplete. 0 when the last character is whole, or when the
+   bytes are not a UTF-8 lead and its continuations. *)
+let utf8_split_suffix_length s =
+  let len = String.length s in
+  let lowest_lead = max 0 (len - (utf8_max_char_bytes - 1)) in
+  let rec scan i =
+    if i < lowest_lead then 0
+    else if is_utf8_continuation s.[i] then scan (i - 1)
+    else
+      match utf8_lead_length s.[i] with
+      | Some n when i + n > len -> len - i
+      | Some _ | None -> 0
+  in
+  scan (len - 1)
+
+(* Bytes at the start of [s], a stream suffix, that continue a character
+   whose lead byte was cut off. 0 when the run of continuation bytes is
+   longer than a cut can leave, since such bytes are not UTF-8. *)
+let utf8_split_prefix_length s =
+  let len = String.length s in
+  let rec count i =
+    if i < len && is_utf8_continuation s.[i] then count (i + 1) else i
+  in
+  let run = count 0 in
+  if run < utf8_max_char_bytes then run else 0
+
 let truncation_marker dropped = Printf.sprintf "\n...(truncated %d bytes)...\n" dropped
 
 let max_render_bytes ~head_cap ~tail_cap =
@@ -167,15 +210,16 @@ let render t =
     in
     head_s ^ extra
   else
-    let dropped = bytes_dropped t in
-    let head_s = utf8_truncate (head t) t.head_cap in
+    (* Both cuts sit mid-stream, so either can land inside a character.
+       The split bytes go into the marker's count with the dropped ones. *)
+    let head_raw = head t in
     let tail_raw = tail t in
+    let head_split = utf8_split_suffix_length head_raw in
+    let tail_split = utf8_split_prefix_length tail_raw in
+    let head_s = String.sub head_raw 0 (String.length head_raw - head_split) in
     let tail_s =
-      if String.length tail_raw > t.tail_cap then
-        let skip = String.length tail_raw - t.tail_cap in
-        utf8_truncate
-          (String.sub tail_raw skip (String.length tail_raw - skip))
-          t.tail_cap
-      else tail_raw
+      String.sub tail_raw tail_split (String.length tail_raw - tail_split)
     in
-    head_s ^ truncation_marker dropped ^ tail_s
+    head_s
+    ^ truncation_marker (bytes_dropped t + head_split + tail_split)
+    ^ tail_s

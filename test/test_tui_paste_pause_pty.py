@@ -276,10 +276,11 @@ def run(executable: str) -> None:
         h.send_and_wait(process, master_fd, output, b"\x03", b"Paste end awaited")
         h.wait_for_output(process, master_fd, output, b"Paste quiet",
                           start=0, timeout=5.0)
+        # A recovered image path is attached while the same Pasted event is
+        # handled, so its "Attached" notice replaces the generic restore
+        # notice before the frame is drawn.
         h.send_and_wait(process, master_fd, output, b"\x03",
-                        b"Incomplete paste restored")
-        h.wait_for_output(process, master_fd, output, b"Attached shot.png",
-                          start=0, timeout=5.0)
+                        b"Attached shot.png")
         os.write(master_fd, h.PASTE_END)
         h.wait_for_output(process, master_fd, output, b"Paste tail ended",
                           start=0, timeout=5.0)
@@ -465,12 +466,10 @@ def run(executable: str) -> None:
                           start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03",
                         b"Incomplete paste restored")
-        start = len(output)
         # The original decoder has already matched ESC[20. The delayed 1~
-        # must close the recovery guard; the following CR must stay unsent.
-        os.write(master_fd, b"1~\rrest")
-        h.wait_for_output(process, master_fd, output, b"Paste tail ended",
-                          start=start, timeout=5.0)
+        # must close the recovery guard. Bytes after the marker are keys
+        # again, so the CR that must stay unsent is sent on its own below.
+        h.send_and_wait(process, master_fd, output, b"1~", b"Paste tail ended")
         h.send_and_wait(process, master_fd, output, b"\r",
                         b"Recovered draft protected")
         if any(path.endswith("/chat/stream") for path, _ in late_tail_requests):

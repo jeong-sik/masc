@@ -18347,6 +18347,10 @@ and is loaded on demand through keeper_skill.
                  && (state.view = Keepers Keeper_message || state.composer_focused) ->
               discard_recovered_paste_lock state;
               report_action state "system" "Recovered draft confirmed; Enter may send";
+              (* The key is consumed here, so the [Input] request that follows
+                 every other key never fires. Without this the lock is gone
+                 but nothing is drawn: the operator sees no answer to Ctrl-G. *)
+              Render_schedule.request render_schedule Render_schedule.Input;
               None
           | other -> other
         else input
@@ -18362,8 +18366,13 @@ and is loaded on demand through keeper_skill.
           report_action state "system"
             "Incomplete paste restored; wait for marker or Ctrl-C, then Ctrl-G enables Enter")
         interrupted_paste;
-      if guarding_before_read && input_reader.paste_phase = No_paste then
+      if guarding_before_read && input_reader.paste_phase = No_paste then begin
         report_action state "system" "Paste tail ended; review the draft before sending";
+        (* The tail's end marker is swallowed and returns no input, so no
+           [Input] request draws this; ask for the frame as the other
+           recovery notices do. *)
+        Render_schedule.request render_schedule Render_schedule.Background
+      end;
       (match input_reader.paste_phase with
        | Pasting _ when not !paste_pause_notified ->
            paste_pause_notified := true;

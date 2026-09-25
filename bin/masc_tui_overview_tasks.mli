@@ -32,7 +32,6 @@ val backlog : Masc_domain.task list -> backlog
 type line =
   | Task_row of { index : int; task : Masc.Tui_decode.task }
       (** [index] is the row's position in {!rows}. *)
-  | More_active of int  (** Rows of {!rows} the height left out. *)
   | Nothing_active  (** No task is held. Said rather than left blank. *)
   | Todo_backlog of backlog
 
@@ -52,9 +51,21 @@ val lines :
     of {!rows} and then the backlog line; when the rows fit but the backlog
     line does not, the backlog line is given up. When the rows do not fit, a
     window of them that keeps the [selected] row on screen (the top rows
-    when nothing is selected), then [More_active] with the
-    count left out, then the backlog line -- each of the two only while a
-    task row is still drawn beside it. *)
+    when nothing is selected), and the backlog line only while a task row is
+    still drawn beside it.
+
+    How many rows were left out is {!held_back}, which the title says. A line
+    here would cost a row, and at the heights where this pane is squeezed to
+    one it was the row the count then could not be drawn in. *)
+
+val held_back :
+  height:int ->
+  selected:int option ->
+  Masc.Tui_decode.task list ->
+  backlog ->
+  int
+(** How many of {!rows} {!lines} leaves out at this height. [0] when they all
+    fit. *)
 
 val row_of : Masc.Tui_decode.task list -> task_id:string -> int option
 (** The open task's position in {!rows}. [None] for a task that has no row

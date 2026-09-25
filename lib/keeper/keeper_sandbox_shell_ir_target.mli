@@ -50,7 +50,7 @@ type ssh_dispatch =
 
 val target_error
   :  ?fields:(string * Yojson.Safe.t) list
-  -> ?class_:Tool_result.tool_failure_class
+  -> class_:Tool_result.tool_failure_class
   -> string
   -> target_error
 

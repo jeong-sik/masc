@@ -81,7 +81,10 @@ let numbered_preview (change : Masc.Tui_decode.file_change) rows =
   | Some occurrence ->
       let old_start = occurrence.old_range.start_line in
       let new_start =
-        Option.map (fun range -> range.start_line) occurrence.new_range
+        Option.map
+          (fun (range : Masc.Keeper_file_change_evidence.line_range) ->
+             range.start_line)
+          occurrence.new_range
       in
       Some
         (Diff.preview_numbered

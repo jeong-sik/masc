@@ -235,7 +235,7 @@ type stream_event =
       { thread_id : string
       ; turn_id : string
       ; model : string
-      ; thread_total : token_usage
+      ; frame : frame_usage
       }
   | Turn_finished of { text : string }
 
@@ -1450,16 +1450,18 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
        here, where it is read, so a turn that later fails still leaves what
        it spent. [seen_usage] folds the turn's frames: the newest [last]
        for the turn result's context occupancy, [total] for its spend. *)
+    let frame =
+      Option.map
+        (fun (last, thread_total) -> frame_usage_of_breakdowns ~last ~thread_total)
+        frame
+    in
     Option.iter
-      (fun (_last, thread_total) ->
-         emit_stream_event
-           on_stream_event
-           (Usage_reported { thread_id; turn_id; model; thread_total }))
+      (fun frame ->
+         emit_stream_event on_stream_event (Usage_reported { thread_id; turn_id; model; frame }))
       frame;
     let seen_usage =
       match frame with
-      | Some (last, thread_total) ->
-        Some (fold_turn_usage seen_usage (frame_usage_of_breakdowns ~last ~thread_total))
+      | Some frame -> Some (fold_turn_usage seen_usage frame)
       | None -> seen_usage
     in
     await_turn_terminal

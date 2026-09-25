@@ -880,6 +880,7 @@
   masc.masc_tool_blob_store
   masc.masc_types
   masc.string_util
+  masc_tui_message_layout
   yojson))
 
 (library

@@ -2680,6 +2680,53 @@ let test_a_clause_wider_than_the_row_is_wrapped_not_cut () =
   check string "the words survive in order" "one clause that is far too wide"
     (String.concat " " rows)
 
+(* The one ladder for a figure a reader reads at a glance. Four spelled the
+   same count four ways: the Acting pane drew "1.0M" for 1,048,576 while the
+   context inspector drew "1.05M" for it on the same screen. The rungs kept
+   are the inspector's, because they are the only set whose boundaries were
+   worked out against the six-character column they have to fit. *)
+let test_compact_count_reads_at_a_glance () =
+  Alcotest.(check string) "under a thousand keeps its digits" "358"
+    (Layout.compact_count 358);
+  Alcotest.(check string) "a thousand keeps a tenth" "2.0k"
+    (Layout.compact_count 2_000);
+  Alcotest.(check string) "the tenth is what parts near neighbours" "73.9k"
+    (Layout.compact_count 73_877);
+  Alcotest.(check bool) "so two near figures do not read alike" true
+    (Layout.compact_count 73_877 <> Layout.compact_count 73_212);
+  Alcotest.(check string) "millions keep a hundredth" "1.50M"
+    (Layout.compact_count 1_500_000);
+  Alcotest.(check string) "and the boundary belongs to the larger unit" "1.0k"
+    (Layout.compact_count 1_000)
+
+(* Each rung changes where the format below it would round past the column:
+   the last figure the lower rung can draw, and the first the higher one
+   takes. *)
+let test_every_rung_changes_where_the_rounding_reaches_it () =
+  List.iter
+    (fun (below, below_text, at, at_text) ->
+       Alcotest.(check string)
+         (Printf.sprintf "%d is the last of its rung" below) below_text
+         (Layout.compact_count below);
+       Alcotest.(check string)
+         (Printf.sprintf "%d changes rung" at) at_text
+         (Layout.compact_count at))
+    [ 999_949, "999.9k", 999_950, "1.00M"
+    ; 99_994_999, "99.99M", 99_995_000, "100.0M"
+    ; 999_949_999, "999.9M", 999_950_000, "1.00B"
+    ]
+
+(* And no rung draws past the column it was measured for. *)
+let test_no_rung_outgrows_its_column () =
+  List.iter
+    (fun n ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%d fits six characters" n)
+         true
+         (Layout.display_width (Layout.compact_count n) <= 6))
+    [ 0; 999; 1_000; 73_877; 999_949; 999_950; 1_048_576; 99_994_999
+    ; 99_995_000; 999_949_999; 999_950_000 ]
+
 let () =
   run "tui_message_layout"
     [
@@ -2887,6 +2934,12 @@ let () =
             test_a_count_takes_the_number_it_counts
         ; test_case "a span fits a six-cell column" `Quick
             test_a_span_fits_a_six_cell_column
+        ; test_case "compact count reads at a glance" `Quick
+            test_compact_count_reads_at_a_glance
+        ; test_case "every rung changes where the rounding reaches it" `Quick
+            test_every_rung_changes_where_the_rounding_reaches_it
+        ; test_case "no rung outgrows its column" `Quick
+            test_no_rung_outgrows_its_column
         ; test_case "a right-aligned cell counts cells, not bytes" `Quick
             test_a_right_aligned_cell_counts_cells_not_bytes
         ; test_case "a duration keeps the tenths only while they are read" `Quick

@@ -2158,8 +2158,21 @@ let committed_range ~keepers_dir ~keeper_id select =
           match Fs_compat.load_file_opt snapshot_path with
           | None -> Ok None
           | Some content ->
-            let+ current = parse snapshot_path content in
-            Some (current, content)
+            (match parse snapshot_path content with
+             | Ok current -> Ok (Some (current, content))
+             | Error rejection ->
+               (* A receipt is evidence for skipping already-committed work, so
+                  an unverifiable receipt must read as no receipt, never as an
+                  honored one: this caller proceeds and re-commits, and the
+                  write path's quarantine branch repairs the undecodable bytes
+                  (#32461). Failing the whole check here stopped every pass in
+                  front of a broken snapshot, which is the wedge itself. An I/O
+                  failure above still raises out of the try. *)
+               Log.Keeper.warn
+                 ~keeper_name:keeper_id
+                 "range receipt check cannot decode the current snapshot; treating its receipts as unverifiable: %s"
+                 rejection;
+               Ok None)
         in
         let* receipts =
           reconcile_durable_range_receipts

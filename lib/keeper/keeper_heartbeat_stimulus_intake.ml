@@ -872,7 +872,23 @@ let heartbeat_event_intake
                else (
                  hitl_selected := true;
                  true)
-             | _ ->
+             (* Every other kind shares a batch; a connector conversation
+                keeps it to one channel. A new kind is listed here on
+                purpose, so whether it may share a batch is decided, not
+                inherited. *)
+             | Keeper_event_queue.Board_signal _
+             | Keeper_event_queue.Board_attention _
+             | Keeper_event_queue.Bootstrap
+             | Keeper_event_queue.Fusion_completed _
+             | Keeper_event_queue.Schedule_due _
+             | Keeper_event_queue.Connector_attention _
+             | Keeper_event_queue.Ask_answered _
+             | Keeper_event_queue.Completion_authority_rejected _
+             | Keeper_event_queue.Task_cancelled _
+             | Keeper_event_queue.Workspace_message _
+             | Keeper_event_queue.Delegate_completed _
+             | Keeper_event_queue.Composition_completed _
+             | Keeper_event_queue.Task_outcome _ ->
                (match
                   Keeper_event_queue.connector_attention_channel
                     selection.source.payload,

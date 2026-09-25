@@ -4678,6 +4678,127 @@ let test_create_waits_for_lifecycle_admission_before_installing_owner () =
          (Owner_registry.For_testing.installed_owner_count ~base_path))
 ;;
 
+(* RFC-0373 direction 2 (issue #38864): the chat lane is offered every freed
+   slot first, so a keeper whose chat queue is fed without end loses each
+   release to the queued chat turn, and the autonomous lane's losses are
+   consecutive by construction. Losing turns of scheduled work without end is
+   the defect; the deferral debt bounds it.
+
+   This is the issue's decisive test, and before the cap commit it is the
+   intended red: the chat turns run one after another and the autonomous
+   lane's consecutive refusals pass the bound. The numbers are stated, not
+   estimated:
+
+   - a fake clock turns each chat turn into 10 seconds, so no number hides
+     behind wall time;
+   - the queue always holds one claimable chat turn -- the executor refills it
+     before its own turn finishes -- so every freed slot is offered to chat
+     first, exactly as [start_child_if_needed] does;
+   - the autonomous lane asks again the moment it is refused, so the count of
+     refusals is the count of releases it lost. *)
+let debt_cap = 3
+let test_fed_chat_lane_owes_the_autonomous_lane_a_turn_within_the_debt_cap () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let now = ref 42.0 in
+  let tick () =
+    now := !now +. 10.0;
+    !now
+  in
+  let chat_turns = ref 0 in
+  let queued = ref 0 in
+  let feed owner =
+    incr queued;
+    let operation_id = operation_id ("kmsg-debt-cap-" ^ string_of_int !queued) in
+    ignore
+      (owner_ok
+         (Owner.submit_operation
+            owner
+            ~operation_id
+            ~source:operation_source
+            ~input:(operation_input "fed chat turn")))
+  in
+  let holder = ref None in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    (match claim () with
+     | Ok (Some _) -> incr chat_turns
+     | Ok None -> fail "fed chat runner found an empty queue"
+     | Error error -> fail (Owner.error_to_string error));
+    let owner =
+      match !holder with
+      | Some owner -> owner
+      | None -> fail "the test did not publish the owner for the feeder"
+    in
+    (* Refill before this turn settles, so the freed slot is contested. *)
+    Eio.Fiber.fork ~sw (fun () -> feed owner);
+    Owner.Operation_succeeded
+      { outcome_ref = "turn:debt-cap-" ^ string_of_int !chat_turns }
+  in
+  let path = Filename.temp_file "keeper-owner-debt-cap-" ".sqlite3" in
+  Unix.unlink path;
+  Eio.Switch.on_release sw (fun () ->
+    if Sys.file_exists path then Unix.unlink path);
+  let owner =
+    owner_ok
+      (Owner.start
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_store_path:path
+         ~now:tick
+         ~operation_runner:
+           (Some
+              Owner.
+                { ready = (fun ~keeper_name:_ -> true)
+                ; execute
+                ; on_execution_settled = noop_execution_settled
+                })
+         ~on_turn_slot_released:None
+         ~keeper_name:"debt-cap"
+         ~initial_meta:(Some (make_meta "debt-cap")))
+  in
+  holder := Some owner;
+  feed owner;
+  let admitted, resolve_admitted = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let refusals = ref 0 in
+    let rec poll () =
+      match Owner.run_autonomous_if_idle owner (fun () -> 42) with
+      | Ok (`Ran _) -> Eio.Promise.resolve resolve_admitted !refusals
+      | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Chat_operation; _ })))
+      | Ok (`Busy (Owner.Turn_busy None)) ->
+        incr refusals;
+        (* The bound keeps the intended red a clean failure instead of a
+           hang: without the cap this lane never runs and the loop never
+           ends. *)
+        if !refusals > debt_cap + 3
+        then Eio.Promise.resolve resolve_admitted !refusals
+        else poll ()
+      | Ok (`Busy block) ->
+        fail
+          ("autonomous lost the slot for the wrong reason: "
+           ^ Owner.autonomous_block_to_string block)
+      | Ok `Interrupted -> fail "nothing interrupted the autonomous lane"
+      | Error error -> fail (Owner.error_to_string error)
+    in
+    poll ());
+  let refusals_needed = Eio.Promise.await admitted in
+  check bool "the chat lane held the slot at all" true (!chat_turns > 0);
+  check bool
+    (Printf.sprintf
+       "the autonomous lane ran within %d consecutive refusals, got %d"
+       debt_cap refusals_needed)
+    true
+    (refusals_needed <= debt_cap);
+  (* Measured price of the cap: the forfeited releases are chat turns that
+     waited, so the keeper runs at most the two live turns plus the cap's
+     worth of held-back ones. *)
+  check bool
+    (Printf.sprintf "the cap prices the chat delay it buys (chat turns: %d)"
+       !chat_turns)
+    true
+    (!chat_turns <= 2 + debt_cap)
+;;
+
 let () =
   run
     "keeper owner"
@@ -4750,6 +4871,10 @@ let () =
             "chat lane holder blocks autonomous admission"
             `Quick
             test_chat_lane_holder_blocks_autonomous_admission
+        ; test_case
+            "a fed chat lane owes the autonomous lane a turn within the debt cap"
+            `Quick
+            test_fed_chat_lane_owes_the_autonomous_lane_a_turn_within_the_debt_cap
         ; test_case
             "turn slot release signals availability"
             `Quick

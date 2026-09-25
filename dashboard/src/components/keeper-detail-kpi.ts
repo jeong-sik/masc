@@ -77,14 +77,10 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="flex flex-col gap-3 mb-5 v2-monitoring-surface">
       <${KpiSection} title="정체성">
-        <div class="grid grid-cols-2 gap-2">
+        <div class="grid grid-cols-1 gap-2">
           <${StatTile}
             label="턴"
             value=${String(keeper.turn_count ?? '-')}
-          />
-          <${StatTile}
-            label="인계"
-            value=${String(keeper.handoff_count_total ?? '-')}
           />
         </div>
       <//>

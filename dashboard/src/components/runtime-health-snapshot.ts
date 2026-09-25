@@ -141,11 +141,25 @@ function startupDegradationDetail(startup: DashboardRuntimeStartupDegradation | 
   return startup.terminal_reason ?? startup.status ?? 'ok'
 }
 
+// Every cause present is named, so exact-output gaps and a kept registry are
+// not hidden behind a missing-catalog line when both happen.
 function startupDegradationAlertDetail(startup: DashboardRuntimeStartupDegradation): string | null {
+  const parts: string[] = []
   const missing = startup.missing_catalog_models
     .slice(0, 3)
     .map(model => model.runtime_id)
-  if (missing.length > 0) return `missing catalog: ${missing.join(', ')}`
+  if (missing.length > 0) parts.push(`missing catalog: ${missing.join(', ')}`)
+  const gaps = (startup.exact_slot_body_deadline_gaps ?? [])
+    .slice(0, 3)
+    .map(gap => `${gap.lane_id}/${gap.slot_id} (${gap.provider_id})`)
+  if (gaps.length > 0) parts.push(`exact slots without exact-body-timeout-s: ${gaps.join(', ')}`)
+  const emptied = startup.exact_lanes_emptied_by_body_deadline_gaps ?? []
+  if (emptied.length > 0) parts.push(`exact lanes unavailable: ${emptied.slice(0, 3).join(', ')}`)
+  const stale = startup.exact_output_registry_stale
+  if (stale) {
+    parts.push(`exact registry kept since commit ${stale.kept_since_commit}: ${stale.reason}`)
+  }
+  if (parts.length > 0) return parts.join(' · ')
   if (startup.disabled_runtime_ids.length > 0) {
     return `disabled runtimes: ${startup.disabled_runtime_ids.slice(0, 3).join(', ')}`
   }

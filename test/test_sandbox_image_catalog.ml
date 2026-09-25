@@ -457,12 +457,22 @@ let test_concurrent_saves_do_not_both_accept_the_same_snapshot () =
 
 (* The copy the binary carries names images and promotes nothing: builds are
    the host's to record. *)
-let rec find_source_root dir hops =
-  if Sys.file_exists (Filename.concat dir "config/sandbox-images.toml") then Some dir
-  else if hops = 0 then None
-  else
-    let parent = Filename.dirname dir in
-    if String.equal parent dir then None else find_source_root parent (hops - 1)
+let find_source_root dir hops =
+  (* Dune also stages a partial config/sandbox-images.toml under _build/default.
+     Compare against the outer checkout's recipe tree, not that staged copy. *)
+  let rec ascend dir hops found =
+    let found =
+      if Sys.file_exists (Filename.concat dir "config/sandbox-images.toml")
+      then Some dir
+      else found
+    in
+    if hops = 0
+    then found
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then found else ascend parent (hops - 1) found
+  in
+  ascend dir hops None
 
 let source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with

@@ -128,20 +128,9 @@ val put_file_durable : t -> path:string -> mime:string -> Tool_output.artifact_r
     raise [Sys_error] without returning a reference. Invalid media types raise
     [Invalid_argument]; cancellation propagates.
 
-    This bounds ingestion memory only. The first uncached {!fetch_range} still
-    validates its artifact with a whole-file read. *)
-
-module For_testing : sig
-  val put_file_durable
-    :  after_hash:(unit -> unit)
-    -> t
-    -> path:string
-    -> mime:string
-    -> Tool_output.artifact_ref
-  (** The production ingestion path with a fault-injection boundary between
-      hashing the source and copying it. The callback runs in the same
-      blocking job and must not perform Eio effects. *)
-end
+    This bounds ingestion memory only. The first uncached {!fetch_range}
+    validates its artifact with a streaming digest, not a whole-file
+    materialisation. *)
 
 val fetch : t -> sha256:string -> (string option, fetch_error) result
 (** Validate and retrieve bytes by sha256. Returns [Ok None] only when the
@@ -174,12 +163,49 @@ val fetch_range :
   max_bytes:int ->
   (range option, fetch_error) result
 (** Read at most [max_bytes] from [offset]. The first uncached read performs a
-    whole-file sha256 validation; later pages whose owned descriptor snapshot
-    is unchanged use bounded range I/O. The validation cache is bounded, so an
-    evicted or changed snapshot is revalidated before any bytes are returned,
-    preserving {!fetch}'s content-address integrity without hashing the whole
-    artifact on every page. Bounds and filesystem failures remain typed.
-    Cancellation propagates. *)
+    streaming whole-file sha256 validation through a fixed-size buffer and
+    never materialises the artifact; later pages whose owned descriptor
+    snapshot is unchanged use bounded range I/O. A nonexistent shard fails
+    fast on the initial range-read descriptor open, before any content is
+    read. The validation cache is bounded, so an evicted or changed snapshot
+    is revalidated before any bytes are returned, preserving {!fetch}'s
+    content-address integrity without hashing the whole artifact on every
+    page. The cold read takes the window and the digest from one owned
+    descriptor, so the bytes it returns are the bytes it hashed (#38972).
+    Bounds and filesystem failures remain typed. Cancellation propagates. *)
+
+module For_testing : sig
+  val put_file_durable
+    :  after_hash:(unit -> unit)
+    -> t
+    -> path:string
+    -> mime:string
+    -> Tool_output.artifact_ref
+  (** The production ingestion path with a fault-injection boundary between
+      hashing the source and copying it. The callback runs in the same
+      blocking job and must not perform Eio effects. *)
+
+  val fetch_range
+    :  after_window_read:(unit -> unit)
+    -> t
+    -> sha256:string
+    -> offset:int
+    -> max_bytes:int
+    -> (range option, fetch_error) result
+  (** The production {!fetch_range} with a fault-injection boundary on the
+      cold path: after the window has been read and before the digest
+      decides whether it is admitted. It runs only when the snapshot cache
+      holds no entry for the shard and the read found the shard, in the
+      calling fiber, not in a blocking job. A test rewrites the shard here to
+      stand in for a put that lands between reading and admitting. *)
+
+  val validated_snapshot
+    :  t
+    -> sha256:string
+    -> Fs_compat.owned_regular_file_snapshot option
+  (** The snapshot the range cache currently holds as validated for this
+      address, if any. *)
+end
 
 val list_all : t -> string list
 (** List all sha256 hashes currently in the store. O(n) in store size.

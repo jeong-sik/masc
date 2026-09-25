@@ -1631,7 +1631,7 @@ type runtime_mode =
    takes it as its first candidate, which is how the lane comes to exist. *)
 type runtime_lane_pick =
   | Pick_conversation_lane of string
-  | Pick_exact_lane of string
+  | Pick_exact_lane of Standalone_lane.t
   | Pick_new_lane of string
   | Pick_media_failover
       (* Appends to [\[runtime\].media_failover]. The route takes its whole
@@ -1642,7 +1642,8 @@ type runtime_lane_pick =
          one runtime, the one a keeper with no assignment walks. *)
 
 let runtime_lane_pick_name = function
-  | Pick_conversation_lane lane | Pick_exact_lane lane | Pick_new_lane lane -> lane
+  | Pick_conversation_lane lane | Pick_new_lane lane -> lane
+  | Pick_exact_lane lane -> Standalone_lane.to_id lane
   | Pick_media_failover -> "[runtime].media_failover"
   | Pick_route_default -> "[runtime].default"
 ;;
@@ -1751,8 +1752,8 @@ type planning_mode =
     along so Left/Esc from a run returns to the list it came from. *)
 type lanes_mode =
   | Lanes_overview
-  | Lanes_run_list of string
-  | Lanes_run_detail of string * string
+  | Lanes_run_list of Standalone_lane.t
+  | Lanes_run_detail of Standalone_lane.t * string
   | Lanes_measurement_detail of string
 
 module Measurement = struct
@@ -5129,15 +5130,34 @@ type runtime_config_reading = {
    RGB plus what to title it. The spectator downsamples the pixels itself. *)
 type msx_menu_mode = Boot_game | Change_disk
 
+(* One row of the MSX load menu. The highlight is kept as the row itself, not
+   its position: rows come and go while the menu is open (the DOS watch row
+   follows an asynchronous read), and a position would then name whatever row
+   moved into it -- a cartridge load in place of a watch. *)
+type msx_menu_entry =
+  | Menu_watch of Masc_tui_machine_live.source
+  | Menu_load of string
+  | Menu_swap_disk of string
+
+(* A DOS live read belongs to the view and server port that asked for it.
+   A reopened screen may start a fresh read while an old one is still ending. *)
+type machine_live_request = { live_view : unit ref; live_port : int }
+
+type msx_meta = {
+  msx_mode : string;
+  msx_cartridge : string option;
+  msx_disk : string option;
+  msx_players : string list;  (* who pressed within the server's window, newest first *)
+}
+
+(* [msx_meta] is [None] for a frame read through the live route, which names
+   no mode, media or players; the next tick answer carries them again. *)
 type msx_frame = {
   msx_number : int;
   msx_width : int;
   msx_height : int;
   msx_rgb : string;
-  msx_mode : string;
-  msx_cartridge : string option;
-  msx_disk : string option;
-  msx_players : string list;  (* who pressed within the server's window, newest first *)
+  msx_meta : msx_meta option;
 }
 
 (* A container-log read that has been asked for and not answered. The keeper and
@@ -5187,7 +5207,7 @@ type local_intervention =
    [\[runtime\].media_failover]. Both are an ordered list of runtime ids that
    something walks in turn, and neither is a conversation lane. *)
 type slot_editor_target =
-  | Exact_lane_slots of string
+  | Exact_lane_slots of Standalone_lane.t
   | Media_failover_slots
 
 (* The slot editor: what it was opened on, and where its cursor sits in that
@@ -5199,7 +5219,7 @@ type slot_editor =
   }
 
 let slot_editor_target_name = function
-  | Exact_lane_slots lane -> lane
+  | Exact_lane_slots lane -> Standalone_lane.to_id lane
   | Media_failover_slots -> "[runtime].media_failover"
 ;;
 
@@ -5438,16 +5458,28 @@ type state = {
      the last frame the server handed it and when it last asked. *)
   mutable msx_frame: msx_frame option;
   mutable msx_last_poll_ns: int64;
+  (* Which machine the spectator shows. The menu picks it. *)
+  mutable machine_source: Masc_tui_machine_live.source;
+  (* The last live read of each machine. [msx_live] is [Showing] the picture
+     [msx_frame] holds, with its change mark, whether a live read or a tick
+     answer drew it: the tick returns its picture and mark from one snapshot,
+     so the next live read sends that mark as [since]. *)
+  mutable msx_live: Masc_tui_machine_live.view;
+  mutable dos_live: Masc_tui_machine_live.view;
+  mutable dos_live_in_flight: machine_live_request option;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
      game, so its keys never reach the emulator. [msx_carts] is the inventory
-     the [/carts] poll cached; [msx_menu_index] is the highlighted row. *)
+     the [/carts] poll cached. [msx_menu_selected] is the highlighted row:
+     [None] until the menu has a row to highlight, then the row itself, kept
+     even after an asynchronous read removes it -- Enter then picks nothing
+     rather than the row that moved into its place. *)
   mutable msx_menu_open: bool;
   mutable msx_notice: string option;
   mutable msx_menu_mode: msx_menu_mode;
   mutable msx_carts: string list;
-  mutable msx_menu_index: int;
+  mutable msx_menu_selected: msx_menu_entry option;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -7760,11 +7792,15 @@ let create_state
   msx_open = false;
   msx_frame = None;
   msx_last_poll_ns = 0L;
+  machine_source = Masc_tui_machine_live.Msx;
+  msx_live = Masc_tui_machine_live.Unread;
+  dos_live = Masc_tui_machine_live.Unread;
+  dos_live_in_flight = None;
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;
   msx_carts = [];
-  msx_menu_index = 0;
+  msx_menu_selected = None;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;
@@ -9405,13 +9441,13 @@ let swap_candidates order i j =
    is an append the server applies to the declared order, never a write of
    this list. A lane being created has no candidates yet. *)
 let lane_picker_existing_slots (state : state) = function
-  | Pick_exact_lane name ->
+  | Pick_exact_lane lane ->
     (match state.standalone_lanes with
      | None -> []
      | Some snapshot ->
          snapshot.Tui_decode.sls_lanes
          |> List.find_opt (fun (row : Tui_decode.standalone_lane) ->
-              String.equal row.Tui_decode.sl_lane_id name)
+              Standalone_lane.equal row.Tui_decode.sl_lane lane)
          |> Option.map (fun row ->
               row.Tui_decode.sl_admitted_slots @ row.Tui_decode.sl_cli_slots
               @ row.Tui_decode.sl_dropped_slots)
@@ -9671,13 +9707,13 @@ type slot_editor_row =
 let slot_editor_rows (state : state) =
   match state.slot_editor with
   | None -> []
-  | Some { se_target = Exact_lane_slots lane_id; _ } ->
+  | Some { se_target = Exact_lane_slots target_lane; _ } ->
     (match state.standalone_lanes with
      | None -> []
      | Some snapshot ->
        snapshot.Tui_decode.sls_lanes
        |> List.find_opt (fun (lane : Tui_decode.standalone_lane) ->
-            String.equal lane.Tui_decode.sl_lane_id lane_id)
+            Standalone_lane.equal lane.Tui_decode.sl_lane target_lane)
        |> Option.map (fun (lane : Tui_decode.standalone_lane) ->
             List.map
               (fun slot ->

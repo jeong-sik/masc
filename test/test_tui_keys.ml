@@ -2093,8 +2093,8 @@ let test_without_a_surface_the_order_is_the_strips () =
 (* --- Lanes drill-down: the lane notice, the combined "/" search list, and
    the click geometry of the overview frame. --- *)
 
-let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
-  { Tui_decode.sl_lane_id = lane_id
+let standalone_lane ~(lane : Standalone_lane.t) ~label : Tui_decode.standalone_lane =
+  { Tui_decode.sl_lane = lane
   ; sl_label = label
   ; sl_purpose = None
   ; sl_required = false
@@ -2123,10 +2123,10 @@ let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
 (* The four lanes the projection fixes, in its order
    (server_standalone_lane_projection.ml). *)
 let four_standalone_lanes =
-  [ standalone_lane ~lane_id:"board_attention_exact" ~label:"Board Attention"
-  ; standalone_lane ~lane_id:"hitl_auto_judge" ~label:"HITL Auto Judge"
-  ; standalone_lane ~lane_id:"librarian_exact" ~label:"Librarian"
-  ; standalone_lane ~lane_id:"verifier_exact" ~label:"Verifier"
+  [ standalone_lane ~lane:Standalone_lane.Board_attention ~label:"Board Attention"
+  ; standalone_lane ~lane:Standalone_lane.Hitl_auto_judge ~label:"HITL Auto Judge"
+  ; standalone_lane ~lane:Standalone_lane.Librarian ~label:"Librarian"
+  ; standalone_lane ~lane:Standalone_lane.Verifier ~label:"Verifier"
   ]
 
 let standalone_snapshot lanes : Tui_decode.standalone_lanes_snapshot =
@@ -2224,10 +2224,10 @@ let test_resources_without_a_list_answers_nothing () =
 
 let test_lanes_sub_modes_stay_unsearchable () =
   let state = lanes_state () in
-  state.lanes_mode <- Lanes_run_list "librarian_exact";
+  state.lanes_mode <- Lanes_run_list Standalone_lane.Librarian;
   Alcotest.(check (option (list string))) "run list keeps / closed" None
     (surface_row_texts state Lanes);
-  state.lanes_mode <- Lanes_run_detail ("verifier_exact", "vrf-1");
+  state.lanes_mode <- Lanes_run_detail (Standalone_lane.Verifier, "vrf-1");
   Alcotest.(check (option (list string))) "run detail keeps / closed" None
     (surface_row_texts state Lanes)
 

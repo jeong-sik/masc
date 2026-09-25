@@ -933,7 +933,6 @@ let attempt_runtime_candidates
                 | Keeper_runtime_failure_route.No_progress_truncated
                 | Keeper_runtime_failure_route.Refusal_body_not_received
                 | Keeper_runtime_failure_route.Generation_repeated
-                | Keeper_runtime_failure_route.Attempt_rejected
                 | Keeper_runtime_failure_route.Admission
                 | Keeper_runtime_failure_route.Provider_reported_failure
                 | Keeper_runtime_failure_route.Request_refused
@@ -1571,7 +1570,6 @@ let run_named
     ?on_request_wire_observation
     ?on_request_attribution
     ?official_client_continuation
-    ?official_client_original_turn
     ?official_task_reference
     ?on_official_client_tool_boundary
     ?on_official_client_result_handoff
@@ -2249,7 +2247,6 @@ let run_named
             ~terminal_effect_state
             ?official_client_continuation
             ?official_task_reference
-            ?official_client_original_turn
             ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
@@ -2876,5 +2873,7 @@ module For_testing = struct
 
   let accept_no_progress_should_try_next =
     Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next
+
+  let lane_should_retry = lane_should_retry
 
 end

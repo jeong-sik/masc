@@ -13,6 +13,9 @@
 
 module B = Tool_blob_store
 module M = Tool_blob_maintenance
+
+(* Maintenance reads each workspace's posts where Board writes them. *)
+let board_posts_file = Masc_board_handlers.Board_paths.posts_file
 module O = Tool_output
 
 (* --- Helpers --- *)
@@ -399,6 +402,210 @@ let test_fetch_miss () =
       | Error error ->
           Alcotest.failf "fetch failed: %s" (B.fetch_error_to_string error))
 
+let test_fetch_range_miss_returns_none_fast () =
+  (* A range read on a nonexistent shard must not fall into whole-file
+     materialisation. The cold path opens the descriptor for the bounded
+     range first, so absence is reported as [Ok None] without reading any
+     file contents. *)
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let missing = String.make 64 '0' in
+      match B.fetch_range store ~sha256:missing ~offset:0 ~max_bytes:64 with
+      | Ok None -> ()
+      | Ok (Some _) ->
+        Alcotest.fail "expected None for nonexistent shard"
+      | Error error ->
+        Alcotest.failf
+          "fetch_range on missing shard returned an error: %s"
+          (B.fetch_error_to_string error))
+
+let test_fetch_range_cold_validates_without_materialising () =
+  (* Cold-cache read of a large artifact: the streaming digest path must
+     validate the content address and return the requested window without
+     loading the whole file into memory. We verify behaviour, not
+     allocation: the range content and total must be exact, and the
+     snapshot cache must be populated so a second page is served by
+     bounded I/O. *)
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let size = 1_048_576 in
+      let payload = String.init size (fun i -> Char.chr (i mod 251)) in
+      match B.put store ~bytes:payload ~mime:"application/octet-stream" with
+      | O.Inline _ -> Alcotest.fail "put returned Inline"
+      | O.Stored { sha256; _ } ->
+        (* Reopen so the snapshot cache is cold. *)
+        let cold = B.create ~base_path:dir in
+        (match B.fetch_range cold ~sha256 ~offset:0 ~max_bytes:1024 with
+         | Ok (Some first) ->
+           Alcotest.(check int) "cold range reports total bytes" size
+             first.total_bytes;
+           Alcotest.(check string) "cold range returns exact prefix"
+             (String.sub payload 0 1024)
+             first.content
+         | Ok None ->
+           Alcotest.fail "cold fetch_range returned None"
+         | Error error ->
+           Alcotest.failf
+             "cold fetch_range failed: %s"
+             (B.fetch_error_to_string error));
+        (* Second page hits the now-warm cache: bounded read only. *)
+        (match B.fetch_range cold ~sha256 ~offset:1024 ~max_bytes:512 with
+         | Ok (Some second) ->
+           Alcotest.(check string) "warm range returns exact window"
+             (String.sub payload 1024 512)
+             second.content
+         | Ok None ->
+           Alcotest.fail "warm fetch_range returned None"
+         | Error error ->
+           Alcotest.failf
+             "warm fetch_range failed: %s"
+             (B.fetch_error_to_string error)))
+
+let shard_path_of store sha256 =
+  Filename.concat
+    (Filename.concat (B.root_dir store) (String.sub sha256 0 2))
+    sha256
+
+let test_fetch_range_cold_returns_only_bytes_it_hashed () =
+  (* #38972. A put that repairs a corrupt address (temp+rename) can land
+     while a cold range read is in flight. The shard holds corrupt bytes C
+     when the read starts; the [after_window_read] seam restores the payload
+     P after the window has been read and before the digest admits it. The
+     invariant is "the bytes returned are the bytes hashed": the call either
+     reports that the state it read does not match the address, or returns a
+     window of a state that does — never C's window as verified — and C's
+     snapshot never becomes the cached validated state. The earlier cold
+     branch read the window and hashed through two opens, so the digest
+     covered P while the window came from C; it served C and cached C. *)
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let payload = String.make 8_192 'p' in
+      let corrupt = String.make 8_192 'c' in
+      match B.put store ~bytes:payload ~mime:"text/plain" with
+      | O.Inline _ -> Alcotest.fail "put returned Inline"
+      | O.Stored { sha256; _ } ->
+        let path = shard_path_of store sha256 in
+        let write bytes =
+          match Fs_compat.save_file_atomic path bytes with
+          | Ok () -> ()
+          | Error error -> Alcotest.failf "failed to write fixture: %s" error
+        in
+        let snapshot_now () =
+          match
+            Fs_compat.load_owned_regular_file_with_snapshot
+              ~ownership_root:dir
+              path
+          with
+          | Ok (Some (contents : Fs_compat.owned_regular_file_contents)) ->
+            contents.snapshot
+          | Ok None -> Alcotest.fail "fixture shard is missing"
+          | Error _ -> Alcotest.fail "fixture shard is unreadable"
+        in
+        write corrupt;
+        let corrupt_snapshot = snapshot_now () in
+        Alcotest.(check bool)
+          "the range cache starts cold for this address"
+          true
+          (Option.is_none (B.For_testing.validated_snapshot store ~sha256));
+        let swaps = ref 0 in
+        let after_window_read () =
+          incr swaps;
+          write payload
+        in
+        (match
+           B.For_testing.fetch_range
+             ~after_window_read
+             store
+             ~sha256
+             ~offset:0
+             ~max_bytes:64
+         with
+         | Error (B.Integrity_mismatch _) -> ()
+         | Ok (Some range) ->
+           Alcotest.(check string)
+             "a returned window belongs to a state whose digest matches the address"
+             (String.sub payload 0 64)
+             range.content
+         | Ok None -> Alcotest.fail "fetch_range returned None"
+         | Error error ->
+           Alcotest.failf
+             "fetch_range failed: %s"
+             (B.fetch_error_to_string error));
+        Alcotest.(check int) "the seam ran once, on the cold path" 1 !swaps;
+        Alcotest.(check bool)
+          "the corrupt state is not cached as validated"
+          false
+          (match B.For_testing.validated_snapshot store ~sha256 with
+           | Some cached ->
+             Fs_compat.equal_owned_regular_file_snapshot cached corrupt_snapshot
+           | None -> false);
+        (* The repaired shard serves the next page. *)
+        match B.fetch_range store ~sha256 ~offset:64 ~max_bytes:64 with
+        | Ok (Some range) ->
+          Alcotest.(check string)
+            "the next read serves the repaired payload"
+            (String.sub payload 64 64)
+            range.content
+        | Ok None -> Alcotest.fail "next fetch_range returned None"
+        | Error error ->
+          Alcotest.failf
+            "next fetch_range failed: %s"
+            (B.fetch_error_to_string error))
+
+let test_range_with_sha256_window_is_a_slice_of_the_hashed_bytes () =
+  (* The single-descriptor read copies the window out while the whole file
+     streams through a 64 KiB buffer, so the window arithmetic is the new
+     risk: windows that start inside a chunk, cross a chunk boundary, fill
+     exactly one chunk, run past EOF, start at or past EOF, or are empty. *)
+  with_temp_dir (fun dir ->
+      let store = B.create ~base_path:dir in
+      let size = 200_000 in
+      let payload = String.init size (fun i -> Char.chr ((i * 7 + (i / 251)) mod 256)) in
+      match B.put store ~bytes:payload ~mime:"application/octet-stream" with
+      | O.Inline _ -> Alcotest.fail "put returned Inline"
+      | O.Stored { sha256; _ } ->
+        let path = shard_path_of store sha256 in
+        List.iter
+          (fun (offset, max_bytes) ->
+             let label = Printf.sprintf "offset %d, max %d" offset max_bytes in
+             match
+               Fs_compat.load_owned_regular_file_range_with_sha256
+                 ~ownership_root:dir
+                 ~offset
+                 ~max_bytes
+                 path
+             with
+             | Ok (Some (observed : Fs_compat.owned_regular_file_range_digest)) ->
+               let start = min offset size in
+               Alcotest.(check string)
+                 (label ^ ": window")
+                 (String.sub payload start (min max_bytes (size - start)))
+                 observed.content;
+               Alcotest.(check string)
+                 (label ^ ": digest covers the whole file")
+                 sha256
+                 observed.sha256;
+               Alcotest.(check int)
+                 (label ^ ": snapshot size")
+                 size
+                 observed.snapshot.file_size
+             | Ok None -> Alcotest.failf "%s: shard missing" label
+             | Error error ->
+               Alcotest.failf
+                 "%s: %s"
+                 label
+                 (Fs_compat.owned_regular_file_read_error_to_string error))
+          [ 0, 64
+          ; 65_530, 20
+          ; 65_536, 65_536
+          ; 131_000, 70_000
+          ; 199_990, 64
+          ; size, 64
+          ; size + 5, 64
+          ; 0, 0
+          ; 0, size
+          ])
+
 let test_idempotent_put () =
   (* Same content twice = same sha = same path, no error. *)
   with_temp_dir (fun dir ->
@@ -541,7 +748,7 @@ let test_sharding_layout () =
 (* Fixtures here hold a handful of small files and compete with no startup
    watchdog, so they scan unbounded; the budget path has its own tests. *)
 let maintenance_ok ~base_path ~mode =
-  match M.run ~base_path ~mode with
+  match M.run ~base_path ~board_posts_file ~mode with
   | Ok report -> report
   | Error error ->
     Alcotest.failf "maintenance failed: %s" (M.error_to_string error)
@@ -738,103 +945,283 @@ let test_maintenance_keeps_wire_capture_reference_within_retention () =
         None
         (fetch_ok store ~sha256:dead.sha256))
 
-(* A non-default cluster keeps its Board under .masc/clusters/<name>/, which
-   the maintenance scan does not read. The run must refuse before it can call
-   that post's artifact unreferenced (review of #38835: tick N writes, N+1
-   scans nothing, N+2 marks, N+3 deletes). Written through Board_paths. *)
-let test_maintenance_refuses_clustered_board_reference () =
+(* #38919. Every durable consumer writes under its cluster's workspace root:
+   [.masc] for the default cluster, [.masc/clusters/<name>] for the others.
+   The blob store is one per BasePath, so maintenance reads the same consumer
+   list in every workspace. Fixtures are written where the product writes:
+   Board posts through Board_paths, workspaces through masc_root_dir_from. *)
+let cluster_workspace ~base_path name =
+  Workspace_utils.masc_root_dir_from ~base_path ~cluster_name:name
+
+let write_json_line path json =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file path (Yojson.Safe.to_string json ^ "\n")
+
+let board_post_with_attachment artifact =
+  `Assoc
+    [ ( "meta"
+      , `Assoc
+          [ ( "attachments"
+            , `List
+                [ `Assoc
+                    [ "kind", `String "image"
+                    ; "artifact", O.normalized_artifact_ref_to_json artifact
+                    ]
+                ] )
+          ] )
+    ]
+
+(* (a) An attachment referenced only from a non-default cluster's Board
+   survives two delete passes, and both passes run instead of refusing. *)
+let test_maintenance_keeps_clustered_board_reference () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
       let attached =
         B.put store ~bytes:"clustered board attachment" ~mime:"image/png"
         |> stored_ref_exn
       in
-      let board_posts =
-        Masc_board_handlers.Board_paths.file_path
-          ~workspace_masc_dir:
-            (Workspace_utils.masc_root_dir_from ~base_path ~cluster_name:"secondary")
-          Masc_board_handlers.Board_paths.Posts
-      in
-      Fs_compat.mkdir_p (Filename.dirname board_posts);
-      Fs_compat.save_file
-        board_posts
-        (Yojson.Safe.to_string
-           (`Assoc
-              [ "meta",
-                `Assoc
-                  [ "attachments",
-                    `List
-                      [ `Assoc
-                          [ "kind", `String "image"
-                          ; "artifact", O.normalized_artifact_ref_to_json attached
-                          ]
-                      ]
-                  ]
-              ])
-         ^ "\n");
-      let refuses round =
-        match M.run ~base_path ~mode:M.Delete_previous_candidates with
-        | Error (M.Clustered_durable_roots_uncoordinated _) -> ()
-        | Error error ->
-          Alcotest.failf
-            "round %d: unexpected maintenance error: %s"
-            round
-            (M.error_to_string error)
-        | Ok _ ->
-          Alcotest.failf "round %d: maintenance ran over an unread cluster Board" round
-      in
-      refuses 1;
-      refuses 2;
+      write_json_line
+        (Masc_board_handlers.Board_paths.posts_file
+           ~workspace_masc_dir:(cluster_workspace ~base_path "secondary"))
+        (board_post_with_attachment attached);
+      List.iter
+        (fun round ->
+           let report =
+             maintenance_ok ~base_path ~mode:M.Delete_previous_candidates
+           in
+           Alcotest.(check int)
+             (Printf.sprintf "round %d: the clustered post's attachment is live" round)
+             1
+             report.live_references;
+           Alcotest.(check int)
+             (Printf.sprintf "round %d: nothing deleted" round)
+             0
+             report.deleted)
+        [ 1; 2 ];
       Alcotest.(check (option string))
-        "clustered Board attachment survives two delete runs"
+        "clustered Board attachment survives two delete passes"
         (Some "clustered board attachment")
         (fetch_ok store ~sha256:attached.sha256))
 
-let test_maintenance_rejects_uncoordinated_cluster_roots () =
+(* (a') Posts are not the only per-cluster consumer: tool-call logs follow
+   [Workspace.masc_root_dir config], and wire captures take the workspace
+   root too. A blob referenced only from a clustered tool_calls or
+   wire-capture file survives. *)
+let test_maintenance_keeps_clustered_consumer_references () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
-      let blob =
-        B.put store ~bytes:"cluster-owned output" ~mime:"text/plain"
+      let workspace = cluster_workspace ~base_path "secondary" in
+      let blobs =
+        List.map
+          (fun (relative, bytes) ->
+             let blob = B.put store ~bytes ~mime:"text/plain" |> stored_ref_exn in
+             write_json_line
+               (Filename.concat workspace relative)
+               (`Assoc
+                 [ "response_text", `String (O.encode_for_agent_core (O.Stored blob)) ]);
+             blob, bytes)
+          [ "tool_calls/2026-09-25.jsonl", "clustered tool call output"
+          ; "wire-capture/2026-07/28.jsonl", "clustered wire capture output"
+          ]
+      in
+      List.iter
+        (fun round ->
+           let report =
+             maintenance_ok ~base_path ~mode:M.Delete_previous_candidates
+           in
+           Alcotest.(check int)
+             (Printf.sprintf "round %d: both clustered references are live" round)
+             2
+             report.live_references;
+           Alcotest.(check int)
+             (Printf.sprintf "round %d: nothing deleted" round)
+             0
+             report.deleted)
+        [ 1; 2 ];
+      List.iter
+        (fun ((blob : O.artifact_ref), bytes) ->
+           Alcotest.(check (option string))
+             (bytes ^ " survives two delete passes")
+             (Some bytes)
+             (fetch_ok store ~sha256:blob.sha256))
+        blobs)
+
+(* (b) GC actually runs on a clustered deployment: an unreferenced blob is a
+   candidate after the first pass and is deleted by the second, while the
+   clustered post's attachment stays. *)
+let test_maintenance_collects_unreferenced_blob_in_clustered_deployment () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let attached =
+        B.put store ~bytes:"clustered board attachment" ~mime:"image/png"
         |> stored_ref_exn
       in
-      let cluster_capture =
-        Filename.concat
-          (Common.masc_dir_from_base_path ~base_path)
-          "clusters/secondary/wire-capture/2026-07/28.jsonl"
+      let dead =
+        B.put store ~bytes:"unreferenced clustered output" ~mime:"text/plain"
+        |> stored_ref_exn
       in
-      Fs_compat.mkdir_p (Filename.dirname cluster_capture);
-      Fs_compat.save_file
-        cluster_capture
-        (Yojson.Safe.to_string
-           (`Assoc
-             [ "response_text", `String (O.encode_for_agent_core (O.Stored blob)) ])
-         ^ "\n");
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
-       | Error
-           (M.Clustered_durable_roots_uncoordinated
-             { path; entries }) ->
-         Alcotest.(check string)
-           "exact cluster root"
-           (Filename.concat
-              (Common.masc_dir_from_base_path ~base_path)
-              "clusters")
-           path;
-         Alcotest.(check int) "one cluster entry" 1 entries
-       | Error error ->
-         Alcotest.failf
-           "unexpected clustered maintenance error: %s"
-           (M.error_to_string error)
-       | Ok _ ->
-         Alcotest.fail
-           "shared blob maintenance ran without cross-cluster coordination");
+      write_json_line
+        (Masc_board_handlers.Board_paths.posts_file
+           ~workspace_masc_dir:(cluster_workspace ~base_path "secondary"))
+        (board_post_with_attachment attached);
+      let first = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+      Alcotest.(check int) "first pass records one candidate" 1 first.candidates_recorded;
+      Alcotest.(check int) "first pass deletes nothing" 0 first.deleted;
+      let second = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+      Alcotest.(check int) "second pass deletes the stable candidate" 1 second.deleted;
       Alcotest.(check (option string))
-        "cluster-owned blob remains readable"
-        (Some "cluster-owned output")
-        (fetch_ok store ~sha256:blob.sha256);
+        "the unreferenced blob is gone"
+        None
+        (fetch_ok store ~sha256:dead.sha256);
+      Alcotest.(check (option string))
+        "the clustered attachment stays"
+        (Some "clustered board attachment")
+        (fetch_ok store ~sha256:attached.sha256))
+
+(* (c) A symlink or a special file under clusters/ rejects the pass instead
+   of being skipped: a symlink can point at a real workspace, and skipping a
+   workspace would make its references look dead. Nothing is deleted and no
+   candidate snapshot is published, over two delete passes. A regular file is
+   the one entry that is skipped, see (e). *)
+let test_maintenance_rejects_symlink_or_special_cluster_entry () =
+  List.iter
+    (fun (label, make_entry) ->
+       with_temp_dir (fun base_path ->
+           let store = B.create ~base_path in
+           let bytes = "unreferenced output beside a " ^ label in
+           let dead = B.put store ~bytes ~mime:"text/plain" |> stored_ref_exn in
+           let clusters = Common.clusters_dir_from_base_path ~base_path in
+           Fs_compat.mkdir_p clusters;
+           let entry = Filename.concat clusters "secondary" in
+           make_entry ~base_path entry;
+           List.iter
+             (fun round ->
+                match
+                  M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates
+                with
+                | Error (M.Cluster_workspace_rejected { path; reason = _ }) ->
+                  Alcotest.(check string)
+                    (Printf.sprintf "%s, round %d: the rejected path is the entry" label round)
+                    entry
+                    path
+                | Error error ->
+                  Alcotest.failf
+                    "%s, round %d: unexpected maintenance error: %s"
+                    label
+                    round
+                    (M.error_to_string error)
+                | Ok _ ->
+                  Alcotest.failf
+                    "%s, round %d: maintenance ran over a %s under clusters/"
+                    label
+                    round
+                    label)
+             [ 1; 2 ];
+           Alcotest.(check (option string))
+             (label ^ ": the unreferenced blob is not deleted")
+             (Some bytes)
+             (fetch_ok store ~sha256:dead.sha256);
+           Alcotest.(check bool)
+             (label ^ ": no candidate snapshot is published")
+             false
+             (Sys.file_exists (M.candidate_snapshot_path ~base_path))))
+    [ ( "symbolic link"
+      , fun ~base_path entry ->
+          let target = Filename.concat base_path "elsewhere" in
+          Fs_compat.mkdir_p target;
+          Unix.symlink target entry )
+    ; "named pipe", fun ~base_path:_ entry -> Unix.mkfifo entry 0o600
+    ]
+
+(* (e) A regular file under clusters/ (Finder's .DS_Store) cannot be a
+   workspace, so it is skipped by name instead of stopping maintenance on
+   every Mac that opened the directory. The pass beside it still reads the
+   real cluster: its Board attachment stays live, the unreferenced blob is
+   collected on the second pass, and both reports name the skipped file. *)
+let test_maintenance_skips_regular_file_cluster_entry () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let attached =
+        B.put store ~bytes:"attachment beside a .DS_Store" ~mime:"image/png"
+        |> stored_ref_exn
+      in
+      let dead =
+        B.put store ~bytes:"unreferenced output beside a .DS_Store" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      write_json_line
+        (Masc_board_handlers.Board_paths.posts_file
+           ~workspace_masc_dir:(cluster_workspace ~base_path "secondary"))
+        (board_post_with_attachment attached);
+      let ds_store =
+        Filename.concat (Common.clusters_dir_from_base_path ~base_path) ".DS_Store"
+      in
+      Fs_compat.save_file ds_store "Finder metadata";
+      List.iter
+        (fun (round, deleted) ->
+           let report = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+           Alcotest.(check (list string))
+             (Printf.sprintf "round %d: the report names the skipped file" round)
+             [ ds_store ]
+             report.skipped_cluster_files;
+           Alcotest.(check int)
+             (Printf.sprintf "round %d: the clustered attachment is live" round)
+             1
+             report.live_references;
+           Alcotest.(check int)
+             (Printf.sprintf "round %d: deleted" round)
+             deleted
+             report.deleted)
+        [ 1, 0; 2, 1 ];
+      Alcotest.(check (option string))
+        "the unreferenced blob is collected"
+        None
+        (fetch_ok store ~sha256:dead.sha256);
+      Alcotest.(check (option string))
+        "the clustered attachment stays"
+        (Some "attachment beside a .DS_Store")
+        (fetch_ok store ~sha256:attached.sha256);
       Alcotest.(check bool)
-        "cluster refusal does not publish a candidate snapshot"
-        false
-        (Sys.file_exists (M.candidate_snapshot_path ~base_path)))
+        "the skipped file is left alone"
+        true
+        (Sys.file_exists ds_store))
+
+(* (d) The second fail-closed rule: a cluster that appears while the pass is
+   reading was never scanned, so its references would look dead. The
+   [after_scan] seam creates one after every workspace has been read and
+   before the cluster set is confirmed. The pass must be rejected on the
+   clusters directory and delete nothing, even though the first pass already
+   recorded the unreferenced blob as a candidate, so the second pass would
+   otherwise delete it. *)
+let test_maintenance_rejects_a_cluster_set_that_changes_during_the_scan () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let bytes = "unreferenced output while the cluster set changes" in
+      let dead = B.put store ~bytes ~mime:"text/plain" |> stored_ref_exn in
+      Fs_compat.mkdir_p (cluster_workspace ~base_path "secondary");
+      let first = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int) "first pass records the candidate" 1 first.candidates_recorded;
+      let clusters = Common.clusters_dir_from_base_path ~base_path in
+      let after_scan () = Fs_compat.mkdir_p (cluster_workspace ~base_path "tertiary") in
+      (match
+         M.For_testing.run
+           ~after_scan
+           ~base_path
+           ~board_posts_file
+           ~mode:M.Delete_previous_candidates
+       with
+       | Error (M.Cluster_workspace_rejected { path; reason = _ }) ->
+         Alcotest.(check string) "the rejected path is the clusters directory" clusters path
+       | Error error ->
+         Alcotest.failf "unexpected maintenance error: %s" (M.error_to_string error)
+       | Ok report ->
+         Alcotest.failf
+           "maintenance accepted a pass the cluster set changed under (deleted %d)"
+           report.deleted);
+      Alcotest.(check (option string))
+        "the candidate from the first pass is not deleted"
+        (Some bytes)
+        (fetch_ok store ~sha256:dead.sha256))
 
 let test_maintenance_malformed_reference_fails_closed () =
   with_temp_dir (fun base_path ->
@@ -850,7 +1237,7 @@ let test_maintenance_malformed_reference_fails_closed () =
       in
       Fs_compat.mkdir_p (Filename.dirname source);
       Fs_compat.save_file source "{\"output\":\"[masc:blob sha256=garbage]\"}\n";
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+      (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
        | Error (M.Malformed_artifact_reference { path; line; _ }) ->
          Alcotest.(check string) "exact malformed source" source path;
          Alcotest.(check int) "exact malformed line" 1 line
@@ -882,7 +1269,7 @@ let test_maintenance_noncanonical_reference_fails_closed () =
         (Yojson.Safe.to_string
            (`String
              (O.encode_for_agent_core (O.Stored blob) ^ " trailing text")));
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+      (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
        | Error (M.Malformed_artifact_reference { path; line; offset; _ }) ->
          Alcotest.(check string) "exact noncanonical source" source path;
          Alcotest.(check int) "exact malformed line" 1 line;
@@ -1167,7 +1554,7 @@ let test_maintenance_rejects_malformed_typed_result_manifest () =
         checkpoint
         (Yojson.Safe.to_string
            (`String (O.encode_for_agent_core (O.Stored manifest))));
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+      (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
        | Error (M.Artifact_manifest_invalid { sha256; _ }) ->
          Alcotest.(check string) "exact malformed manifest" manifest.sha256 sha256
        | Error error ->
@@ -1202,7 +1589,7 @@ let test_maintenance_malformed_normalized_blob_fails_closed () =
                    ] )
              ])
          ^ "\n");
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+      (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
        | Error
            (M.Malformed_structured_artifact_reference
              { path; line; _ }) ->
@@ -1300,7 +1687,7 @@ let test_maintenance_truncated_normalized_blob_fails_closed () =
       Fs_compat.save_file
         tool_call_log
         ("{\"output\":" ^ complete_reference);
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+      (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
        | Error
            (M.Malformed_structured_artifact_reference
              { path; line; _ }) ->
@@ -1327,7 +1714,7 @@ let test_maintenance_unlink_failure_is_typed () =
       Fs_compat.mkdir_p shard_dir;
       Unix.mkdir (Filename.concat shard_dir sha256) 0o755;
       ignore (maintenance_ok ~base_path ~mode:M.Observe_only);
-      match M.run ~base_path ~mode:M.Delete_previous_candidates with
+      match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
       | Error
           (M.Blob_delete_failed
             { Tool_blob_store.sha256 = actual; _ }) ->
@@ -1348,7 +1735,7 @@ let test_maintenance_rejects_symbolic_link_shard () =
         (Filename.concat outside (String.make 64 'a'))
         "outside";
       Unix.symlink outside (Filename.concat (B.root_dir store) "aa");
-      match M.run ~base_path ~mode:M.Observe_only with
+      match M.run ~base_path ~board_posts_file ~mode:M.Observe_only with
       | Error (M.Blob_listing_failed { Tool_blob_store.path; _ }) ->
         Alcotest.(check string)
           "exact symbolic-link shard"
@@ -1380,7 +1767,7 @@ let test_maintenance_rejects_symbolic_link_durable_source () =
       in
       Fs_compat.mkdir_p (Filename.dirname linked_source);
       Unix.symlink outside linked_source;
-      (match M.run ~base_path ~mode:M.Observe_only with
+      (match M.run ~base_path ~board_posts_file ~mode:M.Observe_only with
        | Error (M.Durable_source_stat_failed { path; _ }) ->
          Alcotest.(check string) "exact linked source" linked_source path
        | Error error ->
@@ -1412,7 +1799,7 @@ let test_maintenance_rejects_symbolic_link_candidate_snapshot () =
              ]));
       Sys.remove candidate_path;
       Unix.symlink outside candidate_path;
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+      (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
        | Error (M.Candidate_snapshot_read_failed { path; _ }) ->
          Alcotest.(check string) "exact linked snapshot" candidate_path path
        | Error error ->
@@ -1601,6 +1988,14 @@ let () =
             test_put_then_fetch_bounded_ranges;
           Alcotest.test_case "changed range snapshot revalidates digest" `Quick
             test_fetch_range_revalidates_changed_snapshot;
+          Alcotest.test_case "fetch range miss = None without content read" `Quick
+            test_fetch_range_miss_returns_none_fast;
+          Alcotest.test_case "cold fetch range validates without materialising" `Quick
+            test_fetch_range_cold_validates_without_materialising;
+          Alcotest.test_case "cold fetch range returns only bytes it hashed" `Quick
+            test_fetch_range_cold_returns_only_bytes_it_hashed;
+          Alcotest.test_case "range digest window is a slice of the hashed bytes" `Quick
+            test_range_with_sha256_window_is_a_slice_of_the_hashed_bytes;
           Alcotest.test_case "fetch miss = None" `Quick test_fetch_miss;
           Alcotest.test_case "idempotent put" `Quick test_idempotent_put;
           Alcotest.test_case "put writes an address again only after fetch finds it gone" `Quick
@@ -1640,13 +2035,29 @@ let () =
             `Quick
             test_maintenance_keeps_wire_capture_reference_within_retention;
           Alcotest.test_case
-            "maintenance rejects uncoordinated cluster roots"
+            "maintenance keeps a clustered Board reference"
             `Quick
-            test_maintenance_rejects_uncoordinated_cluster_roots;
+            test_maintenance_keeps_clustered_board_reference;
           Alcotest.test_case
-            "maintenance refuses a clustered Board reference"
+            "maintenance keeps clustered tool_calls and wire-capture references"
             `Quick
-            test_maintenance_refuses_clustered_board_reference;
+            test_maintenance_keeps_clustered_consumer_references;
+          Alcotest.test_case
+            "maintenance collects an unreferenced blob in a clustered deployment"
+            `Quick
+            test_maintenance_collects_unreferenced_blob_in_clustered_deployment;
+          Alcotest.test_case
+            "maintenance rejects a symlink or special file under clusters"
+            `Quick
+            test_maintenance_rejects_symlink_or_special_cluster_entry;
+          Alcotest.test_case
+            "maintenance skips a regular file under clusters and reports it"
+            `Quick
+            test_maintenance_skips_regular_file_cluster_entry;
+          Alcotest.test_case
+            "maintenance rejects a cluster set that changes during the scan"
+            `Quick
+            test_maintenance_rejects_a_cluster_set_that_changes_during_the_scan;
           Alcotest.test_case
             "maintenance ignores repository mirrors"
             `Quick

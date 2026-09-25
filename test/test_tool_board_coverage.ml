@@ -243,6 +243,11 @@ let json_member_list json key =
   | `List values -> values
   | _ -> Alcotest.failf "expected list field %s" key
 
+let json_lacks_field json key =
+  match json with
+  | `Assoc fields -> not (List.mem_assoc key fields)
+  | _ -> false
+
 (* RFC-0393: keeper-ness is a registry lookup, not a name shape. With no
    registered keeper, the old wrapper spelling is an ordinary agent name —
    nothing is recovered from the string. *)
@@ -319,7 +324,9 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   Alcotest.(check int) "post reaction count" 1
     (json_member_int post_summary "count");
   Alcotest.(check bool) "post reaction selected" true
-    (json_member_bool post_summary "has_reacted");
+    (json_member_bool post_summary "reacted");
+  Alcotest.(check bool) "post reaction has one selection field" true
+    (json_lacks_field post_summary "has_reacted");
   let comment_reactions =
     Server_utils.board_reactions_for_comment ~voter:(Some "reactor") ~comment_id
   in
@@ -334,7 +341,9 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   Alcotest.(check string) "comment reaction emoji" "👏"
     (json_member_string comment_summary "emoji");
   Alcotest.(check bool) "comment reaction selected" true
-    (json_member_bool comment_summary "has_reacted")
+    (json_member_bool comment_summary "reacted");
+  Alcotest.(check bool) "comment reaction has one selection field" true
+    (json_lacks_field comment_summary "has_reacted")
 
 let test_inline_board_post_author_rewrites_caller_claim () =
   let args =

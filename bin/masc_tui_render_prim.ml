@@ -962,7 +962,8 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
     | Observer_off -> Pane.Feed_off
     | Observer_opening -> Pane.Feed_opening
     | Observer_live { events; _ } -> Pane.Feed_live events
-    | Observer_closed { reason; _ } -> Pane.Feed_closed reason
+    | Observer_closed_before_answer { reason; _ }
+    | Observer_closed_after_live { reason; _ } -> Pane.Feed_closed reason
   in
   (* This input is built only when the pane is visible. Changes does not
      consume event chunks, so retain the previous projection without folding. *)

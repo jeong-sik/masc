@@ -464,13 +464,13 @@ let route_of error =
     error
 
 (* Rows where the walk and the route answer differently on purpose, with the
-   reason. A context overflow ends this candidate's attempt, and the route
-   reports it as a terminal fact about the turn's size; the walk still asks
-   a later candidate whose window may be larger ([lane_should_retry]). *)
-let walk_and_route_differ_on_purpose =
-  [ "api:context_overflow", "overflow: the walk tries a larger window"
-  ; "projection:capacity_refusal", "overflow: the walk tries a larger window"
-  ]
+   reason. Empty since #38984: a context overflow used to be routed as a
+   terminal fact about the turn's size while the walk still asked a later
+   candidate whose window may be larger ([lane_should_retry]). The route now
+   rotates on it too ([Context_window_exceeded]), so both overflow rows
+   (api:context_overflow, projection:capacity_refusal) agree with the walk.
+   A new entry needs a reason the two sides must disagree. *)
+let walk_and_route_differ_on_purpose : (string * string) list = []
 
 let test_walk_rotates_where_the_route_says_it_does () =
   (* Rows the check must cover on each side. Without them the loop below

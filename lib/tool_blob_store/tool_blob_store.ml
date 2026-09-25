@@ -354,12 +354,8 @@ let fetch_range_with ~between_reads t ~sha256 ~offset ~max_bytes =
            remove_validated_snapshot path;
            forget_written path;
            Ok None
-         | Ok (Some (hashed : Fs_compat.owned_regular_file_digest))
-           when not
-                  (Fs_compat.equal_owned_regular_file_snapshot
-                     snapshot
-                     hashed.snapshot) ->
-           validate_whole_snapshot ()
+         (* INTENDED RED control for #38979: the snapshot comparison is
+            removed. Do not merge. *)
          | Ok (Some (hashed : Fs_compat.owned_regular_file_digest)) ->
            let actual = hashed.sha256 in
            if String.equal sha256 actual

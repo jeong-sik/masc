@@ -305,7 +305,13 @@ open Alcotest
    main was already this wide when that entry was written from a local
    measurement; nothing is added here. Where the 527 bytes came from was not
    traced. No headroom. *)
-let ceiling_bytes = 123_620
+(* 2026-09-25: +389 rendered bytes, the production renderer's rules replayed
+   on the two changed files (not a CI reading). masc_board_curation_submit's
+   tag_suggestions (+167) and answer_matches (+196) and keeper_spawn's argv
+   (+26) now declare their items. Gemini refused every Antigravity request
+   that carried an array without items, and #38588 made this deferred tool
+   part of every such request. No headroom. *)
+let ceiling_bytes = 124_009
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

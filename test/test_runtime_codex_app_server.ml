@@ -5503,13 +5503,22 @@ let test_live_developer_context_comparison () =
               (match !observed_model with
                | None -> observed_model := Some result.model
                | Some model -> check string "same model across comparison" model result.model);
+              (* The newest request's counts, as the experiment compares
+                 them; a compaction estimate or a replaced count is not a
+                 request. *)
               let usage = match result.usage with
-                | None -> `Null
-                | Some usage -> `Assoc
+                | Some
+                    (Runtime_codex_app_server.Thread_count
+                      { last = Runtime_codex_app_server.Request_usage usage; _ }) -> `Assoc
                     [ "input_tokens", `Int usage.input_tokens
                     ; "cache_read_tokens", `Int usage.cached_input_tokens
                     ; "output_tokens", `Int usage.output_tokens
-                    ; "reasoning_output_tokens", `Int usage.reasoning_output_tokens ] in
+                    ; "reasoning_output_tokens", `Int usage.reasoning_output_tokens ]
+                | Some
+                    (Runtime_codex_app_server.Thread_count
+                      { last = Runtime_codex_app_server.Context_estimate { estimated_tokens }; _ }) ->
+                  `Assoc [ "estimated_context_tokens", `Int estimated_tokens ]
+                | Some Runtime_codex_app_server.Thread_count_replaced | None -> `Null in
               print_endline (Yojson.Safe.to_string (`Assoc
                 [ "experiment", `String "developer-context-placement"
                 ; "arm", `String (match arm with `Rewrite -> "rewrite" | `Append -> "append")

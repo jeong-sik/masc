@@ -10,8 +10,6 @@ type 'session opener =
 
 type 'session opened =
   { session : 'session
-  ; tabs : Executor.Tabs.t
-  ; page_slot : Eio.Semaphore.t
   ; release : unit Eio.Promise.u
   ; stopped : unit Eio.Promise.t
   ; ended : string option ref  (* the first reason the session stopped working *)
@@ -33,6 +31,8 @@ type 'session t =
   ; pid : 'session -> int
   ; log : Session.event -> unit
   ; requests : request Eio.Stream.t
+  ; tabs : Executor.Tabs.t  (* for the backend's life, so an id is never reused *)
+  ; verbs : Eio.Semaphore.t  (* one page verb at a time *)
   ; mutable state : 'session state
   }
 
@@ -57,10 +57,11 @@ let note_end ended event =
     match event with
     | Session.Worker_detached -> Some "the service worker went away"
     | Session.Connection_ended reason -> Some ("the connection ended: " ^ reason)
-    | Session.Model_request_refused _ | Session.Model_failed _ | Session.Unsupported_request _
+    (* The session ends with an answer it could not deliver. *)
+    | Session.Reply_not_delivered detail -> Some ("an answer to the extension was not delivered: " ^ detail)
+    | Session.Runtime_ready _ | Session.Model_request_refused _ | Session.Model_failed _ | Session.Unsupported_request _
     | Session.Unsupported_notification _ | Session.Extension_log _ | Session.Malformed_message _
-    | Session.Unexpected_response _ | Session.Abandoned_call_ended _ | Session.Reply_not_delivered _
-    | Session.Malformed_cdp_event _ -> None
+    | Session.Unexpected_response _ | Session.Abandoned_call_ended _ | Session.Malformed_cdp_event _ -> None
   in
   match !ended, reason with
   | None, Some _ -> ended := reason
@@ -96,7 +97,8 @@ let run_session t ~headless ~opened ~resolve_opened =
         not_opened detail
       | Ok (session, _init) ->
         let released, release = Eio.Promise.create () in
-        t.state <- Open { session; tabs = Executor.Tabs.create (); page_slot = Eio.Semaphore.make 1; release; stopped; ended };
+        Executor.Tabs.forget_pages t.tabs;
+        t.state <- Open { session; release; stopped; ended };
         Eio.Promise.resolve resolve_opened (Ok ());
         Eio.Promise.await released)
   with
@@ -160,23 +162,27 @@ let status t =
   answered (`Assoc fields)
 ;;
 
-(* One page verb may make several Stagehand calls. Keep its guard, native
-   input and receipt together, as well as goto and its summary. A caller
-   cancelled while queued never starts its verb or retires the session. *)
-let page t ~mark_started verb =
-  match t.state with
-  | Open opened ->
-    Eio.Semaphore.acquire opened.page_slot;
-    (* [release] does not suspend; unlike a mutex, a cancelled or raising
-       page verb cannot poison the slot for later callers. *)
-    Fun.protect ~finally:(fun () -> Eio.Semaphore.release opened.page_slot) (fun () ->
-      match t.state with
-      | Open current when current == opened ->
-        mark_started ();
-        Executor.execute ~tabs:opened.tabs ~call:(t.call opened.session) verb
-      | Closed | Opening | Closing | Open _ -> no_session)
-  | Closed | Opening | Closing -> no_session
+(* A verb's calls -- a pointer's guard, input and receipt, a navigation and
+   its summary -- must not interleave with another verb's, which the
+   session's one-call slot alone allows: a click would land on a page its
+   guard never checked. The automation lane holds its session lock for a
+   whole verb the same way. *)
+let page t ~began verb =
+  Eio.Semaphore.acquire t.verbs;
+  (* fun-protect-finally-ok: [Eio.Semaphore.release] does not suspend; the
+     slot comes back on return, exception and cancellation, and unlike
+     [Eio.Mutex] the semaphore is not poisoned by an exception. *)
+  Fun.protect ~finally:(fun () -> Eio.Semaphore.release t.verbs) (fun () ->
+    match t.state with
+    | Open opened ->
+      began ();
+      Executor.execute ~tabs:t.tabs ~call:(t.call opened.session) verb
+    | Closed | Opening | Closing -> no_session)
 ;;
+
+(* Whether a page verb got the verb slot and began sending: a caller that
+   leaves while still queued sent nothing, so no call of its is abandoned. *)
+type verb_progress = Queued | Began
 
 (* A verb's exception answers its own request instead of failing the switch
    every request is served on. Cancellation passes through. *)
@@ -222,7 +228,7 @@ let serve t { verb; reply; caller_left } =
   | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _ | Browser_lane.Page_instruct _
   | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ ->
     let requested_session = match t.state with Open opened -> Some opened | Closed | Opening | Closing -> None in
-    let call_started = ref false in
+    let progress = ref Queued in
     (* A caller that leaves cancels the call it asked for; the session then
        holds it as abandoned until the runtime answers it or the sentence
        session is retired below. *)
@@ -231,10 +237,13 @@ let serve t { verb; reply; caller_left } =
          ~watcher:(fun () ->
            Eio.Promise.await caller_left;
            None)
-         (fun () -> Some (guarded (fun () -> page t ~mark_started:(fun () -> call_started := true) verb)))
+         (fun () -> Some (guarded (fun () -> page t ~began:(fun () -> progress := Began) verb)))
      with
      | Some answer -> Eio.Promise.resolve reply answer
-     | None -> if is_sentence verb && !call_started then retire_sentence_session t requested_session)
+     | None ->
+       (match !progress with
+        | Began when is_sentence verb -> retire_sentence_session t requested_session
+        | Began | Queued -> ()))
 ;;
 
 let create ~sw ~clock ~open_session ~call ~pid ~log =
@@ -246,6 +255,8 @@ let create ~sw ~clock ~open_session ~call ~pid ~log =
     ; pid
     ; log
     ; requests = Eio.Stream.create max_int
+    ; tabs = Executor.Tabs.create ()
+    ; verbs = Eio.Semaphore.make 1
     ; state = Closed
     }
   in

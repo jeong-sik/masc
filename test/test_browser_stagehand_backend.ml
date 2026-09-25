@@ -62,20 +62,20 @@ let with_backend ?(configure = ignore) ?(call_hook = fun _ -> None) f =
     | Some answer -> answer
     | None ->
       (match request with
-    | Wire.Context_pages -> Ok (`List [ page ])
-    | Wire.Context_active_page -> Ok page
-    | Wire.Page_evaluate _ -> Ok summary
-    | Wire.Close ->
-      if behaviour.close_answers then Ok (`Assoc [ "closed", `Bool true ]) else Eio.Promise.await never
-    | Wire.Act _ ->
-      (match Eio.Promise.await never with
-       | answer -> answer
-       | exception (Eio.Cancel.Cancelled _ as exn) ->
-         behaviour.act_cancelled <- true;
-         raise exn)
-    | Wire.Init _ | Wire.Observe _ | Wire.Extract _ | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_click _
-    | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ ->
-      failf "the backend sent %s" (Wire.method_name request))
+       | Wire.Context_pages -> Ok (`List [ page ])
+       | Wire.Context_active_page -> Ok page
+       | Wire.Page_evaluate _ -> Ok summary
+       | Wire.Close ->
+         if behaviour.close_answers then Ok (`Assoc [ "closed", `Bool true ]) else Eio.Promise.await never
+       | Wire.Act _ ->
+         (match Eio.Promise.await never with
+          | answer -> answer
+          | exception (Eio.Cancel.Cancelled _ as exn) ->
+            behaviour.act_cancelled <- true;
+            raise exn)
+       | Wire.Observe _ | Wire.Extract _ | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_click _
+       | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ ->
+         failf "the backend sent %s" (Wire.method_name request))
   in
   let backend = Backend.create ~sw ~clock ~open_session ~call ~pid:(fun _ -> 42) ~log:ignore in
   f { backend; sessions; behaviour; settle = (fun () -> Eio.Time.sleep clock settle_s) }
@@ -185,11 +185,85 @@ let test_sentence_caller_retires_its_session () =
   check int "two distinct sessions existed" 2 (List.length !(h.sessions))
 ;;
 
+(* A tab id read before a close reaches no page after the next open, even
+   when the new session's first page has the same page id. *)
+let test_tab_ids_do_not_cross_sessions () =
+  with_backend
+  @@ fun h ->
+  ignore (data (Backend.execute h.backend open_));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  ignore (data (Backend.execute h.backend Lane.Session_close));
+  ignore (data (Backend.execute h.backend open_));
+  (match data (Backend.execute h.backend Lane.Tabs_list) with
+   | `List [ tab ] -> check int "the new session's page gets a new id" 1 Yojson.Safe.Util.(member "id" tab |> to_int)
+   | _ -> fail "the new session lists its page");
+  match Backend.execute h.backend (Lane.Page_goto { url = "http://127.0.0.1:1/next"; tab_id = Some 0 }) with
+  | Lane.Rejected_before_effect _ -> ()
+  | _ -> fail "an id from the closed session is refused before effect"
+;;
+
+(* A page verb waits while another is in flight: the session's one-call slot
+   alone would let a second verb's calls run between a first verb's. *)
+let test_page_verbs_take_turns () =
+  with_backend
+  @@ fun h ->
+  ignore (data (Backend.execute h.backend open_));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  Eio.Switch.run
+  @@ fun sw ->
+  let leave, left = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    try
+      Eio.Switch.run (fun caller ->
+        Eio.Fiber.fork ~sw:caller (fun () ->
+          ignore (Backend.execute h.backend (Lane.Page_instruct { tab_id = 0; instruction = "click Buy" })));
+        Eio.Promise.await leave;
+        Eio.Switch.fail caller Exit)
+    with
+    | Exit -> ());
+  h.settle ();
+  let listed = Eio.Fiber.fork_promise ~sw (fun () -> Backend.execute h.backend Lane.Tabs_list) in
+  h.settle ();
+  check bool "the second verb waits for the first" false (Eio.Promise.is_resolved listed);
+  Eio.Promise.resolve left ();
+  h.settle ();
+  check bool "and runs once the first has ended" true (Eio.Promise.is_resolved listed)
+;;
+
+(* A sentence whose caller leaves while it still waits for the verb slot sent
+   nothing, so the session is not retired on its account. *)
+let test_a_queued_caller_leaves_the_session_open () =
+  with_backend
+  @@ fun h ->
+  ignore (data (Backend.execute h.backend open_));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  Eio.Switch.run
+  @@ fun sw ->
+  let instruct = Lane.Page_instruct { tab_id = 0; instruction = "click Buy" } in
+  let first_leave, first_left = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    try
+      Eio.Switch.run (fun caller ->
+        Eio.Fiber.fork ~sw:caller (fun () -> ignore (Backend.execute h.backend instruct));
+        Eio.Promise.await first_leave;
+        Eio.Switch.fail caller Exit)
+    with
+    | Exit -> ());
+  h.settle ();
+  leave_during h instruct;
+  h.settle ();
+  check bool "the queued caller's leaving stopped nothing" false (the_session h).stopped;
+  check bool "the session is still open" true (is_open h);
+  Eio.Promise.resolve first_left ();
+  h.settle ();
+  check bool "the sentence that began retires the session when its caller leaves" true (the_session h).stopped
+;;
+
 (* The guard of one pointer verb must still own the page when its native
    input arrives. A navigation queued during the guard cannot run between
    that guard and the click. A sentence cancelled while queued must not
    retire the active session either. *)
-let test_pointer_guard_and_input_keep_the_page_slot () =
+let test_pointer_guard_and_input_keep_the_verb_slot () =
   let guard_entered, mark_guard = Eio.Promise.create () in
   let release_guard, allow_guard = Eio.Promise.create () in
   let recording = ref false and evaluations = ref 0 and trace = ref [] in
@@ -218,7 +292,7 @@ let test_pointer_guard_and_input_keep_the_page_slot () =
     | Wire.Page_goto _ when !recording ->
       note "goto";
       Some (Ok (`Assoc [ "page", page ]))
-    | Wire.Init _ | Wire.Close | Wire.Act _ | Wire.Observe _ | Wire.Extract _ | Wire.Context_pages
+    | Wire.Close | Wire.Act _ | Wire.Observe _ | Wire.Extract _ | Wire.Context_pages
     | Wire.Context_active_page | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_evaluate _
     | Wire.Page_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ -> None
   in
@@ -275,6 +349,16 @@ let test_status_reports_an_ended_session () =
   check string "why it stopped working" "the connection ended: Chromium exited" (text "ended" status)
 ;;
 
+let test_status_reports_an_undelivered_answer () =
+  with_backend
+  @@ fun h ->
+  ignore (data (Backend.execute h.backend open_));
+  (the_session h).log (Session.Reply_not_delivered "Execution context was destroyed.");
+  let status = data (Backend.execute h.backend Lane.Session_status) in
+  check string "why it stopped working" "an answer to the extension was not delivered: Execution context was destroyed."
+    (text "ended" status)
+;;
+
 let () =
   run "browser_stagehand_backend" [
     "lifecycle", [
@@ -283,11 +367,15 @@ let () =
       test_case "a failed or raising open leaves the backend usable" `Quick test_open_failures;
       test_case "an open finishes after its caller leaves" `Quick test_open_outlives_its_caller;
       test_case "close waits for the runtime only so long" `Quick test_close_does_not_wait_forever;
+      test_case "tab ids do not cross sessions" `Quick test_tab_ids_do_not_cross_sessions;
+      test_case "page verbs take turns" `Quick test_page_verbs_take_turns;
+      test_case "a caller who leaves while queued leaves the session open" `Quick test_a_queued_caller_leaves_the_session_open;
       test_case "status reports why a session ended" `Quick test_status_reports_an_ended_session;
+      test_case "status reports an answer the session could not deliver" `Quick test_status_reports_an_undelivered_answer;
     ];
     "callers", [
       test_case "a sentence whose caller leaves retires its session" `Quick test_sentence_caller_retires_its_session;
-      test_case "pointer guard and input exclude navigation" `Quick test_pointer_guard_and_input_keep_the_page_slot;
+      test_case "pointer guard and input exclude navigation" `Quick test_pointer_guard_and_input_keep_the_verb_slot;
     ];
   ]
 ;;

@@ -20642,6 +20642,9 @@ and is loaded on demand through keeper_skill.
                  | "a" when not (busy view) ->
                      state.browser_lane <- Some (switch_source Automation view);
                      refresh_browser_lane state ~mailbox:async_messages
+                 | "c" when not (busy view) ->
+                     state.browser_lane <- Some (switch_source Stagehand view);
+                     refresh_browser_lane state ~mailbox:async_messages
                  | "j" | "down" | "k" | "up" ->
                      let delta = if key = "j" || key = "down" then 1 else -1 in
                      state.browser_lane <- Some { view with client_picker = Some

@@ -22,6 +22,13 @@ module Tabs = struct
   ;;
 
   let page_of_id t id = Hashtbl.find_opt t.by_id id
+
+  (* [next] is kept: an id handed out for a page of an earlier session is
+     never handed out again. *)
+  let forget_pages t =
+    Hashtbl.reset t.by_page;
+    Hashtbl.reset t.by_id
+  ;;
 end
 
 type call = Wire.call -> (Yojson.Safe.t, Session.call_failure) result
@@ -32,7 +39,6 @@ let failure_message = function
   | Session.Connection_gone reason -> "the Stagehand connection ended: " ^ reason
   | Session.Abandoned_call_pending -> "a Stagehand call whose caller left has not answered yet"
   | Session.Not_delivered detail -> "the call did not reach Stagehand: " ^ detail
-  | Session.Answer_unreceived seconds -> Printf.sprintf "Stagehand did not answer within %.0f s" seconds
   | Session.Rejected { code; message } -> Printf.sprintf "Stagehand refused the call (%d): %s" code message
   | Session.Lost detail -> "Stagehand did not answer: " ^ detail
 ;;
@@ -52,7 +58,7 @@ let answer_before_effect failure =
   match failure with
   | Session.Not_attached | Session.Detached | Session.Connection_gone _ | Session.Abandoned_call_pending
   | Session.Not_delivered _ -> Browser_lane.Rejected_before_effect (failure_message failure)
-  | Session.Answer_unreceived _ | Session.Rejected _ | Session.Lost _ -> Browser_lane.Refused (failure_message failure)
+  | Session.Rejected _ | Session.Lost _ -> Browser_lane.Refused (failure_message failure)
 ;;
 
 (* For calls sent up to and including the verb's effect. *)
@@ -86,9 +92,15 @@ let active_of = function
 
 type page_runtime = Scene_runtime | No_runtime
 
+(* The body's result goes back as a JSON string, and a throw as an object
+   carrying its message: Stagehand words an uncaught throw by its CDP text,
+   which is "Uncaught" for every throw, so the page script's reason
+   (page_url_changed, scene_document_changed, ...) would not reach the
+   caller. A string and an object cannot be mistaken for each other. *)
 let evaluate_expression ~runtime ~body ~args =
   let runtime = match runtime with Scene_runtime -> Browser_scene_script.runtime | No_runtime -> "" in
-  Printf.sprintf "(function(args) { %s\nreturn JSON.stringify((function(){ %s }).call(null, args)); })(%s)"
+  Printf.sprintf
+    "(function(args) { %s\ntry { return JSON.stringify((function(){ %s }).call(null, args)); } catch (e) { return {thrown: String(e !== null && typeof e === 'object' && 'message' in e ? e.message : e)}; } })(%s)"
     runtime body (Yojson.Safe.to_string args)
 ;;
 
@@ -99,6 +111,9 @@ let evaluate ~runtime ~send ?(args = `Null) page_id body =
     (match Yojson.Safe.from_string encoded with
      | json -> Ok json
      | exception Yojson.Json_error _ -> Error (malformed "page.evaluate" "a JSON result"))
+  (* The reason passes through as the automation lane passes it. Whether it
+     came before or after the verb's effect is the caller's to say. *)
+  | Some (`Assoc [ "thrown", `String reason ]) -> Error (Browser_lane.Refused reason)
   | Some _ | None -> Error (malformed "page.evaluate" "the script's JSON string")
 ;;
 

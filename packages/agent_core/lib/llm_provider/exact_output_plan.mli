@@ -19,10 +19,12 @@ type output_admission_error =
   | Global_admission_not_allowed
   | Invalid_connect_timeout of float
   | Invalid_body_timeout of float
-  | Missing_deadline
+  | Missing_deadline of { provider_id : string option }
       (** No body timeout is declared. The connect timeout ends at the
           response headers, so without a body timeout the response body is
-          read with no deadline. Every exact wire must declare one. *)
+          read with no deadline. Every exact wire must declare one.
+          [provider_id] is the config's provider, so the refusal can name
+          whose declaration is missing; [None] when the config names none. *)
   | Caller_supplied_header_not_allowed of string
   | Unsupported_image_input
   | Unsupported_document_input

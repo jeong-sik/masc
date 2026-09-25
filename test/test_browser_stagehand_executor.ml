@@ -18,13 +18,14 @@ type fake =
   ; mutable active : string option
   ; mutable scroll_y : int
   ; mutable scrolls_while_capturing : bool
+  ; mutable script_throws : string option  (* what the page script throws, as the expression answers it *)
   ; mutable failing : Wire.call -> Session.call_failure option
   ; mutable evaluated : Yojson.Safe.t option  (* what a page script answers, when set *)
   ; mutable sent : Wire.call list
   }
 
 let fake pages ~active =
-  { pages; active; scroll_y = 0; scrolls_while_capturing = false; failing = (fun _ -> None); evaluated = None; sent = [] }
+  { pages; active; scroll_y = 0; scrolls_while_capturing = false; script_throws = None; failing = (fun _ -> None); evaluated = None; sent = [] }
 ;;
 
 let page_ref page = `Assoc [ "page_id", `String page.page_id; "url", `String page.url ]
@@ -48,9 +49,12 @@ let call fake request =
         | Some value -> Ok (`Assoc [ "value", `String (to_s value) ])
         | None ->
        let page = find fake page_id in
-       Ok
-         (`Assoc
-           [ "value", `String (to_s (`Assoc [ "url", `String page.url; "title", `String page.title; "viewport", viewport fake ])) ]))
+        (match fake.script_throws with
+         | Some reason -> Ok (`Assoc [ "value", `Assoc [ "thrown", `String reason ] ])
+         | None ->
+           Ok
+             (`Assoc
+               [ "value", `String (to_s (`Assoc [ "url", `String page.url; "title", `String page.title; "viewport", viewport fake ])) ])))
      | Wire.Page_screenshot _ ->
        if fake.scrolls_while_capturing then fake.scroll_y <- fake.scroll_y + 1;
        Ok (`Assoc [ "data", `String png ])
@@ -60,7 +64,7 @@ let call fake request =
      | Wire.Act _ | Wire.Observe _ | Wire.Extract _ ->
        Ok (`Assoc [ "data", `Assoc [ "success", `Bool true ]; "metadata", `Assoc [ "cache", `Assoc [] ] ])
      | Wire.Page_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ -> Ok (`Assoc [ "ok", `Bool true ])
-     | Wire.Init _ | Wire.Close -> failf "the executor sent %s" (Wire.method_name request))
+     | Wire.Close -> failf "the executor sent %s" (Wire.method_name request))
 ;;
 
 let blank = { page_id = "P1"; url = "about:blank"; title = "" }
@@ -104,6 +108,18 @@ let test_tabs () =
   check (option string) "a new page gets a new id" (Some "P3") (Executor.Tabs.page_of_id tabs 2);
   check (option string) "an id is not given to another page" (Some "P1") (Executor.Tabs.page_of_id tabs 0);
   check (option string) "an id never given" None (Executor.Tabs.page_of_id tabs 3)
+;;
+
+(* A later session's pages are new pages: an id from before reaches none of
+   them, even when the new session reuses a page id. *)
+let test_tabs_across_sessions () =
+  let tabs = Executor.Tabs.create () and fake = fake [ blank; shop () ] ~active:(Some "P2") in
+  ignore (listed tabs fake);
+  Executor.Tabs.forget_pages tabs;
+  check (option string) "an earlier session's id reaches no page" None (Executor.Tabs.page_of_id tabs 0);
+  ignore (listed tabs fake);
+  check (option string) "a page of the new session gets a new id" (Some "P1") (Executor.Tabs.page_of_id tabs 2);
+  check (option string) "the old id stays unused" None (Executor.Tabs.page_of_id tabs 0)
 ;;
 
 let test_goto () =
@@ -319,6 +335,17 @@ let test_unserved_verbs () =
   check int "nothing was sent" 0 (List.length fake.sent)
 ;;
 
+(* A page script's throw reaches the caller by its own reason, not by the
+   "Uncaught" Stagehand would word it with. *)
+let test_script_throw_keeps_its_reason () =
+  let tabs = Executor.Tabs.create () and fake = fake [ shop () ] ~active:(Some "P2") in
+  ignore (listed tabs fake);
+  fake.script_throws <- Some "scene_document_changed";
+  match Executor.execute ~tabs ~call:(call fake) (Lane.Page_capture { tab_id = 0 }) with
+  | Lane.Refused reason -> check string "the thrown reason" "scene_document_changed" reason
+  | _ -> fail "a throw in the page script is refused with its reason"
+;;
+
 let test_evaluate_expression () =
   let args = `Assoc [ "mode", `String "viewport" ] in
   let expression = Executor.evaluate_expression ~runtime:Executor.No_runtime ~body:"return 1;" ~args in
@@ -332,7 +359,10 @@ let test_evaluate_expression () =
 
 let () =
   run "browser_stagehand_executor" [
-    "tabs", [ test_case "pages become tabs with ids that stay" `Quick test_tabs ];
+    "tabs", [
+      test_case "pages become tabs with ids that stay" `Quick test_tabs;
+      test_case "ids are not given again in a later session" `Quick test_tabs_across_sessions;
+    ];
     "goto", [
       test_case "navigates a listed or the active tab" `Quick test_goto;
       test_case "a failure after the navigation is not before effect" `Quick test_goto_effect_boundary;
@@ -345,6 +375,9 @@ let () =
     "reads", [ test_case "reads run the page scripts" `Quick test_reads_run_the_page_scripts ];
     "interactions", [ test_case "scripts and native pointer input" `Quick test_interactions ];
     "refusals", [ test_case "an unserved verb sends nothing" `Quick test_unserved_verbs ];
-    "evaluate", [ test_case "the expression calls its body" `Quick test_evaluate_expression ];
+    "evaluate", [
+      test_case "the expression calls its body" `Quick test_evaluate_expression;
+      test_case "a page script's throw keeps its reason" `Quick test_script_throw_keeps_its_reason;
+    ];
   ]
 ;;

@@ -68,6 +68,7 @@ let attach_error_message = function
   | Session.Init_unanswered seconds -> Printf.sprintf "stagehand.init did not answer within %.0f s" seconds
   | Session.Init_failed failure -> "stagehand.init failed: " ^ Browser_stagehand_executor.failure_message failure
   | Session.Cdp failure -> "a CDP command failed: " ^ failure_message failure
+  | Session.Already_attached -> "the session was already attached"
 ;;
 
 let ( let* ) = Result.bind
@@ -102,17 +103,17 @@ let confirm_group_stopped pgid =
 
 (* [tree_kill] sends SIGKILL at the end of its grace period and returns before
    the kernel necessarily reports group absence. Confirm for one further
-   existing stop-grace interval in a systhread; uncertainty still keeps the
-   owner record and blocks profile replacement. *)
-let confirm_group_stopped_after_kill pgid =
+   stop-grace interval, waiting on the Eio clock so a cancelled caller leaves
+   at once; uncertainty still keeps the owner record and blocks profile
+   replacement. *)
+let confirm_group_stopped_after_kill ~clock pgid =
   let deadline = Monotonic_deadline.after ~seconds:stop_grace_s in
   let rec check () =
     match confirm_group_stopped pgid with
     | Ok () -> Ok ()
     | Error _ as error when Monotonic_deadline.passed deadline -> error
     | Error _ ->
-      (try Unix.sleepf stop_confirm_poll_s with
-       | Unix.Unix_error (Unix.EINTR, _, _) -> ());
+      Eio.Time.sleep clock stop_confirm_poll_s;
       check ()
   in
   check ()
@@ -122,7 +123,7 @@ let confirm_group_stopped_after_kill pgid =
    Keep it when ownership cannot be read or the group cannot be confirmed
    stopped: resetting that browser's profile would make its live process
    unreachable on the next attempt. *)
-let stop_left_behind_checked ~masc_root =
+let stop_left_behind_checked ~clock ~masc_root =
   let record_path = Process.owner_record_path ~masc_root in
   let* present =
     match Unix.lstat record_path with
@@ -159,10 +160,9 @@ let stop_left_behind_checked ~masc_root =
         Log.Server.warn "browser-lane: stopping Chromium pid %d left by a server that did not stop it" pgid;
         (match
            Eio_unix.run_in_systhread (fun () ->
-             Process_eio_detached.tree_kill ~pgid ~signal:Sys.sigterm ~grace_sec:stop_grace_s;
-             confirm_group_stopped_after_kill pgid)
+             Process_eio_detached.tree_kill ~pgid ~signal:Sys.sigterm ~grace_sec:stop_grace_s)
          with
-         | result -> result
+         | () -> confirm_group_stopped_after_kill ~clock pgid
          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
          | exception exn ->
            Error (Printf.sprintf "cannot stop recorded Chromium group %d: %s" pgid
@@ -175,8 +175,8 @@ let stop_left_behind_checked ~masc_root =
        Error ("cannot remove stagehand owner record " ^ record_path ^ ": " ^ Printexc.to_string exn))
 ;;
 
-let stop_left_behind ~masc_root =
-  match stop_left_behind_checked ~masc_root with
+let stop_left_behind ~clock ~masc_root =
+  match stop_left_behind_checked ~clock ~masc_root with
   | Ok () -> ()
   | Error detail -> Log.Server.warn "browser-lane: %s" detail
 ;;
@@ -248,7 +248,7 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
   let extension_id = Browser_stagehand_wire.extension_id_of_real_path extension_dir in
   (* Retire a Chromium left by a previous server before its profile is
      prepared or its owner record can be replaced by this launch. *)
-  let* () = stop_left_behind_checked ~masc_root in
+  let* () = stop_left_behind_checked ~clock ~masc_root in
   let* profile = prepare_profile ~masc_root config in
   let started_pid = ref None in
   (* Registered before the spawn, so it runs after the spawn's own release
@@ -306,6 +306,8 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
 ;;
 
 let log_event = function
+  | Session.Runtime_ready { protocol_version; runtime_version } ->
+    Log.Server.info "browser-lane stagehand: runtime %s ready, protocol %s" runtime_version protocol_version
   | Session.Model_request_refused { reason } -> Log.Server.info "browser-lane stagehand: model request refused: %s" reason
   | Session.Model_failed detail -> Log.Server.warn "browser-lane stagehand: the model failed: %s" detail
   | Session.Unsupported_request { method_ } ->
@@ -319,7 +321,8 @@ let log_event = function
   | Session.Unexpected_response { id } -> Log.Server.warn "browser-lane stagehand: response to %d, which no call waits for" id
   | Session.Abandoned_call_ended { method_; rejected } ->
     Log.Server.info "browser-lane stagehand: abandoned %s ended (%s)" method_ (if rejected then "rejected" else "answered")
-  | Session.Reply_not_delivered detail -> Log.Server.warn "browser-lane stagehand: reply not delivered: %s" detail
+  | Session.Reply_not_delivered detail ->
+    Log.Server.warn "browser-lane stagehand: an answer to the extension was not delivered, so the session ended: %s" detail
   | Session.Malformed_cdp_event { method_; detail } ->
     Log.Server.warn "browser-lane stagehand: malformed CDP event %s: %s" method_ detail
   | Session.Worker_detached -> Log.Server.warn "browser-lane stagehand: the service worker went away"
@@ -330,7 +333,7 @@ let start ~sw ~env =
   let base_path = Config_dir_resolver.base_path_or_cwd () in
   let masc_root = Config_dir_resolver.masc_root ~base_path in
   Eio.Fiber.fork ~sw (fun () ->
-    stop_left_behind ~masc_root;
+    stop_left_behind ~clock:(Eio.Stdenv.clock env) ~masc_root;
     match Server_browser_configuration.load () with
     | Error detail -> Log.Server.error "browser-lane: %s" detail
     | Ok { Browser_configuration.stagehand = None; _ } ->

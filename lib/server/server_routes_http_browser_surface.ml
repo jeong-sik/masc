@@ -30,10 +30,10 @@ let session = function
      | Error detail, _, _ | Ok _, Error detail, _ -> Error detail
      | Ok headless, Ok lane, Some (`String "open") ->
        Browser_lane.issue_server_lane lane ~verb:(Browser_lane.Session_open {headless}) ~timeout_sec:60.
-       |> Browser_surface.decode_answer
+       |> Browser_surface.decode_answer ~lane:(Browser_lane.server_lane_name lane)
      | Ok _, Ok lane, Some (`String "close") ->
        Browser_lane.issue_server_lane lane ~verb:Browser_lane.Session_close ~timeout_sec:60.
-       |> Browser_surface.decode_answer
+       |> Browser_surface.decode_answer ~lane:(Browser_lane.server_lane_name lane)
      | _ -> Error "action must be open or close")
   | _ -> Error "body must be an object"
 let goto = function
@@ -45,7 +45,7 @@ let goto = function
        (match Uri.scheme uri, Uri.host uri with
         | Some ("http" | "https"), Some host when host <> "" ->
           Browser_lane.issue_server_lane lane ~verb:(Browser_lane.Page_goto { url; tab_id = None }) ~timeout_sec:60.
-          |> Browser_surface.decode_answer
+          |> Browser_surface.decode_answer ~lane:(Browser_lane.server_lane_name lane)
         | _ -> Error "url must be an absolute HTTP(S) URL")
      | Ok _, _ -> Error "url is required")
   | _ -> Error "body must be an object"

@@ -53,7 +53,9 @@ let is_digit = function '0' .. '9' -> true | _ -> false
 (* Digits only: int_of_string_opt would also read "0x2", "+2" or "2_0". *)
 let protocol_major marker =
   match String.split_on_char '.' marker.protocol_version with
-  | leading :: _ when leading <> "" && String.for_all is_digit leading -> Ok (int_of_string leading)
+  | leading :: _ when leading <> "" && String.for_all is_digit leading ->
+    Option.to_result ~none:("protocol version " ^ marker.protocol_version ^ " has a major past the int range")
+      (int_of_string_opt leading)
   | _ :: _ | [] -> Error ("protocol version " ^ marker.protocol_version ^ " has no numeric major")
 ;;
 
@@ -85,6 +87,7 @@ type extension_notification =
 
 type incoming =
   | Response of { id : id; result : (Yojson.Safe.t, rpc_error) result }
+  | Malformed_response of { id : id; detail : string }
   | Request of extension_request
   | Notification of extension_notification
 
@@ -112,7 +115,8 @@ let decode payload =
       | Some (`String s) -> Some (String_id s)
       | Some _ | None -> None
     in
-    let params = field "params" json in
+    (* JSON-RPC params are an object or an array; null is none. *)
+    let params = match field "params" json with Some `Null | None -> None | Some params -> Some params in
     (match field "method" json, id with
      | Some (`String method_), Some id -> Ok (Request (request_of ~id method_ params))
      | Some (`String method_), None -> Ok (Notification (notification_of method_ params))
@@ -122,11 +126,13 @@ let decode payload =
         | None, Some error ->
           (match field "code" error, field "message" error with
            | Some (`Int code), Some (`String message) -> Ok (Response { id; result = Error { code; message } })
-           | _ -> Error "Stagehand error response without an integer code and a message")
-        | Some _, Some _ | None, None -> Error "Stagehand response without exactly one of result and error")
+           | _ -> Ok (Malformed_response { id; detail = "an error without an integer code and a message" }))
+        | Some _, Some _ | None, None ->
+          Ok (Malformed_response { id; detail = "a response without exactly one of result and error" }))
      | Some _, _ | None, None -> Error "Stagehand message is neither a request, a notification nor a response")
 ;;
 
+type init = { client_version : string; browser_cdp_url : string }
 type sentence_timeout_ms = Sentence_timeout_ms of int
 
 (* BrowserInstruct formerly abandoned the caller at 120 s. Keep that one
@@ -136,7 +142,6 @@ let sentence_timeout = Sentence_timeout_ms 120_000
 let timeout_ms (Sentence_timeout_ms timeout) = timeout
 
 type call =
-  | Init of { client_version : string; browser_cdp_url : string }
   | Close
   | Act of { page_id : string; instruction : string; timeout : sentence_timeout_ms }
   | Observe of { page_id : string; instruction : string option; timeout : sentence_timeout_ms }
@@ -151,7 +156,6 @@ type call =
   | Page_drag_and_drop of { page_id : string; from_x : float; from_y : float; to_x : float; to_y : float }
 
 let method_name = function
-  | Init _ -> "stagehand.init"
   | Close -> "stagehand.close"
   | Act _ -> "stagehand.act"
   | Observe _ -> "stagehand.observe"
@@ -172,18 +176,11 @@ let sentence_options timeout = [ "options", `Assoc [ "timeout", `Int (timeout_ms
 
 let sentence_timeout_of_call = function
   | Act { timeout; _ } | Observe { timeout; _ } | Extract { timeout; _ } -> Some timeout
-  | Init _ | Close | Context_pages | Context_active_page | Page_goto _ | Page_screenshot _ | Page_evaluate _ -> None
+  | Close | Context_pages | Context_active_page | Page_goto _ | Page_screenshot _ | Page_evaluate _ | Page_click _
+  | Page_scroll _ | Page_drag_and_drop _ -> None
 ;;
 
 let call_params = function
-  | Init { client_version; browser_cdp_url } ->
-    `Assoc
-      [ "protocol_version", `String protocol_version
-      ; "client_info", `Assoc [ "name", `String client_name; "version", `String client_version ]
-      ; (* Every model call comes back to the host as llm.generate. *)
-        "model", `Assoc [ "source", `String "client" ]
-      ; "browser_cdp_url", `String browser_cdp_url
-      ]
   | Close | Context_pages | Context_active_page -> `Assoc []
   | Act { page_id; instruction; timeout } ->
     `Assoc (page page_id @ [ "instruction", `String instruction ] @ sentence_options timeout)
@@ -203,16 +200,29 @@ let call_params = function
 
 let uses_model = function
   | Act _ | Observe _ | Extract _ -> true
-  | Init _ | Close | Context_pages | Context_active_page | Page_goto _ | Page_screenshot _ | Page_evaluate _
-  | Page_click _ | Page_scroll _ | Page_drag_and_drop _ -> false
+  | Close | Context_pages | Context_active_page | Page_goto _ | Page_screenshot _ | Page_evaluate _ | Page_click _
+  | Page_scroll _ | Page_drag_and_drop _ -> false
 ;;
 
 let jsonrpc = "jsonrpc", `String "2.0"
 let id_json = function Int_id n -> `Int n | String_id s -> `String s
 
-let encode_call ~id call =
-  Yojson.Safe.to_string
-    (`Assoc [ jsonrpc; "id", `Int id; "method", `String (method_name call); "params", call_params call ])
+let request ~id method_ params =
+  Yojson.Safe.to_string (`Assoc [ jsonrpc; "id", `Int id; "method", `String method_; "params", params ])
+;;
+
+let encode_call ~id call = request ~id (method_name call) (call_params call)
+let init_method = "stagehand.init"
+
+let encode_init ~id { client_version; browser_cdp_url } =
+  request ~id init_method
+    (`Assoc
+      [ "protocol_version", `String protocol_version
+      ; "client_info", `Assoc [ "name", `String client_name; "version", `String client_version ]
+      ; (* Every model call comes back to the host as llm.generate. *)
+        "model", `Assoc [ "source", `String "client" ]
+      ; "browser_cdp_url", `String browser_cdp_url
+      ])
 ;;
 
 let encode_reply ~id result =

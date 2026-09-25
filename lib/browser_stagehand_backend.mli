@@ -42,5 +42,7 @@ val create :
     - [Session_close] asks the runtime to close, then stops the browser.
     - [Session_status] reports the backend's record and sends nothing.
     - Page verbs go to {!Browser_stagehand_executor.execute} on the open
-      session, and are refused before effect when none is open. *)
+      session one at a time, and are refused before effect when none is
+      open. Tab ids count on across sessions: an id from a closed session
+      reaches no page of a later one. *)
 val execute : 'session t -> Browser_lane.verb -> Browser_lane.answer

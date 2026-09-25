@@ -2236,6 +2236,62 @@ let test_an_official_only_keeper_is_read_from_its_fragments () =
   | Consumer.Memory_not_committed -> fail "read turns were read again"
 ;;
 
+(* An official-client turn that failed after its tools ran: its input is a
+   fragment from the start of the turn, it kept no assistant text, and the
+   error path writes its tool observations and its end line. The Librarian
+   reads that turn like any other, and the turn after it too. *)
+let test_a_failed_official_turn_is_read () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-official-failed" in
+  write_meta config trace_id;
+  let failed_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1 in
+  History.persist_message ~keeper_name ~turn_ref:failed_ref ~source:"direct_user"
+    (session config trace_id) (message "q-failed");
+  let detail tool_name : Masc.Keeper_agent_result.tool_call_detail =
+    { tool_name
+    ; provider = "fixture"
+    ; execution_outcome = Tool_result.Ok
+    ; typed_outcome = None
+    ; latency_ms = 0.
+    ; task_id = None
+    ; route_evidence = None
+    ; input_fingerprint = None
+    ; output_fingerprint = None
+    }
+  in
+  Masc.Keeper_agent_run_finalize_response.record_errored_official_turn_boundary
+    ~config
+    ~meta:(meta trace_id)
+    ~turn_ref:failed_ref
+    ~session:(session config trace_id)
+    ~tool_observations:[ detail "fixture_effect" ]
+    ~history_at_start:Boundaries.Continued_history
+    ~restart_notice_pending:(Atomic.make false);
+  write_official_turn config ~trace_id ~turn:2 ~user:"q2" ~assistant:"a2" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:(Time_compat.now ());
+  let carried = ref [] in
+  let tools = ref [] in
+  (match
+     consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
+       carried := text_markers input;
+       tools :=
+         List.map
+           (fun (o : Masc.Keeper_librarian.tool_observation) -> o.tool_name)
+           input.tool_observations;
+       true)
+   with
+   | Consumer.Official_advanced { official; _ } ->
+     check int "the position passes both end lines" 2 official.boundary_line
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Progress_advanced _
+   | Consumer.Memory_not_committed -> fail "the failed turn left nothing to read");
+  check (list string) "the failed turn's input, then the next turn" [ "q-failed"; "q2"; "a2" ]
+    !carried;
+  check (list string) "the tool the failed turn called" [ "fixture_effect" ] !tools
+;;
+
 (* RFC §10-3's counterexample: T1 Agent-Core, T2 official-client, T3
    Agent-Core. One pass hands the Librarian T2 then T3, by the order of
    their end lines, and moves both positions. *)
@@ -2798,6 +2854,8 @@ let () =
             (test_official_turns_skip_unchanged_atom_checkpoint ~with_atoms:false)
         ; test_case "an official-only keeper is read from its fragments" `Quick
             test_an_official_only_keeper_is_read_from_its_fragments
+        ; test_case "a failed official turn is read" `Quick
+            test_a_failed_official_turn_is_read
         ; test_case "a mixed keeper is read in line order" `Quick
             test_a_mixed_keeper_is_read_in_line_order
         ; test_case "official receipt recovers failed cursor write" `Quick

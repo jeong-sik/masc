@@ -820,7 +820,7 @@ let declared_targets_of_config_path ?(environment = []) ~label path =
   | Error detail -> failf "%s: runtime bindings should initialize: %s" label detail
   (* Loading the bindings is what makes them targets, so a binding this config
      disables has no slot here -- the same answer the server gives. *)
-  | Ok () -> Server_runtime_bootstrap.For_testing.exact_output_targets_of_runtimes ()
+  | Ok () -> Runtime.exact_output_targets (Runtime.get_runtimes ())
 ;;
 
 let snapshot_of_config ?environment ~io ~label path =
@@ -1193,7 +1193,7 @@ let test_model_without_wall_clock_ceiling_leaves_it_unset () =
 
 let test_exact_output_lane_config_is_ordered_and_rejects_duplicates () =
   let valid =
-    "[runtime.exact_output_lanes.auxiliary_exact]\nslots = [\"slot-b\", \"slot-a\"]\n"
+    "[runtime.exact_output_lanes.librarian_exact]\nslots = [\"slot-b\", \"slot-a\"]\n"
   in
   (match Runtime_toml.parse_string valid with
    | Error _ -> fail "valid exact-output lane must parse"
@@ -1204,7 +1204,7 @@ let test_exact_output_lane_config_is_ordered_and_rejects_duplicates () =
           [ "slot-b"; "slot-a" ] lane.slot_ids
       | _ -> fail "exactly one exact-output lane must parse"));
   let duplicate =
-    "[runtime.exact_output_lanes.auxiliary_exact]\nslots = [\"slot-a\", \"slot-a\"]\n"
+    "[runtime.exact_output_lanes.librarian_exact]\nslots = [\"slot-a\", \"slot-a\"]\n"
   in
   match Runtime_toml.parse_string duplicate with
   | Error _ -> ()
@@ -1274,7 +1274,7 @@ let test_exact_output_lane_cli_slots_parse_in_order () =
 
 let test_exact_output_lane_rejects_unknown_key () =
   let config =
-    "[runtime.exact_output_lanes.auxiliary_exact]\n\
+    "[runtime.exact_output_lanes.librarian_exact]\n\
      slots = [\"slot-a\"]\n\
      slost = [\"slot-b\"]\n"
   in
@@ -1285,9 +1285,27 @@ let test_exact_output_lane_rejects_unknown_key () =
          (fun (error : Runtime_toml.parse_error) ->
             String.equal
               error.path
-              "runtime.exact_output_lanes.auxiliary_exact.slost")
+              "runtime.exact_output_lanes.librarian_exact.slost")
          errors)
   | Ok _ -> fail "unknown exact-output lane key must fail config parsing"
+
+(* The standalone-lane projection draws one row per [Standalone_lane.t], so a
+   table under any other name published and then showed nowhere. *)
+let test_exact_output_lane_rejects_unknown_lane_id () =
+  let config =
+    "[runtime.exact_output_lanes.librarain_exact]\n\
+     slots = [\"slot-a\"]\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Error errors ->
+    check bool "unknown exact-output lane id is named" true
+      (List.exists
+         (fun (error : Runtime_toml.parse_error) ->
+            String.equal
+              error.path
+              "runtime.exact_output_lanes.librarain_exact")
+         errors)
+  | Ok _ -> fail "unknown exact-output lane id must fail config parsing"
 
 (* The routing rebirth (RFC-0206) dropped the lane strategy ADT — a lane is
    ordered by construction — but a [strategy = "ordered"] line survived in the
@@ -1308,6 +1326,23 @@ let test_lane_rejects_unknown_key () =
             String.equal error.path "runtime.lanes.default.strategy")
          errors)
   | Ok _ -> fail "unknown lane key must fail config parsing"
+
+(* A misspelt [tools_support = true] is not [tools-support]; loading it as a
+   model without tool support would give the keeper no tools. *)
+let test_model_rejects_unknown_key () =
+  let config =
+    "[models.sample]\n\
+     api-name = \"sample-model\"\n\
+     tools_support = true\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Error errors ->
+    check bool "unknown model key is named" true
+      (List.exists
+         (fun (error : Runtime_toml.parse_error) ->
+            String.equal error.path "models.sample.tools_support")
+         errors)
+  | Ok _ -> fail "unknown model key must fail config parsing"
 
 (* A [models.X].max-context above the model's catalog window resolves to the
    catalog number with source Override_clamped_by_capability: the declaration
@@ -1983,6 +2018,58 @@ let test_boot_path_fixtures_declare_mandatory_exact_output_lanes () =
   List.iter
     (fun (label, path) -> assert_mandatory_exact_output_lanes_declared ~label path)
     fixtures
+;;
+
+(* Every shipped config -- the seed and each boot-path fixture -- is read by a
+   real boot, so an exact slot on an HTTP provider without
+   [exact-body-timeout-s] would refuse the whole file there (#38779). Read at
+   parse level on purpose: a full load of the seed needs a deployment catalog
+   and credentials this test does not own, and would hide this finding behind
+   whichever unrelated check fails first. *)
+let exact_slots_missing_body_deadline (config : Runtime_schema.config) =
+  let provider_of_slot slot_id =
+    match
+      List.find_opt
+        (fun binding -> String.equal (Runtime.id_of_binding binding) slot_id)
+        config.bindings
+    with
+    | None -> None
+    | Some (binding : Runtime_schema.binding) ->
+      List.find_opt
+        (fun (provider : Runtime_schema.provider) ->
+           String.equal provider.id binding.provider_id)
+        config.providers
+  in
+  List.concat_map
+    (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+       List.filter_map
+         (fun slot_id ->
+            match provider_of_slot slot_id with
+            | None -> None
+            | Some { Runtime_schema.transport = Runtime_schema.Cli _; _ } -> None
+            | Some { Runtime_schema.transport = Runtime_schema.Http _; exact_body_timeout_s = Some _; _ } ->
+              None
+            | Some { Runtime_schema.transport = Runtime_schema.Http _; exact_body_timeout_s = None; id; _ } ->
+              Some (Printf.sprintf "%s slot %s (provider %s)" lane.id slot_id id))
+         lane.slot_ids)
+    config.exact_output_lane_decls
+;;
+
+let test_shipped_configs_declare_exact_slot_body_deadlines () =
+  let shipped =
+    ("config/runtime.toml", Filename.concat (repo_root ()) "config/runtime.toml")
+    :: discover_boot_path_fixture_runtime_tomls ()
+  in
+  List.iter
+    (fun (label, path) ->
+       match Runtime_toml.parse_file path with
+       | Error errors -> failf "%s should parse: %s" label (render_runtime_toml_errors errors)
+       | Ok config ->
+         check (list string)
+           (label ^ " exact slots whose HTTP provider declares no exact-body-timeout-s")
+           []
+           (exact_slots_missing_body_deadline config))
+    shipped
 ;;
 
 (* release-evidence.sh boots the installed binary with no environment secret,
@@ -3558,6 +3645,7 @@ let exact_lane_runtime_toml ~lane ~slot =
     "[providers.local]\n\
      protocol = \"openai-compatible-http\"\n\
      endpoint = \"http://127.0.0.1:1/v1\"\n\
+     exact-body-timeout-s = 120.0\n\
      \n\
      [models.sample]\n\
      api-name = \"sample\"\n\
@@ -3605,6 +3693,275 @@ let test_sibling_exact_lanes_keep_catalog_only_slots () =
             | Error msg ->
               failf "%s must accept a catalog-only slot id, got: %s" lane msg))
     [ "hitl_auto_judge"; "librarian_exact"; "board_attention_exact" ]
+;;
+
+(* Rule 3 of RFC-runtime-two-layers (#38779). An exact slot on an HTTP
+   provider without [exact-body-timeout-s] used to load as valid and then be
+   refused on every request, falling to cli_slots with one WARN per request
+   that named neither the key nor where it goes. The provider below declares
+   [connect-timeout-s] on purpose: that deadline ends at the response headers
+   and must not be read as enough. *)
+let exact_deadline_body_timeout_s = 120.0
+
+let exact_deadline_runtime_toml ~body_timeout ~lane =
+  Printf.sprintf
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     connect-timeout-s = 30.0\n\
+     %s\
+     \n\
+     [providers.subscription]\n\
+     protocol = \"claude-code\"\n\
+     command = \"/usr/bin/true\"\n\
+     is-non-interactive = true\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.seeded]\n\
+     api-name = \"seeded\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     \n\
+     [subscription.seeded]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n\
+     \n\
+     %s"
+    (match body_timeout with
+     | None -> ""
+     | Some seconds ->
+       Printf.sprintf "%s = %.1f\n" Runtime_schema.exact_body_timeout_s_key seconds)
+    lane
+;;
+
+let http_slot_lane =
+  "[runtime.exact_output_lanes.librarian_exact]\nslots = [\"local.sample\"]\n"
+;;
+
+(* Pinned so a replacement catalog left in the environment by the caller
+   cannot switch the rule off under these tests. *)
+let with_runtime_binding_targets f =
+  Masc_test_deps.with_process_env Runtime.agent_core_model_catalog_env_var_name None f
+;;
+
+(* Two lanes on the same deadline-less provider, so a report that stops at
+   the first slot shows up as one entry where two are owed. *)
+let two_http_slot_lanes =
+  http_slot_lane
+  ^ "\n[runtime.exact_output_lanes.hitl_auto_judge]\nslots = [\"local.sample\"]\n"
+;;
+
+(* Load the file the way boot does and hand back the degraded record it left,
+   with the runtime state restored afterwards. *)
+let gaps_after_boot_load content =
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) @@ fun () ->
+  with_temp_runtime_toml content (fun path ->
+    (match Runtime.init_default ~config_path:path with
+     | Ok () -> ()
+     | Error detail -> failf "boot must not refuse the file for rule 3: %s" detail);
+    ( Runtime.exact_slot_body_deadline_gaps ()
+    , Runtime.startup_degradation_to_yojson
+        ~exact_slots:(Runtime.exact_slot_degradation ())
+        ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
+        (Runtime.startup_degradation ()) ))
+;;
+
+let gap_triples gaps =
+  List.map
+    (fun (gap : Runtime.exact_slot_body_deadline_gap) ->
+       Printf.sprintf "%s/%s/%s" gap.lane_id gap.slot_id gap.provider_id)
+    gaps
+;;
+
+(* Boot does not stop for rule 3 (owner decision, #38779): the file loads,
+   and every offending slot is kept as a degraded record the startup report
+   names, with the key to add. *)
+let test_exact_slot_without_body_deadline_loads_degraded () =
+  with_runtime_binding_targets @@ fun () ->
+  let gaps, report =
+    gaps_after_boot_load
+      (exact_deadline_runtime_toml ~body_timeout:None ~lane:two_http_slot_lanes)
+  in
+  check (list string) "every offending lane, slot and provider is recorded"
+    [ "librarian_exact/local.sample/local"; "hitl_auto_judge/local.sample/local" ]
+    (gap_triples gaps);
+  let open Yojson.Safe.Util in
+  check string "the startup report is degraded" "degraded"
+    (report |> member "status" |> to_string);
+  check string "and says why" "exact_slot_body_deadline_absent"
+    (report |> member "terminal_reason" |> to_string);
+  check int "and lists each slot" 2
+    (report |> member "exact_slot_body_deadline_gaps" |> to_list |> List.length);
+  check bool "the message names the key to add" true
+    (String_util.contains_substring
+       (report |> member "message" |> to_string)
+       Runtime_schema.exact_body_timeout_s_key)
+;;
+
+let test_exact_slot_with_body_deadline_loads () =
+  with_runtime_binding_targets @@ fun () ->
+  let gaps, report =
+    gaps_after_boot_load
+      (exact_deadline_runtime_toml
+         ~body_timeout:(Some exact_deadline_body_timeout_s)
+         ~lane:two_http_slot_lanes)
+  in
+  check (list string) "a declared body deadline leaves nothing out" [] (gap_triples gaps);
+  check string "and the startup report stays ok" "ok"
+    Yojson.Safe.Util.(report |> member "status" |> to_string)
+;;
+
+(* Official clients are not HTTP targets: the rule reads [slots] of HTTP
+   runtimes only, so the same provider without the key records nothing when
+   the lane walks official clients. *)
+let test_exact_cli_slots_carry_no_body_deadline_rule () =
+  with_runtime_binding_targets @@ fun () ->
+  let gaps, _report =
+    gaps_after_boot_load
+      (exact_deadline_runtime_toml
+         ~body_timeout:None
+         ~lane:
+           "[runtime.exact_output_lanes.librarian_exact]\n\
+            slots = []\n\
+            cli_slots = [\"subscription.seeded\"]\n")
+  in
+  check (list string) "cli_slots carry no body deadline rule" [] (gap_triples gaps)
+;;
+
+(* Under a replacement catalog the exact targets are its [[targets]] rows,
+   which carry their own body_timeout_s; this file's providers are not the
+   targets, so recording them would report a value nothing reads. The path is
+   never opened by the load. *)
+let test_replacement_catalog_targets_skip_the_body_deadline_rule () =
+  Masc_test_deps.with_process_env
+    Runtime.agent_core_model_catalog_env_var_name
+    (Some "/nonexistent/replacement-catalog.toml")
+  @@ fun () ->
+  let gaps, _report =
+    gaps_after_boot_load
+      (exact_deadline_runtime_toml ~body_timeout:None ~lane:two_http_slot_lanes)
+  in
+  check (list string) "a replacement catalog owns the target deadlines" [] (gap_triples gaps)
+;;
+
+let test_saving_an_exact_slot_without_body_deadline_is_refused () =
+  with_runtime_binding_targets @@ fun () ->
+  with_config_save_model_catalog @@ fun () ->
+  let baseline =
+    exact_deadline_runtime_toml
+      ~body_timeout:(Some exact_deadline_body_timeout_s)
+      ~lane:""
+  in
+  let refused = exact_deadline_runtime_toml ~body_timeout:None ~lane:two_http_slot_lanes in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) @@ fun () ->
+  with_temp_runtime_toml baseline (fun path ->
+    (match Runtime.save_config_text ~runtime_config_path:path refused with
+     | Ok _receipt -> fail "a save that leaves an exact slot without a body deadline must fail"
+     | Error detail ->
+       List.iter
+         (fun lane_table ->
+            check bool ("the refusal names " ^ lane_table) true
+              (String_util.contains_substring detail lane_table))
+         [ "[runtime.exact_output_lanes.librarian_exact]"
+         ; "[runtime.exact_output_lanes.hitl_auto_judge]"
+         ];
+       check bool "the refusal names the missing key" true
+         (String_util.contains_substring detail Runtime_schema.exact_body_timeout_s_key));
+    check string "the refused save leaves the file as it was" baseline
+      (Fs_compat.load_file path))
+;;
+
+(* Owner rule: never a hard gate on keeper actions. A file that already
+   carries a gap on disk keeps saving for unrelated edits -- a keeper
+   assignment here -- because boot already keeps that gap as degraded. *)
+let save_over_on_disk ~on_disk text =
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) @@ fun () ->
+  with_temp_runtime_toml on_disk (fun path ->
+    let result = Runtime.save_config_text ~runtime_config_path:path text in
+    result, Fs_compat.load_file path)
+;;
+
+let gap_on_disk = exact_deadline_runtime_toml ~body_timeout:None ~lane:http_slot_lane
+
+let test_an_existing_gap_does_not_block_an_unrelated_save () =
+  with_runtime_binding_targets @@ fun () ->
+  with_config_save_model_catalog @@ fun () ->
+  let assigned = gap_on_disk ^ "\n[runtime.assignments]\nkeeper_a = \"local.sample\"\n" in
+  match save_over_on_disk ~on_disk:gap_on_disk assigned with
+  | Ok _receipt, written -> check string "the assignment is written" assigned written
+  | Error detail, _ -> failf "a gap already on disk must not block this save: %s" detail
+;;
+
+let test_a_save_adding_a_gap_names_only_the_added_one () =
+  with_runtime_binding_targets @@ fun () ->
+  with_config_save_model_catalog @@ fun () ->
+  let added = exact_deadline_runtime_toml ~body_timeout:None ~lane:two_http_slot_lanes in
+  match save_over_on_disk ~on_disk:gap_on_disk added with
+  | Ok _, _ -> fail "a save adding a gap must be refused"
+  | Error detail, written ->
+    check bool "the added lane is named" true
+      (String_util.contains_substring detail "[runtime.exact_output_lanes.hitl_auto_judge]");
+    check bool "the gap already on disk is not" false
+      (String_util.contains_substring detail "[runtime.exact_output_lanes.librarian_exact]");
+    check string "nothing is written" gap_on_disk written
+;;
+
+(* F5: catalog degradation and gaps together. terminal_reason keeps naming
+   the catalog, and the reasons the health rollup reads name both. *)
+let test_catalog_and_gap_degradation_name_both_reasons () =
+  let degradation : Runtime.startup_degradation =
+    { report =
+        { config_path = "runtime.toml"
+        ; missing_models =
+            [ { runtime_id = "local.missing"
+              ; provider_id = "local"
+              ; provider_label = "local"
+              ; model_id = "missing"
+              }
+            ]
+        }
+    ; configured_default_runtime_id = "local.sample"
+    ; disabled_runtime_ids = [ "local.missing" ]
+    ; unavailable_assignments = []
+    }
+  in
+  let exact_slots : Runtime.exact_slot_degradation =
+    { gaps = [ { lane_id = "librarian_exact"; slot_id = "local.sample"; provider_id = "local" } ]
+    ; emptied_lane_ids = [ "librarian_exact" ]
+    }
+  in
+  let json = Runtime.startup_degradation_to_yojson ~exact_slots ~exact_registry_stale:None (Some degradation) in
+  let open Yojson.Safe.Util in
+  check string "terminal_reason keeps the catalog" "missing_agent_core_catalog_models"
+    (json |> member "terminal_reason" |> to_string);
+  check (list string) "the reasons name both causes"
+    [ "missing_agent_core_catalog_models"; "exact_slot_body_deadline_absent" ]
+    (json |> member "operator_action_reasons" |> to_list |> List.map to_string);
+  check (list string) "the emptied lane is listed" [ "librarian_exact" ]
+    (json |> member "exact_lanes_emptied_by_body_deadline_gaps" |> to_list
+     |> List.map to_string);
+  let rollup =
+    Server_health_rollup.operator_summary
+      ~sections:[]
+      ~runtime_startup_degradation:json
+      ~keeper_config_schema_status:"ok"
+      ~keeper_config_schema_blocking:false
+      ~keeper_config_schema_terminal_reason:""
+      ~keeper_config_operator_action_required:false
+      ~lazy_task_boot_guard_fires_total:0
+  in
+  check bool "the health rollup names the gaps" true
+    (List.mem
+       "runtime_startup_degradation:exact_slot_body_deadline_absent"
+       rollup.Server_health_rollup.operator_action_reasons)
 ;;
 
 (* masc#28403. The runtime this declares — [local.typo] — cannot exist, because
@@ -4313,7 +4670,10 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          check bool "runtime records startup degradation" true
            (Runtime.startup_degraded ());
          let json =
-           Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ())
+           Runtime.startup_degradation_to_yojson
+         ~exact_slots:(Runtime.exact_slot_degradation ())
+         ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
+         (Runtime.startup_degradation ())
          in
          let rendered = Yojson.Safe.to_string json in
          check bool "json is operator-visible degraded" true
@@ -4544,18 +4904,33 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
   let catalog_row id = Printf.sprintf
     "[[models]]\nid_prefix = %S\nprovider_name = \"local\"\nbase = \"ollama\"\nmax_context_tokens = 1024\n" id in
   with_model_catalog_content (catalog_row "chat" ^ catalog_row "libr") @@ fun () ->
+  let targets : Exact_output_fixture.target_fixture list =
+    [ { id = "slot-a"; base_url = "http://127.0.0.1:9" }
+    ; { id = "slot-b"; base_url = "http://127.0.0.1:10" }
+    ; { id = "local.chat"; base_url = "http://127.0.0.1:11" }
+    ; { id = "local.libr"; base_url = "http://127.0.0.1:12" }
+    ]
+  in
+  (* The slots are catalog targets, not runtime.toml bindings. A config commit
+     rebuilds the registry from the catalog the process reads, so the
+     targets must live in the replacement catalog [AGENT_CORE_MODEL_CATALOG]
+     names; a snapshot published by hand would be forgotten by the first
+     commit (#38779). *)
+  let catalog_path = Filename.temp_file "exact-raw-save-catalog-" ".toml" in
+  Fun.protect ~finally:(fun () -> Sys.remove catalog_path) @@ fun () ->
+  Exact_output_fixture.replacement_catalog_file ~path:catalog_path targets;
+  Masc_test_deps.with_process_env
+    Runtime.agent_core_model_catalog_env_var_name
+    (Some catalog_path)
+  @@ fun () ->
   let snapshot =
     Exact_output_fixture.resolver_snapshot
       ~source:"runtime raw-save exact replacement"
-      [ { id = "slot-a"; base_url = "http://127.0.0.1:9" }
-      ; { id = "slot-b"; base_url = "http://127.0.0.1:10" }
-      ; { id = "local.chat"; base_url = "http://127.0.0.1:11" }
-      ; { id = "local.libr"; base_url = "http://127.0.0.1:12" }
-      ]
+      targets
   in
   ignore
     (Exact_output_fixture.publish_registry
-       ~lane_id:"auxiliary_exact"
+       ~lane_id:"librarian_exact"
        ~slot_ids:[ "slot-a" ]
        snapshot
       : Runtime_exact_output_registry.t);
@@ -4567,13 +4942,9 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
        endpoint = \"http://localhost:11434\"\n\
        \n\
        [models.chat]\n\
-       provider = \"local\"\n\
-       provider-model-id = \"chat\"\n\
        max-context = 1024\n\
        \n\
        [models.libr]\n\
-       provider = \"local\"\n\
-       provider-model-id = \"libr\"\n\
        max-context = 1024\n\
        \n\
        [local.chat]\n\
@@ -4583,7 +4954,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
        [runtime]\n\
        default = \"%s\"\n\
        \n\
-       [runtime.exact_output_lanes.auxiliary_exact]\n\
+       [runtime.exact_output_lanes.librarian_exact]\n\
        slots = [\"%s\"]\n\
        max_output_tokens = 4096\n"
       default
@@ -4646,7 +5017,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
       (not (after_degraded == stable_registry));
     check bool "degraded save leaves optional lane without admitted slots" true
       (lane_has_no_admitted_slots
-         ~lane_id:"auxiliary_exact"
+         ~lane_id:"librarian_exact"
          after_degraded);
     check bool "degraded save does not synthesize HITL lane" true
       (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_degraded);
@@ -4668,7 +5039,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
            (after_write_failure == after_degraded);
          check bool "write failure preserves no-admitted lane" true
            (lane_has_no_admitted_slots
-              ~lane_id:"auxiliary_exact"
+              ~lane_id:"librarian_exact"
               after_write_failure);
          check bool "write failure does not synthesize HITL lane" true
            (lane_is_unconfigured
@@ -4684,7 +5055,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     check bool "valid save republishes the registry" true
       (not (replaced == after_degraded));
     check (list string) "valid save commits registry slots" [ "slot-b" ]
-      (slots_exn ~lane_id:"auxiliary_exact" replaced);
+      (slots_exn ~lane_id:"librarian_exact" replaced);
     check bool "valid save does not synthesize HITL lane" true
       (lane_is_unconfigured ~lane_id:"hitl_auto_judge" replaced))
 
@@ -5618,8 +5989,12 @@ let () =
             test_exact_output_lane_cli_slots_parse_in_order;
           test_case "exact-output lane rejects unknown keys" `Quick
             test_exact_output_lane_rejects_unknown_key;
+          test_case "exact-output lane rejects unknown lane ids" `Quick
+            test_exact_output_lane_rejects_unknown_lane_id;
           test_case "lane rejects unknown keys" `Quick
             test_lane_rejects_unknown_key;
+          test_case "model rejects unknown keys" `Quick
+            test_model_rejects_unknown_key;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
           test_case "seed capability keys the catalog row decides agree with it" `Quick
@@ -5689,6 +6064,22 @@ let () =
             test_verifier_exact_slot_must_name_a_configured_route;
           test_case "sibling exact lanes keep catalog-only slots" `Quick
             test_sibling_exact_lanes_keep_catalog_only_slots;
+          test_case "exact slot without a body deadline loads degraded" `Quick
+            test_exact_slot_without_body_deadline_loads_degraded;
+          test_case "exact slot with a body deadline loads" `Quick
+            test_exact_slot_with_body_deadline_loads;
+          test_case "exact cli_slots carry no body deadline rule" `Quick
+            test_exact_cli_slots_carry_no_body_deadline_rule;
+          test_case "replacement catalog targets skip the body deadline rule" `Quick
+            test_replacement_catalog_targets_skip_the_body_deadline_rule;
+          test_case "saving an exact slot without a body deadline is refused" `Quick
+            test_saving_an_exact_slot_without_body_deadline_is_refused;
+          test_case "an existing gap does not block an unrelated save" `Quick
+            test_an_existing_gap_does_not_block_an_unrelated_save;
+          test_case "a save adding a gap names only the added one" `Quick
+            test_a_save_adding_a_gap_names_only_the_added_one;
+          test_case "catalog and gap degradation name both reasons" `Quick
+            test_catalog_and_gap_degradation_name_both_reasons;
           test_case "unreferenced binding naming an undeclared model fails the load"
             `Quick test_binding_naming_an_undeclared_model_fails_the_load;
           test_case "non-provider top-level namespaces are not bindings" `Quick
@@ -5789,6 +6180,9 @@ let () =
           test_case
             "every discovered boot-path fixture declares the mandatory exact-output lanes"
             `Quick test_boot_path_fixtures_declare_mandatory_exact_output_lanes;
+          test_case
+            "shipped configs declare a body deadline on every exact HTTP slot"
+            `Quick test_shipped_configs_declare_exact_slot_body_deadlines;
           test_case
             "release-evidence smoke lanes resolve with no environment credential"
             `Quick test_release_evidence_fixture_lanes_resolve_without_environment_credentials

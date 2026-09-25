@@ -231,6 +231,7 @@ type runtime_attempt =
   ; runtime_id : string
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
+  ; usage_report : Runtime_execution.usage_report
   }
 (** Exact materialized candidate selected immediately before dispatch.
     [routing_run_id] identifies one lane walk, including reentry into the same
@@ -320,6 +321,8 @@ val run_named :
   ?on_official_client_native_action:
     (runtime_id:string -> official_turn:int ->
      identity:Runtime_native_tools.action_identity -> tool_name:string -> unit) ->
+  ?on_official_client_usage_report:
+    (official_turn:int -> model:string -> Agent_core.Types.api_usage -> unit) ->
   ?on_model_input_window_observation:
     (measurement:Turn_record.model_input_measurement
      -> Runtime_model_input_tail_window.window_observation

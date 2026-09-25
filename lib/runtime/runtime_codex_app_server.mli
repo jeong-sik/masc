@@ -170,6 +170,14 @@ type stream_event =
       (** The windows an [account/rateLimits/updated] notification reported,
           for the operator projection only; nothing that routes or retries
           reads it. *)
+  | Usage_reported of
+      { model : string
+      ; usage : token_usage
+      }
+      (** One [thread/tokenUsage/updated] frame for this turn: the [last]
+          breakdown, which is one model response's spend. Emitted when the
+          frame is read, before the turn's outcome is known, so a turn that
+          ends in an error still reports what it already spent. *)
   | Turn_finished of { text : string }
 
 type history_role =

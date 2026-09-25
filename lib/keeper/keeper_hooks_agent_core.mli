@@ -131,6 +131,21 @@ val emit_cost_event :
   ?telemetry:Agent_core.Types.inference_telemetry -> unit -> unit
 (** Append a structured cost-ledger event to [costs/YYYY-MM/DD.jsonl]. *)
 
+val emit_client_usage_report :
+  trajectory_acc:Trajectory.accumulator option ->
+  agent_name:string ->
+  trace_id:string ->
+  keeper_turn_id:int ->
+  ?runtime_attempt:(string * string * int) ->
+  official_turn:int ->
+  model:string ->
+  Agent_core.Types.api_usage ->
+  unit
+(** Append one raw cost-ledger row for a model response an official client
+    reported on its own stream. [official_turn] is the client turn the report
+    belongs to. Writes nothing without a trajectory accumulator, as
+    [AfterTurn] does. *)
+
 val broadcast_resolved_turn_complete :
   keeper_name:string ->
   turn:int ->
@@ -173,6 +188,7 @@ val make_hooks :
   on_after_turn_ordinal:(int -> unit) ->
   ?on_tool_stream_observation:(tool_stream_observation -> unit) ->
   ?current_runtime_attempt:(unit -> (string * string * int) option) ->
+  ?current_usage_report:(unit -> Runtime_execution.usage_report option) ->
   ?on_after_turn_response:(response:Agent_core.Types.api_response -> unit) ->
   ?on_tool_executed:(tool_name:string ->
                      input:Yojson.Safe.t ->

@@ -30,6 +30,11 @@ type checkpoint_owner =
   | Masc_agent_core
   | Official_client
 
+type usage_report =
+  | Each_agent_core_response
+  | Client_stream_per_response
+  | Client_turn_result
+
 let supports_native_none = function
   | Agent_core _ | Claude_code _ -> true
   | Codex_app_server _ | Antigravity_cli _ -> false
@@ -51,4 +56,10 @@ let label = function
 let checkpoint_owner = function
   | Agent_core _ -> Masc_agent_core
   | Codex_app_server _ | Claude_code _ | Antigravity_cli _ -> Official_client
+;;
+
+let usage_report = function
+  | Agent_core _ -> Each_agent_core_response
+  | Codex_app_server _ -> Client_stream_per_response
+  | Claude_code _ | Antigravity_cli _ -> Client_turn_result
 ;;

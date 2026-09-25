@@ -75,6 +75,7 @@ type runtime_attempt =
   ; runtime_id : string
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
+  ; usage_report : Runtime_execution.usage_report
   }
 
 type runtime_attempt_candidate =
@@ -1576,6 +1577,7 @@ let run_named
     ?on_official_client_tool_boundary
     ?on_official_client_result_handoff
     ?on_official_client_native_action
+    ?on_official_client_usage_report
     ?on_model_input_window_observation
     ?on_response_observed_model_input
     ?carried_front_seed
@@ -2103,6 +2105,7 @@ let run_named
              ; lane_attempt_index = idx
              ; checkpoint_owner =
                  Runtime_execution.checkpoint_owner runtime.Runtime.execution
+             ; usage_report = Runtime_execution.usage_report runtime.Runtime.execution
              })
         on_runtime_attempt;
       let error_runtime_id = attempt_runtime_id in
@@ -2262,6 +2265,7 @@ let run_named
                  Option.iter
                    (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~identity ~tool_name)
                    on_official_client_native_action)
+            ?on_usage_report:on_official_client_usage_report
             ~event_bus
             ~raw_trace
             ~on_event

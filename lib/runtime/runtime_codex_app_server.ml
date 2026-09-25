@@ -175,6 +175,10 @@ type stream_event =
       ; reason : elicitation_cancel_reason
       }
   | Usage_windows_reported of Runtime_provider_usage_window.report
+  | Usage_reported of
+      { model : string
+      ; usage : token_usage
+      }
   | Turn_finished of { text : string }
 
 let emit_stream_event on_stream_event event =
@@ -1162,7 +1166,7 @@ let cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id par
     Ok ())
 ;;
 
-let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final
+let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~model ~seen_final
     ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event =
   let* message = io.receive () in
   match message with
@@ -1186,6 +1190,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~tool_call_count
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final
       ~seen_fallback
       ~seen_usage
@@ -1193,7 +1198,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~on_stream_event
   | Server_request { id; method_ = "mcpServer/elicitation/request"; params } ->
     let* () = cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params in
-    await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id
+    await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~model
       ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
@@ -1215,6 +1220,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~tool_call_count
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final
       ~seen_fallback
       ~seen_usage
@@ -1229,6 +1235,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~tool_call_count
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final
       ~seen_fallback
       ~seen_usage
@@ -1248,6 +1255,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~tool_call_count
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final
       ~seen_fallback
       ~seen_usage
@@ -1277,7 +1285,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         :: List.filter (fun open_id -> not (String.equal open_id call_id)) open_tool_call_ids
     in
     await_turn_terminal
-      io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final ~seen_fallback
+      io ~tools ~tool_call_count ~thread_id ~turn_id ~model ~seen_final ~seen_fallback
       ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
@@ -1314,6 +1322,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~tool_call_count
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final
       ~seen_fallback
       ~seen_usage
@@ -1338,6 +1347,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         ~tool_call_count
         ~thread_id
         ~turn_id
+        ~model
         ~seen_final
         ~seen_fallback
         ~seen_usage
@@ -1365,6 +1375,14 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     Ok (text, seen_usage)
   | Notification { method_ = "thread/tokenUsage/updated"; params } ->
     let* usage = token_usage_notification ~thread_id ~turn_id params in
+    (* Codex core sends this after every model response of the turn, so each
+       frame is one request's spend. It is reported here, where it is read,
+       so a turn that later fails, is interrupted or times out still leaves
+       the requests it already paid for. [seen_usage] keeps only the newest
+       frame for the turn result. *)
+    Option.iter
+      (fun usage -> emit_stream_event on_stream_event (Usage_reported { model; usage }))
+      usage;
     let seen_usage =
       match usage with
       | Some _ -> usage
@@ -1376,6 +1394,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~tool_call_count
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final
       ~seen_fallback
       ~seen_usage
@@ -1397,6 +1416,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~tool_call_count
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final
       ~seen_fallback
       ~seen_usage
@@ -1412,6 +1432,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~tool_call_count
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final
       ~seen_fallback
       ~seen_usage
@@ -1642,6 +1663,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
       ~tool_call_count
       ~thread_id
       ~turn_id
+      ~model
       ~seen_final:None
       ~seen_fallback:None
       ~seen_usage:None

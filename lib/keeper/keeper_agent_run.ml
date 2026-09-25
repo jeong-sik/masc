@@ -1861,6 +1861,8 @@ let run_turn
                         s.Keeper_run_tools.observe_official_client_result_handoff
                       ~on_official_client_native_action:
                         s.Keeper_run_tools.observe_official_client_native_action
+                      ~on_official_client_usage_report:
+                        s.Keeper_run_tools.observe_official_client_usage_report
                       ())
          in
          (* Trace-store failure isolation: [raw_trace_for_dispatch]

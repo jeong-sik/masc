@@ -166,6 +166,44 @@ let usage_missing_of_usage = function
   | None -> true
   | Some usage -> not (usage_has_tokens usage)
 
+(* One model response's spend, reported by an official client on its own
+   stream while the turn runs ([Runtime_execution.Client_stream_per_response]).
+   The row is the same raw observation [AfterTurn] writes for an AGENT_CORE
+   response, keyed by the official turn the client is running. It is written
+   when the report arrives, so a turn that later fails keeps the requests it
+   already paid for. Without a trajectory accumulator no row is written, the
+   same rule [AfterTurn] follows. *)
+let emit_client_usage_report
+    ~(trajectory_acc : Trajectory.accumulator option)
+    ~agent_name
+    ~trace_id
+    ~keeper_turn_id
+    ?runtime_attempt
+    ~official_turn
+    ~model
+    (usage : Agent_core.Types.api_usage)
+  =
+  match trajectory_acc with
+  | None -> ()
+  | Some acc ->
+    emit_cost_event
+      ~masc_root:acc.masc_root
+      ~agent_name
+      ~task_id:acc.task_id
+      ~trace_id
+      ~keeper_turn_id
+      ~agent_core_turn_ordinal:official_turn
+      ~model
+      ?runtime_attempt
+      ~input_tokens:usage.input_tokens
+      ~output_tokens:usage.output_tokens
+      ~cost_usd:(agent_core_reported_cost usage)
+      ~usage_missing:(usage_missing_of_usage (Some usage))
+      ~cache_creation_input_tokens:usage.cache_creation_input_tokens
+      ~cache_read_input_tokens:usage.cache_read_input_tokens
+      ~usage_trust:(classify_usage_trust ~usage ())
+      ()
+
 type tool_stream_observation =
   | Runtime_attempt_started of
       { runtime_id : string
@@ -187,6 +225,7 @@ let make_hooks
     ~(on_after_turn_ordinal : int -> unit)
     ?(on_tool_stream_observation : tool_stream_observation -> unit = fun _ -> ())
     ?(current_runtime_attempt = fun () -> None)
+    ?(current_usage_report = fun () -> None)
     ?(on_after_turn_response :
         response:Agent_core.Types.api_response -> unit =
         fun ~response:_ -> ())
@@ -416,18 +455,29 @@ let make_hooks
               any turn and the tool timeline disappeared. Adopt the turn the
               runtime already assigns here; [round] derives from it. *)
            Trajectory.set_turn acc turn;
-           emit_cost_event ~masc_root:acc.masc_root
-             ~agent_name:meta.name ~task_id:acc.task_id
-             ~trace_id ~keeper_turn_id ~agent_core_turn_ordinal:turn ~model
-             ~response_id:response.id
-             ?runtime_attempt:(current_runtime_attempt ())
-             ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
-             ~cost_usd:cost_usd_for_event ~usage_missing
-             ~cache_creation_input_tokens:raw_cache_creation_input_tokens
-             ~cache_read_input_tokens:raw_cache_read_input_tokens
-             ~usage_trust
-             ?telemetry:response.telemetry
-             ();
+           (* A client that reports usage per response on its own stream has
+              already written this turn's rows through
+              [emit_client_usage_report]; this response only repeats the
+              newest of them. [None] is a turn with no dispatched attempt,
+              which keeps the row [AfterTurn] always wrote. *)
+           (match current_usage_report () with
+            | Some Runtime_execution.Client_stream_per_response -> ()
+            | Some
+                ( Runtime_execution.Each_agent_core_response
+                | Runtime_execution.Client_turn_result )
+            | None ->
+              emit_cost_event ~masc_root:acc.masc_root
+                ~agent_name:meta.name ~task_id:acc.task_id
+                ~trace_id ~keeper_turn_id ~agent_core_turn_ordinal:turn ~model
+                ~response_id:response.id
+                ?runtime_attempt:(current_runtime_attempt ())
+                ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
+                ~cost_usd:cost_usd_for_event ~usage_missing
+                ~cache_creation_input_tokens:raw_cache_creation_input_tokens
+                ~cache_read_input_tokens:raw_cache_read_input_tokens
+                ~usage_trust
+                ?telemetry:response.telemetry
+                ());
            (* 남김없이: persist THIS turn's reasoning (full, untruncated) every
               turn. The prior single post-run capture (Keeper_agent_run) saved
               only the final turn's thinking; turns 1..N-1 were merely counted

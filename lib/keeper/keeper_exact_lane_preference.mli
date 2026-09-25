@@ -46,12 +46,23 @@ val apply
   -> Runtime_exact_output_registry.resolved_lane
   -> (Runtime_exact_output_registry.resolved_lane, string) result
 (** Apply the exact owner's stored preference to an already-resolved admitted
-    lane. No preference returns the lane unchanged. *)
+    lane. No preference returns the lane unchanged, and so does a preference
+    naming a slot the lane no longer offers (logged): the lane keeps walking
+    its declared order. An unreadable preference store is an error. *)
 
 val validate_admitted_slot : lane_id:string -> slot_id:string -> (unit, string) result
 (** Refuse an operator choice that the currently published lane does not
-    admit. This is an authoring-time check; {!apply} repeats the check at the
-    execution boundary against the current immutable registry. *)
+    admit. This is an authoring-time check; at the execution boundary
+    {!apply} falls back to the declared order instead. *)
+
+val offered : t -> bool
+(** Whether the currently published lane offers this row's slot. [false] means
+    {!apply} ignores the row and the lane walks its declared order; an
+    unpublished registry also reads as [false]. *)
+
+val to_projection_json : t -> Yojson.Safe.t
+(** The row as the dashboard and TUI read it: the stored fields plus
+    [offered]. *)
 
 val set
   :  Workspace.config

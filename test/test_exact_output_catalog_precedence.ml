@@ -130,9 +130,11 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
       true
       (String_util.contains_substring message lane_id);
     Alcotest.(check bool)
-      "missing lane error gives runtime.toml reset guidance"
+      "missing lane error names the TOML table to add"
       true
-      (String_util.contains_substring message "reset the preserved runtime.toml");
+      (String_util.contains_substring
+         message
+         ("[runtime.exact_output_lanes." ^ lane_id ^ "]"));
     require_registry_unpublished ("missing mandatory exact lane " ^ lane_id)
   in
   require_missing_mandatory_lane_rejected

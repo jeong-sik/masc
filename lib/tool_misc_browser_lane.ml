@@ -157,27 +157,19 @@ let handle_tabs ~base_path ~tool_name ~start_time args : Tool_result.result =
    browser belongs to the operator, and its lane refuses them too
    (verb_allowed_on_live). A missing lane is automation, as both tools
    declare. *)
-let server_lanes = Browser_lane.Lane_name.[ Automation; Stagehand ]
-let server_lanes_expected = String.concat " or " (List.map Browser_lane.Lane_name.to_wire server_lanes)
-
 let issue_on_server_lane ~tool_name ~start_time args ~verb ~timeout_sec =
   let lane = match args with
     | `Assoc fields ->
       (match List.assoc_opt "lane" fields with
-       | None -> Ok Browser_lane.Lane_name.Automation
-       | Some (`String raw) ->
-         Option.to_result ~none:("lane must be " ^ server_lanes_expected) (Browser_lane.Lane_name.of_wire raw)
-       | Some _ -> Error ("lane must be " ^ server_lanes_expected))
+       | None -> Ok Browser_lane.Server_automation
+       | Some (`String raw) -> Browser_lane.parse_server_lane raw
+       | Some _ -> Error Browser_lane.server_lane_refused)
     | _ -> Error "browser arguments must be an object" in
   match lane with
   | Error detail -> make_input_err ~tool_name ~start_time detail
-  | Ok (Browser_lane.Lane_name.Automation as lane) ->
-    answer_to_result ~lane ~tool_name ~start_time (Browser_lane.issue_automation ~verb ~timeout_sec)
-  | Ok (Browser_lane.Lane_name.Stagehand as lane) ->
-    answer_to_result ~lane ~tool_name ~start_time (Browser_lane.issue_stagehand ~verb ~timeout_sec)
-  | Ok Browser_lane.Lane_name.Live ->
-    make_input_err ~tool_name ~start_time
-      ("lane must be " ^ server_lanes_expected ^ ": the live browser belongs to the operator")
+  | Ok lane ->
+    answer_to_result ~lane:(Browser_lane.server_lane_name lane) ~tool_name ~start_time
+      (Browser_lane.issue_server_lane lane ~verb ~timeout_sec)
 ;;
 
 let handle_session ~tool_name ~start_time args : Tool_result.result =

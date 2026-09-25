@@ -93,7 +93,11 @@ whether an autosave exists (what it is, when, and who saved it) under
 says `unreadable` and why. Nothing resumes it for you: read the field and call
 `masc_dos_restore slot=autosave` yourself when you want it back.
 
-There is one `autosave` slot, so the next call that runs the guest replaces
-it. After a restart, call `masc_dos_screen` (or `masc_dos_load` with no
-`program`) first. `masc_dos_load` with a program name starts a new machine,
-and its own autosave overwrites the one from before the restart.
+There is one `autosave` slot, and the next call that runs the guest replaces
+it -- except a new machine's own first autosave, which moves whatever was
+there to `autosave-prev` first. So after a restart, `masc_dos_load` with a
+program name is safe to call directly: it starts a new machine, and that
+machine's own first autosave preserves what was there before the restart
+under `autosave-prev` (`masc_dos_restore slot=autosave-prev` to get it back)
+rather than overwriting it. Calling `masc_dos_screen` first is still fine,
+just no longer required to avoid losing the previous run.

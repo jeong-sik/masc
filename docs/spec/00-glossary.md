@@ -946,8 +946,12 @@ status: reference
   `masc_dos_restore` 도 쓰지 않는다. 되살린 기계의 다음 호출부터 쓴다.
   쓰기가 실패해도(예: 디렉터리를 쓸 수 없음) 원래 호출의 결과는 그대로 돌아가고,
   결과 안에 `autosave: {"saved": false, "reason": ...}` 로만 남는다.
-  슬롯이 하나라서 기계를 움직이는 다음 호출이 이 자동 저장을 덮어쓴다. 서버를 다시 켠
-  뒤 프로그램 이름을 넣은 `masc_dos_load` 를 첫 호출로 부르면 이전 자동 저장은 사라진다.
+  기계를 움직이는 다음 호출이 `autosave` 슬롯을 덮어쓴다. 다만 새 기계(incarnation)의
+  첫 자동 저장만은 먼저 그 자리에 있던 파일을 `autosave-prev` 슬롯으로 옮기고 나서 쓴다
+  — 그 파일은 이 기계가 아니라 이전 기계(이전 `load`·`restore`)의 것이라서다. 서버를
+  다시 켠 뒤 프로그램 이름을 넣은 `masc_dos_load` 를 첫 호출로 부르면, 재시작 전 마지막
+  자동 저장은 `autosave-prev` 로 남아 `masc_dos_restore slot=autosave-prev` 로 되살릴 수
+  있다. 같은 기계가 그 뒤 또 자동 저장할 때는 옮기지 않고 `autosave` 를 그대로 갈아 쓴다.
   기계가 없을 때 — 기계가 필요한 호출의 거절(`masc_dos_screen`·`masc_dos_peek` 등)과
   프로그램 이름 없이 부른 `masc_dos_load` 의 인벤토리 응답 — 는 이 자동 저장이 있는지,
   무엇인지(프로그램, 걸음 수, 저장한 사람, 시각), 어떻게 되살리는지

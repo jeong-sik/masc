@@ -4583,6 +4583,33 @@ let test_production_keeper_dispatches_codex_runtime () =
                 ~trace_id:"codex-production-trace-1"))
 ;;
 
+(* An official-client turn that fails never reaches finalize. Its input is
+   already a fragment of its turn, so it still leaves the line that names the
+   turn; without it no Librarian round would read that input. *)
+let test_production_keeper_failed_turn_leaves_its_end_line () =
+  let base_path = temp_workspace "masc-codex-production-failed-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result; account_chatgpt; thread_result; turn_result; turn_failed ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn
+                ~base_path
+                ~trace_id:"codex-production-failed-1"
+                ~user_message:"This turn fails at the provider."
+                ~cli_path
+                ~model:"gpt-fixture"
+                ~turn_instructions:None
+            with
+            | Ok _ -> fail "the fixture turn was expected to fail"
+            | Error _ ->
+              assert_official_client_turn_boundary
+                ~base_path
+                ~trace_id:"codex-production-failed-1"))
+;;
+
 (* The host reads the runtime's count into the turn's usage: reported, per
    request, with the app-server's numbers rather than zero. *)
 let test_production_keeper_reports_codex_token_usage () =
@@ -5630,6 +5657,10 @@ let () =
             "production Keeper dispatches Codex runtime"
             `Quick
             test_production_keeper_dispatches_codex_runtime
+        ; test_case
+            "production Keeper failed turn leaves its end line"
+            `Quick
+            test_production_keeper_failed_turn_leaves_its_end_line
         ; test_case
             "production Keeper reports Codex token usage"
             `Quick

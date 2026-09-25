@@ -936,7 +936,10 @@
  (name masc_tui_render_schedule)
  (wrapped false)
  (modules masc_tui_render_schedule)
- (libraries masc_tui_message_layout masc_tui_table masc_tui_theme))
+ ; masc_tui_scroll so the keeper detail's clamp is the shared one rather than
+ ; a second copy of the same arithmetic.
+ (libraries masc_tui_message_layout masc_tui_scroll masc_tui_table
+  masc_tui_theme))
 
 (library
  (name masc_tui_frame_timing)

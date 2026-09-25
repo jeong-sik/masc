@@ -51,6 +51,7 @@ import {
   normalizeIdeTreeWidth,
 } from './ide-shell'
 import { navigate, route } from '../../router'
+import { globalShortcutManager } from '../../lib/global-shortcut-manager'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 import {
   activeIdeFile,
@@ -948,6 +949,47 @@ describe('IdeShell', () => {
     await waitFor(() => {
       expect(container.querySelector('[data-testid="ide-find-panel"]')).not.toBeNull()
     })
+  })
+
+  it('opens find with Mod+F inside the IDE and leaves it to the browser outside', async () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+    document.body.appendChild(container)
+
+    render(h(IdeShell, {}), container)
+    const outside = document.createElement('button')
+    document.body.appendChild(outside)
+    // Mod is Cmd on macOS and Ctrl elsewhere; press whichever this
+    // platform reads as Mod.
+    const modKey = globalShortcutManager.formatChord({ key: 'f', modifiers: ['Mod'] }).startsWith('⌘')
+      ? 'metaKey'
+      : 'ctrlKey'
+    const press = (target: Element) => {
+      const event = { key: 'f', [modKey]: true, target, preventDefault: vi.fn(), stopPropagation: vi.fn() }
+      return { handled: globalShortcutManager.dispatch(event), event }
+    }
+
+    await waitFor(() => expect(globalShortcutManager.getById('ide.find.open')).toBeDefined())
+    const fromOutside = press(outside)
+    expect(fromOutside.event.preventDefault).not.toHaveBeenCalled()
+    expect(route.value.params.find).toBeUndefined()
+
+    const inside = press(ideCommandInput(container))
+    expect(inside.handled).toBe(true)
+    expect(inside.event.preventDefault).toHaveBeenCalled()
+    expect(route.value.params.find).toBe('open')
+
+    // Empty IDE space leaves focus on the body; that is still the IDE.
+    navigate('code', { section: 'ide-shell', view: 'source' })
+    const fromBody = press(document.body)
+    expect(fromBody.event.preventDefault).toHaveBeenCalled()
+    await waitFor(() => expect(route.value.params.find).toBe('open'))
+
+    outside.remove()
+    container.remove()
   })
 
   it('starts on the activity rail and keeps work context behind a disclosure', () => {

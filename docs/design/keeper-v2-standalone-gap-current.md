@@ -174,10 +174,10 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   backed Fusion run view and source Board post. The card still lazy-fetches
   panel/judge detail only when expanded, so route clicks do not invent local
   state or trigger the evidence fetch.
-- Keeper chat Fusion cards now share the Board evidence path's Fusion failure
-  normalization for `reason_detail`, legacy `Fusion_types.*` constructor
-  strings, provider attribution, and judge `error` fallback, so live/legacy
-  board-sink metadata is not rendered as raw backend internals in chat.
+- Keeper chat Fusion cards read failed-panel `reason_detail` through the shared
+  Board evidence reason normalizer. It trims the detail and corrects
+  `Provider 'unknown'` attribution using the model ID; failed judge detail
+  comes from `judge.error`.
 - Board was audited against the standalone `BoardSurface`. The current backed
   route already has hearth/sub-board rail, feed filters, post/thread detail,
   mention inbox, reactions/votes, comments, and composer modes.
@@ -791,12 +791,11 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   plus mobile viewport fit with no horizontal overflow. Screenshots:
   `/tmp/masc-fusion-chat-card-actions-desktop-20260621.png` and
   `/tmp/masc-fusion-chat-card-actions-mobile-20260621.png`.
-- Fusion chat-card normalization Vitest:
+- The 2026-06-21 Fusion chat-card normalization Vitest run:
   `pnpm exec vitest run src/components/chat/primitives.test.ts src/components/board/board-surface.test.ts --testTimeout 90000`
-  passes (139 tests), including modern `reason_detail`, legacy
-  `Fusion_types.Provider_error`, `Fusion_types.Timeout`, provider attribution
-  normalization, judge `error` fallback, and the Board Fusion evidence consumer
-  still rendering.
+  passed 139 tests. Current source tests exercise `reason_detail`, provider
+  attribution, timeout prose, judge `error`, and the Board Fusion evidence
+  consumer; this historical count is not an exact-head test result.
 - Dashboard TypeScript after the Fusion chat-card normalization slice:
   `pnpm exec tsc --noEmit --pretty false` passes.
 - Dashboard lint after the Fusion chat-card normalization slice: `pnpm lint`

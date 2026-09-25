@@ -6240,6 +6240,7 @@
  (libraries masc alcotest eio eio.mock))
 (include stanzas/test_browser_webdriver.inc)
 (include stanzas/test_browser_cdp.inc)
+(include stanzas/test_browser_stagehand_session.inc)
 (include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)

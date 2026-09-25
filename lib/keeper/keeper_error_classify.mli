@@ -103,7 +103,7 @@ type degraded_retry_reason =
   | Resumable_cli_session
   | Runtime_candidates_filtered
   | Runtime_exhausted
-  | Capacity_backpressure
+  | Provider_capacity
   | Rate_limit
   | Server_error
   | Auth_error
@@ -130,14 +130,13 @@ type degraded_retry =
     labelled:
     - [PaymentRequired] / provider [HardQuota] → ["hard_quota"]
     - [RateLimited] provider throttles → ["rate_limit"]
-    - [Overloaded] / [CapacityExhausted] → ["capacity_backpressure"]
+    - [Overloaded] / [CapacityExhausted] → ["provider_capacity"]
     - API [ServerError] and transient provider [ServerError] → ["server_error"]
     - [AuthError] → ["auth_error"]
 
     Production callers label the deferred lane suffix
     ([Keeper_unified_turn], [Keeper_unified_turn_execution],
-    [Keeper_agent_run]) and read the capacity blocker
-    ([Keeper_status_bridge_blocker]). *)
+    [Keeper_agent_run]). *)
 val recoverable_runtime_failure_reason :
   Agent_core.Error.t -> degraded_retry_reason option
 

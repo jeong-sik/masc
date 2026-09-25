@@ -304,6 +304,20 @@ let test_partial_osc_continues_in_the_normal_reader () =
     (Option.is_none at_deadline.palette);
   check string "only decided input is replayable at the deadline" "before"
     at_deadline.replay;
+  let replay = Buffer.create 64 in
+  String.iter
+    (fun expected ->
+      check bool "startup input remains queued until consumed" true
+        (Masc_tui_terminal_probe.has_replay decoder);
+      match Masc_tui_terminal_probe.next decoder
+              ~next_raw:(fun () -> fail "queued replay must not read the terminal") with
+      | Some byte ->
+        check char "startup bytes replay in order" expected byte;
+        Buffer.add_char replay byte
+      | None -> fail "queued startup input was lost")
+    "before";
+  check bool "an unfinished response is waiting, not queued input" false
+    (Masc_tui_terminal_probe.has_replay decoder);
 
   let unknown_osc = osc_bell "99;normal-input" in
   let pasted =
@@ -321,7 +335,6 @@ let test_partial_osc_continues_in_the_normal_reader () =
       Some byte
     end
   in
-  let replay = Buffer.create 64 in
   let rec read_normally () =
     match Masc_tui_terminal_probe.next decoder ~next_raw with
     | None -> ()

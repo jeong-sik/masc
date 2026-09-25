@@ -286,6 +286,10 @@ let save_file_atomic path content =
   Atomic_write.save_file_atomic ~save_file:save_file_blocking path content
 ;;
 
+let save_file_atomic_rename_only path content =
+  Atomic_write.save_file_atomic_rename_only ~save_file:save_file_blocking path content
+;;
+
 type atomic_replace_failure_stage =
   Atomic_write.atomic_replace_failure_stage =
   | Before_rename

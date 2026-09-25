@@ -637,7 +637,10 @@ let test_fusion_footer_pins_the_shared_list_projection () =
    neither, and a body row named them in its own notation. Both footers now
    read the same two bindings. *)
 let test_fusion_detail_footer_names_the_caller_and_board_keys () =
-  let detail = Masc_tui_keys.footer_hints_fusion_detail ~position:"1-40/47" in
+  (* The window the renderer drew is no longer spelled into this string; it
+     travels as [Masc_tui_footer.line]'s [?position] so the fitter keeps it
+     with the pinned keys. *)
+  let detail = Masc_tui_keys.footer_hints_fusion_detail in
   let holds needle haystack =
     let n = String.length needle and h = String.length haystack in
     let rec scan i = i + n <= h && (String.equal (String.sub haystack i n) needle || scan (i + 1)) in
@@ -753,14 +756,17 @@ let test_lanes_run_list_footer_names_the_drill_down () =
 
 (* [compare], not [scroll]: #32270 stacked Input and Output into one list that
    one scroll walks, so the two panes move together and the key's name says
-   which of the two it does. *)
-let test_lanes_run_detail_footer_appends_the_scroll_position () =
-  check str "the stacked run detail footer carries the window it drew"
-    "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit  4-23/60"
-    (Masc_tui_keys.footer_hints_lanes_run_detail ~position:(Some "4-23/60"));
-  check str "the split panes name their own windows, so the footer does not"
+   which of the two it does.
+
+   The window the stacked list drew is not in this string. It reaches the row
+   as [Masc_tui_footer.line]'s [?position], which the fitter keeps with the
+   pinned keys -- spelled here it was one more item to give up from the back,
+   and it went first. The split panes name their own windows in their titles
+   and pass none. *)
+let test_lanes_run_detail_footer_names_its_keys_alone () =
+  check str "the stacked run detail footer is keys and the shared tail"
     "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit"
-    (Masc_tui_keys.footer_hints_lanes_run_detail ~position:None)
+    Masc_tui_keys.footer_hints_lanes_run_detail
 
 let test_overview_footer_projects_by_focus () =
   (* The retired literal said "j/k:events  t:tasks  q:quit  r:refresh
@@ -1349,6 +1355,50 @@ let test_metrics_is_an_overview_child () =
   Alcotest.(check bool) "Overview documents the [m] hop" true
     (List.mem "m" overview_keys)
 
+(* The strip drops the Approvals entry when nothing is waiting. "Nothing is
+   waiting" is a reading, and with the server unreachable nobody took it: the
+   confirm queue, the held calls and the questions all failed, every other
+   surface drew "(load failed)", and this entry simply left the ring -- so the
+   screen that holds the operator's decisions was the only one that read as
+   settled. The entry now stands until a reading says the lists are empty. *)
+let approvals_reading_is_current state =
+  state.approval_snapshot <-
+    Some
+      { Masc_tui_operator_projection.aps_items = []
+      ; aps_actor_filter = None
+      ; aps_filter_active = false
+      ; aps_visible_count = 0
+      ; aps_total_count = 0
+      ; aps_hidden_count = 0
+      };
+  state.keeper_tool_approvals_error <- None;
+  state.asks_snapshot <-
+    Some { Masc.Tui_decode.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
+  state.asks_error <- None
+
+let approvals_in_ring state =
+  List.exists (fun (surface, _) -> surface = Approvals) (visible_surface_ring state)
+
+let test_the_ring_keeps_approvals_until_a_reading_empties_it () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Overview;
+  Alcotest.(check bool) "before any reading the entry stands" true
+    (approvals_in_ring state);
+  approvals_reading_is_current state;
+  Alcotest.(check bool) "a reading with nothing in it drops the entry" false
+    (approvals_in_ring state);
+  state.keeper_tool_approvals_error <- Some "held calls poll failed";
+  Alcotest.(check bool) "a failed held-calls poll keeps it" true
+    (approvals_in_ring state);
+  state.keeper_tool_approvals_error <- None;
+  state.asks_error <- Some "questions poll failed";
+  Alcotest.(check bool) "a failed questions poll keeps it" true
+    (approvals_in_ring state);
+  state.asks_error <- None;
+  state.approval_snapshot <- None;
+  Alcotest.(check bool) "an unread confirm queue keeps it" true
+    (approvals_in_ring state)
+
 let test_browser_lanes_highlight_config () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Connectors;
@@ -1373,6 +1423,9 @@ let test_browser_lanes_highlight_config () =
 let test_visible_surface_ring_declutter () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Overview;
+  (* Empty, not unread: a fresh state has taken no reading, and a reading
+     nobody took is not a queue with nothing in it. *)
+  approvals_reading_is_current state;
   let ring_empty = visible_surface_ring state in
   Alcotest.(check bool) "Approvals hidden when empty and not active" false
     (List.exists (fun (s, _) -> s = Approvals) ring_empty);
@@ -2878,6 +2931,9 @@ let () =
             test_config_declares_the_page_keys_it_handles
         ; Alcotest.test_case "chat help names the Memory cycle" `Quick
             test_chat_help_names_memory_cycle
+        ; Alcotest.test_case
+            "the ring keeps Approvals until a reading empties it" `Quick
+            test_the_ring_keeps_approvals_until_a_reading_empties_it
         ; Alcotest.test_case "chat help names the voice keys" `Quick
             test_chat_help_names_the_voice_keys
         ; Alcotest.test_case "a searchable surface does not also bind n" `Quick
@@ -2970,8 +3026,8 @@ let () =
             test_keeper_runs_selection_survives_a_shorter_list
         ; Alcotest.test_case "Lanes run list names the drill-down" `Quick
             test_lanes_run_list_footer_names_the_drill_down
-        ; Alcotest.test_case "Lanes run detail appends the scroll position" `Quick
-            test_lanes_run_detail_footer_appends_the_scroll_position
+        ; Alcotest.test_case "Lanes run detail names its keys alone" `Quick
+            test_lanes_run_detail_footer_names_its_keys_alone
         ; Alcotest.test_case "Overview footer projects by focus" `Quick
             test_overview_footer_projects_by_focus
         ; Alcotest.test_case "System logs owns only real filter keys" `Quick

@@ -111,6 +111,42 @@ let workspace_root ~(config : Workspace.config) ~(meta : keeper_meta) =
   Ok (Filename.concat root (Playground_paths.sanitize_keeper_name meta.name))
 ;;
 
+(* #38593: an OpenSSH endpoint's declared roots ([allowed_paths]) name
+   endpoint paths outside the keeper's tree that its commands may use, such
+   as a Terminal-Bench task's /app. A file read there names the endpoint's own
+   file, so it reaches the endpoint as itself instead of through the host
+   bookkeeping namespace. This does not look at the keeper's tree: callers ask
+   it only for a path the tree refused, so a name the tree accepts keeps its
+   meaning whatever a declared root's spelling covers. *)
+let declared_endpoint_path ~(config : Workspace.config) ~(meta : keeper_meta) path =
+  match meta.sandbox_profile with
+  | Docker | Micro_vm -> Ok None
+  | Remote_ssh ->
+    if Filename.is_relative path
+    then Ok None
+    else
+      let* endpoint =
+        Keeper_sandbox_ssh.resolve_endpoint
+          ~base_path:config.base_path ~keeper_name:meta.name
+      in
+      Ok (Exec_policy_paths.extra_root_path ~extra_roots:endpoint.allowed_paths path)
+;;
+
+(* A file tool names a path with [path] and an optional [cwd]. Only an
+   absolute spelling can be an endpoint path: the path itself, or a relative
+   path under an absolute cwd. A relative cwd is a name in the keeper's tree. *)
+let declared_endpoint_path_of_args ~config ~meta ~path ~cwd =
+  let spelling =
+    match Filename.is_relative path, cwd with
+    | false, _ -> Some path
+    | true, Some cwd when not (Filename.is_relative cwd) -> Some (Filename.concat cwd path)
+    | true, (Some _ | None) -> None
+  in
+  match spelling with
+  | None -> Ok None
+  | Some spelling -> declared_endpoint_path ~config ~meta spelling
+;;
+
 let is_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
   match meta.sandbox_profile with
   | Docker -> false

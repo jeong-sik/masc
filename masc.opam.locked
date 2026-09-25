@@ -237,7 +237,7 @@ pin-depends: [
   ]
   [
     "ocaml-dos.dev"
-    "git+https://github.com/jeong-sik/ocaml-dos.git#a4c8b5ff1f9481b2816afe2ae503fb6114035780"
+    "git+https://github.com/jeong-sik/ocaml-dos.git#d9e2cba992292a8aa405d0f1034d5d027946236a"
   ]
   [
     "ocaml-msx.dev"

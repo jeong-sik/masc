@@ -82,6 +82,14 @@ type error =
   | Guest_fault of string
       (** the program ran an instruction the emulator does not implement.
           The machine stays loaded, stopped at that instruction. *)
+  | Unsaveable of string
+      (** {!save} found the machine in a state a checkpoint cannot carry
+          (a value outside the snapshot's ranges, or two fields that
+          disagree). Nothing was written. *)
+  | Checkpoint_refused of Machine_checkpoint.error
+      (** {!restore} found no checkpoint by that name, or one it will not
+          read: another machine's, another format's, or corrupt. Nothing
+          changed. *)
 
 val error_to_string : error -> string
 
@@ -321,6 +329,49 @@ val peek : address:int -> length:int -> (string, error) result
     refuses. *)
 
 val peek_max_bytes : int
+
+(** {1 Checkpoints}
+
+    The whole machine under a name, kept in [dir] by {!Machine_checkpoint}:
+    the core's state (CPU, memory, devices, mounted files and open handles,
+    from [Dos_snapshot]), the program's name, the step count and the input
+    ledger. A checkpoint survives a server restart. *)
+
+val checkpoint_format : int
+(** The lane's checkpoint format, compared on {!restore}; the machine bytes
+    carry the core's own. The core identity is written beside both, to be
+    shown and never compared. *)
+
+val save : who:string -> dir:string -> slot:Machine_checkpoint.slot -> (observation, error) result
+(** Writes the machine to [slot], replacing what was there. Needs no
+    controller and does not move the machine: anyone watching may save. *)
+
+val restore :
+  who:string ->
+  dir:string ->
+  slot:Machine_checkpoint.slot ->
+  ledger_dir:string ->
+  saves_dir_of:(string -> string) ->
+  announce:(unit -> unit) ->
+  (observation, error) result
+(** Replaces the workspace machine with the one saved in [slot], with or
+    without a machine loaded. Allowed when the controller is free or held by
+    [who], as {!load} is, and [who] holds the restored machine's. The
+    restored machine is a new incarnation and raises the change count. The
+    ledger file is rewritten to the checkpoint's ledger, so the next key
+    continues it.
+
+    The program's saves directory, [saves_dir_of] the saved program's saves
+    name, is left as it is: the restored machine's files count as already
+    kept, so nothing is written there until the guest writes again. A newer
+    save a game wrote after the checkpoint is not overwritten by restoring an
+    older one.
+
+    Everything is read and checked first; on any error the current machine,
+    its ledger and its controller are untouched. [announce] runs under the
+    machine's lock, as {!load}'s does. *)
+
+val checkpoints : dir:string -> (Machine_checkpoint.listed list, error) result
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)

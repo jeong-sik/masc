@@ -293,7 +293,12 @@ open Alcotest
    whole sentence that fits. What it bought: those four schemas, 8,370 bytes,
    leave every Agent Core request that has not used them (5,047 requests on
    2026-09-23). No headroom. *)
-let ceiling_bytes = 122_275
+(* 2026-09-25: 123,093 across 141 tools (+818), measured by this suite built
+   locally at the change. masc_dos_save and masc_dos_restore, both deferred:
+   the whole DOS machine saved under a name and put back after a server
+   restart, which took a 133-million-step 삼국지3 hotseat game with it
+   (#38981). No headroom. *)
+let ceiling_bytes = 123_093
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -460,6 +465,8 @@ let all_surface_golden_names =
   ; "masc_dos_pass"
   ; "masc_dos_peek"
   ; "masc_dos_press"
+  ; "masc_dos_restore"
+  ; "masc_dos_save"
   ; "masc_dos_screen"
   ; "masc_dos_step"
   ; "masc_dos_type"

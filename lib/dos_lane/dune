@@ -9,6 +9,7 @@
   ocaml-dos.core-identity
   yojson
   masc.masc_random_id
-  masc.machine_live_publication)
+  masc.machine_live_publication
+  masc.machine_checkpoint)
  (preprocess
   (pps ppx_deriving_yojson)))

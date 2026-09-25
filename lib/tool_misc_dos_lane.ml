@@ -56,9 +56,16 @@ let of_lane ?(extra = []) ~tool_name ~start_time
     Tool_result.make_ok ~tool_name ~start_time
       ~data:(`Assoc (observation_fields o @ extra))
       ()
-  | Error ((Dos_lane.No_machine | Dos_lane.Invalid_request _ | Dos_lane.Held_by _) as e) ->
+  | Error
+      (( Dos_lane.No_machine | Dos_lane.Invalid_request _ | Dos_lane.Held_by _
+       | Dos_lane.Checkpoint_refused
+           ( Machine_checkpoint.No_slot _ | Machine_checkpoint.Other_machine _
+           | Machine_checkpoint.Other_format _ ) ) as e) ->
     reject ~tool_name ~start_time (Dos_lane.error_to_string e)
-  | Error ((Dos_lane.Unreadable _ | Dos_lane.Guest_fault _) as e) ->
+  | Error
+      (( Dos_lane.Unreadable _ | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _
+       | Dos_lane.Checkpoint_refused
+           (Machine_checkpoint.Corrupt _ | Machine_checkpoint.Unreadable _) ) as e) ->
     Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
       (Dos_lane.error_to_string e)
 ;;
@@ -83,6 +90,11 @@ let core_field = ("core", Dos_lane.core_to_yojson Dos_lane.core)
    host path. *)
 let dos_dir ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos"
 let programs_dir ~base_path = Filename.concat (dos_dir ~base_path) "programs"
+
+(* Named whole-machine checkpoints. Beside saves/, not inside it: saves/
+   holds one directory per inventory name, and a program may be called
+   anything. *)
+let checkpoints_dir ~base_path = Filename.concat (dos_dir ~base_path) "checkpoints"
 
 (* What a program wrote on earlier machines, one directory per inventory
    name. Keyed by the inventory name, not the executable: two games may both
@@ -501,4 +513,74 @@ let handle_peek ~tool_name ~start_time args =
           [ ("address", `String (Printf.sprintf "%05x" address)); ("hex", `String hex) ])
       ()
   | Error e -> reject ~tool_name ~start_time (Dos_lane.error_to_string e)
+;;
+
+(* ---------- checkpoints ---------- *)
+
+let default_slot = "quick"
+
+let slot_arg ?default args =
+  match get_string_opt args "slot", default with
+  | (None | Some ""), Some d -> Machine_checkpoint.slot_of_string d |> Result.map Option.some
+  | (None | Some ""), None -> Ok None
+  | Some s, _ -> Machine_checkpoint.slot_of_string s |> Result.map Option.some
+;;
+
+let slot_field slot = ("slot", `String (Machine_checkpoint.slot_to_string slot))
+
+let handle_save ~tool_name ~start_time ~base_path ~who args =
+  match slot_arg ~default:default_slot args with
+  | Error message -> reject ~tool_name ~start_time message
+  | Ok None -> reject ~tool_name ~start_time "slot must name a checkpoint"
+  | Ok (Some slot) ->
+    of_lane ~extra:[ slot_field slot ] ~tool_name ~start_time
+      (off_domain (fun () -> Dos_lane.save ~who ~dir:(checkpoints_dir ~base_path) ~slot))
+;;
+
+let listed_json (l : Machine_checkpoint.listed) =
+  `Assoc
+    ([ slot_field l.slot
+     ; ("bytes", `Int l.size)
+     ; ("saved_at", `String (Time_codec.rfc3339_of_unix l.modified))
+     ]
+     @
+     match l.header with
+     | Ok h ->
+       [ ("machine", `String (Machine_checkpoint.machine_to_string h.machine))
+       ; ("format", `Int h.format)
+       ; ("core", `String h.core)
+       ]
+     | Error e -> [ ("unreadable", `String (Machine_checkpoint.error_to_string e)) ])
+;;
+
+(* No slot lists them, the way masc_dos_load with no program lists the
+   inventory: restoring a default name could replace a game in progress
+   with one nobody meant. *)
+let handle_restore ~tool_name ~start_time ~base_path ~agent_name args =
+  let dir = checkpoints_dir ~base_path in
+  match slot_arg args with
+  | Error message -> reject ~tool_name ~start_time message
+  | Ok None ->
+    (match off_domain (fun () -> Dos_lane.checkpoints ~dir) with
+     | Ok listed ->
+       Tool_result.make_ok ~tool_name ~start_time
+         ~data:
+           (`Assoc
+             [ ("checkpoints", `List (List.map listed_json listed))
+             ; ("checkpoint_format", `Int Dos_lane.checkpoint_format)
+             ])
+         ()
+     | Error e -> of_lane ~tool_name ~start_time (Error e))
+  | Ok (Some slot) ->
+    let restored =
+      off_domain (fun () ->
+        Dos_lane.restore ~who:agent_name ~dir ~slot ~ledger_dir:(dos_dir ~base_path)
+          ~saves_dir_of:(saves_dir ~base_path)
+          ~announce:
+            (announce ~author:agent_name
+               (Printf.sprintf "%s 님이 DOS 기계를 %s 체크포인트로 되돌렸습니다" agent_name
+                  (Machine_checkpoint.slot_to_string slot))))
+    in
+    after_announcing
+      (of_lane ~extra:[ slot_field slot; core_field ] ~tool_name ~start_time restored)
 ;;

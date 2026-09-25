@@ -185,7 +185,9 @@ let record_next_shrink_capacity
 (* The history a Start carries: the range the other official-client lanes
    carry ([Host.carried_start_range]), not the whole checkpoint history. A
    Resume still runs this projection, since the per-turn context it sends in
-   front of the goal is placed by it, but writes none of the history. The
+   front of the goal is placed by it, but writes none of the history; the
+   caller gives it no observers, and [thread_mode] keeps the range it did
+   not send from narrowing the fresh thread that retries it. The
    provider-bound copy is cut; the durable conversation is not rewritten.
    [reserved_bytes] is what the attempt sends besides history -- system
    prompt, posture note and goal -- so a declared window and the fixed
@@ -199,6 +201,7 @@ let record_next_shrink_capacity
    ladder that answers a typed overflow keeps narrowing instead of being
    widened back by the seed. *)
 let carried_model_input_projection
+    ~thread_mode
     ~measure_message_bytes
     ~capacity_bytes
     ~reserved_bytes
@@ -227,12 +230,26 @@ let carried_model_input_projection
       on_model_input_window_observation
   in
   let finish sent =
-    record_next_shrink_capacity
-      ~measure_message_bytes
-      ~capacity_bytes
-      ~reserved_bytes
-      ~observed_next_shrink_capacity_bytes
-      sent;
+    (match thread_mode with
+     | Runtime_codex_app_server.Start ->
+       record_next_shrink_capacity
+         ~measure_message_bytes
+         ~capacity_bytes
+         ~reserved_bytes
+         ~observed_next_shrink_capacity_bytes
+         sent
+     | Runtime_codex_app_server.Resume _ ->
+       (* A Resume sent none of this range, so its overflow says nothing
+          about the range's size: the thread it resumed is what was full.
+          Sizing the retry from the range would open the fresh thread that
+          retries it smaller than it needs to be. The retry gets the
+          ladder's own step from the attempt's capacity instead; with
+          nothing declared that step still carries the whole range, and the
+          fresh thread's own overflow, if any, narrows from what it sent. *)
+       observed_next_shrink_capacity_bytes :=
+         Some
+           (Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+              ~capacity:capacity_bytes));
     match source_projection with
     | None -> Ok sent
     | Some project -> project sent
@@ -1690,25 +1707,27 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
           ~declared_max_prompt_bytes
           ~capacity_bytes
           (* A Resume still projects: the per-turn context it sends in front
-             of the goal is placed by this projection. It reports no carried
-             front, though -- the range it measures is not what a Resume
-             sends, and the continuity record is only for a range the lane
-             sent. *)
+             of the goal is placed by this projection. It reports no window
+             and no carried front, though -- the range it measures is not
+             what a Resume sends, and both records are only for a range the
+             lane sent. As on the Claude Code lane. *)
           ~project_history:(fun ~thread_mode ~reserved_bytes ->
-            let on_carried_front =
+            let observed callback =
               match thread_mode with
-              | Runtime_codex_app_server.Start -> on_carried_front
+              | Runtime_codex_app_server.Start -> callback
               | Runtime_codex_app_server.Resume _ -> None
             in
             carried_model_input_projection
+              ~thread_mode
               ~measure_message_bytes
               ~capacity_bytes
               ~reserved_bytes
               ~observed_next_shrink_capacity_bytes
-              ?on_model_input_window_observation
+              ?on_model_input_window_observation:
+                (observed on_model_input_window_observation)
               ?carried_front_seed
               ?librarian_front
-              ?on_carried_front
+              ?on_carried_front:(observed on_carried_front)
               ~turn_start
               ~keeper_name
               ~runtime_id
@@ -1764,6 +1783,7 @@ module For_testing = struct
         ?on_carried_front ~turn_start ?on_model_input_window_observation
         ~keeper_name ~runtime_id messages =
     carried_model_input_projection
+      ~thread_mode:Runtime_codex_app_server.Start
       ~measure_message_bytes:measure_model_input_message_bytes
       ~capacity_bytes
       ~reserved_bytes:0

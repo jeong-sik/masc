@@ -92,7 +92,7 @@ default = "codex.context"
     | Some _ | None -> fail "fixture runtime missing" in
   let reports = ref [] in
   let run ?official_task_reference ?model_input_projection
-      ?carried_front_seed
+      ?carried_front_seed ?on_model_input_window_observation
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"]) ?official_client_continuation ?(goal="Continue from current World State.") ~instructions ~world () =
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
@@ -103,6 +103,7 @@ default = "codex.context"
           ~runtime:(Runtime.get_runtime_by_id "codex.context" |> Option.get)) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
       ~turn_start
       ?carried_front_seed
+      ?on_model_input_window_observation
       ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_task_reference ?official_client_continuation
       ~goal_blocks:None ~system_prompt:instructions ~tools:[]
       ~initial_messages
@@ -454,15 +455,21 @@ let test_resume_after_start_sends_no_history () =
      new thread with the turn's range only; the Resume that follows sends none
      of the history, since the thread already holds it. *)
   with_fixture @@ fun ~run ~capture ~reports:_ ->
+  let windows = ref 0 in
+  let on_model_input_window_observation _ = incr windows in
   let first = run ~initial_messages:large_history
+    ~on_model_input_window_observation
     ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 60 })
     ~instructions:"Keeper instructions" ~world:"world" () in
   successful first;
+  check int "the Start reports its window" 1 !windows;
   let before = List.length (read_requests capture) in
   successful (run ~initial_messages:large_history
+    ~on_model_input_window_observation
     ~carried_front_seed:(seed_at 60)
     ~turn_start:(Keeper_carried_front.Turn_boundary_unknown { reason = "fixture" })
     ~instructions:"Keeper instructions" ~world:"world" ());
+  check int "the Resume reports no window for history it did not send" 1 !windows;
   let first_rows = read_requests capture |> List.filteri (fun index _ -> index < before) in
   let resumed_rows = read_requests capture |> List.filteri (fun index _ -> index >= before) in
   let start_messages = match params_of "thread/inject_items" first_rows with
@@ -482,6 +489,31 @@ let test_resume_after_start_sends_no_history () =
     check bool "Resume sends no history message" false
       (String_util.contains_substring (Yojson.Safe.to_string row) "xxxx"))
     resumed_rows
+
+let test_a_resume_overflow_retries_with_the_whole_range () =
+  (* A Resume sends no history, so its overflow says the thread is full, not
+     that the range is too large. The fresh thread that retries it carries
+     the whole range, atoms 60..63, not half of it. *)
+  with_fixture ~overflow_resume:true @@ fun ~run ~capture ~reports:_ ->
+  let turn_start = Keeper_carried_front.Turn_boundary { end_atom = 60 } in
+  successful (run ~initial_messages:large_history ~turn_start
+    ~instructions:"Keeper instructions" ~world:"world" ());
+  let before = List.length (read_requests capture) in
+  successful (run ~initial_messages:large_history ~turn_start
+    ~instructions:"Keeper instructions" ~world:"world" ());
+  let rows = read_requests capture |> List.filteri (fun index _ -> index >= before) in
+  (match params_of "thread/resume" rows, params_of "thread/start" rows with
+   | [_], [_] -> ()
+   | resumes, starts ->
+     fail (Printf.sprintf "expected a Resume then a fresh Start, saw %d resumes and %d starts"
+       (List.length resumes) (List.length starts)));
+  match params_of "thread/inject_items" rows with
+  | [injected] ->
+    let seeded = injected |> member "items" |> items in
+    check (list bool) "the retry carries atoms 60..63" [ true; true; true; true ]
+      (List.map (snapshot_carries seeded) [ 60; 61; 62; 63 ])
+  | injected ->
+    fail (Printf.sprintf "expected one retry injection, saw %d" (List.length injected))
 
 let from index = List.init (64 - index) (fun offset -> index + offset)
 
@@ -587,6 +619,7 @@ let () = run "Keeper current Codex context" ["native requests",[
   test_case "a declared prompt limit windows a Start" `Quick test_declared_limit_windows_start;
   test_case "a Start carries the range, not the whole history" `Quick test_start_carries_the_range_not_the_whole_history;
   test_case "a Resume after a Start sends no history" `Quick test_resume_after_start_sends_no_history;
+  test_case "a Resume overflow retries with the whole range" `Quick test_a_resume_overflow_retries_with_the_whole_range;
   test_case "the seed decides the range" `Quick test_the_seed_decides_the_range;
   test_case "a later Librarian position decides the range" `Quick test_a_later_librarian_position_decides_the_range;
   test_case "a declared limit cuts inside the range" `Quick test_a_declared_limit_cuts_inside_the_range;

@@ -57,8 +57,9 @@ val run :
   unit ->
   attempt_outcome
 (** [on_model_input_window_observation] receives how much of the offered
-    history this turn carried. Without it the turn record is written with no
-    window and no input composition, which is what [/context] reads.
+    history a [Start] carried. Without it the turn record is written with no
+    window and no input composition, which is what [/context] reads. A
+    [Resume] sends no history and reports no window.
 
     A [Start] carries the carried range, not the whole history
     ({!Keeper_official_client_host.carried_start_range}), and injects it into

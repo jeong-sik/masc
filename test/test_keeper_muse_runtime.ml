@@ -1,4 +1,5 @@
 open Alcotest
+open Masc
 
 let usage_event =
   Runtime_muse.Usage_reported

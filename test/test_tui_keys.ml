@@ -93,6 +93,35 @@ let test_every_surface_answers () =
         (Masc_tui_keys.for_surface surface <> []))
     every_surface
 
+(* Every screen the ring or a drill-down can put up has keys, and the sheet is
+   where an operator looks them up: [?] opens on the section for the screen
+   they are standing on. The sheet's list of screens was written beside the
+   table's and nothing tied the two together, so four screens had bindings the
+   sheet never built a section for -- Connectors, whose [B], [Ctrl-O] and
+   [b / u] are the least guessable keys in the product, and the three Keeper
+   drill-downs. On those screens [?] opened on Global and named no section for
+   where the reader was. *)
+let test_every_surface_with_keys_has_a_sheet_section () =
+  let missing =
+    List.filter
+      (fun surface ->
+        not
+          (List.exists
+             (fun (_, listed) -> listed = surface)
+             Masc_tui_keys.help_surfaces))
+      every_surface
+  in
+  let name surface =
+    match Masc_tui_keys.for_surface surface with
+    | binding :: _ -> binding.Masc_tui_keys.key
+    | [] -> "(no keys)"
+  in
+  Alcotest.(check int)
+    (Printf.sprintf
+       "every screen with keys has a sheet section (missing, by first key: %s)"
+       (String.concat " | " (List.map name missing)))
+    0 (List.length missing)
+
 let test_no_surface_repeats_a_key () =
   List.iter
     (fun surface ->
@@ -2969,6 +2998,8 @@ let () =
             `Quick test_every_enter_atom_exception_names_a_sheet_surface
         ; Alcotest.test_case "every surface answers" `Quick
             test_every_surface_answers
+        ; Alcotest.test_case "every surface with keys has a sheet section"
+            `Quick test_every_surface_with_keys_has_a_sheet_section
         ; Alcotest.test_case "no surface repeats a key" `Quick
             test_no_surface_repeats_a_key
         ; Alcotest.test_case "one spelling per key" `Quick

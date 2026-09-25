@@ -560,6 +560,26 @@ let for_surface = function
           ~help:"choose manual, Auto Judge or allow-all; Enter applies, Esc cancels"
       ; b Act "e" "external Gate lane"
           ~help:"choose how calls into outside services are reviewed; Enter applies"
+        (* The answering mode's own keys. It opens with [a] and rewrites the
+           footer entirely, so the sheet was the only place left to learn
+           them -- and it named none: [?] on this surface found every
+           browsing key and nothing about answering a question. Each help
+           says when the key answers, the way [[ / ]] above does. *)
+      ; b Navigate "Left/Right" "question"
+          ~help:"while answering, step through the open ask's questions; \
+                 j/k and the arrows do the same"
+      ; b Act "1-9" "pick"
+          ~help:"while answering, choose by the position the server listed"
+      ; b Act "t" "write"
+          ~help:"while answering, open the free-text editor; Enter saves it, \
+                 Esc drops it"
+      ; b Act "s" "skip"
+          ~help:"while answering, leave this question unanswered"
+      ; b Act "c" "clear"
+          ~help:"while answering, drop what is drafted for this question"
+      ; b Act "Esc" "back"
+          ~help:"leave the answering mode; with the editor open it drops the \
+                 draft first"
       ]
       @ row_list_jumps @ listing_meta
   | Planning ->

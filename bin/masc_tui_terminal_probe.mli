@@ -56,6 +56,18 @@ val return_replay : decoder -> unit
     bytes before asking [next_raw] for a suffix. [return_replay] puts back the
     one byte [next] most recently served, for UTF-8 validation pushback. *)
 
+val holds_incomplete_sequence : decoder -> bool
+(** [true] while the decoder keeps bytes of a sequence it has not finished and
+    returns nothing for them, such as an [ESC \[ 2 0 0] head that may be a paste
+    start. The decoder stays in front of the key stream for the whole session
+    on a terminal that never answers the graphics query, so the input reader
+    reports this hold as its own. *)
+
+val discard_incomplete_sequence : decoder -> unit
+(** Drop the bytes {!holds_incomplete_sequence} reports, on the operator's
+    Ctrl-C. Does nothing when no sequence is held; replay bytes already decided
+    are kept. *)
+
 val finish : decoder -> result
 (** Flush an incomplete or unrecognized terminal sequence into [replay]. *)
 

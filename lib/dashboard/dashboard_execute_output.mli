@@ -53,7 +53,9 @@ val record_stream_start :
 val append_stream_chunk :
   keeper_name:string -> stream:[ `Stdout | `Stderr ] -> string -> unit
 (** Append a live output chunk, split it into lines, and broadcast [line]
-    events to current subscribers. Empty chunks are ignored. *)
+    events to current subscribers. A line longer than one row's byte limit
+    continues in the next rows, cut between UTF-8 characters. Empty chunks
+    are ignored. *)
 
 val record_stream_end :
   keeper_name:string -> task_id:string option -> status:Yojson.Safe.t -> unit

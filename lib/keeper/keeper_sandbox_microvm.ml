@@ -1660,6 +1660,22 @@ let build_link_actions rows =
     rows
 ;;
 
+(** Every target a link points at, or is about to: the create and retarget
+    actions plus the rows already linked. The build volume is recreated empty
+    on every fresh guest boot while the work volume keeps the old links, so a
+    link that is already correct points at a directory that no longer exists
+    until it is created again -- and dune does not create it
+    ({!build_target_mkdir_argv}). *)
+let build_link_targets rows =
+  List.filter_map
+    (fun { checkout = _; target; plan } ->
+      match plan, target with
+      | (Link_create _ | Link_retarget _ | Link_already_correct), Some target -> Some target
+      | (Link_create _ | Link_retarget _ | Link_already_correct | Link_refused_real_directory), _ ->
+        None)
+    rows
+;;
+
 (** [ln -sfn] for every action, in one exec. [-f] makes each one atomic --
     a stale link is replaced without a separate unlink, and [ln] refuses
     outright rather than clobber a real, non-empty directory, so a checkout

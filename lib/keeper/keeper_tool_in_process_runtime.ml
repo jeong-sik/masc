@@ -511,7 +511,19 @@ let handle_browser_act_with_outcome ~turn_sandbox_factory ~(config : Workspace.c
     (match Keeper_browser_upload.with_staged_paths ?turn_sandbox_factory
        ~config ~meta ~paths (fun upload_paths -> invoke ~upload_paths ()) with
      | Ok outcome -> outcome
-     | Error message -> Keeper_tool_execution.failure
+     | Error (Keeper_browser_upload.Path_refused refusal) ->
+       Keeper_tool_execution.failure
+         ~class_:refusal.Keeper_alerting_path.failure_class
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         (Keeper_tool_shared_runtime.error_json refusal.message)
+     | Error (Keeper_browser_upload.File_too_large message) ->
+       Keeper_tool_execution.failure
+         ~class_:Tool_result.Policy_rejection
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         (Keeper_tool_shared_runtime.error_json message)
+     | Error (Keeper_browser_upload.Staging_failed message) ->
+       Keeper_tool_execution.failure
+         ~class_:Tool_result.Runtime_failure
          ~effect_disposition:Tool_result.Proven_pre_effect
          (Keeper_tool_shared_runtime.error_json message))
   | _ -> invoke ()
@@ -1777,7 +1789,10 @@ let dispatch_option_to_execution ?failure_effect_disposition ~name = function
   | Some result ->
     Keeper_tool_execution.of_tool_result ?failure_effect_disposition result
   | None ->
+    (* A descriptor the dispatcher does not know is this runtime's mapping,
+       not the caller's name. *)
     Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
       (Yojson.Safe.to_string
          (`Assoc
             [ "error"
@@ -2079,7 +2094,10 @@ let handle_keeper_spawn_with_outcome
        Tool_spawn.dispatch { Tool_spawn.registry; sw } ~name ~args
        |> dispatch_option_to_execution ~failure_effect_disposition ~name)
   | (Some _ | None), (Some _ | None) ->
+    (* The spawn registry is installed by the keeper turn; a call without one
+       is wiring, and the caller has nothing to change. *)
     Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
       (Yojson.Safe.to_string
          (`Assoc
              [ "error", `String "spawn is only available inside a keeper turn"
@@ -2384,8 +2402,7 @@ let handle_analyze_image_with_outcome ?complete ?config ?turn_sandbox_factory
                  |> Result.map_error (fun detail -> Tool_result.Policy_rejection, "image_too_large", detail) in
              let* _ = Keeper_vision_tool.sniff_image_media_type bytes
                  |> Result.map_error (fun detail -> Tool_result.Policy_rejection, "invalid_media_type", detail) in
-             Keeper_vision_tool.store_artifact
-               ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name:meta.name) bytes
+             Keeper_vision_tool.store_kept ~keeper_name:meta.name bytes
                |> Result.map_error (fun detail -> Tool_result.Runtime_failure, "artifact_store_failed", detail)
            in
            (match prepared with

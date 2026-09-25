@@ -26,7 +26,10 @@ type asset_write =
    (write_runtime_manifest). No [_] arm: a new domain has to choose. *)
 let asset_write = function
   | Prompts -> Fsync_each_file
-  | Tools | Mcp -> Rename_only
+  (* INTENDED-RED CONTROL: Tools/Mcp keep the per-file fsync, so the torn
+     rebuild tests must FAIL. Revert this scratch commit after the control
+     run; the real PR maps these domains to Rename_only. *)
+  | Tools | Mcp -> Fsync_each_file
 ;;
 
 let write_asset ~domain dest content =

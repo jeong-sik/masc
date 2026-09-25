@@ -2051,6 +2051,57 @@ type overview_pulls_reading =
     }
   | Overview_pulls_failed of string
 
+(** A sum over a Keeper's turns of a value its runtime may not report
+    (GET /api/v1/dashboard/keeper-costs). [Spend_sum] adds the turns that
+    reported one; [floor] is whether something may be left out of it --
+    turns that gave no value or an unreadable one, rows that were not JSON,
+    or, in a team total, a Keeper whose sum is unknown -- so the sum is then
+    at least this much. [Spend_unknown] is turns that all left the value
+    out: never a zero. *)
+type 'a spend_sum =
+  | Spend_sum of { sum : 'a; floor : bool }
+  | Spend_unknown
+
+type keeper_spend =
+  | Spend_no_turns
+  | Spend_turns of { cost_usd : float spend_sum; tokens : int spend_sum }
+  | Spend_unread of string
+      (** The server could not read this Keeper's metrics store. *)
+  | Spend_rows_unread of { rows : int }
+      (** No turn read, but [rows] rows that may have been turns did not:
+          rows that were not JSON, or turn rows whose time, latency or kind
+          the server could not read. What it spent is unknown. *)
+
+(** How old the server's cached answer is. [Spend_stale] is an answer past
+    its refresh time; [last_error] is why the last refresh failed, if it
+    did. *)
+type spend_freshness =
+  | Spend_fresh
+  | Spend_stale of { age_s : float; last_error : string option }
+
+type overview_spend_reading =
+  | Overview_spend_unread
+  | Overview_spend_warming
+      (** The server answered its placeholder: nothing computed yet. *)
+  | Overview_spend_read of {
+      window_minutes : int;
+      keepers : (string * keeper_spend) list;
+      undecodable : int;
+          (** Rows this build could not read; their Keepers draw unknown. *)
+      freshness : spend_freshness;
+    }
+  | Overview_spend_failed of string
+
+let cost_reply_is_current ~visible ~current_generation ~reply_generation =
+  visible && current_generation = reply_generation
+
+let toggle_cost_visibility ~visible ~generation =
+  (not visible, generation + 1)
+
+let cost_refresh_needed ~visible = function
+  | Overview_spend_unread -> visible
+  | Overview_spend_warming | Overview_spend_read _ | Overview_spend_failed _ -> false
+
 (** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
     briefing writes [null] for a Keeper with no registry entry (an offline
     Keeper that never booted this process), which is a different fact from a
@@ -2878,6 +2929,7 @@ type surface_needs = {
   needs_asks : bool;
   needs_runtime_quota : bool;
   needs_repository_pulls : bool;
+  needs_keeper_spend : bool;
   needs_overview_goals : bool;
 }
 
@@ -2893,6 +2945,7 @@ let nothing =
     needs_asks = false;
     needs_runtime_quota = false;
     needs_repository_pulls = false;
+    needs_keeper_spend = false;
     needs_overview_goals = false;
   }
 
@@ -2907,11 +2960,17 @@ let nothing =
    Read from the surface alone, its marks were the unread dash on every
    screen but Keepers and Metrics, under a count taken from the event feed
    instead of the roster. The roster is 8.4 KB and answers in about a
-   millisecond, which is what makes this affordable where planning is not. *)
-let rec surface_needs ~keeper_pane_drawn surface =
+   millisecond, which is what makes this affordable where planning is not.
+
+   [cost_shown] is the other one: the Team block draws spend only after
+   [/cost], so the Overview asks for keeper-costs only while it is shown. *)
+let rec surface_needs ~keeper_pane_drawn ~cost_shown surface =
   let needs = surface_needs_of_surface surface in
-  if keeper_pane_drawn then { needs with needs_keeper_roster = true }
-  else needs
+  let needs =
+    if keeper_pane_drawn then { needs with needs_keeper_roster = true }
+    else needs
+  in
+  { needs with needs_keeper_spend = needs.needs_keeper_spend && cost_shown }
 
 and surface_needs_of_surface : surface -> surface_needs = function
   (* The Providers section draws each account's usage windows from the
@@ -2922,6 +2981,7 @@ and surface_needs_of_surface : surface -> surface_needs = function
         needs_transport = true
       ; needs_runtime_quota = true
       ; needs_repository_pulls = true
+      ; needs_keeper_spend = true
       ; needs_overview_goals = true
       }
   (* Its rows come from the acting store and the keeper list, neither of which
@@ -2985,15 +3045,18 @@ let surface_needs_delta ~previous ~next =
       next.needs_runtime_quota && not previous.needs_runtime_quota
   ; needs_repository_pulls =
       next.needs_repository_pulls && not previous.needs_repository_pulls
+  ; needs_keeper_spend =
+      next.needs_keeper_spend && not previous.needs_keeper_spend
   ; needs_overview_goals =
       next.needs_overview_goals && not previous.needs_overview_goals
   }
 
 let surface_needs_any needs = needs <> nothing
 
-let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn surface =
+let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn ~cost_shown
+    surface =
   if scoped_refresh_inflight then nothing
-  else surface_needs ~keeper_pane_drawn surface
+  else surface_needs ~keeper_pane_drawn ~cost_shown surface
 
 type full_refresh_intent = Cadence | Revalidate
 
@@ -5690,6 +5753,7 @@ type state = {
   mutable overview_quota: overview_quota_reading;
   mutable overview_providers: overview_providers_reading;
   mutable overview_pulls: overview_pulls_reading;
+  mutable overview_spend: overview_spend_reading;
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
@@ -6113,8 +6177,12 @@ type state = {
   mutable link_modal_links: string list;
   mutable link_modal_cursor: int;
   mutable link_previews_mode: [ `Rich | `Compact | `Off ];
-  (* Real-time Token Burn Velocity and Financial HUD *)
-  mutable burn_hud_visible: bool;
+  (* [/cost]: whether the Team block draws each Keeper's spend and the
+     fleet total. Off until the operator asks, and process-only: keeper-costs
+     rereads every day file of every Keeper's metrics whenever its server
+     cache expires, so a hidden spend is not fetched at all. *)
+  mutable cost_visible: bool;
+  mutable cost_generation: int;
   (* Code surface: one directory level at a time through the lazy /children
      route; the file arrives whole and is lexed once at load. *)
   mutable code_dir: string;
@@ -6327,6 +6395,9 @@ type state = {
   mutable system_logs_detail_seq: int option;
   mutable system_logs_detail_scroll: int;
   msg_input: Buffer.t;
+  (* A draft restored from an unterminated terminal paste needs explicit
+     confirmation before any chat send. Keep its owner across pane changes. *)
+  mutable msg_recovered_paste_keepers: string list;
   (* Images staged with :attach, sent with the next message and cleared by the
      send. Held next to the draft because they are part of the same unsent
      message: switching keepers or abandoning the draft must not leave an image
@@ -7854,6 +7925,7 @@ let create_state
   overview_quota = Quota_unread;
   overview_providers = Providers_unread;
   overview_pulls = Overview_pulls_unread;
+  overview_spend = Overview_spend_unread;
   overview_goals = Goals_unread;
   runtime_lanes = [];
   runtime_assignments = [];
@@ -8099,7 +8171,8 @@ let create_state
   link_modal_links = [];
   link_modal_cursor = 0;
   link_previews_mode = `Rich;
-  burn_hud_visible = false;
+  cost_visible = false;
+  cost_generation = 0;
   code_dir = "";
   code_listing = Masc_tui_fetched.initial;
   code_cursor = 0;
@@ -8188,6 +8261,7 @@ let create_state
   system_logs_detail_seq = None;
   system_logs_detail_scroll = 0;
   msg_input = Buffer.create 256;
+  msg_recovered_paste_keepers = [];
   msg_attachments = [];
   msg_references = [];
   msg_attachments_since = None;
@@ -10580,37 +10654,6 @@ let visible_surface_ring_index (state : state) (view : surface) =
     | (surface, _) :: rest -> if surface = family then i else find (i + 1) rest
   in
   find 0 ring
-;;
-
-let braille_sparkline values =
-  if values = [] then "⣀⡠⠤⠶"
-  else
-    let max_v = List.fold_left max 0.0001 values in
-    let levels = [| " "; "⡀"; "⣀"; "⣄"; "⣤"; "⣦"; "⣶"; "⣷"; "⣿" |] in
-    let glyphs =
-      List.map
-        (fun v ->
-          let ratio = max 0.0 (min 1.0 (v /. max_v)) in
-          let idx = min 8 (int_of_float (ratio *. 8.0)) in
-          levels.(idx))
-        values
-    in
-    String.concat "" glyphs
-;;
-
-let fleet_token_sparkline (state : state) =
-  let tokens =
-    List.map (fun (k : keeper) -> float_of_int k.k_total_tokens) state.keepers
-  in
-  braille_sparkline tokens
-;;
-
-(* The header's `$` reading. It is the same sum the Runtime authority row
-   says, so it comes from the same fold: a rule about what counts (dropping
-   cancelled turns, say) that lands in only one of them would compile. *)
-let fleet_total_cost_usd (state : state) =
-  let _, _, cost = aggregate_keeper_stats state.keepers in
-  cost
 ;;
 
 let conversation_urls (state : state) : string list =

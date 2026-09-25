@@ -59,6 +59,8 @@ let dos_schemas : tool_schema list =
   ; Tool_schemas_misc_toml.dos_type
   ; Tool_schemas_misc_toml.dos_peek
   ; Tool_schemas_misc_toml.dos_pass
+  ; Tool_schemas_misc_toml.dos_save
+  ; Tool_schemas_misc_toml.dos_restore
   ]
 let browser_tabs_schema : tool_schema = Tool_schemas_misc_toml.browser_tabs
 let browser_read_schema : tool_schema = Tool_schemas_misc_toml.browser_read
@@ -194,6 +196,8 @@ type misc_operation =
   | Misc_dos_type
   | Misc_dos_peek
   | Misc_dos_pass
+  | Misc_dos_save
+  | Misc_dos_restore
 [@@deriving enumerate]
 
 let misc_operations = all_of_misc_operation
@@ -246,6 +250,8 @@ let misc_tool_name = function
   | Misc_dos_type -> "masc_dos_type"
   | Misc_dos_peek -> "masc_dos_peek"
   | Misc_dos_pass -> "masc_dos_pass"
+  | Misc_dos_save -> "masc_dos_save"
+  | Misc_dos_restore -> "masc_dos_restore"
 ;;
 
 let misc_operation_of_tool_name value =
@@ -297,6 +303,8 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_dos_type
   | Misc_dos_peek
   | Misc_dos_pass
+  | Misc_dos_save
+  | Misc_dos_restore
   | Misc_ask
   | Misc_ask_status
   | Misc_ask_withdraw

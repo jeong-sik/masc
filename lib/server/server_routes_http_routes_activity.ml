@@ -159,7 +159,7 @@ let handle_schedule_write_request
       ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
       }
     in
-    let start_time = Unix.gettimeofday () in
+    let start_time = Tool_timing.start () in
     let result =
       if update
       then
@@ -1452,7 +1452,7 @@ let add_routes ~sw ~clock router =
              in
              let config = (Mcp_server.workspace_scope state).Mcp_server.config in
              let ctx = { Workspace_types.config; agent_name } in
-             let start_time = Unix.gettimeofday () in
+             let start_time = Tool_timing.start () in
              let result =
                Workspace_goals.handle_goal_transition
                  ~tool_name:"masc_goal_transition" ~start_time ctx args
@@ -1517,7 +1517,7 @@ let add_routes ~sw ~clock router =
                ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
                }
              in
-             let start_time = Unix.gettimeofday () in
+             let start_time = Tool_timing.start () in
              let result =
                Tool_schedule.handle_cancel
                  ~tool_name:"masc_schedule_cancel" ~start_time context args

@@ -41,14 +41,14 @@ let externalize_exn ?base_path value =
   | Error { message; _ } -> Alcotest.fail message
 
 let tool_ok ?(tool_name = "") message =
-  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+  Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data:(`String message) ()
 ;;
 
 let tool_error ?(tool_name = "") message =
   Tool_result.make_err
     ~tool_name
     ~class_:Tool_result.Runtime_failure
-    ~start_time:0.0
+    ~start_time:(Tool_timing.start ())
     ~data:(`String message)
     message
 ;;
@@ -121,7 +121,7 @@ let test_typed_artifact_result_becomes_durable_manifest () =
     let result =
       Tool_result.make_ok
         ~tool_name:"Execute"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         ~data:structured_content
         ()
       |> B.attach_artifact_manifest ~base_path
@@ -182,7 +182,7 @@ let test_manifest_producer_rejects_mixed_malformed_reference () =
     let result =
       Tool_result.make_ok
         ~tool_name:"Execute"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         ~data:
           (`Assoc
              [ "valid", O.normalized_artifact_ref_to_json child
@@ -273,7 +273,7 @@ let test_stored_failure_keeps_immediate_context () =
     check (tool_error ~tool_name:"Execute" (String.make 1024 'e'));
     let child = Tool_blob_store.put_durable store ~bytes:"process stderr" ~mime:"text/plain" in
     let result = Tool_result.make_err ~tool_name:"Execute"
-        ~class_:Tool_result.Runtime_failure ~start_time:0.0
+        ~class_:Tool_result.Runtime_failure ~start_time:(Tool_timing.start ())
         ~data:(`Assoc [ "stderr", O.normalized_artifact_ref_to_json child ])
         "process failed" in
     match B.attach_artifact_manifest ~base_path result with
@@ -324,7 +324,7 @@ let test_failure_recovery_data_reaches_model () =
   in
   List.iter (fun metadata ->
     let result = Tool_result.make_err ~tool_name:"publish"
-        ~class_:Tool_result.Workflow_rejection ~start_time:0.0
+        ~class_:Tool_result.Workflow_rejection ~start_time:(Tool_timing.start ())
         ~data ?metadata "publication needs recovery" in
     match B.to_agent_core_typed_result result with
     | Ok _ -> Alcotest.fail "expected failure"
@@ -348,7 +348,7 @@ let test_to_agent_core_typed_error_preserves_explicit_metadata () =
     Tool_result.make_err
       ~tool_name:"test"
       ~class_:Tool_result.Runtime_failure
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ~metadata
       "effect failed"
   in
@@ -387,7 +387,7 @@ let test_to_agent_core_typed_result_preserves_workflow_rejection () =
     Tool_result.error
       ~failure_class:Tool_result.Workflow_rejection
       ~tool_name:"masc_transition"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       "Invalid task state: submit_for_verification requires verification evidence"
   in
   match B.to_agent_core_typed_result tr with
@@ -403,7 +403,7 @@ let test_to_agent_core_dependency_failure_carries_no_replay_hint () =
     Tool_result.error
       ~failure_class:Tool_result.Dependency_unavailable
       ~tool_name:"tool_search_files"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       {|{"ok":false,"error":"mutex contention","failure_class":"dependency_unavailable"}|}
   in
   match B.to_agent_core_typed_result tr with
@@ -451,7 +451,7 @@ let test_failure_class_reaches_the_model () =
          (Some sentence)
          (B.failure_next_move class_);
        let plain =
-         Tool_result.error ~failure_class:class_ ~tool_name:"t" ~start_time:0.0 "boom"
+         Tool_result.error ~failure_class:class_ ~tool_name:"t" ~start_time:(Tool_timing.start ()) "boom"
        in
        (match B.to_agent_core_typed_result plain with
         | Ok _ -> Alcotest.fail "expected Error"
@@ -464,7 +464,7 @@ let test_failure_class_reaches_the_model () =
          Tool_result.make_err
            ~tool_name:"t"
            ~class_
-           ~start_time:0.0
+           ~start_time:(Tool_timing.start ())
            ~metadata:(`Assoc [ "k", `String "v" ])
            "boom"
        in

@@ -191,12 +191,11 @@ let load_response ~(config : Workspace.config) ~agent_name ~body =
     `Bad_request, load_result_json ~ok:false ~message:("invalid JSON: " ^ message)
   | args ->
     let result =
-      (* Time_compat.now is the codebase's clock accessor the determinism
-         gate accepts, the same one Tool_misc.dispatch stamps tool calls
-         with; reading the wall clock any other way here would add
-         non-deterministic-boundary debt. *)
+      (* Tool_timing.start is the one tool-start stamp Tool_misc.dispatch
+         also uses; it reads Time_compat.now, the clock accessor the
+         determinism gate accepts. *)
       Tool_misc_msx_lane.handle_load ~tool_name:"masc_msx_load"
-        ~start_time:(Time_compat.now ()) ~base_path:config.base_path
+        ~start_time:(Tool_timing.start ()) ~base_path:config.base_path
         ~agent_name ~after_load:(fun () -> machine_changed ~config) args
     in
     let ok = Tool_result.is_success result in
@@ -420,7 +419,7 @@ let checkpoint_response ~(config : Workspace.config) ~restore ~body =
        match Executor_pool_ref.submit_strict (fun () ->
          let tool_name = if restore then "masc_msx_restore" else "masc_msx_save" in
          let result = Tool_misc_msx_lane.handle_checkpoint ~restore ~tool_name
-             ~start_time:(Time_compat.now ()) ~base_path args in
+             ~start_time:(Tool_timing.start ()) ~base_path args in
          let ok = Tool_result.is_success result in
          let status = match Tool_result.failure_class result with
            | None -> `OK
@@ -450,7 +449,7 @@ let handle_change_disk ~(config : Workspace.config) request reqd =
       | args -> (
         match Executor_pool_ref.submit_strict (fun () ->
           let result = Tool_misc_msx_lane.handle_change_disk ~tool_name:"masc_msx_change_disk"
-              ~start_time:(Time_compat.now ()) ~base_path:config.base_path args in
+              ~start_time:(Tool_timing.start ()) ~base_path:config.base_path args in
           let ok = Tool_result.is_success result in
           let status = match Tool_result.failure_class result with
             | None -> `OK | Some Tool_result.Workflow_rejection -> `Bad_request

@@ -2800,7 +2800,7 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
   in
   ignore (check_surfaces ~phase:"verifying" ~proof_state:"proof_pending");
   let committed = Lib.Workspace_goals.commit_verifier_decision
-    ~tool_name:"goal_verifier_commit" ~start_time:0. config ~goal_id
+    ~tool_name:"goal_verifier_commit" ~start_time:(Tool_timing.start ()) config ~goal_id
     ~request_id ~criterion ~verification_run_id:"dashboard-proof-run"
     ~decision:Lib.Workspace_goals.Proof_proven ~evidence:"10 passing cases observed" in
   check bool "internal verifier committed" true (Tool_result.is_success committed);

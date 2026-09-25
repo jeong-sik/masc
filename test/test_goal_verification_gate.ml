@@ -474,7 +474,7 @@ let verifier_transition config goal_id decision evidence =
   let request_id, criterion = proof_identity config goal_id in
   Workspace_goals.commit_verifier_decision
     ~tool_name:"goal_verifier_commit"
-    ~start_time:0.
+    ~start_time:(Tool_timing.start ())
     config
     ~goal_id
     ~verification_run_id:"goal-verifier-test-run"
@@ -597,7 +597,7 @@ let test_reopened_goal_enters_a_new_verification_cycle () =
   check int "the pending request is archived once" 1 (List.length archived_pending);
   ignore (must_fail "stale answer after reopen"
     (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
-       ~start_time:0. config ~goal_id ~request_id:stale_request ~criterion:stale_criterion
+       ~start_time:(Tool_timing.start ()) config ~goal_id ~request_id:stale_request ~criterion:stale_criterion
        ~verification_run_id:"stale-verifier-run"
        ~decision:Workspace_goals.Proof_proven ~evidence:"stale proof"));
   check string "stale answer leaves the goal executing" "executing" (stored_phase config goal_id);
@@ -605,7 +605,7 @@ let test_reopened_goal_enters_a_new_verification_cycle () =
   let request_id, criterion = proof_identity config goal_id in
   ignore (must_succeed "second proof"
     (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
-       ~start_time:0. config ~goal_id ~request_id ~criterion ~verification_run_id:"second-verifier-run"
+       ~start_time:(Tool_timing.start ()) config ~goal_id ~request_id ~criterion ~verification_run_id:"second-verifier-run"
        ~decision:Workspace_goals.Proof_proven ~evidence:"new execution proof"));
   check string "new execution can complete" "awaiting_confirmation" (stored_phase config goal_id);
   match (ledger_record config goal_id).completion with
@@ -683,7 +683,7 @@ let test_dropped_pending_proof_gets_a_new_request_after_reopen () =
     (String.equal old_request new_request);
   ignore (must_fail "old answer after reopen"
     (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
-       ~start_time:0. config ~goal_id ~verification_run_id:"old-run"
+       ~start_time:(Tool_timing.start ()) config ~goal_id ~verification_run_id:"old-run"
        ~request_id:old_request ~criterion:old_criterion
        ~decision:Workspace_goals.Proof_proven ~evidence:"old execution proof"));
   check string "new execution remains verifying" "verifying" (stored_phase config goal_id);
@@ -706,7 +706,7 @@ let test_verdict_after_drop_from_verifying_is_refused () =
     (json_state dropped [ "goal"; "phase" ]);
   ignore (must_fail "late verdict after drop"
     (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
-       ~start_time:0. config ~goal_id ~verification_run_id:"late-run"
+       ~start_time:(Tool_timing.start ()) config ~goal_id ~verification_run_id:"late-run"
        ~request_id ~criterion
        ~decision:Workspace_goals.Proof_proven ~evidence:"late proof"));
   check string "late verdict does not resurrect the goal" "dropped"
@@ -731,7 +731,7 @@ let test_reopen_from_verifying_clears_the_pending_request () =
    | _ -> fail "reopen from verifying retained the pending request");
   ignore (must_fail "late refutation after reopen"
     (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
-       ~start_time:0. config ~goal_id ~verification_run_id:"late-run"
+       ~start_time:(Tool_timing.start ()) config ~goal_id ~verification_run_id:"late-run"
        ~request_id ~criterion
        ~decision:(Workspace_goals.Proof_refuted { reason = "late" })
        ~evidence:"late refutation"));
@@ -895,7 +895,7 @@ let test_proof_proven_completes_with_authority_and_evidence () =
     must_fail "typed proof verdict with blank run ID"
       (Workspace_goals.commit_verifier_decision
          ~tool_name:"goal_verifier_commit"
-         ~start_time:0.
+         ~start_time:(Tool_timing.start ())
          config
          ~goal_id
          ~verification_run_id:"   "

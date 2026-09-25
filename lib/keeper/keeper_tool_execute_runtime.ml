@@ -611,7 +611,7 @@ let handle_tool_execute_typed
           in
           (* NDT-OK: wall clock is used only for elapsed telemetry, never for
              dispatch branching or policy decisions. *)
-          let t0 = Unix.gettimeofday () in
+          let t0 = Tool_timing.start () in
           let task_id =
             Option.map Keeper_id.Task_id.to_string meta.current_task_id
           in
@@ -891,7 +891,8 @@ let handle_tool_execute_typed
             let elapsed_ms =
               (* NDT-OK: second wall-clock read closes the elapsed telemetry
                  span recorded immediately below. *)
-              elapsed_duration_ms ~start_time:t0 ~end_time:(Unix.gettimeofday ())
+              elapsed_duration_ms ~start_time:(Tool_timing.started_at t0)
+                ~end_time:(Time_compat.now ())
             in
             Log.Keeper.info
               "shell_ir dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"

@@ -114,7 +114,7 @@ let with_keeper_dispatch_probe f =
       Some
         (Tool_result.make_ok
            ~tool_name:name
-           ~start_time:0.0
+           ~start_time:(Tool_timing.start ())
            ~data:(`Assoc [ "effect", `String "ran" ])
            ())
     in
@@ -146,7 +146,7 @@ let test_second_tool_snapshot_contains_first_tool_result () =
   let first_result =
     Tool_result.ok
       ~tool_name:"tool_read_file"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       {|{"ok":true,"content":"exact evidence"}|}
   in
   Keeper_gate_causal_context.record_tool_result
@@ -703,7 +703,7 @@ let test_ollama_probe_leaf_requests_exact_authorization () =
     calls := (operation, input) :: !calls;
     Tool_result.ok
       ~tool_name:operation
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       {|{"ok":true,"effect":"intercepted"}|}
   in
   let result =

@@ -728,6 +728,7 @@ type write_action =
   | Update_schedule
 
 let handle_write ~action ~tool_name ~start_time ctx args =
+  let dispatched_at = Tool_timing.started_at start_time in
   let result =
     let* payload = plain (payload_from_args args) in
     let* payload = plain (ctx.stamp_keeper_wake_result_delivery ~payload) in
@@ -742,10 +743,10 @@ let handle_write ~action ~tool_name ~start_time ctx args =
       (* NDT-OK: absent requested_at_unix means "schedule this from the tool
          dispatch boundary now"; replay/tests can pass requested_at_unix explicitly. *)
       match given with
-      | None -> Ok start_time
+      | None -> Ok dispatched_at
       | Some requested_at -> Ok requested_at
     in
-    let* due_at = resolve_due_at ~dispatched_at:start_time recurrence args in
+    let* due_at = resolve_due_at ~dispatched_at recurrence args in
     let* schedule_id =
       match action, string_opt args "schedule_id" with
       | Create_schedule, schedule_id -> Ok schedule_id
@@ -779,7 +780,7 @@ let handle_write ~action ~tool_name ~start_time ctx args =
         |> Result.map_error (fun detail ->
           Schedule_service.Creation_rejected detail)
       in
-      (* [start_time], not [requested_at]: a caller can set requested_at,
+      (* [dispatched_at], not [requested_at]: a caller can set requested_at,
          and the question is whether the due time is already behind the
          clock this call runs on. *)
       (* The cadence the production runner loop sleeps on:
@@ -789,11 +790,11 @@ let handle_write ~action ~tool_name ~start_time ctx args =
       match action, schedule_id with
       | Create_schedule, schedule_id ->
         Schedule_service.create
-          ctx.config ~now:start_time ~runner_tick_sec ?schedule_id ~requested_at ?expires_at
+          ctx.config ~now:dispatched_at ~runner_tick_sec ?schedule_id ~requested_at ?expires_at
           ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
       | Update_schedule, Some schedule_id ->
         Schedule_service.update
-          ctx.config ~now:start_time ~runner_tick_sec ~schedule_id ~requested_at ?expires_at
+          ctx.config ~now:dispatched_at ~runner_tick_sec ~schedule_id ~requested_at ?expires_at
           ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
       | Update_schedule, None ->
         Error (Schedule_service.Invalid_request "schedule_id is required")
@@ -1307,7 +1308,7 @@ let handle_notes_list ~tool_name ~start_time ctx args =
 ;;
 
 let dispatch ctx ~name ~args : Tool_result.result option =
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let handle f =
     try Some (f ~tool_name:name ~start_time ctx args) with
     | Eio.Cancel.Cancelled _ as e -> raise e

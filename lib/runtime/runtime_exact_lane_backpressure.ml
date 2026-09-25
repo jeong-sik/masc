@@ -12,7 +12,15 @@ let candidate_of_slot slot_id =
    ([Keeper_turn_driver.demote_unavailable_candidates]): a quota window the
    provider reported exhausted, and a rate limit this process observed. A
    failed attempt that is not a rate limit carries no rest and does not move a
-   slot here. *)
+   slot here.
+
+   A rate limit rests the slot for the Keeper walk's own path rest
+   ([Keeper_runtime_failure_route.path_rest_sec]): the provider's Retry-After
+   when it sent one, the configured floor when it did not, never past the
+   configured cap. The Keeper walk keeps an unhinted rate limit demoted until
+   the path answers, because a later rotation still reaches it; an Exact lane
+   whose siblings keep answering never would, so here the rest ends and the
+   slot is tried in its declared place again. *)
 let resting ~now slot_id =
   match Runtime.get_runtime_by_id slot_id with
   | None -> false
@@ -26,7 +34,18 @@ let resting ~now slot_id =
       match
         Backpressure.candidate_backpressure ~now ~candidate:runtime.candidate_backpressure
       with
-      | Some { Backpressure.rate_limit = Some _; failed_attempt = _ } -> true
+      | Some
+          { Backpressure.rate_limit =
+              Some (Backpressure.Unknown_scope_rate_limit { noted_at; retry_after })
+          ; failed_attempt = _
+          } ->
+        let rest_sec =
+          Keeper_runtime_failure_route.path_rest_sec
+            ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
+            ~retry_class:Keeper_runtime_failure_route.Rate_limited
+            ~retry_after_hint:retry_after
+        in
+        Float.compare now (noted_at +. rest_sec) < 0
       | Some { Backpressure.rate_limit = None; failed_attempt = _ } | None -> false
     in
     quota_exhausted || rate_limited

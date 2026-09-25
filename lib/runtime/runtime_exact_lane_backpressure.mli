@@ -17,8 +17,10 @@
 val order :
   Runtime_exact_output_registry.resolved_lane ->
   Runtime_exact_output_registry.resolved_lane
-(** Move every slot whose runtime is resting -- a rate limit still in force,
-    or an exhausted quota window -- behind the slots that are not, keeping
+(** Move every slot whose runtime is resting -- a rate limit inside its path
+    rest (the provider's Retry-After, or the configured floor without one,
+    clamped to the configured cap), or an exhausted quota window -- behind
+    the slots that are not, keeping
     declaration (or operator preference) order inside each group. A slot id
     that names no runtime carries no evidence and stays in place. CLI slots
     are untouched. Read at the wall clock of the call. *)

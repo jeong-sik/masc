@@ -725,6 +725,57 @@ let test_edited_tool_is_overwritten_and_reported () =
         check bool "the line names the file" true (mentions ~line "tools/masc_board_vote.toml")
       | lines -> failf "expected one line, found %d" (List.length lines))
 
+(* #37503: tool and MCP files are renamed into place with no fsync, so a
+   power loss can leave one empty or partial. The next pass has to put the
+   embedded bytes back. Both torn shapes, a 0-byte file and a file of
+   garbage, and both manifest states: the manifest this pass wrote (the
+   torn file then differs from its recorded digest) and no manifest at all
+   (the crash came before the manifest was written). *)
+let torn_tools_embedded =
+  [ ( "tools/masc_board_vote.toml"
+    , "name = \"masc_board_vote\"\ndescription = \"Vote.\"\n" )
+  ; ( "tools/masc_board_post.toml"
+    , "name = \"masc_board_post\"\ndescription = \"Post.\"\n" )
+  ]
+
+let torn_tools_are_rebuilt ~drop_manifest () =
+  with_temp_prompts_dir (fun dir ->
+      let run () =
+        Managed_asset_sync.sync ~domain:Managed_asset_sync.Tools
+          ~edit_layer:Managed_asset_sync.No_edit_layer
+          ~read:(fun rel -> List.assoc_opt rel torn_tools_embedded)
+          ~files:(List.map fst torn_tools_embedded)
+          ~dest_dir:dir ()
+      in
+      let (_ : Managed_asset_sync.sync_result) = run () in
+      let truncated = Filename.concat dir "masc_board_vote.toml" in
+      let garbage = Filename.concat dir "masc_board_post.toml" in
+      write_file truncated "";
+      write_file garbage "\x00\xff name = \"masc_board_po";
+      if drop_manifest then Sys.remove (Filename.concat dir "managed-assets.json");
+      let result = run () in
+      check int "failed" 0 (List.length result.Managed_asset_sync.failed);
+      check string "the 0-byte file holds the embedded copy again"
+        (List.assoc "tools/masc_board_vote.toml" torn_tools_embedded)
+        (read_file truncated);
+      check string "the garbage file holds the embedded copy again"
+        (List.assoc "tools/masc_board_post.toml" torn_tools_embedded)
+        (read_file garbage))
+
+(* The prompt domain keeps its fsync: a torn prompt can be promoted to a
+   permanent override (#38741). This pins the choice per domain. *)
+let test_only_tools_and_mcp_skip_the_fsync () =
+  let write = testable (fun ppf -> function
+      | Managed_asset_sync.Fsync_each_file -> Format.pp_print_string ppf "Fsync_each_file"
+      | Managed_asset_sync.Rename_only -> Format.pp_print_string ppf "Rename_only") ( = )
+  in
+  check write "prompts" Managed_asset_sync.Fsync_each_file
+    (Managed_asset_sync.asset_write Managed_asset_sync.Prompts);
+  check write "tools" Managed_asset_sync.Rename_only
+    (Managed_asset_sync.asset_write Managed_asset_sync.Tools);
+  check write "mcp" Managed_asset_sync.Rename_only
+    (Managed_asset_sync.asset_write Managed_asset_sync.Mcp)
+
 (* A manifest under a schema no domain writes reads as no manifest:
    nothing is retired, every differing file is overwritten, and the
    rewritten manifest is the current one with a digest per path. *)
@@ -1008,6 +1059,12 @@ let () =
             test_edited_prompt_with_an_override_is_preserved;
           test_case "an edited tool is overwritten and reported" `Quick
             test_edited_tool_is_overwritten_and_reported;
+          test_case "a torn tool file is rebuilt (manifest written)" `Quick
+            (torn_tools_are_rebuilt ~drop_manifest:false);
+          test_case "a torn tool file is rebuilt (no manifest)" `Quick
+            (torn_tools_are_rebuilt ~drop_manifest:true);
+          test_case "only tools and mcp skip the fsync" `Quick
+            test_only_tools_and_mcp_skip_the_fsync;
           test_case "an old-schema manifest reads as none" `Quick
             test_an_old_schema_manifest_reads_as_none;
           test_case "a manifest without digests retires and judges nothing edited"

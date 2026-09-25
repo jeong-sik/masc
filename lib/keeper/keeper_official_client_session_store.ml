@@ -128,7 +128,6 @@ type transient_release_record =
 
 type context_delivery =
   | Prepared_start_context
-  | Replaced_configuration
   | Canonical_source_guard
   | Held_by_vendor_session
 
@@ -703,7 +702,6 @@ let context_frontier_to_yojson = function
       ; "message_count", `Int frontier.message_count
       ; "delivery", `String (match frontier.delivery with
           | Prepared_start_context -> "prepared_start_context"
-          | Replaced_configuration -> "replaced_configuration"
           | Canonical_source_guard -> "canonical_source_guard"
           | Held_by_vendor_session -> "held_by_vendor_session")
       ; "acknowledged_turn", settlement_opt_to_yojson frontier.acknowledged_turn
@@ -731,7 +729,6 @@ let context_frontier_of_yojson = function
        when message_count >= 0 && valid_sha256 snapshot_sha256 ->
        let* delivery = match delivery with
          | "prepared_start_context" -> Ok Prepared_start_context
-         | "replaced_configuration" -> Ok Replaced_configuration
          | "canonical_source_guard" -> Ok Canonical_source_guard
          | "held_by_vendor_session" -> Ok Held_by_vendor_session
          | _ -> Error "invalid context frontier delivery" in
@@ -1164,7 +1161,7 @@ let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expec
   let plan = match context_frontier with
     | Some {delivery=Canonical_source_guard; snapshot_sha256; _} ->
       reconcile_context plan ~expected ~snapshot_sha256
-    | Some {delivery=(Prepared_start_context | Replaced_configuration | Held_by_vendor_session); _}
+    | Some {delivery=(Prepared_start_context | Held_by_vendor_session); _}
     | None -> plan
   in
   let last_recovery_resolution =
@@ -1351,36 +1348,6 @@ let require_recovery ~base_path ~keeper_name ~expected ~failure ~detail
     { expected with phase = Recovery_required recovery; updated_at = required_at }
 ;;
 
-let conclude_resume_session_full ~base_path ~keeper_name ~expected ~recovery_id
-    ~updated_at =
-  let* () =
-    if Float.is_finite updated_at
-    then Ok ()
-    else Error "official-client session-full updated_at must be finite"
-  in
-  match expected.phase with
-  | Recovery_required
-      ({ failure = Input_rejected Bootstrap_floor_exceeded
-       ; previous_settlement = Some _
-       ; _
-       } as recovery)
-    when String.equal recovery.recovery_id recovery_id ->
-    transition
-      ~base_path
-      ~keeper_name
-      ~expected:(Some expected)
-      { expected with
-        phase =
-          Recovery_required
-            { recovery with failure = Vendor_session_full No_activity_observed }
-      ; updated_at
-      }
-  | Recovery_required _ | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
-    Error
-      "only a resumed session's own floor rejection can be concluded as a full \
-       session"
-;;
-
 let incomplete_claim = function
   | Start { owner_epoch; previous_settlement } ->
     Some (owner_epoch, previous_settlement)
@@ -1408,7 +1375,7 @@ let restored_phase previous_settlement =
 let frontier_restored_to previous_settlement frontier =
   match frontier.delivery with
   | Canonical_source_guard -> { frontier with acknowledged_turn = previous_settlement }
-  | Prepared_start_context | Replaced_configuration | Held_by_vendor_session -> frontier
+  | Prepared_start_context | Held_by_vendor_session -> frontier
 ;;
 
 let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =

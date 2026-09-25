@@ -393,32 +393,6 @@ let observe_cluster_workspaces ~base_path =
          Some before, roots, skipped))
 ;;
 
-(* A cluster created, removed or renamed while the scan ran would leave a
-   workspace half read, so the [clusters] snapshot must be the same after the
-   scan as before it. *)
-let confirm_cluster_set_unchanged ~base_path before =
-  let path = clusters_root ~base_path in
-  let changed () =
-    Error
-      (Cluster_workspace_rejected
-         { path; reason = "the cluster set changed during the scan" })
-  in
-  match Fs_compat.inspect_owned_directory_chain ~ownership_root:base_path path with
-  | Error rejection ->
-    Error
-      (Cluster_workspace_rejected
-         { path
-         ; reason = Fs_compat.owned_directory_chain_rejection_to_string rejection
-         })
-  | Ok observed ->
-    (match before, observed with
-     | None, Fs_compat.Owned_directory_missing -> Ok ()
-     | Some before, Fs_compat.Owned_directory after ->
-       if same_directory_snapshot before after then Ok () else changed ()
-     | None, Fs_compat.Owned_directory _
-     | Some _, Fs_compat.Owned_directory_missing -> changed ())
-;;
-
 let live_references ~after_scan ~base_path ~board_posts_file =
   let read_directory path =
     let inspect () =
@@ -519,7 +493,7 @@ let live_references ~after_scan ~base_path ~board_posts_file =
        | _ -> scan_entry path references)
   in
   let open Result.Syntax in
-  let* cluster_snapshot, cluster_roots, skipped_cluster_files =
+  let* _cluster_snapshot, cluster_roots, skipped_cluster_files =
     observe_cluster_workspaces ~base_path
   in
   let* references =
@@ -532,7 +506,6 @@ let live_references ~after_scan ~base_path ~board_posts_file =
          (Ok Artifact_reference_set.empty)
   in
   after_scan ();
-  let* () = confirm_cluster_set_unchanged ~base_path cluster_snapshot in
   Ok (references, skipped_cluster_files)
 ;;
 

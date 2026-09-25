@@ -293,6 +293,10 @@ let test_misc_tools_name_the_source_they_move () =
     (activity Tool_schemas_misc.Misc_dos_screen);
   check string "handing the DOS controller on refreshes the capture that shows the holder" "dos"
     (activity Tool_schemas_misc.Misc_dos_pass);
+  check string "restoring a DOS checkpoint replaces the machine a watcher shows" "dos"
+    (activity Tool_schemas_misc.Misc_dos_restore);
+  check string "saving one moves nothing" "tool"
+    (activity Tool_schemas_misc.Misc_dos_save);
   check string "interacting with a page moves its document" "browser"
     (activity Tool_schemas_misc.Misc_browser_interact);
   check string "listing tabs moves nothing" "tool"

@@ -39,7 +39,7 @@ open Alcotest
    The loud failure at the end is deliberate. The first version of this test
    read the bare name and CI reported Sys_error("No such file or directory"),
    which reads as a missing Dockerfile rather than a test that cannot find it. *)
-let dockerfile_name = "Dockerfile.keeper-sandbox"
+let dockerfile_name = "sandbox-images/ocaml/Dockerfile"
 
 let rec find_source_root_from dir hops =
   if hops > 8 then None

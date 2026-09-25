@@ -24,6 +24,15 @@ type operator_disposition =
   ; reason : Keeper_execution_receipt.operator_disposition_reason
   }
 
+(** Prompt tokens a local runtime (llama-server, Ollama) reports in its wire
+   timings: [cache_n] reused from the KV cache, [prompt_n] freshly
+   prefilled. Summed over the turn's provider responses that reported both;
+   [None] when none did. Cloud providers report cache use as usage instead. *)
+type wire_prompt_tokens =
+  { cache_n : int
+  ; prompt_n : int
+  }
+
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
@@ -54,6 +63,7 @@ type run_result =
   ; run_validation : Agent_core.Raw_trace.run_validation option
   ; stop_reason : Runtime_agent.stop_reason
   ; inference_telemetry : Agent_core.Types.inference_telemetry option
+  ; wire_prompt_tokens : wire_prompt_tokens option
   ; tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
   }
 
@@ -75,6 +85,9 @@ type turn_settlement =
         (** The lane an earlier turn deferred to, when this turn ran it. *)
   ; degraded_retry_deferred : Keeper_error_classify.degraded_retry option
         (** The lane this turn leaves for a later one. *)
+  ; spend : Keeper_turn_spend.attempt list
+        (** What each dispatched attempt reported about its spend, on either
+            outcome: a failed turn and a lost attempt spent too. *)
   }
 
 (** The settlement of a turn that ended before

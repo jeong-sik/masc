@@ -214,13 +214,15 @@ function statusbarRepositoryLabel(repository: Repository | undefined): string | 
   return compactStatusbarPath(repository?.local_path ?? '') ?? repository?.id?.trim()
 }
 
+// No active repository means the tree is the project root. Naming the
+// first registered repository here put its origin and branch over a tree
+// that is not that repository.
 function activeStatusbarRepository(
   repositories: ReadonlyArray<Repository> | undefined,
   activeRepositoryId: string | null | undefined,
 ): Repository | undefined {
-  if (!repositories || repositories.length === 0) return undefined
-  return repositories.find(repository => activeRepositoryId && repository.id === activeRepositoryId)
-    ?? repositories[0]
+  if (!repositories || !activeRepositoryId) return undefined
+  return repositories.find(repository => repository.id === activeRepositoryId)
 }
 
 /**
@@ -1083,7 +1085,7 @@ export function IdeShell() {
             />
           </div>
         </details>
-        <${IdePresenceStrip} compact=${true} />
+        <${IdePresenceStrip} compact=${true} pollMs=${IDE_ACTIVITY_POLL_MS} />
         <button
           type="button"
           class="ide-v2-action ide-v2-rail-toggle"

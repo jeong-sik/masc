@@ -135,7 +135,7 @@ let test_claim_status_uses_typed_outcome () =
       (Keeper_tool_outcome.No_progress
          { reason =
              Keeper_tool_outcome.No_eligible_tasks
-               { scope_excluded_count = 1; all_goals_excluded = false }
+               { scope_excluded_count = 1 }
          })
   in
   let typed_no_work =

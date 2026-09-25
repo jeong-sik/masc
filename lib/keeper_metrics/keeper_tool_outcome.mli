@@ -18,7 +18,6 @@ and no_progress_reason =
 
 and claim_scope_exclusions = {
   scope_excluded_count : int;
-  all_goals_excluded : bool;
 }
 
 (** JSON serialization for telemetry and trace surfaces. *)

@@ -10,14 +10,11 @@ and no_progress_reason =
 
 and claim_scope_exclusions = {
   scope_excluded_count : int;
-  all_goals_excluded : bool;
 }
 
 let claim_scope_exclusions_to_json (e : claim_scope_exclusions) : Yojson.Safe.t =
   `Assoc
-    [ "scope_excluded_count", `Int e.scope_excluded_count
-    ; "all_goals_excluded", `Bool e.all_goals_excluded
-    ]
+    [ "scope_excluded_count", `Int e.scope_excluded_count ]
 ;;
 
 let to_json (outcome : t) : Yojson.Safe.t =
@@ -58,15 +55,13 @@ let of_json (json : Yojson.Safe.t) : t option =
            | Some (`String "No_eligible_tasks") ->
              (match List.assoc_opt "exclusions" reason_fields with
               | Some (`Assoc exc_fields) ->
-                (match List.assoc_opt "scope_excluded_count" exc_fields,
-                       List.assoc_opt "all_goals_excluded" exc_fields with
-                 | Some (`Int scope_excluded_count), Some (`Bool all_goals_excluded)
+                (match List.assoc_opt "scope_excluded_count" exc_fields with
+                 | Some (`Int scope_excluded_count)
                    when scope_excluded_count >= 0 ->
                    Some
                      (No_progress
                         { reason =
-                            No_eligible_tasks
-                              { scope_excluded_count; all_goals_excluded }
+                            No_eligible_tasks { scope_excluded_count }
                         })
                  | _ -> None)
               | _ -> None)

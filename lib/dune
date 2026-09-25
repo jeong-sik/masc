@@ -71,6 +71,7 @@
   masc.tool_types
   masc.browser_lane
   masc.slack_lane
+  masc.machine_live_publication
   masc.msx_lane
   masc.dos_lane
   masc.tool_metrics_store

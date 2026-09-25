@@ -1,7 +1,7 @@
 (* Typed Execute input projections.
 
    Static helpers around [Keeper_tool_execute_typed_input] - quote a token for
-   policy strings, render its [Argv] or [Script] back to a shell-command
+   policy strings, render its [Argv] or [Command] back to a shell-command
    string (for policy validation + auditing), and pretty-print a validation
    error.
 
@@ -35,15 +35,15 @@ let typed_input_command_text
       ({ source; _ } : Keeper_tool_execute_typed_input.execute_input)
   =
   match source with
-  (* The script is already the command line this wants to render. The shell
-     that runs it is not part of the line the caller wrote. *)
-  | Keeper_tool_execute_typed_input.Script { text; shell = _ } -> text
+  (* The command is already the line this wants to render. The shell that
+     runs it is not part of the line the caller wrote. *)
+  | Keeper_tool_execute_typed_input.Command { text; shell = _ } -> text
   | Keeper_tool_execute_typed_input.Argv argv -> typed_stage_command_text argv
 ;;
 
 (* What an Execute approval is about, in one line: the first line of the
-   command the caller wrote, whole. A multi-line script is named by its first
-   command; fitting the line into a pane is the renderer's decision. *)
+   command the caller wrote, whole. A multi-line command is named by its first
+   line; fitting the line into a pane is the renderer's decision. *)
 let typed_input_call_summary input =
   String_util.first_nonblank_line (typed_input_command_text input)
 ;;

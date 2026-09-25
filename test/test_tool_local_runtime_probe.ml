@@ -273,6 +273,33 @@ let test_endpoint_urls_use_normalized_base () =
     (Masc.Tool_local_runtime_probe.ollama_generate_url
        "http://127.0.0.1:11434///")
 
+(* A model reads the cause, never the URL it sent: a bare "curl" left a
+   Keeper retrying one unresolvable host 16 times. A code without a named
+   cause is still reported by number. *)
+let test_transport_failure_names_its_cause () =
+  let module H = Masc.Tool_local_runtime_http in
+  check string "unresolvable host" "curl exit 6 (could not resolve host)"
+    (H.transport_failure_cause (H.Curl_exited 6));
+  check string "timeout" "curl exit 28 (timed out)"
+    (H.transport_failure_cause (H.Curl_exited 28));
+  check string "unnamed code keeps its number" "curl exit 99"
+    (H.transport_failure_cause (H.Curl_exited 99));
+  check string "a signal is named without OCaml's number"
+    "curl was killed by a signal"
+    (H.transport_failure_cause (H.Curl_signaled Sys.sigkill));
+  (* The runner's own budget usually stops curl first and reports a
+     synthesized exit; that is a timeout, not curl's code 124. *)
+  check bool "the runner's timeout is a timeout" true
+    (H.transport_failure_of_status Process_eio.timed_out_status = Some H.Timed_out);
+  check string "timeout cause" "timed out before curl answered"
+    (H.transport_failure_cause H.Timed_out);
+  check bool "curl's own exit keeps its code" true
+    (H.transport_failure_of_status (Unix.WEXITED 6) = Some (H.Curl_exited 6));
+  check bool "success is no failure" true
+    (H.transport_failure_of_status (Unix.WEXITED 0) = None);
+  check string "operator text keeps the url" "curl exit code 6 for https://example.invalid/"
+    (H.transport_failure_to_string ~url:"https://example.invalid/" (H.Curl_exited 6))
+
 let test_curl_get_argv_keeps_curl_as_executable_with_headers () =
   let argv =
     Masc.Tool_local_runtime_http.curl_get_argv_for_test
@@ -479,6 +506,8 @@ let () =
             test_endpoint_urls_use_normalized_base;
           test_case "curl argv keeps executable before headers" `Quick
             test_curl_get_argv_keeps_curl_as_executable_with_headers;
+          test_case "transport failure names its cause" `Quick
+            test_transport_failure_names_its_cause;
           test_case "reports ps non-200 as error" `Quick
             test_ollama_ps_non_200_is_reported_as_error;
           test_case "omits keep_alive by default" `Quick

@@ -424,14 +424,14 @@ let test_moving_output_input_loop_aborts_at_input_threshold () =
    until this boundary was installed for it the host kept only its own
    exact-adjacent counter. The production boundary now runs for that turn
    too, reading the turn accumulator without a scope. Reproduce the issue's
-   shape -- the Execute script one keeper ran 186 times with byte-identical
+   shape -- the Execute command one keeper ran 186 times with byte-identical
    input -- through the host wiring and hold both axes: identical output
    stops at [repeated_tool_call_yield_threshold] (3), moving output at
    [repeated_tool_call_input_yield_threshold] (5). *)
-let execute_script_input =
+let execute_command_input =
   `Assoc
     [ "cwd", `String "."
-    ; "script", `String "hostname; id -un; uname -m; pwd; cat /proc/1/comm"
+    ; "command", `String "hostname; id -un; uname -m; pwd; cat /proc/1/comm"
     ; "shell", `String "sh"
     ]
 ;;
@@ -440,7 +440,7 @@ let execute_observation ~output_text : Masc.Keeper_agent_result.tool_call_detail
   match
     Masc.Keeper_tool_progress_identity.digest_tool_io
       ~tool_name:"Execute"
-      ~input:execute_script_input
+      ~input:execute_command_input
       ~output_text
   with
   | Some { Masc.Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } ->
@@ -472,7 +472,7 @@ let test_autonomous_official_boundary_stops_execute_loop_without_scope () =
               Ok { Agent_core.Types.content = output_text !executions; content_blocks = None; _meta = None })
         in
         let call index =
-          tool.call ~call_id:(Printf.sprintf "%s-%d" label index) execute_script_input
+          tool.call ~call_id:(Printf.sprintf "%s-%d" label index) execute_command_input
         in
         for index = 1 to stops_at - 1 do
           check bool

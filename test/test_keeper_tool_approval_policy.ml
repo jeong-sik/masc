@@ -54,7 +54,7 @@ let test_execute_delegation_does_not_claim_readonly () =
   let cases =
     [ `Assoc [ "argv", `List [ `String "ls" ]; "cwd", `String "." ]
     ; `Assoc [ "argv", `List [ `String "rg"; `String "--pre=program"; `String "needle" ] ]
-    ; `Assoc [ "script", `String "ls > listing.txt" ] ] in
+    ; `Assoc [ "command", `String "ls > listing.txt" ] ] in
   List.iter (fun input ->
       List.iter (fun tool_name ->
           check bool "one execution permission authority" false

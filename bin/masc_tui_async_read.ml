@@ -8,10 +8,10 @@ let label ?subject cause =
   | None -> cause
   | Some subject -> subject ^ " load failed: " ^ cause
 
-let launch ?(on_not_run = ignore) ?subject ~deliver read =
+let launch ?on_not_run ?subject ~deliver read =
   let deliver result = deliver (Result.map_error (label ?subject) result) in
   let not_run cause =
-    on_not_run ();
+    Option.iter (fun release -> release ()) on_not_run;
     deliver (Error cause)
   in
   match Eio_context.get_switch_opt () with

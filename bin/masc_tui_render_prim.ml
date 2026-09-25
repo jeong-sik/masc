@@ -938,7 +938,8 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
     | Observer_off -> Pane.Feed_off
     | Observer_opening -> Pane.Feed_opening
     | Observer_live { events; _ } -> Pane.Feed_live events
-    | Observer_closed { reason; _ } -> Pane.Feed_closed reason
+    | Observer_closed_before_answer { reason; _ }
+    | Observer_closed_after_live { reason; _ } -> Pane.Feed_closed reason
   in
   (* This input is built only when the pane is visible. Changes does not
      consume event chunks, so retain the previous projection without folding. *)
@@ -4087,8 +4088,14 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
          pane carries the full text and the note says so by counting. *)
       let response_block =
         match response_parts with
-        | None -> []
-        | Some
+        | Error detail ->
+            [ "  "
+              ^ Context_bars.band ~width ~title:"RESPONSE"
+                  ~caption:"what came back for this request"
+            ; (Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail
+              ^ Ansi.reset
+            ]
+        | Ok
             { Masc_tui_context_inspector.parts = []
             ; outside_newest_page = true
             } ->
@@ -4099,7 +4106,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
               ^ "  This turn's reply is not in the newest history page"
               ^ Ansi.reset
             ]
-        | Some { Masc_tui_context_inspector.parts; _ } ->
+        | Ok { Masc_tui_context_inspector.parts; _ } ->
             let cap = 14 in
             let lines =
               List.concat_map
@@ -4315,9 +4322,17 @@ let context_input_map_detail_lines ~width ~scale
 
 
 let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
-    (provider_input : Masc_tui_context_inspector.provider_input option) =
+    (provider_input : (Masc_tui_context_inspector.provider_input, string) result) =
   let module Inspector = Masc_tui_context_inspector in
-  let rows = Inspector.input_map_rows record provider_input in
+  let rows, exact_input, error_rows =
+    match provider_input with
+    | Ok input -> Inspector.input_map_rows record (Some input), Some input, []
+    | Error detail ->
+        ( Inspector.input_map_rows record None
+        , None
+        , [ (Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail
+            ^ Ansi.reset ] )
+  in
   match state.context_inspector_exact with
   | Some index ->
       (match List.nth_opt rows index with
@@ -4346,10 +4361,10 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
                ~sanitize:Keeper_chat.terminal_safe_text text
              |> List.map (fun line -> "  " ^ line)
            in
-           Plain (heading :: digest :: "" :: body, None)
+           Plain (error_rows @ (heading :: digest :: "" :: body), None)
        | Some _ | None ->
            Plain
-             ( [ (Theme.bad ())
+             ( error_rows @ [ (Theme.bad ())
                  ^ "  Exact text is not retained for this component" ^ Ansi.reset
                ]
              , None ))
@@ -4360,7 +4375,7 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
           record.absolute_turn
       in
       let joined =
-        match provider_input with
+        match exact_input with
         | Some input when Ids.Turn_ref.equal input.turn_ref record.turn_ref ->
             Ansi.bold ^ Theme.ok () ^ "[ EXACT TURN JOIN ]" ^ Ansi.reset
         | Some _ | None ->
@@ -4419,9 +4434,11 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
           { common =
               [ identity
               ; "  " ^ joined
-              ; Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset
-              ; ""
               ]
+              @ error_rows
+              @ [ Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset
+                ; ""
+                ]
           ; left
           ; right
           }
@@ -4429,10 +4446,12 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
         let header =
           [ identity
           ; "  " ^ joined
-          ; Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset
-          ; ""
-          ; Ansi.bold ^ "  What the runtime prepared, and why" ^ Ansi.reset
           ]
+          @ error_rows
+          @ [ Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset
+            ; ""
+            ; Ansi.bold ^ "  What the runtime prepared, and why" ^ Ansi.reset
+            ]
         in
         let cursor =
           min (max 0 (List.length rows - 1))
@@ -4494,53 +4513,58 @@ let context_inspector_content_lines ~cols state : context_pane_body =
               else "  No context reading has been requested.")
           ]
         , None )
-  | Some (_, reading) ->
+  | Some (_, Masc_tui_context_inspector.Request_failed detail) ->
+      Plain
+        ( [ (Theme.bad ()) ^ "  Context read failed: "
+            ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ]
+        , None )
+  | Some (_, Masc_tui_context_inspector.Turn_read_failed { detail; forecast }) ->
+      let detail = Keeper_chat.terminal_safe_text detail in
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Composition ->
-           (match reading.turn with
-            | Ok selection ->
-                Plain
-                  ( context_composition_lines ~cols
-                      ~turn_back:state.context_inspector_turn_back
-                      ~forecast:reading.Masc_tui_context_inspector.forecast
-                      selection
-                  , None )
-            | Error detail ->
-                Plain
-                  ( [ (Theme.bad ()) ^ "  Composition unavailable: "
-                      ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
-                    ; ""
-                    ]
-                    @ context_next_request_lines ~cols
-                        ~scale:Masc_tui_token_scale.fleet
-                        ~show_scale_note:true
-                        reading.Masc_tui_context_inspector.forecast
-                  , None ))
+           Plain
+             ( [ (Theme.bad ()) ^ "  Composition unavailable: " ^ detail
+                 ^ Ansi.reset
+               ; ""
+               ]
+               @ context_next_request_lines ~cols
+                   ~scale:Masc_tui_token_scale.fleet
+                   ~show_scale_note:true forecast
+             , None )
        | Masc_tui_context_inspector.Exact_input ->
-           (match reading.provider_input with
+           Plain
+             ( [ (Theme.bad ()) ^ "  Exact input unavailable: " ^ detail
+                 ^ Ansi.reset ]
+             , None )
+       | Masc_tui_context_inspector.Input_map ->
+           Plain
+             ( [ (Theme.bad ()) ^ "  Input map unavailable: " ^ detail
+                 ^ Ansi.reset ]
+             , None ))
+  | Some
+      ( _
+      , Masc_tui_context_inspector.Turn_read
+          { selection; provider_input; response; forecast } ) ->
+      (match state.context_inspector_tab with
+       | Masc_tui_context_inspector.Composition ->
+           Plain
+             ( context_composition_lines ~cols
+                 ~turn_back:state.context_inspector_turn_back ~forecast selection
+             , None )
+       | Masc_tui_context_inspector.Exact_input ->
+           (match provider_input with
             | Ok input ->
-                let response, response_parts =
-                  match reading.turn with
-                  | Ok selection ->
-                      ( Some selection.Masc_tui_context_inspector.latest
-                      , (match reading.response with
-                        | Ok parts -> Some parts
-                        | Error _ -> None) )
-                  | Error _ -> (None, None)
-                in
                 (* The request tab reads sizes at the newest turn's scale;
                    its body is that turn's, whichever row is stepped to
                    on the stack tab. *)
                 let scale =
-                  match reading.turn with
-                  | Ok selection ->
-                      Masc_tui_token_scale.of_turn
-                        ~rows:selection.Masc_tui_context_inspector.rows
-                        selection.Masc_tui_context_inspector.latest
-                  | Error _ -> Masc_tui_token_scale.fleet
+                  Masc_tui_token_scale.of_turn
+                    ~rows:selection.Masc_tui_context_inspector.rows
+                    selection.Masc_tui_context_inspector.latest
                 in
-                context_exact_input_lines ~cols ~scale state ~response
-                  ~response_parts input
+                context_exact_input_lines ~cols ~scale state
+                  ~response:(Some selection.Masc_tui_context_inspector.latest)
+                  ~response_parts:response input
             | Error detail ->
                 Plain
                   ( [ (Theme.bad ()) ^ "  Exact input unavailable: "
@@ -4548,14 +4572,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                     ]
                   , None ))
        | Masc_tui_context_inspector.Input_map ->
-           (match reading.turn with
-            | Error detail ->
-                Plain
-                  ( [ (Theme.bad ()) ^ "  Input map unavailable: "
-                      ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
-                    ]
-                  , None )
-            | Ok selection -> (
+           (
                 (* The newest reading keeps the attributed row -- it is the
                    row the exact provider input was fetched for, so the join
                    on this tab stays honest. A stepped-back turn names its
@@ -4591,17 +4608,12 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                         ]
                       , None )
                 | Some record ->
-                    let provider_input =
-                      match reading.provider_input with
-                      | Ok input -> Some input
-                      | Error _ -> None
-                    in
                     let scale =
                       Masc_tui_token_scale.of_turn
                         ~rows:selection.Masc_tui_context_inspector.rows record
                     in
                     context_input_map_lines ~cols ~scale state record
-                      provider_input)))
+                      provider_input))
 
 
 (* The rows a split body holds below the common summary: one pinned header

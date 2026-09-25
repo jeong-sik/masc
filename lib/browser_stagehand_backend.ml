@@ -34,6 +34,7 @@ type 'session t =
   ; tabs : Executor.Tabs.t  (* for the backend's life, so an id is never reused *)
   ; verbs : Eio.Semaphore.t  (* one page verb at a time *)
   ; mutable state : 'session state
+  ; mutable last_end : string option  (* why the last session stopped working, until the next open *)
   }
 
 let backend_name = "chromium-stagehand"
@@ -75,8 +76,13 @@ let note_end ended event =
    the inner switch in every case. *)
 let run_session t ~headless ~opened ~resolve_opened =
   let ended = ref None in
+  (* A session that stopped working is let go at once: its browser stops,
+     status keeps the reason, and the next open starts a new one instead of
+     reusing a session every page verb would find gone. *)
+  let release_on_end = ref ignore in
   let log event =
     note_end ended event;
+    (match !ended with Some _ -> !release_on_end () | None -> ());
     t.log event
   in
   let stopped, resolve_stopped = Eio.Promise.create () in
@@ -84,6 +90,7 @@ let run_session t ~headless ~opened ~resolve_opened =
     if not (Eio.Promise.is_resolved opened) then Eio.Promise.resolve resolve_opened (Error detail)
   in
   let finish () =
+    t.last_end <- !ended;
     t.state <- Closed;
     Eio.Promise.resolve resolve_stopped ()
   in
@@ -98,7 +105,11 @@ let run_session t ~headless ~opened ~resolve_opened =
       | Ok (session, _init) ->
         let released, release = Eio.Promise.create () in
         Executor.Tabs.forget_pages t.tabs;
+        t.last_end <- None;
         t.state <- Open { session; release; stopped; ended };
+        release_on_end := (fun () -> ignore (Eio.Promise.try_resolve release ()));
+        (* An end that came between attach and now. *)
+        (match !ended with Some _ -> !release_on_end () | None -> ());
         Eio.Promise.resolve resolve_opened (Ok ());
         Eio.Promise.await released)
   with
@@ -117,8 +128,10 @@ let run_session t ~headless ~opened ~resolve_opened =
 
 let open_session t ~headless =
   match t.state with
-  | Open _ -> answered (`Assoc [ "opened", `Bool true; "reused", `Bool true; "backend", `String backend_name ])
-  | Opening | Closing -> in_transition
+  (* An ended session is being let go; the next open after that starts anew. *)
+  | Open { ended = { contents = Some _ }; _ } | Opening | Closing -> in_transition
+  | Open { ended = { contents = None }; _ } ->
+    answered (`Assoc [ "opened", `Bool true; "reused", `Bool true; "backend", `String backend_name ])
   | Closed ->
     t.state <- Opening;
     let opened, resolve_opened = Eio.Promise.create () in
@@ -134,17 +147,25 @@ let close_session t =
   | Opening | Closing -> in_transition
   | Open opened ->
     t.state <- Closing;
+    (* The browser stops whatever the runtime answers: a close that raised
+       would otherwise leave the backend Closing, and every later open and
+       close "ask again", until the server stops. *)
     let runtime =
-      Watched_work.run
-        ~watcher:(fun () ->
-          t.sleep close_answer_wait_s;
-          Printf.sprintf "no answer within %.0f s" close_answer_wait_s)
-        (fun () ->
-          match t.call opened.session Wire.Close with
-          | Ok _ -> "closed"
-          | Error failure -> "did not close: " ^ Executor.failure_message failure)
+      match
+        Watched_work.run
+          ~watcher:(fun () ->
+            t.sleep close_answer_wait_s;
+            Printf.sprintf "no answer within %.0f s" close_answer_wait_s)
+          (fun () ->
+            match t.call opened.session Wire.Close with
+            | Ok _ -> "closed"
+            | Error failure -> "did not close: " ^ Executor.failure_message failure)
+      with
+      | runtime -> runtime
+      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+      | exception exn -> "did not close: " ^ Printexc.to_string exn
     in
-    Eio.Promise.resolve opened.release ();
+    ignore (Eio.Promise.try_resolve opened.release ());
     Eio.Promise.await opened.stopped;
     answered (`Assoc [ "closed", `Bool true; "runtime", `String runtime ])
 ;;
@@ -152,7 +173,7 @@ let close_session t =
 let status t =
   let fields =
     match t.state with
-    | Closed -> [ "open", `Bool false ]
+    | Closed -> [ "open", `Bool false ] @ (match t.last_end with Some reason -> [ "ended", `String reason ] | None -> [])
     | Opening -> [ "open", `Bool false; "opening", `Bool true ]
     | Closing -> [ "open", `Bool true; "closing", `Bool true ]
     | Open opened ->
@@ -209,7 +230,7 @@ let retire_sentence_session t expected =
   match expected, t.state with
   | Some expected, Open current when expected == current ->
     t.state <- Closing;
-    Eio.Promise.resolve current.release ();
+    ignore (Eio.Promise.try_resolve current.release ());
     Eio.Promise.await current.stopped
   | (Some _ | None), (Closed | Opening | Closing | Open _) -> ()
 ;;
@@ -258,6 +279,7 @@ let create ~sw ~clock ~open_session ~call ~pid ~log =
     ; tabs = Executor.Tabs.create ()
     ; verbs = Eio.Semaphore.make 1
     ; state = Closed
+    ; last_end = None
     }
   in
   Eio.Fiber.fork_daemon ~sw (fun () ->

@@ -1713,8 +1713,10 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
          [slack] poll_enabled is set in runtime.toml; the start function
          logs and skips otherwise, leaving the server unaffected. *)
       Server_slack_poll_lane.start ~sw ~env ~state;
-      Server_browser_webdriver.start ~sw ~env;
-      Server_browser_stagehand.start ~sw ~env;
+      (* The browser lanes keep their owner records and profiles under the
+         server's own base path, not one resolved again from env or cwd. *)
+      Server_browser_webdriver.start ~sw ~env ~base_path;
+      Server_browser_stagehand.start ~sw ~env ~base_path;
       (* In-process iMessage connector, replacing the deleted
          sidecars/imessage-bot/ Python connector. Off unless Messages.app's
          chat.db is readable — on Linux it never is, and the start function

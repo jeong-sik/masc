@@ -193,19 +193,22 @@ let remove_record_if_owned ~record_path ~pid =
    server's own profile starts empty. Either way it is made owner-only: it
    holds cookies. *)
 let prepare_profile ~masc_root (config : Browser_configuration.stagehand) =
-  let profile, fresh =
+  let profile =
     match config.profile with
-    | Some profile -> profile, false
-    | None -> Process.server_profile ~masc_root, true
+    | Some path -> Process.Operator_profile path
+    | None -> Process.Server_profile (Process.server_profile ~masc_root)
   in
+  let path = Process.profile_path profile in
   match
-    if fresh then Fs_compat.remove_tree profile;
-    Fs_compat.mkdir_p profile;
-    Unix.chmod profile owner_only;
-    Fs_compat.remove_tree (Filename.concat profile Process.devtools_port_file)
+    (match profile with
+     | Process.Server_profile _ -> Fs_compat.remove_tree path
+     | Process.Operator_profile _ -> ());
+    Fs_compat.mkdir_p path;
+    Unix.chmod path owner_only;
+    Fs_compat.remove_tree (Filename.concat path Process.devtools_port_file)
   with
   | () -> Ok profile
-  | exception ((Eio.Io _ | Unix.Unix_error _ | Sys_error _) as exn) -> io_error ("cannot prepare the profile " ^ profile) exn
+  | exception ((Eio.Io _ | Unix.Unix_error _ | Sys_error _) as exn) -> io_error ("cannot prepare the profile " ^ path) exn
 ;;
 
 let await_devtools_endpoint ~clock ~profile ~process =
@@ -277,9 +280,9 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
       Result.map_error
         (fun detail -> Printf.sprintf "cannot record Chromium pid %d in %s: %s" pid record_path detail)
         (Fs_compat.save_file_atomic record_path
-           (Process.owner_to_string { Process.pid; chrome = config.chrome; profile }))
+           (Process.owner_to_string { Process.pid; chrome = config.chrome; profile = Process.profile_path profile }))
     in
-    let* port, path = await_devtools_endpoint ~clock ~profile ~process in
+    let* port, path = await_devtools_endpoint ~clock ~profile:(Process.profile_path profile) ~process in
     let url = Process.browser_ws_url ~port ~path in
     let session = Session.create ~sw ~clock ~worker_wait_s:service_worker_wait_s ~init_answer_s ~model ~log in
     let* cdp =
@@ -319,8 +322,7 @@ let log_event = function
   | Session.Connection_ended reason -> Log.Server.info "browser-lane stagehand: connection ended: %s" reason
 ;;
 
-let start ~sw ~env =
-  let base_path = Config_dir_resolver.base_path_or_cwd () in
+let start ~sw ~env ~base_path =
   let masc_root = Config_dir_resolver.masc_root ~base_path in
   Eio.Fiber.fork ~sw (fun () ->
     stop_left_behind ~clock:(Eio.Stdenv.clock env) ~masc_root;
@@ -336,7 +338,14 @@ let start ~sw ~env =
       in
       let backend =
         Browser_stagehand_backend.create ~sw ~clock
-          ~open_session:(fun ~sw ~headless ~log -> open_ ~sw ~env ~masc_root ~config ~headless ~model ~log)
+          ~open_session:(fun ~sw ~headless ~log ->
+            (* The caller may have left before a slow open failed, so the
+               reason is also put where the operator reads. *)
+            match open_ ~sw ~env ~masc_root ~config ~headless ~model ~log with
+            | Ok _ as opened -> opened
+            | Error detail as failed ->
+              Log.Server.warn "browser-lane stagehand: the browser did not open: %s" detail;
+              failed)
           ~call:(fun t -> Session.call t.session)
           ~pid ~log:log_event
       in

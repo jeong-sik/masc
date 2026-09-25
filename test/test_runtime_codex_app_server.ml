@@ -4783,9 +4783,13 @@ let test_production_keeper_ledgers_codex_spend_of_a_failed_turn () =
             in
             let conversation_of json =
               let open Yojson.Safe.Util in
-              ( json |> member "conversation_id" |> to_string
-              , json |> member "conversation_position" |> to_string
-              , json |> member "vendor_total_tokens" |> to_int )
+              match json |> member "usage_projection", json |> member "conversation_id" with
+              | `String "raw_observation", `String conversation_id ->
+                Some
+                  ( conversation_id
+                  , json |> member "conversation_position" |> to_string
+                  , json |> member "vendor_total_tokens" |> to_int )
+              | _ -> None
             in
             check (list (triple string string int)) "thread, position and vendor total"
               [ "thread-1", "fresh", 9700
@@ -4793,7 +4797,7 @@ let test_production_keeper_ledgers_codex_spend_of_a_failed_turn () =
               ; "thread-1", "fresh", 11740
               ]
               (Dated_jsonl.read_recent store 100
-               |> List.map conversation_of
+               |> List.filter_map conversation_of
                |> List.sort compare)))
 ;;
 

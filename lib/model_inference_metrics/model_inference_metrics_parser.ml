@@ -25,21 +25,37 @@ let ( let* ) = Result.bind
    [provider_context.runtime_id] is the lane the turn was assigned; in-turn
    failover can answer elsewhere, and a turn that failed before any candidate
    answered has no answerer, so the lane never stands in for one (#38570). A
-   provider context without the field carries no runtime attribution. *)
-let runtime_model_attribution_of_provider_context
+   provider context without the field carries no runtime attribution; one
+   whose field is anything else -- a number, a blank string -- is refused as
+   such rather than read as absent, so the refusal names the broken field. *)
+let runtime_answerer_of_provider_context
       (fields : (string * Yojson.Safe.t) list)
+  : (Runtime_answerer.t option, parse_error) result
   =
-  let answerer =
-    match List.assoc_opt "executed_runtime_id" fields with
-    | Some `Null -> Some Runtime_answerer.Not_observed
-    | Some _ | None ->
-      Option.map
-        (fun runtime_id -> Runtime_answerer.Executed runtime_id)
-        (json_string_field_opt "executed_runtime_id" fields)
+  match List.assoc_opt "executed_runtime_id" fields with
+  | None -> Ok None
+  | Some `Null -> Ok (Some Runtime_answerer.Not_observed)
+  | Some (`String _) ->
+    (match json_string_field_opt "executed_runtime_id" fields with
+     | Some runtime_id -> Ok (Some (Runtime_answerer.Executed runtime_id))
+     | None -> Error Invalid_executed_runtime_id)
+  | Some _ -> Error Invalid_executed_runtime_id
+;;
+
+(* The first provider context that says anything about the answerer. *)
+let runtime_model_attribution provider_context_fields
+  : (string option, parse_error) result
+  =
+  let rec first = function
+    | [] -> Ok None
+    | fields :: rest ->
+      (match runtime_answerer_of_provider_context fields with
+       | Ok None -> first rest
+       | Ok (Some answerer) ->
+         Ok (Some (Runtime_answerer.to_label answerer ^ " (runtime)"))
+       | Error e -> Error e)
   in
-  Option.map
-    (fun answerer -> Runtime_answerer.to_label answerer ^ " (runtime)")
-    answerer
+  first provider_context_fields
 ;;
 
 let assoc_fields_opt key fields =
@@ -113,9 +129,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
          in
          let model_attribution_field_sets = tfields :: provider_context_fields in
          let runtime_model_attribution =
-           List.find_map
-             runtime_model_attribution_of_provider_context
-             provider_context_fields
+           runtime_model_attribution provider_context_fields
          in
          let outcome_opt = json_string_field_opt "outcome" tfields in
          (* Check if this is an error turn (telemetry.outcome = "error") *)
@@ -132,8 +146,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
               sees the gap typed. *)
            let model_result : (string, parse_error) result =
              match runtime_model_attribution with
-             | Some model -> Ok model
-             | None -> Error Missing_error_model_attribution
+             | Ok (Some model) -> Ok model
+             | Ok None -> Error Missing_error_model_attribution
+             | Error e -> Error e
            in
            match model_result with
            | Error _ as e -> e
@@ -203,8 +218,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
                    | Some s -> Ok s
                    | None ->
                   (match runtime_model_attribution with
-                   | Some model -> Ok model
-                   | None -> Error Missing_success_model)))
+                   | Ok (Some model) -> Ok model
+                   | Ok None -> Error Missing_success_model
+                   | Error e -> Error e)))
            in
            match model_result with
            | Error _ as e -> e

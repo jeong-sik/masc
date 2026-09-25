@@ -186,7 +186,8 @@ let cost_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=50)
 
 (* The decision record's [provider_context]: the assigned lane, and the
    runtime that answered ([`Not_observed] writes [null], as the producer does
-   for a turn with no answerer; [`Field_absent] leaves the field out). *)
+   for a turn with no answerer; [`Field_absent] leaves the field out;
+   [`Malformed v] writes a value that is neither). *)
 let provider_context_json ~runtime_id ~answerer =
   let answerer_fields =
     match answerer with
@@ -194,6 +195,7 @@ let provider_context_json ~runtime_id ~answerer =
       [ ("executed_runtime_id", `String executed_runtime_id) ]
     | `Not_observed -> [ ("executed_runtime_id", `Null) ]
     | `Field_absent -> []
+    | `Malformed value -> [ ("executed_runtime_id", value) ]
   in
   `Assoc
     (("runtime_id", `String runtime_id)
@@ -900,7 +902,15 @@ let test_unobserved_answerer_is_not_the_lane () =
       "missing_success_model"
       (refusal
          (success_entry_without_model ~runtime_id:"glm-coding.glm-5.3"
-            ~answerer:`Field_absent ~ts ())))
+            ~answerer:`Field_absent ~ts ()));
+    List.iter
+      (fun (label, value) ->
+         check string (label ^ ": a malformed answerer is refused as such, not as absent")
+           "invalid_executed_runtime_id"
+           (refusal
+              (error_entry ~runtime_id:"glm-coding.glm-5.3"
+                 ~answerer:(`Malformed value) ~ts ())))
+      [ "a number", `Int 5; "a blank string", `String "  " ])
 
 let test_cost_ledger_backfills_wall_tok_per_sec () =
   let base = test_dir () in

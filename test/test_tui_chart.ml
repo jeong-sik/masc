@@ -68,6 +68,43 @@ let test_gauge_proportions () =
   check string "empty width produces empty" "" g_empty
 ;;
 
+(* A bar is read against the bar above it, so its axis has to be the same
+   length whatever the row's own number is. The axis used to be sized from the
+   suffix that row prints, and a percentage is one cell wider once it reaches
+   three characters: on the Metrics memory rows a keeper at 10% drew a
+   nine-cell axis beside a keeper at 6% with ten, so the larger holder drew the
+   shorter trough. *)
+let test_gauge_axis_does_not_move_with_the_value () =
+  let axis g =
+    let opened = String.index g '[' and closed = String.rindex g ']' in
+    (* Cells between the brackets, with the dim escape between fill and
+       remainder taken out: that span is the axis. *)
+    Layout.display_width
+      (Masc_tui_theme.strip_sgr (String.sub g (opened + 1) (closed - opened - 1)))
+  in
+  let width = 16 in
+  let axes =
+    List.map
+      (fun value -> (value, axis (Chart.gauge ~width ~value ~max_value:100 ~label:"" ())))
+      [ 0; 5; 6; 9; 10; 42; 99; 100 ]
+  in
+  match axes with
+  | [] -> check bool "at least one gauge" true false
+  | (_, first) :: _ ->
+      List.iter
+        (fun (value, cells) ->
+          check int
+            (Printf.sprintf "the axis at %d%% is the axis at every other" value)
+            first cells)
+        axes;
+      (* And the row after the bar starts in one column: the suffix is as wide
+         at 6% as at 100%. *)
+      let tail g = String.sub g (String.rindex g ']' + 1) (String.length g - String.rindex g ']' - 1) in
+      check int "the suffix is one width" 
+        (Layout.display_width (tail (Chart.gauge ~width ~value:6 ~max_value:100 ~label:"" ())))
+        (Layout.display_width (tail (Chart.gauge ~width ~value:100 ~max_value:100 ~label:"" ())))
+;;
+
 let test_compact_number () =
   check string "small" "42" (Chart.format_compact_num 42);
   check string "thousands" "1.5k" (Chart.format_compact_num 1500);
@@ -131,6 +168,8 @@ let () =
     ; ( "gauges"
       , [ Alcotest.test_case "no level colour" `Quick test_gauge_carries_no_level_colour
         ; Alcotest.test_case "proportions" `Quick test_gauge_proportions
+        ; Alcotest.test_case "the axis does not move with the value" `Quick
+            test_gauge_axis_does_not_move_with_the_value
         ; Alcotest.test_case "compact_number" `Quick test_compact_number
         ] )
     ; ( "heatmap"

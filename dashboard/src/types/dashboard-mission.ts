@@ -244,7 +244,6 @@ export interface OperatorKeeperSnapshot {
   last_turn_usage?: KeeperLastTurnUsage | null
   keepalive_running?: boolean
   last_model_used?: string
-  last_model_used_label?: string | null
   active_model?: string
   active_model_label?: string | null
   diagnostic?: Record<string, unknown>

@@ -121,7 +121,14 @@ val base_path_lock_path :
 
 val status_line_is_healthy : string -> bool
 
-val looks_like_server_command : string -> bool
+(** When [pid] started, as a source-tagged token: ["proc:<boot_id>:<ticks>"]
+    from /proc/sys/kernel/random/boot_id and field 22 of /proc/<pid>/stat
+    where procfs is mounted, otherwise
+    ["ps:<lstart>"] from [ps -o lstart=] (C locale, UTC). [None] when neither
+    can report it. The pid lock records its writer's token next to the pid,
+    and a takeover signals a live, unresponsive holder only when the two are
+    equal: pid numbers are reused, a (pid, start time) pair is not. *)
+val process_started : int -> string option
 
 (** State of a recorded PID as the takeover reads it. [Zombie] is a process
     that exited and awaits its parent's reap: [kill pid 0] still succeeds, but
@@ -220,6 +227,18 @@ val prepare_base_path_lease_exec_handoff :
   (unit, base_path_lock_rejection) result
 
 module For_testing : sig
+  val acquire_pid_lock_with_start_reader :
+    started_for_pid:(int -> string option) ->
+    ?lock_path:string ->
+    ?probe_timeout_sec:float ->
+    ?term_timeout_sec:float ->
+    ?kill_wait_sec:float ->
+    ?poll_interval_sec:float ->
+    int ->
+    acquire_result
+  (** Injects start-token observations while keeping the real signal and wait
+      path. Used to model PID reuse during the TERM grace deterministically. *)
+
   (** Immutable synchronization boundaries around the external lease open and
       the final identity checks. Production acquisition closes over no-op
       functions; no mutable test hook is reachable from production callers. *)

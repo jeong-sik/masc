@@ -339,6 +339,11 @@ val exact_operation
   -> Chat_operation.Operation_id.t
   -> (Chat_operation.t option, error) result
 
+val has_newer_original_queued
+  :  t
+  -> operation_id:Chat_operation.Operation_id.t
+  -> (bool, error) result
+
 (** The running operations {!start} settled as [Interrupted_by_restart], as
     they were read before settlement. The registry leaves a failure row in the
     transcript for each; the owner has no transcript of its own. *)

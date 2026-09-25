@@ -138,11 +138,14 @@ def run(executable: str) -> None:
         h.resize_and_wait(process, master_fd, output, rows=24, columns=80,
                           needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
         h.drain_until_quiet(process, master_fd, output)
+        # Approvals is a Work child off the ring, so no strip entry carries
+        # the question's badge; the surface's own row says the question was
+        # read, which is the state this layout is measured in.
+        h.palette_go(process, master_fd, output, b"go Approvals", b"MASC Approvals")
         h.wait_for_fixture_state(
             process, master_fd, output,
-            lambda: b"Approvals\xc2\xb71" in bytes(output),
+            lambda: b"Questions waiting on you (1)" in bytes(output),
             timeout=45.0)
-        h.tab_until(process, master_fd, output, b"MASC Approvals")
         h.wait_for_output(process, master_fd, output,
                           b"(no pending approvals)", start=0, timeout=10)
         h.drain_until_quiet(process, master_fd, output)

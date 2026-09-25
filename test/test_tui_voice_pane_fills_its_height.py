@@ -22,7 +22,9 @@ SOURCE_MODULES = (
 )
 
 VOICE = b"MASC Voice"
-FOOTER = b"Esc:overview"
+# System's panes spell Esc "back" (Masc_tui_keys.config_bindings); the help
+# row names the Dashboard it returns to.
+FOOTER = b"Esc:back"
 
 
 def rows_under_the_footer(drawn: bytes, where: str) -> list[bytes]:

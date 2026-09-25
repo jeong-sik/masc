@@ -7,8 +7,10 @@ status: runbook
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
-`bin/masc_tui_types.ml`: Overview, Activity, Keepers, Memory, Approvals,
-Board, Planning, Fusion, Workspace, Config.
+`bin/masc_tui_types.ml`: Overview, Activity, Keepers, Lanes, Memory,
+Approvals, Board, Planning, Fusion, Workspace, Config. Approvals keeps its
+stop while something waits or its reading is not current, and leaves the ring
+only once a reading says every list is empty.
 Additional surfaces hang off parents instead of holding Tab stops:
 Planning's `v` cycles through Task Review and Task Verdicts, then back to Goals;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
@@ -1815,7 +1817,8 @@ Per surface:
 | `m` | Code, file open, repository scope | The notes anchored to the file |
 | `w` | Code, notes view | Add a note through the `$EDITOR` form |
 | `K` / `D` | Code, file open | Ask the language server: hover / definition of a name on the cursor line |
-| `l` | Keeper detail | Open logs |
+| `o` | Keeper detail | Open logs (container logs on the Sandbox tab) |
+| `h` / `l` | Keeper detail, split width | Focus roster / detail; below the split width `l` opens logs |
 | `Enter` | Memory | Browse the selected keeper's facts, both stores |
 | `c` | Memory facts | Cycle the category filter through the loaded categories |
 | `Esc` | Memory facts | Close the browser, back to the health table |
@@ -1839,13 +1842,16 @@ Per surface:
 ```
 Tab cycles the surfaces:
 
-  Overview -> Activity -> Keepers -> Memory -> Approvals -> Board
-           -> Planning -> Workspace
-           -> Runtime -> Config -> Overview
+  Overview -> Activity -> Keepers -> Lanes -> Memory -> Approvals
+           -> Board -> Planning -> Fusion -> Workspace -> Config
+           -> Overview
+
+  (Approvals drops out once a reading says nothing waits; Runtime is
+   off the ring, under Config.)
 
 Within a surface:
 
-  Keepers   --Right/Enter-->  Keeper detail  --l-->  Keeper logs
+  Keepers   --Right/Enter-->  Keeper detail  --o-->  Keeper logs
   Lanes     --Right/Enter-->  Standalone exact runs
 
   Keeper list/detail  --c-->  Message input

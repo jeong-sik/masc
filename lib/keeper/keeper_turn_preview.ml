@@ -14,27 +14,11 @@ type t =
   }
 
 (* Enough to recognize the work ("ah, it is writing the PR body"), small
-   enough that the turns poll stays a light projection. *)
+   enough that the turns poll stays a light projection. The tail is cut with
+   [String_util.utf8_suffix] so a cut Hangul glyph never reaches a terminal. *)
 let tail_bytes = 240
 
 let table : (string, t) Hashtbl.t = Hashtbl.create 16
-
-(* Last [max_bytes] of [s], starting on a UTF-8 boundary so a cut Hangul
-   glyph never reaches a terminal. Walking forward from the byte cut skips
-   continuation bytes (0b10xxxxxx) only — at most 3 steps. *)
-let utf8_tail ~max_bytes s =
-  let len = String.length s in
-  if len <= max_bytes then s
-  else begin
-    let start = ref (len - max_bytes) in
-    while
-      !start < len && Char.code s.[!start] land 0xC0 = 0x80
-    do
-      incr start
-    done;
-    String.sub s !start (len - !start)
-  end
-;;
 
 let mutex = Mutex.create ()
 
@@ -73,7 +57,7 @@ let note_text ~keeper_name ~now text =
   let text = String.trim text in
   if not (String.equal text "") then
     update ~keeper_name ~now (fun old ->
-      { old with text_tail = utf8_tail ~max_bytes:tail_bytes text
+      { old with text_tail = String_util.utf8_suffix ~max_bytes:tail_bytes text
       ; activity = Receiving_response })
 
 let note_tool ~keeper_name ~now tool_name =
@@ -84,7 +68,8 @@ let note_stream ~keeper_name ~now event =
   match event with
   | Agent_core.Types.ContentBlockDelta { delta = TextDelta text; _ } ->
     update ~keeper_name ~now (fun old ->
-      { old with text_tail = utf8_tail ~max_bytes:tail_bytes (old.text_tail ^ text)
+      { old with
+        text_tail = String_util.utf8_suffix ~max_bytes:tail_bytes (old.text_tail ^ text)
       ; activity = Receiving_response })
   | ContentBlockStart { tool_name = Some tool_name; _ } ->
     note_tool ~keeper_name ~now tool_name

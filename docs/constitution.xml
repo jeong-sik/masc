@@ -333,6 +333,7 @@
       판정 첫 줄은 "verdict: PASS|FAIL head: (40자 sha) run: (PR check run id) by: (이름)" 으로 쓴다.
       REQUEST_CHANGES 를 남긴 세션은 고친 head 의 체크가 모두 초록이 되면 그 요청을 직접 푼다.
       필수 체크가 아직 돌고 있거나 시작하지 않은 head 는 누구도 병합하지 않는다.
+      그 run 이 시작된 뒤 main 에 들어온 커밋이 PR 의 파일을 건드렸으면, 그 run 은 병합 근거가 아니다. main 을 합친 새 run 을 받는다.
       근거: 2026-09-25 에 체크가 끝나기 전 병합(#38705, #38976)이 main 을 두 번, 각각 40~75분 깨뜨렸다.
     </merge>
   </execution_protocol>

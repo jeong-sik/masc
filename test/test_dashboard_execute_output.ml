@@ -80,6 +80,56 @@ let test_snapshot_line_ring_shape () =
   check string "json line text" "ok" (List.hd json_lines |> member "text" |> to_string);
   check int "json line ts" 1000000 (List.hd json_lines |> member "ts_ms" |> to_int)
 
+let hangul_line count = String.concat "" (List.init count (fun _ -> "\xea\xb0\x80"))
+
+(* A 9,000-byte line of Hangul is longer than one row (4,096 bytes), and
+   4,096 is not a multiple of 3. The old row kept a character-safe prefix and
+   dropped the other 4,904 bytes without a mark. *)
+let test_long_line_continues_in_next_rows () =
+  let line = hangul_line 3_000 in
+  EO.inject_for_testing
+    ~keeper_name:"alpha"
+    ~stdout:(line ^ "\n")
+    ~stderr:""
+    ~status:status_ok
+    ();
+  let rows = EO.output_lines_for_testing ~keeper_name:"alpha" in
+  check int "the line takes three rows" 3 (List.length rows);
+  List.iteri
+    (fun index (row : EO.output_line) ->
+       check bool
+         (Printf.sprintf "row %d decodes as UTF-8" index)
+         true
+         (String_util.is_valid_utf8 row.text);
+       check bool
+         (Printf.sprintf "row %d fits one row" index)
+         true
+         (String.length row.text <= 4096))
+    rows;
+  check string "the rows spell the whole line" line
+    (String.concat "" (List.map (fun (row : EO.output_line) -> row.text) rows))
+
+(* 270,000 bytes of Hangul, and the snapshot keeps the last 262,144: the ring
+   starts on the third byte of a syllable. That byte is skipped and counted as
+   dropped, so the text decodes and dropped + shown still covers the total. *)
+let test_snapshot_tail_starts_on_a_character () =
+  EO.inject_for_testing
+    ~keeper_name:"alpha"
+    ~stdout:(hangul_line 90_000)
+    ~stderr:""
+    ~status:status_ok
+    ();
+  match EO.snapshot ~keeper_name:"alpha" with
+  | None -> fail "expected snapshot"
+  | Some snapshot ->
+    check bool "stdout_since decodes as UTF-8" true
+      (String_util.is_valid_utf8 snapshot.stdout_since);
+    check int "total bytes" 270_000 snapshot.since_stdout;
+    check int "the partial character counts as dropped" 7_857
+      snapshot.bytes_dropped_stdout;
+    check int "dropped + shown = total" snapshot.since_stdout
+      (snapshot.bytes_dropped_stdout + String.length snapshot.stdout_since)
+
 let test_live_tail_subscriber_receives_line_and_close () =
   Eio_main.run (fun env ->
     match EO.subscribe ~keeper_name:"alpha" with
@@ -320,6 +370,14 @@ let () =
             (with_fresh test_snapshot_merges_completed_output)
         ; test_case "snapshot json shape" `Quick (with_fresh test_snapshot_json_shape)
         ; test_case "snapshot line ring shape" `Quick (with_fresh test_snapshot_line_ring_shape)
+        ; test_case
+            "long line continues in next rows"
+            `Quick
+            (with_fresh test_long_line_continues_in_next_rows)
+        ; test_case
+            "snapshot tail starts on a character"
+            `Quick
+            (with_fresh test_snapshot_tail_starts_on_a_character)
         ; test_case
             "live tail subscriber receives line and close"
             `Quick

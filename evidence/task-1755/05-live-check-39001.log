@@ -1,0 +1,34 @@
+# task-1755 — live --check 영수증 (진짜 gh + 진짜 GitHub)
+# 계정: anyang-keepers  repo: jeong-sik/masc  PR: #39001
+# 헤드: 9078150374841715eee3b6dfd6c3e2ad0488e7d2  (open, draft=true, base=main)
+# 열린 CHANGES_REQUESTED: review id 5313511140 (login jeong-sik, commit 90432ea)
+
+## (a) --check WITHOUT --replaces (must refuse)
+$ approve-guard.sh --repo jeong-sik/masc --pr 39001 --head 9078150374841715eee3b6dfd6c3e2ad0488e7d2 --slot "SLOT: #39001 head 9078150374841715eee3b6dfd6c3e2ad0488e7d2" --body body --check
+REFUSED #39001 head 9078150374841715eee3b6dfd6c3e2ad0488e7d2
+  - PR is Draft
+  - check 'TLA model check' is completed/skipped (check-run 107974540086)
+  - check 'dashboard typecheck' is completed/skipped (check-run 107974569290)
+  - check 'dune build --profile release @check' is completed/skipped (check-run 107974540413)
+  - check 'dune build @check' is completed/skipped (check-run 107974569691)
+  - check 'lint suite' is completed/skipped (check-run 107974575840)
+  - workflow 'PR check' run 36104701553 is completed/skipped
+rc=2
+
+## (b) --check WITH --replaces 5313511140 (jeong-sik CR — 다른 계정이라 지명 불가)
+$ approve-guard.sh ... --replaces 5313511140 --check
+REFUSED #39001 head 9078150374841715eee3b6dfd6c3e2ad0488e7d2
+  - PR is Draft
+  - check 'TLA model check' is completed/skipped (check-run 107974540086)
+  - check 'dashboard typecheck' is completed/skipped (check-run 107974569290)
+  - check 'dune build --profile release @check' is completed/skipped (check-run 107974540413)
+  - check 'dune build @check' is completed/skipped (check-run 107974569691)
+  - check 'lint suite' is completed/skipped (check-run 107974575840)
+  - workflow 'PR check' run 36104701553 is completed/skipped
+rc=2
+
+## 결론
+# - #39001 은 draft=true 라 §2 'PR is Draft' 로 거절 (rc=2). 이는 Draft 차단이지 same-account CR 거절이 아니다.
+# - 열린 CR(5313511140) 은 jeong-sik 계정이라 §6 같은 계정 CR 이 아니므로 --replaces 지명 불가.
+# - 같은 계정 CR 거절 문구(from ${me} ... pass --replaces ${rid}) 는 실행 계정이 자기 PR의 CR일 때만 나온다.
+# - 현재 같은 계정 CR이 있는 PR은 pangyo 소유 #39021(열린 CR, reviewer jeong-sik)뿐. 그의 CR이 live 증거의 유일한 충족 경로.

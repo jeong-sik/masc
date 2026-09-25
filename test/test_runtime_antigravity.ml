@@ -89,12 +89,17 @@ let fixture_script
     ?(line_delays = [])
     ?pipe_holder_s
     ?exit_delay_s
+    ?(stderr_line = "")
     ?(exit_code = 0)
     lines
   =
   let path = Filename.temp_file "masc-antigravity-" ".sh" in
   let output = open_out_bin path in
   output_string output "#!/bin/sh\n";
+  (* A line the fixture shouts on its own stderr, so a test can pin what the
+     runtime's stderr tail carried into an error detail. *)
+  if stderr_line <> "" then
+    output_string output (Printf.sprintf "echo %s >&2\n" (shell_quote stderr_line));
   output_string output
     "test -z \"${GEMINI_API_KEY+x}\" && test -z \"${GEMINI_API_KEY_WORK+x}\" && test -z \"${GOOGLE_API_TOKEN+x}\" && test -z \"${OPENAI_API_KEY+x}\" && test -z \"${OPENAI_API_KEY_MAIN+x}\" && test -z \"${ANTHROPIC_API_KEY+x}\" && test -z \"${ANTHROPIC_API_KEY_WORK+x}\" && test -z \"${AGY_ADC_AUTH+x}\" && test -z \"${MASC_PUBLIC_FIXTURE+x}\" || exit 92\n";
   output_string output "case \" $* \" in *\" --print \"*) exit 98 ;; esac\n";
@@ -161,7 +166,7 @@ let fixture_script
 ;;
 
 let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?stdin ?line_delay_s
-    ?line_delays ?pipe_holder_s ?exit_delay_s ?exit_code lines f =
+    ?line_delays ?pipe_holder_s ?exit_delay_s ?stderr_line ?exit_code lines f =
   let path =
     fixture_script
       ?require_resume
@@ -173,6 +178,7 @@ let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?stdin 
       ?line_delays
       ?pipe_holder_s
       ?exit_delay_s
+      ?stderr_line
       ?exit_code
       lines
   in
@@ -777,12 +783,48 @@ let test_success_with_blank_response_is_not_success () =
     [ init (); result ~response:" \n\t" () ]
     (fun path ->
        match run_fixture path with
-       | Error
-           (Runtime_antigravity.Turn_failed
-              "successful result response has no deliverable content") ->
-         ()
+       | Error (Runtime_antigravity.Turn_failed detail) ->
+         (* The diagnostic fields ride after the fixed rejection sentence, so
+            downstream substring checks (keeper runtime tests) keep working. *)
+         check bool "detail keeps the rejection sentence" true
+           (String.starts_with
+              ~prefix:"successful result response has no deliverable content"
+              detail);
+         check bool "detail names the model" true
+           (String_util.contains_substring detail "model=gemini-fixture");
+         check bool "detail reports zero tool steps" true
+           (String_util.contains_substring detail "tool_steps=0");
+         check bool "detail records an empty stderr" true
+           (String_util.contains_substring detail "stderr=<empty>")
        | Error error -> fail (Runtime_antigravity.error_to_string error)
        | Ok _ -> fail "blank SUCCESS result was admitted as a completed turn")
+;;
+
+(* One tool step and a blank answer: the count, the model, and the fixture's
+   stderr line must all arrive in the failure so an operator can tell a
+   tool-only turn from a vendor-side empty success. *)
+let test_empty_success_after_a_tool_step_carries_diagnostics () =
+  with_fixture
+    ~stderr_line:"antigravity: WARNING model streamed nothing"
+    [ init ()
+    ; step ~index:1 ~state:"ACTIVE" ~step_type:"tool" ()
+    ; step ~index:1 ~state:"DONE" ~step_type:"tool" ()
+    ; result ~response:"" () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Turn_failed detail) ->
+         check bool "rejection sentence kept" true
+           (String.starts_with
+              ~prefix:"successful result response has no deliverable content"
+              detail);
+         check bool "model named" true
+           (String_util.contains_substring detail "model=gemini-fixture");
+         check bool "tool step counted" true
+           (String_util.contains_substring detail "tool_steps=1");
+         check bool "stderr tail carried" true
+           (String_util.contains_substring detail "stderr tail: antigravity: WARNING model streamed nothing")
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "blank SUCCESS after a tool step was admitted")
 ;;
 
 let test_duplicate_keys_fail_closed () =
@@ -1338,6 +1380,10 @@ let () =
             "blank success"
             `Quick
             test_success_with_blank_response_is_not_success
+        ; test_case
+            "blank success after a tool step carries diagnostics"
+            `Quick
+            test_empty_success_after_a_tool_step_carries_diagnostics
         ; test_case "duplicate keys" `Quick test_duplicate_keys_fail_closed
         ; test_case
             "observed permission modes are admitted"

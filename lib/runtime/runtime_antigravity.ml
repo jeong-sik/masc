@@ -46,6 +46,29 @@ let result_exit_grace_s = 5.0
    client, not a limit on how long legitimate work may take. *)
 let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 8192
+
+(* The empty-success rejection carries what a bare sentence cannot: the model
+   that answered blank, how far the trajectory got, and the CLI's own last
+   words on stderr — the split between a model that ended a tool-only turn
+   without a reply and a vendor that dressed a quota or auth refusal up as a
+   successful empty result. *)
+let empty_success_detail_prefix = "successful result response has no deliverable content"
+
+let empty_success_stderr_bytes = 200
+
+let empty_success_detail ~model ~tool_steps stderr =
+  let trimmed = String.trim stderr in
+  let len = String.length trimmed in
+  let stderr_tail =
+    if len <= empty_success_stderr_bytes then trimmed
+    else String.sub trimmed (len - empty_success_stderr_bytes) empty_success_stderr_bytes
+  in
+  if stderr_tail = "" then
+    Printf.sprintf "%s (model=%s, tool_steps=%d, stderr=<empty>)"
+      empty_success_detail_prefix model tool_steps
+  else
+    Printf.sprintf "%s (model=%s, tool_steps=%d, stderr tail: %s)"
+      empty_success_detail_prefix model tool_steps stderr_tail
 let max_wire_line_bytes = 8 * 1024 * 1024
 
 (* [--print-timeout] is a wall-clock deadline owned by agy, not an idle
@@ -1040,12 +1063,14 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent 
      the process ended: the reply is already durable in the CLI's own
      conversation store, and the exit status only describes the CLI's
      shutdown (which can hang and get reaped, #28912). *)
-  | _, Some _, Some (Success, text, _, _, _)
+  | _, Some (_, model, _), Some (Success, text, _, _, _)
     when not
            (Agent_core.Response_shape.has_deliverable_content
               (Agent_core.Response_shape.summarize_blocks
                  [ Agent_core.Types.Text text ])) ->
-    Error (Turn_failed "successful result response has no deliverable content")
+    Error
+      (Turn_failed
+         (empty_success_detail ~model ~tool_steps:state.tool_steps stderr))
   | _, Some (conversation_id, model, permission_mode),
     Some (Success, text, _, num_turns, usage) ->
     emit_stream_event on_stream_event (Turn_finished { text });

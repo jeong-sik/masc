@@ -804,7 +804,13 @@ let test_blank_success_requires_fresh_conversation () =
                           true
                           (String_util.contains_substring
                              (Agent_core.Error.to_string error)
-                             "successful result response has no deliverable content")
+                             "successful result response has no deliverable content");
+                        check bool
+                          "diagnostic fields ride in the provider error"
+                          true
+                          (let rendered = Agent_core.Error.to_string error in
+                           String_util.contains_substring rendered "model="
+                           && String_util.contains_substring rendered "tool_steps=")
                       | Some other ->
                         fail
                           (Keeper_turn_driver.kind_of_masc_internal_error other)

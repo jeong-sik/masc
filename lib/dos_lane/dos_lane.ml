@@ -201,7 +201,7 @@ let activity : Lane_activity.entry list Atomic.t = Atomic.make []
 
 let note_activity ~who action =
   Atomic.set activity
-    (Lane_activity.push { Lane_activity.at = Unix.gettimeofday (); who; action } (Atomic.get activity))
+    (Lane_activity.push { Lane_activity.at = Time_compat.now (); who; action } (Atomic.get activity))
 ;;
 
 let recent_activity () = Atomic.get activity

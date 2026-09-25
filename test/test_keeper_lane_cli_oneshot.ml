@@ -292,8 +292,9 @@ let shell_quote text =
 let a1 = official_client_runtime
 let a2 = "claude_code.claude-opus-5"
 let b = "agy.gemini"
+let c = "codex.codex-fixture"
 
-let quota_fixture ~claude_cli ~agy_cli ~oauth_source =
+let quota_fixture ~claude_cli ~agy_cli ~codex_cli ~oauth_source =
   let base = fixture ~claude_cli () in
   base ^ Printf.sprintf {|
 [models."claude-opus-5"]
@@ -310,7 +311,15 @@ credentials = { type = "file", path = %S }
 api-name = "gemini-fixture"
 max-context = 128000
 [agy.gemini]
-|} agy_cli oauth_source
+[providers.codex]
+protocol = "codex-app-server"
+command = %S
+is-non-interactive = true
+[models.codex-fixture]
+api-name = "gpt-fixture"
+max-context = 400000
+[codex.codex-fixture]
+|} agy_cli oauth_source codex_cli
 ;;
 
 let scope runtime_id =
@@ -390,12 +399,53 @@ let claude_answer answer =
               "uuid", `String "answer-result"; "result", `String answer ])
 ;;
 
+(* A stand-in for the Codex app-server: it answers the handshake, accepts
+   turn/start, then ends the turn with [terminal]. The request order is the
+   client's (initialize, initialized, account/read, thread/start, turn/start);
+   the replies are the ones test_runtime_codex_app_server.ml drives the same
+   client with. *)
+let codex_script ~marker ~terminal =
+  let reply line = "printf '%s\\n' " ^ shell_quote line in
+  String.concat "\n"
+    [ "#!/bin/sh"
+    ; "set -eu"
+    ; "printf 'C\\n' >> " ^ shell_quote marker
+    ; "IFS= read -r request"
+    ; reply
+        {|{"id":1,"result":{"userAgent":"fixture/0.147.0","codexHome":"/tmp/codex","platformFamily":"unix","platformOs":"linux"}}|}
+    ; "IFS= read -r request"
+    ; "IFS= read -r request"
+    ; reply
+        {|{"id":2,"result":{"account":{"type":"chatgpt","email":"fixture@example.test","planType":"pro"},"requiresOpenaiAuth":true}}|}
+    ; "IFS= read -r request"
+    ; reply {|{"id":3,"result":{"thread":{"id":"thread-1"},"model":"gpt-fixture"}}|}
+    ; "IFS= read -r request"
+    ; reply {|{"id":4,"result":{"turn":{"id":"turn-1"}}}|}
+    ; reply terminal
+    ; "while IFS= read -r ignored; do :; done"
+    ; ""
+    ]
+;;
+
+(* The weekly limit, as the app-server reports it: a terminal [error] whose
+   [codexErrorInfo] is [usageLimitExceeded]. The reset time is only in the
+   message text. *)
+let codex_usage_limit =
+  {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"You've hit your usage limit. Try again at Sep 26th, 2026 5:33 PM.","codexErrorInfo":"usageLimitExceeded","additionalDetails":null}}}|}
+;;
+
+(* A failed turn that names no cause. *)
+let codex_turn_failed =
+  {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"fixture provider rejection"}}}}|}
+;;
+
 let with_quota_fixture f =
   let dir = Filename.temp_dir "cli-quota-adapter" "" in
   let path name = Filename.concat dir name in
   let marker = path "calls" in
   let claude_cli = path "claude" in
   let agy_cli = path "agy" in
+  let codex_cli = path "codex" in
   let oauth_source = path "oauth.json" in
   let config_path = path "runtime.toml" in
   let load_config text =
@@ -433,7 +483,8 @@ printf '%%s\n' '{"event":"result","result":{"conversation_id":"quota-b","status"
                   ; "permission_mode", `String "always-proceed"
                   ]
               ]))));
-      let catalog = quota_fixture ~claude_cli ~agy_cli ~oauth_source in
+      write_file ~path:codex_cli ~perm:0o700 (codex_script ~marker ~terminal:codex_usage_limit);
+      let catalog = quota_fixture ~claude_cli ~agy_cli ~codex_cli ~oauth_source in
       load_config catalog;
       Eio_main.run (fun env ->
         Eio_context.set_env env;
@@ -518,6 +569,44 @@ let test_provider_reset_and_success_before_json_validation () =
       (Runtime_quota_window.is_exhausted ~scope:account ~now:(Time_compat.now ())))
 ;;
 
+(* A Codex account out of usage must leave the same record a Claude quota
+   refusal leaves, or every exact-lane walk sends its next judgment to the
+   spent account first (2026-09-25: 3,135 and 739 usageLimitExceeded
+   refusals on two Codex slots). On main the one-shot path recorded nothing:
+   the account was not exhausted after the refusal, and the second walk
+   began with C again. *)
+let test_codex_usage_limit_is_read_by_the_next_walk () =
+  with_quota_fixture (fun ~dir ~path ~marker ~claude_cli:_ ~load_config:_ ~env:_ ->
+    let codex_cli = path "codex" in
+    let account = scope c in
+    let require_b = function
+      | Ok (runtime_id, _) -> check string "the other account answered" b runtime_id
+      | Error failures -> failf "walk failed: %s"
+          (String.concat "; " (List.map Cli_oneshot.failure_to_string failures))
+    in
+    write_file ~path:codex_cli ~perm:0o700
+      (codex_script ~marker ~terminal:codex_turn_failed);
+    (match walk_real ~dir [c] with
+     | Error [Cli_oneshot.Execution_failed { runtime_id; _ }] ->
+       check string "the Codex slot failed" c runtime_id
+     | Ok _ | Error _ -> fail "a failed Codex turn must fail its only slot");
+    check bool "a Codex failure that names no spent usage records no quota" false
+      (Runtime_quota_window.is_exhausted ~scope:account ~now:(Time_compat.now ()));
+    write_file ~path:codex_cli ~perm:0o700
+      (codex_script ~marker ~terminal:codex_usage_limit);
+    write_file ~path:marker ~perm:0o600 "";
+    walk_real ~dir [c; b] |> require_b;
+    check (list string) "the spent account was asked, then the next slot" ["C"; "B"]
+      (calls marker);
+    check bool "the usage-limit refusal is recorded for the Codex account" true
+      (Runtime_quota_window.is_exhausted ~scope:account ~now:(Time_compat.now ()));
+    check (option (float 0.0)) "the refusal states no typed reset, so none is invented" None
+      (Runtime_quota_window.active_until ~scope:account ~now:(Time_compat.now ()));
+    walk_real ~dir [c; b] |> require_b;
+    check (list string) "the next walk begins with the account that can answer"
+      ["C"; "B"; "B"] (calls marker))
+;;
+
 let test_catalog_reload_does_not_move_inflight_quota () =
   with_quota_fixture (fun ~dir ~path ~marker ~claude_cli ~load_config ~env ->
     let account = scope a1 in
@@ -564,6 +653,7 @@ let () =
     [ ( "quota across real adapters",
         [ test_case "new and prior rejection order account siblings" `Quick test_real_quota_reorders_siblings_and_next_walk
         ; test_case "absolute reset and transport success before JSON parsing" `Quick test_provider_reset_and_success_before_json_validation
+        ; test_case "Codex usage limit is read by the next walk" `Quick test_codex_usage_limit_is_read_by_the_next_walk
         ; test_case "catalog reload keeps in-flight scope" `Quick test_catalog_reload_does_not_move_inflight_quota ])
     ; ( "cli one-shot"
       , [ test_case

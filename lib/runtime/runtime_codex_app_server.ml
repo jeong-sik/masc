@@ -452,6 +452,45 @@ let error_to_string = function
     else Printf.sprintf "Codex app-server stream was idle for %.3fs" seconds
 ;;
 
+(* Every constructor is listed so a new [codexErrorInfo] value or a new
+   failure stops compilation here until someone decides whether it spends
+   the account. *)
+let refused_for_spent_usage = function
+  | Turn_failed { codex_error_info = Some info; detail = _ } ->
+    (match info with
+     | Codex_error_info.Usage_limit_exceeded | Codex_error_info.Session_budget_exceeded -> true
+     | Codex_error_info.Rate_limit_exceeded
+     | Codex_error_info.Server_overloaded
+     | Codex_error_info.Cyber_policy
+     | Codex_error_info.Misalignment_policy_violation
+     | Codex_error_info.Internal_server_error
+     | Codex_error_info.Unauthorized
+     | Codex_error_info.Bad_request
+     | Codex_error_info.Thread_rollback_failed
+     | Codex_error_info.Sandbox_error
+     | Codex_error_info.Other
+     | Codex_error_info.Http_connection_failed _
+     | Codex_error_info.Response_stream_connection_failed _
+     | Codex_error_info.Response_stream_disconnected _
+     | Codex_error_info.Response_too_many_failed_attempts _
+     | Codex_error_info.Active_turn_not_steerable _
+     | Codex_error_info.Unrecognized _ -> false)
+  | Turn_failed { codex_error_info = None; detail = _ }
+  | Invalid_config _
+  | Spawn_failed _
+  | Turn_input_write_failed _
+  | Protocol_error _
+  | Rpc_error _
+  | Subscription_required _
+  | Unsupported_server_request _
+  | Context_window_exceeded _
+  | Stopped_by_host _
+  | Turn_interrupted
+  | Runtime_shutting_down
+  | Process_exited _
+  | Timeout _ -> false
+;;
+
 let error_kind = function
   | Invalid_config _ -> "invalid_config"
   | Spawn_failed _ -> "spawn_failed"

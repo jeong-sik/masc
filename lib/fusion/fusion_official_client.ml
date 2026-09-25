@@ -241,6 +241,19 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
      | _ -> ());
     Error (if admission then Claude_admission_failure error else Claude_failure error)
   in
+  (* A Codex account out of usage is the fact a Keeper turn already records
+     for this scope: [Keeper_codex_runtime] reads the refusal as a hard quota
+     with no reset, and the turn driver writes it as an exhaustion with no end.
+     A one-shot turn recorded nothing, so an exact lane's CLI walk sent the
+     next judgment to the spent account first again (2026-09-25: 3,135
+     usageLimitExceeded refusals on codex_subscription.gpt-5.6-luna and 739
+     on codex-gpt-6-luna-xhigh). The next answer on this scope clears the
+     record through [succeeded]. *)
+  let codex_failed error =
+    if Runtime_codex_app_server.refused_for_spent_usage error
+    then Runtime_quota_window.note_observed_exhausted ~scope:quota_scope;
+    Error (Codex_failure error)
+  in
   let* env, clock = eio_context ~runtime_id |> Result.map_error (fun failure -> Setup_failure failure) in
   let mgr = Posix_spawn_process_mgr.mgr in
   let cwd = Eio.Path.(Eio.Stdenv.fs env / base_dir) in
@@ -294,8 +307,7 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
            ({ media_type = image.media_type; base64_data = image.base64_data }
             : Runtime_codex_app_server.image_input)) images) with
      | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = result.text; model = result.model }
-     | Error error ->
-       Error (Codex_failure error))
+     | Error error -> codex_failed error)
   | Runtime_execution.Antigravity_cli _ when not (List.is_empty images) ->
     Error (Setup_failure (provider_error ~runtime_id "Antigravity transport does not support image input"))
   | Runtime_execution.Antigravity_cli execution ->

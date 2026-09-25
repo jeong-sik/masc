@@ -41,8 +41,6 @@ let enter_atom_count_exceptions =
     "Keeper detail", 0
   ; (* A roster with a cursor and nothing the cursor opens. *)
     "Config / Runtime / Clients", 0
-  ; (* A scrolling reading, not a row list. *)
-    "Config / Tools", 0
   ; (* The second is the history overlay's, which [footer_hints_code] drops
        from the panes that have no commits. *)
     "Workspace / Code", 2

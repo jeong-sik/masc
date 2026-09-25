@@ -292,6 +292,14 @@ let durable_consumer_roots ~base_path =
   List.map (Filename.concat runtime_root) durable_consumer_basenames
 ;;
 
+(* The default cluster's Board posts file, the same place
+   [Board_paths.file_path ~workspace_masc_dir Posts] writes when the cluster is
+   "default" (this library sits below Board, so the name is repeated here and
+   test_tool_blob_store pins the two together through Board_paths). A
+   non-default cluster keeps its posts under .masc/clusters/<name>/, and [run]
+   refuses before this scan whenever that directory has an entry
+   ([reject_uncoordinated_cluster_roots]). So an absent file here means the
+   default cluster has no posts, not that the posts live somewhere unread. *)
 let board_post_consumer_path ~base_path =
   Filename.concat
     (Common.masc_dir_from_base_path ~base_path)

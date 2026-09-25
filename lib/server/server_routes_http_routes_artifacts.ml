@@ -29,7 +29,7 @@ let artifact_read_permission = Masc_domain.CanAdmin
 
 (* Whole responses are materialised by both HTTP backends. Bound their
    largest single allocation before serving any bytes. *)
-let maximum_artifact_response_bytes = 32 * 1024 * 1024
+let maximum_artifact_response_bytes = Tool_blob_store.max_served_bytes
 
 let artifact_bytes ~base_path ~sha256 =
   Eio_unix.run_in_systhread (fun () ->

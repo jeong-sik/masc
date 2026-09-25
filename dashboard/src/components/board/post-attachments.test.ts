@@ -161,7 +161,7 @@ describe('PostAttachments', () => {
     vi.mocked(fetchToolBlobBytes).mockResolvedValue(binary)
     const { unmount } = render(h(PostAttachments, { attachments: [{
       ok: true,
-      attachment: { kind: 'image', source: {
+      attachment: { kind: 'external_link', source: {
         kind: 'artifact', sha256, bytes: 12, mime: 'application/octet-stream',
       } },
     }] }))
@@ -178,6 +178,57 @@ describe('PostAttachments', () => {
     expect(document.querySelector('img')).toBeNull()
     unmount()
     expect(revokeObjectURL).toHaveBeenCalledWith(objectUrl)
+  })
+
+  function stubObjectUrls(objectUrl: string) {
+    const NativeURL = URL
+    vi.stubGlobal('URL', class extends NativeURL {
+      static createObjectURL = vi.fn(() => objectUrl)
+      static revokeObjectURL = vi.fn()
+    })
+  }
+
+  function renderArtifact(kind: BoardAttachmentKind) {
+    render(h(PostAttachments, { attachments: [{
+      ok: true,
+      attachment: { kind, source: {
+        kind: 'artifact', sha256: 'b'.repeat(64), bytes: 3, mime: 'application/octet-stream',
+      } },
+    }] }))
+    fireEvent.click(screen.getByTestId('board-attachment-artifact').querySelector('button')!)
+  }
+
+  it('previews an image artifact once loaded and keeps the download link', async () => {
+    stubObjectUrls('blob:artifact-image')
+    vi.mocked(fetchToolBlobBytes).mockResolvedValue(new ArrayBuffer(3))
+    renderArtifact('image')
+    const image = await screen.findByTestId('board-attachment-artifact-image')
+    expect(image.tagName).toBe('IMG')
+    expect(image).toHaveAttribute('src', 'blob:artifact-image')
+    expect(screen.getByTestId('board-attachment-artifact-download'))
+      .toHaveAttribute('href', 'blob:artifact-image')
+    expect(document.querySelector('video')).toBeNull()
+  })
+
+  it('previews a video artifact as a video element', async () => {
+    stubObjectUrls('blob:artifact-video')
+    vi.mocked(fetchToolBlobBytes).mockResolvedValue(new ArrayBuffer(3))
+    renderArtifact('video')
+    const video = await screen.findByTestId('board-attachment-artifact-video')
+    expect(video.tagName).toBe('VIDEO')
+    expect(video).toHaveAttribute('src', 'blob:artifact-video')
+    expect(document.querySelector('img')).toBeNull()
+  })
+
+  it('falls back to the download when the bytes are not what kind claims', async () => {
+    stubObjectUrls('blob:artifact-not-an-image')
+    vi.mocked(fetchToolBlobBytes).mockResolvedValue(new ArrayBuffer(3))
+    renderArtifact('image')
+    fireEvent.error(await screen.findByTestId('board-attachment-artifact-image'))
+    expect(await screen.findByTestId('board-attachment-artifact-preview-failed')).toBeInTheDocument()
+    expect(screen.queryByTestId('board-attachment-artifact-image')).toBeNull()
+    expect(screen.getByTestId('board-attachment-artifact-download'))
+      .toHaveAttribute('href', 'blob:artifact-not-an-image')
   })
 
   it('shows an artifact read failure instead of a broken link', async () => {

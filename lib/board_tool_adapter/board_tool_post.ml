@@ -13,35 +13,38 @@ open Tool_args
 (* RFC-0189 PR-1b.2 — handlers in this module return the typed
    [Tool_result.result] variant directly. *)
 
-let handle_post_create ~tool_name ~start_time args : Tool_result.result =
-  let attachment_result =
-    Result.bind
-      (Board_tool_attachment.parse_args args)
-      (Board_tool_attachment.resolve ~base_path:(Env_config_core.base_path ()))
+let attachment_error ~tool_name ~start_time error : Tool_result.result =
+  let class_ =
+    match error with
+    | Board_tool_attachment.Artifact_read_failed _ -> Tool_result.Runtime_failure
+    | Board_tool_attachment.Raw_meta_attachments
+    | Board_tool_attachment.Attachments_not_array
+    | Board_tool_attachment.Duplicate_attachments
+    | Board_tool_attachment.Entry_not_object _
+    | Board_tool_attachment.Invalid_entry_fields _
+    | Board_tool_attachment.Invalid_kind _
+    | Board_tool_attachment.Invalid_url _
+    | Board_tool_attachment.Invalid_sha256 _
+    | Board_tool_attachment.Missing_artifact _
+    | Board_tool_attachment.Invalid_artifact_reference _
+    | Board_tool_attachment.Youtube_requires_url _
+    | Board_tool_attachment.Artifact_too_large _ ->
+      Tool_result.Workflow_rejection
   in
-  match attachment_result with
-  | Error error ->
-    let class_ =
-      match error with
-      | Board_tool_attachment.Artifact_read_failed _ -> Tool_result.Runtime_failure
-      | Board_tool_attachment.Raw_meta_attachments
-      | Board_tool_attachment.Attachments_not_array
-      | Board_tool_attachment.Duplicate_attachments
-      | Board_tool_attachment.Entry_not_object _
-      | Board_tool_attachment.Invalid_entry_fields _
-      | Board_tool_attachment.Invalid_kind _
-      | Board_tool_attachment.Invalid_url _
-      | Board_tool_attachment.Invalid_sha256 _
-      | Board_tool_attachment.Missing_artifact _
-      | Board_tool_attachment.Invalid_artifact_reference _ ->
-        Tool_result.Workflow_rejection
-    in
-    Tool_result.make_err
-      ~tool_name
-      ~class_
-      ~start_time
-      (Board_tool_attachment.error_to_string error)
-  | Ok attachments ->
+  Tool_result.make_err
+    ~tool_name
+    ~class_
+    ~start_time
+    (Board_tool_attachment.error_to_string error)
+;;
+
+(* Attachment syntax is checked first, like any other argument. Artifact bytes
+   are read last, after every check that needs no I/O, so a post that is going
+   to be rejected for its title, author or post_kind reads no blob. *)
+let handle_post_create ~tool_name ~start_time args : Tool_result.result =
+  match Board_tool_attachment.parse_args args with
+  | Error error -> attachment_error ~tool_name ~start_time error
+  | Ok attachment_entries ->
   let title = get_string_opt args "title" in
   (* Reject empty or whitespace-only titles. *)
   match title with
@@ -103,14 +106,6 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
       let hearth = get_string_opt args "hearth" in
       let thread_id = get_string_opt args "thread_id" in
       let raw_post_kind = get_string_opt args "post_kind" in
-      let meta_json =
-        match sources with
-        | Some entries ->
-          Board_tool_format.merge_sources_into_meta
-            (Board_tool_format.normalize_board_post_meta ~attachments args)
-            entries
-        | None -> Board_tool_format.normalize_board_post_meta ~attachments args
-      in
       let visibility =
         match Board_tool_format.visibility_of_string visibility_str with
         | Some v -> v
@@ -124,6 +119,22 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
           ~start_time
           msg
       | Ok post_kind ->
+        match
+          Board_tool_attachment.resolve
+            ~base_path:(Env_config_core.base_path ())
+            ~max_artifact_bytes:Tool_blob_store.max_served_bytes
+            attachment_entries
+        with
+        | Error error -> attachment_error ~tool_name ~start_time error
+        | Ok attachments ->
+        let meta_json =
+          match sources with
+          | Some entries ->
+            Board_tool_format.merge_sources_into_meta
+              (Board_tool_format.normalize_board_post_meta ~attachments args)
+              entries
+          | None -> Board_tool_format.normalize_board_post_meta ~attachments args
+        in
         (match
            Board_dispatch.create_post
              ~author

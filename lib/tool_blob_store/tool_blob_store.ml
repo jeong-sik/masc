@@ -235,6 +235,8 @@ let fetch t ~sha256 =
            forget_written path;
            Error (Integrity_mismatch { path; expected = sha256; actual })))
 
+let max_served_bytes = 32 * 1024 * 1024
+
 let fetch_bounded t ~sha256 ~max_bytes =
   match validate_sha256 sha256 with
   | Error invalid -> Error (Invalid_sha256 invalid)

@@ -4,7 +4,7 @@ import { mediaEmbedForUrl } from '../common/rich-content-utils'
 import { formatFileSize } from './composer-v2'
 import { isRecord } from '../common/normalize'
 import { fetchToolBlobBytes } from '../../api/tool-blob'
-import type { BoardAttachmentDecode, BoardAttachmentSource } from '../../types'
+import type { BoardAttachmentDecode, BoardAttachmentKind, BoardAttachmentSource } from '../../types'
 
 type UrlSource = Extract<BoardAttachmentSource, { kind: 'url' }>
 type ArtifactSource = Extract<BoardAttachmentSource, { kind: 'artifact' }>
@@ -180,10 +180,20 @@ function ExternalLinkAttachment({ source }: { source: UrlSource }) {
   `
 }
 
-function ArtifactAttachment({ source }: { source: ArtifactSource }) {
+/** An artifact carries no stored media type, so `kind` (the poster's claim) picks
+ *  the preview element once the bytes are loaded. `<img>` and `<video>` sniff the
+ *  format themselves (WHATWG MIME Sniffing, image/media rules), so the Blob stays
+ *  application/octet-stream; bytes that are not what `kind` says show a notice
+ *  and the download link still works. Other kinds are download-only. */
+function ArtifactAttachment({ kind, source, compact }: {
+  kind: BoardAttachmentKind
+  source: ArtifactSource
+  compact: boolean
+}) {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [previewFailed, setPreviewFailed] = useState(false)
   const mounted = useRef(true)
   const pending = useRef<AbortController | null>(null)
   const objectUrl = useRef<string | null>(null)
@@ -218,13 +228,35 @@ function ArtifactAttachment({ source }: { source: ArtifactSource }) {
     >
       <button type="button" class="text-left text-xs font-semibold text-[var(--color-fg-secondary)] underline"
         disabled=${loading} onClick=${() => void load()}>
-        📎 아티팩트 다운로드 준비 (${source.sha256.slice(0, 12)})
+        ${kind === 'image' ? '🖼 이미지 불러오기' : kind === 'video' ? '🎞 동영상 불러오기' : '📎 아티팩트 다운로드 준비'}
+        ${' '}(${source.sha256.slice(0, 12)})
       </button>
       <span class="text-2xs text-[var(--color-fg-muted)]">
         ${formatFileSize(source.bytes)} · ${source.mime}
       </span>
       ${loading ? html`<span role="status">읽는 중…</span>` : null}
       ${error ? html`<${FailureCard} label=${`아티팩트를 읽지 못했습니다 (${error})`} />` : null}
+      ${downloadUrl !== null && !previewFailed && kind === 'image'
+        ? html`<img src=${downloadUrl} alt=${`첨부 이미지 (${source.sha256.slice(0, 12)})`}
+            data-testid="board-attachment-artifact-image"
+            onError=${() => setPreviewFailed(true)}
+            class=${compact
+              ? 'max-h-24 w-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] object-cover'
+              : 'max-h-[480px] w-auto max-w-full rounded-[var(--r-1)] border border-[var(--color-border-default)]'} />`
+        : null}
+      ${downloadUrl !== null && !previewFailed && kind === 'video'
+        ? html`<video src=${downloadUrl} controls preload="metadata"
+            data-testid="board-attachment-artifact-video"
+            onError=${() => setPreviewFailed(true)}
+            class=${compact
+              ? 'max-h-24 w-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-black'
+              : 'block w-full max-h-[480px] rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-black'} />`
+        : null}
+      ${previewFailed
+        ? html`<span class="text-2xs text-[var(--color-fg-muted)]" data-testid="board-attachment-artifact-preview-failed">
+            ${kind === 'video' ? '동영상' : '이미지'}으로 표시하지 못했습니다. 아래에서 받을 수 있습니다.
+          </span>`
+        : null}
       ${downloadUrl !== null
         ? html`<a href=${downloadUrl} download=${`artifact-${source.sha256}.bin`}
             data-testid="board-attachment-artifact-download">다운로드</a>`
@@ -240,7 +272,7 @@ function AttachmentView({ entry, compact }: { entry: BoardAttachmentDecode; comp
   const attachment = entry.attachment
   const source = attachment.source
   if (source.kind === 'artifact') {
-    return html`<${ArtifactAttachment} source=${source} />`
+    return html`<${ArtifactAttachment} kind=${attachment.kind} source=${source} compact=${compact} />`
   }
   if (!isSafeAttachmentUrl(source.url)) {
     return html`<${UnsafeUrlCard} url=${source.url} />`

@@ -156,6 +156,12 @@ val fetch_bounded :
     allocation. Negative bounds return [Invalid_max_bytes]. This does not
     populate the snapshot cache used by {!fetch_range}. *)
 
+val max_served_bytes : int
+(** Largest artifact the HTTP artifact routes materialise in one response.
+    A writer that records a reference for a reader behind those routes — a
+    Board attachment, which the dashboard opens only through them — refuses
+    anything larger, so every accepted reference is one the reader can open. *)
+
 type range =
   { content : string
   ; total_bytes : int

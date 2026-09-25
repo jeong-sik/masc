@@ -22,6 +22,8 @@ type error =
   | Missing_artifact of int * string
   | Artifact_read_failed of int * string
   | Invalid_artifact_reference of int * Tool_output.make_error
+  | Youtube_requires_url of int
+  | Artifact_too_large of { index : int; bytes : int; maximum : int }
 
 let error_to_string = function
   | Raw_meta_attachments ->
@@ -56,6 +58,16 @@ let error_to_string = function
       "attachments[%d].sha256 artifact reference invalid: %s"
       index
       (Tool_output.make_error_to_string invalid)
+  | Youtube_requires_url index ->
+    Printf.sprintf
+      "attachments[%d]: kind youtube needs url; attach an artifact as image, video, or external_link"
+      index
+  | Artifact_too_large { index; bytes; maximum } ->
+    Printf.sprintf
+      "attachments[%d].sha256 artifact is %d bytes, over the %d-byte limit the dashboard can open"
+      index
+      bytes
+      maximum
 ;;
 
 let kind_of_json index = function
@@ -99,9 +111,12 @@ let parse_entry index = function
          Ok { kind; source = Https_url url }
        | Some _, None -> Error (Invalid_url index)
        | None, Some (`String sha256) ->
-         (match Tool_blob_store.validate_sha256 sha256 with
-          | Ok () -> Ok { kind; source = Artifact_sha256 sha256 }
-          | Error invalid -> Error (Invalid_sha256 (index, invalid)))
+         (match kind with
+          | Youtube -> Error (Youtube_requires_url index)
+          | Image | Video | External_link ->
+            (match Tool_blob_store.validate_sha256 sha256 with
+             | Ok () -> Ok { kind; source = Artifact_sha256 sha256 }
+             | Error invalid -> Error (Invalid_sha256 (index, invalid))))
        | None, Some _ | None, None | Some _, Some _ ->
          Error (Invalid_entry_fields index))
   | _ -> Error (Entry_not_object index)
@@ -147,7 +162,7 @@ let artifact_mime bytes =
   | exception Yojson.Json_error _ -> "application/octet-stream"
 ;;
 
-let resolve ~base_path entries =
+let resolve ~base_path ~max_artifact_bytes entries =
   let store = Tool_blob_store.create ~base_path in
   let rec loop index acc = function
     | [] -> Ok (List.rev acc)
@@ -155,10 +170,17 @@ let resolve ~base_path entries =
       loop (index + 1) (Url { kind; url } :: acc) rest
     | { kind; source = Artifact_sha256 sha256 } :: rest ->
       let fetched =
-        Eio_unix.run_in_systhread (fun () -> Tool_blob_store.fetch store ~sha256)
+        Eio_unix.run_in_systhread (fun () ->
+          Tool_blob_store.fetch_bounded store ~sha256 ~max_bytes:max_artifact_bytes)
       in
       (match fetched with
-       | Error error ->
+       | Error (Tool_blob_store.Too_large { actual; maximum; path = _ }) ->
+         Error (Artifact_too_large { index; bytes = actual; maximum })
+       | Error
+           (( Tool_blob_store.Invalid_sha256 _
+            | Tool_blob_store.Owned_read_failed _
+            | Tool_blob_store.Invalid_max_bytes _
+            | Tool_blob_store.Integrity_mismatch _ ) as error) ->
          Error
            (Artifact_read_failed
               (index, Tool_blob_store.fetch_error_to_string error))

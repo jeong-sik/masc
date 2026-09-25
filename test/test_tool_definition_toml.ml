@@ -615,6 +615,36 @@ let test_patterns_must_be_provider_portable () =
   | Error message -> failf "expected an anchored pattern to load: %s" message
 ;;
 
+(* Gemini refuses a request whose tool declares an array without [items], so
+   the loader refuses the declaration first, at every depth the grammar reads:
+   a top-level param, a field of an object, a field of an array's object
+   items, and the keeper projection. *)
+let test_array_without_items_is_refused () =
+  let needle = "an array parameter must declare items" in
+  check_rejects ~name:"t"
+    ~contents:(minimal "t" ^ "[[params]]\nname = \"list\"\ntype = \"array\"\n")
+    ("(list): " ^ needle);
+  check_rejects ~name:"t"
+    ~contents:
+      (minimal "t"
+       ^ "[[params]]\nname = \"outer\"\ntype = \"object\"\n\n\
+          [[params.params]]\nname = \"inner\"\ntype = \"array\"\n")
+    ("(inner): " ^ needle);
+  check_rejects ~name:"t"
+    ~contents:
+      (minimal "t"
+       ^ "[[params]]\nname = \"rows\"\ntype = \"array\"\n\n\
+          [params.items]\ntype = \"object\"\n\n\
+          [[params.items.params]]\nname = \"tags\"\ntype = \"array\"\n")
+    ("(tags): " ^ needle);
+  check_rejects ~name:"t"
+    ~contents:
+      (minimal "t"
+       ^ "[keeper_projection]\ndescription = \"d.\"\n\n\
+          [[keeper_projection.params]]\nname = \"picks\"\ntype = \"array\"\n")
+    ("(picks): " ^ needle)
+;;
+
 let test_array_unique_items () =
   match
     Tool_definition_toml.load
@@ -1228,6 +1258,8 @@ let () =
             test_patterns_must_be_provider_portable
         ; test_case "an array may require unique items" `Quick
             test_array_unique_items
+        ; test_case "an array without items is refused at every depth" `Quick
+            test_array_without_items_is_refused
         ] )
     ; ( "validate_embedded"
       , [ test_case "walks tools/, skips the manifest, fails closed" `Quick

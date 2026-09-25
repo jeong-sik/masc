@@ -86,8 +86,27 @@ let test_delegated_exception_is_reported () =
   assert (result.status = Unix.WEXITED 1);
   assert (String.length result.stdout = 0)
 
+(* A caller whose lane reports a transport failure. A payload stopped by
+   its time budget keeps the timeout status a host run has, so Execute and
+   the dashboard read a remote timeout as a timeout (#38890); a lane that
+   delivered nothing is still a failed status. *)
+let transport_failing_caller failure : Sandbox_target.runner =
+ fun ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ->
+  Sandbox_target.Transport_failed
+    { failure; output_files = None; reason = "lane"; stdout = ""; stderr = "lane" }
+
+let test_delegated_transport_timeout_is_a_timeout () =
+  let status failure =
+    (Exec_dispatch.dispatch_simple
+       (delegated_simple ~caller:(transport_failing_caller failure) ~argv:[ "board"; "list" ]))
+      .status
+  in
+  assert (status Sandbox_target.Payload_timed_out = Process_eio.timed_out_status);
+  assert (status Sandbox_target.Lane_unavailable = Unix.WEXITED 1)
+
 let () =
   test_delegated_round_trip ();
+  test_delegated_transport_timeout_is_a_timeout ();
   test_delegated_failure_is_a_status ();
   test_delegated_redirect_refused ();
   test_delegated_exception_is_reported ();

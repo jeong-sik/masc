@@ -35,7 +35,13 @@ let broadcast_resolved_turn_complete
       ~tool_calls_made
       ~total_turns
       ~(usage_resolution : Keeper_usage_resolution.t)
+      ~wire_prompt_tokens
   =
+  let wire_field pick =
+    match wire_prompt_tokens with
+    | Some tokens -> `Int (pick tokens)
+    | None -> `Null
+  in
   let usage_field field =
     match usage_resolution.delta with
     | Some usage -> `Int (field usage)
@@ -60,8 +66,11 @@ let broadcast_resolved_turn_complete
       ; key_tool_calls_made, `Int tool_calls_made
       ; ( key_cache_read_tokens
         , usage_field (fun usage -> usage.Keeper_usage_resolution.cache_read_input_tokens) )
-      ; key_cache_n, `Null
-      ; key_prompt_n, `Null
+      ; ( key_cache_creation_tokens
+        , usage_field (fun usage ->
+            usage.Keeper_usage_resolution.cache_creation_input_tokens) )
+      ; key_cache_n, wire_field fst
+      ; key_prompt_n, wire_field snd
       ; key_total_turns, `Int total_turns
       ; "usage_resolution", Keeper_usage_resolution.to_json usage_resolution
       ; key_ts_unix, `Float (Time_compat.now ())
@@ -185,7 +194,13 @@ let emit_client_usage_report
     ?runtime_attempt
     (report : Keeper_client_usage_report.t)
   =
-  let usage = report.usage in
+  (* A replaced count counts nothing. Its row says so and keeps the vendor
+     total that took the count's place. *)
+  let usage =
+    match report.count with
+    | Keeper_client_usage_report.Running_count usage -> usage
+    | Keeper_client_usage_report.Count_replaced -> Agent_core.Types.zero_api_usage
+  in
   match trajectory_acc with
   | None -> ()
   | Some acc ->
@@ -236,6 +251,10 @@ let make_hooks
     ?(on_after_turn_response :
         response:Agent_core.Types.api_response -> unit =
         fun ~response:_ -> ())
+    ?(on_agent_core_response_usage :
+        response_id:string -> ordinal:int -> model:string ->
+        Agent_core.Types.api_usage option -> unit =
+        fun ~response_id:_ ~ordinal:_ ~model:_ _ -> ())
     ?(on_tool_executed :
         tool_name:string -> input:Yojson.Safe.t -> output_text:string ->
         execution_evidence:Yojson.Safe.t option ->
@@ -330,6 +349,17 @@ let make_hooks
           | None -> (0, 0, 0.0)
         in
         let usage_missing = usage_missing_of_usage response.usage in
+        (* An Agent Core response is one provider request, and the turn's
+           spend reads it here. An official client's response repeats what its
+           stream already reported, and that report is its reading. *)
+        (match current_attempt_usage () with
+         | Some Agent_core_attempt ->
+           on_agent_core_response_usage
+             ~response_id:response.id
+             ~ordinal:turn
+             ~model
+             (if usage_missing then None else response.usage)
+         | Some (Client_stream_attempt _) | None -> ());
         let cost_usd_for_event = turn_cost_usd in
         let cost_usd_for_sse =
           match response.usage with
@@ -514,12 +544,13 @@ let make_hooks
              response.content
          | None -> ());
         (try
-           (* Cache observability rides the same per-turn event (RFC-0382):
+           (* Cache observability rides this per-request event (RFC-0382):
               [cache_read_tokens] is usage-reported (cloud providers),
               [cache_n]/[prompt_n] are wire timings (llama-server, Ollama) —
               KV-reused vs freshly prefilled prompt tokens. The two sources
               have different semantics and are surfaced side by side, never
-              merged. *)
+              merged. These are this request's timings; the turn's sum rides
+              [keeper_turn_complete]. *)
            let timings_int_json field =
              match response.telemetry with
              | Some { timings = Some t; _ } ->

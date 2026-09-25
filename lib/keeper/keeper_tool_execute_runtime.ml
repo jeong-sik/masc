@@ -108,10 +108,15 @@ let sandbox_target_label = function
    path so the two cannot drift apart into an unsupported-replay repair. *)
 let gate_operation = Keeper_gate.tool_execute_gate_operation
 
+(* The resolved [cwd] is upserted into the wrapped arguments as well as the
+   envelope: replay hands back [input] verbatim, so the arguments alone must
+   name the directory the operator approved. Owning the upsert here keeps the
+   producer and its inverse [replay_args_of_gate_input] pinned by the same
+   round-trip test (#26143). *)
 let execute_gate_input ~input ~cwd ~sandbox_profile ~sandbox_target =
   `Assoc
     [ "schema", `String "masc.keeper_gate.request.v1"
-    ; "input", input
+    ; "input", Keeper_tool_execute_input.assoc_upsert "cwd" (`String cwd) input
     ; "cwd", `String cwd
     ; "sandbox_profile", `String sandbox_profile
     ; "sandbox_target", `String sandbox_target
@@ -535,7 +540,6 @@ let handle_tool_execute_typed
           Keeper_types_profile_sandbox.sandbox_profile_to_string
             dispatch_bundle.sandbox_profile
         in
-        let typed_args = assoc_upsert "cwd" (`String cwd) typed_args in
         let gate_input =
           execute_gate_input
             ~input:typed_args

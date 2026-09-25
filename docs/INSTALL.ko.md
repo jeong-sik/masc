@@ -443,7 +443,7 @@ macOS 26을 지원하며, [Kata](https://github.com/kata-containers/kata-contain
 less, procps, Python 3, ripgrep이 들어갑니다. **Node, pnpm, OCaml, 컴파일러,
 SSH client, 모델 CLI는 포함하지 않습니다.** 프로젝트 빌드·테스트가 목적이면
 필요한 toolchain이 있는 이미지를 준비하고 Keeper의 `sandbox_image`로 지정합니다.
-저장소의 `Dockerfile.keeper-sandbox`는 MASC 개발용 별도 이미지이며 일반 설치물이 아닙니다.
+저장소의 `sandbox-images/ocaml/Dockerfile`은 MASC 개발용 별도 이미지이며 일반 설치물이 아닙니다.
 
 ## 초기 프롬프트·skills·Keeper
 

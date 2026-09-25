@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 scan_paths=(
-  bin lib test scripts config packages viewer docs
+  bin lib test scripts config packages viewer docs sandbox-images
   ':(exclude)docs/evidence/**'
   ':(exclude)docs/screenshots/**'
 )

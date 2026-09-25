@@ -276,7 +276,7 @@ let claude_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~
            ; conversation_id = session_id
            ; position
            ; usage_scope = Runtime_usage_scope.Turn_total
-           ; usage = api_usage_of_turn_usage usage
+           ; count = Keeper_client_usage_report.Running_count (api_usage_of_turn_usage usage)
            ; vendor_total_tokens = None
            })
       on_usage_report
@@ -529,8 +529,13 @@ let request_context_of_request_input (input : Runtime_claude_code.request_input)
   =
   { input_tokens =
       input.input_tokens + input.cache_creation_input_tokens + input.cache_read_input_tokens
-  ; cache_creation_input_tokens = input.cache_creation_input_tokens
-  ; cache_read_input_tokens = input.cache_read_input_tokens
+  ; cache =
+      Some
+        { Runtime_observation.cache_creation_input_tokens =
+            input.cache_creation_input_tokens
+        ; cache_read_input_tokens = input.cache_read_input_tokens
+        }
+  ; output_tokens = None (* an assistant frame's output is a streaming snapshot *)
   }
 ;;
 

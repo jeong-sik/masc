@@ -40,14 +40,50 @@ description = "Important post ids to highlight"
 [[params]]
 name = "tag_suggestions"
 type = "array"
-description = "Objects with post_id, tags[], rationale"
+description = "Suggested tags, one entry per post"
+
+[params.items]
+type = "object"
+
+[[params.items.params]]
+name = "post_id"
+type = "string"
+required = true
+
+[[params.items.params]]
+name = "tags"
+type = "array"
+items = { type = "string" }
+
+[[params.items.params]]
+name = "rationale"
+type = "string"
 
 [[params]]
 name = "answer_matches"
 type = "array"
-description = """
-Objects with question_post_id, answer_post_id, score, \
-rationale"""
+description = "Candidate answer posts for question posts"
+
+[params.items]
+type = "object"
+
+[[params.items.params]]
+name = "question_post_id"
+type = "string"
+required = true
+
+[[params.items.params]]
+name = "answer_post_id"
+type = "string"
+required = true
+
+[[params.items.params]]
+name = "score"
+type = "number"
+
+[[params.items.params]]
+name = "rationale"
+type = "string"
 
 [[params]]
 name = "rationale"
@@ -88,14 +124,50 @@ description = "Important post ids to highlight"
 [[keeper_projection.params]]
 name = "tag_suggestions"
 type = "array"
-description = "Objects with post_id, tags[], rationale"
+description = "Suggested tags, one entry per post"
+
+[keeper_projection.params.items]
+type = "object"
+
+[[keeper_projection.params.items.params]]
+name = "post_id"
+type = "string"
+required = true
+
+[[keeper_projection.params.items.params]]
+name = "tags"
+type = "array"
+items = { type = "string" }
+
+[[keeper_projection.params.items.params]]
+name = "rationale"
+type = "string"
 
 [[keeper_projection.params]]
 name = "answer_matches"
 type = "array"
-description = """
-Objects with question_post_id, answer_post_id, score, \
-rationale"""
+description = "Candidate answer posts for question posts"
+
+[keeper_projection.params.items]
+type = "object"
+
+[[keeper_projection.params.items.params]]
+name = "question_post_id"
+type = "string"
+required = true
+
+[[keeper_projection.params.items.params]]
+name = "answer_post_id"
+type = "string"
+required = true
+
+[[keeper_projection.params.items.params]]
+name = "score"
+type = "number"
+
+[[keeper_projection.params.items.params]]
+name = "rationale"
+type = "string"
 
 [[keeper_projection.params]]
 name = "rationale"

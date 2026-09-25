@@ -649,19 +649,6 @@ let overview_pulse_text (state : state) ~now =
    highlighted. Wider terminals see the whole ring; narrower ones see a
    window around the active entry with how many entries hide past each edge,
    so position in the cycle stays readable at any width. *)
-(* What [/burn] puts at the right of the tab row: the fleet's cost, then one
-   braille bar per Keeper for its token total when any Keeper has spent one.
-   It read "[HUD $0.00   ]": a word naming the widget rather than what it shows,
-   and, with nothing spent, bars of blank cells inside the brackets. The bars
-   are each Keeper's running total, not a rate over time. *)
-let burn_hud_text (state : state) =
-  if not state.burn_hud_visible then None
-  else
-    let cost = Printf.sprintf "$%.2f" (Masc_tui_types.fleet_total_cost_usd state) in
-    if List.exists (fun (k : keeper) -> k.k_total_tokens > 0) state.keepers then
-      Some (cost ^ " " ^ Masc_tui_types.fleet_token_sparkline state)
-    else Some cost
-
 let surface_strip (state : state) ~cols =
   (* An array because the strip is drawn by index: the width probe, the
      label and the cell each read entry [i], and a list answers that by
@@ -753,17 +740,6 @@ let surface_strip (state : state) ~cols =
   if hi < n - 1 then
     Buffer.add_string parts
       (Printf.sprintf " %s%s%s" Ansi.dim (hidden_after_mark (n - 1 - hi)) Ansi.reset);
-  (match burn_hud_text state with
-   | None -> ()
-   | Some hud_raw ->
-       let hud = Theme.recede () ^ hud_raw ^ Ansi.reset in
-       let hud_cells = Message_layout.display_width hud_raw in
-       let used_cells = Message_layout.display_width (Masc_tui_theme.strip_sgr (Buffer.contents parts)) in
-       if cols >= used_cells + hud_cells + 2 then begin
-         let gap = String.make (max 1 (cols - used_cells - hud_cells - 1)) ' ' in
-         Buffer.add_string parts gap;
-         Buffer.add_string parts hud
-       end);
   Buffer.contents parts
 
 
@@ -2779,7 +2755,10 @@ let render_diff_surface (state : state) (ds : diff_surface) =
     + (List.length ds.ds_context_lines * diff_surface_rows_per_context_line)
     + if Option.is_some ds.ds_error then diff_surface_error_rows else 0
   in
-  let content_height = max 1 (rows - chrome_rows) in
+  let content_height =
+    Masc_tui_scroll.content_height ~rows ~chrome:chrome_rows ~count:total
+      ~preview_keep:None ~overflow_takes_row:false
+  in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min ds.ds_scroll max_scroll) in
   let diff_rows_window = Rows.of_list ~first:scroll ~height:content_height diff_rows in
@@ -2807,10 +2786,12 @@ let render_diff_surface (state : state) (ds : diff_surface) =
       | Some row ->
           box_line_span buf cols (tree_diff_row_span ~width:(framed_inner_width cols) row)
     done;
-  box_line_styled buf cols ~style:(Theme.recede ())
-    (if total > content_height then
-       Printf.sprintf "[lines %s]  %s" (Masc_tui_scroll.window_text ~scroll ~height:content_height total) ds.ds_esc_hint
-     else "  " ^ ds.ds_esc_hint);
+  (* The status line carries the esc hint at every count, so it is one of
+     the fixed chrome rows above and the reading needs no row of its own. *)
+  Option.iter
+    (box_line_styled buf cols ~style:(Theme.recede ()))
+    (Masc_tui_scroll.position_row ~scroll ~height:content_height
+       ~hint:ds.ds_esc_hint total);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:ds.ds_footer_hints);

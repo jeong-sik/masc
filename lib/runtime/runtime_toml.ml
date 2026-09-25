@@ -590,7 +590,8 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
 ;;
 
 let usage_read_key = "usage-read"
-let usage_read_keys = [ "shape"; "url" ]
+let usage_read_refresh_key = "refresh-s"
+let usage_read_keys = [ "shape"; "url"; usage_read_refresh_key ]
 let usage_read_url_scheme = "https"
 
 let usage_read_shape_of_string = function
@@ -728,18 +729,24 @@ let parse_usage_read
         error path "usage-read needs the provider's [credentials]; none are declared"
     in
     let execution_errors = usage_read_execution_errors ~path api_format in
+    let refresh_result =
+      strict_float_find path usage_tbl usage_read_refresh_key
+      |> positive_finite_float_opt_field ~path ~key:usage_read_refresh_key
+    in
     (match
        ( unknown_key_errors @ execution_errors @ credential_errors
        , usage_read_shape_field ~path usage_tbl
-       , usage_read_url_field ~path ~transport usage_tbl )
+       , usage_read_url_field ~path ~transport usage_tbl
+       , refresh_result )
      with
-     | [], Ok shape, Ok url -> Ok (Some { Runtime_schema.shape; url })
-     | errors, shape, url ->
+     | [], Ok shape, Ok url, Ok refresh_s ->
+       Ok (Some { Runtime_schema.shape; url; refresh_s })
+     | errors, shape, url, refresh ->
        let field_errors = function
          | Ok _ -> []
          | Error errors -> errors
        in
-       Error (errors @ field_errors shape @ field_errors url))
+       Error (errors @ field_errors shape @ field_errors url @ field_errors refresh))
   | Some
       ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
       | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _

@@ -90,9 +90,12 @@ IFS=$'\t' read -r st draft base cur merged <<<"$pr_row"
 # and then the guard refuses. A newer queued or in-progress run still outranks
 # an older finished one.
 # sort+awk rather than an associative array: lanes may run bash 3.2.
-wf_all="$(gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" '.workflow_runs[] | [(.workflow_id|tostring), (if .conclusion == "cancelled" then "0" else "1" end), (.run_number|tostring), .name, .status, (.conclusion // "none"), (.id|tostring), ((.check_suite_id // 0)|tostring)] | @tsv')" || exit 1
+wf_all="$(gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" '.workflow_runs[] | [(.workflow_id|tostring), (if .conclusion == "cancelled" then "0" else "1" end), (.run_number|tostring), .name, .status, (.conclusion // "none"), (.id|tostring), ((.check_suite_id // 0)|tostring), (.event // "none"), (.path // "")] | @tsv')" || exit 1
 wf_all="$(printf '%s\n' "$wf_all" | sort -t "$(printf '\t')" -k1,1 -k2,2nr -k3,3nr)"
 wf="$(printf '%s\n' "$wf_all" | awk -F '\t' 'NF && !seen[$1]++')"
+# Which suite belongs to which event and workflow file: section 4 needs it to
+# tell a by-design skipped dispatch job from a skipped one that should have run.
+suite_kinds="$(printf '%s\n' "$wf_all" | awk -F '\t' 'NF && $8 + 0 != 0 { print $8 "\t" $9 "\t" $10 }')"
 # The check suites of the runs that lost (older, or cancelled twins). Their
 # check-runs are dropped in section 4: #39049's cancelled twin run 14709 owned
 # the newest suite (97837801954) and all five of its check-runs were skipped.
@@ -122,9 +125,33 @@ runs="$(gh_json "repos/${repo}/commits/${head}/check-runs?per_page=100" '.check_
 # Rows from a suite whose workflow run lost in section 3 never count.
 runs="$(printf '%s\n' "$runs" | awk -F '\t' -v lost="$lost_suites" 'BEGIN { n = split(lost, l, " "); for (i = 1; i <= n; i++) if (l[i] != "") drop[l[i]] = 1 } NF && !($5 in drop)')"
 runs="$(printf '%s\n' "$runs" | sort -t "$(printf '\t')" -k1,1 -k5,5nr -k4,4nr | awk -F '\t' 'NF && !seen[$1]++')"
+# A skipped row of the newest suite is a refusal, except when the job is one
+# the pull_request event never runs: its `if:` requires workflow_dispatch
+# (#38873, 2026-09-25: compare-tui exists only to be dispatched, so every PR
+# run of that workflow carries it skipped). Narrow on purpose: a required job
+# whose `if:` misfires still refuses, so this cannot turn a broken check
+# green. The condition is read from the workflow file itself, and only for a
+# pull_request-event suite; a dispatch suite owns the job's real verdict.
+# GUARD_REPO_ROOT overrides where the workflow files are read from; the
+# selftest points it at fixture trees.
+dispatch_skips=""
 n_runs=0; run_ids=()
-while IFS=$'\t' read -r name status concl id _suite; do
+while IFS=$'\t' read -r name status concl id suite; do
   [ -n "${name:-}" ] || continue
+  if [ "$status" = "completed" ] && [ "$concl" = "skipped" ]; then
+    suite_event="$(printf '%s\n' "$suite_kinds" | awk -F '\t' -v s="$suite" '$1 == s { print $2; exit }')"
+    if [ "$suite_event" = "pull_request" ]; then
+      # The check-run does not name its workflow file; find it from the runs
+      # of this suite that section 3 already read.
+      suite_path="$(printf '%s\n' "$suite_kinds" | awk -F '\t' -v s="$suite" '$1 == s { print $3; exit }')"
+      wf_file="${GUARD_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}/${suite_path:-}"
+      if [ -n "$suite_path" ] && [ -f "$wf_file" ] && \
+         sed -n "/^  ${name}:$/,/^  [^ ]/p" "$wf_file" 2>/dev/null | grep -q "workflow_dispatch"; then
+        dispatch_skips="$dispatch_skips $name"
+        continue
+      fi
+    fi
+  fi
   n_runs=$((n_runs+1)); run_ids+=("$id")
   if [ "$status" != "completed" ] || [ "$concl" != "success" ]; then
     refuse "check '${name}' is ${status}/${concl} (check-run ${id})"
@@ -174,6 +201,7 @@ fi
 footer="$(printf '\n\n---\napprove-guard: head `%s` · %d check-runs completed+success · workflow runs %s' \
   "$head" "$n_runs" "$(IFS=,; echo "${wf_ids[*]}")")"
 [ -z "$replaced" ] || footer="${footer} · replaces own CHANGES_REQUESTED ${replaced}"
+[ -z "$(printf '%s' "$dispatch_skips" | tr -d ' ')" ] || footer="${footer} · dispatch-only skipped:${dispatch_skips}"
 if [ "$check_only" -eq 1 ]; then
   echo "WOULD APPROVE #${pr} head ${head} (${n_runs} check-runs, workflow runs ${wf_ids[*]})"
   exit 0

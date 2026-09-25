@@ -212,12 +212,14 @@ path = "/models"
 type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
 
-# Usage windows for the operator view, read once at server start with no
-# model call. Undocumented endpoint; Ollama's own client calls it. The decoder
-# supports the observed session/weekly shape and reports other shapes as errors.
+# Usage windows for the operator view, read at server start with no model
+# call, then again refresh-s seconds after each read. Undocumented
+# endpoint; Ollama's own client calls it. The decoder supports the observed
+# session/weekly shape and reports other shapes as errors.
 [providers.ollama_cloud.usage-read]
 shape = "ollama-usage"
 url = "https://ollama.com/api/usage"
+refresh-s = 600.0
 
 [providers.deepseek]
 display-name = "DeepSeek API"
@@ -261,11 +263,13 @@ path = "/models"
 type = "env"
 key = "ZAI_API_KEY"
 
-# Usage windows for the operator view, read once at server start with no
-# model call. Undocumented endpoint; Z.AI's own coding plugin calls it.
+# Usage windows for the operator view, read at server start with no model
+# call, then again refresh-s seconds after each read. Undocumented
+# endpoint; Z.AI's own coding plugin calls it.
 [providers.glm-coding.usage-read]
 shape = "zai-quota-limit"
 url = "https://api.z.ai/api/monitor/usage/quota/limit"
+refresh-s = 600.0
 
 [providers.kimi_coding]
 display-name = "Kimi For Coding Subscription"
@@ -282,11 +286,13 @@ exact-body-timeout-s = 1200.0
 type = "env"
 key = "KIMI_API_KEY"
 
-# Usage windows for the operator view, read once at server start with no
-# model call. Undocumented endpoint; Kimi's own CLI calls it.
+# Usage windows for the operator view, read at server start with no model
+# call, then again refresh-s seconds after each read. Undocumented
+# endpoint; Kimi's own CLI calls it.
 [providers.kimi_coding.usage-read]
 shape = "kimi-coding-usages"
 url = "https://api.kimi.com/coding/v1/usages"
+refresh-s = 600.0
 
 [providers.ollama]
 display-name = "Local Ollama"
@@ -2517,11 +2523,13 @@ path = "/models"
 type = "env"
 key = "OPENROUTER_API_KEY"
 
-# Usage windows for the operator view, read once at server start with no
-# model call. Documented at openrouter.ai/docs/api-reference/limits.
+# Usage windows for the operator view, read at server start with no model
+# call, then again refresh-s seconds after each read. Documented at
+# openrouter.ai/docs/api-reference/limits.
 [providers.openrouter.usage-read]
 shape = "openrouter-key"
 url = "https://openrouter.ai/api/v1/key"
+refresh-s = 600.0
 
 # OpenRouter identifies the calling app by these two headers and attributes
 # usage to it. Both were accepted (HTTP 200) on all twelve probed models.

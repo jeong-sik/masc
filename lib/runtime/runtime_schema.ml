@@ -129,6 +129,7 @@ let usage_read_shape_to_string = function
 type usage_read =
   { shape : usage_read_shape
   ; url : string
+  ; refresh_s : float option
   }
 [@@deriving show, eq]
 

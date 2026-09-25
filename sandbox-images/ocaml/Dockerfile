@@ -73,6 +73,13 @@ RUN apt-get update \
       zsh \
       perl \
       trash-cli \
+      file \
+      xxd \
+      time \
+      iproute2 \
+      bind9-dnsutils \
+      python3-pip \
+      python3-yaml \
       libev-dev \
       libgmp-dev \
       libprotobuf-dev \
@@ -105,6 +112,13 @@ RUN apt-get update \
 # What keepers actually invoke, measured over 35,919 filesystem tool calls
 # (2026-08-20..26). The apt list above closed procps (ps/pgrep/pkill, 35 uses),
 # lsof (7), fd (2), zsh (3) and trash (39). These three are not apt packages.
+#
+# A second count, over 93,111 Execute records (2026-09-10..24), found commands
+# that neither this image nor the general one had: file (20 calls from 12
+# keepers), ip, ss, nslookup and dig (37), python3's yaml module (15), time
+# (8) and xxd (7). They are apt packages and sit in the list above. pip is
+# there so a turn can make a venv inside its workspace; the rootfs itself stays
+# read-only, so nothing lands in the image at run time.
 #
 # Node is resolved from the nodesource apt repository added above, the same
 # keyring-and-signed-source shape this file already uses for `gh`, and for the

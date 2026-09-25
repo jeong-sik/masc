@@ -12,14 +12,8 @@ let error_to_string = function
 let schema = "keeper.deferred_runtime_lane.v1"
 let filename = "deferred-runtime-lane.json"
 
-let path_for ~base_path ~keeper_name =
-  Filename.concat
-    (Filename.concat
-       (Filename.concat
-          (Common.masc_dir_from_base_path ~base_path)
-          Common.keepers_runtime_dirname)
-       keeper_name)
-    filename
+let path_for ~keepers_dir ~keeper_name =
+  Filename.concat (Filename.concat keepers_dir keeper_name) filename
 ;;
 
 let exact_fields expected fields =
@@ -136,11 +130,11 @@ let validate_keeper_name keeper_name =
   else Error (Invalid_keeper_name keeper_name)
 ;;
 
-let load ~base_path ~keeper_name =
+let load ~keepers_dir ~keeper_name =
   match validate_keeper_name keeper_name with
   | Error _ as error -> error
   | Ok () ->
-    let path = path_for ~base_path ~keeper_name in
+    let path = path_for ~keepers_dir ~keeper_name in
     (try
        match Fs_compat.load_file_opt path with
        | None -> Ok None
@@ -153,11 +147,11 @@ let load ~base_path ~keeper_name =
      | exn -> Error (Io_error (Printexc.to_string exn)))
 ;;
 
-let save ~base_path ~keeper_name hint =
+let save ~base_path ~keepers_dir ~keeper_name hint =
   match validate_keeper_name keeper_name with
   | Error _ as error -> error
   | Ok () ->
-    let path = path_for ~base_path ~keeper_name in
+    let path = path_for ~keepers_dir ~keeper_name in
     ignore (Keeper_fs.ensure_dir (Filename.dirname path));
     (match
        Keeper_fs.save_json_durable_atomic
@@ -171,11 +165,11 @@ let save ~base_path ~keeper_name hint =
        Error (Io_error (Keeper_fs.durable_write_error_to_string error)))
 ;;
 
-let clear ~base_path ~keeper_name =
+let clear ~base_path ~keepers_dir ~keeper_name =
   match validate_keeper_name keeper_name with
   | Error _ as error -> error
   | Ok () ->
-    let path = path_for ~base_path ~keeper_name in
+    let path = path_for ~keepers_dir ~keeper_name in
     (match Keeper_fs.remove_file_durable ~ownership_root:base_path path with
      | Ok () -> Ok ()
      | Error error ->

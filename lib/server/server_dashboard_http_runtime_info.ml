@@ -2134,7 +2134,10 @@ let runtime_inventory_json () =
     ; "source", `String runtime_inventory_source
     ; "config_path", Json_util.string_opt_to_json (Runtime.config_path ())
     ; ( "startup_degradation"
-      , Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ()) )
+      , Runtime.startup_degradation_to_yojson
+         ~exact_slots:(Runtime.exact_slot_degradation ())
+         ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
+         (Runtime.startup_degradation ()) )
     ; ( "summary"
       , `Assoc
           [ "providers", `Int (runtime_unique_count provider_ids)

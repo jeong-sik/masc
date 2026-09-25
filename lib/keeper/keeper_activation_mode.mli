@@ -7,4 +7,9 @@ val restore_owner : t -> bool
 val spontaneous : t -> bool
 val to_string : t -> string
 val of_string : string -> t option
+
+val all : t list
+(** Every mode, in declaration order. A caller that names the accepted
+    values (an editor refusal, say) derives them from here with [to_string],
+    so the list cannot drift from [of_string]. *)
 val to_yojson : t -> Yojson.Safe.t

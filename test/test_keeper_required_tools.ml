@@ -75,7 +75,7 @@ candidates = ["native.no_tools", "binding.sample"]
     (fun _ -> Ok {Agent_core.Types.content="fixture result"; content_blocks = None; _meta = None}) in
   let errors = ref [] in
   let run ?provider_config_transform ?output_contract ~tool_requirement ~tools runtime_id =
-    Keeper_turn_driver.run_named ~runtime_id ~keeper_name:"required-tools-proof"
+    Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk ~runtime_id ~keeper_name:"required-tools-proof"
       ~base_path:root ~system_prompt:"Tool requirement dispatch fixture."
       ~goal:"Answer the request." ~tools ~agent_core_tools:tools ~tool_requirement
       ?provider_config_transform ?output_contract
@@ -139,7 +139,7 @@ candidates = ["native.no_tools", "binding.sample"]
      channel left to report a verdict on. *)
   let wrapper_attempts = ref [] in
   ignore
-    (Keeper_turn_driver_wrappers.run_named_with_masc_tools
+    (Keeper_turn_driver_wrappers.run_named_with_masc_tools ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
        ~runtime_id:"native.no_tools" ~keeper_name:"required-tools-wrapper"
        ~base_path:root ~system_prompt:"Wrapper requirement fixture."
        ~goal:"Answer the request."

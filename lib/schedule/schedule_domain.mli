@@ -131,11 +131,20 @@ val modify_allowed : schedule_status -> bool
     [false], and the TUI asks the same function before it opens the editor,
     so the rule is written once. *)
 val validate_recurrence : recurrence -> (recurrence, string) result
-val check_admission : recurrence -> (recurrence, string) result
-(** Creation-time admission bound. Rejects an [Interval] recurrence whose
-    interval is below [min_interval_sec]; every other recurrence passes. The
-    decoder deliberately does not apply this bound: [Schedule_store] loads
-    legacy records through [validate_recurrence] and must stay readable. *)
+
+type interval_below_runner_tick =
+  { interval_sec : int
+  ; runner_tick_sec : float
+  }
+
+val interval_fires_as_declared :
+  runner_tick_sec:float ->
+  recurrence ->
+  (unit, interval_below_runner_tick) result
+(** Whether the schedule runner, which looks once every [runner_tick_sec],
+    fires [recurrence] as often as it declares. Refuses an [Interval] shorter
+    than the tick. Create and modify ask it; [validate_recurrence] does not,
+    so loading accepts any positive interval. *)
 val first_due_after : now:float -> recurrence -> float option
 (** Compute the first due time for calendar recurrences that do not need an
     explicit [due_at] anchor. Returns [None] for [One_shot] and [Interval]. *)

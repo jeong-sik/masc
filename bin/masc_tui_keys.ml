@@ -453,7 +453,9 @@ let for_surface = function
       ; b Act "Esc" "back" ~help:"back; during a turn, interrupt it"
       ]
   | Keepers Keeper_runtime_pick ->
-      [ b Navigate "j/k" "move"
+      [ b Navigate "j/k" "move" ~help:"move; PgUp/PgDn page, Home/End jump"
+      ; b Navigate "/" "filter"
+          ~help:"type to narrow the lanes and runtimes; Esc drops the filter"
       ; b Act "Enter" "choose"
       ; b Act "d" "use the default"
           ~help:"drop this Keeper's own binding and follow [runtime].default"
@@ -1118,16 +1120,29 @@ let cancels_two_press ~input_seen ~key ~second_press =
    [K] and [B] answer in the detail as they do on the list (masc_tui.ml
    matches them under [Fusion_detail]); the footer left them out, and a body
    row said "K Keeper · B Board" in its own notation instead. *)
-let footer_hints_board_read ~focus_posts ~split =
+let footer_hints_board_read ~focus_posts ~(layout : board_read_layout) =
+  let pane_keys =
+    match layout with
+    | Board_read_split -> [ b Navigate "h/l" "pane"; b Navigate "Ctrl-W" "switch" ]
+    | Board_read_wide | Board_read_one_pane -> []
+  in
+  (* The label is where the key goes, and [z] goes both ways. Drawn as "wide"
+     in either state it named the screen an operator was already looking at:
+     on a wide detail the footer offered to widen it. On one pane there is no
+     second layout to reach, and the key is not drawn. *)
+  let width_key =
+    match layout with
+    | Board_read_split -> [ b Navigate "z" "wide" ]
+    | Board_read_wide -> [ b Navigate "z" "list" ]
+    | Board_read_one_pane -> []
+  in
   hints_of_bindings
     ([ b Navigate "j/k" (if focus_posts then "posts" else "scroll")
      ; b Navigate "[/]" "post"
      ; b Navigate "PgUp/PgDn" "page"
      ]
-     @ (if split then [ b Navigate "h/l" "pane"; b Navigate "Ctrl-W" "switch" ]
-        else [])
-     @ [ b Navigate "z" "wide"
-       ; board_vote_key
+     @ pane_keys @ width_key
+     @ [ board_vote_key
        ; board_reply_key
        ; board_copy_key
        ; b Act "Left / Esc" "back"
@@ -1135,18 +1150,21 @@ let footer_hints_board_read ~focus_posts ~split =
        ; b Meta "Tab" "next"
        ])
 
-let footer_hints_fusion_detail ~position =
-  Printf.sprintf "%s  %s"
-    (hints_of_bindings
-       ([ b Navigate "j/k" "scroll"
-        ; b Navigate "PgUp/PgDn" "page"
-        ; fusion_caller_key
-        ; fusion_board_key
-        ; b Act "Y" "copy"
-        ; b Act "Esc" "back" ~help:"Left or Esc returns to the run list"
-        ]
-        @ listing_meta))
-    position
+(* The scroll position is not here. It is not a key and it cannot be looked
+   up, so it travels to the footer as its own argument
+   ([Masc_tui_footer.line]'s [?position]) rather than as two spaces on the end
+   of this string -- spelled that way the fitter read it as one more key item
+   and gave it up first, and on this surface it was never drawn. *)
+let footer_hints_fusion_detail =
+  hints_of_bindings
+    ([ b Navigate "j/k" "scroll"
+     ; b Navigate "PgUp/PgDn" "page"
+     ; fusion_caller_key
+     ; fusion_board_key
+     ; b Act "Y" "copy"
+     ; b Act "Esc" "back" ~help:"Left or Esc returns to the run list"
+     ]
+     @ listing_meta)
 
 (* Lanes sub-modes ([lanes_mode] owns overview/list/detail/notice —
    masc_tui_types.ml). The overview footer stays [for_surface Lanes]; these
@@ -1160,18 +1178,15 @@ let footer_hints_lanes_run_list =
      ]
      @ listing_meta)
 
-let footer_hints_lanes_run_detail ~position =
-  let hints =
-    hints_of_bindings
-      ([ b Navigate "j/k" "compare" ~help:"scroll Input and Output together"
-       ; b Navigate "PgUp/PgDn" "page" ~help:"page both evidence panes"
-       ; b Act "Left / Esc" "back" ~help:"back to the run list"
-       ]
-       @ listing_meta)
-  in
-  match position with
-  | None -> hints
-  | Some position -> hints ^ "  " ^ position
+(* The position travels as [Masc_tui_footer.line]'s [?position], for the
+   reason spelled over [footer_hints_fusion_detail]. *)
+let footer_hints_lanes_run_detail =
+  hints_of_bindings
+    ([ b Navigate "j/k" "compare" ~help:"scroll Input and Output together"
+     ; b Navigate "PgUp/PgDn" "page" ~help:"page both evidence panes"
+     ; b Act "Left / Esc" "back" ~help:"back to the run list"
+     ]
+     @ listing_meta)
 
 let footer_hints_git_changes =
   hints_of_bindings
@@ -1241,6 +1256,15 @@ let help_surfaces : (string * surface) list =
   ; "Keepers", Keepers Keeper_list
   ; "Keeper detail", Keepers Keeper_detail
   ; "Chat", Keepers Keeper_message
+  (* Three screens a Keeper detail drills into, each with keys of its own and
+     no section until now: [?] there opened on Global and named no section for
+     the screen the reader was standing on. Named the way their titles read
+     ("Keepers > <keeper> > logs"), which is also how Schedules is named
+     below. The runtime picker earns its own: [d] follows [runtime].default
+     and [/] narrows the list, and neither is guessable. *)
+  ; "Keepers / Logs", Keepers Keeper_logs
+  ; "Keepers / Calls", Keepers Keeper_calls
+  ; "Keepers / Runtime", Keepers Keeper_runtime_pick
   ; "Lanes", Lanes
   ; "Config / Runtime / Clients", Clients
   ; "Board", Board
@@ -1265,6 +1289,10 @@ let help_surfaces : (string * surface) list =
   ; "Config / Resources", Resources
   ; "Config / Tools", Tools
   ; "Activity / Logs", System_logs
+  (* Its keys are the least guessable on the product -- [B] opens the Browser
+     Lane, [Ctrl-O] previews a tab, [b / u] bind and unbind a channel -- and
+     the sheet built no section for them at all. *)
+  ; "Connectors", Connectors
   ]
 
 let entries bindings =

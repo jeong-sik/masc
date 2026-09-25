@@ -638,6 +638,35 @@ let count_noun ?plural count singular =
   in
   Printf.sprintf "%d %s" count noun
 
+(* A token figure a reader reads at a glance rather than counts digit by
+   digit. Thousands keep a tenth so nearby readings such as 73.9k and 73.2k
+   remain distinct. *)
+let thousand = 1_000
+let million = 1_000_000
+
+(* Up to 99,994,999,999 the figure fits the six-character "\xe2\x89\x88%6s tok"
+   column. A figure changes rung as soon as the previous format would round
+   it to a seventh character: 999,950 reads "1.00M" rather than "1000.0k",
+   99,995,000 reads "100.0M" rather than "100.00M", and 999,950,000 reads
+   "1.00B" rather than "1000.0M".
+
+   The boundaries match the precision each column reserves, so two views of
+   the same token count do not disagree near a rounding threshold. *)
+let rung_billion = 999_950_000
+let rung_hundred_million = 99_995_000
+let rung_million = 999_950
+
+let compact_count n =
+  if n >= rung_billion then
+    Printf.sprintf "%.2fB" (float_of_int n /. 1_000_000_000.)
+  else if n >= rung_hundred_million then
+    Printf.sprintf "%.1fM" (float_of_int n /. float_of_int million)
+  else if n >= rung_million then
+    Printf.sprintf "%.2fM" (float_of_int n /. float_of_int million)
+  else if n >= thousand then
+    Printf.sprintf "%.1fk" (float_of_int n /. float_of_int thousand)
+  else string_of_int n
+
 let cut_mark = "…"
 let cut_mark_cells = display_width cut_mark
 
@@ -663,6 +692,17 @@ let fit_width text width =
           let reset = if saw_ansi then "\x1B[0m" else "" in
           prefix ^ reset ^ String.make (room - prefix_cells) ' ' ^ cut_mark
         else text ^ String.make (width - cells) ' '
+
+(* [fit_width]'s other end: the padding goes in front, so a column of figures
+   -- or of ages beside them -- lines up on its right edge.
+
+   Printf's "%*s" does this too, but it counts bytes. A cell holding the
+   no-value mark, three bytes and one column, came out four cells wide in a
+   six-cell field and pulled the column after it two cells left. *)
+let pad_left text width =
+  let cells = display_width text in
+  if cells >= width then fit_width text width
+  else String.make (width - cells) ' ' ^ text
 
 (* Where a bare URL begins and where it stops. Two readers ask -- the one that
    underlines them and the one that names what they point at -- and they get
@@ -780,23 +820,32 @@ let chat_title_row ~inner_cells ~title ~mode_suffix =
 (* At the newest row the arrows answer the composer's history. Once PgUp has
    moved into the transcript they adjust it one row at a time, so the hint can
    name them without risking a draft replacement. *)
-let scroll_hint ~scrolled_back ~older_exist =
+let scroll_hint ~scrolled_back ~older_exist:_ =
   if scrolled_back <= 0 then "PgUp:scroll back"
+  else "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest"
+
+(* Where the pane stands, which is not a key and cannot be looked up: it
+   travels to the row as [Masc_tui_footer.line]'s [?position], not on the end
+   of the key hints, because the fitter reads those as items and gives up the
+   last one first. Spelled among the keys it was never drawn -- measured on
+   the live fleet at eighty columns, where the row kept Ctrl-R and Ctrl-D and
+   dropped this.
+
+   [None] at the newest row: there is no distance to say, and the hint beside
+   it already names the key that starts one.
+
+   The marker answers the other half of the question. How far back is one
+   number; whether pressing up keeps finding history is the other. At the
+   oldest row with nothing more to fetch, that it is the start is the more
+   useful fact than the distance -- an operator pressing up against a pane
+   that will not move should know it is the beginning of the conversation
+   rather than a stuck key -- and there the distance says what "start"
+   already says. *)
+let scroll_position ~scrolled_back ~older_exist =
+  if scrolled_back <= 0 then None
   else if older_exist then
-    (* The marker answers the other half of the position question: how far
-       back is one number, whether pressing up keeps finding history is the
-       other. The start variant below says the opposite end. *)
-    Printf.sprintf
-      "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (%d back \xc2\xb7 more\xe2\x86\x91)"
-      scrolled_back
-  else
-    (* At the oldest row with nothing more to fetch that is the more useful
-       fact than the distance: an operator pressing up against a pane that will
-       not move should know it is the start of the conversation rather than a
-       stuck key, and at the start the distance says what "start" already
-       says. Saying both is also what would have made this hint wider than the
-       one it replaced. *)
-    "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (start)"
+    Some (Printf.sprintf "(%d back \xc2\xb7 more\xe2\x86\x91)" scrolled_back)
+  else Some "(start)"
 
 let input_cursor_column ~terminal_cols ~input =
   let last_column = max 1 (terminal_cols - 1) in

@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.37.0)
+(version 0.39.0)
 
 ; Local-sandbox-only: vendor/ocaml-msx carries a copy of the pinned
 ; ocaml-msx package so sandboxes whose opam switch lacks the pin can still
@@ -55,9 +55,9 @@
   (mcp_protocol (>= 1.3.0))
   (grpc-direct-core (>= 0.1.0))
   (grpc-direct (>= 0.1.0))
-  (ws-direct-core (>= 0.1.0))
-  (ws-direct-gluten (>= 0.1.0))
-  (ws-direct-eio (>= 0.1.0))
+  (ws-direct-core (>= 0.2.0))
+  (ws-direct-gluten (>= 0.2.0))
+  (ws-direct-eio (>= 0.2.0))
   ; lib/msx_lane links ocaml-msx.msx. The generated masc.opam carried this
   ; dependency by hand while dune-project did not declare it, so every local
   ; `dune build` regenerated masc.opam without the line and left the worktree

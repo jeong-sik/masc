@@ -43,6 +43,17 @@ let enter_atom_count_exceptions =
     "Config / Runtime / Clients", 0
   ; (* A scrolling reading, not a row list. *)
     "Config / Tools", 0
+  ; (* Two readings a Keeper detail drills into: [j/k] scrolls the text and
+       there is no row under a cursor for Enter to open. *)
+    "Keepers / Logs", 0
+  ; (* Its rows are calls, read by scrolling; Home and End reach the ends.
+       Nothing opens one further. *)
+    "Keepers / Calls", 0
+  ; (* A cursor with no Enter, the way Clients has one: [b / u] bind and
+       unbind the transport under it, and binding is not opening. It joined
+       this list when the sheet started naming the screen (#39055); until
+       then the screen had no section and this check never asked. *)
+    "Connectors", 0
   ; (* The second is the history overlay's, which [footer_hints_code] drops
        from the panes that have no commits. *)
     "Workspace / Code", 2

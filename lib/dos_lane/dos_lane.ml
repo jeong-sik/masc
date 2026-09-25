@@ -160,6 +160,33 @@ let publish_running () = publish (fun mark -> Running mark)
 let mark_change () = incr change_count; publish_stable ()
 let current_publication () = Atomic.get published
 
+(* A short spectator feed of what a Keeper did to this Lane -- one line per
+   call -- not the replay ledger on [machine.entries], which only presses
+   belong to and which a checkpoint replays for continuity.
+
+   Read lock-free, like [published]: [with_control]/[with_machine] hold
+   [lock] for the emulation itself, not just a state swap -- up to
+   [max_steps_per_call] (about 170ms, this file's own measurement) -- and the
+   live HTTP route reads this from the fast path that answers without a
+   locked read at all, on the server's main fiber. A [Mutex.protect] there
+   could stall on a press or step in flight; [Atomic.get] cannot.
+
+   Written only from call sites that already hold [lock], same as
+   [published]'s writes, so the two are never torn relative to each other.
+   Capped by {!Lane_activity.push} rather than kept whole. It outlives an
+   eject on purpose -- "who ejected it" is itself an answer a spectator
+   watching the screen go blank wants -- and is never otherwise reset: a load
+   or restore is one more line on the same feed, not a new one, so the
+   Lane's timeline reads as continuous. *)
+let activity : Lane_activity.entry list Atomic.t = Atomic.make []
+
+let note_activity ~who action =
+  Atomic.set activity
+    (Lane_activity.push { Lane_activity.at = Unix.gettimeofday (); who; action } (Atomic.get activity))
+;;
+
+let recent_activity () = Atomic.get activity
+
 let with_machine f =
   locked (fun () ->
     match !state with
@@ -551,6 +578,7 @@ let load ~who ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announ
         in
         state := Some st;
         mark_change ();
+        note_activity ~who (Printf.sprintf "load %s" program_name);
         let booted =
           running (fun () ->
             let ran = advance st ~budget:boot_steps ~until_ready:true in
@@ -574,6 +602,7 @@ let eject ~who ~announce () =
        | Ok () ->
          state := None;
          mark_change ();
+         note_activity ~who "eject";
          announce ();
          Ok ()))
 ;;
@@ -584,6 +613,8 @@ let pass ~who ~to_ ~announce =
     | Error e -> Error e
     | Ok () ->
       st.controller <- to_;
+      note_activity ~who
+        (match to_ with Some name -> "pass -> " ^ name | None -> "release control");
       announce ();
       Ok (observe st))
 ;;
@@ -597,6 +628,7 @@ let release_left ~holder ~announce =
     match st.controller with
     | Some current when String.equal current holder ->
       st.controller <- None;
+      note_activity ~who:holder "released (idle)";
       announce ();
       Ok true
     | Some _ | None -> Ok false)
@@ -660,6 +692,7 @@ let step ~who ~steps ~until_ready =
     | Error e -> Error e
     | Ok budget ->
       let ran = advance st ~budget ~until_ready in
+      note_activity ~who (Printf.sprintf "step %d" ran.steps_run);
       ran_then_kept st ran)
 ;;
 
@@ -738,6 +771,7 @@ let press ~who ~keys ~steps =
          | Error e -> Error e
          | Ok resolved ->
            let ran = press_resolved st ~who ~keys:resolved ~budget in
+           note_activity ~who ("press " ^ String.concat "," (List.map fst resolved));
            ran_then_kept st ran))
 ;;
 
@@ -766,6 +800,7 @@ let click ~who ~x ~y ~buttons ~steps =
       | Ok budget ->
         append_entry st
           { at_step = st.steps; who; key_name = Printf.sprintf "mouse(%d,%d,%d)" x y buttons };
+        note_activity ~who (Printf.sprintf "click (%d,%d)" x y);
         Dos_machine.set_mouse st.m ~x ~y ~buttons;
         if buttons = 0 then begin
           let ran = advance st ~budget ~until_ready:true in
@@ -803,6 +838,7 @@ let type_text ~who ~text ~steps =
          | Error e -> Error e
          | Ok resolved ->
            let ran = press_resolved st ~who ~keys:resolved ~budget in
+           note_activity ~who (Printf.sprintf "type %d chars" (String.length text));
            ran_then_kept st ran))
 ;;
 
@@ -840,7 +876,9 @@ let save ~who ~dir ~slot =
          Machine_checkpoint.write ~dir slot header ~meta:(checkpoint_meta st ~who)
            ~machine_bytes
        with
-       | Ok () -> Ok (observe st)
+       | Ok () ->
+         note_activity ~who ("save " ^ Machine_checkpoint.slot_to_string slot);
+         Ok (observe st)
        | Error message -> Error (Unreadable message)))
 ;;
 
@@ -949,6 +987,7 @@ let restore ~who ~dir ~slot ~ledger_dir ~saves_dir_of ~announce =
               in
               state := Some st;
               mark_change ();
+              note_activity ~who ("restore " ^ Machine_checkpoint.slot_to_string slot);
               announce ();
               Ok (observe st))
 ;;

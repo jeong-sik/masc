@@ -375,3 +375,13 @@ val checkpoints : dir:string -> (Machine_checkpoint.listed list, error) result
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)
+
+val recent_activity : unit -> Lane_activity.entry list
+(** The last {!Lane_activity.cap} things a Keeper did to this Lane -- load,
+    step, press, click, type, save, restore, pass and eject, newest first --
+    for a spectator, not for replay: unlike {!ledger} this is not scoped to
+    the current machine. It spans a [load] or [restore] (one more line on the
+    same feed, not a fresh one) and outlives an [eject] (the ejection itself
+    is on it), so it can be non-empty with no machine loaded. Lock-free:
+    unlike {!ledger} it may be called from a fiber that must not block on a
+    press or step in flight. *)

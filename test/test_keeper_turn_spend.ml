@@ -2,7 +2,7 @@ open Alcotest
 open Masc
 
 let usage ~input ~output : Agent_core.Types.api_usage =
-  { Agent_core.Types.empty_usage with input_tokens = input; output_tokens = output }
+  { Agent_core.Types.zero_api_usage with input_tokens = input; output_tokens = output }
 ;;
 
 let report

@@ -190,7 +190,7 @@ let emit_client_usage_report
   let usage =
     match report.count with
     | Keeper_client_usage_report.Running_count usage -> usage
-    | Keeper_client_usage_report.Count_replaced -> Agent_core.Types.empty_usage
+    | Keeper_client_usage_report.Count_replaced -> Agent_core.Types.zero_api_usage
   in
   match trajectory_acc with
   | None -> ()

@@ -160,6 +160,110 @@ let store_for_base_path ~base_path ~keeper_name =
     ()
 ;;
 
+(* An occurrence whose queue witness was retired needs an exact, bounded
+   lookup. A new occurrence must not register itself in the dashboard's
+   per-identity ledger cache and rescan the whole append-only ledger. The
+   owner lock serializes writes; the hash is only a safe file name, while the
+   decoded receipt still has to name the requested occurrence. *)
+let schedule_occurrence_receipt_path ~base_path ~keeper_name ~occurrence_id =
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
+  let owner_dir =
+    Filename.concat
+      (Filename.concat masc_root Common.keepers_runtime_dirname)
+      keeper_name
+  in
+  let digest =
+    Digestif.SHA256.(digest_string occurrence_id |> to_hex)
+  in
+  Filename.concat
+    (Filename.concat owner_dir "consumed-schedule-occurrences-v1")
+    ("occurrence-" ^ digest ^ ".json")
+;;
+
+let schedule_occurrence_receipt_result ~base_path ~keeper_name ~occurrence_id =
+  let path =
+    schedule_occurrence_receipt_path ~base_path ~keeper_name ~occurrence_id
+  in
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
+  match Fs_compat.load_owned_regular_file ~ownership_root:masc_root path with
+  | Error error ->
+    Error
+      (Printf.sprintf "schedule occurrence receipt unreadable at %s: %s"
+         path (Fs_compat.owned_regular_file_read_error_to_string error))
+  | Ok None -> Ok None
+  | Ok (Some text) ->
+    let parsed =
+      try Ok (Yojson.Safe.from_string text) with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    (match parsed with
+     | Error detail -> Error (Printf.sprintf "schedule occurrence receipt malformed at %s: %s" path detail)
+     | Ok json ->
+       (match Keeper_event_queue_state.durable_disposition_of_yojson json with
+        | Error detail -> Error (Printf.sprintf "schedule occurrence receipt invalid at %s: %s" path detail)
+        | Ok (Keeper_event_queue_state.Projected_witness witness)
+          when String.equal witness.post_id occurrence_id
+               && witness.source_kind = Keeper_event_queue_state.Source_schedule_due ->
+          Ok (Some witness)
+        | Ok (Keeper_event_queue_state.Projected_witness _
+             | Keeper_event_queue_state.Current_receipt _) ->
+          Error (Printf.sprintf "schedule occurrence receipt identity mismatch at %s" path)))
+;;
+
+let save_schedule_occurrence_receipt ~base_path ~keeper_name
+      (receipt : Keeper_event_queue_state.transition_receipt) =
+  let source = Keeper_event_queue_state.transition_source receipt.Keeper_event_queue_state.transition in
+  match source.Keeper_event_queue.payload with
+  | Keeper_event_queue.Schedule_due _ ->
+    let occurrence_id = source.post_id in
+    let path = schedule_occurrence_receipt_path ~base_path ~keeper_name ~occurrence_id in
+    let ( let* ) = Result.bind in
+    let* previous =
+      schedule_occurrence_receipt_result ~base_path ~keeper_name ~occurrence_id
+    in
+    let compact = Keeper_event_queue_state.durable_of_projected_receipt receipt in
+    (match previous with
+     | Some previous ->
+       (match compact with
+        | Keeper_event_queue_state.Projected_witness witness when previous = witness -> Ok ()
+        | Keeper_event_queue_state.Projected_witness _
+        | Keeper_event_queue_state.Current_receipt _ ->
+          Error (Printf.sprintf "schedule occurrence receipt conflicts at %s" path))
+     | None ->
+       let* () =
+         try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn -> Error (Printf.sprintf "schedule occurrence receipt directory failed at %s: %s" path (Printexc.to_string exn))
+       in
+       let text =
+         Keeper_event_queue_state.durable_disposition_to_yojson compact
+         |> Yojson.Safe.to_string
+       in
+       (match Fs_compat.save_file_atomic_strict_staged path text with
+        | Ok () -> Ok ()
+        | Error error ->
+          let detail = Fs_compat.atomic_replace_failure_to_string error in
+          (match error.stage with
+           | Fs_compat.Before_rename ->
+             Error (Printf.sprintf "schedule occurrence receipt write failed at %s: %s" path detail)
+           | Fs_compat.After_rename ->
+             Error (Printf.sprintf "schedule occurrence receipt may be written at %s; inspect before retry: %s" path detail))))
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Bootstrap
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Ask_answered _
+  | Keeper_event_queue.Completion_authority_rejected _
+  | Keeper_event_queue.Task_outcome _
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Workspace_message _
+  | Keeper_event_queue.Delegate_completed _
+  | Keeper_event_queue.Composition_completed _ -> Ok ()
+;;
+
 let base_fields ~record_kind ~event_id ~keeper_name ~recorded_at =
   [ "schema", `String schema
   ; "record_kind", `String record_kind
@@ -455,6 +559,32 @@ let after_ledger_append_hook :
 
 let after_ledger_append_hook_mutex = Stdlib.Mutex.create ()
 
+(* #38527: the retention predicate for a retiring transition's prior receipt.
+   A durable paused-work disposition receipt keyed by the same operation id is
+   the standing asker that can still re-ask it by
+   [prior_disposition_by_operation_id]; anything else (every turn-completion
+   ack, every superseded-occurrence cancellation) has no asker and is dropped.
+   One existence stat per transition, under the owner lock, in the same layer
+   that already owns the outbox append -- the reaction ledger this module
+   writes is where a dropped receipt's delivery stays answerable. *)
+let transition_prior_receipt_has_standing_asker
+      ~base_path
+      ~keeper_name
+      (receipt : Keeper_event_queue_state.transition_receipt)
+  =
+  let operator_operation_id =
+    match receipt.transition with
+    | Keeper_event_queue_state.Cancel_accepted cancellation ->
+        cancellation.operator_operation_id
+    | Transfer_accepted transfer -> transfer.operator_operation_id
+    | Ack_source_terminal terminal -> terminal.operator_operation_id
+  in
+  Keeper_paused_work_disposition_receipt.durable_receipt_exists
+    ~masc_root:(Common.masc_dir_from_base_path ~base_path)
+    ~keeper_name
+    ~operator_operation_id
+;;
+
 let project_event_queue_transition_outbox_result
       ~base_path
       ~keeper_name
@@ -462,7 +592,11 @@ let project_event_queue_transition_outbox_result
   =
   let ( let* ) = Result.bind in
   Keeper_event_queue_persistence.project_transition_outbox_result
+    ~retain_previous:(transition_prior_receipt_has_standing_asker
+                       ~base_path
+                       ~keeper_name)
     ~append_before_retire:(fun
+        (state : Keeper_event_queue_state.t)
         (entry : Keeper_event_queue_state.outbox_entry)
       ->
       let* () =
@@ -514,13 +648,25 @@ let project_event_queue_transition_outbox_result
                     (Printexc.to_string exn)))
         in
         let* () = append_sources 0 stimuli in
-        (match Atomic.get after_ledger_append_hook with
-         | None -> Ok ()
-         | Some hook -> hook ()))
+        let* () =
+          match Atomic.get after_ledger_append_hook with
+          | None -> Ok ()
+          | Some hook -> hook ()
+        in
+        (* The prior receipt is about to leave [last_transition]. Its ledger
+           append already succeeded in an earlier projection; commit a small
+           exact-id receipt before this owner snapshot can forget it. A
+           failed write keeps the outbox, so replay can finish this step. *)
+        match Keeper_event_queue_state.last_transition state with
+        | None -> Ok ()
+        | Some previous ->
+          save_schedule_occurrence_receipt ~base_path ~keeper_name previous)
     ~base_path
     ~keeper_name
 
 module For_testing = struct
+  let schedule_occurrence_receipt_path = schedule_occurrence_receipt_path
+
   let with_after_ledger_append ~after_ledger_append f =
     Stdlib.Mutex.lock after_ledger_append_hook_mutex;
     let previous =

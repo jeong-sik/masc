@@ -47,7 +47,10 @@ type descriptor
 val ordinary_descriptor :
   ?call_effect:(Yojson.Safe.t -> call_effect) -> Tool_contract.execution_mode -> descriptor
 
-(** An ordinary tool whose admission is decided per call input.
+(** An ordinary tool whose admission is decided per call input. The
+    predicate proves the input read-only, so the same predicate is the tool's
+    {!call_effect}: an input it accepts is [Read_only], every other input
+    [Effect_possible].
 
     @since 0.233.0 *)
 val ordinary_descriptor_concurrent_when : (Yojson.Safe.t -> bool) -> descriptor

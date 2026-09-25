@@ -37,10 +37,13 @@ type descriptor =
 let ordinary_descriptor ?(call_effect = fun _ -> Effect_possible) execution_mode =
   Ordinary_descriptor { admission = Static execution_mode; call_effect }
 
+(* One predicate, one fact: an input it proves read-only is both admitted
+   concurrently and certified read-only for retry. *)
 let ordinary_descriptor_concurrent_when proves_read_only =
   Ordinary_descriptor
     { admission = Concurrent_when proves_read_only
-    ; call_effect = (fun _ -> Effect_possible)
+    ; call_effect =
+        (fun input -> if proves_read_only input then Read_only else Effect_possible)
     }
 ;;
 

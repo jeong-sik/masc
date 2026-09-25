@@ -41,8 +41,6 @@ let enter_atom_count_exceptions =
     "Keeper detail", 0
   ; (* A roster with a cursor and nothing the cursor opens. *)
     "Config / Runtime / Clients", 0
-  ; (* A scrolling reading, not a row list. *)
-    "Config / Tools", 0
   ; (* Two readings a Keeper detail drills into: [j/k] scrolls the text and
        there is no row under a cursor for Enter to open. *)
     "Keepers / Logs", 0
@@ -518,7 +516,7 @@ let test_schedule_update_form_preserves_exact_editable_definition () =
    can drift to any footer at all without a test noticing. *)
 let test_tools_footer_carries_the_keeper_axis () =
   check str "tools names the effective Keeper switch"
-    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [ / ]:Keeper  c / C:new Skill  e:edit Skill  Esc:config  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [ / ]:Keeper  Enter:evidence  c / C:new Skill  e:edit Skill  Esc:config  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Tools)
 
 let test_resources_footer_steps_through_detail () =

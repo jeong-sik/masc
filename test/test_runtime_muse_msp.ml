@@ -178,6 +178,18 @@ let test_capability_handshake () =
     "granted"
     true
     (init.granted_capabilities = [ Msp.Session_list_stream ]);
+  check
+    string
+    "corpus fingerprint"
+    Msp.corpus_schema_fingerprint
+    init.schema_fingerprint;
+  let other_version =
+    Yojson.Safe.from_string
+      {|{"serverInfo":{"name":"m","version":"9"},"userAgent":"m","museHome":"/h","schema":{"version":2,"fingerprint":"sha256:x"},"grantedCapabilities":[]}|}
+  in
+  (match Msp.parse_initialize_result other_version with
+   | Ok _ -> fail "a schema version other than 1 must be refused"
+   | Error _ -> ());
   let frame =
     Msp.initialize_request
       ~id:1
@@ -235,7 +247,9 @@ let test_approval_round_trip () =
           ~id:9
           ~command_id:"018f6a2a-3333-7abc-8def-00000000d001"
           approval
-          ~choice_id:"allow_session"));
+          (List.find
+             (fun (c : Msp.approval_choice) -> c.choice_id = "allow_session")
+             approval.choices)));
   (* The corpus answers a string request id; the codec reads it as one. *)
   check
     bool

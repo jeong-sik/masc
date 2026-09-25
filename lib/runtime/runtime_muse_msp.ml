@@ -381,6 +381,12 @@ let parse_initialize_result json =
   let* muse_home = required_string stage "museHome" fields in
   let* schema = required_member stage "schema" fields in
   let* schema = assoc_at stage schema in
+  let* schema_version = required_int stage "version" schema in
+  let* () =
+    if schema_version = 1
+    then Ok ()
+    else fail stage (Printf.sprintf "MSP schema version %d is not v1" schema_version)
+  in
   let* schema_fingerprint = required_string stage "fingerprint" schema in
   let* granted_capabilities =
     match List.assoc_opt "grantedCapabilities" fields with
@@ -394,6 +400,10 @@ let parse_initialize_result json =
     | None -> fail stage "missing field \"grantedCapabilities\""
   in
   Ok { server_version; user_agent; muse_home; schema_fingerprint; granted_capabilities }
+;;
+
+let corpus_schema_fingerprint =
+  "sha256:c8d1a2a1866814e220fd396d382a9a75861412feee884b5021b2ee359bd3dc59"
 ;;
 
 type session =
@@ -497,9 +507,11 @@ let parse_turn_error stage fields =
   Ok ({ kind = turn_error_kind_of_string kind; message; retryable } : turn_error)
 ;;
 
-(* [error] is present iff [terminal] is "failed" (tdd SS4.5.1); a failed
-   terminal without one is a host that broke its own contract, so it is
-   refused rather than filled in. *)
+(* A "failed" terminal must carry [error] (tdd SS4.5.1); one without it is a
+   host that broke its own contract, so it is refused rather than filled
+   in. The schema keeps [error] optional on the other terminals, so an
+   [error] beside "completed" or "cancelled" is not read: the terminal
+   decides the outcome. *)
 let parse_terminal stage fields =
   let* terminal = required_string stage "terminal" fields in
   let* error = optional_assoc stage "error" fields in
@@ -869,7 +881,12 @@ let parse_server_request ~method_ params =
   | _ -> Ok (Unhandled_server_request { method_ })
 ;;
 
-let approval_decide_request ~id ~command_id (approval : approval_request) ~choice_id =
+let approval_decide_request
+      ~id
+      ~command_id
+      (approval : approval_request)
+      (choice : approval_choice)
+  =
   request
     ~id
     ~method_:"approval/decide"
@@ -881,7 +898,7 @@ let approval_decide_request ~id ~command_id (approval : approval_request) ~choic
           [ "approvalId", `String approval.requirement.requirement_approval_id
           ; "sourceIndex", `Int approval.requirement.source_index
           ] )
-    ; "choiceId", `String choice_id
+    ; "choiceId", `String choice.choice_id
     ]
 ;;
 

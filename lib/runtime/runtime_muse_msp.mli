@@ -200,6 +200,15 @@ type initialize_result =
   }
 
 val parse_initialize_result : Yojson.Safe.t -> (initialize_result, error) result
+(** Refuses a [schema.version] other than 1: this codec reads MSP v1 only,
+    and the SDK is a pre-1.0 developer preview, so a host that moved on is
+    named at the handshake rather than by a missing field mid-turn. *)
+
+val corpus_schema_fingerprint : string
+(** The stable-surface fingerprint of the conformance corpus this codec is
+    tested against (muse-code-sdk a7c10c5). A host that reports another one
+    still speaks v1, but its frames were not the ones proven here; the
+    process client reports the difference rather than refusing it. *)
 
 type session =
   { session_id : string
@@ -415,9 +424,11 @@ val approval_decide_request
   :  id:int
   -> command_id:string
   -> approval_request
-  -> choice_id:string
+  -> approval_choice
   -> Yojson.Safe.t
-(** Decides [approval_request] with one of its own [choices]. The request's
+(** Decides [approval_request] with one of its own [choices]; taking the
+    choice rather than its id keeps a choice the host never offered out of
+    reach. The request's
     [requirement] is sent back unchanged: MSP uses it to guard against a
     decision landing on a later stage of the approval. *)
 

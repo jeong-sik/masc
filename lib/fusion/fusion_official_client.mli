@@ -2,7 +2,7 @@
 
     Fusion panels are fanned out through {!Agent_core.Async_agent.all}, which
     can only drive [Runtime_execution.Agent_core] runtimes. A panelist naming a
-    Claude Code / Codex / Antigravity runtime therefore never produced an answer:
+    Claude Code / Codex / Antigravity / Muse runtime therefore never produced an answer:
     a panel made only of them ended in [Panels_unavailable], and a mixed panel
     completed on quorum while those panelists silently contributed nothing.
 
@@ -64,7 +64,7 @@ val run_panelist
     timeout. It does not move [admission_timeout_s], which bounds waiting for
     admission rather than the answer.
 
-    On all three clients the turn timeout is the longest silence allowed
+    On all four clients the turn timeout is the longest silence allowed
     between stream messages, not a whole-turn limit: a client that keeps
     streaming outlives it, bounded only by the adapter's wall-clock ceiling
     (left at its default here). On Codex the window is suspended while a tool
@@ -74,8 +74,9 @@ val run_panelist
 
     [output_schema] is a JSON Schema the client holds its own answer to. Every
     official client has a channel for one and no two are the same shape:
-    [--json-schema] on the Claude and Antigravity CLIs, [outputSchema] on the
-    Codex v2 [turn/start] request. On the two CLIs the mechanism is validation
+    [--json-schema] on the Claude and Antigravity CLIs, [--output-schema] on
+    the Muse CLI, [outputSchema] on the
+    Codex v2 [turn/start] request. On the three CLIs the mechanism is validation
     with a re-prompt, not constrained decoding, and
     the answer returned here is then the validated value rather than the
     narrated text: the Antigravity result event was measured on 2026-08-30
@@ -109,6 +110,7 @@ type failure =
   | Claude_failure of Runtime_claude_code.error
   | Claude_admission_failure of Runtime_claude_code.error
   | Antigravity_failure of Runtime_antigravity.error
+  | Muse_failure of Runtime_muse.error
 
 val failure_detail : runtime_id:string -> failure -> string
 (** The adapter's own failure text, prefixed with [runtime_id]. A
@@ -140,4 +142,7 @@ val run_with_images
     through their native transports. Antigravity rejects nonempty image input
     and, having no system-prompt channel, gets a nonempty [system_prompt]
     framed into its input ({!Antigravity_input_frame}); a missing frame label
-    asset is a [Setup_failure]. [model] is the transport's response identity. *)
+    asset is a [Setup_failure]. Muse likewise rejects panel image input (the
+    CLI takes image files, the panel holds bytes) and likewise gets a nonempty
+    [system_prompt] framed into its input. [model] is the transport's response
+    identity. *)

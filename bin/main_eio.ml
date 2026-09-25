@@ -2246,6 +2246,11 @@ let runtime_probe_cmd_exit base_path runtime_id =
               Printf.eprintf "runtime %S (antigravity) exposes no login probe\n"
                 runtime_id;
               3
+          | Runtime_execution.Muse_cli _ ->
+              print_string "unsupported\n";
+              Printf.eprintf "runtime %S (muse) exposes no login probe\n"
+                runtime_id;
+              3
           | Runtime_execution.Claude_code exec ->
               Eio_main.run @@ fun env ->
               let bound =

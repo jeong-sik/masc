@@ -178,6 +178,35 @@ let antigravity_prompt ~runtime_id ~system_prompt ~prompt =
            (Antigravity_input_frame.current_goal_label ())))
 ;;
 
+let muse_config ~base_dir ~runtime_id ~override_s ~output_schema
+  (execution : Runtime_execution.muse_cli)
+  : Runtime_muse.config
+  =
+  { cli_path = execution.cli_path
+  ; cwd = base_dir
+  ; model = execution.model
+  ; reasoning_effort = None
+  (* A panelist answers a question; nothing can approve a prompt mid-panel,
+     so the turn runs unaudited. This is the fusion analogue of the keeper
+     path's Yolo-only admission for native-full. *)
+  ; approval_mode = Runtime_muse.Never
+  ; output_schema
+  ; admission_timeout_s = execution.timeout_s
+  ; timeout_s =
+      resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
+  ; wall_clock_ceiling_s = None
+  }
+;;
+
+(* Muse has no system-prompt channel. Like the Antigravity panel path, a
+   one-shot turn frames nonempty instructions at the head of the input so
+   the group prompt reaches the model. *)
+let muse_prompt ~system_prompt ~prompt =
+  match system_prompt with
+  | None -> prompt
+  | Some instructions -> instructions ^ "\n\n" ^ prompt
+;;
+
 type image_input = { media_type : string; base64_data : string }
 type response = { text : string; model : string }
 type failure =
@@ -186,6 +215,7 @@ type failure =
   | Claude_failure of Runtime_claude_code.error
   | Claude_admission_failure of Runtime_claude_code.error
   | Antigravity_failure of Runtime_antigravity.error
+  | Muse_failure of Runtime_muse.error
 
 let failure_detail ~runtime_id = function
   | Setup_failure failure -> Fusion_agent_core.panel_failure_text failure
@@ -195,6 +225,8 @@ let failure_detail ~runtime_id = function
     Printf.sprintf "%s: %s" runtime_id (Runtime_claude_code.error_to_string error)
   | Antigravity_failure error ->
     Printf.sprintf "%s: %s" runtime_id (Runtime_antigravity.error_to_string error)
+  | Muse_failure error ->
+    Printf.sprintf "%s: %s" runtime_id (Runtime_muse.error_to_string error)
 ;;
 
 (* 세 어댑터 모두 자기 [Timeout] 갈래를 갖는다. 그것을 문자열로 접으면 Fusion
@@ -210,6 +242,8 @@ let panel_failure ~runtime_id = function
   | Claude_failure error | Claude_admission_failure error -> provider_error ~runtime_id (Runtime_claude_code.error_to_string error)
   | Antigravity_failure (Runtime_antigravity.Timeout _) -> Fusion_types.Timeout
   | Antigravity_failure error -> provider_error ~runtime_id (Runtime_antigravity.error_to_string error)
+  | Muse_failure (Runtime_muse.Timeout _) -> Fusion_types.Timeout
+  | Muse_failure error -> provider_error ~runtime_id (Runtime_muse.error_to_string error)
 
 
 let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?timeout_s ?output_schema ~prompt () =
@@ -313,6 +347,25 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
      | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model }
      | Error error ->
        Error (Antigravity_failure error))
+  | Runtime_execution.Muse_cli _ when not (List.is_empty images) ->
+    Error (Setup_failure (provider_error ~runtime_id "Muse panel path does not carry image input: the CLI takes image files and the panel holds bytes"))
+  | Runtime_execution.Muse_cli execution ->
+    let config =
+      muse_config ~base_dir ~runtime_id ~override_s:timeout_s ~output_schema execution
+    in
+    let model =
+      match execution.model with
+      | Some model -> model
+      | None -> "muse"
+    in
+    (match
+       Runtime_muse.run_turn ~mgr ~clock ~cwd config
+         ~prompt:(muse_prompt ~system_prompt ~prompt)
+         ~images:[]
+     with
+     | Ok (result : Runtime_muse.turn_result) -> succeeded { text = result.text; model }
+     | Error error ->
+       Error (Muse_failure error))
 ;;
 
 let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema ~prompt () =

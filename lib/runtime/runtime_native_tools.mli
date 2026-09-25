@@ -77,6 +77,7 @@ val valid_posture_strings : string list
 val claude_code_default : posture
 val codex_default : posture
 val antigravity_default : posture
+val muse_default : posture
 
 val claude_code_read_tool_names : string list
 (** Built-in Claude Code tools that observe without effect. *)

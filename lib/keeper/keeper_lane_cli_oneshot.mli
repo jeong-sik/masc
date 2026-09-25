@@ -63,9 +63,10 @@ type runner =
 
     [output_schema] is the caller's own domain schema, handed to whatever
     channel the transport has so the client holds its own answer to the shape
-    instead of only being asked for it in prose. All three official clients
-    have one, by three different routes: [--json-schema] on Claude and
-    Antigravity, [outputSchema] on the Codex v2 [turn/start] request. *)
+    instead of only being asked for it in prose. All four official clients
+    have one, by four different routes: [--json-schema] on Claude and
+    Antigravity, [--output-schema] on Muse, [outputSchema] on the Codex v2
+    [turn/start] request. *)
 
 val run
   :  ?runner:runner

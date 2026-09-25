@@ -1,13 +1,15 @@
-type client = Codex | Claude | Antigravity
-let name = function Codex -> "codex" | Claude -> "claude" | Antigravity -> "agy"
+type client = Codex | Claude | Antigravity | Muse
+let name = function Codex -> "codex" | Claude -> "claude" | Antigravity -> "agy" | Muse -> "muse"
 let source_url = function
   | Codex -> "https://developers.openai.com/codex/cli/"
   | Claude -> "https://code.claude.com/docs/en/installation"
   | Antigravity -> "https://antigravity.google/docs/cli/install/"
+  | Muse -> "https://dev.meta.ai/docs/muse-code"
 let script = function
   | Codex -> "https://chatgpt.com/codex/install.sh", "sh"
   | Claude -> "https://claude.ai/install.sh", "bash"
   | Antigravity -> "https://antigravity.google/cli/install.sh", "bash"
+  | Muse -> "https://dev.meta.ai/install.sh", "bash"
 (* An executable regular file at [path], as the path was given. [stat] follows
    a link, so a link to such a file passes; the path returned is the link,
    not its target. The Claude Code installer keeps ~/.local/bin/claude as a
@@ -37,11 +39,11 @@ let path_directories () =
 ;;
 
 (* Where the vendor installer writes the client: CODEX_INSTALL_DIR for Codex
-   when set, else ~/.local/bin for each of the three. *)
+   when set, else ~/.local/bin for each client. *)
 let vendor_directories client =
   match client, Env_config_core.raw_value_opt "CODEX_INSTALL_DIR" with
   | Codex, Some path when String.trim path <> "" -> [ path ]
-  | (Codex | Claude | Antigravity), _ ->
+  | (Codex | Claude | Antigravity | Muse), _ ->
     (match Env_config_core.raw_value_opt "HOME" with
      | Some home -> [ Filename.concat home ".local/bin" ]
      | None -> [])

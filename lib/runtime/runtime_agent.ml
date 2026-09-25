@@ -703,13 +703,15 @@ let apply_runtime_model_input_capabilities
   }
 
 (* A model declaration cannot make its host transport carry a media block.
-   The official-client adapters accept text plus inline images for Codex and
-   Claude, and text only for Antigravity (Keeper_official_client_host). *)
+   The official-client adapters accept text plus inline images for Codex,
+   Claude and Muse, and text only for Antigravity
+   (Keeper_official_client_host). *)
 let apply_execution_input_capabilities execution
     (caps : Llm_provider.Capabilities.capabilities) =
   match execution with
   | Runtime_execution.Agent_core _ -> caps
-  | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _ ->
+  | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
+  | Runtime_execution.Muse_cli _ ->
     { caps with
       supports_multimodal_inputs = false
     ; supports_audio_input = false
@@ -749,7 +751,8 @@ let input_capabilities_of_runtime (rt : Runtime.t) =
       provider_caps_of_config provider_config
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Claude_code _
-    | Runtime_execution.Antigravity_cli _ ->
+    | Runtime_execution.Antigravity_cli _
+    | Runtime_execution.Muse_cli _ ->
       Llm_provider.Capabilities.default_capabilities
   in
   apply_runtime_model_input_capabilities

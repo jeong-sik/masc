@@ -244,7 +244,8 @@ let probe_invocation ~sw ~net ~clock ~now ~runtime_id ~tool ~prompt () =
        (match rt.Runtime.execution with
         | Runtime_execution.Codex_app_server _
         | Runtime_execution.Antigravity_cli _
-        | Runtime_execution.Claude_code _ ->
+        | Runtime_execution.Claude_code _
+        | Runtime_execution.Muse_cli _ ->
           Error (Not_agent_core_lane (Runtime_execution.label rt.Runtime.execution))
         | Runtime_execution.Agent_core _ ->
     (* [_for_turn], not the bare resolver: the bare one yields the provider
@@ -384,7 +385,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
              Error
                (Not_official_client_lane
                   (Runtime_execution.label rt.Runtime.execution))
-           | Runtime_execution.Antigravity_cli _ ->
+           | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_cli _ ->
              Error
                (Tools_only_via_mcp_bridge
                   (Runtime_execution.label rt.Runtime.execution))

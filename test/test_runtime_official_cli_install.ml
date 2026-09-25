@@ -143,11 +143,28 @@ let test_codex_install_dir_replaces_the_vendor_directory () =
     (Install.locate Install.Claude ~command:"claude")
 ;;
 
+let test_muse_is_found_like_the_other_clients () =
+  with_home @@ fun home ->
+  Fs_compat.mkdir_p (Filename.concat home ".local/bin");
+  let muse = Filename.concat home ".local/bin/muse" in
+  executable muse;
+  let empty = Filename.concat home "empty" in
+  Fs_compat.mkdir_p empty;
+  with_path [ empty ] @@ fun () ->
+  check string "client name" "muse" (Install.name Install.Muse);
+  check (option string) "found where the installer wrote it" (Some muse)
+    (Install.locate Install.Muse ~command:"muse");
+  check string "and that is what the runtime spawns" muse
+    (Install.spawn_path Install.Muse ~command:"muse")
+;;
+
 let () =
   run
     "runtime_official_cli_install"
     [ ( "locate"
-      , [ test_case "the vendor directory when PATH has no client" `Quick
+      , [ test_case "muse is found like the other clients" `Quick
+            test_muse_is_found_like_the_other_clients
+        ; test_case "the vendor directory when PATH has no client" `Quick
             test_the_vendor_directory_when_path_has_no_client
         ; test_case "PATH first, as the shell finds it" `Quick
             test_path_first_as_the_shell_finds_it

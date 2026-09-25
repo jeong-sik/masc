@@ -25,6 +25,17 @@ val read_codex :
   (unit, string) result
 (** Read one Codex account and record its windows under [scope]. *)
 
+val read_muse :
+  mgr:_ Eio.Process.mgr ->
+  clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  scope:Runtime_quota_window.scope ->
+  Runtime_execution.muse_cli ->
+  (unit, string) result
+(** Read one Muse subscription over a serve host and record its windows
+    under [scope]. A host that observed nothing records nothing and logs
+    one info line. *)
+
 type http_error
 (** Why one HTTP read recorded nothing. *)
 
@@ -40,6 +51,7 @@ type http_read =
 
 type how =
   | Codex of Runtime_execution.codex_app_server
+  | Muse of Runtime_execution.muse_cli
   | Http of http_read
 
 type readable =
@@ -51,14 +63,18 @@ val read_scopes :
   codex:(scope:Runtime_quota_window.scope ->
          Runtime_execution.codex_app_server ->
          (unit, string) result) ->
+  muse:(scope:Runtime_quota_window.scope ->
+        Runtime_execution.muse_cli ->
+        (unit, string) result) ->
   fetch:(api_key:Llm_provider.Secret.t -> string -> (string, http_error) result) ->
   readable list ->
   unit
-(** Read each scope in order with [codex] or [fetch] (one GET of the
-    declared URL), decode, and record.  A failed or raising read is logged
-    with its scope (and shape) and does not stop the scopes after it; only
-    {!Eio.Cancel.Cancelled} is re-raised.  A read that states no windows logs
-    one info line.  An HTTP read with an empty key fails without a request. *)
+(** Read each scope in order with [codex], [muse] or [fetch] (one GET of
+    the declared URL), decode, and record.  A failed or raising read is
+    logged with its scope (and shape) and does not stop the scopes after
+    it; only {!EioCancel.Cancelled} is re-raised.  A read that states no
+    windows logs one info line.  An HTTP read with an empty key fails
+    without a request. *)
 
 val read_all :
   mgr:_ Eio.Process.mgr ->

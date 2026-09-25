@@ -272,7 +272,7 @@ let probe_body ~base_path ~body =
          ~runtime_id
          ~model
          config)
-  | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_cli _ ->
     error
       Bad_request
       "login_probe_unsupported"

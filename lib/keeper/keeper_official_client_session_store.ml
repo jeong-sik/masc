@@ -2,6 +2,7 @@ type client_kind = Keeper_semantic_execution.official_client_kind =
   | Codex
   | Claude_code
   | Antigravity
+  | Muse
 
 type settlement =
   { session_id : string
@@ -448,12 +449,14 @@ let client_kind_to_string = function
   | Codex -> "codex"
   | Claude_code -> "claude_code"
   | Antigravity -> "antigravity"
+  | Muse -> "muse"
 ;;
 
 let client_kind_of_string = function
   | "codex" -> Ok Codex
   | "claude_code" -> Ok Claude_code
   | "antigravity" -> Ok Antigravity
+  | "muse" -> Ok Muse
   | _ -> Error "unknown official-client kind"
 ;;
 

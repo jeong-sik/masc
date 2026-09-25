@@ -20,11 +20,18 @@ type claude_code =
   ; timeout_s : float
   }
 
+type muse_cli =
+  { cli_path : string
+  ; model : string option
+  ; timeout_s : float
+  }
+
 type t =
   | Agent_core of Llm_provider.Provider_config.t
   | Codex_app_server of codex_app_server
   | Antigravity_cli of antigravity_cli
   | Claude_code of claude_code
+  | Muse_cli of muse_cli
 
 type checkpoint_owner =
   | Masc_agent_core
@@ -36,13 +43,14 @@ type usage_report =
 
 let supports_native_none = function
   | Agent_core _ | Claude_code _ -> true
-  | Codex_app_server _ | Antigravity_cli _ -> false
+  | Codex_app_server _ | Antigravity_cli _ | Muse_cli _ -> false
 
 let model_id = function
   | Agent_core config -> Some config.Llm_provider.Provider_config.model_id
   | Codex_app_server config -> config.model
   | Antigravity_cli config -> Some config.model
   | Claude_code config -> config.model
+  | Muse_cli config -> config.model
 ;;
 
 let label = function
@@ -50,14 +58,15 @@ let label = function
   | Codex_app_server _ -> "codex_app_server"
   | Antigravity_cli _ -> "antigravity_cli"
   | Claude_code _ -> "claude_code"
+  | Muse_cli _ -> "muse_cli"
 ;;
 
 let checkpoint_owner = function
   | Agent_core _ -> Masc_agent_core
-  | Codex_app_server _ | Claude_code _ | Antigravity_cli _ -> Official_client
+  | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_cli _ -> Official_client
 ;;
 
 let usage_report = function
   | Agent_core _ -> Each_agent_core_response
-  | Codex_app_server _ | Claude_code _ | Antigravity_cli _ -> Client_usage_stream
+  | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_cli _ -> Client_usage_stream
 ;;

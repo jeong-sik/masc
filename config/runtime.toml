@@ -826,6 +826,86 @@ supports-image-input = true
 # (developerInstructions). Declared, it windows Start and Resume from the first
 # attempt. The limit counts characters and the window counts bytes, which are
 # never fewer, so the window can only cut short of it.
+[providers.muse_cli]
+display-name = "Muse"
+protocol = "muse-cli"
+command = "muse"
+is-non-interactive = true
+
+# api-name is the Meta Model API model id the CLI resolves `--model`
+# against. muse-spark-1.3 is the documented default ("Recommended for new
+# work", dev.meta.ai/docs/models); the first live turn confirms the CLI
+# still resolves it, and a typed Turn_failed names a rejection.
+# max-context is the documented 1M window. No max-prompt-bytes: the
+# transport sends the whole prompt file and reads no ceiling.
+[models.muse-default]
+api-name = "muse-spark-1.3"
+max-context = 1048576
+tools-support = true
+streaming = true
+turn-timeout-s = 600.0
+
+# The Muse CLI takes image files (--image, repeatable); the keeper path
+# passes the stored files through.
+[models.muse-default.capabilities]
+supports-image-input = true
+
+[muse_cli.muse-default]
+wizard-default = true
+
+# ── Meta Model API (metered HTTP; the CLI above rides a subscription) ─────────
+# OpenAI-compatible Chat Completions at the documented base URL
+# (dev.meta.ai/docs/quickstart: base URL https://api.meta.ai/v1, key
+# MODEL_API_KEY, model muse-spark-1.3). The key is per Meta account from the
+# dev.meta.ai dashboard — a different credential from the CLI's login session.
+# Without MODEL_API_KEY this provider is skipped at boot and reported, like
+# every env-credentialed provider; nothing here fails a keyless install.
+# No exact-body-timeout-s: no exact-output lane points at this provider, and
+# an unmeasured copy of the 1200 s sibling value would be fiction. Setup
+# refuses a muse exact-output slot until a live lane measures one (#38779).
+[providers.muse]
+display-name = "Meta Model API"
+protocol = "openai-compatible-http"
+endpoint = "https://api.meta.ai/v1"
+
+[providers.muse.healthcheck]
+path = "/models"
+
+[providers.muse.credentials]
+type = "env"
+key = "MODEL_API_KEY"
+
+# muse-spark-1.3, the documented default ("Recommended for new work",
+# dev.meta.ai/docs/models). Window is the official 1,048,576 tokens; input
+# modalities per that table are text, image, video, audio (degraded on 1.3)
+# and PDF. tools-support is the documented tool-calling + "multi-step tool"
+# agentic tuning; streaming is the documented SSE stream flag
+# (dev.meta.ai/docs/protocols/chat-completions). thinking-support is
+# deliberately unstated — the API has reasoning-effort levels but the
+# transport the wire preset would read is unprobed, so the dialect decides
+# until a live turn writes the row. No AGENT_CORE catalog row exists for
+# this provider yet, so the projection fallback in runtime_adapter
+# (model_capabilities_override_of_model_spec) builds the contract from this
+# declaration; the capabilities block below is what keeps the startup gate
+# from rejecting an uncatalogued model.
+[models.muse-spark-1-3]
+api-name = "muse-spark-1.3"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+# Image input only: the image-understanding doc covers it, while video has
+# no keeper sender and 1.3 audio is documented-degraded. Absent media flags
+# stay false (fail-closed), never the wire preset.
+[models.muse-spark-1-3.capabilities]
+supports-image-input = true
+
+# House watermarks (glm-coding, kimi_coding carry the same pair); no
+# max-concurrent — the account's rate limits are unmeasured.
+[muse.muse-spark-1-3]
+context-high-water-tokens = 100000
+context-low-water-tokens = 70000
+
 [providers.codex_subscription]
 display-name = "Codex ChatGPT Subscription"
 protocol = "codex-app-server"

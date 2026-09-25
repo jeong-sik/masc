@@ -640,6 +640,11 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
          | Error error ->
            Error
              (Provider_rejected (Runtime_codex_app_server.error_to_string error)))))
+      (* The challenge is a host-declared tool and the reply counts only when
+         it consumed the tool result. The Muse transport takes no dynamic
+         tools, so a prompt-only turn cannot satisfy this contract and is
+         refused instead of reported as verified. *)
+      | Runtime_execution.Muse_cli _ -> Error (Unavailable Unsupported_runtime)
   in
   measure
     ~runtime_id:runtime.id

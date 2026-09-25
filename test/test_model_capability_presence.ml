@@ -61,7 +61,8 @@ let resolved_capabilities runtime_id =
        Provider_tool_support.agent_core_capabilities_of_config provider
      | Runtime_execution.Claude_code _
      | Runtime_execution.Codex_app_server _
-     | Runtime_execution.Antigravity_cli _ ->
+     | Runtime_execution.Antigravity_cli _
+     | Runtime_execution.Muse_cli _ ->
        failf "runtime %s is not an Agent Core binding" runtime_id)
 ;;
 

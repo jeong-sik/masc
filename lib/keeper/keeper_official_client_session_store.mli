@@ -9,6 +9,7 @@ type client_kind = Keeper_semantic_execution.official_client_kind =
   | Codex
   | Claude_code
   | Antigravity
+  | Muse
 
 type settlement =
   { session_id : string

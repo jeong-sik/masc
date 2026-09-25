@@ -106,7 +106,7 @@ val binding_to_provider_config
     concrete provider config.
 
     An official-client command ([claude-code], [codex-app-server],
-    [antigravity-cli]) is spawned from where
+    [antigravity-cli], [muse-cli]) is spawned from where
     {!Runtime_official_cli_install.locate} finds it at this call: PATH first,
     then the vendor installer's directory for the client's own name. A
     command found nowhere is kept as configured; its absence surfaces when
@@ -120,7 +120,8 @@ val binding_to_execution
     {!Runtime_execution.Agent_core}. The exact [codex-app-server] protocol over
     a credential-free CLI transport becomes
     {!Runtime_execution.Codex_app_server}; [claude-code] becomes
-    {!Runtime_execution.Claude_code}; and [antigravity-cli] becomes
-    {!Runtime_execution.Antigravity_cli}. These clients have no supported
+    {!Runtime_execution.Claude_code}; [antigravity-cli] becomes
+    {!Runtime_execution.Antigravity_cli}; and [muse-cli] becomes
+    {!Runtime_execution.Muse_cli}. These clients have no supported
     [disable_parallel_tool_use] control here, so bindings requesting it are
     refused. Other CLI protocols remain rejected. *)

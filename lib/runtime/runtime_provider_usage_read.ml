@@ -23,6 +23,7 @@ type http_read =
 
 type how =
   | Codex of Runtime_execution.codex_app_server
+  | Muse of Runtime_execution.muse_cli
   | Http of http_read
 
 type readable =
@@ -45,6 +46,7 @@ let how_of_runtime (rt : Runtime.t) =
         Http { credential = config.credential_source, config.api_key; usage_read })
       rt.provider.usage_read
   | Runtime_execution.Codex_app_server codex -> Some (Codex codex)
+  | Runtime_execution.Muse_cli muse -> Some (Muse muse)
   | Runtime_execution.Antigravity_cli _ | Runtime_execution.Claude_code _ -> None
 ;;
 
@@ -73,6 +75,35 @@ let read_codex ~mgr ~clock ~cwd ~scope codex =
     Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
     Ok ()
   | Error error -> Error (Runtime_codex_app_server.error_to_string error)
+;;
+
+let read_muse ~mgr ~clock ~cwd ~scope (exec : Runtime_execution.muse_cli) =
+  let bound = Float.min read_timeout_s exec.timeout_s in
+  let config =
+    { (Runtime_muse.default_config ~cwd:".") with
+      cli_path = exec.cli_path
+    ; model = exec.model
+    ; admission_timeout_s = bound
+    ; timeout_s = Some bound
+    }
+  in
+  match Runtime_muse.serve_usage ~mgr ~clock ~cwd config with
+  | Error error -> Error (Runtime_muse.error_to_string error)
+  | Ok None ->
+    Log.Runtime_agent.info
+      "provider usage read for %s (muse serve) stated no windows"
+      (Runtime_quota_window.scope_to_string scope);
+    Ok ()
+  | Ok (Some usage) ->
+    (match
+       Runtime_provider_usage_window.decode_muse_usage_read
+         (`Assoc [ "usage", usage ])
+     with
+     | Error error ->
+       Error (Runtime_provider_usage_window.decode_error_to_string error)
+     | Ok report ->
+       Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
+       Ok ())
 ;;
 
 type http_error =
@@ -185,7 +216,7 @@ let read_http ~fetch ~scope http =
    cancellation passes through.  An HTTP read that raises logs only the
    exception's constructor: the request carried the key, and nothing
    bounds what an HTTP client's exception message quotes. *)
-let read_scope ~codex ~fetch { scope; how } =
+let read_scope ~codex ~muse ~fetch { scope; how } =
   let scope_label = Runtime_quota_window.scope_to_string scope in
   match how with
   | Codex exec ->
@@ -194,6 +225,19 @@ let read_scope ~codex ~fetch { scope; how } =
      | Error detail ->
        Log.Runtime_agent.warn "provider usage read failed for %s: %s" scope_label detail
      | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+     | exception exn ->
+       Log.Runtime_agent.warn
+         "provider usage read raised for %s: %s"
+         scope_label
+         (Printexc.to_string exn))
+  | Muse exec ->
+    (* No prompt is ever sent on this connection, so the exception text
+       cannot quote one; the Codex arm's reasoning applies unchanged. *)
+    (match muse ~scope exec with
+     | Ok () -> ()
+     | Error detail ->
+       Log.Runtime_agent.warn "provider usage read failed for %s: %s" scope_label detail
+     | exception (EioCancel.Cancelled _ as cancelled) -> raise cancelled
      | exception exn ->
        Log.Runtime_agent.warn
          "provider usage read raised for %s: %s"
@@ -217,12 +261,15 @@ let read_scope ~codex ~fetch { scope; how } =
          (Printexc.exn_slot_name exn))
 ;;
 
-let read_scopes ~codex ~fetch readables = List.iter (read_scope ~codex ~fetch) readables
+let read_scopes ~codex ~muse ~fetch readables =
+  List.iter (read_scope ~codex ~muse ~fetch) readables
+;;
 
 let read_all ~mgr ~net ~clock ~cwd =
   let codex ~scope exec = read_codex ~mgr ~clock ~cwd ~scope exec in
+  let muse ~scope exec = read_muse ~mgr ~clock ~cwd ~scope exec in
   let fetch ~api_key url = get_usage ~net ~clock ~api_key url in
-  read_scopes ~codex ~fetch (readable_scopes ())
+  read_scopes ~codex ~muse ~fetch (readable_scopes ())
 ;;
 
 (* Scopes a background read is running for. Keepers sharing one account are

@@ -42,6 +42,7 @@ type source =
   | Zai_quota_limit_read  (** Z.AI [GET /api/monitor/usage/quota/limit]. *)
   | Kimi_coding_usages_read  (** Kimi [GET /coding/v1/usages]. *)
   | Ollama_usage_read  (** Ollama [GET https://ollama.com/api/usage]. *)
+  | Muse_usage_read  (** Muse [usage/read] on a serve host. *)
 
 type window =
   { limit_id : string option
@@ -142,6 +143,17 @@ val decode_ollama_usage : Yojson.Safe.t -> (report, decode_error) result
     [limits.weekly.usage] a {!Seven_day} window, each a {!Fraction} that
     must be within [0..1].  No
     reset time is stated. *)
+
+val decode_muse_usage_read : Yojson.Safe.t -> (report, decode_error) result
+(** Muse [usage/read] result.  The top-level [usage] object is optional: a
+    bare [{}] states no windows, which is the host's truthful absence, not
+    an error.  A present [usage.window] is a {!Five_hour} window when its
+    [windowDurationMins] is exactly 300 and a {!Duration_minutes} window
+    otherwise; [usage.weekly] is a {!Seven_day} window.  Both carry a
+    {!Percent} that is not clamped (over-quota values above 100 are valid)
+    and a [resetsAtMs] normalized to epoch seconds.  A present window with
+    a missing counter or stamp is a {!Missing_field}: a half-stated window
+    is malformed, not half-reported. *)
 
 type recorded =
   { window : window

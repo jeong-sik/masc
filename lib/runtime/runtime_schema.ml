@@ -18,21 +18,25 @@ type api_format =
   | Codex_app_server_runtime
   | Antigravity_cli_runtime
   | Claude_code_runtime
+  | Muse_cli_runtime
 [@@deriving show, eq]
 
 (* The runtimes whose admission reads [max-prompt-bytes]: Claude Code cuts the
    history it seeds a start turn with to it, Antigravity refuses to send a
    prompt above it, and Codex windows its Start and Resume to it from the
-   first attempt when one is declared (#37353). No other runtime reads the
-   field, so a declaration there bounds nothing the provider checks. Every arm
-   is listed so a new format has to be decided here. *)
+   first attempt when one is declared (#37353). Muse sends the whole prompt
+   file and has no windowing yet, so it does not read the field. No other
+   runtime reads the field, so a declaration there bounds nothing the
+   provider checks. Every arm is listed so a new format has to be decided
+   here. *)
 let api_format_reads_max_prompt_bytes = function
   | Claude_code_runtime | Antigravity_cli_runtime | Codex_app_server_runtime -> true
   | Messages_api
   | Chat_completions_api
   | Ollama_api
   | Gemini_api
-  | Vertex_gemini_api -> false
+  | Vertex_gemini_api
+  | Muse_cli_runtime -> false
 ;;
 
 (** Which vendor dialect an endpoint speaks. [protocol] names the request

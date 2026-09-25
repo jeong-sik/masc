@@ -97,6 +97,11 @@ let resolve_runtime_providers ~runtime_id () =
         (Printf.sprintf
            "runtime %S is owned by antigravity-cli, not the Agent Core"
            rt.Runtime.id)
+    | Runtime_execution.Muse_cli _ ->
+      Error
+        (Printf.sprintf
+           "runtime %S is owned by muse-cli, not the Agent Core"
+           rt.Runtime.id)
   in
   if String.equal runtime_id "" then
     match Runtime.get_default_runtime () with

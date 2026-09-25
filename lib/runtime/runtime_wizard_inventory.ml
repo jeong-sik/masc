@@ -68,7 +68,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
       let supported =
         match provider.api_format with
         | Runtime_schema.Antigravity_cli_runtime | Messages_api | Chat_completions_api | Ollama_api
-        | Codex_app_server_runtime | Claude_code_runtime
+        | Codex_app_server_runtime | Claude_code_runtime | Muse_cli_runtime
         | Gemini_api | Vertex_gemini_api -> true
       in
       let fields =

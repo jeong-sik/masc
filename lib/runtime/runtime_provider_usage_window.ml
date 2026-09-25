@@ -85,6 +85,7 @@ let source_to_string = function
   | Zai_quota_limit_read -> "zai.quota_limit"
   | Kimi_coding_usages_read -> "kimi_coding.usages"
   | Ollama_usage_read -> "ollama.usage"
+  | Muse_usage_read -> "muse.usage_read"
 ;;
 
 let ( let* ) = Result.bind
@@ -597,6 +598,49 @@ let decode_ollama_usage json =
   distinct_windows
     ~path
     { source = Ollama_usage_read; windows = List.filter_map Fun.id [ session; weekly ] }
+;;
+
+let muse_window ~path name fields =
+  let* entry = optional_object ~path name fields in
+  match entry with
+  | None -> Ok None
+  | Some (path, entry_fields) ->
+    let* used = required_as int_at ~path "usedPercent" entry_fields in
+    let* resets_ms = required_as int_at ~path "resetsAtMs" entry_fields in
+    let* minutes =
+      match name with
+      | "weekly" -> Ok None
+      | _ ->
+        required_as int_at ~path "windowDurationMins" entry_fields
+        |> Result.map Option.some
+    in
+    let kind =
+      match minutes with
+      | None -> Seven_day
+      | Some 300 -> Five_hour
+      | Some minutes -> Duration_minutes minutes
+    in
+    Ok
+      (Some
+         { limit_id = None
+         ; kind
+         ; utilization = Percent used
+         ; resets_at = Some (resets_ms / 1000)
+         })
+;;
+
+let decode_muse_usage_read json =
+  let path = "muse-usage-read" in
+  let* fields = fields_at ~path json in
+  let* entry = optional_object ~path "usage" fields in
+  match entry with
+  | None -> Ok { source = Muse_usage_read; windows = [] }
+  | Some (path, usage_fields) ->
+    let* window = muse_window ~path "window" usage_fields in
+    let* weekly = muse_window ~path "weekly" usage_fields in
+    distinct_windows
+      ~path
+      { source = Muse_usage_read; windows = List.filter_map Fun.id [ window; weekly ] }
 ;;
 
 type recorded =

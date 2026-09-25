@@ -54,6 +54,8 @@ let choice_of_api_format : Runtime_schema.api_format -> (Runtime_setup_spec.choi
   | Runtime_schema.Codex_app_server_runtime -> Ok Runtime_setup_spec.Codex
   | Runtime_schema.Claude_code_runtime -> Ok Runtime_setup_spec.Claude_code
   | Runtime_schema.Antigravity_cli_runtime -> Ok Runtime_setup_spec.Antigravity
+  (* Web setup does not drive Muse yet; TOML-declared muse-cli providers work. *)
+  | Runtime_schema.Muse_cli_runtime -> Error Unsupported_connection
   | Runtime_schema.Gemini_api | Runtime_schema.Vertex_gemini_api -> Error Unsupported_connection
 let choice config ~id ~protocol =
   match declared_provider config id with

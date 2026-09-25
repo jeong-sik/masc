@@ -94,7 +94,8 @@ let vision_runtime_candidates ~now =
        else match rt.Runtime.execution with
        | Runtime_execution.Agent_core config -> Some (rt.id, rt, Api config)
        | Runtime_execution.Codex_app_server _
-       | Runtime_execution.Claude_code _ -> Some (rt.id, rt, Official_client)
+       | Runtime_execution.Claude_code _
+       | Runtime_execution.Muse_cli _ -> Some (rt.id, rt, Official_client)
        | Runtime_execution.Antigravity_cli _ -> None)
 
 let vision_runtime_ids ~now : string list =
@@ -507,6 +508,13 @@ let official_failure_can_advance : Fusion_official_client.failure -> bool = func
      | Turn_transport_interrupted _ | Context_window_exceeded _ | Turn_failed _
      | Turn_failed_with_observation _ | Stopped_by_host _ | Quota_blocked _
      | Process_exited { turn_admitted = true; _ } | Timeout _ -> false)
+  | Muse_failure error ->
+    (match error with
+     | Runtime_muse.Invalid_config _ | Runtime_muse.Spawn_failed _
+     | Runtime_muse.Process_exited { turn_admitted = false; _ } -> true
+     | Runtime_muse.Protocol_error _ | Runtime_muse.Turn_failed _
+     | Runtime_muse.Process_exited { turn_admitted = true; _ }
+     | Runtime_muse.Timeout _ -> false)
 ;;
 
 let outcome_of_official_failure ~runtime_id failure =
@@ -525,7 +533,10 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
       | Quota_blocked { tool_effect_attempted = false; response_emitted = false; _ }
       | Context_window_exceeded { tool_effect_attempted = false; response_emitted = false; _ }
       | Turn_failed_with_observation { tool_effect_attempted = false; response_emitted = false; _ }) -> Proven_pre_effect
-  | Codex_failure _ | Claude_failure _ | Antigravity_failure _ -> Effect_outcome_unknown
+  | Muse_failure (Invalid_config _ | Spawn_failed _
+      | Process_exited { turn_admitted = false; _ }) -> Proven_pre_effect
+  | Codex_failure _ | Claude_failure _ | Antigravity_failure _ | Muse_failure _ ->
+    Effect_outcome_unknown
 ;;
 
 (* A 402 states the binding's account cannot pay. The keeper walk records the

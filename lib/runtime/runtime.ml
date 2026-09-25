@@ -69,7 +69,8 @@ let validate_dispatch_credential
   match runtime.execution with
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Muse_cli _ ->
     Ok ()
   | Runtime_execution.Agent_core _ ->
     let requirement =
@@ -297,7 +298,8 @@ let quota_scope_of_materialized
         provider.credentials
     | Runtime_execution.Antigravity_cli _ -> provider.credentials
     | Runtime_execution.Codex_app_server _
-    | Runtime_execution.Claude_code _ ->
+    | Runtime_execution.Claude_code _
+    | Runtime_execution.Muse_cli _ ->
       (* Official clients own subscription login. A registry API-key default
          with the same provider label is a different account authority. *)
       None
@@ -357,7 +359,8 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
                       | Error reason -> Runtime_candidate_backpressure.Http_binding_unavailable reason)
                  | Runtime_execution.Codex_app_server _
                  | Runtime_execution.Claude_code _
-                 | Runtime_execution.Antigravity_cli _ -> Runtime_candidate_backpressure.Official_client_binding
+                 | Runtime_execution.Antigravity_cli _
+                 | Runtime_execution.Muse_cli _ -> Runtime_candidate_backpressure.Official_client_binding
                in
                Runtime_candidate_backpressure.create_candidate ~binding)
            ; quota_scope = quota_scope_of_materialized ~provider ~execution
@@ -1071,7 +1074,8 @@ let capabilities_for_runtime (rt : t) =
     Llm_provider.Provider_config.capabilities_for_config_model provider_config
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _ -> None
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Muse_cli _ -> None
 ;;
 
 type max_context_source =
@@ -1342,7 +1346,8 @@ let exact_slot_body_deadline_gaps_of
        | Runtime_execution.Agent_core _, Some (_ : float) -> None
        | ( Runtime_execution.Codex_app_server _
          | Runtime_execution.Claude_code _
-         | Runtime_execution.Antigravity_cli _ ), (Some _ | None) -> None)
+         | Runtime_execution.Antigravity_cli _
+         | Runtime_execution.Muse_cli _ ), (Some _ | None) -> None)
   in
   match target_source with
   | Replacement_catalog_targets { path = _ } -> []
@@ -1408,7 +1413,8 @@ let missing_runtime_model_capabilities ~(config_path : string) (runtimes : t lis
          match r.execution, capabilities_for_runtime r with
          | ( Runtime_execution.Codex_app_server _
            | Runtime_execution.Claude_code _
-           | Runtime_execution.Antigravity_cli _ ), _ -> None
+           | Runtime_execution.Antigravity_cli _
+           | Runtime_execution.Muse_cli _ ), _ -> None
          | Runtime_execution.Agent_core _, Some _ -> None
          | Runtime_execution.Agent_core provider_config, None ->
            let provider_label =
@@ -1975,7 +1981,8 @@ let exact_output_targets runtimes =
             } : Agent_core.Exact_output.declared_target)
        | Runtime_execution.Codex_app_server _
        | Runtime_execution.Claude_code _
-       | Runtime_execution.Antigravity_cli _ -> None)
+       | Runtime_execution.Antigravity_cli _
+       | Runtime_execution.Muse_cli _ -> None)
     runtimes
 ;;
 
@@ -2247,7 +2254,8 @@ let verifier_runtime_admission (runtime : t) =
   | Runtime_execution.Claude_code _ when runtime.model.tools_support -> Ok ()
   | Runtime_execution.Claude_code _ ->
     Error (runtime.id ^ ": completion verifier requires model tools-support")
-  | Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Muse_cli _ ->
     Error (runtime.id ^ ": completion verifier requires native-tool suppression, which this client does not support")
 ;;
 
@@ -2268,7 +2276,8 @@ let verifier_cli_slot_admission_in ~runtimes ~lane_ids ~runtime_id =
      | Runtime_execution.Agent_core _ ->
        Error (runtime_id ^ ": verifier CLI slot must name an official client")
      | Runtime_execution.Claude_code _ | Runtime_execution.Codex_app_server _
-     | Runtime_execution.Antigravity_cli _ -> verifier_runtime_admission runtime)
+     | Runtime_execution.Antigravity_cli _
+     | Runtime_execution.Muse_cli _ -> verifier_runtime_admission runtime)
 ;;
 
 let verifier_cli_slot_admission ~runtime_id =
@@ -4464,7 +4473,8 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           | Runtime_execution.Agent_core _ -> [ runtime_id ], []
           | Runtime_execution.Codex_app_server _
           | Runtime_execution.Claude_code _
-          | Runtime_execution.Antigravity_cli _ -> [], [ runtime_id ]
+          | Runtime_execution.Antigravity_cli _
+          | Runtime_execution.Muse_cli _ -> [], [ runtime_id ]
         in
         let next = update_runtime_scalar_text content ~key:"default" ~runtime_id:(Some runtime_id) in
         (* The HTTP runtime chosen here becomes an exact-output slot below, and
@@ -4488,7 +4498,8 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           | Runtime_execution.Agent_core _, None, Replacement_catalog_targets _
           | ( Runtime_execution.Codex_app_server _
             | Runtime_execution.Claude_code _
-            | Runtime_execution.Antigravity_cli _ ), (Some _ | None), (Runtime_binding_targets | Replacement_catalog_targets _) -> next
+            | Runtime_execution.Antigravity_cli _
+            | Runtime_execution.Muse_cli _ ), (Some _ | None), (Runtime_binding_targets | Replacement_catalog_targets _) -> next
         in
         let next =
           Toml_line_editor.edit_table_multiline_array next
@@ -4933,7 +4944,8 @@ let exact_slot_list_of_new_slot (config : Runtime_schema.config) slot =
        (match provider.api_format with
         | Runtime_schema.Codex_app_server_runtime
         | Runtime_schema.Antigravity_cli_runtime
-        | Runtime_schema.Claude_code_runtime -> Cli_slots
+        | Runtime_schema.Claude_code_runtime
+        | Runtime_schema.Muse_cli_runtime -> Cli_slots
         | Runtime_schema.Messages_api
         | Runtime_schema.Chat_completions_api
         | Runtime_schema.Ollama_api

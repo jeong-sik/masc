@@ -70,6 +70,7 @@ let client_kind (runtime : Runtime.t) =
   | Runtime_execution.Codex_app_server _ -> "codex"
   | Runtime_execution.Claude_code _ -> "claude_code"
   | Runtime_execution.Antigravity_cli _ -> "antigravity"
+  | Runtime_execution.Muse_cli _ -> "muse"
 ;;
 
 let descriptor_schema_tool (descriptor : Keeper_tool_descriptor.t) name =
@@ -370,12 +371,24 @@ let resolve_native_posture ~base_path ~keeper_name (runtime : Runtime.t) =
       ~default:Runtime_native_tools.antigravity_default
       ~none_supported:false
     |> Result.map Option.some
+  | Runtime_execution.Muse_cli _ ->
+    Keeper_official_client_host.resolve_native_posture
+      ~posture_source:Runtime_native_tools.Declared_on_disk
+      ~base_path
+      ~keeper_name
+      ~client_label:"Muse"
+      ~default:Runtime_native_tools.muse_default
+      ~none_supported:false
+    |> Result.map Option.some
 ;;
 
 let runtime_tool_delivery (runtime : Runtime.t) =
   match runtime.execution with
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Antigravity_cli _ -> Tools_delivered
+  (* The Muse transport takes no MASC tools: the turn runs the client's own
+     tools only. Suppress rather than deliver into a channel that drops them. *)
+  | Runtime_execution.Muse_cli _ -> Tools_suppressed_runtime_unsupported
   | Runtime_execution.Claude_code _ ->
     if runtime.model.tools_support
     then Tools_delivered

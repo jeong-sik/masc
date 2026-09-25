@@ -1,10 +1,10 @@
-type client = Codex | Claude | Antigravity
+type client = Codex | Claude | Antigravity | Muse
 val name : client -> string
 val source_url : client -> string
 
 (** {1 Where a client runs from}
 
-    One lookup for the three official clients. The runtime spawns what it
+    One lookup for the official clients. The runtime spawns what it
     answers ({!Runtime_adapter}), the vendor installer checks its result with
     it, and the setup wizard shows and stores it ([masc runtime-client-path]),
     so the list, the selection, the verification and the turn agree on

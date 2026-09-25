@@ -2808,6 +2808,7 @@ let test_parallel_policy_rejects_unsupported_runtimes () =
   ) [ Runtime_schema.Claude_code_runtime, "claude-code"
     ; Codex_app_server_runtime, "codex-app-server"
     ; Antigravity_cli_runtime, "antigravity-cli"
+    ; Muse_cli_runtime, "muse-cli"
     ; Ollama_api, "ollama-http"
     ; Gemini_api, "gemini-http"
     ; Vertex_gemini_api, "vertex-gemini" ]

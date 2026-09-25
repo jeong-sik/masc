@@ -362,6 +362,28 @@ let test_kimi_coding_usages () =
        {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"20"}},{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"90"}}]}|})
 ;;
 
+let test_muse_usage_read () =
+  check (list string) "windows"
+    [ "limit=- five_hour percent 67 resets=1780500000"
+    ; "limit=- seven_day percent 12 resets=1781000000"
+    ]
+    (decoded_windows Usage.decode_muse_usage_read ~source:"muse.usage_read"
+       {|{"usage":{"observedAtMs":1780000000000,"tier":"pro","weekly":{"usedPercent":12,"resetsAtMs":1781000000000},"window":{"usedPercent":67,"resetsAtMs":1780500000000,"windowDurationMins":300}}}|});
+  check (list string) "a non-300-minute window keeps its length"
+    [ "limit=- 60 minutes percent 3 resets=1780500000" ]
+    (decoded_windows Usage.decode_muse_usage_read ~source:"muse.usage_read"
+       {|{"usage":{"window":{"usedPercent":3,"resetsAtMs":1780500000000,"windowDurationMins":60}}}|});
+  check (list string) "a bare result states no windows" []
+    (decoded_windows Usage.decode_muse_usage_read ~source:"muse.usage_read" {|{}|});
+  check (list string) "over-quota percents are verbatim" [ "limit=- seven_day percent 142 resets=1781000000" ]
+    (decoded_windows Usage.decode_muse_usage_read ~source:"muse.usage_read"
+       {|{"usage":{"weekly":{"usedPercent":142,"resetsAtMs":1781000000000}}}|});
+  check string "a half-stated window is malformed"
+    "muse-usage-read.usage.window.usedPercent is missing"
+    (refused Usage.decode_muse_usage_read
+       {|{"usage":{"window":{"resetsAtMs":1780500000000,"windowDurationMins":300}}}|})
+;;
+
 let test_ollama_usage () =
   check (list string) "windows"
     [ "limit=- label \"session\" fraction 0 resets=-"
@@ -419,7 +441,8 @@ let test_a_raising_scope_does_not_stop_the_rest () =
     else failwith "connection closed by peer"
   in
   let codex ~scope:_ _ = failwith "codex app-server died" in
-  Read.read_scopes ~codex ~fetch [ raising; codex_raising; after ];
+  let muse ~scope:_ _ = fail "no muse scope was scheduled" in
+  Read.read_scopes ~codex ~muse ~fetch [ raising; codex_raising; after ];
   check bool "the raising scope recorded nothing" false (reported raising.scope);
   check bool "the scope after it was read" true (reported after.scope)
 ;;
@@ -428,7 +451,11 @@ let test_a_raising_scope_does_not_stop_the_rest () =
 let test_an_empty_key_sends_no_request () =
   let empty = http_readable ~provider_id:"usage_read_empty_key" ~url:"https://ok.invalid" ~key:"" in
   let fetch ~api_key:_ _ = fail "a request was sent with an empty key" in
-  Read.read_scopes ~codex:(fun ~scope:_ _ -> Ok ()) ~fetch [ empty ];
+  Read.read_scopes
+    ~codex:(fun ~scope:_ _ -> Ok ())
+    ~muse:(fun ~scope:_ _ -> Ok ())
+    ~fetch
+    [ empty ];
   check bool "nothing recorded" false (reported empty.scope)
 ;;
 
@@ -448,6 +475,7 @@ let () =
         ; test_case "zai-quota-limit" `Quick test_zai_quota_limit
         ; test_case "kimi-coding-usages" `Quick test_kimi_coding_usages
         ; test_case "ollama-usage" `Quick test_ollama_usage
+        ; test_case "muse-usage-read" `Quick test_muse_usage_read
         ] )
     ; ( "reading scopes"
       , [ test_case "a raising scope does not stop the rest" `Quick

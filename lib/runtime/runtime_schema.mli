@@ -16,6 +16,7 @@ type api_format =
   | Codex_app_server_runtime
   | Antigravity_cli_runtime
   | Claude_code_runtime
+  | Muse_cli_runtime
 [@@deriving show, eq]
 
 val api_format_reads_max_prompt_bytes : api_format -> bool

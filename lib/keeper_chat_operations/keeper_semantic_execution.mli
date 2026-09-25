@@ -48,7 +48,7 @@ val runtime_suffix : assignment_id:string -> failed_runtime_id:string -> next_ru
 type session_scope
 val session_scope : string list -> (session_scope, string) result
 val session_scope_components : session_scope -> string list
-type official_client_kind = Codex | Claude_code | Antigravity
+type official_client_kind = Codex | Claude_code | Antigravity | Muse
 type official_client_checkpoint =
   { client_kind : official_client_kind; runtime_id : string; session_id : string;
     turn_id : string; tool_surface_sha256 : string; frame : Keeper_repetition_snapshot.t }

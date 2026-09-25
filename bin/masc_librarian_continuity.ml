@@ -95,7 +95,8 @@ let prepare_runtime options =
         (match runtime.execution with
          | Runtime_execution.Claude_code _
          | Runtime_execution.Codex_app_server _
-         | Runtime_execution.Antigravity_cli _ ->
+         | Runtime_execution.Antigravity_cli _
+         | Runtime_execution.Muse_cli _ ->
              Error "Continuity measurement requires an Agent Core runtime; CLI transports are unsupported"
          | Runtime_execution.Agent_core _ ->
              let* providers =

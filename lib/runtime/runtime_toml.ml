@@ -212,6 +212,7 @@ let protocol_declarations =
       "codex-app-server"
       Runtime_schema.Codex_app_server_runtime
   ; official_client_protocol "claude-code" Runtime_schema.Claude_code_runtime
+  ; official_client_protocol "muse-cli" Runtime_schema.Muse_cli_runtime
   ; { protocol = "antigravity-cli"
     ; api_format = Runtime_schema.Antigravity_cli_runtime
     ; editor = antigravity_editor
@@ -573,7 +574,8 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
   | Gemini_api
   | Vertex_gemini_api
   | Codex_app_server_runtime
-  | Claude_code_runtime ->
+  | Claude_code_runtime
+  | Muse_cli_runtime ->
     (match
        List.find_opt
          (fun key -> Option.is_some (Otoml.find_opt tbl Fun.id [ key ]))
@@ -669,9 +671,9 @@ let usage_read_url_field ~path ~(transport : Runtime_schema.transport) tbl =
 
 (* The read sends the API key the runtime's HTTP execution was built with,
    and its windows are recorded under the quota scope of that key.  An
-   official-client runtime (Codex, Claude Code, Antigravity) logs in with the
-   vendor's subscription and its quota scope names no key, so an API-key
-   read there would file one account's usage under another. *)
+   official-client runtime (Codex, Claude Code, Antigravity, Muse) logs in
+   with the vendor's subscription and its quota scope names no key, so an
+   API-key read there would file one account's usage under another. *)
 let usage_read_execution_errors ~path (api_format : Runtime_schema.api_format) =
   match api_format with
   | Runtime_schema.Messages_api
@@ -681,7 +683,8 @@ let usage_read_execution_errors ~path (api_format : Runtime_schema.api_format) =
   | Runtime_schema.Vertex_gemini_api -> []
   | Runtime_schema.Codex_app_server_runtime
   | Runtime_schema.Antigravity_cli_runtime
-  | Runtime_schema.Claude_code_runtime ->
+  | Runtime_schema.Claude_code_runtime
+  | Runtime_schema.Muse_cli_runtime ->
     error
       path
       "usage-read is only for an API-key HTTP provider; this protocol runs an \
@@ -2817,7 +2820,8 @@ let validate_ollama_only_binding_fields
             | Runtime_schema.Vertex_gemini_api
             | Runtime_schema.Codex_app_server_runtime
             | Runtime_schema.Antigravity_cli_runtime
-            | Runtime_schema.Claude_code_runtime ) as api_format) ->
+            | Runtime_schema.Claude_code_runtime
+            | Runtime_schema.Muse_cli_runtime ) as api_format) ->
          let path = binding.provider_id ^ "." ^ binding.model_id in
          let refuse key =
            error

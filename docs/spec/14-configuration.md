@@ -37,10 +37,20 @@ operator choice. Configurability is not added speculatively.
 
 ## 3. Keeper runtime selection
 
-A Keeper names a runtime id resolved through the agent core catalog. Fallbacks are an
-explicit ordered runtime membership, not a health tier, score, failure count,
-or vendor-specific branch. Provider outcomes are recorded and returned to the
-Keeper/LLM; MASC does not turn them into cooldown or admission policy.
+A Keeper assignment (`[runtime.assignments]`, or a lane id in
+`[runtime.lanes]`) names a routing id, not a binding. `resolve_assignment`
+takes a declared lane first; an id naming a bare runtime resolves to a lane
+holding that runtime alone. A lane walks exactly the candidates it declares,
+in declaration order — an explicit ordered membership, not a health tier,
+score, or vendor-specific branch. A candidate that failed on timeout, 5xx,
+or network is demoted until it answers (#36935). An assignment pointing at a
+slot the lane does not list falls back to declaration order (#39037).
+Provider outcomes are recorded and returned to the Keeper/LLM; MASC does not
+turn them into cooldown or admission policy.
+
+Runtime declarations describe capabilities reported by agent core, including text,
+tool use, reasoning/thinking, multi-turn, image/audio/voice, streaming, and
+structured output. MASC must not guess these features from model-name strings.
 
 Runtime declarations describe capabilities reported by agent core, including text,
 tool use, reasoning/thinking, multi-turn, image/audio/voice, streaming, and

@@ -5512,7 +5512,7 @@ let launch_all_memory_facts_load state ~mailbox =
          a keeper with no facts. *)
       let unread = ref [] in
       let note_unread keeper_name detail =
-        unread := Printf.sprintf "%s: %s" keeper_name detail :: !unread
+        unread := (keeper_name, detail) :: !unread
       in
       List.iter
         (fun (k : Tui_decode.memory_keeper_health) ->
@@ -5609,8 +5609,14 @@ let launch_all_memory_facts_load state ~mailbox =
              ( "*",
                Error
                  (Printf.sprintf "%d of %d keepers not read: %s"
-                    (List.length failures) (List.length keepers)
-                    (String.concat "; " failures)) ))
+                    (List.length
+                       (List.sort_uniq String.compare (List.map fst failures)))
+                    (List.length keepers)
+                    (String.concat "; "
+                       (List.map
+                          (fun (keeper_name, detail) ->
+                            Printf.sprintf "%s: %s" keeper_name detail)
+                          failures))) ))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->

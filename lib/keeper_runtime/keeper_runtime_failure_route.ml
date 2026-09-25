@@ -249,9 +249,8 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
     observe_retry Server_error
   | Llm_provider.Candidate_fault.Binding Window ->
     exhaust_failure Context_overflow
-  | Llm_provider.Candidate_fault.Binding Body_limit ->
+  | Llm_provider.Candidate_fault.Binding (Body_limit | Admission (* INTENDED RED probe, task-1753: the Admission line is deleted; never merge *)) ->
     rotate Request_refused
-  | Llm_provider.Candidate_fault.Binding Admission -> rotate Admission
   | Llm_provider.Candidate_fault.Binding Deadline ->
     observe_retry Provider_timeout
   | Llm_provider.Candidate_fault.Binding Output_dialect ->

@@ -35,6 +35,12 @@
   `<base>/.masc/keepers/<name>/official-client-runtime/session.json` for each
   Keeper whose file contains `"delivery":"replaced_configuration"`. The next
   turn starts a new vendor session (#38882).
+- A request that the candidate's own policy refuses before it is sent
+  (`Retry.Attempt_rejected`) now shows route class `admission` instead of
+  `attempt_rejected` in Keeper turn records and driver logs, because Api-error
+  route classes now come from the same `Candidate_fault` judgment that the
+  candidate walks use. Lanes behave the same as before: both classes already
+  rotated to the next candidate (#38958).
 
 ### Added
 

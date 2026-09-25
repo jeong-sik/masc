@@ -1924,6 +1924,65 @@ let drain_available
     ~execute
 ;;
 
+(* Pause is read once per wake, before any partition I/O, from the same
+   TOML-overlaid meta the heartbeat reads before it dispatches a turn
+   ([Keeper_heartbeat_loop] selected_source_authority). The heartbeat refuses
+   to act on a read failure, an absent meta, or [paused]; the worker skips the
+   wake for the same three facts. A skipped wake leaves every candidate and
+   partition untouched, so the ledger still holds the work for the next wake. *)
+type wake_skip_reason =
+  | Keeper_paused
+  | Keeper_meta_absent
+  | Keeper_meta_read_failed of string
+
+type wake_admission =
+  | Wake_admitted
+  | Wake_skipped of wake_skip_reason
+
+let wake_admission_of_meta_read = function
+  | Error detail -> Wake_skipped (Keeper_meta_read_failed detail)
+  | Ok None -> Wake_skipped Keeper_meta_absent
+  | Ok (Some (meta : Keeper_meta_contract.keeper_meta)) ->
+    if meta.paused then Wake_skipped Keeper_paused else Wake_admitted
+;;
+
+let read_wake_admission ~base_path ~keeper_name =
+  wake_admission_of_meta_read
+    (Keeper_meta_store.read_effective_meta
+       (Workspace.default_config base_path)
+       keeper_name)
+;;
+
+let wake_skip_reason_label = function
+  | Keeper_paused -> "keeper_paused"
+  | Keeper_meta_absent -> "keeper_meta_absent"
+  | Keeper_meta_read_failed _ -> "keeper_meta_read_failed"
+;;
+
+(* Pause is an operator state, so skipping for it is routine. An absent or
+   unreadable meta means the worker cannot see its owner at all. *)
+let wake_skip_log_level = function
+  | Keeper_paused -> Log.Info
+  | Keeper_meta_absent -> Log.Warn
+  | Keeper_meta_read_failed _ -> Log.Error
+;;
+
+let log_wake_skipped ~keeper_name reason =
+  let detail =
+    match reason with
+    | Keeper_paused | Keeper_meta_absent -> ""
+    | Keeper_meta_read_failed detail -> " detail=" ^ detail
+  in
+  Log.Keeper.emit
+    (wake_skip_log_level reason)
+    ~keeper_name
+    (Printf.sprintf
+       "board_attention_worker_wake_skipped keeper=%s reason=%s%s"
+       keeper_name
+       (wake_skip_reason_label reason)
+       detail)
+;;
+
 let run
       ~sw
       ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
@@ -1998,6 +2057,12 @@ let run
              | Wake.Registration_closed -> Ok ()
              | Wake.Wake -> drain ()
            and drain () =
+             match read_wake_admission ~base_path ~keeper_name with
+             | Wake_skipped reason ->
+               log_wake_skipped ~keeper_name reason;
+               await ()
+             | Wake_admitted -> drain_admitted ()
+           and drain_admitted () =
              match
                drain_available_current
                  ~yield:Eio.Fiber.yield
@@ -2052,5 +2117,6 @@ module For_testing = struct
   let apply_drain_rearm = apply_drain_rearm
   let replay_completed_owner_wake = replay_completed_owner_wake
   let with_process_recovery_claim = with_process_recovery_claim
+  let wake_admission_of_meta_read = wake_admission_of_meta_read
 end
 ;;

@@ -22,13 +22,17 @@ type request_context = {
       (** Inclusive: uncached input plus both cache components. *)
   cache_creation_input_tokens : int;
   cache_read_input_tokens : int;
+  output_tokens : int option;
+      (** That request's output, when the runtime reports its final count
+          (Codex's per-response frame). [None] when only a mid-stream
+          snapshot exists (Claude Code's assistant frames). *)
 }
-(** Input side of the newest provider request of the turn: how much of the
-    context window that request occupied. A runtime that reports the turn's
-    spend and the request's occupancy as two different counts (Claude Code's
-    result frame vs. its assistant frames) carries the occupancy here, and
-    the spend in the response usage under [usage_scope]. There is no output
-    side: a request's output count seen mid-stream is not its final count. *)
+(** The newest provider request of the turn: how much of the context window
+    it occupied, and its output when known. A runtime that reports the
+    turn's spend and the request's occupancy as two different counts (Claude
+    Code's result frame vs. its assistant frames, Codex's thread count vs.
+    its [last] breakdown) carries the request here, and the spend in the
+    response usage under [usage_scope]. *)
 
 type runtime_observation = {
   runtime_id : string;

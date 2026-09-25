@@ -304,15 +304,17 @@ let read_usage_after_quota_refusal ~keeper_name ~runtime_id ~clock ~cwd config =
    count already includes the cached prefix and the output count already
    includes reasoning, so both copy across and the cache fields fill the
    canonical record's cache slots. *)
-(* The newest request's input side, the context it occupied, in the
-   inclusive convention [Runtime_observation.request_context] uses. OpenAI's
-   input count already includes the cached prefix. *)
+(* The newest request: the context it occupied, in the inclusive convention
+   [Runtime_observation.request_context] uses (OpenAI's input count already
+   includes the cached prefix), and its output, final once the frame for
+   that response arrives. *)
 let request_context_of_token_usage (usage : Runtime_codex_app_server.token_usage)
   : Runtime_observation.request_context
   =
   { input_tokens = usage.input_tokens
   ; cache_creation_input_tokens = usage.cache_write_input_tokens
   ; cache_read_input_tokens = usage.cached_input_tokens
+  ; output_tokens = Some usage.output_tokens
   }
 ;;
 

@@ -2181,13 +2181,14 @@ let run_turn
                   Some { request_context = Some (context : Runtime_observation.request_context); _ }
               ; _
               } ->
-            (* A runtime that reports the newest request's occupancy apart from
-               the turn's spend (Claude Code) records that request here: this
-               record's readers ask what one request carried. The request's
-               own output count is not known; the turn's output goes to
-               [turn_output_tokens] below, under its own scope. *)
+            (* A runtime that reports the newest request apart from the
+               turn's spend (Claude Code, Codex) records that request here:
+               this record's readers ask what one request carried. Its output
+               is there when the runtime reports a final count (Codex); the
+               turn's output goes to [turn_output_tokens] below, under its own
+               scope. *)
             { input_tokens = Some context.input_tokens
-            ; output_tokens = None
+            ; output_tokens = context.output_tokens
             ; cache_creation_input_tokens = Some context.cache_creation_input_tokens
             ; cache_read_input_tokens = Some context.cache_read_input_tokens
             ; scope = Runtime_usage_scope.Per_request

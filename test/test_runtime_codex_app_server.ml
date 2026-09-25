@@ -4734,7 +4734,8 @@ let test_production_keeper_reports_codex_token_usage () =
                  (match observation.Runtime_observation.request_context with
                   | Some context ->
                     check int "the newest request's occupancy" 1200 context.input_tokens;
-                    check int "its cache read" 1000 context.cache_read_input_tokens
+                    check int "its cache read" 1000 context.cache_read_input_tokens;
+                    check (option int) "its final output" (Some 80) context.output_tokens
                   | None -> fail "the newest request's occupancy was dropped")
                | None -> fail "production turn recorded no runtime observation")))
 ;;

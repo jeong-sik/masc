@@ -10,11 +10,11 @@ let text =
 let default_text_chars = 50_000
 let max_text_chars = 100_000
 
+let text_cap_refused = Printf.sprintf "maxChars must be between 1 and %d" max_text_chars
+
 let text_cap requested =
   let cap = match requested with Some cap -> cap | None -> default_text_chars in
-  if cap < 1 || cap > max_text_chars then
-    Error (Printf.sprintf "maxChars must be between 1 and %d" max_text_chars)
-  else Ok cap
+  if cap < 1 || cap > max_text_chars then Error text_cap_refused else Ok cap
 ;;
 
 let elements = {|

@@ -216,7 +216,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
         | Some tab_id when tab_id < 0 -> make_input_err ~tool_name ~start_time "tabId must be nonnegative"
         | Some tab_id ->
           let mode = match mode with
-            | "text" -> Ok (`Text (get_int args "maxChars" 50_000))
+            | "text" -> Ok (`Text (get_int args "maxChars" Browser_page_script.default_text_chars))
             | "elements" -> Ok `Elements | "frames" -> Ok `Frames
             | "dialog" when frame_path = [] -> Ok `Dialog
             | _ -> Error "framePath supports text, elements and frames; dialogs belong to the top-level tab" in
@@ -226,7 +226,9 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
               (Browser_lane.issue_automation
                 ~verb:(Browser_lane.Page_context {tab_id;frame_path;mode}) ~timeout_sec:default_timeout_sec))
     else
-    let max_chars = max 1 (min 100_000 (get_int args "maxChars" 50_000)) in
+    let max_chars =
+      max 1 (min Browser_page_script.max_text_chars (get_int args "maxChars" Browser_page_script.default_text_chars))
+    in
     match get_string args "mode" "text" with
     | ("scene" | "regions") as mode ->
       (match get_int_opt args "tabId" with

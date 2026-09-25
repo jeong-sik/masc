@@ -51,16 +51,19 @@ let resting ~now slot_id =
     quota_exhausted || rate_limited
 ;;
 
-let order (resolved : Registry.resolved_lane) =
-  (* NDT-OK: the wall clock only decides whether a stated Retry-After has run
-     out; it reorders candidates and never changes which ones a lane walks. *)
-  let now = Unix.gettimeofday () in
+let order_at ~now (resolved : Registry.resolved_lane) =
   let serving, resting =
     List.partition
       (fun (slot : Registry.selected_slot) -> not (resting ~now slot.slot_id))
       resolved.selected_slots
   in
   { resolved with selected_slots = serving @ resting }
+;;
+
+let order resolved =
+  (* NDT-OK: the wall clock only decides whether a slot's rest has run out; it
+     reorders candidates and never changes which ones a lane walks. *)
+  order_at ~now:(Unix.gettimeofday ()) resolved
 ;;
 
 let note_cause ~slot_id (cause : Exact.execution_error_cause) =

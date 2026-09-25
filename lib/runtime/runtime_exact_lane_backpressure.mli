@@ -25,6 +25,12 @@ val order :
     that names no runtime carries no evidence and stays in place. CLI slots
     are untouched. Read at the wall clock of the call. *)
 
+val order_at :
+  now:float ->
+  Runtime_exact_output_registry.resolved_lane ->
+  Runtime_exact_output_registry.resolved_lane
+(** {!order} read at [now] instead of the wall clock. *)
+
 val observe :
   ( ('accepted, 'rejection) Agent_core.Exact_output.validated_flow_success
   , ('callback_error, 'rejection) Agent_core.Exact_output.validated_flow_error )

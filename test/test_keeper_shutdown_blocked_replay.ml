@@ -176,7 +176,7 @@ let test_meta_update_operator_stop_is_replayed () =
       true
       (match meta.latched_reason with
        | Some (Keeper_latched_reason.Operator_paused _) -> true
-       | Some _ | None -> false);
+       | None -> false);
     check_admission_released ~config ~keeper_name;
     check_reclaimed ~config operation)
 ;;

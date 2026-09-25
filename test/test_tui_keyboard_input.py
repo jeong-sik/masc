@@ -13533,8 +13533,15 @@ def fusion_list_detail_interaction(
         )
         exits = (b"Esc:back", b"q:quit")
         secondary = (b"Y:copy", b"/:find", b"n / N:next / previous match")
+        # 144 cells fit all but the longest of the three once [ / ] left this
+        # row: the key answers only with a run open, and the cell it was
+        # holding is a cell a usable key can have. The order is what this
+        # pins -- the search pair yields before copy, and both before the
+        # exits -- not how many survive at one width.
+        at_200 = (b"Y:copy", b"/:find")
         for columns, required, omitted in (
-                (200, exits, secondary), (280, exits + secondary, ())):
+                (200, exits + at_200, (b"n / N:next / previous match",)),
+                (280, exits + secondary, ())):
             resize_and_wait(
                 process, master_fd, output, rows=30, columns=columns,
                 needle=b"MASC Fusion", controls=(FULL_REDRAW,),

@@ -300,6 +300,27 @@ let read_usage_after_quota_refusal ~keeper_name ~runtime_id ~clock ~cwd config =
          "Codex usage not read after a quota refusal: no server root switch")
 ;;
 
+(* The newest request: the context it occupied, in the inclusive convention
+   [Runtime_observation.request_context] uses (OpenAI's input count already
+   includes the cached prefix), and its output, final once the frame for
+   that response arrives. A compaction estimate is the whole new history:
+   its size is the occupancy, and it has no cache split and no response
+   behind it. *)
+let request_context_of_last_usage : Runtime_codex_app_server.last_usage -> Runtime_observation.request_context =
+  function
+  | Runtime_codex_app_server.Request_usage usage ->
+    { input_tokens = usage.input_tokens
+    ; cache =
+        Some
+          { Runtime_observation.cache_creation_input_tokens = usage.cache_write_input_tokens
+          ; cache_read_input_tokens = usage.cached_input_tokens
+          }
+    ; output_tokens = Some usage.output_tokens
+    }
+  | Runtime_codex_app_server.Context_estimate { estimated_tokens } ->
+    { input_tokens = estimated_tokens; cache = None; output_tokens = None }
+;;
+
 (* OpenAI counting, as Backend_openai_parse reads the API wire: the input
    count already includes the cached prefix and the output count already
    includes reasoning, so both copy across and the cache fields fill the
@@ -322,10 +343,17 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
     ~on_usage_report ~position on_event =
   (* The thread's running count, reported under the app-server turn id (the
      identity the completion hook also writes for a Codex turn) and the
-     thread it counts. The app-server's own total is kept: an overflow reset
-     reports zero counts with the window size there. *)
-  let report_usage ~thread_id ~turn_id ~model
-      (thread_total : Runtime_codex_app_server.token_usage) =
+     thread it counts. The app-server's own total is kept beside it; for a
+     context-window fill it is the window Codex wrote in place of the count. *)
+  let report_usage ~thread_id ~turn_id ~model (frame : Runtime_codex_app_server.frame_usage) =
+    let count, vendor_total_tokens =
+      match frame with
+      | Runtime_codex_app_server.Counted { thread_total; last = _ } ->
+        ( Keeper_client_usage_report.Running_count (api_usage_of_token_usage thread_total)
+        , thread_total.total_tokens )
+      | Runtime_codex_app_server.Context_window_filled { context_window } ->
+        Keeper_client_usage_report.Count_replaced, context_window
+    in
     Option.iter
       (fun report ->
          report
@@ -335,8 +363,8 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
            ; conversation_id = thread_id
            ; position
            ; usage_scope = Runtime_usage_scope.Conversation_cumulative
-           ; usage = api_usage_of_token_usage thread_total
-           ; vendor_total_tokens = Some thread_total.total_tokens
+           ; count
+           ; vendor_total_tokens = Some vendor_total_tokens
            })
       on_usage_report
   in
@@ -346,8 +374,8 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
       (function
         | Runtime_codex_app_server.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
-        | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; thread_total } ->
-          report_usage ~thread_id ~turn_id ~model thread_total
+        | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
+          report_usage ~thread_id ~turn_id ~model frame
         | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
         | Turn_finished _ -> ())
@@ -439,8 +467,8 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
             server_name
         | Runtime_codex_app_server.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
-        | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; thread_total } ->
-          report_usage ~thread_id ~turn_id ~model thread_total
+        | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
+          report_usage ~thread_id ~turn_id ~model frame
         | Runtime_codex_app_server.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text
@@ -924,52 +952,60 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
        0.156.1, 2026-09-25: a resumed thread's requests carried none of them
        until its compaction wrote them into the replacement history), so the
        carried messages stay out of them and the compacted thread never holds a
-       stale copy of what the prompt carries. *)
-    let* developer_messages, history =
-      project_messages
-        (match thread_mode with
-         | Runtime_codex_app_server.Start -> prepared.messages
-         | Runtime_codex_app_server.Resume _ ->
-           (* Runtime_codex_app_server drops history on Resume. Only
-              non-carried System messages can enter developerInstructions;
-              formatting the held conversation here would allocate it again. *)
-           List.filter
-             (fun (message : Agent_core.Types.message) ->
-                not (Host.is_carried_on_resume message)
-                && match message.role with
-                   | Agent_core.Types.System -> true
-                   | Agent_core.Types.User | Agent_core.Types.Assistant
-                   | Agent_core.Types.Tool -> false)
-             prepared.messages)
+       stale copy of what the prompt carries.
+
+       History can contain large tool results. Projecting, encoding and hashing
+       it is CPU work over immutable messages; keeping it on the owner domain
+       stalls HTTP, SSE and every other Keeper sharing that scheduler. *)
+    let* history, context_frontier, composed_developer_instructions =
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        let* developer_messages, history =
+          project_messages
+            (match thread_mode with
+             | Runtime_codex_app_server.Start -> prepared.messages
+             | Runtime_codex_app_server.Resume _ ->
+               (* Runtime_codex_app_server drops history on Resume. Only
+                  non-carried System messages can enter developerInstructions;
+                  formatting the held conversation here would allocate it again. *)
+               List.filter
+                 (fun (message : Agent_core.Types.message) ->
+                    not (Host.is_carried_on_resume message)
+                    && match message.role with
+                       | Agent_core.Types.System -> true
+                       | Agent_core.Types.User | Agent_core.Types.Assistant
+                       | Agent_core.Types.Tool -> false)
+                 prepared.messages)
+        in
+        let snapshot_messages =
+          List.filter (fun message -> not (Host.is_composed_system_context message))
+            prepared.messages in
+        let snapshot_sha256 =
+          `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages)
+          |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+        let context_frontier : Keeper_official_client_session_store.context_frontier =
+          { snapshot_sha256; message_count = List.length snapshot_messages;
+            delivery = (match thread_mode with
+              | Runtime_codex_app_server.Start -> Prepared_start_context
+              | Runtime_codex_app_server.Resume _ -> Held_by_vendor_session);
+            acknowledged_turn = None } in
+        (* [None] here means "send no developerInstructions": [optional_field]
+           omits the member and the app-server runs the thread on Codex's own
+           default instructions. The probe and fusion callers build [None] on
+           purpose and do not pass through here. This composition always carries
+           [prepared.system_prompt], which [Host.prepare_turn] refused when blank,
+           so the joined text is never empty. A check on the joined text could
+           not see a blank keeper prompt behind the posture note this lane
+           appends (#33165). *)
+        let composed_developer_instructions =
+          compose_developer_instructions developer_messages |> String.trim
+        in
+        Ok (history, context_frontier, composed_developer_instructions))
     in
     let prompt =
       match thread_mode with
       | Runtime_codex_app_server.Start -> prompt
       | Runtime_codex_app_server.Resume _ ->
         Host.resume_prompt ~goal:prompt prepared.messages
-    in
-    let snapshot_messages =
-      List.filter (fun message -> not (Host.is_composed_system_context message))
-        prepared.messages in
-    let snapshot_sha256 =
-      `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages)
-      |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
-    let context_frontier : Keeper_official_client_session_store.context_frontier =
-      { snapshot_sha256; message_count = List.length snapshot_messages;
-        delivery = (match thread_mode with
-          | Runtime_codex_app_server.Start -> Prepared_start_context
-          | Runtime_codex_app_server.Resume _ -> Held_by_vendor_session);
-        acknowledged_turn = None } in
-    (* [None] here means "send no developerInstructions": [optional_field]
-       omits the member and the app-server runs the thread on Codex's own
-       default instructions. The probe and fusion callers build [None] on
-       purpose and do not pass through here. This composition always carries
-       [prepared.system_prompt], which [Host.prepare_turn] refused when blank,
-       so the joined text is never empty. A check on the joined text could
-       not see a blank keeper prompt behind the posture note this lane
-       appends (#33165). *)
-    let composed_developer_instructions =
-      compose_developer_instructions developer_messages |> String.trim
     in
     let developer_instructions = Some composed_developer_instructions in
     (* The window already fits; this is the account checked once more before
@@ -1388,12 +1424,25 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
          | Some detail -> Error (internal_error detail)
        in
        let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
+       (* The spend is the thread's running count, resolved against the
+          previous count of the same thread; a repeated frame adds nothing.
+          The newest request's [last] rides apart as the context it
+          occupied, the way the Claude Code lane keeps its request context.
+          A turn whose count a context-window fill replaced has no one count
+          that measures it, so it reports no spend rather than the count
+          that restarted from zero. *)
+       let spend, request_context =
+         match turn.usage with
+         | Some (Runtime_codex_app_server.Thread_count { last; thread_total }) ->
+           Some (api_usage_of_token_usage thread_total), Some (request_context_of_last_usage last)
+         | Some Runtime_codex_app_server.Thread_count_replaced | None -> None, None
+       in
        let response =
          { Agent_core.Types.id = turn.turn_id
          ; model = turn.model
          ; stop_reason = EndTurn
          ; content = [ Text turn.text ]
-         ; usage = Option.map api_usage_of_token_usage turn.usage
+         ; usage = spend
          ; telemetry =
              Some
                { Agent_core.Types.default_inference_telemetry with
@@ -1444,16 +1493,17 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
            ~attempt_details_source:"codex_app_server"
            ~agent_core_internal_runtime_allowed:false
            ~usage_scope:
-             (match turn.usage with
-              | Some _ -> Runtime_usage_scope.Per_request
+             (match spend with
+              | Some _ -> Runtime_usage_scope.Conversation_cumulative
               | None -> Runtime_usage_scope.Usage_scope_unavailable)
+           ?request_context
            ()
        in
        Ok
          { Runtime_agent.response
          ; checkpoint = None
          ; session_id = turn.thread_id
-         ; session_resumed = None
+         ; session_resumed = Some turn.resumed
          ; turns = turn_count
          ; trace_ref = None
          ; run_validation = None

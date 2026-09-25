@@ -423,11 +423,17 @@ let test_refused_turn_reports_its_spend_to_the_keeper () =
     (fun () ->
        let reports = ref [] in
        let on_official_client_usage_report (report : Keeper_client_usage_report.t) =
+         let usage =
+           match report.count with
+           | Keeper_client_usage_report.Running_count usage -> usage
+           | Keeper_client_usage_report.Count_replaced ->
+             Alcotest.fail "a Claude Code count was reported as replaced"
+         in
          reports :=
            ( report.response_id
            , report.model
            , Runtime_usage_scope.to_string report.usage_scope
-           , (report.usage.input_tokens, report.usage.output_tokens) )
+           , (usage.input_tokens, usage.output_tokens) )
            :: !reports
        in
        with_fixture
@@ -490,9 +496,12 @@ let test_real_two_request_turn_routes_spend_and_occupancy_apart () =
                | Some context ->
                  check int "occupancy is the second request's inclusive input"
                    (8 + 2747 + 22834) context.input_tokens;
-                 check int "occupancy cache read" 22834 context.cache_read_input_tokens;
-                 check int "occupancy cache creation" 2747
-                   context.cache_creation_input_tokens))))
+                 (match context.cache with
+                  | None -> fail "the request's cache split was dropped"
+                  | Some cache ->
+                    check int "occupancy cache read" 22834 cache.cache_read_input_tokens;
+                    check int "occupancy cache creation" 2747
+                      cache.cache_creation_input_tokens)))))
 ;;
 
 (* An assistant frame reported usage but the result frame carried none: the

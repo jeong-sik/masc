@@ -1,15 +1,24 @@
-(* The shared launch for TUI reads: catch the read's exceptions, answer on
-   the mailbox, answer "Eio switch is unavailable" when there is no switch,
-   and survive a refused launch. A failure is labelled once, here, when the
-   caller names a subject. *)
+type source =
+  | Keeper_turns
+  | Standalone_lanes
+  | Connectors
 
-let label ?subject cause =
-  match subject with
-  | None -> cause
-  | Some subject -> subject ^ " load failed: " ^ cause
+let source_name = function
+  | Keeper_turns -> "keeper turns"
+  | Standalone_lanes -> "standalone lanes"
+  | Connectors -> "connector"
 
-let launch ?on_not_run ?subject ~deliver read =
-  let deliver result = deliver (Result.map_error (label ?subject) result) in
+let attribute source result =
+  Result.map_error
+    (fun detail -> source_name source ^ " load failed: " ^ detail)
+    result
+
+let launch ?source ?on_not_run ~deliver read =
+  let deliver result =
+    match source with
+    | None -> deliver result
+    | Some source -> deliver (attribute source result)
+  in
   let not_run cause =
     Option.iter (fun release -> release ()) on_not_run;
     deliver (Error cause)

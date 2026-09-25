@@ -1,5 +1,4 @@
 import type { PromptSegmentTelemetry } from '../types'
-import type { TurnInputComponentId } from '../api/dashboard-turn-records'
 
 // ── Context pressure thresholds (shared across KPIs, charts) ─
 export const CTX_CRITICAL_PCT = 85
@@ -12,16 +11,11 @@ export function ctxColor(pct: number): string {
   return pct > CTX_CRITICAL_PCT ? CTX_COLOR_CRITICAL : pct > CTX_WARN_PCT ? CTX_COLOR_WARN : CTX_COLOR_OK
 }
 
-// Segment keys are `Turn_record.input_component_id` tokens
-// (keeper_agent_prompt_metrics.ml), so both maps are keyed by the decoder's
-// TurnInputComponentId and a new component is a type error until it is named.
-export const CTX_SEGMENT_LABELS: Readonly<Record<TurnInputComponentId, string>> = {
+export const CTX_SEGMENT_LABELS: Record<string, string> = {
   'prompt.keeper_instructions': 'Keeper 지침',
   'prompt.dynamic_context': '턴 컨텍스트',
   'prompt.temporal_summary': '시간 요약',
   'prompt.memory_os_recall': '메모리 회상',
-  'prompt.operator_note': '운영자 노트',
-  'prompt.skill_compositions': '스킬 구성',
   tool_schemas: '도구 스키마',
   message_user: '메시지 · user',
   message_system: '메시지 · system',
@@ -35,13 +29,11 @@ export const CTX_SEGMENT_LABELS: Readonly<Record<TurnInputComponentId, string>> 
   message_audio: '메시지 · audio',
 }
 
-export const CTX_SEGMENT_COLORS: Readonly<Record<TurnInputComponentId, string>> = {
+export const CTX_SEGMENT_COLORS: Record<string, string> = {
   'prompt.keeper_instructions': 'var(--amber-bright)',
   'prompt.dynamic_context': 'var(--purple)',
   'prompt.temporal_summary': 'var(--cyan)',
   'prompt.memory_os_recall': 'var(--rose-light)',
-  'prompt.operator_note': 'var(--amber-bright)',
-  'prompt.skill_compositions': 'var(--sky-400)',
   tool_schemas: 'var(--amber-bright)',
   message_user: 'var(--sky-400)',
   message_system: 'var(--color-fg-muted)',
@@ -56,13 +48,11 @@ export const CTX_SEGMENT_COLORS: Readonly<Record<TurnInputComponentId, string>> 
 }
 
 export function ctxSegmentLabel(key: string): string {
-  return (CTX_SEGMENT_LABELS as Readonly<Record<string, string | undefined>>)[key]
-    ?? key.replace(/[_-]+/g, ' ')
+  return CTX_SEGMENT_LABELS[key] ?? key.replace(/[_-]+/g, ' ')
 }
 
 export function ctxSegmentColor(key: string): string {
-  return (CTX_SEGMENT_COLORS as Readonly<Record<string, string | undefined>>)[key]
-    ?? 'var(--color-fg-muted)'
+  return CTX_SEGMENT_COLORS[key] ?? 'var(--color-fg-muted)'
 }
 
 /**

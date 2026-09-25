@@ -539,21 +539,18 @@ describe('keeper turn record final input composition', () => {
     ])
   })
 
-  // A prompt component the decoder refuses rejects the whole turn record, and
-  // its token and price go with it. Every block in TURN_PROMPT_BLOCK_IDS (which
-  // test_turn_record.ml holds equal to the OCaml producer) must decode both as
-  // a block and as its `prompt.*` input component.
-  it.each([...TURN_PROMPT_BLOCK_IDS])('decodes the %s prompt block and component', async (block) => {
+  // The decoder switch and TURN_PROMPT_BLOCK_IDS are two copies of the same
+  // list, and they drifted: 'operator_note' shipped in the constant and in the
+  // OCaml producer (prompt_block_id.ml:24) but never reached the switch, so a
+  // turn carrying an operator note failed decodeTurnInputComponents and was
+  // rejected whole. Walk the constant so the next block added cannot repeat it.
+  it.each([...TURN_PROMPT_BLOCK_IDS])('decodes the %s prompt component', async (block) => {
     getMock.mockResolvedValue(payload(entry({
-      blocks: [{ block, bytes: 1, digest: 'a'.repeat(64) }],
       input_components: [{ component: `prompt.${block}`, bytes: 1 }],
     })))
 
     const response = await fetchKeeperTurnRecords('sangsu')
 
-    expect(response.entries[0]?.record.blocks).toEqual([
-      { block, bytes: 1, digest: 'a'.repeat(64) },
-    ])
     expect(response.entries[0]?.record.input_components).toEqual([
       { component: `prompt.${block}`, bytes: 1 },
     ])

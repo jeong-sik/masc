@@ -141,13 +141,13 @@ let test_resource_read_max_bytes_contract () =
            | _ -> false))
     [ 0; -1 ];
   let config =
-    parse_exn (with_bound_line "resource-read-max-bytes = 123456\n")
+    parse_exn (with_bound_line "resource-read-max-bytes = 12345\n")
   in
   match config.resource_read_max_bytes with
   | Some value ->
     check int
       "positive bound is preserved"
-      123456
+      12345
       (resource_read_max_bytes_to_int value)
   | None -> fail "configured resource read bound was discarded"
 ;;

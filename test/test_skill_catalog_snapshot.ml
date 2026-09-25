@@ -288,7 +288,7 @@ let test_revisions_track_only_skill_truth () =
   let text_one = config_text ~runtime:"provider.one" sources in
   let text_two = config_text ~runtime:"provider.two" sources in
   let text_with_other_bound =
-    config_text ~runtime:"provider.one" ~resource_read_max_bytes:131072 sources
+    config_text ~runtime:"provider.one" ~resource_read_max_bytes:8192 sources
   in
   let config_one = parse_config text_one in
   let config_two = parse_config text_two in

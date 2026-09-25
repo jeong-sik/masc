@@ -122,6 +122,10 @@ let fixture_script
     "[ \"${CLAUDE_CODE_ENTRYPOINT-}\" = masc ] || exit 92\n";
   output_string output
     "[ \"${CLAUDE_AGENT_SDK_VERSION-}\" = masc-ocaml ] || exit 93\n";
+  (* A Keeper session must not load the auto-memory index of the directory
+     it runs in (the operator's). *)
+  output_string output
+    "[ \"${CLAUDE_CODE_DISABLE_AUTO_MEMORY-}\" = 1 ] || exit 98\n";
   output_string output "if [ \"${2-}\" = auth ]; then\n";
   output_string output
     ("  printf '%s\\n' " ^ shell_quote auth_json ^ "\n");

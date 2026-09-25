@@ -705,6 +705,11 @@ let test_developer_context_preserves_authority_and_history () =
                 | Resume _ -> "thread/resume" in
               check string "stable policy remains separate" "stable policy"
                 (request thread_method |> member "developerInstructions" |> to_string);
+              check string "only a resume asks Codex to leave the past turns out"
+                (match thread_mode with
+                 | Runtime_codex_app_server.Start -> "null"
+                 | Resume _ -> "true")
+                (Yojson.Safe.to_string (request thread_method |> member "excludeTurns"));
               let items = request "thread/inject_items" |> member "items" |> to_list in
               check (list string) "context retains developer authority; resume omits history"
                 expected_roles (List.map (fun j -> member "role" j |> to_string) items);

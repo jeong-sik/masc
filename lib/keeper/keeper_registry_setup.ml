@@ -511,7 +511,6 @@ let register_with_state_result
     ; tool_usage = StringMap.empty
     ; transition_seq = 0
     ; waiting_for_inference = Atomic.make false
-    ; last_context_actions = None
     ; last_event_bus_correlation = None
     ; pending_turn_measurement = None
     ; current_turn_observation = None
@@ -791,7 +790,6 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
     ; tool_usage = StringMap.empty
     ; transition_seq = 0
     ; waiting_for_inference = Atomic.make false
-    ; last_context_actions = None
     ; last_event_bus_correlation = None
     ; pending_turn_measurement = None
     ; current_turn_observation = None

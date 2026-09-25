@@ -51,6 +51,7 @@ import {
   normalizeIdeTreeWidth,
 } from './ide-shell'
 import { navigate, route } from '../../router'
+import { globalShortcutManager } from '../../lib/global-shortcut-manager'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 import {
   activeIdeFile,
@@ -296,6 +297,7 @@ describe('IdeShell', () => {
   })
 
   it('renders repository git status without the dirty-count stub', async () => {
+    setLocalStorageItem('masc.ide.activeRepositoryId', 'masc')
     render(h(IdeShell, {}), container)
 
     await waitFor(() => {
@@ -305,6 +307,26 @@ describe('IdeShell', () => {
     expect(container.querySelector('[data-stub="repo-dirty-count"]')).toBeNull()
     expect(container.querySelector('[data-state="dirty"]')?.getAttribute('title'))
       .toContain('untracked 1')
+  })
+
+  // With no repository chosen the tree is the project root. The origin
+  // block and the picker used to name the first registered repository
+  // anyway, and picking that repository then changed nothing.
+  it('does not name a repository over the project root tree', async () => {
+    render(h(IdeShell, {}), container)
+
+    const picker = await waitFor(() => {
+      const select = container.querySelector<HTMLSelectElement>('select[aria-label="IDE repository"]')
+      expect(select).not.toBeNull()
+      return select!
+    })
+    expect(picker.value).toBe('')
+    expect(container.querySelector('[data-testid="ide-repo-origin"]')).toBeNull()
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('select[aria-label="IDE repository"] option')).toHaveLength(2)
+    })
+    expect(container.querySelector('[data-testid="ide-statusbar-workspace"]')?.textContent).not.toBe('masc')
   })
 
   it('hydrates current file and line focus from IDE route params', async () => {
@@ -581,6 +603,7 @@ describe('IdeShell', () => {
       postId: null,
     }
 
+    setLocalStorageItem('masc.ide.activeRepositoryId', 'masc')
     render(h(IdeShell, {}), container)
 
     await waitFor(() => expect(activeIdeFile.value).toBe('lib/runtime.ml'))
@@ -926,6 +949,47 @@ describe('IdeShell', () => {
     await waitFor(() => {
       expect(container.querySelector('[data-testid="ide-find-panel"]')).not.toBeNull()
     })
+  })
+
+  it('opens find with Mod+F inside the IDE and leaves it to the browser outside', async () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+    document.body.appendChild(container)
+
+    render(h(IdeShell, {}), container)
+    const outside = document.createElement('button')
+    document.body.appendChild(outside)
+    // Mod is Cmd on macOS and Ctrl elsewhere; press whichever this
+    // platform reads as Mod.
+    const modKey = globalShortcutManager.formatChord({ key: 'f', modifiers: ['Mod'] }).startsWith('⌘')
+      ? 'metaKey'
+      : 'ctrlKey'
+    const press = (target: Element) => {
+      const event = { key: 'f', [modKey]: true, target, preventDefault: vi.fn(), stopPropagation: vi.fn() }
+      return { handled: globalShortcutManager.dispatch(event), event }
+    }
+
+    await waitFor(() => expect(globalShortcutManager.getById('ide.find.open')).toBeDefined())
+    const fromOutside = press(outside)
+    expect(fromOutside.event.preventDefault).not.toHaveBeenCalled()
+    expect(route.value.params.find).toBeUndefined()
+
+    const inside = press(ideCommandInput(container))
+    expect(inside.handled).toBe(true)
+    expect(inside.event.preventDefault).toHaveBeenCalled()
+    expect(route.value.params.find).toBe('open')
+
+    // Empty IDE space leaves focus on the body; that is still the IDE.
+    navigate('code', { section: 'ide-shell', view: 'source' })
+    const fromBody = press(document.body)
+    expect(fromBody.event.preventDefault).toHaveBeenCalled()
+    await waitFor(() => expect(route.value.params.find).toBe('open'))
+
+    outside.remove()
+    container.remove()
   })
 
   it('starts on the activity rail and keeps work context behind a disclosure', () => {

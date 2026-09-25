@@ -1643,10 +1643,17 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
       , false )
     | Resume { thread_id } ->
       ( "thread/resume"
+      (* [excludeTurns]: the reply is read for the thread id and the model only
+         (parse_thread_response). Without it Codex returns every past turn in
+         [thread.turns], and a long thread's reply outgrew the 8 MiB line limit
+         (masc-pro-builder, 2026-09-20 13:11Z: Buffer_limit_exceeded on
+         resume); the next turn started a fresh thread. The flag changes the
+         reply, not the history the model sees. *)
       , [ "threadId", `String thread_id
         ; "cwd", `String protocol_cwd
         ; "approvalPolicy", `String approval_policy
         ; "permissions", `String permissions_profile
+        ; "excludeTurns", `Bool true
         ]
         @ optional_field "model" config.model
         @ optional_field "developerInstructions" config.developer_instructions

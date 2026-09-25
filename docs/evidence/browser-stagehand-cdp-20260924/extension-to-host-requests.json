@@ -1,0 +1,217 @@
+[
+  {
+    "method": "stagehand.log",
+    "bytes": 105,
+    "params": {
+      "level": "info",
+      "message": "stagehand.init",
+      "data": {}
+    }
+  },
+  {
+    "method": "stagehand.log",
+    "bytes": 225,
+    "params": {
+      "level": "info",
+      "message": "Starting extraction using an accessibility snapshot",
+      "data": {
+        "category": "extraction",
+        "instruction": "Extract the page heading and the plan price"
+      }
+    }
+  },
+  {
+    "method": "llm.generate",
+    "bytes": 1464,
+    "params": {
+      "messages": [
+        {
+          "role": "user",
+          "content": {
+            "type": "text",
+            "text": "Instruction: Extract the page heading and the plan price\nDOM: [0-2] RootWebArea: spike fixture\n  [0-4] scrollable, html\n    [0-9] body\n      [0-10] heading: Order form\n      [0-12] paragraph\n        [0-13] StaticText: Plan price: 42 USD\n      [0-14] LabelText\n        [0-15] StaticText: Email\n      [0-3] textbox: Email\n      [0-18] button: Submit order"
+          }
+        }
+      ],
+      "system_prompt": "You are extracting content on behalf of a user. If a user asks you to extract a 'list' of information, or 'all' information, YOU MUST EXTRACT ALL OF THE INFORMATION THAT THE USER REQUESTS. You will be given: 1. An instruction 2. A list of DOM elements to extract from. Print the exact text from the DOM elements with all symbols, characters, and endlines as is. Print null or an empty string if no new information is found. If a user is attempting to extract links or URLs, you MUST respond with ONLY the IDs of the link elements. Do not attempt to extract links directly from the text unless absolutely necessary. ",
+      "response_format": {
+        "type": "json_schema",
+        "name": "Extraction",
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "heading": {
+              "type": "string"
+            },
+            "price": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "heading",
+            "price"
+          ],
+          "additionalProperties": {}
+        }
+      }
+    }
+  },
+  {
+    "method": "llm.generate",
+    "bytes": 1469,
+    "params": {
+      "messages": [
+        {
+          "role": "user",
+          "content": {
+            "type": "text",
+            "text": "Instruction: Extract the page heading and the plan price\nExtracted content: {\n  \"heading\": \"Order form\",\n  \"price\": \"42 USD\"\n}"
+          }
+        }
+      ],
+      "system_prompt": "You are an AI assistant tasked with evaluating the progress and completion status of an extraction task.\nAnalyze the extraction response and determine if the task is completed or if more information is needed.\nStrictly abide by the following criteria:\n1. Once the instruction has been satisfied by the current extraction response, ALWAYS set completion status to true and stop processing, regardless of remaining chunks.\n2. Only set completion status to false if BOTH of these conditions are true:\n   - The instruction has not been satisfied yet\n   - There are still chunks left to process (chunksTotal > chunksSeen)",
+      "response_format": {
+        "type": "json_schema",
+        "name": "Metadata",
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "progress": {
+              "type": "string",
+              "description": "progress of what has been extracted so far, as concise as possible"
+            },
+            "completed": {
+              "type": "boolean",
+              "description": "true if the goal is now accomplished. Use this conservatively, only when sure that the goal has been completed."
+            }
+          },
+          "required": [
+            "progress",
+            "completed"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  },
+  {
+    "method": "stagehand.log",
+    "bytes": 205,
+    "params": {
+      "level": "info",
+      "message": "Extraction completed successfully",
+      "data": {
+        "category": "extraction",
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "inferenceTimeMs": 3
+      }
+    }
+  },
+  {
+    "method": "llm.generate",
+    "bytes": 4834,
+    "params": {
+      "messages": [
+        {
+          "role": "user",
+          "content": {
+            "type": "text",
+            "text": "instruction: Find the most relevant element to perform an action on given the following action: click the Submit order button.  \n  IF AND ONLY IF the action EXPLICITLY includes the word 'dropdown' and implies choosing/selecting an option from a dropdown, ignore the 'General Instructions' section, and follow the 'Dropdown Specific Instructions' section carefully.\n  \n  General Instructions: \n    Provide an action for this element such as click, fill, type, press, scrollTo, nextChunk, prevChunk, selectOptionFromDropdown, hover, doubleClick, dragAndDrop. Remember that to users, buttons and links look the same in most cases.\n    When choosing non-left click actions, provide right or middle as the argument\n    If the action is completely unrelated to a potential action to be taken on the page, or no matching element exists, set `action` to null. Do not fabricate or guess an element.\n    ONLY return one action. If multiple actions are relevant, return the most relevant one.\n    If the user is asking to scroll to a position on the page, e.g., 'halfway' or 0.75, etc, you must return the argument formatted as the correct percentage, e.g., '50%' or '75%', etc.\n    If the user is asking to scroll to the next chunk/previous chunk, choose the nextChunk/prevChunk method. No arguments are required here.\n    If the action implies a key press, e.g., 'press enter', 'press a', 'press space', etc., always choose the press method with the appropriate key as argument — e.g. 'a', 'Enter', 'Space'. Do not choose a click action on an on-screen keyboard. Capitalize the first character like 'Enter', 'Tab', 'Escape' only for special keys. \n  \n  Dropdown Specific Instructions:\n    For interacting with dropdowns, there are two specific cases that you need to handle. \n    \n    CASE 1: the element is a 'select' element. \n      - choose the selectOptionFromDropdown method,\n      - set the argument to the exact text of the option that should be selected,\n      - set twoStep to false.\n    CASE 2: the element is NOT a 'select' element:\n      - do not attempt to directly choose the element from the dropdown. You will need to click to expand the dropdown first. You will achieve this by following these instructions:\n        - choose the node that most closely corresponds to the given instruction EVEN if it is a 'StaticText' element, or otherwise does not appear to be interactable.  \n        - choose the 'click' method\n        - set twoStep to true.\n  \nAccessibility Tree: \n[0-2] RootWebArea: spike fixture\n  [0-4] scrollable, html\n    [0-9] body\n      [0-10] heading: Order form\n      [0-12] paragraph\n        [0-13] StaticText: Plan price: 42 USD\n      [0-14] LabelText\n        [0-15] StaticText: Email\n      [0-3] textbox: Email\n      [0-18] button: Submit order\n"
+          }
+        }
+      ],
+      "system_prompt": " You are helping the user automate the browser by finding elements based on what action the user wants to take on the page You will be given: 1. a user defined instruction about what action to take 2. a hierarchical accessibility tree showing the semantic structure of the page. The tree is a hybrid of the DOM and the accessibility tree. Return the element that matches the instruction if it exists. If no element on the page matches the instruction, set `action` to null. Do not fabricate or guess an element — empty strings or placeholder values for elementId/description/method are not acceptable.",
+      "response_format": {
+        "type": "json_schema",
+        "name": "Act",
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "action": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "elementId": {
+                      "type": "string",
+                      "pattern": "^\\d+-\\d+$",
+                      "description": "The complete frame ordinal and backend node ID copied from the accessibility tree, without square brackets."
+                    },
+                    "description": {
+                      "type": "string",
+                      "description": "A description of the element and its purpose."
+                    },
+                    "method": {
+                      "type": "string",
+                      "enum": [
+                        "click",
+                        "fill",
+                        "type",
+                        "press",
+                        "scrollTo",
+                        "nextChunk",
+                        "prevChunk",
+                        "selectOptionFromDropdown",
+                        "hover",
+                        "doubleClick",
+                        "dragAndDrop"
+                      ],
+                      "description": "The supported browser interaction method to execute."
+                    },
+                    "arguments": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "The arguments to pass to the selected interaction method."
+                    }
+                  },
+                  "required": [
+                    "elementId",
+                    "description",
+                    "method",
+                    "arguments"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The element to act on, or null when no matching element exists."
+            },
+            "twoStep": {
+              "type": "boolean",
+              "description": "Whether the selected interaction requires a second action to finish the request."
+            }
+          },
+          "required": [
+            "action",
+            "twoStep"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  },
+  {
+    "method": "stagehand.log",
+    "bytes": 233,
+    "params": {
+      "level": "info",
+      "message": "Act inference completed",
+      "data": {
+        "category": "action",
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0,
+        "inferenceTimeMs": 9
+      }
+    }
+  }
+]

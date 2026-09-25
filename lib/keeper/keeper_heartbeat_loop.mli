@@ -258,8 +258,8 @@ val run_keepalive_unified_turn :
   shared_context:Agent_core.Context.t ->
   deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
   on_deferred_runtime_consumed:(unit -> unit) ->
-  record_deferred_runtime_lane:
-    (Keeper_turn_driver.deferred_runtime_lane -> unit) ->
+  settle_deferred_runtime_lane:
+    (Keeper_turn_driver.deferred_runtime_lane option -> unit) ->
   keepalive_turn_outcome
 (** Why the last turn that ran ended before completing is no longer this
     loop's state: {!Keeper_heartbeat_loop_cycle.run_keeper_cycle} records it
@@ -355,18 +355,52 @@ module For_testing : sig
       label, including {!Keeper_world_observation.Deferred_runtime_lane},
       authorized the turn. *)
 
-  (** Deferred runtime lane hints have nothing to do with continuation
-      delivery; they only shared this module with it. The implementation and
-      its live caller both remain, so the export stays too. *)
-  val consume_deferred_runtime_lane_hint :
-    Keeper_turn_driver.deferred_runtime_lane option ref ->
-    Keeper_turn_driver.deferred_runtime_lane ->
-    bool
+  (** The loop's deferred hint together with its durable file
+      ({!Keeper_deferred_runtime_lane_store}). The production loop builds one
+      with {!restore_deferred_lane_slot} at start and writes the hint only
+      through the functions below, so a restart resumes the frozen suffix. *)
+  type deferred_lane_slot
 
-  (** The hint when it was recorded for [assignment_id]; otherwise the hint is
-      cleared and [None] returned. *)
-  val deferred_runtime_lane_for_assignment :
-    Keeper_turn_driver.deferred_runtime_lane option ref ->
+  (** What an assignment walks now, as the restore check sees it. Production
+      reads {!Runtime.resolve_assignment}. *)
+  type deferred_lane_now =
+    | Lane_candidates of string list
+    | Lane_missing
+    | Lane_unavailable
+
+  (** Load the durable hint for [keeper_name] under the cluster-aware
+      [keepers_dir]. A missing file is no hint; a
+      store error is logged with its path and also yields no hint, leaving the
+      file in place as evidence. A suffix naming an id the assignment no
+      longer has as a candidate, or an assignment no longer configured, is
+      dropped and its file removed, so an edited [runtime.toml] wins. *)
+  val restore_deferred_lane_slot :
+    lane_now:(string -> deferred_lane_now) ->
+    base_path:string ->
+    keepers_dir:string ->
+    keeper_name:string ->
+    deferred_lane_slot
+
+  (** Persist, then hold, the suffix a failed cycle left behind. *)
+  val record_deferred_lane :
+    deferred_lane_slot -> Keeper_turn_driver.deferred_runtime_lane -> unit
+
+  (** Dispatch consumed [expected]: the in-process hint is cleared when it is
+      still the held one, but its file stays until the cycle settles, so a
+      restart while the next runtime runs resumes on it. *)
+  val consume_deferred_lane :
+    deferred_lane_slot -> Keeper_turn_driver.deferred_runtime_lane -> unit
+
+  (** End of cycle: the suffix the cycle left behind replaces the file, or,
+      when it left none, the file of a suffix it dispatched is removed. *)
+  val settle_deferred_lane :
+    deferred_lane_slot -> Keeper_turn_driver.deferred_runtime_lane option -> unit
+
+  (** The held hint when it was recorded for [assignment_id]. A hint for
+      another assignment is dropped and its file removed, as a lane restart
+      does. *)
+  val deferred_lane_for_assignment :
+    deferred_lane_slot ->
     assignment_id:string ->
     Keeper_turn_driver.deferred_runtime_lane option
 end

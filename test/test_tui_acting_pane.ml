@@ -38,6 +38,8 @@ let settled ~at keeper : Observer.event =
     ; tc_turn = Some 41
     ; tc_model = None
     ; tc_input_tokens = Some 73_877
+    ; tc_cache_read_tokens = None
+    ; tc_cache_creation_tokens = None
     ; tc_output_tokens = Some 358
     ; tc_cost_usd = Some 0.0258
     ; tc_tool_calls = Some 3
@@ -266,6 +268,8 @@ let dead_fixture : Pane.input =
                 ; tc_turn = None
                 ; tc_model = None
                 ; tc_input_tokens = Some 120
+                ; tc_cache_read_tokens = None
+                ; tc_cache_creation_tokens = None
                 ; tc_output_tokens = Some 30
                 ; tc_cost_usd = Some 0.001
                 ; tc_tool_calls = Some 2
@@ -1051,10 +1055,20 @@ let test_hidden_rows_do_not_allocate_text_layout () =
     ["fleet", 5, fleet; "focus", 6, focus; "changes", 4, changes]
 
 let test_tokens_and_ages_are_compact () =
-  check string "both sides as parts" "in 73.9k · out 358" (Pane.tokens_text (Some 73_877, Some 358));
-  check string "both sides summed" "74.2k tok" (Pane.tokens_sum_text (Some 73_877, Some 358));
+  let whole = Some (Acting.Input_whole 73_877) in
+  check string "both sides as parts" "in 73.9k · out 358" (Pane.tokens_text (whole, Some 358));
+  check string "both sides summed" "74.2k tok" (Pane.tokens_sum_text (whole, Some 358));
   check string "one side alone" "358 tok" (Pane.tokens_text (None, Some 358));
   check string "unknown is empty" "" (Pane.tokens_text (None, None));
+  (* e-masc-the-leader's turn 1853 (2026-09-25): 3,716,155 in, 3,556,362 of
+     them cache reads. *)
+  let split = Some (Acting.Input_split { fresh = 159_793; cached = 3_556_362 }) in
+  check string "a cached input as its new and cached parts"
+    "in 159.8k new · 3.56M cached · out 6.6k" (Pane.tokens_text (split, Some 6_622));
+  check string "and alone, still as its parts" "in 159.8k new · 3.56M cached"
+    (Pane.tokens_text (split, None));
+  check string "the sum still counts the cache reads" "3.72M tok"
+    (Pane.tokens_sum_text (split, Some 6_622));
   check string "age in the feed's shape" "10.0s" (Pane.age_text ~now 990.);
   check string "a clock behind now is zero" "0ms" (Pane.age_text ~now 2_000.)
 
@@ -1100,35 +1114,39 @@ let test_widest_done_reading_fits_whole () =
    under the header. The order is the feed's own; a settle folded before its
    turn's start would take the later start into itself, since a settled
    chunk with no session number accepts any session-numbered member. The
-   row carries no receipt age; with the fixture's tokens and cost it is 48
+   row carries no receipt age; with the fixture's tokens and cost it is 53
    cells against a 56-cell pane and keeps everything. *)
-let settled_earlier ?(calls = 3) ?(input = 73_877) ?(output = 358) ?(cost = 0.0258) () =
+let settled_earlier ?(turn = 3141) ?(calls = 3) ?(input = 73_877) ?(output = 358)
+    ?(cost = 0.0258) ?cache_read ?cache_creation () =
   match settled ~at:980. "tester" with
   | Observer.Keeper_turn_complete value ->
     Observer.Keeper_turn_complete
       { value with
-        tc_turn = Some 3141
+        tc_turn = Some turn
       ; tc_tool_calls = Some calls
       ; tc_input_tokens = Some input
+      ; tc_cache_read_tokens = cache_read
+      ; tc_cache_creation_tokens = cache_creation
       ; tc_output_tokens = Some output
       ; tc_cost_usd = Some cost
       }
   | _ -> fail "settled fixture must carry a turn completion"
 
-let earlier_turn_input ?calls ?input ?output ?cost () =
+let earlier_turn_input ?turn ?calls ?input ?output ?cost ?cache_read ?cache_creation () =
   { fixture with
     Pane.keepers = Some [ keeper "tester" ]; approvals = []
   ; chunks = chunks [ "tester" ] @@ entries
       [ 990., agent_core ~kind:Observer.Turn_started ~turn:6 ~at:990.
           ~correlation:"trace-tester" lane
-      ; 980., settled_earlier ?calls ?input ?output ?cost ()
+      ; 980., settled_earlier ?turn ?calls ?input ?output ?cost ?cache_read
+          ?cache_creation ()
       ; 970., agent_core ~kind:Observer.Turn_started ~turn:5 ~at:970.
           ~correlation:"trace-tester" lane
       ]
   }
 
-let earlier_turn_row input =
-  find_row_in (List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows) "turn 3141"
+let earlier_turn_row ?(cols = cols) ?(name = "turn 3141") input =
+  find_row_in (List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows) name
 
 let test_earlier_turn_row_carries_its_parts_and_cost_and_no_clock () =
   let row = earlier_turn_row (earlier_turn_input ()) in
@@ -1137,7 +1155,7 @@ let test_earlier_turn_row_carries_its_parts_and_cost_and_no_clock () =
   check bool "no receipt age" false (contains "last event" row);
   check bool "the count" true (contains "3 calls" row)
 
-(* Three-digit calls, two large parts and a six-figure cost: 59 cells
+(* Three-digit calls, two large parts and a six-figure cost: 64 cells
    against a 56-cell pane, so the cost goes and the parts stay. *)
 let test_earlier_turn_row_gives_up_its_cost_before_its_parts () =
   let row =
@@ -1147,6 +1165,73 @@ let test_earlier_turn_row_gives_up_its_cost_before_its_parts () =
   check bool "both token parts" true (contains "in 999.9k · out 999.9k" row);
   check bool "the cost is what it gave up" false (contains "$" row);
   check bool "the count" true (contains "123 calls" row)
+
+(* e-masc-the-leader's turn 1853 (2026-09-25): 30 calls, 3,716,155 in of
+   which 3,556,362 were cache reads, 6,622 out. The narrow pane has 56 cells:
+   the row is 75 with the cost and 65 without it, so it gives up the output
+   too and keeps the new and cached parts at 54. The wide pane's 74 hold the
+   65. *)
+let cached_turn_input () =
+  earlier_turn_input ~calls:30 ~input:3_716_155 ~output:6_622
+    ~cache_read:3_556_362 ~cache_creation:159_783 ()
+
+let test_a_cached_turn_row_leads_with_its_new_input () =
+  let narrow = earlier_turn_row (cached_turn_input ()) in
+  check bool "the new and cached parts" true
+    (contains "30 calls · in 159.8k new · 3.56M cached" narrow);
+  check bool "the whole input is not drawn as the input" false (contains "3.72M" narrow);
+  check bool "the output is what the narrow row gave up" false (contains "out" narrow);
+  let wide = earlier_turn_row ~cols:Pane.wide_pane_cols (cached_turn_input ()) in
+  check bool "the wide row keeps the output" true
+    (contains "in 159.8k new · 3.56M cached · out 6.6k" wide)
+
+(* The fleet column counts what the turn processed new. Turn 1853's
+   3,716,155 in held 3,556,362 cache reads: the column draws the new
+   159,793 plus 6,622 out, 166,415, where it used to draw 3.72M. *)
+let test_a_cached_fleet_row_counts_new_tokens () =
+  let event =
+    match settled ~at:990. "tester" with
+    | Observer.Keeper_turn_complete value ->
+      Observer.Keeper_turn_complete
+        { value with
+          tc_tool_calls = Some 30
+        ; tc_input_tokens = Some 3_716_155
+        ; tc_cache_read_tokens = Some 3_556_362
+        ; tc_cache_creation_tokens = Some 159_783
+        ; tc_output_tokens = Some 6_622
+        }
+    | _ -> fail "settled fixture must carry a turn completion"
+  in
+  let input =
+    { fixture with
+      Pane.keepers = Some [ keeper "tester" ]; approvals = []
+    ; chunks = chunks [ "tester" ] @@ entries [ 990., event ]
+    }
+  in
+  let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
+  let row = find_row_in texts "tester" in
+  check bool "the new tokens, in and out" true (contains "   166.4k" row);
+  check bool "not the sum with the cache reads" false (contains "3.72M" row);
+  check bool "the heading says new" true
+    (List.exists (fun line -> contains "new tok" line) texts)
+
+(* The widest split: three-digit calls and six-cell parts. With a four-digit
+   turn the new and cached parts take the narrow pane to exactly 56 cells;
+   a five-digit turn is one cell over, and the row keeps the new part and
+   the output instead, at 54. *)
+let test_the_widest_cached_turn_row_keeps_its_new_part () =
+  let widest ?turn () =
+    earlier_turn_input ?turn ~calls:123 ~input:1_999_800 ~output:999_900
+      ~cost:123456.789 ~cache_read:999_900 ~cache_creation:0 ()
+  in
+  let four = earlier_turn_row (widest ()) in
+  check bool "four-digit turn: both input parts, whole" true
+    (contains "123 calls · in 999.9k new · 999.9k cached" four);
+  let five = earlier_turn_row ~name:"turn 31415" (widest ~turn:31415 ()) in
+  check bool "five-digit turn: the new part and the output, whole" true
+    (contains "123 calls · in 999.9k new · out 999.9k" five);
+  check bool "and never the whole input" false (contains "2.00M" five);
+  check bool "and never input plus output" false (contains "3.00M" five)
 
 (* Beside the roster every fleet row would be a roster row said twice. The
    pane then draws the selected keeper's record alone: no fleet rows, no
@@ -2155,6 +2240,12 @@ let () =
             test_earlier_turn_row_carries_its_parts_and_cost_and_no_clock
         ; test_case "earlier turn row gives up its cost before its parts" `Quick
             test_earlier_turn_row_gives_up_its_cost_before_its_parts
+        ; test_case "a cached turn row leads with its new input" `Quick
+            test_a_cached_turn_row_leads_with_its_new_input
+        ; test_case "a cached fleet row counts new tokens" `Quick
+            test_a_cached_fleet_row_counts_new_tokens
+        ; test_case "the widest cached turn row keeps its new part" `Quick
+            test_the_widest_cached_turn_row_keeps_its_new_part
         ; test_case "fleet rows carry no clock" `Quick test_fleet_rows_carry_no_clock
         ] )
     ; ( "offline"

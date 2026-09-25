@@ -194,9 +194,9 @@ depends: [
   "uunf" {= "17.0.0"}
   "uuseg" {= "17.0.0"}
   "uutf" {= "1.0.4"}
-  "ws-direct-core" {= "0.1.0"}
-  "ws-direct-eio" {= "0.1.0"}
-  "ws-direct-gluten" {= "0.1.0"}
+  "ws-direct-core" {= "0.2.0"}
+  "ws-direct-eio" {= "0.2.0"}
+  "ws-direct-gluten" {= "0.2.0"}
   "x509" {= "1.0.6"}
   "yaml" {= "3.2.0"}
   "yojson" {= "3.0.0"}
@@ -241,23 +241,23 @@ pin-depends: [
   ]
   [
     "ocaml-dos.dev"
-    "git+https://github.com/jeong-sik/ocaml-dos.git#49bc23217cfc9ed12acc04eef1f1562603c4a5cd"
+    "git+https://github.com/jeong-sik/ocaml-dos.git#d9e2cba992292a8aa405d0f1034d5d027946236a"
   ]
   [
     "ocaml-msx.dev"
     "git+https://github.com/jeong-sik/ocaml-msx.git#870e61063e08ca4a0b15b939cb72a1c11aade1d3"
   ]
   [
-  "ws-direct-core.0.1.0"
-  "git+https://github.com/jeong-sik/ws-direct.git#05e01cf008d4a5024474d13cee35cda42e2bea09"
+  "ws-direct-core.0.2.0"
+  "git+https://github.com/jeong-sik/ws-direct.git#d812d6fec4153efc11235661e0d4b4d0d789c45b"
 ]
   [
-  "ws-direct-eio.0.1.0"
-  "git+https://github.com/jeong-sik/ws-direct.git#05e01cf008d4a5024474d13cee35cda42e2bea09"
+  "ws-direct-eio.0.2.0"
+  "git+https://github.com/jeong-sik/ws-direct.git#d812d6fec4153efc11235661e0d4b4d0d789c45b"
 ]
   [
-  "ws-direct-gluten.0.1.0"
-  "git+https://github.com/jeong-sik/ws-direct.git#05e01cf008d4a5024474d13cee35cda42e2bea09"
+  "ws-direct-gluten.0.2.0"
+  "git+https://github.com/jeong-sik/ws-direct.git#d812d6fec4153efc11235661e0d4b4d0d789c45b"
 ]
 ]
 x-maintenance-intent: ["(latest)"]

@@ -12,7 +12,7 @@ name: PR check
 # label that would not resolve) is a compile error @check reports.
 #
 # Since 2026-09-06 (#33507) the @check job does not stop there. Its last step
-# links and runs the suites this pull request selects, bounded at 1080
+# links and runs the suites this pull request selects, bounded at 1800
 # seconds; the comment above that step carries the reasoning and the numbers.
 # Two things follow. The scope no longer matches the manual job's, which is
 # why ci.yml's header describes a narrower lane than this one. And this gate
@@ -193,7 +193,10 @@ jobs:
     if: github.event.pull_request.draft == false
     name: dune build @check
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Run 36009641291 selected 268 linked suites after a 5m40s PTY rule;
+    # 151 selected suites were still unrun at the former 18-minute budget.
+    # The job's setup and build took about nine minutes before this step.
+    timeout-minutes: 45
     permissions:
       contents: read
       # Only the edited-test step below reads it, and it asks the pull
@@ -394,9 +397,14 @@ jobs:
         # budget does not reach is named and fails the step (RFC-0428, "넓힌
         # 선택"). The step's own deadline sits two minutes above that budget
         # so the script, not the runner, ends a step that runs out and the
-        # log says which suites did not run. The job is bounded at 30 minutes,
-        # and in run 35216373548 this step started 7m55s into it.
-        timeout-minutes: 20
+        # log says which suites did not run. Run 36009641291 ran 171 suites,
+        # stopped one, and left 151 unrun at the former 18-minute budget,
+        # after a 5m40s PTY rule and a build of 268 linked suites. The
+        # remaining selection needs about ten more minutes at the observed
+        # execution rate. Keep a 30-minute script
+        # budget with a two-minute step cleanup margin and a 45-minute job
+        # boundary after the measured setup/build time.
+        timeout-minutes: 32
         env:
           GH_TOKEN: ${{ github.token }}
           DUNE_JOBS: "4"
@@ -404,7 +412,7 @@ jobs:
         run: |
           bash scripts/ci/run-edited-tests.sh \
             "${{ github.event.pull_request.number }}" \
-            --budget-seconds 1080
+            --budget-seconds 1800
 
 
   # dashboard/ ships a `typecheck` script and no lane calls it.

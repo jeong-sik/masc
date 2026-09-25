@@ -55,6 +55,15 @@ val validate_admitted_slot : lane_id:string -> slot_id:string -> (unit, string) 
     admit. This is an authoring-time check; at the execution boundary
     {!apply} falls back to the declared order instead. *)
 
+val offered : t -> bool
+(** Whether the currently published lane offers this row's slot. [false] means
+    {!apply} ignores the row and the lane walks its declared order; an
+    unpublished registry also reads as [false]. *)
+
+val to_projection_json : t -> Yojson.Safe.t
+(** The row as the dashboard and TUI read it: the stored fields plus
+    [offered]. *)
+
 val set
   :  Workspace.config
   -> actor:string

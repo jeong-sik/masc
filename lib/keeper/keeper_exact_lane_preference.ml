@@ -133,7 +133,7 @@ let apply ~base_path ~keeper_name ~lane_id
      with
      | Ok selected_slots -> Ok { resolved with Runtime_exact_output_registry.selected_slots }
      | Error detail ->
-       Log.Keeper.warn ~keeper_name
+       Log.Keeper.info ~keeper_name
          "exact-lane preference ignored; lane=%s walks its declared order: %s"
          lane_id detail;
        Ok resolved)
@@ -157,6 +157,21 @@ let validate_admitted_slot ~lane_id ~slot_id =
       ~preferred:slot_id
   in
   ()
+;;
+
+let offered row =
+  Result.is_ok (validate_admitted_slot ~lane_id:row.lane_id ~slot_id:row.slot_id)
+;;
+
+let to_projection_json row : Yojson.Safe.t =
+  `Assoc
+    [ "keeper_name", `String row.keeper_name
+    ; "lane_id", `String row.lane_id
+    ; "slot_id", `String row.slot_id
+    ; "updated_by", `String row.actor
+    ; "updated_at", `String row.changed_at
+    ; "offered", `Bool (offered row)
+    ]
 ;;
 
 let set (config : Workspace.config) ~actor ~keeper_name ~lane_id slot_id =

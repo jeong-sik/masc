@@ -425,7 +425,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
 ;;
 
 (* The pending inputs the last committed queue pass was shown, beside the
-   working-context version that pass wrote and whether every store was read.
+   working-context version that pass wrote and how many stores it could not read.
    A snapshot stores only the sources its pockets reference, and a pass that
    could not read one store keeps history it cannot confirm settled, so the
    stored references can differ from the pending ones on every capture while

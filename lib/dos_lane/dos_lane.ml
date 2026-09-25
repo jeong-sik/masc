@@ -29,6 +29,8 @@ type error =
   | Unreadable of string
   | Held_by of string
   | Guest_fault of string
+  | Unsaveable of string
+  | Checkpoint_refused of Machine_checkpoint.error
 
 let error_to_string = function
   | No_machine -> "no DOS machine is loaded: call masc_dos_load first"
@@ -42,6 +44,8 @@ let error_to_string = function
   | Guest_fault message ->
     "the program ran something this machine does not implement, and stopped there: "
     ^ message
+  | Unsaveable message -> "the machine cannot be checkpointed right now, so nothing was written: " ^ message
+  | Checkpoint_refused e -> Machine_checkpoint.error_to_string e
 ;;
 
 (* The core runs about 24 million instructions a second on this hardware
@@ -63,6 +67,29 @@ let peek_max_bytes = 256
    masc_dos_type.toml declare the same two numbers to the caller. *)
 let max_keys_per_call = 64
 let max_text_length = 256
+
+(* ---------- which core ---------- *)
+
+type core = {
+  source_digest : string;
+  pinned_source_digest : string;
+  matches_pin : bool;
+}
+[@@deriving yojson]
+
+(* The digest ocaml-dos reports for the sources at OCAML_DOS_SHA in
+   scripts/opam-pin-external-deps.sh. Bump the two together: CI links the
+   pinned core, and test_dos_tools checks that the linked digest equals this
+   one, so a SHA bumped alone turns that test red with the new digest in its
+   message. Read the digest of a commit from its build:
+   _build/default/lib/identity/dos_core_identity.ml. *)
+let pinned_core_source_digest = "2a711d6932bbb72699645a40e835f8a1"
+
+let core =
+  { source_digest = Dos_core_identity.source_digest
+  ; pinned_source_digest = pinned_core_source_digest
+  ; matches_pin = String.equal Dos_core_identity.source_digest pinned_core_source_digest
+  }
 
 type ran = {
   steps_run : int;
@@ -99,6 +126,40 @@ let state : machine option ref = ref None
 let lock = Mutex.create ()
 let locked f = Mutex.protect lock f
 
+type change_mark = { count : int; incarnation : string }
+
+(* The machine change counter a spectator compares against, one per process,
+   written only while holding [lock]. It is not [steps]: a guest fault raises
+   out of the core before [steps] moves, so a faulting run can leave [steps]
+   where it was while the attempt still happened. [running] marks every
+   completed run, including a guest fault, in one place. A call refused
+   before running leaves the count alone. A load also marks when it installs
+   the new machine, an eject marks when it drops it, and nothing resets the
+   count, so one value never names two screens while the server runs.
+
+   [published] also records when a run holds the lock. A spectator may answer
+   unchanged from a Stable mark, but a Running mark must wait for the final
+   frame even when its count matches [since]. *)
+let change_count = ref 0
+type 'mark publication = 'mark Machine_live_publication.t =
+  | No_screen
+  | Stable of 'mark
+  | Running of 'mark
+type published_state = change_mark publication
+let published : published_state Atomic.t = Atomic.make No_screen
+
+let publish make =
+  Atomic.set published
+    (match !state with
+     | None -> No_screen
+     | Some st -> make { count = !change_count; incarnation = st.incarnation })
+;;
+
+let publish_stable () = publish (fun mark -> Stable mark)
+let publish_running () = publish (fun mark -> Running mark)
+let mark_change () = incr change_count; publish_stable ()
+let current_publication () = Atomic.get published
+
 let with_machine f =
   locked (fun () ->
     match !state with
@@ -120,10 +181,22 @@ let with_machine f =
    raises rather than misbehave quietly), or the ledger file will not take a
    line. Both come back as errors, not exceptions out of the tool. *)
 let running f =
-  match f () with
-  | result -> result
-  | exception Cpu86.Unsupported message -> Error (Guest_fault message)
-  | exception Sys_error message -> Error (Unreadable message)
+  publish_running ();
+  let result =
+    match f () with
+    | result -> result
+    | exception Cpu86.Unsupported message -> Error (Guest_fault message)
+    | exception Sys_error message -> Error (Unreadable message)
+    | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      mark_change ();
+      Printexc.raise_with_backtrace exn backtrace
+  in
+  (match result with
+   | Ok _ | Error (Unreadable _ | Guest_fault _) -> mark_change ()
+   | Error (No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _) ->
+     publish_stable ());
+  result
 ;;
 
 let refuse_other st ~who =
@@ -145,7 +218,8 @@ let with_control ~who f =
       (match result with
        | Ok _ | Error (Unreadable _ | Guest_fault _) -> ()
          (* the call ran: the machine may have moved *)
-       | Error (No_machine | Invalid_request _ | Held_by _) -> st.controller <- before);
+       | Error (No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _) ->
+         st.controller <- before);
       result)
 ;;
 
@@ -245,11 +319,31 @@ let clamp_steps steps =
   else Ok steps
 ;;
 
+(* [run_until] calls [stop] once per completed instruction, but an exception
+   escapes before it can return that count. Keep [st.steps] aligned with the
+   instructions that actually ran so tool responses and ledger positions are
+   accurate even when the guest faults. Preserve the original exception and
+   backtrace for the caller. *)
+let run_counted st ~max_steps =
+  let completed = ref 0 in
+  match
+    Dos_machine.run_until st.m ~max_steps ~stop:(fun _ ->
+      incr completed;
+      false)
+  with
+  | n ->
+    st.steps <- st.steps + n;
+    n
+  | exception fault ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    st.steps <- st.steps + !completed;
+    Printexc.raise_with_backtrace fault backtrace
+;;
+
 (* Runs the budget straight through, with nothing watching. *)
 let advance_blind st ~budget =
   let before = Dos_machine.input_requests st.m in
-  let n = Dos_machine.run_until st.m ~max_steps:budget ~stop:(fun _ -> false) in
-  st.steps <- st.steps + n;
+  let n = run_counted st ~max_steps:budget in
   { steps_run = n
   ; settled = false
   ; input_requests = Dos_machine.input_requests st.m - before
@@ -278,17 +372,13 @@ let advance_until_ready st ~budget =
   let ran = ref 0 and settled = ref false in
   while (not !settled) && !ran < budget && not (Dos_machine.exited m) do
     let asked_before = Dos_machine.input_requests m in
-    let n =
-      Dos_machine.run_until m ~max_steps:(min settle_chunk (budget - !ran))
-        ~stop:(fun _ -> false)
-    in
+    let n = run_counted st ~max_steps:(min settle_chunk (budget - !ran)) in
     ran := !ran + n;
     let asked = Dos_machine.input_requests m > asked_before in
     let now = Dos_machine.screen_digest m in
     if asked && now = !previous then settled := true;
     previous := now
   done;
-  st.steps <- st.steps + !ran;
   { steps_run = !ran
   ; settled = !settled
   ; input_requests = Dos_machine.input_requests m - requests_before
@@ -460,6 +550,7 @@ let load ~who ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announ
           ; controller = Some who; incarnation = Random_id.uuid_v7 () }
         in
         state := Some st;
+        mark_change ();
         let booted =
           running (fun () ->
             let ran = advance st ~budget:boot_steps ~until_ready:true in
@@ -482,6 +573,7 @@ let eject ~who ~announce () =
        | Error e -> Error e
        | Ok () ->
          state := None;
+         mark_change ();
          announce ();
          Ok ()))
 ;;
@@ -538,6 +630,28 @@ let capture_with_identity () =
       ; input_count = List.length st.entries
       ; input_ledger = st.entries
       })
+;;
+
+type live =
+  | Nothing_loaded
+  | Unchanged of change_mark
+  | Changed of change_mark * frame
+
+(* Compare and copy under one lock hold, so the count, the incarnation and the
+   pixels always describe the same machine state. An unchanged answer renders
+   nothing. *)
+let live ~since =
+  locked (fun () ->
+    match !state with
+    | None -> Nothing_loaded
+    | Some st ->
+      let mark = { count = !change_count; incarnation = st.incarnation } in
+      (match since with
+       | Some seen when seen.count = mark.count
+                        && String.equal seen.incarnation mark.incarnation -> Unchanged mark
+       | Some _ | None ->
+         let width, height = Dos_machine.frame_dims st.m in
+         Changed (mark, { width; height; rgb = Dos_machine.frame_rgb st.m })))
 ;;
 
 let step ~who ~steps ~until_ready =
@@ -690,6 +804,159 @@ let type_text ~who ~text ~steps =
          | Ok resolved ->
            let ran = press_resolved st ~who ~keys:resolved ~budget in
            ran_then_kept st ran))
+;;
+
+(* ---------- checkpoints ---------- *)
+
+(* The lane's part of a checkpoint: what the machine bytes do not carry. The
+   machine bytes are Dos_snapshot's and carry their own format; this number
+   covers the meta beside them. Bump it by hand when [checkpoint_meta] changes
+   shape or meaning -- a checkpoint of any other number is refused, and
+   nothing reads an old one. *)
+let checkpoint_format = 1
+
+let checkpoint_meta st ~who : Yojson.Safe.t =
+  `Assoc
+    [ ("program", `String st.program)
+    ; ("saves", `String (Filename.basename st.saves_dir))
+    ; ("steps", `Int st.steps)
+    ; ("saved_by", `String who)
+    ; ("ledger", `List (List.rev_map entry_json st.entries))
+    ]
+;;
+
+let save ~who ~dir ~slot =
+  with_machine (fun st ->
+    let header =
+      { Machine_checkpoint.machine = Machine_checkpoint.Dos
+      ; format = checkpoint_format
+      ; core = Dos_core_identity.source_digest
+      }
+    in
+    match Dos_snapshot.save st.m with
+    | Error e -> Error (Unsaveable (Dos_snapshot.save_error_to_string e))
+    | Ok machine_bytes ->
+      (match
+         Machine_checkpoint.write ~dir slot header ~meta:(checkpoint_meta st ~who)
+           ~machine_bytes
+       with
+       | Ok () -> Ok (observe st)
+       | Error message -> Error (Unreadable message)))
+;;
+
+type restored_meta = {
+  saved_program : string;
+  saved_saves : string;
+  saved_steps : int;
+  saved_ledger : entry list;  (* oldest first *)
+}
+
+(* Every field the lane wrote, or the checkpoint is corrupt: a missing step
+   count is not zero and a missing ledger is not empty. *)
+let meta_of_json json =
+  let corrupt message = Error (Checkpoint_refused (Machine_checkpoint.Corrupt message)) in
+  let field name =
+    match json with
+    | `Assoc fields -> List.assoc_opt name fields
+    | _ -> None
+  in
+  let entry_of = function
+    | `Assoc fields ->
+      (match
+         ( List.assoc_opt "step" fields
+         , List.assoc_opt "who" fields
+         , List.assoc_opt "key" fields )
+       with
+       | Some (`Int at_step), Some (`String who), Some (`String key_name) ->
+         Some { at_step; who; key_name }
+       | _ -> None)
+    | _ -> None
+  in
+  match field "program", field "saves", field "steps", field "ledger" with
+  | Some (`String program), Some (`String saves), Some (`Int steps), Some (`List items) ->
+    let ledger = List.filter_map entry_of items in
+    let rec ordered previous = function
+      | [] -> true
+      | e :: rest -> e.at_step >= previous && e.at_step <= steps && ordered e.at_step rest
+    in
+    if List.length ledger <> List.length items then corrupt "a ledger line does not read"
+    else if not (ordered 0 ledger) then corrupt "the ledger does not fit the saved step count"
+    else if escapes saves || String.equal saves "" then corrupt "the saves name is a path"
+    else Ok { saved_program = program; saved_saves = saves; saved_steps = steps; saved_ledger = ledger }
+  | _ -> corrupt "the lane's fields are missing"
+;;
+
+let restore ~who ~dir ~slot ~ledger_dir ~saves_dir_of ~announce =
+  locked (fun () ->
+    match Option.map (refuse_other ~who) !state with
+    | Some (Error e) -> Error e
+    | Some (Ok ()) | None ->
+      (* Everything is read and checked before anything changes: a refused
+         restore leaves the machine, its ledger and its controller as they
+         were. *)
+      match
+        Machine_checkpoint.read ~dir slot ~machine:Machine_checkpoint.Dos
+          ~format:checkpoint_format
+      with
+      | Error (Machine_checkpoint.Unreadable message) -> Error (Unreadable message)
+      | Error e -> Error (Checkpoint_refused e)
+      | Ok { Machine_checkpoint.meta; machine_bytes; header = _ } ->
+        match meta_of_json meta with
+        | Error e -> Error e
+        | Ok meta ->
+          match Dos_snapshot.restore machine_bytes with
+          | Error (Dos_snapshot.Wrong_format { saved; supported }) ->
+            Error
+              (Checkpoint_refused
+                 (Machine_checkpoint.Other_format { saved; expected = supported }))
+          | Error ((Dos_snapshot.Not_a_snapshot | Dos_snapshot.Corrupt _) as e) ->
+            Error
+              (Checkpoint_refused
+                 (Machine_checkpoint.Corrupt (Dos_snapshot.error_to_string e)))
+          | Ok m ->
+            let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
+            let lines =
+              String.concat ""
+                (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") meta.saved_ledger)
+            in
+            match
+              mkdir_p ledger_dir;
+              write_atomically ~dir:ledger_dir "ledger.jsonl" lines
+            with
+            | exception Sys_error message -> Error (Unreadable message)
+            | () ->
+              (* The saves directory keeps what is on disk. The restored
+                 machine's files are taken as already kept, so nothing is
+                 written back until the guest writes again: an older
+                 checkpoint never overwrites a newer save a game made after
+                 it. *)
+              let kept = Hashtbl.create 16 in
+              List.iter
+                (fun name ->
+                  Option.iter (Hashtbl.replace kept name) (Dos_machine.read_mounted m name))
+                (Dos_machine.mounted_names m);
+              let st =
+                { m
+                ; steps = meta.saved_steps
+                ; program = meta.saved_program
+                ; ledger_path
+                ; entries = List.rev meta.saved_ledger
+                ; saves_dir = saves_dir_of meta.saved_saves
+                ; kept
+                ; controller = Some who
+                ; incarnation = Random_id.uuid_v7 ()
+                }
+              in
+              state := Some st;
+              mark_change ();
+              announce ();
+              Ok (observe st))
+;;
+
+let checkpoints ~dir =
+  match Machine_checkpoint.list ~dir with
+  | Ok listed -> Ok listed
+  | Error message -> Error (Unreadable message)
 ;;
 
 (* ---------- introspection ---------- *)

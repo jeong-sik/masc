@@ -24,6 +24,7 @@ SOURCE_MODULES = (
 )
 CONNECTORS = "/api/v1/gate/connectors"
 TITLE = b"MASC Connectors"
+LOADED_TITLE = h.screen_header(TITLE, b" (0 of 0 available)")
 
 
 def fixtures() -> h.HttpFixtures:
@@ -47,7 +48,7 @@ def the_transport_list_is_reachable(binary: str) -> None:
     ) -> None:
         try:
             landed = h.palette_go(
-                process, master_fd, output, b"go Connectors", TITLE
+                process, master_fd, output, b"go Connectors", LOADED_TITLE
             )
             plain = h.CSI_RE.sub(b"", landed)
             for needle in (
@@ -70,12 +71,11 @@ def the_transport_list_is_reachable(binary: str) -> None:
             # And back: with the lane on screen, asking for the list closes it.
             # This is the half the palette entry exists for -- a plain jump to
             # the view renders whichever screen the lane's visibility names.
-            # The title carries its own styling, so "MASC Connectors (0 of 0
-            # available)" is only one string once the escapes are off; the
-            # wait reads the unstyled half and the count is read from the
-            # stripped frame.
+            # The screen title also appears before its HTTP result arrives.
+            # Wait for the loaded count across the title's styling before
+            # checking the registry, including when input renders at once.
             again = h.CSI_RE.sub(
-                b"", h.palette_go(process, master_fd, output, b"go Connectors", TITLE)
+                b"", h.palette_go(process, master_fd, output, b"go Connectors", LOADED_TITLE)
             )
             if b"MASC Browser Lane" in again:
                 raise AssertionError(

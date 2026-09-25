@@ -3,6 +3,11 @@ open Schedule_domain
 open Schedule_runner
 open Schedule_service
 
+(* Fixture tick for create and modify: the runner's floor tick, below every
+   interval these fixtures declare, so the runner-tick check never refuses one
+   of them. *)
+let runner_tick_sec = 1.0
+
 let temp_dir () =
   let path = Filename.temp_file "schedule_runner_test" "" in
   Sys.remove path;
@@ -51,7 +56,7 @@ let create_ok
   config
   =
   match
-    create config ~now:100.0 ~schedule_id ~requested_at:100.0
+    create config ~runner_tick_sec ~now:100.0 ~schedule_id ~requested_at:100.0
       ~requested_by:(human "requester") ~scheduled_by:(human "scheduler")
       ~due_at:200.0 ~payload:(payload_json "wake me") ~source:Operator_request
       ?recurrence ()
@@ -147,7 +152,7 @@ let accepting_consumer
             (fun acceptance_commit ->
                Work_accepted { detail; acceptance_commit })
             (commit_acceptance detail))
-  ; defer_wake = (fun _config ~occurrence_id:_ _request -> false)
+  ; defer_wake = (fun _config ~occurrence_id:_ _request -> None)
   }
 ;;
 
@@ -324,7 +329,7 @@ let test_tick_prune_keeps_a_key_the_schedule_can_still_produce () =
                (fun acceptance_commit ->
                   Work_accepted { detail = accepted_detail; acceptance_commit })
                (commit_acceptance accepted_detail))
-    ; defer_wake = (fun _config ~occurrence_id:_ _request -> false)
+    ; defer_wake = (fun _config ~occurrence_id:_ _request -> None)
     }
   in
   let retry_key = occurrence_key retry_request ~due_at:200.0 in
@@ -759,6 +764,35 @@ let test_tick_dispatches_every_recurring_occurrence () =
     !calls
 ;;
 
+(* An interval shorter than the runner tick fires once per tick, not once per
+   interval (#38176): [next_due_after] skips the seconds the runner did not
+   look at. Such a row can only exist when it was stored under a shorter tick
+   (create and modify refuse it now); it still loads, and this is how often it
+   fires. Four ticks, the production default spacing apart, emit four
+   occurrences, not one per second as the interval declares. *)
+let test_sub_tick_interval_fires_once_per_tick () =
+  with_workspace
+  @@ fun config ->
+  let calls = ref [] in
+  let request =
+    create_ok ~schedule_id:"sub-tick-interval"
+      ~recurrence:(Interval { interval_sec = 1 })
+      config
+  in
+  let production_tick_spacing = 15.0 in
+  let ticks = 4 in
+  let emitted =
+    List.init ticks (fun index ->
+      let now = request.due_at +. (float_of_int index *. production_tick_spacing) in
+      let result = tick_ok config ~now ~consumer:(accepting_consumer calls) in
+      check int (Printf.sprintf "tick %d dispatches once" index) 1
+        (List.length result.dispatches);
+      List.length result.emitted)
+  in
+  check int "one occurrence per tick" ticks (List.fold_left ( + ) 0 emitted);
+  check int "one consumer call per tick" ticks (List.length !calls)
+;;
+
 let test_tick_marks_terminal_dispatch_rejection_failed () =
   with_workspace
   @@ fun config ->
@@ -820,7 +854,7 @@ let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
            else (
              incr healthy_calls;
              accept (`Assoc [ "healthy", `Bool true ])))
-    ; defer_wake = (fun _config ~occurrence_id:_ _request -> false)
+    ; defer_wake = (fun _config ~occurrence_id:_ _request -> None)
     }
   in
   let first = tick_ok config ~now:201.0 ~consumer in
@@ -953,7 +987,7 @@ let test_runner_status_snapshot_tracks_liveness () =
   Schedule_runner_status.record_tick_ok ~started_at:1.5 ~finished_at:1.75
     (* A hold-only tick: zero counts, so the totals checked below are the
        other ticks' sums. *)
-    { ok_result with due_changed = 0; rescheduled = 0; dispatches = []; held = [ held_signal ] };
+    { ok_result with due_changed = 0; rescheduled = 0; dispatches = []; held = [ { signal = held_signal; reason = Previous_occurrence_unconsumed } ] };
   let held_ids () =
     match json_field "held" (render ~now:2.0 ()) with
     | Some (`List held) ->
@@ -1122,7 +1156,7 @@ let test_tick_defers_held_wake_without_advancing () =
            Result.map
              (fun acceptance_commit -> Work_accepted { detail = `Assoc []; acceptance_commit })
              (commit_acceptance (`Assoc [])))
-    ; defer_wake = (fun _config ~occurrence_id:_ _request -> true)
+    ; defer_wake = (fun _config ~occurrence_id:_ _request -> Some Schedule_runner.Previous_occurrence_unconsumed)
     }
   in
   let result = tick_ok config ~now:201.0 ~consumer in
@@ -1130,14 +1164,14 @@ let test_tick_defers_held_wake_without_advancing () =
   check int "held wake emits no signal" 0 (List.length result.emitted);
   check int "a held wake is not a dispatch" 0 (List.length result.dispatches);
   check (list string) "held wake is reported as held once" [ request.schedule_id ]
-    (List.map (fun (signal : wake_signal) -> signal.schedule_id) result.held);
+    (List.map (fun ({ signal; _ } : held) -> signal.schedule_id) result.held);
   let again = tick_ok config ~now:216.0 ~consumer in
   check (list string) "the same occurrence is held on the next tick"
     (List.map
-       (fun (signal : wake_signal) -> Schedule_occurrence_id.to_string signal.occurrence_id)
+       (fun ({ signal; _ } : held) -> Schedule_occurrence_id.to_string signal.occurrence_id)
        result.held)
     (List.map
-       (fun (signal : wake_signal) -> Schedule_occurrence_id.to_string signal.occurrence_id)
+       (fun ({ signal; _ } : held) -> Schedule_occurrence_id.to_string signal.occurrence_id)
        again.held);
   check int "a hold that continues is not newly held" 0
     (List.length (Schedule_runner.newly_held ~previous:result.held again.held));
@@ -1183,6 +1217,8 @@ let () =
             test_tick_stamps_wakes_from_clock_and_anchors_recurrence_on_now
         ; test_case "dispatches every recurring occurrence" `Quick
             test_tick_dispatches_every_recurring_occurrence
+        ; test_case "sub-tick interval fires once per tick" `Quick
+            test_sub_tick_interval_fires_once_per_tick
         ; test_case "marks terminal dispatch rejection failed" `Quick
             test_tick_marks_terminal_dispatch_rejection_failed
         ; test_case "retries same occurrence without blocking other schedule" `Quick

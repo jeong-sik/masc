@@ -153,11 +153,20 @@ ledger = []
 for path in day_paths('costs'):
     ledger.extend(read_rows(path))
 requests = []
+# A raw row without usage_scope was written before rows stated one; whether it
+# was one request is unknown, so it is counted apart, not read as a request.
+raw_rows_without_scope = 0
 for row in ledger:
+    if row.get('usage_projection') == 'raw_observation' and 'usage_scope' not in row:
+        raw_rows_without_scope += 1
     ts = seconds(row.get('timestamp'))
     tokens = count(row.get('input_tokens'))
     miss = count(row.get('cache_miss_input_tokens'))
-    if row.get('usage_projection') != 'raw_observation' or ts is None or not tokens or miss is None:
+    # Only a per-request raw row is one request; official-client rows count a
+    # client turn or a whole conversation (usage_scope).
+    if (row.get('usage_projection') != 'raw_observation'
+            or row.get('usage_scope') != 'per_request'
+            or ts is None or not tokens or miss is None):
         continue
     requests.append({'agent': row.get('agent'), 'runtime_id': row.get('runtime_id'),
                      'turn': row.get('keeper_turn_id'), 'ordinal': row.get('agent_core_turn_ordinal'),
@@ -368,6 +377,7 @@ receipt_report = [{'selected_model': model, 'receipts': sum(c.values()), 'termin
 report = {'generated_at': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
           'dates': args.date, 'deploy_at': args.deploy_at,
           'sources': sources, 'malformed': malformed,
+          'raw_rows_without_scope': raw_rows_without_scope,
           'requests_read': len(requests), 'turn_records_read': len(records),
           'snapshots_read': len(snapshots), 'receipts_read': len(receipts),
           'settled_usage_by_family': usage_report,

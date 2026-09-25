@@ -142,8 +142,15 @@ let of_request_validation_error ~binding error =
   of_attempt_error ~binding ~evidence:Request_validation error
 ;;
 
+(* The reply came back from the binding's endpoint, so the attempt itself is
+   not the owner. Which of endpoint, region or provider produced the bad body
+   is not known from the body alone, the same as a generic server status in
+   [ownership_of_http_status]. *)
 let of_response_parse_error ~binding error =
-  of_attempt_error ~binding ~evidence:Response_parse error
+  { error
+  ; provider_failure =
+      Some { ownership = Unclassified; binding = Some binding; evidence = Response_parse }
+  }
 ;;
 
 let credential_owned binding =

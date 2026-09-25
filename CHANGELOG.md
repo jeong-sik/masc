@@ -2,6 +2,601 @@
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-09-25
+
+### Upgrade notes
+
+- The session store no longer knows the `replaced_configuration` context
+  delivery. An official-client session file that still records it fails to
+  load, and that Keeper's turns fail until the file is removed. Before
+  starting this release, remove
+  `<base>/.masc/keepers/<name>/official-client-runtime/session.json` for each
+  Keeper whose file contains `"delivery":"replaced_configuration"`. The next
+  turn starts a new vendor session (#38882).
+- Tool blob maintenance (`masc-deployment-preflight-helper` blob GC) now runs on deployments with non-default clusters. It previously refused whenever `.masc/clusters/` had any entry, so on those deployments blobs were never collected. It now reads every cluster workspace, so the first two passes after upgrading may free a backlog of unreferenced blobs. A symlink or special file under `.masc/clusters/` makes the pass fail with that path instead of being skipped. A regular file there (such as Finder's `.DS_Store`) is skipped: the helper prints one stderr line naming it and lists it under `skipped_cluster_files` in its JSON output (#38996).
+- Ephemeral screen captures in `<keeper>.vision/frames` are pruned to the newest 500 files / 20 MB on the first frame write after upgrade. Checkpoints and uploaded images stored in `<keeper>.vision` root are kept untouched and protected from eviction (#38634).
+- A `[models.<id>]` table in `runtime.toml` with a key the parser does not read fails the load and names the key, instead of being ignored. A misspelt `tools_support = true` used to load as a model without tool support, so its keeper ran with no tools. Before restarting on this version, run the new binary's `masc doctor` against the live base path: it loads that `runtime.toml` and reports `runtime.toml loads.` or the offending key (#38742).
+- The server's PID lock now records the start time of the process that wrote it, read from `/proc/<pid>/stat` on Linux (no `ps` needed) and from `ps -o lstart=` elsewhere. A lock left by an older server that is still alive but not answering is not taken over automatically; stop that process or remove the lock by hand (#38742).
+- A `runtime.toml` whose exact-output lane `slots` name an HTTP runtime on a
+  provider without `exact-body-timeout-s` still boots, degraded: those slots
+  are left out of their lanes, a WARN line per slot names the lane, the slot,
+  the provider and the key to add, and the runtime startup report (`/health`
+  `runtime_startup_degradation`, the dashboard runtime inventory) lists them
+  under `exact_slot_body_deadline_gaps`. A lane left with no HTTP slot walks its
+  `cli_slots`; a lane left with nothing at all is unavailable on its own and is
+  listed under `exact_lanes_emptied_by_body_deadline_gaps`, and every other
+  lane still publishes, mandatory or not. A save that adds such a slot is
+  refused before anything is written, naming every slot it adds; a save that
+  keeps the slots the file already has, such as a keeper assignment, goes
+  through. Add
+  `exact-body-timeout-s` to every such provider. `cli_slots` are not affected,
+  and neither is a deployment whose `AGENT_CORE_MODEL_CATALOG` names a
+  replacement catalog, whose `[[targets]]` rows keep their own `body_timeout_s`
+  (#38849).
+- HTTP callers must send attachments in top-level `attachments` rather than `meta.attachments`. The raw metadata carrier now returns a bad-request error. `http:`, `javascript:`, and `data:` attachment URLs are refused (#38835).
+- A `youtube` attachment must use `url`; `youtube` with `sha256` is refused. An artifact attachment over 32 MiB is refused when the post is written, because the dashboard can open artifacts only up to that size (#38835).
+- Old untyped attachment metadata, including HTTPS entries, displays a failure card. Artifact downloads require an Admin token and return exact bytes. The whole-body HTTP readers return 413 for artifacts over 32 MiB (#38835).
+- A request that the candidate's own policy refuses before it is sent
+  (`Retry.Attempt_rejected`) now shows route class `admission` instead of
+  `attempt_rejected` in Keeper turn records and driver logs, because Api-error
+  route classes now come from the same `Candidate_fault` judgment that the
+  candidate walks use. Lanes behave the same as before: both classes already
+  rotated to the next candidate (#38958).
+
+### Fresh state required
+
+- Raw cost-ledger rows (`usage_projection: raw_observation`) now require `usage_scope`, and an official client's rows also carry `conversation_id`, `conversation_position` and `vendor_total_tokens`. A raw row written before this release has no scope and does not decode: `masc cost` warns and counts it as an invalid row, inference metrics counts it as a schema violation. Move `<base-path>/.masc/costs/` aside before upgrading to start the ledger fresh (#38970).
+
+### Added
+
+- `masc_dos_load`, `masc_dos_screen` and the `/health` build object
+  (`ocaml_dos_core`) name the linked ocaml-dos core: the source digest the
+  core computed at its build, the digest pinned for `OCAML_DOS_SHA`, and a
+  `matches_pin` flag. A server built against an older opam copy of the core
+  no longer looks identical to one built against the pin (#38826) (#38941).
+- The glossary gains a Board Attachment entry: a typed reference a Board post carries, with `kind` (image|video|youtube|external_link) and exactly one source — an absolute HTTPS `url` or an existing artifact `sha256`. The post handler is the only writer, the Keeper tool and HTTP paths share the input, and the entry separates it from the wider Artifact concept (#38957, closes #38833).
+- The TUI Keeper runtime picker (Keepers, `U`) can now be narrowed by typing:
+  `/` opens a filter over the drawn kind, target and route of every declared
+  lane and runtime, Backspace edits it, and Esc drops the filter before a
+  second Esc closes the picker. The count line shows the filter and `N of M`,
+  and a filter that matches nothing says so instead of "loading". PgUp/PgDn
+  move a page and Home/End jump to the ends. While the filter is open, `d`,
+  `j`/`k`, the quit key and a paste go into the filter. The picker moves onto
+  the shared `Masc_tui_pick_list`, which gains a `Follows_cursor` window for
+  screen-high pickers (#38976).
+- `masc_dos_save` and `masc_dos_restore` keep the whole DOS machine under a
+  slot name in `<.masc>/dos/checkpoints/` and put it back, including after a
+  server restart. A save needs no controller and moves nothing; a restore
+  needs the controller free or the caller's, makes the restorer the holder,
+  starts a new incarnation, and continues the key ledger from the checkpoint.
+  It leaves the game's own saves directory as it is. `masc_dos_restore` with
+  no slot lists the checkpoints (#39011).
+- `Machine_checkpoint`, the slot store a machine lane writes through: slot
+  names, a header naming the machine, its format and the writing core, zstd
+  compression, a checksum and an atomic replace. Another machine's or another
+  format's checkpoint is refused; the core identity is shown, not compared (#39011).
+- Add bounded retention and rotation to multimodal vision artifact stores (`default_max_entries = 500`, `default_max_bytes = 20 MB`), isolating ephemeral screen frames into a `frames/` subdirectory and evicting older frames on write while refreshing modification times on re-used frames, protecting checkpoints and active workflows from data loss (#38634).
+- The Overview's Providers section can show usage windows for OpenRouter,
+  Z.AI (GLM Coding Plan), Kimi Coding and Ollama Cloud accounts. A provider
+  in `runtime.toml` declares `[providers.<id>.usage-read]` with a `shape`
+  (`openrouter-key`, `zai-quota-limit`, `kimi-coding-usages` or
+  `ollama-usage`) and an absolute `https://` `url`; masc sends one GET with
+  the API key its HTTP runtime was built with, without a model call, once per account at
+  server start. An unknown shape, a URL that is not `https://`, a missing
+  URL, an unknown key or a provider without `credentials` is refused at load.
+  A failed read is logged as a warning with its scope and shape; routing and
+  admission do not read these windows. The seed `runtime.toml` declares the
+  four endpoints; only OpenRouter's is documented (#38706).
+- `usage-read` on a `codex-app-server`, `claude-code` or `antigravity-cli`
+  provider is refused at load: those runtimes log in with a subscription, and
+  an API-key read would file one account's usage under another (#38706).
+- A usage read that raises is logged with its scope and shape and no longer
+  stops the reads of the accounts after it (#38706).
+- A usage response with a value out of range is refused: Ollama `usage`
+  outside 0..1, Z.AI `percentage` outside 0..100, OpenRouter
+  `limit_remaining` outside 0..limit, Kimi or OpenRouter `used` above its
+  `limit`, and a Z.AI `number` or Kimi `window.duration` of 0 or less (#38706).
+- A usage response that states the same window twice is refused instead of
+  keeping the last one; a read that states no windows logs one info line.
+  OpenRouter's `limit_reset` is no longer part of the "credit limit" label
+  (#38706).
+- `usage-read.url` must be on the host of the provider's own `endpoint`; any
+  other host is refused at load, because the read sends that provider's key
+  (#38706).
+- `GET /api/v1/lane-addons/live?source_kind=msx_capture|dos_capture&since=N&incarnation=I` answers the MSX or DOS screen with a machine change count and incarnation, or only "unchanged" when `since` and `incarnation` name the current mark. The count rises on every call that runs or replaces the machine: an MSX press that raises after running frames, and a DOS run that faults at its first instruction, which leaves `steps` where it was. Each lane publishes its mark in an `Atomic.t` under the machine lock, so an unchanged or no-machine answer reads neither the lock nor a systhread; only a moved mark reads the frame, under one lock hold in a systhread. The route needs read auth and writes nothing to the lane store (#38733).
+- The TUI runtime candidate picker (Runtime lanes reading and Lanes surface)
+  can now be narrowed by typing: `/` opens a filter over the drawn runtime
+  id, provider and model, Backspace edits it, and Esc drops the filter before
+  a second Esc closes the picker. The header shows the filter and `N of M`.
+  PgUp/PgDn move a page, Home/End jump to the ends, and the arrow keys and
+  the mouse wheel move the picker (before, only `j`/`k` did, and the arrows
+  and the wheel moved the list hidden under it). The cursor, filter and
+  visible window live in one shared module, `Masc_tui_pick_list`, so the
+  other pickers can move onto it (#38803).
+- Board posts accept typed `attachments` on the Keeper tool and HTTP write paths. An entry names its kind and exactly one HTTPS URL or existing artifact SHA-256. The dashboard displays valid entries and an explicit failure card for malformed stored metadata (#38835, closes #38833).
+- An artifact attachment follows its kind in the dashboard: after the reader loads it, `image` shows as an image and `video` as a video, with the download link kept; `external_link` stays a download (#38835).
+- Board artifact references participate in tool blob retention while their posts remain stored (#38835).
+- Write and Edit on a remote_ssh Keeper can write a path under one of its
+  endpoint's declared roots (`allowed_paths`, such as a Terminal-Bench task's
+  `/app`). The write takes the same `filesystem_write` Gate decision as a host
+  write outside the playground; a deferred decision writes nothing, and an
+  approved one replays as the same mode. The endpoint checks, as it writes,
+  that the directory is physically under a declared root and the target is
+  not a symbolic link, so a link under `/app` cannot carry the approved bytes
+  elsewhere. Append copies the file and renames the copy over it, so a hard
+  link, or a link swapped in during the write, does not either
+  (#38788, refs #38593).
+
+### Changed
+
+- Add boot stage timing to release smoke diagnostics (#38804).
+- A Keeper's Automation rows say when each schedule was asked for. The rows
+  drew a status, a recurrence and a summary, and a store that keeps every
+  request it ever took draws the same one-shot many times: twenty of
+  code-reviewer's 91 rows shared one status and one summary (#38458).
+- The status and request-clock columns use measured cell widths. The
+  recurrence column aligns values that leave room for the payload summary;
+  a long recurrence moves to a labelled continuation so it cannot hide the
+  summary on its own row or on shorter rows in the same page (#38458).
+- Present the leading completed TUI input immediately, then pace repeated input frames while coalescing terminal and probe replay bursts (#38821).
+- The TUI and dashboard runtime-config receipt decoders now require
+  `application.exact_output_registry` and accept `commit.warnings`, which the
+  server always sent and the TUI decoder refused, so every TUI config save
+  reported a decode failure. The dashboard runtime health card names exact
+  slots without `exact-body-timeout-s`, lanes they leave empty and a kept
+  registry, also when catalog-missing models are present (#38850).
+- Two functions answered how many rows a buffer holds, a row apart: one added
+  a row for a last line with no newline after it, the other did not, and a
+  footer is written without one. The rule -- a last line with no newline is a
+  row, because the terminal draws it -- is now stated once on the one function
+  that remains rather than living as the difference between two names (#38922).
+- The TUI reads the machine screen through
+  `GET /api/v1/lane-addons/live` instead of `/api/v1/msx/frame`. Each read
+  sends the `since` change count and `incarnation` of the picture already
+  drawn. A `state: "unchanged"` answer draws nothing and decodes no pixels.
+  `state: "no_machine"` says no machine is loaded. A failed read is drawn
+  as its error, not as an empty machine or an old picture. The MSX tick
+  (`POST /api/v1/msx/tick`) still advances a watched MSX game (#38952).
+- The MSX load menu (`&` or `:go msx`) now also lists `watch DOS machine`
+  while a DOS machine is loaded. Picking it shows the DOS screen, scaled the
+  way an MSX frame is and titled by its change count. Only `Esc` and `+`/`-`
+  act there, and no key reaches either machine (#38952).
+- The menu keeps its highlight on a row, not on a position. When the DOS
+  watch row appears or disappears while the menu is open, Enter still picks
+  the highlighted row, or nothing if that row has gone. It never loads the
+  cartridge that moved into its place (#38952).
+- A key on the DOS screen no longer drops the DOS read in flight, so typing
+  there does not stop the picture from updating. A changed DOS answer is
+  parsed and base64-decoded on a system thread, off the UI domain (#38952).
+- The live route names no mode or cartridge, so until the first tick
+  answers, the menu's MSX watch row reads `watch MSX machine` and the
+  spectator title shows only the frame number. After a tick, both name the
+  mode and cartridge again for as long as the machine keeps its
+  incarnation (#38952).
+- The MSX tick now returns its picture and change mark from one machine-lock
+  snapshot, so the next live read can send `since` without reloading pixels.
+  A keypress keeps the current title metadata within the same incarnation.
+  Opening the menu starts DOS discovery asynchronously and keeps menu input
+  responsive while its first full-screen response is in flight. Reopening
+  starts a fresh read without waiting for an older view's response (#38952).
+- The MSX tick answers with the change mark a spectator reads next. It
+  answered one below it, so a live read after a tick never matched as
+  unchanged and always carried the whole picture (#38952).
+- Evidence references sent to a goal whose phase has no active proof request
+  are refused with `error_code` `precondition_failed` instead of
+  `validation_error` (#38774).
+- The Board API now reports whether you reacted to a post or comment in one
+  field, `reacted`. The duplicate `has_reacted` field is gone; scripts that
+  read it should read `reacted` (#38842).
+- The Keeper API and Dashboard report the model a Keeper last used in
+  `active_model_label` only. The duplicate `last_model_used_label` field is
+  gone; scripts that read it should read `active_model_label` (#38844).
+
+### Removed
+
+- Removed the public `Llm_provider.Constants.Http` status list. Downstream code
+  using that module must move to `Llm_provider.Retry.classify_error` and its
+  typed `api_error` (or `is_retryable` for retry decisions); the old list is
+  not equivalent, including its former HTTP 498 entry. The runtime lane walk
+  already uses typed retry classification and is unchanged (#38678).
+
+### Fixed
+
+- A direct chat turn that is still calling tools now hands its slot to a
+  person's chat that arrived after it. It stops after the next settled MASC
+  tool result, keeps its session as a continuation, and resumes after the
+  newer chat. A continuation never makes the next turn yield back to it
+  (#38807).
+- Main CI compile runs no longer cancel the run already in progress when another push arrives; one newer run waits, so a merge burst still uses a single runner (#38838).
+- Remove Keeper handoff count and age from status, operator, briefing, and Dashboard views. The current writer does not advance those values, so the former display reported a zero count or missing age as if it measured handoffs. Persisted Keeper metadata remains on its current schema (#38843).
+- `masc.opam.locked` pins `cohttp-eio` to the fork carrying the SSE body fix,
+  so builds that replay the lock file (the keeper sandbox image) get the fix
+  too (#38869).
+- The Task Verdicts screen drew no key hints at all. It declared its chrome as
+  a constant that said seven rows where the head draws nine, so it ran three
+  rows past its budget, and a surface that overruns loses its last rows -- the
+  last row here is the footer. The rows above and below the list are now
+  counted off the buffers they were drawn into (#38912).
+- Dashboard turn records and last-prompt captures decode the `skill_compositions` prompt block again. A Keeper with composition tools carries it on every turn, and one unknown block failed that Keeper's whole turn-records response. A parity test now holds the dashboard block ids and input components equal to the OCaml emitters (#38923).
+- An official-client turn that fails after its client reported usage now leaves that report in the cost ledger: Codex's thread count from every `thread/tokenUsage/updated` frame, the Claude Code result frame's turn total, and the Antigravity result's conversation count, each as a raw row under its scope and conversation. A completed or host-stopped turn whose response carries no usage gets a row saying its usage is missing; a failed turn whose client reported nothing still writes no row (#38970).
+- The first paged read of a stored artifact (for example `keeper_artifact_read`) could return bytes from a different version of the file than the one whose checksum it verified, if the file was rewritten between two reads. The page and the checksum now come from a single read of the file, so a returned page is always part of what was verified (#38979).
+- `analyze_image` with `path` reads the image through the raw byte prefix
+  (`head -c`, binary capture) instead of Read's line window. The window is a
+  text read: on an OpenSSH or container endpoint its output has the remote
+  workspace root rewritten to the host's, so image bytes that spell that root
+  came back changed. `read_sandbox_bytes`, whose only production caller was
+  this read, is gone (#38999).
+- The Board read footer drew `z:wide` in both of that key's states, so a wide
+  detail offered the operator the screen they were already on, and below the
+  split width it offered a second pane the terminal has no room for -- the key
+  flipped a flag there that changed nothing on screen and then widened the
+  next wide-enough terminal unasked. The footer, the frame and the three key
+  guards now read one layout (`Board_read_split | Board_read_wide |
+  Board_read_one_pane`) instead of each recomposing a split from the width and
+  the flag: the label names where `z` goes, and on one pane the key is neither
+  drawn nor armed (#39002).
+- TUI Keeper settings (`e`): an `activation_mode` outside `manual | on_demand | autonomous` (for example `auto`) is no longer sent and lost behind one status line. The editor reopens with your text and the allowed values on top; saving it unchanged closes the editor with the reason (#39007).
+- Only `verifier_exact`'s `cli_slots` were reference-checked when
+  `runtime.toml` loaded. A typo'd id on any other exact-output lane
+  (`librarian_exact`, `hitl_auto_judge`, `board_attention_exact`) loaded
+  fine and then failed every `Keeper_lane_cli_oneshot` attempt at run time
+  with a misleading "is not an official-client runtime" message, 192 times
+  in one server log for a single stray id. Every declared lane's `cli_slots`
+  is now checked at load: an id that names no configured runtime, or one
+  that names a provider-dispatched (HTTP) runtime instead of an official
+  client, is refused with a message naming the lane, the key and the id.
+  `keeper_lane_cli_oneshot.ml`'s run-time failure now also distinguishes
+  "no such runtime" from "not an official client" as separate typed cases,
+  instead of folding both into one (#39020).
+- The Prompts pane title no longer hides how many prompt overrides are not applied. At 120 columns the title row is one cell short and is cut from the end, which removed that count; the count now sits right after the prompt count, so a shorter label is cut instead (#39022).
+- The Task Review and Verdicts indexes now part a row from its siblings by a
+  value of its own instead of its age. An age moves under the reader and
+  rounds two rows minutes apart to one reading, so seven rows read
+  "task-1663" alike. Task Review draws the request id; a verdict has none on
+  the wire, so it draws when it was recorded (#38492).
+- The TUI's Activity and Acting feed rows abbreviate a token figure the way
+  the Acting pane's own block already did. Captured live, one turn drew
+  "in 411465 out 3" on the feed while the block beside it drew "411.5k" for
+  the same reading; the ladder now lives in Masc_tui_message_layout beside
+  the other readings every surface shares (#38504).
+- The Keeper detail pane reads its token figures the same way. A live roster
+  drew "Total Tokens: 75111274" and "Tokens In / Out: 56865402 / 56616"; the
+  cumulative total, the window's input and output and the Context row's
+  used/maximum pair now go through the shared ladder (#38504).
+- A schedule whose target Keeper holds a shutdown fence is now held instead of
+  dispatched into the fence every tick, and the fence owner is asked on that
+  tick to finish its finalization, so a purge that stopped on a since-repaired
+  event queue settles without a server restart. `/health`, the dashboard
+  schedule row and the TUI now say why a schedule is held (#38620).
+- When the fence owner cannot be retried in this process, the first held tick
+  logs its durable shutdown phase so an operator can see why the hold needs
+  boot recovery or intervention without a warning on every tick (#38620).
+- The TUI Voice screens fill their height, so the footer is the last row of
+  the body rather than the row under the last line drawn. Measured on the
+  live server: the Config Voice pane's twenty lines put the footer on row 24
+  of a forty-four row terminal with eighteen blank rows under it, and on row
+  24 of a thirty row one. Three screens share `finish_voice_surface` — the
+  voice wizard, the agent-voice screen and the Config pane — so all three
+  fill (#38635).
+- A Dashboard purge whose receipt was delivered but whose fence release failed
+  now retries only that release while the fence is still its own, instead of
+  refusing the Keeper's intake until the next restart (#38649).
+- The TUI no longer reads a saved OAuth app reply without a `scopes` list as
+  an app saved with no scopes. The reply is now decoded by
+  `Tui_decode.decode_oauth_client_saved`, which requires the field the server
+  always sends and checks that every scope is a string (#38670).
+- Read, Grep, Write and Edit report a refused path, a missing file, a missing
+  or non-directory cwd, or a limit below one as `policy_rejection` instead of
+  the `runtime_failure` default, so the model is told the corrected call can
+  succeed and the refusal is logged at WARN (#38689, refs #27742).
+- The TUI Metrics fleet row now shows the number of paused keepers directly
+  (`N configured · P paused`). Previously it showed an unpaused count that
+  excluded declared keepers, so subtracting the two displayed counts made
+  declared keepers appear paused. The new count reads each keeper's `k_paused`
+  field; a declared keeper is created with `k_paused = false` (#38690).
+- `Keeper_tool_execution.failure` takes a required failure class: a tool
+  that named none reported every failure as `runtime_failure` ("not on your
+  arguments"). The constitution tools, owned-tree Read, Grep, browser upload
+  staging and the remaining producers now name the class they know (#38703,
+  refs #27742).
+- The Keeper detail tab strip now says how many tabs it holds back past each
+  edge, the way the surface ring above it already did. Both strips draw the
+  same two marks from one place (#38713).
+- A DOS guest fault no longer leaves the step count behind instructions that
+  finished before the fault. Tool responses and ledger positions now reflect
+  those completed instructions, while the original fault still reaches the
+  caller (#38715).
+- `/api/v1/dashboard/keeper-costs` counts the rows it used to drop as
+  `metrics_read.unread_turn_rows`: turn rows the window may hold whose
+  `ts_unix` or `latency_ms` it cannot read, and rows whose kind it cannot
+  read. Any of them may have been a turn, so a sum beside a non-zero count
+  is a floor (#38728).
+- A human press, load, restore or disk change through the `/api/v1/msx/*`
+  routes now wakes Lane instances bound to `msx_capture` once, the same
+  `Msx_changed` activity a Keeper's MSX tool produces. Save, refused
+  operations and tick notify nothing. `Lane_addon_runtime.notify_activity`
+  now runs on the root-switch owner domain instead of dropping a call made
+  from another domain, such as the HTTP serving domain (#38730).
+- Server start signals a live, unresponsive lock holder only when `ps` reports the same start time the lock recorded for that PID. It used to send SIGTERM and then SIGKILL to any process whose command line contained `masc` or `main_eio`, including an unrelated process that had been given the reused PID (#38742).
+- The keeper-decisions feed reads a turn's input and output tokens, `cost_usd`, `stop_reason` and `error_category` from the row's `telemetry` object, where the writer puts them. They were null on every row (#31729, #38742).
+- A criterion edit that takes a goal out of Verifying, Awaiting confirmation or Completed records a `goal_phase` event with the phase it left, the actor and `cause: criterion_edit` (#38742).
+- GLM arrears, package exhaustion and plan errors (1113, 1304, 1308-1311, 1313) take the hard-quota route instead of being retried every minute as a rate limit (#38742).
+- The TUI Keepers roster no longer draws a failing keeper's last failure as
+  the age of the turn it is working now. The TURN cell counts from the open
+  turn when one is running and from the last recorded turn otherwise, on every
+  row. The HEALTH cell keeps the health word the header counts, so a keeper
+  whose failure streak survived a restart reads `failing` with the new turn's
+  run time beside it, instead of `failing` beside the failure's age (#38749).
+- The Board read pane's window reading now says it counts rows. It read
+  "comments 1-10/6085" under a header drawing the thread's own comment
+  count, and the two numbers count different things (#38753).
+- The Memory fact list now keeps a floor of rows under a long detail. A fact
+  with no length limit could leave the browser drawing one row of several
+  hundred, and a cut detail now says so and points at the overlay Enter
+  opens (#38772).
+- An exact-output slot without a whole-request deadline was accepted by
+  configuration validation and then refused on every request, falling to
+  `cli_slots` with a WARN line that read only
+  `wire_admission_rejected:missing_deadline`. The slot is now named once, when
+  the configuration is read or saved, and a request that still reaches plan
+  admission without a body deadline says which provider lacks it, which key to
+  set, and that `connect-timeout-s` ends at the response headers. The evidence
+  JSON keeps `"kind": "missing_deadline"` and adds `provider_id` and `detail`.
+  The seed `runtime.toml` and the setup wizard declare `exact-body-timeout-s`
+  on every HTTP provider, because `--setup-lanes` can put any of them in an
+  exact slot, and selecting a connection an older setup wrote now adds the key
+  to it (#38849).
+- The Fusion run detail, the Lanes run detail, the Keeper chat pane and the
+  Task Verdicts detail now keep the scroll position on their footer. It was
+  spelled onto the end of the key hints, so the fitter read it as a key item
+  and gave it up first: at sixty and eighty columns it was never drawn, and on
+  the verdict detail -- the one screen that exists for reading a ruling in
+  full -- it was missing at a hundred and sixty columns too (#38820).
+- Saving `runtime.toml` through the server (the raw editor, lane and routing
+  writers, keeper assignments, Fusion and credential saves) now rebuilds the
+  exact-output registry from the saved text in the same commit. A changed
+  `exact-body-timeout-s`, a new binding or a lane's `max_output_tokens` reaches
+  exact requests without a restart; before, the save answered `applied` while
+  requests kept the boot-time targets until a restart (#38850).
+- Every config write response carries `application.exact_output_registry`:
+  `{"status": "applied", "targets": "runtime_bindings" | "replacement_catalog"}`
+  (under a replacement catalog, runtime.toml binding fields do not reach the
+  targets), `{"status": "unpublished", "requires_restart": true}` when no
+  registry is running, or `{"status": "kept", "next_boot_publishes": false,
+  "reason": ...}` when neither the saved text nor the file it replaced
+  rebuilds a registry. A kept registry is also listed in the runtime startup
+  report as `exact_output_registry_stale` (reason `exact_output_registry_stale`)
+  until a later save replaces it (#38850).
+- A save whose text cannot rebuild the exact-output registry is refused before
+  anything is written, unless the file on disk cannot rebuild one either; then
+  the save goes through and the registry is kept, so a pre-existing fault never
+  blocks keeper assignments. The save preview's `can_save` makes the same
+  check (#38850).
+- An exact slot left out for a missing `exact-body-timeout-s` stays out, and
+  stays in the startup report, across an unrelated save. A save that fixes the
+  last such slot of a lane brings the lane back, and the startup report reads
+  `ok`, in the same commit (#38850).
+- An Apple container Keeper rebooted onto a fresh, empty build volume creates
+  the target of every `_build` link again, including links that were already
+  correct. Before, every `dune build` after the second guest boot failed with
+  `open(_build/.lock)` ENOENT and never healed (#38563, #38851).
+- The terminal sanitizer escapes every Unicode Default_Ignorable code point
+  (variation selectors after the first one on a base, the word joiner family,
+  Hangul fillers, the soft hyphen) instead of a hand-kept list, so an
+  approval screen cannot show text that differs from the bytes its hash
+  covers (#38445, #38501, #38851).
+- `masc-tui` attaches a failed token refresh reason only to refusals of the
+  token that failed, not to refusals of a token adopted later (#38334, #38851).
+- `approve-guard` judges each GitHub Actions workflow by its newest run and
+  each check name by its newest check-run on the SHA, so an older cancelled,
+  failed or Draft-time skipped run no longer blocks APPROVE forever (#38625,
+  #38851).
+- A `[runtime.exact_output_lanes.<id>]` table whose id is not one of the five
+  exact-output lanes is refused when the runtime file loads, naming the table
+  and the accepted ids. A misspelt lane used to load, publish, and show on no
+  surface while the intended lane read as unconfigured (#38861).
+- The installer places the guest exec shim in the workspace the workspace
+  check settles on, so choosing a new workspace no longer leaves the shim in
+  the old one (#38868).
+- `--version 0.38.0` without the leading `v` is normalized instead of failing
+  on a missing `SHA256SUMS` with a hint toward `--allow-unverified` (#38868).
+- On Apple Silicon, a shell running under Rosetta 2 now installs the arm64
+  build and applies the macOS 14 minimum (#38868).
+- `--team` verifies the preset `manifest.txt` against `SHA256SUMS` and refuses
+  absolute, `..` or unusual paths, and paths that cross an existing symlink
+  under the config directory, before creating any directory;
+  `MASC_PRESETS_BASE_URL` points it at a mirror (#38868).
+- The Overview Tasks title now says how many held rows the pane could not
+  draw. The count was a line under the rows, and a line costs a row: at the
+  heights where the pane is squeezed to one, that row went to a task and the
+  count was dropped, so the pane drew one of twenty-three and said nothing
+  about the rest (#38893).
+- The Approvals surface counted its two Gate lane rows twice, once inside the
+  shared chrome constant and again on its own, so it drew two rows fewer than
+  its budget. A short surface is padded under its last row, and that row is the
+  footer, so the footer sat two rows above the composer at every terminal
+  height and the approval queue lost the same two rows. Each block around the
+  queue now reports the height it drew (#38904).
+- A Config pane's title row cut its head from the right, so at eighty columns
+  it read `MASC Conf` and a cut mark -- a stub that says nothing the tab strip
+  a row above does not already say, while still spending the cells the rest of
+  the row needs. The head is now two parts: the reading a pane adds beside its
+  name gives way first and is cut with a mark, and the name is drawn whole or
+  not at all (#38908).
+- The exact walk (Librarian, `verifier_exact`, HITL judgment, Board attention) no longer stops a whole lane when the first slot's key is revoked (401), permission is refused (403), or the model is gone (404). It now reads one closed `Candidate_fault` judgment and advances to the next candidate, matching the Keeper walk. An un-attributed refusal (the collapsed `Invalid_request`) and a refusal whose body never arrived also advance (#38913). Closes the freeze reported in #38472 where a dead first-slot key stopped every Keeper on a lane.
+- The tab strip dropped its Approvals entry whenever the count came out zero,
+  and that count is taken over three lists that can each fail to be read. With
+  the server unreachable none of them was read, so the entry left the strip
+  while every other surface drew "(load failed)" -- a disappearance that reads
+  as "nothing is waiting". The entry now stands until a reading says the lists
+  are empty (#38917).
+- The Board hearth census scenario waited for the row's label and then measured
+  the row. The label is its first cells, so the wait came back while the rest
+  was still being written, and at 130 columns the case read one hearth with
+  neither its count nor the total. It now lets the frame finish and reads the
+  last whole one (#38921).
+- An operator stop or purge whose shutdown blocked at a stage that releases
+  the admission fence (`Meta_update`, `Pending_confirm_cleanup`, or the new
+  `Meta_read`) is no longer lost after a restart. Boot recovery now replays it
+  to completion, so the stop latch is applied. If a newer operation exists,
+  the Keeper's trace changed, or the Keeper took new tasks since the block,
+  boot closes the record as `Superseded` (`boot_replay_abandoned`), logs a
+  warning and reclaims it. A replay that cannot finish leaves the record
+  `Blocked` with fresh evidence and a warning, and the Keeper still boots
+  (#38944).
+- A gauge sized its axis from the suffix the row printed, and a percentage is a
+  cell wider once it reaches three characters. On the Metrics memory rows the
+  keeper holding the most facts drew the shortest trough, and the token figures
+  after the bars started in two columns. The percentage is now written to three
+  digits and the wide suffix's numbers are measured at `max_value`, so the axis
+  comes off the gauge rather than off the row (#38945).
+- When an official client turn (Codex app server, Antigravity CLI, Claude Code)
+  ends in an error, its tool observations and turn-end line are now recorded,
+  so the Librarian reads that turn like any other instead of skipping it
+  (#38809).
+- Board read in the TUI shows a failed post-detail load once, with the whole
+  error, in both read layouts; the loader no longer reports the same failure
+  twice in different words (#38877).
+- A resumed Codex Keeper no longer sends its whole conversation in
+  `developerInstructions`. Codex applies those instructions only when it next
+  compacts the thread, so the 12-85 MB copy became one input item over the
+  10,485,760-character limit and the turn after compaction failed
+  (`string_above_max_length`). The thread keeps the conversation; the
+  per-turn context and the continuation's task reference go in front of the
+  resume prompt, as in the Claude Code lane, and now reach the model on every
+  resumed turn (#37353, #38882).
+- A Gate or checkpoint continuation whose resume overflows is recorded as a
+  full thread at once instead of being resent unchanged into the same thread
+  (#38882).
+- Execute reports a path refusal (`Path blocked`, the caller's cwd, cd or
+  redirect target) as `policy_rejection`; it was `runtime_failure` through a
+  local default. The keeper's remaining failure helpers take a required
+  class, and three unused `Tool_args` helpers that fixed a class are gone
+  (#38705, refs #27742).
+- A tool failure that carries a `Tool_args` error code takes its class from
+  that code (`Tool_args.failure_class_of_error_code`). Goal tools and the
+  agent metrics, card and timeline tools no longer report every failure as
+  `workflow_rejection`: a missing field, an unknown action or an unknown goal
+  is a `policy_rejection`, and a store failure is a `runtime_failure`. A goal
+  proof request refused for its evidence references keeps the reference's
+  cause instead of becoming an internal error (#38774, refs #27742).
+- A refused `keeper_surface_read` is recorded as a failed call instead of a
+  completed one. A blank surface, a connector the Keeper is not bound to or a
+  label no lane carries is a `policy_rejection`; a Discord read failure takes
+  the class of its error code. The output JSON is unchanged. From 2026-09-18
+  to 2026-09-24, 12 refusals were recorded as completed (#38775).
+- Discord REST reads now retain typed invalid request, conflict, rate limit,
+  authorization, missing resource, timeout, and external service failures.
+  Channel selection also distinguishes caller input errors from absent bindings and binding-store
+  failures instead of classifying all three as a workflow precondition (#38775).
+- Read on a Keeper whose tree the endpoint owns (remote_ssh, microvm)
+  reports a missing file as `path_not_found` with `policy_rejection`, and a
+  directory as not a file, instead of `remote_ssh_read_failed ... head: cannot
+  open` with `runtime_failure`. The read script checks the path on the
+  endpoint and exits with its own code for each case (#38778, refs #27742).
+- A keeper whose chat lane is fed without end no longer loses autonomous
+  turns without bound: consecutive refusals of the turn slot by a chat
+  holder become deferral debt, and at three the freed slot is left open
+  for the autonomous lane instead of being offered to the queued chat
+  turn first. A chat turn can be delayed by at most those forfeited
+  releases (#38963).
+- The TUI no longer drops a Keeper chat that waits silently behind another
+  Keeper turn after three minutes. While the request is queued or running the
+  server now sends a keepalive every 30 seconds, and it closes the stream when
+  the request has already finished (#38819).
+- A Keeper whose sandbox endpoint cannot be reached no longer skips the
+  GitHub identity check. Only a check that really ran and found no login
+  counts as "not logged in"; an unreachable endpoint now reports its own
+  error (#38995).
+- The Dashboard tool quality view no longer counts tool runs that ended by a
+  signal or a timeout as `unknown_error`. It reads each result with the
+  format that wrote it, and a result it cannot read gets its own unreadable
+  label (#39009).
+
+### Performance
+
+- A Skill composition can declare `defer_loading` in its composition block,
+  as a tool file does. The two browser compositions are deferred, taking 3,563
+  bytes of tool schemas off every Agent Core request that has not used them
+  (#38567).
+- Fewer disk syncs when installing a new version: tool and MCP assets the
+  binary rebuilds on every boot are no longer fsynced one by one (#38954).
+- Reading a small window of a large tool-output artifact no longer reads the
+  whole file on the first uncached read, and a missing artifact file fails at
+  once instead of after a full read attempt (#38956).
+
+### Documentation
+
+- RFC-machine-spectating-goes-through-lanes: MSX and DOS screens are watched
+  through one authenticated `live` lane route keyed by a machine-owned change
+  counter instead of a frame route per machine, and human machine control
+  emits the same lane activity as the Keeper tools (#38695).
+- Glossary: the Sandbox Target entry names `command` instead of the removed
+  `script` field (#38763), the Disposable Build Volume is defined with its
+  three invariants (#38563), and four Lane entries are aligned with the
+  shipped code (Exact-output route, Lane Add-on act contributions, new MSX
+  Lane and Browser Lane entries) (#38837).
+- The from-source steps in the README, CONTRIBUTING and the docs site now
+  create the opam switch with `--no-install`, pin before resolving, and install
+  with `opam install ./masc.opam --deps-only --locked`, the same versions CI
+  builds with. The README lists the native packages per OS and the `protoc`
+  requirement, shows the `export PATH` line it referred to, and names all four
+  release platforms (#38867).
+- Glossary: adds Candidate Fault, the one closed judgment the exact and
+  Keeper walks read, and writes the exact-output slot-advance rule, the
+  approval detail escapes (`\xNN`, `\u00NN`, `\uXXXX`, with their three
+  exceptions) and the five tool failure classes as the code has them. Lane
+  Add-on and Quiz Lane name the Keeper tool `masc_lane_act` (#38929).
+- Glossary: adds Deferred Tool Loading (the `defer_loading` declaration, its two
+  places and why a schema returns after the first call), and writes the
+  exact-output registry's rebuild on every config save, the slot body-deadline
+  gaps and the end line a failed official-client turn now leaves, as the code
+  has them (#38946).
+
+### Internal
+
+- The TUI reads a standalone lane id into `Standalone_lane.t` once, in the
+  decoder. The lane pick, the lane run views and the slot editor carry the
+  type, and strings are built only for HTTP paths, config keys and display.
+  A lane row or a run whose lane no lane has is refused (#38785, closes
+  #38578).
+- The openapi e2e suite sends its Host authority cases as raw requests. curl merged the two Host headers into one, so the duplicate-Host case never reached the server (#38800).
+- Pull requests that change the turn-record contract now run the focused Context Inspector PTY scenario, so its Python HTTP fixture and the screen's token-scope reading are checked before merge without rerunning the full keyboard walk (#38832).
+- The PR check's edited-test step now runs a broad selection within a
+  30-minute budget (was 18), with a 32-minute step and 45-minute job
+  deadline. Run 36009641291 selected 268 linked suites and left 151 unrun at
+  the former budget (#38847).
+- `/ocaml-msx.opam`, generated by the first build, is kept out of commits.
+  Installation commands in CI, release builds and local docs name
+  `./masc.opam`, so the generated file cannot shadow the `ocaml-msx` git pin.
+  The opam pin script's repair hint covers the local switch the README creates
+  (#38869).
+- The route class `attempt_rejected`, which nothing produces any more because its label became `admission` in this release, is removed (#38971).
+- The DOS live TUI scenario counts a read re-asked at the drawn counter as a
+  disowned read, instead of counting the next poll after the answer (#39019).
+- `test_tui_runtime_listing` links `masc.runtime` again, so the test that
+  names `Standalone_lane` compiles; #38976 had dropped it from the stanza
+  and `dune build @check` stopped on main (#39032).
+- The Keeper batch admission filter names every event kind instead of a catch-all arm, so a new kind must decide whether it may share a batch before the build passes (#38756).
+- CI fixture: stop recording a blank JSONL line when stdin closes before the
+  fifth request; a real fifth request is still captured (#38872).
+- Keep dashboard runtime request decoding in a private module and reuse its lane formatting in routing tests (#38885).
+- Stabilize the CI deadline regression by starting its fixture clock after the command begins (#38910).
+- Skip CI jobs on Draft PRs and run the full suite on `ready_for_review` (#38914).
+- `approve-guard` refuses an APPROVE while another account's newest decisive
+  review on the PR is CHANGES_REQUESTED, the same rule GitHub uses to block
+  the merge; a later COMMENTED does not lift it. This account's own open
+  change request is named on stderr, since review accounts are shared by
+  several lanes (#38810, #38928).
+- `Candidate_fault` no longer reads a network failure as a dead key
+  (`Credential`); it is `Unknown_after_dispatch`, and the Keeper walk still
+  rotates on it. The Candidate_fault table test now runs; #38913 added it
+  without a dune stanza (#38931).
+- `scripts/review/approve-guard.sh` refuses an APPROVE over this account's own open CHANGES_REQUESTED unless the caller names that review with `--replace-own-cr <review id>`; the posted footer records the replaced review. The selftest's fake `gh` now refuses a read without `--paginate`, pinning that every page of reviews and check-runs is read. (#38950)
+- Read and Grep lose their host read branches, which no sandbox profile has
+  reached since the Local profile was removed; `should_route_read`,
+  `shell_command_available` and the runner's `host_via` go with them (#38722).
+
 ## [0.38.0] - 2026-09-24
 
 ### Upgrade notes
@@ -21,7 +616,7 @@
   send it, so a TUI from this release refuses its planning snapshot and the
   Goals view does not load (#38509).
 - Apple-container microVM Keepers now create a build volume at boot (default size 128g, set with `MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE`). If the volume cannot be created, the Keeper refuses to boot. A `_build` linked to the volume is emptied at every boot. A `_build` that is already a real directory in the checkout is left in place and is not reclaimed; delete it to move that Keeper onto the volume (#38563).
-- A `Blocked` shutdown record already on disk at a released stage (`Task_discovery`, `Record_persist`, `Meta_update`, `Pending_confirm_cleanup`) no longer holds the admission fence: the Keeper boots again on the next start and the shutdown is retried. Records at every other stage keep the fence as before (#38569).
+- A `Blocked` shutdown record already on disk at a released stage (`Task_discovery`, `Record_persist`, `Meta_update`, `Pending_confirm_cleanup`) no longer holds the admission fence: the Keeper boots again on the next start. This release does not replay or remove such a record; it stays on disk. Records at every other stage keep the fence as before (#38569).
 - A Keeper whose TOML says `sandbox_profile = "docker"` or `"microvm"` must
   also name its image in `sandbox_image`. One that names none no longer boots
   on `masc-sandbox:general` without saying so: boot and `masc_keeper_up`
@@ -614,7 +1209,7 @@
 - A WebFetch that fails in transport names curl's cause, such as
   `curl exit 6 (could not resolve host)`, instead of the single word `curl`.
   The URL still stays out of the message (#38568).
-- A Keeper whose shutdown failed before it mutated anything durable is no longer permanently unbootable. The admission fence now follows the failure stage: `Task_discovery`, `Record_persist`, `Meta_update` and `Pending_confirm_cleanup` are retryable, while every stage from `Task_settlement` onward keeps the fence. It used to fence every `Blocked` shutdown, so only an operator supersession could free a Keeper that had not been torn down at all (#38569).
+- A Keeper whose shutdown failed before it mutated anything durable is no longer permanently unbootable. The admission fence now follows the failure stage: `Task_discovery`, `Record_persist`, `Meta_update` and `Pending_confirm_cleanup` no longer hold it, while every stage from `Task_settlement` onward keeps the fence. It used to fence every `Blocked` shutdown, so only an operator supersession could free a Keeper that had not been torn down at all (#38569).
 - An exact-output request without a body deadline is refused at plan
   admission even when a connect deadline is declared. The connect deadline
   ends when the response headers arrive, so such a request read a stalled

@@ -88,23 +88,31 @@ val create_server_state :
 val mandatory_exact_output_lane_ids : string list
 (** Every exact-output lane a server must find declared, with a non-empty HTTP or CLI
     slot list, in the resolved [runtime.toml] before readiness. Startup raises
-    [Env_config_core.Config_error] when one is missing rather than synthesizing
-    a default, so this list is also the contract every boot-path config fixture
+    one [Env_config_core.Config_error] naming every lane that is missing or has
+    no slots rather than synthesizing a default, so this list is also the
+    contract every boot-path config fixture
     has to satisfy. Exposed so a fixture that a PR never boots can still be
     checked against it — a lane added here without a matching fixture update is
     the failure mode this value exists to make detectable. *)
 
+(** Why one of {!mandatory_exact_output_lane_ids} is unusable in the resolved
+    [runtime.toml]: it has no [\[runtime.exact_output_lanes.<id>\]] table, or
+    the table declares neither [slots] nor [cli_slots]. *)
+type mandatory_exact_output_lane_violation =
+  | Mandatory_lane_missing of { lane_id : string }
+  | Mandatory_lane_without_slots of { lane_id : string }
+
 module For_testing : sig
   val configure_exact_output_registry : ?config_root:string -> unit -> unit
 
-  val exact_output_targets_of_runtimes
-    :  unit
-    -> Agent_core.Exact_output.declared_target list
-  (** The exact-output slots of the runtimes loaded right now. A test that asks
-      what a deployment's bindings admit reads them from here rather than
-      building its own list beside this one: a second copy of this derivation
-      is what left the slots on a different wire than their Keeper requests
-      (#37674). *)
+  val mandatory_exact_output_lane_violations :
+    Runtime_schema.exact_output_lane_decl list ->
+    mandatory_exact_output_lane_violation list
+  (** Every violation, in {!mandatory_exact_output_lane_ids} order. *)
+
+  val require_explicit_mandatory_exact_output_lanes :
+    config_path:string -> Runtime_schema.exact_output_lane_decl list -> unit
+  (** Raises one [Env_config_core.Config_error] that names every violation. *)
 
   val install_domain_pool_references : Domain_pool.t -> unit
 end
@@ -200,7 +208,8 @@ val initialize_owner_state_blocking
     (Store_quarantine_refused _)] and nothing is moved aside. *)
 
 val activate_owner_state
-  :  sw:Eio.Switch.t
+  :  ?boot_stage:(string -> unit)
+  -> sw:Eio.Switch.t
   -> clock:float Eio.Time.clock_ty Eio.Resource.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> domain_mgr:[> Eio.Domain_manager.ty ] Eio.Domain_manager.t
@@ -212,7 +221,9 @@ val activate_owner_state
     persistence ownership, then immediately start the affine Keeper token.
     Current request writers use a disjoint staging namespace, so forensic
     cleanup cannot hold readiness. Readiness remains an explicit transport
-    commit after its required surfaces are installed. *)
+    commit after its required surfaces are installed. [boot_stage] is the
+    optional release-smoke timing observer; direct test/stdio callers may
+    omit it. *)
 
 val mark_owner_state_ready
   :  unit

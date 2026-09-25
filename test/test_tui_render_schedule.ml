@@ -20,66 +20,122 @@ let check_idle label = function
 
 let test_idle_has_no_render_work () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
-  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   for offset = 1 to 1000 do
-    check_idle "one second idle" (Schedule.take schedule ~now_ns:(ms offset))
+    check_idle "one second idle" (Schedule.take ~input_pending:false schedule ~now_ns:(ms offset))
   done;
   check (float 0.000_001) "idle keeps the maximum input wait" 0.1
     (Schedule.input_timeout_seconds schedule ~now_ns:(ms 1000) ~maximum:0.1)
 
 let test_burst_coalesces_to_one_frame () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
-  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   for offset = 1 to 1000 do
     Schedule.request schedule Schedule.Background;
-    match Schedule.take schedule ~now_ns:(Int64.of_int offset) with
+    match Schedule.take ~input_pending:false schedule ~now_ns:(Int64.of_int offset) with
     | Schedule.Wait_until due -> check int64 "stable deadline" (ms 16) due
     | Schedule.Idle -> fail "dirty burst became idle"
     | Schedule.Render -> fail "dirty burst rendered before its frame deadline"
   done;
   check_render "one coalesced frame"
-    (Schedule.take schedule ~now_ns:(ms 16));
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 16));
   check_idle "burst is consumed"
-    (Schedule.take schedule ~now_ns:(ms 17))
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 17))
 
 let test_input_after_idle_renders_immediately () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
-  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   Schedule.request schedule Schedule.Input;
   check_render "input after idle"
-    (Schedule.take schedule ~now_ns:(ms 1000))
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 1000))
+
+let test_input_does_not_wait_for_recent_frame () =
+  let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
+  Schedule.request schedule Schedule.Input;
+  check (float 0.0) "first input does not sleep" 0.0
+    (Schedule.input_timeout_seconds schedule ~now_ns:1L ~maximum:0.1);
+  check_render "keypress immediately after a background frame"
+    (Schedule.take ~input_pending:false schedule ~now_ns:1L)
+
+let test_separate_repeated_inputs_keep_the_frame_interval () =
+  let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
+  Schedule.request schedule Schedule.Input;
+  check_render "first input is immediate" (Schedule.take ~input_pending:false schedule ~now_ns:(ms 1));
+  Schedule.request schedule Schedule.Input;
+  check (float 0.000_001) "next input waits without a busy poll" 0.011
+    (Schedule.input_timeout_seconds schedule ~now_ns:(ms 6) ~maximum:0.1);
+  (match Schedule.take ~input_pending:false schedule ~now_ns:(ms 6) with
+   | Schedule.Wait_until due -> check int64 "input frame deadline" (ms 17) due
+   | Schedule.Idle | Schedule.Render -> fail "a separate input rendered before its frame deadline");
+  check_render "second input renders at the frame deadline"
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 17));
+  Schedule.request schedule Schedule.Force;
+  check_render "force still renders immediately" (Schedule.take ~input_pending:false schedule ~now_ns:(ms 18));
+  Schedule.request schedule Schedule.Input;
+  check_render "a later input preempts the forced frame"
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 19))
+
+let test_a_second_of_separate_inputs_keeps_the_frame_ceiling () =
+  let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
+  let rendered = ref 0 in
+  for offset = 1 to 1000 do
+    Schedule.request schedule Schedule.Input;
+    match Schedule.take ~input_pending:false schedule ~now_ns:(ms offset) with
+    | Schedule.Render -> incr rendered
+    | Schedule.Wait_until _ -> ()
+    | Schedule.Idle -> fail "separate input was dropped"
+  done;
+  check bool "one second of 1ms-spaced input paints at most 63 frames" true
+    (!rendered > 0 && !rendered <= 63)
+
+let test_buffered_input_renders_when_drained () =
+  let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
+  Schedule.request schedule Schedule.Background;
+  Schedule.request schedule Schedule.Input;
+  (match Schedule.take ~input_pending:true schedule ~now_ns:1L with
+   | Schedule.Wait_until due -> check int64 "buffered burst deadline" (ms 16) due
+   | Schedule.Render -> fail "painted before buffered input was handled"
+   | Schedule.Idle -> fail "lost pending input");
+  Schedule.request schedule Schedule.Input;
+  check_render "the last byte need not wait for the deadline"
+    (Schedule.take ~input_pending:false schedule ~now_ns:2L);
+  check_idle "input frame consumed" (Schedule.take ~input_pending:false schedule ~now_ns:3L)
 
 let test_dirty_timeout_wakes_at_deadline () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
-  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   Schedule.request schedule Schedule.Background;
   check (float 0.000_001) "deadline caps the select wait" 0.006
     (Schedule.input_timeout_seconds schedule ~now_ns:(ms 10) ~maximum:0.1)
 
 let test_input_preempts_pending_background_frame () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
-  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   Schedule.request schedule Schedule.Background;
-  (match Schedule.take schedule ~now_ns:(ms 2) with
+  (match Schedule.take ~input_pending:false schedule ~now_ns:(ms 2) with
    | Schedule.Wait_until due -> check int64 "background deadline" (ms 16) due
    | Schedule.Idle -> fail "background request became idle"
    | Schedule.Render -> fail "background request rendered too early");
   Schedule.request schedule Schedule.Input;
   check_render "input preempts background deadline"
-    (Schedule.take schedule ~now_ns:(ms 2))
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 2))
 
 let test_input_burst_stays_inside_one_frame_window () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
-  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   for offset = 1 to 1000 do
     Schedule.request schedule Schedule.Input;
-    match Schedule.take schedule ~now_ns:(Int64.of_int offset) with
+    match Schedule.take ~input_pending:true schedule ~now_ns:(Int64.of_int offset) with
     | Schedule.Wait_until due -> check int64 "input deadline" (ms 16) due
     | Schedule.Idle -> fail "input request became idle"
     | Schedule.Render -> fail "input byte burst rendered before the deadline"
   done;
   check_render "coalesced input frame"
-    (Schedule.take schedule ~now_ns:(ms 16))
+    (Schedule.take ~input_pending:true schedule ~now_ns:(ms 16))
 
 let test_terminal_size_cache_reprobes_only_after_invalidation () =
   let probes = ref 0 in
@@ -207,73 +263,165 @@ let overview_frame_rows (allocation : Schedule.overview_allocation) =
   + allocation.task_rows
   + allocation.filler_rows
 
-let test_overview_rows_share_one_viewport_budget () =
-  let max_data =
-    Schedule.allocate_overview ~terminal_rows:14
-      ~attention_count:6 ~goal_count:0 ~team_count:0 ~providers_count:0 ~task_count:5 ~has_task_error:false
+(* What the Tasks block cannot give up: the task error row when there is
+   one, then the first held task and the backlog line beside it -- or the
+   one row an empty or unread list gets. *)
+let overview_task_floor ~task_count ~has_task_error =
+  let error_rows = if has_task_error then 1 else 0 in
+  let task_rows =
+    if task_count <= 0 then if has_task_error then 0 else 1 else task_count
   in
-  check int "14-row attention allocation" 3 max_data.attention_rows;
-  check int "14-row task allocation" 1 max_data.task_rows;
-  check int "14-row error allocation" 0 max_data.task_error_rows;
-  check int "14-row frame is exact" 14
-    (overview_frame_rows max_data);
-  let task_error =
-    Schedule.allocate_overview ~terminal_rows:14
-      ~attention_count:6 ~goal_count:0 ~team_count:0 ~providers_count:0 ~task_count:5 ~has_task_error:true
+  error_rows + min task_rows 2
+
+let overview_blocks (allocation : Schedule.overview_allocation) =
+  [ ("attention", allocation.attention_rows)
+  ; ("goals", allocation.goal_rows)
+  ; ("providers", allocation.providers_rows)
+  ; ("team", allocation.team_rows)
+  ; ("task error", allocation.task_error_rows)
+  ; ("tasks", allocation.task_rows)
+  ]
+
+(* The Overview at every height from 24 to 70 and every mix of blocks. The
+   defects this replaces were mixes nobody had drawn: GOALS and Team together
+   left Tasks one row at 40 (#38607), and adding Providers above them made a
+   36-row terminal draw fewer Tasks rows than a 32-row one (#38911). Each
+   block keeps what it cannot give up, the frame reaches the bottom, and no
+   block loses a row as the terminal grows or as the panel loses items. *)
+let test_overview_rows_are_shared_floors_first () =
+  let allocate ~terminal_rows ~attention_count ~goal_count ~team
+      ~providers_count ~task_count ~has_task_error =
+    let team_count, team_stuck = team in
+    Schedule.allocate_overview ~terminal_rows ~attention_count ~goal_count
+      ~team_count ~team_stuck ~providers_count ~task_count ~has_task_error
   in
-  check int "task error keeps its reserved row" 1
-    task_error.task_error_rows;
-  check int "task error precedes ordinary task rows" 0 task_error.task_rows;
-  check int "task error frame is exact" 14
-    (overview_frame_rows task_error);
-  let full =
-    Schedule.allocate_overview ~terminal_rows:22
-      ~attention_count:6 ~goal_count:0 ~team_count:0 ~providers_count:0 ~task_count:5 ~has_task_error:false
+  List.iter
+    (fun attention_count ->
+      List.iter
+        (fun goal_count ->
+          List.iter
+            (fun ((team_count, team_stuck) as team) ->
+              List.iter
+                (fun providers_count ->
+                  List.iter
+                    (fun task_count ->
+                      List.iter
+                        (fun has_task_error ->
+                          for terminal_rows = 24 to 70 do
+                            let at terminal_rows =
+                              allocate ~terminal_rows ~attention_count
+                                ~goal_count ~team ~providers_count ~task_count
+                                ~has_task_error
+                            in
+                            let allocation = at terminal_rows in
+                            let case =
+                              Printf.sprintf
+                                "rows %d attention %d goals %d team %d%s \
+                                 providers %d tasks %d%s"
+                                terminal_rows attention_count goal_count
+                                team_count
+                                (if team_stuck then " (stuck)" else "")
+                                providers_count task_count
+                                (if has_task_error then " (error)" else "")
+                            in
+                            check int (case ^ ": the frame is exact")
+                              terminal_rows
+                              (overview_frame_rows allocation);
+                            List.iter
+                              (fun (block, rows) ->
+                                if rows < 0 then
+                                  failf "%s: %s has %d rows" case block rows)
+                              (overview_blocks allocation);
+                            if
+                              allocation.task_error_rows + allocation.task_rows
+                              < overview_task_floor ~task_count ~has_task_error
+                            then
+                              failf "%s: Tasks drew %d rows, under its floor"
+                                case allocation.task_rows;
+                            if goal_count > 0 && allocation.goal_rows < 1 then
+                              failf "%s: GOALS lost its headline" case;
+                            if team_stuck && allocation.team_rows < 1 then
+                              failf "%s: Team lost its stuck Keeper" case;
+                            if allocation.team_rows > team_count then
+                              failf "%s: Team drew %d of %d rows" case
+                                allocation.team_rows team_count;
+                            if allocation.providers_rows > providers_count then
+                              failf "%s: Providers drew %d of %d rows" case
+                                allocation.providers_rows providers_count;
+                            List.iter2
+                              (fun (block, rows) (_, taller) ->
+                                if taller < rows then
+                                  failf "%s: one more row takes %s from %d to %d"
+                                    case block rows taller)
+                              (overview_blocks allocation)
+                              (overview_blocks (at (terminal_rows + 1)));
+                            (* [Overview_team.settle] hands the items a drawn
+                               Team row carries out of the panel, and needs the
+                               Team block not to shrink for it. *)
+                            if attention_count > 0 then begin
+                              let fewer =
+                                allocate ~terminal_rows
+                                  ~attention_count:(attention_count - 1)
+                                  ~goal_count ~team ~providers_count ~task_count
+                                  ~has_task_error
+                              in
+                              if fewer.team_rows < allocation.team_rows then
+                                failf "%s: one attention item fewer takes Team \
+                                       from %d to %d rows"
+                                  case allocation.team_rows fewer.team_rows
+                            end
+                          done)
+                        [ false; true ])
+                    [ 0; 1; 8; 687 ])
+                [ 0; 1; 8 ])
+            [ (0, false); (1, false); (1, true); (13, false); (13, true); (60, true) ])
+        [ 0; 1; 9; 30 ])
+    [ 0; 1; 6; 10 ]
+
+(* #38607's viewport: 40 rows, six attention items, GOALS asking for nine
+   rows and Team for thirteen. Served first come first served the backlog
+   kept one row and drew one held task with nothing beside it. *)
+let test_overview_goals_and_team_leave_the_backlog_its_floor () =
+  let live =
+    Schedule.allocate_overview ~terminal_rows:40 ~attention_count:6
+      ~goal_count:9 ~team_count:13 ~team_stuck:false ~providers_count:0
+      ~task_count:8 ~has_task_error:false
   in
-  check int "full viewport restores attention cap" 6 full.attention_rows;
-  check int "full viewport restores task cap" 5 full.task_rows;
-  for terminal_rows = 14 to 40 do
-    for attention_count = 0 to 8 do
-      for task_count = 0 to 7 do
-        List.iter
-          (fun has_task_error ->
-            let allocation =
-              Schedule.allocate_overview ~terminal_rows ~attention_count
-                ~goal_count:0 ~team_count:0 ~providers_count:0 ~task_count ~has_task_error
-            in
-            let total = overview_frame_rows allocation in
-            if total > terminal_rows then
-              failf
-                "overview exceeds viewport: rows=%d attention=%d tasks=%d error=%b total=%d"
-                terminal_rows attention_count task_count has_task_error total;
-            if
-              allocation.attention_rows < 0
-              || allocation.task_error_rows < 0
-              || allocation.task_rows < 0
-            then
-              failf "overview allocation became negative at rows=%d"
-                terminal_rows)
-          [ false; true ]
-      done
-    done
-  done
+  check int "the panel keeps its ceiling" 6 live.attention_rows;
+  check int "every goal fits" 9 live.goal_rows;
+  check int "Team takes what the backlog's floor leaves" 10 live.team_rows;
+  check int "the backlog keeps a task and its backlog line" 2 live.task_rows;
+  check int "40-row frame is exact" 40 (overview_frame_rows live)
+
+(* Below the heights the table covers the floors do not all fit, and they
+   are paid in the order the blocks are served. *)
+let test_overview_floors_are_paid_in_serving_order () =
+  let tight =
+    Schedule.allocate_overview ~terminal_rows:14 ~attention_count:6
+      ~goal_count:1 ~team_count:0 ~team_stuck:false ~providers_count:0
+      ~task_count:2 ~has_task_error:false
+  in
+  check int "the panel keeps its first item" 1 tight.attention_rows;
+  check int "GOALS keeps its headline" 1 tight.goal_rows;
+  check int "the backlog gets the last row" 1 tight.task_rows;
+  check int "14-row frame is exact" 14 (overview_frame_rows tight)
 
 (* The surface is the box, the key footer under it, and -- when the post or
    the thread has more lines than it can show -- the position line the pane
    writes above the box bottom. The footer and the position line were left out
    of the allocation, so the frame ran one or two rows past the terminal and
    the footer landed on the composer's row. *)
-let board_read_frame_rows ~body_line_count ~comment_count
+let board_read_frame_rows ~body_line_count ~comment_line_count
     (allocation : Layout.board_read_allocation) =
   let position_rows =
     if
       body_line_count > allocation.body_rows
-      || comment_count > allocation.comment_rows
+      || comment_line_count > allocation.comment_rows
     then 1
     else 0
   in
   Layout.board_read_box_rows
-  + (if comment_count > 0 then 2 else 0)
+  + (if comment_line_count > 0 then 2 else 0)
   + 1
   + position_rows
   + allocation.body_rows
@@ -285,24 +433,35 @@ let board_read_frame_rows ~body_line_count ~comment_count
    of the frame is lost. *)
 let test_overview_frame_always_fills_the_terminal () =
   List.iter
-    (fun (attention_count, task_count, has_task_error) ->
+    (fun ( attention_count
+         , goal_count
+         , team_count
+         , team_stuck
+         , providers_count
+         , task_count
+         , has_task_error ) ->
       for terminal_rows = 14 to 80 do
         let allocation =
           Schedule.allocate_overview ~terminal_rows ~attention_count
-            ~goal_count:0 ~team_count:0 ~providers_count:0 ~task_count ~has_task_error
+            ~goal_count ~team_count ~team_stuck ~providers_count ~task_count
+            ~has_task_error
         in
         check int
-          (Printf.sprintf "rows %d data %d/%d/%b" terminal_rows
-             attention_count task_count has_task_error)
+          (Printf.sprintf "rows %d data %d/%d/%d/%b/%d/%d/%b" terminal_rows
+             attention_count goal_count team_count team_stuck providers_count
+             task_count has_task_error)
           terminal_rows
           (overview_frame_rows allocation)
       done)
-    [ (0, 0, false)
-    ; (0, 0, true)
-    ; (6, 5, false)
-    ; (0, 5, false)
-    ; (40, 40, true)
-    ; (1, 1, false)
+    [ (0, 0, 0, false, 0, 0, false)
+    ; (0, 0, 0, false, 0, 0, true)
+    ; (6, 0, 0, false, 0, 5, false)
+    ; (0, 0, 0, false, 0, 5, false)
+    ; (40, 0, 0, false, 0, 40, true)
+    ; (1, 0, 0, false, 0, 1, false)
+    ; (6, 6, 13, true, 4, 40, true)
+    ; (6, 30, 60, false, 9, 40, false)
+    ; (10, 1, 3, true, 1, 687, false)
     ]
 
 (* A long attention list must not take the whole viewport: the backlog is the
@@ -311,7 +470,7 @@ let test_overview_frame_always_fills_the_terminal () =
 let test_overview_task_block_keeps_a_share_of_a_tall_viewport () =
   let crowded =
     Schedule.allocate_overview ~terminal_rows:60
-      ~attention_count:80 ~goal_count:0 ~team_count:0 ~providers_count:0 ~task_count:20 ~has_task_error:false
+      ~attention_count:80 ~goal_count:0 ~team_count:0 ~team_stuck:false ~providers_count:0 ~task_count:20 ~has_task_error:false
   in
   check int "the panel stops at its ceiling" 6 crowded.attention_rows;
   check int "every task is still drawn" 20 crowded.task_rows
@@ -322,23 +481,18 @@ let test_overview_task_block_keeps_a_share_of_a_tall_viewport () =
 let test_overview_blocks_grow_to_their_item_counts () =
   let roomy =
     Schedule.allocate_overview ~terminal_rows:60
-      ~attention_count:9 ~goal_count:0 ~team_count:0 ~providers_count:0 ~task_count:12 ~has_task_error:false
+      ~attention_count:9 ~goal_count:0 ~team_count:0 ~team_stuck:false ~providers_count:0 ~task_count:12 ~has_task_error:false
   in
   check int "the panel stops at its ceiling" 6 roomy.attention_rows;
   check int "every task is drawn" 12 roomy.task_rows;
   check bool "the remainder becomes filler" true (roomy.filler_rows > 0)
 
-(* The Team block says who is doing what. On the operator's 40-row window with
-   sixteen Keepers it gets its rows ahead of the backlog, the frame still ends
-   on the terminal's last row at every size, and a viewport too short for a
-   title, a divider and one Keeper draws no Team block at all rather than
-   chrome with nothing under it. *)
 (* Pull request lines under the Team block take only blank rows: the 23-row
    Overview keeps every task, and a tall one draws the lines. *)
 let test_team_detail_lines_take_only_spare_rows () =
   let tight =
     Schedule.allocate_overview ~terminal_rows:23
-      ~attention_count:6 ~goal_count:0 ~team_count:0 ~providers_count:0 ~task_count:5
+      ~attention_count:6 ~goal_count:0 ~team_count:0 ~team_stuck:false ~providers_count:0 ~task_count:5
       ~has_task_error:false
   in
   let spent = Schedule.spend_spare_rows_on_team tight ~extra:3 in
@@ -346,7 +500,7 @@ let test_team_detail_lines_take_only_spare_rows () =
   check int "the backlog is untouched" tight.task_rows spent.task_rows;
   let tall =
     Schedule.allocate_overview ~terminal_rows:40
-      ~attention_count:2 ~goal_count:0 ~team_count:4 ~providers_count:0 ~task_count:3
+      ~attention_count:2 ~goal_count:0 ~team_count:4 ~team_stuck:false ~providers_count:0 ~task_count:3
       ~has_task_error:false
   in
   let spent = Schedule.spend_spare_rows_on_team tall ~extra:3 in
@@ -356,7 +510,7 @@ let test_team_detail_lines_take_only_spare_rows () =
   check int "40-row frame is exact" 40 (overview_frame_rows spent);
   let empty =
     Schedule.allocate_overview ~terminal_rows:40
-      ~attention_count:2 ~goal_count:0 ~team_count:0 ~providers_count:0 ~task_count:3
+      ~attention_count:2 ~goal_count:0 ~team_count:0 ~team_stuck:false ~providers_count:0 ~task_count:3
       ~has_task_error:false
   in
   let spent = Schedule.spend_spare_rows_on_team empty ~extra:2 in
@@ -365,178 +519,31 @@ let test_team_detail_lines_take_only_spare_rows () =
     (empty.filler_rows - 2 - Schedule.overview_team_chrome_rows) spent.filler_rows;
   check int "40-row frame is exact" 40 (overview_frame_rows spent)
 
-let test_overview_team_block_sits_between_panel_and_backlog () =
-  let live =
-    Schedule.allocate_overview ~terminal_rows:40
-      ~attention_count:10 ~goal_count:0 ~team_count:13 ~providers_count:0 ~task_count:687
-      ~has_task_error:false
-  in
-  check int "the panel keeps its ceiling" 6 live.attention_rows;
-  check int "every Team row fits" 13 live.team_rows;
-  check int "the backlog takes what is left" 9 live.task_rows;
-  check int "40-row frame is exact" 40
-    (overview_frame_rows live);
-  let short =
-    Schedule.allocate_overview ~terminal_rows:17
-      ~attention_count:6 ~goal_count:0 ~team_count:13 ~providers_count:0 ~task_count:20
-      ~has_task_error:false
-  in
-  check int "a short viewport gives Team no half block" 0 short.team_rows;
-  check int "the backlog keeps its held row" 1 short.task_rows;
-  List.iter
-    (fun team_count ->
-      for terminal_rows = 14 to 80 do
-        let allocation =
-          Schedule.allocate_overview ~terminal_rows 
-            ~attention_count:6 ~goal_count:0 ~team_count ~providers_count:0 ~task_count:40
-            ~has_task_error:true
-        in
-        check int
-          (Printf.sprintf "rows %d team %d" terminal_rows team_count)
-          terminal_rows
-          (overview_frame_rows allocation);
-        if allocation.team_rows < 0 || allocation.team_rows > team_count then
-          failf "team rows out of range at rows=%d team=%d: %d" terminal_rows
-            team_count allocation.team_rows
-      done)
-    [ 0; 1; 3; 16; 60 ]
-
-(* GOALS sits under the alert panel and ahead of Team and the backlog: on a
-   contended viewport it keeps its rows and Team gives up its block first. The
-   frame still adds up to the terminal at every height. *)
-let test_overview_goals_block_takes_rows_before_team_and_tasks () =
-  let live =
-    Schedule.allocate_overview ~terminal_rows:40 ~attention_count:10
-      ~goal_count:6 ~team_count:13 ~providers_count:0 ~task_count:687 ~has_task_error:false
-  in
-  check int "the panel keeps its ceiling" 6 live.attention_rows;
-  check int "the headline and five goals fit" 6 live.goal_rows;
-  check int "every Team row fits" 13 live.team_rows;
-  check int "the backlog takes what is left" 2 live.task_rows;
-  check int "40-row frame is exact" 40 (overview_frame_rows live);
-  let short =
-    Schedule.allocate_overview ~terminal_rows:23 ~attention_count:6
-      ~goal_count:6 ~team_count:13 ~providers_count:0 ~task_count:20 ~has_task_error:false
-  in
-  check int "a short viewport still draws the goals" 5 short.goal_rows;
-  check int "Team gives up its block before GOALS" 0 short.team_rows;
-  check int "the backlog keeps its held row" 1 short.task_rows;
-  List.iter
-    (fun goal_count ->
-      for terminal_rows = 14 to 80 do
-        let allocation =
-          Schedule.allocate_overview ~terminal_rows ~attention_count:6
-            ~goal_count ~team_count:5 ~providers_count:0 ~task_count:40 ~has_task_error:true
-        in
-        check int
-          (Printf.sprintf "rows %d goals %d" terminal_rows goal_count)
-          terminal_rows
-          (overview_frame_rows allocation);
-        if allocation.goal_rows < 0 || allocation.goal_rows > goal_count then
-          failf "goal rows out of range at rows=%d goals=%d: %d" terminal_rows
-            goal_count allocation.goal_rows
-      done)
-    [ 0; 1; 6; 30 ]
-
-(* The Providers section is served after GOALS and Team and before the
-   backlog, and never takes the one task row held back. *)
-let test_overview_providers_section_sits_before_backlog () =
-  let live =
-    Schedule.allocate_overview ~terminal_rows:40 ~attention_count:10
-      ~goal_count:0 ~team_count:13 ~providers_count:4 ~task_count:687
-      ~has_task_error:false
-  in
-  check int "every Team row still fits" 13 live.team_rows;
-  check int "every provider row fits" 4 live.providers_rows;
-  check int "the backlog takes what is left" 3 live.task_rows;
-  check int "40-row frame is exact" 40 (overview_frame_rows live);
-  (* Either side of the chrome: 19 rows leave the section its title and
-     divider and no row, so it is not drawn; 20 rows leave it one. *)
-  let at rows =
-    Schedule.allocate_overview ~terminal_rows:rows ~attention_count:6
-      ~goal_count:0 ~team_count:0 ~providers_count:4 ~task_count:20
-      ~has_task_error:false
-  in
-  check int "chrome with no row is no section" 0 (at 19).providers_rows;
-  check int "the backlog takes the rows the section could not use" 3
-    (at 19).task_rows;
-  check int "19-row frame is exact" 19 (overview_frame_rows (at 19));
-  check int "one row past the chrome draws one row" 1 (at 20).providers_rows;
-  check int "the backlog keeps its held row" 1 (at 20).task_rows;
-  check int "20-row frame is exact" 20 (overview_frame_rows (at 20))
-
-(* GOALS, Providers and Team together: each is paid in that order, and the
-   frame still reaches exactly the bottom of the terminal. *)
-let test_overview_goals_and_providers_share_the_viewport () =
-  let tall =
-    Schedule.allocate_overview ~terminal_rows:50 ~attention_count:10
-      ~goal_count:6 ~team_count:13 ~providers_count:4 ~task_count:687
-      ~has_task_error:false
-  in
-  check int "the goals fit" 6 tall.goal_rows;
-  check int "the Team rows fit" 13 tall.team_rows;
-  check int "the provider rows fit" 4 tall.providers_rows;
-  check int "the backlog takes what is left" 6 tall.task_rows;
-  check int "50-row frame is exact" 50 (overview_frame_rows tall);
-  let crowded =
-    Schedule.allocate_overview ~terminal_rows:40 ~attention_count:10
-      ~goal_count:6 ~team_count:13 ~providers_count:4 ~task_count:687
-      ~has_task_error:false
-  in
-  (* The viewport that used to cut the reason a Keeper is stuck. *)
-  check int "Providers keeps its rows in a crowded viewport" 4
-    crowded.providers_rows;
-  check int "Team takes what Providers left" 8 crowded.team_rows;
-  check int "the backlog keeps its held row" 1 crowded.task_rows;
-  check int "40-row frame is exact" 40 (overview_frame_rows crowded);
-  List.iter
-    (fun (goal_count, team_count, providers_count) ->
-      for terminal_rows = 14 to 80 do
-        let allocation =
-          Schedule.allocate_overview ~terminal_rows ~attention_count:6
-            ~goal_count ~team_count ~providers_count ~task_count:40
-            ~has_task_error:false
-        in
-        check int
-          (Printf.sprintf "rows %d goals %d team %d providers %d" terminal_rows
-             goal_count team_count providers_count)
-          terminal_rows
-          (overview_frame_rows allocation);
-        if allocation.providers_rows < 0
-           || allocation.providers_rows > providers_count
-        then
-          failf "provider rows out of range at rows=%d: %d" terminal_rows
-            allocation.providers_rows;
-        if allocation.task_rows < 1 then
-          failf "the held task row was taken at rows=%d" terminal_rows
-      done)
-    [ (0, 0, 1); (6, 0, 3); (6, 13, 4); (2, 60, 5); (40, 5, 9) ]
-
 let test_board_read_rows_reserve_comments_and_footer () =
   let crowded =
     Layout.allocate_board_read ~terminal_rows:14 ~body_line_count:10
-      ~comment_count:5
+      ~comment_line_count:5
   in
   check int "14-row board keeps one body row" 1 crowded.body_rows;
   check int "14-row board fits two comments" 2 crowded.comment_rows;
   check int "14-row board frame is exact" 14
-    (board_read_frame_rows ~body_line_count:10 ~comment_count:5 crowded);
+    (board_read_frame_rows ~body_line_count:10 ~comment_line_count:5 crowded);
   let comments_only =
     Layout.allocate_board_read ~terminal_rows:14 ~body_line_count:0
-      ~comment_count:5
+      ~comment_line_count:5
   in
   check int "empty body consumes no semantic row" 0 comments_only.body_rows;
   check int "empty body frees a third comment row" 3
     comments_only.comment_rows;
   let no_comments =
     Layout.allocate_board_read ~terminal_rows:14 ~body_line_count:10
-      ~comment_count:0
+      ~comment_line_count:0
   in
   check int "comment-free board uses the full body viewport" 5
     no_comments.body_rows;
   let full_comments =
     Layout.allocate_board_read ~terminal_rows:16 ~body_line_count:10
-      ~comment_count:5
+      ~comment_line_count:5
   in
   check int "16-row board widens the thread" 4 full_comments.comment_rows;
   (* A tall terminal is where the old flat five hurt: a forty-reply thread got
@@ -544,7 +551,7 @@ let test_board_read_rows_reserve_comments_and_footer () =
      share grows with the height, and the post still keeps the larger half. *)
   let tall =
     Layout.allocate_board_read ~terminal_rows:60 ~body_line_count:200
-      ~comment_count:40
+      ~comment_line_count:40
   in
   check int "a tall pane gives comments a share, not a constant" 16
     tall.comment_rows;
@@ -552,7 +559,7 @@ let test_board_read_rows_reserve_comments_and_footer () =
     (tall.body_rows > tall.comment_rows);
   let few_comments =
     Layout.allocate_board_read ~terminal_rows:60 ~body_line_count:200
-      ~comment_count:3
+      ~comment_line_count:3
   in
   check int "a short thread takes only what it has" 3
     few_comments.comment_rows;
@@ -560,30 +567,30 @@ let test_board_read_rows_reserve_comments_and_footer () =
      rows of filler under a ten-line post while the thread was cut at five. *)
   let short_post =
     Layout.allocate_board_read ~terminal_rows:60 ~body_line_count:10
-      ~comment_count:40
+      ~comment_line_count:40
   in
   check int "a short post hands its unused rows to the thread" 40
     short_post.comment_rows;
   check int "the body keeps exactly the rows it has" 10 short_post.body_rows;
   for terminal_rows = 14 to 40 do
     for body_line_count = 0 to 10 do
-      for comment_count = 0 to 10 do
+      for comment_line_count = 0 to 10 do
         let allocation =
           Layout.allocate_board_read ~terminal_rows ~body_line_count
-            ~comment_count
+            ~comment_line_count
         in
         let total =
-          board_read_frame_rows ~body_line_count ~comment_count allocation
+          board_read_frame_rows ~body_line_count ~comment_line_count allocation
         in
         if total <> terminal_rows then
           failf
             "board-read does not fill viewport: rows=%d body=%d comments=%d total=%d"
-            terminal_rows body_line_count comment_count total;
+            terminal_rows body_line_count comment_line_count total;
         if body_line_count > 0 && allocation.body_rows < 1 then
           failf "board-read hid a nonempty body at rows=%d comments=%d"
-            terminal_rows comment_count;
+            terminal_rows comment_line_count;
         let ceiling =
-          let chrome = if comment_count > 0 then 2 else 0 in
+          let chrome = if comment_line_count > 0 then 2 else 0 in
           let available =
             max 0 (terminal_rows - Layout.board_read_box_rows - 1 - chrome)
           in
@@ -591,18 +598,18 @@ let test_board_read_rows_reserve_comments_and_footer () =
         in
         if
           allocation.comment_rows < 0
-          || allocation.comment_rows > min ceiling comment_count
+          || allocation.comment_rows > min ceiling comment_line_count
         then
           failf "board-read comment allocation escaped its cap";
         let last =
           Layout.project_board_read_scroll ~body_line_count
-            ~body_rows:allocation.body_rows ~comment_count
+            ~body_rows:allocation.body_rows ~comment_line_count
             ~comment_rows:allocation.comment_rows max_int
         in
-        if last.comment_offset + allocation.comment_rows <> comment_count then
+        if last.comment_offset + allocation.comment_rows <> comment_line_count then
           failf
             "board-read cannot reach the last comment: rows=%d body=%d comments=%d"
-            terminal_rows body_line_count comment_count;
+            terminal_rows body_line_count comment_line_count;
         if
           body_line_count > allocation.body_rows
           && last.body_offset + allocation.body_rows <> body_line_count
@@ -615,18 +622,18 @@ let test_board_read_rows_reserve_comments_and_footer () =
 let test_board_read_scroll_reaches_hidden_comments () =
   let allocation =
     Layout.allocate_board_read ~terminal_rows:14 ~body_line_count:1
-      ~comment_count:5
+      ~comment_line_count:5
   in
   let first =
     Layout.project_board_read_scroll ~body_line_count:1
-      ~body_rows:allocation.body_rows ~comment_count:5
+      ~body_rows:allocation.body_rows ~comment_line_count:5
       ~comment_rows:allocation.comment_rows 0
   in
   check int "initial body offset" 0 first.body_offset;
   check int "initial comment offset" 0 first.comment_offset;
   let last =
     Layout.project_board_read_scroll ~body_line_count:1
-      ~body_rows:allocation.body_rows ~comment_count:5
+      ~body_rows:allocation.body_rows ~comment_line_count:5
       ~comment_rows:allocation.comment_rows 99
   in
   check int "overscroll normalizes to the combined maximum" 3
@@ -635,14 +642,14 @@ let test_board_read_scroll_reaches_hidden_comments () =
   check int "last comment becomes visible" 3 last.comment_offset;
   let long_body =
     Layout.project_board_read_scroll ~body_line_count:10 ~body_rows:1
-      ~comment_count:5 ~comment_rows:3 10
+      ~comment_line_count:5 ~comment_rows:3 10
   in
   check int "body scroll is consumed first" 9 long_body.body_offset;
   check int "remaining scroll advances comments" 1
     long_body.comment_offset;
   let negative =
     Layout.project_board_read_scroll ~body_line_count:10 ~body_rows:1
-      ~comment_count:5 ~comment_rows:3 (-1)
+      ~comment_line_count:5 ~comment_rows:3 (-1)
   in
   check int "negative scroll normalizes to zero" 0
     negative.normalized_scroll
@@ -680,31 +687,31 @@ let test_board_read_side_layout_falls_back_when_narrow () =
    under it -- never a heading alone. *)
 let test_board_read_side_allocation_reserves_the_heading () =
   for terminal_rows = 9 to 40 do
-    for comment_count = 0 to 12 do
+    for comment_line_count = 0 to 12 do
       let allocation =
         Layout.allocate_board_read_side ~terminal_rows ~body_line_count:20
-          ~comment_count
+          ~comment_line_count
       in
-      if comment_count > 0 && allocation.comment_rows > 0
+      if comment_line_count > 0 && allocation.comment_rows > 0
          && allocation.comment_rows < 2
       then
         failf
           "rows=%d comments=%d: comment column has a heading with no room \
            under it (%d rows)"
-          terminal_rows comment_count allocation.comment_rows;
+          terminal_rows comment_line_count allocation.comment_rows;
       if allocation.body_rows < 0 || allocation.comment_rows < 0 then
         failf "rows=%d comments=%d: negative row allocation" terminal_rows
-          comment_count;
+          comment_line_count;
       let available = max 0 (terminal_rows - 9) in
       if max allocation.body_rows allocation.comment_rows <> available then
         failf
           "rows=%d comments=%d: side columns leave vertical space unused"
-          terminal_rows comment_count
+          terminal_rows comment_line_count
     done
   done;
   let no_comments =
     Layout.allocate_board_read_side ~terminal_rows:30 ~body_line_count:20
-      ~comment_count:0
+      ~comment_line_count:0
   in
   check int "no thread spends no row on a heading" 0 no_comments.comment_rows
 
@@ -718,14 +725,14 @@ let test_board_read_side_allocation_reserves_the_heading () =
 let test_board_read_side_layout_opens_head_first () =
   let allocation =
     Layout.allocate_board_read_side ~terminal_rows:16 ~body_line_count:20
-      ~comment_count:20
+      ~comment_line_count:20
   in
   check bool "this allocation has room for a heading and a line under it"
     true (allocation.comment_rows >= 2);
   let comment_rows = allocation.comment_rows - 1 (* the heading's own row *) in
   let opening =
     Layout.project_board_read_scroll ~body_line_count:20
-      ~body_rows:allocation.body_rows ~comment_count:20 ~comment_rows 0
+      ~body_rows:allocation.body_rows ~comment_line_count:20 ~comment_rows 0
   in
   check int "post opens at its head" 0 opening.body_offset;
   check int "thread opens at its head, not its tail" 0 opening.comment_offset
@@ -1716,6 +1723,85 @@ let test_fusion_sidebar_label_format () =
   check string "label starts with status, time, keeper, and run id"
     "[done] 14:20:05 @edgar fusion-target-501" label
 
+(* Task Review and Verdicts drew a row's task id and nothing else. Measured
+   on the live history 2026-09-24: 200 Task Review rows carry 113 distinct
+   ids, 45 of them more than once, and seven rows are task-1663. The Verdicts
+   list is shorter and collides too -- of eight rows one task carries two
+   verdicts at the same gate. Rows reading the same thing cannot be picked
+   between. *)
+let test_two_submissions_of_one_task_read_differently () =
+  let first =
+    Schedule.task_history_sidebar_label ~task_id:"task-1663"
+      ~apart:(Some "vrf-2dc02d93")
+  in
+  let second =
+    Schedule.task_history_sidebar_label ~task_id:"task-1663"
+      ~apart:(Some "vrf-9f1b0c47")
+  in
+  check bool "the two rows read differently" true (first <> second);
+  check string "the id leads so the column reads down"
+    "task-1663  vrf-2dc02d93" first
+
+(* The value beside the id has to hold still. An age does not: the ladder
+   spells seconds under an hour, so a row read one thing and another a second
+   later, and two requests minutes apart round to the same reading. *)
+let test_the_parting_value_does_not_move_under_the_reader () =
+  (* Two request ids, which is what the Task Review index parts its rows by.
+     They are the row's own value: the same row reads the same way on every
+     frame, and two rows never read alike. *)
+  let first = "vrf-2dc02d93" and second = "vrf-9f1b0c47" in
+  check string "the same row reads the same way twice"
+    (Schedule.task_history_sidebar_label ~task_id:"task-1663" ~apart:(Some first))
+    (Schedule.task_history_sidebar_label ~task_id:"task-1663" ~apart:(Some first));
+  check bool "and two rows do not read alike" true
+    (Schedule.task_history_sidebar_label ~task_id:"task-1663" ~apart:(Some first)
+     <> Schedule.task_history_sidebar_label ~task_id:"task-1663"
+          ~apart:(Some second))
+
+let test_verdicts_in_the_same_second_have_distinct_labels () =
+  let labels =
+    Schedule.verdict_sidebar_labels
+      [ "task-1663", "09-25 01:12:45"
+      ; "task-1663", "09-25 01:12:45"
+      ; "task-2000", "09-25 01:12:45"
+      ]
+  in
+  check (list string) "only colliding task and clock pairs get ordinals"
+    [ "task-1663  09-25 01:12#1"
+    ; "task-1663  09-25 01:12#2"
+    ; "task-2000  09-25 01:12:45"
+    ] labels
+
+(* A row with nothing to part it keeps the id alone. The row said one thing
+   before this column and still says it; a mark for "nothing here" would be a
+   second vocabulary on a surface that has none. *)
+let test_a_row_without_a_parting_value_keeps_its_id () =
+  check string "the id alone" "task-1663"
+    (Schedule.task_history_sidebar_label ~task_id:"task-1663" ~apart:None)
+
+(* The list pane is [Masc_tui_roster_pane.pane_cols] wide and folds a label to
+   the room its caret lead leaves -- which is narrower than the frame's inner
+   width by that lead. Both parting values have to fit the room a task id
+   leaves, or every row is cut. *)
+let test_the_widest_row_fits_the_list_pane () =
+  let room =
+    Masc_tui_frame.inner_width ~cols:Masc_tui_roster_pane.pane_cols
+    - Masc_tui_render_prim.sidebar_row_lead_cells
+  in
+  List.iter
+    (fun apart ->
+       let label =
+         Schedule.task_history_sidebar_label ~task_id:"task-10000"
+           ~apart:(Some apart)
+       in
+       check bool
+         (Printf.sprintf "%S fits the pane's label room" apart)
+         true
+         (Masc_tui_message_layout.display_width label <= room))
+    (* A request id, and the clock the Verdicts index draws. A verdict has no
+       id of its own on the wire, so when it was recorded is what parts it. *)
+    [ "vrf-2dc02d93"; "09-25 01:12:45" ]
+
 let test_fusion_pipeline_diagram_stages () =
   let running_judge =
     Schedule.fusion_pipeline_diagram
@@ -1841,7 +1927,24 @@ let test_a_held_schedule_says_what_it_waits_for () =
   let tag = Schedule.schedule_hold_tag ~due:"09-23 12:34" in
   check bool "the short tag leads the full reading" true
     (String.length reading >= String.length tag
-     && String.sub reading 0 (String.length tag) = tag)
+     && String.sub reading 0 (String.length tag) = tag);
+  (* #34642: a hold on the target's shutdown fence must not claim the keeper
+     still has the previous wake. *)
+  let fenced =
+    Schedule.schedule_fence_hold_reading ~due:"09-23 12:34" ~target:"analyst"
+      ~fence_owner:"shutdown-1"
+  in
+  let fenced_has needle =
+    let n = String.length needle and m = String.length fenced in
+    let rec go i = i + n <= m && (String.sub fenced i n = needle || go (i + 1)) in
+    go 0
+  in
+  check bool "a fence hold names the keeper" true (fenced_has "analyst");
+  check bool "a fence hold names the shutdown" true (fenced_has "shutdown-1");
+  check bool "a fence hold does not blame the previous wake" false
+    (fenced_has "previous wake");
+  check bool "a fence hold leads with the same tag" true
+    (String.sub fenced 0 (String.length tag) = tag)
 ;;
 
 (* #38411: while the runner is not ok, the hold on screen is the one it read
@@ -2183,6 +2286,28 @@ let test_an_absent_date_does_not_move_the_age () =
     (Masc_tui_message_layout.display_width with_both)
     (Masc_tui_message_layout.display_width without_date)
 
+(* A list pane's index: what the row is about, then what parts it from its
+   neighbours. The Approvals index drew the tool alone, and a queue holds one
+   row per held call, so calls from different Keepers can share a tool name.
+
+   The parting reading goes last because the pane folds from the middle and
+   keeps the tail: with the asker in front, such rows would share
+   their opening and fold alike again. *)
+let test_rows_alike_but_for_the_asker_are_parted_by_it () =
+  let room =
+    Masc_tui_frame.inner_width ~cols:Masc_tui_roster_pane.pane_cols
+  in
+  let fold label = Masc_tui_message_layout.fit_middle room label in
+  let first =
+    Schedule.sidebar_row_label ~about:"tool_execute" ~apart:(Some "tui-developer")
+  and second =
+    Schedule.sidebar_row_label ~about:"tool_execute" ~apart:(Some "ocaml-agent-ic")
+  in
+  check bool "the two rows part" true (fold first <> fold second);
+  check string "and the tool still leads" "tool_execute  tui-developer" first;
+  check string "an unnamed asker leaves the label as it was" "tool_execute"
+    (Schedule.sidebar_row_label ~about:"tool_execute" ~apart:None)
+
 (* A post with no time has no age. Read as the epoch, it drew twenty thousand
    days folded into the column as "2…d09h". *)
 let test_a_board_post_without_a_time_has_no_age () =
@@ -2200,6 +2325,14 @@ let () =
             test_burst_coalesces_to_one_frame
         ; test_case "input after idle is immediate" `Quick
             test_input_after_idle_renders_immediately
+        ; test_case "a recent frame does not delay a keypress" `Quick
+            test_input_does_not_wait_for_recent_frame
+        ; test_case "separate repeated inputs keep the frame interval" `Quick
+            test_separate_repeated_inputs_keep_the_frame_interval
+        ; test_case "one second of separate input keeps the frame ceiling" `Quick
+            test_a_second_of_separate_inputs_keeps_the_frame_ceiling
+        ; test_case "buffered input paints when drained" `Quick
+            test_buffered_input_renders_when_drained
         ; test_case "dirty input wait uses the frame deadline" `Quick
             test_dirty_timeout_wakes_at_deadline
         ; test_case "input preempts a pending background frame" `Quick
@@ -2218,8 +2351,12 @@ let () =
             test_quit_shortcut_does_not_steal_message_input
         ; test_case "compact viewport follows fixed chrome budget" `Quick
             test_compact_viewport_uses_largest_fixed_chrome_budget
-        ; test_case "overview rows share one viewport budget" `Quick
-            test_overview_rows_share_one_viewport_budget
+        ; test_case "overview rows are shared floors first" `Quick
+            test_overview_rows_are_shared_floors_first
+        ; test_case "overview GOALS and Team leave the backlog its floor" `Quick
+            test_overview_goals_and_team_leave_the_backlog_its_floor
+        ; test_case "overview floors are paid in serving order" `Quick
+            test_overview_floors_are_paid_in_serving_order
         ; test_case "overview frame always fills the terminal" `Quick
             test_overview_frame_always_fills_the_terminal
         ; test_case "overview tasks keep a share of a tall viewport" `Quick
@@ -2228,14 +2365,6 @@ let () =
             test_overview_blocks_grow_to_their_item_counts
         ; test_case "team detail lines take only spare rows" `Quick
             test_team_detail_lines_take_only_spare_rows
-        ; test_case "overview goals block takes rows before team and tasks"
-            `Quick test_overview_goals_block_takes_rows_before_team_and_tasks
-        ; test_case "overview providers section sits before the backlog" `Quick
-            test_overview_providers_section_sits_before_backlog
-        ; test_case "overview goals and providers share the viewport" `Quick
-            test_overview_goals_and_providers_share_the_viewport
-        ; test_case "overview team block sits between panel and backlog" `Quick
-            test_overview_team_block_sits_between_panel_and_backlog
         ; test_case "board read reserves comments and footer" `Quick
             test_board_read_rows_reserve_comments_and_footer
         ; test_case "board read reaches hidden comments" `Quick
@@ -2340,6 +2469,16 @@ let () =
             test_the_widest_failure_code_fits_the_state_cell
         ; test_case "fusion sidebar label format" `Quick
             test_fusion_sidebar_label_format
+        ; test_case "two submissions of one task read differently" `Quick
+            test_two_submissions_of_one_task_read_differently
+        ; test_case "a row without a parting value keeps its id" `Quick
+            test_a_row_without_a_parting_value_keeps_its_id
+        ; test_case "the parting value does not move under the reader" `Quick
+            test_the_parting_value_does_not_move_under_the_reader
+        ; test_case "same-second verdicts have distinct labels" `Quick
+            test_verdicts_in_the_same_second_have_distinct_labels
+        ; test_case "the widest row fits the list pane" `Quick
+            test_the_widest_row_fits_the_list_pane
         ; test_case "fusion pipeline diagram stages" `Quick
             test_fusion_pipeline_diagram_stages
         ; test_case "planning strip names only its own stops" `Quick
@@ -2352,6 +2491,8 @@ let () =
             test_capped_page_cannot_report_an_empty_store
         ; test_case "wake readings stay four separate answers" `Quick
             test_wake_readings_stay_four_separate_answers
+        ; test_case "rows alike but for the asker are parted by it" `Quick
+            test_rows_alike_but_for_the_asker_are_parted_by_it
         ; test_case "a board post without a time has no age" `Quick
             test_a_board_post_without_a_time_has_no_age
         ; test_case "a held schedule says what it waits for" `Quick

@@ -30,6 +30,10 @@ type operation_projection =
   ; terminal_count : int
   ; interrupted_count : int
   ; store_unavailable : bool
+  ; autonomous_owed_slot : bool
+        (* Owner-fiber-local debt, stamped at publish time: the slot the
+           deferral debt cap holds open for the autonomous lane. Not a
+           count. Store queries cannot know it, so it rides the projection. *)
   }
 
 type operation_interrupt_result =
@@ -165,6 +169,8 @@ type _ command =
       -> (Keeper_meta_contract.keeper_meta option, error) result command
   | Exact_operation :
       Operation_id.t -> (Chat_operation.t option, error) result command
+  | Has_newer_original_queued :
+      Operation_id.t -> (bool, error) result command
   | Direct_checkpoint : Operation_id.t ->
       (Keeper_semantic_execution.gate_checkpoint option, error) result command
   | Defer_direct_checkpoint :
@@ -347,6 +353,7 @@ type t =
   ; shutdown_idle_waiters : ((unit, error) result Eio.Promise.u) list ref
   ; on_turn_slot_released : (unit -> unit) option
   ; autonomous_lost_slot : bool ref
+  ; autonomous_deferral_debt : int ref
         (* Set when the autonomous lane asked for the slot and was refused,
            cleared when the release notification is delivered. Without it the
            notification fires after every turn, and since a woken keeper starts
@@ -395,6 +402,7 @@ let operation_projection_equal
   && Int.equal left.terminal_count right.terminal_count
   && Int.equal left.interrupted_count right.interrupted_count
   && Bool.equal left.store_unavailable right.store_unavailable
+  && Bool.equal left.autonomous_owed_slot right.autonomous_owed_slot
 ;;
 
 let turn_in_flight_equal (left : turn_in_flight option) (right : turn_in_flight option) =
@@ -411,8 +419,26 @@ let shutdown_operation_id_equal =
   Option.equal Keeper_shutdown_types.Operation_id.equal
 ;;
 
+(* RFC-0373 direction 2: consecutive losses of the turn slot to the chat lane
+   become a value the next admission decision reads. The debt counts releases
+   the autonomous lane asked for and did not get while a chat turn held the
+   slot, resets to zero the moment an autonomous turn is admitted, and at
+   [autonomous_deferral_debt_cap] the admission stops handing a freed slot to
+   the queued chat first: the handoff leaves the slot free, which is the owed
+   release signal the autonomous lane needs to take it. The cap is 3 -- one
+   less than the 5 consecutive cycles RFC-0373 measured a single 16.3-minute
+   chat hold to cost -- and it can delay a chat turn by at most the forfeited
+   releases. Owner-fiber-local like [autonomous_lost_slot]. *)
+let autonomous_deferral_debt_cap = 3
+;;
+
 let publish_operation_projection t next =
   let previous = Atomic.get t.operation_projection in
+  (* The debt mark is owner-fiber-local and lives here, not in the store, so
+     every published snapshot is stamped with the state at its own publish
+     moment. A later publish without the mark therefore also clears it, and
+     readers can never see a stale admission promise. *)
+  let next = { next with autonomous_owed_slot = !(t.autonomous_deferral_debt) >= autonomous_deferral_debt_cap } in
   if not (operation_projection_equal previous next)
   then (
     Atomic.set t.operation_projection next;
@@ -539,6 +565,7 @@ let answer : type response. response command -> answer = function
   | Exact_projection -> In_its_drain_step
   | Apply_meta _ -> In_its_drain_step
   | Exact_operation _ -> In_its_drain_step
+  | Has_newer_original_queued _ -> In_its_drain_step
   | Direct_checkpoint _ -> In_its_drain_step
   | Defer_direct_checkpoint _ -> In_its_drain_step
   | Resume_direct_checkpoint _ -> In_its_drain_step
@@ -740,6 +767,9 @@ let operation_projection_of_inventory ~has_claimable_queued ~next_runtime_retry_
   ; terminal_count = inventory.terminal_count
   ; interrupted_count = inventory.interrupted_count
   ; store_unavailable = false
+  ; (* The debt mark is not a store fact: publish_operation_projection
+       stamps each published snapshot with the owner-fiber-local state. *)
+    autonomous_owed_slot = false
   }
 ;;
 
@@ -1025,6 +1055,7 @@ let start
     ; child_active = ref false
     ; child_cancel = Atomic.make None
     ; autonomous_lost_slot = ref false
+    ; autonomous_deferral_debt = ref 0
     ; stopping_waiters = ref []
     ; shutdown_idle_waiters = ref []
     ; on_turn_slot_released
@@ -1204,7 +1235,27 @@ let start
       | Some runner when not (runner.ready ~keeper_name:t.keeper_name) -> ()
       | Some runner ->
         let inventory = Atomic.get t.operation_projection in
-        if inventory.has_claimable_queued && Option.is_none inventory.running_operation_id
+        (* RFC-0373 direction 2: past the debt cap the freed slot goes to the
+           autonomous lane that lost [autonomous_deferral_debt_cap]
+           consecutive releases, so the queued chat is not started and the
+           slot is left free: the handoff branch of [Run_if_idle] reads a free
+           slot as the owed release signal and wakes that lane, and with no
+           autonomous waiter the next [Run_if_idle] admits it directly. An
+           admitted autonomous turn clears the debt elsewhere; nothing else
+           writes it, and every read here is on the command loop. *)
+        let autonomous_owed_slot =
+          !(t.autonomous_deferral_debt) >= autonomous_deferral_debt_cap
+        in
+        if autonomous_owed_slot
+        then
+          Log.Keeper.info
+            ~keeper_name:t.keeper_name
+            "deferral debt cap reached: the freed slot stays open for the autonomous lane (debt=%d)"
+            !(t.autonomous_deferral_debt);
+        if
+          (not autonomous_owed_slot)
+          && inventory.has_claimable_queued
+          && Option.is_none inventory.running_operation_id
         then (
           t.child_active := true;
           publish_turn_in_flight
@@ -1408,6 +1459,14 @@ let start
           let response =
             run_operation_read t ~label:"lookup Keeper chat operation" (fun () ->
               Chat_operation_store.get t.operation_store operation_id)
+          in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Has_newer_original_queued operation_id, resolve) ->
+          let response =
+            run_operation_read t ~label:"read newer original Keeper chat" (fun () ->
+              Chat_operation_store.has_newer_original_queued
+                t.operation_store ~operation_id)
           in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
@@ -1844,13 +1903,30 @@ let start
                 (match Atomic.get t.turn_in_flight with
                  | Some in_flight ->
                    (match lane with
-                    | Autonomous -> t.autonomous_lost_slot := true
+                    | Autonomous ->
+                      t.autonomous_lost_slot := true;
+                      (* RFC-0373 direction 2: count the lost release, but
+                         only against the chat lane -- a maintenance or
+                         autonomous holder is not the queue that starves the
+                         autonomous lane, and the cap must not reorder around
+                         them. *)
+                      (match in_flight.lane with
+                       | Chat_operation ->
+                         t.autonomous_deferral_debt := !(t.autonomous_deferral_debt) + 1
+                       | Autonomous | Maintenance -> ())
                     | Chat_operation | Maintenance -> ());
                    Eio.Promise.resolve
                      resolve
                      (Ok (Autonomous_busy (Turn_busy (Some in_flight))))
                  | None ->
                    let run_admitted_turn () =
+                     (* The turn the debt existed for is running now. The
+                        debt stays at the cap while it runs -- that is what
+                        keeps [autonomous_owed_slot] true on every publish
+                        during the turn, so later consults keep the slot
+                        too (a chat queued behind the cap must not take it
+                        back at a second tool boundary). It clears at this
+                        turn's settle. *)
                      t.child_active := true;
                      publish_turn_in_flight
                        t
@@ -1925,6 +2001,9 @@ let start
                         match Atomic.get t.turn_in_flight with
                         | Some ({ lane = Chat_operation; _ } as chat) ->
                           t.autonomous_lost_slot := true;
+                          (* Same count as the poll refusal above: the lane
+                             lost this release to a chat turn. *)
+                          t.autonomous_deferral_debt := !(t.autonomous_deferral_debt) + 1;
                           Eio.Promise.resolve
                             resolve
                             (Ok (Autonomous_busy (Turn_busy (Some chat))))
@@ -1954,6 +2033,9 @@ let start
                 | Error (exn, backtrace) -> Ok (Autonomous_raised (exn, backtrace))
               in
               Eio.Promise.resolve autonomous_resolve response;
+              (* The turn the debt bought has finished, so its slot protection
+                 ends here: the next release starts a fresh cap count. *)
+              t.autonomous_deferral_debt := 0;
               Ok ()
           in
           t.child_active := false;
@@ -2019,6 +2101,8 @@ let resume_direct_runtime_retry t ~operation_id ~observed =
   request t (Resume_direct_runtime_retry {operation_id; observed})
 
 let exact_operation t operation_id = request t (Exact_operation operation_id)
+let has_newer_original_queued t ~operation_id =
+  request t (Has_newer_original_queued operation_id)
 let restart_interrupted_operations t = t.restart_interrupted
 let pause_and_interrupt ?expected_control_token t target = request t (Pause_and_interrupt {target; expected_control_token})
 let interrupt_turn = pause_and_interrupt

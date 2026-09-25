@@ -1634,7 +1634,7 @@ let phase_text ~now t =
         Printf.sprintf "%s, continued past %d context checkpoint(s)" work
           t.checkpoints
   | Stream_ended -> "stream ended; settling the outcome"
-  | Stream_failed message -> "stream reported an error: " ^ message
+  | Stream_failed message -> message
 
 (* Says what was sent, not what became of the turn. A signalled turn parked in
    an uncancellable section keeps running, and reading the signal as the
@@ -2105,6 +2105,9 @@ let apply_delta ~now t (delta : Live.delta) =
          It is not a turn outcome: the run says when it ends. *)
       ()
   | Live.Run_failed { message } ->
+      let message =
+        if String.trim message = "" then "cause not reported" else message
+      in
       let message =
         match t.current_runtime_id with
         | Some rid when not (String.contains message '[') ->

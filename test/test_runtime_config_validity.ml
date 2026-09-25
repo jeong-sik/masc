@@ -1327,6 +1327,23 @@ let test_lane_rejects_unknown_key () =
          errors)
   | Ok _ -> fail "unknown lane key must fail config parsing"
 
+(* A misspelt [tools_support = true] is not [tools-support]; loading it as a
+   model without tool support would give the keeper no tools. *)
+let test_model_rejects_unknown_key () =
+  let config =
+    "[models.sample]\n\
+     api-name = \"sample-model\"\n\
+     tools_support = true\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Error errors ->
+    check bool "unknown model key is named" true
+      (List.exists
+         (fun (error : Runtime_toml.parse_error) ->
+            String.equal error.path "models.sample.tools_support")
+         errors)
+  | Ok _ -> fail "unknown model key must fail config parsing"
+
 (* A [models.X].max-context above the model's catalog window resolves to the
    catalog number with source Override_clamped_by_capability: the declaration
    is clamped away and reaches nothing. Two shipped runtimes carried one, and
@@ -4925,13 +4942,9 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
        endpoint = \"http://localhost:11434\"\n\
        \n\
        [models.chat]\n\
-       provider = \"local\"\n\
-       provider-model-id = \"chat\"\n\
        max-context = 1024\n\
        \n\
        [models.libr]\n\
-       provider = \"local\"\n\
-       provider-model-id = \"libr\"\n\
        max-context = 1024\n\
        \n\
        [local.chat]\n\
@@ -5980,6 +5993,8 @@ let () =
             test_exact_output_lane_rejects_unknown_lane_id;
           test_case "lane rejects unknown keys" `Quick
             test_lane_rejects_unknown_key;
+          test_case "model rejects unknown keys" `Quick
+            test_model_rejects_unknown_key;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
           test_case "seed capability keys the catalog row decides agree with it" `Quick

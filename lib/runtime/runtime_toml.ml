@@ -1157,10 +1157,59 @@ let sampling_capability_errors
     top_k_errors @ min_p_errors
 ;;
 
+(* Every key [parse_model] reads. Any other key fails the load: a misspelt
+   [tools_support = true] would otherwise load as a model without tool
+   support and the keeper would run with an empty tool list. *)
+let model_keys =
+  [ "api-name"
+  ; "model-name"
+  ; "max-context"
+  ; "tools-support"
+  ; "thinking-support"
+  ; "preserve-thinking"
+  ; "streaming"
+  ; "capabilities"
+  ; "temperature"
+  ; "top-p"
+  ; "top-k"
+  ; "min-p"
+  ; "reasoning-effort"
+  ; "reasoning-uncontrolled"
+  ; "turn-timeout-s"
+  ; "wall-clock-ceiling-s"
+  ; "max-prompt-bytes"
+  ]
+;;
+
+let model_unknown_key_errors ~path (tbl : Otoml.t) =
+  match tbl with
+  | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+    List.concat_map
+      (fun (key, _) ->
+         if List.mem key model_keys
+         then []
+         else
+           error
+             (path ^ "." ^ key)
+             (Printf.sprintf
+                "unknown model key %S; expected one of %s"
+                key
+                (String.concat ", " model_keys)))
+      entries
+  | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+  | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+  | Otoml.TomlTableArray _ ->
+    error path (Printf.sprintf "[%s] must be a TOML table" path)
+;;
+
 let parse_model (id : string) (tbl : Otoml.t)
   : (Runtime_schema.model_spec, parse_error list) result
   =
   let path = Printf.sprintf "models.%s" id in
+  match model_unknown_key_errors ~path tbl with
+  | _ :: _ as errors -> Error errors
+  | [] ->
   let api_name_result =
     match
       ( typed_find "a string" path tbl "api-name" Otoml.get_string

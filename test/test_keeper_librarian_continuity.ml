@@ -853,11 +853,10 @@ let test_a_waiting_unit_ends_the_catch_up_after_a_commit () =
   pass_with_waiting_unit ();
   check int "a waiting unit stops the loop after the first committed round"
     (refused_requests + 1) (List.length !bodies);
-  let after_yield = coverage () in
-  check bool "that round committed part of the backlog" true
-    (match after_yield with
-     | Some end_atom -> end_atom > 0 && end_atom < narrowing_atom_count
-     | None -> false);
+  (* Two refusals halve eight atoms to a width of two; the one committed
+     round reads exactly that width. *)
+  check (option int) "that round committed one width of the backlog" (Some 2)
+    (coverage ());
   pass ();
   check (option int) "the next unit resumes and reads the rest"
     (Some narrowing_atom_count) (coverage ());

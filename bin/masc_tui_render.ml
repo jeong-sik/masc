@@ -14656,16 +14656,27 @@ let render_prompt_registry (state : state) =
         Printf.sprintf "%d/%d개" total all_prompt_count)
   in
   box_top buf cols;
+  (* The count the registry answered, and -- before any decoration that can
+     be cut -- how many overrides it held back. The row keeps a fixed floor
+     for the tab strip, so at a hundred and twenty columns the reading can
+     run a cell short and [config_pane_title_head] shortens the tail first.
+     An override the registry declined is exactly the warning an operator
+     must not lose to an ellipsis, so it sits beside the count the row
+     protects rather than after the part that gives way. *)
+  let held_back_note =
+    match held_back with
+    | [] -> ""
+    | entries ->
+      Printf.sprintf " %s적용 안 된 오버라이드 %d개%s" (Theme.warn ())
+        (List.length entries) Ansi.reset
+  in
   let reading =
-    Printf.sprintf "%s%s · %s%s%s"
+    Printf.sprintf "%s%s%s%s · %s%s"
       Ansi.dim count_text
+      held_back_note
+      Ansi.dim
       (if state.prompts_show_fragments then "내부 조각 포함" else "주 프롬프트")
       Ansi.reset
-      (match held_back with
-       | [] -> ""
-       | entries ->
-         Printf.sprintf "  %s적용 안 된 오버라이드 %d개%s" (Theme.warn ())
-           (List.length entries) Ansi.reset)
   in
   box_line buf cols
     (config_pane_title ~cols ~name:(screen_title " MASC 프롬프트") ~reading state);

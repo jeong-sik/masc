@@ -1823,6 +1823,12 @@ let test_fixed_sections_at_capacity_are_refused () =
 let test_stream_usage_is_keyed_by_the_clis_turn () =
   let reports = ref [] in
   let report (report : Keeper_client_usage_report.t) =
+    let usage =
+      match report.count with
+      | Keeper_client_usage_report.Running_count usage -> usage
+      | Keeper_client_usage_report.Count_replaced ->
+        Alcotest.fail "an Antigravity count was reported as replaced"
+    in
     reports :=
       ( ( report.official_turn
         , report.response_id
@@ -1831,9 +1837,9 @@ let test_stream_usage_is_keyed_by_the_clis_turn () =
       , ( report.conversation_id
         , Keeper_usage_resolution.position_to_string report.position
         , report.vendor_total_tokens )
-      , ( report.usage.input_tokens
-        , report.usage.output_tokens
-        , report.usage.cache_read_input_tokens ) )
+      , ( usage.input_tokens
+        , usage.output_tokens
+        , usage.cache_read_input_tokens ) )
       :: !reports
   in
   Keeper_antigravity_runtime.For_testing.report_stream_usage

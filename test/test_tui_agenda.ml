@@ -406,14 +406,16 @@ let test_empty_sections_answer_in_words () =
                             ~awaiting:(Agenda.Read [])) in
   let text = joined lines in
   check bool "the wake section answers" true (contains ~needle:"nothing is scheduled" text);
-  check bool "so does the waiting section" true (contains ~needle:"nobody is waiting" text);
+  check bool "so does the held-call section" true
+    (contains ~needle:"no keeper is holding a call" text);
   check bool "and the stuck section" true (contains ~needle:"no task is stuck on you" text);
   check int "all three headings are still drawn" 3 (List.length (tones_of lines Agenda.Heading))
 ;;
 
 (* An empty section is an answer only once its list was read. With the server
-   down the panel said "nothing is scheduled" and "nobody is waiting on you"
-   about two lists no request had brought back. *)
+   down the panel said "nothing is scheduled" and, where it now says no keeper
+   is holding a call, that nobody was waiting -- about two lists no request had
+   brought back. *)
 let test_an_unread_section_does_not_say_it_is_empty () =
   let text reading_s reading_a =
     joined (overlay_of (Agenda.project ~scheduled:reading_s ~awaiting:reading_a))
@@ -423,8 +425,8 @@ let test_an_unread_section_does_not_say_it_is_empty () =
     (contains ~needle:"not loaded yet" unread);
   check bool "and does not say nothing is scheduled" false
     (contains ~needle:"nothing is scheduled" unread);
-  check bool "or that nobody is waiting" false
-    (contains ~needle:"nobody is waiting" unread);
+  check bool "or that no keeper is holding a call" false
+    (contains ~needle:"no keeper is holding a call" unread);
   let failed =
     text
       (Agenda.Read_failed "schedule load failed: HTTP 503")
@@ -462,7 +464,7 @@ let test_the_state_says_which_lists_were_read () =
   let fresh = panel (state ()) in
   check bool "a fresh state has read neither list" false
     (contains ~needle:"nothing is scheduled" fresh
-     || contains ~needle:"nobody is waiting" fresh);
+     || contains ~needle:"no keeper is holding a call" fresh);
   let failed = state () in
   failed.Masc_tui_types.schedules_error <- Some "connect failed";
   failed.Masc_tui_types.keeper_tool_approvals_error <- Some "connect failed";
@@ -470,7 +472,12 @@ let test_the_state_says_which_lists_were_read () =
     (contains ~needle:"connect failed" (panel failed));
   let answered = state () in
   answered.Masc_tui_types.keeper_tool_approvals_observed <- true;
-  check bool "an answered empty held-call list is nobody waiting" true
+  (* The note names this list, not the badge's union of it and the stuck
+     one: the badge says "Awaiting you" over both, and a note echoing that
+     word answered the badge with "nobody" while the stuck section had rows. *)
+  check bool "an answered empty held-call list says so" true
+    (contains ~needle:"no keeper is holding a call" (panel answered));
+  check bool "and does not answer the badge's word" false
     (contains ~needle:"nobody is waiting on you" (panel answered))
 ;;
 

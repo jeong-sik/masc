@@ -5191,6 +5191,14 @@ let lane_name_entry_with_draft entry draft =
   | Renaming_lane { lane; _ } -> Renaming_lane { lane; draft }
 ;;
 
+(* The Task Review row the keys act on. [Verification_unselected] follows an
+   agenda jump whose request changed or closed: nothing is highlighted, a
+   verdict key has no row to judge, and the operator's first move lands on the
+   first row. *)
+type verification_selection =
+  | Verification_row of int
+  | Verification_unselected
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -6289,7 +6297,7 @@ type state = {
   mutable verification_inflight: bool;
   mutable verification_generation: int;
   mutable verification_scroll: int;
-  mutable verification_cursor: int;
+  mutable verification_selection: verification_selection;
   (* Which list this surface is reading. The store keeps every submission ever
      made, so the history outgrows the queue by an order of magnitude on a
      live workspace and the operator's default is the queue. The reader can
@@ -6307,7 +6315,6 @@ type state = {
   (* An agenda jump waits for a fresh queue read. Keep both identities so a
      reordered or replaced request cannot turn into the first visible row. *)
   mutable verification_jump: (string * string) option;
-  mutable verification_selection_suspended: bool;
   mutable verification_detail_scroll: int;
   (* An approve armed for a second keypress: which task. The cursor can move
      between the two presses, so the task id is captured at arm time and a
@@ -8168,12 +8175,11 @@ let create_state
   verification_inflight = false;
   verification_generation = 0;
   verification_scroll = 0;
-  verification_cursor = 0;
+  verification_selection = Verification_row 0;
   verification_view = Tui_decode.Awaiting_queue;
   verification_offset = 0;
   verification_detail_request_id = None;
   verification_jump = None;
-  verification_selection_suspended = false;
   verification_detail_scroll = 0;
   verification_verdict_armed = None;
   verification_verdict_error = None;

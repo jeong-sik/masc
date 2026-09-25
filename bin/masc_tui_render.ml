@@ -8878,8 +8878,9 @@ let render_verification_list (state : state) =
             | Some _ -> (Theme.bad ())
             | None -> Ansi.reset
           in
-          if idx = state.verification_cursor
-             && not state.verification_selection_suspended then
+          if (match state.verification_selection with
+              | Verification_row cursor -> idx = cursor
+              | Verification_unselected -> false) then
             box_line_selected buf cols line
           else box_line_styled buf cols ~style line
     done;
@@ -9202,14 +9203,18 @@ let render_verification_detail (state : state) request =
       let right_buf = Buffer.create 4096 in
       (* One server page: the list screen next door draws "history 1-50 of
          664" off the same snapshot, and this index drew "(50)". *)
-      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Task Review"
+      write_list_sidebar_selection left_buf ~rows ~cols:left_cols ~title:"Task Review"
         ~focused:false
         ~holding:
           (Option.map
              (fun (snapshot : Tui_decode.verification_snapshot) ->
                snapshot.Tui_decode.vs_total)
              state.verification)
-        ~labels ~selected:state.verification_cursor;
+        ~labels
+        ~selection:
+          (match state.verification_selection with
+           | Verification_row cursor -> Some cursor
+           | Verification_unselected -> None);
       let answer =
         verification_detail_pane state ~rows ~cols:(cols - left_cols) request
           right_buf

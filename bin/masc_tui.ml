@@ -383,6 +383,27 @@ let move_row_cursor (state : state) ~delta ~cursor ~scroll =
       let height = surface_body_height_at state ~cursor scrolled in
       (cursor, Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
 
+(* Where a Task Review move starts. With no row selected the first move lands
+   on the first row whichever way it points; clamping an out-of-range cursor
+   would instead land on the last row. *)
+let verification_move_origin state =
+  match state.verification_selection with
+  | Verification_row cursor -> cursor
+  | Verification_unselected -> 0
+
+let move_verification_selection state ~delta =
+  let delta =
+    match state.verification_selection with
+    | Verification_row _ -> delta
+    | Verification_unselected -> 0
+  in
+  let cursor, scroll =
+    move_row_cursor state ~delta ~cursor:(verification_move_origin state)
+      ~scroll:state.verification_scroll
+  in
+  state.verification_selection <- Verification_row cursor;
+  state.verification_scroll <- scroll
+
 (* The Identity tab's provider list. The cursor names a provider while the
    pane scrolls lines, so the row kept visible is the line that provider is
    drawn on rather than the cursor itself -- the two differ by whatever the
@@ -6402,11 +6423,10 @@ let open_measurement_artifact state ~mailbox ~sha256 =
    looked at. *)
 let reset_verification_rows state =
   state.verification_generation <- state.verification_generation + 1;
-  state.verification_cursor <- 0;
+  state.verification_selection <- Verification_row 0;
   state.verification_scroll <- 0;
   state.verification_detail_request_id <- None;
   state.verification_jump <- None;
-  state.verification_selection_suspended <- false;
   state.verification_detail_scroll <- 0;
   state.verification_verdict_armed <- None;
   state.verification_verdict_error <- None
@@ -6574,11 +6594,9 @@ let row_list (state : state) : row_list option =
             ~set_scroll:(fun s -> state.clients_surface_scroll <- s))
   | Verification ->
       of_counted (fun count ->
-          scrolling ~count ~cursor:state.verification_cursor
+          scrolling ~count ~cursor:(verification_move_origin state)
             ~scroll:state.verification_scroll
-            ~set_cursor:(fun i ->
-              state.verification_cursor <- i;
-              state.verification_selection_suspended <- false)
+            ~set_cursor:(fun i -> state.verification_selection <- Verification_row i)
             ~set_scroll:(fun s -> state.verification_scroll <- s))
   | Harness ->
       of_counted (fun count ->
@@ -9037,15 +9055,13 @@ let selected_surface_reference state =
   | Verification ->
       (* The task, not the request: a verification request is a question about
          a task, and the task is the thing another surface can open. *)
-      Option.bind
-        (if state.verification_selection_suspended then None
-         else state.verification)
-        (fun snapshot ->
-          Option.map
-            (fun (request : Tui_decode.verification_request) ->
-               Link.reference Task request.vr_task_id)
-            (List.nth_opt snapshot.Tui_decode.vs_requests
-               state.verification_cursor))
+      (match state.verification_selection, state.verification with
+       | Verification_row cursor, Some snapshot ->
+           Option.map
+             (fun (request : Tui_decode.verification_request) ->
+                Link.reference Task request.vr_task_id)
+             (List.nth_opt snapshot.Tui_decode.vs_requests cursor)
+       | Verification_unselected, _ | Verification_row _, None -> None)
   | Approvals ->
       (* An ask names what it is asking about. A keeper's tool ask names the
          keeper; an operator ask carries a typed target, so the kind is read
@@ -12313,14 +12329,14 @@ let verification_cursor_row state =
     | None -> []
     | Some s -> s.Masc.Tui_decode.vs_requests
   in
-  if state.verification_selection_suspended then None else
-  match state.verification_detail_request_id with
-  | Some request_id ->
+  match state.verification_selection, state.verification_detail_request_id with
+  | Verification_unselected, _ -> None
+  | Verification_row _, Some request_id ->
       List.find_opt
         (fun row ->
            String.equal row.Masc.Tui_decode.vr_request_id request_id)
         requests
-  | None -> List.nth_opt requests state.verification_cursor
+  | Verification_row cursor, None -> List.nth_opt requests cursor
 
 (* The approve key on the row under the cursor. Two presses, like the cancel
    and vote keys: the first names the task, the same press again sends the
@@ -12382,10 +12398,12 @@ let open_verification_detail state ~mailbox =
     | None -> []
     | Some s -> s.Masc.Tui_decode.vs_requests
   in
-  match
-    if state.verification_selection_suspended then None
-    else List.nth_opt requests state.verification_cursor
-  with
+  let selected =
+    match state.verification_selection with
+    | Verification_row cursor -> List.nth_opt requests cursor
+    | Verification_unselected -> None
+  in
+  match selected with
   | None -> ()
   | Some row ->
       state.verification_detail_request_id <-
@@ -16132,17 +16150,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           end else begin
           state.verification <- Some snapshot;
           state.verification_error <- None;
-          if not state.verification_selection_suspended
-             && state.verification_cursor >= count then
-            state.verification_cursor <- max 0 (count - 1);
+          (match state.verification_selection with
+           | Verification_row cursor when cursor >= count ->
+               state.verification_selection <- Verification_row (max 0 (count - 1))
+           | Verification_row _ | Verification_unselected -> ());
           (match state.verification_jump with
            | None -> ()
            | Some (task_id, request_id) ->
                state.verification_jump <- None;
                (match jump_index with
                 | Some index ->
-                    state.verification_selection_suspended <- false;
-                    state.verification_cursor <- index;
+                    state.verification_selection <- Verification_row index;
                     state.verification_detail_request_id <- Some request_id;
                     state.verification_detail_scroll <- 0;
                     state.verification_evidence <- None;
@@ -16152,8 +16170,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                     (* No row is selected until the operator moves explicitly.
                        Keeping cursor zero here would let the next a or x
                        judge the first, unrelated request. *)
-                    state.verification_cursor <- count;
-                    state.verification_selection_suspended <- true;
+                    state.verification_selection <- Verification_unselected;
                     state.verification_verdict_error <-
                       Some (Printf.sprintf
                         "%s: stop request %s %s; review the refreshed queue"
@@ -16183,7 +16200,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            | None -> ()
            | Some (task_id, request_id) ->
                state.verification_jump <- None;
-               state.verification_selection_suspended <- true;
+               state.verification_selection <- Verification_unselected;
                state.verification_verdict_error <-
                  Some (Printf.sprintf "%s: could not open stop request %s: %s"
                    task_id request_id detail)))
@@ -21317,11 +21334,9 @@ and is loaded on demand through keeper_skill.
                (match state.verification with
                 | None -> 0
                 | Some s -> List.length s.Masc.Tui_decode.vs_requests)
-             ~cursor:state.verification_cursor
+             ~cursor:(verification_move_origin state)
              ~delta:(if bracket = "]" then 1 else -1)
-             ~set_cursor:(fun n ->
-               state.verification_cursor <- n;
-               state.verification_selection_suspended <- false)
+             ~set_cursor:(fun n -> state.verification_selection <- Verification_row n)
              ~reopen:(fun () ->
                open_verification_detail state ~mailbox:async_messages)
        | Some (("[" | "]") as bracket)
@@ -22550,14 +22565,7 @@ and is loaded on demand through keeper_skill.
                      Masc_tui_types.scroll_down_from state.verification_detail_scroll ~by:page
                    else max 0 (state.verification_detail_scroll + (direction * page)))
                 else
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:(direction * page)
-                      ~cursor:state.verification_cursor
-                      ~scroll:state.verification_scroll
-                  in
-                  state.verification_cursor <- cursor;
-                  state.verification_selection_suspended <- false;
-                  state.verification_scroll <- scroll
+                  move_verification_selection state ~delta:(direction * page)
             | Harness ->
                 if Option.is_some state.harness_detail then
                   state.harness_detail_scroll <-
@@ -23449,14 +23457,7 @@ and is loaded on demand through keeper_skill.
                   state.verification_detail_scroll <-
                     Masc_tui_types.scroll_down_from state.verification_detail_scroll ~by:1
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:1
-                       ~cursor:state.verification_cursor
-                       ~scroll:state.verification_scroll
-                   in
-                   state.verification_cursor <- cursor;
-                   state.verification_selection_suspended <- false;
-                   state.verification_scroll <- scroll)
+                  move_verification_selection state ~delta:1
             | Clients ->
                 let cursor, scroll =
                   move_row_cursor state ~delta:1
@@ -23802,14 +23803,7 @@ and is loaded on demand through keeper_skill.
                   state.verification_detail_scroll <-
                     max 0 (state.verification_detail_scroll - 1)
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:(-1)
-                       ~cursor:state.verification_cursor
-                       ~scroll:state.verification_scroll
-                   in
-                   state.verification_cursor <- cursor;
-                   state.verification_selection_suspended <- false;
-                   state.verification_scroll <- scroll)
+                  move_verification_selection state ~delta:(-1)
             | Clients ->
                 let cursor, scroll =
                   move_row_cursor state ~delta:(-1)

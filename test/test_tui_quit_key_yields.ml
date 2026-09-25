@@ -14,6 +14,7 @@ let every_text_target =
   ; ("command palette", Text_palette)
   ; ("row search", Text_row_search)
   ; ("runtime picker filter", Text_runtime_picker_filter)
+  ; ("keeper runtime picker filter", Text_keeper_runtime_picker_filter)
   ; ("identity app form", Text_identity_app_form)
   ; ("identity filter", Text_identity_filter)
   ; ("github token", Text_github_token)
@@ -43,9 +44,9 @@ let test_with_no_field_open_the_quit_key_is_a_quit_key () =
    before it goes on measuring all of them rather than a subset someone
    trimmed. *)
 let test_the_list_covers_every_target_this_build_has () =
-  Alcotest.(check int) "fields counted" 14 (List.length every_text_target);
+  Alcotest.(check int) "fields counted" 15 (List.length every_text_target);
   let spelled = List.map fst every_text_target in
-  Alcotest.(check int) "and none of them is listed twice" 14
+  Alcotest.(check int) "and none of them is listed twice" 15
     (List.length (List.sort_uniq String.compare spelled))
 
 let () =

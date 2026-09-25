@@ -15694,12 +15694,12 @@ let render_surface (state : state) =
                         | Board_detail.Ready _ -> ())))
   | Planning ->
       (match state.task_detail_id, state.task_focus, state.planning_mode with
-       | Some _, Right_pane, Planning_list ->
+       | Some _, Overview_tasks.Task_focus _, Planning_list ->
            (match Task_selection.detail_row
                     ~detail_id:state.task_detail_id ~tasks:state.tasks_domain with
             | Some task -> render_task_detail state task
             | None -> render_work_tasks state)
-       | None, Right_pane, Planning_list -> render_work_tasks state
+       | None, Overview_tasks.Task_focus _, Planning_list -> render_work_tasks state
        | _, _, Planning_list -> render_planning_list state
        | _, _, Planning_detail goal_id ->
            let goals = match state.planning with None -> [] | Some p -> p.pl_goals in

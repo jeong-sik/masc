@@ -5130,6 +5130,7 @@ type provider_usage_state =
 
 type provider_usage_account = {
   pua_scope : string;
+  pua_scope_id : string;
   pua_providers : string list;
   pua_state : provider_usage_state;
 }
@@ -5240,6 +5241,7 @@ type provider_usage_history_point = {
 type provider_usage_history = {
   puh_days : int;
   puh_generated_at : float;
+  puh_unreadable_reports : int;
   puh_points : provider_usage_history_point list;
 }
 

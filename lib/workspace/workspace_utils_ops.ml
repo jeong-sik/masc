@@ -212,25 +212,51 @@ let read_json config path =
     end
   | None -> read_json_local path
 
-let read_json_result config path =
+(* A missing key or file is [Ok None], never an empty object, so a caller
+   decoding the value cannot mistake absence for a document that violates its
+   schema (#29562). A blank file is present and says nothing: an [Error], not
+   absence. Each caller decides what [Ok None] means for its own store. *)
+type json_doc_error =
+  | Json_doc_unreadable of string
+  | Json_doc_unparsable of string
+  | Json_doc_blank
+
+let json_doc_error_to_string = function
+  | Json_doc_unreadable detail -> "unreadable: " ^ detail
+  | Json_doc_unparsable detail -> "unparsable: " ^ detail
+  | Json_doc_blank -> "blank document"
+
+let parse_json_doc ~context content =
+  let trimmed = String.trim content in
+  if String.equal trimmed "" then Error Json_doc_blank
+  else
+    Safe_ops.parse_json_off_fiber ~context trimmed
+    |> Result.map Option.some
+    |> Result.map_error (fun detail -> Json_doc_unparsable detail)
+
+let read_json_doc_local path =
+  match Safe_ops.read_file_result path with
+  | Error (Safe_ops.File_not_found _) -> Ok None
+  | Error (Safe_ops.Read_failed _ as error) ->
+      Error (Json_doc_unreadable (Safe_ops.read_file_error_to_string error))
+  | Ok content -> parse_json_doc ~context:path content
+
+let read_json_doc config path =
   match key_of_path config path with
   | Some key -> begin
       match config.backend with
-      | FileSystem _ when Sys.file_exists path -> read_json_local_result path
+      | FileSystem _ when Sys.file_exists path -> read_json_doc_local path
       | Memory _ | FileSystem _ ->
-          let* content_opt =
-            backend_get config ~key
-            |> Result.map_error (fun e ->
-                 Printf.sprintf
-                   "[read_json_result] backend_get failed for %s: %s"
-                   key
-                   (Backend_types.show_error e))
-          in
-          (match content_opt with
-           | Some content -> parse_json_content_result ~context:"read_json_result" content
-           | None -> Ok (`Assoc []))
+          (match backend_get config ~key with
+           | Error e ->
+               Error
+                 (Json_doc_unreadable
+                    (Printf.sprintf "backend_get failed for %s: %s"
+                       key (Backend_types.show_error e)))
+           | Ok None -> Ok None
+           | Ok (Some content) -> parse_json_doc ~context:path content)
     end
-  | None -> read_json_local_result path
+  | None -> read_json_doc_local path
 
 let read_text config path =
   match key_of_path config path with

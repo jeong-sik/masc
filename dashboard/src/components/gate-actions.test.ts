@@ -49,6 +49,7 @@ const baseResponse = {
   queued: 0,
   recovery_failure_count: 0,
   recovery_failures: [],
+  recovery_blockers: [],
 } as const
 
 beforeEach(() => {
@@ -207,6 +208,38 @@ describe('setKeeperGateMode recovery result', () => {
       'warning',
     )
     expect(mocks.refreshGate).toHaveBeenCalledWith({ force: true })
+  })
+
+  it('names the blocked owner when recovery starts nothing (#25979)', async () => {
+    mocks.setGateMode.mockResolvedValue({
+      ...baseResponse,
+      recovery_status: 'completed',
+      started: 0,
+      queued: 3,
+      recovery_blockers: [
+        {
+          keeper_name: 'keeper-b',
+          kind: 'owner_at_capacity',
+          approval_ids: ['approval-1'],
+          reason: null,
+        },
+        {
+          keeper_name: 'keeper-c',
+          kind: 'mode_manual',
+          approval_ids: [],
+          reason: null,
+        },
+      ],
+    })
+
+    await setKeeperGateMode('auto_judge')
+
+    expect(mocks.showToast).toHaveBeenCalledWith(
+      'Gate 모드를 Auto Judge(으)로 저장했습니다 · Auto Judge backlog recovery 요청 처리 완료'
+      + ' (started 0, queued 3)'
+      + ' · blocked keeper-b: 판정 슬롯이 모두 사용 중 (active approval-1) 외 1건',
+      'success',
+    )
   })
 
   it('reports that recovery was not requested and refreshes', async () => {

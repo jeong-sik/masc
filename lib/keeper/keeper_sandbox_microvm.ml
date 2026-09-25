@@ -1784,7 +1784,7 @@ let keeper_work_root_mkdir_argv_for backend ~container_name ~keeper_name =
     [-F] makes the match a fixed string structurally rather than by the
     pattern happening to carry no regex metacharacters. [grep] over
     [/proc/mounts] rather than [mountpoint(1)]: the image
-    (Dockerfile.keeper-sandbox, ubuntu-24.04) ships grep as essential and
+    (sandbox-images/ocaml/Dockerfile, ubuntu-24.04) ships grep as essential and
     util-linux's mountpoint is not in the apt list. Runs as root from [/] so
     the answer does not depend on the keeper's uid or a workdir that is the
     very thing under test. *)

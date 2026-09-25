@@ -966,7 +966,7 @@ let rec resolve_durable_occurrence
       (* A retired queue witness is read by exact occurrence id. A new
          occurrence does one small file lookup, and a damaged receipt cannot
          be mistaken for absence and re-executed. *)
-      match
+      (match
         Keeper_reaction_ledger.schedule_occurrence_receipt_result
           ~base_path ~keeper_name ~occurrence_id
       with
@@ -999,7 +999,7 @@ let rec resolve_durable_occurrence
            Ok
              (Terminal_failed_at
                 (keeper_name, compact_source, "projected turn attempt terminal",
-                 Terminal_evidence_recorded)))
+                 Terminal_evidence_recorded))))
     | Some { source; state = Pending; _ } -> Ok (Pending_at (keeper_name, source))
     | Some { source; state = Terminally_completed evidence; _ } ->
       Ok (Terminal_completed_at (keeper_name, source, evidence))

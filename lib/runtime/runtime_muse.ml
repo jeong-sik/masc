@@ -347,7 +347,7 @@ let client_environment () =
   ; "MODEL_API_KEY"
   ]
   |> List.filter_map (fun name ->
-    Option.map (fun value -> name ^ "=" ^ value) (Sys.getenv_opt name))
+    Option.map (fun value -> name ^ "=" ^ value) (Env_config_core.raw_value_opt name))
   |> Array.of_list
 ;;
 

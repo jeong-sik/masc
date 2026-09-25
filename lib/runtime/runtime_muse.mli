@@ -169,7 +169,9 @@ val command :
 val client_environment : unit -> string array
 (** The credential-preserving environment the child receives: the login
     home plus the API-key variables the CLI reads. Nothing else from the
-    operator shell leaks in. *)
+    operator shell leaks in. Values are read through
+    [Env_config_core.raw_value_opt], so a variable the parent did not
+    export but boot overrides define still reaches the child. *)
 
 val effort_of_reasoning_effort : Llm_provider.Reasoning_effort.t -> effort
 (** Total snap from the provider-neutral effort to the CLI's flag spelling.

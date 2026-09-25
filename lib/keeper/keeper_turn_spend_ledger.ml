@@ -26,7 +26,7 @@ let write ~masc_root ~agent_name ~task_id ~trace_id ~keeper_turn_id resolved =
          ~model:reading.model
          ~input_tokens:delta.input_tokens
          ~output_tokens:delta.output_tokens
-         ~cost_usd:(Option.value ~default:0.0 delta.cost_usd)
+         ~cost_usd:(Keeper_usage_resolution.reported_cost_usd delta)
          ~usage_projection:
            (Cost_ledger.Resolved_attempt_delta
               { lane_attempt_index = resolved.lane_attempt_index

@@ -106,7 +106,7 @@ let with_attempt_spend (meta : keeper_meta)
            , total
              + Inference_utils.total_tokens
                  (Keeper_usage_resolution.api_usage_of_sample delta)
-           , cost +. Option.value ~default:0.0 delta.cost_usd )
+           , cost +. Keeper_usage_resolution.reported_cost_usd delta )
          | None -> input, output, total, cost)
       (0, 0, 0, 0.0)
       resolved

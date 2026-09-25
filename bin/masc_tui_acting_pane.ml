@@ -7,13 +7,17 @@ module Reading = Masc.Tui_decode
    The pane is a column of fleet rows. A row is a border cell, the health
    mark and its gap, a name, a gap, and the reading. Sixteen name cells keep
    the configured names whole that the roster's window keeps whole. The
-   reading's budget holds the record glyph, the newest tool or the count,
-   and both token parts: [~ network_read · 3+ calls] and
-   [■ 123 calls · in 999.9k · out 999.9k] at exactly 36. No slack: labelling
-   the parts spent the five cells the old [999.9k+999.9k tok] left over, and
-   anything added to a done reading now has to take width from somewhere
-   else. [test_widest_done_reading_fits_whole] is what says so. The age of the newest
-   event is one fact and sits on the focus header, not here. *)
+   reading is four columns -- state 10, tool 12, calls 5, tokens 9 -- at
+   exactly 36, and a done row's tokens are one summed figure: [2.00M] for
+   123 calls of 999.9k in and 999.9k out. No slack: anything added to a done
+   reading has to take width from another column.
+   [test_widest_done_reading_fits_whole] is what says so. The age of the
+   newest event is one fact and sits on the focus header, not here.
+
+   The token parts -- in and out, and the input's new and cached parts when
+   the runtime reports its cache -- go on the focus block's turn line, which
+   spends the pane's whole width and drops parts in a fixed order when they
+   do not fit (see [turn_summary_line]). *)
 let border_cells = 1
 let mark_cells = 2
 let name_cells = 16
@@ -269,24 +273,29 @@ let last_event_text ~now at = "last event " ^ age_text ~now at
    plus sign between them reads as arithmetic -- the more so because
    [tokens_sum_text] right below produces exactly that sum in the same shape.
    One operator asked what 73.9k+358 added up to. *)
+(* An input with a cache split names its parts even without an output
+   beside it: "3.72M tok" alone is the figure that read as all new. *)
 let tokens_text = function
   | None, None -> ""
-  | Some i, Some o ->
-    "in " ^ Layout.compact_count i ^ " · out " ^ Layout.compact_count o
-  | Some n, None | None, Some n -> Layout.compact_count n ^ " tok"
+  | Some input, Some o ->
+    Acting.turn_input_text input ^ middle_dot ^ "out " ^ Layout.compact_count o
+  | Some (Acting.Input_split _ as input), None -> Acting.turn_input_text input
+  | Some (Acting.Input_whole n), None | None, Some n -> Layout.compact_count n ^ " tok"
 
 let tokens_sum_text = function
   | None, None -> ""
-  | Some i, Some o -> Layout.compact_count (i + o) ^ " tok"
-  | Some n, None | None, Some n -> Layout.compact_count n ^ " tok"
+  | Some input, Some o -> Layout.compact_count (Acting.turn_input_total input + o) ^ " tok"
+  | Some input, None -> Layout.compact_count (Acting.turn_input_total input) ^ " tok"
+  | None, Some n -> Layout.compact_count n ^ " tok"
 
 (* The same sum without its unit, for the fleet row's column: the heading
    above it already says what the figure counts, and repeating "tok" on every
    row cost four of the nine cells the column has. *)
 let tokens_sum_figure = function
   | None, None -> ""
-  | Some i, Some o -> Layout.compact_count (i + o)
-  | Some n, None | None, Some n -> Layout.compact_count n
+  | Some input, Some o -> Layout.compact_count (Acting.turn_input_total input + o)
+  | Some input, None -> Layout.compact_count (Acting.turn_input_total input)
+  | None, Some n -> Layout.compact_count n
 
 let calls_text n = Masc_tui_message_layout.count_noun n "call"
 let files_text n = Masc_tui_message_layout.count_noun n "file"
@@ -960,15 +969,39 @@ let turn_summary_line ~cols ~health (chunk : Acting.chunk) =
       @ named
       @ [ { text = middle_dot ^ join [ chunk_calls_text chunk; tokens; cost ]; tone = Dim } ] )
   in
-  let parts = tokens_text chunk.Acting.ck_tokens
-  and sum = tokens_sum_text chunk.Acting.ck_tokens
-  and cost = cost_text chunk.Acting.ck_cost_usd in
+  let cost = cost_text chunk.Acting.ck_cost_usd in
   (* No receipt age: when this settle arrived is not what the row is read
      for, and the header carries the one clock. The cost goes before the
-     token parts, since the parts are what the row is read for. *)
-  fit_line ~cols
-    (first_fitting ~room:cols
-       [ line ~tokens:parts ~cost; line ~tokens:parts ~cost:""; line ~tokens:sum ~cost:"" ])
+     token parts, since the parts are what the row is read for.
+
+     After the cost, a split input drops its output; where that still does
+     not fit, it keeps the output and drops the cached part instead. The new
+     part always stays, labelled, because "in 3.72M" without it is the
+     reading that sent an operator looking for a fault. The last candidate is
+     at most
+     [123 calls · in 999.9k new · out 999.9k], 54 cells with a five-digit
+     turn against the pane's 56. A split input is never summed: the sum is
+     the figure that read as all new. *)
+  let candidates =
+    match chunk.Acting.ck_tokens with
+    | Some (Acting.Input_split { fresh; cached }), out ->
+      let fresh = Acting.fresh_input_text fresh
+      and cached = Acting.cached_input_text cached
+      and out =
+        match out with
+        | Some o -> "out " ^ Layout.compact_count o
+        | None -> ""
+      in
+      [ line ~tokens:(join [ fresh; cached; out ]) ~cost
+      ; line ~tokens:(join [ fresh; cached; out ]) ~cost:""
+      ; line ~tokens:(join [ fresh; cached ]) ~cost:""
+      ; line ~tokens:(join [ fresh; out ]) ~cost:""
+      ]
+    | ((Some (Acting.Input_whole _) | None), (Some _ | None)) as tokens ->
+      let parts = tokens_text tokens and sum = tokens_sum_text tokens in
+      [ line ~tokens:parts ~cost; line ~tokens:parts ~cost:""; line ~tokens:sum ~cost:"" ]
+  in
+  fit_line ~cols (first_fitting ~room:cols candidates)
 
 (* What the keeper is doing right now, when the record and the keepalive
    agree on it. The record alone cannot say: an open wire call sits in a

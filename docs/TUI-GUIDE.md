@@ -264,7 +264,8 @@ feed has: `open` (no end event yet), `done`, `no end` (the process is gone,
 so no end will come), `approval` (waiting on you), or `no events`. An open
 record names the tool it is in and counts the calls seen *so far*, which is
 what the `+` says: the feed may have started mid-turn. A done record carries
-the turn's calls and its tokens, in and out summed. A name longer than its
+the turn's calls and its tokens, in and out summed, cache reads included. A
+name longer than its
 column is cut with `…`; the wide pane has cells for the ones that outgrow
 the narrow one. The header says the feed only when it is not delivering
 (`no feed`, `feed opening`, `feed closed: …`).
@@ -276,6 +277,15 @@ the same tool is one row that counts it and says what the calls took
 fit); the Keeper Calls surface (`t`) reads each call one by one. `Enter` or
 a press on a call opens its facts, input and output; on an earlier turn's
 row it opens that keeper's calls surface.
+
+An earlier turn's row states its tokens as parts. When the runtime reports
+its cache, the input is split into what the turn processed fresh and what it
+read back from the cache: `30 calls · in 159.8k new · 3.56M cached · out
+6.6k`. The input count alone (`in 3.72M` for that turn) holds the cache reads
+and is mostly them on a cached runtime. Where the row is too narrow it drops
+the cost, then the output, then the cached part; the new part stays. A
+runtime that reports no cache reads, or counts that do not add up, keeps the
+single `in` figure.
 
 The `Changes` tab lists the files this keeper's calls wrote, newest first.
 
@@ -366,7 +376,7 @@ opening ten chats.
    TIME     KEEPER             EVENT            DETAIL
    01:12:03 analyst          ▶ call             read_file [1/2] · turn 2086 · task-494
    01:12:03 analyst          ✓ returned         read_file · 32ms [1/2] · task-494
-   01:11:58 rondo            ■ turn done        turn 2086 · in 73877 out 358 · $0.0258 · 0 calls
+   01:11:58 rondo            ■ turn done        turn 2086 · in 159.8k new · 3.56M cached · out 6.6k · 30 calls
    01:11:51 taskmaster       ● turn start       turn 1738
   j/k:scroll  g:newest  G:oldest  f:filter  Tab:next  q:quit  | Port: 8935
 ```

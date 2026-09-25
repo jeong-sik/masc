@@ -45,11 +45,26 @@ type source =
   | Kimi_coding_usages_read  (** Kimi [GET /coding/v1/usages]. *)
   | Ollama_usage_read  (** Ollama [GET https://ollama.com/api/usage]. *)
 
+(** What a window limits, set by each decoder from the provider's own
+    shape, never from a label. *)
+type window_role =
+  | Gates_model_calls
+      (** Spending it refuses model calls on the account: Claude and Codex
+          windows, OpenRouter's credit limit, Z.AI's TOKENS_LIMIT, both Kimi
+          counts, Ollama's session and weekly usage. *)
+  | Counts_other_use
+      (** It counts something a model call does not need: Z.AI's
+          TIME_LIMIT (MCP and tool calls), OpenRouter's free-model daily
+          requests. *)
+  | Unclassified_limit
+      (** A Z.AI limit type this decoder does not know. *)
+
 type window =
   { limit_id : string option
         (** Codex [limitId]; one account reports several limits.  Claude Code
             names none. *)
   ; kind : window_kind
+  ; role : window_role
   ; utilization : utilization
   ; resets_at : int option  (** Unix epoch seconds, as reported. *)
   }

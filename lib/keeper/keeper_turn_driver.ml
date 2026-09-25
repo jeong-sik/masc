@@ -621,8 +621,14 @@ let attempt_runtime_candidates
     | Some read -> read
     | None ->
       fun candidate ->
+        (* The outcome is logged where it is read; the walk reads only the
+           quota window it may have written. *)
         Option.iter
-          Runtime_provider_usage_read.read_runtime_after_account_refusal
+          (fun runtime ->
+            let (_ : Runtime_provider_usage_read.account_refusal_outcome) =
+              Runtime_provider_usage_read.read_runtime_after_account_refusal runtime
+            in
+            ())
           (Runtime.get_runtime_by_id (runtime_id_of candidate))
   in
   let candidate_backpressure_of =
@@ -2021,7 +2027,10 @@ let run_named
       | Missing_runtime _ -> None)
     ~read_usage_after_account_refusal:(function
       | Resolved_runtime runtime ->
-        Runtime_provider_usage_read.read_runtime_after_account_refusal runtime
+        let (_ : Runtime_provider_usage_read.account_refusal_outcome) =
+          Runtime_provider_usage_read.read_runtime_after_account_refusal runtime
+        in
+        ()
       | Missing_runtime _ -> ())
     ~model_of:(function
       (* The served name comes from the same frozen snapshot as the quota

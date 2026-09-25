@@ -3233,73 +3233,93 @@ let kimi_account_refusal () =
        })
 ;;
 
-(* The production glue ([read_runtime_after_account_refusal]) with the GET
-   replaced: the runtime's declared read, its materialized scope. *)
-let read_usage_with ~fetch runtime_id =
-  match Runtime.get_runtime_by_id runtime_id with
-  | None -> Alcotest.failf "no runtime %s" runtime_id
-  | Some runtime ->
-    (match Runtime_provider_usage_read.http_read_of_runtime runtime with
-     | None -> ()
-     | Some http ->
-       let (_ : (Runtime_provider_usage_read.account_refusal_read, _) result) =
-         Runtime_provider_usage_read.read_after_account_refusal
-           ~fetch
-           ~scope:(Runtime.quota_scope_of_runtime runtime)
-           http
-       in
-       ())
-;;
+external unsetenv : string -> unit = "masc_test_unsetenv"
 
 let with_env key value f =
   let original = Sys.getenv_opt key in
   Unix.putenv key value;
-  Fun.protect ~finally:(fun () -> Unix.putenv key (Option.value original ~default:"")) f
+  Fun.protect
+    ~finally:(fun () ->
+      match original with
+      | Some previous -> Unix.putenv key previous
+      | None -> unsetenv key)
+    f
+;;
+
+module Usage_read = Runtime_provider_usage_read
+
+(* The production read ([read_runtime_after_account_refusal]) with only the
+   GET replaced. *)
+let read_usage_with ~fetch runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | None -> Alcotest.failf "no runtime %s" runtime_id
+  | Some runtime ->
+    let (_ : Usage_read.account_refusal_outcome) =
+      Usage_read.read_runtime_after_account_refusal ~fetch runtime
+    in
+    ()
+;;
+
+let outcome_label : Usage_read.account_refusal_outcome -> string = function
+  | Read (Spent_until _) -> "read: spent until"
+  | Read Spent_without_reset -> "read: spent without reset"
+  | Read No_window_spent -> "read: no window spent"
+  | Read_failed _ -> "read failed"
+  | Read_raised name -> "raised " ^ name
+  | Skipped No_usage_read -> "skipped: no usage-read"
+  | Skipped Scope_already_resting -> "skipped: scope already resting"
+  | Skipped Already_reading -> "skipped: already reading"
+  | Skipped No_net_or_clock -> "skipped: no net or clock"
 ;;
 
 (* 2026-09-25: after a restart the lane heads rested on their quota and Kimi,
    declared last, was the one candidate with no mark, so every walk led with
    it and failed 17 of 17 times. The 403 alone rests nothing; the usage read
    it triggers decides. *)
-let account_refusal_case ~toml ~usages_body check =
+let with_refusal_lane ~toml f =
   with_env "OTHER_QUOTA_TEST_KEY" "fixture-kimi-key" (fun () ->
     with_runtime_config toml (fun () ->
       Fun.protect ~finally:reset_quota_lane_rests (fun () ->
         reset_quota_lane_rests ();
-        let head = "shared_a.test_model"
-        and sibling = "shared_b.test_model"
-        and refused = "other.test_model" in
-        let lane = [ head; sibling; refused ] in
-        Runtime_quota_window.note_observed_exhausted
-          ~scope:(Option.get (Runtime.quota_scope_of_runtime_id head));
-        Alcotest.(check (list string)) "the unmarked last candidate leads while the heads rest"
-          [ refused; head; sibling ] (backpressure_order lane);
-        let account_refusal = kimi_account_refusal () in
-        (match account_refusal with
-         | Agent_core.Error.Api (Llm_provider.Retry.AuthorizationError _) -> ()
-         | other ->
-           Alcotest.failf "the 403 is not an authorization error: %s"
-             (Agent_core.Error.to_string other));
-        let fetched = ref [] in
-        let fetch ~api_key:_ url =
-          fetched := url :: !fetched;
-          Ok usages_body
-        in
-        (match
-           walk_once
-             ~read_usage_after_account_refusal:(read_usage_with ~fetch)
-             (fun _ -> Error account_refusal)
-             [ refused ]
-         with
-         | Error _ -> ()
-         | Ok () -> Alcotest.fail "the refused candidate unexpectedly answered");
-        Alcotest.check attempt_failure "a 403 is never a failed attempt" None
-          (failed_attempt_of refused);
-        check
-          ~fetched:(List.rev !fetched)
-          ~refused_scope:(Option.get (Runtime.quota_scope_of_runtime_id refused))
-          ~order:(backpressure_order lane)
-          ~lane)))
+        f ())))
+;;
+
+let account_refusal_case ~toml ~usages_body check =
+  with_refusal_lane ~toml (fun () ->
+    let head = "shared_a.test_model"
+    and sibling = "shared_b.test_model"
+    and refused = "other.test_model" in
+    let lane = [ head; sibling; refused ] in
+    Runtime_quota_window.note_observed_exhausted
+      ~scope:(Option.get (Runtime.quota_scope_of_runtime_id head));
+    Alcotest.(check (list string)) "the unmarked last candidate leads while the heads rest"
+      [ refused; head; sibling ] (backpressure_order lane);
+    let account_refusal = kimi_account_refusal () in
+    (match account_refusal with
+     | Agent_core.Error.Api (Llm_provider.Retry.AuthorizationError _) -> ()
+     | other ->
+       Alcotest.failf "the 403 is not an authorization error: %s"
+         (Agent_core.Error.to_string other));
+    let fetched = ref [] in
+    let fetch ~api_key:_ url =
+      fetched := url :: !fetched;
+      Ok usages_body
+    in
+    (match
+       walk_once
+         ~read_usage_after_account_refusal:(read_usage_with ~fetch)
+         (fun _ -> Error account_refusal)
+         [ refused ]
+     with
+     | Error _ -> ()
+     | Ok () -> Alcotest.fail "the refused candidate unexpectedly answered");
+    Alcotest.check attempt_failure "a 403 is never a failed attempt" None
+      (failed_attempt_of refused);
+    check
+      ~fetched:(List.rev !fetched)
+      ~refused_scope:(Option.get (Runtime.quota_scope_of_runtime_id refused))
+      ~order:(backpressure_order lane)
+      ~lane)
 ;;
 
 let test_a_403_with_a_spent_window_rests_until_its_reset () =
@@ -3342,6 +3362,65 @@ let test_a_403_without_usage_read_rests_nothing () =
       Alcotest.(check (list string)) "nothing is read without usage-read" [] fetched;
       Alcotest.(check bool) "the status alone rests nothing" false
         (Runtime_quota_window.is_exhausted ~scope:refused_scope ~now:(Unix.gettimeofday ())))
+;;
+
+(* The seams of the production read: no Eio context, a raising GET, one read
+   per scope at a time, and no second read once the scope rests. *)
+let test_the_read_after_a_403_skips_and_contains_its_failures () =
+  with_refusal_lane ~toml:runtime_toml_quota_lane_with_usage_read (fun () ->
+    let refused = Option.get (Runtime.get_runtime_by_id "other.test_model") in
+    let scope = Runtime.quota_scope_of_runtime refused in
+    let read ?fetch () = outcome_label (Usage_read.read_runtime_after_account_refusal ?fetch refused) in
+    Alcotest.(check string) "outside a server there is no net or clock to read with"
+      "skipped: no net or clock" (read ());
+    Alcotest.(check string) "a raising GET is contained and named by its constructor"
+      "raised Failure"
+      (read ~fetch:(fun ~api_key:_ _ -> failwith "boom with a secret") ());
+    Alcotest.(check bool) "a raising GET rests nothing" false
+      (Runtime_quota_window.is_exhausted ~scope ~now:(Unix.gettimeofday ()));
+    let inner = ref "" in
+    let resets_at = Float.round (Unix.gettimeofday () +. 3600.0) in
+    let fetch ~api_key:_ _ =
+      inner :=
+        read ~fetch:(fun ~api_key:_ _ -> Alcotest.fail "a second read ran while one held the scope") ();
+      Ok (kimi_usages_body ~five_hour_used:100 ~five_hour_reset:(rfc3339_of_epoch resets_at))
+    in
+    Alcotest.(check string) "the first read rests the scope" "read: spent until" (read ~fetch ());
+    Alcotest.(check string) "a read for the same scope while one runs is skipped"
+      "skipped: already reading" !inner;
+    Alcotest.(check string) "a scope that already rests is not read again"
+      "skipped: scope already resting"
+      (read ~fetch:(fun ~api_key:_ _ -> Alcotest.fail "a resting scope was read again") ()))
+;;
+
+(* A refreshable credential is not refreshed for the diagnostic read after a
+   refusal: the read fails without a request. *)
+let test_the_read_after_a_403_does_not_refresh_a_credential () =
+  Runtime_quota_window.reset_for_testing ();
+  let refreshed = ref false in
+  let http : Usage_read.http_read =
+    { credential =
+        ( Llm_provider.Provider_config.Refreshable_credential
+            (fun () ->
+              refreshed := true;
+              Ok (Llm_provider.Secret.of_string "fresh"))
+        , Llm_provider.Secret.of_string "materialized" )
+    ; usage_read =
+        { Runtime_schema.shape = Runtime_schema.Kimi_coding_usages
+        ; url = "https://127.0.0.1/coding/v1/usages"
+        }
+    }
+  in
+  let scope = Runtime_quota_window.scope_of_credential ~provider_id:"refresh-fixture" None in
+  (match
+     Usage_read.read_after_account_refusal
+       ~fetch:(fun ~api_key:_ _ -> Alcotest.fail "a refreshable credential was sent")
+       ~scope
+       http
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "the read ran with a refreshable credential");
+  Alcotest.(check bool) "the credential is not refreshed" false !refreshed
 ;;
 (* The evidence follows the failure route. A closed runtime connection is
    routed as a server error, so it is evidence; MASC's own capacity, a
@@ -5957,6 +6036,10 @@ let () =
             test_a_403_with_headroom_rests_nothing;
           Alcotest.test_case "a 403 without usage-read rests nothing" `Quick
             test_a_403_without_usage_read_rests_nothing;
+          Alcotest.test_case "the read after a 403 skips and contains its failures" `Quick
+            test_the_read_after_a_403_skips_and_contains_its_failures;
+          Alcotest.test_case "the read after a 403 does not refresh a credential" `Quick
+            test_the_read_after_a_403_does_not_refresh_a_credential;
           Alcotest.test_case "only the candidate's own failures are evidence" `Quick
             test_only_the_candidates_own_failures_are_evidence;
           Alcotest.test_case "a yield before the first token clears no evidence" `Quick

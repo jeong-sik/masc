@@ -90,29 +90,34 @@ val read_codex_in_background :
     failure is logged. *)
 
 (** What the usage endpoint said after the provider refused the account with
-    HTTP 403. *)
+    HTTP 403. Only windows whose role is
+    {!Runtime_provider_usage_window.Gates_model_calls} count. *)
 type account_refusal_read =
   | Spent_until of float
-      (** A window's used count reached its limit; the latest stated reset
-          among the spent windows, Unix epoch seconds. *)
-  | Spent_without_reset  (** A spent window states no reset. *)
+      (** A gating window's used count reached its limit; the latest stated
+          reset among the spent gating windows, Unix epoch seconds. *)
+  | Spent_without_reset  (** A spent gating window states no reset. *)
   | No_window_spent
-      (** Every window has headroom: the refusal is not a spent quota (a
-          blocked client, a suspended account), and nothing rests. *)
+      (** Every gating window has headroom: the refusal is not a spent quota
+          (a blocked client, a suspended account), and nothing rests. *)
 
 val account_refusal_read_of_report :
   Runtime_provider_usage_window.report -> account_refusal_read
-(** A window is spent when its utilization is a whole [Fraction] of at least
-    1.0 or a [Percent] of at least 100. *)
+(** A window is spent when its utilization is a [Fraction] of at least 1.0
+    or a [Percent] of at least 100. Windows that count other use (Z.AI's
+    TIME_LIMIT, OpenRouter's free-model requests) and unclassified ones are
+    ignored. *)
 
 val read_after_account_refusal :
   fetch:(api_key:Llm_provider.Secret.t -> string -> (string, http_error) result) ->
   scope:Runtime_quota_window.scope ->
   http_read ->
   (account_refusal_read, http_error) result
-(** Read [scope]'s usage once, record the windows as {!read_scopes} does, and
-    rest the scope on {!Runtime_quota_window} when a window is spent:
-    [Spent_until t] is {!Runtime_quota_window.note_exhausted} until [t],
+(** Read [scope]'s usage once with the credential as materialized (a
+    refreshable credential is not refreshed: the read fails instead), record
+    the windows as {!read_scopes} does, and rest the scope on
+    {!Runtime_quota_window} when a gating window is spent: [Spent_until t]
+    is {!Runtime_quota_window.note_exhausted} until [t],
     [Spent_without_reset] is {!Runtime_quota_window.note_observed_exhausted}.
     This is the only read whose answer the walk order sees; the startup read
     ({!read_all}) stays an operator projection. A failed read rests nothing. *)
@@ -120,8 +125,26 @@ val read_after_account_refusal :
 val http_read_of_runtime : Runtime.t -> http_read option
 (** The runtime's HTTP usage read when its provider declares [usage-read]. *)
 
-val read_runtime_after_account_refusal : Runtime.t -> unit
-(** {!read_after_account_refusal} for a runtime whose provider declares
-    [usage-read], with one GET on the process's Eio net and clock, in the
-    caller's fiber. A runtime without [usage-read] is not read and nothing
-    rests. The outcome or failure is logged without the body or the key. *)
+type account_refusal_skip =
+  | No_usage_read  (** The provider declares no [usage-read]. *)
+  | Scope_already_resting
+      (** The scope already has a live quota mark, e.g. from a sibling's
+          read in the same walk. *)
+  | Already_reading  (** A read for this scope is running. *)
+  | No_net_or_clock  (** No Eio net or clock is installed. *)
+
+type account_refusal_outcome =
+  | Read of account_refusal_read
+  | Read_failed of http_error
+  | Read_raised of string  (** The exception's constructor name only. *)
+  | Skipped of account_refusal_skip
+
+val read_runtime_after_account_refusal :
+  ?fetch:(api_key:Llm_provider.Secret.t -> string -> (string, http_error) result) ->
+  Runtime.t ->
+  account_refusal_outcome
+(** {!read_after_account_refusal} for [rt]'s materialized scope, in the
+    caller's fiber, at most one per scope at a time (shared with
+    {!read_codex_in_background}). [fetch] defaults to one GET on the
+    process's Eio net and clock. The outcome is logged without the body or
+    the key, and returned. *)

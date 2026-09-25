@@ -19,9 +19,15 @@ type source =
   | Kimi_coding_usages_read
   | Ollama_usage_read
 
+type window_role =
+  | Gates_model_calls
+  | Counts_other_use
+  | Unclassified_limit
+
 type window =
   { limit_id : string option
   ; kind : window_kind
+  ; role : window_role
   ; utilization : utilization
   ; resets_at : int option
   }
@@ -147,7 +153,13 @@ let claude_window ~path (key, json) =
       Error (Wrong_type { path = member_path path "utilization"; expected = "a number" })
   in
   let* resets_at = optional_int ~path "resetsAt" fields in
-  Ok { limit_id = None; kind = claude_window_kind key; utilization; resets_at }
+  Ok
+    { limit_id = None
+    ; kind = claude_window_kind key
+    ; role = Gates_model_calls
+    ; utilization
+    ; resets_at
+    }
 ;;
 
 let decode_claude_rate_limit_event json =
@@ -204,6 +216,7 @@ let codex_window ~path ~limit_id ~slot fields =
       (Some
          { limit_id
          ; kind = codex_window_kind ~slot duration
+         ; role = Gates_model_calls
          ; utilization = Percent used_percent
          ; resets_at
          })
@@ -391,6 +404,7 @@ let openrouter_credit_window ~path fields =
       (Some
          { limit_id = None
          ; kind = Provider_label "credit limit"
+         ; role = Gates_model_calls
          ; utilization = Fraction ((limit -. remaining) /. limit)
          ; resets_at = None
          })
@@ -409,6 +423,8 @@ let openrouter_free_requests_window ~path fields =
       (Some
          { limit_id = None
          ; kind = Provider_label "free model requests, daily"
+         (* Counts requests to the free models only; paid calls go on. *)
+         ; role = Counts_other_use
          ; utilization = fraction_of_counts ~used ~limit
          ; resets_at = None
          })
@@ -441,6 +457,20 @@ let zai_window_kind ~limit_type ~unit ~number =
   else Provider_label (Printf.sprintf "%s, %d x unit %d" limit_type number unit)
 ;;
 
+(* Z.AI states what each row limits in [type]. TOKENS_LIMIT is the model
+   token allowance; TIME_LIMIT counts MCP and tool calls, which a model
+   call does not spend. Any other code is kept but not classified. *)
+let zai_tokens_limit = "TOKENS_LIMIT"
+let zai_time_limit = "TIME_LIMIT"
+
+let zai_window_role limit_type =
+  if String.equal limit_type zai_tokens_limit
+  then Gates_model_calls
+  else if String.equal limit_type zai_time_limit
+  then Counts_other_use
+  else Unclassified_limit
+;;
+
 let zai_limit ~path json =
   let* fields = fields_at ~path json in
   let* limit_type = required_as string_at ~path "type" fields in
@@ -455,6 +485,7 @@ let zai_limit ~path json =
   Ok
     { limit_id = Some limit_type
     ; kind = zai_window_kind ~limit_type ~unit ~number
+    ; role = zai_window_role limit_type
     ; utilization = Percent percentage
     ; resets_at = Option.map (fun ms -> ms / ms_per_second) next_reset_ms
     }
@@ -512,13 +543,13 @@ let optional_rfc3339 ~path name fields =
 ;;
 
 (* One Kimi [detail] object, or the top-level [usage]: [used] of [limit]. *)
-let kimi_count_window ~path ~kind fields =
+let kimi_count_window ~path ~kind ~role fields =
   let* used = required_as decimal_string_at ~path "used" fields in
   let* limit = required_as decimal_string_at ~path "limit" fields in
   let* limit = positive_int ~path:(member_path path "limit") limit in
   let* used = count_within_limit ~path:(member_path path "used") ~limit used in
   let* resets_at = optional_rfc3339 ~path "resetTime" fields in
-  Ok { limit_id = None; kind; utilization = fraction_of_counts ~used ~limit; resets_at }
+  Ok { limit_id = None; kind; role; utilization = fraction_of_counts ~used ~limit; resets_at }
 ;;
 
 let kimi_minute_unit = "TIME_UNIT_MINUTE"
@@ -542,7 +573,7 @@ let kimi_limit ~path json =
   let* detail = required ~path "detail" fields in
   let path = member_path path "detail" in
   let* detail_fields = fields_at ~path detail in
-  kimi_count_window ~path ~kind:(kind_of_minutes minutes) detail_fields
+  kimi_count_window ~path ~kind:(kind_of_minutes minutes) ~role:Gates_model_calls detail_fields
 ;;
 
 (* Kimi, GET /coding/v1/usages (undocumented; the vendor's own CLI calls it).
@@ -561,7 +592,14 @@ let decode_kimi_coding_usages json =
     | None -> Ok []
     | Some (path, plan_fields) ->
       let* window =
-        kimi_count_window ~path ~kind:(Provider_label "usage (provider resetTime)") plan_fields
+        (* The plan-period count: its resetTime is the weekly reset
+           ([usages.limit_7d.reset_time] on the same response), and Kimi
+           refuses model calls with a 403 when it is spent. *)
+        kimi_count_window
+          ~path
+          ~kind:(Provider_label "usage (provider resetTime)")
+          ~role:Gates_model_calls
+          plan_fields
       in
       Ok [ window ]
   in
@@ -583,7 +621,14 @@ let ollama_window ~path ~kind name fields =
     let* usage =
       within ~path:(member_path path "usage") ~expected:"within 0..1" ~low:0.0 ~high:1.0 usage
     in
-    Ok (Some { limit_id = None; kind; utilization = Fraction usage; resets_at = None })
+    Ok
+      (Some
+         { limit_id = None
+         ; kind
+         ; role = Gates_model_calls
+         ; utilization = Fraction usage
+         ; resets_at = None
+         })
 ;;
 
 let decode_ollama_usage json =

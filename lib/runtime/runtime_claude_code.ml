@@ -190,6 +190,12 @@ type stream_event =
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Usage_windows_reported of Runtime_provider_usage_window.report
+  | Usage_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model : string
+      ; usage : turn_usage
+      }
   | Turn_finished of { text : string }
 
 let emit_stream_event on_stream_event event =
@@ -401,7 +407,17 @@ let client_environment () =
   |> List.filter_map (fun name ->
     Option.map (fun value -> name ^ "=" ^ value) (Sys.getenv_opt name))
   |> fun inherited ->
-  ("CLAUDE_CODE_ENTRYPOINT=masc" :: "CLAUDE_AGENT_SDK_VERSION=masc-ocaml" :: inherited)
+  (* Claude Code loads the auto-memory index kept for its working directory
+     (~/.claude/projects/<cwd>/memory/MEMORY.md) into every session. A Keeper
+     runs with the operator's base path as its working directory, so without
+     this it read the operator's own memory index -- notes from unrelated
+     work and personal details -- on every session. --setting-sources ""
+     does not cover this; the environment switch does (measured with Claude
+     Code 2.1.282: the `instructions` attachment carrying MEMORY.md is gone). *)
+  ("CLAUDE_CODE_ENTRYPOINT=masc"
+   :: "CLAUDE_AGENT_SDK_VERSION=masc-ocaml"
+   :: "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
+   :: inherited)
   |> Array.of_list
 ;;
 
@@ -1016,112 +1032,117 @@ let terminal_reason_to_wire = function
   | Other_terminal_reason wire -> wire
 ;;
 
-let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
-    ~response_emitted fields =
+(* The result frame's own session and turn identity, checked before anything
+   it carries is taken as this turn's: a frame of another session is a
+   protocol error, not this turn's spend. *)
+let result_turn_id ~expected_session_id fields =
   let stage = "result message" in
-  let* subtype = required_string stage "subtype" fields in
-  let* is_error = required_bool stage "is_error" fields in
   let* session_id = required_string stage "session_id" fields in
   if session_id <> expected_session_id
   then protocol_error stage "session_id does not match the active Claude session"
-  else
-    let* turn_id = required_string stage "uuid" fields in
-    let* api_error_status = optional_int stage "api_error_status" fields in
-    let* terminal_reason = optional_string stage "terminal_reason" fields in
-    let terminal_reason = Option.map terminal_reason_of_wire terminal_reason in
-    let result =
-      match List.assoc_opt "result" fields with
-      | None | Some `Null -> Ok None
-      | Some (`String value) -> Ok (Some value)
-      | Some _ -> protocol_error stage "field \"result\" must be a string or null"
-    in
-    let* result = result in
-    (* Under --json-schema the client validates its own answer and re-prompts,
-       and [structured_output] carries what passed. The docs say a run can end
-       [subtype=success] with the field absent and that this counts as a
-       failure, so an absent field is left to the caller's own contract rather
-       than silently read as "no schema was asked for". Measured 2026-08-30 in
-       this argv shape: a prompt asking for a key the schema forbids came back
-       without it, and both fields agreed. Prefer the parsed value anyway --
-       the sibling antigravity adapter's narrated text does not agree. *)
-    let result =
-      match List.assoc_opt "structured_output" fields with
-      | None | Some `Null -> result
-      | Some value -> Some (Yojson.Safe.to_string value)
-    in
-    let usage = turn_usage_of_fields fields in
-    let structurally_quota_blocked =
-      Option.equal Int.equal api_error_status (Some 429)
-      || Option.exists
-           (fun (limit : rate_limit) -> limit.status = Rejected)
-           rate_limit
-    in
-    let terminal_failure_detail () =
-      (* [terminal_reason] decides whether an overflow is typed as one, and it
-         used to be absent from what a reader sees. A live failure carrying
-         "Prompt is too long" that did not reach the overflow path was
-         indistinguishable from one where the sentence never appeared: both
-         printed the same line, and the field that separates them was not in
-         it (one keeper, 2026-08-24). Naming it costs one field and answers the
-         question the next reader will have. *)
-      Printf.sprintf
-        "terminal subtype=%s api_status=%s reason=%s%s"
-        subtype
-        (Option.fold
-           ~none:"unknown"
-           ~some:string_of_int
-           api_error_status)
-        (Option.fold ~none:"none" ~some:terminal_reason_to_wire terminal_reason)
-        (match result with
-         | Some detail when String.trim detail <> "" -> ": " ^ String.trim detail
-         | Some _ | None -> "")
-    in
-    let provider_reported_context_window_exceeded =
-      (* The CLI states why its query loop terminated as a typed enum on this
-         frame; [prompt_too_long] is the CLI's own promotion of every provider
-         context-window rejection (either status, or a 413 naming the window),
-         [blocking_limit] is the same verdict reached before sending, and
-         [rapid_refill_breaker] reports repeated refills after compaction.
-         A frame that carries the verdict is authoritative in both directions,
-         like the codex lane's [codexErrorInfo]; a frame without it is not an
-         overflow. *)
-      match terminal_reason with
-      | Some (Prompt_too_long | Blocking_limit | Rapid_refill_breaker) -> true
-      | Some (Other_terminal_reason _) | None -> false
-    in
-    if structurally_quota_blocked
-    then
-      Error
-        (Quota_blocked
-           { api_error_status
-           ; rate_limit
-           ; tool_effect_attempted
-           ; response_emitted
-           })
-    else if is_error && provider_reported_context_window_exceeded
-    then
-      Error
-        (Context_window_exceeded
-           { message = terminal_failure_detail ()
-           ; tool_effect_attempted
-           ; response_emitted
-           })
-    else if is_error
-    then
-      (* [result] is the one field on this frame that says why the turn failed.
-         The prompt-too-long verdict above (typed [terminal_reason]) has its
-         own typed path; unrelated 400s and every other terminal rejection
-         still retain the provider's sentence instead of collapsing to the
-         status code (#28071). *)
-      Error
-        (Turn_failed_with_observation
-           { detail = terminal_failure_detail ()
-           ; tool_effect_attempted
-           ; response_emitted
-           })
-    else if subtype <> "success"
-    then Error (Turn_failed (Printf.sprintf "terminal subtype=%s" subtype))
-    else Ok (turn_id, result, usage)
+  else required_string stage "uuid" fields
+;;
+
+let parse_result ~rate_limit ~tool_effect_attempted ~response_emitted ~turn_id ~usage
+    fields =
+  let stage = "result message" in
+  let* subtype = required_string stage "subtype" fields in
+  let* is_error = required_bool stage "is_error" fields in
+  let* api_error_status = optional_int stage "api_error_status" fields in
+  let* terminal_reason = optional_string stage "terminal_reason" fields in
+  let terminal_reason = Option.map terminal_reason_of_wire terminal_reason in
+  let result =
+    match List.assoc_opt "result" fields with
+    | None | Some `Null -> Ok None
+    | Some (`String value) -> Ok (Some value)
+    | Some _ -> protocol_error stage "field \"result\" must be a string or null"
+  in
+  let* result = result in
+  (* Under --json-schema the client validates its own answer and re-prompts,
+     and [structured_output] carries what passed. The docs say a run can end
+     [subtype=success] with the field absent and that this counts as a
+     failure, so an absent field is left to the caller's own contract rather
+     than silently read as "no schema was asked for". Measured 2026-08-30 in
+     this argv shape: a prompt asking for a key the schema forbids came back
+     without it, and both fields agreed. Prefer the parsed value anyway --
+     the sibling antigravity adapter's narrated text does not agree. *)
+  let result =
+    match List.assoc_opt "structured_output" fields with
+    | None | Some `Null -> result
+    | Some value -> Some (Yojson.Safe.to_string value)
+  in
+  let structurally_quota_blocked =
+    Option.equal Int.equal api_error_status (Some 429)
+    || Option.exists
+         (fun (limit : rate_limit) -> limit.status = Rejected)
+         rate_limit
+  in
+  let terminal_failure_detail () =
+    (* [terminal_reason] decides whether an overflow is typed as one, and it
+       used to be absent from what a reader sees. A live failure carrying
+       "Prompt is too long" that did not reach the overflow path was
+       indistinguishable from one where the sentence never appeared: both
+       printed the same line, and the field that separates them was not in
+       it (one keeper, 2026-08-24). Naming it costs one field and answers the
+       question the next reader will have. *)
+    Printf.sprintf
+      "terminal subtype=%s api_status=%s reason=%s%s"
+      subtype
+      (Option.fold
+         ~none:"unknown"
+         ~some:string_of_int
+         api_error_status)
+      (Option.fold ~none:"none" ~some:terminal_reason_to_wire terminal_reason)
+      (match result with
+       | Some detail when String.trim detail <> "" -> ": " ^ String.trim detail
+       | Some _ | None -> "")
+  in
+  let provider_reported_context_window_exceeded =
+    (* The CLI states why its query loop terminated as a typed enum on this
+       frame; [prompt_too_long] is the CLI's own promotion of every provider
+       context-window rejection (either status, or a 413 naming the window),
+       [blocking_limit] is the same verdict reached before sending, and
+       [rapid_refill_breaker] reports repeated refills after compaction.
+       A frame that carries the verdict is authoritative in both directions,
+       like the codex lane's [codexErrorInfo]; a frame without it is not an
+       overflow. *)
+    match terminal_reason with
+    | Some (Prompt_too_long | Blocking_limit | Rapid_refill_breaker) -> true
+    | Some (Other_terminal_reason _) | None -> false
+  in
+  if structurally_quota_blocked
+  then
+    Error
+      (Quota_blocked
+         { api_error_status
+         ; rate_limit
+         ; tool_effect_attempted
+         ; response_emitted
+         })
+  else if is_error && provider_reported_context_window_exceeded
+  then
+    Error
+      (Context_window_exceeded
+         { message = terminal_failure_detail ()
+         ; tool_effect_attempted
+         ; response_emitted
+         })
+  else if is_error
+  then
+    (* [result] is the one field on this frame that says why the turn failed.
+       The prompt-too-long verdict above (typed [terminal_reason]) has its
+       own typed path; unrelated 400s and every other terminal rejection
+       still retain the provider's sentence instead of collapsing to the
+       status code (#28071). *)
+    Error
+      (Turn_failed_with_observation
+         { detail = terminal_failure_detail ()
+         ; tool_effect_attempted
+         ; response_emitted
+         })
+  else if subtype <> "success"
+  then Error (Turn_failed (Printf.sprintf "terminal subtype=%s" subtype))
+  else Ok (turn_id, result, usage)
 ;;
 
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
@@ -1211,12 +1232,35 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
       ~stream_started ~response_emitted
   | "result" ->
+    (* The result frame is the only place the turn's spend is reported, and
+       it arrives on failures too (a quota refusal, a provider error after
+       tool calls). Once the frame is known to be this session's turn, the
+       spend is reported, before the frame decides whether the turn
+       succeeded, so a failed turn still reports it. The model is the one the
+       turn's responses were measured on; a frame with usage and no measured
+       model response has no model to attribute it to and is logged. *)
+    let* turn_id = result_turn_id ~expected_session_id fields in
+    let usage = turn_usage_of_fields fields in
+    (match assistant_model, usage with
+     | Some model, Some usage ->
+       emit_stream_event
+         on_stream_event
+         (Usage_reported { session_id = expected_session_id; turn_id; model; usage })
+     | None, Some usage ->
+       Log.Runtime_agent.warn
+         "Claude Code result %s reported usage (input=%d output=%d) with no measured \
+          model response; it is not attributed to a model"
+         turn_id
+         usage.input_tokens
+         usage.output_tokens
+     | (Some _ | None), None -> ());
     let parsed_result =
       parse_result
-        ~expected_session_id
         ~rate_limit
         ~tool_effect_attempted:(!tool_call_count > 0 || !native_tool_attempted)
         ~response_emitted:!response_emitted
+        ~turn_id
+        ~usage
         fields
     in
     let* turn_id, result, usage =

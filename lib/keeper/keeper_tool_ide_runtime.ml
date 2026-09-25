@@ -46,7 +46,7 @@ let handle_ide_annotate_with_outcome
        | Error why -> reject ("the memo cannot be written: " ^ why)
        | Ok memo ->
          (match Lsp_process_manager.memo_line ~path:file_path memo with
-          | Error refusal -> reject (Lsp_process_manager.memo_line_refusal_to_string refusal)
+          | Error refusal -> reject (Lsp_process_manager.memo_line_error_to_string refusal)
           | Ok comment_line ->
             Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
               ~turn_sandbox_factory

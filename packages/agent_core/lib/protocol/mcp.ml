@@ -5,7 +5,6 @@
     MCP servers that paginate [tools/list] and add non-standard fields. *)
 
 open Types
-open Result_syntax
 include Mcp_schema
 module Stdio_transport = struct
   include Mcp_protocol_eio.Stdio_transport
@@ -182,21 +181,33 @@ let call_tool t ~name ~arguments : Types.tool_result =
     else Ok { content = text; content_blocks = None; _meta = None }
 ;;
 
-(** Convert MCP tools to SDK [Tool.t] list.
-    Each tool's handler delegates to {!call_tool} on [t]. *)
-let to_tools t (tools : mcp_tool list) =
-  let schema_error detail =
-    Error.Config (InvalidConfig { field = "mcp.tools"; detail })
-  in
+(** One MCP tool whose input schema could not be converted into a
+    {!Tool.t}. The tool is left out of {!managed.tools}; [detail] is the
+    converter's diagnostic. *)
+type skipped_tool =
+  { tool_name : string
+  ; detail : string
+  }
+
+(** Convert MCP tools to agent-core [Tool.t] values, one tool at a time.
+    A tool whose schema fails conversion disables only that tool: it is
+    returned in the skipped list (and logged) instead of failing the whole
+    server's tool list. Input order is preserved in both lists. *)
+let convert_tools ~server_name ~call_fn_for (tools : mcp_tool list) =
   List.fold_right
-    (fun (mt : mcp_tool) acc ->
-       let* tools = acc in
-       let call_fn input = call_tool t ~name:mt.name ~arguments:input in
-       match mcp_tool_to_agent_core_tool_result ~call_fn mt with
-       | Ok tool_ -> Ok (tool_ :: tools)
-       | Error detail -> Error (schema_error detail))
+    (fun (mt : mcp_tool) (converted, skipped) ->
+       match mcp_tool_to_agent_core_tool_result ~call_fn:(call_fn_for mt) mt with
+       | Ok tool_ -> tool_ :: converted, skipped
+       | Error detail ->
+         Llm_provider.Diag.warn
+           "mcp"
+           "server %s: skipping tool %s with unconvertible input schema: %s"
+           server_name
+           mt.name
+           detail;
+         converted, { tool_name = mt.name; detail } :: skipped)
     tools
-    (Ok [])
+    ([], [])
 ;;
 
 (** Check if the MCP server subprocess is still responsive.
@@ -323,6 +334,7 @@ type transport =
 (** A connected MCP server together with its converted agent-core tools. *)
 type managed =
   { tools : Tool.t list
+  ; skipped_tools : skipped_tool list
   ; name : string
   ; transport : transport
   }
@@ -383,12 +395,19 @@ let connect_and_load ~sw ~mgr (spec : server_spec) =
             close client;
             Error e
           | Ok mcp_tools ->
-            (match to_tools client mcp_tools with
-             | Ok tools ->
-               Ok { tools; name = spec.name; transport = Stdio { client; spec } }
-             | Error e ->
-               close client;
-               Error e))
+            let tools, skipped_tools =
+              convert_tools
+                ~server_name:spec.name
+                ~call_fn_for:(fun (mt : mcp_tool) input ->
+                  call_tool client ~name:mt.name ~arguments:input)
+                mcp_tools
+            in
+            Ok
+              { tools
+              ; skipped_tools
+              ; name = spec.name
+              ; transport = Stdio { client; spec }
+              })
      with
      | Out_of_memory ->
        close client;

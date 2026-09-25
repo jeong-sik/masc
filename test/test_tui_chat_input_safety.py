@@ -229,6 +229,71 @@ def queued_attachments(binary: str) -> None:
     )
 
 
+def failed_progress_names_the_cause_once(binary: str) -> None:
+    show_failure = threading.Event()
+    release = threading.Event()
+
+    def respond(body: bytes) -> h.StreamingHttpResponse:
+        response = h.keeper_chat_failed_response(body)
+        blocks = [block for block in response.body.split(b"\n\n") if block]
+        failure = json.loads(blocks[-1].removeprefix(b"data: "))
+        assert failure["type"] == "RUN_ERROR", failure
+        failure["message"] = "provider 429"
+
+        def chunks() -> Iterator[bytes]:
+            yield b"\n\n".join(blocks[:-1]) + b"\n\n"
+            if show_failure.wait(timeout=30):
+                yield b"data: " + json.dumps(failure).encode() + b"\n\n"
+                release.wait(timeout=30)
+
+        return h.StreamingHttpResponse(chunks)
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        fd: int,
+        _slave: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        try:
+            open_chat(process, fd, output)
+            h.send_and_wait(process, fd, output, b"trigger-error", b"trigger-error")
+            h.send_and_wait(process, fd, output, b"\r", b"IN PROGRESS")
+            before = len(output)
+            show_failure.set()
+            h.wait_for_output(
+                process, fd, output, b"REQUEST ERROR", start=before, timeout=5
+            )
+            h.wait_for_output(
+                process,
+                fd,
+                output,
+                h.FRAME_END,
+                start=h.end_of_needle(output, b"REQUEST ERROR", before),
+                timeout=5,
+            )
+            screen = h.unwrapped(h.screen_text(bytes(output)))
+            if b"REQUEST ERROR \xc2\xb7 provider 429" not in screen:
+                raise AssertionError(f"failure progress lost its cause: {screen!r}")
+            if b"stream reported an error" in screen:
+                raise AssertionError(f"failure progress repeated its label: {screen!r}")
+        finally:
+            show_failure.set()
+            release.set()
+            os.killpg(process.pid, signal.SIGTERM)
+
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
+    fixtures[CHAT] = h.RequestHttpResponse(respond)
+    h.run_terminal_scenario(
+        binary,
+        description="failed Keeper progress names its cause once",
+        interact=interact,
+        confirm_exit=b"",
+        http_fixtures=fixtures,
+    )
+
+
 def quiet_leave_belongs_to_the_chat_surface(binary: str) -> None:
     """Ctrl-Q leaves the chat pane, and only from the chat pane.
 
@@ -286,4 +351,5 @@ if __name__ == "__main__":
     approval_typing(executable, "approve")
     approval_typing(executable, "deny")
     queued_attachments(executable)
+    failed_progress_names_the_cause_once(executable)
     quiet_leave_belongs_to_the_chat_surface(executable)

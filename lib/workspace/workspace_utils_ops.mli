@@ -60,9 +60,20 @@ val path_exists_root : config -> string -> bool
     the backend has no key for this path). *)
 val read_json : config -> string -> Yojson.Safe.t
 
-(** Result-returning variant. *)
-val read_json_result :
-  config -> string -> (Yojson.Safe.t, string) result
+(** Why a present document yielded no JSON value. *)
+type json_doc_error =
+  | Json_doc_unreadable of string
+  | Json_doc_unparsable of string
+  | Json_doc_blank
+
+val json_doc_error_to_string : json_doc_error -> string
+
+(** Read one JSON document via the active backend (or local FS when the
+    backend has no key for this path). [Ok None] means the key or file does
+    not exist, and only that; a blank, unreadable or unparsable document is an
+    [Error]. The caller decides what absence means for its store. *)
+val read_json_doc :
+  config -> string -> (Yojson.Safe.t option, json_doc_error) result
 
 (** Read a UTF-8 text file via the active backend; falls back to
     local FS when the backend has no key for this path. *)

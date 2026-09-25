@@ -231,10 +231,12 @@ let test_load_all_result_speaker_authority_contract () =
           detail)
 ;;
 
-(* A connector row whose surface does not decode reads as a direct row. The
-   Librarian's counterpart reader uses [load_all_result] and moves its cursor
-   past what it returns, so that row must stop it rather than be recorded
-   with the wrong channel. *)
+(* A persisted surface is the row's only routing identity. A row whose
+   surface does not decode must not read as a direct (unscoped) row: the
+   permissive readers drop it and count the drop, so it cannot leak into
+   global history; the Librarian's counterpart reader uses
+   [load_all_result] and moves its cursor past what it returns, so the
+   same row stops it rather than being recorded with the wrong channel. *)
 let test_load_all_result_rejects_invalid_surface () =
   let base_dir = temp_base_path "keeper-chat-store-strict-surface" in
   Fun.protect
@@ -242,25 +244,36 @@ let test_load_all_result_rejects_invalid_surface () =
     (fun () ->
       let keeper_name = "keeper-chat-strict-surface" in
       let path = chat_path ~base_dir ~keeper_name in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
       write_file path
         ({|{"id":"valid-surface","role":"user","content":"routed","ts":1.0,"speaker_authority":"external","surface":{"kind":"slack","channel_id":"C1"}}|}
          ^ "\n"
          ^ {|{"id":"invalid-surface","role":"user","content":"unrouted","ts":2.0,"speaker_authority":"external","surface":{"kind":"carrier-pigeon"}}|}
          ^ "\n");
-      (match K.load_all ~base_dir ~keeper_name with
-       | [ routed; unrouted ] ->
+      let ids messages = List.map (fun (m : K.chat_message) -> m.K.id) messages in
+      let before_load = drop_value invalid_payload in
+      (match K.load ~base_dir ~keeper_name with
+       | [ routed ] ->
+         Alcotest.(check string)
+           "global history keeps only the routed row"
+           "valid-surface"
+           routed.K.id;
          Alcotest.(check bool)
-           "permissive load keeps the decoded surface"
+           "the kept row carries its decoded surface"
            true
-           (Option.is_some routed.K.surface);
-         Alcotest.(check bool)
-           "permissive load keeps the row without a surface"
-           true
-           (Option.is_none unrouted.K.surface)
+           (Option.is_some routed.K.surface)
        | messages ->
          Alcotest.failf
-           "permissive load dropped a surface row: got %d"
-           (List.length messages));
+           "global history kept an undecodable surface row: [%s]"
+           (String.concat "; " (ids messages)));
+      Alcotest.(check (float 0.001))
+        "the dropped surface row is counted as a read drop"
+        1.0
+        (drop_value invalid_payload -. before_load);
+      Alcotest.(check (list string))
+        "permissive load_all drops the undecodable surface row"
+        [ "valid-surface" ]
+        (ids (K.load_all ~base_dir ~keeper_name));
       match K.load_all_result ~base_dir ~keeper_name with
       | Ok _ -> Alcotest.fail "strict load accepted a surface it could not decode"
       | Error detail ->

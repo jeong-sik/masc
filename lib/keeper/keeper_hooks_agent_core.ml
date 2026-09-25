@@ -35,7 +35,13 @@ let broadcast_resolved_turn_complete
       ~tool_calls_made
       ~total_turns
       ~(usage_resolution : Keeper_usage_resolution.t)
+      ~wire_prompt_tokens
   =
+  let wire_field pick =
+    match wire_prompt_tokens with
+    | Some tokens -> `Int (pick tokens)
+    | None -> `Null
+  in
   let usage_field field =
     match usage_resolution.delta with
     | Some usage -> `Int (field usage)
@@ -60,8 +66,11 @@ let broadcast_resolved_turn_complete
       ; key_tool_calls_made, `Int tool_calls_made
       ; ( key_cache_read_tokens
         , usage_field (fun usage -> usage.Keeper_usage_resolution.cache_read_input_tokens) )
-      ; key_cache_n, `Null
-      ; key_prompt_n, `Null
+      ; ( key_cache_creation_tokens
+        , usage_field (fun usage ->
+            usage.Keeper_usage_resolution.cache_creation_input_tokens) )
+      ; key_cache_n, wire_field fst
+      ; key_prompt_n, wire_field snd
       ; key_total_turns, `Int total_turns
       ; "usage_resolution", Keeper_usage_resolution.to_json usage_resolution
       ; key_ts_unix, `Float (Time_compat.now ())
@@ -166,6 +175,57 @@ let usage_missing_of_usage = function
   | None -> true
   | Some usage -> not (usage_has_tokens usage)
 
+type attempt_usage =
+  | Agent_core_attempt
+  | Client_stream_attempt of { reported : bool }
+
+(* One usage report an official client sent on its own stream while the
+   turn runs ([Runtime_execution.Client_usage_stream]). The row is a raw
+   observation under the scope the client reports it in, keyed by the
+   official turn the client is running and the client's own identity for it.
+   It is written when the report arrives, so a turn that later fails keeps
+   what the client already reported. Without a trajectory accumulator no row
+   is written, the same rule [AfterTurn] follows. *)
+let emit_client_usage_report
+    ~(trajectory_acc : Trajectory.accumulator option)
+    ~agent_name
+    ~trace_id
+    ~keeper_turn_id
+    ?runtime_attempt
+    (report : Keeper_client_usage_report.t)
+  =
+  (* A replaced count counts nothing. Its row says so and keeps the vendor
+     total that took the count's place. *)
+  let usage =
+    match report.count with
+    | Keeper_client_usage_report.Running_count usage -> usage
+    | Keeper_client_usage_report.Count_replaced -> Agent_core.Types.zero_api_usage
+  in
+  match trajectory_acc with
+  | None -> ()
+  | Some acc ->
+    emit_cost_event
+      ~masc_root:acc.masc_root
+      ~agent_name
+      ~task_id:acc.task_id
+      ~trace_id
+      ~keeper_turn_id
+      ~agent_core_turn_ordinal:report.official_turn
+      ~model:report.model
+      ~usage_projection:(Cost_ledger.Raw_observation report.usage_scope)
+      ~response_id:report.response_id
+      ~conversation:(report.conversation_id, report.position)
+      ?vendor_total_tokens:report.vendor_total_tokens
+      ?runtime_attempt
+      ~input_tokens:usage.input_tokens
+      ~output_tokens:usage.output_tokens
+      ~cost_usd:(agent_core_reported_cost usage)
+      ~usage_missing:(usage_missing_of_usage (Some usage))
+      ~cache_creation_input_tokens:usage.cache_creation_input_tokens
+      ~cache_read_input_tokens:usage.cache_read_input_tokens
+      ~usage_trust:(classify_usage_trust ~usage ())
+      ()
+
 type tool_stream_observation =
   | Runtime_attempt_started of
       { runtime_id : string
@@ -187,14 +247,21 @@ let make_hooks
     ~(on_after_turn_ordinal : int -> unit)
     ?(on_tool_stream_observation : tool_stream_observation -> unit = fun _ -> ())
     ?(current_runtime_attempt = fun () -> None)
+    ?(current_attempt_usage = fun () -> None)
     ?(on_after_turn_response :
         response:Agent_core.Types.api_response -> unit =
         fun ~response:_ -> ())
+    ?(on_agent_core_response_usage :
+        response_id:string -> ordinal:int -> model:string ->
+        Agent_core.Types.api_usage option -> unit =
+        fun ~response_id:_ ~ordinal:_ ~model:_ _ -> ())
     ?(on_tool_executed :
         tool_name:string -> input:Yojson.Safe.t -> output_text:string ->
+        execution_evidence:Yojson.Safe.t option ->
         success:bool -> duration_ms:float -> provider:string ->
         typed_outcome:Keeper_tool_outcome.t option -> unit =
-        fun ~tool_name:_ ~input:_ ~output_text:_ ~success:_ ~duration_ms:_ ~provider:_ ~typed_outcome:_ -> ())
+        fun ~tool_name:_ ~input:_ ~output_text:_ ~execution_evidence:_ ~success:_
+          ~duration_ms:_ ~provider:_ ~typed_outcome:_ -> ())
     ?tool_result_commit_required
     ?on_tool_result_ready
     ?(trajectory_acc : Trajectory.accumulator option)
@@ -282,6 +349,17 @@ let make_hooks
           | None -> (0, 0, 0.0)
         in
         let usage_missing = usage_missing_of_usage response.usage in
+        (* An Agent Core response is one provider request, and the turn's
+           spend reads it here. An official client's response repeats what its
+           stream already reported, and that report is its reading. *)
+        (match current_attempt_usage () with
+         | Some Agent_core_attempt ->
+           on_agent_core_response_usage
+             ~response_id:response.id
+             ~ordinal:turn
+             ~model
+             (if usage_missing then None else response.usage)
+         | Some (Client_stream_attempt _) | None -> ());
         let cost_usd_for_event = turn_cost_usd in
         let cost_usd_for_sse =
           match response.usage with
@@ -416,18 +494,47 @@ let make_hooks
               any turn and the tool timeline disappeared. Adopt the turn the
               runtime already assigns here; [round] derives from it. *)
            Trajectory.set_turn acc turn;
-           emit_cost_event ~masc_root:acc.masc_root
-             ~agent_name:meta.name ~task_id:acc.task_id
-             ~trace_id ~keeper_turn_id ~agent_core_turn_ordinal:turn ~model
-             ~response_id:response.id
-             ?runtime_attempt:(current_runtime_attempt ())
-             ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
-             ~cost_usd:cost_usd_for_event ~usage_missing
-             ~cache_creation_input_tokens:raw_cache_creation_input_tokens
-             ~cache_read_input_tokens:raw_cache_read_input_tokens
-             ~usage_trust
-             ?telemetry:response.telemetry
-             ();
+           (* An AGENT_CORE response is one provider request, and this is
+              where its usage is seen. An official client reports usage on
+              its own stream through [emit_client_usage_report]: a response
+              that carries usage after such a report only repeats it. A
+              response without usage (a host stop, which ends the turn before
+              the client reports on the response that asked for it; a result
+              without usage) gets a row that records the missing usage under
+              no scope, whether or not earlier reports of the attempt arrived.
+              A count this hook cannot place ([None]: no dispatched attempt;
+              a client response no report preceded) is written under no
+              scope rather than a guessed one. *)
+           let raw_projection =
+             match current_attempt_usage () with
+             | Some (Client_stream_attempt { reported = true }) when not usage_missing -> None
+             | Some (Client_stream_attempt _) | None ->
+               Some
+                 (Cost_ledger.Raw_observation
+                    Runtime_usage_scope.Usage_scope_unavailable)
+             | Some Agent_core_attempt ->
+               Some
+                 (Cost_ledger.Raw_observation
+                    (if usage_missing
+                     then Runtime_usage_scope.Usage_scope_unavailable
+                     else Runtime_usage_scope.Per_request))
+           in
+           (match raw_projection with
+            | None -> ()
+            | Some usage_projection ->
+              emit_cost_event ~masc_root:acc.masc_root
+                ~agent_name:meta.name ~task_id:acc.task_id
+                ~trace_id ~keeper_turn_id ~agent_core_turn_ordinal:turn ~model
+                ~usage_projection
+                ~response_id:response.id
+                ?runtime_attempt:(current_runtime_attempt ())
+                ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
+                ~cost_usd:cost_usd_for_event ~usage_missing
+                ~cache_creation_input_tokens:raw_cache_creation_input_tokens
+                ~cache_read_input_tokens:raw_cache_read_input_tokens
+                ~usage_trust
+                ?telemetry:response.telemetry
+                ());
            (* 남김없이: persist THIS turn's reasoning (full, untruncated) every
               turn. The prior single post-run capture (Keeper_agent_run) saved
               only the final turn's thinking; turns 1..N-1 were merely counted
@@ -437,12 +544,13 @@ let make_hooks
              response.content
          | None -> ());
         (try
-           (* Cache observability rides the same per-turn event (RFC-0382):
+           (* Cache observability rides this per-request event (RFC-0382):
               [cache_read_tokens] is usage-reported (cloud providers),
               [cache_n]/[prompt_n] are wire timings (llama-server, Ollama) —
               KV-reused vs freshly prefilled prompt tokens. The two sources
               have different semantics and are surfaced side by side, never
-              merged. *)
+              merged. These are this request's timings; the turn's sum rides
+              [keeper_turn_complete]. *)
            let timings_int_json field =
              match response.telemetry with
              | Some { timings = Some t; _ } ->
@@ -523,12 +631,17 @@ let make_hooks
            outcome comes from the result's [_meta] instead -- the
            [Tool_outcome_declaration] the handler attached to its result -- so a
            tool that declares [Progress] is read as such and one that declares
-           nothing stays [None]; nothing is reconstructed from content. *)
-        let output_text, typed_outcome =
+           nothing stays [None]; nothing is reconstructed from content.
+           A completed Execute's audit fields travel the same way: the model
+           reads [content], the ledger row also gets [execution_evidence]
+           (#39035). *)
+        let output_text, typed_outcome, execution_evidence =
           match output with
           | Ok { Agent_core.Types.content; _meta; _ } ->
-            content, Keeper_tool_outcome_metadata.declared _meta
-          | Error { Agent_core.Types.message; _ } -> (message, None)
+            ( content
+            , Keeper_tool_outcome_metadata.declared _meta
+            , Keeper_tool_call_log.execution_evidence_of_metadata _meta )
+          | Error { Agent_core.Types.message; _ } -> (message, None, None)
         in
         let input_keys = tool_input_keys_for_log input in
         let outcome, out_len = match output with
@@ -668,6 +781,7 @@ let make_hooks
              ?disposition:
                (Keeper_tool_call_log.consume_disposition ~invocation ())
              ?file_change_evidence
+             ?execution_evidence
              ~artifact_refs:(retained_artifacts @ Keeper_tool_call_log.peek_file_change_artifact_refs ~invocation ())
              ~duration_ms
              ~model:(current_keeper_model !meta_ref)
@@ -784,6 +898,7 @@ let make_hooks
              ~tool_name
              ~input
              ~output_text
+             ~execution_evidence
              ~success:(outcome = Tool_result.Ok)
              ~duration_ms:summary.duration_ms
              ~provider:summary.provider

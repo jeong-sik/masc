@@ -91,8 +91,8 @@ status: reference
 
 **Goals 블록 (Overview Goals)**
 : TUI Overview 최상단에서 fleet의 활성 작업이 목표를 실제로 진전시키고 있는지를
-  보여주는 자리(`Masc_tui_overview_goals`). Attention 패널 뒤, Team 블록 앞에
-  배치된다. 헤드라인은 전체 활성 태스크(진행 중이거나 검증 대기 중인 Task) 중 그려진
+  보여주는 자리(`Masc_tui_overview_goals`). 요약 줄 바로 아래, Attention 패널 앞에
+  그려진다. 순서는 Goals, Attention, Team이다(그 사이에 Providers 구획이 있다). 헤드라인은 전체 활성 태스크(진행 중이거나 검증 대기 중인 Task) 중 그려진
   목표에 연결된 태스크 수 비율을 표시하고, 아직 일이 진행 중인 단계(`Executing`·
   `Verifying`·`Awaiting_confirmation`)의 Goal마다 우선순위(낮은 숫자 우선) 및 마감일
   순으로 한 줄씩 그린다(#38386).
@@ -114,7 +114,11 @@ status: reference
   점수가 아니라 이 무리와 이름이다. 막힌 줄의 설명은 그 Keeper 를 `Attention_keeper` 로
   가리키는 info 가 아닌 첫 Attention 문장을 그대로 싣는다. Keeper 가 아닌
   담당자(MCP client 등)가 잡은 Task 는 "held outside the fleet" 한 줄로 센다.
-  → [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli), RFC-0464
+  `/cost` 로 켜면 Keeper 줄마다 최근 24시간 비용·토큰을, 제목에 합계를 싣는다
+  (`/api/v1/dashboard/keeper-costs`). 모르는 비용은 `$0.00` 으로 그리지 않는다. 기본은
+  꺼져 있고, 꺼져 있으면 읽지도 않는다.
+  → [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli),
+  [Masc_tui_keeper_spend](../../bin/masc_tui_keeper_spend.ml), RFC-0464
 
 **Attention (Overview Attention 패널)**
 : briefing 의 `incidents` 와 `attention_queue` 를 합친 목록. 운영자가 봐야 할 조건 하나가
@@ -517,7 +521,11 @@ status: reference
   `Retry_after_observed`의 retry class 중 공급자 자체 과부하(HTTP 529, CapacityExhausted 풀)는
   MASC 자체의 슬롯 대기가 아니라 시도한 런타임 후보의 실패(Server_error와 같은 층위)로 분류되며,
   클래스 라벨은 `provider_capacity`다(#38290). 이 실패는 다음 런타임 후보로 walk하며 503 과 같이
-  다음 후보로 넘기고 이 후보를 뒤로 미룬다.
+  다음 후보로 넘기고 이 후보를 뒤로 미룬다. 영수증 `fallback_reason`과 이벤트 에러 `variant`도
+  같은 조건을 같은 `provider_capacity` 이름으로 적는다(#38858). 이 조건의 runtime blocker class 는
+  만드는 곳이 없어 지웠다.
+  `capacity_backpressure`라는 글자는 다른 개념인 provider `timeout_phase`(용량·슬롯을 기다리다
+  끝난 timeout 단계) 라벨로만 남는다. 원문 문자열로 거르는 질의는 필드를 구분해야 한다.
   `ECONNRESET`은 요청을 보낸 뒤(`sent`) 발생한 연결 단절로, 연결 수립 전 거부(`connection_refused`)와
   구분되는 `connection_reset`으로 기록된다(#38518). 재시도 가능 여부·Librarian 크기 판정 제외 등
   처리 정책은 `connection_refused`와 같으나 wire 및 운영자 요약 라벨이 분리된다.
@@ -648,11 +656,15 @@ status: reference
   descriptor와 권한 검사는 MASC가 소유한다. → [Tool boundary](13-agent-core.md#tool-boundary)
 
 **Tool Input Validation (도구 입력 검증)**
-: 도구 핸들러로 전달하기 전에 인자 스키마를 사전 검사하는 경계(`Tool_input_validation.validate_input`).
-  도구 선언의 `required`·`type`·`enum`·`const`를 중첩 객체(`properties`)와 배열 항목(`items`)까지
-  재귀적으로 검사하며, 위반된 모든 경로(`JSON path`)와 원인을 한 번에 보고한다(#38391).
-  스키마 위반은 도구 실행이 아니라 사전 거절(`pre-dispatch refusal`)이며, `oneOf`는 루트에서만 검사한다.
-  → [Tool_input_validation](../../packages/agent_core/lib/tool_input_validation.mli)
+: 도구 핸들러로 전달하기 전에 인자 스키마를 사전 검사하는 경계. MASC의
+  `Tool_input_validation.validate`가 Agent-Core의 `Agent_core.Tool_input_validation.validate`를 부른다.
+  Agent-Core 쪽은 도구 선언의 `required`·`type`·`enum`·`const`를 중첩 객체(`properties`)와 배열
+  항목(`items`)까지 재귀적으로 검사하며, 위반된 모든 경로(`JSON path`)와 원인을 한 번에 보고한다(#38391).
+  MASC 쪽은 Agent-Core가 하지 않는 검사를 더한다. 선언 안 된 필드(`additionalProperties: false`),
+  `oneOf` 분기 선택, 범위·길이 한계다. `oneOf`는 루트 스키마에서만 검사한다.
+  스키마 위반은 도구 실행이 아니라 사전 거절(`pre-dispatch refusal`)이다.
+  → [Tool_input_validation (MASC)](../../lib/tool_input_validation.mli),
+  [Tool_input_validation (Agent-Core)](../../packages/agent_core/lib/tool_input_validation.mli)
 
 **Deferred Tool Loading (도구 스키마 지연 로딩)**
 : 도구 스키마를 요청마다 싣지 않고, `keeper_tool_search` 목록에 이름과 요약만 올려 두는
@@ -918,6 +930,22 @@ status: reference
   Keeper 는 그대로 쥔다. 이름은 부르는 쪽이 스스로 대는 값이라
   권한 검사가 아니라 차례를 정하는 장치다.
   → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli)
+
+**기계 체크포인트 (Machine Checkpoint)**
+: 공유 기계 하나를 통째로 이름 붙여 디스크에 남긴 파일. CPU·메모리·화면·열린 파일과
+  키 기록(ledger)이 다 들어 있어서, 서버를 다시 켜도 그 순간부터 이어서 할 수 있다.
+  게임 메뉴로 하는 저장과 다르다. 게임마다 메뉴가 없어도 되고, 저장한 뒤로 한 일까지
+  남는다. 지금은 DOS Lane 이 `masc_dos_save`·`masc_dos_restore` 로 쓴다.
+  파일 머리에 어느 기계인지, 형식 번호, 만든 코어의 digest 가 적힌다. 기계나 형식
+  번호가 다르면 읽지 않는다. 코어 digest 는 보여 주기만 하고 비교하지 않는다.
+  되살리면 새 incarnation 이 되고, 조종권은 되살린 사람이 쥔다.
+  → [Machine_checkpoint](../../lib/machine_checkpoint/machine_checkpoint.mli),
+  [Dos_lane.restore](../../lib/dos_lane/dos_lane.mli)
+
+**슬롯 (Slot)**
+: 기계 체크포인트에 붙이는 이름. 영문자·숫자·`_`·`-` 로 1~64자이고, 경로가 될 수
+  없다. Keeper 끼리 같은 이름 공간을 쓴다. 같은 이름에 다시 저장하면 덮어쓴다.
+  → [Machine_checkpoint.slot_of_string](../../lib/machine_checkpoint/machine_checkpoint.mli)
 
 **MSX Lane**
 : 서버 안에 사는 MSX 기계 하나. Keeper 는 `masc_msx_*` 도구로 같은 기계에 키를
@@ -1358,17 +1386,13 @@ status: reference
   개별적으로 수행하던 취약하고 중복된 4문자열 휴리스틱 매칭을 대체하고, 서버
   SSE/REST 엔드포인트(`pending_entry`, `hitl_rows`)가 직접 방출한다(#38404). wire 값은
   각각 `"queued"` · `"judging"` · `"human_required"` · `"blocked"`다.
-  - `blocked`: 준비 단계 워커 부재(`Summary_attempt_pre_worker_unavailable`),
-    식별자 언바운드(`Summary_attempt_identity_unbound`), 지속성 불확실
-    (`Summary_attempt_persistence_uncertain`), 심판 실행 실패(`Summary_failed`)인 경우.
-    특히 `Summary_pre_worker_start_reserved` 상태는 초기 폴링 중 대시보드와 서버가
-    `judging`이 아닌 `blocked`로 투영하여 불필요한 대기 혼선을 막는다.
-  - `judging`: 자동 심판 워커가 실행 중(`Summary_attempt_in_flight`)이거나 요약 대기
-    (`Summary_pending`)인 경우.
-  - `human_required`: 모델 심판 결과 명시적인 사람 개입이 필요하다고 판정된 경우
-    (`advisory_judgment = Require_human`).
-  - `queued`: 심판 전 대기 중(`Summary_attempt_ready`)이며 아직 심판이 요청되지
-    않았거나(`Summary_not_requested`) 모델 판정(`Approve` | `Deny`)이 대기 중인 경우.
+  네 값의 뜻은 이렇다. 어떤 (심판 시도 상태, 요약 상태) 조합이 어느 값이 되는지는
+  `phase_of_disposition_and_summary` 한 곳이 정한다. 이 문서는 그 판정표를 옮겨 적지 않는다.
+  - `queued`: 아직 누구도 이 항목을 판정하고 있지 않다.
+  - `judging`: 자동 심판이 판정하는 중이거나, 판정이 끝나 적용을 기다린다.
+  - `human_required`: 자동 심판이 사람의 결정이 필요하다고 판정했다.
+  - `blocked`: 심판을 돌릴 수 없는 상태다(워커 없음, 식별자 없음, 지속성 불확실,
+    심판 실패). 사람이 보거나 원인이 풀려야 진행된다.
   - **비영속 투영 경계**: 승인 큐의 durable 저널 직렬화(`pending_entry_to_yojson` /
     `pending_entry_of_yojson`)에는 파생값인 `phase` 필드를 저장하지 않고, 오직
     클라이언트 관측을 위한 wire 프로젝션에서만 유지한다.
@@ -1623,7 +1647,10 @@ status: reference
     지원하기 위해 `runtime.toml`의 `[exec.ssh.endpoints.<name>] allowed_paths = ["/app", ...]`로
     추가 허용 루트를 선언할 수 있다(#38603).
   - **설정 불변식**: 선언 경로는 반드시 절대 경로이자 정규화된(normalized) 경로여야 하며,
-    루트(`/`)는 거절된다(`Exec_ssh_endpoint.parse_toml`).
+    루트(`/`)는 거절된다(`runtime_toml.ml`의 `exec_ssh_allowed_path_error`). 선언 경로는 그
+    엔드포인트의 `remote_root` 자신이거나 그 조상이면 안 된다. 루트는 한 Keeper가 아니라
+    엔드포인트에 속하므로, 그런 경로는 각 Keeper가 서로의 영역을 가리키게 한다
+    (`exec_ssh_allowed_path_covers_remote_root`).
   - **어휘 비교 경계**: 엔드포인트가 원격 머신일 수 있으므로 호스트 파일시스템의 심볼릭
     링크를 해석하지 않고 순수 어휘(lexical prefix)로만 비교한다. 그래서 추가 루트 아래에서
     밖을 가리키는 심볼릭 링크는 이 검사가 막지 못한다. 엔드포인트가 이 머신이면 추가 루트는 링크를
@@ -1638,6 +1665,7 @@ status: reference
   → [Sandbox_target](../../lib/exec/sandbox_target.mli),
   [Exec_policy_paths](../../lib/exec_policy/exec_policy_paths.mli),
   [Exec_ssh_endpoint](../../lib/runtime/exec_ssh_endpoint.mli),
+  [runtime_toml](../../lib/runtime/runtime_toml.ml),
   [Keeper_sandbox_remote_lane](../../lib/keeper/keeper_sandbox_remote_lane.mli)
 
 **Worktree**
@@ -1725,12 +1753,13 @@ status: reference
 
 **Boot Meta Failure Cause (부팅 메타 실패 사유)**
 : Keeper 기동 및 구체화(materialization) 시점에 메타데이터 검증 실패를 표현하는 닫힌 구조화 사유(`Keeper_runtime.boot_meta_failure_cause`).
-  - 닫힌 다섯 가지 variant:
-    1. `Meta_read_error`: 메타데이터 파일 읽기 또는 디코딩 실패.
-    2. `Config_invalid`: TOML 파싱 또는 유효성 검사 실패.
-    3. `Sandbox_profile_required`: 선언형 키퍼 프로필에 필수 `sandbox_profile` 누락.
-    4. `Sandbox_image_required`: 컨테이너 실행 프로필(`docker`·`microvm`)에 `sandbox_image` 누락 또는 공백(#37523·#38572). `remote_ssh`는 이미지를 쓰지 않으므로 요구되지 않음. 부팅 조정(`reconcile`)과 `keeper_up` 생성 파싱 양쪽에서 `Keeper_meta_contract.missing_required_sandbox_image_error` 공통 규칙으로 즉시 거절.
-    5. `Materialization_failed`: 파일시스템 또는 디렉터리 구조 구체화 실패.
+  - 닫힌 여섯 가지 variant:
+    1. `Missing_meta`: 영속 메타 파일이 없음. Keeper TOML이 있으면 부팅이 그 TOML로 메타를 구체화하고, TOML이 없거나 구체화한 뒤에도 메타가 써지지 않았으면 이 사유로 남음.
+    2. `Meta_read_error`: 메타데이터 파일 읽기 또는 디코딩 실패.
+    3. `Config_invalid`: TOML 파싱 또는 유효성 검사 실패.
+    4. `Sandbox_profile_required`: 선언형 키퍼 프로필에 필수 `sandbox_profile` 누락.
+    5. `Sandbox_image_required`: 컨테이너 실행 프로필(`docker`·`microvm`)에 `sandbox_image` 누락 또는 공백(#37523·#38572). `remote_ssh`는 이미지를 쓰지 않으므로 요구되지 않음. 부팅 조정(`reconcile`)과 `keeper_up` 생성 파싱 양쪽에서 `Keeper_meta_contract.missing_required_sandbox_image_error` 공통 규칙으로 즉시 거절.
+    6. `Materialization_failed`: 파일시스템 또는 디렉터리 구조 구체화 실패.
   → [keeper_runtime](../../lib/keeper/keeper_runtime.mli),
   [Keeper_meta_contract](../../lib/keeper/keeper_meta_contract.mli)
 
@@ -1885,8 +1914,8 @@ status: reference
   `speaker=unknown`, 잘못된 형태(`Invalid`)면 `speaker=invalid(...)`, 중복(`Duplicate`)이면
   `speaker=duplicate`로 표기해 패스를 중단하지 않고 대화를 계속 읽는다.
   이 메타데이터는 LLM provider로 전송되지 않고(`Input_speaker.without`), 공식 클라이언트
-  이력 봉투 및 스냅숏 해시에서 제외되며, 승인 입학 다이제스트(`Keeper_approval_input_admission.admission_digest`)
-  에서도 제외된다.
+  이력 봉투 및 스냅숏 해시에서 제외되며, 승인 입력 입학 표식이 메시지를 대조할 때 쓰는
+  다이제스트(`keeper_approval_input_admission.ml`의 내부 `digest`)에서도 제외된다.
   → [Keeper_input_speaker](../../lib/keeper/keeper_input_speaker.mli)
 
 **Atom**
@@ -2213,19 +2242,6 @@ status: reference
   잴 수 있는 Keeper가 다 가려진다.
   → [server_dashboard_http_keeper_memory_health](../../lib/server/server_dashboard_http_keeper_memory_health.ml)
 
-**Librarian Stalled (Librarian 이 멈춰 건너뛴 구간)**
-: Librarian 지점이 provider 가 마지막으로 받아들인 시작점보다 뒤에 있어서, 다음 요청이
-  건너뛰는 atom 중 요청에도 기억에도 없는 구간. 시작은 스냅숏 컷과 durable 읽은 위치 중 늦은
-  쪽, 끝은 받아들여진 시작점 바로 앞이다. 비면 gap 이 없다. 규칙은 순수 함수
-  `Keeper_carried_front.librarian_gap` 하나이고, 경보는 Keeper 의 작은 파일(meta, 스냅숏,
-  진행 파일, 턴 기록)만 읽어 그 함수를 부른다(`Keeper_next_request_forecast.librarian_gap`).
-  health JSON 의 `librarian.stalled`(`kind: "gap"`, `gap_start_atom`, `gap_end_atom` — 끝은
-  제외)이고, TUI 는 `Librarian stalled · atoms <a>-<b>` 로 그린다. 읽어야 할 파일을 못 읽으면
-  gap 없음(`null`)도 gap 도 아닌 `kind: "unmeasured"` 와 못 읽은 파일(`cause`)로 보낸다.
-  경보이지 Gate 가 아니다. Librarian 이 받아들여진 시작점에 닿으면 사라진다(RFC
-  librarian-lifecycle §4.10).
-  → [keeper_carried_front](../../lib/keeper/keeper_carried_front.mli) · [keeper_next_request_forecast](../../lib/keeper/keeper_next_request_forecast.mli)
-
 **Continuity Width (연속성 회차의 폭)**
 : 연속성 회차가 한 번에 읽을 수 있는 atom 수의 상한. 크기 때문에 거절당한 회차가 좁힌
   값을 다음 회차가 이어받는다. (keepers dir, keeper)별로 그 값을 잰 trace와 함께 루프
@@ -2411,7 +2427,17 @@ status: reference
   직전까지가 틈이 된다. `accepted_start`가 그 끝 이하이거나 두 위치를 모두 알 수 없으면
   틈은 없다(`None`). 현재 이력에 맞지 않는 스냅숏이 남아 있는 동안에는 읽은 위치 대신
   그 자르기부터 계산되어 틈이 짧게 산출될 수 있다 (RFC librarian-lifecycle §4.10, rule 3).
-  → [Keeper_carried_front.librarian_gap](../../lib/keeper/keeper_carried_front.mli)
+  틈의 끝(`gap_end_atom`)은 범위에 들지 않는다.
+  규칙은 이 순수 함수 하나다. 경보는 Keeper의 작은 파일(meta, 스냅숏, 진행 파일, 턴 기록)만
+  읽어 그 함수를 부른다(`Keeper_next_request_forecast.librarian_gap`). checkpoint는 읽지 않는다.
+  health JSON의 키는 `librarian.stalled`다. 틈이 있으면 `kind: "gap"`과 `gap_start_atom`,
+  `gap_end_atom`을 싣고, 틈이 없으면 `null`이다. 읽어야 할 파일을 못 읽으면 틈 없음도 틈도 아닌
+  `kind: "unmeasured"`와 못 읽은 파일(`cause`), 그 오류 문장(`detail`)을 보낸다.
+  TUI는 `Librarian stalled · atoms <a>-<b> are in neither the request nor memory`로 그린다
+  (`<b>`는 틈의 마지막 atom, 한 atom이면 `atom <a> is ...`). 못 잰 경우는 `Librarian stalled · not measured, <원인> · <detail>`이다.
+  경보이지 Gate가 아니다. Librarian이 받아들여진 시작점에 닿으면 사라진다.
+  → [Keeper_carried_front.librarian_gap](../../lib/keeper/keeper_carried_front.mli),
+  [Keeper_next_request_forecast](../../lib/keeper/keeper_next_request_forecast.mli)
 
 **Librarian Replay**
 : `masc-librarian-replay` CLI. 라이브 워크스페이스의 turn-boundary 로그와 checkpoint에

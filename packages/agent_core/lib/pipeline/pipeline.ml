@@ -311,25 +311,22 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
          | None -> with_assistant
          | Some note -> Util.snoc with_assistant note
        in
-       let checkpoint_state =
-         { agent.state with
-           messages = collected_messages agent.state.messages
-         ; turn_count = next_turn
-         ; usage
-         }
-       in
-       let* () =
-         persist_turn_checkpoint_for_state
-           agent
-           After_assistant_collected
-           checkpoint_state
-       in
+       (* Live state first, then the snapshot of it, as at the other two
+          mutation boundaries and as [Agent.create] documents. A sink failure
+          stops the turn here but never leaves live state behind a snapshot
+          the sink has already seen. *)
        update_state agent (fun state ->
          { state with
            messages = collected_messages state.messages
          ; turn_count = next_turn
          ; usage
          });
+       let* () =
+         persist_turn_checkpoint_for_state
+           agent
+           After_assistant_collected
+           agent.state
+       in
        (match agent.options.event_bus with
         | Some bus ->
           safe_publish

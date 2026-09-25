@@ -276,6 +276,10 @@ opam_pin_add() {
   local status=0
 
   while true; do
+    # Printed before the network call so a run that stalls here names the
+    # dependency and source it is waiting on (#26179): GitHub shows a running
+    # job's log only once the job ends, and the line is the last one written.
+    echo "[opam-pin] pinning ${package} from ${source} (attempt ${attempt}/${max_attempts})" >&2
     if opam pin add "${package}" "${source}" "$@"; then
       return 0
     fi

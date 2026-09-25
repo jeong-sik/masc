@@ -79,6 +79,16 @@
 - Board posts accept typed `attachments` on the Keeper tool and HTTP write paths. An entry names its kind and exactly one HTTPS URL or existing artifact SHA-256. The dashboard displays valid entries and an explicit failure card for malformed stored metadata (#38835, closes #38833).
 - An artifact attachment follows its kind in the dashboard: after the reader loads it, `image` shows as an image and `video` as a video, with the download link kept; `external_link` stays a download (#38835).
 - Board artifact references participate in tool blob retention while their posts remain stored (#38835).
+- Write and Edit on a remote_ssh Keeper can write a path under one of its
+  endpoint's declared roots (`allowed_paths`, such as a Terminal-Bench task's
+  `/app`). The write takes the same `filesystem_write` Gate decision as a host
+  write outside the playground; a deferred decision writes nothing, and an
+  approved one replays as the same mode. The endpoint checks, as it writes,
+  that the directory is physically under a declared root and the target is
+  not a symbolic link, so a link under `/app` cannot carry the approved bytes
+  elsewhere. Append copies the file and renames the copy over it, so a hard
+  link, or a link swapped in during the write, does not either
+  (#38788, refs #38593).
 
 ### Changed
 
@@ -134,6 +144,9 @@
 - The MSX tick answers with the change mark a spectator reads next. It
   answered one below it, so a live read after a tick never matched as
   unchanged and always carried the whole picture (#38952).
+- Evidence references sent to a goal whose phase has no active proof request
+  are refused with `error_code` `precondition_failed` instead of
+  `validation_error` (#38774).
 
 ### Removed
 
@@ -364,6 +377,32 @@
 - A Gate or checkpoint continuation whose resume overflows is recorded as a
   full thread at once instead of being resent unchanged into the same thread
   (#38882).
+- Execute reports a path refusal (`Path blocked`, the caller's cwd, cd or
+  redirect target) as `policy_rejection`; it was `runtime_failure` through a
+  local default. The keeper's remaining failure helpers take a required
+  class, and three unused `Tool_args` helpers that fixed a class are gone
+  (#38705, refs #27742).
+- A tool failure that carries a `Tool_args` error code takes its class from
+  that code (`Tool_args.failure_class_of_error_code`). Goal tools and the
+  agent metrics, card and timeline tools no longer report every failure as
+  `workflow_rejection`: a missing field, an unknown action or an unknown goal
+  is a `policy_rejection`, and a store failure is a `runtime_failure`. A goal
+  proof request refused for its evidence references keeps the reference's
+  cause instead of becoming an internal error (#38774, refs #27742).
+- A refused `keeper_surface_read` is recorded as a failed call instead of a
+  completed one. A blank surface, a connector the Keeper is not bound to or a
+  label no lane carries is a `policy_rejection`; a Discord read failure takes
+  the class of its error code. The output JSON is unchanged. From 2026-09-18
+  to 2026-09-24, 12 refusals were recorded as completed (#38775).
+- Discord REST reads now retain typed invalid request, conflict, rate limit,
+  authorization, missing resource, timeout, and external service failures.
+  Channel selection also distinguishes caller input errors from absent bindings and binding-store
+  failures instead of classifying all three as a workflow precondition (#38775).
+- Read on a Keeper whose tree the endpoint owns (remote_ssh, microvm)
+  reports a missing file as `path_not_found` with `policy_rejection`, and a
+  directory as not a file, instead of `remote_ssh_read_failed ... head: cannot
+  open` with `runtime_failure`. The read script checks the path on the
+  endpoint and exits with its own code for each case (#38778, refs #27742).
 
 ### Performance
 
@@ -423,6 +462,9 @@
   rotates on it. The Candidate_fault table test now runs; #38913 added it
   without a dune stanza (#38931).
 - `scripts/review/approve-guard.sh` refuses an APPROVE over this account's own open CHANGES_REQUESTED unless the caller names that review with `--replace-own-cr <review id>`; the posted footer records the replaced review. The selftest's fake `gh` now refuses a read without `--paginate`, pinning that every page of reviews and check-runs is read. (#38950)
+- Read and Grep lose their host read branches, which no sandbox profile has
+  reached since the Local profile was removed; `should_route_read`,
+  `shell_command_available` and the runner's `host_via` go with them (#38722).
 
 ## [0.38.0] - 2026-09-24
 

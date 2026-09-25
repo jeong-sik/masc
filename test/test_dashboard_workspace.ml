@@ -88,6 +88,31 @@ let test_mentions_without_me_returns_all_mentions () =
   Alcotest.(check int) "all mentions" 1 (List.length (list_field "mentions_inbox" json))
 ;;
 
+(* The inbox snippet keeps 157 bytes and a "..." mark. After the 8-byte
+   "@alpha x", 157 bytes end on the second byte of a Hangul syllable, and the
+   snippet reached the dashboard ending in U+FFFD. *)
+let test_mention_snippet_cuts_between_characters () =
+  with_workspace
+  @@ fun config ->
+  let hangul = String.concat "" (List.init 100 (fun _ -> "\xea\xb0\x80")) in
+  let content = "@alpha x" ^ hangul in
+  ignore
+    (Workspace.broadcast ~audience:Workspace_broadcast.System_record config
+       ~from_agent:"operator" ~content);
+  let json = Dashboard_workspace.json ~config ~me:"alpha" ~limit:10 () in
+  match list_field "mentions_inbox" json with
+  | [ item ] ->
+    let snippet = string_field "snippet" item in
+    Alcotest.(check bool) "snippet decodes as UTF-8" true
+      (String_util.is_valid_utf8 snippet);
+    Alcotest.(check string) "snippet keeps whole characters and marks the cut"
+      (String.sub content 0 155 ^ "...")
+      snippet;
+    Alcotest.(check string) "the message body keeps the full text" content
+      (string_field "body" (List.hd (list_field "messages" json)))
+  | items -> Alcotest.failf "expected one mention, got %d" (List.length items)
+;;
+
 let () =
   Alcotest.run
     "Dashboard_workspace"
@@ -100,6 +125,10 @@ let () =
             "mentions without me returns all mentions"
             `Quick
             test_mentions_without_me_returns_all_mentions
+        ; Alcotest.test_case
+            "mention snippet cuts between characters"
+            `Quick
+            test_mention_snippet_cuts_between_characters
         ] )
     ]
 ;;

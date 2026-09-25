@@ -2402,8 +2402,7 @@ let handle_analyze_image_with_outcome ?complete ?config ?turn_sandbox_factory
                  |> Result.map_error (fun detail -> Tool_result.Policy_rejection, "image_too_large", detail) in
              let* _ = Keeper_vision_tool.sniff_image_media_type bytes
                  |> Result.map_error (fun detail -> Tool_result.Policy_rejection, "invalid_media_type", detail) in
-             Keeper_vision_tool.store_artifact
-               ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name:meta.name) bytes
+             Keeper_vision_tool.store_kept ~keeper_name:meta.name bytes
                |> Result.map_error (fun detail -> Tool_result.Runtime_failure, "artifact_store_failed", detail)
            in
            (match prepared with

@@ -300,16 +300,54 @@ let read_usage_after_quota_refusal ~keeper_name ~runtime_id ~clock ~cwd config =
          "Codex usage not read after a quota refusal: no server root switch")
 ;;
 
-(* Always installed so usage-window reports are recorded. A turn nobody
-   streams, traces or observes gets only that; its other events are ignored as
-   before. *)
-let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action on_event =
+(* OpenAI counting, as Backend_openai_parse reads the API wire: the input
+   count already includes the cached prefix and the output count already
+   includes reasoning, so both copy across and the cache fields fill the
+   canonical record's cache slots. *)
+let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
+  : Agent_core.Types.api_usage
+  =
+  { input_tokens = usage.input_tokens
+  ; output_tokens = usage.output_tokens
+  ; cache_creation_input_tokens = usage.cache_write_input_tokens
+  ; cache_read_input_tokens = usage.cached_input_tokens
+  ; cost_usd = None
+  }
+;;
+
+(* Always installed so usage-window reports and the thread's usage counts are
+   recorded. A turn nobody streams, traces or observes gets only those; its
+   other events are ignored as before. *)
+let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
+    ~on_usage_report ~position on_event =
+  (* The thread's running count, reported under the app-server turn id (the
+     identity the completion hook also writes for a Codex turn) and the
+     thread it counts. The app-server's own total is kept: an overflow reset
+     reports zero counts with the window size there. *)
+  let report_usage ~thread_id ~turn_id ~model
+      (thread_total : Runtime_codex_app_server.token_usage) =
+    Option.iter
+      (fun report ->
+         report
+           { Keeper_client_usage_report.official_turn = turn_count
+           ; response_id = turn_id
+           ; model
+           ; conversation_id = thread_id
+           ; position
+           ; usage_scope = Runtime_usage_scope.Conversation_cumulative
+           ; usage = api_usage_of_token_usage thread_total
+           ; vendor_total_tokens = Some thread_total.total_tokens
+           })
+      on_usage_report
+  in
   match on_event, raw_trace_run, on_native_action with
   | None, None, None ->
     Some
       (function
         | Runtime_codex_app_server.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
+        | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; thread_total } ->
+          report_usage ~thread_id ~turn_id ~model thread_total
         | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
         | Turn_finished _ -> ())
@@ -401,6 +439,8 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
             server_name
         | Runtime_codex_app_server.Usage_windows_reported report ->
           record_usage_windows ~keeper_name ~runtime_id report
+        | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; thread_total } ->
+          report_usage ~thread_id ~turn_id ~model thread_total
         | Runtime_codex_app_server.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text
@@ -666,21 +706,6 @@ let recovery_failure_of_attempt ~thread_mode ~gate_continuation error =
    check first if writes start failing. If Codex closes it, [Native_read]
    leaves a keeper with no write path at all, and the posture is what has to
    change; a note about which tool to reach for would then be wrong. *)
-(* OpenAI counting, as Backend_openai_parse reads the API wire: the input
-   count already includes the cached prefix and the output count already
-   includes reasoning, so both copy across and the cache fields fill the
-   canonical record's cache slots. *)
-let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
-  : Agent_core.Types.api_usage
-  =
-  { input_tokens = usage.input_tokens
-  ; output_tokens = usage.output_tokens
-  ; cache_creation_input_tokens = usage.cache_write_input_tokens
-  ; cache_read_input_tokens = usage.cached_input_tokens
-  ; cost_usd = None
-  }
-;;
-
 let native_posture_note = function
   | Runtime_native_tools.Native_read ->
     [ "Your built-in file edits run under a read-only sandbox in this session, \
@@ -698,7 +723,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
-    ~(config : Runtime_execution.codex_app_server) =
+    ~on_usage_report ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
     Error
@@ -1222,8 +1247,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             ~latency_ms:
               (Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
               (* A host stop ends the turn from inside a tool call, before
-                 the app-server's thread/tokenUsage/updated for this turn has
-                 arrived, so there is no count to report here. *)
+                 the app-server's thread/tokenUsage/updated for the response
+                 that asked for it arrives. Frames of earlier responses in
+                 the turn were already reported on the stream. *)
             ~request_context:None
             stop
         in
@@ -1264,7 +1290,13 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       try
         let on_stream_event =
           codex_stream_callback
-          ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action on_event
+          ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
+          ~on_usage_report
+          ~position:
+            (match thread_mode with
+             | Runtime_codex_app_server.Start -> Keeper_usage_resolution.Fresh
+             | Runtime_codex_app_server.Resume _ -> Keeper_usage_resolution.Resumed)
+          on_event
         in
         (match
        Runtime_codex_app_server.run_turn
@@ -1536,6 +1568,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
+    ?on_usage_report
     ~event_bus ~raw_trace ~on_event ~config () =
   let settled_session = Atomic.make None in
   let on_session_settled value = Atomic.set settled_session (Some value) in
@@ -1634,6 +1667,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
           ~context
           ~terminal_effect_state
         ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+          ~on_usage_report
           ~event_bus
           ~raw_trace
           ~on_event
@@ -1660,6 +1694,8 @@ module For_testing = struct
         ~raw_trace_run:None
         ~turn_count
         ~on_native_action:(Some observe)
+        ~on_usage_report:None
+        ~position:Keeper_usage_resolution.Fresh
         None
     with
     | Some callback -> callback event

@@ -353,22 +353,6 @@ type read_file_attempt =
       ; payload : string
       }
 
-let read_sandbox_bytes ?turn_sandbox_factory ?cwd ~config ~meta ~path ~max_bytes () =
-  let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
-  let* read_target =
-    resolve_read_file_target ~config ~meta ~args ~raw_path:path
-    |> Result.map_error (function Read_path_error refusal -> refusal.Keeper_alerting_path.message)
-  in
-  let* () =
-    check_read_file_target ~config ~meta read_target
-    |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) -> refusal.message)
-  in
-  Keeper_sandbox_read_runner.read_file ?turn_sandbox_factory ~config ~meta
-    ~host_path:(read_file_target_path read_target) ~max_bytes
-    ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
-  |> Result.map_error Keeper_sandbox_read_backend.read_error_to_string
-;;
-
 let read_complete_sandbox_bytes ?turn_sandbox_factory ~config ~meta ~path ?cwd () =
   let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
   let* read_target =

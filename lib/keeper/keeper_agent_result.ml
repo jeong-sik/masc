@@ -119,6 +119,7 @@ type turn_settlement =
   { result : (run_result, Agent_core.Error.t) result
   ; degraded_retry_applied : Keeper_error_classify.degraded_retry option
   ; degraded_retry_deferred : Keeper_error_classify.degraded_retry option
+  ; spend : Keeper_turn_spend.attempt list
   }
 
 (* A turn that ended before [Keeper_agent_run_receipt.finalize] ran. It wrote
@@ -131,6 +132,7 @@ let not_dispatched error =
   { result = Error error
   ; degraded_retry_applied = None
   ; degraded_retry_deferred = None
+  ; spend = []
   }
 ;;
 

@@ -230,7 +230,6 @@ export interface BoardReactionSummary {
   emoji: string
   count: number
   reacted: boolean
-  has_reacted: boolean
   recent_user_ids: string[]
 }
 
@@ -1345,7 +1344,6 @@ export interface Keeper {
   active_model?: string
   active_model_label?: string | null
   last_model_used?: string
-  last_model_used_label?: string | null
   next_model_hint?: string | null
   runtime_id?: string | null
   runtime_ref?: RuntimeRef | null
@@ -1384,7 +1382,6 @@ export interface Keeper {
   updated_at?: string
   keeper_age_s?: number
   last_turn_ago_s?: number
-  last_handoff_ago_s?: number
   last_proactive_ago_s?: number
   last_proactive_reason?: string | null
   last_proactive_preview?: string | null
@@ -1432,7 +1429,6 @@ export interface Keeper {
   conversation_tail_count?: number
   k2k_count?: number
   k2k_mentions?: Array<{ keeper: string; count: number }>
-  handoff_count_total?: number
   metrics_window?: MetricsWindow
   // Metrics time-series (from backend metrics_series)
   metrics_series?: KeeperMetricPoint[]
@@ -1531,7 +1527,6 @@ interface KeeperConfigExecution {
   models: string[]
   active_model: string
   active_model_label?: string | null
-  last_model_used_label?: string | null
   verify: boolean
   selected_runtime_id: string
   selected_runtime_canonical: string
@@ -1604,7 +1599,6 @@ interface KeeperConfigRuntime {
   fiber_health: string
   runtime_blocker_class?: KeeperRuntimeBlockerClass | null
   active_model_label?: string | null
-  last_model_used_label?: string | null
   runtime_blocker_summary?: string | null
 }
 

@@ -41,6 +41,9 @@ let test_tool_input_recovery () =
             (phase = Tool_result.Proven_pre_effect); result);
         "navigation guard on text read", (fun () -> read ["mode",`String "text";
           "navigationSource",`Assoc ["url",`String "https://example.org/";"documentId",`String "observed"]]);
+        "text cap below the range", (fun () -> read ["mode",`String "text";"maxChars",`Int 0]);
+        "text cap past the most", (fun () -> read ["mode",`String "text";
+          "maxChars",`Int (Masc.Browser_page_script.max_text_chars + 1)]);
         "malformed scene source", (fun () -> read ["mode",`String "scene";"navigationSource",`Assoc []]);
         "malformed scene scope", (fun () -> read ["mode",`String "scene";"scope",`Assoc []]);
         "malformed scene URL", (fun () -> read ["mode",`String "scene";"expectedUrl",`Int 1]);

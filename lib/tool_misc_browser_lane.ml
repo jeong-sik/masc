@@ -238,9 +238,11 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
               (Browser_lane.issue_automation
                 ~verb:(Browser_lane.Page_context {tab_id;frame_path;mode}) ~timeout_sec:default_timeout_sec))
     else
-    let max_chars =
-      max 1 (min Browser_page_script.max_text_chars (get_int args "maxChars" Browser_page_script.default_text_chars))
-    in
+    (* One rule for the cap, the one every lane's executor applies: a value
+       out of range is refused, not quietly clamped. *)
+    match Browser_page_script.text_cap (get_int_opt args "maxChars") with
+    | Error detail -> make_input_err ~tool_name ~start_time detail
+    | Ok max_chars ->
     match get_string args "mode" "text" with
     | ("scene" | "regions") as mode ->
       (match get_int_opt args "tabId" with

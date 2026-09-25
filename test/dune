@@ -2540,6 +2540,8 @@
 
 (include stanzas/test_dos_tools.inc)
 
+(include stanzas/test_machine_checkpoint.inc)
+
 (include stanzas/test_msx_frame_route.inc)
 
 (include stanzas/test_lane_addon_live_route.inc)
@@ -5035,6 +5037,22 @@
  (deps (alias runtest-test_tui_keyboard_input-keepers-lanes)))
 
 (rule
+ (alias runtest-test_tui_keyboard_input-keeper-settings-activation)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   keeper-settings-activation)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-keeper-settings-activation)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-board-json)
  (deps
   test_tui_keyboard_input.py
@@ -6205,6 +6223,7 @@
  (modules test_browser_bidi_downloads_reply_window)
  (libraries masc alcotest eio eio.mock))
 (include stanzas/test_browser_webdriver.inc)
+(include stanzas/test_browser_cdp.inc)
 (include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)
@@ -6267,7 +6286,7 @@
   %{workspace_root}/bin/masc_tui.ml
   %{workspace_root}/bin/masc_tui_types.ml
   %{workspace_root}/bin/masc_tui_render.ml)
- (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
+ (libraries alcotest ast_grep compiler-libs.common masc masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
 
 
 (rule

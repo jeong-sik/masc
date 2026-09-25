@@ -81,6 +81,8 @@ type agent_setup =
   ; observe_official_client_native_action :
       runtime_id:string -> official_turn:int ->
       identity:Runtime_native_tools.action_identity -> tool_name:string -> unit
+  ; observe_official_client_usage_report :
+      Keeper_client_usage_report.t -> unit
   ; acc : hook_accumulator
   ; all_tool_names : string list
   ; skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list

@@ -171,6 +171,7 @@ type turn_result =
   ; usage : turn_usage option
     (* The turn's thread/tokenUsage/updated frames, folded; [None] when none
        arrived before turn/completed. *)
+  ; model_context_window : int option
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
@@ -1200,7 +1201,14 @@ let token_usage_notification ~thread_id ~turn_id params =
     let* usage_fields = assoc_at stage usage_json in
     let* last = token_usage_breakdown stage usage_fields "last" in
     let* thread_total = token_usage_breakdown stage usage_fields "total" in
-    Ok (Some (last, thread_total))
+    let* model_context_window =
+      match List.assoc_opt "modelContextWindow" usage_fields with
+      | None | Some `Null -> Ok None
+      | Some (`Int window) when window > 0 -> Ok (Some window)
+      | Some _ ->
+        protocol_error stage "field \"modelContextWindow\" must be a positive integer or null"
+    in
+    Ok (Some (last, thread_total, model_context_window))
 ;;
 
 (* Codex MCP requests include approvals and forms, independently of shell
@@ -1248,7 +1256,7 @@ let cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id par
     Ok ())
 ;;
 
-let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~model ~seen_final
+let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~thread_id ~turn_id ~model ~seen_final
     ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event =
   let* message = io.receive () in
   match message with
@@ -1269,7 +1277,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1280,7 +1288,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
       ~on_stream_event
   | Server_request { id; method_ = "mcpServer/elicitation/request"; params } ->
     let* () = cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params in
-    await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~model
+    await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~thread_id ~turn_id ~model
       ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
@@ -1301,7 +1309,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1316,7 +1324,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1336,7 +1344,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1369,7 +1377,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
         :: List.filter (fun open_id -> not (String.equal open_id call_id)) open_tool_call_ids
     in
     await_turn_terminal
-      io ~tools ~tool_call_count ~thread_id ~turn_id ~model ~seen_final ~seen_fallback
+      io ~tools ~tool_call_count ~model_context_window ~thread_id ~turn_id ~model ~seen_final ~seen_fallback
       ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
@@ -1403,7 +1411,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1428,7 +1436,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
       await_turn_terminal
         io
         ~tools
-        ~tool_call_count
+        ~tool_call_count ~model_context_window
         ~thread_id
         ~turn_id
         ~model
@@ -1470,7 +1478,9 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
        for the turn result's context occupancy, [total] for its spend. *)
     let frame =
       Option.map
-        (fun (last, thread_total) -> frame_usage_of_breakdowns ~last ~thread_total)
+        (fun (last, thread_total, window) ->
+           Option.iter (fun window -> model_context_window := Some window) window;
+           frame_usage_of_breakdowns ~last ~thread_total)
         frame
     in
     Option.iter
@@ -1485,7 +1495,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1507,7 +1517,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1523,7 +1533,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~mode
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1757,11 +1767,12 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
   in
   emit_stream_event on_stream_event (Turn_started { turn_id; model });
   let tool_call_count = ref 0 in
+  let model_context_window = ref None in
   let* text, turn_usage =
     await_turn_terminal
       io
       ~tools:dynamic_tools
-      ~tool_call_count
+      ~tool_call_count ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1782,6 +1793,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
     ; user_agent
     ; resumed
     ; usage = turn_usage
+    ; model_context_window = !model_context_window
     }
 ;;
 

@@ -1492,6 +1492,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
               | Some _ -> Runtime_usage_scope.Conversation_cumulative
               | None -> Runtime_usage_scope.Usage_scope_unavailable)
            ?request_context
+           ?reported_context_window:turn.model_context_window
            ()
        in
        Ok

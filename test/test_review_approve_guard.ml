@@ -1,9 +1,10 @@
 (* Runs scripts/review/approve-guard-selftest.sh, which drives
    scripts/review/approve-guard.sh against a fake gh (no network) through
-   every refusal the guard exists for: short/long SHA, SLOT naming another PR
-   or head, Draft, moved head, non-main base, merged PR, pending / failed /
-   cancelled / empty check-runs, queued workflow run, empty body, duplicate
-   approval, and a posted review that reads back wrong. *)
+   every refusal the guard exists for: short/long SHA, Draft, moved head,
+   non-main base, merged PR, pending / failed / cancelled / empty check-runs,
+   a Draft-time suite whose check-run ids outrank the Ready-time suite, queued
+   workflow run, a cancelled twin run, empty body, duplicate approval, and a
+   posted review that reads back wrong. *)
 
 let source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with

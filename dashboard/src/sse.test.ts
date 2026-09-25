@@ -257,3 +257,30 @@ describe('server-push Agent Core typed-payload handlers', () => {
     expect(lastJournalEntry()?.text).toBe('Handoff requested · alpha→beta · load')
   })
 })
+
+describe('keeper turn KV reuse', () => {
+  beforeEach(() => {
+    _resetJournalForTests()
+  })
+
+  function complete(fields: { cache_n?: number | null; prompt_n?: number | null }) {
+    recordServerPushEvent({
+      type: 'keeper_turn_complete',
+      name: 'sangsu',
+      turn: 42,
+      input_tokens: 10,
+      output_tokens: 5,
+      tool_calls_made: 1,
+      ...fields,
+    })
+    return journal.value[0]?.text ?? ''
+  }
+
+  it('shows the turn sum the server put on keeper_turn_complete', () => {
+    expect(complete({ cache_n: 3508, prompt_n: 66 })).toContain('KV 재사용 3508/3574tok (98%)')
+  })
+
+  it('leaves the suffix off when the turn reported no wire timings', () => {
+    expect(complete({ cache_n: null, prompt_n: null })).not.toContain('KV 재사용')
+  })
+})

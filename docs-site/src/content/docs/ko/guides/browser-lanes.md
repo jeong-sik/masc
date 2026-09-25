@@ -58,11 +58,11 @@ extension = "/absolute/path/printed/by/the/installer"
 
 세 값 모두 절대 경로입니다. MASC는 디버깅 연결로 확장을 올립니다(`Extensions.loadUnpacked`). Chrome Canary 156과 Chrome for Testing 154에서 확인했습니다. 일반 Chrome은 137부터 `--load-extension`을 막았고, CDP로 올리는 방식을 받는지는 빌드마다 다를 수 있습니다. 디버깅 포트는 loopback에서 열립니다. origin 플래그는 확장의 WebSocket Origin을 허용하지만, Origin 헤더를 보내지 않는 로컬 클라이언트를 배제하지는 못합니다. 호스트와 로그인용 profile에 대한 접근을 그에 맞게 관리해야 합니다. `profile`이 없으면 세션마다 서버 소유 profile을 비우고 시작하며, 설정한 profile은 지우지 않습니다. 어느 쪽이든 폴더는 소유자만 접근할 수 있습니다.
 
-Stagehand 런타임은 `llm.generate`로 모델을 요청합니다. MASC는 `runtime.toml`의 `browser_stagehand_exact` exact-output lane으로 답합니다. slot을 순서대로 시도하며, system prompt를 받지 않는 모델의 slot은 건너뜁니다. CLI slot을 선언한 lane은 거절합니다. 답은 JSON 값 하나인지만 확인하고, 모양은 확장이 자기 스키마로 확인합니다.
+Stagehand 런타임은 `llm.generate`로 모델을 요청합니다. MASC는 `runtime.toml`의 `browser_stagehand_exact` exact-output lane으로 답합니다. slot을 순서대로 시도하며, system prompt를 받지 않는 모델의 slot은 건너뜁니다. 선언한 `cli_slots`(구독 공식 클라이언트)는 HTTP slot이 모두 실패한 뒤, 또는 system prompt를 받는 HTTP slot이 없을 때 one-shot으로 실행합니다. assistant 턴이 든 대화는 CLI slot으로 보내지 않습니다. 답은 JSON 값 하나인지만 확인하고, 모양은 확장이 자기 스키마로 확인합니다.
 
 브라우저는 `BrowserSession`을 `lane="stagehand"`로 열 때 뜨고, 닫을 때·세션이 실패할 때·서버가 멈출 때 내려갑니다. 비정상 종료한 서버가 남긴 Chromium은 다음 시작 때 정리합니다.
 
-Stagehand는 서버가 공유하는 세션 하나를 사용합니다. `BrowserSession action="open"`은 기존 세션을 재사용할 수 있으며, `reused: true`는 연결이 살아 있다는 증거가 아닙니다. 연결이 끊겼다는 답이 오면 `action="status"`의 `ended`를 확인합니다. 세션을 종료해도 되는지 확인한 뒤 `action="close"` → `action="open"`으로 다시 열고, `BrowserTabs`로 새 tab ID를 찾습니다. `open`만 반복하면 끊긴 세션에도 `reused: true`가 올 수 있습니다. 이미 페이지를 바꿨을 수 있는 act는 그대로 반복하지 않습니다.
+Stagehand는 서버가 공유하는 세션 하나를 사용합니다. `BrowserSession action="open"`은 살아 있는 세션을 재사용합니다(`reused: true`). service worker나 연결이 끊긴 세션은 서버가 바로 놓습니다. `action="status"`는 그 이유를 `ended`에 적고, 그 사이의 `open`은 "ask again"으로 답하며, 다음 `open`이 새 브라우저를 엽니다. 그 뒤 `BrowserTabs`로 새 tab ID를 찾습니다. 이미 페이지를 바꿨을 수 있는 act는 그대로 반복하지 않습니다.
 
 `status`는 누가 세션을 열었거나 지금 쓰는지 알려주지 않습니다. 운영자가 종료해도 된다고 확인했거나 작업에 명시적인 독점 사용 범위가 있을 때만 닫고, 그 외에는 사용 관계를 조율해 인계합니다.
 

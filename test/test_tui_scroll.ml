@@ -181,6 +181,23 @@ let test_a_window_names_its_first_and_last_rows () =
   check Alcotest.string "no rows to show them in" "0/30" (text ~scroll:0 ~height:0 30);
   check Alcotest.string "an empty list" "0/0" (text ~scroll:0 ~height:26 0)
 
+(* One builder for the "[lines a-b/n]" row (#38744). Without a hint it has
+   something to say only when the rows overflow, which is the row
+   [content_height ~overflow_takes_row:true] took off; with one it is drawn at
+   every count. *)
+let test_the_position_row_is_drawn_when_it_has_something_to_say () =
+  let row = Masc_tui_scroll.position_row in
+  let some = Alcotest.(option string) in
+  check some "an overflowing window names its rows" (Some "  [lines 5-30/30]")
+    (row ~scroll:4 ~height:26 30);
+  check some "every row fits: no row" None (row ~scroll:0 ~height:26 26);
+  check some "the hint follows the reading"
+    (Some "  [lines 1-26/30]  esc closes")
+    (row ~scroll:0 ~height:26 ~hint:"esc closes" 30);
+  check some "a hint alone when every row fits" (Some "  esc closes")
+    (row ~scroll:0 ~height:26 ~hint:"esc closes" 3);
+  check some "an empty list has nothing to place" None (row ~scroll:0 ~height:26 0)
+
 let () =
   Alcotest.run "tui_scroll"
     [ ( "bound"
@@ -220,5 +237,7 @@ let () =
     ; ( "position"
       , [ Alcotest.test_case "a window names its first and last rows" `Quick
             test_a_window_names_its_first_and_last_rows
+        ; Alcotest.test_case "the position row has one builder" `Quick
+            test_the_position_row_is_drawn_when_it_has_something_to_say
         ] )
     ]

@@ -1621,6 +1621,34 @@ let test_direct_reply_projection_keeps_external_wait_typed () =
   | Error error ->
     fail (Ops.direct_reply_decode_error_to_string error)
 
+(* A reply the provider did not stream is published as deltas cut from the
+   stored reply, and Discord and Slack post those deltas joined. The joined
+   chunks must be the reply: a whitespace-only chunk between two paragraphs
+   used to be dropped, so "\n\n" arrived as "\n". *)
+let test_reply_chunks_join_back_to_the_reply () =
+  let long_line = String.concat " " (List.init 60 (fun i -> Printf.sprintf "단어%d" i)) in
+  let replies =
+    [ "첫 문단입니다.\n\n둘째 문단."
+    ; "Done!\n\n\nNext?\n\nLast."
+    ; "코드:\n\n```\nlet x = 1\n\n\nlet y = 2\n```\n"
+    ; "  앞 공백. 뒤 공백.  "
+    ; "\n\n"
+    ; long_line ^ ".\n\n" ^ long_line
+    ; ""
+    ]
+  in
+  List.iter
+    (fun reply ->
+       let chunks = Server_routes_http_keeper_stream.split_keeper_reply_chunks reply in
+       check string (Printf.sprintf "joined chunks of %S" reply) reply (String.concat "" chunks);
+       check bool (Printf.sprintf "no empty chunk in %S" reply) false
+         (List.exists (String.equal "") chunks))
+    replies;
+  check (list string) "a paragraph break is its own chunk, not dropped"
+    [ "첫 문단입니다."; "\n"; "\n둘째 문단." ]
+    (Server_routes_http_keeper_stream.split_keeper_reply_chunks "첫 문단입니다.\n\n둘째 문단.")
+;;
+
 let () =
   run "keeper_turn_outcome"
     [
@@ -1717,5 +1745,10 @@ let () =
             test_connector_projection_suppresses_completed_external_effect;
           test_case "direct reply keeps external wait typed" `Quick
             test_direct_reply_projection_keeps_external_wait_typed;
+        ] );
+      ( "reply chunks",
+        [
+          test_case "joined chunks equal the reply" `Quick
+            test_reply_chunks_join_back_to_the_reply;
         ] );
     ]

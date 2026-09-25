@@ -1408,7 +1408,7 @@ let test_ambiguous_json_is_rejected () =
     let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname state_path) in
     write_file
       state_path
-      {|{"client_kind":"codex","last_recovery_resolution":null,"last_transient_release":null,"phase":{"kind":"settled","session_id":"session-1","turn_id":"turn-1"},"runtime_id":"codex.default","runtime_id":"codex.other","schema":"masc.keeper.official-client-session.v1","tool_surface_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","turn_count":1,"updated_at":1.0}|};
+      {|{"client_kind":"codex","last_recovery_resolution":null,"last_transient_release":null,"phase":{"kind":"settled","session_id":"session-1","turn_id":"turn-1"},"runtime_id":"codex.default","runtime_id":"codex.other","schema":"masc.keeper.official-client-session.v2","tool_surface_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","turn_count":1,"updated_at":1.0}|};
     match load ~base_path ~keeper_name with
     | Error _ -> ()
     | Ok _ -> fail "duplicate JSON keys were accepted")

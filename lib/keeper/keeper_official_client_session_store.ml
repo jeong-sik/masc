@@ -179,7 +179,7 @@ type claim_error =
   | Turn_already_inflight
 
 let ( let* ) = Result.bind
-let schema = "masc.keeper.official-client-session.v1"
+let schema = "masc.keeper.official-client-session.v2"
 let filename = "session.json"
 let state_dirname = "official-client-runtime"
 let recovery_rng = Random.State.make_self_init ()

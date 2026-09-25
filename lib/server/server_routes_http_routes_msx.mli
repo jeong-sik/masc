@@ -4,11 +4,6 @@
     Machine spectating is handled via
     [GET /api/v1/lane-addons/live?source_kind=msx_capture]. *)
 
-val frame_json : unit -> Yojson.Safe.t
-(** The frame payload: [{loaded:false}] when no machine is loaded, else
-    [{loaded:true, number, width, height, mode, cartridge, rgb_base64}].
-    Exposed for the route test. *)
-
 val press_result_json :
   ok:bool -> ?message:string -> Msx_lane.observation option -> Yojson.Safe.t
 (** The press response body. Exposed for the route test. *)

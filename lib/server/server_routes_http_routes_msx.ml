@@ -243,32 +243,6 @@ let frame_rgb_base64 rgb =
         let encoded = Base64.encode_string rgb in
         encoded_pixels := Some (rgb, encoded);
         encoded)
-
-let frame_json () : Yojson.Safe.t =
-  match Msx_lane.frame () with
-  | None -> `Assoc [ ("loaded", `Bool false) ]
-  | Some f ->
-    `Assoc
-      [ ("loaded", `Bool true)
-      ; ("number", `Int f.Msx_lane.number)
-      ; ("width", `Int f.Msx_lane.width)
-      ; ("height", `Int f.Msx_lane.height)
-      ; ("mode", `String f.Msx_lane.mode)
-      ; ( "cartridge"
-        , match f.Msx_lane.cartridge with Some c -> `String c | None -> `Null )
-      ; ("disk", match f.Msx_lane.disk with Some d -> `String d | None -> `Null)
-      ; ("rgb_base64", `String (frame_rgb_base64 f.Msx_lane.rgb))
-      ; ( "players"
-        , `List
-            (List.map
-               (fun (who, last) ->
-                 `Assoc
-                   [ ("who", `String who)
-                   ; ("last_frame", `Int last)
-                   ; ("frames_ago", `Int (f.Msx_lane.number - last))
-                   ])
-               (recent_players ~now:f.Msx_lane.number)) )
-      ]
 ;;
 
 (* Frames per poll-cadence tick (RFC-0439 §3.2). At the TUI's ~3 Hz spectator

@@ -4,6 +4,7 @@
  (name test_dos_tools)
  (modules test_dos_tools)
  (libraries
-  alcotest yojson unix eio_main fs_compat masc masc.dos_lane masc.board_handlers
+  alcotest yojson unix eio_main fs_compat masc masc.dos_lane ocaml-dos.core-identity
+  masc.board_handlers
   masc.masc_core masc.tool_types masc.masc_tool_dispatch masc.tool_schemas
   masc.masc_types masc_test_deps))

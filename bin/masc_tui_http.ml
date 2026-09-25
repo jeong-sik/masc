@@ -1629,6 +1629,12 @@ let fetch_repository_pulls ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/repositories/pulls"
 
+(** GET /api/v1/dashboard/keeper-costs -- each Keeper's cost and tokens over
+    the server's default window, which the answer's [window_minutes] names. *)
+let fetch_keeper_costs ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/keeper-costs"
+
 let fetch_dashboard_goals ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/goals"

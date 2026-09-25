@@ -294,7 +294,7 @@ export function IdeExplorer({
           ${repoList.length > 0 ? html`
             <select
               aria-label="IDE repository"
-              value=${selectedRepoId ?? repoList[0]?.id ?? ''}
+              value=${selectedRepoId ?? ''}
               onChange=${(event: Event) => {
                 const next = (event.currentTarget as HTMLSelectElement).value || null
                 setSelectedRepoId(next)
@@ -311,6 +311,7 @@ export function IdeExplorer({
                 padding: 'var(--sp-1) var(--sp-2)',
               }}
             >
+              <option value="">프로젝트 루트 (base path)</option>
               ${repoList.map(repository => html`
                 <option key=${repository.id} value=${repository.id}>
                   ${repository.name} · ${repository.local_path}

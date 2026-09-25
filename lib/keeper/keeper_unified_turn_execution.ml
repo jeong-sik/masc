@@ -95,8 +95,8 @@ type ctx =
   }
 
 let run (ctx : ctx)
-      ~(autonomous_yield_requested :
-          unit -> (Keeper_agent_run.autonomous_yield_request option, string) result)
+      ~(yield_requested :
+          unit -> (Keeper_agent_run.yield_request option, string) result)
       ~(initial_execution : runtime_execution)
       ~(turn_state : turn_state)
       ~(before_dispatch_authority : unit -> (unit, string) result)
@@ -288,7 +288,7 @@ let run (ctx : ctx)
                       path. Thus the probe is lane-gated and runs only at AGENT_CORE's
                       post-tool boundary. Its signals come from the exact chat
                       receipt and durable-event queues their consumers drain. *)
-                 ~autonomous_yield_requested
+                 ~yield_requested
                  ()
             with
             | Eio.Cancel.Cancelled _ as exn ->

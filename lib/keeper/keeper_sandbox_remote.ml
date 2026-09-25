@@ -673,9 +673,22 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
   let ran status stdout stderr =
     Masc_exec.Sandbox_target.Ran { output_files = None; status; stdout; stderr }
   in
-  let transport_failed ?(stdout = "") ?(prefix_stderr = "") reason =
+  (* The same failure [settle] records, carried in the outcome as the one
+     distinction a caller acts on: a payload stopped by its time budget, or a
+     lane that delivered nothing. *)
+  let transport_failed ?(stdout = "") ?(prefix_stderr = "") ~failure reason =
+    let failure : Masc_exec.Sandbox_target.transport_failure =
+      match failure with
+      | Remote_timeout -> Masc_exec.Sandbox_target.Payload_timed_out
+      (* Local_timeout is the host budget (connect + T + slack) running out
+         before the shim answered: the shim's own timer fires at T, so this
+         is a stalled lane, and a timeout status would invite a longer
+         [timeout_sec] against it. *)
+      | Local_timeout | Transport_failed | Shim_refused | Trailer_disagreement ->
+        Masc_exec.Sandbox_target.Lane_unavailable
+    in
     Masc_exec.Sandbox_target.Transport_failed
-      { output_files = None; reason; stdout; stderr = append_error prefix_stderr reason }
+      { failure; output_files = None; reason; stdout; stderr = append_error prefix_stderr reason }
   in
   fun ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd ->
     let observation = ref (Execution_unavailable Request_not_sent) in
@@ -685,7 +698,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
         Error "docker_observe_mode_required: Docker host mounts require the filesystem and network Observe box"
       | Docker_exec _, Exec_ssh_protocol.Observe
       | (Openssh _ | Container_exec _), _ -> wire_env t env) with
-    | Error error -> transport_failed error
+    | Error error -> transport_failed ~failure:Transport_failed error
     | Ok env ->
       let injected = injected_env t in
       let env =
@@ -698,7 +711,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
       let stdin = Option.value stdin_content ~default:"" in
       let cwd = match cwd with Some cwd -> cwd | None -> request_root in
       (match remote_cwd t cwd with
-       | Error error -> transport_failed error
+       | Error error -> transport_failed ~failure:Transport_failed error
        | Ok cwd ->
       let request : Exec_ssh_protocol.request =
         { v = wire_major t
@@ -712,7 +725,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
         }
       in
       (match Exec_ssh_protocol.encode_request request ~stdin with
-       | Error error -> transport_failed error
+       | Error error -> transport_failed ~failure:Transport_failed error
        | Ok frame ->
          if Atomic.compare_and_set t.shared.first_dispatch_logged false true
          then log_first_dispatch t;
@@ -787,7 +800,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
            match !binary_capture_failure with
            | Some error ->
              let detail = "binary_stdout_capture_failed: " ^ Printexc.to_string error in
-             settle (failed Transport_failed detail) (transport_failed detail)
+             settle (failed Transport_failed detail) (transport_failed ~failure:Transport_failed detail)
            | None ->
            match split_final_trailer raw_stderr with
            | Error detail ->
@@ -799,7 +812,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                else Transport_failed, transport_error t detail
              in
              settle (failed failure error)
-               (transport_failed ~stdout:(rewrite stdout)
+               (transport_failed ~failure ~stdout:(rewrite stdout)
                   ~prefix_stderr:(rewrite raw_stderr) error)
            | Ok (payload_stderr, trailer_bytes) ->
              let streamed_payload =
@@ -815,26 +828,26 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
               | true, _ ->
                 let error = local_timeout_error t budget in
                 settle (failed Local_timeout error)
-                  (transport_failed ~stdout ~prefix_stderr:payload_stderr error)
+                  (transport_failed ~failure:Local_timeout ~stdout ~prefix_stderr:payload_stderr error)
               | false, Some detail ->
                 let error = transport_error t detail in
                 settle (failed Transport_failed error)
-                  (transport_failed ~stdout ~prefix_stderr:payload_stderr error)
+                  (transport_failed ~failure:Transport_failed ~stdout ~prefix_stderr:payload_stderr error)
               | false, None ->
                 (match Exec_ssh_protocol.parse_trailer trailer_bytes with
                  | Error error ->
                    let error = transport_error t error in
                    settle (failed Transport_failed error)
-                     (transport_failed ~stdout ~prefix_stderr:payload_stderr error)
+                     (transport_failed ~failure:Transport_failed ~stdout ~prefix_stderr:payload_stderr error)
                  | Ok trailer
                    when trailer.timed_out && status = Unix.WEXITED 0 ->
                    let error = remote_timeout_error t timeout_sec in
                    settle (failed Remote_timeout error)
-                     (transport_failed ~stdout ~prefix_stderr:payload_stderr error)
+                     (transport_failed ~failure:Remote_timeout ~stdout ~prefix_stderr:payload_stderr error)
                  | Ok { shim_error = Some error; _ }
                    when status = Unix.WEXITED 1 ->
                    settle (failed Shim_refused error)
-                     (transport_failed ~stdout ~prefix_stderr:payload_stderr error)
+                     (transport_failed ~failure:Shim_refused ~stdout ~prefix_stderr:payload_stderr error)
                  | Ok { exit = Some code; signal = None; shim_error = None; _ }
                    when status = Unix.WEXITED 0 ->
                    settle (finished (Unix.WEXITED code))
@@ -848,7 +861,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                      transport_error t "transport status and result trailer disagree"
                    in
                    settle (failed Trailer_disagreement error)
-                     (transport_failed ~stdout ~prefix_stderr:payload_stderr error))))))
+                     (transport_failed ~failure:Trailer_disagreement ~stdout ~prefix_stderr:payload_stderr error))))))
     in
     Option.iter (fun notify -> notify !observation) on_receipt;
     result
@@ -873,7 +886,12 @@ let bootstrap_keeper_control_root ~timeout_sec t =
         (lane_prefix t.transport) t.name
     in
     Masc_exec.Sandbox_target.Transport_failed
-      { output_files = None; reason; stdout = ""; stderr = reason }
+      { failure = Masc_exec.Sandbox_target.Lane_unavailable
+      ; output_files = None
+      ; reason
+      ; stdout = ""
+      ; stderr = reason
+      }
 ;;
 
 (* ── Preflight ───────────────────────────────────────────────────────── *)
@@ -1059,15 +1077,19 @@ let github_hosts_path t = Filename.concat t.gh_config_dir "hosts.yml"
 
 let github_identity_intent t =
   let run = runner ~timeout_sec:(preflight_timeout_sec t) t in
-  let status, _stdout, _stderr =
-    Masc_exec.Sandbox_target.status_tuple
-      (run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
-         ~argv:[ "test"; "-s"; github_hosts_path t ]
-         ~env:[||] ~cwd:(Some (workspace_root t)))
-  in
-  match status with
-  | Unix.WEXITED 1 -> No_login_configured
-  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Login_provisioned
+  (* Matched rather than collapsed with [status_tuple]: that helper gives an
+     unavailable lane [WEXITED 1], which is this probe's "no login" answer, so
+     an endpoint that never ran [test] would skip the identity preflight
+     (#38890). Only a probe that ran and found no file says so. *)
+  match
+    run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+      ~argv:[ "test"; "-s"; github_hosts_path t ]
+      ~env:[||] ~cwd:(Some (workspace_root t))
+  with
+  | Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 1; _ } -> No_login_configured
+  | Masc_exec.Sandbox_target.Ran
+      { status = Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _; _ }
+  | Masc_exec.Sandbox_target.Transport_failed _ -> Login_provisioned
 ;;
 
 let whitespace_tokens line =

@@ -18,7 +18,7 @@ RFC-shell-ir-lines-heredoc-dquote §1의 코퍼스(실전 `bash -c` 511건) 재�
 열리는 것은 약 40건(7.8%). 통과율 76.5% → 약 84%.
 
 `eval $(opam env)` 16건은 파서 문제가 아니다. 샌드박스 이미지가 이미 switch
-환경을 굽는다 (`Dockerfile.keeper-sandbox` L183-205: `ENV OPAMROOT
+환경을 굽는다 (`sandbox-images/ocaml/Dockerfile` L183-205: `ENV OPAMROOT
 OPAM_SWITCH_PREFIX …`, 주석에 "`eval $(opam env)` never runs"). keeper가
 호스트 스크립트 습관으로 붙이는 것이라, 거절 메시지가 "switch env는 이미
 export되어 있다"고 말해주면 된다. dispatch 변경 없음.

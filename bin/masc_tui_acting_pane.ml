@@ -288,14 +288,18 @@ let tokens_sum_text = function
   | Some input, None -> Layout.compact_count (Acting.turn_input_total input) ^ " tok"
   | None, Some n -> Layout.compact_count n ^ " tok"
 
-(* The same sum without its unit, for the fleet row's column: the heading
-   above it already says what the figure counts, and repeating "tok" on every
-   row cost four of the nine cells the column has. *)
+(* The fleet row's figure: the tokens the turn processed new, without a unit,
+   since the heading above it says what the figure counts and repeating "tok"
+   on every row cost four of the nine cells the column has. A split input
+   counts only its new part: the cache reads it re-read on every call are
+   what made a turn read in the millions. An input with no cache report is
+   all new as far as anyone was told, so it counts whole. *)
 let tokens_sum_figure = function
   | None, None -> ""
-  | Some input, Some o -> Layout.compact_count (Acting.turn_input_total input + o)
-  | Some input, None -> Layout.compact_count (Acting.turn_input_total input)
-  | None, Some n -> Layout.compact_count n
+  | Some (Acting.Input_split { fresh; cached = _ }), Some o -> Layout.compact_count (fresh + o)
+  | Some (Acting.Input_split { fresh; cached = _ }), None -> Layout.compact_count fresh
+  | Some (Acting.Input_whole n), Some o -> Layout.compact_count (n + o)
+  | Some (Acting.Input_whole n), None | None, Some n -> Layout.compact_count n
 
 let calls_text n = Masc_tui_message_layout.count_noun n "call"
 let files_text n = Masc_tui_message_layout.count_noun n "file"
@@ -1550,10 +1554,10 @@ let legend ~cols =
   ^ pad_right state_cells "state"
   ^ pad_right (tool_cells_for ~cols) "tool"
   ^ pad_left calls_cells "calls"
-  (* The figure is the turn's own tokens, in and out summed. "tok/turn"
-     read as a rate -- tokens per turn across turns -- which is not what any
-     row carries. *)
-  ^ pad_left tokens_cells "tokens"
+  (* The figure is the turn's own new tokens, in and out summed, cache reads
+     left out. "tok/turn" read as a rate -- tokens per turn across turns --
+     which is not what any row carries. *)
+  ^ pad_left tokens_cells "new tok"
 
 let next_target_row ~(targets : row_target array) ~row ~step =
   let count = Array.length targets in

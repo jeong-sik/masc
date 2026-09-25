@@ -264,7 +264,8 @@ feed has: `open` (no end event yet), `done`, `no end` (the process is gone,
 so no end will come), `approval` (waiting on you), or `no events`. An open
 record names the tool it is in and counts the calls seen *so far*, which is
 what the `+` says: the feed may have started mid-turn. A done record carries
-the turn's calls and its tokens, in and out summed, cache reads included. A
+the turn's calls and its new tokens (`new tok`): in and out summed, cache
+reads left out, so a cached turn shows what it processed fresh. A
 name longer than its
 column is cut with `…`; the wide pane has cells for the ones that outgrow
 the narrow one. The header says the feed only when it is not delivering

@@ -1185,6 +1185,36 @@ let test_a_cached_turn_row_leads_with_its_new_input () =
   check bool "the wide row keeps the output" true
     (contains "in 159.8k new · 3.56M cached · out 6.6k" wide)
 
+(* The fleet column counts what the turn processed new. Turn 1853's
+   3,716,155 in held 3,556,362 cache reads: the column draws the new
+   159,793 plus 6,622 out, 166,415, where it used to draw 3.72M. *)
+let test_a_cached_fleet_row_counts_new_tokens () =
+  let event =
+    match settled ~at:990. "tester" with
+    | Observer.Keeper_turn_complete value ->
+      Observer.Keeper_turn_complete
+        { value with
+          tc_tool_calls = Some 30
+        ; tc_input_tokens = Some 3_716_155
+        ; tc_cache_read_tokens = Some 3_556_362
+        ; tc_cache_creation_tokens = Some 159_783
+        ; tc_output_tokens = Some 6_622
+        }
+    | _ -> fail "settled fixture must carry a turn completion"
+  in
+  let input =
+    { fixture with
+      Pane.keepers = Some [ keeper "tester" ]; approvals = []
+    ; chunks = chunks [ "tester" ] @@ entries [ 990., event ]
+    }
+  in
+  let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
+  let row = find_row_in texts "tester" in
+  check bool "the new tokens, in and out" true (contains "   166.4k" row);
+  check bool "not the sum with the cache reads" false (contains "3.72M" row);
+  check bool "the heading says new" true
+    (List.exists (fun line -> contains "new tok" line) texts)
+
 (* The widest split: three-digit calls and six-cell parts. With a four-digit
    turn the new and cached parts take the narrow pane to exactly 56 cells;
    a five-digit turn is one cell over, and the row keeps the new part and
@@ -2212,6 +2242,8 @@ let () =
             test_earlier_turn_row_gives_up_its_cost_before_its_parts
         ; test_case "a cached turn row leads with its new input" `Quick
             test_a_cached_turn_row_leads_with_its_new_input
+        ; test_case "a cached fleet row counts new tokens" `Quick
+            test_a_cached_fleet_row_counts_new_tokens
         ; test_case "the widest cached turn row keeps its new part" `Quick
             test_the_widest_cached_turn_row_keeps_its_new_part
         ; test_case "fleet rows carry no clock" `Quick test_fleet_rows_carry_no_clock

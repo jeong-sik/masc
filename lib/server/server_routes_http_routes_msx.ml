@@ -224,8 +224,6 @@ let recent_players_of ~now entries =
   |> List.sort (fun (_, a) (_, b) -> compare b a)
 ;;
 
-let recent_players ~now = recent_players_of ~now (Msx_lane.ledger ())
-
 (* The lane owns immutable RGB snapshots and reuses their identity until a
    machine mutation. Cache only pixel encoding: clock and player metadata must
    remain live. One entry bounds retained memory across load/restore/eject.

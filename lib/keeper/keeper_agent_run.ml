@@ -1063,10 +1063,6 @@ let run_turn
       | Some (Gate_continuation admission) -> Keeper_direct_gate_continuation.official_client admission
       | Some (Checkpoint_continuation admission) -> Keeper_direct_checkpoint_continuation.official_client admission
       | Some (Runtime_continuation _) | None -> None in
-    let official_client_original_turn = match direct_resume with
-      | Some (Checkpoint_continuation admission) -> Keeper_direct_checkpoint_continuation.official_client_original_turn admission
-      | Some (Gate_continuation _) -> official_client_continuation
-      | Some (Runtime_continuation _) | None -> None in
     let native_scope = match official_client_continuation, repetition_execution with
       | Some checkpoint, Some execution -> Keeper_repetition_scope.Execution.resume execution checkpoint.frame
         |> Result.map_error Keeper_repetition_snapshot.error_to_string
@@ -1485,6 +1481,10 @@ let run_turn
          ();
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
        let raw_trace = raw_trace_for_dispatch ~config ~meta in
+       (* The owner of the last candidate this turn dispatched. A turn that
+          fails returns no [run_result] and so no [checkpoint_owner]; this is
+          how the error path below knows the turn ran on an official client. *)
+       let last_dispatched_checkpoint_owner = ref None in
        let turn_result =
          (* A repetition yield is the judgment on the calls it saw. On the
             lane seeded from the checkpoint history, record where those
@@ -1635,6 +1635,10 @@ let run_turn
                       ~runtime_id:runtime_id_string
                       ~base_path:config.base_path
                       ~keeper_name:meta.name
+                      ~walk_owner:
+                        (Keeper_turn_driver.Fleet_keeper_turn
+                           (Runtime_candidate_backpressure.keeper_recorder
+                              ~keeper_name:meta.name))
                       ~pre_tool_rejects
                       ~continue_from_checkpoint
                       ~goal:user_message
@@ -1680,7 +1684,6 @@ let run_turn
                       ?cooperative_yield_probe
                       ?person_queued_probe
                       ?official_client_continuation
-                      ?official_client_original_turn
                       ?official_task_reference
                       ~on_official_client_tool_boundary
                       ?agent_core_checkpoint:checkpoint
@@ -1691,6 +1694,8 @@ let run_turn
                       ?trace_link
                       ~on_runtime_attempt:
                         (fun attempt ->
+                           last_dispatched_checkpoint_owner :=
+                             Some attempt.Keeper_turn_driver.checkpoint_owner;
                            Keeper_turn_preview.note_attempt ~keeper_name:meta.name
                              ~now:(Time_compat.now ()) ~runtime_id:attempt.runtime_id;
                            (* Each lane attempt assembles its own request.
@@ -2081,6 +2086,26 @@ let run_turn
                                    ())
                              ())))
                in
+       (* [finalize] writes the end line of a turn that settles. An
+          official-client turn that fails never reaches it, and without that
+          line the Librarian has nothing that names the turn: its input is
+          already a fragment and its tools may already have acted, but no round
+          reads them (RFC librarian-lifecycle §10-3, I3). An Agent-Core turn
+          needs no line here -- its stage saves hold its atoms and the next end
+          line covers them. With no dispatched candidate there is no owner to
+          name the line's kind; such a turn reached no model and ran no tool,
+          and its input fragment is left unnamed (#38827). *)
+       (match turn_result, !last_dispatched_checkpoint_owner with
+        | Error _, Some Runtime_execution.Official_client ->
+          Keeper_agent_run_finalize_response.record_errored_official_turn_boundary
+            ~config
+            ~meta
+            ~turn_ref
+            ~session
+            ~tool_observations:(List.rev acc.tool_calls)
+            ~history_at_start
+            ~restart_notice_pending:restart_notice_after_first_save
+        | Error _, (Some Runtime_execution.Masc_agent_core | None) | Ok _, _ -> ());
        (* The lane this turn leaves behind, and the lane an earlier turn left
           for this one. They used to be merged into one runtime slot with the
           new deferral winning, so a receipt could read "retry applied"

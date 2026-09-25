@@ -1601,7 +1601,7 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
   with_workspace "masc-context-frontier-" (fun base_path ->
     let keeper_name = "frontier" in
     let frontier = {snapshot_sha256=String.make 64 'a'; message_count=3;
-      delivery=Replaced_configuration;
+      delivery=Held_by_vendor_session;
       acknowledged_turn=Some {session_id="fabricated";turn_id="fabricated"}} in
     let claimed = claim_with_context_frontier ~context_frontier:(Some frontier)
       ~base_path ~keeper_name ~expected:None ~client_kind:Codex ~owner_epoch

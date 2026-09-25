@@ -125,11 +125,10 @@ type transient_release_record =
   ; released_at : float
   }
 
-(** Delivery provenance for canonical context. Replaced configuration is an
-    external snapshot available to this vendor turn, not persistent history
-    injection. Canonical_source_guard binds the pre-projection source used by
-    a client without replacement support; it does not claim all source bytes
-    were delivered. Held_by_vendor_session records a resume that sent none of
+(** Delivery provenance for canonical context. Prepared_start_context is the
+    history a new vendor session was seeded with. Canonical_source_guard binds
+    the pre-projection source used by a client without replacement support; it
+    does not claim all source bytes were delivered. Held_by_vendor_session records a resume that sent none of
     the canonical snapshot: the vendor session holds the conversation and the
     system prompt it recorded at its first launch, and MASC sent only its
     composed per-turn context in front of the user prompt
@@ -138,7 +137,6 @@ type transient_release_record =
     receipt asserts that the model understood its contents. *)
 type context_delivery =
   | Prepared_start_context
-  | Replaced_configuration
   | Canonical_source_guard
   | Held_by_vendor_session
 
@@ -368,20 +366,6 @@ val require_recovery :
 (** Convert the exact incomplete claim into an operator-visible failure
     observation. The next claim may supersede it atomically; an operator may
     still resolve it first to choose the previous settlement or a fresh start. *)
-
-val conclude_resume_session_full :
-  base_path:string ->
-  keeper_name:string ->
-  expected:t ->
-  recovery_id:string ->
-  updated_at:float ->
-  (t, string) result
-(** Re-record the exact [Input_rejected Bootstrap_floor_exceeded] recovery of a
-    resumed session as [Vendor_session_full No_activity_observed], keeping its
-    recovery id and evidence. A caller uses it once the same-session shrink
-    retries of a Gate continuation have run out: no smaller input remains, and
-    no other session may carry the continuation. Any other phase or failure is
-    refused. *)
 
 val release_transient :
   base_path:string ->

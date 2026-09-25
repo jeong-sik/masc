@@ -45,6 +45,7 @@ let runpod_provider =
   ; exact_body_timeout_s = None
   ; antigravity_cli = None
   ; account_home = None
+  ; usage_read = None
   }
 
 let qwen_model =

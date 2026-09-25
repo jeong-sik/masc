@@ -186,7 +186,7 @@ let run_durable ~base_path ~keeper_name =
 (* Continuity has its own exact source position. A Memory baseline does not
    claim the earlier checkpoint was summarized. Work stays in this Keeper's
    existing serial Librarian lane. *)
-let run_continuity ?cli_runner ~base_path ~keeper_name () =
+let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
   let module P = Keeper_librarian_continuity in
   let module Runtime = Keeper_librarian_runtime in
   let config = Workspace.default_config base_path in
@@ -208,6 +208,13 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
      another oversized request. Fitting still checks the runtime is selected
      and re-renders every chunk; neither an atom count nor a prompt is cached. *)
   let capacity = ref (last_input_capacity ~config ~keeper_name) in
+  (* RFC-0467: a committed round loops only while nothing waits on the lane.
+     A waiting unit starts with the durable pass for the turns that ended
+     meanwhile, then resumes continuity at the same position and width, so
+     ending here loses no progress and keeps Memory following the turns. *)
+  let has_waiting = match has_waiting with
+    | Some has_waiting -> has_waiting
+    | None -> fun () -> Keeper_memory_lane.has_waiting ~base_path ~keeper_name in
   let rec next () =
     observe O.Checking;
     match Env_config.KeeperMemoryOs.librarian_config_state () with
@@ -334,7 +341,9 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
         ~base_path ~keepers_dir ~keeper_id:keeper_name
         ~expected_revision:(Option.map (fun (value : Keeper_memory_os_current.t) -> value.revision) current)
         input;
-      if !saved then next ()
+      if !saved && not (has_waiting ()) then next ()
+      else if !saved then Log.Keeper.info ~keeper_name
+        "continuity round committed; yielding to the waiting Librarian unit"
       else
       let cause_detail () =
         match !cause with

@@ -952,52 +952,60 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
        0.156.1, 2026-09-25: a resumed thread's requests carried none of them
        until its compaction wrote them into the replacement history), so the
        carried messages stay out of them and the compacted thread never holds a
-       stale copy of what the prompt carries. *)
-    let* developer_messages, history =
-      project_messages
-        (match thread_mode with
-         | Runtime_codex_app_server.Start -> prepared.messages
-         | Runtime_codex_app_server.Resume _ ->
-           (* Runtime_codex_app_server drops history on Resume. Only
-              non-carried System messages can enter developerInstructions;
-              formatting the held conversation here would allocate it again. *)
-           List.filter
-             (fun (message : Agent_core.Types.message) ->
-                not (Host.is_carried_on_resume message)
-                && match message.role with
-                   | Agent_core.Types.System -> true
-                   | Agent_core.Types.User | Agent_core.Types.Assistant
-                   | Agent_core.Types.Tool -> false)
-             prepared.messages)
+       stale copy of what the prompt carries.
+
+       History can contain large tool results. Projecting, encoding and hashing
+       it is CPU work over immutable messages; keeping it on the owner domain
+       stalls HTTP, SSE and every other Keeper sharing that scheduler. *)
+    let* history, context_frontier, composed_developer_instructions =
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        let* developer_messages, history =
+          project_messages
+            (match thread_mode with
+             | Runtime_codex_app_server.Start -> prepared.messages
+             | Runtime_codex_app_server.Resume _ ->
+               (* Runtime_codex_app_server drops history on Resume. Only
+                  non-carried System messages can enter developerInstructions;
+                  formatting the held conversation here would allocate it again. *)
+               List.filter
+                 (fun (message : Agent_core.Types.message) ->
+                    not (Host.is_carried_on_resume message)
+                    && match message.role with
+                       | Agent_core.Types.System -> true
+                       | Agent_core.Types.User | Agent_core.Types.Assistant
+                       | Agent_core.Types.Tool -> false)
+                 prepared.messages)
+        in
+        let snapshot_messages =
+          List.filter (fun message -> not (Host.is_composed_system_context message))
+            prepared.messages in
+        let snapshot_sha256 =
+          `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages)
+          |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+        let context_frontier : Keeper_official_client_session_store.context_frontier =
+          { snapshot_sha256; message_count = List.length snapshot_messages;
+            delivery = (match thread_mode with
+              | Runtime_codex_app_server.Start -> Prepared_start_context
+              | Runtime_codex_app_server.Resume _ -> Held_by_vendor_session);
+            acknowledged_turn = None } in
+        (* [None] here means "send no developerInstructions": [optional_field]
+           omits the member and the app-server runs the thread on Codex's own
+           default instructions. The probe and fusion callers build [None] on
+           purpose and do not pass through here. This composition always carries
+           [prepared.system_prompt], which [Host.prepare_turn] refused when blank,
+           so the joined text is never empty. A check on the joined text could
+           not see a blank keeper prompt behind the posture note this lane
+           appends (#33165). *)
+        let composed_developer_instructions =
+          compose_developer_instructions developer_messages |> String.trim
+        in
+        Ok (history, context_frontier, composed_developer_instructions))
     in
     let prompt =
       match thread_mode with
       | Runtime_codex_app_server.Start -> prompt
       | Runtime_codex_app_server.Resume _ ->
         Host.resume_prompt ~goal:prompt prepared.messages
-    in
-    let snapshot_messages =
-      List.filter (fun message -> not (Host.is_composed_system_context message))
-        prepared.messages in
-    let snapshot_sha256 =
-      `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages)
-      |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
-    let context_frontier : Keeper_official_client_session_store.context_frontier =
-      { snapshot_sha256; message_count = List.length snapshot_messages;
-        delivery = (match thread_mode with
-          | Runtime_codex_app_server.Start -> Prepared_start_context
-          | Runtime_codex_app_server.Resume _ -> Held_by_vendor_session);
-        acknowledged_turn = None } in
-    (* [None] here means "send no developerInstructions": [optional_field]
-       omits the member and the app-server runs the thread on Codex's own
-       default instructions. The probe and fusion callers build [None] on
-       purpose and do not pass through here. This composition always carries
-       [prepared.system_prompt], which [Host.prepare_turn] refused when blank,
-       so the joined text is never empty. A check on the joined text could
-       not see a blank keeper prompt behind the posture note this lane
-       appends (#33165). *)
-    let composed_developer_instructions =
-      compose_developer_instructions developer_messages |> String.trim
     in
     let developer_instructions = Some composed_developer_instructions in
     (* The window already fits; this is the account checked once more before

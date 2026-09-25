@@ -92,7 +92,7 @@ let read request =
   let* page = match selection with
     | None_active -> Ok `Null
     | Requested tab | Active tab ->
-      let* data = issue (Browser_lane.Page_read {tab_id=Some tab.id;max_chars=Some 50_000}) in
+      let* data = issue (Browser_lane.Page_read {tab_id=Some tab.id;max_chars=Some Browser_page_script.default_text_chars}) in
       (match field "url" data, field "title" data, field "text" data,
              field "chars" data, field "truncated" data with
        | Some (`String url), Some (`String title), Some (`String text),

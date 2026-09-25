@@ -185,7 +185,13 @@ let emit_client_usage_report
     ?runtime_attempt
     (report : Keeper_client_usage_report.t)
   =
-  let usage = report.usage in
+  (* A replaced count counts nothing. Its row says so and keeps the vendor
+     total that took the count's place. *)
+  let usage =
+    match report.count with
+    | Keeper_client_usage_report.Running_count usage -> usage
+    | Keeper_client_usage_report.Count_replaced -> Agent_core.Types.zero_api_usage
+  in
   match trajectory_acc with
   | None -> ()
   | Some acc ->
@@ -236,6 +242,10 @@ let make_hooks
     ?(on_after_turn_response :
         response:Agent_core.Types.api_response -> unit =
         fun ~response:_ -> ())
+    ?(on_agent_core_response_usage :
+        response_id:string -> ordinal:int -> model:string ->
+        Agent_core.Types.api_usage option -> unit =
+        fun ~response_id:_ ~ordinal:_ ~model:_ _ -> ())
     ?(on_tool_executed :
         tool_name:string -> input:Yojson.Safe.t -> output_text:string ->
         success:bool -> duration_ms:float -> provider:string ->
@@ -328,6 +338,17 @@ let make_hooks
           | None -> (0, 0, 0.0)
         in
         let usage_missing = usage_missing_of_usage response.usage in
+        (* An Agent Core response is one provider request, and the turn's
+           spend reads it here. An official client's response repeats what its
+           stream already reported, and that report is its reading. *)
+        (match current_attempt_usage () with
+         | Some Agent_core_attempt ->
+           on_agent_core_response_usage
+             ~response_id:response.id
+             ~ordinal:turn
+             ~model
+             (if usage_missing then None else response.usage)
+         | Some (Client_stream_attempt _) | None -> ());
         let cost_usd_for_event = turn_cost_usd in
         let cost_usd_for_sse =
           match response.usage with

@@ -21,6 +21,7 @@ let target =
       | Some Tui_types.Text_palette -> "palette"
       | Some Tui_types.Text_row_search -> "row-search"
       | Some Tui_types.Text_runtime_picker_filter -> "runtime-picker-filter"
+      | Some Tui_types.Text_keeper_runtime_picker_filter -> "keeper-runtime-picker-filter"
       | Some Tui_types.Text_identity_app_form -> "identity-app-form"
       | Some Tui_types.Text_identity_filter -> "identity-filter"
       | Some Tui_types.Text_github_token -> "github-token"
@@ -254,6 +255,23 @@ let test_the_runtime_picker_filter_claims_once_opened () =
   check target "a compact frame lets go" None (resolved ~compact_viewport:true state);
   state.Tui_types.runtime_lane_pick <- None;
   check target "a closed picker holds nothing" None (resolved state)
+;;
+
+(* The Keeper runtime picker's filter holds typing only once [/] opened it:
+   before that, [d] and j/k are the picker's keys. A compact frame draws no
+   picker, so it holds nothing there. *)
+let test_the_keeper_runtime_picker_filter_claims_once_opened () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Keepers Tui_types.Keeper_runtime_pick;
+  state.Tui_types.runtime_pick_keeper <- Some "alpha";
+  check target "the open picker takes no text" None (resolved state);
+  state.Tui_types.runtime_pick_list <-
+    Masc_tui_pick_list.type_text Masc_tui_pick_list.closed "gl";
+  check target "the filter claims typing"
+    (Some Tui_types.Text_keeper_runtime_picker_filter) (resolved state);
+  check target "a compact frame lets go" None (resolved ~compact_viewport:true state);
+  state.Tui_types.view <- Tui_types.Keepers Tui_types.Keeper_list;
+  check target "another surface holds nothing" None (resolved state)
 ;;
 
 (* A new lane's name is typed on the Runtime surface, where x, J, K and D are
@@ -505,6 +523,8 @@ let () =
             test_a_new_lane_name_claims_typing_on_runtime;
           test_case "the runtime picker filter claims once opened" `Quick
             test_the_runtime_picker_filter_claims_once_opened;
+          test_case "the keeper runtime picker filter claims once opened" `Quick
+            test_the_keeper_runtime_picker_filter_claims_once_opened;
           test_case "the Fusion launch form claims while open" `Quick
             test_the_fusion_launch_form_claims_while_open;
           test_case "the loop drops a launch form left on another surface" `Quick

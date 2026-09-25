@@ -16,12 +16,28 @@ type wake_signal =
   ; payload : Yojson.Safe.t
   }
 
+type hold_reason =
+  | Previous_occurrence_unconsumed
+      (** The target still holds this schedule's previous occurrence (#36213). *)
+  | Target_intake_fenced of
+      { target : string
+      ; fence_owner : string
+      }
+      (** The target refuses intake while [fence_owner] holds its intake
+          fence. The occurrence stays due and is reconsidered next tick
+          (#34642). *)
+
+type held =
+  { signal : wake_signal
+  ; reason : hold_reason
+  }
+
 type tick_result =
   { due_changed : int
   ; emitted : wake_signal list
   ; rescheduled : int
   ; dispatches : dispatch_result list
-  ; held : wake_signal list
+  ; held : held list
   ; held_at : float
   }
 
@@ -65,8 +81,9 @@ type consumer =
   ; defer_wake :
       Workspace_utils.config ->
       occurrence_id:Schedule_occurrence_id.t ->
-      Schedule_domain.schedule_request -> bool
-      (** Self-clock: [true] leaves this due schedule unfired this tick — no
+      Schedule_domain.schedule_request -> hold_reason option
+      (** [Some reason] holds this due schedule; see the interface.
+          Self-clock: [Some Previous_occurrence_unconsumed] leaves this due schedule unfired this tick — no
           signal, no dispatch, no advance — because its target still holds the
           previous, unconsumed occurrence. The current [occurrence_id] is a
           retry, not a new wake, and must remain eligible for reconciliation.
@@ -74,7 +91,7 @@ type consumer =
           rather than wall-clock, bounding a slow keeper to one pending
           occurrence per instance. The consumer decides which schedules
           self-clock; a schedule whose every occurrence is distinct work returns
-          [false] and fires on every due. *)
+          [None] and fires on every due. *)
   }
 
 type runner_error =
@@ -540,12 +557,16 @@ let tick ?consumer ?clock config ~now ~retention_days =
        reconsidered next tick, so emission tracks consumption instead of the
        wall clock. Without a consumer the runner is keeper-agnostic and holds
        nothing. *)
-    let deferred, active =
+    let held, active =
       match consumer with
       | Some consumer ->
-        List.partition
-          (fun (request, (signal : wake_signal)) ->
-             consumer.defer_wake config ~occurrence_id:signal.occurrence_id request)
+        List.partition_map
+          (fun ((request, (signal : wake_signal)) as candidate) ->
+             match
+               consumer.defer_wake config ~occurrence_id:signal.occurrence_id request
+             with
+             | Some reason -> Either.Left { signal; reason }
+             | None -> Either.Right candidate)
           all_candidates
       | None -> [], all_candidates
     in
@@ -555,7 +576,6 @@ let tick ?consumer ?clock config ~now ~retention_days =
     let held_at = clock () in
     let candidate_signals = List.map snd active in
     let* emitted = append_new_signals config ~state candidate_signals in
-    let held = List.map snd deferred in
     (match consumer with
      | Some consumer ->
        let dispatches = dispatch_candidates config ~now ~clock consumer active in
@@ -570,14 +590,36 @@ let tick ?consumer ?clock config ~now ~retention_days =
           Ok { due_changed; emitted; rescheduled; dispatches = []; held; held_at }))
 ;;
 
+let hold_reason_to_json = function
+  | Previous_occurrence_unconsumed ->
+    `Assoc [ "kind", `String "previous_occurrence_unconsumed" ]
+  | Target_intake_fenced { target; fence_owner } ->
+    `Assoc
+      [ "kind", `String "target_intake_fenced"
+      ; "target", `String target
+      ; "fence_owner", `String fence_owner
+      ]
+;;
+
+let hold_reason_equal left right =
+  match left, right with
+  | Previous_occurrence_unconsumed, Previous_occurrence_unconsumed -> true
+  | ( Target_intake_fenced { target; fence_owner }
+    , Target_intake_fenced { target = target'; fence_owner = fence_owner' } ) ->
+    String.equal target target' && String.equal fence_owner fence_owner'
+  | Previous_occurrence_unconsumed, Target_intake_fenced _
+  | Target_intake_fenced _, Previous_occurrence_unconsumed -> false
+;;
+
 let newly_held ~previous held =
-  let was_held (signal : wake_signal) =
+  let was_held ({ signal; reason } : held) =
     List.exists
-      (fun (earlier : wake_signal) ->
+      (fun ({ signal = earlier; reason = earlier_reason } : held) ->
          String.equal
            (Schedule_occurrence_id.to_string earlier.occurrence_id)
-           (Schedule_occurrence_id.to_string signal.occurrence_id))
+           (Schedule_occurrence_id.to_string signal.occurrence_id)
+         && hold_reason_equal earlier_reason reason)
       previous
   in
-  List.filter (fun signal -> not (was_held signal)) held
+  List.filter (fun hold -> not (was_held hold)) held
 ;;

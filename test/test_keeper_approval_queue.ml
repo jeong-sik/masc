@@ -5930,7 +5930,9 @@ let test_cancelled_audit_observation_preserves_committed_allow () =
         | [ receipt ] -> check_append_failure Keeper_approval.Audit.Gate_allowed receipt
         | _ -> Alcotest.fail "Always Allow did not retain its exact audit receipt");
        let execution =
-         Masc.Keeper_tool_execution.failure "effect failed after authorization"
+         Masc.Keeper_tool_execution.failure
+           ~class_:Tool_result.Runtime_failure
+           "effect failed after authorization"
          |> Masc.Keeper_tool_execution.with_gate_authorization authorization
        in
        let metadata =

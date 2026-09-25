@@ -241,7 +241,7 @@ docker exec "$container" bash -lc '
   cd /src
   eval "$(opam env --switch=masc)"
   for attempt in 1 2 3; do
-    opam install . --deps-only --with-test --locked -y && break
+    opam install ./masc.opam --deps-only --with-test --locked -y && break
     if [ "$attempt" -eq 3 ]; then echo "opam install failed after 3 attempts" >&2; exit 1; fi
     echo "opam install failed (attempt $attempt); retrying in 15s"
     sleep 15

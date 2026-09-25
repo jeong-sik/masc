@@ -36,7 +36,12 @@ val retry_completion :
 (** Restore admission from owner-addressable durable inventory. A Keeper with
     any corrupt payload is fenced once. A current operation that still requires
     a fence owns admission long enough to recover; otherwise the deterministic
-    [corrupt_owner_fences] entry owns it. Corrupt records remain explicit. *)
+    [corrupt_owner_fences] entry owns it. Corrupt records remain explicit.
+    A [Blocked] operation at a replayable stage
+    ({!Keeper_shutdown_types.failure_stage_boot_replay}) is fenced too when it
+    is its Keeper's newest operation and no sibling holds the fence, so the
+    Keeper does not autoboot ahead of the replay. If that fence cannot be
+    taken, the operation is left out of [operations] for this boot and logged. *)
 val restore_inventory_admission :
   config:Workspace.config ->
   Keeper_shutdown_store.inventory_entry list ->
@@ -62,7 +67,11 @@ val submit_dormant :
 
 (** Recover operations left by an earlier server process. Must run before
     Keeper autoboot so a stopped Keeper cannot acquire a replacement lane
-    ahead of settlement. Returns one explicit result per durable operation. *)
+    ahead of settlement. Returns one explicit result per durable operation.
+    A replayable [Blocked] operation is replayed to completion, closed as
+    [Superseded (Boot_replay_abandoned _)] with a warning when a later
+    operation or Keeper state overtook it, or left [Blocked] with fresh
+    evidence and a warning; the last two release admission. *)
 val recover_at_boot :
   config:Workspace.config ->
   (Keeper_shutdown_types.t, string) result list
@@ -88,6 +97,30 @@ val recover_operation_with_corrupt_owner_fence :
   Keeper_shutdown_types.t ->
   (Keeper_shutdown_types.t, string) result
 
+type redrive_error =
+  | Redrive_load_failed of Keeper_shutdown_store.error
+  | Redrive_start_rejected of worker_start_error
+
+val redrive_error_to_string : redrive_error -> string
+
+type redrive_outcome =
+  | Redrive_started
+  | Redrive_already_active
+  | Redrive_not_in_process of Keeper_shutdown_types.phase
+
+(** Walk a stopped operation again inside the running process (#34642).
+    Called when intake is observed refused by this operation's fence, so a
+    finalization that stopped on something since repaired settles without a
+    restart. Runs on the process switch under the same claim as the submit
+    worker and boot recovery. [Redrive_not_in_process] names the durable phase
+    left for operator action or boot recovery; it must not be reported as a
+    started walk. A walk that fails again leaves the operation in its phase. *)
+val redrive_finalization :
+  config:Workspace.config ->
+  keeper_name:string ->
+  operation_id:Keeper_shutdown_types.Operation_id.t ->
+  (redrive_outcome, redrive_error) result
+
 module For_testing : sig
   val persist_unhandled_failure :
     now:(unit -> string) ->
@@ -95,4 +128,11 @@ module For_testing : sig
     Keeper_shutdown_types.t ->
     exn ->
     unit
+
+  val stop_is_on_record :
+    before:Keeper_shutdown_types.t ->
+    after:Keeper_shutdown_types.t ->
+    bool
+  (** Whether a re-drive that stopped left the stop already on record: the same
+      recorded reason, or, for a phase with no reason, the same revision. *)
 end

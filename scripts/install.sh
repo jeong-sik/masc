@@ -3,11 +3,11 @@
 #
 # Usage:
 #   TAG=vX.Y.Z
-#   curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/$TAG/scripts/install.sh" -o /tmp/masc-install.sh
+#   curl -fsSL "https://github.com/jeong-sik/masc/releases/download/$TAG/install.sh" -o /tmp/masc-install.sh
 #   bash /tmp/masc-install.sh --version "$TAG"
 #
 # Flags:
-#   --version vX.Y.Z   Pin a specific release (default: latest)
+#   --version vX.Y.Z   Pin a specific release (default: latest; X.Y.Z gets the v)
 #   --prefix DIR       Install dir for the binary (default: $HOME/.local/bin)
 #   --base-path DIR    Workspace containing .masc (asked in a terminal;
 #                      noninteractive default: $PWD)
@@ -43,6 +43,9 @@
 #   MASC_RELEASE_BASE_URL  Override the release asset base URL (mirror or
 #                  air-gapped install; file:// works). Defaults to
 #                  https://github.com/<repo>/releases/download
+#   MASC_PRESETS_BASE_URL  Override where --team fetches presets/<PRESET>/ from
+#                  (mirror or air-gapped install). Defaults to
+#                  https://raw.githubusercontent.com/<repo>/<version>/presets
 #   AGENT_CORE_MODEL_CATALOG  Explicit full model catalog override, owning every
 #                  row. When unset, AGENT_CORE's embedded catalog is the only one.
 #   MASC_RUNTIME_EVENTS=0/1  Override OCaml Runtime_events. When unset, the
@@ -1146,8 +1149,21 @@ RUNTIME_STAGE=""
 RUNTIME_ARCHIVE=""
 RUNTIME_ARGS=()
 DRY_RUN_WITHOUT_PYTHON=0
+# The CPU architecture, not the process's. A shell running under Rosetta 2
+# reports x86_64 from `uname -m` on Apple Silicon, which would install the Intel
+# build and apply the Intel macOS minimum.
+host_arch() {
+  local arch
+  arch=$(uname -m)
+  if [ "$(uname -s)" = Darwin ] && [ "$arch" = x86_64 ] \
+    && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = 1 ]; then
+    arch=arm64
+  fi
+  echo "$arch"
+}
+
 if [ "$(uname -s)" = Darwin ]; then
-  case "$(uname -m)" in arm64) minimum=14 ;; x86_64) minimum=15 ;; *) die "unsupported macOS architecture" ;; esac
+  case "$(host_arch)" in arm64) minimum=14 ;; x86_64) minimum=15 ;; *) die "unsupported macOS architecture" ;; esac
   os_version=$(sw_vers -productVersion) || die "cannot read macOS version"
   major=${os_version%%.*}
   case "$major" in ''|*[!0-9]*) die "invalid macOS version: $os_version" ;; esac
@@ -1234,7 +1250,7 @@ verify_checksum() {
 # --- 1. detect platform -------------------------------------------------------
 detect_asset() {
   local os arch
-  os=$(uname -s); arch=$(uname -m)
+  os=$(uname -s); arch=$(host_arch)
   case "$os/$arch" in
     Darwin/arm64)  echo "masc-macos-arm64" ;;
     Linux/x86_64)  echo "masc-linux-x64"   ;;
@@ -1279,6 +1295,9 @@ resolve_version() {
 
 VERSION=$(resolve_version)
 [ -n "$VERSION" ] || die "could not resolve version (network or rate limit?)"
+# Release tags carry a leading v. `--version 0.37.0` would otherwise miss
+# SHA256SUMS and end on a checksum error that points at --allow-unverified.
+case "$VERSION" in [0-9]*) VERSION="v$VERSION" ;; esac
 log "version: $VERSION"
 
 # --- 2b. fetch release checksums ----------------------------------------------
@@ -1563,10 +1582,6 @@ install_guest_shim() {
   fi
 }
 
-if [ "$GUEST_SHIM" -eq 1 ]; then
-  install_guest_shim
-fi
-
 # Fetch and verify both halves before publishing the new runtime. The helper
 # installs an immutable release directory and one atomic executable pointer;
 # EXIT rolls it back if later seeding/wizard/smoke fails.
@@ -1618,6 +1633,12 @@ if [ "$DRY_RUN" -eq 0 ] && [ "$SEED_CONFIG" -eq 1 ]; then
   with_terminal_input python3 "$workspace_helper" --binary "$DEST" --base-path "$BASE_PATH" --workspace-check > "$workspace_receipt" \
     || die "workspace check stopped installation; existing workspace data was preserved"
   BASE_PATH=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["base_path"])' "$workspace_receipt")
+fi
+
+# The shim lives under the workspace, so it waits for the check above: choosing
+# a new workspace there must not leave the shim in the old one.
+if [ "$GUEST_SHIM" -eq 1 ]; then
+  install_guest_shim
 fi
 
 # --- 4. seed minimum config ---------------------------------------------------
@@ -1710,7 +1731,8 @@ seed_team() {
 
   log "seeding keeper team preset '$preset' into $cfg"
   mkdir -p "$cfg"
-  local manifest_url="https://raw.githubusercontent.com/$REPO/$VERSION/presets/$preset/manifest.txt"
+  local presets_base="${MASC_PRESETS_BASE_URL:-https://raw.githubusercontent.com/$REPO/$VERSION/presets}"
+  local manifest_url="$presets_base/$preset/manifest.txt"
   local manifest_tmp
   manifest_tmp="$(mktemp)"
   PARTIAL_FILES+=("$manifest_tmp")
@@ -1719,16 +1741,34 @@ seed_team() {
     --retry "$MASC_INSTALL_CURL_RETRIES" \
     -o "$manifest_tmp" "$manifest_url" \
     || die "team preset '$preset' manifest fetch failed ($manifest_url)"
+  verify_checksum "$manifest_tmp" "presets/$preset/manifest.txt"
 
   local rel dest tmp raw
   while IFS= read -r rel || [ -n "$rel" ]; do
     case "$rel" in ''|'#'*) continue ;; esac
+    # Nothing is created from a manifest path before it is known to stay inside
+    # the config directory.
+    case "$rel" in
+      /*|..|../*|*/..|*/../*|*//*) die "team preset '$preset' manifest has an unsafe path: $rel" ;;
+      *[!A-Za-z0-9_./-]*) die "team preset '$preset' manifest has an unsafe path: $rel" ;;
+    esac
+    # A clean string is not a clean destination: an existing symlink under the
+    # config directory (keepers -> elsewhere) would carry mkdir, the partial
+    # download and the final mv outside it. Refuse any link on the way down.
+    local part="" rest="$rel" component
+    while [ -n "$rest" ]; do
+      component="${rest%%/*}"
+      case "$rest" in */*) rest="${rest#*/}" ;; *) rest="" ;; esac
+      part="${part:+$part/}$component"
+      [ ! -L "$cfg/$part" ] || die "team preset '$preset' path crosses a symlink in $cfg: $part"
+    done
+    [ ! -L "$cfg/$rel.partial" ] || die "team preset '$preset' path crosses a symlink in $cfg: $rel.partial"
     dest="$cfg/$rel"
     if [ -e "$dest" ] && [ "$RESET_CONFIG" -eq 0 ]; then
       log "team file present: $rel, skipping"
       continue
     fi
-    raw="https://raw.githubusercontent.com/$REPO/$VERSION/presets/$preset/$rel"
+    raw="$presets_base/$preset/$rel"
     tmp="$dest.partial"
     mkdir -p "$(dirname "$dest")"
     PARTIAL_FILES+=("$tmp")

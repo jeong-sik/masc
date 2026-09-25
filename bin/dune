@@ -556,6 +556,13 @@
  (wrapped false)
  (modules masc_tui_scroll))
 
+; The choose-one-of-N list the pickers share: cursor, typed filter, window.
+(library
+ (name masc_tui_pick_list)
+ (wrapped false)
+ (modules masc_tui_pick_list)
+ (libraries masc_tui_scroll masc_tui_message_layout))
+
 (library
  (name masc_tui_rows)
  (wrapped false)
@@ -1242,7 +1249,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries digestif mtime.clock.os masc_tui_esc_interrupt masc_tui_planning_detail
+ (libraries digestif mtime.clock.os masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   masc_tui_overview_tasks
   masc_tui_connector_unbind
   ;; [sch_last_wake_status] is the schedule contract's wake_status.
@@ -1603,6 +1610,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_pick_list
   masc_tui_repository_pulls
   digestif
   masc.string_util

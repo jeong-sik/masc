@@ -3624,6 +3624,7 @@
   fmt
   masc
   masc_tui_types
+  masc_tui_pick_list
   masc_tui_fusion_launch
   masc_tui_ask_projection
   masc.voice_setup
@@ -5676,6 +5677,7 @@
 (include stanzas/test_tui_config.inc)
 (include stanzas/test_tui_config_highlight_wiring.inc)
 (include stanzas/test_tui_row_wiring.inc)
+(include stanzas/test_tui_pick_list.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
@@ -5965,7 +5967,7 @@
 (test
  (name test_tui_identity_tab)
  (modules test_tui_identity_tab)
- (libraries alcotest masc_tui_types masc_tui_keys masc_tui_footer))
+ (libraries alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer))
 
 (test
  (name test_tui_log_channel_column)
@@ -6217,11 +6219,14 @@
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
  ; The pick dispatch lives in the executable, which no test can link, so the
- ; one assertion about it is read through Ast_grep. The source is a dep:
- ; without it the test reads a cached verdict and stays green while the
- ; wiring it asserts is gone.
- (deps %{workspace_root}/bin/masc_tui.ml)
- (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
+ ; assertions about it and about the two renderers are read through Ast_grep.
+ ; The sources are deps: without them the test reads a cached verdict and
+ ; stays green while the wiring it asserts is gone.
+ (deps
+  %{workspace_root}/bin/masc_tui.ml
+  %{workspace_root}/bin/masc_tui_types.ml
+  %{workspace_root}/bin/masc_tui_render.ml)
+ (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
 
 
 (rule

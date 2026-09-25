@@ -2135,6 +2135,38 @@ let () =
     (Yojson.Safe.Util.member "degraded_retry_deferred" split_shape = `Null)
 ;;
 
+
+(* The error preview keeps 900 bytes. After one ASCII byte, 900 bytes of
+   Hangul end on the second byte of a syllable, and the preview reached the
+   dashboard ending in U+FFFD. The cut now ends between characters, and
+   [message_truncated] still says that the rest was left out. *)
+let () =
+  let message =
+    "x" ^ String.concat "" (List.init 400 (fun _ -> "\xea\xb0\x80"))
+  in
+  let compact =
+    Server_dashboard_compact_receipt_json.compact_receipt_error_json
+      (`Assoc
+         [ ( "error"
+           , `Assoc [ "kind", `String "runtime"; "message", `String message ] )
+         ])
+  in
+  let preview =
+    match Yojson.Safe.Util.member "message_preview" compact with
+    | `String preview -> preview
+    | _ -> ""
+  in
+  check
+    "a Hangul error preview decodes as UTF-8"
+    (String_util.is_valid_utf8 preview);
+  check
+    "the preview keeps whole characters up to the budget and marks the cut"
+    (String.equal preview (String.sub message 0 898 ^ "..."));
+  check
+    "and says the message was truncated"
+    (Yojson.Safe.Util.member "message_truncated" compact = `Bool true)
+;;
+
 (* #29929 gave [Terminal_effect_failed] its own operator disposition, but the
    wire it arrives on carries the call's parameters after the kind, and
    [wire_kind_of_string] compared the whole string. The reason decoded as

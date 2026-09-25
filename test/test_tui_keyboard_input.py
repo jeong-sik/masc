@@ -18283,8 +18283,17 @@ def run_dos_live_regression(executable: str) -> None:
         finally:
             held["release"].set()
         wait_for_output(process, master, output, b"change 200", start=changed_from, timeout=5.0)
+        # The held read asked at 100. Once its answer is drawn the next poll
+        # asks at 200, and that poll can already be under way by the time
+        # "change 200" is on screen, so a read at 200 says nothing about the
+        # key. A disowned read is re-asked at the counter still drawn -- 100
+        # -- so the reads at 100 are what tell the two apart: exactly one,
+        # and it is the first.
         after_change = dos_reads[reads_before_change:]
-        if len(after_change) != 1:
+        at_old = [since for since in after_change if since == (100, LIVE_INCARNATION)]
+        rest = [since for since in after_change if since != (100, LIVE_INCARNATION)]
+        if (len(at_old) != 1 or after_change[0] != (100, LIVE_INCARNATION)
+                or any(since != (200, LIVE_INCARNATION) for since in rest)):
             raise AssertionError(
                 f"a key on the DOS screen disowned the read in flight: {after_change!r}")
         wait_for_output(process, master, output, b"Esc: back", start=changed_from, timeout=5.0)

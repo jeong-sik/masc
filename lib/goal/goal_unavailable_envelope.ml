@@ -38,7 +38,7 @@ let tool_result ~tool_name ~start_time unavailable : Tool_result.result =
   let data = to_yojson unavailable in
   Tool_result.make_err
     ~tool_name
-    ~class_:Tool_result.Dependency_unavailable
+    ~class_:(Tool_args.failure_class_of_error_code error_code)
     ~start_time
     ~data
     (Yojson.Safe.to_string data)

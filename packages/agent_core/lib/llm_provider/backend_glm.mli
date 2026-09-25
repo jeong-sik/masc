@@ -61,6 +61,13 @@ val http_code_of_glm_error_class : glm_error_class -> int
     field before provider identity is erased (agent-core boundary). *)
 val check_glm_error : string -> glm_error option
 
+(** The typed failure a GLM provider error is promoted to, or [None] when its
+    class keeps the HTTP path. [Glm_context_overflow] becomes
+    [Context_overflow], [Glm_quota_exceeded] becomes [Hard_quota]. The sync
+    and stream completion seams both read GLM envelopes through this one
+    rule, so the same body is classified the same way on either path. *)
+val provider_failure_of_glm_error : glm_error -> Http_client.http_error option
+
 (** Build a Glm chat completion request body.
     Delegates to {!Backend_openai.build_request} and injects
     Glm-specific [thinking] parameter when [enable_thinking] is set. *)

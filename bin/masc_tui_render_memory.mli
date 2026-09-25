@@ -65,6 +65,12 @@ val render_memory_body :
   push_empty:(unit -> unit) ->
   unit
 
+val memory_fact_list_floor_rows : int
+(** How many rows the fact list keeps before the detail below it takes any --
+    one of which the window reading takes when the list overflows. A fact has
+    no length limit, so without this floor one long fact left a browser of a
+    few hundred facts showing a single row. *)
+
 val memory_facts_content_height : cols:int -> budget:int -> cursor:int -> state -> int
 (** The fact list's height after reserving the selected detail, filters and
     errors. [budget] excludes the surrounding surface chrome. *)

@@ -35,9 +35,9 @@ type last_success =
   ; held_at : float
       (** When that tick decided [held], before it dispatched anything
           ({!Schedule_runner.tick_result.held_at}). *)
-  ; held : Schedule_runner.wake_signal list
-      (** The occurrences this tick held back, each waiting for its target to
-          consume the previous occurrence. A current state, not a count: the
+  ; held : Schedule_runner.held list
+      (** The occurrences this tick held back, each with the reason it was
+          held. A current state, not a count: the
           next successful tick replaces it, and it is never summed into
           [totals] (#37912). A failed tick does not re-read it, which is why
           it is kept with the time it was read at rather than on its own
@@ -69,6 +69,9 @@ type snapshot =
 
 type held_occurrence =
   { signal : Schedule_runner.wake_signal
+  ; reason : Schedule_runner.hold_reason
+      (** Why the successful tick that saw this hold held it back
+          ({!Schedule_runner.held.reason}). *)
   ; observed_at : float
       (** When the successful tick that saw this hold decided it, before it
           dispatched anything. Ticks that failed after it did not look again,

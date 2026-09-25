@@ -438,7 +438,11 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
 type observed_inputs =
   { version : Keeper_librarian_context.version
   ; references : string list
-  ; complete : bool
+  ; unreadable_stores : int
+      (** How many stores the capture could not read. A store read again
+          may settle sources the snapshot still holds, so fewer unreadable
+          stores than last time asks for a pass. Counted, not compared by
+          their failure text. *)
   }
 
 let observed_inputs : ((string * string), observed_inputs) Hashtbl.t = Hashtbl.create 16
@@ -453,7 +457,7 @@ let remember_context_pass ~keepers_dir ~keeper_name
   let observed =
     { version
     ; references = context_references working_context.sources
-    ; complete = working_context.unavailable = []
+    ; unreadable_stores = List.length working_context.unavailable
     }
   in
   Stdlib.Mutex.protect measurements_mu (fun () ->
@@ -473,7 +477,7 @@ let context_pass_needed ~keepers_dir ~keeper_name
     let changed = match observed with
       | Some observed when observed.version = Keeper_librarian_context.version snapshot ->
         references <> observed.references
-        || (not observed.complete && working_context.unavailable = [])
+        || List.length working_context.unavailable < observed.unreadable_stores
       | Some _ | None -> references <> context_references snapshot.sources in
     changed || needs_reconsideration
 ;;

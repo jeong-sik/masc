@@ -231,7 +231,8 @@ let test_openapi_route_serves_document () =
 (* The authority cases send their Host lines as written, over a plain socket.
    curl keeps one Host header however many are given (8.7.1 sent only the
    first), so through curl the "multiple" case reached the server as one
-   untrusted Host and never tested the duplicate. *)
+   untrusted Host and never tested the duplicate. The answer is the status
+   and body; there is no curl exit or stderr to report. *)
 let run_raw ~host_lines ~port ~path () =
   let request =
     String.concat ""
@@ -272,7 +273,7 @@ let run_raw ~host_lines ~port ~path () =
       let body =
         String.sub raw (header_end + 4) (String.length raw - header_end - 4)
       in
-      { status = parse_status header_raw; body; curl_exit = 0; stderr = "" })
+      (parse_status header_raw, body))
 
 let test_invalid_authority_is_rejected_before_authority_routes () =
   with_server @@ fun ~port ~base_path ->
@@ -309,10 +310,10 @@ let test_invalid_authority_is_rejected_before_authority_routes () =
     (fun (case, headers, expected_code) ->
       List.iter
         (fun path ->
-          let result = run_raw ~host_lines:headers ~port ~path () in
+          let status, body = run_raw ~host_lines:headers ~port ~path () in
           let label = case ^ " " ^ path in
-          check (option int) (label ^ " status") (Some 400) result.status;
-          let json = Yojson.Safe.from_string result.body in
+          check (option int) (label ^ " status") (Some 400) status;
+          let json = Yojson.Safe.from_string body in
           check
             string
             (label ^ " error code")

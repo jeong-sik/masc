@@ -1113,7 +1113,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/board/context-inference" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_keeper_delegate"
+       with_tool_actor_auth ~tool_name:Keeper_tool_name.(to_string Keeper_delegate)
          (fun state submitted_by _req reqd ->
          Http.Request.read_body_async reqd
            (handle_board_context_inference_request ~state ~sw ~clock
@@ -1320,7 +1320,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/tools/masc_board_post" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_board_post"
+       with_tool_actor_auth ~tool_name:(Tool_name.Board_name.to_string Tool_name.Board_name.Board_post)
          (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
@@ -1346,7 +1346,8 @@ let add_routes ~sw ~clock router =
                    args
              in
              let* args = json_ensure_meta_source "dashboard_board_post" args in
-             let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_post" args in
+             let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client
+                 (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post) args in
              let ok = Tool_result.is_success result in
              let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in

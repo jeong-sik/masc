@@ -3392,7 +3392,7 @@ let add_routes ~sw ~clock router =
          request reqd)
 
   |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_keeper_delegate" (fun state submitted_by _req reqd ->
+       with_tool_actor_auth ~tool_name:Keeper_tool_name.(to_string Keeper_delegate) (fun state submitted_by _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            match parse_keeper_chat_stream_request body_str with
            | Ok payload ->
@@ -3451,7 +3451,7 @@ let add_routes ~sw ~clock router =
          request reqd)
 
   |> Http.Router.post "/api/v1/keepers/turn/interrupt" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state actor _req reqd ->
+       with_tool_actor_auth ~tool_name:Keeper_tool_name.(to_string Keeper_delegate_cancel) (fun state actor _req reqd ->
          handle_keeper_turn_interrupt ~actor state request reqd) request reqd)
 
   (* Answers a tool call the keeper is holding. Same authority as interrupting

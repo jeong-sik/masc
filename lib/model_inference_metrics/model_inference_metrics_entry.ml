@@ -193,9 +193,9 @@ type parse_error =
   | Missing_outcome                (* telemetry.outcome absent on success-branch row *)
   | Missing_usage_reported
   | Missing_telemetry_reported
-  | Missing_success_model          (* no selected_model / model_used / runtime_id *)
+  | Missing_success_model          (* no selected_model / model_used / executed_runtime_id *)
   | Missing_success_inference_identity
-  | Missing_error_model_attribution (* no runtime_id on error turn *)
+  | Missing_error_model_attribution (* no executed_runtime_id on error turn *)
   | Invalid_current_cost_row of Cost_ledger.decode_error
 
 let parse_error_label = function

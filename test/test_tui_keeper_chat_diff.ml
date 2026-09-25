@@ -470,6 +470,73 @@ let test_full_projection_skips_numbers_on_narrow_pane () =
     (contains ~needle:"```diff\n-old\n+new\n```" (body rows))
 ;;
 
+let test_full_projection_needs_room_for_gutter_and_source () =
+  let evidence =
+    Evidence.edited
+      [ Evidence.edit_occurrence
+          ~old_start_line:1
+          ~new_start_line:1
+          ~old_string:"old"
+          ~new_string:"new"
+      ]
+    |> Evidence.to_yojson
+  in
+  let at cells =
+    projected_rows ~max_line_cells:cells Transcript.Full
+      (index
+         [ change_json
+             ~line_evidence:evidence
+             ~kind:(`Edit ("old", "new", false))
+             ()
+         ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+  in
+  check bool "fifteen cells hold the gutter but no source" true
+    (contains ~needle:"```diff\n-old\n+new\n```" (body (at 15)));
+  let sixteen = at 16 in
+  check bool "sixteen cells number the rows" true
+    (contains ~needle:"    1     - - o…" (body sixteen));
+  List.iter
+    (fun row ->
+       check bool "a sixteen-cell row fits sixteen cells" true
+         (Masc_tui_message_layout.display_width row <= 16))
+    sixteen
+;;
+
+let test_full_projection_numbers_a_lone_replace_all_match () =
+  let evidence =
+    Evidence.edited
+      [ Evidence.edit_occurrence
+          ~old_start_line:1
+          ~new_start_line:1
+          ~old_string:"old"
+          ~new_string:"new"
+      ]
+    |> Evidence.to_yojson
+  in
+  let rows =
+    projected_rows Transcript.Full
+      (index
+         [ change_json
+             ~line_evidence:evidence
+             ~kind:(`Edit ("old", "new", true))
+             ()
+         ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+  in
+  check (list string) "one match has one address per row, replace-all or not"
+    [ "✓ Edit lib/example.ml · 12ms"
+    ; "↳ masc:lib/example.ml (+1 -1 per match)"
+    ; "  1 match · replace-all template"
+    ; "  old L1 -> new L1"
+    ; "```diff"
+    ; "    1     - - old"
+    ; "    -     1 + new"
+    ; "```"
+    ]
+    rows
+;;
+
 let test_replace_all_shows_bounded_actual_ranges () =
   let occurrence old_start new_start =
     Evidence.edit_occurrence
@@ -855,6 +922,10 @@ let () =
             test_full_projection_skips_numbers_for_many_matches
         ; test_case "a narrow pane keeps unnumbered rows" `Quick
             test_full_projection_skips_numbers_on_narrow_pane
+        ; test_case "sixteen cells number the rows" `Quick
+            test_full_projection_needs_room_for_gutter_and_source
+        ; test_case "a lone replace-all match is numbered" `Quick
+            test_full_projection_numbers_a_lone_replace_all_match
         ; test_case "replace-all range annotations are bounded" `Quick
             test_replace_all_shows_bounded_actual_ranges
         ; test_case "omitted ranges keep count only" `Quick

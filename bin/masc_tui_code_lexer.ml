@@ -370,33 +370,47 @@ let json_lexer text =
 (* The fence tag decides who lexes. Untagged and unknown tags answer None and
    the fence keeps the single code span -- a guess at the grammar from the
    text alone is exactly the colouring-as-pretence the palette avoids. *)
-(* A cell of [Masc_tui_diff.numbered_gutter]: what [line_number_cell] emits,
-   a right-aligned number or a spelled absence. Anything else in the column
-   means the line is not guttered, however digit-shaped its start looks. *)
-let is_gutter_cell_char char =
-  char = ' ' || char = '-'
-  || (char >= '0' && char <= '9')
+(* A cell of [Masc_tui_diff.numbered_gutter], read strictly: what
+   [line_number_cell] emits is four spaces and a dash for absence, else
+   blanks then digits to the column's end. A looser read — any mix of
+   blanks, digits, and dashes — would let source text shaped like
+   coordinates borrow a row's colour. *)
+let is_strict_gutter_cell offset line =
+  let cell = String.sub line offset 5 in
+  if String.equal cell "    -" then true
+  else
+    (* Blanks, then digits to the column's end, at least one digit: exactly
+       what a right-aligned [%5d] emits. Only the space counts as blank —
+       a tab-indented number is source text, not a coordinate. *)
+    let blanks = ref 0 in
+    while !blanks < 5 && cell.[!blanks] = ' ' do incr blanks done;
+    let digits = 5 - !blanks in
+    digits >= 1
+    && (let ok = ref true in
+        for i = !blanks to 4 do
+          let c = cell.[i] in
+          if c < '0' || c > '9' then ok := false
+        done;
+        !ok)
 
-(* The marker of a numbered diff row, when the line wears the gutter the chat
-   preview emits: two five-cell columns, the marker, their three separating
-   spaces. The marker sits at offset twelve; a six-digit line overflows its
-   column and the offset misses, which reads the row by its first cell below
-   instead — the marker stays in the text, only the colour is lost. *)
-let numbered_gutter_marker line =
-  if String.length line >= 13 && line.[5] = ' ' && line.[11] = ' ' then
-    let cells_ok =
-      let ok = ref true in
-      for i = 0 to 4 do
-        if not (is_gutter_cell_char line.[i]) then ok := false
-      done;
-      for i = 6 to 10 do
-        if not (is_gutter_cell_char line.[i]) then ok := false
-      done;
-      !ok
-    in
-    if cells_ok then
+(* The kind of a numbered diff row, when the line wears the gutter the chat
+   preview emits: two five-cell coordinate columns, the marker, their three
+   separating spaces, and the trailing space the fourteen-cell gutter ends
+   with. The marker sits at offset twelve and is one of the three the
+   preview emits; a hunk marker never wears a gutter. A six-digit line
+   overflows its column and the offsets miss, which falls back to the
+   first cell below instead — the marker stays in the text, only the
+   colour is lost. *)
+let numbered_gutter_kind line =
+  if
+    String.length line >= 14 && line.[5] = ' ' && line.[11] = ' '
+    && line.[13] = ' '
+  then
+    if is_strict_gutter_cell 0 line && is_strict_gutter_cell 6 line then
       match line.[12] with
-      | '+' | '-' | '@' | ' ' -> Some line.[12]
+      | '+' -> Some kind_diff_added
+      | '-' -> Some kind_diff_removed
+      | ' ' -> Some kind_code
       | _ -> None
     else None
   else None
@@ -418,11 +432,8 @@ let diff_line_kind line =
        "+++" directly above the first added line and read as part of it. *)
     kind_code
   else
-    match numbered_gutter_marker line with
-    | Some '+' -> kind_diff_added
-    | Some '-' -> kind_diff_removed
-    | Some '@' -> kind_comment
-    | Some _ -> kind_code
+    match numbered_gutter_kind line with
+    | Some kind -> kind
     | None -> (
         match line.[0] with
         | '+' -> kind_diff_added

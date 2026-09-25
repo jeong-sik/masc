@@ -190,8 +190,8 @@ let diff_line ~max_line_cells = function
 
 (* The same row with its file coordinates, the gutter the Changes tree draws.
    The gutter's own cells come out of the source budget, so the row still
-   fits [max_line_cells]; a pane narrower than the gutter keeps the
-   unnumbered row instead (see [edited_section]). *)
+   fits [max_line_cells]; a pane too narrow for the gutter and clipped
+   source keeps the unnumbered row instead (see [edited_section]). *)
 let numbered_line ~max_line_cells (numbered : Diff.numbered) =
   let marker, text =
     match numbered.nrow with
@@ -343,10 +343,13 @@ let edited_section ~max_line_cells change ~preview ~omitted ~removed ~added
     ]
     @ evidence_rows
   else
-    (* Coordinates cost fourteen cells of gutter; a pane that cannot spare
-       them keeps the unnumbered rows rather than a gutter with no source. *)
+    (* Coordinates cost the fourteen-cell gutter plus clipped source, whose
+       narrowest honest shape is one cell and its ellipsis: a pane below
+       sixteen cells keeps the unnumbered rows rather than a gutter with no
+       room to say anything in. *)
     let numbered =
-      if max_line_cells > Diff.numbered_gutter_cells then numbered else None
+      if max_line_cells > Diff.numbered_gutter_cells + 1 then numbered
+      else None
     in
     let detail = clipped ~max_cells:max_line_cells detail in
     let lines, omitted =

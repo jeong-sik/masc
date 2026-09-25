@@ -22,6 +22,7 @@ import { chatHistoryEntriesFromRest } from '../../keeper-state'
 import { collectAttachments } from './attachments'
 import { lookupToolCallOutput, recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
 import { fetchBoardPost } from '../../api/board'
+import { normalizeFusionPanel } from '../../lib/fusion-meta'
 
 // Renderer fixtures supply already-resolved evidence. The real lookup's
 // authorization, duplicate and async races run in tool-output-lookup.test.ts.
@@ -4177,6 +4178,32 @@ describe('fusion chat card', () => {
     expect(card?.textContent).toContain('3,432 tok')
     // Per-panel token count present.
     expect(container.querySelector('[data-fusion-detail]')?.textContent).toContain('1,200 tok')
+  })
+
+  it('reads panel entries through the shared Fusion panel reader', async () => {
+    const meta = {
+      source: 'fusion',
+      panel: [
+        { model: 'm1', status: 'answered', answer: 'a', usage: { output_tokens: 1200 } },
+        { model: 'm2', status: 'failed', reason_detail: "Provider 'unknown' timeout", reason: 'stale copy' },
+      ],
+      judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'r' },
+    }
+    vi.mocked(fetchBoardPost).mockResolvedValue({ meta } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+
+    const shared = normalizeFusionPanel(meta.panel)
+    const detail = container.querySelector('[data-fusion-detail]')
+    // Nested usage is read by the shared reader only; the card shows it too.
+    expect(shared[0]?.outputTokens).toBe(1200)
+    expect(detail?.textContent).toContain('1,200 tok')
+    // Same failure line as Board evidence: reason_detail, provider attributed.
+    expect(shared[1]?.reason).toBe("Provider 'm2' timeout")
+    expect(detail?.textContent).toContain("Provider 'm2' timeout")
+    expect(detail?.textContent).not.toContain('stale copy')
   })
 })
 

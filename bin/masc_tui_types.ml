@@ -1912,7 +1912,13 @@ type observer_status =
       since : float;
       events : int;  (** frames received on this stream *)
     }
-  | Observer_closed of {
+  | Observer_closed_before_answer of {
+      reason : string;
+          (** why it failed while opening: the server never answered this
+              stream, so there is no count of what it delivered *)
+      at : float;
+    }
+  | Observer_closed_after_live of {
       reason : string;
       at : float;
       events : int;  (** frames the stream delivered before it closed *)
@@ -8420,14 +8426,22 @@ let field_missing_reading ~error =
    surface's title in that frame, and the Logs tab of this very surface, reads
    "(load failed)" or "(not loaded)".
 
+   A feed that closed while opening never answered either, and its reason is
+   the failure: with nothing held it reads "(load failed)", the way a refused
+   read does on every other surface, and not "(0 rows \xc2\xb7 0 events held)"
+   above a row saying the feed closed before any event arrived.
+
    Held frames outlive the stream that delivered them, so a closed feed, or one
    switched back off, with frames in hand still has a reading to report. Only
    the state before any answer, with nothing held, has none. *)
 let activity_title_reading ~observer ~shown ~held =
   match observer, held with
   | (Observer_off | Observer_opening), 0 -> title_missing_reading ~error:None
-  | (Observer_off | Observer_opening | Observer_live _ | Observer_closed _), _
-    ->
+  | Observer_closed_before_answer { reason; _ }, 0 ->
+    title_missing_reading ~error:(Some reason)
+  | ( ( Observer_off | Observer_opening | Observer_live _
+      | Observer_closed_before_answer _ | Observer_closed_after_live _ ),
+      _ ) ->
     Printf.sprintf "(%s \xc2\xb7 %s held)"
       (Masc_tui_message_layout.count_noun shown "row")
       (Masc_tui_message_layout.count_noun held "event")

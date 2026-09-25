@@ -11368,9 +11368,13 @@ let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
   match (state.connection_status, state.observer) with
   | (Connected | Degraded), Observer_off ->
       launch_observer state ~host ~port ~mailbox
-  | (Connected | Degraded), Observer_closed _ when retry_closed ->
+  | (Connected | Degraded),
+    (Observer_closed_before_answer _ | Observer_closed_after_live _)
+    when retry_closed ->
       launch_observer state ~host ~port ~mailbox
-  | (Connected | Degraded), (Observer_closed _ | Observer_opening | Observer_live _)
+  | (Connected | Degraded),
+    ( Observer_closed_before_answer _ | Observer_closed_after_live _
+    | Observer_opening | Observer_live _ )
   | (Disconnected | Connecting | Booting | Reconnecting), _ ->
       ()
 
@@ -13615,7 +13619,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                | Observer_live live ->
                    state.observer <-
                      Observer_live { live with events = live.events + 1 }
-               | Observer_off | Observer_opening | Observer_closed _ -> ());
+               | Observer_off | Observer_opening
+               | Observer_closed_before_answer _ | Observer_closed_after_live _
+                 -> ());
               (match Masc_tui_observer.chat_appended_keeper event with
                | Some appended_keeper
                  when state.view = Keepers Keeper_message
@@ -13787,11 +13793,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       report_action state "error"
         (Printf.sprintf "task for %s not created: %s" keeper detail)
   | Observer_closed outcome ->
-      let events =
-        match state.observer with
-        | Observer_live live -> live.events
-        | Observer_off | Observer_opening | Observer_closed _ -> 0
-      in
       let reason =
         match outcome with
         | Ok () -> "the server closed the stream"
@@ -13802,8 +13803,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             (match status with 404 | 409 -> state.mcp_session <- None | _ -> ());
             Printf.sprintf "observer stream refused with %d: %s" status detail
       in
+      let at = Unix.gettimeofday () in
+      (* Only a stream that went live answered; one that closed while opening
+         has no count to keep, and the title must not read one. *)
       state.observer <-
-        Observer_closed { reason; at = Unix.gettimeofday (); events };
+        (match state.observer with
+         | Observer_live { events; _ } ->
+           Observer_closed_after_live { reason; at; events }
+         | Observer_off | Observer_opening | Observer_closed_before_answer _
+         | Observer_closed_after_live _ ->
+           Observer_closed_before_answer { reason; at });
       add_event state "observer" ("runtime event feed closed: " ^ reason)
   | Http_refresh_failed (err, approval_ticket) ->
       http_refresh_inflight := false;

@@ -830,6 +830,41 @@ let test_refused_width_carries_to_the_next_pass () =
     (List.for_all (fun size -> size <= narrowing_ceiling)
        (List.filteri (fun index _ -> index >= 2) !bodies))
 
+(* RFC-0467: after a committed round, a unit waiting on the lane ends the
+   loop so its durable pass reads the turns that ended meanwhile. The next
+   unit resumes continuity at the same position and width. Without a waiting
+   unit the same refusals end with the whole backlog read in one pass, as in
+   the case above. *)
+let test_a_waiting_unit_ends_the_catch_up_after_a_commit () =
+  narrowing_fixture ~slot_count:1
+    ~answer:(fun _index body ->
+      if String.length body > narrowing_ceiling
+      then `Request_entity_too_large, refused "invalid_request_error"
+      else `OK, accepted_answer)
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
+  let base_path = config.Masc.Workspace.base_path in
+  let pass_with_waiting_unit () =
+    Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity
+      ~has_waiting:(fun () -> true) ~base_path ~keeper_name () in
+  pass_with_waiting_unit ();
+  pass_with_waiting_unit ();
+  check (option int) "refused rounds commit nothing" None (coverage ());
+  let refused_requests = List.length !bodies in
+  pass_with_waiting_unit ();
+  check int "a waiting unit stops the loop after the first committed round"
+    (refused_requests + 1) (List.length !bodies);
+  let after_yield = coverage () in
+  check bool "that round committed part of the backlog" true
+    (match after_yield with
+     | Some end_atom -> end_atom > 0 && end_atom < narrowing_atom_count
+     | None -> false);
+  pass ();
+  check (option int) "the next unit resumes and reads the rest"
+    (Some narrowing_atom_count) (coverage ());
+  check bool "the resumed unit keeps the narrowed width" true
+    (List.for_all (fun size -> size <= narrowing_ceiling)
+       (List.filteri (fun index _ -> index >= refused_requests) !bodies))
+
 let test_a_refusal_that_is_not_about_size_keeps_the_width () =
   narrowing_fixture ~slot_count:1
     ~answer:(fun _index _body -> `Too_many_requests, refused "rate_limit_error")
@@ -1043,6 +1078,8 @@ let () = run "production continuity pair"
     test_case "pending receipt overrides next turn" `Quick test_recovery_overrides_next_turn;
     test_case "queue keeps capacity and alternative opportunity" `Quick test_queue_reuses_capacity_without_gating_alternatives;
     test_case "a refused width carries to the next pass" `Quick test_refused_width_carries_to_the_next_pass;
+    test_case "a waiting unit ends the catch-up after a commit" `Quick
+      test_a_waiting_unit_ends_the_catch_up_after_a_commit;
     test_case "a committed range asks for the working state alone" `Quick
       test_a_committed_range_asks_for_the_working_state_alone;
     test_case "a continuity pass carries tool turns folded once" `Quick

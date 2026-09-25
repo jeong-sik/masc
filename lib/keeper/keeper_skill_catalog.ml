@@ -223,6 +223,7 @@ let parse_skill ~directory content =
 
 type authored_source_error =
   | Source_too_large of { bytes : int; max_bytes : int }
+  | Body_too_large_to_read of { bytes : int; max_bytes : int }
   | Invalid_document of error
 
 let validate_authored_source ~directory source_text =
@@ -231,7 +232,20 @@ let validate_authored_source ~directory source_text =
   let bytes = String.length source_text in
   if bytes > max_bytes
   then Error (Source_too_large { bytes; max_bytes })
-  else parse_skill ~directory source_text |> Result.map_error (fun error -> Invalid_document error)
+  else
+    match parse_skill ~directory source_text with
+    | Error error -> Error (Invalid_document error)
+    | Ok skill ->
+      (* [keeper_skill] returns the body as one inline tool result, and a body
+         over that boundary is refused on every read. Refusing it here tells
+         the author while the source is still in hand. *)
+      let body_bytes = String.length skill.body in
+      if body_bytes > Common.max_tool_result_wire_bytes
+      then
+        Error
+          (Body_too_large_to_read
+             { bytes = body_bytes; max_bytes = Common.max_tool_result_wire_bytes })
+      else Ok skill
 ;;
 
 let empty = []

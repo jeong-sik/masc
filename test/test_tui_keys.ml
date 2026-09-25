@@ -43,6 +43,17 @@ let enter_atom_count_exceptions =
     "Config / Runtime / Clients", 0
   ; (* A scrolling reading, not a row list. *)
     "Config / Tools", 0
+  ; (* Two readings a Keeper detail drills into: [j/k] scrolls the text and
+       there is no row under a cursor for Enter to open. *)
+    "Keepers / Logs", 0
+  ; (* Its rows are calls, read by scrolling; Home and End reach the ends.
+       Nothing opens one further. *)
+    "Keepers / Calls", 0
+  ; (* A cursor with no Enter, the way Clients has one: [b / u] bind and
+       unbind the transport under it, and binding is not opening. It joined
+       this list when the sheet started naming the screen (#39055); until
+       then the screen had no section and this check never asked. *)
+    "Connectors", 0
   ; (* The second is the history overlay's, which [footer_hints_code] drops
        from the panes that have no commits. *)
     "Workspace / Code", 2
@@ -92,6 +103,35 @@ let test_every_surface_answers () =
         "a surface with no bindings has no footer and no help row" true
         (Masc_tui_keys.for_surface surface <> []))
     every_surface
+
+(* Every screen the ring or a drill-down can put up has keys, and the sheet is
+   where an operator looks them up: [?] opens on the section for the screen
+   they are standing on. The sheet's list of screens was written beside the
+   table's and nothing tied the two together, so four screens had bindings the
+   sheet never built a section for -- Connectors, whose [B], [Ctrl-O] and
+   [b / u] are the least guessable keys in the product, and the three Keeper
+   drill-downs. On those screens [?] opened on Global and named no section for
+   where the reader was. *)
+let test_every_surface_with_keys_has_a_sheet_section () =
+  let missing =
+    List.filter
+      (fun surface ->
+        not
+          (List.exists
+             (fun (_, listed) -> listed = surface)
+             Masc_tui_keys.help_surfaces))
+      every_surface
+  in
+  let name surface =
+    match Masc_tui_keys.for_surface surface with
+    | binding :: _ -> binding.Masc_tui_keys.key
+    | [] -> "(no keys)"
+  in
+  Alcotest.(check int)
+    (Printf.sprintf
+       "every screen with keys has a sheet section (missing, by first key: %s)"
+       (String.concat " | " (List.map name missing)))
+    0 (List.length missing)
 
 let test_no_surface_repeats_a_key () =
   List.iter
@@ -1675,17 +1715,6 @@ let test_the_sheet_says_the_listing_tail_once () =
          | None -> false
          | Some config -> List.mem ("r", "reload") config)
 
-let test_braille_sparkline () =
-  Alcotest.(check string) "empty list gives base line" "⣀⡠⠤⠶"
-    (braille_sparkline []);
-  let spark = braille_sparkline [ 0.0; 0.5; 1.0 ] in
-  Alcotest.(check bool) "sparkline non-empty" true (String.length spark > 0)
-
-let test_fleet_total_cost () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
-  Alcotest.(check (float 0.001)) "fleet cost initially 0" 0.0
-    (fleet_total_cost_usd state)
-
 (* The golden below holds every label, so a deliberate relabelling fails it and
    asks to be looked at -- which is what it is for. The three hops are asserted
    on their own underneath, because losing one of those is not a relabelling: it
@@ -2969,6 +2998,8 @@ let () =
             `Quick test_every_enter_atom_exception_names_a_sheet_surface
         ; Alcotest.test_case "every surface answers" `Quick
             test_every_surface_answers
+        ; Alcotest.test_case "every surface with keys has a sheet section"
+            `Quick test_every_surface_with_keys_has_a_sheet_section
         ; Alcotest.test_case "no surface repeats a key" `Quick
             test_no_surface_repeats_a_key
         ; Alcotest.test_case "one spelling per key" `Quick
@@ -3152,10 +3183,6 @@ let () =
             test_the_question_count_counts_questions
         ; Alcotest.test_case "the questions reading tells unread from none open"
             `Quick test_the_questions_reading_tells_unread_from_none_open
-        ; Alcotest.test_case "braille sparkline renders levels" `Quick
-            test_braille_sparkline
-        ; Alcotest.test_case "fleet total cost sums correctly" `Quick
-            test_fleet_total_cost
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "the sheet files the fact detail keys" `Quick

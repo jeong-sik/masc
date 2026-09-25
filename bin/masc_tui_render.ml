@@ -31,6 +31,7 @@ module Overview_team = Masc_tui_overview_team
 module Overview_goals = Masc_tui_overview_goals
 module Overview_providers = Masc_tui_overview_providers
 module Repository_pulls = Masc_tui_repository_pulls
+module Keeper_spend = Masc_tui_keeper_spend
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
 module Markdown = Masc_tui_markdown
@@ -326,15 +327,31 @@ let overview_team (state : state) =
 let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview_pulls
 
 (* Lines under the Team block that explain no Keeper row: the pull request
-   summary. *)
-let overview_team_detail_lines (state : state) = overview_pulls_lines state
+   summary and why a Keeper's spend could not be read. *)
+let overview_team_detail_lines (state : state) =
+  overview_pulls_lines state @ Keeper_spend.lines state.overview_spend
 
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the name lines and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
-    ~detail_lines ~pr_tag_of_keeper =
+    ~detail_lines ~pr_tag_of_keeper ~spend_tags ~spend_total =
+  (* Each Keeper's spend over the window, padded to the widest tag among
+     the rows so the tags stand in one column at the right. The title sums
+     the same rows. *)
+  let spend_tag_of_keeper =
+    spend_tags (List.map (fun (row : Overview_team.row) -> row.keeper.okp_name) team.rows)
+  in
+  (* The title's total covers every Keeper the block knows, the ones drawn
+     only on a name line included: a paused or stopped Keeper's turns in the
+     window are still spend. *)
+  let spend_forms =
+    spend_total
+      (List.map (fun (row : Overview_team.row) -> row.keeper.okp_name) team.rows
+      @ List.map fst (team.no_phase @ team.paused @ team.stopped))
+  in
+  let inner = framed_inner_width cols in
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -388,11 +405,16 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
     (* The Keeper's PR, ahead of the detail so a narrow row keeps it: its
        number and one glyph for its checks, "+N" for more. *)
     let pr_tag = pr_tag_of_keeper row.keeper.okp_name in
-    Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s%s" tone mark Ansi.reset
-      (fit_width (Terminal_text.single_line row.keeper.okp_name) name_cells)
-      tone
-      (fit_width (Terminal_text.single_line (Overview_team.phase_word row.keeper)) 10)
-      Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset pr_tag detail
+    (* Spend goes at the right, after the detail, and only where the row
+       still fits whole: the detail is the row's reason, and a stuck
+       Keeper's cause is drawn nowhere else. *)
+    Keeper_spend.place_tag ~inner
+      ~tag:(spend_tag_of_keeper row.keeper.okp_name)
+      (Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s%s" tone mark Ansi.reset
+         (fit_width (Terminal_text.single_line row.keeper.okp_name) name_cells)
+         tone
+         (fit_width (Terminal_text.single_line (Overview_team.phase_word row.keeper)) 10)
+         Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset pr_tag detail)
   in
   let off_glyph = "\xe2\x97\x8b" in
   let names_line glyph label = function
@@ -499,15 +521,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
             ; spark
             ])
   in
-  let title =
-    match
-      List.find_opt
-        (fun tail -> Message_layout.display_width (head ^ tail) <= cols)
-        tails
-    with
-    | Some tail -> head ^ tail
-    | None -> head
-  in
+  let title = Keeper_spend.fit_title ~cols ~head ~forms:spend_forms ~tails in
   (title, List.filteri (fun index _ -> index < team_rows) rows)
 
 (* Every item the Overview has to place: the transport's, then the
@@ -836,6 +850,8 @@ let render_overview (state : state) =
            ~flow:state.task_flow ~cols
            ~detail_lines:(overview_team_detail_lines state)
            ~pr_tag_of_keeper:(Repository_pulls.keeper_tag state.overview_pulls)
+           ~spend_tags:(Keeper_spend.keeper_tags state.overview_spend)
+           ~spend_total:(Keeper_spend.team_total state.overview_spend)
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;
@@ -7363,10 +7379,30 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
               | Some word -> " \xc2\xb7 " ^ Terminal_text.single_line word
               | None -> "")
            ^ Ansi.reset);
-    add_row "Judge first:"
-      (match List.assoc_opt k.k_name state.keeper_gate_judges with
-       | Some slot -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ Terminal_text.single_line slot ^ Ansi.reset
-       | None -> Ansi.dim ^ "lane order" ^ Ansi.reset);
+    add_row "Lane first:"
+      (match
+         List.filter
+           (fun (first : Tui_decode.keeper_exact_lane_first) ->
+             String.equal first.Tui_decode.kel_keeper k.k_name)
+           state.keeper_exact_lane_firsts
+       with
+       | [] -> Ansi.dim ^ "lane order" ^ Ansi.reset
+       | firsts ->
+           (Masc_tui_theme.tone Masc_tui_theme.Accent)
+           ^ Terminal_text.single_line
+               (String.concat ", "
+                  (List.map
+                     (fun (first : Tui_decode.keeper_exact_lane_first) ->
+                       first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
+                       ^ first.kel_slot_id)
+                     firsts))
+           ^ Ansi.reset);
+    (match state.keeper_gate_settings_unread with
+     | None -> ()
+     | Some reason ->
+         add_row "Gate settings:"
+           (Theme.bad () ^ "unread \xc2\xb7 "
+            ^ Terminal_text.single_line reason ^ Ansi.reset));
     add_empty ();
 
     (* Current work section *)

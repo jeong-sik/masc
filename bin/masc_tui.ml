@@ -1825,6 +1825,11 @@ type approval_observation = {
   ao_result: (approval_snapshot, string) result;
 }
 
+type keeper_spend_reply =
+  { asked_at_generation : int
+  ; reply : (overview_spend_reading, string) result
+  }
+
 type http_scoped_surface_results = {
   http_transport: (Tui_decode.transport_health, string) result option;
   http_approvals: approval_observation option;
@@ -1854,6 +1859,7 @@ type http_scoped_surface_results = {
   http_repository_pulls:
     (overview_pulls_reading, string) result
     option;
+  http_keeper_spend: keeper_spend_reply option;
   (* [None] off the Overview, the one surface that draws the GOALS section. *)
   http_overview_goals: (Tui_decode.overview_goal list, string) result option;
 }
@@ -2033,6 +2039,10 @@ type async_msg =
      for somebody else must be dropped, not filed under whoever is open. *)
   | Memory_facts_loaded of
       string * (Masc.Tui_decode.memory_fact_snapshot, string) result
+  | All_memory_facts_loaded of
+      (Masc.Tui_decode.memory_fact_snapshot * string option, string) result
+      (** The "all keepers" merge and, when some keepers could not be read,
+          which ones. *)
   | Repository_changes_loaded of
       Masc.Tui_decode.repository_change_scope
       * (Masc.Tui_decode.repository_change_snapshot, string) result
@@ -2150,7 +2160,7 @@ type async_msg =
   (* Its own message rather than a field on the stance one: the two come from
      different endpoints and one failing must not blank the other. *)
   | Keeper_gate_settings_loaded of
-      (((string * string) list * (string * string) list), string) result
+      (((string * string) list * Masc.Tui_decode.keeper_exact_lane_first list), string) result
   | Keeper_tool_modes_loaded of
       ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result
       * Approval.Listing_order.ticket
@@ -5472,119 +5482,31 @@ let launch_memory_facts_load state ~mailbox ~keeper_name =
 let launch_all_memory_facts_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
-  let keepers =
-    match state.memory_health with
-    | Some h -> h.Tui_decode.mhs_keepers
-    | None -> []
-  in
   let run () =
-    if keepers = [] then
+    match state.memory_health with
+    | None ->
+      (* Without the health read there is no keeper list to merge. An empty
+         "all keepers" view would read as memory that is empty. *)
       enqueue_async mailbox
-        (Memory_facts_loaded
-           ( "*",
-             Ok
-               { Tui_decode.mfs_keeper = "*"
-               ; mfs_ordinary =
-                   Tui_decode.Memory_store_present
-                     { Tui_decode.mos_revision = 1
-                     ; mos_updated_at = Unix.gettimeofday ()
-                     ; mos_facts = []
-                     }
-               ; mfs_source =
-                   Tui_decode.Memory_store_present
-                     { Tui_decode.mss_revision = 1
-                     ; mss_updated_at = Unix.gettimeofday ()
-                     ; mss_facts = []
-                     ; mss_invalidations = []
-                     }
-               ; mfs_events_read_error = None
-               } ))
-    else
-      let all_ord_facts = ref [] in
-      let all_src_facts = ref [] in
-      let all_invals = ref [] in
-      let all_event_read_errors = ref [] in
-      List.iter
-        (fun (k : Tui_decode.memory_keeper_health) ->
-          let keeper_name = k.Tui_decode.mkh_keeper_id in
-          match
-            try Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name with
-            | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | _ -> Error "failed"
-          with
-          | Ok snap ->
-              (match snap.Tui_decode.mfs_events_read_error with
-               | None -> ()
-               | Some detail ->
-                 all_event_read_errors :=
-                   Printf.sprintf "%s: %s" keeper_name detail
-                   :: !all_event_read_errors);
-              (match snap.Tui_decode.mfs_ordinary with
-               | Tui_decode.Memory_store_present store ->
-                   let tagged =
-                     List.map
-                       (fun (f : Tui_decode.memory_fact) ->
-                         { f with
-                           Tui_decode.mf_origin =
-                             if String.starts_with ~prefix:(keeper_name ^ " · ") f.Tui_decode.mf_origin then
-                               f.Tui_decode.mf_origin
-                             else Printf.sprintf "%s · %s" keeper_name f.Tui_decode.mf_origin
-                         })
-                       store.Tui_decode.mos_facts
-                   in
-                   all_ord_facts := !all_ord_facts @ tagged
-               | _ -> ());
-              (match snap.Tui_decode.mfs_source with
-               | Tui_decode.Memory_store_present store ->
-                   let tagged_src =
-                     List.map
-                       (fun (f : Tui_decode.memory_source_fact) ->
-                         { f with
-                           Tui_decode.msf_path =
-                             if String.starts_with ~prefix:(keeper_name ^ ":") f.Tui_decode.msf_path then
-                               f.Tui_decode.msf_path
-                             else Printf.sprintf "%s:%s" keeper_name f.Tui_decode.msf_path
-                         })
-                       store.Tui_decode.mss_facts
-                   in
-                   let tagged_inv =
-                     List.map
-                       (fun (inv : Tui_decode.memory_invalidation) ->
-                         { inv with
-                           Tui_decode.mi_source_path =
-                             if String.starts_with ~prefix:(keeper_name ^ ":") inv.Tui_decode.mi_source_path then
-                               inv.Tui_decode.mi_source_path
-                             else Printf.sprintf "%s:%s" keeper_name inv.Tui_decode.mi_source_path
-                         })
-                       store.Tui_decode.mss_invalidations
-                   in
-                   all_src_facts := !all_src_facts @ tagged_src;
-                   all_invals := !all_invals @ tagged_inv
-               | _ -> ())
-          | Error _ -> ())
-        keepers;
-      let combined =
-        { Tui_decode.mfs_keeper = "*"
-        ; mfs_ordinary =
-            Tui_decode.Memory_store_present
-              { Tui_decode.mos_revision = 1
-              ; mos_updated_at = Unix.gettimeofday ()
-              ; mos_facts = !all_ord_facts
-              }
-        ; mfs_source =
-            Tui_decode.Memory_store_present
-              { Tui_decode.mss_revision = 1
-              ; mss_updated_at = Unix.gettimeofday ()
-              ; mss_facts = !all_src_facts
-              ; mss_invalidations = !all_invals
-              }
-        ; mfs_events_read_error =
-            (match List.rev !all_event_read_errors with
-             | [] -> None
-             | errors -> Some (String.concat "; " errors))
-        }
+        (All_memory_facts_loaded
+           (Error "keeper list not read yet (memory health has not loaded)"))
+    | Some health ->
+      let loads =
+        List.map
+          (fun (k : Tui_decode.memory_keeper_health) ->
+            let keeper_name = k.Tui_decode.mkh_keeper_id in
+            ( keeper_name,
+              try Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn -> Error (Printexc.to_string exn) ))
+          health.Tui_decode.mhs_keepers
       in
-      enqueue_async mailbox (Memory_facts_loaded ("*", Ok combined))
+      (* One message: the merged facts and the keepers missing from them
+         travel together, so the handler never has to keep one answer across
+         another. *)
+      enqueue_async mailbox
+        (All_memory_facts_loaded
+           (Ok (Tui_decode.merge_keeper_memory_facts ~now:(Unix.gettimeofday ()) loads)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -5593,7 +5515,7 @@ let launch_all_memory_facts_load state ~mailbox =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Memory_facts_loaded ("*", Error "Eio switch is unavailable"))
+        (All_memory_facts_loaded (Error "Eio switch is unavailable"))
 
 let open_all_fleet_memory state ~mailbox =
   state.memory_facts_keeper <- Some "*";
@@ -9939,13 +9861,21 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.patch_modal_path <- Some target_path;
       launch_repository_changes_diff_load state ~mailbox
         ~scope:Tui_decode.Repository_change_project ~path:target_path
-  | Masc_tui_command.Toggle_burn_hud ->
+  | Masc_tui_command.Toggle_cost ->
       Buffer.clear state.msg_input;
-      state.burn_hud_visible <- not state.burn_hud_visible;
-      let status_str = if state.burn_hud_visible then "shown" else "hidden" in
-      let cost = Masc_tui_types.fleet_total_cost_usd state in
+      let visible, generation =
+        Masc_tui_types.toggle_cost_visibility ~visible:state.cost_visible
+          ~generation:state.cost_generation
+      in
+      state.cost_visible <- visible;
+      state.cost_generation <- generation;
+      (* Hidden, spend stops being read, so a reading kept from before would
+         come back as a number nobody observed since. Shown again, it starts
+         unread and the next refresh fills it. *)
+      state.overview_spend <- Overview_spend_unread;
       notice ~kind:Notice_reply
-        (Printf.sprintf "Fleet cost in the tab row: %s ($%.4f so far)" status_str cost)
+        (if state.cost_visible then "Cost on the Overview Team block: shown"
+         else "Cost on the Overview Team block: hidden")
   | Masc_tui_command.Open_link_preview url_opt ->
       Buffer.clear state.msg_input;
       let all_urls = Masc_tui_types.conversation_urls state in
@@ -10684,6 +10614,17 @@ let apply_repository_pulls_load state = function
   | Ok reading -> state.overview_pulls <- reading
   | Error err -> state.overview_pulls <- Overview_pulls_failed err
 
+(* A failed read replaces the last good one, as the pull requests do: a
+   spend drawn after the reading that said so stopped arriving would be a
+   number nobody observed. *)
+let apply_keeper_spend_load state ~generation result =
+  (* A response from before an off/on cycle cannot certify the new reading,
+     even if it arrives after the operator turns spend back on. *)
+  if Masc_tui_types.cost_reply_is_current ~visible:state.cost_visible
+       ~current_generation:state.cost_generation ~reply_generation:generation
+  then
+    state.overview_spend <- Masc_tui_keeper_spend.reading_of_load result
+
 (* A failed read replaces the last good one, as the quota reading does: goals
    drawn after the read that listed them stopped arriving would be rows nobody
    observed this refresh. *)
@@ -10877,7 +10818,8 @@ let refresh_status results =
   | _ -> Masc_tui_types.Degraded
 
 let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
-    ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
+    ~board_hearth ~system_log_level ~cost_generation
+    ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
   (* Metrics draws the transport and the Overview reads its queue pressure,
      so a refresh on another surface does not spend a request on it. [None]
@@ -10938,6 +10880,16 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn -> Error (Printexc.to_string exn))
   in
+  let http_keeper_spend =
+    when_needed needs.needs_keeper_spend (fun () ->
+        match Masc_tui_loader.load_keeper_spend ~host ~port with
+        | reply -> { asked_at_generation = cost_generation; reply }
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception exn ->
+            { asked_at_generation = cost_generation
+            ; reply = Error (Printexc.to_string exn)
+            })
+  in
   let http_overview_goals =
     when_needed needs.needs_overview_goals (fun () ->
         match Masc_tui_loader.load_overview_goals ~host ~port with
@@ -10956,11 +10908,13 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   ; http_keeper_roster
   ; http_runtime_quota
   ; http_repository_pulls
+  ; http_keeper_spend
   ; http_overview_goals
   }
 
 let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
-    ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
+    ~board_hearth ~system_log_level ~cost_generation
+    ~(needs : Masc_tui_types.surface_needs) =
   (* A process can disappear and another bind the same endpoint between two
      successful ticks. The compact /health identity is therefore revalidated
      on every refresh rather than inferred from connection failure. It goes
@@ -10984,7 +10938,7 @@ let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
          still decides whether the panel renders, only the fetch is
          unconditional. Targeted scoped refreshes keep their own needs. *)
       load_http_scoped_surfaces ~host ~port ~approval_ticket:None
-        ~board_sort ~board_hearth ~system_log_level
+        ~board_sort ~board_hearth ~system_log_level ~cost_generation
         ~needs:{ needs with needs_asks = true }
     in
     Refresh_surfaces
@@ -11003,6 +10957,10 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
   Option.iter (apply_runtime_quota_load state) results.http_runtime_quota;
   Option.iter (apply_repository_pulls_load state) results.http_repository_pulls;
+  Option.iter
+    (fun { asked_at_generation; reply } ->
+       apply_keeper_spend_load state ~generation:asked_at_generation reply)
+    results.http_keeper_spend;
   Option.iter (apply_overview_goals_load state) results.http_overview_goals
 
 (* This is a current reading, not a last-known cache. A failed probe makes
@@ -11317,6 +11275,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         ~scoped_refresh_inflight:!scoped_refresh_inflight
         ~keeper_pane_drawn:
           (not (Masc_tui_render.acting_pane_suppressed state))
+        ~cost_shown:state.cost_visible
         state.view
     in
     (* The chat pane's history comes down its own generation-guarded path, not
@@ -11378,11 +11337,13 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        is in the payload whether or not the tail is. *)
     if not was_booting then launch_schedules_load state ~mailbox;
 
+    let cost_generation = state.cost_generation in
     let run_refresh () =
       try
         enqueue_async mailbox
           (Http_refresh_done
              (load_http_surfaces ~host ~port ~approval_ticket
+                ~cost_generation
                 ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -11406,6 +11367,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
           (fun () ->
              apply_http_refresh_outcome state
                (load_http_surfaces ~host ~port ~approval_ticket
+                  ~cost_generation
                   ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -11430,11 +11392,13 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
        match state.msg_target_keeper_name with
        | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
        | None -> ());
+    let cost_generation = state.cost_generation in
     let run_refresh () =
       try
         enqueue_async mailbox
           (Http_scoped_refresh_done
              (load_http_scoped_surfaces ~host ~port
+                ~cost_generation
                 ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -11458,6 +11422,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
           (fun () ->
              apply_http_scoped_surfaces state
                (load_http_scoped_surfaces ~host ~port
+                  ~cost_generation
                   ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -12903,7 +12868,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
         | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
-        | Masc_tui_command.Toggle_burn_hud | Masc_tui_command.Open_changes
+        | Masc_tui_command.Toggle_cost | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane
          | Masc_tui_command.Show_acting_pane_tab _
          | Masc_tui_command.Acting_pane_tab_unknown _
@@ -15044,14 +15009,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              (Printf.sprintf "%s Gate change failed: %s" (gate_lane_label lane) detail))
   | Keeper_gate_settings_loaded result ->
       (match result with
-       | Ok (modes, judges) ->
+       | Ok (modes, exact_lanes) ->
            state.keeper_gate_modes <- modes;
-           state.keeper_gate_judges <- judges
-       | Error _ ->
+           state.keeper_exact_lane_firsts <- exact_lanes;
+           state.keeper_gate_settings_unread <- None
+       | Error detail ->
            (* Keep the last known settings rather than showing every Keeper as
               following the workspace, which is the looser reading and the one
-              an operator would act on. *)
-           ())
+              an operator would act on. The pane says the read failed: before
+              the first successful read, the "last known" values are the
+              defaults. *)
+           state.keeper_gate_settings_unread <- Some detail)
   | Keeper_tool_modes_loaded (result, ticket) ->
       (* Dropped when a press has opened since the fetch went out -- it
          describes the stance from before that press, including a press that
@@ -15757,6 +15725,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.memory_health <- Some snapshot;
           state.memory_health_error <- None
       | Error detail -> state.memory_health_error <- Some detail)
+  | All_memory_facts_loaded result ->
+      if Option.equal String.equal state.memory_facts_keeper (Some "*") then (
+        match result with
+        | Ok (snapshot, unread) ->
+            state.memory_facts <- Some snapshot;
+            state.memory_facts_error <- unread
+        | Error detail -> state.memory_facts_error <- Some detail)
   | Memory_facts_loaded (keeper_name, result) ->
       (* Only the keeper the browser is still open on: a late answer for a
          browser that closed, or for the keeper the reader already left,
@@ -16885,6 +16860,7 @@ let main
     ref
       (Masc_tui_types.surface_needs
          ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state))
+         ~cost_shown:state.cost_visible
          state.view)
   in
   let input_reader = create_input_reader () in
@@ -25451,15 +25427,24 @@ and is loaded on demand through keeper_skill.
         Masc_tui_types.surface_needs
           ~keeper_pane_drawn:
             (not (Masc_tui_render.acting_pane_suppressed state))
+          ~cost_shown:state.cost_visible
           state.view
       in
+      let cost_retry =
+        needed.needs_keeper_spend
+        && Masc_tui_types.cost_refresh_needed ~visible:state.cost_visible
+             state.overview_spend
+      in
       if
-        needed <> !drawn_needs
+        (needed <> !drawn_needs || cost_retry)
         && not !http_refresh_inflight
         && not !http_scoped_refresh_inflight
       then begin
         let delta =
           Masc_tui_types.surface_needs_delta ~previous:!drawn_needs ~next:needed
+        in
+        let delta =
+          { delta with needs_keeper_spend = delta.needs_keeper_spend || cost_retry }
         in
         drawn_needs := needed;
         if Masc_tui_types.surface_needs_any delta then

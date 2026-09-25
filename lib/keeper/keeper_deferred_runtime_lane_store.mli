@@ -12,19 +12,26 @@ type error =
 
 val error_to_string : error -> string
 
-val path_for : base_path:string -> keeper_name:string -> string
+(** [keepers_dir] is the cluster-aware keeper runtime directory
+    ({!Workspace.keepers_runtime_dir}); two named clusters with the same keeper
+    name keep separate hints. [base_path] is the durable-write ownership root. *)
+val path_for : keepers_dir:string -> keeper_name:string -> string
 
 val load :
-  base_path:string ->
+  keepers_dir:string ->
   keeper_name:string ->
   (Keeper_turn_driver.deferred_runtime_lane option, error) result
 
 val save :
   base_path:string ->
+  keepers_dir:string ->
   keeper_name:string ->
   Keeper_turn_driver.deferred_runtime_lane ->
   (unit, error) result
 
 val clear :
-  base_path:string -> keeper_name:string -> (unit, error) result
+  base_path:string ->
+  keepers_dir:string ->
+  keeper_name:string ->
+  (unit, error) result
 

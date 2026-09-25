@@ -68,7 +68,7 @@ let test_patch_contains_only_changed_fields () =
     | _ -> assert false
   in
   match patch_of_edit ~before:observed ~after with
-  | Error detail -> Alcotest.fail detail
+  | Error refusal -> Alcotest.fail (edit_refusal_to_string refusal)
   | Ok patch ->
       Alcotest.(check string) "one changed field"
         {|{"expected_config_revision":{"manifest":{"state":"sha256","value":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"runtime_assignment":{"state":"runtime_config_present","source_revision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","assignment":{"state":"assigned","runtime_id":"codex_subscription.gpt-5.6-sol"}}},"activation_mode":"manual"}|}
@@ -76,7 +76,7 @@ let test_patch_contains_only_changed_fields () =
 
 let test_input_policy_patch () =
   match patch_of_edit ~before:observed ~after:(`Assoc ["input_policy", `String "wide"]) with
-  | Error detail -> Alcotest.fail detail
+  | Error refusal -> Alcotest.fail (edit_refusal_to_string refusal)
   | Ok patch ->
       Alcotest.(check string) "policy change is editable" "wide"
         (Yojson.Safe.Util.member "input_policy" patch |> Yojson.Safe.Util.to_string);
@@ -85,7 +85,7 @@ let test_input_policy_patch () =
 
 let test_deleted_field_means_unchanged () =
   match patch_of_edit ~before:observed ~after:(`Assoc []) with
-  | Error detail -> Alcotest.fail detail
+  | Error refusal -> Alcotest.fail (edit_refusal_to_string refusal)
   | Ok patch ->
       Alcotest.(check string) "empty patch" "{}" (Yojson.Safe.to_string patch)
 
@@ -102,7 +102,7 @@ let with_edited_skills before skills =
 let check_skill_patch ~label ~before ~skills ~expected =
   let after = with_edited_skills before skills in
   match patch_of_edit ~before ~after with
-  | Error detail -> Alcotest.fail detail
+  | Error refusal -> Alcotest.fail (edit_refusal_to_string refusal)
   | Ok patch ->
       Alcotest.(check string) label expected (Yojson.Safe.to_string patch)
 
@@ -164,9 +164,62 @@ let test_unknown_field_is_rejected () =
     patch_of_edit ~before:observed ~after:(`Assoc [ "mystery", `Bool true ])
   with
   | Ok _ -> Alcotest.fail "unknown field was accepted"
-  | Error detail ->
+  | Error (Cannot_send detail) -> Alcotest.fail ("not an editor refusal: " ^ detail)
+  | Error (Fix_in_editor detail) ->
       Alcotest.(check string) "actionable error"
         "unknown keeper setting(s): mystery" detail
+
+(* activation_mode is a closed set on the server. A value outside it used to
+   travel to the server and come back as one status line; now it is refused
+   before the request, as something the operator fixes in the editor, and the
+   refusal names every value the set accepts. *)
+let test_activation_outside_the_set_is_an_editor_refusal () =
+  let edit value = `Assoc [ "activation_mode", value ] in
+  List.iter
+    (fun (label, value) ->
+      match patch_of_edit ~before:observed ~after:(edit value) with
+      | Ok patch ->
+        Alcotest.fail (label ^ " reached a patch: " ^ Yojson.Safe.to_string patch)
+      | Error (Cannot_send detail) -> Alcotest.fail (label ^ ": " ^ detail)
+      | Error (Fix_in_editor reason) ->
+        Alcotest.(check bool) (label ^ " names the set") true
+          (contains reason "manual | on_demand | autonomous");
+        Alcotest.(check bool) (label ^ " names the value") true
+          (contains reason (Yojson.Safe.to_string value)))
+    [ "alias", `String "auto"; "wrong case", `String "Autonomous"; "not a string", `Bool true ];
+  match patch_of_edit ~before:observed ~after:(edit (`String "on_demand")) with
+  | Error refusal -> Alcotest.fail (edit_refusal_to_string refusal)
+  | Ok patch ->
+    Alcotest.(check string) "a member of the set is sent" "on_demand"
+      (Yojson.Safe.Util.member "activation_mode" patch |> Yojson.Safe.Util.to_string)
+
+(* The reopened text has to parse as exactly what the operator left, and a
+   second refusal replaces the first rather than stacking on it. *)
+let test_reopened_stem_parses_and_replaces () =
+  let edited = {|{
+  "activation_mode": "auto"
+}|} in
+  let once = reopened_stem ~reason:"first\nreason" edited in
+  let twice = reopened_stem ~reason:"second" once in
+  Alcotest.(check string) "same JSON as the edit"
+    (Yojson.Safe.to_string (Yojson.Safe.from_string edited))
+    (Yojson.Safe.to_string (Yojson.Safe.from_string twice));
+  Alcotest.(check (list string)) "one refusal line, the latest" [ "// second" ]
+    (String.split_on_char '\n' twice
+     |> List.filter (fun line -> String.starts_with ~prefix:"//" line));
+  Alcotest.(check bool) "reason is kept on one line" true
+    (String.starts_with ~prefix:"// first reason\n" once)
+
+(* No revision to send against is not the operator's text to fix: reopening
+   the editor over it would loop on something no edit can change. *)
+let test_missing_revision_is_not_an_editor_refusal () =
+  let before = `Assoc [ "activation_mode", `String "manual" ] in
+  match
+    patch_of_edit ~before ~after:(`Assoc [ "activation_mode", `String "autonomous" ])
+  with
+  | Error (Cannot_send _) -> ()
+  | Error (Fix_in_editor reason) -> Alcotest.fail ("reopens over: " ^ reason)
+  | Ok patch -> Alcotest.fail ("sent without a revision: " ^ Yojson.Safe.to_string patch)
 
 (* The server refuses a patch that lowers [max_context_override] unless it
    carries [confirm_context_shrink], and says so in its refusal. The editor
@@ -180,7 +233,9 @@ let test_context_shrink_confirmation_reaches_the_patch () =
       ]
   in
   (match patch_of_edit ~before:observed ~after:shrink with
-   | Error detail -> Alcotest.fail ("shrink confirmation was refused: " ^ detail)
+   | Error refusal ->
+       Alcotest.fail
+         ("shrink confirmation was refused: " ^ edit_refusal_to_string refusal)
    | Ok (`Assoc fields) ->
        Alcotest.(check bool) "carries the confirmation" true
          (List.assoc_opt "confirm_context_shrink" fields = Some (`Bool true));
@@ -194,7 +249,8 @@ let test_context_shrink_confirmation_reaches_the_patch () =
   with
   | Ok (`Assoc []) -> ()
   | Ok _ -> Alcotest.fail "the bare confirmation posted a patch"
-  | Error detail -> Alcotest.fail ("bare confirmation errored: " ^ detail)
+  | Error refusal ->
+      Alcotest.fail ("bare confirmation errored: " ^ edit_refusal_to_string refusal)
 
 let test_view_explains_effective_values_and_sources () =
   let rendered = rendered_of observed in
@@ -693,6 +749,12 @@ let () =
             `Quick test_context_shrink_confirmation_reaches_the_patch
         ; Alcotest.test_case "reject unknown" `Quick
             test_unknown_field_is_rejected
+        ; Alcotest.test_case "activation outside the set is an editor refusal" `Quick
+            test_activation_outside_the_set_is_an_editor_refusal
+        ; Alcotest.test_case "reopened stem parses and replaces" `Quick
+            test_reopened_stem_parses_and_replaces
+        ; Alcotest.test_case "missing revision is not an editor refusal" `Quick
+            test_missing_revision_is_not_an_editor_refusal
         ; Alcotest.test_case "view meaning" `Quick
             test_view_explains_effective_values_and_sources
         ; Alcotest.test_case "every row marks editability" `Quick

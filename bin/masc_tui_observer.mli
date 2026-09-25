@@ -104,6 +104,14 @@ type keeper_turn_complete = {
   tc_turn : int option;
   tc_model : string option;
   tc_input_tokens : int option;
+      (** Everything the turn sent, cache reads included. *)
+  tc_cache_read_tokens : int option;
+      (** The part of [tc_input_tokens] read from the provider's cache.
+          [None] when the event does not carry it. *)
+  tc_cache_creation_tokens : int option;
+      (** The part of [tc_input_tokens] written to the cache this turn:
+          processed fresh, not read back. [None] when the event does not
+          carry it. *)
   tc_output_tokens : int option;
   tc_cost_usd : float option;
   tc_tool_calls : int option;

@@ -1920,13 +1920,13 @@ let start
                      (Ok (Autonomous_busy (Turn_busy (Some in_flight))))
                  | None ->
                    let run_admitted_turn () =
-                     (* The turn the debt existed for is running now. A
-                        chat or maintenance admission leaves the debt
-                        alone: it is the autonomous lane's credit, and a
-                        turn of another lane does not pay it back. *)
-                     (match lane with
-                      | Autonomous -> t.autonomous_deferral_debt := 0
-                      | Chat_operation | Maintenance -> ());
+                     (* The turn the debt existed for is running now. The
+                        debt stays at the cap while it runs -- that is what
+                        keeps [autonomous_owed_slot] true on every publish
+                        during the turn, so later consults keep the slot
+                        too (a chat queued behind the cap must not take it
+                        back at a second tool boundary). It clears at this
+                        turn's settle. *)
                      t.child_active := true;
                      publish_turn_in_flight
                        t
@@ -2033,6 +2033,9 @@ let start
                 | Error (exn, backtrace) -> Ok (Autonomous_raised (exn, backtrace))
               in
               Eio.Promise.resolve autonomous_resolve response;
+              (* The turn the debt bought has finished, so its slot protection
+                 ends here: the next release starts a fresh cap count. *)
+              t.autonomous_deferral_debt := 0;
               Ok ()
           in
           t.child_active := false;

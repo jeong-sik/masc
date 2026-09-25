@@ -2782,7 +2782,7 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
 let test_transport_failure_is_error_not_empty () =
   let outcome =
     Masc_exec.Sandbox_target.Transport_failed
-      { output_files = None; reason = "remote_ssh_version_error: trailer carries v=2"
+      { failure = Masc_exec.Sandbox_target.Lane_unavailable; output_files = None; reason = "remote_ssh_version_error: trailer carries v=2"
       ; stdout = ""
       ; stderr = "remote_ssh_version_error"
       }

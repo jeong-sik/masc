@@ -20,6 +20,8 @@ open Alcotest
 open Masc
 module Q = Keeper_event_queue
 module A = Keeper_external_attention
+module Owner = Keeper_owner
+module Owner_registry = Keeper_owner_registry
 
 let contains ~needle haystack =
   let nl = String.length needle in
@@ -1114,6 +1116,185 @@ let test_batch_with_a_channel_less_member_routes_nowhere () =
   | Some _ -> fail "a channel-less member must take the route from the batch"
 ;;
 
+(* RFC-0373 direction 2, the slot the debt cap buys must be worth having.
+   When the deferral debt cap admits an autonomous turn over a queued chat,
+   that turn's first advisory consult still finds a claimable chat in the
+   store, so [autonomous_yield_request] answers [Operation_queued] and the
+   turn hands the just-bought slot straight back -- the buyer returns the
+   slot unswept, and the keeper stalls. The advice must read the slot as
+   bought, not free, until a chat actually takes it.
+
+   This script drives the real advisory against a real Owner: the chat
+   runner completes each turn but refills the queue before settling, so a
+   claimable chat always waits; three refusals put the owner at the cap;
+   the freed slot reaches the autonomous lane. The admitted turn's body is
+   the advisory call itself, exactly as the unified turn consults at its
+   first boundary. Today the answer is [Operation_queued], so this runs
+   red; the fix threads the debt-cap admission into the published
+   operation projection and the advisory early-returns [None]. *)
+let test_debt_cap_slot_survives_the_first_advisory () =
+  Eio_main.run
+  @@ fun env ->
+  Masc_test_deps.ensure_rng_initialized ();
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run
+  @@ fun sw ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Unix.putenv "MASC_BASE_PATH" base_path;
+  let keeper_name = "debt-advisory" in
+  let meta = test_meta keeper_name in
+  Keeper_registry.For_testing.clear ();
+  Fun.protect ~finally:(fun () -> Keeper_registry.For_testing.clear ()) @@ fun () ->
+  ignore (Keeper_registry.For_testing.register ~base_path keeper_name meta);
+  (* Cross-domain counters: the chat child runs on another eio domain, so a
+     plain ref's write may never become visible to this domain's spin. *)
+  let chat_turns = Atomic.make 0 in
+  let fed = Atomic.make 0 in
+  let holder = ref None in
+  (* Deterministic handshake: the runner resolves [held] once its claim
+     succeeded, and parks on [release_gate] until the test opens it --
+     the way a real chat turn keeps the slot for its duration. *)
+  let held, hold = Eio.Promise.create () in
+  let release_gate, release = Eio.Promise.create () in
+  let submit owner =
+    let serial = Atomic.fetch_and_add fed 1 + 1 in
+    let operation_id =
+      match
+        Owner.Chat_operation.Operation_id.of_string
+          ("kmsg-debt-advisory-" ^ string_of_int serial)
+      with
+      | Ok operation_id -> operation_id
+      | Error detail -> fail detail
+    in
+    (match
+       Owner.submit_operation owner ~operation_id
+         ~source:(`Assoc [ "kind", `String "dashboard" ])
+         ~input:(`Assoc [ "message", `String "fed chat turn" ])
+     with
+     | Ok _ -> ()
+     | Error error -> fail (Owner.error_to_string error))
+  in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    match claim () with
+    | Ok (Some _) ->
+      let claimed = Atomic.fetch_and_add chat_turns 1 + 1 in
+      (* The claim is durable and the slot is ours: tell the test. *)
+      Eio.Promise.resolve hold ();
+      let owner =
+        match !holder with
+        | Some owner -> owner
+        | None -> fail "the test did not publish the owner for the feeder"
+      in
+      (* Refill before this turn settles, so the admitted autonomous turn's
+         advisory still finds a claimable chat -- the exact situation the
+         first consult must survive. The submit rides the owner's mailbox
+         and the stream order guarantees it completes before any later
+         poll's Run_if_idle is served. *)
+      submit owner;
+      Eio.Promise.await release_gate;
+      Owner.Operation_succeeded
+        { outcome_ref = "turn:debt-advisory-" ^ string_of_int claimed }
+    | Ok None -> fail "the chat runner found an empty queue"
+    | Error Owner.Owner_closed ->
+      (* A queued chat whose slot only opens at teardown: the owner is
+         gone, and the row is settled as cancelled rather than raising
+         through the test's switch. *)
+      Owner.Operation_failed
+        { kind = Owner.Chat_operation.Turn_cancelled
+        ; detail = "keeper owner closed before the queued chat claimed"
+        ; outcome_ref = None
+        }
+    | Error error -> fail (Owner.error_to_string error)
+  in
+  let noop_execution_settled ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ = () in
+  (match
+     Owner_registry.install_from_store
+       ~sw
+       ~operation_runner:
+         (Some
+            Owner.
+              { ready = (fun ~keeper_name:_ -> true)
+              ; execute
+              ; on_execution_settled = noop_execution_settled
+              })
+       ~on_turn_slot_released:None
+       (Workspace.default_config base_path)
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Owner_registry.install_error_to_string error));
+  (* install_from_store materialises persisted keepers only; create_meta
+     starts this one inside the pool, inheriting the runner above. *)
+  (match Owner_registry.create_meta ~base_path meta with
+   | Ok _ -> ()
+   | Error error -> fail (Owner_registry.command_error_to_string error));
+  let owner =
+    match Owner_registry.get ~base_path ~keeper_name with
+    | Ok owner -> owner
+    | Error error -> fail (Owner_registry.lookup_error_to_string error)
+  in
+  holder := Some owner;
+  submit owner;
+  (* The first chat child claims and parks in the gate; [held] resolving
+     is the deterministic signal that the slot is occupied. *)
+  Eio.Promise.await held;
+  Fun.protect
+    ~finally:(fun () -> ignore (Eio.Promise.try_resolve release ()))
+    @@ fun () ->
+  let cap = Owner.autonomous_deferral_debt_cap in
+  let refusals = ref 0 in
+  let bound = cap + 6 in
+  let rec poll () =
+    match
+      Owner_registry.run_autonomous_if_idle ~base_path ~keeper_name (fun () ->
+        (* The turn the debt bought. Its body consults the way the unified
+           turn does at every tool boundary: first, and then again once
+           another chat has queued behind it -- the whole turn, not just its
+           first boundary, must keep the slot. *)
+        let consult () =
+          match Keeper_unified_turn.autonomous_yield_request ~base_path ~keeper_name with
+          | Ok answer -> answer
+          | Error detail -> fail detail
+        in
+        (match consult () with
+         | None -> ()
+         | Some _ ->
+           fail "the debt-cap slot was handed back on the very first advisory");
+        let owner =
+          match !holder with
+          | Some owner -> owner
+          | None -> fail "the test did not publish the owner for the feeder"
+        in
+        submit owner;
+        consult ())
+    with
+    | Ok (`Ran answer) -> answer
+    | Ok (`Busy _) ->
+      incr refusals;
+      (* The cap-th refusal is the debt that buys the slot. From then on
+         the holding chat may finish: the cap suppression keeps the next
+         queued chat out and the slot reaches this poller. *)
+      if !refusals = cap then Eio.Promise.resolve release ();
+      if !refusals >= bound
+      then
+        fail
+          (Printf.sprintf
+             "the autonomous lane never received the debt-cap slot (%d refusals)"
+             !refusals);
+      poll ()
+    | Ok `Interrupted -> fail "nothing interrupted the autonomous lane"
+    | Error error -> fail (Owner_registry.command_error_to_string error)
+  in
+  check bool "the chat lane held the slot before the cap"
+    (Atomic.get chat_turns > 0)
+    true;
+  match poll () with
+  | None -> ()
+    (* The bought slot survived both consults. *)
+  | Some _ ->
+    fail "the debt-cap slot was handed back once another chat queued"
+;;
+
 let () =
   run
     "keeper_connector_attention_batch"
@@ -1153,6 +1334,10 @@ let () =
             "turn completion acks every batch member, not only the primary"
             `Quick
             test_batch_completion_acks_every_member
+        ; test_case
+            "the debt-cap slot survives the autonomous turn's first advisory"
+            `Quick
+            test_debt_cap_slot_survives_the_first_advisory
         ] )
     ; ( "batch_disposition_of_cycle_outcome (P1-2)"
       , [ test_case

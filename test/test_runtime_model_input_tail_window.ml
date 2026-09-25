@@ -1024,28 +1024,10 @@ let test_opening_digest_names_the_first_message_of_each_atom () =
   | None -> Alcotest.fail "atom 0 exists"
 ;;
 
-(* A projection that carried no atom has no front to name: its front index is
-   the history's atom count, which the lookup over that history has no atom
-   at. The same history carrying its newest atom does name one, so the [None]
-   is the index, not the lookup. *)
-let test_a_window_without_an_atom_is_no_observation () =
-  let history = atoms 5 in
-  let atom_count = count_atoms history in
-  let digest_at = Window.atom_opening_digest history in
-  let observe ~dropped_atoms =
-    Window.observe
-      ~digest_at
-      ~history_atom_count:atom_count
-      { Window.messages = []; dropped_atoms; atom_count }
-  in
-  Alcotest.(check bool) "every atom dropped, nothing observed" true
-    (Option.is_none (observe ~dropped_atoms:atom_count));
-  match observe ~dropped_atoms:(atom_count - 1) with
-  | None -> Alcotest.fail "the newest atom alone is a window"
-  | Some observed ->
-    Alcotest.(check (option string)) "named by the newest atom"
-      (digest_at (atom_count - 1))
-      observed.Window.front_atom_digest
+(* A projection that carried no atom names no front: its observation reports
+   [front_atom_digest = None] beside the zero transmitted count — measured,
+   never silent (#39013). The same history carrying its newest atom names
+   one. *)
 
 (* #39013: a floor the ceiling composed on purpose is still a measurement.
    The projection carried no atom, so it names no front — but the observation
@@ -1075,9 +1057,7 @@ let test_the_floor_projection_is_an_observation_with_no_front () =
     | Some carried ->
       Alcotest.(check (option string)) "its neighbour still names its front"
         (Window.atom_opening_digest history (atom_count - 1))
-        (match carried.Window.front_atom_digest with
-         | Some digest -> Some digest
-         | None -> Alcotest.fail "the carried atom names no front")
+        carried.Window.front_atom_digest
 ;;
 
 let () =

@@ -913,8 +913,6 @@ let () =
             test_read_seed_stops_at_history_restart
         ; test_case "previous trace fences older retained rows" `Quick
             test_read_seed_stops_at_previous_trace
-        ; test_case "a floor response stops the seed read" `Quick
-            test_read_seed_stops_at_a_floor_response
         ; test_case "boundary errors are not TurnRecord errors" `Quick
             test_read_seed_keeps_boundary_errors_out_of_the_record_count
         ; test_case "a seed read reports each failure once" `Quick

@@ -638,27 +638,31 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           model_input_measurement_of_string raw)
       in
       let* front_atom_digest =
-        nullable "front_atom_digest" fields as_nonempty_string
+        nullable "front_atom_digest" fields (fun name json ->
+          match json with
+          | `Null -> Ok None
+          | _ ->
+            let* value = as_sha256_digest name json in
+            Ok (Some value))
       in
       let* model_input_window =
         match transmitted_atoms, total_atoms, measurement, front_atom_digest with
         | Some transmitted_atoms, Some total_atoms, Some measurement, Some front_atom_digest ->
           if transmitted_atoms > total_atoms
           then Error "turn_record: transmitted_atoms cannot exceed total_atoms"
+          else if front_atom_digest = None && transmitted_atoms <> 0
+          then
+            Error
+              "turn_record: front_atom_digest is null only when \
+               transmitted_atoms is 0"
           else
-            Ok
-              (Some
-                 { transmitted_atoms
-                 ; total_atoms
-                 ; measurement
-                 ; front_atom_digest = Some front_atom_digest
-                 })
+            Ok (Some { transmitted_atoms; total_atoms; measurement; front_atom_digest })
         | None, None, None, None -> Ok None
         | _ ->
           Error
             "turn_record: transmitted_atoms, total_atoms, \
              model_input_measurement and front_atom_digest must all be present \
-             or all be null"
+             or all be null (a null digest names a window with no front)"
       in
       let* response_observed_model_input_json =
         require "response_observed_model_input" fields
@@ -718,15 +722,31 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           let* measurement = model_input_measurement_of_string measurement_raw in
           let* front_atom_digest_json = require_observed "front_atom_digest" in
           let* front_atom_digest =
-            as_sha256_digest
-              "response_observed_model_input.front_atom_digest"
-              front_atom_digest_json
+            match front_atom_digest_json with
+            | `Null -> Ok None
+            | _ ->
+              let* value =
+                as_sha256_digest
+                  "response_observed_model_input.front_atom_digest"
+                  front_atom_digest_json
+              in
+              Ok (Some value)
           in
           if transmitted_atoms > total_atoms
           then
             Error
               "turn_record: response_observed_model_input.transmitted_atoms \
                cannot exceed total_atoms"
+          else if front_atom_digest = None && transmitted_atoms <> 0
+          then
+            Error
+              "turn_record: response_observed_model_input.front_atom_digest is \
+               null only when transmitted_atoms is 0"
+          else if front_atom_digest = None && transmitted_atoms <> 0
+          then
+            Error
+              "turn_record: response_observed_model_input.front_atom_digest is \
+               null only when transmitted_atoms is 0"
           else
             Ok
               (Some
@@ -735,7 +755,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
                      { transmitted_atoms
                      ; total_atoms
                      ; measurement
-                     ; front_atom_digest = Some front_atom_digest
+                     ; front_atom_digest
                      }
                  })
         | _ ->

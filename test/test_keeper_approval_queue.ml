@@ -2429,6 +2429,82 @@ let test_absent_queue_keeps_the_delivery_until_the_keeper_is_gone () =
     check_delivery_retired ~base_path approval_id)
 ;;
 
+(* #39025 retires two Keeper meta keys. A live meta file that still carries
+   one fails the current-schema decode ("unknown fields ... runtime reset
+   required") until the operator strips it. The fixture adds a key the decoder
+   does not know, which puts the file in the same state. *)
+let make_meta_not_current ~base_path ~keeper_name =
+  let config = Masc.Workspace.default_config base_path in
+  let path = Masc.Keeper_types_profile.keeper_meta_path config keeper_name in
+  (match Yojson.Safe.from_file path with
+   | `Assoc fields ->
+     Yojson.Safe.to_file path (`Assoc (("retired_meta_key", `Bool true) :: fields))
+   | other ->
+     Alcotest.failf "keeper meta fixture is not an object: %s" (Yojson.Safe.to_string other));
+  match Masc.Keeper_meta_store.read_meta_presence config keeper_name with
+  | Ok (Masc.Keeper_meta_store.Meta_not_current _) -> ()
+  | Ok (Masc.Keeper_meta_store.Meta_present _) ->
+    Alcotest.fail "fixture meta still decodes as current"
+  | Ok Masc.Keeper_meta_store.Meta_absent -> Alcotest.fail "fixture meta file is gone"
+  | Error detail -> Alcotest.fail detail
+;;
+
+(* A meta file that does not decode as the current schema still names a
+   Keeper; the boot path re-materialises it after this install. An approved
+   decision whose wake is still queued keeps its delivery, so the wake finds
+   its resolution when the Keeper takes it. Only a missing meta file retires
+   the delivery. *)
+let test_not_current_meta_keeps_the_delivery_until_the_meta_file_is_gone () =
+  with_spent_fixture "queue-delivery-meta-not-current" (fun ~base_path ~keeper_name ->
+    let input = `Assoc [ "target", `String "meta-not-current" ] in
+    let approval_id, _ = approve_with_wake ~base_path ~keeper_name ~input in
+    make_meta_not_current ~base_path ~keeper_name;
+    let report = reinstall_exn ~base_path in
+    Alcotest.(check int) "not-current meta keeps the delivery" 0 report.retired_deliveries;
+    check_delivery_kept ~base_path approval_id;
+    (match AQ.approved_resolution_state ~base_path ~id:approval_id with
+     | Ok AQ.Resolution_unconsumed -> ()
+     | Ok AQ.Resolution_consumed -> Alcotest.fail "restart consumed the grant"
+     | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+    (match
+       Masc.Keeper_meta_store.remove_snapshot
+         (Masc.Workspace.default_config base_path)
+         ~name:keeper_name
+     with
+     | Ok () -> ()
+     | Error detail -> Alcotest.fail detail);
+    let gone = reinstall_exn ~base_path in
+    Alcotest.(check int) "delivery of a gone Keeper retired" 1 gone.retired_deliveries;
+    check_delivery_retired ~base_path approval_id)
+;;
+
+(* Boot replay of a decision whose wake never reached the queue, owed to a
+   Keeper whose meta file is present but not current: the enqueue is a
+   delivery failure that keeps the delivery, not an absent recipient that
+   retires it. Once the meta decodes again the next boot sends the wake. *)
+let test_replay_to_a_not_current_meta_fails_and_keeps_the_delivery () =
+  with_spent_fixture "queue-replay-meta-not-current" (fun ~base_path ~keeper_name ->
+    let input = `Assoc [ "target", `String "replay-meta-not-current" ] in
+    let approval_id, resolution = approve_with_wake ~base_path ~keeper_name ~input in
+    drop_resolution ~base_path ~keeper_name resolution;
+    make_meta_not_current ~base_path ~keeper_name;
+    let report = reinstall_exn ~base_path in
+    Alcotest.(check int) "not retired at install" 0 report.retired_deliveries;
+    Alcotest.(check (list string))
+      "replay to a not-current meta is a failure"
+      [ approval_id ]
+      (List.map (fun failure -> failure.AQ.approval_id) report.delivery_replay_failures);
+    check_delivery_kept ~base_path approval_id;
+    ensure_keeper_exists ~base_path ~keeper_name;
+    let recovered = reinstall_exn ~base_path in
+    Alcotest.(check int) "replayed once the meta is current" 1 recovered.replayed_deliveries;
+    let replayed =
+      durable_resolution_opt ~base_path ~keeper_name ~approval_id
+      |> require_some "replay did not queue the wake"
+    in
+    drop_resolution ~base_path ~keeper_name replayed)
+;;
+
 let test_pre_effect_replay_failure_retires_grant_and_unblocks_continuation () =
   let base_path = temp_dir () in
   let keeper_name = "queue-pre-effect-replay-failure" in
@@ -6478,6 +6554,14 @@ let () =
             "absent queue keeps the delivery until the Keeper is gone"
             `Quick
             test_absent_queue_keeps_the_delivery_until_the_keeper_is_gone
+        ; Alcotest.test_case
+            "not-current meta keeps the delivery until the meta file is gone"
+            `Quick
+            test_not_current_meta_keeps_the_delivery_until_the_meta_file_is_gone
+        ; Alcotest.test_case
+            "replay to a not-current meta fails and keeps the delivery"
+            `Quick
+            test_replay_to_a_not_current_meta_fails_and_keeps_the_delivery
         ; Alcotest.test_case
             "pre-effect replay failure retires grant and continues"
             `Quick

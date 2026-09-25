@@ -651,6 +651,21 @@ status: reference
   스키마 위반은 도구 실행이 아니라 사전 거절(`pre-dispatch refusal`)이며, `oneOf`는 루트에서만 검사한다.
   → [Tool_input_validation](../../packages/agent_core/lib/tool_input_validation.mli)
 
+**Deferred Tool Loading (도구 스키마 지연 로딩)**
+: 도구 스키마를 요청마다 싣지 않고, `keeper_tool_search` 목록에 이름과 요약만 올려 두는
+  선언(`Tool_definition_toml.loading` = `Always_loaded`·`Deferrable`). 모델이 그 이름을
+  넘기면 그 턴에 스키마가 붙고, 한 번 부른 도구는 그 대화의 나머지 턴에도 스키마가
+  실린다(`Keeper_identity_tool_search`의 `already_used`). 그래서 이 선언이 줄이는 바이트는
+  그 대화가 아직 부르지 않은 도구의 스키마다. 선언 자리는 둘이다 — 도구 파일
+  `config/tools/<name>.toml`의 `defer_loading = true`, Skill composition 블록의
+  `defer_loading`(#38567). composition의 선언은 Skill 블록에만 두고, 같은 이름의
+  `config/tools/` 파일은 composition에 읽히지 않는다. 선언이 없으면 `Always_loaded`이고,
+  TOML 파일 없이 OCaml로 만든 도구는 지연을 선언할 수 없다. 목록은 description 첫 줄
+  (80바이트까지)로 도구를 소개한다. Agent Core lane에만 적용된다 — codex·antigravity·
+  claude_code runtime은 도구 배열 전체를 받는다. Execution Disposition의 `Deferred`(도구
+  호출의 결말)와 이름이 겹치지만 다른 개념이다. 이쪽은 스키마를 언제 싣느냐다.
+  → [Tool_loading_declarations](../../lib/tool_surface/tool_loading_declarations.mli)
+
 **Tool-host failure report**
 : 클라이언트가 관측한 도구 연결 실패 기록. HTTP 인증 결과의 보고자는 감사
   이벤트의 `actor`가 된다. 본문의 `agent_name`은 실패가 보고된 Agent이며,
@@ -988,6 +1003,30 @@ status: reference
     `outward_effect=none`으로 오기록하지 않는다). 단, 사전 토큰 수 측정
     (`token-count measurement`)은 별개 외부 호출이며 생성 발송 사실로 계수하지
     않는다(#38525).
+  - **Exact-output registry와 설정 저장**: exact 요청이 쓰는 target 목록
+    (`Runtime_exact_output_registry`). target 출처는 둘이다(`exact_output_target_source`) —
+    `Runtime_binding_targets`(이 파일의 HTTP 바인딩에서 만들고, 슬롯의 전체 기한은 그
+    provider의 `exact-body-timeout-s`), `Replacement_catalog_targets`
+    (`AGENT_CORE_MODEL_CATALOG`가 교체 카탈로그를 가리키면 그 `[[targets]]` 행이 target
+    전부이고 각자 `body_timeout_s`를 가진다. runtime.toml의 바인딩 필드는 닿지 않는다).
+    registry는 부팅 때 만들고, 서버를 거친 설정 저장마다 같은 커밋에서 다시 만든다
+    (#38850). 저장 응답의 `application.exact_output_registry`는 셋 가운데 하나다 —
+    `applied`(`Exact_output_registry_replaced`, `targets`는 `runtime_bindings`·
+    `replacement_catalog`), `unpublished`(돌고 있는 registry가 없고 저장은 첫 registry를
+    만들지 않는다. 재시작이 필요하다), `kept`(저장한 글도, 그 글이 대신한 파일도 registry를
+    만들지 못한다. 옛 registry가 계속 쓰이지만 파일과 맞지 않고, 다음 부팅은 registry를
+    만들지 않는다. startup report에 `exact_output_registry_stale`로 남는다). 저장한 글이
+    registry를 만들지 못하면 쓰기 전에 거절하되, 디스크의 파일도 못 만드는 경우는 통과시킨다
+    — 이미 있던 결함이 keeper 배정 같은 저장을 막지 않게 하려는 것이다.
+  - **슬롯 본문 기한 빈칸 (`exact_slot_body_deadline_gap`)**: `slots`가 가리키는 HTTP
+    runtime의 provider가 `exact-body-timeout-s`를 선언하지 않은 슬롯. 부팅은 막지 않고
+    degrade한다 — 그 슬롯을 lane에서 빼고, 슬롯마다 WARN 한 줄을 남기고, startup report
+    (`/health`의 `runtime_startup_degradation`)에 `exact_slot_body_deadline_gaps`로 올린다.
+    HTTP 슬롯이 모두 빠진 lane은 `cli_slots`로 걷고, 아무것도 남지 않은 lane만 unavailable
+    (`exact_lanes_emptied_by_body_deadline_gaps`)이며 다른 lane은 그대로 뜬다. 저장이 새
+    빈칸을 더하면 쓰기 전에 거절하고(`Exact_slot_body_deadlines_absent`), 파일에 이미 있던
+    빈칸은 막지 않는다. `cli_slots`와 `Replacement_catalog_targets`에는 해당하지 않는다
+    (#38849).
   → [Exact_output](../../packages/agent_core/lib/llm_provider/exact_output.mli),
   [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
 
@@ -1910,7 +1949,13 @@ status: reference
   `Stale_noop`일 때만 Checkpoint가 없으므로 `Stale_noop`이다. 저장이 `Error`면 줄을
   쓰지 않는다
   (`keeper_agent_run_finalize_response.ml`의 `turn_boundary_position`). 그래서
-  `No_atom_history` 줄은 공식 클라이언트 turn을 가리킨다. `Stale_noop`은
+  `No_atom_history` 줄은 공식 클라이언트 turn을 가리킨다. 실패로 끝난 turn은 이 저장에
+  닿지 않지만, 마지막으로 파견한 후보가 공식 클라이언트였으면 `No_atom_history` 끝 줄을
+  따로 남긴다. 입력은 이미 그 turn의 History Fragment이고 부른 도구는 이미 행동했을 수
+  있으므로, Librarian 회차가 입력과 도구 관측을 읽어야 하기 때문이다
+  (`record_errored_official_turn_boundary`, #38809). 실패한 Agent Core turn은 stage 저장이
+  Atom을 갖고 있어 다음 끝 줄이 덮고, 어떤 후보도 파견하지 못한 turn은 줄을 남기지 않는다.
+  `Stale_noop`은
   `Keeper_checkpoint_store`의 저장 결과 `Stale_noop`(더 새 writer가 앞서 canonical
   Checkpoint를 그대로 둔 성공적 no-op)과 이름을 공유하지만 다른 값이다 — 하나는
   저장 결과, 하나는 turn 경계 위치다.

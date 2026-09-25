@@ -1,3 +1,10 @@
+(* WORKAROUND: h2 0.13's Reqd names no stream id and reports no peer reset,
+   so this module reads frame headers a second time beside h2's own parser.
+   {!request_stream} relies on h2 parsing each read synchronously; if h2 ever
+   batches frames or defers the request callback, it names the wrong stream
+   silently. Root fix: a stream id and a peer-reset callback on upstream h2's
+   Reqd; delete this module when that lands (#39050). *)
+
 (** HTTP/2 frame boundaries observed on one server connection socket.
 
     The h2 0.13 public API neither names a request's stream nor tells the

@@ -2544,7 +2544,7 @@
 
 (include stanzas/test_machine_checkpoint.inc)
 
-(include stanzas/test_msx_frame_route.inc)
+(include stanzas/test_msx_routes.inc)
 
 (include stanzas/test_lane_addon_live_route.inc)
 

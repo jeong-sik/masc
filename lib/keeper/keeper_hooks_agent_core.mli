@@ -99,6 +99,7 @@ val cost_event_payload :
   ?runtime_attempt:(string * string * int) ->
   ?conversation:(string * Keeper_usage_resolution.cumulative_position) ->
   ?vendor_total_tokens:int ->
+  ?resolution_status:Keeper_usage_resolution.status ->
   ?cache_creation_input_tokens:int ->
   ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->
@@ -108,8 +109,10 @@ val cost_event_payload :
     [response_id] is the opaque AGENT_CORE/CLI response identity, not necessarily
     a vendor request ID. [runtime_attempt] is (routing_run_id, runtime_id,
     lane_attempt_index), captured from the materialized candidate. Both identities
-    are emitted only for raw observations; settlements
-    may aggregate multiple responses and carry null. [non_cached_input_tokens]
+    are emitted for raw observations and for an attempt's resolved reading
+    ([Resolved_attempt_delta]); a turn's settlement may aggregate multiple
+    responses and carries null. [resolution_status] says how a resolved
+    row's delta came out. [non_cached_input_tokens]
     includes cache creation and is null for missing/invalid input partitions. *)
 
 val emit_cost_event :
@@ -128,6 +131,7 @@ val emit_cost_event :
   ?runtime_attempt:(string * string * int) ->
   ?conversation:(string * Keeper_usage_resolution.cumulative_position) ->
   ?vendor_total_tokens:int ->
+  ?resolution_status:Keeper_usage_resolution.status ->
   ?cache_creation_input_tokens:int ->
   ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->

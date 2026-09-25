@@ -174,6 +174,40 @@ let to_projection_json row : Yojson.Safe.t =
     ]
 ;;
 
+(* A preference is stored only for a lane that {!apply} actually reads: the
+   Librarian, HITL auto-judge and Board attention flows. [writable_lane]
+   matches every constructor of [Standalone_lane.t] without a wildcard, so
+   adding a lane fails this build until it says what the new lane means here,
+   and the error texts re-read every id through [to_id]. *)
+let writable_lane = function
+  | Standalone_lane.Librarian
+  | Standalone_lane.Hitl_auto_judge
+  | Standalone_lane.Board_attention -> true
+  | Standalone_lane.Workspace_curator
+  | Standalone_lane.Verifier -> false
+;;
+
+let refused_lane_ok lane_id =
+  match Standalone_lane.of_id lane_id with
+  | None ->
+    Error
+      (Printf.sprintf
+         "unknown exact-output lane %S; expected one of %s"
+         lane_id
+         (String.concat ", " (List.map Standalone_lane.to_id Standalone_lane.all)))
+  | Some lane when writable_lane lane -> Ok ()
+  | Some _ ->
+    Error
+      (Printf.sprintf
+         "exact-output lane %S never reads a preference; expected one of %s"
+         lane_id
+         (String.concat ", "
+            (List.filter_map
+               (fun lane ->
+                  if writable_lane lane then Some (Standalone_lane.to_id lane) else None)
+               Standalone_lane.all)))
+;;
+
 let set (config : Workspace.config) ~actor ~keeper_name ~lane_id slot_id =
   let keeper_name = String.trim keeper_name in
   let lane_id = String.trim lane_id in
@@ -187,6 +221,7 @@ let set (config : Workspace.config) ~actor ~keeper_name ~lane_id slot_id =
   else
     let base_path = config.base_path in
     let open Result.Syntax in
+    let* () = refused_lane_ok lane_id in
     let* rows = all ~base_path in
     let changed_at = Masc_domain.now_iso () in
     let without =

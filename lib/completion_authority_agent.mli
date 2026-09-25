@@ -16,6 +16,11 @@ module For_testing : sig
   (** The fixed authority identity (RFC-0361 D7(b)): the [verifier_exact]
       lane id, shared by every judgement so verdicts aggregate by actor. *)
 
+  val retry_delay_of_path_rest :
+    retry_interval_sec:float -> now:float -> Keeper_turn_driver.path_rest -> float
+  (** How long a retryable review waits: the maintenance pulse, or until the
+      refusing slot's rest ends when that is later. *)
+
   val evidence_refs_of_output :
     Yojson.Safe.t -> (string list, string) result
 

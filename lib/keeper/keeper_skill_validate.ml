@@ -69,6 +69,13 @@ let handle ~config ~args =
          failure ~class_:Tool_result.Policy_rejection ~code:"source_too_large"
            ~message:(Printf.sprintf "Skill source is %d bytes; maximum is %d bytes" bytes max_bytes)
            (identity @ [ "bytes", `Int bytes; "max_bytes", `Int max_bytes ])
+       | Error (Body_too_large_to_read { bytes; max_bytes }) ->
+         failure ~class_:Tool_result.Policy_rejection ~code:"body_too_large_to_read"
+           ~message:
+             (Printf.sprintf
+                "Skill body is %d bytes; keeper_skill reads at most %d bytes inline"
+                bytes max_bytes)
+           (identity @ [ "bytes", `Int bytes; "max_bytes", `Int max_bytes ])
        | Error (Invalid_document error) ->
          failure ~class_:Tool_result.Policy_rejection
            ~code:(Keeper_skill_catalog.error_code error)

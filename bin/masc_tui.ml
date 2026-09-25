@@ -7308,12 +7308,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
-          let error = Error (Printexc.to_string exn) in
-          { Masc_tui_context_inspector.turn = error
-          ; provider_input = error
-          ; response = error
-          ; forecast = error
-          }
+          Masc_tui_context_inspector.Request_failed (Printexc.to_string exn)
     in
     enqueue_async mailbox
       (Context_inspector_loaded (generation, keeper_name, reading))
@@ -7333,16 +7328,12 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
             (fun () -> Eio.Promise.await superseded);
           `Stop_daemon)
   | None ->
-      let error = Error "Eio switch is unavailable" in
       enqueue_async mailbox
         (Context_inspector_loaded
            ( generation
            , keeper_name
-           , { Masc_tui_context_inspector.turn = error
-             ; provider_input = error
-             ; response = error
-             ; forecast = error
-             } ))
+           , Masc_tui_context_inspector.Request_failed
+               "Eio switch is unavailable" ))
 
 let open_context_inspector state ~mailbox ~keeper_name =
   state.context_inspector_open <- true;
@@ -11368,9 +11359,13 @@ let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
   match (state.connection_status, state.observer) with
   | (Connected | Degraded), Observer_off ->
       launch_observer state ~host ~port ~mailbox
-  | (Connected | Degraded), Observer_closed _ when retry_closed ->
+  | (Connected | Degraded),
+    (Observer_closed_before_answer _ | Observer_closed_after_live _)
+    when retry_closed ->
       launch_observer state ~host ~port ~mailbox
-  | (Connected | Degraded), (Observer_closed _ | Observer_opening | Observer_live _)
+  | (Connected | Degraded),
+    ( Observer_closed_before_answer _ | Observer_closed_after_live _
+    | Observer_opening | Observer_live _ )
   | (Disconnected | Connecting | Booting | Reconnecting), _ ->
       ()
 
@@ -13615,7 +13610,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                | Observer_live live ->
                    state.observer <-
                      Observer_live { live with events = live.events + 1 }
-               | Observer_off | Observer_opening | Observer_closed _ -> ());
+               | Observer_off | Observer_opening
+               | Observer_closed_before_answer _ | Observer_closed_after_live _
+                 -> ());
               (match Masc_tui_observer.chat_appended_keeper event with
                | Some appended_keeper
                  when state.view = Keepers Keeper_message
@@ -13787,11 +13784,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       report_action state "error"
         (Printf.sprintf "task for %s not created: %s" keeper detail)
   | Observer_closed outcome ->
-      let events =
-        match state.observer with
-        | Observer_live live -> live.events
-        | Observer_off | Observer_opening | Observer_closed _ -> 0
-      in
       let reason =
         match outcome with
         | Ok () -> "the server closed the stream"
@@ -13802,8 +13794,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             (match status with 404 | 409 -> state.mcp_session <- None | _ -> ());
             Printf.sprintf "observer stream refused with %d: %s" status detail
       in
+      let at = Unix.gettimeofday () in
+      (* Only a stream that went live answered; one that closed while opening
+         has no count to keep, and the title must not read one. *)
       state.observer <-
-        Observer_closed { reason; at = Unix.gettimeofday (); events };
+        (match state.observer with
+         | Observer_live { events; _ } ->
+           Observer_closed_after_live { reason; at; events }
+         | Observer_off | Observer_opening | Observer_closed_before_answer _
+         | Observer_closed_after_live _ ->
+           Observer_closed_before_answer { reason; at });
       add_event state "observer" ("runtime event feed closed: " ^ reason)
   | Http_refresh_failed (err, approval_ticket) ->
       http_refresh_inflight := false;
@@ -17781,6 +17781,11 @@ and is loaded on demand through keeper_skill.
                   report_action state "error"
                     (Printf.sprintf "SKILL.md is too large: %d bytes (maximum %d)"
                        bytes max_bytes)
+                | Error (Masc.Keeper_skill_catalog.Body_too_large_to_read { bytes; max_bytes }) ->
+                  report_action state "error"
+                    (Printf.sprintf
+                       "SKILL.md body is %d bytes; Keepers read at most %d bytes"
+                       bytes max_bytes)
                 | Error (Masc.Keeper_skill_catalog.Invalid_document error) ->
                   report_action state "error" (Masc.Keeper_skill_catalog.error_to_string error)
                 | Ok _ ->
@@ -19901,7 +19906,8 @@ and is loaded on demand through keeper_skill.
              match state.context_inspector_reading with
              | Some
                  ( _
-                 , { Masc_tui_context_inspector.provider_input = Ok input; _ }
+                 , Masc_tui_context_inspector.Turn_read
+                     { provider_input = Ok input; _ }
                  ) ->
                  Masc_tui_context_inspector.exact_input_items input
              | Some _ | None -> []
@@ -19910,8 +19916,10 @@ and is loaded on demand through keeper_skill.
              match state.context_inspector_reading with
              | Some
                  ( _
-                 , { Masc_tui_context_inspector.turn = Ok selection
+                 , Masc_tui_context_inspector.Turn_read
+                     { selection
                    ; provider_input
+                   ; _
                    } ) -> (
                  (* The map is a per-component table, so it needs the
                     attributed record; the render side shows its own "no
@@ -19954,8 +19962,8 @@ and is loaded on demand through keeper_skill.
                   match state.context_inspector_reading with
                   | Some
                       ( _
-                      , { Masc_tui_context_inspector.turn =
-                            Ok { Masc_tui_context_inspector.rows; _ }
+                      , Masc_tui_context_inspector.Turn_read
+                          { selection = { Masc_tui_context_inspector.rows; _ }
                         ; _ } ) ->
                       List.length rows
                   | _ -> 0

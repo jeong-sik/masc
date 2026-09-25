@@ -2576,7 +2576,7 @@ let render_board_list (state : state) =
      counted them by hand and counted two rows it no longer draws, so the
      footer stood two rows above the composer. *)
   surface_chrome state ~terminal_rows ~cols ~surface_key:"board-list"
-    ~title:header ~hints:(Masc_tui_keys.footer_hints state.view)
+    ~title:header ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view)
     ~body:(fun ~budget c ->
       (* The header is laid out by the same arithmetic as the rows below it,
          because a header laid out by its own is a header that stops
@@ -3561,13 +3561,34 @@ let render_planning_list (state : state) =
          let content_height =
            rows - count_frame_lines buf - selection_rows - tail_rows
          in
+         (* Where the list stands, when it does not hold every goal. At
+            sixty columns and twenty-four rows the active filter held eight
+            and the frame drew seven, and nothing on the screen said an
+            eighth existed -- the rollup above counts every goal in the
+            store, not the ones this filter and this frame leave off. The
+            reading costs one of the rows it describes, which is the rule
+            [Masc_tui_scroll.content_height ~overflow_takes_row:true] already
+            holds for the roster and the reading panes. The chrome is zero
+            here because [content_height] above has already taken it. *)
+         let list_rows =
+           (* A short frame may leave no list row at all. When it leaves
+              one, that row is the selected goal: the cursor row is what
+              [j/k] and Enter act on, and the count needs a second row. *)
+           if content_height <= 0 then 0
+           else if content_height = 1 then 1
+           else
+             Masc_tui_scroll.content_height ~rows:content_height ~chrome:0
+               ~count ~preview_keep:None ~overflow_takes_row:true
+         in
+         let overflowing = content_height > 1 && count > list_rows in
          let scroll_offset =
-           if state.planning_cursor >= content_height then
-             state.planning_cursor - content_height + 1
+           if list_rows = 0 then 0
+           else if state.planning_cursor >= list_rows then
+             state.planning_cursor - list_rows + 1
            else 0
          in
-         let goals_window = Rows.of_list ~first:scroll_offset ~height:content_height goals in
-         for i = 0 to content_height - 1 do
+         let goals_window = Rows.of_list ~first:scroll_offset ~height:list_rows goals in
+         for i = 0 to list_rows - 1 do
            let idx = i + scroll_offset in
            match Rows.at goals_window idx with
            | None -> box_empty buf cols
@@ -3660,6 +3681,11 @@ let render_planning_list (state : state) =
                box_line buf cols line
            end
          done;
+         if overflowing then
+           box_line_styled buf cols ~style:(Theme.recede ())
+             (Printf.sprintf "  [goals %s]"
+                (Masc_tui_scroll.window_text ~scroll:scroll_offset
+                   ~height:list_rows count));
          match List.nth_opt goals state.planning_cursor with
          | None -> box_empty buf cols
          | Some selected ->
@@ -7395,7 +7421,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                (String.concat ", "
                   (List.map
                      (fun (first : Tui_decode.keeper_exact_lane_first) ->
-                       first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
+                       (* The marker leads: a narrow pane cuts the row's
+                          tail, and the slot id is the part it can lose. *)
+                       (if first.kel_offered then ""
+                        else "not offered, lane order \xc2\xb7 ")
+                       ^ first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
                        ^ first.kel_slot_id)
                      firsts))
            ^ Ansi.reset);
@@ -8533,7 +8563,7 @@ let render_system_log_detail (state : state) seq =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints System_logs));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:true System_logs));
   finish_surface state ~clamped:(System_log_detail_scroll scroll)
     ~surface_key:"system-log-detail" ~rows:terminal_rows ~cols buf
 
@@ -8745,7 +8775,8 @@ let render_system_logs (state : state) =
       (Printf.sprintf "[entries %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height total_entries));
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view));
   finish_surface state ~surface_key:"system-logs" ~rows:terminal_rows
       ~cols buf
 
@@ -9990,7 +10021,7 @@ let render_fusion_list (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints Fusion));
+         (Masc_tui_keys.footer_hints ~detail_open:false Fusion));
   finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
 
 (* The panel as marks, one per model, filled where the model answered.
@@ -11488,7 +11519,9 @@ let render_changes_list (state : state) =
       (Printf.sprintf "[changes %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:move  Right/Enter:diff  [/]:keeper  d:tree diff  v:code  o:editor  r:refresh  q:quit");
+    (* The footer is the key table's (for_surface Changes); never a literal here. *)
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints Changes));
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 
@@ -13150,8 +13183,12 @@ let render_acting (state : state) =
     | Observer_live { events; _ } -> Printf.sprintf "feed: live %d" events
     (* The count sits straight after the state word, so it reads as the count
        its "live N" sibling above uses. *)
-    | Observer_closed { events; reason; _ } ->
+    | Observer_closed_after_live { events; reason; _ } ->
         Printf.sprintf "feed: closed %d (%s)" events
+          (Terminal_text.single_line reason)
+    (* No count: the stream never answered, so there is nothing it carried. *)
+    | Observer_closed_before_answer { reason; _ } ->
+        Printf.sprintf "feed: failed to open (%s)"
           (Terminal_text.single_line reason)
   in
   (* Rows and events, each with its noun. This read "(3 of 120 held, turns)",
@@ -13238,8 +13275,11 @@ let render_acting (state : state) =
       | Observer_live _ ->
           if held = 0 then "  (no events yet)"
           else "  (nothing under this filter; f shows everything)"
-      | Observer_closed _ ->
+      | Observer_closed_after_live _ ->
           if held = 0 then "  (the feed closed before any event arrived)"
+          else "  (nothing under this filter; f shows everything)"
+      | Observer_closed_before_answer _ ->
+          if held = 0 then "  (no events yet: the feed failed to open)"
           else "  (nothing under this filter; f shows everything)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;

@@ -281,7 +281,7 @@ type degraded_retry_reason =
   | Resumable_cli_session
   | Runtime_candidates_filtered
   | Runtime_exhausted
-  | Capacity_backpressure
+  | Provider_capacity
   | Rate_limit
   | Server_error
   | Auth_error
@@ -295,7 +295,7 @@ let degraded_retry_reason_to_string = function
   | Resumable_cli_session -> "resumable_cli_session"
   | Runtime_candidates_filtered -> "runtime_candidates_filtered"
   | Runtime_exhausted -> "runtime_exhausted"
-  | Capacity_backpressure -> "capacity_backpressure"
+  | Provider_capacity -> "provider_capacity"
   | Rate_limit -> "rate_limit"
   | Server_error -> "server_error"
   | Auth_error -> "auth_error"
@@ -383,7 +383,7 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
          | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _) ->
              Some Rate_limit
          | Agent_core.Error.Api (Llm_provider.Retry.Overloaded _) ->
-             Some Capacity_backpressure
+             Some Provider_capacity
          | Agent_core.Error.Api (Llm_provider.Retry.ServerError _) ->
              Some Server_error
          | Agent_core.Error.Api
@@ -394,7 +394,7 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
              (Llm_provider.Error.RateLimit _) ->
              Some Rate_limit
          | Agent_core.Error.Provider (Llm_provider.Error.CapacityExhausted _) ->
-             Some Capacity_backpressure
+             Some Provider_capacity
          | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) ->
              Some Hard_quota
          | Agent_core.Error.Provider

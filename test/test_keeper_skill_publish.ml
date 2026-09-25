@@ -33,7 +33,7 @@ let instruction ?(description = "Inspect the lane status.") name =
 let keeper_name = "skill-author"
 
 (* The seed config/runtime.toml value; the config is refused without it. *)
-let resource_read_max_bytes = 65536
+let resource_read_max_bytes = 16384
 
 let config_text =
   Printf.sprintf

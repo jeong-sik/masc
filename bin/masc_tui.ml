@@ -7308,12 +7308,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
-          let error = Error (Printexc.to_string exn) in
-          { Masc_tui_context_inspector.turn = error
-          ; provider_input = error
-          ; response = error
-          ; forecast = error
-          }
+          Masc_tui_context_inspector.Request_failed (Printexc.to_string exn)
     in
     enqueue_async mailbox
       (Context_inspector_loaded (generation, keeper_name, reading))
@@ -7333,16 +7328,12 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
             (fun () -> Eio.Promise.await superseded);
           `Stop_daemon)
   | None ->
-      let error = Error "Eio switch is unavailable" in
       enqueue_async mailbox
         (Context_inspector_loaded
            ( generation
            , keeper_name
-           , { Masc_tui_context_inspector.turn = error
-             ; provider_input = error
-             ; response = error
-             ; forecast = error
-             } ))
+           , Masc_tui_context_inspector.Request_failed
+               "Eio switch is unavailable" ))
 
 let open_context_inspector state ~mailbox ~keeper_name =
   state.context_inspector_open <- true;
@@ -19910,7 +19901,8 @@ and is loaded on demand through keeper_skill.
              match state.context_inspector_reading with
              | Some
                  ( _
-                 , { Masc_tui_context_inspector.provider_input = Ok input; _ }
+                 , Masc_tui_context_inspector.Turn_read
+                     { provider_input = Ok input; _ }
                  ) ->
                  Masc_tui_context_inspector.exact_input_items input
              | Some _ | None -> []
@@ -19919,8 +19911,10 @@ and is loaded on demand through keeper_skill.
              match state.context_inspector_reading with
              | Some
                  ( _
-                 , { Masc_tui_context_inspector.turn = Ok selection
+                 , Masc_tui_context_inspector.Turn_read
+                     { selection
                    ; provider_input
+                   ; _
                    } ) -> (
                  (* The map is a per-component table, so it needs the
                     attributed record; the render side shows its own "no
@@ -19963,8 +19957,8 @@ and is loaded on demand through keeper_skill.
                   match state.context_inspector_reading with
                   | Some
                       ( _
-                      , { Masc_tui_context_inspector.turn =
-                            Ok { Masc_tui_context_inspector.rows; _ }
+                      , Masc_tui_context_inspector.Turn_read
+                          { selection = { Masc_tui_context_inspector.rows; _ }
                         ; _ } ) ->
                       List.length rows
                   | _ -> 0

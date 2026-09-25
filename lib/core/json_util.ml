@@ -255,6 +255,16 @@ let optional_float json key : (float option, string) result =
       (Printf.sprintf "%s must be a number, got %s: %s" key (kind_name other)
          (excerpt other))
 
+let optional_bool json key : (bool option, string) result =
+  match optional_member ~key json with
+  | Error message -> Error message
+  | Ok None -> Ok None
+  | Ok (Some (`Bool b)) -> Ok (Some b)
+  | Ok (Some other) ->
+    Error
+      (Printf.sprintf "%s must be true or false, got %s: %s" key (kind_name other)
+         (excerpt other))
+
 let optional_nonblank_string json key : (string option, string) result =
   match optional_member ~key json with
   | Error message -> Error message

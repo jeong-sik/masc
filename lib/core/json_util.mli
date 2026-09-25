@@ -51,6 +51,10 @@ val require_bool : Yojson.Safe.t -> string -> (bool, string) result
 val optional_float : Yojson.Safe.t -> string -> (float option, string) result
 (** [optional_float json key] reads a number, widening [`Int] to float. *)
 
+val optional_bool : Yojson.Safe.t -> string -> (bool option, string) result
+(** [optional_bool json key] reads [true] or [false]; a string such as
+    ["no"] is [Error], not a guess at what it meant. *)
+
 val optional_nonblank_string :
   Yojson.Safe.t -> string -> (string option, string) result
 (** [optional_nonblank_string json key] reads a string that is not blank

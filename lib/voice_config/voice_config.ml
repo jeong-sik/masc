@@ -267,8 +267,15 @@ let parse_endpoint ~ctx json =
   let mcp_url = Json_util.get_string_nonempty json "mcp_url" in
   let health_url = Json_util.get_string_nonempty json "health_url" in
   let api_key_env = Json_util.get_string_nonempty json "api_key_env" in
-  let enabled =
-    Option.value ~default:true (Json_util.get_bool json "enabled")
+  (* Absent means on. Written means meant, as for the timeout below: an
+     [enabled] that is not a boolean, such as "no", is refused by name rather
+     than read as absent, which would turn on the endpoint it was written to
+     turn off. *)
+  let* enabled =
+    match Json_util.optional_bool json "enabled" with
+    | Error message -> Error (Printf.sprintf "%s.%s" ctx message)
+    | Ok None -> Ok true
+    | Ok (Some enabled) -> Ok enabled
   in
   (* Absent means the workspace timeout. Written means meant: a value that is
      not a number, or that is not a finite duration above zero, is refused by

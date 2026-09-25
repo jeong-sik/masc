@@ -1013,6 +1013,27 @@ let test_an_unusable_endpoint_timeout_is_refused () =
            (String_util.string_contains_substring ~needle:".timeout_seconds" message))
     [ "zero", `Float 0.0; "a negative", `Int (-5); "a string", `String "30" ]
 
+(* An [enabled] written as something other than a boolean is refused by
+   name: read as absent it would turn on the endpoint it meant to turn off. *)
+let test_an_unusable_endpoint_enabled_is_refused () =
+  List.iter
+    (fun (label, value) ->
+       match
+         parse_stt_endpoints
+           [ `Assoc
+               [ "id", `String "whisper-local"
+               ; "kind", `String "whisper_cli"
+               ; "model", `String "/models/ggml-base.bin"
+               ; "enabled", value
+               ]
+           ]
+       with
+       | Ok _ -> failf "an enabled of %s must be refused" label
+       | Error message ->
+         check bool (label ^ ": the refusal names the field") true
+           (String_util.string_contains_substring ~needle:".enabled" message))
+    [ "the string no", `String "no"; "a number", `Int 0; "null", `Null ]
+
 (* The wire names the model the endpoint that would answer is asked for, and
    lists every model the section's endpoints are asked for. *)
 let test_the_public_json_reads_the_endpoint_models () =
@@ -1176,6 +1197,8 @@ let () =
             test_a_blank_endpoint_model_is_refused
         ; test_case "an unusable endpoint timeout is refused" `Quick
             test_an_unusable_endpoint_timeout_is_refused
+        ; test_case "an unusable endpoint enabled is refused" `Quick
+            test_an_unusable_endpoint_enabled_is_refused
         ; test_case "the public json reads the endpoint models" `Quick
             test_the_public_json_reads_the_endpoint_models
         ] )

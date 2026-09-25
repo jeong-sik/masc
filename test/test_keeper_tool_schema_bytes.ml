@@ -302,19 +302,19 @@ open Alcotest
    write paths (tool + HTTP) stop accepting a raw, unvalidated meta.attachments
    blob; both now parse the same closed type and reject unsafe URLs, missing
    artifacts, and duplicate meta. No headroom. *)
-(* 2026-09-25: the Stagehand lane adds 119 bytes over the 122,228 surface it
-   was measured against (122,347, the #38697 entry: BrowserSession and
-   BrowserGoto take a lane, BrowserSession says what each lane needs, and
-   BrowserTabs says a stagehand tab has no clientId). Added to main's ceiling
-   above with no headroom; the next CI run measures it. *)
-(* 2026-09-25: BrowserInstruct adds 739 rendered bytes by the production
-   renderer's rules replayed on config/tools/masc_browser_instruct.toml, over
-   the 122,710 ceiling above. Projected until exact-head CI measures it. No
+(* 2026-09-25: 122,882 across 139 tools, measured by this suite on CI for
+   #38697 after main was merged in (PR check run 36123827619, the "grew to"
+   line). BrowserSession and BrowserGoto take a lane, BrowserSession says what
+   each lane needs, and BrowserTabs says a stagehand tab has no clientId. No
    headroom. *)
-(* 2026-09-25: BrowserRead's stagehand lane enum adds 12 rendered bytes over
-   the 123,449 ceiling above. Projected until exact-head CI measures it. No
-   headroom. *)
-let ceiling_bytes = 123_461
+(* 2026-09-25: 123,621 across 140 tools, measured by this suite on CI for
+   #38747 (PR check run 36123991091). BrowserInstruct tells the Stagehand
+   browser what to do in one sentence; it adds 739 bytes to the entry above.
+   No headroom. *)
+(* 2026-09-25: 123,633, measured by this suite on CI for #38805 (PR check run
+   36124038165). BrowserRead takes the stagehand lane: 12 bytes over the entry
+   above. No headroom. *)
+let ceiling_bytes = 123_633
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

@@ -40,6 +40,7 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   ; mutable assistant_turn_texts : string list
     (** One entry per completed provider turn, newest first: the turn's [Text]
         blocks concatenated in emission order, "" when the turn emitted none. *)
+  ; mutable wire_prompt_tokens : Keeper_agent_result.wire_prompt_tokens option
   }
 
 (** Immutable snapshot of hook outputs after AGENT_CORE execution completes. *)

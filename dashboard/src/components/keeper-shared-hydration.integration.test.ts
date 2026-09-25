@@ -157,6 +157,77 @@ describe('KeeperConversationPanel hydration wiring', () => {
     resetToolCallOutputs()
   })
 
+  // #26276: a hard refresh starts with an empty in-memory thread. Until the
+  // first REST history hydration settles, the transcript must show a loading
+  // state, never the semantic "no messages" empty card.
+  it('shows loading instead of the empty card on hard refresh, then the hydrated transcript', async () => {
+    let resolveHistory: (rows: unknown[]) => void = () => undefined
+    fetchKeeperChatHistory.mockImplementationOnce(
+      () => new Promise(resolve => { resolveHistory = resolve }),
+    )
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`,
+      container,
+    )
+
+    // First synchronous render, before the mount effect starts hydration.
+    expect(container.querySelector('[data-chat-transcript-loading]')).not.toBeNull()
+    expect(container.querySelector('[data-chat-transcript-empty]')).toBeNull()
+
+    await waitFor(() => {
+      expect(fetchKeeperChatHistory).toHaveBeenCalledWith('sangsu')
+    })
+    expect(container.querySelector('[data-chat-transcript-loading]')).not.toBeNull()
+    expect(container.querySelector('[data-chat-transcript-empty]')).toBeNull()
+
+    resolveHistory([
+      {
+        id: 'user-history-hard-refresh',
+        role: 'user',
+        content: '새로고침 전 질문',
+        ts: 1_783_267_301,
+        source: 'dashboard',
+      },
+      {
+        id: 'assistant-history-hard-refresh',
+        role: 'assistant',
+        content: '새로고침 전 답변',
+        ts: 1_783_267_302,
+        source: 'dashboard',
+      },
+    ])
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('새로고침 전 답변')
+    })
+    expect(container.querySelector('[data-chat-transcript-loading]')).toBeNull()
+    expect(container.querySelector('[data-chat-transcript-empty]')).toBeNull()
+  })
+
+  it('renders the empty card only after hydration returns zero rows', async () => {
+    let resolveHistory: (rows: unknown[]) => void = () => undefined
+    fetchKeeperChatHistory.mockImplementationOnce(
+      () => new Promise(resolve => { resolveHistory = resolve }),
+    )
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`,
+      container,
+    )
+    await waitFor(() => {
+      expect(fetchKeeperChatHistory).toHaveBeenCalledWith('sangsu')
+    })
+    expect(container.querySelector('[data-chat-transcript-empty]')).toBeNull()
+
+    resolveHistory([])
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-chat-transcript-empty]')).not.toBeNull()
+    })
+    expect(container.querySelector('[data-chat-transcript-loading]')).toBeNull()
+  })
+
   it('drives live transcript hydration-failed DOM from a real tool-call endpoint failure', async () => {
     const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     fetchKeeperChatHistory.mockResolvedValueOnce([

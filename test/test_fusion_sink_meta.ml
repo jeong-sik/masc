@@ -145,8 +145,7 @@ let test_panel_meta_failure_keeps_raw_provider () =
     (string_field a "model");
   check (option string) "reason_detail keeps raw provider (no panelist leak)"
     (Some "Provider 'claude': boom") (string_field a "reason_detail");
-  check (option string) "reason mirrors detail" (Some "Provider 'claude': boom")
-    (string_field a "reason");
+  check bool "failure stores one detail field" false (List.mem "reason" (keys a));
   check (option string) "reason_code stable" (Some "provider_error")
     (string_field a "reason_code")
 
@@ -173,8 +172,8 @@ let test_panel_meta_empty_response_text () =
   let a = assoc_of (Masc.Fusion_sink.panel_meta o) in
   check (option string) "empty response reason_detail" (Some detail)
     (string_field a "reason_detail");
-  check (option string) "empty response reason mirrors detail" (Some detail)
-    (string_field a "reason");
+  check bool "empty response stores one detail field" false
+    (List.mem "reason" (keys a));
   check (option string) "empty response reason_code" (Some "empty_response")
     (string_field a "reason_code")
 

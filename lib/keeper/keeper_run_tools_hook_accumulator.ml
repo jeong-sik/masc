@@ -54,6 +54,9 @@ type hook_accumulator =
        turn without a [Text] block contributes "" so positions stay aligned
        with provider turns — blank entries never satisfy the detector, they
        only break a streak. *)
+  ; mutable wire_prompt_tokens : Keeper_agent_result.wire_prompt_tokens option
+    (* Sum of the turn's provider responses' wire [cache_n] / [prompt_n],
+       written by the after_turn hook. *)
   }
 
 type hook_outputs =
@@ -83,6 +86,7 @@ let create ~meta ~tool_surface ~historical_tool_calls ~history_pairs_at_setup =
   ; extra_system_context_size = None
   ; extra_system_context_blocks = None
   ; assistant_turn_texts = []
+  ; wire_prompt_tokens = None
   }
 ;;
 
@@ -123,4 +127,25 @@ let record_assistant_turn_text
     |> String.concat ""
   in
   acc.assistant_turn_texts <- turn_text :: acc.assistant_turn_texts
+;;
+
+let record_wire_prompt_tokens
+      (acc : hook_accumulator)
+      (response : Agent_core.Types.api_response)
+  =
+  match response.Agent_core.Types.telemetry with
+  | Some
+      { Agent_core.Types.timings =
+          Some { Agent_core.Types.cache_n = Some cache_n; prompt_n = Some prompt_n; _ }
+      ; _
+      } ->
+    acc.wire_prompt_tokens
+    <- Some
+         (match acc.wire_prompt_tokens with
+          | None -> { Keeper_agent_result.cache_n; prompt_n }
+          | Some sum ->
+            { Keeper_agent_result.cache_n = sum.cache_n + cache_n
+            ; prompt_n = sum.prompt_n + prompt_n
+            })
+  | Some { timings = Some _; _ } | Some { timings = None; _ } | None -> ()
 ;;

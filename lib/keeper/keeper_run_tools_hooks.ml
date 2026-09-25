@@ -632,19 +632,24 @@ let assemble_hooks
           (fun ~response ->
              Keeper_run_tools_hook_accumulator.record_assistant_turn_text
                acc
+               response;
+             Keeper_run_tools_hook_accumulator.record_wire_prompt_tokens
+               acc
                response)
         ~tool_result_commit_required:ctx.tool_result_commit_required
         ?on_tool_result_ready:ctx.on_tool_result_ready
         ?trajectory_acc
         ~on_tool_executed:
           (fun
-            ~tool_name ~input ~output_text ~success ~duration_ms ~provider ~typed_outcome ->
+            ~tool_name ~input ~output_text ~execution_evidence ~success ~duration_ms
+            ~provider ~typed_outcome ->
             serialize_tool_observer (fun () ->
               let route_evidence =
                 Keeper_tool_call_log.route_evidence_json_of_tool_io
                   ~tool_name
                   ~input
                   ~output_text
+                  ~execution_evidence
               in
               let progress_io_fingerprints =
                 Keeper_tool_progress_identity.digest_tool_io

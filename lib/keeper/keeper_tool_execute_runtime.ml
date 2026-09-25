@@ -910,7 +910,6 @@ let handle_tool_execute_typed
             let exit_report =
               Keeper_tool_execute_exit_report.of_status
                 ~status:result.status
-                ~stderr
                 ~timeout_budget
             in
             let status_json = exit_report.Keeper_tool_execute_exit_report.status in
@@ -950,9 +949,6 @@ let handle_tool_execute_typed
                  meta.name
                  (Printexc.to_string exn));
             let succeeded = exit_report.Keeper_tool_execute_exit_report.ok in
-            let failure_error_fields =
-              exit_report.Keeper_tool_execute_exit_report.error_fields
-            in
             let output_fields =
               match result.output_files with
               | Some files ->
@@ -1006,13 +1002,13 @@ let handle_tool_execute_typed
                     @ [ "typed", `Bool true
                       ; "execution_time_ms", `Int elapsed_ms
                       ]
-                    @ failure_error_fields
                     @ sandbox_extra_fields)
                in
                (* A process that ran and exited nonzero (or died to a
                   signal) is an observed tool result the model reads and
                   reacts to — the payload carries ok:false, the exit
-                  status, and stderr. Routing it through the failure
+                  status, and stderr exactly once: inside [output], or as
+                  [stderr_artifact] once the output is externalized. Routing it through the failure
                   disposition marked the whole turn
                   Terminal_effect_failed (sticky), so a keeper probing a
                   missing path with `ls` died mid-mission — four turn

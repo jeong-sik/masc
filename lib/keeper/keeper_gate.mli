@@ -362,6 +362,13 @@ val authorization_metadata
   -> authorization
   -> Yojson.Safe.t
 
+(** Log an already committed authorization whose tool then failed. A failed
+    result's metadata is rendered into the model-visible failure text, so the
+    Gate decision and its audit receipts are kept in the log instead of being
+    attached to that result. Failed audit appends are additionally published
+    at decision time ([allow]). *)
+val observe_authorization_of_failed_result : authorization -> unit
+
 module For_testing : sig
   type exact_completion =
     id:string ->

@@ -1271,7 +1271,13 @@ let mark_turn_started ~base_path ~keeper_name ~expected ~session_id ~turn_id
     Error "official-client turn identity can be recorded only for an in-flight turn"
 ;;
 
-let settle_turn ~held_context ~base_path ~keeper_name ~expected ~session_id ~turn_id ~updated_at =
+(* What a settlement records as held: the resumed frontier's set unchanged, or
+   the set this turn composed. *)
+type held_update =
+  | Keep_held
+  | Hold of held_context list
+
+let settle_turn ~held_update ~base_path ~keeper_name ~expected ~session_id ~turn_id ~updated_at =
   match expected.phase with
   | Turn_inflight
       { session_id = inflight_session_id
@@ -1288,7 +1294,10 @@ let settle_turn ~held_context ~base_path ~keeper_name ~expected ~session_id ~tur
         context_frontier = Option.map (fun frontier ->
           { frontier with
             acknowledged_turn = Some {session_id; turn_id}
-          ; held_context = Option.value held_context ~default:frontier.held_context })
+          ; held_context =
+              (match held_update with
+               | Keep_held -> frontier.held_context
+               | Hold held_context -> held_context) })
           expected.context_frontier }
   | Turn_inflight _ ->
     Error "official-client terminal turn identity changed before settlement"
@@ -1297,13 +1306,13 @@ let settle_turn ~held_context ~base_path ~keeper_name ~expected ~session_id ~tur
 ;;
 
 let settle ~base_path ~keeper_name ~expected ~session_id ~turn_id ~updated_at =
-  settle_turn ~held_context:None ~base_path ~keeper_name ~expected ~session_id ~turn_id
+  settle_turn ~held_update:Keep_held ~base_path ~keeper_name ~expected ~session_id ~turn_id
     ~updated_at
 ;;
 
 let settle_holding ~held_context ~base_path ~keeper_name ~expected ~session_id ~turn_id
     ~updated_at =
-  settle_turn ~held_context:(Some held_context) ~base_path ~keeper_name ~expected
+  settle_turn ~held_update:(Hold held_context) ~base_path ~keeper_name ~expected
     ~session_id ~turn_id ~updated_at
 ;;
 

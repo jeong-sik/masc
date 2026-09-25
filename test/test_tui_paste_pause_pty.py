@@ -366,19 +366,26 @@ def run(executable: str) -> None:
         h.send_and_wait(process, master_fd, output, b"alpha new",
                         h.composer_showing(b"alpha new"))
         os.write(master_fd, b"\r")
+        # The fixture answers 503, which the TUI treats as an unverified
+        # outcome: it re-POSTs the same request_id every half second to
+        # reconcile (the server refuses a second turn for one id). So beta's
+        # request repeats, and a count of chat/stream requests says nothing
+        # about alpha. Wait for a request addressed to alpha instead.
+        def chat_sends(name):
+            return [json.loads(body) for path, body in list(keeper_requests)
+                    if path == "/api/v1/keepers/chat/stream"
+                    and json.loads(body).get("name") == name]
+
         deadline = time.monotonic() + 3.0
-        while (len([1 for path, _ in keeper_requests
-                    if path == "/api/v1/keepers/chat/stream"]) < 2
-               and time.monotonic() < deadline):
+        while not chat_sends("alpha") and time.monotonic() < deadline:
             h.read_available(master_fd, output)
             time.sleep(0.05)
-        bodies = [body for path, body in keeper_requests
-                  if path == "/api/v1/keepers/chat/stream"]
-        if len(bodies) != 2:
-            raise AssertionError(f"expected beta and alpha sends: {keeper_requests!r}")
-        alpha_body = bodies[-1]
-        if json.loads(alpha_body).get("message") != "alpha new":
-            raise AssertionError("Ctrl-U did not release the discarded draft")
+        alpha_messages = {send.get("message") for send in chat_sends("alpha")}
+        if alpha_messages != {"alpha new"}:
+            raise AssertionError(
+                f"Ctrl-U did not release the discarded draft: {keeper_requests!r}")
+        if {send.get("message") for send in chat_sends("beta")} != {"beta safe"}:
+            raise AssertionError(f"beta sent something else: {keeper_requests!r}")
         h.escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         h.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")

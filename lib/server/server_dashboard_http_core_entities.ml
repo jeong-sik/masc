@@ -93,12 +93,12 @@ let dashboard_general_agent_count_light config =
            then count
            else (
              let path = Filename.concat (Workspace.agents_dir config) name in
-             match Workspace.read_json_result config path with
-             | Ok json ->
+             match Workspace.read_json_doc config path with
+             | Ok (Some json) ->
                (match active_agent_summary_json json with
                 | Some agent_type when not (String.equal agent_type "keeper") -> count + 1
                 | Some _ | None -> count)
-             | Error _ -> count))
+             | Ok None | Error _ -> count))
          0
 ;;
 

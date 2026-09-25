@@ -3531,6 +3531,106 @@ let test_a_verifier_cli_slot_naming_a_lane_is_refused () =
     then Alcotest.failf "the refusal %S does not name %S" msg needle
 ;;
 
+(* Regression for the 2026-09-24 defect: only [verifier_exact]'s [cli_slots]
+   were reference-checked at load, so a typo'd id on any sibling lane
+   ([librarian_exact], [hitl_auto_judge], [board_attention_exact]) loaded
+   fine and then failed every [Keeper_lane_cli_oneshot] attempt at run time
+   with a misleading "is not an official-client runtime" message (192 times
+   in one server log, on [librarian_exact]). [exact_lane_cli_slot_references]
+   is one function over every declared lane, so the same refusal must reach
+   every sibling lane, not just the one this incident happened to hit. *)
+let test_a_sibling_lane_cli_slot_naming_an_unknown_id_is_refused () =
+  List.iter
+    (fun lane_id ->
+       let config =
+         String.trim runtime_config
+         ^ Printf.sprintf
+             "\n\n[runtime.exact_output_lanes.%s]\n\
+              slots = [\"openai.gpt\"]\ncli_slots = [\"codex_subscription.gpt-6-luna-xhigh\"]\n"
+             lane_id
+       in
+       match load_lane_config config with
+       | Ok _ -> Alcotest.failf "%s: an unknown cli_slots id loaded" lane_id
+       | Error msg ->
+         let needle =
+           Printf.sprintf
+             {|[runtime.exact_output_lanes.%s].cli_slots entry "codex_subscription.gpt-6-luna-xhigh"|}
+             lane_id
+         in
+         Alcotest.(check bool)
+           (lane_id ^ ": the refusal names the lane, the key and the id")
+           true
+           (string_contains msg needle);
+         Alcotest.(check bool)
+           (lane_id ^ ": the refusal keeps the not-found-among-runtimes wording")
+           true
+           (string_contains msg "not found among"))
+    [ "librarian_exact"; "hitl_auto_judge"; "board_attention_exact" ]
+;;
+
+(* [cli_slots] dispatches through [Keeper_lane_cli_oneshot.run] on every lane
+   alike, which requires an official-client runtime
+   ([Runtime_execution.Official_client]); a [cli_slots] entry that resolves to
+   a provider-dispatched (HTTP) runtime is a load error distinct from an
+   unresolved id, because the id is not missing. *)
+let test_a_sibling_lane_cli_slot_naming_an_http_runtime_is_refused () =
+  let config =
+    String.trim runtime_config
+    ^ "\n\n[runtime.exact_output_lanes.librarian_exact]\n\
+       slots = [\"runpod_mtp.qwen\"]\ncli_slots = [\"openai.gpt\"]\n"
+  in
+  match load_lane_config config with
+  | Ok _ -> Alcotest.fail "an HTTP runtime named in cli_slots loaded"
+  | Error msg ->
+    Alcotest.(check bool)
+      "the refusal names the lane and the offending cli_slots entry"
+      true
+      (string_contains msg {|[runtime.exact_output_lanes.librarian_exact].cli_slots entry "openai.gpt"|});
+    Alcotest.(check bool)
+      "the refusal says why, not just that the id is unknown"
+      true
+      (string_contains msg "dispatched over HTTP rather than an official-client CLI");
+    Alcotest.(check bool)
+      "the refusal does NOT fall back to the not-found wording (the id did resolve)"
+      false
+      (string_contains msg "not found among")
+;;
+
+let test_a_sibling_lane_cli_slot_naming_an_official_client_is_accepted () =
+  let config =
+    String.concat
+      "\n\n"
+      [ String.trim runtime_config
+      ; String.trim official_client_bindings
+      ; "[runtime.exact_output_lanes.librarian_exact]\n\
+         slots = [\"openai.gpt\"]\ncli_slots = [\"codex.codex\"]"
+      ]
+  in
+  match load_lane_config config with
+  | Error msg -> Alcotest.failf "a librarian_exact cli_slots naming an official client must load: %s" msg
+  | Ok _ -> ()
+;;
+
+(* The design boundary [verifier_exact_slot_references]'s comment documents:
+   a sibling lane's [slots] (unlike its [cli_slots]) is consumed exclusively
+   through [Runtime_exact_output_registry], which admits an id against the
+   AGENT_CORE catalog rather than [runtime.toml]'s runtime list -- a
+   catalog-only id such as ["catalog.only"] (used the same way by other lane
+   writer tests in this file) is not a runtime.toml typo, and refusing it at
+   load would break a configuration dispatch already handles. This pins that
+   boundary so a future change to [exact_lane_cli_slot_references] cannot
+   silently widen to cover [slots] too. *)
+let test_a_sibling_lane_slots_entry_may_be_catalog_only () =
+  let config =
+    String.trim runtime_config
+    ^ "\n\n[runtime.exact_output_lanes.librarian_exact]\n\
+       slots = [\"catalog.only\"]\n"
+  in
+  match load_lane_config config with
+  | Error msg -> Alcotest.failf "a catalog-only slots id on a sibling lane must load: %s" msg
+  | Ok _ -> ()
+;;
+
 let test_an_assignment_names_a_lane_of_its_own_name () =
   match load_lane_config runtime_config_lane_named_freely with
   | Error msg -> Alcotest.failf "a freely named lane must load: %s" msg
@@ -3885,6 +3985,22 @@ let () =
             "a verifier CLI slot naming a lane is refused"
             `Quick
             test_a_verifier_cli_slot_naming_a_lane_is_refused
+        ; Alcotest.test_case
+            "a sibling lane's CLI slot naming an unknown id is refused"
+            `Quick
+            test_a_sibling_lane_cli_slot_naming_an_unknown_id_is_refused
+        ; Alcotest.test_case
+            "a sibling lane's CLI slot naming an HTTP runtime is refused"
+            `Quick
+            test_a_sibling_lane_cli_slot_naming_an_http_runtime_is_refused
+        ; Alcotest.test_case
+            "a sibling lane's CLI slot naming an official client is accepted"
+            `Quick
+            test_a_sibling_lane_cli_slot_naming_an_official_client_is_accepted
+        ; Alcotest.test_case
+            "a sibling lane's slots entry may be catalog-only"
+            `Quick
+            test_a_sibling_lane_slots_entry_may_be_catalog_only
         ; Alcotest.test_case
             "a second write replaces the ladder"
             `Quick

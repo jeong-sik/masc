@@ -97,7 +97,7 @@ let test_compact_keeper_strict_keys () =
     List.sort compare
       [
         "name"; "status"; "context_ratio";
-        "last_turn_ago_s"; "handoff_count_total";
+        "last_turn_ago_s";
         "current_task"; "last_reply_status"; "last_reply_preview";
       ]
   in

@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name machine_checkpoint)
+ (public_name masc.machine_checkpoint)
+ (wrapped false)
+ (modules machine_checkpoint)
+ (libraries masc.masc_compression yojson unix))

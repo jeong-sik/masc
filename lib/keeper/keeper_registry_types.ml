@@ -122,7 +122,6 @@ type registry_entry =
     (** Ephemeral flag: true when keeper is blocked in admission queue.
           Set/cleared around the AGENT_CORE inference boundary.
           Does not affect state machine phase derivation. *)
-  ; last_context_actions : (float * Keeper_state_machine.context_actions) option
   ; last_event_bus_correlation : string option
   ; pending_turn_measurement : turn_measurement option
   ; current_turn_observation : turn_observation option

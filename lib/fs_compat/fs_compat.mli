@@ -203,6 +203,29 @@ val load_owned_regular_file_range
     snapshot validated across that exact read. Negative bounds return a typed
     read error; an offset at or beyond EOF returns empty [content]. *)
 
+type owned_regular_file_range_digest =
+  { content : string
+  ; sha256 : string
+  ; snapshot : owned_regular_file_snapshot
+  }
+
+val load_owned_regular_file_range_with_sha256
+  :  ownership_root:string
+  -> offset:int
+  -> max_bytes:int
+  -> string
+  -> (owned_regular_file_range_digest option, owned_regular_file_read_error) result
+(** {!load_owned_regular_file_range} and {!sha256_owned_regular_file} through
+    one validated owned descriptor. The whole file streams through a
+    fixed-size buffer into the SHA-256; the window of at most [max_bytes]
+    bytes from [offset] is copied out on the way. So
+    [content] is a slice of exactly the bytes [sha256] covers: a caller that
+    checks [sha256] against a content address has checked [content] too, and
+    no second open can observe a different file state. Memory is bounded by
+    [max_bytes] and the buffer, not the file size. [snapshot] and the
+    parent-chain, identity and changed-during-read checks are those of
+    {!load_owned_regular_file_range}; bounds behave the same. *)
+
 val owned_regular_file_read_error_to_string
   :  owned_regular_file_read_error
   -> string

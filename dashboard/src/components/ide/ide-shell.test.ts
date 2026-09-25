@@ -296,6 +296,7 @@ describe('IdeShell', () => {
   })
 
   it('renders repository git status without the dirty-count stub', async () => {
+    setLocalStorageItem('masc.ide.activeRepositoryId', 'masc')
     render(h(IdeShell, {}), container)
 
     await waitFor(() => {
@@ -305,6 +306,26 @@ describe('IdeShell', () => {
     expect(container.querySelector('[data-stub="repo-dirty-count"]')).toBeNull()
     expect(container.querySelector('[data-state="dirty"]')?.getAttribute('title'))
       .toContain('untracked 1')
+  })
+
+  // With no repository chosen the tree is the project root. The origin
+  // block and the picker used to name the first registered repository
+  // anyway, and picking that repository then changed nothing.
+  it('does not name a repository over the project root tree', async () => {
+    render(h(IdeShell, {}), container)
+
+    const picker = await waitFor(() => {
+      const select = container.querySelector<HTMLSelectElement>('select[aria-label="IDE repository"]')
+      expect(select).not.toBeNull()
+      return select!
+    })
+    expect(picker.value).toBe('')
+    expect(container.querySelector('[data-testid="ide-repo-origin"]')).toBeNull()
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('select[aria-label="IDE repository"] option')).toHaveLength(2)
+    })
+    expect(container.querySelector('[data-testid="ide-statusbar-workspace"]')?.textContent).not.toBe('masc')
   })
 
   it('hydrates current file and line focus from IDE route params', async () => {
@@ -581,6 +602,7 @@ describe('IdeShell', () => {
       postId: null,
     }
 
+    setLocalStorageItem('masc.ide.activeRepositoryId', 'masc')
     render(h(IdeShell, {}), container)
 
     await waitFor(() => expect(activeIdeFile.value).toBe('lib/runtime.ml'))

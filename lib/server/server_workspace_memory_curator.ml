@@ -57,7 +57,10 @@ let execute ~(resolved : Runtime_exact_output_registry.resolved_lane) ~rendered_
       let* rest = candidates rest in
       Ok (candidate :: rest)
   in
-  let* candidates = candidates resolved.selected_slots in
+  (* Ordered here, not in [prepare_execution]: the declared order is part of
+     the published configuration, and a rest must not change its identity. *)
+  let* candidates =
+    candidates (Runtime_exact_lane_backpressure.order resolved).selected_slots in
   let* first, rest = match candidates with
     | [] -> Error "workspace curator has no admitted exact-output slot"
     | first :: rest -> Ok (first, rest) in
@@ -77,11 +80,13 @@ let execute ~(resolved : Runtime_exact_output_registry.resolved_lane) ~rendered_
       match Proposals.decode (Context.proposal_json context raw) with
       | Ok _ -> Exact.Accept raw
       | Error detail -> Exact.Reject_and_advance detail in
-    (match Exact.execute_flow_once ~net ~clock
+    let flow = Exact.execute_flow_once ~net ~clock
        ~before_measurement_dispatch:(fun _ -> Ok ())
        ~on_measurement_terminal:(fun _ -> Ok ())
        ~before_dispatch:(fun _ -> Ok ())
-       ~before_advance:(fun ~failed:_ ~next:_ -> Ok ()) ~validate attempt with
+       ~before_advance:(fun ~failed:_ ~next:_ -> Ok ()) ~validate attempt in
+    Runtime_exact_lane_backpressure.observe flow;
+    (match flow with
      | Ok success ->
        let candidate = Exact.flow_success_candidate success.transport_success in
        Ok (success.accepted, candidate.visit.identity.candidate_id)

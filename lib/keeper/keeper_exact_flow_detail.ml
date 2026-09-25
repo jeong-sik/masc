@@ -32,7 +32,7 @@ let execution_cause_detail : Exact_output.execution_error_cause -> string = func
        | Generation_dispatch_started -> "sent")
   | Response_body_deadline_exceeded ->
     "total request deadline exceeded while reading response body"
-  | Provider_response_refused { http_status; refusal } ->
+  | Provider_response_refused { http_status; refusal; _ } ->
     Printf.sprintf
       "provider refused (http_status=%d refusal=%s)"
       http_status

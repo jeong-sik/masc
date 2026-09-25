@@ -401,6 +401,7 @@ let prepare_flow
       resolved
     |> Result.map_error (fun detail ->
       "HITL exact-lane preference unavailable: " ^ detail)
+    |> Result.map Runtime_exact_lane_backpressure.order
   in
   let* transport =
     match resolved.selected_slots, resolved.cli_slots with
@@ -1488,7 +1489,7 @@ let execute_prepared_flow_with_queue_ops_current
            ~cause:Exact_flow_execution_failed);
       Executed
     | Http_attempt attempt ->
-    match
+    let flow =
       Exact_output.execute_flow_once
         ~net
         ?clock
@@ -1498,7 +1499,9 @@ let execute_prepared_flow_with_queue_ops_current
         ~before_advance:guarded_before_advance
         ~validate:(validate_success prepared)
         attempt
-    with
+    in
+    Runtime_exact_lane_backpressure.observe flow;
+    match flow with
     | Ok success ->
       handle_validated_success
         ~queue_ops

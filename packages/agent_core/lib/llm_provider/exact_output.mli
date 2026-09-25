@@ -299,6 +299,10 @@ type execution_error_cause =
   | Provider_response_refused of
       { http_status : int
       ; refusal : provider_refusal
+      ; retry_after_s : float option
+          (** The provider's Retry-After, in seconds, when a [Rate_limited]
+              refusal carried a parseable one; [None] for every other
+              refusal. Not part of flow evidence. *)
       }
   | Incomplete_output
   | Missing_output

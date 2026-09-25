@@ -6628,8 +6628,10 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
     | R.Provided text -> [ "QUESTION PROVIDED"; text ]
     | R.Generated value -> generation "QUESTION GENERATED" value
   in
+  (* The sample header names the failed stage. Retain the stage when the
+     header scrolls away, without repeating the FAILED status. *)
   let failed_generation label (value : R.failed_generation) =
-    [ label ^ " FAILED  " ^ value.error
+    [ label ^ " CAUSE  " ^ value.error
     ; "REQUESTED  " ^ value.request.requested_model ^ "  ·  runtime " ^ value.request.runtime_id
     ] @ prepared value.request
     @ (match value.incomplete_response with
@@ -6663,7 +6665,7 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
         | R.Judge_failed { question; answer; failure } -> Theme.bad (), "JUDGE FAILED",
             question_lines question @ generation "ANSWER" answer
             @ [ "JUDGE REQUESTED  " ^ failure.request.model ^ "  ·  " ^ failure.request.endpoint
-              ; "JUDGE FAILED  " ^ failure.error ]
+              ; "JUDGE CAUSE  " ^ failure.error ]
         | R.Scored { question; answer; judgment } -> Ansi.reset, "SCORED",
             question_lines question @ generation "ANSWER" answer
             @ [ "JUDGE  " ^ judgment.response_model ^ "  ·  " ^ judgment.request.endpoint

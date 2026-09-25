@@ -178,7 +178,9 @@ let to_projection_json row : Yojson.Safe.t =
    Librarian, HITL auto-judge and Board attention flows. [writable_lane]
    matches every constructor of [Standalone_lane.t] without a wildcard, so
    adding a lane fails this build until it says what the new lane means here,
-   and the error texts re-read every id through [to_id]. *)
+   and the error texts re-read every id through [to_id]. [set] clears through
+   the gate only when it stores a slot; clearing a known lane bypasses it, so
+   a row a lane stopped reading stays removable. *)
 let writable_lane = function
   | Standalone_lane.Librarian
   | Standalone_lane.Hitl_auto_judge
@@ -221,7 +223,12 @@ let set (config : Workspace.config) ~actor ~keeper_name ~lane_id slot_id =
   else
     let base_path = config.base_path in
     let open Result.Syntax in
-    let* () = refused_lane_ok lane_id in
+    (* Clearing takes a preference back instead of writing one, so it passes
+       without the writable-lane gate: a row left behind by a lane that
+       stopped reading preferences would otherwise be unremovable here. *)
+    let* () =
+      match slot_id with Some _ -> refused_lane_ok lane_id | None -> Ok ()
+    in
     let* rows = all ~base_path in
     let changed_at = Masc_domain.now_iso () in
     let without =

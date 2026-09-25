@@ -505,9 +505,9 @@ let classify_script script =
 ;;
 
 (* Mirrors [Keeper_tool_execute_runtime.execute_gate_input]: the command
-   lives under the nested [input] as [argv] or [script]. An argv whose
-   program is a shell with [-c] is a script in an argv costume
-   ([Keeper_tooling.Shell_costume]) and is classified as the script it is,
+   lives under the nested [input] as [argv] or [command]. An argv whose
+   program is a shell with [-c] is a command line in an argv costume
+   ([Keeper_tooling.Shell_costume]) and is classified as the line it is,
    because that is what the dispatcher runs. The sandbox labels at the top
    level of the envelope are display/audit data only — the sandbox decision
    reads the typed [sandbox_profile] the request carries, never these
@@ -531,8 +531,8 @@ let classify_command input =
              | Some costume -> classify_script costume.Keeper_tooling.Shell_costume.script
              | None -> classify_argv strings)
         | _ ->
-          (match List.assoc_opt "script" inner with
-           | Some (`String script) -> classify_script script
+          (match List.assoc_opt "command" inner with
+           | Some (`String command) -> classify_script command
            | _ -> Needs_observation Unproven_request))
      | _ -> Needs_observation Unproven_request)
   | _ -> Needs_observation Unproven_request

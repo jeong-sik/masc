@@ -157,7 +157,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
           (List.length errors)
     in
     let require_slots label registry =
-      match Registry.resolve_lane registry ~lane_id:"auxiliary_exact" with
+      match Registry.resolve_lane registry ~lane_id:"librarian_exact" with
       | Error error ->
         Alcotest.failf
           "%s: %s"
@@ -174,7 +174,11 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
     require_slots "replacement-only lane" registry;
     let stable_registry_snapshot = registry in
     let prepared =
-      match Registry.prepare_replacement ~lanes with
+      match Registry.prepare_replacement
+              ~lanes
+              ~excused_lane_ids:[]
+              ~load_resolver_snapshot:(fun () -> Ok replacement_snapshot)
+      with
       | Ok prepared -> prepared
       | Error error ->
         Alcotest.failf
@@ -201,7 +205,11 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
     in
     Registry.current () |> require_publication_busy "published registry read fence";
     let concurrently_prepared =
-      match Registry.prepare_replacement ~lanes with
+      match Registry.prepare_replacement
+              ~lanes
+              ~excused_lane_ids:[]
+              ~load_resolver_snapshot:(fun () -> Ok replacement_snapshot)
+      with
       | Ok prepared -> prepared
       | Error error ->
         Alcotest.failf
@@ -226,13 +234,21 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
           "same-lane finish did not republish: %s"
           (Registry.publication_error_to_string error)
     in
+    (* A replacement is admitted against the snapshot the commit built, so
+       finishing one publishes a new generation even when the lanes read the
+       same: a binding field the lanes do not name may have changed. *)
     Alcotest.(check bool)
-      "same lanes preserve registry generation"
+      "same-lane finish publishes the rebuilt candidate"
       true
-      (after_noop == stable_registry_snapshot);
+      (not (after_noop == stable_registry_snapshot));
     require_slots "same-lane finish preserves slots" after_noop;
+    let stable_registry_snapshot = after_noop in
     let successor_prepared =
-      match Registry.prepare_replacement ~lanes with
+      match Registry.prepare_replacement
+              ~lanes
+              ~excused_lane_ids:[]
+              ~load_resolver_snapshot:(fun () -> Ok replacement_snapshot)
+      with
       | Ok prepared -> prepared
       | Error error ->
         Alcotest.failf
@@ -309,7 +325,11 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
       (after_failed_save == stable_registry_snapshot);
     require_slots "failed published save preserves slots" after_failed_save;
     let stale_prepared =
-      match Registry.prepare_replacement ~lanes with
+      match Registry.prepare_replacement
+              ~lanes
+              ~excused_lane_ids:[]
+              ~load_resolver_snapshot:(fun () -> Ok replacement_snapshot)
+      with
       | Ok prepared -> prepared
       | Error error ->
         Alcotest.failf
@@ -328,7 +348,11 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
     |> require_replacement_base_changed
          "stale prepared candidate";
     let successor_prepared =
-      match Registry.prepare_replacement ~lanes with
+      match Registry.prepare_replacement
+              ~lanes
+              ~excused_lane_ids:[]
+              ~load_resolver_snapshot:(fun () -> Ok replacement_snapshot)
+      with
       | Ok prepared -> prepared
       | Error error ->
         Alcotest.failf
@@ -741,14 +765,14 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
   in
   require_lane_slots
     "unknown optional slot is excluded while admitted fallback remains"
-    ~lane_id:"auxiliary_exact"
+    ~lane_id:"librarian_exact"
     ~expected:[ replacement_target ]
     degraded_optional_registry;
   (match Registry.rejected_slots degraded_optional_registry with
    | [ rejected ] ->
      Alcotest.(check string)
        "rejected lane"
-       "auxiliary_exact"
+       "librarian_exact"
        rejected.lane_id;
      Alcotest.(check int) "rejected position" 1 rejected.position;
      Alcotest.(check string) "rejected slot" deployment_target rejected.slot_id
@@ -768,7 +792,7 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
   in
   require_lane_slots
     "unbound optional target is excluded while admitted fallback remains"
-    ~lane_id:"auxiliary_exact"
+    ~lane_id:"librarian_exact"
     ~expected:[ replacement_target ]
     unbound_optional_registry;
   (match Registry.rejected_slots unbound_optional_registry with
@@ -1040,6 +1064,7 @@ let test_catalog_absent_assignments_names_only_retired_targets () =
    losing it from the file. *)
 let test_an_append_keeps_a_slot_the_registry_dropped () =
   with_temp_dir "exact-append-dropped" @@ fun root ->
+  with_replacement_catalog_file root @@ fun () ->
   let saved = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () ->

@@ -12,6 +12,29 @@ let prefix = function
   | Mcp -> "mcp/"
 ;;
 
+type asset_write =
+  | Fsync_each_file
+  | Rename_only
+
+(* How an asset reaches its runtime file (#37503). A tool or MCP file a
+   crash leaves empty or partial differs from the embedded copy, and the
+   next pass rewrites it: [No_edit_layer] discards whatever the file
+   holds. A prompt file is different. A torn prompt whose frontmatter
+   survived reads as an operator edit, and
+   [Prompt_registry.promote_file_edit] saves it as a permanent override
+   (#38741), so prompts keep the fsync. The manifest is always fsynced
+   (write_runtime_manifest). No [_] arm: a new domain has to choose. *)
+let asset_write = function
+  | Prompts -> Fsync_each_file
+  | Tools | Mcp -> Rename_only
+;;
+
+let write_asset ~domain dest content =
+  match asset_write domain with
+  | Fsync_each_file -> Fs_compat.save_file_atomic dest content
+  | Rename_only -> Fs_compat.save_file_atomic_rename_only dest content
+;;
+
 (* One schema string per domain, written into the runtime manifest so a
    reader of the runtime directory can tell which domain owns it.
 
@@ -403,7 +426,7 @@ let sync_current_asset
       (* [written] is the pass once the file holds the embedded copy;
          [unwritten] is what it reports when the write fails. *)
       let install ~written ~unwritten =
-        match Fs_compat.save_file_atomic dest content with
+        match write_asset ~domain dest content with
         | Error msg -> fail unwritten msg
         | Ok () -> written, record (Some embedded_digest)
       in

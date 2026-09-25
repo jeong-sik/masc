@@ -33,10 +33,14 @@ let release_owner owner =
     leases) in
   List.iter (fun lease -> lease.cleanup ()) leases
 let ( let* ) = Result.bind
+type 'read_error staging_error =
+  | Read_failed of 'read_error
+  | Snapshot_failed of string
+
 let with_staged_files ~files f =
   let* directory =
     try Ok (Filename.temp_dir ~perms:0o700 "masc-browser-upload-" "")
-    with Sys_error message -> Error ("upload staging failed: " ^ message) in
+    with Sys_error message -> Error (Snapshot_failed ("upload staging failed: " ^ message)) in
   let staged = ref [] in
   let subdirs = ref [] in
   let lease = ref None in
@@ -49,9 +53,9 @@ let with_staged_files ~files f =
     let rec stage index acc = function
       | [] -> Ok (List.rev acc)
       | (name,read) :: rest ->
-        let* bytes = read () in
+        let* bytes = read () |> Result.map_error (fun error -> Read_failed error) in
         if name="." || name=".." || name="" || Filename.basename name <> name
-        then Error "upload snapshot requires a file basename"
+        then Error (Snapshot_failed "upload snapshot requires a file basename")
         else
           let subdir = Filename.concat directory (string_of_int index) in
           Unix.mkdir subdir 0o700;
@@ -62,8 +66,8 @@ let with_staged_files ~files f =
           Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc bytes);
           stage (index+1) (target :: acc) rest in
     let* paths = try stage 0 [] files with
-      | Sys_error message -> Error ("upload staging failed: " ^ message)
+      | Sys_error message -> Error (Snapshot_failed ("upload staging failed: " ^ message))
       | Unix.Unix_error (error,operation,_) ->
-        Error ("upload staging failed: " ^ operation ^ ": " ^ Unix.error_message error) in
+        Error (Snapshot_failed ("upload staging failed: " ^ operation ^ ": " ^ Unix.error_message error)) in
     lease := Some (register ~paths ~cleanup);
     Ok (f paths))

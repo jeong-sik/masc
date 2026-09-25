@@ -119,14 +119,24 @@ let apply ~base_path ~keeper_name ~lane_id
   match preference with
   | None -> Ok resolved
   | Some preference ->
-    let+ selected_slots =
-      prefer
-        ~slots:resolved.selected_slots
-        ~slot_id_of:(fun (slot : Runtime_exact_output_registry.selected_slot) ->
-          slot.slot_id)
-        ~preferred:preference.slot_id
-    in
-    { resolved with Runtime_exact_output_registry.selected_slots }
+    (* The preference only reorders. A slot the lane stopped offering (removed
+       from runtime.toml, or left out at boot) leaves the declared order in
+       place: refusing here would fail this Keeper's lane on every pass until
+       an operator cleared the row, while the declared order is still a lane
+       the registry admitted. The stale row is logged each time it is read. *)
+    (match
+       prefer
+         ~slots:resolved.selected_slots
+         ~slot_id_of:(fun (slot : Runtime_exact_output_registry.selected_slot) ->
+           slot.slot_id)
+         ~preferred:preference.slot_id
+     with
+     | Ok selected_slots -> Ok { resolved with Runtime_exact_output_registry.selected_slots }
+     | Error detail ->
+       Log.Keeper.info ~keeper_name
+         "exact-lane preference ignored; lane=%s walks its declared order: %s"
+         lane_id detail;
+       Ok resolved)
 ;;
 
 let validate_admitted_slot ~lane_id ~slot_id =
@@ -149,6 +159,55 @@ let validate_admitted_slot ~lane_id ~slot_id =
   ()
 ;;
 
+let offered row =
+  Result.is_ok (validate_admitted_slot ~lane_id:row.lane_id ~slot_id:row.slot_id)
+;;
+
+let to_projection_json row : Yojson.Safe.t =
+  `Assoc
+    [ "keeper_name", `String row.keeper_name
+    ; "lane_id", `String row.lane_id
+    ; "slot_id", `String row.slot_id
+    ; "updated_by", `String row.actor
+    ; "updated_at", `String row.changed_at
+    ; "offered", `Bool (offered row)
+    ]
+;;
+
+(* A preference is stored only for a lane that {!apply} actually reads: the
+   Librarian, HITL auto-judge and Board attention flows. [writable_lane]
+   matches every constructor of [Standalone_lane.t] without a wildcard, so
+   adding a lane fails this build until it says what the new lane means here,
+   and the error texts re-read every id through [to_id]. *)
+let writable_lane = function
+  | Standalone_lane.Librarian
+  | Standalone_lane.Hitl_auto_judge
+  | Standalone_lane.Board_attention -> true
+  | Standalone_lane.Workspace_curator
+  | Standalone_lane.Verifier -> false
+;;
+
+let refused_lane_ok lane_id =
+  match Standalone_lane.of_id lane_id with
+  | None ->
+    Error
+      (Printf.sprintf
+         "unknown exact-output lane %S; expected one of %s"
+         lane_id
+         (String.concat ", " (List.map Standalone_lane.to_id Standalone_lane.all)))
+  | Some lane when writable_lane lane -> Ok ()
+  | Some _ ->
+    Error
+      (Printf.sprintf
+         "exact-output lane %S never reads a preference; expected one of %s"
+         lane_id
+         (String.concat ", "
+            (List.filter_map
+               (fun lane ->
+                  if writable_lane lane then Some (Standalone_lane.to_id lane) else None)
+               Standalone_lane.all)))
+;;
+
 let set (config : Workspace.config) ~actor ~keeper_name ~lane_id slot_id =
   let keeper_name = String.trim keeper_name in
   let lane_id = String.trim lane_id in
@@ -162,6 +221,7 @@ let set (config : Workspace.config) ~actor ~keeper_name ~lane_id slot_id =
   else
     let base_path = config.base_path in
     let open Result.Syntax in
+    let* () = refused_lane_ok lane_id in
     let* rows = all ~base_path in
     let changed_at = Masc_domain.now_iso () in
     let without =

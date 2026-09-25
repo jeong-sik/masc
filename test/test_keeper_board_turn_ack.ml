@@ -181,7 +181,9 @@ data: [DONE]
     ~pending_board_events:[] ~stop:(Atomic.make false) ~proactive_warmup_elapsed:true
     ~reactive_wake:true ~shared_context ~deferred_runtime_lane:None
     ~on_deferred_runtime_consumed:(fun () -> ())
-    ~record_deferred_runtime_lane:(fun _ -> failwith "unexpected runtime failover") in
+    ~settle_deferred_runtime_lane:(function
+      | Some _ -> failwith "unexpected runtime failover"
+      | None -> ()) in
   Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 1;
   let first = cycle meta in
   require (not first.stimuli_acked) "transient read was ACKed";

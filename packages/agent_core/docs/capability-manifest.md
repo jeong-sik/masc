@@ -95,6 +95,7 @@ for the full JSON Schema (draft-07).
 | `supports_audio_input` | bool | from base | Audio inputs (native tokens). |
 | `supports_video_input` | bool | from base | Video inputs. |
 | `supports_document_input` | bool | from base | Document inputs (e.g. PDF). Not implied by `supports_image_input`: a row that omits it has its documents rejected at serialization rather than relabelled as images. |
+| `modality_priority` | string | from base | Multimodal block ordering applied before serialization. Accepted values: `preserve_input_order` (aliases `preserve-input-order`, `preserve`), `visual_first` (alias `visual-first`). |
 | `supports_native_streaming` | bool | from base | SSE streaming. |
 | `supports_system_prompt` | bool | from base | System prompt field. |
 | `supports_prompt_caching` | bool | from base | Explicit cache breakpoints. |
@@ -106,6 +107,8 @@ for the full JSON Schema (draft-07).
 | `preserve_thinking_control_format` | string | from base | Historical reasoning replay/preserve wire control. Accepted values: `none`, `thinking_object_keep_all`, `chat_template_kwargs_preserve_thinking`, `always_preserved`, `thinking_object_clear_thinking`. |
 | `reasoning_output_format` | string | from base | Request-side reasoning output split control. Accepted values: `none`, `split_reasoning_fields`. |
 | `reasoning_replay` | string | `default` | Optional multi-turn reasoning replay override. Accepted values: `default`, `no_replay`, `drop_without_tool`, `latest_user_turn_tool_calls`, `preserve_always`. |
+| `emits_usage_tokens` | bool | from base | Whether the standard response carries usage tokens (`input_tokens`/`output_tokens`). |
+| `supported_models` | string[] | from base | Exact client-side model allow-list. Must be non-empty; blank, padded, or duplicate ids are rejected. |
 
 Unknown fields and unknown enum values are rejected. Additive schema changes
 must update the parser and this schema together.

@@ -310,8 +310,10 @@ let test_the_rest_of_the_lane_stays_behind_it () =
   | Error detail -> fail ("a declared slot was refused: " ^ detail)
 
 let test_a_slot_the_lane_does_not_offer_is_refused () =
-  (* Quietly falling back would leave an operator believing this Keeper is
-     judged by a model it has never been judged by. *)
+  (* Refused when the operator sets it: accepting it would leave them believing
+     this Keeper is judged by a model it has never been judged by. A slot that
+     leaves the lane later is a different case; [apply] then walks the
+     declared order and logs the stale preference. *)
   match preferred_order "some.model" with
   | Ok _ -> fail "accepted a slot the lane never declared"
   | Error detail ->
@@ -472,6 +474,50 @@ let test_preferences_are_scoped_by_exact_lane () =
     check string "HITL owns its slot" "glm.turbo" hitl.slot_id;
     check string "Librarian owns its slot" "ollama.qwen" librarian.slot_id
   | _ -> fail "one Keeper's exact lanes did not retain independent preferences"
+
+let test_a_lane_that_reads_no_preference_is_refused () =
+  with_workspace @@ fun (_base_path, config) ->
+  let expect_refusal lane_id =
+    match
+      Keeper_exact_lane_preference.set
+        config
+        ~actor:"test"
+        ~keeper_name:"echo"
+        ~lane_id
+        (Some "ollama.qwen")
+    with
+    | Ok _ -> fail (Printf.sprintf "a %s preference was accepted" lane_id)
+    | Error detail ->
+      check string
+        (Printf.sprintf "%s names the lanes it accepts" lane_id)
+        (Printf.sprintf
+           "exact-output lane %S never reads a preference; expected one of %s"
+           lane_id
+           "librarian_exact, hitl_auto_judge, board_attention_exact")
+        detail
+  in
+  expect_refusal "verifier_exact";
+  expect_refusal "workspace_curator_exact";
+  match
+    ( Keeper_exact_lane_preference.all ~base_path:config.base_path
+    , Keeper_exact_lane_preference.set
+        config
+        ~actor:"test"
+        ~keeper_name:"echo"
+        ~lane_id:"verifier_made_up"
+        (Some "ollama.qwen") )
+  with
+  | Ok rows, Error detail ->
+    check string
+      "an unknown exact-output lane is refused with every published id"
+      (Printf.sprintf
+         "unknown exact-output lane %S; expected one of %s"
+         "verifier_made_up"
+         "librarian_exact, hitl_auto_judge, board_attention_exact, \
+          workspace_curator_exact, verifier_exact")
+      detail;
+    check int "a refusal stores no row" 0 (List.length rows)
+  | _ -> fail "an unknown lane did not meet the refusal contract"
 
 let test_keeper_effects_defer_without_dispatch () =
   with_clean_gate_runtime @@ fun () ->
@@ -1082,6 +1128,8 @@ let () =
             test_duplicate_exact_lane_owner_is_rejected
         ; test_case "preferences are scoped by exact lane" `Quick
             test_preferences_are_scoped_by_exact_lane
+        ; test_case "a lane that reads no preference is refused" `Quick
+            test_a_lane_that_reads_no_preference_is_refused
         ] )
     ; ( "causal_context"
       , [ test_case

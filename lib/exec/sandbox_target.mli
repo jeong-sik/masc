@@ -10,6 +10,23 @@
     directly to [Process_eio], and guest / SSH targets via the carried
     [runner]. *)
 
+(** What kind of transport failure it was. *)
+type transport_failure =
+  | Payload_timed_out
+      (** The payload ran past its time budget and the endpoint stopped it
+          (the remote shim's [timed_out]). A host-side budget that ran out
+          before the endpoint answered is a stalled lane, not this. *)
+  | Lane_unavailable
+      (** The lane never delivered the command's own result: unreachable
+          endpoint, refused request, unreadable reply, or a lane that cannot
+          run this request. *)
+
+(** The status a caller that needs one gives a transport failure: a timeout
+    is {!Process_eio.timed_out_status}, the status a host run that timed out
+    has, so a remote timeout is read as a timeout wherever a host one is; an
+    unavailable lane is [WEXITED 1]. *)
+val status_of_transport_failure : transport_failure -> Unix.process_status
+
 (** Whether a runner delivered the command's own result ([Ran]), or the
     transport failed before/instead of producing one ([Transport_failed]).
     The remote lane used to report both as [WEXITED 1], so a lane that was
@@ -24,6 +41,7 @@ type run_outcome =
       output_files : Process_output_capture.files option;
     }
   | Transport_failed of {
+      failure : transport_failure;
       reason : string;
       stdout : string;
       stderr : string;
@@ -35,7 +53,7 @@ type run_outcome =
 
 (** Collapse a [run_outcome] to the legacy [status, stdout, stderr] tuple for
     consumers that treat a transport failure the same as any command failure
-    ([Transport_failed] becomes [WEXITED 1]). Do NOT use this where a non-zero
+    ([Transport_failed] becomes {!status_of_transport_failure}). Do NOT use this where a non-zero
     exit can mean success (the read backend's Grep lane): match the variant
     directly there so a down lane cannot read as an empty result. *)
 val status_tuple : run_outcome -> Unix.process_status * string * string

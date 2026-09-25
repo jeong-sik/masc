@@ -3,7 +3,7 @@
 
     Internal helpers ([log_prefix], [split_path_env],
     [find_executable_in_path], [local_playback_argvs],
-    [record_playback], the dedup [last_playback] state, the playback
+    the dedup [last_playback] state, the playback
     mutex,
     [resolved_base_path_opt], [strip_provider_metadata], and
     [provider_metadata_keys]) are hidden — callers consume the
@@ -82,11 +82,21 @@ val with_voice_output_turn : agent_id:string -> (unit -> 'a) -> 'a
     MCP session and direct TTS do not overlap across processes. *)
 
 val is_dedup_hit : agent_id:string -> message:string -> bool
-(** [true] iff [(agent_id, hash message)] matches the most recent
-    playback within {!playback_dedup_window_sec}. Exposed so
-    {!Voice_bridge} can short-circuit before the playback mutex is
-    acquired (the mutex'd recheck inside {!run_local_playback} closes
-    the residual check-then-act race). *)
+(** [true] iff [agent_id] and [message] are both exactly equal
+    ([String.equal]) to the most recent recorded playback and that
+    playback is within {!playback_dedup_window_sec}. The text is
+    compared, not its hash: two different lines that share a
+    [Hashtbl.hash] are two lines. Exposed so {!Voice_bridge} can
+    short-circuit before the playback mutex is acquired (the mutex'd
+    recheck inside {!run_local_playback} closes the residual
+    check-then-act race). *)
+
+val record_playback : agent_id:string -> message:string -> unit
+(** Remember [(agent_id, message)] as the most recent playback, opening a
+    {!playback_dedup_window_sec} window in which {!is_dedup_hit} answers
+    [true] for exactly that pair. {!run_local_playback} calls it inside the
+    playback lock before playing; exposed so the dedup decision can be
+    tested without audio. *)
 
 val run_local_playback :
   sw:Eio.Switch.t ->

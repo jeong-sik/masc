@@ -39,6 +39,7 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   ; mutable assistant_turn_texts : string list
     (** One entry per completed provider turn, newest first: the turn's [Text]
         blocks concatenated in emission order, "" when the turn emitted none. *)
+  ; mutable wire_prompt_tokens : Keeper_agent_result.wire_prompt_tokens option
   }
 
 (** Immutable snapshot of hook outputs after AGENT_CORE execution completes. *)
@@ -83,6 +84,8 @@ type agent_setup =
       identity:Runtime_native_tools.action_identity -> tool_name:string -> unit
   ; observe_official_client_usage_report :
       Keeper_client_usage_report.t -> unit
+  ; spend_attempts : unit -> Keeper_turn_spend.attempt list
+      (** What every dispatched attempt so far reported about its spend. *)
   ; acc : hook_accumulator
   ; all_tool_names : string list
   ; skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list

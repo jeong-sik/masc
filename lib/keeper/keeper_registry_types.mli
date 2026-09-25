@@ -386,13 +386,6 @@ type registry_entry = {
   waiting_for_inference : bool Atomic.t;
       (** Ephemeral flag: true when keeper is blocked in admission queue.
           Does not affect state machine phase derivation. *)
-  last_context_actions :
-    (float * Keeper_state_machine.context_actions) option;
-      (** Snapshot of the most recent [Context_measured] auto-rule summary.
-          Stored as [(wall_clock, summary)] so the composite observer
-          (RFC-0003 §6) can surface the last measurement without reading
-          history files. [None] until the first [Context_measured] event
-          has been dispatched. *)
   last_event_bus_correlation : string option;
       (** Most recent AGENT_CORE Event_bus [correlation_id] extracted after a
           keeper turn via [Event_bus.drain]. [None] until the first

@@ -47,7 +47,19 @@ class PrefixCacheEvidence(unittest.TestCase):
     def request(turn, ordinal, ts, tokens, miss):
         return {'agent': 'k', 'runtime_id': 'ollama_cloud.m', 'keeper_turn_id': turn,
                 'agent_core_turn_ordinal': ordinal, 'timestamp': ts, 'usage_projection': 'raw_observation',
+                'usage_scope': 'per_request',
                 'input_tokens': tokens, 'cache_miss_input_tokens': miss}
+
+    def test_only_per_request_rows_are_requests(self):
+        # An official client's row counts a client turn or a conversation, and
+        # a row from before rows stated a scope is unknown; neither is a request.
+        cumulative = dict(self.request(1, 1, '2026-09-16T13:00:00Z', 900, 90),
+                          usage_scope='conversation_cumulative')
+        unscoped = self.request(1, 2, '2026-09-16T13:00:10Z', 950, 95)
+        del unscoped['usage_scope']
+        report = self.audit([cumulative, unscoped], [])
+        self.assertEqual(report['raw_rows_without_scope'], 1)
+        self.assertEqual([r for r in report['rounds_by_family_and_era'] if r['era'] == 'after_deploy'], [])
 
     def test_first_rounds_are_read_apart_from_later_rounds(self):
         rows = [self.request(1, 1, '2026-09-16T13:00:00Z', 100, 100),

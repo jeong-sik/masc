@@ -34,7 +34,6 @@ describe('ReactionBar a11y', () => {
         emoji: '🔥',
         count: 2,
         reacted: true,
-        has_reacted: true,
         recent_user_ids: ['agent-a'],
       }],
       supportedEmojis: ['🔥'],

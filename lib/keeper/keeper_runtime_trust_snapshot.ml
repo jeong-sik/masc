@@ -340,6 +340,19 @@ let trust_model_json_fields (model : Trust_core.t) =
   ]
 ;;
 
+let unread_keeper_json ~disposition ~disposition_reason ~attention_reason
+    ~next_human_action =
+  `Assoc
+    (trust_model_json_fields
+       { Trust_core.disposition
+       ; disposition_reason
+       ; receipt_operator_disposition = None
+       ; needs_attention = true
+       ; attention_reason = Some attention_reason
+       ; next_human_action = Some next_human_action
+       })
+;;
+
 let decision_log_persistence_surface = "keeper_runtime_trust_decision_log"
 
 let report_decision_log_read_drop ~reason ~path ~detail =

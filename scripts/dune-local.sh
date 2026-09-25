@@ -331,7 +331,7 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
     printf '%s\n' \
       "[dune-local]   eval \"\$(opam env --switch=${_required_version} --set-switch)\"" >&2
     printf '[dune-local]   bash scripts/opam-pin-external-deps.sh --install\n' >&2
-    printf '[dune-local]   opam install . --deps-only --with-test -y\n' >&2
+    printf '[dune-local]   opam install ./masc.opam --deps-only --with-test -y\n' >&2
     printf '[dune-local] set MASC_SKIP_OCAML_VERSION_CHECK=1 to bypass this guard\n' >&2
     exit 1
   fi
@@ -424,7 +424,7 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
       printf '[dune-local]   Error: Library "<name>" not found\n' >&2
       printf '[dune-local] repair (run each line in turn):\n' >&2
       printf '[dune-local]   bash scripts/opam-pin-external-deps.sh --install\n' >&2
-      printf '[dune-local]   opam install . --deps-only --with-test -y\n' >&2
+      printf '[dune-local]   opam install ./masc.opam --deps-only --with-test -y\n' >&2
       printf '[dune-local] set MASC_SKIP_DEPS_CHECK=1 to bypass this guard\n' >&2
       exit 1
     fi

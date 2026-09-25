@@ -89,7 +89,7 @@ let deferred_external_effect_data ?approval_id ?(effect_disposition = Tool_resul
 ;;
 
 let failure
-      ?(class_ = Tool_result.Runtime_failure)
+      ~class_
       ?(effect_disposition = Tool_result.Effect_outcome_unknown)
       raw_output
   =

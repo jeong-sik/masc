@@ -8,6 +8,8 @@ trace.csexp
 *.merlin
 .merlin
 _opam/
+# Dune generates this local vendor package stub; it is not an opam source package.
+/ocaml-msx.opam
 
 # Editor
 .vscode/
@@ -207,3 +209,10 @@ memory/
 
 # Local sandbox builds vendor the pinned ocaml-msx here (never commit).
 /vendor/
+# dune-project declares ocaml-msx for that vendored copy, so the first build
+# generates its opam file. Ignoring it only keeps it out of commits: `opam
+# install .` still reads every *.opam in the directory, ignored or not, and
+# would take it for an empty local package that shadows the git pin
+# lib/msx_lane needs. Install from a built checkout with
+# `opam install ./masc.opam`.
+/ocaml-msx.opam

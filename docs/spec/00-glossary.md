@@ -1135,12 +1135,11 @@ status: reference
     저장되지 않아 요소가 직접 감지한다). `youtube`는 `url`만 허용한다 — 저장된
     아티팩트는 유튜브 영상이 아니다.
   - 출처 둘은 동시에 쓰지 않고, 둘 다 없으면 거절한다. `http:`·`javascript:`·
-    `data:` URL과 형식이 맞지 않는 메타데이터는 받지 않는다. 아티팩트 참조는
+    `data:` URL과 형식이 맞지 않는 항목은 받지 않는다. 아티팩트 참조는
     쓰기 전에 기존 Tool_blob_store에서 바이트를 확인하고, 지정된 상한
     (`max_served_bytes`, HTTP 아티팩트 라우트와 같은 32 MiB)을 넘으면
     `Artifact_too_large`로 거절해 대시보드에서 열 수 없는 카드가 남지 않게 한다.
-  - 이름 경계: 예전 `meta.attachments` 원시 슬롯은 폐지됐다. 첨부는 이제 최상위
-    `attachments`에 두며, 낡은 비타입 메타데이터는 실패 카드로만 보인다. Artifact(실행
+  - 이름 경계: 첨부는 글쓰기 입력의 최상위 `attachments` 인자에 적는다. Artifact(실행
     산출물)는 이 첨부보다 넓은 개념 — Board Attachment는 그 넓은 개념을 가리키는
     하나의 용도일 뿐이다.
   → [Board_tool_attachment](../../lib/board_tool_adapter/board_tool_attachment.mli),

@@ -211,10 +211,11 @@ type stream_event =
       { thread_id : string
       ; turn_id : string
       ; model : string
-      ; thread_total : token_usage
+      ; frame : frame_usage
       }
-      (** One [thread/tokenUsage/updated] frame for this turn: its [total]
-          breakdown, the running count of [thread_id]. A frame is not one
+      (** One [thread/tokenUsage/updated] frame for this turn, parsed: its
+          [total] breakdown is the running count of [thread_id], or the
+          fill that replaced it. A frame is not one
           response; the app-server repeats it on rate-limit updates,
           refusals and retries, and a repeat carries the same count. Emitted
           when the frame is read, before the turn's outcome is known, so a

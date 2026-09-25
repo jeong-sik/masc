@@ -257,6 +257,31 @@ let ansi_csi_end text offset =
     in
     scan (offset + 2)
 
+let printable_ascii byte = byte >= ' ' && byte <= '~'
+
+(* ASCII columns and padding have one cell per byte. A CSI is the same
+   zero-cell piece [display_pieces] recognises. Any other byte needs the
+   Unicode path, including an ASCII base followed by a combining mark or
+   emoji selector: deciding the whole string first keeps that cluster whole. *)
+let ascii_display_width text =
+  let length = String.length text in
+  let rec scan offset cells =
+    if offset >= length then Some cells
+    else if printable_ascii text.[offset] then scan (offset + 1) (cells + 1)
+    else
+      match ansi_csi_end text offset with
+      | Some next -> scan next cells
+      | None -> None
+  in
+  scan 0 0
+
+let printable_ascii_range text start_offset end_offset =
+  let rec scan offset =
+    offset >= end_offset
+    || (printable_ascii text.[offset] && scan (offset + 1))
+  in
+  scan start_offset
+
 let scalar_cell_width scalar =
   let code = Uchar.to_int scalar in
   if code >= 0x20 && code <= 0x7E then 1
@@ -348,6 +373,8 @@ let valid_utf_8_range text start_offset end_offset =
    cluster, run as the scalars arrive. *)
 let grapheme_pieces text start_offset end_offset reversed =
   if start_offset >= end_offset then reversed
+  else if printable_ascii_range text start_offset end_offset then
+    scalar_pieces text start_offset end_offset reversed
   else if not (valid_utf_8_range text start_offset end_offset) then
     scalar_pieces text start_offset end_offset reversed
   else begin
@@ -413,6 +440,11 @@ let grapheme_pieces text start_offset end_offset reversed =
           drain `Await
       | `Await | `End -> ()
     in
+    let rec after_ascii offset =
+      if offset < end_offset && printable_ascii text.[offset] then
+        after_ascii (offset + 1)
+      else offset
+    in
     let rec feed offset =
       if offset >= end_offset then begin
         drain `End;
@@ -420,8 +452,30 @@ let grapheme_pieces text start_offset end_offset reversed =
       end
       else
         let decoded = String.get_utf_8_uchar text offset in
+        let next = offset + Uchar.utf_decode_length decoded in
         drain (`Uchar (Uchar.utf_decode_uchar decoded));
-        feed (offset + Uchar.utf_decode_length decoded)
+        if printable_ascii text.[offset] then begin
+          (* GB999 separates adjacent printable ASCII. Feed the first scalar
+             normally for a preceding Prepend and retain the last for a
+             following Extend, SpacingMark, ZWJ or keycap selector.
+
+             Uuseg 17's grapheme update_left resets RI, emoji and Indic
+             context after any printable ASCII (GCB=Other, InCB=None).
+             [drain] has returned it to Await, so skipping more of that same
+             state preserves the boundary before the last scalar. Keep one
+             segmenter for the range, including runs with only one interior
+             byte; no new segmenter is allocated at either boundary. *)
+          let last = after_ascii next - 1 in
+          if next < last then begin
+            close_cluster ();
+            pieces := scalar_pieces text next last !pieces;
+            cluster_start := last;
+            cluster_end := last;
+            feed last
+          end
+          else feed next
+        end
+        else feed next
     in
     feed start_offset;
     !pieces
@@ -502,7 +556,10 @@ let cell_suffix_of_pieces text pieces max_cells =
   let start = drop_detached_zero_width pieces in
   String.sub text start (String.length text - start)
 
-let display_width text = pieces_width (display_pieces text)
+let display_width text =
+  match ascii_display_width text with
+  | Some cells -> cells
+  | None -> pieces_width (display_pieces text)
 
 let cell_prefix text max_cells =
   cell_prefix_of_pieces text (display_pieces text) max_cells
@@ -643,16 +700,25 @@ let cut_mark_cells = display_width cut_mark
 let fit_width text width =
   if width <= 0 then ""
   else
-    let pieces = display_pieces text in
-    let cells = pieces_width pieces in
-    if cells > width then
-      let room = max 0 (width - cut_mark_cells) in
-      let prefix, prefix_cells, saw_ansi =
-        cell_prefix_of_pieces text pieces room
-      in
-      let reset = if saw_ansi then "\x1B[0m" else "" in
-      prefix ^ reset ^ String.make (room - prefix_cells) ' ' ^ cut_mark
-    else text ^ String.make (width - cells) ' '
+    match ascii_display_width text with
+    | Some cells when cells <= width -> text ^ String.make (width - cells) ' '
+    | Some cells when cells = String.length text ->
+        (* The whole row is printable ASCII with no CSI, so byte offsets and
+           display cells agree even at the cut. Styled or Unicode rows still
+           need grapheme pieces and the style reset below. *)
+        let room = max 0 (width - cut_mark_cells) in
+        String.sub text 0 room ^ cut_mark
+    | Some _ | None ->
+        let pieces = display_pieces text in
+        let cells = pieces_width pieces in
+        if cells > width then
+          let room = max 0 (width - cut_mark_cells) in
+          let prefix, prefix_cells, saw_ansi =
+            cell_prefix_of_pieces text pieces room
+          in
+          let reset = if saw_ansi then "\x1B[0m" else "" in
+          prefix ^ reset ^ String.make (room - prefix_cells) ' ' ^ cut_mark
+        else text ^ String.make (width - cells) ' '
 
 (* [fit_width]'s other end: the padding goes in front, so a column of figures
    -- or of ages beside them -- lines up on its right edge.

@@ -133,6 +133,15 @@ type keeper_chat_stream_request = {
     connector context is supplied; [channel_user_id] and
     [channel_user_name] are optional. *)
 
+(** {1 Reply chunks} *)
+
+val split_keeper_reply_chunks : string -> string list
+(** Splits a reply the provider did not stream into the text deltas published
+    in its place: after a sentence end followed by whitespace, after the first
+    newline of a blank line, and at a space once a chunk passes the hard-wrap
+    width. [String.concat "" (split_keeper_reply_chunks text) = text] for every
+    [text]; no chunk is empty. *)
+
 (** {1 Parsing} *)
 
 val parse_keeper_chat_stream_request :

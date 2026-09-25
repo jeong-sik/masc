@@ -405,7 +405,7 @@ let confirm_cluster_set_unchanged ~base_path before =
      | Some _, Fs_compat.Owned_directory_missing -> changed ())
 ;;
 
-let live_references ~base_path ~board_posts_file =
+let live_references ~after_scan ~base_path ~board_posts_file =
   let read_directory path =
     let inspect () =
       match
@@ -515,6 +515,7 @@ let live_references ~base_path ~board_posts_file =
             Result.bind result (fun progress -> scan_source progress source))
          (Ok Artifact_reference_set.empty)
   in
+  after_scan ();
   let* () = confirm_cluster_set_unchanged ~base_path cluster_snapshot in
   Ok references
 ;;
@@ -698,10 +699,10 @@ let save_candidate_snapshot ~base_path candidates =
     Error (Candidate_snapshot_write_failed { path; detail })
 ;;
 
-let run ~base_path ~board_posts_file ~mode =
+let run_with ~after_scan ~base_path ~board_posts_file ~mode =
   let open Result.Syntax in
   let store = Tool_blob_store.create ~base_path in
-  let* direct_live = live_references ~base_path ~board_posts_file in
+  let* direct_live = live_references ~after_scan ~base_path ~board_posts_file in
   let* live_references = expand_artifact_manifests ~store direct_live in
   let live =
     Artifact_reference_set.fold
@@ -748,3 +749,11 @@ let run ~base_path ~board_posts_file ~mode =
     ; deleted
     }
 ;;
+
+let run ~base_path ~board_posts_file ~mode =
+  run_with ~after_scan:(fun () -> ()) ~base_path ~board_posts_file ~mode
+;;
+
+module For_testing = struct
+  let run = run_with
+end

@@ -990,6 +990,45 @@ let test_maintenance_rejects_non_directory_cluster_entry () =
       , fun ~base_path:_ entry -> Fs_compat.save_file entry "not a workspace" )
     ]
 
+(* (d) The second fail-closed rule: a cluster that appears while the pass is
+   reading was never scanned, so its references would look dead. The
+   [after_scan] seam creates one after every workspace has been read and
+   before the cluster set is confirmed. The pass must be rejected on the
+   clusters directory and delete nothing, even though the first pass already
+   recorded the unreferenced blob as a candidate, so the second pass would
+   otherwise delete it. *)
+let test_maintenance_rejects_a_cluster_set_that_changes_during_the_scan () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let bytes = "unreferenced output while the cluster set changes" in
+      let dead = B.put store ~bytes ~mime:"text/plain" |> stored_ref_exn in
+      Fs_compat.mkdir_p (cluster_workspace ~base_path "secondary");
+      let first = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int) "first pass records the candidate" 1 first.candidates_recorded;
+      let clusters =
+        Filename.concat (Common.masc_dir_from_base_path ~base_path) "clusters"
+      in
+      let after_scan () = Fs_compat.mkdir_p (cluster_workspace ~base_path "tertiary") in
+      (match
+         M.For_testing.run
+           ~after_scan
+           ~base_path
+           ~board_posts_file
+           ~mode:M.Delete_previous_candidates
+       with
+       | Error (M.Cluster_workspace_rejected { path; reason = _ }) ->
+         Alcotest.(check string) "the rejected path is the clusters directory" clusters path
+       | Error error ->
+         Alcotest.failf "unexpected maintenance error: %s" (M.error_to_string error)
+       | Ok report ->
+         Alcotest.failf
+           "maintenance accepted a pass the cluster set changed under (deleted %d)"
+           report.deleted);
+      Alcotest.(check (option string))
+        "the candidate from the first pass is not deleted"
+        (Some bytes)
+        (fetch_ok store ~sha256:dead.sha256))
+
 let test_maintenance_malformed_reference_fails_closed () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -1813,6 +1852,10 @@ let () =
             "maintenance rejects a non-directory entry under clusters"
             `Quick
             test_maintenance_rejects_non_directory_cluster_entry;
+          Alcotest.test_case
+            "maintenance rejects a cluster set that changes during the scan"
+            `Quick
+            test_maintenance_rejects_a_cluster_set_that_changes_during_the_scan;
           Alcotest.test_case
             "maintenance ignores repository mirrors"
             `Quick

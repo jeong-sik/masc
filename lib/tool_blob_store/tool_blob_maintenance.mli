@@ -99,3 +99,16 @@ val run :
     workspace. Production passes [Board_paths.file_path ~workspace_masc_dir
     Posts] ([Masc_board_handlers.Board_paths.posts_file]); this library sits
     below Board, so it takes the name instead of repeating it. *)
+
+module For_testing : sig
+  val run :
+    after_scan:(unit -> unit) ->
+    base_path:string ->
+    board_posts_file:(workspace_masc_dir:string -> string) ->
+    mode:mode ->
+    (report, error) result
+  (** {!run} with a fault-injection boundary after every workspace has been
+      scanned and before the cluster set is confirmed unchanged. A test
+      creates a cluster there to stand in for one that appears while a real
+      pass is reading. *)
+end

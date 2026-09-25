@@ -42,7 +42,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                  ; "last_model_used", field_or_null "last_model_used"
                  ; "active_model", field_or_null "active_model"
                  ; "active_model_label", field_or_null "active_model_label"
-                 ; "last_model_used_label", field_or_null "last_model_used_label"
                  ; "runtime_id", field_or_null "runtime_id"
                  ; "runtime_canonical", field_or_null "runtime_canonical"
                  ; ( "selected_runtime_canonical"

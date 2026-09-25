@@ -1,6 +1,4 @@
 module type Backend = sig
-  val should_route_read : meta:Keeper_meta_contract.keeper_meta -> bool
-
   val container_path_of_host :
     config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
@@ -46,9 +44,7 @@ module type Backend = sig
 end
 
 module type S = sig
-  val host_via : string
   val backend_via : string
-  val should_route_read : meta:Keeper_meta_contract.keeper_meta -> bool
 
   val container_path_of_host :
     config:Workspace.config ->
@@ -95,11 +91,9 @@ module type S = sig
 end
 
 module Make (Backend : Backend) = struct
-  let host_via = Keeper_sandbox_runner.route_label Keeper_sandbox_runner.Host
   let backend_via =
     Keeper_sandbox_runner.route_label Keeper_sandbox_runner.Sandbox_backend
 
-  let should_route_read = Backend.should_route_read
   let container_path_of_host = Backend.container_path_of_host
   let read_complete_file = Backend.read_complete_file
   let read_file = Backend.read_file
@@ -108,7 +102,6 @@ module Make (Backend : Backend) = struct
 end
 
 module Docker_backend = struct
-  let should_route_read = Keeper_sandbox_read_backend.should_route_read
   let container_path_of_host = Keeper_sandbox_read_backend.container_path_of_host
   let read_complete_file ~config ~meta ~host_path ~timeout_sec () =
     Keeper_sandbox_read_backend.read_complete_file ~config ~meta ~host_path ~timeout_sec ()

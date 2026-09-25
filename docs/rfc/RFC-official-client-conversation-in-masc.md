@@ -184,7 +184,9 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
   - 2026-09-14 #36035 가 두 계약과 다르게 바꿨다. #36688 이 본 "turn 4484~4550 동안 똑같은 composition" 이 그 결과다.
 - 세션 저장소: code-reviewer `official-client-runtime/session.json` 에 `context_frontier.delivery = "replaced_configuration"`, `message_count = 86` 이 남았다(2026-09-15 16:33Z).
 - #38075 부터 Claude Code resume 은 `context_frontier.delivery = "held_by_vendor_session"` 을 남기고, 입력 보고는 `Held_by_client_session` 이다. 턴 컨텍스트, working state, historical task reference 는 resume 사용자 프롬프트 앞에 실리고(`Keeper_official_client_host.resume_prompt`), 대화 스냅샷은 보내지 않는다.
-- Codex 레인도 같은 구조다(`keeper_codex_runtime.ml:662-725`). `thread/resume` 에서 새 `developerInstructions` 를 쓰는지는 확인하지 않았다.
+- Codex resume 도 `held_by_vendor_session` 을 남기고, 입력 보고는 `Held_by_client_session` 이다. 턴마다 바뀌는 맥락은 resume 사용자 프롬프트 앞에 실리고, 대화는 보내지 않는다.
+  - Codex 는 `thread/resume` 이 준 `developerInstructions` 를 그 thread 가 다음에 압축될 때만 쓴다. codex-cli 0.156.1, 2026-09-25 rollout 에서 resume 뒤 요청에는 새 지시문이 실리지 않았고, 압축이 만든 대체 이력(`replacement_history`)에 그대로 들어갔다.
+  - 그래서 지시문에 대화 전체를 실으면 압축 다음 요청이 단일 문자열 상한(10,485,760자)에 걸린다. 같은 날 거절된 길이 13,083,184 / 44,655,906 / 78,259,588 이 압축 기록 속 지시문 길이와 같았다(#37353).
 - Antigravity 레인은 resume 을 `Held_by_client_session` 으로 보고한다(`keeper_antigravity_runtime.ml:531-535`).
 
 ### 2.6 Claude Code 가 keeper 대화를 요약했다
@@ -343,7 +345,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
 2. **턴을 어떻게 남기나(§5.6).** 스트림 프레임에서 assistant message id·`tool_use` id·tool_result 를 masc 안쪽까지 가져오는 길, 병렬 호출 짝, thinking 서명, native 도구를 켠 keeper 의 결과, 실패·중단 턴의 마감.
 3. **체크포인트 소유.** 쓰는 주체와 `turn_count` 주인, Agent Core 단계 저장·실패 기록·purge 와의 순서. 반복 스냅샷과 판정 쌍은 누가 갖나.
 4. **bootstrap 에피소드 동일성.** RFC-claude-code-context-overflow-bounded-restart 는 durable 이력 전체로 에피소드를 식별한다. §5.6 뒤에는 그 이력이 턴마다 바뀐다.
-5. **Codex.** `thread/resume` 의 `developerInstructions` 적용 여부. `tokenUsage.last` 가 요청 단위인지 턴 단위인지.
+5. **Codex.** `tokenUsage.last` 가 요청 단위인지 턴 단위인지.
 6. **Antigravity.** 요청별 토큰이 없다. 같은 정책으로 갈지, 지금의 guard 로 둘지. (canonical 원본이 바뀐 뒤의 처리는 정했다: 새 세션. 2026-09-23 운영자 결정)
 7. **§2.2 13:16:42 처럼 resume 턴이 캐시를 전혀 못 읽는 원인.**
 8. **실패한 Agent Core 턴 다음의 Claude Code 턴이 `keeper_instructions` 만 기록한 이유**(analyst 3987·4004·4009·4012·4029·4033·4057).

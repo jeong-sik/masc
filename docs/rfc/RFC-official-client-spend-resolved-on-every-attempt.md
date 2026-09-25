@@ -76,12 +76,16 @@ related: ["official-client-conversation-in-masc"]
 - 불변식: 한 대화의 delta 합 = 그 대화의 마지막 관측 − 턴 시작 커서. 단위 테스트로 고정한다. `keeper_usage_resolution.ml` 427-428 의 "one settled turn at a time" 주석도 이에 맞게 고친다.
 - **이긴 시도**의 해석은 지금처럼 `t` 하나를 받는 곳에 간다: `update_metrics_from_result`(`last_usage_resolution`), metrics 행, activity graph, decision 행, usage log, broadcast, `wall_tokens_per_second`, dashboard `last_*`.
 - **진 시도**는 자기 `Resolved_delta` 행으로만 합계에 들어간다. decision 행이 없으니 inference metrics 에서는 "짝 없는 cost 행"으로 더해진다. 이긴 시도와 겹치지 않는다.
-- 진 시도 행은 자기 ordinal · model · `runtime_attempt` 를 싣는다. official client ordinal 은 recovery 뒤 1 로 돌아가므로(`keeper_official_client_session_store.ml` 967-981) `(trace_id, keeper_turn_id, ordinal)` 가 겹칠 수 있다. 겹치면 reader 가 그 턴 전체를 버린다(`model_inference_metrics_reader.ml` 224-232). 그래서 `inference_identity` 에 `lane_attempt_index` 를 넣는다. resolved 행의 hard cut 이다.
-- resolved 행에 해석 상태(`resolution_status`)를 적는다. 행은 dispatch 된 시도에만 쓴다. `masc cost` 의 `usage_missing_entries` 는 턴이 아니라 시도를 세게 되니 이름과 설명을 바꾼다.
+- 진 시도 행은 자기 ordinal · model · `runtime_attempt` 를 싣는다. official client ordinal 은 새 세션이면 1 로 돌아간다(`plan_claim`). 그래서 `(trace_id, keeper_turn_id, ordinal)` 가 겹칠 수 있고, 겹치면 reader 가 그 묶음을 통째로 버린다(`model_inference_metrics_reader.ml` 224-232).
+  - `lane_attempt_index` 만으로는 부족하다. context overflow shrink retry 는 **같은 시도 안에서** 세션을 새로 열어 다시 부른다(`context_overflow_shrink_sequence`). 그래서 한 시도 안의 두 client 턴이 같은 ordinal 1 을 가질 수 있다.
+  - 그래서 재료마다 시도 안의 순번 `reading_index` 를 붙인다. 진 시도·실패 턴의 행은 새 projection `Resolved_attempt_delta { lane_attempt_index; reading_index }` 로 쓴다. reader 의 key 는 `Turn_inference (trace, turn, ordinal) | Attempt_inference (trace, turn, lane_attempt_index, reading_index)` 다.
+  - 이긴 재료의 `Resolved_delta` 행과 decision 행은 지금처럼 `Turn_inference` 로 짝을 짓는다. decision 스키마는 바뀌지 않는다. 옛 행은 모두 그대로 읽히므로 hard cut 이 아니다.
+- resolved 행에 해석 상태(`resolution_status`)를 적는다. 행은 dispatch 된 시도에만 쓴다.
 
 ### D3. 실패한 턴도 같은 commit 에서 기록한다
 
 - autonomous lane 실패 분기(1411-1451)에는 이미 이전 meta, 갱신 meta, keeper turn id, Owner commit 한 번이 있다. D2 의 계산을 여기서 하고 같은 `updated_meta` 에 합계와 커서를 넣는다.
+- 누적 커서의 키를 하나로 맞춘다. 성공 경로는 지금 `Conversation_counter.runtime_id` 에 `run_turn` 의 `runtime_id` 를 쓰는데, 이 값은 레인 id(assignment)일 수 있다. 재료는 실제로 보낸 후보의 id 를 쓴다. 둘이 다르면 실패 턴이 남긴 커서를 다음 성공 턴이 못 읽고 매번 `baseline_missing` 이 된다. 성공 경로도 runtime 이 남긴 `runtime_observation.runtime_id`(후보 id)를 쓴다. 배포 직후 Keeper 마다 한 번 `baseline_missing` 이 난다.
 - `Resolved_delta` 행은 commit 이 성공한 **뒤에** 쓴다. 지금 성공 경로는 행을 먼저 쓰고 commit 한다(732-739 → 758-763). 그러면 commit 이 실패했을 때 커서는 그대로인데 행만 남는다. 다음 턴이 같은 사용량을 다시 계산해서 이중으로 더한다. 성공 경로도 같은 순서로 바꾼다.
 - direct lane: 실패 시 `commit_turn_runtime` 을 새로 부르고, preempted 분기(`keeper_unified_turn.ml` 1207-1226)처럼 keeper turn id 를 쓴다(3단계).
 - §2 의 다른 출구는 각각 "계산한다 / 하지 않는다"를 정한다. 기본은 계산한다. 운영자 중지(취소)는 계산하지 않고, 재료는 raw 행으로만 남는다.
@@ -119,14 +123,15 @@ related: ["official-client-conversation-in-masc"]
 | 단계 | 내용 | 바뀌는 합계 |
 |---|---|---|
 | 1 (#39000) | D4: Codex 를 누적값 + `request_context` 로. `request_context` 선택 출력과 누적값 필드 정리 | Codex 성공 턴이 마지막 요청에서 턴 전체로 |
-| 2a | D1 재료 운반(D5.1 fill 포함), D2 fold, D3(autonomous 실패 분기): 실패 턴의 모든 시도를 계산해 같은 commit 에 합계·커서를 넣고, commit 뒤에 행을 쓴다. identity 에 `lane_attempt_index` | autonomous 실패 턴 |
+| 2a | D1 재료 운반(D5.1 fill 포함), D2 fold, D3(autonomous 실패 분기): 실패 턴의 모든 시도를 계산해 같은 commit 에 합계·커서를 넣고, commit 뒤에 `Resolved_attempt_delta` 행을 쓴다. 성공 경로 커서 키를 후보 id 로 | autonomous 실패 턴 |
 | 2b | 성공 경로도 재료에서 계산: 진 시도 행, 이긴 시도의 앞 대화, Agent Core 응답 합. 성공 경로 행도 commit 뒤로 | 진 시도 · Agent Core 앞 응답 |
 | 3 | D3(direct lane): 실패 commit 과 turn id | direct lane 실패 턴 |
 | 4 | (측정 뒤) 커서를 (런타임, 대화)마다 | `baseline_missing` 으로 잃는 턴 |
 
 - 4단계 판단 기준: 2단계 배포 뒤 1주일 동안 Keeper 별 `baseline_missing` 턴 수와 그 턴들의 raw 행 입력 합. 이 값이 D4 의 전환 비율보다 커졌으면 한다. meta 스키마를 바꾸는 일이라 따로 정한다.
 - 2단계를 둘로 나눈 까닭: 가장 큰 손실은 실패한 턴이다(Codex 중단 턴 384개 입력 542.9M, §1). 2a 가 이것부터 고친다. 성공 경로를 재료로 옮기는 일은 이긴 시도의 해석을 받는 곳이 많아서 따로 한다.
-- 1·2단계는 운영 합계를 바꾼다. 각 PR 에 `### Upgrade notes` 로 "이 버전 앞뒤 합계는 바로 비교할 수 없다"를 적는다. 2a 의 identity 변경은 `### Fresh state required` 다.
+- 1·2단계는 운영 합계를 바꾼다. 각 PR 에 `### Upgrade notes` 로 "이 버전 앞뒤 합계는 바로 비교할 수 없다"를 적는다.
+- 2a 는 두 PR 이다. 2a-1(#39042)은 재료를 턴 밖으로 운반하고, 2a-2 는 autonomous 실패 턴을 계산해 attempt 행을 쓴다.
 
 ## 5. 검증
 

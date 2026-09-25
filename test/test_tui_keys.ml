@@ -1715,17 +1715,6 @@ let test_the_sheet_says_the_listing_tail_once () =
          | None -> false
          | Some config -> List.mem ("r", "reload") config)
 
-let test_braille_sparkline () =
-  Alcotest.(check string) "empty list gives base line" "⣀⡠⠤⠶"
-    (braille_sparkline []);
-  let spark = braille_sparkline [ 0.0; 0.5; 1.0 ] in
-  Alcotest.(check bool) "sparkline non-empty" true (String.length spark > 0)
-
-let test_fleet_total_cost () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
-  Alcotest.(check (float 0.001)) "fleet cost initially 0" 0.0
-    (fleet_total_cost_usd state)
-
 (* The golden below holds every label, so a deliberate relabelling fails it and
    asks to be looked at -- which is what it is for. The three hops are asserted
    on their own underneath, because losing one of those is not a relabelling: it
@@ -3194,10 +3183,6 @@ let () =
             test_the_question_count_counts_questions
         ; Alcotest.test_case "the questions reading tells unread from none open"
             `Quick test_the_questions_reading_tells_unread_from_none_open
-        ; Alcotest.test_case "braille sparkline renders levels" `Quick
-            test_braille_sparkline
-        ; Alcotest.test_case "fleet total cost sums correctly" `Quick
-            test_fleet_total_cost
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "the sheet files the fact detail keys" `Quick

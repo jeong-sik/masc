@@ -185,6 +185,12 @@
 - Evidence references sent to a goal whose phase has no active proof request
   are refused with `error_code` `precondition_failed` instead of
   `validation_error` (#38774).
+- The Board API now reports whether you reacted to a post or comment in one
+  field, `reacted`. The duplicate `has_reacted` field is gone; scripts that
+  read it should read `reacted` (#38842).
+- The Keeper API and Dashboard report the model a Keeper last used in
+  `active_model_label` only. The duplicate `last_model_used_label` field is
+  gone; scripts that read it should read `active_model_label` (#38844).
 
 ### Removed
 
@@ -494,6 +500,18 @@
   for the autonomous lane instead of being offered to the queued chat
   turn first. A chat turn can be delayed by at most those forfeited
   releases (#38963).
+- The TUI no longer drops a Keeper chat that waits silently behind another
+  Keeper turn after three minutes. While the request is queued or running the
+  server now sends a keepalive every 30 seconds, and it closes the stream when
+  the request has already finished (#38819).
+- A Keeper whose sandbox endpoint cannot be reached no longer skips the
+  GitHub identity check. Only a check that really ran and found no login
+  counts as "not logged in"; an unreachable endpoint now reports its own
+  error (#38995).
+- The Dashboard tool quality view no longer counts tool runs that ended by a
+  signal or a timeout as `unknown_error`. It reads each result with the
+  format that wrote it, and a result it cannot read gets its own unreadable
+  label (#39009).
 
 ### Performance
 

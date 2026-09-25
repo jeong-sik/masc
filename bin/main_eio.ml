@@ -2994,10 +2994,7 @@ let rec sandbox_image_remove_tree path =
 let sandbox_image_report_build ~cli ~tag status =
   match status with
   | Unix.WEXITED 0 ->
-    Printf.printf
-      "built %s into %s's image store\n\
-       Point a Keeper at it with sandbox_image = %S in its TOML.\n"
-      tag cli tag;
+    Printf.printf "built %s into %s's image store\n" tag cli;
     Cmd.Exit.ok
   | Unix.WEXITED code ->
     Printf.eprintf "sandbox-image: %s build exited %d\n" cli code;
@@ -3202,7 +3199,19 @@ let sandbox_image_cmd_exit print_only tag runtime recipe_name source =
              tag)
       | Tag_absent ->
         let labels = Keeper_sandbox_image_version.labels ~built_at recipe in
-        Ok (sandbox_image_build ~builder ~recipe ~tag ~labels)
+        let code = sandbox_image_build ~builder ~recipe ~tag ~labels in
+        (* A Keeper's sandbox_image is a catalog name, never a tag, so the
+           next step for a build is the promote that makes it what that name
+           starts from. *)
+        if code = Cmd.Exit.ok
+        then
+          Printf.printf "Make it what %s starts from: masc sandbox-image promote %s %s%s\n"
+            recipe.Keeper_sandbox_image_version.name
+            recipe.Keeper_sandbox_image_version.name tag
+            (match runtime with
+             | None -> ""
+             | Some backend -> " --runtime " ^ Keeper_microvm_backend.to_string backend);
+        Ok code
   in
   match run with
   | Ok code -> code

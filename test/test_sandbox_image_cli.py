@@ -69,6 +69,13 @@ sys.exit(int(os.environ['TEST_EXIT']))
             if failure:
                 self.assertIn('19', result.stderr)
                 self.assertIn(expected_command, result.stderr)
+            else:
+                # A Keeper names a catalog image, so a build points at promote,
+                # never at putting the tag in sandbox_image.
+                flag = f' --runtime {runtime}' if runtime else ''
+                self.assertIn(f'masc sandbox-image promote base fixture:requested{flag}',
+                              result.stdout)
+                self.assertNotIn('sandbox_image =', result.stdout)
 
     def test_default_uses_docker(self):
         self.exercise(None, 'docker')

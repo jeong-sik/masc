@@ -1529,7 +1529,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
             ask_block (fun b -> draw_ask_context b cols ~row:selected)
           in
           let plan =
-            Ask_layout.plan ~budget ~spent:(rows_drawn buf)
+            Ask_layout.plan ~budget ~spent:(count_frame_lines buf)
               ~question_heights:(List.map snd question_blocks)
               ~question_cursor:state.ask_question_cursor
               ~context_height:why_rows ~other_asks:(count - 1)
@@ -1584,7 +1584,8 @@ let draw_ask_questions buf cols (state : state) ~budget =
    the width of the pane, so at eighty columns the two cannot share a row.
 
    Built here rather than inline so the surface draws it into the block it
-   then measures with [rows_drawn], which is where its height comes from.
+   then measures with [count_frame_lines], which is where its height comes
+   from.
    Until 2026-08-31 the second row was spelled as a literal ["\\n"] --
    backslash and n, printed as those two characters -- because a real newline
    would have drawn a row nobody counted. *)
@@ -1968,7 +1969,7 @@ let render_approvals (state : state) =
      row, and the last row here is the footer: it floated two rows above the
      composer at every terminal height, and the queue drew two blank rows in
      place of two approvals. *)
-  let head_rows = rows_drawn buf in
+  let head_rows = count_frame_lines buf in
   (* The rows under the queue: the frame's closing row, the selected row's
      detail, the metadata rows, and the payload row beneath them. Drawn now so
      their height is the same measured fact -- a metadata row that breaks into
@@ -1984,7 +1985,9 @@ let render_approvals (state : state) =
   let footer_buf = Buffer.create 256 in
   Buffer.add_string footer_buf
     (footer_line state ~max_cells:cols ~hints:(question_hints state));
-  let around_rows = head_rows + rows_drawn below_buf + rows_drawn footer_buf in
+  let around_rows =
+    head_rows + count_frame_lines below_buf + count_frame_lines footer_buf
+  in
   (* What the questions may spend. The block is drawn last, and a surface that
      overruns loses its final rows, so an unbudgeted question list does not
      push the approval queue off the screen -- it pushes itself off, cursor and
@@ -1995,7 +1998,7 @@ let render_approvals (state : state) =
      fact rather than a second estimate that can disagree with the drawing. *)
   let ask_buf = Buffer.create 1024 in
   draw_ask_questions ask_buf cols state ~budget:ask_budget;
-  let ask_rows = rows_drawn ask_buf in
+  let ask_rows = count_frame_lines ask_buf in
   let approval_body_rows = max 1 (rows - around_rows - ask_rows) in
 
   let approvals_error =
@@ -5608,7 +5611,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
          configuration last_run)
   @ wrap Ansi.dim
       (Printf.sprintf "Config: [runtime.exact_output_lanes.%s]"
-         (Terminal_text.single_line lane.sl_lane_id))
+         (Standalone_lane.to_id lane.sl_lane))
   @ jev_lines
   @ wrap (if lane.sl_failed_count > 0 then Theme.warn () else Ansi.reset)
       run_stats
@@ -5960,18 +5963,18 @@ let lane_run_clock started_at =
   Printf.sprintf "%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
-let standalone_lane_label (state : state) lane_id =
+let standalone_lane_label (state : state) (target : Standalone_lane.t) =
   match state.standalone_lanes with
-  | None -> lane_id
+  | None -> Standalone_lane.to_id target
   | Some snapshot ->
       (match
          List.find_opt
            (fun (lane : Tui_decode.standalone_lane) ->
-             String.equal lane.sl_lane_id lane_id)
+             Standalone_lane.equal lane.sl_lane target)
            snapshot.Tui_decode.sls_lanes
        with
        | Some lane -> lane.sl_label
-       | None -> lane_id)
+       | None -> Standalone_lane.to_id target)
 
 let lane_run_subject (run : Tui_decode.lane_run_summary) =
   match run.lrs_run_kind, run.lrs_subject_id with
@@ -5985,7 +5988,7 @@ let lane_run_subject (run : Tui_decode.lane_run_summary) =
 
 (** Recent retained runs of one standalone lane. The list is the paged summary:
     no payload ever crosses it, so Enter fetches one exact detail. *)
-let render_lane_run_list (state : state) ~lane_id =
+let render_lane_run_list (state : state) ~(lane : Standalone_lane.t) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
@@ -6009,7 +6012,7 @@ let render_lane_run_list (state : state) ~lane_id =
     Printf.sprintf "%s · %s (%s)  %s"
       (screen_title " MASC Lanes")
       (fit_width
-         (Terminal_text.single_line (standalone_lane_label state lane_id))
+         (Terminal_text.single_line (standalone_lane_label state lane))
          20)
       coverage (connection_badge state)
   in
@@ -6017,14 +6020,12 @@ let render_lane_run_list (state : state) ~lane_id =
   box_line buf cols header;
   box_divider buf cols;
   let identity_heading =
-    match Standalone_lane.of_id lane_id with
-    | Some Standalone_lane.Verifier -> "SUBJECT"
-    | Some
-        ( Standalone_lane.Librarian
-        | Standalone_lane.Hitl_auto_judge
-        | Standalone_lane.Board_attention
-        | Standalone_lane.Workspace_curator )
-    | None -> "ACTOR"
+    match lane with
+    | Standalone_lane.Verifier -> "SUBJECT"
+    | Standalone_lane.Librarian
+    | Standalone_lane.Hitl_auto_judge
+    | Standalone_lane.Board_attention
+    | Standalone_lane.Workspace_curator -> "ACTOR"
   in
   (* The run id takes what the named columns leave; it used to run off the
      header with no end while the row cut it at twelve. *)
@@ -6423,7 +6424,7 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
   in
   [ ( Ansi.reset
     , Printf.sprintf "  LANE  %s  ·  %s%s"
-        (Terminal_text.single_line detail.lrd_lane)
+        (Standalone_lane.to_id detail.lrd_lane)
         (Terminal_text.single_line
            (Tui_decode.lane_run_kind_label detail.lrd_run_kind))
         subject )
@@ -6963,7 +6964,7 @@ let render_clients (state : state) =
 let render_lanes (state : state) =
   match state.lanes_mode with
   | Lanes_overview -> render_lanes_overview state
-  | Lanes_run_list lane_id -> render_lane_run_list state ~lane_id
+  | Lanes_run_list lane -> render_lane_run_list state ~lane
   | Lanes_run_detail (_, run_id) -> render_lane_run_detail state ~run_id
   | Lanes_measurement_detail sha256 -> render_lane_run_detail state ~run_id:sha256
 
@@ -9154,7 +9155,15 @@ let render_verification_detail (state : state) request =
         match state.verification with
         | None -> []
         | Some snapshot ->
-          List.map (fun (row : Tui_decode.verification_request) -> row.Tui_decode.vr_task_id)
+          List.map
+            (fun (row : Tui_decode.verification_request) ->
+              (* The request id is one per row and never moves. The age it
+                 replaced rounded two requests six minutes apart to the same
+                 "1d12h", and spelled seconds under an hour, so an index row
+                 changed while the reader was looking at it. *)
+              Render_schedule.task_history_sidebar_label
+                ~task_id:row.Tui_decode.vr_task_id
+                ~apart:(Some row.Tui_decode.vr_request_id))
             snapshot.Tui_decode.vs_requests
       in
       let left_buf = Buffer.create 1024 in
@@ -9634,8 +9643,13 @@ let render_harness_detail (state : state) verdict =
         match state.harness with
         | None -> []
         | Some snapshot ->
-          List.map (fun (row : Tui_decode.harness_verdict) -> row.Tui_decode.hv_task_id)
-            snapshot.Tui_decode.hs_verdicts
+          (* A verdict has no id of its own on the wire. The notes hash is
+             shared by repeat verdicts on one submission, and a clock alone
+             can name several verdicts recorded in the same second. *)
+          snapshot.Tui_decode.hs_verdicts
+          |> List.map (fun (row : Tui_decode.harness_verdict) ->
+               row.hv_task_id, lane_run_clock row.hv_at)
+          |> Render_schedule.verdict_sidebar_labels
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
@@ -12392,9 +12406,9 @@ let render_runtime (state : state) =
          | Masc_tui_types.Pick_new_lane lane ->
              ( Printf.sprintf "first runtime of new lane %s" (Terminal_text.single_line lane)
              , "Enter create" )
-         | Masc_tui_types.Pick_conversation_lane lane | Masc_tui_types.Pick_exact_lane lane ->
+         | (Masc_tui_types.Pick_conversation_lane _ | Masc_tui_types.Pick_exact_lane _) as pick ->
              ( Printf.sprintf "adding a candidate to the candidate order of %s"
-                 (Terminal_text.single_line lane)
+                 (Terminal_text.single_line (Masc_tui_types.runtime_lane_pick_name pick))
              , "Enter append" )
          | Masc_tui_types.Pick_media_failover ->
              ( "adding to [runtime].media_failover, the order the vision fleet is called in"

@@ -422,15 +422,15 @@ let handle_read_file_with_outcome
       (error_json refusal.message)
   | Ok window, Ok read_target ->
     let target = read_file_target_path read_target in
-    let payload_of_slice ~via ~file_bytes ~first_line ~scan_complete body =
-      match slice_read_window ~window ~first_line ~max_bytes ~scan_complete body with
-      (* Neither caller below reaches this arm. The sandbox body begins at
-         [window.start_line], so the window's first line is the body's first
-         line and always has a start. The host read passes the whole file
-         with [scan_complete:true], which turns a line past EOF into an empty
-         window. Only [handle_owned_read_file_with_outcome] can get
-         [Offset_beyond_scan], in its own arm; #38609 removes the [Error]
-         case there. Reaching it here is masc's defect, not the caller's. *)
+    let payload_of_slice ~scan_complete body =
+      match
+        slice_read_window ~window ~first_line:window.start_line ~max_bytes ~scan_complete body
+      with
+      (* The backend body begins at [window.start_line], so the window's first
+         line is the body's first line and always has a start. Only
+         [handle_owned_read_file_with_outcome] can get [Offset_beyond_scan], in
+         its own arm; #38609 removes the [Error] case there. Reaching it here is
+         masc's defect, not the caller's. *)
       | Error `Offset_beyond_scan ->
         Read_refused
           { failure_class = Tool_result.Runtime_failure
@@ -455,12 +455,6 @@ let handle_read_file_with_outcome
             ; (if slice.last_line_partial
                then [ "last_line_partial", `Bool true ]
                else [])
-            ; (match file_bytes with
-               | Some total -> [ "file_bytes", `Int total ]
-               | None -> [])
-            ; (match via with
-               | Some via -> [ "via", `String via ]
-               | None -> [])
             ]
         in
         Read_succeeded
@@ -473,7 +467,8 @@ let handle_read_file_with_outcome
                ; "returned_lines", `Int slice.returned_lines
                ; "content", `String slice.window_content
                ]
-               @ optional_fields))
+               @ optional_fields
+               @ [ "via", `String Keeper_sandbox_read_runner.backend_via ]))
     in
     let refused failure_class message =
       Read_refused
@@ -497,67 +492,31 @@ let handle_read_file_with_outcome
       | Error (refusal : Keeper_alerting_path.path_refusal) ->
         refused refusal.failure_class refusal.message
       | Ok () ->
-        (* RFC-0006 Phase B-2: sandbox-backed keepers route the actual
-           byte read through the backend read runner so the backend mount
-           restrictions are the load-bearing isolation. The host containment
-           check above remains as defense-in-depth. *)
-        if Keeper_sandbox_read_runner.should_route_read ~meta
-        then (
-          let timeout_sec =
-            Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()
-          in
-          (* The backend streams from [window.start_line], so the byte bound
-             is the window's and every line of the file is reachable. *)
-          match
-            Keeper_sandbox_read_runner.read_file
-              ?turn_sandbox_factory
-              ~start_line:window.start_line
-              ~config
-              ~meta
-              ~host_path:target
-              ~max_bytes
-              ~timeout_sec
-              ()
-          with
-          | Error (Keeper_sandbox_read_backend.Missing_file error) -> missing_file error
-          | Error (Keeper_sandbox_read_backend.Not_a_file detail) ->
-            refused Tool_result.Policy_rejection detail
-          | Error (Keeper_sandbox_read_backend.Read_failed detail) ->
-            refused Tool_result.Runtime_failure detail
-          | Ok body ->
-            let scan_complete = String.length body < max_bytes in
-            payload_of_slice
-              ~via:(Some Keeper_sandbox_read_runner.backend_via)
-              ~file_bytes:None
-              ~first_line:window.start_line
-              ~scan_complete
-              body)
-        else (
-          match read_target with
-          (* An endpoint path is the endpoint's file; this host never holds
-             it, so a keeper whose reads are not routed cannot read one. Only
-             an OpenSSH endpoint declares roots, and its reads are routed, so
-             reaching here is a broken contract rather than the caller's path. *)
-          | Declared_endpoint_file endpoint_path ->
-            refused
-              Tool_result.Runtime_failure
-              (Printf.sprintf
-                 "declared_endpoint_path_needs_remote_lane: %s is an endpoint path and \
-                  this keeper's reads do not go through its endpoint"
-                 endpoint_path)
-          | Keeper_tree_file target ->
-            (match Safe_ops.read_file_result target with
-             | Error (Safe_ops.File_not_found _ as err) ->
-               missing_file (Safe_ops.read_file_error_to_string err)
-             | Error (Safe_ops.Read_failed _ as err) ->
-               refused Tool_result.Runtime_failure (Safe_ops.read_file_error_to_string err)
-             | Ok content ->
-               payload_of_slice
-                 ~via:None
-                 ~file_bytes:(Some (String.length content))
-                 ~first_line:1
-                 ~scan_complete:true
-                 content))
+        (* RFC-0006 Phase B-2: every sandbox profile reads through its
+           backend read runner, so the backend's mount restrictions are the
+           load-bearing isolation. The host containment check above remains
+           as defense in depth. *)
+        let timeout_sec = Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read () in
+        (* The backend streams from [window.start_line], so the byte bound is
+           the window's and every line of the file is reachable. *)
+        (match
+           Keeper_sandbox_read_runner.read_file
+             ?turn_sandbox_factory
+             ~start_line:window.start_line
+             ~config
+             ~meta
+             ~host_path:target
+             ~max_bytes
+             ~timeout_sec
+             ()
+         with
+         | Error (Keeper_sandbox_read_backend.Missing_file error) -> missing_file error
+         | Error (Keeper_sandbox_read_backend.Not_a_file detail) ->
+           refused Tool_result.Policy_rejection detail
+         | Error (Keeper_sandbox_read_backend.Read_failed detail) ->
+           refused Tool_result.Runtime_failure detail
+         | Ok body ->
+           payload_of_slice ~scan_complete:(String.length body < max_bytes) body)
     in
     (match run_read () with
      | Read_succeeded json -> Keeper_tool_execution.success_data json
@@ -1560,7 +1519,7 @@ let write_call_summary ~requested_target =
 let gate_operation = Keeper_gate.filesystem_write_gate_operation
 
 let file_write_gate_input
-      ~gate_effect
+      ~effect_json
       ~requested_target
       ~content
       ?content_source
@@ -1584,7 +1543,7 @@ let file_write_gate_input
     | Some value -> [ name, `Int value ]
   in
   `Assoc
-    ([ "effect", Keeper_alerting_path.path_effect_to_yojson gate_effect
+    ([ "effect", effect_json
      ; "requested_target", `String requested_target
      ]
      @ Keeper_write_content.fields (match content_source with
@@ -1620,6 +1579,66 @@ let decide_file_write
     ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
     ; continuation_channel
     }
+;;
+
+(* The Gate effect names what the write does to the file. A host write
+   carries a pinned capability ([Keeper_alerting_path.path_effect]); an
+   endpoint's file has none this host can pin, so a write under a declared
+   root names the endpoint and its path. The operation is spelled as for a
+   host write, and [fs_write_mode_of_gate_effect_operation] reads it back, so
+   an approved endpoint write replays as the same mode. *)
+let path_effect_operation_of_write_mode = function
+  | Overwrite -> Keeper_alerting_path.Atomic_replace_entry
+  | Append -> Keeper_alerting_path.Append_pinned_resource
+  | Patch -> Keeper_alerting_path.Patch_then_atomic_replace_entry
+;;
+
+(* A write to a path under an endpoint's declared roots (#38593) is outside
+   the keeper's tree, so it takes the Gate decision a host write outside the
+   playground takes, with the same operation and the same input shape. The
+   effect carries the endpoint's whole configuration, not only its name:
+   replay rebuilds this input from the configuration current then, so an
+   approval given for one host, key or pinned host key is not spent on
+   another that took the same name. The configuration is the endpoint's own
+   runtime.toml serialization, so a field added to the endpoint joins it. *)
+let declared_root_write_gate_input
+      ~(endpoint : Exec_ssh_endpoint.t)
+      ~requested_target
+      ~mode
+      ~content_source
+      ~content
+      ~(patch : Keeper_tool_filesystem_remote_write.patch_request option)
+  =
+  let effect_json =
+    `Assoc
+      [ ( "operation"
+        , `String
+            (Keeper_alerting_path.path_effect_operation_to_string
+               (path_effect_operation_of_write_mode mode)) )
+      ; ( "endpoint"
+        , `Assoc
+            [ "name", `String endpoint.name
+            ; "config_toml", `String (Exec_ssh_endpoint.to_toml endpoint)
+            ] )
+      ; "endpoint_path", `String requested_target
+      ]
+  in
+  match patch with
+  | None -> file_write_gate_input ~effect_json ~requested_target ~content ~content_source ()
+  | Some { old_string; new_string; replace_all } ->
+    file_write_gate_input ~effect_json ~requested_target ~content ~old_string ~new_string
+      ~replace_all ()
+;;
+
+let declared_root_writes ~config ~meta ?continuation_channel ?gate_context ?gate_grant () =
+  Keeper_tool_filesystem_remote_write.Authorize_declared_roots
+    (fun ~endpoint ~requested_target ~mode ~content_source ~content ~patch ->
+      let input =
+        declared_root_write_gate_input ~endpoint ~requested_target ~mode ~content_source
+          ~content ~patch
+      in
+      decide_file_write ~config ~meta ?continuation_channel ?gate_context ?gate_grant
+        ~requested_target ~input ())
 ;;
 
 let confined_write_is_keeper_playground
@@ -2443,6 +2462,9 @@ let handle_file_write_content_with_outcome
   match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
   | Keeper_types_profile_sandbox.Endpoint_owned ->
     Keeper_tool_filesystem_remote_write.handle
+      ~declared_root_writes:
+        (declared_root_writes ~config ~meta ?continuation_channel ?gate_context
+           ?gate_grant ())
       ~turn_sandbox_factory
       ~config
       ~meta
@@ -2596,7 +2618,7 @@ let handle_file_write_content_with_outcome
     let mode_label = fs_write_mode_to_string mode in
     let input =
       file_write_gate_input
-        ~gate_effect
+        ~effect_json:(Keeper_alerting_path.path_effect_to_yojson gate_effect)
         ~requested_target:target
         ~content_source
         ~content:(content ())
@@ -2967,7 +2989,7 @@ let handle_file_write_content_with_outcome
                   match operation with
                   | Keeper_tool_patch.Replace { old_string; new_string; replace_all } ->
                     file_write_gate_input
-                      ~gate_effect
+                      ~effect_json:(Keeper_alerting_path.path_effect_to_yojson gate_effect)
                       ~requested_target:target
                       ~content:updated
                       ~old_string
@@ -2976,7 +2998,7 @@ let handle_file_write_content_with_outcome
                       ()
                   | Keeper_tool_patch.Insert_before_line { line; text } ->
                     file_write_gate_input
-                      ~gate_effect
+                      ~effect_json:(Keeper_alerting_path.path_effect_to_yojson gate_effect)
                       ~requested_target:target
                       ~content:updated
                       ~insert_before_line:line
@@ -3296,7 +3318,11 @@ let handle_file_write_with_outcome ~turn_sandbox_factory ~config ~(meta : Keeper
     ~publication_recovery ?continuation_channel ?gate_context ?gate_grant ~args () =
   match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
   | Keeper_types_profile_sandbox.Endpoint_owned ->
-    Keeper_tool_filesystem_remote_write.handle ~turn_sandbox_factory ~config ~meta ~args
+    Keeper_tool_filesystem_remote_write.handle
+      ~declared_root_writes:
+        (declared_root_writes ~config ~meta ?continuation_channel ?gate_context
+           ?gate_grant ())
+      ~turn_sandbox_factory ~config ~meta ~args
   | Keeper_types_profile_sandbox.Shared_mount ->
   match Keeper_write_content.of_args args with
   | Error error -> Keeper_write_content.failure error

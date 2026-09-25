@@ -3544,7 +3544,7 @@
 (test
  (name test_tui_lane_slot_reach)
  (modules test_tui_lane_slot_reach)
- (libraries alcotest masc masc_tui_types))
+ (libraries alcotest masc masc.runtime masc_tui_types))
 
 ; Its own anchor, under the other suite that links only the state vocabulary,
 ; so two pull requests adding a suite do not both land on the head of this
@@ -4744,6 +4744,22 @@
  (deps (alias runtest-test_tui_keyboard_input-msx-size)))
 
 (rule
+ (alias runtest-test_tui_keyboard_input-dos-live)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   dos-live)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-dos-live)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-cli-base-path)
  (deps
   test_tui_keyboard_input.py
@@ -5369,6 +5385,7 @@
   alcotest
   astring
   masc
+  masc.runtime
   masc_tui_answering
   masc_tui_message_layout))
 
@@ -5521,11 +5538,18 @@
  ; and a byte offset would report the header and its own cell as misaligned.
  ; masc_tui_table so the gap between columns is asked of the contract that
  ; sets it, not spelled again here.
+ ; masc_tui_frame and masc_tui_roster_pane so the list pane's label room is
+ ; asked of the two contracts that set it rather than counted here.
+ ; masc_tui_render_prim for the caret lead that room is narrower by, and for
+ ; the minute clock a Verdicts row is parted from its siblings with.
  (libraries
   alcotest
+  masc_tui_frame
   masc_tui_layout
   masc_tui_message_layout
+  masc_tui_render_prim
   masc_tui_render_schedule
+  masc_tui_roster_pane
   masc_tui_table))
 
 (test
@@ -6193,18 +6217,26 @@
 (test
  (name test_tui_msx_load)
  (modules test_tui_msx_load)
- (libraries alcotest unix masc_tui_types masc_tui_interactive masc_tui_msx))
+ (libraries alcotest unix masc_tui_types masc_tui_machine_live masc_tui_interactive
+   masc_tui_msx))
+
+; The spectator's typed read of GET /api/v1/lane-addons/live: every answer
+; shape, the malformed ones, and what a read does to the drawn view.
+(test
+ (name test_tui_machine_live)
+ (modules test_tui_machine_live)
+ (libraries alcotest yojson base64 masc_tui_machine_live))
 
 (test
  (name test_tui_msx_tick)
  (modules test_tui_msx_tick)
- (libraries masc_test_deps))
+ (libraries masc_test_deps masc_tui_machine_live))
 
 (test
  (name test_tui_msx_graphics)
  (modules test_tui_msx_graphics)
  (libraries alcotest unix masc_tui_types masc_tui_interactive masc_tui_graphics
-   masc_tui_msx masc_tui_ansi))
+   masc_tui_msx masc_tui_ansi masc_tui_machine_live))
 
 (test
  (name test_tui_interactive)
@@ -6227,7 +6259,7 @@
   %{workspace_root}/bin/masc_tui.ml
   %{workspace_root}/bin/masc_tui_types.ml
   %{workspace_root}/bin/masc_tui_render.ml)
- (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
+ (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
 
 
 (rule

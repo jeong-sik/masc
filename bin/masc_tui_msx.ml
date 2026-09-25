@@ -80,31 +80,60 @@ let fit_line width s = String.sub s 0 (min (String.length s) (max width 1))
 
    The connection the refresh loop already keeps is what separates them; this
    reads it rather than keeping a second account of the same fact. *)
-let title_of ~(connection : Masc_tui_types.connection_status)
-    (frame : Masc_tui_types.msx_frame option) =
-  match frame with
-  | None -> (
+module Live = Masc_tui_machine_live
+
+let load_tool = function
+  | Live.Msx -> "masc_msx_load"
+  | Live.Dos -> "masc_dos_load"
+
+(* The title of a screen with no picture. The live read, when there was one,
+   says why; before any read the connection does. *)
+let empty_title ~(connection : Masc_tui_types.connection_status) source
+    (live : Live.view) =
+  let label = Live.source_label source in
+  match live with
+  | Live.Failed detail ->
+      Printf.sprintf " %s — could not read the machine: %s" label detail
+  | Live.Not_loaded | Live.Unread | Live.Showing _ -> (
     match connection with
     | Masc_tui_types.Connected | Masc_tui_types.Degraded ->
-      " MSX — no machine loaded. A keeper loads one with masc_msx_load."
+      Printf.sprintf " %s — no machine loaded. A keeper loads one with %s." label
+        (load_tool source)
     | (Masc_tui_types.Disconnected | Masc_tui_types.Connecting
       | Masc_tui_types.Booting | Masc_tui_types.Reconnecting) as status ->
       Printf.sprintf
-        " MSX — no frame: the server is %s, so nothing could be asked for."
+        " %s — no frame: the server is %s, so nothing could be asked for." label
         (Masc_tui_types.connection_status_label status))
-  | Some f ->
+
+let title_of ~(connection : Masc_tui_types.connection_status)
+    ~(live : Live.view) (frame : Masc_tui_types.msx_frame option) =
+  match frame with
+  | None -> empty_title ~connection Live.Msx live
+  | Some { msx_meta = None; msx_number; _ } ->
+      Printf.sprintf " MSX — frame %d   (spectating the server)" msx_number
+  | Some ({ msx_meta = Some m; _ } as f) ->
       let media =
-        match (f.msx_cartridge, f.msx_disk) with
+        match (m.msx_cartridge, m.msx_disk) with
         | Some c, _ | None, Some c -> " · " ^ c
         | None, None -> ""
       in
       let playing =
-        match f.msx_players with
+        match m.msx_players with
         | [] -> ""
         | who -> "   조작: " ^ String.concat ", " who
       in
-      Printf.sprintf " MSX — %s%s   frame %d%s   (spectating the server)" f.msx_mode
+      Printf.sprintf " MSX — %s%s   frame %d%s   (spectating the server)" m.msx_mode
         media f.msx_number playing
+
+let live_title ~connection source (live : Live.view) =
+  match live with
+  | Live.Showing { time = Live.Untimed; mark; _ } ->
+      Printf.sprintf " %s — change %d   (spectating the server)"
+        (Live.source_label source) mark.count
+  | Live.Showing { time = Live.Frame frame; _ } ->
+      Printf.sprintf " %s — frame %d   (spectating the server)"
+        (Live.source_label source) frame
+  | Live.Unread | Live.Not_loaded | Live.Failed _ -> empty_title ~connection source live
 
 (* How much of the terminal the picture takes: 1.0 fills the screen, and
    the size keys step it in eighths between a quarter and full. A local
@@ -126,14 +155,17 @@ let footer () =
   Printf.sprintf " Esc: back  +/-: %d%%  F6: save quick  F7: restore quick  F8: disk"
     (int_of_float (!screen_fraction *. 100.0))
 
+(* A watched machine other than MSX takes no keys from this screen: only
+   leaving and sizing. *)
+let live_footer () =
+  Printf.sprintf " Esc: back  +/-: %d%%" (int_of_float (!screen_fraction *. 100.0))
+
 (* RFC-msx-surface-focus-mode stage 1: the pixels this view draws arrive as a
    surface frame ([Masc_tui_interactive.frame]) — the renderer knows the
    contract, not [Masc_tui_types.msx_frame]'s pixel fields. The meta frame
    (mode, media, who pressed) still rides the old type; only the picture went
    through the contract. *)
-let render ~(write : string -> unit)
-    ~(connection : Masc_tui_types.connection_status) ?notice
-    (frame : Masc_tui_types.msx_frame option)
+let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
     (surface : Masc_tui_interactive.frame option) =
   let dims =
     match surface with
@@ -177,7 +209,7 @@ let render ~(write : string -> unit)
     if kitty || !image_may_exist then Buffer.add_string buf delete_image;
     Buffer.add_string buf "\027[2J\027[H"
   end;
-  Buffer.add_string buf (fit_line cols (title_of ~connection frame));
+  Buffer.add_string buf (fit_line cols title);
   Buffer.add_string buf "\027[0K\r\n";
   Option.iter (fun message -> Buffer.add_string buf (fit_line cols (" " ^ message)); Buffer.add_string buf "\027[0K\r\n") notice;
   let blank_row () = Buffer.add_string buf "\027[0K\r\n" in
@@ -231,15 +263,33 @@ let render ~(write : string -> unit)
    | Some _ | None ->
        (* Nothing to draw: clear the body so a stale frame does not linger. *)
        for _ = 1 to screen_rows do blank_row () done);
-  Buffer.add_string buf (fit_line cols (footer ()));
+  Buffer.add_string buf (fit_line cols footer);
   Buffer.add_string buf "\027[0K";
   image_may_exist := !image_may_exist || kitty;
   write_batch ~write (Buffer.contents buf);
   image_may_exist := kitty;
   (* Always retained, not just Kitty: [consume]'s repaint redraws the last
      surface frame, and the mosaic path needs it too. *)
-  Option.iter (fun _frame -> retained := Some { geometry; pixels = surface }) frame
+  if retain then retained := Some { geometry; pixels = surface }
 ;;
+
+let render ~(write : string -> unit)
+    ~(connection : Masc_tui_types.connection_status) ~live ?notice
+    (frame : Masc_tui_types.msx_frame option)
+    (surface : Masc_tui_interactive.frame option) =
+  draw ~write ~title:(title_of ~connection ~live frame) ~footer:(footer ())
+    ~retain:(Option.is_some frame) ?notice surface
+
+let render_live ~(write : string -> unit)
+    ~(connection : Masc_tui_types.connection_status) source (live : Live.view) =
+  let surface =
+    match live with
+    | Live.Showing p ->
+        Some (Masc_tui_interactive.Pixels { width = p.width; height = p.height; rgb = p.rgb })
+    | Live.Unread | Live.Not_loaded | Live.Failed _ -> None
+  in
+  draw ~write ~title:(live_title ~connection source live) ~footer:(live_footer ())
+    ~retain:(Option.is_some surface) surface
 
 (* The last surface a render drew — consume's repaint redraws it. *)
 let last_surface () =
@@ -258,7 +308,7 @@ let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
     (* Any other key just repaints the latest frame the poll cached: a
        spectator does not drive the machine. *)
     render ~write ?notice:state.msx_notice ~connection:state.Masc_tui_types.connection_status
-      state.msx_frame (last_surface ());
+      ~live:state.msx_live state.msx_frame (last_surface ());
     true
   end
 
@@ -272,24 +322,77 @@ let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
 type menu_action =
   | Stay              (* navigated or repainted; the menu is still up *)
   | Closed            (* esc: leave the menu *)
-  | Watch             (* spectate the machine already loaded *)
+  | Watch of Live.source  (* spectate the machine already loaded *)
   | Swap_disk of string
   | Load of string    (* plug this cartridge in *)
 
 (* The rows in order: a "watch current" row first when a machine is loaded,
-   then one row per cartridge. [msx_menu_index] indexes this list. *)
-let menu_entries (state : Masc_tui_types.state) : menu_action list =
-  let watch = if Option.is_some state.msx_frame then [ Watch ] else [] in
+   then one row per cartridge. *)
+let menu_entries (state : Masc_tui_types.state) : Masc_tui_types.msx_menu_entry list =
+  let watch = if Option.is_some state.msx_frame then [ Masc_tui_types.Menu_watch Live.Msx ] else [] in
   let media = match state.msx_menu_mode with
-    | Masc_tui_types.Boot_game -> List.map (fun c -> Load c) state.msx_carts
+    | Masc_tui_types.Boot_game -> List.map (fun c -> Masc_tui_types.Menu_load c) state.msx_carts
     | Change_disk -> state.msx_carts
         |> List.filter (fun c -> String.ends_with ~suffix:".dsk" (String.lowercase_ascii c))
-        |> List.map (fun c -> Swap_disk c) in
-  watch @ media
+        |> List.map (fun c -> Masc_tui_types.Menu_swap_disk c) in
+  (* The DOS machine is watched from here too, the one door to a machine's
+     screen; a disk change is MSX's alone. *)
+  let dos = match state.msx_menu_mode, state.dos_live with
+    | Masc_tui_types.Boot_game, Live.Showing _ -> [ Masc_tui_types.Menu_watch Live.Dos ]
+    | Masc_tui_types.Boot_game, (Live.Unread | Live.Not_loaded | Live.Failed _)
+    | Change_disk, (Live.Unread | Live.Not_loaded | Live.Showing _ | Live.Failed _) -> [] in
+  watch @ dos @ media
 
-let clamp_index (state : Masc_tui_types.state) =
-  let n = List.length (menu_entries state) in
-  state.msx_menu_index <- (if n = 0 then 0 else max 0 (min (n - 1) state.msx_menu_index))
+let same_entry (a : Masc_tui_types.msx_menu_entry) (b : Masc_tui_types.msx_menu_entry) =
+  match a, b with
+  | Menu_watch x, Menu_watch y -> (
+      match x, y with
+      | Live.Msx, Live.Msx | Live.Dos, Live.Dos -> true
+      | Live.Msx, Live.Dos | Live.Dos, Live.Msx -> false)
+  | Menu_load x, Menu_load y | Menu_swap_disk x, Menu_swap_disk y -> String.equal x y
+  | Menu_watch _, (Menu_load _ | Menu_swap_disk _)
+  | Menu_load _, (Menu_watch _ | Menu_swap_disk _)
+  | Menu_swap_disk _, (Menu_watch _ | Menu_load _) -> false
+
+let is_selected (state : Masc_tui_types.state) entry =
+  match state.msx_menu_selected with
+  | Some selected -> same_entry selected entry
+  | None -> false
+
+let action_of_entry : Masc_tui_types.msx_menu_entry -> menu_action = function
+  | Menu_watch source -> Watch source
+  | Menu_load cart -> Load cart
+  | Menu_swap_disk disk -> Swap_disk disk
+
+(* A menu that had no row to highlight takes its first row as soon as it has
+   one; nothing was highlighted, so no choice moves. A highlighted row that has
+   since gone stays the selection, so Enter picks nothing until a move key
+   picks a row that is on screen. *)
+let settle_selection (state : Masc_tui_types.state) entries =
+  match state.msx_menu_selected, entries with
+  | None, first :: _ -> state.msx_menu_selected <- Some first
+  | None, [] | Some _, ([] | _ :: _) -> ()
+
+let rec index_in entries entry i =
+  match entries with
+  | [] -> None
+  | e :: rest -> if same_entry e entry then Some i else index_in rest entry (i + 1)
+
+(* Move the highlight by [delta] rows among the rows on screen now. From a row
+   that has gone, a move lands on the first row. *)
+let move_selection (state : Masc_tui_types.state) delta =
+  let entries = menu_entries state in
+  match entries with
+  | [] -> ()
+  | first :: _ ->
+      let current = match state.msx_menu_selected with
+        | Some selected -> index_in entries selected 0
+        | None -> None in
+      state.msx_menu_selected <- (match current with
+        | None -> Some first
+        | Some i ->
+            let last = List.length entries - 1 in
+            List.nth_opt entries (max 0 (min last (i + delta))))
 
 let menu_title = " MSX \xe2\x80\x94 pick a game"
 
@@ -307,22 +410,23 @@ let menu_hints (mode : Masc_tui_types.msx_menu_mode) ~has_entries =
   if has_entries then String.concat "  " [ "j/k:move"; choose; leave ] else leave
 
 let entry_label (state : Masc_tui_types.state) = function
-  | Watch ->
+  | Masc_tui_types.Menu_watch Live.Msx ->
       let cart =
         match state.msx_frame with
-        | Some { msx_cartridge = Some c; _ } -> c
-        | Some { msx_disk = Some d; _ } -> d
-        | _ -> "current machine"
+        | Some { msx_meta = Some { msx_cartridge = Some c; _ }; _ } -> c
+        | Some { msx_meta = Some { msx_disk = Some d; _ }; _ } -> d
+        | Some { msx_meta = Some { msx_cartridge = None; msx_disk = None; _ }; _ }
+        | Some { msx_meta = None; _ } | None -> "MSX machine"
       in
       "> watch " ^ cart
-  | Load c | Swap_disk c -> "  " ^ c
-  | Stay | Closed -> ""
+  | Menu_watch Live.Dos -> "> watch DOS machine"
+  | Menu_load c | Menu_swap_disk c -> "  " ^ c
 
 let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state) =
   invalidate ();
-  clamp_index state;
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
   let entries = menu_entries state in
+  settle_selection state entries;
   let buf = Buffer.create 1024 in
   if !image_may_exist then Buffer.add_string buf delete_image;
   Buffer.add_string buf "\027[2J\027[H";
@@ -345,11 +449,11 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
             " no cartridges yet \xe2\x80\x94 an operator fills .masc/msx/carts/ with ROM or .dsk images");
        Buffer.add_string buf "\027[0K\r\n"
    | _ ->
-       List.iteri
-         (fun i entry ->
+       List.iter
+         (fun entry ->
            let label = entry_label state entry in
            let line =
-             if i = state.msx_menu_index then
+             if is_selected state entry then
                "\027[7m" ^ fit_line (max 1 (cols - 1)) (" " ^ label) ^ "\027[0m"
              else fit_line cols (" " ^ label)
            in
@@ -381,7 +485,7 @@ let open_menu ~(write : string -> unit) ?(mode = Masc_tui_types.Boot_game) (stat
   state.msx_menu_mode <- mode;
   state.msx_open <- true;
   state.msx_menu_open <- true;
-  state.msx_menu_index <- 0;
+  state.msx_menu_selected <- None;
   render_menu ~write state
 
 let menu_consume ~(write : string -> unit) (state : Masc_tui_types.state) key :
@@ -389,17 +493,19 @@ let menu_consume ~(write : string -> unit) (state : Masc_tui_types.state) key :
   match key with
   | "esc" -> Closed
   | "up" | "k" ->
-      state.msx_menu_index <- state.msx_menu_index - 1;
+      move_selection state (-1);
       render_menu ~write state;
       Stay
   | "down" | "j" ->
-      state.msx_menu_index <- state.msx_menu_index + 1;
+      move_selection state 1;
       render_menu ~write state;
       Stay
   | "\r" | "\n" | "enter" | "return" | " " | "space" -> (
-      match List.nth_opt (menu_entries state) state.msx_menu_index with
-      | Some ((Watch | Load _ | Swap_disk _) as a) -> a
-      | Some (Stay | Closed) | None ->
+      (* Enter picks the highlighted row only while it is on screen. *)
+      match state.msx_menu_selected with
+      | Some selected when List.exists (same_entry selected) (menu_entries state) ->
+          action_of_entry selected
+      | Some _ | None ->
           render_menu ~write state;
           Stay)
   | _ ->

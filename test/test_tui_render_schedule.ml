@@ -1772,6 +1772,85 @@ let test_fusion_sidebar_label_format () =
   check string "label starts with status, time, keeper, and run id"
     "[done] 14:20:05 @edgar fusion-target-501" label
 
+(* Task Review and Verdicts drew a row's task id and nothing else. Measured
+   on the live history 2026-09-24: 200 Task Review rows carry 113 distinct
+   ids, 45 of them more than once, and seven rows are task-1663. The Verdicts
+   list is shorter and collides too -- of eight rows one task carries two
+   verdicts at the same gate. Rows reading the same thing cannot be picked
+   between. *)
+let test_two_submissions_of_one_task_read_differently () =
+  let first =
+    Schedule.task_history_sidebar_label ~task_id:"task-1663"
+      ~apart:(Some "vrf-2dc02d93")
+  in
+  let second =
+    Schedule.task_history_sidebar_label ~task_id:"task-1663"
+      ~apart:(Some "vrf-9f1b0c47")
+  in
+  check bool "the two rows read differently" true (first <> second);
+  check string "the id leads so the column reads down"
+    "task-1663  vrf-2dc02d93" first
+
+(* The value beside the id has to hold still. An age does not: the ladder
+   spells seconds under an hour, so a row read one thing and another a second
+   later, and two requests minutes apart round to the same reading. *)
+let test_the_parting_value_does_not_move_under_the_reader () =
+  (* Two request ids, which is what the Task Review index parts its rows by.
+     They are the row's own value: the same row reads the same way on every
+     frame, and two rows never read alike. *)
+  let first = "vrf-2dc02d93" and second = "vrf-9f1b0c47" in
+  check string "the same row reads the same way twice"
+    (Schedule.task_history_sidebar_label ~task_id:"task-1663" ~apart:(Some first))
+    (Schedule.task_history_sidebar_label ~task_id:"task-1663" ~apart:(Some first));
+  check bool "and two rows do not read alike" true
+    (Schedule.task_history_sidebar_label ~task_id:"task-1663" ~apart:(Some first)
+     <> Schedule.task_history_sidebar_label ~task_id:"task-1663"
+          ~apart:(Some second))
+
+let test_verdicts_in_the_same_second_have_distinct_labels () =
+  let labels =
+    Schedule.verdict_sidebar_labels
+      [ "task-1663", "09-25 01:12:45"
+      ; "task-1663", "09-25 01:12:45"
+      ; "task-2000", "09-25 01:12:45"
+      ]
+  in
+  check (list string) "only colliding task and clock pairs get ordinals"
+    [ "task-1663  09-25 01:12#1"
+    ; "task-1663  09-25 01:12#2"
+    ; "task-2000  09-25 01:12:45"
+    ] labels
+
+(* A row with nothing to part it keeps the id alone. The row said one thing
+   before this column and still says it; a mark for "nothing here" would be a
+   second vocabulary on a surface that has none. *)
+let test_a_row_without_a_parting_value_keeps_its_id () =
+  check string "the id alone" "task-1663"
+    (Schedule.task_history_sidebar_label ~task_id:"task-1663" ~apart:None)
+
+(* The list pane is [Masc_tui_roster_pane.pane_cols] wide and folds a label to
+   the room its caret lead leaves -- which is narrower than the frame's inner
+   width by that lead. Both parting values have to fit the room a task id
+   leaves, or every row is cut. *)
+let test_the_widest_row_fits_the_list_pane () =
+  let room =
+    Masc_tui_frame.inner_width ~cols:Masc_tui_roster_pane.pane_cols
+    - Masc_tui_render_prim.sidebar_row_lead_cells
+  in
+  List.iter
+    (fun apart ->
+       let label =
+         Schedule.task_history_sidebar_label ~task_id:"task-10000"
+           ~apart:(Some apart)
+       in
+       check bool
+         (Printf.sprintf "%S fits the pane's label room" apart)
+         true
+         (Masc_tui_message_layout.display_width label <= room))
+    (* A request id, and the clock the Verdicts index draws. A verdict has no
+       id of its own on the wire, so when it was recorded is what parts it. *)
+    [ "vrf-2dc02d93"; "09-25 01:12:45" ]
+
 let test_fusion_pipeline_diagram_stages () =
   let running_judge =
     Schedule.fusion_pipeline_diagram
@@ -2421,6 +2500,16 @@ let () =
             test_the_widest_failure_code_fits_the_state_cell
         ; test_case "fusion sidebar label format" `Quick
             test_fusion_sidebar_label_format
+        ; test_case "two submissions of one task read differently" `Quick
+            test_two_submissions_of_one_task_read_differently
+        ; test_case "a row without a parting value keeps its id" `Quick
+            test_a_row_without_a_parting_value_keeps_its_id
+        ; test_case "the parting value does not move under the reader" `Quick
+            test_the_parting_value_does_not_move_under_the_reader
+        ; test_case "same-second verdicts have distinct labels" `Quick
+            test_verdicts_in_the_same_second_have_distinct_labels
+        ; test_case "the widest row fits the list pane" `Quick
+            test_the_widest_row_fits_the_list_pane
         ; test_case "fusion pipeline diagram stages" `Quick
             test_fusion_pipeline_diagram_stages
         ; test_case "planning strip names only its own stops" `Quick

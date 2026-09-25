@@ -43,7 +43,7 @@ let reads_prim ~binding_name ~fields =
    That second row used to be spelled as a literal ["\\n"]: backslash and n,
    printed to the operator as those two characters, because a real newline
    would have drawn a row nobody had counted. The surface draws the block into
-   a buffer and reads its height back with [rows_drawn], so a row it draws is
+   a buffer and reads its height back with [count_frame_lines], so a row it draws is
    a row it counted. A height declared beside the drawing instead of read off
    it is how the footer floats a row: the rows above the queue were once
    subtracted twice, in [boxed_surface_chrome_rows] and again as the Gate lane
@@ -58,7 +58,7 @@ let test_the_detail_height_is_read_off_the_line_it_draws () =
   Alcotest.(check int) "the surface builds the detail line once" 1
     (calls "approval_detail_line");
   Alcotest.(check int) "and reads every block's height off what it drew" 4
-    (calls "rows_drawn")
+    (calls "count_frame_lines")
 
 (* A window reading is a position, not a key. The footer fitter reads the
    hints as key items and gives them up from the back, so a reading packed
@@ -1032,6 +1032,51 @@ let test_both_doors_into_the_runtime_detail_ask_the_same_lane_list () =
    "newest post first" a post replied to a minute ago sat sixth reading "25s".
    The sort is read once for the whole list: the header word and every row's
    number name the same time only while one reading feeds both. *)
+(* Both list panes drew a row's task id and nothing else. Measured on the
+   live history 2026-09-24: 200 Task Review rows carry 113 distinct ids, 45
+   of them more than once, and seven rows are task-1663. The Verdicts list is
+   shorter and collides too -- of eight rows one task carries two verdicts at
+   the same gate.
+
+   What parts a row has to be the row's own and has to hold still. Task
+   Review has a request id. A verdict has no id on the wire, and its notes
+   hash is not one either -- it is SHA256 of the task title and the
+   completion notes, so a second verdict on the same submission hashes the
+   same -- so that pane reads when the verdict was recorded. Neither reads an
+   age, which moves under the reader. The label helper is tested on its own
+   in test_tui_render_schedule; these two say the panes reach it, and which
+   field each hands it. *)
+let test_both_task_history_panes_say_which_row_each_is () =
+  List.iter
+    (fun binding_name ->
+      Alcotest.(check int)
+        (binding_name ^ " builds its labels through the shared one")
+        1
+        (Ast_grep.count_calls_in_value_binding ~module_path:render
+           ~binding_name
+           ~callee:"Render_schedule.task_history_sidebar_label"))
+    [ "render_verification_detail" ];
+  Alcotest.(check int) "Verdicts builds labels through the collision-aware helper" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_harness_detail"
+       ~callee:"Render_schedule.verdict_sidebar_labels");
+  Alcotest.(check int) "Task Review reads the request id" 1
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"render_verification_detail" ~field_name:"vr_request_id");
+  Alcotest.(check int) "Verdicts reads when the verdict was recorded" 1
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"render_harness_detail" ~field_name:"hv_at");
+  (* And not the notes hash, which two verdicts on one submission share. *)
+  Alcotest.(check int) "and not the notes hash" 0
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"render_harness_detail" ~field_name:"hv_notes_hash");
+  (* Neither reads an age. An age moves under the reader, which is what this
+     pair of fields replaced. *)
+  Alcotest.(check int) "Task Review no longer reads a clock to age" 0
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"render_verification_detail" ~field_name:"vr_created_at")
+;;
+
 (* The Tasks pane beside the detail drew a row's title and nothing else. The
    label itself is tested in test_tui_sidebar_index_fold; this says the pane
    reaches it, and that the id it passes is the row's own. *)
@@ -1331,6 +1376,9 @@ let () =
             `Quick test_the_automation_row_cuts_the_columns_it_draws
         ; Alcotest.test_case "one long cron cannot hide schedule identities"
             `Quick test_one_long_cron_does_not_hide_any_schedule_identity
+        ; Alcotest.test_case
+            "both task history panes say which row each is" `Quick
+            test_both_task_history_panes_say_which_row_each_is
         ; Alcotest.test_case
             "the Tasks list pane says which task each row is" `Quick
             test_the_tasks_list_pane_says_which_task_each_row_is

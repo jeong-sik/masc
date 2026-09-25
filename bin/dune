@@ -1129,6 +1129,14 @@
  (modules masc_tui_fork_guard)
  (libraries eio))
 
+;; The one launch every TUI read goes through: the switch, the read's
+;; exceptions, a refused launch and the failure label, handled once.
+(library
+ (name masc_tui_async_read)
+ (wrapped false)
+ (modules masc_tui_async_read)
+ (libraries eio masc_eio_context masc_tui_fork_guard))
+
 (library
  (name masc_tui_board_detail)
  (wrapped false)
@@ -1637,6 +1645,7 @@
   masc_tui_lane_installer
   masc_tui_queue_inspection
   masc_tui_fork_guard
+  masc_tui_async_read
   masc_tui_lane_subscriptions
   masc_tui_lane_declaration
   masc_tui_lane_table

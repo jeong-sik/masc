@@ -705,6 +705,23 @@ let test_system_llm_authority_helpers_are_typed () =
    projected from the scheduler's answer, not from the attempt's request. A
    timer this stall armed names the lane interval; a timer it joined, or one
    already holding its key, names no number it does not hold. *)
+(* A retryable review waits the maintenance pulse, and longer only while the
+   slot that refused it rests after a provider rate limit: a retry inside
+   that rest would send the whole review to a slot that just refused it. The
+   pulse stays the shortest wait. *)
+let test_retry_waits_out_a_resting_slot () =
+  let delay = CA.For_testing.retry_delay_of_path_rest ~retry_interval_sec:60.0 ~now:1000.0 in
+  Alcotest.(check (float 0.0)) "a serving slot waits the pulse" 60.0
+    (delay Masc.Keeper_turn_driver.Path_serving);
+  Alcotest.(check (float 0.0)) "a slot resting past the pulse is waited out" 300.0
+    (delay
+       (Masc.Keeper_turn_driver.Path_resting
+          { release_at = 1300.0; walk_promotes_at_release = true }));
+  Alcotest.(check (float 0.0)) "a rest shorter than the pulse still waits the pulse" 60.0
+    (delay
+       (Masc.Keeper_turn_driver.Path_resting
+          { release_at = 1010.0; walk_promotes_at_release = false }))
+
 let test_system_llm_retry_disposition_is_typed () =
   let module For_testing = CA.For_testing in
   (match For_testing.retry_request_of_evaluator_retryable (Some true) with
@@ -4426,6 +4443,8 @@ let () =
         test_system_llm_authority_helpers_are_typed;
       Alcotest.test_case "system LLM retry disposition is typed" `Quick
         test_system_llm_retry_disposition_is_typed;
+      Alcotest.test_case "a retry waits out a resting slot" `Quick
+        test_retry_waits_out_a_resting_slot;
       Alcotest.test_case "system LLM stop and retry lines name the next move" `Quick
         test_system_llm_stop_and_retry_lines_name_the_next_move;
       Alcotest.test_case "only a reviewed stop can request a retry" `Quick

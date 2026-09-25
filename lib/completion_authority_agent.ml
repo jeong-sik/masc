@@ -1046,10 +1046,10 @@ let queue_retry ~sw ~wait ~dispatch pending scope =
   enqueue ()
 ;;
 
-let schedule_retry_scope (runtime : runtime) scope =
+let schedule_retry_scope (runtime : runtime) ~delay_sec scope =
   queue_retry
     ~sw:runtime.sw
-    ~wait:(fun () -> Eio.Time.sleep runtime.clock runtime.retry_interval_sec)
+    ~wait:(fun () -> Eio.Time.sleep runtime.clock delay_sec)
     ~dispatch:(function
       | Whole_backlog -> request_sweep runtime
       | Targets keys -> List.iter (request_review runtime) keys)
@@ -1057,14 +1057,41 @@ let schedule_retry_scope (runtime : runtime) scope =
     scope
 ;;
 
-let schedule_retry (runtime : runtime) key =
-  schedule_retry_scope runtime (Targets [ key ])
+(* How long a retry of one stalled review waits: the maintenance pulse, or
+   longer while the slot that last refused it is resting after a provider
+   rate limit or an exhausted quota (RFC-provider-path-rest §3.3) -- the
+   provider's Retry-After, the configured floor without one, never past the
+   configured cap. A retry that fired inside that rest would send the whole
+   review prompt to a slot that has just said it will refuse it. The pulse
+   stays the shortest wait and there is still no attempt cap; only the rest a
+   provider imposed is waited out. *)
+let retry_delay_of_path_rest ~retry_interval_sec ~now = function
+  | Keeper_turn_driver.Path_serving -> retry_interval_sec
+  | Keeper_turn_driver.Path_resting { release_at; walk_promotes_at_release = _ } ->
+    Float.max retry_interval_sec (release_at -. now)
+;;
+
+let retry_delay_sec (runtime : runtime) = function
+  | Not_reviewed { evaluator_runtime; _ } ->
+    let now = Eio.Time.now runtime.clock in
+    retry_delay_of_path_rest
+      ~retry_interval_sec:runtime.retry_interval_sec
+      ~now
+      (Keeper_turn_driver.path_rest ~now evaluator_runtime)
+  | Infrastructure_unavailable _ | Commit_failed _ | Raised _ ->
+    runtime.retry_interval_sec
+;;
+
+let schedule_retry (runtime : runtime) key ~delay_sec =
+  schedule_retry_scope runtime ~delay_sec (Targets [ key ])
 ;;
 
 let schedule_sweep_retry (runtime : runtime) =
   (* The backlog-read diagnostic already names this request. A duplicate
      sweep shares the existing timer and needs no separate notification. *)
-  let (_ : retry_admission) = schedule_retry_scope runtime Whole_backlog in
+  let (_ : retry_admission) =
+    schedule_retry_scope runtime ~delay_sec:runtime.retry_interval_sec Whole_backlog
+  in
   ()
 ;;
 
@@ -1099,10 +1126,11 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
          registry row alone reaches no one: every stop is promoted to the
          Board, where the producer Keeper and the operator read it and decide
          whether to resubmit. *)
+      let delay_sec = retry_delay_sec runtime cause in
       let scheduling =
         match retry_request_of_stop_cause cause with
         | No_retry_requested -> Retry_not_requested
-        | Retry_requested -> Retry_admitted (schedule_retry runtime key)
+        | Retry_requested -> Retry_admitted (schedule_retry runtime key ~delay_sec)
       in
       (* One disposition, read after the scheduler answered, drives both the
          WARN template and the Board sentence: the reader of either is told
@@ -1121,9 +1149,7 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
         ~verification_id
         ~cause
         ~disposition:
-          (stall_disposition_of_scheduling
-             ~retry_interval_sec:runtime.retry_interval_sec
-             scheduling))
+          (stall_disposition_of_scheduling ~retry_interval_sec:delay_sec scheduling))
   else
     Log.Misc.debug
       "system LLM completion authority skipped duplicate in-flight review task_id=%s verification_id=%s"
@@ -1292,6 +1318,7 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
 
 module For_testing = struct
   let authority_actor = authority_actor
+  let retry_delay_of_path_rest = retry_delay_of_path_rest
   let evidence_refs_of_output = evidence_refs_of_output
   let verdict_question_of_request = verdict_question_of_request
   let completion_verdict_of_review = completion_verdict_of_review

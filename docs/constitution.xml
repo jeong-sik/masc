@@ -96,7 +96,8 @@
         <invariant>started_at 은 제출·거절을 관통해 원래 작업 시작 시각을 보존한다.
                    (workspace_task_lifecycle.ml)</invariant>
         <invariant>AwaitingVerification 에 verifier binding 도 횟수 상한은 없다.
-                   간격은 지수 backoff 가 아니라 고정 maintenance pulse 간격이며,
+                   간격은 지수 backoff 가 아니라 고정 maintenance pulse 간격이며
+                   (거절한 slot 이 provider rate limit 으로 쉬는 중이면 그 rest 가 끝날 때까지만 더 기다린다),
                    retryable boolean 이 자동 재시도 지속 여부를 결정하고
                    전역 review_slots 세마포어가 동시 실행만 제한한다.
                    (completion_authority_agent.ml)</invariant>

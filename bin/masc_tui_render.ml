@@ -7422,7 +7422,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                   (List.map
                      (fun (first : Tui_decode.keeper_exact_lane_first) ->
                        first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
-                       ^ first.kel_slot_id)
+                       ^ first.kel_slot_id
+                       ^ (if first.kel_offered then ""
+                          else " (not offered \xc2\xb7 lane order)"))
                      firsts))
            ^ Ansi.reset);
     (match state.keeper_gate_settings_unread with

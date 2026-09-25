@@ -24,7 +24,6 @@ let all_variants : blocker_class list =
   ; Runtime_exhausted All_providers_failed
   ; Runtime_exhausted Candidates_filtered_after_cycles
   ; Runtime_exhausted Session_conflict
-  ; Provider_capacity
   ; Fiber_unresolved
   ; Agent_core_context_window_exceeded
   ; Agent_core_unrecognized_stop_reason

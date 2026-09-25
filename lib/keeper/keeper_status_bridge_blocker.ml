@@ -43,10 +43,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   let str = runtime_blocker_class_label cls in
   let summary =
     match cls with
-    | Provider_capacity ->
-      if summary = ""
-      then "Provider capacity exhaustion blocked this keeper turn."
-      else summary
     | Runtime_exhausted reason ->
       if summary = "" then runtime_exhaustion_summary reason else summary
     | Fiber_unresolved ->

@@ -421,7 +421,6 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   // for anything absent, so eleven real classes arrived and were dropped.
   // `test_blocker_class_mirror` fails if the server gains another one.
   'agent_core_input_required',
-  'provider_capacity',
   'gate_replay_repair_required',
   'incomplete_tool_transcript',
   'internal_bridge_exception',

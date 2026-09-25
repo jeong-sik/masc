@@ -31,9 +31,13 @@ val classify_read_outcome :
 
 (** [container_path_of_host ~config ~meta ~host_path] maps a host-side
     absolute playground path to its selected backend counterpart (container or
-    SSH endpoint). Returns [Error _] when [host_path] is not inside the
-    keeper's playground bundle (programmer error — caller should have
-    run the containment check first). *)
+    SSH endpoint). On an OpenSSH endpoint, a path outside the keeper's tree
+    that lies under the endpoint's declared roots
+    ({!Keeper_sandbox_remote_lane.declared_endpoint_path}) is the endpoint's
+    own path and returns as itself. Returns [Error _] when [host_path] is
+    neither inside the keeper's playground bundle nor such a declared path
+    (programmer error — caller should have run the containment check
+    first). *)
 val container_path_of_host :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

@@ -21,6 +21,7 @@ type rotate_class =
   | Refusal_body_not_received
   | Generation_repeated
   | Attempt_rejected
+  | Admission
   | Provider_reported_failure
   | Request_refused
   | Provider_wire_defect
@@ -240,12 +241,16 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
       ; _
       } ->
     rotate Request_refused
-  (* No walk predicate moves on a JSON parse failure, so the route keeps it
-     terminal too. *)
+  (* [Json_parse_error] is this binding's [Admission]
+     (RFC-one-slot-fault-judgment-for-every-walk.md §3.2): the
+     refusal happened before dispatch, so the walk predicate
+     [attempt_rejected_should_try_next] rotates to the next candidate. The
+     route names that rotation as [Admission], matching the exact walk's
+     [Binding Admission] advance. *)
   | Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Json_parse_error; _ } ->
-    exhaust_failure Deterministic_request
+    rotate Admission
   | Llm_provider.Retry.ContextOverflow _ -> exhaust_failure Context_overflow
-  | Llm_provider.Retry.InputCapacity _ -> exhaust_failure Deterministic_request
+  | Llm_provider.Retry.InputCapacity _ -> rotate Admission
 
 let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   let exhaust_failure = exhaust ~err ~provenance:Agent_core_provider_error in
@@ -434,6 +439,7 @@ let rotate_class_label = function
   | No_progress_thinking_only -> "no_progress_thinking_only"
   | No_progress_truncated -> "no_progress_truncated"
   | Attempt_rejected -> "attempt_rejected"
+  | Admission -> "admission"
   | Refusal_body_not_received -> "refusal_body_not_received"
   | Generation_repeated -> "generation_repeated"
   | Provider_reported_failure -> "provider_reported_failure"
@@ -510,6 +516,10 @@ let response_observed = function
      | Attempt_rejected
      (* the candidate's own policy refused the request before the wire
         (#34475): no generation. *)
+     | Admission
+     (* this binding's pre-dispatch admission refused the prepared request
+        (RFC-one-slot-fault-judgment-for-every-walk.md §3.2:
+        [InputCapacity]/[Json_parse_error]): no generation. *)
      | Refusal_body_not_received
      (* the provider refused the request; the body naming why never
         arrived, and a refusal is not an answer. *)
@@ -656,6 +666,7 @@ let route_resumes_on_same_path = function
      | Refusal_body_not_received
      | Generation_repeated
      | Attempt_rejected
+     | Admission
      | Provider_reported_failure
      | Request_refused
      | Provider_wire_defect

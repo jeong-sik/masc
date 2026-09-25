@@ -88,16 +88,19 @@ let test_api_auth_rotates_invalid_request_judges () =
             ; reason = Llm_provider.Retry.Json_parse_error
             }))
   with
-  | KFR.Exhausted_visible_alive { terminal = KFR.Deterministic_request; _ } -> ()
+  | KFR.Rotate_now { rotate = KFR.Admission } -> ()
   | other ->
-    Alcotest.failf "an unparsed request should exhaust, got %s"
+    Alcotest.failf "an unparsed request is an admission refusal and rotates, got %s"
       (KFR.route_kind_label other)
 
 (* #33057: the driver already moves a lane to its next candidate when masc's
    own pre-wire policy refuses the attempt, but the route labelled that
    failure a deterministic terminal one. The label now says rotate. A
    provider's own refusal of the body rotates too, because the walk moves on
-   it (#37631); only a JSON parse failure stays terminal. *)
+   it (#37631). RFC-one-slot-fault-judgment-for-every-walk.md §3.2 absorbs
+   [Json_parse_error] and [InputCapacity]
+   into [Admission], so a JSON parse failure rotates as well — the walk
+   predicate now moves the lane on it, and the route names that rotation. *)
 let test_api_attempt_rejected_routes_as_rotation () =
   check_route
     "pre-wire policy refusal rotates"
@@ -109,15 +112,11 @@ let test_api_attempt_rejected_routes_as_rotation () =
           }));
   List.iter
     (fun (label, reason) ->
-      match
-        route_of_agent_core_error
-          (Agent_core.Error.Api
-             (Llm_provider.Retry.InvalidRequest { message = label; reason }))
-      with
-      | KFR.Exhausted_visible_alive { terminal = KFR.Deterministic_request; _ } -> ()
-      | other ->
-        Alcotest.failf "%s should stay terminal, got %s:%s" label
-          (KFR.route_kind_label other) (KFR.route_class_label other))
+      check_route
+        (label ^ " rotates as an admission refusal")
+        (KFR.Rotate_now { rotate = KFR.Admission })
+        (Agent_core.Error.Api
+           (Llm_provider.Retry.InvalidRequest { message = label; reason })))
     [ "json parse error", Llm_provider.Retry.Json_parse_error ];
   List.iter
     (fun (label, reason) ->
@@ -150,21 +149,8 @@ let test_api_input_capacity_is_terminal_judgment () =
          { message = "typed capacity"; constraint_; reason })
   in
   check_route
-    "accepted bound remains a deterministic terminal observation"
-    (KFR.Exhausted_visible_alive
-       { terminal = KFR.Deterministic_request
-       ; provenance = KFR.Agent_core_api_error
-       ; detail =
-           Agent_core.Error.to_string
-             (error
-                (Llm_provider.Retry.Serving_constraint_rejected
-                   (Llm_provider.Serving_constraint.Input_rejected
-                      { input_tokens = 524299
-                      ; accepted_through = 524298
-                      ; rejected_from = 524299
-                      })))
-           |> Keeper_internal_error.cap_blocker_detail
-       })
+    "accepted bound rotates as an admission refusal"
+    (KFR.Rotate_now { rotate = KFR.Admission })
     (error
        (Llm_provider.Retry.Serving_constraint_rejected
           (Llm_provider.Serving_constraint.Input_rejected
@@ -178,14 +164,8 @@ let test_api_input_capacity_is_terminal_judgment () =
          Llm_provider.Input_token_count.Anthropic_messages_count_tokens)
   in
   check_route
-    "measurement-unavailable remains a terminal observation"
-    (KFR.Exhausted_visible_alive
-       { terminal = KFR.Deterministic_request
-       ; provenance = KFR.Agent_core_api_error
-       ; detail =
-           Agent_core.Error.to_string measurement_unavailable
-           |> Keeper_internal_error.cap_blocker_detail
-       })
+    "measurement-unavailable rotates as an admission refusal"
+    (KFR.Rotate_now { rotate = KFR.Admission })
     measurement_unavailable
 
 let test_provider_quota_family_threads_hint () =
@@ -195,6 +175,16 @@ let test_provider_quota_family_threads_hint () =
     (Agent_core.Error.Provider
        (Llm_provider.Error.HardQuota
           { provider = "glm"; retry_after = Some 3600.0; detail = "balance 0" }));
+  (* [keeper_runtime_attempt] folds RateLimit and HardQuota into one transport
+     value for the walk. The route reads the provider error before that fold,
+     so a rate limit stays this candidate's backpressure and never becomes
+     the whole scope's quota window. *)
+  check_route
+    "provider RateLimit stays the candidate's rate limit"
+    (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = Some 30.0 })
+    (Agent_core.Error.Provider
+       (Llm_provider.Error.RateLimit
+          { provider = "codex"; retry_after = Some 30.0; detail = "slow down" }));
   check_route
     "provider CapacityExhausted is the provider's capacity"
     (KFR.Retry_after_observed

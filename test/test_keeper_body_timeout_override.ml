@@ -112,7 +112,7 @@ max-context = 200000
   let attempt_errors = ref [] in
   let started = Unix.gettimeofday () in
   let result =
-    Keeper_turn_driver.run_named
+    Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
       ~system_prompt:"Body timeout override proof."
       ~runtime_id:"silent.sample"
       ~keeper_name:"body-timeout-override-proof"

@@ -56,6 +56,26 @@ val admission_already_released_by_removal :
   -> Keeper_owner_registry.command_error
   -> bool
 
+(** Where boot recovery resumes a replayable [Blocked] operation.
+    [Replay_resume settled] resumes [Finalizing_tasks settled]: every owned
+    task for {!Keeper_shutdown_types.Replay_settled_tasks} when the Keeper
+    actively owns none of them, and otherwise (and for
+    {!Keeper_shutdown_types.Replay_unsettled_tasks}) the owned tasks whose
+    backlog row carries this operation's release receipt. [Replay_abandon] means
+    the Keeper changed after the block. [Replay_unavailable detail] means the
+    owner, metadata or backlog could not be read now; the operation stays
+    [Blocked] with [detail] as fresh evidence. Performs no writes. *)
+type replay_plan =
+  | Replay_resume of Keeper_id.Task_id.t list
+  | Replay_abandon of Keeper_shutdown_types.boot_replay_abandonment
+  | Replay_unavailable of string
+
+val plan_blocked_replay :
+  config:Workspace.config ->
+  Keeper_shutdown_types.t ->
+  Keeper_shutdown_types.blocked_replay ->
+  replay_plan
+
 module For_testing : sig
   val paused_meta :
     Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta

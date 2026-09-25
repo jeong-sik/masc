@@ -120,27 +120,29 @@ let test_tick_worker_advances_and_returns_frame () =
 
 let test_checkpoint_route () =
   with_tick_machine (fun () ->
-    let base_path = Filename.temp_dir "msx-checkpoint-route-" "" in
+    let (config : Masc.Workspace.config) =
+      Masc.Workspace.default_config (Filename.temp_dir "msx-checkpoint-route-" "") in
+    let base_path = config.base_path in
     let before = frame_number (Route.frame_json ()) in
     Executor_pool_ref.For_testing.with_pool_option None (fun () ->
       List.iter (fun body ->
-        let status, _ = Route.checkpoint_response ~base_path ~restore:false ~body in
+        let status, _ = Route.checkpoint_response ~config ~restore:false ~body in
         check bool "checkpoint validates before requesting worker" true (status = `Bad_request))
         ["[]"; {|{"slot":3}|}; {|{"slot":"../escape"}|}; {|{"slot":"x","slot":"y"}|}; {|{"extra":true}|}];
-      let status, _ = Route.checkpoint_response ~base_path ~restore:false ~body:"{}" in
+      let status, _ = Route.checkpoint_response ~config ~restore:false ~body:"{}" in
       check bool "checkpoint never runs inline without a worker" true (status = `Service_unavailable));
     Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
       let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
       Executor_pool_ref.For_testing.with_pool pool (fun () ->
-        let status, _ = Route.checkpoint_response ~base_path ~restore:false ~body:"{}" in
+        let status, _ = Route.checkpoint_response ~config ~restore:false ~body:"{}" in
         check bool "save through executor succeeds" true (status = `OK);
         ignore (Lane.step ~frames:12 : (Lane.observation, Lane.error) result);
-        let status, _ = Route.checkpoint_response ~base_path ~restore:true ~body:"{}" in
+        let status, _ = Route.checkpoint_response ~config ~restore:true ~body:"{}" in
         check bool "restore through executor succeeds" true (status = `OK);
         check int "saved clock restored" before (frame_number (Route.frame_json ()));
         let destination = Filename.concat base_path ".masc/msx/saves/quick.json" in
         Sys.remove destination; Sys.mkdir destination 0o700;
-        let status, response = Route.checkpoint_response ~base_path ~restore:false ~body:"{}" in
+        let status, response = Route.checkpoint_response ~config ~restore:false ~body:"{}" in
         check bool "storage failure is server error" true (status = `Internal_server_error);
         check bool "storage error carries failure" true (member "ok" response = Some (`Bool false));
         check int "storage failure preserves machine" before (frame_number (Route.frame_json ()))))))
@@ -253,13 +255,17 @@ let test_encoded_pixel_snapshot () =
    Proves: a press field of the wrong type is a 400 that names the field and
    presses nothing. On main, hold_frames:"5" ran with the default 5 and
    sequence:1 ran as a chord, both silently. *)
+(* No Lane instance is attached in this workspace; a press here wakes nothing. *)
+let unwatched_config =
+  lazy (Masc.Workspace.default_config (Filename.temp_dir "msx-press-route-" ""))
+
 let ledger_whos () = List.map (fun (e : Lane.entry) -> e.who) (Lane.ledger ())
 
 let test_press_rejects_wrong_types () =
   with_tick_machine (fun () ->
     let before = frame_number (Route.frame_json ()) in
     List.iter (fun (body, expected) ->
-      let status, response = Route.press_response ~who:"unit-presser" ~body in
+      let status, response = Route.press_response ~config:(Lazy.force unwatched_config) ~who:"unit-presser" ~body in
       check bool ("wrong type is a bad request: " ^ body) true (status = `Bad_request);
       check (option string) ("the refusal names the field: " ^ body) (Some expected)
         (match member "message" response with Some (`String m) -> Some m | _ -> None);
@@ -276,10 +282,13 @@ let test_press_rejects_wrong_types () =
       ; {|{}|}, "keys must name at least one key"
       ; {|{"keys":[]}|}, "keys must name at least one key" ])
 
+(* An accepted press wakes machine watchers under [Eio.Cancel.protect], so it runs
+   in an Eio fiber, as the HTTP route does. *)
 let test_press_defaults_and_identity () =
   with_tick_machine (fun () ->
+    Eio_main.run @@ fun _env ->
     let before = frame_number (Route.frame_json ()) in
-    let status, response = Route.press_response ~who:"unit-presser" ~body:{|{"keys":["space"]}|} in
+    let status, response = Route.press_response ~config:(Lazy.force unwatched_config) ~who:"unit-presser" ~body:{|{"keys":["space"]}|} in
     check bool "a well-typed press succeeds" true (status = `OK);
     check (option bool) "ok is true" (Some true)
       (match member "ok" response with Some (`Bool b) -> Some b | _ -> None);
@@ -288,12 +297,12 @@ let test_press_defaults_and_identity () =
     check bool "the edge is recorded under the caller's who" true
       (List.mem "unit-presser" (ledger_whos ()));
     let before = frame_number (Route.frame_json ()) in
-    let status, _ = Route.press_response ~who:"unit-presser"
+    let status, _ = Route.press_response ~config:(Lazy.force unwatched_config) ~who:"unit-presser"
         ~body:{|{"keys":["space","space"],"sequence":true,"hold_frames":1,"frames":2}|} in
     check bool "a typed sequence press succeeds" true (status = `OK);
     check int "a sequence advances frames per key" 4
       (frame_number (Route.frame_json ()) - before);
-    let status, _ = Route.press_response ~who:"unit-presser"
+    let status, _ = Route.press_response ~config:(Lazy.force unwatched_config) ~who:"unit-presser"
         ~body:{|{"keys":["space"],"hold_frames":20}|} in
     check bool "the lane's own bounds still answer 400" true (status = `Bad_request))
 

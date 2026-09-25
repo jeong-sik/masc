@@ -7,8 +7,8 @@ status: runbook
 This runbook documents the current operator surface for `Execute` and
 adjacent structured process routing. Execute is typed-only: callers provide
 exactly one of a non-empty `argv` process vector, run without a shell, or a
-`script` command line handed as `-c` text to the shell named in `shell`.
-Pipes, redirections, `;`/`&&` sequencing and `FOO=1` prefixes are `script`
+`command` line handed as `-c` text to the shell named in `shell`.
+Pipes, redirections, `;`/`&&` sequencing and `FOO=1` prefixes are `command`
 syntax; there is no object form for them. Raw `cmd` strings and the old
 background task lifecycle are not part of the callable surface.
 
@@ -54,20 +54,20 @@ Direct form, one process and no shell:
 Shell form, one line run by the sandbox shell:
 
 ```json
-{ "script": "rg --files lib | head -20", "cwd": "repos/masc" }
+{ "command": "rg --files lib | head -20", "cwd": "repos/masc" }
 ```
 
-Exactly one of `argv` and `script` is present. Shell metacharacters inside
+Exactly one of `argv` and `command` is present. Shell metacharacters inside
 `argv` are data: a literal `|` token is an argument, not a pipe. Write pipes,
-redirections, `;`/`&&` and `FOO=1` prefixes in `script`. `shell` names which
-shell runs `script` (`sh`, `bash`, `zsh`, `dash`, `ksh`; default `sh`) and is
+redirections, `;`/`&&` and `FOO=1` prefixes in `command`. `shell` names which
+shell runs `command` (`sh`, `bash`, `zsh`, `dash`, `ksh`; default `sh`) and is
 ignored with `argv`. `cwd` is a relative path inside the path jail;
 `timeout_sec` defaults to 600.
 
 ## Output Streaming
 
 Below the tool boundary the exec layer routes `Shell_ir`. An `Execute` call
-reaches it as one `Simple` command (`argv` verbatim, or `shell -c script`);
+reaches it as one `Simple` command (`argv` verbatim, or `shell -c command`);
 the `Pipeline` and stdin-content routes are reached by callers that build
 `Shell_ir` directly, not by any typed `Execute` field. The host pipeline, host
 simple-with-stdin, and Docker runner contract routes forward
@@ -109,7 +109,7 @@ scripts/dune-local.sh build lib/exec/test/test_exec_dispatch_docker_streaming.ex
 
 `Execute` remains synchronous at the callable-surface level. The public schema
 rejects legacy background flags and accepts only typed command fields:
-`argv`, `script`, `shell`, `cwd`, and `timeout_sec`. It does not expose
+`argv`, `command`, `shell`, `cwd`, `timeout_sec`, and `intent`. It does not expose
 `job_id`, `request_id`, `poll`, or `cancel` fields.
 
 Keeper-turn async messaging is a separate surface (`keeper_msg`,

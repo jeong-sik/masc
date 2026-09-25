@@ -454,16 +454,24 @@ let for_surface = function
       ]
   | Keepers Keeper_runtime_pick ->
       (* The picker claims its own keys through [Masc_tui_pick_list], page and
-         edge among them, and the table carried those two inside [j/k]'s help
+         edge among them, and the table carried both inside [j/k]'s help
          instead of declaring them. Prose there reaches the sheet and never
-         the footer. *)
-      [ b Navigate "j/k" "move"
+         the footer.
+
+         Only the page pair is declared: measured through the fitter at
+         eighty cells, declaring both costs [d] and [/] their place, and [d]
+         is the one key this screen exists for. [d]'s label is shortened in
+         the same breath -- with "use the default" spelled out it did not fit
+         beside the page pair either, and its help still says what it drops
+         and what it follows. The edge pair stays in the help until #39082
+         decides what this screen owes a guard that reads help for key
+         names. *)
+      [ b Navigate "j/k" "move" ~help:"move; Home/End jump to the top or bottom"
       ; b Navigate "PgUp/PgDn" "page"
-      ; b Navigate "Home/End" "top/bottom"
       ; b Navigate "/" "filter"
           ~help:"type to narrow the lanes and runtimes; Esc drops the filter"
       ; b Act "Enter" "choose"
-      ; b Act "d" "use the default"
+      ; b Act "d" "default"
           ~help:"drop this Keeper's own binding and follow [runtime].default"
       ; b Act "Esc" "back"
       ]

@@ -122,8 +122,7 @@ let test_the_runtime_picker_names_its_paging () =
       Alcotest.(check bool)
         (Printf.sprintf "the runtime picker footer names %S" needle)
         true (holds needle))
-    [ "j/k:move"; "PgUp/PgDn:page"; "Home/End:top/bottom"; "Enter:choose"
-    ; "d:use the default"; "Esc:back" ]
+    [ "j/k:move"; "PgUp/PgDn:page"; "Enter:choose"; "d:default"; "Esc:back" ]
 
 (* Every screen the ring or a drill-down can put up has keys, and the sheet is
    where an operator looks them up: [?] opens on the section for the screen

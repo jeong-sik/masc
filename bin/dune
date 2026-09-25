@@ -1700,6 +1700,9 @@
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
   masc_tui_runtime_config_view
+  ;; The Lanes provider jump reads runtime.toml table headers by the TOML
+  ;; grammar's key path rather than by spelling.
+  masc.toml_line_editor
   masc_tui_interrupt_signal
   masc_tui_esc_interrupt
   masc_tui_exit_signals

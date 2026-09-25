@@ -8219,6 +8219,7 @@ let picker_default_runtime =
   `Assoc
     [ ("id", `String "ollama_cloud.deepseek")
     ; ("provider", `String "Ollama Cloud")
+    ; ("provider_id", `String "ollama_cloud")
     ; ("model", `String "deepseek-v4-flash:0731")
     ; ("exact_slot_group", `String "slots")
     ; ("effective_max_context", `Int 200000)
@@ -8243,6 +8244,7 @@ let runtime_resolved_json =
           ; `Assoc
               [ ("id", `String "exact.embed")
               ; ("provider", `String "Local")
+              ; ("provider_id", `String "exact")
               ; ("model", `String "embed")
               ; ("exact_slot_group", `String "slots")
               ; ("effective_max_context", `Int 8192)
@@ -8523,6 +8525,7 @@ let resolved_runtime id provider model =
   `Assoc
     [ "id", `String id
     ; "provider", `String provider
+    ; "provider_id", `String provider
     ; "model", `String model
     ; "exact_slot_group", `String "slots"
     ; "effective_max_context", `Int 200000
@@ -8817,6 +8820,7 @@ let test_runtime_default_limits_must_match_listed_row () =
         "default_runtime disagrees with its resolved runtime row" detail
     | Ok _ -> Alcotest.fail ("contradictory default accepted: " ^ key))
     ["effective_max_context", `Int 100000;
+     "provider_id", `String "another_provider";
      "exact_slot_group", `String "cli_slots";
      "max_context_source", `String "capability";
      "max_output_tokens", `Null;

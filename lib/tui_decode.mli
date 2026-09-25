@@ -837,6 +837,8 @@ type exact_slot_group = Exact_http_slots | Exact_cli_slots
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
+  ro_provider_id : string;
+      (** The [providers.<id>] table key; [ro_provider] is its display name. *)
   ro_model : string;
   ro_exact_slot_group : exact_slot_group;
       (** The declared list an exact-lane append writes. *)

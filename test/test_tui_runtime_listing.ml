@@ -3,7 +3,7 @@ open Masc_tui_types
 let expect label wanted actual = Alcotest.(check int) label wanted actual
 
 let runtime id : Masc.Tui_decode.runtime_option =
-  { ro_id = id; ro_provider = "provider"; ro_model = "model";
+  { ro_id = id; ro_provider = "provider"; ro_provider_id = "provider"; ro_model = "model";
     ro_exact_slot_group = Exact_http_slots;
     ro_effective_max_context = 200000; ro_max_context_source = Runtime_context_capability;
     ro_max_output_tokens = Some 8192; ro_declared_reasoning_effort = None; ro_is_local = false;

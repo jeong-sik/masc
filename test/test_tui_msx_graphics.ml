@@ -18,10 +18,9 @@ let frame ?(w = 256) ?(h = 192) ?(mode = "screen2") () =
   ; msx_width = w
   ; msx_height = h
   ; msx_rgb = String.make (w * h * 3) '\128'
-  ; msx_mode = mode
-  ; msx_cartridge = Some "test.rom"
-  ; msx_disk = None
-  ; msx_players = []
+  ; msx_meta =
+      Some { Types.msx_mode = mode; msx_cartridge = Some "test.rom"; msx_disk = None;
+             msx_players = [] }
   }
 ;;
 
@@ -34,7 +33,7 @@ let surface_of ?(w = 256) ?(h = 192) () =
 
 let drawn ?(f = frame ()) ?(surface = surface_of ()) ?notice () =
   let buf = Buffer.create 65536 in
-  Msx.render
+  Msx.render ~live:Masc_tui_machine_live.Unread
     ~write:(Buffer.add_string buf)
     ~connection:Masc_tui_types.Connected
     ?notice
@@ -45,7 +44,7 @@ let drawn ?(f = frame ()) ?(surface = surface_of ()) ?notice () =
 
 let drawn_empty ~connection =
   let buf = Buffer.create 4096 in
-  Msx.render ~write:(Buffer.add_string buf) ~connection None None;
+  Msx.render ~live:Masc_tui_machine_live.Unread ~write:(Buffer.add_string buf) ~connection None None;
   Buffer.contents buf
 ;;
 
@@ -153,7 +152,7 @@ let test_meta_pixels_do_not_draw () =
     let f = frame () in
     let meta_changed = { f with Types.msx_rgb = String.make (256 * 192 * 3) '\001' } in
     let buf = Buffer.create 1024 in
-    Msx.render
+    Msx.render ~live:Masc_tui_machine_live.Unread
       ~write:(Buffer.add_string buf)
       ~connection:Types.Connected
       (Some meta_changed)
@@ -263,7 +262,7 @@ let test_no_cell_size_leaves_the_rows_alone () =
 
 let draw_frame f =
   let buf = Buffer.create 1024 in
-  Msx.render ~write:(Buffer.add_string buf) ~connection:Types.Connected (Some f)
+  Msx.render ~live:Masc_tui_machine_live.Unread ~write:(Buffer.add_string buf) ~connection:Types.Connected (Some f)
     (Some (Masc_tui_interactive.Pixels
              { width = f.Types.msx_width; height = f.Types.msx_height; rgb = f.Types.msx_rgb }));
   Buffer.contents buf
@@ -290,7 +289,7 @@ let test_failed_write_and_layout () =
     ignore (drawn ());
     let failed =
       try
-        Msx.render ~write:(fun _ -> raise Exit) ~connection:Types.Connected
+        Msx.render ~live:Masc_tui_machine_live.Unread ~write:(fun _ -> raise Exit) ~connection:Types.Connected
           (Some (frame ())) (Some (surface_of ()));
         false
       with Exit -> true

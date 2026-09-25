@@ -227,6 +227,11 @@ val save_file : string -> string -> unit
     Returns [Error msg] on I/O failure instead of raising. *)
 val save_file_atomic : string -> string -> (unit, string) Result.t
 
+(** {!save_file_atomic} without any fsync: temp file, then rename. After a
+    power loss the renamed file can be empty or partial, so only a file the
+    caller rebuilds on its next pass may be written this way. *)
+val save_file_atomic_rename_only : string -> string -> (unit, string) Result.t
+
 type atomic_replace_failure_stage =
   Atomic_write.atomic_replace_failure_stage =
   | Before_rename

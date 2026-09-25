@@ -2,7 +2,7 @@
 
     Live references are the union of exact {!Tool_output} markers in the
     closed durable-consumer registry: Keeper state/checkpoints, Gate replay,
-    tool-call logs, traces, messages, Keeper chat, and bounded wire captures.
+    tool-call logs, traces, messages, Keeper chat, Board posts, and bounded wire captures.
     A marker whose media type is {!Tool_output.artifact_manifest_mime} adds the
     manifest's strictly decoded normalized children transitively. No other
     blob content is parsed or treated as an ownership edge.

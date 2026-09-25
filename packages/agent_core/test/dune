@@ -475,6 +475,13 @@
  (modules test_exact_fit_call_window)
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
 
+; Candidate_fault table (RFC-one-slot-fault-judgment-for-every-walk.md §4
+; step 1). #38913 added the file without a stanza, so it never compiled.
+(test
+ (name test_candidate_fault)
+ (modules test_candidate_fault)
+ (libraries agent_core_test_deps llm_provider))
+
 (test
  (name test_exact_output_single_surface)
  (modules test_exact_output_single_surface)

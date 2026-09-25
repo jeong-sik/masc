@@ -2456,13 +2456,6 @@ type identity_provider =
       }
   | Identity_unreadable of { idp_id: string; idp_problem: string }
 
-(** The providers a key can act on, in the order the screen numbers them.
-    Both the renderer and the key handler read this, so the number an
-    operator sees and the provider a keypress starts cannot drift apart. *)
-(* Case-insensitive substring. One definition, shared with the pickers'
-   typed filter. *)
-let lowercase_contains = Masc_tui_pick_list.lowercase_contains
-
 (** Whether a query names this provider.
 
     Both the label and the id, because they diverge and an operator knows
@@ -2470,7 +2463,8 @@ let lowercase_contains = Masc_tui_pick_list.lowercase_contains
     names say "googlesheets_". Matching one would make the other a query
     that finds nothing while the row is right there. *)
 let identity_names ~query (id, label) =
-  lowercase_contains ~needle:query label || lowercase_contains ~needle:query id
+  Masc_tui_pick_list.lowercase_contains ~needle:query label
+  || Masc_tui_pick_list.lowercase_contains ~needle:query id
 
 (** Which Keeper a connected client is acting for, where that is a reading
     its row does not already carry.
@@ -2496,6 +2490,9 @@ let clients_act_for_others rows =
            ~keeper_name:row.Tui_decode.cr_keeper_name))
     rows
 
+(** The providers a key can act on, in the order the screen numbers them.
+    Both the renderer and the key handler read this, so the number an
+    operator sees and the provider a keypress starts cannot drift apart. *)
 let identity_connectable ?(query = "") providers =
   List.filter_map
     (function
@@ -8884,7 +8881,8 @@ let palette_starts_with ~needle haystack =
     ~prefix:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
 
-let palette_contains ~needle haystack = lowercase_contains ~needle haystack
+let palette_contains ~needle haystack =
+  Masc_tui_pick_list.lowercase_contains ~needle haystack
 
 (* Memory already trims its filter; count and cursor search must use that
    same query. Other surfaces keep their literal-space search semantics. *)
@@ -9373,9 +9371,6 @@ let runtime_picker_rows (state : state) pick =
   ( already, providers,
     runtimes_for_lane_picker ~lane_providers:providers ~already state.runtime_catalog )
 
-(* The keys the picker's header names, around the verb its Enter carries.
-   While the filter is typed, letters are the filter's, so the header names
-   only the keys that still act. *)
 (* The one row the picker draws when it has no rows: the catalogue is unread,
    or it is read and the filter keeps none of it. The two need different
    actions, so they read differently. *)
@@ -9384,6 +9379,9 @@ let runtime_picker_empty_note picker =
   else
     Printf.sprintf "  (no runtime among %d matches the filter)" picker.rlp_total
 
+(* The keys the picker's header names, around the verb its Enter carries.
+   While the filter is typed, letters are the filter's, so the header names
+   only the keys that still act. *)
 let runtime_picker_keys enter = function
   | None -> Printf.sprintf "j/k move, PgUp/PgDn page, %s, e cancel" enter
   | Some _ -> Printf.sprintf "\xe2\x86\x91/\xe2\x86\x93 move, %s, Esc clear filter" enter

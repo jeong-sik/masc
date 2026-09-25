@@ -19,8 +19,6 @@ type field =
   | Name
   | Instructions
   | Trace_id
-  | Trace_history
-  | Last_handoff_ts
   | Created_at
   | Updated_at
   | Total_turns
@@ -55,8 +53,6 @@ let all_fields =
   ; Name
   ; Instructions
   ; Trace_id
-  ; Trace_history
-  ; Last_handoff_ts
   ; Created_at
   ; Updated_at
   ; Total_turns
@@ -92,8 +88,6 @@ let field_name = function
   | Name -> "name"
   | Instructions -> "instructions"
   | Trace_id -> "trace_id"
-  | Trace_history -> "trace_history"
-  | Last_handoff_ts -> "last_handoff_ts"
   | Created_at -> "created_at"
   | Updated_at -> "updated_at"
   | Total_turns -> "total_turns"

@@ -398,7 +398,7 @@ let absorbed_match_to_json { row; into; into_current } : Yojson.Safe.t =
     ]
 ;;
 
-(* --- History search (checkpoint + trace history) --- *)
+(* --- History search (checkpoint + current trace) --- *)
 
 type history_search =
   { matches : string list
@@ -509,7 +509,7 @@ let search_history ~config ~(meta : keeper_meta) ~ctx_work ~query ~limit =
     let exact_matches = !checkpoint_exact in
     read_traces (limit - List.length exact_matches) !exact_seen !fragment_seen
       exact_matches !checkpoint_fragments 0 []
-      (Keeper_id.Trace_id.to_string meta.runtime.trace_id :: meta.runtime.trace_history)
+      [ Keeper_id.Trace_id.to_string meta.runtime.trace_id ]
 ;;
 
 type all_search_match =

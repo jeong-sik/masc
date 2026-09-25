@@ -3,8 +3,7 @@
 open Masc
 
 let target_keys =
-  [ "trace_history"
-  ; "instructions"
+  [ "instructions"
   ; "last_runtime_attempt"
   ; "current_task_id"
   ; "keeper_id"

@@ -9,8 +9,6 @@ type field =
   | Name
   | Instructions
   | Trace_id
-  | Trace_history
-  | Last_handoff_ts
   | Created_at
   | Updated_at
   | Total_turns

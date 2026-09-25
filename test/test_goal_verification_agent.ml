@@ -680,9 +680,13 @@ let test_verifying_goal_with_a_missing_request_is_rearmed_and_drained () =
   (* Simulate the crash window: the phase is Verifying but the ledger never
      recorded the proof request. *)
   (match
-     Goal_store.upsert_goal config ~id:goal_id ~phase:Goal_phase.Verifying ()
+     Goal_store.update_goal_if_phase config ~goal_id
+       ~expected_phase:Goal_phase.Executing
+       (fun goal -> { goal with Goal_store.phase = Goal_phase.Verifying })
    with
-   | Ok _ -> ()
+   | Ok (Goal_store.Goal_updated _) -> ()
+   | Ok (Goal_store.Goal_phase_mismatch phase) ->
+     fail ("test setup: goal was not Executing but " ^ Goal_phase.to_string phase)
    | Error error -> fail (Goal_store.write_error_to_string error));
   (* Creation writes no ledger row, so the wedge starts with none at all —
      the same hole the scan re-arms, reached without a row to empty. *)

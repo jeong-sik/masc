@@ -20,5 +20,7 @@ let to_id = function
   | Browser_stagehand -> "browser_stagehand_exact"
 ;;
 
+let equal (left : t) (right : t) = left = right
+
 (* Read back through [to_id], so no id is spelled a second time. *)
 let of_id id = List.find_opt (fun lane -> String.equal (to_id lane) id) all

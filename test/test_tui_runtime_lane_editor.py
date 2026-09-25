@@ -515,7 +515,102 @@ def run_exact(executable: str) -> None:
     )
 
 
+# SGR mouse wheel notches at column 5, row 5, clear of the Activity pane.
+WHEEL_UP = b"\x1b[<64;5;5M"
+WHEEL_DOWN = b"\x1b[<65;5;5M"
+# The picker header's filter cursor, U+258F.
+FILTER_CURSOR = "▏".encode()
+
+
+def run_filter(executable: str) -> None:
+    """The candidate picker is walked without holding an arrow key: End, Home
+    and PgDn jump, [/] narrows the list to the typed text, and Esc drops the
+    filter before it closes the picker. Letters typed into the filter are the
+    filter's, and Enter over an empty result posts nothing."""
+    store = LaneStore()
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.RUNTIME_PROBE_PATH] = h.runtime_probe_response(fresh=True)
+    fixtures[h.RUNTIME_PROBE_FORCE_PATH] = h.runtime_probe_response(fresh=True)
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    requests: h.HttpRequests = []
+    picker = b"adding a candidate to the candidate order of primary"
+
+    def interact(process, fd, _slave, output, _base):
+        h.tab_until(process, fd, output, b"MASC Config")
+        h.resize_and_wait(
+            process, fd, output, rows=30, columns=131,
+            needle=b"MASC Config", controls=(h.FULL_REDRAW,),
+        )
+        h.send_and_wait(process, fd, output, b"9", b"Lanes (3 lanes, 4 slots)")
+        # primary holds runtime-a and runtime-b, so the other three rank
+        # first: c, d, e, then a, b.
+        mark = mark_output(fd, output)
+        h.send_and_wait(process, fd, output, b"e", picker)
+        h.wait_for_output(process, fd, output, b"> runtime-c", start=mark, timeout=5.0)
+        h.wait_for_output(process, fd, output, "5 of 5 · / filter".encode(), start=mark, timeout=5.0)
+        # The wheel moves the picker, not the lane list under it: primary's
+        # rows are 0 and 1 there and degraded is 2, so two notches that
+        # leaked would leave the list on degraded (checked at the end).
+        h.send_and_wait(process, fd, output, WHEEL_DOWN, b"> runtime-d")
+        h.send_and_wait(process, fd, output, WHEEL_DOWN, b"> runtime-e")
+        h.send_and_wait(process, fd, output, WHEEL_UP, b"> runtime-d")
+        h.send_and_wait(process, fd, output, b"\x1b[F", b"> runtime-b")
+        h.send_and_wait(process, fd, output, b"\x1b[H", b"> runtime-c")
+        h.send_and_wait(process, fd, output, b"\x1b[6~", b"> runtime-a")
+
+        h.send_and_wait(process, fd, output, b"/", b"filter: " + FILTER_CURSOR + b" 5 of 5")
+        mark = mark_output(fd, output)
+        h.send_and_wait(process, fd, output, b"-d", b"filter: -d" + FILTER_CURSOR + b" 1 of 5")
+        h.wait_for_output(process, fd, output, b"> runtime-d", start=mark, timeout=3.0)
+        # [j] moves the picker outside a filter; inside one it is a letter.
+        h.send_and_wait(
+            process, fd, output, b"j", b"(no runtime among 5 matches the filter)",
+        )
+        # Enter over no match changes nothing, so nothing repaints; the posts
+        # compared at the end are what show it sent nothing.
+        os.write(fd, b"\r")
+        h.send_and_wait(process, fd, output, b"\x7f", b"filter: -d" + FILTER_CURSOR + b" 1 of 5")
+        # Esc drops the filter and keeps runtime-d under the cursor.
+        # runtime-d opens the window again, on the row it was drawn on under
+        # the filter, so the frame does not redraw that row: read the screen.
+        h.send_and_wait(process, fd, output, b"\x1b", "5 of 5 · / filter".encode())
+        h.drain_until_quiet(process, fd, output)
+        if b"> runtime-d   Resolved D / model-d" not in h.screen_text(bytes(output)):
+            raise AssertionError("Esc did not keep runtime-d under the cursor")
+
+        h.send_and_wait(process, fd, output, b"/model-e", b"filter: model-e" + FILTER_CURSOR + b" 1 of 5")
+        os.write(fd, b"\r")
+        screen_lacks(process, fd, output, picker, timeout=5.0)
+
+        expected = [{"lane": "primary", "runtime_ids": ["runtime-a", "runtime-b", "runtime-e"]}]
+        deadline = time.monotonic() + 3.0
+        while True:
+            posted = [json.loads(body) for path, body in requests if path == ROUTING_PATH]
+            if len(posted) >= len(expected) or time.monotonic() > deadline:
+                break
+            time.sleep(0.05)
+        if posted != expected:
+            raise AssertionError(f"routing posts: {posted!r}, expected {expected!r}")
+        # [e] opens the picker for the lane under the list's cursor: still
+        # primary, so no wheel notch moved it while the picker was open.
+        h.send_and_wait(process, fd, output, b"e", picker)
+        # Esc and q apart: written together they read as Alt-q.
+        os.write(fd, b"\x1b")
+        screen_lacks(process, fd, output, picker, timeout=5.0)
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="Runtime candidate picker filters and pages",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
     run_exact(os.path.abspath(sys.argv[1]))
+    run_filter(os.path.abspath(sys.argv[1]))
     print("runtime lane editor: PASS")

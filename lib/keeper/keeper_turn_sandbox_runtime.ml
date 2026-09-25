@@ -1219,13 +1219,15 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
            | Link_already_correct | Link_create _ | Link_retarget _ -> ())
          rows;
        let actions = Keeper_sandbox_microvm.build_link_actions rows in
-       (match actions with
+       (* Already-correct links need their target too: a fresh boot recreates
+          the build volume empty while the work volume keeps the links. *)
+       (match Keeper_sandbox_microvm.build_link_targets rows with
         | [] -> ()
-        | _ :: _ ->
-          let targets = List.map snd actions in
+        | _ :: _ as targets ->
           let mkdir = Keeper_sandbox_microvm.build_target_mkdir_argv ~container_name ~targets in
-          (match run_argv_with_status ?timeout_sec mkdir with
-           | Unix.WEXITED 0, _ ->
+          (match run_argv_with_status ?timeout_sec mkdir, actions with
+           | (Unix.WEXITED 0, _), [] -> ()
+           | (Unix.WEXITED 0, _), _ :: _ ->
              let apply =
                Keeper_sandbox_microvm.build_link_apply_argv_for
                  backend
@@ -1241,7 +1243,7 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
                 Log.Keeper.warn
                   "microvm_build_link_apply_failed: %s"
                   (Keeper_sandbox_runtime.docker_failure_output_for_log out))
-           | _, out ->
+           | (_, out), _ ->
              Log.Keeper.warn
                "microvm_build_link_mkdir_failed: %s"
                (Keeper_sandbox_runtime.docker_failure_output_for_log out)))

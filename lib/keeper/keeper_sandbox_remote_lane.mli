@@ -58,6 +58,12 @@ val workspace_root :
 (** The resolved workspace used for path translation:
     [<endpoint_root>/<sanitized keeper name>]. *)
 
+val declared_path_of_endpoint : Exec_ssh_endpoint.t -> string -> string option
+(** [Some p] when [path] is absolute and under one of [endpoint]'s declared
+    roots ([allowed_paths], {!Exec_policy_paths.extra_root_path}); [p] is the
+    endpoint path, lexically normalized. The one judgment {!declared_endpoint_path}
+    and the remote Write lane both make. *)
+
 val declared_endpoint_path :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

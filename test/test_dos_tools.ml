@@ -206,15 +206,22 @@ let test_load_and_screen_name_the_core () =
 (* CI links the core at OCAML_DOS_SHA. This fails when the SHA moved without
    Dos_lane's pinned digest, and locally when the build linked another core
    (an older opam install, a vendored checkout on another branch). *)
+(* The pin lives in these two files. Naming them here, as the literals the
+   edited-tests selector reads, makes a PR that moves only OCAML_DOS_SHA run
+   this suite, so a digest left behind fails that PR and not a later main. *)
+let pin_script = "scripts/opam-pin-external-deps.sh"
+let pin_lock = "masc.opam.locked"
+
 let test_the_linked_core_is_the_pinned_one () =
   let core = Dos_lane.core in
   if not core.Dos_lane.matches_pin then
     fail
       (Printf.sprintf
          "linked ocaml-dos source digest %s differs from the pinned %s: either this \
-          build linked a core other than OCAML_DOS_SHA, or the SHA moved and \
+          build linked a core other than OCAML_DOS_SHA (%s, %s), or the SHA moved and \
           Dos_lane.pinned_core_source_digest must become %s"
-         core.source_digest core.pinned_source_digest core.source_digest)
+         core.source_digest core.pinned_source_digest pin_script pin_lock
+         core.source_digest)
 ;;
 
 let test_press_reaches_the_guest_and_the_ledger () =

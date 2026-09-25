@@ -133,8 +133,13 @@ readonly OCAML_MSX_SHA="870e61063e08ca4a0b15b939cb72a1c11aade1d3"
 # 49bc232 = ocaml-dos #29: a mode set reloads the VGA DAC and the ROM font is
 # served in IBM bit order, so 삼국지3's copy-protection prompt is visible and
 # its letters are no longer mirrored.
+# 909e143 = ocaml-dos #32: the core reports a build-time digest of its lib/
+# sources (ocaml-dos.core-identity), which masc shows on DOS answers and /health.
 # Bump Dos_lane.pinned_core_source_digest (lib/dos_lane/dos_lane.ml) with this
-# SHA: test_dos_tools fails with the new digest in its message until they agree.
+# SHA. test_dos_tools names this file, so the PR that moves the SHA runs it, and
+# it fails with the new digest in its message until the two agree. A build that
+# says "Library ocaml-dos.core-identity not found" is linking an ocaml-dos older
+# than #32: re-run this script with --install, or vendor the pinned core.
 readonly OCAML_DOS_SHA="909e14318c651b1c6fd72168f96ada0339587906"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it

@@ -193,6 +193,15 @@ val tool_kind : entry -> Keeper_tool_descriptor.tool_kind
 val status_tool_kind : Keeper_tool_descriptor.tool_kind
 val cancel_tool_kind : Keeper_tool_descriptor.tool_kind
 
+(** Whether a surface materializing [entries] carries the shared status and
+    cancel controls: exactly when one of them is [Async]. The controls address
+    the durable request id an async composition hands back, and nothing else
+    on a Keeper surface mints one, so on a surface without an async entry they
+    are schemas with nothing to act on; on a surface with one they are how its
+    result is read, and are placed with their schemas rather than behind the
+    deferred-tool listing. *)
+val requires_async_controls : entry list -> bool
+
 (** The ad-hoc plan tool's name. It lives here beside the catalog's own tool
     names because the approval policy needs to recognise it and must not
     depend on the surface that materialises it. Unlike a [keeper_compose_*]

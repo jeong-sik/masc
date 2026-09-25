@@ -358,6 +358,19 @@ let optional_int stage name fields =
     protocol_error stage (Printf.sprintf "field %S must be an integer or null" name)
 ;;
 
+(* Deferred MCP loading is part of how masc drives this client, not an
+   operator preference: every posture names [ToolSearch] in [--tools]
+   ([Runtime_native_tools.claude_code_tools_arg]) so masc's tool schemas are
+   sent by name. Left unset, the client turns tool search off whenever
+   [ANTHROPIC_BASE_URL] names a non-first-party host, and every masc schema
+   rides inline on every request of a routed turn. [true] keeps it on there
+   too; on the first-party API it is the client's own default. A gateway that
+   does not forward [tool_reference] blocks then fails the request rather than
+   silently paying for the whole surface -- a runtime failure the lane can
+   fail over from. Documented at https://code.claude.com/docs/en/mcp
+   ("Configure tool search"). *)
+let tool_search_setting = "ENABLE_TOOL_SEARCH=true"
+
 let client_environment () =
   let inherited_names =
     [ "HOME"
@@ -398,7 +411,10 @@ let client_environment () =
   |> List.filter_map (fun name ->
     Option.map (fun value -> name ^ "=" ^ value) (Sys.getenv_opt name))
   |> fun inherited ->
-  ("CLAUDE_CODE_ENTRYPOINT=masc" :: "CLAUDE_AGENT_SDK_VERSION=masc-ocaml" :: inherited)
+  ("CLAUDE_CODE_ENTRYPOINT=masc"
+   :: "CLAUDE_AGENT_SDK_VERSION=masc-ocaml"
+   :: tool_search_setting
+   :: inherited)
   |> Array.of_list
 ;;
 

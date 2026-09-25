@@ -124,18 +124,23 @@ let schema_tool_rows ?(skill_compositions = []) () =
          Declared_composition evidence, schema_tool_of_entry entry)
       skill_compositions
   in
-  composition_tools
-  @ [ ( Async_status
-      , schema_tool
-          ~name:Catalog.status_tool_name
-          ~description:Tool_schemas_composition_control.status_schema.description
-          ~input_schema:Tool_schemas_composition_control.status_schema.input_schema )
-    ; ( Async_cancel
-      , schema_tool
-          ~name:Catalog.cancel_tool_name
-          ~description:Tool_schemas_composition_control.cancel_schema.description
-          ~input_schema:Tool_schemas_composition_control.cancel_schema.input_schema )
-    ]
+  let controls =
+    if Catalog.requires_async_controls (List.map fst skill_compositions)
+    then
+      [ ( Async_status
+        , schema_tool
+            ~name:Catalog.status_tool_name
+            ~description:Tool_schemas_composition_control.status_schema.description
+            ~input_schema:Tool_schemas_composition_control.status_schema.input_schema )
+      ; ( Async_cancel
+        , schema_tool
+            ~name:Catalog.cancel_tool_name
+            ~description:Tool_schemas_composition_control.cancel_schema.description
+            ~input_schema:Tool_schemas_composition_control.cancel_schema.input_schema )
+      ]
+    else []
+  in
+  composition_tools @ controls
 ;;
 
 let schedule_to_json (schedule : Agent_core.Tool_contract.schedule) =
@@ -2176,6 +2181,12 @@ let make_tools_with_authority
             ()
         ]
   in
+  (* Built only where they can address something: an async entry on this
+     surface is the one thing that mints the request id they take. *)
+  let async_controls =
+    Catalog.requires_async_controls
+      (List.map (fun (skill : composition_skill) -> skill.entry) skill_compositions)
+  in
   let status_tool =
       make_request_control_tool
         ~config
@@ -2195,7 +2206,9 @@ let make_tools_with_authority
         ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
         ~handle:(fun request_id -> cancel_result ~config ~meta ~request_id)
   in
-  composition_tools @ [ status_tool; cancel_tool ]
+  if async_controls
+  then composition_tools @ [ status_tool; cancel_tool ]
+  else composition_tools
 ;;
 
 let make_tools ~capability_surface =

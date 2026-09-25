@@ -5,13 +5,10 @@ Read the status and structured result of one async Keeper composition.
 Both are exact and durable, addressed by the request's own id."""
 additional_properties = false
 
+# Placed with its schema, never behind the deferred-tool listing: it is on a
+# surface only beside an async composition, whose result it reads
+# (Keeper_tool_composition_catalog.requires_async_controls).
 
-# Held back from the request until the model asks for it by name.
-# 2026-09-01..03: 5 turns needed it across 6317 provider requests, and its
-# 293 B schema rode every one of those requests. Loading it on demand costs
-# one extra request on those 5 turns and saves the 293 B on the rest.
-# What that trade does not cover is in Tool_loading_declarations.
-defer_loading = true
 [[params]]
 name = "request_id"
 type = "string"

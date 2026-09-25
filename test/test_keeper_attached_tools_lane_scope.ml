@@ -118,6 +118,7 @@ let with_bundle ?(history = []) ?(attached = true) ?(with_loader = true) f =
         ; agent_cell = ref None
         ; history
         ; load_receipts
+        ; keeper_turn_id = 1
         }
     else None
   in

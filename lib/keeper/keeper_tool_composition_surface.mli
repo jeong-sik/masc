@@ -1,6 +1,6 @@
 (** Materialize validated catalog entries as first-class Agent-Core tools,
-    plus the always-present plan/proposal execution and durable async control
-    tools. *)
+    plus the durable async request controls when an entry is [Async]
+    ({!Keeper_tool_composition_catalog.requires_async_controls}). *)
 
 val composition_run_summary_tool_name : string
 (** Internal durable row name for one terminal composition run. It is not a
@@ -59,7 +59,8 @@ val schema_tool_rows :
   ('evidence schema_tool_origin * Agent_core.Tool.t) list
 (** Handler-free schemas paired with caller-owned composition evidence. This
     preserves typed provenance through materialization instead of recovering it
-    from a generated tool name. *)
+    from a generated tool name. The async controls are rows exactly when
+    {!make_tools} would build them. *)
 
 val instruction_skill_schema_tool :
   instruction_skills:instruction_skill list ->

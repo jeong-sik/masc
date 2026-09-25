@@ -613,6 +613,7 @@ let make_tool_bundle_for_descriptors_with_policy
           ~restored:surface.load_receipts
           ~trace_id:meta.runtime.trace_id
           ~task_id:meta.current_task_id
+          ~keeper_turn:surface.keeper_turn_id
           ~current_task_id:(fun () ->
             match
               Keeper_owner_registry.get

@@ -177,6 +177,15 @@ let tool_kind (entry : entry) =
 let status_tool_kind = Keeper_tool_descriptor.Async_composition_tool
 let cancel_tool_kind = Keeper_tool_descriptor.Async_composition_tool
 
+let requires_async_controls entries =
+  List.exists
+    (fun (entry : entry) ->
+       match entry.execution with
+       | Async -> true
+       | Inline -> false)
+    entries
+;;
+
 
 let entries catalog = catalog
 

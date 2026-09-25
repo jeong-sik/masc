@@ -5,9 +5,9 @@ Request cancellation of one async Keeper composition.
 Addressed by its exact durable request id."""
 additional_properties = false
 
-# Held back from the request until the model asks for it by name. Not
-# called once on 2026-08-29 or 2026-08-30 across the fleet.
-defer_loading = true
+# Placed with its schema, never behind the deferred-tool listing: it is on a
+# surface only beside an async composition, whose run it stops
+# (Keeper_tool_composition_catalog.requires_async_controls).
 
 [[params]]
 name = "request_id"

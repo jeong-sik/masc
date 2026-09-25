@@ -16883,7 +16883,10 @@ let main
   let input_reader = create_input_reader () in
   let paste_pause_notified = ref false in
   let paste_quiet_notified = ref false in
-  let csi_pause_notified = ref false in
+  (* The notice this loop last set for a held sequence, kept as the exact
+     [last_action] value so clearing it can tell it apart, by identity, from
+     any notice set after it. *)
+  let csi_pause_notice = ref None in
   let paste_guard_idle_notified = ref false in
   (* Palette and graphics share one bounded startup probe because both replies
      arrive on the key stream. The probe removes only replies to these exact
@@ -18241,6 +18244,19 @@ and is loaded on demand through keeper_skill.
                       tail_last_byte_ns = Mtime_clock.elapsed_ns () };
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 Some (Masc_tui_paste.snapshot_payload paste.decoder)
+            (* Bytes already waiting may finish the held head: a split
+               [ESC \[ 2] whose [0 0 ~ first CR second] tail arrived just
+               before this Ctrl-C. Cancelling first would type that tail as
+               keys, and its CR is Enter. [input_byte_ready] pulls them
+               through the probe without waiting; while any are there the
+               Ctrl-C only waits, as the paste arms do, and the loop reads
+               them now. *)
+            | No_paste, true when input_byte_ready input_reader ->
+                Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+                report_action state "system"
+                  "Terminal sequence still arriving; Ctrl-C again after it stops";
+                Render_schedule.request render_schedule Render_schedule.Background;
+                None
             | No_paste, true ->
                 cancel_incomplete_sequence input_reader;
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
@@ -18368,14 +18384,23 @@ and is loaded on demand through keeper_skill.
            paste_quiet_notified := false
        | Pasting _ -> ()
        | No_paste | Draining_tail _ -> paste_quiet_notified := false);
-      (match input_holds_incomplete_sequence input_reader with
-       | true when not !csi_pause_notified ->
-           csi_pause_notified := true;
+      (match input_holds_incomplete_sequence input_reader, !csi_pause_notice with
+       | true, None ->
            report_action state "system"
              "Terminal sequence incomplete; Ctrl-C cancels it";
+           csi_pause_notice := state.last_action;
            Render_schedule.request render_schedule Render_schedule.Background
-       | true -> ()
-       | false -> csi_pause_notified := false);
+       | true, Some _ | false, None -> ()
+       | false, Some shown ->
+           (* The hold is over, so its notice is no longer true. Only that
+              notice is taken down: one set since (the Ctrl-C outcome, a key's
+              answer) stays for its own window. *)
+           (match state.last_action with
+            | Some current when current == shown ->
+                state.last_action <- None;
+                Render_schedule.request render_schedule Render_schedule.Background
+            | Some _ | None -> ());
+           csi_pause_notice := None);
       (match input_reader.paste_phase with
        | Draining_tail tail when paste_can_recover input_reader tail.tail_last_byte_ns
                      && not !paste_guard_idle_notified ->

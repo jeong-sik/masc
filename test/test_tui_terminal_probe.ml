@@ -422,6 +422,53 @@ let test_a_started_paste_is_not_a_hold () =
     (read_through decoder "second\x1b[201~")
 ;;
 
+let fed ~palette_requested text =
+  let decoder = Masc_tui_terminal_probe.create ~palette_requested in
+  String.iter (Masc_tui_terminal_probe.feed decoder) text;
+  decoder
+;;
+
+(* Every state that keeps bytes back across an idle read is a hold, and
+   the one-byte [Escape] state is not: [next] hands a lone ESC on as a key
+   the moment input runs dry. *)
+let test_hold_states_are_reported () =
+  let holds name palette_requested text expected =
+    check bool name expected
+      (Masc_tui_terminal_probe.holds_incomplete_sequence
+         (fed ~palette_requested text))
+  in
+  holds "OSC reply candidate" true "\x1b]10;rgb:" true;
+  holds "private CSI (theme reply)" true "\x1b[?99" true;
+  holds "cell-size reply or PageDown" false "\x1b[6" true;
+  holds "APC prefix" false "\x1b_" true;
+  holds "graphics APC body" false "\x1b_Gi=31" true;
+  holds "a lone ESC" false "\x1b" false
+;;
+
+(* A discard ends the held sequence where it stands, as the reader's own
+   CSI cancel does: the bytes after it are read from [Normal] as keys. *)
+let test_a_discarded_window_hold_reads_later_bytes_as_keys () =
+  let decoder = fed ~palette_requested:false "\x1b[6" in
+  Masc_tui_terminal_probe.discard_incomplete_sequence decoder;
+  check string "the rest is keys, not the end of PageDown" "~x"
+    (read_through decoder "~x");
+  let kept = fed ~palette_requested:false "\x1b[6" in
+  check string "control: kept, the same bytes finish PageDown" "\x1b[6~x"
+    (read_through kept "~x")
+;;
+
+(* Why Ctrl-C reads waiting bytes before it cancels: a tail already in the
+   stream finishes the held head into a paste start, and the hold is gone. *)
+let test_a_waiting_tail_resolves_the_hold () =
+  let decoder = fed ~palette_requested:false "\x1b[2" in
+  check bool "the split head is held" true
+    (Masc_tui_terminal_probe.holds_incomplete_sequence decoder);
+  check string "the tail makes it a paste start" "\x1b[200~first\rsecond"
+    (read_through decoder "00~first\rsecond");
+  check bool "no hold remains to cancel" false
+    (Masc_tui_terminal_probe.holds_incomplete_sequence decoder)
+;;
+
 let test_process_palette_preserves_none () =
   Masc_tui_terminal_palette.set_current None;
   let unknown_snapshot = Masc_tui_terminal_palette.snapshot () in
@@ -517,6 +564,12 @@ let () =
             test_a_kept_paste_head_replays_into_later_keys
         ; test_case "a started paste is not a hold" `Quick
             test_a_started_paste_is_not_a_hold
+        ; test_case "hold states are reported" `Quick
+            test_hold_states_are_reported
+        ; test_case "a discarded window hold reads later bytes as keys" `Quick
+            test_a_discarded_window_hold_reads_later_bytes_as_keys
+        ; test_case "a waiting tail resolves the hold" `Quick
+            test_a_waiting_tail_resolves_the_hold
         ] )
     ]
 ;;

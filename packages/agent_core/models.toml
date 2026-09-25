@@ -3949,6 +3949,346 @@ supports_min_p = false
 supports_parallel_tool_calls = false
 supports_structured_output = false
 
+# OpenRouter free (":free") ids, lane-end fallbacks (operator decision
+# askc7f672a01024a692, 2026-09-25). Every value comes from GET /api/v1/models
+# at 2026-09-25T16:10Z (evidence/task-openrouter-free-models/
+# models-snapshot.json) through gen_rows.py in the same directory, which states
+# the rules: window and ceiling as listed, parameter flags lowered where the
+# gateway does not forward the parameter, image input only lowered, and the
+# router's effort ladder without "none" until a probe shows the model stops
+# thinking. Free ids bill nothing, so both prices are 0. Two free ids list no
+# tools and get no row: z-ai/glm-5.2:free, nvidia/nemotron-3.5-content-safety:free.
+
+[[models]]
+id_prefix = "cohere/north-mini-code:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 256000
+max_output_tokens = 64000
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_min_p = false
+supports_multimodal_inputs = false
+supports_image_input = false
+
+[[models]]
+id_prefix = "dots-studio/dots-3-note-preview:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 512000
+max_output_tokens = 460800
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = false
+supports_parallel_tool_calls = false
+supports_top_k = false
+supports_min_p = false
+
+[[models]]
+id_prefix = "google/gemma-4-26b-a4b-it:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 262144
+max_output_tokens = 32768
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+supports_structured_output = false
+supports_top_k = false
+supports_min_p = false
+
+[[models]]
+id_prefix = "google/gemma-4-31b-it:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 262144
+max_output_tokens = 32768
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+supports_structured_output = false
+supports_top_k = false
+supports_min_p = false
+
+[[models]]
+id_prefix = "inclusionai/ling-3.0-flash-fin:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 262144
+max_output_tokens = 32768
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_min_p = false
+supports_multimodal_inputs = false
+supports_image_input = false
+
+[[models]]
+id_prefix = "inclusionai/ling-3.0-flash-sante:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 262144
+max_output_tokens = 32768
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_min_p = false
+supports_multimodal_inputs = false
+supports_image_input = false
+
+[[models]]
+id_prefix = "liquid/lfm-2.5-2.6b:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 65536
+max_output_tokens = 8192
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+supports_multimodal_inputs = false
+supports_image_input = false
+
+[[models]]
+id_prefix = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 256000
+max_output_tokens = 65536
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_top_k = false
+supports_min_p = false
+
+[[models]]
+id_prefix = "nvidia/nemotron-3-super-120b-a12b:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 262144
+max_output_tokens = 235929
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+supports_top_k = false
+supports_min_p = false
+supports_multimodal_inputs = false
+supports_image_input = false
+
+[[models]]
+id_prefix = "nvidia/nemotron-3-ultra-550b-a55b:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 65536
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_top_k = false
+supports_min_p = false
+supports_multimodal_inputs = false
+supports_image_input = false
+
+[[models]]
+id_prefix = "nvidia/nemotron-3.5-lightning:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 65536
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_parallel_tool_calls = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_top_k = false
+supports_min_p = false
+supports_multimodal_inputs = false
+supports_image_input = false
+
+[[models]]
+id_prefix = "poolside/laguna-s-2.1:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 262144
+max_output_tokens = 32768
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = false
+supports_parallel_tool_calls = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_top_k = false
+supports_min_p = false
+supports_multimodal_inputs = false
+supports_image_input = false
+
+[[models]]
+id_prefix = "poolside/laguna-xs-2.1:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 262144
+max_output_tokens = 32768
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = false
+supports_parallel_tool_calls = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_top_k = false
+supports_min_p = false
+supports_multimodal_inputs = false
+supports_image_input = false
+
+[[models]]
+id_prefix = "qwen/qwen3.8-27b:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 262144
+max_output_tokens = 235929
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = false
+supports_parallel_tool_calls = false
+supports_response_format_json = false
+supports_top_k = false
+supports_min_p = false
+
+[[models]]
+id_prefix = "thinkingmachines/inkling-small:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 262144
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_top_k = false
+supports_min_p = false
+
+[[models]]
+id_prefix = "thinkingmachines/inkling:free"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 262144
+input_per_million = 0.0
+output_per_million = 0.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_top_k = false
+supports_min_p = false
+
 # Z.AI coding plan. Window 1M (docs.z.ai). The 131072 output ceiling is the
 # value the endpoint named when it refused an out-of-range max_tokens with
 # code 1210. Reads images (probe PNG confirmed).

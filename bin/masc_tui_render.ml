@@ -3561,13 +3561,34 @@ let render_planning_list (state : state) =
          let content_height =
            rows - count_frame_lines buf - selection_rows - tail_rows
          in
+         (* Where the list stands, when it does not hold every goal. At
+            sixty columns and twenty-four rows the active filter held eight
+            and the frame drew seven, and nothing on the screen said an
+            eighth existed -- the rollup above counts every goal in the
+            store, not the ones this filter and this frame leave off. The
+            reading costs one of the rows it describes, which is the rule
+            [Masc_tui_scroll.content_height ~overflow_takes_row:true] already
+            holds for the roster and the reading panes. The chrome is zero
+            here because [content_height] above has already taken it. *)
+         let list_rows =
+           (* A short frame may leave no list row at all. When it leaves one
+              row for several goals, use that row to say how many goals are
+              hidden; the selected goal still has its detail row below. *)
+           if content_height <= 0 then 0
+           else if content_height = 1 && count > 1 then 0
+           else
+             Masc_tui_scroll.content_height ~rows:content_height ~chrome:0
+               ~count ~preview_keep:None ~overflow_takes_row:true
+         in
+         let overflowing = content_height > 0 && count > list_rows in
          let scroll_offset =
-           if state.planning_cursor >= content_height then
-             state.planning_cursor - content_height + 1
+           if list_rows = 0 then 0
+           else if state.planning_cursor >= list_rows then
+             state.planning_cursor - list_rows + 1
            else 0
          in
-         let goals_window = Rows.of_list ~first:scroll_offset ~height:content_height goals in
-         for i = 0 to content_height - 1 do
+         let goals_window = Rows.of_list ~first:scroll_offset ~height:list_rows goals in
+         for i = 0 to list_rows - 1 do
            let idx = i + scroll_offset in
            match Rows.at goals_window idx with
            | None -> box_empty buf cols
@@ -3660,6 +3681,11 @@ let render_planning_list (state : state) =
                box_line buf cols line
            end
          done;
+         if overflowing then
+           box_line_styled buf cols ~style:(Theme.recede ())
+             (Printf.sprintf "  [goals %s]"
+                (Masc_tui_scroll.window_text ~scroll:scroll_offset
+                   ~height:list_rows count));
          match List.nth_opt goals state.planning_cursor with
          | None -> box_empty buf cols
          | Some selected ->
@@ -11488,7 +11514,9 @@ let render_changes_list (state : state) =
       (Printf.sprintf "[changes %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:move  Right/Enter:diff  [/]:keeper  d:tree diff  v:code  o:editor  r:refresh  q:quit");
+    (* The footer is the key table's (for_surface Changes); never a literal here. *)
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints Changes));
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 
@@ -13150,8 +13178,12 @@ let render_acting (state : state) =
     | Observer_live { events; _ } -> Printf.sprintf "feed: live %d" events
     (* The count sits straight after the state word, so it reads as the count
        its "live N" sibling above uses. *)
-    | Observer_closed { events; reason; _ } ->
+    | Observer_closed_after_live { events; reason; _ } ->
         Printf.sprintf "feed: closed %d (%s)" events
+          (Terminal_text.single_line reason)
+    (* No count: the stream never answered, so there is nothing it carried. *)
+    | Observer_closed_before_answer { reason; _ } ->
+        Printf.sprintf "feed: failed to open (%s)"
           (Terminal_text.single_line reason)
   in
   (* Rows and events, each with its noun. This read "(3 of 120 held, turns)",
@@ -13238,8 +13270,11 @@ let render_acting (state : state) =
       | Observer_live _ ->
           if held = 0 then "  (no events yet)"
           else "  (nothing under this filter; f shows everything)"
-      | Observer_closed _ ->
+      | Observer_closed_after_live _ ->
           if held = 0 then "  (the feed closed before any event arrived)"
+          else "  (nothing under this filter; f shows everything)"
+      | Observer_closed_before_answer _ ->
+          if held = 0 then "  (no events yet: the feed failed to open)"
           else "  (nothing under this filter; f shows everything)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;

@@ -937,7 +937,10 @@ let attempt_runtime_candidates
                 | Keeper_runtime_failure_route.Admission
                 | Keeper_runtime_failure_route.Provider_reported_failure
                 | Keeper_runtime_failure_route.Request_refused
-                | Keeper_runtime_failure_route.Provider_wire_defect )
+                | Keeper_runtime_failure_route.Provider_wire_defect
+                (* the input outgrew this window; it says nothing about
+                   the candidate answering a smaller turn (#38984). *)
+                | Keeper_runtime_failure_route.Context_window_exceeded )
             } ->
           ()
         (* A 5xx the provider called permanent failed this candidate without

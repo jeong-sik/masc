@@ -122,6 +122,10 @@ let fixture_script
     "[ \"${CLAUDE_CODE_ENTRYPOINT-}\" = masc ] || exit 92\n";
   output_string output
     "[ \"${CLAUDE_AGENT_SDK_VERSION-}\" = masc-ocaml ] || exit 93\n";
+  (* A Keeper session must not load the auto-memory index of the directory
+     it runs in (the operator's). *)
+  output_string output
+    "[ \"${CLAUDE_CODE_DISABLE_AUTO_MEMORY-}\" = 1 ] || exit 98\n";
   output_string output "if [ \"${2-}\" = auth ]; then\n";
   output_string output
     ("  printf '%s\\n' " ^ shell_quote auth_json ^ "\n");
@@ -1068,7 +1072,9 @@ let test_api_diagnostic_preserves_prior_text () =
        run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
        |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:true;
        match List.rev !events with
-       | [ Turn_started { model = "claude-fixture"; _ }; Text_delta "MASC_CLAUDE_OK" ] ->
+       | [ Turn_started { model = "claude-fixture"; _ }
+         ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK" }
+         ] ->
          ()
        | _ -> fail "diagnostic changed the real response stream")
 ;;
@@ -1208,7 +1214,9 @@ let test_real_identical_prose_is_still_response () =
             run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
             |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:true;
             match List.rev !events with
-            | [ Turn_started _; Text_delta "You've hit your limit" ] -> ()
+            | [ Turn_started _
+              ; Text_delta { message_id = None; text = "You've hit your limit" }
+              ] -> ()
             | _ -> fail "ordinary assistant prose was hidden"))
     [ None; Some (`Bool false) ]
 ;;
@@ -1246,7 +1254,7 @@ let test_valid_response_after_api_diagnostic () =
       check string "real response" "MASC_CLAUDE_OK" turn.text;
       (match List.rev !events with
        | [ Turn_started { turn_id = "assistant-fixture-1"; model = "claude-fixture" }
-         ; Text_delta "MASC_CLAUDE_OK"
+         ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK" }
          ; Turn_finished { text = "MASC_CLAUDE_OK" }
          ] -> ()
        | _ -> fail "diagnostic started or polluted response stream")
@@ -1504,7 +1512,7 @@ let test_stream_events_preserve_text_and_tool_identity () =
       | Ok _ ->
         match List.rev !events with
         | [ Turn_started { turn_id = "assistant-fixture-1"; model = "claude-fixture" }
-          ; Text_delta "MASC_CLAUDE_OK"
+          ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK" }
           ; Dynamic_tool_started
               { call_id = "call-1"
               ; tool_name = "masc_probe"
@@ -1546,7 +1554,7 @@ let test_stream_events_preserve_native_tool_origin () =
               ; tool_name = Some "Read"
               ; origin = Runtime_native_tools.Built_in
               }
-          ; Text_delta "MASC_CLAUDE_OK"
+          ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK" }
           ; Turn_finished { text = "MASC_CLAUDE_OK" }
           ] -> ()
         | _ -> fail "Claude native tool activity was not kept distinct from MASC tools")

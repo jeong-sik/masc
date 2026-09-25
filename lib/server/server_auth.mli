@@ -57,6 +57,11 @@ val request_carries_auth_credential : Httpun.Request.t -> bool
 val observer_sse_auth_token_from_request : Httpun.Request.t -> string option
 (** Combined header-or-query lookup for the SSE observer endpoint. *)
 
+val ide_lsp_upgrade_path : string
+(** Route of the IDE language-server WebSocket. A browser WebSocket cannot
+    set headers, so token-bound auth also reads the token query parameter on
+    a GET to exactly this path; a credential header still takes precedence. *)
+
 val agent_from_request : Httpun.Request.t -> string option
 (** Caller-declared agent name from the request (header / query). *)
 

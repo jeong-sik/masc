@@ -26,7 +26,8 @@ val default_tag : string
     [sandbox_image] or [MASC_KEEPER_SANDBOX_DOCKER_IMAGE]. *)
 
 val dockerfile : string
-(** The recipe, carrying no [COPY]: it builds from stdin with no context, which
+(** The recipe, read at build time from [sandbox-images/base/Dockerfile]. It
+    carries no [COPY]: it builds from stdin with no context, which
     is what lets an installed binary build it with no checkout anywhere. *)
 
 val build_argv : tag:string -> string list

@@ -81,7 +81,6 @@ let keeper_tool_approval_path = "/api/v1/keepers/tool-approval"
 let fusion_runs_path = "/api/v1/dashboard/fusion-runs"
 let fusion_config_path = "/api/v1/runtime/config/fusion"
 let runtime_probe_path = "/api/v1/dashboard/runtime-probe"
-let msx_frame_path = "/api/v1/msx/frame"
 let msx_press_path = "/api/v1/msx/press"
 let msx_carts_path = "/api/v1/msx/carts"
 let msx_load_path = "/api/v1/msx/load"
@@ -255,7 +254,14 @@ let install_operator_token ~base_path ~host ~port =
    reason reaches the operator through [refusal]. *)
 let failed_refresh : (string * string) option ref = ref None
 
-let refresh_failure () = Option.map snd !failed_refresh
+(* The failure is news only while the bearer it failed to replace is still
+   the one held. Once [masc login] or another masc-tui left a bearer this
+   client adopted, the old reason is about a bearer no longer sent, and a
+   later refusal of the new one must not carry it. *)
+let refresh_failure () =
+  match !failed_refresh, !operator_token_cell with
+  | Some (failed, why), Some held when String.equal failed held -> Some why
+  | Some _, _ | None, _ -> None
 
 let refresh_operator_token ~sent =
   match !credential_workspace with
@@ -481,14 +487,27 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:false ~status_code ~body
 
-(* The workspace MSX frame (RFC-0439 §3.7). [None] on any of: transport error,
-   non-object body, [loaded:false], or a payload that does not decode -- the
-   spectator treats all of them as "nothing to watch right now". *)
-let fetch_msx_frame ~(host : string) ~(port : int) :
-    Masc_tui_types.msx_frame option =
-  match get_json ~host ~port ~path:msx_frame_path with
-  | Error _ -> None
-  | Ok json -> Masc_tui_msx_tick.frame_of_json json
+(* One live read of a workspace machine's screen (RFC machine-spectating-
+   goes-through-lanes §2.1). A transport error, a refusal and a body that does
+   not decode are all [Error]: none of them says the machine is absent. The
+   message goes to the screen, so it is made terminal-safe here.
+
+   A changed DOS answer is about 1.2 MB of JSON around 921 KB of pixels.
+   Parsing it and decoding the base64 are pure work, so they run on a system
+   thread and the UI domain keeps drawing and reading keys meanwhile; the
+   request itself stays on the fiber, where the Eio client runs. *)
+let fetch_machine_live ~(host : string) ~(port : int)
+    (source : Masc_tui_machine_live.source) ~(since : Masc_tui_machine_live.mark option) :
+    (Masc_tui_machine_live.answer, string) result =
+  let result =
+    match http_get ~host ~port ~path:(Masc_tui_machine_live.path source ~since) with
+    | Error _ as error -> error
+    | Ok (status_code, body) ->
+        Eio_guard.run_in_systhread ~label:"tui-machine-live-decode" (fun () ->
+          Result.bind (decode_json ~allow_empty:false ~status_code ~body)
+            (Masc_tui_machine_live.decode source))
+  in
+  Result.map_error Masc.Tui_decode.sanitize_terminal_text result
 
 (** POST a JSON body and parse the JSON response. *)
 let post_json_with_timeout ~timeout_sec ~(host : string) ~(port : int)
@@ -611,7 +630,8 @@ let post_msx_checkpoint ~host ~port ~restore ~slot =
    Only validated pixels are retained; every tick supplies fresh metadata. *)
 let msx_tick_cache = Masc_tui_msx_tick.create ()
 
-let tick_msx ~(host : string) ~(port : int) : (Masc_tui_types.msx_frame option, string) result =
+let tick_msx ~(host : string) ~(port : int) :
+    (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result =
   let headers = auth_headers () in
   let request ~body =
     match http_post_with_timeout ~timeout_sec:(request_timeout_sec ()) ~headers

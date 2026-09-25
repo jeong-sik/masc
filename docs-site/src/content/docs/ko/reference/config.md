@@ -65,6 +65,9 @@ default = "deepseek.deepseek-v4-flash"
 display-name = "DeepSeek API"
 protocol = "openai-compatible-http"
 endpoint = "https://api.deepseek.com"
+# 이 provider 를 Exact 출력 레인 슬롯으로 쓰려면 요청 전체 상한이 있어야 해요.
+# connect-timeout-s 는 응답 헤더가 오면 끝나서 그 대신이 되지 않아요.
+exact-body-timeout-s = 1200.0
 
 [providers.deepseek.healthcheck]
 path = "/models"
@@ -92,6 +95,10 @@ verifier 같은 역할은 `[roles]` 테이블이 아니라, lane 에 `<provider>
 [runtime.exact_output_lanes.verifier_exact]
 slots = ["deepseek.deepseek-v4-flash"]
 ```
+
+슬롯의 provider 에는 `exact-body-timeout-s` 가 있어야 해요. 이 키가 없는 슬롯을
+새로 더하는 저장은 거절되고, 부팅 때는 그런 슬롯을 레인에서 빼고 런타임 시작 보고에
+레인·슬롯·provider 이름을 남겨요.
 
 ---
 

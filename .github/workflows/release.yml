@@ -577,6 +577,7 @@ jobs:
           (cd .. && for m in presets/*/manifest.txt; do
              [ -f "$m" ] || continue
              d="$(dirname "$m")"
+             sha256sum "$m"
              while IFS= read -r rel; do
                case "$rel" in ''|'#'*) continue ;; esac
                sha256sum "$d/$rel"

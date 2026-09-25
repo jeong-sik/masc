@@ -79,13 +79,13 @@ Check [GitHub Releases](https://github.com/jeong-sik/masc/releases) for binary a
 
 ### Published binaries
 
-Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.38.0).
+Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.39.0).
 It verifies and installs the assets for the selected release.
 
-> Installation target: v0.38.0 (check tag availability on GitHub Releases).
+> Installation target: v0.39.0 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.38.0
+TAG=v0.39.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
@@ -93,7 +93,11 @@ bash /tmp/masc-install.sh --version "$TAG"
 
 Optional inspection: run `less /tmp/masc-install.sh` before installation. Press `q` to exit, then run the `bash` installation command above.
 
-For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command. The separate `export PATH=...` command takes no installer options.
+For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command.
+
+The installer installs into `~/.local/bin` by default and offers to add it to your
+shell's `PATH`. If you skipped that prompt, run
+`export PATH="$HOME/.local/bin:$PATH"` (this command takes no installer options).
 
 The installer requires and verifies `SHA256SUMS`, installs the release executables,
 and runs a one-time wizard (`--no-wizard` skips it). The wizard
@@ -105,35 +109,50 @@ reads those variables from its startup environment. `--provider <id>` selects
 an existing provider without prompting. For the default `imp`, `masc setup`
 prepares the Docker image after you install and start Docker.
 
-Each release includes Intel macOS, `masc-browser-host`, and the matched
-dashboard, and preserves configuration during `--force` reinstalls.
+Each release ships macOS (Apple Silicon, Intel) and Linux (x86_64, arm64)
+builds of `masc`, `masc-tui` and `masc-browser-host` with the matched dashboard
+(see the [platform table](docs/INSTALL.md)), and the installer preserves
+configuration during `--force` reinstalls.
 The macOS installer includes its Python and shared libraries, so MASC does not require Homebrew. Apple Silicon requires macOS 14 or later; Intel requires macOS 15 or later.
 
 
 ### From source
 
-Install Git, opam, a native C toolchain, Node.js 22 and Corepack first. Native
-libraries and the reproducible build steps are listed in the
-[Release workflow](.github/workflows/release.yml). The dashboard build below
-is required for browser access from a checkout. Coding agents use CI builds
+Install Git, opam, a native C toolchain, Node.js 22, Corepack and the native
+libraries first:
+
+- Debian/Ubuntu: `pkg-config m4 libgmp-dev libssl-dev libzstd-dev
+  libsqlite3-dev libpq-dev libev-dev libffi-dev zlib1g-dev libncurses-dev
+  libprotobuf-dev protobuf-compiler`. `protoc` must understand proto3
+  `optional`; Ubuntu 22.04's packaged 3.12 does not, so put a newer
+  [upstream protoc](https://github.com/protocolbuffers/protobuf/releases) first
+  on `PATH` (the release build uses 25.1; see
+  [`scripts/build-linux-release.sh`](scripts/build-linux-release.sh)).
+- macOS (Homebrew): `flock gmp libpq openssl@3 zstd protobuf`, then export
+  `PKG_CONFIG_PATH`, `CPATH` and `LIBRARY_PATH` for `openssl@3` and `libpq` as the
+  macOS step of the [Release workflow](.github/workflows/release.yml) does.
+
+The dashboard build below is required for browser access from a checkout. Coding agents use CI builds
 according to [the repository execution protocol](docs/constitution.xml).
 
 ```bash
 git clone https://github.com/jeong-sik/masc.git
 cd masc
 opam init --bare
-opam switch create . ocaml-base-compiler.5.5.1
+opam switch create . ocaml-base-compiler.5.5.1 --no-install
 eval "$(opam env)"
 scripts/opam-pin-external-deps.sh
 opam install ./masc.opam --deps-only --locked
 opam exec -- dune build bin/main_eio.exe bin/masc_tui.exe
 corepack enable
 corepack prepare pnpm@10.31.0 --activate
-(cd dashboard && pnpm install --frozen-lockfile)
 scripts/build-dashboard-if-needed.sh --force
 ```
 
-The compiler and Dune versions are pinned in `dune-project`. The first build
+`--no-install` keeps the switch from resolving MASC's dependencies before the
+pin script has registered the ones that are not in opam-repository. The
+compiler version is pinned in `dune-project`, and `--locked` installs the exact
+Dune and library versions CI builds with from `masc.opam.locked`. The first build
 takes several minutes. Dune leaves the two programs at
 `_build/default/bin/main_eio.exe` (server and CLI) and
 `_build/default/bin/masc_tui.exe` (TUI). `masc` finds the TUI by the name
@@ -145,6 +164,12 @@ mkdir -p ~/.local/bin
 ln -sf "$PWD/_build/default/bin/main_eio.exe" ~/.local/bin/masc
 ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 ```
+
+Alternatively, `scripts/install-local-build.sh` builds and copies `masc`,
+`masc-tui` and `masc-browser-host` into `~/.local/bin` in one step; run it in a
+shell where `eval "$(opam env)"` has been applied. It also reinstalls every
+registered Firefox browser-lane host from the new build and stops the host
+processes those workspaces started; the extension reconnects to the new copy.
 
 `./quickstart.sh` seeds a workspace under `~/masc-quickstart`, starts the
 server, and writes an MCP bearer to `.masc/config/mcp-client.env`. It starts
@@ -521,7 +546,7 @@ source of truth for binaries. APIs and configuration may change before 1.0.
 Milestones (the live rules are `ROADMAP.md` → "Release lane rules"):
 
 - `0.y.0` opens a user-visible train and `0.y.z` stabilizes it — the current
-  line is `0.35.0`.
+  line is the `version` in `dune-project`.
 - `1.0.0` opens only when the TUI, the MCP workspace, and release truth hold
   without caveats.
 - `v2.*` tags are history; they do not define the active line.

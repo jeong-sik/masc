@@ -292,6 +292,20 @@ let durable_consumer_roots ~base_path =
   List.map (Filename.concat runtime_root) durable_consumer_basenames
 ;;
 
+(* The default cluster's Board posts file, the same place
+   [Board_paths.file_path ~workspace_masc_dir Posts] writes when the cluster is
+   "default" (this library sits below Board, so the name is repeated here and
+   test_tool_blob_store pins the two together through Board_paths). A
+   non-default cluster keeps its posts under .masc/clusters/<name>/, and [run]
+   refuses before this scan whenever that directory has an entry
+   ([reject_uncoordinated_cluster_roots]). So an absent file here means the
+   default cluster has no posts, not that the posts live somewhere unread. *)
+let board_post_consumer_path ~base_path =
+  Filename.concat
+    (Common.masc_dir_from_base_path ~base_path)
+    "board_posts.jsonl"
+;;
+
 let same_directory_snapshot (left : Unix.stats) (right : Unix.stats) =
   left.st_dev = right.st_dev
   && left.st_ino = right.st_ino
@@ -450,11 +464,25 @@ let live_references ~base_path =
                 scan_entry (Filename.concat path name) current))
            (Ok references)
   in
+  let scan_board_post_file references =
+    let path = board_post_consumer_path ~base_path in
+    match Unix.lstat path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok references
+    | exception Unix.Unix_error (code, fn, arg) ->
+      Error
+        (Durable_source_stat_failed
+           { path
+           ; reason =
+               Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
+           })
+    | _ -> scan_entry path references
+  in
   durable_consumer_roots ~base_path
   |> List.fold_left
        (fun result root ->
           Result.bind result (fun progress -> scan_directory root progress))
        (Ok Artifact_reference_set.empty)
+  |> (fun result -> Result.bind result scan_board_post_file)
 ;;
 
 let expand_artifact_manifests ~store references =

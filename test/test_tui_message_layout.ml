@@ -8,14 +8,15 @@ module Markdown_cache = Masc_tui_markdown_render_cache
    one: [String.contains text '~'] used to answer it, and once the mark became
    "…" that check could no longer fail -- the byte it looked for had left the
    renderer, so an assertion meant to catch a regression passed for free. *)
-let carries_cut_mark text =
-  let mark = "\xe2\x80\xa6" in
-  let n = String.length mark in
+let holds text needle =
+  let n = String.length needle in
   let rec seek i =
     i + n <= String.length text
-    && (String.sub text i n = mark || seek (i + 1))
+    && (String.sub text i n = needle || seek (i + 1))
   in
-  seek 0
+  n = 0 || seek 0
+
+let carries_cut_mark text = holds text "\xe2\x80\xa6"
 
 (* No [timeline_bucket] unless a test passes one: an entry without a
    trustworthy time. Tests about the heading's clock pass [twelve_o_clock]. *)
@@ -381,16 +382,40 @@ let test_scroll_hint_says_how_far_back () =
   in
   check string "an unscrolled pane names the key that scrolls" "PgUp:scroll back" (hint 0);
   check string "a clamped position is not scrolled" "PgUp:scroll back" (hint (-1));
-  check string "a scrolled pane says how far back and that more history loads"
-    "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (3 back \xc2\xb7 more\xe2\x86\x91)"
+  check string "a scrolled pane names the keys that move it"
+    "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest"
     (hint 3);
-  check string "at the start, that is said instead of the distance"
-    "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (start)"
-    (hint ~older_exist:false 3);
-  check bool "the count does not widen the start-of-history hint" true
-    (Layout.display_width (hint ~older_exist:false 9999)
+  (* How far back is not among them. It travels as the footer's own
+     ?position, because the fitter gives up key items from the back and a
+     position is the one item on the row that [?] cannot recover. *)
+  check bool "and does not carry how far back" false (holds (hint 3) "back");
+  check bool "nor the parenthesis the distance is drawn in" false
+    (holds (hint 3) "(");
+  check string "the keys are the same at the start of the conversation"
+    (hint 3) (hint ~older_exist:false 3)
+;;
+
+(* The distance beside them. The marker answers the other half of the
+   question: how far back is one number, whether pressing up keeps finding
+   history is the other. At the oldest row with nothing more to fetch, that it
+   is the start is the more useful fact than the distance. *)
+let test_scroll_position_says_how_far_back () =
+  let position ?(older_exist = true) scrolled_back =
+    Layout.scroll_position ~scrolled_back ~older_exist
+  in
+  check (option string) "an unscrolled pane has no distance to say" None
+    (position 0);
+  check (option string) "a clamped position is not scrolled" None (position (-1));
+  check (option string) "a scrolled pane says how far back and that more loads"
+    (Some "(3 back \xc2\xb7 more\xe2\x86\x91)")
+    (position 3);
+  check (option string) "at the start, that is said instead of the distance"
+    (Some "(start)")
+    (position ~older_exist:false 3);
+  check bool "the count does not widen the start-of-history reading" true
+    (Layout.display_width (Option.get (position ~older_exist:false 9999))
      <= Layout.display_width
-          "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (start)")
+          (Option.get (position ~older_exist:false 3)))
 ;;
 
 let test_utf8_scalar_input_contract () =
@@ -2780,6 +2805,8 @@ let () =
             `Quick test_emoji_cluster_is_two_cells
         ; test_case "the scroll hint says how far back" `Quick
             test_scroll_hint_says_how_far_back
+        ; test_case "scroll position says how far back" `Quick
+            test_scroll_position_says_how_far_back
         ; test_case "UTF-8 scalar input contract" `Quick
             test_utf8_scalar_input_contract
         ; test_case "backspace removes one UTF-8 scalar" `Quick

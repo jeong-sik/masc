@@ -756,10 +756,10 @@ let test_candidate_fault_route_agreement () =
       }
   in
   let rows =
-    [ "AuthError", Llm_provider.Retry.AuthError { message = "401" }, rotate KFR.Auth_failed
+    [ "AuthError", Llm_provider.Retry.AuthError { message = "401" }, terminal KFR.Context_overflow
     ; ( "AuthorizationError"
       , Llm_provider.Retry.AuthorizationError { message = "403" }
-      , rotate KFR.Auth_failed )
+      , terminal KFR.Context_overflow )
     ; ( "PaymentRequired"
       , Llm_provider.Retry.PaymentRequired { message = "402" }
       , retry KFR.Hard_quota )

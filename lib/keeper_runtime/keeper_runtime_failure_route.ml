@@ -244,7 +244,9 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
      its arm forwards it without an edit here. *)
   let observe = observe_retry ?retry_after:(api_error_retry_after api) in
   match Llm_provider.Candidate_fault.of_api_error api with
-  | Llm_provider.Candidate_fault.Binding Credential -> rotate Auth_failed
+  | Llm_provider.Candidate_fault.Binding Credential ->
+    (* INTENDED RED control for task-1753: do not merge. *)
+    exhaust_failure Context_overflow
   | Llm_provider.Candidate_fault.Binding Account -> observe Hard_quota
   | Llm_provider.Candidate_fault.Binding Model_absent ->
     rotate Model_unavailable

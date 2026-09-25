@@ -67,6 +67,9 @@ A **provider** describes how to reach a backend:
 display-name = "DeepSeek API"
 protocol = "openai-compatible-http"
 endpoint = "https://api.deepseek.com"
+# An exact-output lane slot on this provider needs a whole-request deadline.
+# connect-timeout-s stops at the response headers, so it does not count.
+exact-body-timeout-s = 1200.0
 
 [providers.deepseek.healthcheck]
 path = "/models"
@@ -94,6 +97,10 @@ a lane, not with a `[roles]` table:
 [runtime.exact_output_lanes.verifier_exact]
 slots = ["deepseek.deepseek-v4-flash"]
 ```
+
+A slot's provider must declare `exact-body-timeout-s`. A save that adds a slot
+without it is refused; at boot such a slot is left out of its lane and the
+runtime startup report names the lane, the slot and the provider.
 
 ---
 

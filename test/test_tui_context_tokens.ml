@@ -334,7 +334,7 @@ let test_codex_client_context_stays_distinct_from_masc_ceiling () =
   Alcotest.(check bool) "the previous-turn row keeps that provider reading" true
     (says "client ctx 310.5k/272.0k" rows);
   Alcotest.(check bool) "the previous-turn row retains cache and output" true
-    (says "cache read 1.0k  out 80" rows);
+    (says "cache read 1.0k     out 80" rows);
   Alcotest.(check bool) "MASC's smaller ceiling is still named" true
     (says "310.2k provider input tokens exceed the 272.0k-token MASC shaping ceiling" rows);
   Alcotest.(check bool) "no false remaining percentage is drawn" false

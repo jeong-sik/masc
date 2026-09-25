@@ -3433,7 +3433,8 @@ let context_composition_lines ~cols ~turn_back
   in
   let provider_context_lines =
     match record.provider_context_tokens, record.provider_context_window with
-    | Some tokens, Some window when window > 0 ->
+    (* [Turn_record.of_json] admits only a positive window, so no guard here. *)
+    | Some tokens, Some window ->
       fact
         (Printf.sprintf
            "Client reports active context %s / provider window %s tokens%s; \
@@ -3441,15 +3442,15 @@ let context_composition_lines ~cols ~turn_back
            (Inspector.format_tokens tokens)
            (Inspector.format_tokens window)
            (if tokens > window then " (over the reported window)" else ""))
-    | Some tokens, (None | Some _) ->
+    | Some tokens, None ->
       fact
         (Printf.sprintf "Client reports active context %s tokens; provider window unavailable"
            (Inspector.format_tokens tokens))
-    | None, Some window when window > 0 ->
+    | None, Some window ->
       fact
         (Printf.sprintf "Client reports a %s-token model window; active context unavailable"
            (Inspector.format_tokens window))
-    | None, (None | Some _) -> []
+    | None, None -> []
   in
   let cache_lines =
     let parts =

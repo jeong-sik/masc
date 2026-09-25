@@ -325,6 +325,12 @@ let as_nonnegative_int name json =
   then Error (Printf.sprintf "turn_record: field %S is negative" name)
   else Ok value
 
+let as_positive_int name json =
+  let* value = as_int name json in
+  if value <= 0
+  then Error (Printf.sprintf "turn_record: field %S must be positive" name)
+  else Ok value
+
 let as_sha256_digest name json =
   let* value = as_string name json in
   let is_lower_hex = function
@@ -761,11 +767,8 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         opt_member "provider_context_tokens" fields as_nonnegative_int
       in
       let* provider_context_window =
-        opt_member "provider_context_window" fields as_nonnegative_int
+        opt_member "provider_context_window" fields as_positive_int
       in
-      let* () = match provider_context_window with
-        | Some 0 -> Error "turn_record: provider_context_window must be positive"
-        | Some _ | None -> Ok () in
       let* price_input_per_million = opt_member "price_input_per_million" fields as_float in
       let* price_output_per_million = opt_member "price_output_per_million" fields as_float in
       let* request_latency_ms = opt_member "request_latency_ms" fields as_int in

@@ -1,19 +1,28 @@
-(* The shared launch for TUI reads. Every read site used to repeat the same
-   four moves -- catch the read's exceptions, answer on the mailbox, answer
-   "Eio switch is unavailable" when there is no switch, and (at some sites
-   only) survive a refused launch -- and each site labelled its failure in
-   its own place, which is how a failure came to be labelled twice. The
-   moves live here once. *)
+type source =
+  | Keeper_turns
+  | Standalone_lanes
+  | Connectors
+  | Skills_catalog
 
-let label ?subject cause =
-  match subject with
-  | None -> cause
-  | Some subject -> subject ^ " load failed: " ^ cause
+let source_name = function
+  | Keeper_turns -> "keeper turns"
+  | Standalone_lanes -> "standalone lanes"
+  | Connectors -> "connector"
+  | Skills_catalog -> "skills catalog"
 
-let launch ?(on_not_run = ignore) ?subject ~deliver read =
-  let deliver result = deliver (Result.map_error (label ?subject) result) in
+let attribute source result =
+  Result.map_error
+    (fun detail -> source_name source ^ " load failed: " ^ detail)
+    result
+
+let launch ?source ?on_not_run ~deliver read =
+  let deliver result =
+    match source with
+    | None -> deliver result
+    | Some source -> deliver (attribute source result)
+  in
   let not_run cause =
-    on_not_run ();
+    Option.iter (fun release -> release ()) on_not_run;
     deliver (Error cause)
   in
   match Eio_context.get_switch_opt () with

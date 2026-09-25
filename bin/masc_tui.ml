@@ -68,8 +68,13 @@ let scrolled_surface state surface =
   match surface with
   | Tools -> Some (Masc_tui_render.tools_scrolled state)
   | Memory when Option.is_none state.memory_facts_keeper ->
-      let _, cols = get_terminal_size () in
-      Some (Masc_tui_render_memory.memory_overview_scrolled ~cols state)
+      let terminal_rows, cols = get_terminal_size () in
+      let budget =
+        max 1
+          (Masc_tui_types.surface_body_rows state ~terminal_rows
+           - Masc_tui_frame.chrome_rows)
+      in
+      Some (Masc_tui_render_memory.memory_overview_scrolled ~cols ~budget state)
   (* Runtime's authority row wraps to the terminal width too, so its bound is
      read at that width for the same reason the Memory overview's is. *)
   | Runtime ->
@@ -366,7 +371,9 @@ let surface_body_height_at (state : state) ~cursor scrolled =
     let scrolled =
       if state.view = Memory then
         let _, cols = get_terminal_size () in
-        Masc_tui_render_memory.memory_overview_scrolled ~cols ~cursor state
+        Masc_tui_render_memory.memory_overview_scrolled ~cols
+          ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
+          ~cursor state
       else scrolled
     in
     surface_body_height ~rows:(surface_rows state) scrolled
@@ -448,6 +455,25 @@ type input_source =
   | Probe_replay
   | Terminal_buffer
 
+type paste_in_progress = {
+  decoder : Masc_tui_paste.decoder;
+  mutable last_byte_ns : int64;
+  mutable cancel_armed : bool;
+}
+
+type paste_tail = {
+  tail_decoder : Masc_tui_paste.decoder;
+  mutable tail_last_byte_ns : int64;
+}
+
+(* A paste can only be active or draining its quarantined tail. Keeping the
+   decoder and its recovery clock in the same phase prevents a recovered
+   draft from also being treated as a live paste. *)
+type paste_phase =
+  | No_paste
+  | Pasting of paste_in_progress
+  | Draining_tail of paste_tail
+
 type input_reader = {
   bytes : Bytes.t;
   mutable filled : int;
@@ -471,6 +497,8 @@ type input_reader = {
           So the head waits here instead. The next read resumes it, which is
           the same character arriving late rather than a lost one. Empty
           whenever no character is in flight. *)
+  mutable paste_phase : paste_phase;
+  mutable csi_parameters : Buffer.t option;
 }
 
 (* One terminal read. Bigger than any escape sequence and big enough that a
@@ -487,6 +515,8 @@ let create_input_reader () =
     late_palette_publisher = None;
     last_source = None;
     partial_scalar = "";
+    paste_phase = No_paste;
+    csi_parameters = None;
   }
 
 (* Both sources can hold bytes already read from the terminal. A partial
@@ -683,6 +713,49 @@ let return_input_byte reader =
   reader.last_source <- None
 ;;
 
+(* A sequence begun but not finished, wherever this reader holds it: its own
+   CSI parameters, or the startup probe. The probe completes only on a
+   graphics reply, so on a terminal without one it stays in front of every
+   byte for the session and keeps an [ESC \[ 2 0 0] head in its own buffer as
+   a possible paste start. [read_input] then never sees the head, and a check
+   of [csi_parameters] alone showed no notice and let Ctrl-C fall through to
+   the quit prompt. *)
+let input_holds_incomplete_sequence reader =
+  Option.is_some reader.csi_parameters
+  || (match reader.terminal_probe with
+      | Some decoder -> Masc_tui_terminal_probe.holds_incomplete_sequence decoder
+      | None -> false)
+
+let cancel_incomplete_sequence reader =
+  reader.csi_parameters <- None;
+  Option.iter Masc_tui_terminal_probe.discard_incomplete_sequence
+    reader.terminal_probe
+
+(* Ctrl-C recovery only snapshots a paste after this much quiet since its
+   last byte. Reading itself uses the caller's short render-loop deadline;
+   this is a recovery observation, not a blocking terminal read. *)
+let paste_quiet_seconds = 0.5
+let paste_quiet_ns =
+  Int64.of_float (paste_quiet_seconds *. nanoseconds_per_second)
+
+let paste_is_quiet last_byte_ns =
+  Int64.compare
+    (Int64.sub (Mtime_clock.elapsed_ns ()) last_byte_ns)
+    paste_quiet_ns >= 0
+
+(* Check every input source without consuming its next byte. A terminal read
+   can already be buffered, and the startup probe can still have replay; a
+   clock alone cannot prove that a paused paste has no unread tail. *)
+let input_byte_ready reader =
+  match take_input_byte reader ~timeout:0.0 with
+  | None -> false
+  | Some _ ->
+      return_input_byte reader;
+      true
+
+let paste_can_recover reader last_byte_ns =
+  paste_is_quiet last_byte_ns && not (input_byte_ready reader)
+
 let is_utf8_continuation = Masc_tui_utf8_input.is_continuation
 
 (* [prefix] is what has already been read of this character: one leading byte
@@ -740,11 +813,6 @@ type input_event =
           other one into the [wheel-up] / [wheel-down] key the surfaces bind,
           so no surface learned a new key when the pane appeared. *)
 
-(* How long to wait for the next byte of a paste already in progress. The
-   terminal writes the payload in one go behind the start marker, so this is a
-   liveness bound on a stream that stalled, not a pace. *)
-let paste_byte_timeout_seconds = 0.5
-
 (* Read an APC body to its terminator. Bounded: a terminal that opens one and
    never closes it would otherwise hold the reader until the stream stalled,
    and every reply the protocol defines is short. *)
@@ -777,6 +845,95 @@ let read_apc_body reader =
 let read_input ?(timeout = 0.1) reader () : input_event option =
   Eio_guard.run_in_systhread ~label:"tui-read-key" (fun () ->
       let key name = Some (Key name) in
+      let rec continue_paste paste =
+        match take_input_byte reader ~timeout with
+        | None -> None
+        | Some byte ->
+            paste.last_byte_ns <- Mtime_clock.elapsed_ns ();
+            (match Masc_tui_paste.feed paste.decoder byte with
+             | None ->
+                 (* Return to the main loop after each terminal read buffer.
+                    A sender that never pauses must not hold Ctrl-C or other
+                    queued work behind this recursive byte consumer. *)
+                 if reader.position >= reader.filled then None
+                 else continue_paste paste
+             | Some completed_paste ->
+                 reader.paste_phase <- No_paste;
+                 Some (Pasted completed_paste))
+      in
+      let rec drain_recovered_paste tail =
+        match take_input_byte reader ~timeout with
+        | None -> None
+        | Some byte ->
+            tail.tail_last_byte_ns <- Mtime_clock.elapsed_ns ();
+            (match Masc_tui_paste.feed tail.tail_decoder byte with
+             | Some _ ->
+                 reader.paste_phase <- No_paste;
+                 None
+             | None ->
+                 if reader.position >= reader.filled then None
+                 else drain_recovered_paste tail)
+      in
+      let handle_csi parameters final =
+        match parameters, final with
+        | "200", '~' ->
+            let paste =
+              { decoder = Masc_tui_paste.create ();
+                cancel_armed = false;
+                last_byte_ns = Mtime_clock.elapsed_ns () }
+            in
+            reader.paste_phase <- Pasting paste;
+            continue_paste paste
+        | params, final when String.length params > 0 && params.[0] = '<' -> (
+            match Masc.Tui_decode.sgr_wheel_report params final with
+            | Some (direction, row, column) ->
+                Some (Mouse_wheel (direction, row, column))
+            | None -> (
+                match Masc.Tui_decode.sgr_left_press params final with
+                | Some (row, column) -> Some (Mouse_left_press (row, column))
+                | None -> (
+                    match Masc.Tui_decode.sgr_left_release params final with
+                    | Some (row, column) -> Some (Mouse_left_release (row, column))
+                    | None -> key "unknown-esc")))
+        | "", 'M' ->
+            let button = take_input_byte reader ~timeout:0.05 in
+            let _column = take_input_byte reader ~timeout:0.05 in
+            let _row = take_input_byte reader ~timeout:0.05 in
+            (match button with
+             | None -> key "unknown-esc"
+             | Some button -> (
+                 match Masc.Tui_decode.x10_wheel_key button with
+                 | Some wheel_key -> key wheel_key
+                 | None -> key "unknown-esc"))
+        | parameters, final -> (
+            match Masc_tui_csi.name ~parameters ~final with
+            | Some named -> key named
+            | None -> key "unknown-esc")
+      in
+      let rec continue_csi parameters =
+        match take_input_byte reader ~timeout with
+        | None -> None
+        | Some byte when Char.code byte >= 0x40 && Char.code byte <= 0x7E ->
+            reader.csi_parameters <- None;
+            Some (`Complete (Buffer.contents parameters, byte))
+        | Some byte ->
+            Buffer.add_char parameters byte;
+            if Buffer.length parameters > 16 then begin
+              reader.csi_parameters <- None;
+              Some `Malformed
+            end else continue_csi parameters
+      in
+      let finish_csi_read parameters =
+        match continue_csi parameters with
+        | None -> None
+        | Some (`Complete (parameters, final)) -> handle_csi parameters final
+        | Some `Malformed -> key "esc"
+      in
+      match reader.paste_phase, reader.csi_parameters with
+      | Draining_tail tail, _ -> drain_recovered_paste tail
+      | Pasting paste, _ -> continue_paste paste
+      | No_paste, Some parameters -> finish_csi_read parameters
+      | No_paste, None ->
       (* A character left half-read by the previous call is finished before
          anything else is looked at. Its remaining bytes are the next thing in
          the stream, so reading past them would decode the tail of one
@@ -797,78 +954,15 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
       match take_input_byte reader ~timeout with
       | None -> None
       | Some '\027' -> (
-          (* CSI: parameter bytes, then one final byte in 0x40-0x7E. Reading to
-             the final byte is what keeps a parameterised key from leaving its
-             tail in the stream -- Page Up is ESC [ 5 ~, and stopping at the 5
-             left the ~ to be typed as text. *)
+          (* ESC is ambiguous until another byte arrives: it is both a key and
+             the prefix of bracketed paste. Keep the short standalone-Escape
+             response; once '[' has arrived, retain CSI parameters across
+             idle reads so a slow marker tail cannot become typed input. *)
           match take_input_byte reader ~timeout:0.05 with
           | Some '[' ->
               let parameters = Buffer.create 4 in
-              let rec read_csi () =
-                match take_input_byte reader ~timeout:0.05 with
-                | None -> None
-                | Some byte when Char.code byte >= 0x40 && Char.code byte <= 0x7E
-                  -> Some (Buffer.contents parameters, byte)
-                | Some byte ->
-                    Buffer.add_char parameters byte;
-                    if Buffer.length parameters > 16 then None else read_csi ()
-              in
-              (match read_csi () with
-               | None -> key "esc"
-
-               (* The terminal says the next bytes were pasted, not typed.
-                  Every newline in them is text; without this mode each one
-                  arrives as Return and a three-line paste is three sends. *)
-               | Some ("200", '~') ->
-                   Some
-                     (Pasted
-                        (Masc_tui_paste.read ~next_byte:(fun () ->
-                             take_input_byte reader
-                               ~timeout:paste_byte_timeout_seconds)))
-               (* A parameter span starting with [<] is an SGR mouse report.
-                  A wheel notch travels with its position, so the loop can
-                  give it to the pane under the pointer and turn the rest into
-                  the key every surface's scroll binding answers; an unmodified
-                  left press travels as its own event so a surface can map the
-                  row to its cursor; a report nothing consumes stays unclaimed
-                  rather than leaking into a key. *)
-               | Some (params, final)
-                 when String.length params > 0 && params.[0] = '<' -> (
-                   match Masc.Tui_decode.sgr_wheel_report params final with
-                   | Some (direction, row, column) ->
-                       Some (Mouse_wheel (direction, row, column))
-                   | None -> (
-                       match Masc.Tui_decode.sgr_left_press params final with
-                       | Some (row, column) ->
-                           Some (Mouse_left_press (row, column))
-                       | None -> (match Masc.Tui_decode.sgr_left_release params final with
-                           | Some (row,column) -> Some (Mouse_left_release (row,column))
-                           | None -> key "unknown-esc")))
-               (* A bare [CSI M] is the legacy X10 mouse report: three raw
-                  bytes follow and belong to the report, not to the typist.
-                  Terminals that ignore the SGR half of the [?1006;1000h]
-                  request answer in this shape -- Apple Terminal, the macOS
-                  default, is one -- so leaving the bytes unread typed three
-                  characters into the composer on every wheel notch. They are
-                  consumed whether or not the button means anything. *)
-               | Some ("", 'M') ->
-                   let button = take_input_byte reader ~timeout:0.05 in
-                   let _column = take_input_byte reader ~timeout:0.05 in
-                   let _row = take_input_byte reader ~timeout:0.05 in
-                   (match button with
-                    | None -> key "unknown-esc"
-                    | Some button -> (
-                        match Masc.Tui_decode.x10_wheel_key button with
-                        | Some wheel_key -> key wheel_key
-                        | None -> key "unknown-esc"))
-               (* Every named key, legacy or modifier-reporting, comes from
-                  one vocabulary now. It was seven arms here that could not
-                  see a second parameter, so Shift+Up and Ctrl+P both reached
-                  the surface as "unknown-esc". *)
-               | Some (parameters, final) -> (
-                   match Masc_tui_csi.name ~parameters ~final with
-                   | Some named -> key named
-                   | None -> key "unknown-esc"))
+              reader.csi_parameters <- Some parameters;
+              finish_csi_read parameters
           (* [ESC O <final>] is SS3: what a terminal in application cursor
              mode sends for the arrows and Home/End instead of [ESC \[
              <final>]. Left unread the [ESC] answered as "esc" and the final
@@ -1002,6 +1096,30 @@ let save_message_draft state =
       state.msg_drafts <-
         if String.equal text "" then other_drafts
         else (keeper_name, text) :: other_drafts
+
+let recovered_paste_send_locked_for state keeper_name =
+  match keeper_name with
+  | Some target ->
+      List.exists (String.equal target) state.msg_recovered_paste_keepers
+  | None -> false
+
+let recovered_paste_send_locked state =
+  recovered_paste_send_locked_for state state.msg_target_keeper_name
+
+let discard_recovered_paste_lock state =
+  match state.msg_target_keeper_name with
+  | Some target ->
+      state.msg_recovered_paste_keepers <-
+        List.filter (fun name -> not (String.equal name target))
+          state.msg_recovered_paste_keepers
+  | None -> ()
+
+let protect_recovered_paste_for_current_keeper state =
+  match state.msg_target_keeper_name with
+  | Some target when not (recovered_paste_send_locked state) ->
+      state.msg_recovered_paste_keepers <-
+        target :: state.msg_recovered_paste_keepers
+  | Some _ | None -> ()
 
 (* Put the pasted text back into the draft where its placeholder stands.
 
@@ -1244,6 +1362,7 @@ let leave_keeper_message state ~drain_queue =
 
 let clear_current_message_draft state =
   Buffer.clear state.msg_input;
+  discard_recovered_paste_lock state;
   save_message_draft state
 
 let consume_dispatched_message_draft state request =
@@ -1257,7 +1376,8 @@ let consume_dispatched_message_draft state request =
   match state.msg_target_keeper_name with
   | Some keeper_name
     when String.equal keeper_name request.Keeper_chat.keeper_name
-         && String.equal (Buffer.contents state.msg_input) request.message ->
+         && String.equal (Buffer.contents state.msg_input) request.message
+         && not (recovered_paste_send_locked state) ->
       clear_current_message_draft state
   | Some _ | None -> save_message_draft state
 
@@ -1445,7 +1565,10 @@ let clear_staged_attachments (state : state) =
 let submit_chat_draft (state : state) ~(submit_message : string -> unit)
     ~(drain_queue : unit -> unit) =
   let text = Buffer.contents state.msg_input in
-  if String.trim text <> "" then begin
+  if recovered_paste_send_locked state then
+    report_action state "system"
+      "Recovered draft protected; press Ctrl-G to enable Enter"
+  else if String.trim text <> "" then begin
     (* Back to the newest row: the turn that is about to start is drawn
        there, and staying scrolled back would hide the send. *)
     set_msg_scroll state 0;
@@ -1521,6 +1644,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     state.msg_recall_replaces <- None;
     clear_staged_attachments state;
     Buffer.clear state.msg_input;
+    discard_recovered_paste_lock state;
     drain_queue ();
     true
   | "\t" -> apply_autocomplete Masc_tui_command.Next
@@ -1696,13 +1820,14 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          next Enter is a new line, not a replacement. *)
       state.msg_spill <- None;
       forget_recall state;
+      clear_staged_attachments state;
       if Option.is_some state.msg_recall_replaces
       then begin
-        clear_staged_attachments state;
         state.msg_recall_replaces <- None;
         drain_queue ()
       end;
       Buffer.clear state.msg_input;
+      discard_recovered_paste_lock state;
       (* Cleared composer: release any line held only for this keeper's compose
          ([composing_for_keeper]). *)
       drain_queue ();
@@ -1825,6 +1950,11 @@ type approval_observation = {
   ao_result: (approval_snapshot, string) result;
 }
 
+type keeper_spend_reply =
+  { asked_at_generation : int
+  ; reply : (overview_spend_reading, string) result
+  }
+
 type http_scoped_surface_results = {
   http_transport: (Tui_decode.transport_health, string) result option;
   http_approvals: approval_observation option;
@@ -1854,6 +1984,7 @@ type http_scoped_surface_results = {
   http_repository_pulls:
     (overview_pulls_reading, string) result
     option;
+  http_keeper_spend: keeper_spend_reply option;
   (* [None] off the Overview, the one surface that draws the GOALS section. *)
   http_overview_goals: (Tui_decode.overview_goal list, string) result option;
 }
@@ -2033,6 +2164,10 @@ type async_msg =
      for somebody else must be dropped, not filed under whoever is open. *)
   | Memory_facts_loaded of
       string * (Masc.Tui_decode.memory_fact_snapshot, string) result
+  | All_memory_facts_loaded of
+      (Masc.Tui_decode.memory_fact_snapshot * string option, string) result
+      (** The "all keepers" merge and, when some keepers could not be read,
+          which ones. *)
   | Repository_changes_loaded of
       Masc.Tui_decode.repository_change_scope
       * (Masc.Tui_decode.repository_change_snapshot, string) result
@@ -2150,7 +2285,7 @@ type async_msg =
   (* Its own message rather than a field on the stance one: the two come from
      different endpoints and one failing must not blank the other. *)
   | Keeper_gate_settings_loaded of
-      (((string * string) list * (string * string) list), string) result
+      (((string * string) list * Masc.Tui_decode.keeper_exact_lane_first list), string) result
   | Keeper_tool_modes_loaded of
       ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result
       * Approval.Listing_order.ticket
@@ -3262,6 +3397,7 @@ let launch_keeper_turns_load state ~mailbox =
     let host = server_peer_host in
     let port = state.port in
     Masc_tui_async_read.launch
+      ~source:Masc_tui_async_read.Keeper_turns
       ~on_not_run:(fun () -> state.keeper_turns_inflight <- false)
       ~deliver:(fun result ->
         enqueue_async mailbox (Keeper_turns_loaded (generation, result)))
@@ -3511,34 +3647,29 @@ let launch_tools_load ?(force = true) state ~mailbox =
       };
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_tools ~host ~port ?keeper () with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Tools_loaded (generation, keeper, result));
-      let async_observation =
-        try Masc_tui_http.fetch_async_request_observation ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Tools_async_observation_loaded (generation, async_observation))
+    (* The async-request observation is read after the inventory, as it
+       always was; the inventory's answer launches it. Both go through the
+       shared launch, so a missing or finished switch still answers each part
+       and the pending read settles instead of staying "loading". *)
+    let launch_async_observation () =
+      Masc_tui_async_read.launch
+        ~deliver:(fun result ->
+          enqueue_async mailbox (Tools_async_observation_loaded (generation, result)))
+        (fun () -> Masc_tui_http.fetch_async_request_observation ~host ~port)
     in
     (* The skills catalog (usage + flows) is a separate read and must not
        delay the tool list: a slow catalog costs its own section, not the
        screen. *)
     Masc_tui_async_read.launch
-      ~subject:"skills catalog"
+      ~source:Masc_tui_async_read.Skills_catalog
       ~deliver:(fun result ->
         enqueue_async mailbox (Skills_catalog_loaded (generation, result)))
       (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port);
-    (match Eio_context.get_switch_opt () with
-     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-     | None ->
-         let error = Error "Eio switch is unavailable" in
-         enqueue_async mailbox (Tools_loaded (generation, keeper, error));
-         enqueue_async mailbox (Tools_async_observation_loaded (generation, error)))
+    Masc_tui_async_read.launch
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Tools_loaded (generation, keeper, result));
+        launch_async_observation ())
+      (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ())
   end
 
 let settle_tools_read state ~generation part =
@@ -4698,6 +4829,7 @@ let launch_connectors_load state ~mailbox =
     let host = server_peer_host in
     let port = state.port in
     Masc_tui_async_read.launch
+      ~source:Masc_tui_async_read.Connectors
       ~on_not_run:(fun () -> state.connectors_inflight <- false)
       ~deliver:(fun result ->
         enqueue_async mailbox (Connectors_loaded result))
@@ -5120,119 +5252,31 @@ let launch_memory_facts_load state ~mailbox ~keeper_name =
 let launch_all_memory_facts_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
-  let keepers =
-    match state.memory_health with
-    | Some h -> h.Tui_decode.mhs_keepers
-    | None -> []
-  in
   let run () =
-    if keepers = [] then
+    match state.memory_health with
+    | None ->
+      (* Without the health read there is no keeper list to merge. An empty
+         "all keepers" view would read as memory that is empty. *)
       enqueue_async mailbox
-        (Memory_facts_loaded
-           ( "*",
-             Ok
-               { Tui_decode.mfs_keeper = "*"
-               ; mfs_ordinary =
-                   Tui_decode.Memory_store_present
-                     { Tui_decode.mos_revision = 1
-                     ; mos_updated_at = Unix.gettimeofday ()
-                     ; mos_facts = []
-                     }
-               ; mfs_source =
-                   Tui_decode.Memory_store_present
-                     { Tui_decode.mss_revision = 1
-                     ; mss_updated_at = Unix.gettimeofday ()
-                     ; mss_facts = []
-                     ; mss_invalidations = []
-                     }
-               ; mfs_events_read_error = None
-               } ))
-    else
-      let all_ord_facts = ref [] in
-      let all_src_facts = ref [] in
-      let all_invals = ref [] in
-      let all_event_read_errors = ref [] in
-      List.iter
-        (fun (k : Tui_decode.memory_keeper_health) ->
-          let keeper_name = k.Tui_decode.mkh_keeper_id in
-          match
-            try Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name with
-            | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | _ -> Error "failed"
-          with
-          | Ok snap ->
-              (match snap.Tui_decode.mfs_events_read_error with
-               | None -> ()
-               | Some detail ->
-                 all_event_read_errors :=
-                   Printf.sprintf "%s: %s" keeper_name detail
-                   :: !all_event_read_errors);
-              (match snap.Tui_decode.mfs_ordinary with
-               | Tui_decode.Memory_store_present store ->
-                   let tagged =
-                     List.map
-                       (fun (f : Tui_decode.memory_fact) ->
-                         { f with
-                           Tui_decode.mf_origin =
-                             if String.starts_with ~prefix:(keeper_name ^ " · ") f.Tui_decode.mf_origin then
-                               f.Tui_decode.mf_origin
-                             else Printf.sprintf "%s · %s" keeper_name f.Tui_decode.mf_origin
-                         })
-                       store.Tui_decode.mos_facts
-                   in
-                   all_ord_facts := !all_ord_facts @ tagged
-               | _ -> ());
-              (match snap.Tui_decode.mfs_source with
-               | Tui_decode.Memory_store_present store ->
-                   let tagged_src =
-                     List.map
-                       (fun (f : Tui_decode.memory_source_fact) ->
-                         { f with
-                           Tui_decode.msf_path =
-                             if String.starts_with ~prefix:(keeper_name ^ ":") f.Tui_decode.msf_path then
-                               f.Tui_decode.msf_path
-                             else Printf.sprintf "%s:%s" keeper_name f.Tui_decode.msf_path
-                         })
-                       store.Tui_decode.mss_facts
-                   in
-                   let tagged_inv =
-                     List.map
-                       (fun (inv : Tui_decode.memory_invalidation) ->
-                         { inv with
-                           Tui_decode.mi_source_path =
-                             if String.starts_with ~prefix:(keeper_name ^ ":") inv.Tui_decode.mi_source_path then
-                               inv.Tui_decode.mi_source_path
-                             else Printf.sprintf "%s:%s" keeper_name inv.Tui_decode.mi_source_path
-                         })
-                       store.Tui_decode.mss_invalidations
-                   in
-                   all_src_facts := !all_src_facts @ tagged_src;
-                   all_invals := !all_invals @ tagged_inv
-               | _ -> ())
-          | Error _ -> ())
-        keepers;
-      let combined =
-        { Tui_decode.mfs_keeper = "*"
-        ; mfs_ordinary =
-            Tui_decode.Memory_store_present
-              { Tui_decode.mos_revision = 1
-              ; mos_updated_at = Unix.gettimeofday ()
-              ; mos_facts = !all_ord_facts
-              }
-        ; mfs_source =
-            Tui_decode.Memory_store_present
-              { Tui_decode.mss_revision = 1
-              ; mss_updated_at = Unix.gettimeofday ()
-              ; mss_facts = !all_src_facts
-              ; mss_invalidations = !all_invals
-              }
-        ; mfs_events_read_error =
-            (match List.rev !all_event_read_errors with
-             | [] -> None
-             | errors -> Some (String.concat "; " errors))
-        }
+        (All_memory_facts_loaded
+           (Error "keeper list not read yet (memory health has not loaded)"))
+    | Some health ->
+      let loads =
+        List.map
+          (fun (k : Tui_decode.memory_keeper_health) ->
+            let keeper_name = k.Tui_decode.mkh_keeper_id in
+            ( keeper_name,
+              try Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn -> Error (Printexc.to_string exn) ))
+          health.Tui_decode.mhs_keepers
       in
-      enqueue_async mailbox (Memory_facts_loaded ("*", Ok combined))
+      (* One message: the merged facts and the keepers missing from them
+         travel together, so the handler never has to keep one answer across
+         another. *)
+      enqueue_async mailbox
+        (All_memory_facts_loaded
+           (Ok (Tui_decode.merge_keeper_memory_facts ~now:(Unix.gettimeofday ()) loads)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -5241,7 +5285,7 @@ let launch_all_memory_facts_load state ~mailbox =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Memory_facts_loaded ("*", Error "Eio switch is unavailable"))
+        (All_memory_facts_loaded (Error "Eio switch is unavailable"))
 
 let open_all_fleet_memory state ~mailbox =
   state.memory_facts_keeper <- Some "*";
@@ -5746,30 +5790,13 @@ let launch_lanes_load state ~mailbox =
     let port = state.port in
     state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
     let standalone_generation = state.standalone_lanes_generation in
-    let run () =
-      let standalone_result =
-        try Masc_tui_loader.load_standalone_lanes ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox
-        (Standalone_lanes_loaded (standalone_generation, standalone_result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Masc_tui_fork_guard.launch ~sw
-          ~on_sync_failure:(fun detail ->
-              state.standalone_lanes_inflight <- false;
-              enqueue_async mailbox
-                (Standalone_lanes_loaded (standalone_generation, Error detail)))
-          (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.standalone_lanes_inflight <- false;
+    Masc_tui_async_read.launch
+      ~source:Masc_tui_async_read.Standalone_lanes
+      ~on_not_run:(fun () -> state.standalone_lanes_inflight <- false)
+      ~deliver:(fun result ->
         enqueue_async mailbox
-          (Standalone_lanes_loaded
-             (standalone_generation, Error "Eio switch is unavailable"))
+          (Standalone_lanes_loaded (standalone_generation, result)))
+      (fun () -> Masc_tui_loader.load_standalone_lanes ~host ~port)
   end
 
 (* A re-read that has to happen: a write's read-back, or the operator's [r].
@@ -7407,6 +7434,18 @@ let handle_runtime_lane_edit state ~mailbox edit =
             Masc_tui_http.remove_runtime_lane ~host ~port ~lane)
   | Masc_tui_types.Refuse_lane_edit notice -> state.runtime_lane_notice <- Some notice
 
+(* The Keeper runtime picker has no close key of its own: Esc closes it,
+   after dropping a filter. The shared list already steps on the wheel. *)
+let keeper_runtime_picker_action (list : Masc_tui_pick_list.t) key =
+  Masc_tui_pick_list.action_of_key ~close_keys:[] list key
+
+(* Back to the Keeper list, with the picker's cursor and filter dropped: a
+   picker opened again starts at the top with no filter. *)
+let close_keeper_runtime_pick state =
+  state.runtime_pick_keeper <- None;
+  state.runtime_pick_list <- Masc_tui_pick_list.closed;
+  state.view <- Keepers Keeper_list
+
 let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
   let host = server_peer_host in
   let port = state.port in
@@ -7441,6 +7480,31 @@ let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
       enqueue_async mailbox
         (Runtime_assignment_set
            (keeper_name, runtime_id, Error "Eio switch is unavailable"))
+
+(* One key on the Keeper runtime picker, read against the list it draws: the
+   declared lanes, then the whole catalogue. Enter assigns the row under the
+   cursor to the Keeper the picker was opened for; Esc with no filter closes
+   it. *)
+let keeper_runtime_pick_key state ~mailbox ~terminal_rows key =
+  match keeper_runtime_picker_action state.runtime_pick_list key with
+  | None -> ()
+  | Some action -> (
+      match
+        Masc_tui_pick_list.apply
+          ~page:(Masc_tui_types.keeper_runtime_picker_page state ~terminal_rows)
+          ~label:Masc_tui_types.runtime_pick_label
+          (Masc_tui_types.runtime_picker_items state)
+          state.runtime_pick_list action
+      with
+      | Masc_tui_pick_list.Stay list -> state.runtime_pick_list <- list
+      | Masc_tui_pick_list.Chosen item ->
+          (match state.runtime_pick_keeper with
+           | Some keeper_name ->
+               launch_runtime_assignment_set state ~mailbox ~keeper_name
+                 ~runtime_id:(Some (Masc_tui_types.runtime_pick_item_id item))
+           | None -> ());
+          close_keeper_runtime_pick state
+      | Masc_tui_pick_list.Dismissed -> close_keeper_runtime_pick state)
 
 let inflight_for state keeper_name =
   Option.map (fun entry -> entry.sent_request)
@@ -9230,6 +9294,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       "A queued edit is active; press Enter for its text or Ctrl-U to abandon it"
   else
   match command with
+  | Masc_tui_command.Say _ when recovered_paste_send_locked_for state target ->
+      notice ~kind:Notice_failure
+        "Recovered draft protected; press Ctrl-G to enable Enter"
   | Masc_tui_command.Say _ ->
       start_keeper_message ?keeper_name state ~base_path ~mailbox text
   | Masc_tui_command.Task_missing_title ->
@@ -9337,13 +9404,21 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.patch_modal_path <- Some target_path;
       launch_repository_changes_diff_load state ~mailbox
         ~scope:Tui_decode.Repository_change_project ~path:target_path
-  | Masc_tui_command.Toggle_burn_hud ->
+  | Masc_tui_command.Toggle_cost ->
       Buffer.clear state.msg_input;
-      state.burn_hud_visible <- not state.burn_hud_visible;
-      let status_str = if state.burn_hud_visible then "shown" else "hidden" in
-      let cost = Masc_tui_types.fleet_total_cost_usd state in
+      let visible, generation =
+        Masc_tui_types.toggle_cost_visibility ~visible:state.cost_visible
+          ~generation:state.cost_generation
+      in
+      state.cost_visible <- visible;
+      state.cost_generation <- generation;
+      (* Hidden, spend stops being read, so a reading kept from before would
+         come back as a number nobody observed since. Shown again, it starts
+         unread and the next refresh fills it. *)
+      state.overview_spend <- Overview_spend_unread;
       notice ~kind:Notice_reply
-        (Printf.sprintf "Fleet cost in the tab row: %s ($%.4f so far)" status_str cost)
+        (if state.cost_visible then "Cost on the Overview Team block: shown"
+         else "Cost on the Overview Team block: hidden")
   | Masc_tui_command.Open_link_preview url_opt ->
       Buffer.clear state.msg_input;
       let all_urls = Masc_tui_types.conversation_urls state in
@@ -10082,6 +10157,17 @@ let apply_repository_pulls_load state = function
   | Ok reading -> state.overview_pulls <- reading
   | Error err -> state.overview_pulls <- Overview_pulls_failed err
 
+(* A failed read replaces the last good one, as the pull requests do: a
+   spend drawn after the reading that said so stopped arriving would be a
+   number nobody observed. *)
+let apply_keeper_spend_load state ~generation result =
+  (* A response from before an off/on cycle cannot certify the new reading,
+     even if it arrives after the operator turns spend back on. *)
+  if Masc_tui_types.cost_reply_is_current ~visible:state.cost_visible
+       ~current_generation:state.cost_generation ~reply_generation:generation
+  then
+    state.overview_spend <- Masc_tui_keeper_spend.reading_of_load result
+
 (* A failed read replaces the last good one, as the quota reading does: goals
    drawn after the read that listed them stopped arriving would be rows nobody
    observed this refresh. *)
@@ -10275,7 +10361,8 @@ let refresh_status results =
   | _ -> Masc_tui_types.Degraded
 
 let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
-    ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
+    ~board_hearth ~system_log_level ~cost_generation
+    ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
   (* Metrics draws the transport and the Overview reads its queue pressure,
      so a refresh on another surface does not spend a request on it. [None]
@@ -10336,6 +10423,16 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn -> Error (Printexc.to_string exn))
   in
+  let http_keeper_spend =
+    when_needed needs.needs_keeper_spend (fun () ->
+        match Masc_tui_loader.load_keeper_spend ~host ~port with
+        | reply -> { asked_at_generation = cost_generation; reply }
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception exn ->
+            { asked_at_generation = cost_generation
+            ; reply = Error (Printexc.to_string exn)
+            })
+  in
   let http_overview_goals =
     when_needed needs.needs_overview_goals (fun () ->
         match Masc_tui_loader.load_overview_goals ~host ~port with
@@ -10354,11 +10451,13 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   ; http_keeper_roster
   ; http_runtime_quota
   ; http_repository_pulls
+  ; http_keeper_spend
   ; http_overview_goals
   }
 
 let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
-    ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
+    ~board_hearth ~system_log_level ~cost_generation
+    ~(needs : Masc_tui_types.surface_needs) =
   (* A process can disappear and another bind the same endpoint between two
      successful ticks. The compact /health identity is therefore revalidated
      on every refresh rather than inferred from connection failure. It goes
@@ -10382,7 +10481,7 @@ let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
          still decides whether the panel renders, only the fetch is
          unconditional. Targeted scoped refreshes keep their own needs. *)
       load_http_scoped_surfaces ~host ~port ~approval_ticket:None
-        ~board_sort ~board_hearth ~system_log_level
+        ~board_sort ~board_hearth ~system_log_level ~cost_generation
         ~needs:{ needs with needs_asks = true }
     in
     Refresh_surfaces
@@ -10401,6 +10500,10 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
   Option.iter (apply_runtime_quota_load state) results.http_runtime_quota;
   Option.iter (apply_repository_pulls_load state) results.http_repository_pulls;
+  Option.iter
+    (fun { asked_at_generation; reply } ->
+       apply_keeper_spend_load state ~generation:asked_at_generation reply)
+    results.http_keeper_spend;
   Option.iter (apply_overview_goals_load state) results.http_overview_goals
 
 (* This is a current reading, not a last-known cache. A failed probe makes
@@ -10715,6 +10818,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         ~scoped_refresh_inflight:!scoped_refresh_inflight
         ~keeper_pane_drawn:
           (not (Masc_tui_render.acting_pane_suppressed state))
+        ~cost_shown:state.cost_visible
         state.view
     in
     (* The chat pane's history comes down its own generation-guarded path, not
@@ -10776,11 +10880,13 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        is in the payload whether or not the tail is. *)
     if not was_booting then launch_schedules_load state ~mailbox;
 
+    let cost_generation = state.cost_generation in
     let run_refresh () =
       try
         enqueue_async mailbox
           (Http_refresh_done
              (load_http_surfaces ~host ~port ~approval_ticket
+                ~cost_generation
                 ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -10804,6 +10910,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
           (fun () ->
              apply_http_refresh_outcome state
                (load_http_surfaces ~host ~port ~approval_ticket
+                  ~cost_generation
                   ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -10828,11 +10935,13 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
        match state.msg_target_keeper_name with
        | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
        | None -> ());
+    let cost_generation = state.cost_generation in
     let run_refresh () =
       try
         enqueue_async mailbox
           (Http_scoped_refresh_done
              (load_http_scoped_surfaces ~host ~port
+                ~cost_generation
                 ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -10856,6 +10965,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
           (fun () ->
              apply_http_scoped_surfaces state
                (load_http_scoped_surfaces ~host ~port
+                  ~cost_generation
                   ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -12262,6 +12372,11 @@ let handle_composer_key state ~base_path ~mailbox key =
            drain_queued_message state ~base_path ~mailbox);
       true
   | Composer.Send ->
+      if recovered_paste_send_locked state then begin
+        report_action state "system"
+          "Recovered draft protected; press Ctrl-G to enable Enter";
+        true
+      end else begin
       state.composer_focused <- false;
       let text = Buffer.contents state.msg_input in
       (match Masc_tui_command.parse text with
@@ -12301,7 +12416,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
         | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
-        | Masc_tui_command.Toggle_burn_hud | Masc_tui_command.Open_changes
+        | Masc_tui_command.Toggle_cost | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane
          | Masc_tui_command.Show_acting_pane_tab _
          | Masc_tui_command.Acting_pane_tab_unknown _
@@ -12338,6 +12453,7 @@ let handle_composer_key state ~base_path ~mailbox key =
            ());
       send_operator_text state ~base_path ~mailbox text;
       true
+      end
   | Composer.Edit ->
       (* Annotated: [handle_message_key] takes labelled callbacks, and a
          missing one leaves a partial application that binds to [_handled]
@@ -12408,7 +12524,8 @@ let spill_nonce () =
 
    Shares handle_paste's guard: a staged image with no keeper to send it to is
    the same silence as a paste with nowhere to go. *)
-let attach_dropped_image state ~base_path ~mailbox attachment =
+let attach_dropped_image ?(protect_recovered = false) state ~base_path ~mailbox
+    attachment =
   let in_chat = state.view = Keepers Keeper_message in
   if not (in_chat || state.composer_focused) then
     ignore
@@ -12418,6 +12535,7 @@ let attach_dropped_image state ~base_path ~mailbox attachment =
       (Printf.sprintf "Dropped %s with no Keeper to send it to"
          attachment.Masc_tui_keeper_chat_projection.name)
   else begin
+    if protect_recovered then protect_recovered_paste_for_current_keeper state;
     state.msg_attachments <- state.msg_attachments @ [ attachment ];
     note_attachment_staged state;
     report_action state "system"
@@ -12428,7 +12546,8 @@ let attach_dropped_image state ~base_path ~mailbox attachment =
          (List.length state.msg_attachments))
   end
 
-let handle_paste state ~base_path ~mailbox ~(paste : Masc_tui_paste.t) =
+let handle_paste ?(protect_recovered = false) state ~base_path ~mailbox
+    ~(paste : Masc_tui_paste.t) =
   if state.workspace_identity <> Masc_tui_types.Workspace_identity_match
   then ()
   else
@@ -12449,6 +12568,11 @@ let handle_paste state ~base_path ~mailbox ~(paste : Masc_tui_paste.t) =
       Keeper_chat.terminal_safe_text ~preserve_newlines:true
         paste.Masc_tui_paste.text
     in
+    if protect_recovered
+       && (String.trim (Buffer.contents state.msg_input ^ text) <> ""
+           || state.msg_attachments <> [] || state.msg_references <> [])
+    then
+      protect_recovered_paste_for_current_keeper state;
     (match
        Masc_tui_paste_spill.of_paste ~now_iso:(spill_stamp ())
          ~nonce:(spill_nonce ()) text
@@ -14442,14 +14566,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              (Printf.sprintf "%s Gate change failed: %s" (gate_lane_label lane) detail))
   | Keeper_gate_settings_loaded result ->
       (match result with
-       | Ok (modes, judges) ->
+       | Ok (modes, exact_lanes) ->
            state.keeper_gate_modes <- modes;
-           state.keeper_gate_judges <- judges
-       | Error _ ->
+           state.keeper_exact_lane_firsts <- exact_lanes;
+           state.keeper_gate_settings_unread <- None
+       | Error detail ->
            (* Keep the last known settings rather than showing every Keeper as
               following the workspace, which is the looser reading and the one
-              an operator would act on. *)
-           ())
+              an operator would act on. The pane says the read failed: before
+              the first successful read, the "last known" values are the
+              defaults. *)
+           state.keeper_gate_settings_unread <- Some detail)
   | Keeper_tool_modes_loaded (result, ticket) ->
       (* Dropped when a press has opened since the fetch went out -- it
          describes the stance from before that press, including a press that
@@ -14881,10 +15008,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.runtime_catalog <- runtimes;
           state.runtime_lanes <- lanes;
           state.runtime_assignments <- assignments;
-          state.runtime_catalog_error <- None;
-          let count = List.length (Masc_tui_types.runtime_picker_items state) in
-          if state.runtime_pick_cursor >= count then
-            state.runtime_pick_cursor <- max 0 (count - 1)
+          state.runtime_catalog_error <- None
       | Error detail -> state.runtime_catalog_error <- Some detail)
   | Runtime_assignment_set (keeper_name, runtime_id, result) -> (
       match result with
@@ -15158,6 +15282,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.memory_health <- Some snapshot;
           state.memory_health_error <- None
       | Error detail -> state.memory_health_error <- Some detail)
+  | All_memory_facts_loaded result ->
+      if Option.equal String.equal state.memory_facts_keeper (Some "*") then (
+        match result with
+        | Ok (snapshot, unread) ->
+            state.memory_facts <- Some snapshot;
+            state.memory_facts_error <- unread
+        | Error detail -> state.memory_facts_error <- Some detail)
   | Memory_facts_loaded (keeper_name, result) ->
       (* Only the keeper the browser is still open on: a late answer for a
          browser that closed, or for the keeper the reader already left,
@@ -15764,6 +15895,10 @@ let read_terminal_probe reader ~palette_requested =
 let bracketed_paste_enable = "\x1b[?2004h"
 let bracketed_paste_disable = "\x1b[?2004l"
 
+let enable_bracketed_paste () =
+  output_string stdout bracketed_paste_enable;
+  flush stdout
+
 (* Raw mode, and the keys the record cannot ask for.
 
    [Unix.tcsetattr] writes a C-side termios buffer that its last [tcgetattr]
@@ -16038,6 +16173,7 @@ let main
            frame lands on top of whatever the user did meanwhile. *)
         Frame_presenter.setup frame_presenter ~write:(output_string stdout)
           ~flush:(fun () -> flush stdout);
+        enable_bracketed_paste ();
         request_full_repaint 0)
       (fun () -> Unix.kill (Unix.getpid ()) Sys.sigtstp)
   in
@@ -16117,7 +16253,7 @@ let main
      background rather than only its ink. *)
   sync_theme_page state;
   output_string stdout mouse_tracking_enable;
-  output_string stdout bracketed_paste_enable;
+  enable_bracketed_paste ();
   (* Only terminals with an extended profile receive this opt-in. Apple
      Terminal does not implement the protocol; keeping an unsupported control
      sequence off its parser also keeps its crash-sensitive render path small. *)
@@ -16151,6 +16287,7 @@ let main
      originally carried this definition. *)
   let reenter_terminal () =
     apply_raw_mode new_term;
+    enable_bracketed_paste ();
     request_full_repaint 0
   in
   let reject_gate_approval (pending : Tui_decode.gate_pending) =
@@ -16286,9 +16423,17 @@ let main
     ref
       (Masc_tui_types.surface_needs
          ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state))
+         ~cost_shown:state.cost_visible
          state.view)
   in
   let input_reader = create_input_reader () in
+  let paste_pause_notified = ref false in
+  let paste_quiet_notified = ref false in
+  (* The notice this loop last set for a held sequence, kept as the exact
+     [last_action] value so clearing it can tell it apart, by identity, from
+     any notice set after it. *)
+  let csi_pause_notice = ref None in
+  let paste_guard_idle_notified = ref false in
   (* Palette and graphics share one bounded startup probe because both replies
      arrive on the key stream. The probe removes only replies to these exact
      questions and puts every other consumed byte back into this same reader.
@@ -17611,7 +17756,9 @@ and is loaded on demand through keeper_skill.
          outright. Both leave through [Break], the exit q takes, so the
          switch release that stops a server this TUI started runs for every
          way out. *)
-      (match Masc_tui_exit_signals.poll exit_signals with
+      let skip_input_after_interrupt = ref false in
+      let interrupted_paste =
+        match Masc_tui_exit_signals.poll exit_signals with
        | Masc_tui_exit_signals.Quit ->
            note_exit_reason
              (match Masc_tui_exit_signals.terminate_signal exit_signals with
@@ -17620,11 +17767,76 @@ and is loaded on demand through keeper_skill.
            raise Break
        | Masc_tui_exit_signals.Interrupt_armed ->
            state.quit_armed <- false;
-           report_action state "system"
-             (Masc_tui_exit_signals.quit_notice ~key:"Ctrl-C"
-                ~waiting:(Masc_tui_keeper_chat_queue.length state.msg_queued));
-           Render_schedule.request render_schedule Render_schedule.Background
-       | Masc_tui_exit_signals.Continue -> ());
+           (match input_reader.paste_phase,
+                  input_holds_incomplete_sequence input_reader with
+            | Draining_tail tail, _
+              when not (paste_can_recover input_reader tail.tail_last_byte_ns) ->
+                Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+                report_action state "system" "Paste tail still arriving; waiting for end marker";
+                Render_schedule.request render_schedule Render_schedule.Background;
+                None
+            | Draining_tail _, _ ->
+                (* Once the terminal loses its closing marker, stdin has no
+                   provenance bit: a later pasted BEL is indistinguishable
+                   from the operator's Ctrl-G. This is a force unlock for a
+                   stream the operator has observed stop, not an automatic
+                   declaration that all paste bytes have arrived. *)
+                input_reader.paste_phase <- No_paste;
+                Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+                skip_input_after_interrupt := true;
+                report_action state "system"
+                  "Paste input unlocked; confirm only after the terminal stops";
+                Render_schedule.request render_schedule Render_schedule.Background;
+                None
+            | Pasting paste, _ when not paste.cancel_armed ->
+                paste.cancel_armed <- true;
+                Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+                report_action state "system"
+                  "Paste end awaited; press Ctrl-C again after bytes stop if the marker is missing";
+                Render_schedule.request render_schedule Render_schedule.Background;
+                None
+            | Pasting paste, _
+              when not (paste_can_recover input_reader paste.last_byte_ns) ->
+                Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+                report_action state "system"
+                  "Paste still arriving; waiting for end marker";
+                Render_schedule.request render_schedule Render_schedule.Background;
+                None
+            | Pasting paste, _ ->
+                input_reader.paste_phase <-
+                  Draining_tail
+                    { tail_decoder = paste.decoder;
+                      tail_last_byte_ns = Mtime_clock.elapsed_ns () };
+                Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+                Some (Masc_tui_paste.snapshot_payload paste.decoder)
+            (* Bytes already waiting may finish the held head: a split
+               [ESC \[ 2] whose [0 0 ~ first CR second] tail arrived just
+               before this Ctrl-C. Cancelling first would type that tail as
+               keys, and its CR is Enter. [input_byte_ready] pulls them
+               through the probe without waiting; while any are there the
+               Ctrl-C only waits, as the paste arms do, and the loop reads
+               them now. *)
+            | No_paste, true when input_byte_ready input_reader ->
+                Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+                report_action state "system"
+                  "Terminal sequence still arriving; Ctrl-C again after it stops";
+                Render_schedule.request render_schedule Render_schedule.Background;
+                None
+            | No_paste, true ->
+                cancel_incomplete_sequence input_reader;
+                Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+                skip_input_after_interrupt := true;
+                report_action state "system" "Incomplete terminal sequence cancelled";
+                Render_schedule.request render_schedule Render_schedule.Background;
+                None
+            | No_paste, false ->
+                report_action state "system"
+                  (Masc_tui_exit_signals.quit_notice ~key:"Ctrl-C"
+                     ~waiting:(Masc_tui_keeper_chat_queue.length state.msg_queued));
+                Render_schedule.request render_schedule Render_schedule.Background;
+                None)
+       | Masc_tui_exit_signals.Continue -> None
+      in
       if
         drain_async_messages state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
@@ -17683,13 +17895,99 @@ and is loaded on demand through keeper_skill.
           | Masc_tui_machine_live.Dos -> launch_dos_live_poll state ~mailbox:async_messages
         end
       end;
-      let input = read_input ~timeout:input_timeout input_reader () in
+      let guarding_before_read =
+        match input_reader.paste_phase with
+        | Draining_tail _ -> true
+        | No_paste | Pasting _ -> false
+      in
+      let input =
+        match interrupted_paste with
+        | Some paste -> Some (Pasted paste)
+        | None when !skip_input_after_interrupt -> None
+        | None -> read_input ~timeout:input_timeout input_reader ()
+      in
+      let input =
+        if recovered_paste_send_locked state then
+          match input with
+          | Some (Key "\007")
+            when input_reader.paste_phase = No_paste
+                 && (state.view = Keepers Keeper_message || state.composer_focused) ->
+              discard_recovered_paste_lock state;
+              report_action state "system" "Recovered draft confirmed; Enter may send";
+              (* The key is consumed here, so the [Input] request that follows
+                 every other key never fires. Without this the lock is gone
+                 but nothing is drawn: the operator sees no answer to Ctrl-G. *)
+              Render_schedule.request render_schedule Render_schedule.Input;
+              None
+          | other -> other
+        else input
+      in
       (* The footer's notice answers the last key. The next input is a new
          key, so the notice goes before anything handles it: it takes the
          room the key hints need, and a notice left standing after the
          operator moved on hid the hints of the screen they moved to. A key
          that has something to say sets its own. *)
       if Option.is_some input then state.last_action <- None;
+      Option.iter
+        (fun _ ->
+          report_action state "system"
+            "Incomplete paste restored; wait for marker or Ctrl-C, then Ctrl-G enables Enter")
+        interrupted_paste;
+      if guarding_before_read && input_reader.paste_phase = No_paste then begin
+        report_action state "system" "Paste tail ended; review the draft before sending";
+        (* The tail's end marker is swallowed and returns no input, so no
+           [Input] request draws this; ask for the frame as the other
+           recovery notices do. *)
+        Render_schedule.request render_schedule Render_schedule.Background
+      end;
+      (match input_reader.paste_phase with
+       | Pasting _ when not !paste_pause_notified ->
+           paste_pause_notified := true;
+           report_action state "system"
+             "Paste in progress; Ctrl-C twice restores, third unlocks if stuck";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Pasting _ -> ()
+       | No_paste | Draining_tail _ -> paste_pause_notified := false);
+      (match input_reader.paste_phase with
+       | Pasting paste when paste.cancel_armed
+                     && paste_can_recover input_reader paste.last_byte_ns
+                     && not !paste_quiet_notified ->
+           paste_quiet_notified := true;
+           report_action state "system"
+             "Paste quiet; Ctrl-C again restores the draft if the end marker was lost";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Pasting paste when not (paste_can_recover input_reader paste.last_byte_ns) ->
+           paste_quiet_notified := false
+       | Pasting _ -> ()
+       | No_paste | Draining_tail _ -> paste_quiet_notified := false);
+      (match input_holds_incomplete_sequence input_reader, !csi_pause_notice with
+       | true, None ->
+           report_action state "system"
+             "Terminal sequence incomplete; Ctrl-C cancels it";
+           csi_pause_notice := state.last_action;
+           Render_schedule.request render_schedule Render_schedule.Background
+       | true, Some _ | false, None -> ()
+       | false, Some shown ->
+           (* The hold is over, so its notice is no longer true. Only that
+              notice is taken down: one set since (the Ctrl-C outcome, a key's
+              answer) stays for its own window. *)
+           (match state.last_action with
+            | Some current when current == shown ->
+                state.last_action <- None;
+                Render_schedule.request render_schedule Render_schedule.Background
+            | Some _ | None -> ());
+           csi_pause_notice := None);
+      (match input_reader.paste_phase with
+       | Draining_tail tail when paste_can_recover input_reader tail.tail_last_byte_ns
+                     && not !paste_guard_idle_notified ->
+           paste_guard_idle_notified := true;
+           report_action state "system"
+             "Paste tail quiet; Ctrl-C unlocks input if the end marker was lost";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Draining_tail tail when not (paste_can_recover input_reader tail.tail_last_byte_ns) ->
+           paste_guard_idle_notified := false
+       | Draining_tail _ -> ()
+       | No_paste | Pasting _ -> paste_guard_idle_notified := false);
       (* SIGWINCH can arrive while [read_input] is waiting. Consume it before
          this input sees the old frame; the next loop would be one key too
          late. *)
@@ -17957,6 +18255,7 @@ and is loaded on demand through keeper_skill.
          pasted text the way the palette, row search and the preset name
          each did. *)
       let text_target = text_input_target state ~compact_viewport in
+      let recovered_paste = Option.is_some interrupted_paste in
       (match input with
        | Some (Pasted paste) when Option.is_some state.lane_addons ->
            (match state.lane_addons with
@@ -18031,6 +18330,9 @@ and is loaded on demand through keeper_skill.
                   Option.map
                     (fun (pick, list) -> (pick, Masc_tui_pick_list.type_text list text))
                     state.runtime_lane_pick
+            | Some Text_keeper_runtime_picker_filter ->
+                state.runtime_pick_list <-
+                  Masc_tui_pick_list.type_text state.runtime_pick_list text
             | Some Text_row_search ->
                 let longer =
                   Option.value state.search ~default:"" ^ text
@@ -18112,16 +18414,19 @@ and is loaded on demand through keeper_skill.
             | Some path when Sys.file_exists path -> (
                 match Masc_tui_attachment.classify_drop ~path with
                 | Masc_tui_attachment.Attach attachment ->
-                    attach_dropped_image state ~base_path
+                    attach_dropped_image ~protect_recovered:recovered_paste
+                      state ~base_path
                       ~mailbox:async_messages attachment
                 | Masc_tui_attachment.Keep_path ->
-                    handle_paste state ~base_path ~mailbox:async_messages
+                    handle_paste ~protect_recovered:recovered_paste state
+                      ~base_path ~mailbox:async_messages
                       ~paste:{ paste with Masc_tui_paste.text = path }
                 | Masc_tui_attachment.Refuse error ->
                     report_action state "error"
                       (Masc_tui_attachment.error_to_string error))
             | Some _ | None ->
-                handle_paste state ~base_path ~mailbox:async_messages ~paste)
+                handle_paste ~protect_recovered:recovered_paste state
+                  ~base_path ~mailbox:async_messages ~paste)
        (* The wheel over the Activity pane scrolls the pane. The pane is drawn
           under no modal (render reserves it no columns while one is up), so
           the hit test alone says whether the notch is the pane's. *)
@@ -19910,6 +20215,19 @@ and is loaded on demand through keeper_skill.
                        ~existing:already
                  | Masc_tui_pick_list.Dismissed ->
                      state.runtime_lane_pick <- None))
+       | Some k
+         when state.view = Keepers Keeper_runtime_pick
+              && (Option.is_some (keeper_runtime_picker_action state.runtime_pick_list k)
+                  || text_input_target state ~compact_viewport
+                     = Some Text_keeper_runtime_picker_filter) ->
+           (* The Keeper runtime picker: arrows or j/k step, PgUp/PgDn page,
+              Home/End jump, [/] types a filter over the drawn lanes and
+              runtimes, Enter assigns, and Esc drops the filter and then
+              closes. While the filter is typed it holds every key, so [d]
+              and the quit key are letters in it. [d] outside a filter is its
+              own arm below. *)
+           let terminal_rows, _ = get_terminal_size () in
+           keeper_runtime_pick_key state ~mailbox:async_messages ~terminal_rows k
        | Some "e" | Some "E"
          when state.view = Runtime
               && state.runtime_mode = Masc_tui_types.Runtime_lanes
@@ -21408,8 +21726,12 @@ and is loaded on demand through keeper_skill.
                   "No web links found in this conversation to preview.")
        | Some "\023"
          when state.view = Board
-              && terminal_columns >= keeper_split_threshold_cols
-              && not state.board_detail_wide ->
+              && (match
+                    board_read_layout ~cols:terminal_columns
+                      ~wide:state.board_detail_wide
+                  with
+                  | Board_read_split -> true
+                  | Board_read_wide | Board_read_one_pane -> false) ->
            (match state.board_mode with
             | Board_read _ -> (
                 match state.board_focus with
@@ -21588,9 +21910,18 @@ and is loaded on demand through keeper_skill.
                 end)
        | Some ("z" | "Z") when state.view = Board ->
            (match state.board_mode with
-            | Board_read _ ->
-                state.board_detail_wide <- not state.board_detail_wide;
-                state.board_focus <- Right_pane
+            | Board_read _ -> (
+                (* On one pane the two layouts draw the same screen, so the
+                   footer does not offer [z] and pressing it must not leave
+                   the flag set for the next widening. *)
+                match
+                  board_read_layout ~cols:terminal_columns
+                    ~wide:state.board_detail_wide
+                with
+                | Board_read_one_pane -> ()
+                | Board_read_split | Board_read_wide ->
+                    state.board_detail_wide <- not state.board_detail_wide;
+                    state.board_focus <- Right_pane)
             | Board_list | Board_compose -> ())
        | Some (("o" | "O" | "l") as sandbox_log_key)
          when state.view = Keepers Keeper_detail
@@ -21624,7 +21955,13 @@ and is loaded on demand through keeper_skill.
                   | Keepers Keeper_detail | Resources -> true
                   | Board ->
                       (match state.board_mode with
-                       | Board_read _ -> not state.board_detail_wide
+                       | Board_read _ -> (
+                           match
+                             board_read_layout ~cols:terminal_columns
+                               ~wide:state.board_detail_wide
+                           with
+                           | Board_read_split -> true
+                           | Board_read_wide | Board_read_one_pane -> false)
                        | Board_list | Board_compose -> false)
                   | Code -> Option.is_some (Masc_tui_fetched.current_key state.code_file)
                   | Overview | Acting | Metrics | Keepers _ | Lanes | Clients
@@ -22307,10 +22644,8 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_detail ->
                 state.view <- Keepers Keeper_list;
                 state.detail_scroll <- 0
-            | Keepers Keeper_runtime_pick ->
-                state.runtime_pick_keeper <- None;
-                state.runtime_pick_cursor <- 0;
-                state.view <- Keepers Keeper_list
+            (* The picker's own arm takes Esc. *)
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_logs ->
                 state.view <- Keepers Keeper_detail;
                 state.keeper_detail_focus <- Right_pane;
@@ -22974,12 +23309,8 @@ and is loaded on demand through keeper_skill.
                    in
                    state.system_logs_cursor <- cursor;
                    state.system_logs_scroll <- scroll)
-            | Keepers Keeper_runtime_pick ->
-                let count =
-                  List.length (Masc_tui_types.runtime_picker_items state)
-                in
-                if state.runtime_pick_cursor < count - 1 then
-                  state.runtime_pick_cursor <- state.runtime_pick_cursor + 1
+            (* The picker's own arm takes these keys. *)
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_message -> ())
        | Some ("k" | "up" | "wheel-up") when state.repository_changes_open ->
            (match state.repository_changes_diff_path with
@@ -23320,9 +23651,8 @@ and is loaded on demand through keeper_skill.
                    in
                    state.system_logs_cursor <- cursor;
                    state.system_logs_scroll <- scroll)
-            | Keepers Keeper_runtime_pick ->
-                if state.runtime_pick_cursor > 0 then
-                  state.runtime_pick_cursor <- state.runtime_pick_cursor - 1
+            (* The picker's own arm takes these keys. *)
+            | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_message -> ())
        (* Enter starts the provider the arrows are on. The digits below still
           work for the first nine; past that a number is no longer a key, so
@@ -23471,25 +23801,8 @@ and is loaded on demand through keeper_skill.
                         launch_code_file_load state ~mailbox:async_messages
                           ~path:node.Masc.Tui_decode.wt_path
                   | None -> ())
-            | Keepers Keeper_runtime_pick ->
-                (match state.runtime_pick_keeper with
-                 | Some keeper_name ->
-                     let items = Masc_tui_types.runtime_picker_items state in
-                     (match
-                        List.nth_opt items state.runtime_pick_cursor
-                      with
-                      | Some item ->
-                          let target_id =
-                            Masc_tui_types.runtime_pick_item_id item
-                          in
-                          launch_runtime_assignment_set state
-                            ~mailbox:async_messages ~keeper_name
-                            ~runtime_id:(Some target_id);
-                          state.runtime_pick_keeper <- None;
-                          state.runtime_pick_cursor <- 0;
-                          state.view <- Keepers Keeper_list
-                      | None -> ())
-                 | None -> state.view <- Keepers Keeper_list)
+            (* The picker's own arm takes Enter. *)
+            | Keepers Keeper_runtime_pick -> ()
             | Overview ->
                 (* Only under task focus: Enter while the events own j/k would
                    open whatever row the cursor happens to rest on. Under task
@@ -23822,7 +24135,7 @@ and is loaded on demand through keeper_skill.
               now, not the last visit. *)
            let keeper = List.nth state.keepers state.keeper_cursor in
            state.runtime_pick_keeper <- Some keeper.k_name;
-           state.runtime_pick_cursor <- 0;
+           state.runtime_pick_list <- Masc_tui_pick_list.closed;
            launch_runtime_catalog_load state ~mailbox:async_messages;
            state.view <- Keepers Keeper_runtime_pick
        | Some "d" | Some "D"
@@ -23831,10 +24144,8 @@ and is loaded on demand through keeper_skill.
             | Some keeper_name ->
                 launch_runtime_assignment_set state ~mailbox:async_messages
                   ~keeper_name ~runtime_id:None;
-                state.runtime_pick_keeper <- None;
-                state.runtime_pick_cursor <- 0;
-                state.view <- Keepers Keeper_list
-            | None -> state.view <- Keepers Keeper_list)
+                close_keeper_runtime_pick state
+            | None -> close_keeper_runtime_pick state)
        | Some "d" when state.repository_changes_open -> (
            match state.repository_changes_diff_path with
            | Some _ -> ()
@@ -24843,15 +25154,24 @@ and is loaded on demand through keeper_skill.
         Masc_tui_types.surface_needs
           ~keeper_pane_drawn:
             (not (Masc_tui_render.acting_pane_suppressed state))
+          ~cost_shown:state.cost_visible
           state.view
       in
+      let cost_retry =
+        needed.needs_keeper_spend
+        && Masc_tui_types.cost_refresh_needed ~visible:state.cost_visible
+             state.overview_spend
+      in
       if
-        needed <> !drawn_needs
+        (needed <> !drawn_needs || cost_retry)
         && not !http_refresh_inflight
         && not !http_scoped_refresh_inflight
       then begin
         let delta =
           Masc_tui_types.surface_needs_delta ~previous:!drawn_needs ~next:needed
+        in
+        let delta =
+          { delta with needs_keeper_spend = delta.needs_keeper_spend || cost_retry }
         in
         drawn_needs := needed;
         if Masc_tui_types.surface_needs_any delta then

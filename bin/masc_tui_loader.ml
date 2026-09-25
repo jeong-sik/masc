@@ -1210,9 +1210,7 @@ let load_keeper_tool_approvals ~(host : string) ~(port : int) :
 (** Load which keepers are mid-turn right now (the "answering now" badge). *)
 let load_keeper_turns ~(host : string) ~(port : int) :
     (Tui_decode.keeper_turn_row list, string) result =
-  match fetch_keeper_turns ~host ~port with
-  | Error err -> Error ("keeper turns load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_keeper_turns json
+  Result.bind (fetch_keeper_turns ~host ~port) Tui_decode.decode_keeper_turns
 
 (** Load the durable Gate: pending approvals and both lane modes. *)
 let load_dashboard_gate ~(host : string) ~(port : int) :
@@ -1227,7 +1225,7 @@ let load_dashboard_gate ~(host : string) ~(port : int) :
 
 (** Load the durable per-keeper Gate settings. *)
 let load_keeper_gate_settings ~(host : string) ~(port : int) :
-    ((string * string) list * (string * string) list, string) result =
+    ((string * string) list * Tui_decode.keeper_exact_lane_first list, string) result =
   match fetch_keeper_gate_settings ~host ~port with
   | Error err -> Error ("keeper Gate settings load failed: " ^ err)
   | Ok json -> Tui_decode.decode_keeper_gate_settings json
@@ -1328,6 +1326,15 @@ let load_repository_pulls ~(host : string) ~(port : int) :
   match Masc_tui_http.fetch_repository_pulls ~host ~port with
   | Error err -> Error ("pull requests load failed: " ^ err)
   | Ok json -> Repository_pulls.decode_reading json
+
+(* Each Keeper's spend over the server's default window; the title draws the
+   window the answer names. A Keeper row the decoder cannot read is counted,
+   and that Keeper is drawn unknown. *)
+let load_keeper_spend ~(host : string) ~(port : int) :
+    (overview_spend_reading, string) result =
+  match Masc_tui_http.fetch_keeper_costs ~host ~port with
+  | Error err -> Error ("keeper spend load failed: " ^ err)
+  | Ok json -> Masc_tui_keeper_spend.decode_reading json
 
 (* The Overview's GOALS section. A phase this build does not know refuses the
    whole reading: a goal dropped from the list, or drawn under a phase it is
@@ -1446,15 +1453,13 @@ let load_tools ~(host : string) ~(port : int) ?keeper () :
 (** Load the workspace skills catalog for the Tools screen tracking views. *)
 let load_skills_catalog ~(host : string) ~(port : int) :
     (Tui_decode.skills_catalog, string) result =
-  match fetch_skills_catalog ~host ~port with
-  | Error err -> Error err
-  | Ok json -> Tui_decode.decode_skills_catalog json
+  Result.bind (fetch_skills_catalog ~host ~port) Tui_decode.decode_skills_catalog
 
 (** Load connector status from /api/v1/gate/connectors *)
 let load_connectors ~(host : string) ~(port : int) :
     (Tui_decode.connector_snapshot, string) result =
   match fetch_connectors ~host ~port with
-  | Error err -> Error ("connector load failed: " ^ err)
+  | Error err -> Error err
   | Ok json ->
       (match Tui_decode.decode_connector_snapshot json with
        | Error _ as error -> error
@@ -1555,7 +1560,7 @@ let load_keeper_lanes ~(host : string) ~(port : int) :
 let load_standalone_lanes ~(host : string) ~(port : int) :
     (Tui_decode.standalone_lanes_snapshot, string) result =
   match fetch_standalone_lanes ~host ~port with
-  | Error err -> Error ("standalone lanes load failed: " ^ err)
+  | Error err -> Error err
   | Ok json -> Tui_decode.decode_standalone_lanes_snapshot json
 
 (** Load the clients roster from /api/v1/dashboard/clients *)

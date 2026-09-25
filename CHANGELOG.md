@@ -6,6 +6,14 @@
 
 ### Upgrade notes
 
+- The session store no longer knows the `replaced_configuration` context
+  delivery. An official-client session file that still records it fails to
+  load, and that Keeper's turns fail until the file is removed. Before
+  starting this release, remove
+  `<base>/.masc/keepers/<name>/official-client-runtime/session.json` for each
+  Keeper whose file contains `"delivery":"replaced_configuration"`. The next
+  turn starts a new vendor session (#38882).
+- Tool blob maintenance (`masc-deployment-preflight-helper` blob GC) now runs on deployments with non-default clusters. It previously refused whenever `.masc/clusters/` had any entry, so on those deployments blobs were never collected. It now reads every cluster workspace, so the first two passes after upgrading may free a backlog of unreferenced blobs. A symlink or special file under `.masc/clusters/` makes the pass fail with that path instead of being skipped. A regular file there (such as Finder's `.DS_Store`) is skipped: the helper prints one stderr line naming it and lists it under `skipped_cluster_files` in its JSON output (#38996).
 - Ephemeral screen captures in `<keeper>.vision/frames` are pruned to the newest 500 files / 20 MB on the first frame write after upgrade. Checkpoints and uploaded images stored in `<keeper>.vision` root are kept untouched and protected from eviction (#38634).
 - A `[models.<id>]` table in `runtime.toml` with a key the parser does not read fails the load and names the key, instead of being ignored. A misspelt `tools_support = true` used to load as a model without tool support, so its keeper ran with no tools. Before restarting on this version, run the new binary's `masc doctor` against the live base path: it loads that `runtime.toml` and reports `runtime.toml loads.` or the offending key (#38742).
 - The server's PID lock now records the start time of the process that wrote it, read from `/proc/<pid>/stat` on Linux (no `ps` needed) and from `ps -o lstart=` elsewhere. A lock left by an older server that is still alive but not answering is not taken over automatically; stop that process or remove the lock by hand (#38742).
@@ -28,13 +36,6 @@
 - HTTP callers must send attachments in top-level `attachments` rather than `meta.attachments`. The raw metadata carrier now returns a bad-request error. `http:`, `javascript:`, and `data:` attachment URLs are refused (#38835).
 - A `youtube` attachment must use `url`; `youtube` with `sha256` is refused. An artifact attachment over 32 MiB is refused when the post is written, because the dashboard can open artifacts only up to that size (#38835).
 - Old untyped attachment metadata, including HTTPS entries, displays a failure card. Artifact downloads require an Admin token and return exact bytes. The whole-body HTTP readers return 413 for artifacts over 32 MiB (#38835).
-- The session store no longer knows the `replaced_configuration` context
-  delivery. An official-client session file that still records it fails to
-  load, and that Keeper's turns fail until the file is removed. Before
-  starting this release, remove
-  `<base>/.masc/keepers/<name>/official-client-runtime/session.json` for each
-  Keeper whose file contains `"delivery":"replaced_configuration"`. The next
-  turn starts a new vendor session (#38882).
 - A request that the candidate's own policy refuses before it is sent
   (`Retry.Attempt_rejected`) now shows route class `admission` instead of
   `attempt_rejected` in Keeper turn records and driver logs, because Api-error
@@ -42,8 +43,38 @@
   candidate walks use. Lanes behave the same as before: both classes already
   rotated to the next candidate (#38958).
 
+### Fresh state required
+
+- Raw cost-ledger rows (`usage_projection: raw_observation`) now require `usage_scope`, and an official client's rows also carry `conversation_id`, `conversation_position` and `vendor_total_tokens`. A raw row written before this release has no scope and does not decode: `masc cost` warns and counts it as an invalid row, inference metrics counts it as a schema violation. Move `<base-path>/.masc/costs/` aside before upgrading to start the ledger fresh (#38970).
+
 ### Added
 
+- `masc_dos_load`, `masc_dos_screen` and the `/health` build object
+  (`ocaml_dos_core`) name the linked ocaml-dos core: the source digest the
+  core computed at its build, the digest pinned for `OCAML_DOS_SHA`, and a
+  `matches_pin` flag. A server built against an older opam copy of the core
+  no longer looks identical to one built against the pin (#38826) (#38941).
+- The glossary gains a Board Attachment entry: a typed reference a Board post carries, with `kind` (image|video|youtube|external_link) and exactly one source — an absolute HTTPS `url` or an existing artifact `sha256`. The post handler is the only writer, the Keeper tool and HTTP paths share the input, and the entry separates it from the wider Artifact concept (#38957, closes #38833).
+- The TUI Keeper runtime picker (Keepers, `U`) can now be narrowed by typing:
+  `/` opens a filter over the drawn kind, target and route of every declared
+  lane and runtime, Backspace edits it, and Esc drops the filter before a
+  second Esc closes the picker. The count line shows the filter and `N of M`,
+  and a filter that matches nothing says so instead of "loading". PgUp/PgDn
+  move a page and Home/End jump to the ends. While the filter is open, `d`,
+  `j`/`k`, the quit key and a paste go into the filter. The picker moves onto
+  the shared `Masc_tui_pick_list`, which gains a `Follows_cursor` window for
+  screen-high pickers (#38976).
+- `masc_dos_save` and `masc_dos_restore` keep the whole DOS machine under a
+  slot name in `<.masc>/dos/checkpoints/` and put it back, including after a
+  server restart. A save needs no controller and moves nothing; a restore
+  needs the controller free or the caller's, makes the restorer the holder,
+  starts a new incarnation, and continues the key ledger from the checkpoint.
+  It leaves the game's own saves directory as it is. `masc_dos_restore` with
+  no slot lists the checkpoints (#39011).
+- `Machine_checkpoint`, the slot store a machine lane writes through: slot
+  names, a header naming the machine, its format and the writing core, zstd
+  compression, a checksum and an atomic replace. Another machine's or another
+  format's checkpoint is refused; the core identity is shown, not compared (#39011).
 - Add bounded retention and rotation to multimodal vision artifact stores (`default_max_entries = 500`, `default_max_bytes = 20 MB`), isolating ephemeral screen frames into a `frames/` subdirectory and evicting older frames on write while refreshing modification times on re-used frames, protecting checkpoints and active workflows from data loss (#38634).
 - The Overview's Providers section can show usage windows for OpenRouter,
   Z.AI (GLM Coding Plan), Kimi Coding and Ollama Cloud accounts. A provider
@@ -98,6 +129,7 @@
 
 ### Changed
 
+- Add boot stage timing to release smoke diagnostics (#38804).
 - A Keeper's Automation rows say when each schedule was asked for. The rows
   drew a status, a recurrence and a summary, and a store that keeps every
   request it ever took draws the same one-shot many times: twenty of
@@ -153,6 +185,12 @@
 - Evidence references sent to a goal whose phase has no active proof request
   are refused with `error_code` `precondition_failed` instead of
   `validation_error` (#38774).
+- The Board API now reports whether you reacted to a post or comment in one
+  field, `reacted`. The duplicate `has_reacted` field is gone; scripts that
+  read it should read `reacted` (#38842).
+- The Keeper API and Dashboard report the model a Keeper last used in
+  `active_model_label` only. The duplicate `last_model_used_label` field is
+  gone; scripts that read it should read `active_model_label` (#38844).
 
 ### Removed
 
@@ -164,6 +202,53 @@
 
 ### Fixed
 
+- A direct chat turn that is still calling tools now hands its slot to a
+  person's chat that arrived after it. It stops after the next settled MASC
+  tool result, keeps its session as a continuation, and resumes after the
+  newer chat. A continuation never makes the next turn yield back to it
+  (#38807).
+- Main CI compile runs no longer cancel the run already in progress when another push arrives; one newer run waits, so a merge burst still uses a single runner (#38838).
+- Remove Keeper handoff count and age from status, operator, briefing, and Dashboard views. The current writer does not advance those values, so the former display reported a zero count or missing age as if it measured handoffs. Persisted Keeper metadata remains on its current schema (#38843).
+- `masc.opam.locked` pins `cohttp-eio` to the fork carrying the SSE body fix,
+  so builds that replay the lock file (the keeper sandbox image) get the fix
+  too (#38869).
+- The Task Verdicts screen drew no key hints at all. It declared its chrome as
+  a constant that said seven rows where the head draws nine, so it ran three
+  rows past its budget, and a surface that overruns loses its last rows -- the
+  last row here is the footer. The rows above and below the list are now
+  counted off the buffers they were drawn into (#38912).
+- Dashboard turn records and last-prompt captures decode the `skill_compositions` prompt block again. A Keeper with composition tools carries it on every turn, and one unknown block failed that Keeper's whole turn-records response. A parity test now holds the dashboard block ids and input components equal to the OCaml emitters (#38923).
+- An official-client turn that fails after its client reported usage now leaves that report in the cost ledger: Codex's thread count from every `thread/tokenUsage/updated` frame, the Claude Code result frame's turn total, and the Antigravity result's conversation count, each as a raw row under its scope and conversation. A completed or host-stopped turn whose response carries no usage gets a row saying its usage is missing; a failed turn whose client reported nothing still writes no row (#38970).
+- The first paged read of a stored artifact (for example `keeper_artifact_read`) could return bytes from a different version of the file than the one whose checksum it verified, if the file was rewritten between two reads. The page and the checksum now come from a single read of the file, so a returned page is always part of what was verified (#38979).
+- `analyze_image` with `path` reads the image through the raw byte prefix
+  (`head -c`, binary capture) instead of Read's line window. The window is a
+  text read: on an OpenSSH or container endpoint its output has the remote
+  workspace root rewritten to the host's, so image bytes that spell that root
+  came back changed. `read_sandbox_bytes`, whose only production caller was
+  this read, is gone (#38999).
+- The Board read footer drew `z:wide` in both of that key's states, so a wide
+  detail offered the operator the screen they were already on, and below the
+  split width it offered a second pane the terminal has no room for -- the key
+  flipped a flag there that changed nothing on screen and then widened the
+  next wide-enough terminal unasked. The footer, the frame and the three key
+  guards now read one layout (`Board_read_split | Board_read_wide |
+  Board_read_one_pane`) instead of each recomposing a split from the width and
+  the flag: the label names where `z` goes, and on one pane the key is neither
+  drawn nor armed (#39002).
+- TUI Keeper settings (`e`): an `activation_mode` outside `manual | on_demand | autonomous` (for example `auto`) is no longer sent and lost behind one status line. The editor reopens with your text and the allowed values on top; saving it unchanged closes the editor with the reason (#39007).
+- Only `verifier_exact`'s `cli_slots` were reference-checked when
+  `runtime.toml` loaded. A typo'd id on any other exact-output lane
+  (`librarian_exact`, `hitl_auto_judge`, `board_attention_exact`) loaded
+  fine and then failed every `Keeper_lane_cli_oneshot` attempt at run time
+  with a misleading "is not an official-client runtime" message, 192 times
+  in one server log for a single stray id. Every declared lane's `cli_slots`
+  is now checked at load: an id that names no configured runtime, or one
+  that names a provider-dispatched (HTTP) runtime instead of an official
+  client, is refused with a message naming the lane, the key and the id.
+  `keeper_lane_cli_oneshot.ml`'s run-time failure now also distinguishes
+  "no such runtime" from "not an official client" as separate typed cases,
+  instead of folding both into one (#39020).
+- The Prompts pane title no longer hides how many prompt overrides are not applied. At 120 columns the title row is one cell short and is cut from the end, which removed that count; the count now sits right after the prompt count, so a shorter label is cut instead (#39022).
 - The Task Review and Verdicts indexes now part a row from its siblings by a
   value of its own instead of its age. An age moves under the reader and
   rounds two rows minutes apart to one reading, so seven rows read
@@ -415,6 +500,18 @@
   for the autonomous lane instead of being offered to the queued chat
   turn first. A chat turn can be delayed by at most those forfeited
   releases (#38963).
+- The TUI no longer drops a Keeper chat that waits silently behind another
+  Keeper turn after three minutes. While the request is queued or running the
+  server now sends a keepalive every 30 seconds, and it closes the stream when
+  the request has already finished (#38819).
+- A Keeper whose sandbox endpoint cannot be reached no longer skips the
+  GitHub identity check. Only a check that really ran and found no login
+  counts as "not logged in"; an unreachable endpoint now reports its own
+  error (#38995).
+- The Dashboard tool quality view no longer counts tool runs that ended by a
+  signal or a timeout as `unknown_error`. It reads each result with the
+  format that wrote it, and a result it cannot read gets its own unreadable
+  label (#39009).
 
 ### Performance
 
@@ -458,6 +555,28 @@
 
 ### Internal
 
+- The TUI reads a standalone lane id into `Standalone_lane.t` once, in the
+  decoder. The lane pick, the lane run views and the slot editor carry the
+  type, and strings are built only for HTTP paths, config keys and display.
+  A lane row or a run whose lane no lane has is refused (#38785, closes
+  #38578).
+- The openapi e2e suite sends its Host authority cases as raw requests. curl merged the two Host headers into one, so the duplicate-Host case never reached the server (#38800).
+- Pull requests that change the turn-record contract now run the focused Context Inspector PTY scenario, so its Python HTTP fixture and the screen's token-scope reading are checked before merge without rerunning the full keyboard walk (#38832).
+- The PR check's edited-test step now runs a broad selection within a
+  30-minute budget (was 18), with a 32-minute step and 45-minute job
+  deadline. Run 36009641291 selected 268 linked suites and left 151 unrun at
+  the former budget (#38847).
+- `/ocaml-msx.opam`, generated by the first build, is kept out of commits.
+  Installation commands in CI, release builds and local docs name
+  `./masc.opam`, so the generated file cannot shadow the `ocaml-msx` git pin.
+  The opam pin script's repair hint covers the local switch the README creates
+  (#38869).
+- The route class `attempt_rejected`, which nothing produces any more because its label became `admission` in this release, is removed (#38971).
+- The DOS live TUI scenario counts a read re-asked at the drawn counter as a
+  disowned read, instead of counting the next poll after the answer (#39019).
+- `test_tui_runtime_listing` links `masc.runtime` again, so the test that
+  names `Standalone_lane` compiles; #38976 had dropped it from the stanza
+  and `dune build @check` stopped on main (#39032).
 - The Keeper batch admission filter names every event kind instead of a catch-all arm, so a new kind must decide whether it may share a batch before the build passes (#38756).
 - CI fixture: stop recording a blank JSONL line when stdin closes before the
   fifth request; a real fifth request is still captured (#38872).

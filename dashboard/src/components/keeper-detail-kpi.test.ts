@@ -91,5 +91,6 @@ describe('KpiGrid', () => {
     expect(screen.getByText('60.0 tok/s')).toBeInTheDocument()
     expect(screen.getByText('hw tok/s')).toBeInTheDocument()
     expect(screen.getByText('150.0 tok/s')).toBeInTheDocument()
+    expect(screen.queryByText('인계')).not.toBeInTheDocument()
   })
 })

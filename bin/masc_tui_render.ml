@@ -530,10 +530,12 @@ let overview_providers_section (state : state) ~cols =
 let overview_layout (state : state) ~terminal_rows =
   let all_attention = overview_attention state in
   let tasks_error = Terminal_text.optional_single_line state.tasks_error in
-  let team_count =
+  let team_count, team_stuck =
     match overview_team state with
-    | None -> 0
-    | Some team -> Overview_team.drawn_rows team
+    | None -> (0, false)
+    | Some team ->
+        ( Overview_team.drawn_rows team
+        , Overview_team.count team Overview_team.Needs_you > 0 )
   in
   let providers_count =
     match overview_providers_section state ~cols:(snd (get_terminal_size ())) with
@@ -544,7 +546,7 @@ let overview_layout (state : state) ~terminal_rows =
     Render_schedule.allocate_overview ~terminal_rows
       ~attention_count:(List.length attention_items)
       ~goal_count:(Overview_goals.wanted_rows state.overview_goals)
-      ~team_count
+      ~team_count ~team_stuck
       ~providers_count
       ~task_count:
         (Overview_tasks.line_count state.tasks

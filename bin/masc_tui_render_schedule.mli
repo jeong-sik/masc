@@ -93,14 +93,19 @@ val allocate_overview :
   attention_count:int ->
   goal_count:int ->
   team_count:int ->
+  team_stuck:bool ->
   providers_count:int ->
   task_count:int ->
   has_task_error:bool ->
   overview_allocation
-(** The Providers section is sized after GOALS and before the Team block: it
-    takes up to [providers_count] rows of what is left once the one task row
-    held back is kept. With no room for one row besides its chrome it is not
-    drawn at all. *)
+(** The blocks share the rows through {!Masc_tui_layout.allocate}, served in
+    the order Attention panel, GOALS, Providers, Team, Tasks. Each is first
+    paid what it cannot give up -- the panel's first row, the GOALS headline,
+    the first Team row when [team_stuck] says it is a stuck Keeper, the first
+    held task and the backlog line -- and then each grows, in the same order,
+    to what it wants. A block with no room for one row besides its chrome is
+    not drawn at all and its rows are filler. A taller terminal never gives
+    any block fewer rows, and fewer attention items never give Team fewer. *)
 
 (** {1 Keeper roster columns} *)
 

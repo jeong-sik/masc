@@ -87,6 +87,45 @@ let test_a_failed_act_may_have_acted () =
      = Tool_result.Proven_pre_effect)
 ;;
 
+(* Stagehand 4.1.0 answers an act it could not carry out as a normal result
+   with data.success = false. Through the real executor, BrowserInstruct
+   reports that act as a failed tool call that may have acted. *)
+let test_an_unsuccessful_act_is_a_failure () =
+  let module Wire = Masc.Browser_stagehand_wire in
+  let module Executor = Masc.Browser_stagehand_executor in
+  let page = `Assoc [ "page_id", `String "P1"; "url", `String "http://127.0.0.1:1/" ] in
+  let call = function
+    | Wire.Context_pages -> Ok (`List [ page ])
+    | Wire.Context_active_page -> Ok page
+    | Wire.Page_evaluate _ -> Ok (`Assoc [ "value", `String {|{"url":"http://127.0.0.1:1/","title":"Shop"}|} ])
+    | Wire.Act _ ->
+      Ok
+        (`Assoc
+          [ "data", `Assoc [ "success", `Bool false; "message", `String "no element matched" ]; "metadata", `Assoc [] ])
+    | request -> failf "the executor sent %s" (Wire.method_name request)
+  in
+  let tabs = Executor.Tabs.create () in
+  Eio_main.run
+  @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  Lane.install_stagehand_executor (Some (Executor.execute ~tabs ~call));
+  Fun.protect ~finally:(fun () -> Lane.install_stagehand_executor None)
+  @@ fun () ->
+  (match Executor.execute ~tabs ~call Lane.Tabs_list with
+   | Lane.Answered _ -> ()
+   | Lane.Lane_absent | Lane.Timed_out | Lane.Refused _ | Lane.Rejected_before_effect _ -> fail "the tabs were listed");
+  let result, phase = instruct [ "action", `String "act"; "instruction", `String "click Buy"; "tabId", `Int 0 ] in
+  check bool "the tool call failed" false (Tool_result.is_success result);
+  check bool "the act may have acted" true (phase = Tool_result.Effect_outcome_unknown);
+  check bool "Stagehand's message reaches the Keeper" true
+    (let message = Tool_result.message result and needle = "no element matched" in
+     let rec has i =
+       i + String.length needle <= String.length message
+       && (String.equal (String.sub message i (String.length needle)) needle || has (i + 1))
+     in
+     has 0)
+;;
+
 let () =
   run "browser_instruct" [
     "input", [
@@ -94,6 +133,9 @@ let () =
       test_case "each action becomes its sentence verb" `Quick test_actions_become_sentence_verbs;
       test_case "bad input reaches no browser" `Quick test_bad_input_sends_nothing;
     ];
-    "effects", [ test_case "a failed act may have acted, a failed read did not" `Quick test_a_failed_act_may_have_acted ];
+    "effects",
+    [ test_case "a failed act may have acted, a failed read did not" `Quick test_a_failed_act_may_have_acted;
+      test_case "an act Stagehand did not carry out is a failure" `Quick test_an_unsuccessful_act_is_a_failure
+    ];
   ]
 ;;

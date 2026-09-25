@@ -326,6 +326,38 @@ let test_interactions () =
     (List.for_all (function Wire.Page_click _ -> false | _ -> true) fake.sent)
 ;;
 
+(* Stagehand 4.1.0 answers an act it could not do as a normal result with
+   [data.success = false]; the lane answers it as a failure that may have
+   acted, carrying Stagehand's message. *)
+let test_act_that_did_not_succeed () =
+  let tabs = Executor.Tabs.create () and fake = fake [ blank; shop () ] ~active:(Some "P2") in
+  ignore (listed tabs fake);
+  let act_answers data request =
+    match request with
+    | Wire.Act _ -> Ok (`Assoc [ "data", data; "metadata", `Assoc [] ])
+    | _ -> call fake request
+  in
+  let instruct call = Executor.execute ~tabs ~call (Lane.Page_instruct { tab_id = 1; instruction = "click Buy" }) in
+  (match instruct (act_answers (`Assoc [ "success", `Bool false; "message", `String "no element matched" ])) with
+   | Lane.Refused reason -> check string "Stagehand's message" "Stagehand act did not succeed: no element matched" reason
+   | Lane.Answered _ | Lane.Lane_absent | Lane.Timed_out | Lane.Rejected_before_effect _ ->
+     fail "an unsuccessful act is refused after its effect");
+  check bool "an unsuccessful act without a message" true
+    (refused (instruct (act_answers (`Assoc [ "success", `Bool false ]))));
+  check bool "an act answer without success" true (refused (instruct (act_answers (`Assoc [ "actions", `List [] ]))));
+  check bool "observe has no success flag to read" true
+    (match
+       Executor.execute ~tabs
+         ~call:(fun request ->
+           match request with
+           | Wire.Observe _ -> Ok (`Assoc [ "data", `List []; "metadata", `Assoc [] ])
+           | _ -> call fake request)
+         (Lane.Page_locate { tab_id = 1; instruction = None })
+     with
+     | Lane.Answered _ -> true
+     | Lane.Lane_absent | Lane.Timed_out | Lane.Refused _ | Lane.Rejected_before_effect _ -> false)
+;;
+
 let test_unserved_verbs () =
   let tabs = Executor.Tabs.create () and fake = fake [ blank ] ~active:None in
   List.iter
@@ -371,7 +403,10 @@ let () =
       test_case "a capture passes the surface's checks" `Quick test_capture_passes_the_surface;
       test_case "a page that moved during capture is refused" `Quick test_capture_refuses_a_moving_page;
     ];
-    "sentences", [ test_case "each sentence verb sends one Stagehand call" `Quick test_sentence_verbs ];
+    ( "sentences",
+      [ test_case "each sentence verb sends one Stagehand call" `Quick test_sentence_verbs;
+        test_case "an act Stagehand did not carry out is a failure" `Quick test_act_that_did_not_succeed
+      ] );
     "reads", [ test_case "reads run the page scripts" `Quick test_reads_run_the_page_scripts ];
     "interactions", [ test_case "scripts and native pointer input" `Quick test_interactions ];
     "refusals", [ test_case "an unserved verb sends nothing" `Quick test_unserved_verbs ];

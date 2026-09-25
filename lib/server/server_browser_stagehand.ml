@@ -317,8 +317,10 @@ let log_event = function
     Log.Server.warn "browser-lane stagehand: refused unsupported request %s" method_
   | Session.Unsupported_notification { method_ } ->
     Log.Server.info "browser-lane stagehand: ignored notification %s" method_
+  (* The extension's log can carry instruction text and page content, many
+     lines per sentence; it stays out of the info log. *)
   | Session.Extension_log params ->
-    Log.Server.info "browser-lane stagehand: extension log %s"
+    Log.Server.debug "browser-lane stagehand: extension log %s"
       (match params with Some json -> Yojson.Safe.to_string json | None -> "without params")
   | Session.Malformed_message detail -> Log.Server.warn "browser-lane stagehand: malformed message: %s" detail
   | Session.Unexpected_response { id } -> Log.Server.warn "browser-lane stagehand: response to %d, which no call waits for" id
@@ -336,7 +338,7 @@ let start ~sw ~env ~base_path =
   let masc_root = Config_dir_resolver.masc_root ~base_path in
   Eio.Fiber.fork ~sw (fun () ->
     stop_left_behind ~clock:(Eio.Stdenv.clock env) ~masc_root;
-    match Server_browser_configuration.load () with
+    match Server_browser_configuration.load ~base_path with
     | Error detail -> Log.Server.error "browser-lane: %s" detail
     | Ok { Browser_configuration.stagehand = None; _ } ->
       Log.Server.info "browser-lane: stagehand has no [browser.stagehand]"

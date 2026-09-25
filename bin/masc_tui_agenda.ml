@@ -302,8 +302,8 @@ let overlay ~now ~localtime ~cols t =
     { tone = Failed; text = two_column ~cols reason ""; goes_to = Nowhere }
   in
   (* An empty section is an answer only once its list was read. Before that,
-     or when the read failed, "nothing is scheduled" and "nobody is waiting on
-     you" were said about lists no one had seen. *)
+     or when the read failed, each section's empty note was said about a list
+     no one had seen. *)
   let wakes =
     match t.coming with
     | Not_read -> [ quiet "not loaded yet" ]
@@ -329,7 +329,12 @@ let overlay ~now ~localtime ~cols t =
     match t.blocked with
     | Not_read -> [ quiet "not loaded yet" ]
     | Read_failed reason -> [ failure ~cols reason ]
-    | Read [] -> [ quiet "nobody is waiting on you" ]
+    (* Named after what this section holds, the way the stuck section is. The
+       note used to read "nobody is waiting on you" while the strip's badge
+       said "Awaiting you" over a number that counts this list AND the stuck
+       one: with no held call and sixteen stuck tasks the panel answered the
+       badge with "nobody is waiting on you" two rows under it. *)
+    | Read [] -> [ quiet "no keeper is holding a call" ]
     | Read rows ->
       List.map
         (fun (held : awaiting) ->
@@ -367,7 +372,11 @@ let overlay ~now ~localtime ~cols t =
   let heading text = { tone = Heading; text; goes_to = Nowhere } in
   let blank = { tone = Quiet; text = ""; goes_to = Nowhere } in
   (heading "Coming up" :: wakes)
-  @ [ blank; heading "Waiting on you" ]
+  (* "Awaiting you" is the badge's word for this list and the stuck one
+     together. This heading names its own rows, which say "<keeper> is holding
+     <call>", so the badge's number reads as the two sections under it rather
+     than as this one. *)
+  @ [ blank; heading "Holding a call" ]
   @ questions
   @ [ blank; heading "Stuck on you" ]
   @ stuck

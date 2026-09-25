@@ -41,6 +41,20 @@ type checkpoint_owner =
   | Masc_agent_core
   | Official_client
 
+(** Where a turn's provider spend becomes visible to MASC, which decides who
+    writes the cost ledger's raw rows. Separate from [checkpoint_owner]: that
+    answers who holds resumable state, this answers who reports usage.
+
+    - [Each_agent_core_response]: AGENT_CORE hands MASC every provider
+      response, and [AfterTurn] carries that response's usage.
+    - [Client_usage_stream]: the official client reports usage on its own
+      stream while the turn runs, before the turn has an outcome. What one
+      report covers (one model response, one client turn, the conversation so
+      far) is that client's usage scope, not part of this answer. *)
+type usage_report =
+  | Each_agent_core_response
+  | Client_usage_stream
+
 val supports_native_none : t -> bool
 (** Whether the execution owner can enforce that all tools are supplied by MASC. *)
 
@@ -50,3 +64,5 @@ val checkpoint_owner : t -> checkpoint_owner
 (** Typed owner of the runtime's resumable execution state. [Masc_agent_core]
     requires an AGENT_CORE checkpoint on every successful turn. [Official_client]
     forbids projecting the client's session state into an AGENT_CORE checkpoint. *)
+
+val usage_report : t -> usage_report

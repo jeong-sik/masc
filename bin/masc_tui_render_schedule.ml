@@ -161,9 +161,9 @@ let overview_providers_chrome_rows = 2
    say what it is for; the rest of what it counts its title already says. *)
 let overview_leading_rows = 1
 
-(* The Tasks block's first held task and the backlog line beside it. With one
-   row it drew the task and nothing else, and the backlog's size and age went
-   unsaid (#38607). *)
+(* The Tasks block's first held task and the backlog line beside it: the
+   task says what is held, the backlog line says how much waits and for how
+   long. *)
 let overview_task_floor_rows = 2
 
 (* A block drawn with its chrome costs its rows and the chrome; a block of no
@@ -182,12 +182,8 @@ let allocate_overview ~terminal_rows ~attention_count ~goal_count
   (* Ten rows are invariant chrome. What is left is shared by the blocks in
      the order they are served -- the Attention panel, GOALS, Providers,
      Team, Tasks -- and whatever none of them needs becomes filler so the
-     frame reaches the bottom of the terminal.
-
-     The blocks are bounded by how many items they have, not by a constant.
-     They used to stop at six and five rows whatever the terminal offered, so a
-     44-row window drew 22 rows of frame and left its own footer sitting in the
-     middle of the screen with the backlog cut off above it. *)
+     frame reaches the bottom of the terminal. The blocks are bounded by how
+     many items they have, not by a constant. *)
   let available = max 0 (terminal_rows - overview_fixed_rows) in
   let desired_panel_rows = max 1 attention_count in
   let desired_task_error_rows = if has_task_error then 1 else 0 in
@@ -202,10 +198,8 @@ let allocate_overview ~terminal_rows ~attention_count ~goal_count
      already give and broke what the cap was holding. *)
   let desired_panel_rows = min overview_panel_row_cap desired_panel_rows in
   (* Every block is first paid the rows it cannot give up, and only then do
-     the blocks grow, in the same order. Served first come first served, each
-     block took all it wanted and the backlog kept one row held back by hand:
-     GOALS and Team together left it that row at 40 rows (#38607), and every
-     block added above it took from the same row (#38911).
+     the blocks grow, in the same order, so a block above can never take the
+     rows a block below needs to say what it is for.
 
      The panel is the alert surface and is served first. GOALS answers
      whether the fleet's work moves any goal and keeps its headline; its

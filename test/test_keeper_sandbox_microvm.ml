@@ -400,7 +400,8 @@ let test_live_an_absent_image_is_refused_not_built () =
          (Astring.String.is_infix ~affix:"microvm_image_missing" message))
 
 (* A missing promoted build needs different repair steps for each backend.
-   Only Apple's store has a supported catalog promotion path. *)
+   Every store takes a promote; msb's gets its build through `msb load`
+   because masc cannot build into it. *)
 let test_a_missing_image_names_supported_recovery_for_its_backend () =
   let refusal backend name =
     match
@@ -411,24 +412,27 @@ let test_a_missing_image_names_supported_recovery_for_its_backend () =
     | Error message -> message
   in
   let has message needle = Astring.String.is_infix ~affix:needle message in
-  let apple = refusal Backend.Apple_container (Some "ocaml") in
   List.iter
-    (fun needle -> Alcotest.(check bool) needle true (has apple needle))
-    [ "masc-sandbox-ocaml:t1"
-    ; "masc sandbox-image --recipe ocaml --source <checkout> --runtime apple_container"
-    ; "masc sandbox-image promote ocaml <tag> --runtime apple_container"
-    ; "masc sandbox-image rollback ocaml --runtime apple_container"
-    ];
+    (fun (backend, runtime) ->
+       let message = refusal backend (Some "ocaml") in
+       List.iter
+         (fun needle -> Alcotest.(check bool) (runtime ^ ": " ^ needle) true (has message needle))
+         [ "masc-sandbox-ocaml:t1"
+         ; "masc sandbox-image --recipe ocaml --source <checkout> --runtime " ^ runtime
+         ; "masc sandbox-image promote ocaml <tag> --runtime " ^ runtime
+         ];
+       Alcotest.(check bool) (runtime ^ " is not told to roll back") false
+         (has message "rollback");
+       Alcotest.(check bool) (runtime ^ " is not told about a digest") false
+         (has message "digest"))
+    [ Backend.Apple_container, "apple_container"; Backend.Nerdctl_kata, "nerdctl_kata" ];
   let msb = refusal Backend.Microsandbox (Some "ocaml") in
-  Alcotest.(check bool) "msb load is the supported restore path" true
+  Alcotest.(check bool) "msb load is how a build reaches msb" true
     (has msb "msb load");
-  Alcotest.(check bool) "msb is not told to build or promote" false
-    (has msb "masc sandbox-image --recipe" || has msb "sandbox-image promote");
-  let nerdctl = refusal Backend.Nerdctl_kata (Some "ocaml") in
-  Alcotest.(check bool) "nerdctl digest gap is explained" true
-    (has nerdctl "cannot read that store's image digest");
-  Alcotest.(check bool) "nerdctl is not told to promote" false
-    (has nerdctl "sandbox-image promote")
+  Alcotest.(check bool) "msb promotes what it loaded" true
+    (has msb "masc sandbox-image promote ocaml <tag> --runtime microsandbox");
+  Alcotest.(check bool) "msb is not told to build" false
+    (has msb "masc sandbox-image --recipe")
 
 let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
   with_eio_fs @@ fun () ->

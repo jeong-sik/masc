@@ -133,9 +133,10 @@ val image_present_result_for :
   image_probe_outcome ->
   (unit, string) result
 (** The gate's answer for one probe outcome. [name] is the Keeper's catalog
-    name, when declared. A missing image gives recovery steps supported by
-    the selected backend; only Apple Container can currently promote a newly
-    built image through [masc sandbox-image]. *)
+    name, when declared. A missing image gives the recovery steps the
+    selected backend supports: [masc sandbox-image] builds into [container]'s
+    and [nerdctl]'s store, a build reaches [msb]'s through [msb load], and on
+    every backend [masc sandbox-image promote] records a tag that store has. *)
 
 type json_shape =
   | Json_array

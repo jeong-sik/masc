@@ -671,7 +671,7 @@ let for_surface = function
       [ b Navigate "j/k" "move"
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Enter" "open" ~help:"open a retained run or its historical Board evidence"
-      ; b Navigate "[ / ]" "previous / next"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; fusion_caller_key
       ; fusion_board_key
@@ -766,7 +766,7 @@ let for_surface = function
       ; b Navigate "Ctrl-W" "focus"
           ~help:"cycle the resource list, the text, and the Activity pane when it is drawn"
       ; b Navigate "J/K" "scroll text"
-      ; b Navigate "[ / ]" "previous / next"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while the detail is focused, read the adjacent resource"
       ; b Navigate "PgUp/PgDn" "page"
           ~help:"a page of the list, or of the text when it is focused"
@@ -856,7 +856,7 @@ let for_surface = function
       [ b Navigate "1 / 2" "Events / Logs"
       ; b Navigate "j/k" "move / scroll"
       ; b Navigate "PgUp/PgDn" "detail page"
-      ; b Navigate "[ / ]" "previous / next"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while detail is open, inspect the adjacent visible log entry"
       ; b Act "l" "level floor"
           ~help:"raise the minimum level; after error, back to everything"
@@ -892,15 +892,21 @@ let hints_of_bindings bindings =
    forgets to pass it falls back to that same behaviour, which is the bug this
    argument exists to end; [test_tui_footer_detail_state] is what keeps a new
    surface from quietly landing there. *)
+(* Whether a binding answers in the state a footer is drawing. Its own
+   function because two footers filter their surface's table by hand --
+   Resources for the focused pane, Code for the open one -- and a second
+   reading of this rule beside them is how a key comes back to a footer that
+   refuses it. *)
+let answers_in_state ?detail_open binding =
+  match detail_open, binding.detail with
+  | _, Either -> true
+  | None, (List_only | Detail_only) -> true
+  | Some open_, List_only -> not open_
+  | Some open_, Detail_only -> open_
+
 let footer_hints ?detail_open surface =
-  let answers binding =
-    match detail_open, binding.detail with
-    | _, Either -> true
-    | None, (List_only | Detail_only) -> true
-    | Some open_, List_only -> not open_
-    | Some open_, Detail_only -> open_
-  in
-  hints_of_bindings (List.filter answers (for_surface surface))
+  hints_of_bindings
+    (List.filter (answers_in_state ?detail_open) (for_surface surface))
 
 (* Whether this surface's table scopes any binding to one of the two states.
    A surface this answers [true] for owes [footer_hints] a [~detail_open] from
@@ -1078,6 +1084,10 @@ let footer_hints_runtime ~(mode : runtime_mode) =
 
 let footer_hints_resources ~detail_focus =
   for_surface Resources
+  (* The focused pane is this surface's two states: [[ / ]] reads the
+     adjacent resource and the dispatcher answers it only with the text
+     focused. *)
+  |> List.filter (answers_in_state ~detail_open:detail_focus)
   (* The row search needs a cursor to land on, and with the text focused
      there is none -- [surface_row_texts] says so too. Dropped here rather
      than listed and silent. *)
@@ -1151,6 +1161,11 @@ let footer_hints_fusion_detail =
   hints_of_bindings
     ([ b Navigate "j/k" "scroll"
      ; b Navigate "PgUp/PgDn" "page"
+     (* The table scopes this key to the open detail, and this footer is what
+        an open detail draws, so the key belongs on it. It was on the list
+        footer instead, where the dispatcher refuses it. *)
+     ; b Navigate "[ / ]" "previous / next"
+         ~help:"step to the run before or after this one"
      ; fusion_caller_key
      ; fusion_board_key
      ; b Act "Y" "copy"

@@ -13523,8 +13523,11 @@ def fusion_list_detail_interaction(
         # terminal gives this footer 144 cells. Status yields before hints,
         # then copy/search yield before pinned exits. A wider frame must still
         # show those controls; check both states on the actual footer row.
+        # [ / ] steps the open run and the dispatcher answers it only with a
+        # detail open, so the run list does not offer it -- the open run's own
+        # footer does.
         footer_head = (
-            b"j/k:move  PgUp/PgDn:page  [ / ]:previous / next  "
+            b"j/k:move  PgUp/PgDn:page  "
             b"K:calling Keeper  B:Board evidence  Home/End:top/bottom  "
             b"Enter:open"
         )

@@ -28,7 +28,8 @@ val press_response :
     [sequence] a boolean when present, each defaulting when absent. A field of
     the wrong type is a [`Bad_request] naming the field, and nothing is pressed.
     An accepted press wakes the [config] workspace's Lane instances bound to the
-    machine once, with [Msx_changed]; a refused one wakes nothing. *)
+    machine once, with [Msx_changed]; a refused one wakes nothing. The wake is
+    cancellation-protected, so the call must run in an Eio fiber. *)
 
 val carts_json : base_path:string -> Yojson.Safe.t
 (** The load menu's inventory: [{carts:[names], loaded, cartridge}], the file
@@ -42,7 +43,8 @@ val load_response :
   config:Workspace.config -> agent_name:string -> body:string ->
   [ `OK | `Bad_request ] * Yojson.Safe.t
 (** An accepted load wakes the workspace's machine watchers after the machine
-    changes and before the optional Board announcement. A refusal wakes none. *)
+    changes and before the optional Board announcement. A refusal wakes none.
+    The wake is cancellation-protected, so the call must run in an Eio fiber. *)
 
 val msx_tick_default_frames : int
 (** Frames a [POST /api/v1/msx/tick] advances when the body names none. *)

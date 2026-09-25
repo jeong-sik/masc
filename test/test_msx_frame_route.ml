@@ -282,8 +282,11 @@ let test_press_rejects_wrong_types () =
       ; {|{}|}, "keys must name at least one key"
       ; {|{"keys":[]}|}, "keys must name at least one key" ])
 
+(* An accepted press wakes machine watchers under [Eio.Cancel.protect], so it runs
+   in an Eio fiber, as the HTTP route does. *)
 let test_press_defaults_and_identity () =
   with_tick_machine (fun () ->
+    Eio_main.run @@ fun _env ->
     let before = frame_number (Route.frame_json ()) in
     let status, response = Route.press_response ~config:(Lazy.force unwatched_config) ~who:"unit-presser" ~body:{|{"keys":["space"]}|} in
     check bool "a well-typed press succeeds" true (status = `OK);

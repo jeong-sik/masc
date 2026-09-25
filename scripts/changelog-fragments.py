@@ -14,6 +14,11 @@ bullet cites the fragment's own pull request as `#<number>`.
 Modes:
   check [--dir D]                      refuse a malformed fragment
   assemble [--dir D] [--changelog C]   fold fragments into [Unreleased], delete them
+  missing --base B [--head H] [--dir D]
+                                       list PRs merged since B whose changes
+                                       carry no fragment — reported once, at
+                                       the fold, so the release author can
+                                       write the entries; never a refusal
   pr-guard --base B [--head H]         refuse a PR that adds a bullet under
                                        [Unreleased] in CHANGELOG.md instead of
                                        writing a fragment (a release PR, which
@@ -289,6 +294,70 @@ def pr_guard(base: str, head: str) -> int:
     return 1
 
 
+def merge_subject(rev: str) -> str:
+    result = subprocess.run(["git", "log", "-1", "--format=%s", rev],
+                            text=True, capture_output=True)
+    if result.returncode != 0:
+        raise FragmentError(f"cannot read the subject of {rev}: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+def merged_squashes(base: str, head: str) -> list[tuple[int, str]]:
+    """[(PR number, subject)] of squash commits merged into `head` since `base`.
+
+    Squash subjects end in (#<number>). This repo has no merge commits, so the
+    number is the only PR identity in the history.
+    """
+    log = subprocess.run(
+        ["git", "log", "--format=%H %s", f"{base}..{head}"], text=True,
+        capture_output=True, check=True).stdout
+    merged: list[tuple[int, str]] = []
+    for line in log.splitlines():
+        match = re.search(r"\(#([1-9][0-9]*)\)$", line)
+        if match is not None:
+            merged.append((int(match.group(1)), line.split(" ", 1)[1]))
+    return merged
+
+
+def missing(base: str, head: str, directory: pathlib.Path) -> int:
+    """Report PRs merged since `base` whose history carries no fragment.
+
+    A PR not yet folded still carries its own changelog.d/<N>.md on main, so a
+    missing number means either a squash that merged without a fragment or a
+    fragment already folded away by an earlier release. Scanning from the
+    last tag limits the second case to entries written before that tag's
+    CHANGELOG section existed, which #39079 and #39095 were still backfilling.
+    A file whose name is not <PR number>.md proves nothing about any PR, so it
+    is ignored here; `check` is the mode that refuses it, and bump-version.sh
+    runs check before this.
+    """
+    have: set[int] = set()
+    for path in fragment_paths(directory):
+        match = FRAGMENT_NAME.match(path.name)
+        if match is not None:
+            have.add(int(match.group(1)))
+    unfragmented: list[tuple[int, str]] = []
+    for number, subject in merged_squashes(base, head):
+        if number not in have:
+            unfragmented.append((number, subject))
+    if not unfragmented:
+        print(f"every pull request merged since {base} has a changelog fragment")
+        return 0
+    unfragmented.sort()
+    print(
+        f"{len(unfragmented)} pull request(s) merged since {base} without a "
+        f"changelog fragment:"
+    )
+    for number, subject in unfragmented:
+        print(f"  #{number} {subject}")
+    print(
+        "Write the entries to "
+        f"{FRAGMENT_DIR}/<PR number>.md before folding, or note here why a "
+        "release omits one."
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Per-PR changelog fragments.")
     sub = parser.add_subparsers(dest="mode", required=True)
@@ -297,6 +366,10 @@ def main() -> int:
     fold = sub.add_parser("assemble")
     fold.add_argument("--dir", default=FRAGMENT_DIR)
     fold.add_argument("--changelog", default=CHANGELOG)
+    miss = sub.add_parser("missing")
+    miss.add_argument("--base", required=True)
+    miss.add_argument("--head", default="HEAD")
+    miss.add_argument("--dir", default=FRAGMENT_DIR)
     guard = sub.add_parser("pr-guard")
     guard.add_argument("--base", required=True)
     guard.add_argument("--head", default="HEAD")
@@ -308,6 +381,9 @@ def main() -> int:
             return 0
         if args.mode == "assemble":
             return assemble(pathlib.Path(args.dir), pathlib.Path(args.changelog))
+        if args.mode == "missing":
+            return missing(base=args.base, head=args.head,
+                           directory=pathlib.Path(args.dir))
         return pr_guard(args.base, args.head)
     except FragmentError as err:
         print(err, file=sys.stderr)

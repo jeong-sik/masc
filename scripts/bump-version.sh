@@ -56,6 +56,14 @@ fi
 # 4) CHANGELOG: fold the per-PR fragments (changelog.d/<PR>.md) into
 # [Unreleased], then add the version stub if missing. The release author moves
 # the [Unreleased] entries into the version section before tagging.
+# Before folding, list the pull requests merged since the last tag whose
+# changes carry no fragment (#39079, #39095: nine entries had to be backfilled
+# after their releases). It reports; it does not refuse.
+last_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+if [ -n "$last_tag" ]; then
+  python3 "$ROOT_DIR/scripts/changelog-fragments.py" missing \
+    --base "$last_tag" --dir "$ROOT_DIR/changelog.d" || true
+fi
 python3 "$ROOT_DIR/scripts/changelog-fragments.py" assemble \
   --dir "$ROOT_DIR/changelog.d" --changelog "$ROOT_DIR/CHANGELOG.md"
 if ! grep -q "^## \[$NEW_VERSION\]" "$ROOT_DIR/CHANGELOG.md"; then

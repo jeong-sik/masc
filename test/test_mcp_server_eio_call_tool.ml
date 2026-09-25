@@ -999,7 +999,7 @@ let test_canonical_keeper_retention ?(rebind = false) ~bearer ~fail_audit () =
       let row = match rows with [row] -> row | _ -> fail "canonical Keeper needs exactly one receipt" in
       let roots = Tool_output.normalized_artifact_refs_in_json (row |> U.member "artifact_refs") in
       check int "canonical caller owns the retained scene" 1 (List.length roots);
-      let gc = match Tool_blob_maintenance.run ~base_path ~mode:Observe_only with
+      let gc = match Tool_blob_maintenance.run ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~base_path ~mode:Observe_only with
         | Ok gc -> gc | Error error -> fail (Tool_blob_maintenance.error_to_string error) in
       check int "receipt is a durable GC root even after audit failure" 1 gc.live_references))
 

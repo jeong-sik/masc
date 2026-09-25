@@ -5802,7 +5802,9 @@ type state = {
   mutable runtime_params_cursor: int;
   mutable runtime_param_edit: runtime_param_edit option;
   mutable runtime_params_notice: (bool * string) option;
-  mutable keeper_gate_judges: (string * string) list;
+  mutable keeper_exact_lane_firsts: (string * (string * string)) list;
+      (** (keeper, (lane_id, slot_id)): the slot a Keeper reaches first in one
+          exact-output lane. *)
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
   (* One per background listing that replaces a whole set: the held-call
      queue and the tool-mode (YOLO) stances. [approval_flow] says whether a
@@ -7911,7 +7913,7 @@ let create_state
   runtime_param_edit = None;
   runtime_params_notice = None;
   keeper_gate_modes = [];
-  keeper_gate_judges = [];
+  keeper_exact_lane_firsts = [];
   approval_flow = Masc_tui_operator_projection.Flow.initial;
   approvals_order = Masc_tui_operator_projection.Listing_order.initial;
   tool_modes_order = Masc_tui_operator_projection.Listing_order.initial;

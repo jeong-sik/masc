@@ -10743,23 +10743,42 @@ let keeper_gate_settings_json =
       , `List
           [ `Assoc [ ("keeper_name", `String "echo"); ("mode", `String "manual") ] ] )
     ; ("modes_state", `Assoc [ ("state", `String "ready") ])
-    ; ( "judges"
+    ; ( "exact_lanes"
       , `List
           [ `Assoc
               [ ("keeper_name", `String "echo")
+              ; ("lane_id", `String "hitl_auto_judge")
               ; ("slot_id", `String "glm-coding.glm-5-turbo")
+              ; ("updated_by", `String "vincent")
+              ; ("updated_at", `String "2026-08-27T05:00:00Z")
               ] ] )
-    ; ("judges_state", `Assoc [ ("state", `String "ready") ])
+    ; ("exact_lanes_state", `Assoc [ ("state", `String "ready") ])
     ]
 
 let test_decode_keeper_gate_settings_reads_both_lists () =
   match Tui_decode.decode_keeper_gate_settings keeper_gate_settings_json with
   | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
-  | Ok (modes, judges) ->
+  | Ok (modes, exact_lanes) ->
     Alcotest.(check (list (pair string string)))
       "modes" [ ("echo", "manual") ] modes;
-    Alcotest.(check (list (pair string string)))
-      "judges" [ ("echo", "glm-coding.glm-5-turbo") ] judges
+    Alcotest.(check (list (pair string (pair string string))))
+      "exact lanes" [ ("echo", ("hitl_auto_judge", "glm-coding.glm-5-turbo")) ] exact_lanes
+
+(* An unreadable store answers an empty list beside state=unavailable. Read
+   as the list alone, that is "nobody singled out". *)
+let test_decode_keeper_gate_settings_refuses_an_unavailable_store () =
+  let json =
+    `Assoc
+      [ ("modes", `List [])
+      ; ("modes_state", `Assoc [ ("state", `String "ready") ])
+      ; ("exact_lanes", `List [])
+      ; ( "exact_lanes_state"
+        , `Assoc [ ("state", `String "unavailable"); ("error", `String "unreadable") ] )
+      ]
+  in
+  match Tui_decode.decode_keeper_gate_settings json with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "an unreadable store read as nobody singled out"
 
 let test_decode_keeper_gate_settings_takes_an_empty_workspace () =
   (* Nobody singled out is a working configuration, not a missing answer. *)
@@ -10767,8 +10786,8 @@ let test_decode_keeper_gate_settings_takes_an_empty_workspace () =
     `Assoc
       [ ("modes", `List [])
       ; ("modes_state", `Assoc [ ("state", `String "ready") ])
-      ; ("judges", `List [])
-      ; ("judges_state", `Assoc [ ("state", `String "ready") ])
+      ; ("exact_lanes", `List [])
+      ; ("exact_lanes_state", `Assoc [ ("state", `String "ready") ])
       ]
   in
   match Tui_decode.decode_keeper_gate_settings json with
@@ -10782,7 +10801,9 @@ let test_decode_keeper_gate_settings_rejects_a_row_without_a_keeper () =
   let json =
     `Assoc
       [ ("modes", `List [ `Assoc [ ("mode", `String "manual") ] ])
-      ; ("judges", `List [])
+      ; ("modes_state", `Assoc [ ("state", `String "ready") ])
+      ; ("exact_lanes", `List [])
+      ; ("exact_lanes_state", `Assoc [ ("state", `String "ready") ])
       ]
   in
   match Tui_decode.decode_keeper_gate_settings json with
@@ -12448,6 +12469,8 @@ let () =
           test_decode_keeper_gate_settings_takes_an_empty_workspace;
         Alcotest.test_case "rejects a row without a keeper" `Quick
           test_decode_keeper_gate_settings_rejects_a_row_without_a_keeper;
+        Alcotest.test_case "refuses an unavailable store" `Quick
+          test_decode_keeper_gate_settings_refuses_an_unavailable_store;
       ] );
     ( "keeper_secret_projection",
       [

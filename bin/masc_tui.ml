@@ -15044,9 +15044,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              (Printf.sprintf "%s Gate change failed: %s" (gate_lane_label lane) detail))
   | Keeper_gate_settings_loaded result ->
       (match result with
-       | Ok (modes, judges) ->
+       | Ok (modes, exact_lanes) ->
            state.keeper_gate_modes <- modes;
-           state.keeper_gate_judges <- judges
+           state.keeper_exact_lane_firsts <- exact_lanes
        | Error _ ->
            (* Keep the last known settings rather than showing every Keeper as
               following the workspace, which is the looser reading and the one

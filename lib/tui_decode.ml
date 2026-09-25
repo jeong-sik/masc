@@ -8602,20 +8602,48 @@ let decode_gate_snapshot json =
    somebody singled out, so an empty one means everybody follows the
    workspace. *)
 let decode_keeper_gate_settings json =
-  let pairs field value_key =
+  (* An unreadable store answers with an empty list beside
+     [state = "unavailable"]. Read as a list alone, that is "nobody singled
+     out", the looser reading, so it is an error here and the caller keeps
+     what it last knew. *)
+  let readable field =
+    match member (field ^ "_state") json with
+    | `Assoc _ as state ->
+      (match member "state" state with
+       | `String "ready" -> Ok ()
+       | `String "unavailable" ->
+         Error
+           (match member "error" state with
+            | `String detail -> Printf.sprintf "%s unavailable: %s" field detail
+            | _ -> field ^ " unavailable")
+       | _ -> Error (field ^ "_state.state must be ready or unavailable"))
+    | _ -> Error (field ^ "_state must be an object")
+  in
+  let rows field decode_row =
+    let* () = readable field in
     let* items = required_list_field json field in
     let rec loop acc = function
       | [] -> Ok (List.rev acc)
       | item :: rest ->
-        let* keeper = required_string_field item "keeper_name" in
-        let* value = required_string_field item value_key in
-        loop ((keeper, value) :: acc) rest
+        let* row = decode_row item in
+        loop (row :: acc) rest
     in
     loop [] items
   in
-  let* modes = pairs "modes" "mode" in
-  let* judges = pairs "judges" "slot_id" in
-  Ok (modes, judges)
+  let* modes =
+    rows "modes" (fun item ->
+      let* keeper = required_string_field item "keeper_name" in
+      let* mode = required_string_field item "mode" in
+      Ok (keeper, mode))
+  in
+  let* exact_lanes =
+    rows "exact_lanes" (fun item ->
+      let* keeper = required_string_field item "keeper_name" in
+      let* lane_id = required_string_field item "lane_id" in
+      let* slot_id = required_string_field item "slot_id" in
+      Ok (keeper, (lane_id, slot_id)))
+  in
+  Ok (modes, exact_lanes)
 
 (* Keep the JSON spelling, including quotes around strings.  The Config pane
    now hands this exact spelling to its inline editor and sends the parsed

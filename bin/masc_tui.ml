@@ -2033,6 +2033,10 @@ type async_msg =
      for somebody else must be dropped, not filed under whoever is open. *)
   | Memory_facts_loaded of
       string * (Masc.Tui_decode.memory_fact_snapshot, string) result
+  | All_memory_facts_loaded of
+      (Masc.Tui_decode.memory_fact_snapshot * string option, string) result
+      (** The "all keepers" merge and, when some keepers could not be read,
+          which ones. *)
   | Repository_changes_loaded of
       Masc.Tui_decode.repository_change_scope
       * (Masc.Tui_decode.repository_change_snapshot, string) result
@@ -5472,119 +5476,31 @@ let launch_memory_facts_load state ~mailbox ~keeper_name =
 let launch_all_memory_facts_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
-  let keepers =
-    match state.memory_health with
-    | Some h -> h.Tui_decode.mhs_keepers
-    | None -> []
-  in
   let run () =
-    if keepers = [] then
+    match state.memory_health with
+    | None ->
+      (* Without the health read there is no keeper list to merge. An empty
+         "all keepers" view would read as memory that is empty. *)
       enqueue_async mailbox
-        (Memory_facts_loaded
-           ( "*",
-             Ok
-               { Tui_decode.mfs_keeper = "*"
-               ; mfs_ordinary =
-                   Tui_decode.Memory_store_present
-                     { Tui_decode.mos_revision = 1
-                     ; mos_updated_at = Unix.gettimeofday ()
-                     ; mos_facts = []
-                     }
-               ; mfs_source =
-                   Tui_decode.Memory_store_present
-                     { Tui_decode.mss_revision = 1
-                     ; mss_updated_at = Unix.gettimeofday ()
-                     ; mss_facts = []
-                     ; mss_invalidations = []
-                     }
-               ; mfs_events_read_error = None
-               } ))
-    else
-      let all_ord_facts = ref [] in
-      let all_src_facts = ref [] in
-      let all_invals = ref [] in
-      let all_event_read_errors = ref [] in
-      List.iter
-        (fun (k : Tui_decode.memory_keeper_health) ->
-          let keeper_name = k.Tui_decode.mkh_keeper_id in
-          match
-            try Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name with
-            | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | _ -> Error "failed"
-          with
-          | Ok snap ->
-              (match snap.Tui_decode.mfs_events_read_error with
-               | None -> ()
-               | Some detail ->
-                 all_event_read_errors :=
-                   Printf.sprintf "%s: %s" keeper_name detail
-                   :: !all_event_read_errors);
-              (match snap.Tui_decode.mfs_ordinary with
-               | Tui_decode.Memory_store_present store ->
-                   let tagged =
-                     List.map
-                       (fun (f : Tui_decode.memory_fact) ->
-                         { f with
-                           Tui_decode.mf_origin =
-                             if String.starts_with ~prefix:(keeper_name ^ " · ") f.Tui_decode.mf_origin then
-                               f.Tui_decode.mf_origin
-                             else Printf.sprintf "%s · %s" keeper_name f.Tui_decode.mf_origin
-                         })
-                       store.Tui_decode.mos_facts
-                   in
-                   all_ord_facts := !all_ord_facts @ tagged
-               | _ -> ());
-              (match snap.Tui_decode.mfs_source with
-               | Tui_decode.Memory_store_present store ->
-                   let tagged_src =
-                     List.map
-                       (fun (f : Tui_decode.memory_source_fact) ->
-                         { f with
-                           Tui_decode.msf_path =
-                             if String.starts_with ~prefix:(keeper_name ^ ":") f.Tui_decode.msf_path then
-                               f.Tui_decode.msf_path
-                             else Printf.sprintf "%s:%s" keeper_name f.Tui_decode.msf_path
-                         })
-                       store.Tui_decode.mss_facts
-                   in
-                   let tagged_inv =
-                     List.map
-                       (fun (inv : Tui_decode.memory_invalidation) ->
-                         { inv with
-                           Tui_decode.mi_source_path =
-                             if String.starts_with ~prefix:(keeper_name ^ ":") inv.Tui_decode.mi_source_path then
-                               inv.Tui_decode.mi_source_path
-                             else Printf.sprintf "%s:%s" keeper_name inv.Tui_decode.mi_source_path
-                         })
-                       store.Tui_decode.mss_invalidations
-                   in
-                   all_src_facts := !all_src_facts @ tagged_src;
-                   all_invals := !all_invals @ tagged_inv
-               | _ -> ())
-          | Error _ -> ())
-        keepers;
-      let combined =
-        { Tui_decode.mfs_keeper = "*"
-        ; mfs_ordinary =
-            Tui_decode.Memory_store_present
-              { Tui_decode.mos_revision = 1
-              ; mos_updated_at = Unix.gettimeofday ()
-              ; mos_facts = !all_ord_facts
-              }
-        ; mfs_source =
-            Tui_decode.Memory_store_present
-              { Tui_decode.mss_revision = 1
-              ; mss_updated_at = Unix.gettimeofday ()
-              ; mss_facts = !all_src_facts
-              ; mss_invalidations = !all_invals
-              }
-        ; mfs_events_read_error =
-            (match List.rev !all_event_read_errors with
-             | [] -> None
-             | errors -> Some (String.concat "; " errors))
-        }
+        (All_memory_facts_loaded
+           (Error "keeper list not read yet (memory health has not loaded)"))
+    | Some health ->
+      let loads =
+        List.map
+          (fun (k : Tui_decode.memory_keeper_health) ->
+            let keeper_name = k.Tui_decode.mkh_keeper_id in
+            ( keeper_name,
+              try Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn -> Error (Printexc.to_string exn) ))
+          health.Tui_decode.mhs_keepers
       in
-      enqueue_async mailbox (Memory_facts_loaded ("*", Ok combined))
+      (* One message: the merged facts and the keepers missing from them
+         travel together, so the handler never has to keep one answer across
+         another. *)
+      enqueue_async mailbox
+        (All_memory_facts_loaded
+           (Ok (Tui_decode.merge_keeper_memory_facts ~now:(Unix.gettimeofday ()) loads)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -5593,7 +5509,7 @@ let launch_all_memory_facts_load state ~mailbox =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Memory_facts_loaded ("*", Error "Eio switch is unavailable"))
+        (All_memory_facts_loaded (Error "Eio switch is unavailable"))
 
 let open_all_fleet_memory state ~mailbox =
   state.memory_facts_keeper <- Some "*";
@@ -15757,6 +15673,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.memory_health <- Some snapshot;
           state.memory_health_error <- None
       | Error detail -> state.memory_health_error <- Some detail)
+  | All_memory_facts_loaded result ->
+      if Option.equal String.equal state.memory_facts_keeper (Some "*") then (
+        match result with
+        | Ok (snapshot, unread) ->
+            state.memory_facts <- Some snapshot;
+            state.memory_facts_error <- unread
+        | Error detail -> state.memory_facts_error <- Some detail)
   | Memory_facts_loaded (keeper_name, result) ->
       (* Only the keeper the browser is still open on: a late answer for a
          browser that closed, or for the keeper the reader already left,

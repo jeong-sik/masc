@@ -3462,7 +3462,7 @@
 (test
  (name test_keeper_sandbox_image_contract)
  (modules test_keeper_sandbox_image_contract)
- (deps %{workspace_root}/Dockerfile.keeper-sandbox)
+ (deps %{workspace_root}/sandbox-images/ocaml/Dockerfile)
  (libraries alcotest))
 
 (test

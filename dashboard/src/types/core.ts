@@ -230,7 +230,6 @@ export interface BoardReactionSummary {
   emoji: string
   count: number
   reacted: boolean
-  has_reacted: boolean
   recent_user_ids: string[]
 }
 

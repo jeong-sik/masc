@@ -925,7 +925,7 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
       ~terminal_effect_state:Masc.Keeper_tools_agent_core.Terminal_effect_open
       ~tool_calls:calls
       ~assistant_turn_texts:[]
-      ~autonomous_yield_requested:(Some requested)
+      ~yield_requested:(Some requested)
   in
   (match native (live_call () :: run_2_starts_from) with
    | Ok (Runtime_agent.Yield
@@ -952,6 +952,7 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
     Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
       ~repetition_execution:None
       ~tool_calls:calls
+      ()
   in
   (match official (live_call () :: run_2_starts_from) with
    | Ok (Some (Masc.Keeper_official_client_host.Repeated_tool_call
@@ -1076,10 +1077,10 @@ let test_repeated_assistant_text_boundary () =
 
 let test_autonomous_yield_boundary_contract () =
   let module F = Masc.Keeper_agent_run.For_testing in
-  let chat : Masc.Keeper_agent_run.autonomous_yield_request =
+  let chat : Masc.Keeper_agent_run.yield_request =
     { reason = Masc.Keeper_agent_run.Operation_queued }
   in
-  let durable_stimulus : Masc.Keeper_agent_run.autonomous_yield_request =
+  let durable_stimulus : Masc.Keeper_agent_run.yield_request =
     { reason =
         Masc.Keeper_agent_run.Durable_stimulus_waiting
           { pending_count = 1
@@ -1151,6 +1152,25 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Yielded_after_repeated_tool_call _
      | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ -> false)
+
+let test_claimed_direct_input_waits_for_resumable_tool_boundary () =
+  let calls = ref 0 in
+  let requested () =
+    incr calls;
+    Ok (Some Masc.Keeper_agent_run.{ reason = Operation_queued })
+  in
+  let probe turn_kind =
+    Masc.Keeper_agent_run.For_testing.person_queued_probe
+      ~turn_kind ~yield_requested:(Some requested)
+  in
+  check bool "claimed direct input has no pre-first-token abort" true
+    (Option.is_none (probe Turn_record.Direct));
+  check int "direct probe did not read the queue" 0 !calls;
+  (match probe Turn_record.Autonomous with
+   | Some run -> check bool "autonomous stimulus can give way" true (run ())
+   | None -> fail "autonomous queue probe disappeared");
+  check int "autonomous probe read the queue" 1 !calls
+;;
 
 let test_terminal_externalization_failure_contract () =
   let classify =
@@ -1655,6 +1675,8 @@ let () =
             test_repeated_assistant_text_boundary;
           test_case "autonomous yield boundary contract" `Quick
             test_autonomous_yield_boundary_contract;
+          test_case "direct input waits for a resumable tool boundary" `Quick
+            test_claimed_direct_input_waits_for_resumable_tool_boundary;
           test_case "terminal externalization failure contract" `Quick
             test_terminal_externalization_failure_contract;
         ] );

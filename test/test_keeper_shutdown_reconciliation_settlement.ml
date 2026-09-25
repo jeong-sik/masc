@@ -63,7 +63,7 @@ let trace_id_exn value =
   | Error detail -> failf "trace id rejected: %s" detail
 ;;
 
-(* Finalization reads the keeper's meta file (Meta_update stage), so the
+(* Finalization reads the keeper's meta file (Meta_read stage), so the
    settled operation only completes for a keeper that exists — as every
    live wedged keeper did. *)
 let write_keeper_meta_exn ~(config : Workspace.config) ~keeper_name =

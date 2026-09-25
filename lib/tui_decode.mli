@@ -1181,20 +1181,25 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
+(** Whether a search has ever returned the fact. The count, the number of
+    distinct UTC days and the last clock come from one list of retrieval
+    times on the server, so they are all absent or all present; the decoder
+    rejects a row where they disagree. *)
+type memory_fact_retrieval =
+  | Never_retrieved
+  | Retrieved of { count : int; distinct_days : int; last_at : float }
+
 (** What the keeper did with one fact, as the server projected it from the
-    memory-events sidecar (RFC-0418): how often a search returned it, on how
-    many distinct UTC days, when last, how often it was retracted, and
-    which dropped facts it continues. No strength or score; the numbers are
-    the record. *)
+    memory-events sidecar (RFC-0418): whether and how a search returned it,
+    how often it was retracted, and which dropped facts it continues. No
+    strength or score; the numbers are the record. *)
 type memory_fact_events = {
-  mfe_retrieved_count : int;
-  mfe_retrieved_distinct_days : int;
-  mfe_last_retrieved_at : float option;
+  mfe_retrieval : memory_fact_retrieval;
   mfe_retracted_count : int;
   mfe_revised_from : string list;
 }
 
-(** A fact nothing has used yet: every count zero, no retrieval, no
+(** A fact nothing has used yet: never retrieved, no retractions, no
     predecessors. Fixtures start here. *)
 val no_memory_fact_events : memory_fact_events
 
@@ -1578,7 +1583,7 @@ type standalone_lane_jev =
   | Jev_lane_unavailable
 
 type standalone_lane = {
-  sl_lane_id : string;
+  sl_lane : Standalone_lane.t;
   sl_label : string;
   sl_purpose : string option;
       (** Human-readable consumer purpose. Optional so a newer TUI can still
@@ -1635,9 +1640,7 @@ type standalone_lane_answer = {
 }
 
 val standalone_lane_answer : standalone_lane -> standalone_lane_answer
-(** Reads [sl_lane_id] as a {!Standalone_lane.t} once, and every lane has its
-    own pair. An id no lane has gets a pair that names the id, escaped for the
-    terminal. *)
+(** Every lane has its own pair. *)
 val decode_standalone_lanes_snapshot :
   Yojson.Safe.t -> (standalone_lanes_snapshot, string) result
 
@@ -2578,7 +2581,9 @@ type librarian_run_page =
 val decode_librarian_run_page : Yojson.Safe.t -> (librarian_run_page, string) result
 (** One cursor page of exact-lane summaries. [lrp_next] is present only when
     the server says older rows exist, so a client can search through the full
-    retained registry without assuming the newest page contains a Librarian. *)
+    retained registry without assuming the newest page contains a Librarian.
+    Every row is read before the first Librarian is picked, so an unknown lane
+    or a missing [run_id] in any row refuses the whole page. *)
 
 val decode_librarian_actual_input :
   run_id:string -> Yojson.Safe.t -> (string list, string) result
@@ -2680,7 +2685,7 @@ type lane_run_failure =
 type lane_run_summary =
   { lrs_run_id : string
   ; lrs_run_kind : lane_run_kind
-  ; lrs_lane : string
+  ; lrs_lane : Standalone_lane.t
   ; lrs_subject_id : string option
   ; lrs_actor : string
   ; lrs_started_at : float
@@ -2710,7 +2715,7 @@ type lane_run_answer_source =
 type lane_run_detail =
   { lrd_run_id : string
   ; lrd_run_kind : lane_run_kind
-  ; lrd_lane : string
+  ; lrd_lane : Standalone_lane.t
   ; lrd_subject_id : string option
   ; lrd_actor : string
   ; lrd_started_at : float
@@ -2730,7 +2735,7 @@ type lane_run_detail =
   }
 
 val decode_lane_run_page :
-  lane:string -> Yojson.Safe.t -> (lane_run_page, string) result
+  lane:Standalone_lane.t -> Yojson.Safe.t -> (lane_run_page, string) result
 (** One cursor page of standalone-lane summaries. The server filters before
     pagination; the decoder still checks [lane] so a mismatched response
     cannot move the cursor onto another lane. *)
@@ -3568,18 +3573,29 @@ val sgr_left_release : string -> char -> (int * int) option
 
 val keeper_of_declaration : Keeper_declared_roster.t -> keeper
 
+type schedule_hold_reason =
+  | Hold_previous_wake_untaken
+      (** The target Keeper has not taken the previous occurrence yet. *)
+  | Hold_target_shutdown_fenced of
+      { target : string
+      ; fence_owner : string
+      }
+      (** The target Keeper refuses intake while the shutdown operation
+          [fence_owner] holds its fence (#34642). *)
+
 type schedule_runner_hold =
   { srh_occurrence_id : string
       (** The occurrence the schedule runner held back on its newest
           successful tick. *)
   ; srh_due_at_iso : string
       (** When that occurrence came due. *)
+  ; srh_reason : schedule_hold_reason
+      (** Why the runner holds it. *)
   ; srh_observed_at : float
       (** When that tick decided to hold it: the newest time the hold is known
           to have stood. *)
   }
-(** A schedule the runner is holding because its target Keeper has not yet
-    taken the previous occurrence. The server reads it from the same runner
+(** A schedule the runner is holding back. The server reads it from the same runner
     status [/health] reports as [schedule_runner.held]. *)
 
 val latest_drawable_unix_seconds : float
@@ -3591,7 +3607,7 @@ val decode_schedule_runner_hold :
   Yojson.Safe.t -> (schedule_runner_hold option, string) result
 (** Reads a schedule row's [runner_hold]. The key is required: [null] is a
     schedule the runner is not holding, and a row without the key is refused
-    rather than read as one. An object must carry all three fields, with
+    rather than read as one. An object must carry all four fields, with
     [observed_at] a time from 1970 to {!latest_drawable_unix_seconds}. *)
 
 type schedule_runner_status =
@@ -3632,3 +3648,12 @@ val schedule_hold_reading :
     succeeds, and a list kept after a failed reload is an earlier answer, so
     every other combination draws the hold at the time it was read
     (#38411). *)
+
+val decode_oauth_client_saved : Yojson.Safe.t -> (int, string) result
+(** Reads the reply of [POST /api/v1/keepers/oauth/client]: the number of
+    scopes the saved app will ask for, [0] being an app saved with none, so
+    the service's own list is asked for. The server always echoes [scopes];
+    a reply without it, or with a non-string scope, is refused rather than
+    read as a valid scope count. The server's refusals arrive as a non-2xx
+    status, which the HTTP client has already turned into an error before this
+    runs. *)

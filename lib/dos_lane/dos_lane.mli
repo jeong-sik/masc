@@ -82,6 +82,14 @@ type error =
   | Guest_fault of string
       (** the program ran an instruction the emulator does not implement.
           The machine stays loaded, stopped at that instruction. *)
+  | Unsaveable of string
+      (** {!save} found the machine in a state a checkpoint cannot carry
+          (a value outside the snapshot's ranges, or two fields that
+          disagree). Nothing was written. *)
+  | Checkpoint_refused of Machine_checkpoint.error
+      (** {!restore} found no checkpoint by that name, or one it will not
+          read: another machine's, another format's, or corrupt. Nothing
+          changed. *)
 
 val error_to_string : error -> string
 
@@ -94,6 +102,26 @@ val boot_steps : int
 (** Instructions run at {!load} before the first observation, stopping early
     if the program asks for a key. A DOS program reaches its title screen in
     its own time; this is the budget for getting there. *)
+
+type core = {
+  source_digest : string;
+      (** the linked ocaml-dos core's own identity: a digest of its [lib/]
+          sources, computed by its build ([Dos_core_identity]). Not a
+          commit — an opam install has no history to ask. *)
+  pinned_source_digest : string;
+      (** the digest of the core at the CI pin, [OCAML_DOS_SHA] in
+          [scripts/opam-pin-external-deps.sh]. *)
+  matches_pin : bool;
+      (** the two digests are equal. [false] means this server runs a
+          different core from the one CI builds against — an older opam
+          copy, or a vendored checkout on another branch. *)
+}
+[@@deriving yojson]
+(** Which DOS core this server was built with. A server built without its
+    vendored copy links whatever opam installed, which can lack a fix the
+    games depend on while every masc build field stays the same. *)
+
+val core : core
 
 type ran = {
   steps_run : int;  (** instructions actually advanced *)
@@ -197,6 +225,45 @@ val capture_with_identity : unit -> (identified_capture, error) result
 (** {!capture} with the machine's identity and input history, for a Lane
     Add-on source ([dos_capture]). Never advances the machine. *)
 
+(** {1 Spectating} — one read a watcher can repeat cheaply. *)
+
+type change_mark = {
+  count : int;
+      (** The machine change counter. A completed run raises it even when
+          the guest faults before [steps] moves. {!load} also raises it when
+          installing a new machine, and {!eject} when removing it. Refused
+          calls and {!pass} leave it alone. Nothing resets it in this process;
+          after a restart {!live} also compares the incarnation. *)
+  incarnation : string;  (** as in {!identified_capture} *)
+}
+
+type 'mark publication = 'mark Machine_live_publication.t =
+  | No_screen
+  | Stable of 'mark
+  | Running of 'mark
+type published_state = change_mark publication
+
+val current_publication : unit -> published_state
+(** An atomic, lock-free read. [Running] is published before a run can mutate
+    the guest; a spectator must then use {!live} on a systhread and wait for
+    the final frame. [Stable mark] permits an immediate unchanged answer for
+    the same mark. A refused call restores [Stable] without raising the count. *)
+
+type live =
+  | Nothing_loaded  (** no machine: nothing to watch *)
+  | Unchanged of change_mark
+      (** [since] names the current count and the current incarnation *)
+  | Changed of change_mark * frame
+      (** [since] was absent, or its count or incarnation differs *)
+
+val live : since:change_mark option -> live
+(** Reads the count, the incarnation and, when either differs from [since],
+    the frame under one hold of the machine lock, so a [Changed] mark always
+    names its pixels. Never runs the guest or writes anything. A run can hold
+    the lock for a whole call (up to {!max_steps_per_call} instructions), so
+    an Eio caller uses {!current_publication} first and runs this in
+    [Eio_unix.run_in_systhread] when it sees [Running] or a different mark. *)
+
 val entry_json : entry -> Yojson.Safe.t
 (** One ledger line: [{"step", "who", "key"}], the shape written to
     [ledger.jsonl]. *)
@@ -262,6 +329,49 @@ val peek : address:int -> length:int -> (string, error) result
     refuses. *)
 
 val peek_max_bytes : int
+
+(** {1 Checkpoints}
+
+    The whole machine under a name, kept in [dir] by {!Machine_checkpoint}:
+    the core's state (CPU, memory, devices, mounted files and open handles,
+    from [Dos_snapshot]), the program's name, the step count and the input
+    ledger. A checkpoint survives a server restart. *)
+
+val checkpoint_format : int
+(** The lane's checkpoint format, compared on {!restore}; the machine bytes
+    carry the core's own. The core identity is written beside both, to be
+    shown and never compared. *)
+
+val save : who:string -> dir:string -> slot:Machine_checkpoint.slot -> (observation, error) result
+(** Writes the machine to [slot], replacing what was there. Needs no
+    controller and does not move the machine: anyone watching may save. *)
+
+val restore :
+  who:string ->
+  dir:string ->
+  slot:Machine_checkpoint.slot ->
+  ledger_dir:string ->
+  saves_dir_of:(string -> string) ->
+  announce:(unit -> unit) ->
+  (observation, error) result
+(** Replaces the workspace machine with the one saved in [slot], with or
+    without a machine loaded. Allowed when the controller is free or held by
+    [who], as {!load} is, and [who] holds the restored machine's. The
+    restored machine is a new incarnation and raises the change count. The
+    ledger file is rewritten to the checkpoint's ledger, so the next key
+    continues it.
+
+    The program's saves directory, [saves_dir_of] the saved program's saves
+    name, is left as it is: the restored machine's files count as already
+    kept, so nothing is written there until the guest writes again. A newer
+    save a game wrote after the checkpoint is not overwritten by restoring an
+    older one.
+
+    Everything is read and checked first; on any error the current machine,
+    its ledger and its controller are untouched. [announce] runs under the
+    machine's lock, as {!load}'s does. *)
+
+val checkpoints : dir:string -> (Machine_checkpoint.listed list, error) result
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)

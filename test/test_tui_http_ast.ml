@@ -415,6 +415,36 @@ let test_is_success_http_status_called () =
       n
 ;;
 
+(* RFC machine-spectating-goes-through-lanes stage 3: the spectator reads every
+   machine's screen through the one live route, asked with the counter of the
+   picture it drew. The per-machine frame route is no longer read by the TUI. *)
+let test_the_spectator_reads_the_live_route () =
+  List.iter
+    (fun module_path ->
+      check int (module_path ^ " names no per-machine frame route") 0
+        (Ast_grep.count_string_literals ~module_path ~needle:"/api/v1/msx/frame"
+         + Ast_grep.count_string_literals ~module_path ~needle:"/api/v1/dos/frame"))
+    [ "bin/masc_tui_http.ml"; "bin/masc_tui.ml"; "bin/masc_tui_msx.ml";
+      "bin/masc_tui_machine_live.ml" ];
+  check bool "the live route is the one the reader asks" true
+    (Ast_grep.count_string_literals ~module_path:"bin/masc_tui_machine_live.ml"
+       ~needle:"/api/v1/lane-addons/live" = 1);
+  check bool "the HTTP read builds its path from the counter it is given" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_http.ml"
+       ~binding_name:"fetch_machine_live" ~callee:"Masc_tui_machine_live.path" = 1
+     && Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_http.ml"
+          ~binding_name:"fetch_machine_live" ~callee:"Masc_tui_machine_live.decode" = 1);
+  List.iter
+    (fun binding_name ->
+      check int (binding_name ^ " reads the live route") 1
+        (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+           ~binding_name ~callee:"Masc_tui_http.fetch_machine_live");
+      check bool (binding_name ^ " asks with the drawn counter") true
+        (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+           ~binding_name ~callee:"Masc_tui_machine_live.since" >= 1))
+    [ "observe_msx_frame"; "launch_dos_live_poll" ]
+;;
+
 let test_http_get_uses_auth_headers () =
   let n =
     Ast_grep.count_calls
@@ -1683,6 +1713,17 @@ let test_planning_refresh_reconciles_navigation_identity () =
 
 let test_render_loop_uses_monotonic_dirty_schedule () =
   let main_path = "bin/masc_tui.ml" in
+  check int "the render loop queries both buffered input sources" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"input_reader_has_pending_bytes");
+  check int "queued input includes the terminal probe replay" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"input_reader_has_pending_bytes"
+       ~callee:"Masc_tui_terminal_probe.has_replay");
+  check int "an incomplete scalar does not postpone a frame" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:main_path ~binding_name:"input_reader_has_pending_bytes"
+       ~callees:[] ~fields:[ "partial_scalar" ]);
   check bool "main loop reads a monotonic clock" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Mtime_clock.elapsed_ns"
@@ -2776,11 +2817,12 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_keeper_logs"
        ~callee:"Terminal_text.clock_timestamp");
-  (* Six: two observation timestamps in Live Context, the last turn, the oldest
-     row a partial Last 24h window reached, and the created / updated pair. Each
-     one arrives from a keeper file or a metrics row, so none may reach the
-     frame unprojected. *)
-  check int "keeper detail uses safe short projections for every timestamp" 6
+  (* Seven: two observation timestamps in Live Context, the last turn, the
+     oldest row a partial Last 24h window reached, the created / updated pair,
+     and the Automation row's request clock. Each one arrives from a keeper
+     file, a metrics row or the schedule store, so none may reach the frame
+     unprojected. *)
+  check int "keeper detail uses safe short projections for every timestamp" 7
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"keeper_detail_pane"
        ~callee:"Terminal_text.short_timestamp");
@@ -3061,6 +3103,8 @@ let () =
           `Quick
           test_chat_roles_draw_through_the_readable_path;
         test_case "check success status" `Quick test_is_success_http_status_called;
+        test_case "the spectator reads the live route" `Quick
+          test_the_spectator_reads_the_live_route;
         test_case "the attention note starts where its rows do" `Quick
           test_the_attention_note_starts_where_its_rows_do;
         test_case "the lane failure row adds no second verdict" `Quick

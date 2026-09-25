@@ -73,17 +73,12 @@ type rotate_class =
           The connection delivered every byte, so this is neither a wire
           fault nor a provider integration defect: the lane rotates, and the
           driver leaves the model, not only the provider, behind *)
-  | Attempt_rejected
-      (** the request was refused before the wire by this candidate's own
-          policy (a reasoning-effort ladder, an explicit disable) rather than
-          by the provider; the driver's [attempt_rejected_should_try_next]
-          moves the lane to its next declared candidate in the same turn, so
-          the route names that rotation instead of calling the failure
-          deterministic *)
   | Admission
       (** this binding's own pre-dispatch admission refused the prepared
-          request (RFC-38531 §3.2: [InputCapacity] and [Json_parse_error] are
-          both [Admission], a fact about this candidate's binding, not the
+          request (RFC-one-slot-fault-judgment-for-every-walk.md §3.2:
+          [InputCapacity], [Json_parse_error] and a [Retry.Attempt_rejected]
+          policy refusal — a reasoning-effort ladder, an explicit disable —
+          are all [Admission], a fact about this candidate's binding, not the
           request); the driver's [attempt_rejected_should_try_next] /
           [candidate_access_should_try_next] move the lane to its next
           declared candidate, and the route names that rotation *)

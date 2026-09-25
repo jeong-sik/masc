@@ -45,10 +45,13 @@ let of_api_error (api : Retry.api_error) : t =
      | Retry.Attempt_rejected -> Binding Admission
      | Retry.Json_parse_error -> Binding Admission
      | Retry.Unknown_invalid_request -> Unattributed)
-  (* A network failure after a successful send is a property of this
-     binding's reachability; before dispatch it is transport wiring, which
-     every candidate shares. *)
-  | Retry.NetworkError _ -> Binding Credential
+  (* A network failure is not a key, account or model fact: nothing the
+     provider answered says whose affair it is, and [Retry.NetworkError]
+     carries no dispatch fact to split "sent, then lost" from wiring every
+     candidate shares. The RFC §2.1 table has no network row, so it stays
+     unknown. The Keeper walk still rotates on it through
+     [Runtime_attempt_fsm.should_try_next]. *)
+  | Retry.NetworkError _ -> Unknown_after_dispatch
   | Retry.Timeout _ -> Binding Deadline
 ;;
 
@@ -58,7 +61,7 @@ let of_api_error (api : Retry.api_error) : t =
 let of_transport_error (err : Http_client.http_error) ~(dispatch : dispatch) : t =
   match err with
   | Http_client.HttpError _ -> Binding Server
-  | Http_client.NetworkError _ -> Binding Credential
+  | Http_client.NetworkError _ -> Unknown_after_dispatch
   | Http_client.TimeoutError { phase; _ } ->
     (match dispatch with
      | Dispatched ->

@@ -2704,6 +2704,20 @@ let save_file_atomic ~save_file path content =
   |> legacy_atomic_replace_result
 ;;
 
+(* No fsync at all: tmp -> rename. The rename still replaces the target in
+   one step, so a reader never sees half of the old file and half of the
+   new one, but after a power loss the renamed file can be empty or hold
+   only part of [content]. Only a caller that rebuilds the file on its next
+   pass may use it (#37503: the binary's own tool and MCP assets). *)
+let save_file_atomic_rename_only ~save_file path content =
+  write_file_atomic_with_parent_sync
+    ~sync_file:(fun (_ : string) -> ())
+    ~sync_parent:(fun (_ : string) -> ())
+    ~write_temp:(fun tmp -> save_file tmp content)
+    path
+  |> legacy_atomic_replace_result
+;;
+
 let save_file_atomic_strict_staged ~save_file path content =
   write_file_atomic_with_parent_sync
     ~sync_file:fsync_path_strict

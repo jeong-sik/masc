@@ -5628,6 +5628,8 @@
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
 
+(include stanzas/test_tui_voice_pane_fills_its_height.inc)
+
 (include stanzas/test_tui_overlay_window_reading.inc)
 (include stanzas/test_tui_approvals_footer_matches_the_sheet.inc)
 (include stanzas/test_tui_sheet_names_every_palette_destination.inc)

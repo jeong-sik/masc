@@ -1247,11 +1247,26 @@ let test_debt_cap_slot_survives_the_first_advisory () =
   let rec poll () =
     match
       Owner_registry.run_autonomous_if_idle ~base_path ~keeper_name (fun () ->
-        (* The turn the debt bought. Its body is the advisory consult
-           itself, as the unified turn does at its first boundary. *)
-        match Keeper_unified_turn.autonomous_yield_request ~base_path ~keeper_name with
-        | Ok answer -> answer
-        | Error detail -> fail detail)
+        (* The turn the debt bought. Its body consults the way the unified
+           turn does at every tool boundary: first, and then again once
+           another chat has queued behind it -- the whole turn, not just its
+           first boundary, must keep the slot. *)
+        let consult () =
+          match Keeper_unified_turn.autonomous_yield_request ~base_path ~keeper_name with
+          | Ok answer -> answer
+          | Error detail -> fail detail
+        in
+        (match consult () with
+         | None -> ()
+         | Some _ ->
+           fail "the debt-cap slot was handed back on the very first advisory");
+        let owner =
+          match !holder with
+          | Some owner -> owner
+          | None -> fail "the test did not publish the owner for the feeder"
+        in
+        submit owner;
+        consult ())
     with
     | Ok (`Ran answer) -> answer
     | Ok (`Busy _) ->
@@ -1275,8 +1290,9 @@ let test_debt_cap_slot_survives_the_first_advisory () =
     true;
   match poll () with
   | None -> ()
-    (* The bought slot survived the first advisory. *)
-  | Some _ -> fail "the debt-cap slot was handed back on the very first advisory"
+    (* The bought slot survived both consults. *)
+  | Some _ ->
+    fail "the debt-cap slot was handed back once another chat queued"
 ;;
 
 let () =

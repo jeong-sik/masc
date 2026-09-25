@@ -8653,7 +8653,7 @@ def run_skill_catalog_error_regression(executable: str) -> None:
             send_and_wait(process, master_fd, output, b"t", b"MASC Config / Tools")
             frame = send_and_wait(
                 process, master_fd, output, b"p" * 3,
-                b"Skill catalog read failed:" if initial_error else b"1 of 2 catalog Skills observed",
+                b"skills catalog load failed:" if initial_error else b"1 of 2 catalog Skills observed",
             )
             if not initial_error:
                 fail_reads.set()
@@ -8665,11 +8665,11 @@ def run_skill_catalog_error_regression(executable: str) -> None:
                 (b"HTTP 503", b"fixture catalog unavailable")
                 if initial_error else (b"usage_coverage",)
             )
-            if rendered.count(b"Skill catalog read failed:") != 1 or not all(
+            if rendered.count(b"skills catalog load failed:") != 1 or not all(
                 cause in rendered for cause in causes
             ):
                 raise AssertionError(f"Catalog failure was hidden or duplicated: {frame!r}")
-            if b"skills catalog load failed:" in rendered or b"refresh failed" in rendered:
+            if b"Skill catalog read failed:" in rendered or b"refresh failed" in rendered:
                 raise AssertionError(f"Catalog failure was described more than once: {frame!r}")
             if initial_error:
                 if b"unavailable (no catalog reading)" not in rendered:

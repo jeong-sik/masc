@@ -1210,7 +1210,7 @@ let tools_display_lines (state : state) =
       match state.skills_catalog_error with
       | None -> []
       | Some error ->
-          [ Theme.bad (), " Skill catalog read failed: " ^ Terminal_text.single_line error ]
+          [ Theme.bad (), " " ^ Terminal_text.single_line error ]
           @ (match state.skills_catalog with
              | None -> []
              | Some _ -> [ Theme.warn (), " Previous catalog reading retained" ])

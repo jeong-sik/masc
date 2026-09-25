@@ -3528,10 +3528,8 @@ let launch_tools_load ?(force = true) state ~mailbox =
     (* The skills catalog (usage + flows) is a separate read and must not
        delay the tool list: a slow catalog costs its own section, not the
        screen. *)
-    (* No subject: the Tools renderer names this failure ("Skill catalog
-       read failed"), so the cause arrives unlabelled and is labelled once
-       there. *)
     Masc_tui_async_read.launch
+      ~subject:"skills catalog"
       ~deliver:(fun result ->
         enqueue_async mailbox (Skills_catalog_loaded (generation, result)))
       (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port);

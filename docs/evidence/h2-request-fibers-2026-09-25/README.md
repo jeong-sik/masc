@@ -47,6 +47,10 @@ one-domain CPU pool:
    forcing completion on the connection reader rather than a buffered-body
    callback inside the request fiber.
 4. RST_STREAM suppresses a delayed response and permits another stream/PING.
+   A second case holds 32 streams, resets all of them, and requires the
+   per-connection stream registry to be empty once a following PING is
+   acknowledged, every held handler to observe cancellation, and a new
+   stream to still complete.
 5. Closing the socket cancels a queued response and an ordinary child fiber
    before the held CPU worker is released.
 6. A handler exception becomes a stream 500 while siblings remain usable.
@@ -67,12 +71,26 @@ switch propagation. Formatting and whitespace checks pass. No local OCaml
 build or behavioral test was run under the repository execution protocol.
 Exact-source CI is pending.
 
+## Stream reset
+
+The public h2 0.13 interface neither names a request's stream nor notifies the
+application of a peer reset. `Server_h2_frame_tap` wraps the connection socket
+and reads only the 9-byte frame headers in both directions; header blocks and
+payloads are never decoded. Inbound reads stop at frame boundaries, and h2
+parses each read synchronously, so the request callback runs while the tap
+names the HEADERS/CONTINUATION frame that completed its header block.
+
+`Server_h2_stream_registry` keys each stream's scope by that id
+(`Admitted` then `Running stream_sw`). A peer RST_STREAM removes the entry and
+fails the stream switch, cancelling the handler, deferred body callbacks and
+response producers of that stream only. A server END_STREAM or RST_STREAM lets
+the stream fiber release its entry once its work returns.
+
 ## Limits
 
-A stream reset closes h2's response state and prevents a later response. The
-public h2 interface does not notify application request fibers of that reset;
-this change does not claim immediate cancellation of the CPU computation on
-RST_STREAM. Connection termination does cancel request work. No new timeout,
-wire parser, dependency patch, production restart or deployment is introduced.
+No new timeout, count cap, dependency patch, production restart or deployment
+is introduced. CPU work already running inside a pool worker is not
+interrupted mid-computation; its awaiting fiber is cancelled and a queued job
+is withdrawn.
 No 0.1ms claim is made. Shared-pool queueing, JSON work on the main domain,
 and full live-runtime latency still require measurement and further work.

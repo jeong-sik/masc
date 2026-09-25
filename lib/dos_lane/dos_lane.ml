@@ -79,7 +79,7 @@ type core = {
    one, so a SHA bumped alone turns that test red with the new digest in its
    message. Read the digest of a commit from its build:
    _build/default/lib/identity/dos_core_identity.ml. *)
-let pinned_core_source_digest = "9140e64dd08b4f9b8931115af9ebf200"
+let pinned_core_source_digest = "6db10f3513d3bfa0505c660962c53773"
 
 let core =
   { source_digest = Dos_core_identity.source_digest

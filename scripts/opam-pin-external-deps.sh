@@ -135,12 +135,14 @@ readonly OCAML_MSX_SHA="870e61063e08ca4a0b15b939cb72a1c11aade1d3"
 # its letters are no longer mirrored.
 # 909e143 = ocaml-dos #32: the core reports a build-time digest of its lib/
 # sources (ocaml-dos.core-identity), which masc shows on DOS answers and /health.
+# a4c8b5f = ocaml-dos #33: lib/dune is hashed with the sources, so a flag or
+# module-list change moves the digest too.
 # Bump Dos_lane.pinned_core_source_digest (lib/dos_lane/dos_lane.ml) with this
 # SHA. test_dos_tools names this file, so the PR that moves the SHA runs it, and
 # it fails with the new digest in its message until the two agree. A build that
 # says "Library ocaml-dos.core-identity not found" is linking an ocaml-dos older
 # than #32: re-run this script with --install, or vendor the pinned core.
-readonly OCAML_DOS_SHA="909e14318c651b1c6fd72168f96ada0339587906"
+readonly OCAML_DOS_SHA="a4c8b5ff1f9481b2816afe2ae503fb6114035780"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first

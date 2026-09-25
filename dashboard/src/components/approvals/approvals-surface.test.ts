@@ -187,6 +187,7 @@ async function loadSurface(
       queued: 0,
       recovery_failure_count: 0,
       recovery_failures: [],
+      recovery_blockers: [],
     })
   const response = hitl
     ? responseWithQueue(
@@ -227,6 +228,7 @@ async function loadSurface(
       queued: 0,
       recovery_failure_count: 0,
       recovery_failures: [],
+      recovery_blockers: [],
     })
   const apiMock = () => ({
     fetchDashboardGate: vi.fn().mockResolvedValue(response),

@@ -192,15 +192,7 @@ class Setup(unittest.TestCase):
             commands = base / 'commands'
             commands.mkdir()
             docker = commands / 'docker'
-            # `image inspect --format {{.Id}}` answers an image id as Docker
-            # does, so the `base` build setup promotes records a real-shaped
-            # id rather than an empty line.
-            image_id = 'sha256:' + '5e' * 32
-            docker.write_text(
-                "#!/bin/sh\n"
-                "if [ \"$1\" = info ]; then echo '{\"OSType\":\"linux\",\"SecurityOptions\":[]}'; fi\n"
-                f"if [ \"$1\" = image ] && [ \"$2\" = inspect ] && [ \"$3\" = --format ]; then echo '{image_id}'; fi\n"
-                "exit 0\n")
+            docker.write_text("#!/bin/sh\nif [ \"$1\" = info ]; then echo '{\"OSType\":\"linux\",\"SecurityOptions\":[]}'; fi\nexit 0\n")
             docker.chmod(0o755)
             env = {key: value for key, value in os.environ.items()
                    if key in ('PATH', 'HOME', 'LANG', 'TMPDIR')}

@@ -710,6 +710,7 @@ export interface SetGateModeResponse {
   queued: number
   recovery_failure_count: number
   recovery_failures: GateModeRecoveryFailure[]
+  recovery_blockers: GateModeRecoveryBlocker[]
   replaced_read_error?: string
 }
 
@@ -717,6 +718,37 @@ export interface GateModeRecoveryFailure {
   keeper_name: string
   approval_id: string | null
   operator_detail: string
+}
+
+/** Closed wire projection of the server's typed Auto Judge drain blocker. */
+export type GateModeRecoveryBlockerKind =
+  | 'owner_at_capacity'
+  | 'entry_changed'
+  | 'entry_missing'
+  | 'start_failed'
+  | 'mode_manual'
+  | 'mode_always_allow'
+
+/** Why one owner's recovery drain stopped short. `reason` is present only
+    for `start_failed`. */
+export interface GateModeRecoveryBlocker {
+  keeper_name: string
+  kind: GateModeRecoveryBlockerKind
+  approval_ids: string[]
+  reason: string | null
+}
+
+const GATE_MODE_RECOVERY_BLOCKER_KINDS: ReadonlySet<string> = new Set<GateModeRecoveryBlockerKind>([
+  'owner_at_capacity',
+  'entry_changed',
+  'entry_missing',
+  'start_failed',
+  'mode_manual',
+  'mode_always_allow',
+])
+
+function isGateModeRecoveryBlockerKind(raw: unknown): raw is GateModeRecoveryBlockerKind {
+  return typeof raw === 'string' && GATE_MODE_RECOVERY_BLOCKER_KINDS.has(raw)
 }
 
 const SET_GATE_MODE_RESPONSE_FIELDS = new Set([
@@ -731,6 +763,7 @@ const SET_GATE_MODE_RESPONSE_FIELDS = new Set([
   'queued',
   'recovery_failure_count',
   'recovery_failures',
+  'recovery_blockers',
   'replaced_read_error',
 ])
 
@@ -840,6 +873,57 @@ function decodeSetGateModeResponse(raw: unknown, requestedMode: GateMode): SetGa
       'recovery_failure_count must equal recovery_failures length',
     )
   }
+  if (!Array.isArray(raw.recovery_blockers)) {
+    return gateModeProtocolDrift('recovery_blockers must be an array')
+  }
+  const recoveryBlockers = raw.recovery_blockers.map((blocker, index): GateModeRecoveryBlocker => {
+    if (!isRecord(blocker)) {
+      return gateModeProtocolDrift(`recovery_blockers[${index}] must be an object`)
+    }
+    const fields = Object.keys(blocker)
+    if (
+      fields.length !== 4
+      || !fields.includes('keeper_name')
+      || !fields.includes('kind')
+      || !fields.includes('approval_ids')
+      || !fields.includes('reason')
+    ) {
+      return gateModeProtocolDrift(`recovery_blockers[${index}] fields must be exact`)
+    }
+    const keeperName =
+      typeof blocker.keeper_name === 'string' ? blocker.keeper_name.trim() : ''
+    if (!keeperName) {
+      return gateModeProtocolDrift(`recovery_blockers[${index}].keeper_name must be non-empty`)
+    }
+    const kind = blocker.kind
+    if (!isGateModeRecoveryBlockerKind(kind)) {
+      return gateModeProtocolDrift(`recovery_blockers[${index}].kind is invalid`)
+    }
+    if (
+      !Array.isArray(blocker.approval_ids)
+      || !blocker.approval_ids.every(id => typeof id === 'string' && id.trim() !== '')
+    ) {
+      return gateModeProtocolDrift(
+        `recovery_blockers[${index}].approval_ids must be non-empty strings`,
+      )
+    }
+    const approvalIds = blocker.approval_ids as string[]
+    const reason = blocker.reason
+    if (kind === 'start_failed') {
+      if (typeof reason !== 'string' || reason.trim() === '') {
+        return gateModeProtocolDrift(
+          `recovery_blockers[${index}].reason must be non-empty for start_failed`,
+        )
+      }
+      return { keeper_name: keeperName, kind, approval_ids: approvalIds, reason }
+    }
+    if (reason !== null) {
+      return gateModeProtocolDrift(
+        `recovery_blockers[${index}].reason must be null for ${kind}`,
+      )
+    }
+    return { keeper_name: keeperName, kind, approval_ids: approvalIds, reason: null }
+  })
 
   if (
     status === 'completed'
@@ -859,14 +943,16 @@ function decodeSetGateModeResponse(raw: unknown, requestedMode: GateMode): SetGa
   }
   if (status === 'failed'
       && (mode !== 'auto_judge' || recoveryError === null
-        || started !== 0 || queued !== 0 || recoveryFailureCount !== 0)) {
+        || started !== 0 || queued !== 0 || recoveryFailureCount !== 0
+        || recoveryBlockers.length !== 0)) {
     return gateModeProtocolDrift(
       'failed recovery requires auto_judge mode, an error, and zero outcomes',
     )
   }
   if (status === 'not_requested'
       && (mode === 'auto_judge' || recoveryError !== null
-        || started !== 0 || queued !== 0 || recoveryFailureCount !== 0)) {
+        || started !== 0 || queued !== 0 || recoveryFailureCount !== 0
+        || recoveryBlockers.length !== 0)) {
     return gateModeProtocolDrift(
       'not_requested recovery requires a non-auto mode and zero outcomes',
     )
@@ -890,6 +976,7 @@ function decodeSetGateModeResponse(raw: unknown, requestedMode: GateMode): SetGa
     queued,
     recovery_failure_count: recoveryFailureCount,
     recovery_failures: recoveryFailures,
+    recovery_blockers: recoveryBlockers,
     ...(typeof replacedReadError === 'string'
       ? { replaced_read_error: replacedReadError }
       : {}),

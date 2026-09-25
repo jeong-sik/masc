@@ -10,7 +10,9 @@
     time MASC heard it.
 
     It is an observation.  Routing, candidate ordering, admission and retry
-    do not read it: codex-cli 0.156.0's protocol schema says clients must not
+    do not read this table (a spent window read after an HTTP 403 rests its
+    scope through {!Runtime_provider_usage_read.read_after_account_refusal},
+    on {!Runtime_quota_window}, not here): codex-cli 0.156.0's protocol schema says clients must not
     infer recovery from percentages or reset times, so no availability is
     derived from these numbers.  What the provider said is stored and shown
     as it was said.

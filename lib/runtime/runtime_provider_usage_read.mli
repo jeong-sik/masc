@@ -4,7 +4,10 @@
     turn runs. An account the router stopped picking because it is spent runs
     no turn, so the operator never learns when it resets. This module asks
     the provider directly and records the answer in the same table, for the
-    operator projection only: routing and admission do not read it.
+    operator projection. Routing and admission do not read that table; the
+    one read the walk order sees is the read after a 403
+    ({!read_after_account_refusal}), which rests a spent account on
+    {!Runtime_quota_window}.
 
     Codex answers [account/rateLimits/read] after account admission, with no
     thread or turn. A provider that declares [usage-read] in runtime.toml is
@@ -85,3 +88,40 @@ val read_codex_in_background :
 (** {!read_codex} in a fiber on the server's root switch, so it outlives the
     turn that asked for it, with at most one read per scope at a time. Its
     failure is logged. *)
+
+(** What the usage endpoint said after the provider refused the account with
+    HTTP 403. *)
+type account_refusal_read =
+  | Spent_until of float
+      (** A window's used count reached its limit; the latest stated reset
+          among the spent windows, Unix epoch seconds. *)
+  | Spent_without_reset  (** A spent window states no reset. *)
+  | No_window_spent
+      (** Every window has headroom: the refusal is not a spent quota (a
+          blocked client, a suspended account), and nothing rests. *)
+
+val account_refusal_read_of_report :
+  Runtime_provider_usage_window.report -> account_refusal_read
+(** A window is spent when its utilization is a whole [Fraction] of at least
+    1.0 or a [Percent] of at least 100. *)
+
+val read_after_account_refusal :
+  fetch:(api_key:Llm_provider.Secret.t -> string -> (string, http_error) result) ->
+  scope:Runtime_quota_window.scope ->
+  http_read ->
+  (account_refusal_read, http_error) result
+(** Read [scope]'s usage once, record the windows as {!read_scopes} does, and
+    rest the scope on {!Runtime_quota_window} when a window is spent:
+    [Spent_until t] is {!Runtime_quota_window.note_exhausted} until [t],
+    [Spent_without_reset] is {!Runtime_quota_window.note_observed_exhausted}.
+    This is the only read whose answer the walk order sees; the startup read
+    ({!read_all}) stays an operator projection. A failed read rests nothing. *)
+
+val http_read_of_runtime : Runtime.t -> http_read option
+(** The runtime's HTTP usage read when its provider declares [usage-read]. *)
+
+val read_runtime_after_account_refusal : Runtime.t -> unit
+(** {!read_after_account_refusal} for a runtime whose provider declares
+    [usage-read], with one GET on the process's Eio net and clock, in the
+    caller's fiber. A runtime without [usage-read] is not read and nothing
+    rests. The outcome or failure is logged without the body or the key. *)

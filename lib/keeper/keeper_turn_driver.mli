@@ -553,6 +553,7 @@ module For_testing : sig
     ?model_of:('candidate -> string option) ->
     ?candidate_backpressure_of:('candidate -> Runtime_candidate_backpressure.candidate option) ->
     ?candidate_dispatchable:('candidate -> bool) ->
+    ?read_usage_after_account_refusal:('candidate -> unit) ->
     walk_owner:walk_owner ->
     runtime_id:string ->
     runtime_id_of:('candidate -> string) ->

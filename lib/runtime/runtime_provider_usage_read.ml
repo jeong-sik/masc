@@ -284,3 +284,102 @@ let read_codex_in_background ~clock ~cwd ~scope codex =
                   (Printexc.to_string exn)));
         Started))
 ;;
+
+(* After a 403: the one read whose answer the walk reads.
+
+   An HTTP 403 does not say why the account was refused. Kimi For Coding
+   sends the same body type for a spent 5-hour window and for a client the
+   plan does not admit. The provider's usage endpoint answers the question
+   with counts: a window whose used count reached its limit is spent until
+   its stated reset. Only that answer rests the scope; the status alone
+   rests nothing. *)
+
+type account_refusal_read =
+  | Spent_until of float
+  | Spent_without_reset
+  | No_window_spent
+
+(* [used] reached [limit]. Count windows are decoded as [used / limit]
+   ([fraction_of_counts]), which is exactly 1.0 when the two are equal. *)
+let window_spent (window : Runtime_provider_usage_window.window) =
+  match window.utilization with
+  | Runtime_provider_usage_window.Fraction used -> Float.compare used 1.0 >= 0
+  | Runtime_provider_usage_window.Percent used -> used >= 100
+;;
+
+(* The latest stated reset among the spent windows. A spent window that
+   states no reset keeps the scope resting until its next success, whatever
+   the other windows say. *)
+let account_refusal_read_of_report (report : Runtime_provider_usage_window.report) =
+  List.fold_left
+    (fun acc (window : Runtime_provider_usage_window.window) ->
+      if not (window_spent window)
+      then acc
+      else (
+        match acc, window.resets_at with
+        | Spent_without_reset, (Some _ | None) | (No_window_spent | Spent_until _), None ->
+          Spent_without_reset
+        | No_window_spent, Some resets_at -> Spent_until (Float.of_int resets_at)
+        | Spent_until held, Some resets_at -> Spent_until (Float.max held (Float.of_int resets_at))))
+    No_window_spent
+    report.windows
+;;
+
+let account_refusal_read_to_string = function
+  | Spent_until resets_at -> Printf.sprintf "a window is spent until %.0f" resets_at
+  | Spent_without_reset -> "a window is spent and states no reset"
+  | No_window_spent -> "no window is spent"
+;;
+
+let read_after_account_refusal ~fetch ~scope http =
+  let ( let* ) = Result.bind in
+  let* (report : Runtime_provider_usage_window.report) = usage_report ~fetch http in
+  Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
+  let read = account_refusal_read_of_report report in
+  (match read with
+   | Spent_until resets_at -> Runtime_quota_window.note_exhausted ~scope ~resets_at
+   | Spent_without_reset -> Runtime_quota_window.note_observed_exhausted ~scope
+   | No_window_spent -> ());
+  Ok read
+;;
+
+let http_read_of_runtime (rt : Runtime.t) =
+  match how_of_runtime rt with
+  | Some (Http http) -> Some http
+  | Some (Codex _) | None -> None
+;;
+
+let read_runtime_after_account_refusal (rt : Runtime.t) =
+  match http_read_of_runtime rt with
+  | None -> ()
+  | Some http ->
+    let scope = Runtime.quota_scope_of_runtime rt in
+    let scope_label = Runtime_quota_window.scope_to_string scope in
+    (match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
+     | Some net, Some clock ->
+       let fetch ~api_key url = get_usage ~net ~clock ~api_key url in
+       (match read_after_account_refusal ~fetch ~scope http with
+        | Ok read ->
+          Log.Runtime_agent.info
+            "provider usage read after a 403 for %s (shape %s): %s"
+            scope_label
+            (shape_label http)
+            (account_refusal_read_to_string read)
+        | Error error ->
+          Log.Runtime_agent.warn
+            "provider usage read after a 403 failed for %s (shape %s): %s"
+            scope_label
+            (shape_label http)
+            (http_error_to_string error)
+        | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+        | exception exn ->
+          Log.Runtime_agent.warn
+            "provider usage read after a 403 raised for %s (shape %s): %s"
+            scope_label
+            (shape_label http)
+            (Printexc.exn_slot_name exn))
+     | None, _ | _, None ->
+       Log.Runtime_agent.warn
+         "provider usage not read after a 403 for %s: no Eio net or clock"
+         scope_label)
+;;

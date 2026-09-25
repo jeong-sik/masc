@@ -82,9 +82,11 @@ type wire_admission_error =
   | Global_admission_not_allowed
   | Invalid_connect_timeout
   | Invalid_body_timeout
-  | Missing_deadline
+  | Missing_deadline of { provider_id : string option }
       (** No body timeout reached the plan; the response body would be read
-          with no deadline. See {!Exact_output_plan.output_admission_error}. *)
+          with no deadline. [provider_id] names the provider whose
+          declaration is missing, [None] when the config names none. See
+          {!Exact_output_plan.output_admission_error}. *)
   | Caller_supplied_header_not_allowed
   | Unsupported_image_input
   | Unsupported_document_input

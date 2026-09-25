@@ -34,6 +34,9 @@ module Env_config_sandbox = struct module Shell_timeout = struct
   type bucket = Read
   let timeout_sec ~(bucket : bucket) () = let _ = bucket in 20.
 end end
+module Keeper_alerting_path = struct
+  type path_refusal = { message : string }
+end
 module Keeper_tool_shared_runtime = struct
   let resolve_keeper_read_path ~config ~meta:_ ~raw_path =
     Ok (Filename.concat config raw_path)

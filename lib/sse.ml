@@ -322,9 +322,14 @@ let buffer_ttl_seconds = Env_config.InternalTimers.sse_buffer_ttl_sec
 type event_buffer_state = {
   events_by_id : delivery IntMap.t;
   count : int;
+  evicted_through : int;
+      (* The highest id either eviction ever removed, 0 when none has. A
+         cursor below it may have missed an event the buffer no longer holds;
+         without it a replay could not tell that from a quiet stream. *)
 }
 
-let empty_event_buffer_state = { events_by_id = IntMap.empty; count = 0 }
+let empty_event_buffer_state =
+  { events_by_id = IntMap.empty; count = 0; evicted_through = 0 }
 
 let event_buffer : event_buffer_state Atomic.t =
   Atomic.make empty_event_buffer_state
@@ -336,7 +341,7 @@ let event_buffer_state_of_events events =
          IntMap.add delivery.event_id delivery acc)
       IntMap.empty events
   in
-  { events_by_id; count = IntMap.cardinal events_by_id }
+  { events_by_id; count = IntMap.cardinal events_by_id; evicted_through = 0 }
 
 let event_buffer_events_newest_first state =
   state.events_by_id |> IntMap.bindings |> List.rev_map snd
@@ -360,13 +365,15 @@ let buffer_event delivery =
       IntMap.add delivery.event_id delivery state.events_by_id
     in
     let count = if replacing then state.count else state.count + 1 in
-    let events_by_id, count =
-      if count <= max_buffer_size then events_by_id, count
+    let events_by_id, count, evicted_through =
+      if count <= max_buffer_size then events_by_id, count, state.evicted_through
       else
         let oldest_id, _oldest = IntMap.min_binding events_by_id in
-        IntMap.remove oldest_id events_by_id, count - 1
+        ( IntMap.remove oldest_id events_by_id,
+          count - 1,
+          max state.evicted_through oldest_id )
     in
-    { next_state = { events_by_id; count }; result = () })
+    { next_state = { events_by_id; count; evicted_through }; result = () })
 
 let session_kind_matches_target target ~jsonrpc_payload kind =
   match target with
@@ -402,9 +409,27 @@ let get_events_after_raw last_id =
 
 let get_events_after_for_test = get_events_after_raw
 
-let get_events_after_for_session ~session_id ~kind last_id =
-  get_events_after_raw last_id
-  |> List.filter (event_matches_session ~session_id ~kind)
+type replay_continuity =
+  | Continuous
+  | After_gap of { missed_through : int }
+
+type replay = { deliveries : delivery list; continuity : replay_continuity }
+
+(* One snapshot answers both: read apart, an eviction in between could drop
+   an event from the deliveries while the continuity still said none was. *)
+let replay_after_for_session ~session_id ~kind last_id =
+  let state = Atomic.get event_buffer in
+  let _older_or_equal, _at_last_id, newer = IntMap.split last_id state.events_by_id in
+  let deliveries =
+    newer |> IntMap.bindings |> List.map snd
+    |> List.filter (event_matches_session ~session_id ~kind)
+  in
+  let continuity =
+    if state.evicted_through > last_id
+    then After_gap { missed_through = state.evicted_through }
+    else Continuous
+  in
+  { deliveries; continuity }
 
 type replay_handoff = IntSet.t ref
 
@@ -429,18 +454,19 @@ let accept_live_delivery handoff (delivery : delivery) =
 let cleanup_expired_events () =
   let now = Time_compat.now () in
   Lockfree_atomic.update_with_commit event_buffer (fun state ->
-    let events_by_id, evicted =
+    let events_by_id, evicted, evicted_through =
       IntMap.fold
-        (fun id (delivery : delivery) (kept, evicted) ->
+        (fun id (delivery : delivery) (kept, evicted, through) ->
           if now -. delivery.emitted_at > buffer_ttl_seconds then
-            (kept, evicted + 1)
+            (kept, evicted + 1, max through id)
           else
-            (IntMap.add id delivery kept, evicted))
+            (IntMap.add id delivery kept, evicted, through))
         state.events_by_id
-        (IntMap.empty, 0)
+        (IntMap.empty, 0, state.evicted_through)
     in
     {
-      next_state = { events_by_id; count = IntMap.cardinal events_by_id };
+      next_state =
+        { events_by_id; count = IntMap.cardinal events_by_id; evicted_through };
       result = evicted;
     })
 

@@ -186,11 +186,20 @@ val reap_dead_external_subscribers : unit -> int
 
 val clients : client_registry_state Atomic.t
 val buffer_event : delivery -> unit
-val get_events_after_for_session :
-  session_id:string -> kind:session_kind -> int -> delivery list
-(** Replay-buffer lookup for one exact session. Targeted deliveries are visible
-    only to their named agent-stream session; broadcasts use the same target
-    and JSON-RPC filtering rules as live fan-out. *)
+type replay_continuity =
+  | Continuous  (** No event after the cursor has left the buffer. *)
+  | After_gap of { missed_through : int }
+      (** The buffer dropped events up to [missed_through], past the cursor,
+          by count or by age. Any of them may have been for this session. *)
+
+type replay = { deliveries : delivery list; continuity : replay_continuity }
+
+val replay_after_for_session :
+  session_id:string -> kind:session_kind -> int -> replay
+(** Replay-buffer lookup for one exact session, read from one snapshot.
+    Targeted deliveries are visible only to their named agent-stream session;
+    broadcasts use the same target and JSON-RPC filtering rules as live
+    fan-out. *)
 
 type replay_handoff
 

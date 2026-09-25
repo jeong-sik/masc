@@ -7,4 +7,22 @@
  (name keeper_sandbox_image)
  (public_name masc.keeper_sandbox_image)
  (wrapped false)
- (modules keeper_sandbox_image))
+ (modules keeper_sandbox_image keeper_sandbox_image_base_recipe)
+ (private_modules keeper_sandbox_image_base_recipe))
+
+; sandbox-images/base/Dockerfile is the recipe's only copy. The binary carries
+; it as a string so an installed binary can build the image with no checkout.
+; A recipe that ever contained the closing delimiter would end the string early
+; and the generated module would stop compiling, so that mistake cannot pass
+; quietly.
+
+(rule
+ (target keeper_sandbox_image_base_recipe.ml)
+ (deps ../../sandbox-images/base/Dockerfile)
+ (action
+  (with-stdout-to
+   %{target}
+   (progn
+    (echo "let dockerfile = {masc_recipe|")
+    (cat ../../sandbox-images/base/Dockerfile)
+    (echo "|masc_recipe}\n")))))

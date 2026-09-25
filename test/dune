@@ -2540,6 +2540,8 @@
 
 (include stanzas/test_dos_tools.inc)
 
+(include stanzas/test_machine_checkpoint.inc)
+
 (include stanzas/test_msx_frame_route.inc)
 
 (include stanzas/test_lane_addon_live_route.inc)
@@ -2658,7 +2660,7 @@
 
 (include stanzas/test_env_config_keeper_admission_bounds.inc)
 
-(include stanzas/test_schedule_domain_admission_split.inc)
+(include stanzas/test_schedule_interval_runner_tick.inc)
 
 (include stanzas/test_env_config_nonneg.inc)
 
@@ -3460,7 +3462,7 @@
 (test
  (name test_keeper_sandbox_image_contract)
  (modules test_keeper_sandbox_image_contract)
- (deps %{workspace_root}/Dockerfile.keeper-sandbox)
+ (deps %{workspace_root}/sandbox-images/ocaml/Dockerfile)
  (libraries alcotest))
 
 (test
@@ -4271,6 +4273,20 @@
  (name test_tui_repository_pulls)
  (modules test_tui_repository_pulls)
  (libraries alcotest masc.server masc_tui_types masc_tui_repository_pulls))
+
+; The Team block's per-Keeper spend decoder against the server's own encoder.
+(test
+ (name test_tui_keeper_spend)
+ (modules test_tui_keeper_spend)
+ (libraries
+  alcotest
+  masc_test_deps
+  masc.jsonl_writer
+  masc.dashboard_utils
+  masc.server
+  masc_tui_types
+  masc_tui_message_layout
+  masc_tui_keeper_spend))
 
 (test
  (name test_tui_overview_team)
@@ -5590,6 +5606,7 @@
 (include stanzas/test_keeper_turn_boundaries.inc)
 (include stanzas/test_keeper_context_core_history.inc)
 (include stanzas/test_keeper_turn_fragments.inc)
+(include stanzas/test_keeper_turn_spend.inc)
 
 (include stanzas/test_keeper_clear_admission.inc)
 (include stanzas/test_keeper_librarian_progress.inc)
@@ -5668,6 +5685,7 @@
 (include stanzas/test_review_prompt_sections_reach_the_model.inc)
 (include stanzas/test_prompt_templates_render.inc)
 (include stanzas/test_tui_send_disposition.inc)
+(include stanzas/test_tui_layout.inc)
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_schedules_hold_says_when_it_was_checked.inc)
 (include stanzas/test_tui_rows.inc)
@@ -5677,7 +5695,6 @@
 (include stanzas/test_tui_tab_strip.inc)
 
 (include stanzas/test_tui_row_with_field.inc)
-(include stanzas/test_tui_burn_hud.inc)
 (include stanzas/test_tui_context_tokens.inc)
 (include stanzas/test_tui_next_request_band.inc)
 (include stanzas/test_tui_coordinator_status_row.inc)
@@ -6291,7 +6308,7 @@
   %{workspace_root}/bin/masc_tui.ml
   %{workspace_root}/bin/masc_tui_types.ml
   %{workspace_root}/bin/masc_tui_render.ml)
- (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
+ (libraries alcotest ast_grep compiler-libs.common masc masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
 
 
 (rule
@@ -6415,6 +6432,16 @@
  (deps (alias runtest-test_tui_tab_strip_pty)))
 
 (rule
+ (alias runtest-test_tui_paste_pause_pty)
+ (deps test_tui_paste_pause_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_paste_pause_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_paste_pause_pty)))
+
+(rule
  (alias runtest-test_tui_input_frame_pty)
  (deps test_tui_input_frame_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
@@ -6433,6 +6460,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_approvals_ring_pty)))
+
+(rule
+ (alias runtest-test_tui_batch_status_pty)
+ (deps test_tui_batch_status_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_batch_status_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_batch_status_pty)))
 
 (rule
  (alias runtest-test_tui_approval_detail_scroll_pty)
@@ -6724,6 +6761,7 @@
  (deps
   test_install_local_build.py
   ../scripts/install-local-build.sh
+  ../scripts/dune-local.sh
   ../connectors/browser/install-host.sh)
  (action
   (run python3 %{dep:test_install_local_build.py})))

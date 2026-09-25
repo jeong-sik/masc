@@ -991,6 +991,49 @@ let test_a_blank_endpoint_model_is_refused () =
     check bool "the refusal names the field" true
       (String_util.string_contains_substring ~needle:".model must be a non-blank string" message)
 
+(* A written timeout is meant (#35641). Zero or a negative was taken as
+   written and expired every call at once; a string was read as absent and
+   handed the endpoint the workspace timeout. Each is refused by name. *)
+let test_an_unusable_endpoint_timeout_is_refused () =
+  List.iter
+    (fun (label, value) ->
+       match
+         parse_stt_endpoints
+           [ `Assoc
+               [ "id", `String "whisper-local"
+               ; "kind", `String "whisper_cli"
+               ; "model", `String "/models/ggml-base.bin"
+               ; "timeout_seconds", value
+               ]
+           ]
+       with
+       | Ok _ -> failf "a timeout_seconds of %s must be refused" label
+       | Error message ->
+         check bool (label ^ ": the refusal names the field") true
+           (String_util.string_contains_substring ~needle:".timeout_seconds" message))
+    [ "zero", `Float 0.0; "a negative", `Int (-5); "a string", `String "30" ]
+
+(* An [enabled] written as something other than a boolean is refused by
+   name: read as absent it would turn on the endpoint it meant to turn off. *)
+let test_an_unusable_endpoint_enabled_is_refused () =
+  List.iter
+    (fun (label, value) ->
+       match
+         parse_stt_endpoints
+           [ `Assoc
+               [ "id", `String "whisper-local"
+               ; "kind", `String "whisper_cli"
+               ; "model", `String "/models/ggml-base.bin"
+               ; "enabled", value
+               ]
+           ]
+       with
+       | Ok _ -> failf "an enabled of %s must be refused" label
+       | Error message ->
+         check bool (label ^ ": the refusal names the field") true
+           (String_util.string_contains_substring ~needle:".enabled" message))
+    [ "the string no", `String "no"; "a number", `Int 0; "null", `Null ]
+
 (* The wire names the model the endpoint that would answer is asked for, and
    lists every model the section's endpoints are asked for. *)
 let test_the_public_json_reads_the_endpoint_models () =
@@ -1152,6 +1195,10 @@ let () =
             test_a_section_whose_endpoints_all_name_models_needs_no_fallback
         ; test_case "a blank endpoint model is refused" `Quick
             test_a_blank_endpoint_model_is_refused
+        ; test_case "an unusable endpoint timeout is refused" `Quick
+            test_an_unusable_endpoint_timeout_is_refused
+        ; test_case "an unusable endpoint enabled is refused" `Quick
+            test_an_unusable_endpoint_enabled_is_refused
         ; test_case "the public json reads the endpoint models" `Quick
             test_the_public_json_reads_the_endpoint_models
         ] )

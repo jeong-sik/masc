@@ -214,14 +214,32 @@ let capture ~tabs ~call ~tab_id =
   else Error (Browser_lane.Refused "the page moved during capture")
 ;;
 
-let sentence ~tabs ~call ~tab_id to_call =
+(* Stagehand answers an act it could not carry out (no element matched, the
+   action failed) as a normal result with [data.success = false], not as an
+   RPC error. The act may already have touched the page, so the failure is
+   [Refused], never a pre-effect rejection. Observe and extract report no such
+   flag: their data is the answer. *)
+let act_outcome data =
+  match field "success" data, field "message" data with
+  | Some (`Bool true), (Some _ | None) -> Ok ()
+  | Some (`Bool false), Some (`String message) ->
+    Error (Browser_lane.Refused ("Stagehand act did not succeed: " ^ message))
+  | Some (`Bool false), (Some _ | None) -> Error (Browser_lane.Refused "Stagehand act did not succeed")
+  | (Some _ | None), (Some _ | None) -> Error (malformed "stagehand.act" "data.success as a boolean")
+;;
+
+let sentence ~tabs ~call ~tab_id ~outcome to_call =
   let* page_id = page_of ~tabs tab_id in
   let request = to_call page_id in
   let* result = send call request in
   match field "data" result, field "metadata" result with
-  | Some data, Some metadata -> Ok (`Assoc [ "tabId", `Int tab_id; "data", data; "metadata", metadata ])
+  | Some data, Some metadata ->
+    let* () = outcome data in
+    Ok (`Assoc [ "tabId", `Int tab_id; "data", data; "metadata", metadata ])
   | (Some _ | None), (Some _ | None) -> Error (malformed (Wire.method_name request) "data and metadata")
 ;;
+
+let reported_as_data (_ : Yojson.Safe.t) = Ok ()
 
 let execute ~tabs ~call verb =
   let served =
@@ -230,11 +248,11 @@ let execute ~tabs ~call verb =
     | Browser_lane.Page_goto { url; tab_id } -> goto ~tabs ~call ~url ~tab_id
     | Browser_lane.Page_capture { tab_id } -> capture ~tabs ~call ~tab_id
     | Browser_lane.Page_instruct { tab_id; instruction } ->
-      sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Act { page_id; instruction; timeout = Wire.sentence_timeout })
+      sentence ~tabs ~call ~tab_id ~outcome:act_outcome (fun page_id -> Wire.Act { page_id; instruction; timeout = Wire.sentence_timeout })
     | Browser_lane.Page_locate { tab_id; instruction } ->
-      sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Observe { page_id; instruction; timeout = Wire.sentence_timeout })
+      sentence ~tabs ~call ~tab_id ~outcome:reported_as_data (fun page_id -> Wire.Observe { page_id; instruction; timeout = Wire.sentence_timeout })
     | Browser_lane.Page_extract { tab_id; instruction; schema } ->
-      sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Extract { page_id; instruction; schema; timeout = Wire.sentence_timeout })
+      sentence ~tabs ~call ~tab_id ~outcome:reported_as_data (fun page_id -> Wire.Extract { page_id; instruction; schema; timeout = Wire.sentence_timeout })
     | Browser_lane.Session_open _ | Browser_lane.Session_close | Browser_lane.Session_status | Browser_lane.Page_read _
     | Browser_lane.Page_document _ | Browser_lane.Page_downloads _ | Browser_lane.Page_scene _
     | Browser_lane.Page_interact _ | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _ ->

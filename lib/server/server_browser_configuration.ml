@@ -1,5 +1,5 @@
-let load () =
-  let resolution = Config_dir_resolver.resolve () in
+let load ~base_path =
+  let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
   let path = Filename.concat resolution.Config_dir_resolver.config_root.path
       Config_dir_resolver.runtime_toml_filename in
   match Unix.lstat path with

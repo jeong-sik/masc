@@ -106,7 +106,7 @@ let read_costs period =
       note_invalid (line_label path line_number) detail
     | Dated_jsonl.Parsed json ->
       (match Cost_ledger.of_json json with
-       | Ok ({ usage_projection = Raw_observation; _ } : Cost_ledger.t) -> ()
+       | Ok ({ usage_projection = Raw_observation _; _ } : Cost_ledger.t) -> ()
        | Ok entry -> entries := entry :: !entries
        | Error error ->
          note_invalid

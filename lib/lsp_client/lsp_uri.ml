@@ -2,7 +2,8 @@
 
 let path_of_file_uri uri =
   let parsed = Uri.of_string uri in
-  match Uri.scheme parsed with
+  (* RFC 3986 section 3.1: schemes compare case-insensitively. *)
+  match Option.map String.lowercase_ascii (Uri.scheme parsed) with
   | Some "file" ->
     (match Uri.host parsed with
      | None | Some "" | Some "localhost" -> Uri.path parsed |> Uri.pct_decode

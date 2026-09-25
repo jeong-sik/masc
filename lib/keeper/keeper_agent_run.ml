@@ -1879,6 +1879,8 @@ let run_turn
                         s.Keeper_run_tools.observe_official_client_result_handoff
                       ~on_official_client_native_action:
                         s.Keeper_run_tools.observe_official_client_native_action
+                      ~on_official_client_usage_report:
+                        s.Keeper_run_tools.observe_official_client_usage_report
                       ())
          in
          (* Trace-store failure isolation: [raw_trace_for_dispatch]
@@ -2173,6 +2175,7 @@ let run_turn
            ~receipt_runtime_observation_ref
            ~receipt_lane_attempt_index_ref
            ~receipt_response_text_present_ref
+           ~spend:(s.Keeper_run_tools.spend_attempts ())
            ()
        in
        (* RFC-0233 PR-3: TurnRecord — same per-keeper-turn cadence as the
@@ -2202,15 +2205,25 @@ let run_turn
                   Some { request_context = Some (context : Runtime_observation.request_context); _ }
               ; _
               } ->
-            (* A runtime that reports the newest request's occupancy apart from
-               the turn's spend (Claude Code) records that request here: this
-               record's readers ask what one request carried. The request's
-               own output count is not known; the turn's output goes to
-               [turn_output_tokens] below, under its own scope. *)
+            (* A runtime that reports its newest request apart from the
+               turn's spend records that request here: this record's readers
+               ask what one request carried. Its output is there when the
+               runtime reports that request's final count; the turn's output
+               goes to [turn_output_tokens] below, under its own scope. Its
+               cache split is absent when the runtime reports only an
+               estimate of the whole context, as it does after a compaction. *)
             { input_tokens = Some context.input_tokens
-            ; output_tokens = None
-            ; cache_creation_input_tokens = Some context.cache_creation_input_tokens
-            ; cache_read_input_tokens = Some context.cache_read_input_tokens
+            ; output_tokens = context.output_tokens
+            ; cache_creation_input_tokens =
+                Option.map
+                  (fun (cache : Runtime_observation.request_cache) ->
+                     cache.cache_creation_input_tokens)
+                  context.cache
+            ; cache_read_input_tokens =
+                Option.map
+                  (fun (cache : Runtime_observation.request_cache) ->
+                     cache.cache_read_input_tokens)
+                  context.cache
             ; scope = Runtime_usage_scope.Per_request
             }
           | Ok result when result.usage_reported ->

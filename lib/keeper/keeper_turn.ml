@@ -221,7 +221,7 @@ let surface_context_to_instructions (ctx : Yojson.Safe.t) : string option =
   | json ->
       Some
         (Printf.sprintf "[Co-view context]\n%s"
-           (Yojson.Safe.pretty_to_string json))
+           (Yojson.Safe.to_string json))
 
 let resolve_turn_runtime_id (meta : keeper_meta) =
   let runtime_id = String.trim (Keeper_meta_contract.runtime_id_of_meta meta) in

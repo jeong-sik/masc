@@ -1415,13 +1415,13 @@ let test_prompt_carries_typed_tool_observations_without_payloads () =
   let observations = List.assoc "turn_tool_observations" variables in
   check bool "successful artifact read is host-authored input" true
     (String_util.contains_substring observations
-       {|"tool_name": "keeper_artifact_read"|});
+       {|"tool_name":"keeper_artifact_read"|});
   check bool "successful outcome is retained" true
-    (String_util.contains_substring observations {|"outcome": "succeeded"|});
+    (String_util.contains_substring observations {|"outcome":"succeeded"|});
   check bool "failed outcome is retained" true
-    (String_util.contains_substring observations {|"outcome": "failed"|});
+    (String_util.contains_substring observations {|"outcome":"failed"|});
   check bool "unknown outcome is retained without guessing" true
-    (String_util.contains_substring observations {|"outcome": "unknown"|});
+    (String_util.contains_substring observations {|"outcome":"unknown"|});
   match Runtime.messages_for_librarian (input ()) with
   | Error detail -> failf "librarian render failed: %s" detail
   | Ok messages ->

@@ -105,7 +105,7 @@ type usage_read =
   { shape : usage_read_shape
   ; url : string
   ; refresh_s : float option
-    (** [refresh-s] — seconds from one answer to the next read, after the
+    (** [refresh-s] — seconds from the end of one read to the next, after the
         read at server start. [None] reads at server start only. *)
   }
 [@@deriving show, eq]

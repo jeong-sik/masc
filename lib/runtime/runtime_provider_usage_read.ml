@@ -230,50 +230,62 @@ let read_all ~mgr ~net ~clock ~cwd =
   read_scopes ~codex ~fetch (readable_scopes ())
 ;;
 
-let refresh_period (http : http_read) = http.usage_read.refresh_s
+(* A static key that is empty never reaches a request ([usage_report]
+   refuses it first) and stays empty while the runtime lives, so repeating
+   its read would only repeat the warning the start read logged.  A
+   refreshable credential may answer on a later read. *)
+let may_answer (http : http_read) =
+  match http.credential with
+  | Llm_provider.Provider_config.Static_credential, api_key ->
+    not (Llm_provider.Secret.is_empty api_key)
+  | Llm_provider.Provider_config.Refreshable_credential _, _ -> true
+;;
 
-(* The account's HTTP read as the catalogue declares it now, while its
-   provider still declares [refresh-s]. *)
-let refreshing_http scope =
+let repeat_period (http : http_read) =
+  if may_answer http then http.usage_read.refresh_s else None
+;;
+
+(* The account's HTTP read as [readables] declares it, while it repeats. *)
+let repeat_of readables scope =
   List.find_map
     (fun (readable : readable) ->
        match readable.how with
        | Http http when Runtime_quota_window.scope_equal readable.scope scope ->
-         Option.map (fun period -> period, http) (refresh_period http)
+         Option.map (fun period -> period, http) (repeat_period http)
        | Http _ | Codex _ -> None)
-    (readable_scopes ())
+    readables
 ;;
 
-let rec refresh_scope ~clock ~fetch ~lookup scope period =
+let rec refresh_scope ~clock ~fetch ~catalogue scope period =
   Eio.Time.sleep clock period;
-  match lookup scope with
+  match repeat_of (catalogue ()) scope with
   | None ->
     Log.Runtime_agent.info
-      "provider usage refresh for %s stopped: no provider of it declares \
-       usage-read.refresh-s now"
+      "provider usage refresh for %s stopped: the catalogue no longer holds a \
+       usage-read.refresh-s it can answer"
       (Runtime_quota_window.scope_to_string scope)
   | Some (period, http) ->
     read_http_logged ~fetch ~scope http;
-    refresh_scope ~clock ~fetch ~lookup scope period
+    refresh_scope ~clock ~fetch ~catalogue scope period
 ;;
 
-(* Each account is looked up in the catalogue again before every repeat, so
-   a config save that removes its provider or its [refresh-s] stops the
-   repeats, and a changed period applies after the current wait.  An
-   account whose [refresh-s] a save adds is repeated from the next start. *)
-let refresh_declared ~net ~clock =
-  let fetch ~api_key url = get_usage ~net ~clock ~api_key url in
-  let declared =
+let refresh_readables ~clock ~fetch ~catalogue =
+  let repeating =
     List.filter_map
       (fun (readable : readable) ->
          match readable.how with
-         | Http http -> Option.map (fun period -> readable.scope, period) (refresh_period http)
+         | Http http -> Option.map (fun period -> readable.scope, period) (repeat_period http)
          | Codex _ -> None)
-      (readable_scopes ())
+      (catalogue ())
   in
   Eio.Fiber.List.iter
-    (fun (scope, period) -> refresh_scope ~clock ~fetch ~lookup:refreshing_http scope period)
-    declared
+    (fun (scope, period) -> refresh_scope ~clock ~fetch ~catalogue scope period)
+    repeating
+;;
+
+let refresh_declared ~net ~clock =
+  let fetch ~api_key url = get_usage ~net ~clock ~api_key url in
+  refresh_readables ~clock ~fetch ~catalogue:readable_scopes
 ;;
 
 (* Scopes a background read is running for. Keepers sharing one account are

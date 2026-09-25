@@ -213,7 +213,7 @@ type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
 
 # Usage windows for the operator view, read at server start with no model
-# call, then again refresh-s seconds after each answer. Undocumented
+# call, then again refresh-s seconds after each read. Undocumented
 # endpoint; Ollama's own client calls it. The decoder supports the observed
 # session/weekly shape and reports other shapes as errors.
 [providers.ollama_cloud.usage-read]
@@ -264,7 +264,7 @@ type = "env"
 key = "ZAI_API_KEY"
 
 # Usage windows for the operator view, read at server start with no model
-# call, then again refresh-s seconds after each answer. Undocumented
+# call, then again refresh-s seconds after each read. Undocumented
 # endpoint; Z.AI's own coding plugin calls it.
 [providers.glm-coding.usage-read]
 shape = "zai-quota-limit"
@@ -287,7 +287,7 @@ type = "env"
 key = "KIMI_API_KEY"
 
 # Usage windows for the operator view, read at server start with no model
-# call, then again refresh-s seconds after each answer. Undocumented
+# call, then again refresh-s seconds after each read. Undocumented
 # endpoint; Kimi's own CLI calls it.
 [providers.kimi_coding.usage-read]
 shape = "kimi-coding-usages"
@@ -2444,7 +2444,7 @@ type = "env"
 key = "OPENROUTER_API_KEY"
 
 # Usage windows for the operator view, read at server start with no model
-# call, then again refresh-s seconds after each answer. Documented at
+# call, then again refresh-s seconds after each read. Documented at
 # openrouter.ai/docs/api-reference/limits.
 [providers.openrouter.usage-read]
 shape = "openrouter-key"

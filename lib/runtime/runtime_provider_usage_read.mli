@@ -11,7 +11,7 @@
     asked with one HTTP GET to that URL, authenticated with the key its HTTP
     runtime was built with, and the answer is decoded by the declared shape.
     A provider that also declares [usage-read.refresh-s] is asked again that
-    many seconds after each answer. runtime.toml refuses [usage-read] on an
+    many seconds after each read ends. runtime.toml refuses [usage-read] on an
     official-client protocol. *)
 
 val read_timeout_s : float
@@ -73,30 +73,33 @@ val read_all :
     leaves that scope as it was; neither the response body nor the key is
     logged. *)
 
-val refresh_scope :
+val refresh_readables :
   clock:_ Eio.Time.clock ->
   fetch:(api_key:Llm_provider.Secret.t -> string -> (string, http_error) result) ->
-  lookup:(Runtime_quota_window.scope -> (float * http_read) option) ->
-  Runtime_quota_window.scope ->
-  float ->
+  catalogue:(unit -> readable list) ->
   unit
-(** [refresh_scope ~clock ~fetch ~lookup scope period] waits [period]
-    seconds, then asks [lookup] for [scope]'s read. It reads, logging a
-    failure the way {!read_scopes} does, and repeats with the period [lookup]
-    gave, or returns when [lookup] answers [None]. A failed or raising read is logged and the
-    repeats go on; only {!Eio.Cancel.Cancelled} is re-raised. *)
+(** Repeat the read of every HTTP account in [catalogue ()] whose provider
+    declares [usage-read.refresh-s], each waiting its own period from the
+    call. An account whose static key is empty is not repeated: that read
+    never reaches a request, and the key stays empty while the runtime lives.
+    Before each repeat the account is looked up in [catalogue ()] again. Its
+    repeats end when it is gone, no longer declares [refresh-s], or can no
+    longer answer; otherwise the period it declares then is the wait after
+    that read. A failed or raising read is logged the way {!read_scopes}
+    logs it, and the repeats go on; only {!Eio.Cancel.Cancelled} is
+    re-raised. Returns when every account's repeats have ended. *)
 
 val refresh_declared :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   clock:_ Eio.Time.clock ->
   unit
-(** Repeat the read of every HTTP account whose provider declares
-    [usage-read.refresh-s] at the time of the call, each on its own period,
-    after {!read_all} has read it once. Each repeat looks the account up in
-    the catalogue again: a provider that no longer declares [refresh-s], or
-    that is gone, ends that account's repeats, and a changed period applies
-    after the current wait. Returns when every account's repeats have
-    ended, so the server runs it on a fiber of its own. *)
+(** {!refresh_readables} over the runtime catalogue, one HTTP GET per read.
+    The accounts that repeat are the ones the catalogue declares at the call.
+    An account whose repeats a config save ended does not repeat again, even
+    when a later save restores it, and one whose [refresh-s] a save adds
+    does not start; both repeat from the next server start. The server calls
+    it right after {!read_all}, so each first repeat waits its period from
+    the end of that whole start pass. *)
 
 type background =
   | Started  (** A read was forked on the server's root switch. *)

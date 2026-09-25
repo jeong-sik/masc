@@ -636,7 +636,7 @@ status: reference
   - **직접 읽기**: 턴이 없어도 창을 알 수 있게, 서버는 시작할 때 계정마다 한 번 제공자에게
     직접 묻는다. Codex 는 `account/rateLimits/read`(#38671), `usage-read` 를 선언한 HTTP
     provider 는 그 URL 로 GET 한 번이다(#38706). `usage-read.refresh-s` 를 선언한 계정은
-    응답이 온 뒤 그 초마다 다시 묻는다(#39144).
+    읽기가 끝날 때마다 그 초 뒤에 다시 묻는다(#39144).
   - **Usage Scope와의 구분**: 위의 Usage Scope(MASC가 집계하는 토큰 수의 범위)와 다른 축이다 —
     이쪽은 모델 제공자가 wire로 알려준 자기 계정의 5시간·7일 한도 창이다.
   → [Runtime_provider_usage_window](../../lib/runtime/runtime_provider_usage_window.mli)

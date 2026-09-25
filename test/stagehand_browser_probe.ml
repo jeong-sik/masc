@@ -4,9 +4,9 @@
    key. scripts/probe-stagehand.py serves the fixture page and runs this.
 
    The scripted model answers from what reached it: the page text for
-   extract, the element id Stagehand listed for the button for act. So a
-   passing run shows the page reached the model and the model's choice reached
-   the page, not only that the wire carries messages. *)
+   extract, the element id Stagehand listed for the button for observe and
+   act. So a passing run shows the page reached the model and the model's
+   choice reached the page, not only that the wire carries messages. *)
 
 module Model = Masc.Browser_stagehand_model
 module Wire = Masc.Browser_stagehand_wire
@@ -90,24 +90,24 @@ let scripted_model params =
            answer (`Assoc [ "heading", `String "Order form"; "price", `String "42 USD" ])
          else refuse "probe model: the page text did not reach the model"
        else if List.mem "completed" props then answer (`Assoc [ "progress", `String "read"; "completed", `Bool true ])
-       else if List.mem "action" props then (
+       else if List.mem "action" props || List.mem "elements" props then (
          match
            List.find_map
              (fun line -> if contains ~sub:"button: Submit order" line then element_id line else None)
              (String.split_on_char '\n' text)
          with
          | Some id ->
-           answer
-             (`Assoc
-               [ ( "action"
-                 , `Assoc
-                     [ "elementId", `String id
-                     ; "description", `String "Submit order button"
-                     ; "method", `String "click"
-                     ; "arguments", `List []
-                     ] )
-               ; "twoStep", `Bool false
-               ])
+           let button =
+             `Assoc
+               [ "elementId", `String id
+               ; "description", `String "Submit order button"
+               ; "method", `String "click"
+               ; "arguments", `List []
+               ]
+           in
+           (* act asks for one action; observe for the elements that match. *)
+           if List.mem "action" props then answer (`Assoc [ "action", button; "twoStep", `Bool false ])
+           else answer (`Assoc [ "elements", `List [ button ] ])
          | None -> refuse "probe model: no Submit order button in the page the model was shown")
        else refuse ("probe model: no scripted answer for " ^ String.concat "," props)
      | Model.Text_generation | Model.Tool_generation _ -> refuse "probe model: only structured requests are scripted")
@@ -192,6 +192,12 @@ let () =
         match string_at [ "data"; "heading" ] data, string_at [ "data"; "price" ] data with
         | Some "Order form", Some "42 USD" -> Ok data
         | _ -> Error ("extract answered " ^ Yojson.Safe.to_string data));
+     record "observe locates the button the model chose"
+       (let* data =
+          instruct [ "action", `String "observe"; "instruction", `String "the Submit order button"; "tabId", `Int tab_id ]
+        in
+        if contains ~sub:"Submit order" (Yojson.Safe.to_string data) then Ok data
+        else Error ("observe answered " ^ Yojson.Safe.to_string data));
      record "act clicks the button the model chose"
        (let* _ = instruct [ "action", `String "act"; "instruction", `String "click the Submit order button"; "tabId", `Int tab_id ] in
         let* tabs = tabs () in

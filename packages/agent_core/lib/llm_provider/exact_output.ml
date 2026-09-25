@@ -2250,3 +2250,270 @@ let execute_flow_once
     in
     terminal prior_rejections cause
 ;;
+
+(* Text renderers for the exact-output error family (#27861). They exist so a
+   consumer never reimplements this classification or drops a payload behind
+   [_]: every match below is exhaustive with no catch-all, so a new
+   constructor is a compile error here. Numeric fields are printed because
+   they are what tells a local capacity refusal from a provider outage. The
+   strings are for logs and operator lines only; nothing may branch on them.
+   A transport error is rendered by its typed kind, never by its message,
+   because a message can echo request material; a raw provider body is
+   rendered by its sha256 for the same reason. *)
+
+let optional_token_count_to_string = function
+  | None -> "unknown"
+  | Some tokens -> string_of_int tokens
+;;
+
+let token_capacity_rejection_to_string : token_capacity_rejection -> string = function
+  | Capacity_evidence_not_yet_valid { now_unix_s; checked_at_unix_s } ->
+    Printf.sprintf
+      "capacity evidence not yet valid (now=%d checked_at=%d)"
+      now_unix_s
+      checked_at_unix_s
+  | Capacity_evidence_expired { now_unix_s; expires_at_unix_s } ->
+    Printf.sprintf
+      "capacity evidence expired (now=%d expires_at=%d)"
+      now_unix_s
+      expires_at_unix_s
+  | Capacity_boundary_unknown { input_tokens; accepted_through_tokens; rejected_from_tokens }
+    ->
+    Printf.sprintf
+      "capacity boundary unknown (input=%d accepted_through=%d rejected_from=%s)"
+      input_tokens
+      accepted_through_tokens
+      (optional_token_count_to_string rejected_from_tokens)
+  | Capacity_input_rejected { input_tokens; accepted_through_tokens; rejected_from_tokens }
+    ->
+    Printf.sprintf
+      "capacity input rejected (input=%d accepted_through=%d rejected_from=%d)"
+      input_tokens
+      accepted_through_tokens
+      rejected_from_tokens
+;;
+
+let input_capacity_disposition_to_string : input_capacity_disposition -> string =
+  function
+  | Token_measurement_required { accepted_through_tokens; rejected_from_tokens } ->
+    Printf.sprintf
+      "token measurement required (accepted_through=%d rejected_from=%s)"
+      accepted_through_tokens
+      (optional_token_count_to_string rejected_from_tokens)
+  | Context_window_exceeded { input_tokens; reserved_output_tokens; max_context_tokens } ->
+    Printf.sprintf
+      "context window exceeded (input=%d reserved_output=%d max_context=%d)"
+      input_tokens
+      reserved_output_tokens
+      max_context_tokens
+  | Token_capacity_rejected rejection -> token_capacity_rejection_to_string rejection
+;;
+
+let candidate_rejection_disposition_to_string
+  : candidate_rejection_disposition -> string
+  = function
+  | Runtime_slot_unavailable -> "runtime slot unavailable"
+  | Runtime_contract_rejected -> "runtime contract rejected"
+  | Input_contract_rejected -> "input contract rejected"
+  | Output_requirement_rejected -> "output requirement rejected"
+  | Input_capacity disposition -> input_capacity_disposition_to_string disposition
+  | Request_preparation_failed -> "request preparation failed"
+;;
+
+let admission_error_to_string : admission_error -> string = admission_error_reason
+
+let http_error_kind_to_string : Http_client.http_error -> string = function
+  | Http_client.HttpError { code; body = _; retry_after_header = _ } ->
+    Printf.sprintf "http_status=%d" code
+  | Http_client.NetworkError { kind; message = _ } ->
+    "network_error:" ^ Http_client.network_error_kind_to_string kind
+  | Http_client.TimeoutError { phase; message = _ } ->
+    "timeout:" ^ Http_client.timeout_phase_to_label phase
+  | Http_client.AcceptRejected { reason = _ } -> "accept_rejected"
+  | Http_client.ProviderTerminal { kind = Http_client.Session_conflict; message = _ } ->
+    "provider_terminal:session_conflict"
+  | Http_client.ProviderTerminal { kind = Http_client.Other subtype; message = _ } ->
+    "provider_terminal:" ^ subtype
+  | Http_client.ProviderFailure { kind; message = _ } ->
+    Http_client.provider_failure_kind_to_string kind
+;;
+
+let generation_dispatch_fact_to_string : generation_dispatch_fact -> string = function
+  | No_generation_dispatch -> "not sent"
+  | Generation_dispatch_started -> "sent"
+;;
+
+let execution_error_cause_to_string : execution_error_cause -> string = function
+  | Attempt_already_started -> "attempt already started"
+  | Clock_required_for_timeout -> "clock required for timeout"
+  | Frozen_request_mismatch -> "frozen request mismatch"
+  | Completion_failed { error; dispatch } ->
+    Printf.sprintf
+      "completion failed (%s, %s)"
+      (http_error_kind_to_string error)
+      (generation_dispatch_fact_to_string dispatch)
+  | Response_body_deadline_exceeded ->
+    "total request deadline exceeded while reading response body"
+  | Provider_response_refused { http_status; refusal } ->
+    Printf.sprintf
+      "provider refused (http_status=%d refusal=%s)"
+      http_status
+      (provider_refusal_to_string refusal)
+  | Incomplete_output -> "incomplete output"
+  | Missing_output -> "missing output"
+  | Ambiguous_output count -> Printf.sprintf "ambiguous output (candidates=%d)" count
+  | Unexpected_output_content -> "unexpected output content"
+  | Invalid_json_output -> "invalid json output"
+  | Internal_non_json_output -> "internal non-json output"
+;;
+
+let start_attempt_error_to_string : start_attempt_error -> string = function
+  | Call_id_generation_failed detail ->
+    Printf.sprintf "call_id_generation_failed detail=%S" detail
+;;
+
+let measurement_start_error_to_string : measurement_start_error -> string = function
+  | Measurement_operation_id_generation_failed detail ->
+    Printf.sprintf "operation_id_generation_failed detail=%S" detail
+  | Measurement_clock_required_for_timeout -> "measurement_clock_required_for_timeout"
+;;
+
+let candidate_rejection_to_string (rejection : candidate_rejection_receipt) =
+  Printf.sprintf
+    "slot=%s %s cause=%s"
+    rejection.visit.identity.candidate_id
+    (candidate_rejection_disposition_to_string
+       (candidate_rejection_disposition rejection))
+    (candidate_rejection_reason rejection)
+;;
+
+let flow_advance_failure_to_string
+  : flow_advance_failure_snapshot -> string * string
+  = function
+  | Flow_advance_candidate_rejected rejection ->
+    ( rejection.visit.identity.candidate_id
+    , "candidate_rejected cause=" ^ candidate_rejection_reason rejection )
+  | Flow_advance_execution_failed { candidate; cause; raw_response_sha256 } ->
+    let sha =
+      match raw_response_sha256 with
+      | None -> ""
+      | Some sha -> Printf.sprintf " raw_response_sha256=%s" sha
+    in
+    ( candidate.visit.identity.candidate_id
+    , Printf.sprintf
+        "execution_failed cause=%s%s"
+        (execution_error_cause_to_string cause)
+        sha )
+;;
+
+let flow_evidence_to_string (evidence : flow_evidence) =
+  let attempts =
+    List.map
+      (fun (attempt : flow_attempt_snapshot) ->
+         Printf.sprintf
+           "slot=%s call_id=%s"
+           attempt.visit.identity.candidate_id
+           (call_id_to_string (generation_receipt_snapshot_call_id attempt.receipt)))
+      evidence.attempts
+  in
+  let advances =
+    List.map
+      (fun (advance : flow_advance_receipt) ->
+         let failed_slot, failure_kind = flow_advance_failure_to_string advance.failed in
+         Printf.sprintf
+           "advance=%s->%s kind=%s"
+           failed_slot
+           advance.next.identity.candidate_id
+           failure_kind)
+      evidence.advances
+  in
+  match attempts @ advances with
+  | [] -> "no candidate attempt or advance was recorded"
+  | details -> String.concat "; " details
+;;
+
+let raw_response_sha256_to_string : raw_response option -> string = function
+  | None -> "none"
+  | Some raw -> raw.body_sha256
+;;
+
+let execution_error_to_string (error : execution_error) =
+  Printf.sprintf
+    "call_id=%s cause=%s raw_response_sha256=%s"
+    (call_id_to_string error.call_id)
+    (execution_error_cause_to_string error.cause)
+    (raw_response_sha256_to_string error.raw_response)
+;;
+
+let flow_candidate_failure_to_string : flow_candidate_failure -> string = function
+  | Flow_candidate_rejected rejection ->
+    "candidate_rejected " ^ candidate_rejection_to_string rejection
+  | Flow_candidate_execution_failed { candidate; cause } ->
+    Printf.sprintf
+      "execution_failed slot=%s %s"
+      candidate.visit.identity.candidate_id
+      (execution_error_to_string cause)
+;;
+
+let flow_execution_error_to_string
+      ~(callback_error_to_string : 'callback_error -> string)
+      (error : 'callback_error flow_execution_error)
+  =
+  let with_flow evidence detail =
+    Printf.sprintf "%s; flow=[%s]" detail (flow_evidence_to_string evidence)
+  in
+  match error with
+  | Flow_attempt_already_started evidence -> with_flow evidence "attempt_already_started"
+  | Flow_attempt_start_failed { candidate; cause; evidence } ->
+    with_flow
+      evidence
+      (Printf.sprintf
+         "attempt_start_failed: slot=%s cause=%s"
+         candidate.identity.candidate_id
+         (start_attempt_error_to_string cause))
+  | Flow_measurement_start_failed { candidate; cause; evidence } ->
+    with_flow
+      evidence
+      (Printf.sprintf
+         "measurement_start_failed: slot=%s cause=%s"
+         candidate.identity.candidate_id
+         (measurement_start_error_to_string cause))
+  | Flow_before_measurement_dispatch_callback_failed { measurement; cause; evidence } ->
+    with_flow
+      evidence
+      (Printf.sprintf
+         "before_measurement_dispatch_callback_failed: slot=%s cause=%s"
+         measurement.visit.identity.candidate_id
+         (callback_error_to_string cause))
+  | Flow_measurement_terminal_callback_failed { measurement; cause; evidence } ->
+    with_flow
+      evidence
+      (Printf.sprintf
+         "measurement_terminal_callback_failed: slot=%s cause=%s"
+         measurement.visit.identity.candidate_id
+         (callback_error_to_string cause))
+  | Flow_before_dispatch_callback_failed { candidate; cause; evidence } ->
+    with_flow
+      evidence
+      (Printf.sprintf
+         "before_dispatch_callback_failed: slot=%s cause=%s"
+         candidate.visit.identity.candidate_id
+         (callback_error_to_string cause))
+  | Flow_before_advance_callback_failed { failed; next; cause; evidence } ->
+    with_flow
+      evidence
+      (Printf.sprintf
+         "before_advance_callback_failed: failed=[%s] next=%s cause=%s"
+         (flow_candidate_failure_to_string failed)
+         next.identity.candidate_id
+         (callback_error_to_string cause))
+  | Flow_candidates_exhausted { rejection; evidence } ->
+    with_flow evidence ("candidates_exhausted: " ^ candidate_rejection_to_string rejection)
+  | Flow_exact_execution_failed { candidate; cause; evidence } ->
+    with_flow
+      evidence
+      (Printf.sprintf
+         "execution_failed: slot=%s %s"
+         candidate.visit.identity.candidate_id
+         (execution_error_to_string cause))
+;;

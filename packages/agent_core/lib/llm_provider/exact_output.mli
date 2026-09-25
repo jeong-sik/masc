@@ -910,6 +910,57 @@ val flow_execution_terminal_kind
     typed advancement rule used between candidates; callers never recover the
     distinction from an error string or receipt phase. *)
 
+(** {2 Error renderers}
+
+    One-line text renderings of the exact-output error family, for logs and
+    operator-facing lines only. No caller may branch on these strings; the
+    typed values stay the only control-flow input. Every renderer matches
+    exhaustively, so a new constructor is a compile error in AGENT_CORE rather
+    than a payload a consumer drops behind [_]. Numeric fields (token counts,
+    unix seconds, HTTP status) are always printed: they are what separates a
+    local capacity refusal from a provider failure. Transport errors are
+    rendered by their typed kind and raw provider bodies by their sha256,
+    never by their text, because either can echo request material. *)
+
+(** e.g. ["capacity evidence expired (now=1700000100 expires_at=1700000000)"]. *)
+val token_capacity_rejection_to_string : token_capacity_rejection -> string
+
+(** e.g. ["context window exceeded (input=9000 reserved_output=2000 max_context=8192)"]. *)
+val input_capacity_disposition_to_string : input_capacity_disposition -> string
+
+val candidate_rejection_disposition_to_string : candidate_rejection_disposition -> string
+
+(** The typed admission refusal, including its nested wire cause. *)
+val admission_error_to_string : admission_error -> string
+
+(** e.g. ["provider refused (http_status=429 refusal=rate_limited)"],
+    ["completion failed (network_error:dns_failure, not sent)"]. *)
+val execution_error_cause_to_string : execution_error_cause -> string
+
+(** ["call_id=... cause=... raw_response_sha256=<sha|none>"]. *)
+val execution_error_to_string : execution_error -> string
+
+val start_attempt_error_to_string : start_attempt_error -> string
+val measurement_start_error_to_string : measurement_start_error -> string
+
+(** ["slot=<candidate id> <disposition> cause=<typed reason>"]: the coarse
+    disposition with its numbers and the original typed selection or
+    admission error ({!candidate_rejection_reason}). *)
+val candidate_rejection_to_string : candidate_rejection_receipt -> string
+
+(** Attempts and advances the flow recorded, one clause per visit
+    (["slot=... call_id=..."], ["advance=a->b kind=..."]). *)
+val flow_evidence_to_string : flow_evidence -> string
+
+(** One line for any terminal flow error: a static label
+    (["candidates_exhausted: "], ["execution_failed: "], ...), the payload the
+    branch carries, and the flow journey (["; flow=[...]"]). The callback
+    error type belongs to the caller, so the caller supplies its renderer. *)
+val flow_execution_error_to_string
+  :  callback_error_to_string:('callback_error -> string)
+  -> 'callback_error flow_execution_error
+  -> string
+
 (** Whether any candidate the flow reached began its one outward completion
     (generation) dispatch. It answers for the whole walk: a candidate that
     dispatched and then failed over to its successor counts, and so does the

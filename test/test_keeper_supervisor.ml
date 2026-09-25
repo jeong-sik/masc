@@ -844,6 +844,41 @@ let test_declarative_boot_records_typed_invalid_config_failure () =
        check string "keeper path retained" keeper_path error.keeper_path;
        check string "failing path retained" keeper_path error.failing_path)
 
+(* A docker keeper naming a catalog name with nothing promoted on this host
+   does not boot, and the refusal is recorded where the boot failure is read.
+   [with_config_dir] promotes only [base]. *)
+let test_declarative_boot_refuses_an_unbuilt_sandbox_image () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let name = "unbuilt-image" in
+  write_file
+    (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
+    (Printf.sprintf
+       "[keeper]\nname = \"%s\"\ninstructions = \"test keeper\"\nsandbox_profile = \"docker\"\nsandbox_image = \"ocaml\"\n"
+       name);
+  Keeper_types_profile.invalidate_keeper_profile_defaults_cache name;
+  Eio.Switch.on_release sw (fun () ->
+      Reg.For_testing.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
+  let ctx = keeper_runtime_context env sw config in
+  (match KR.load_or_materialize_boot_meta ctx name with
+   | Ok _ -> fail "a keeper naming an unbuilt image booted"
+   | Error err ->
+     check bool "the refusal names what is missing" true
+       (String_util.contains_substring err "nothing is promoted for \"ocaml\""));
+  match KR.boot_meta_failure_for ~base_path:config.base_path ~name with
+  | None -> fail "expected the unresolved image boot failure to be recorded"
+  | Some failure ->
+    check string "typed cause" "sandbox_image_unresolved"
+      (KR.boot_meta_failure_cause_label failure.cause)
+
 let test_reconcile_materializes_configured_keeper_without_meta () =
   with_config_dir @@ fun config_dir ->
   Eio_main.run @@ fun env ->
@@ -2946,6 +2981,8 @@ let () =
         test_declarative_boot_rematerializes_incompatible_meta;
       test_case "declarative boot records typed invalid-config failure" `Quick
         test_declarative_boot_records_typed_invalid_config_failure;
+      test_case "declarative boot refuses an unbuilt sandbox image" `Quick
+        test_declarative_boot_refuses_an_unbuilt_sandbox_image;
       test_case "reconcile materializes configured keeper without meta" `Quick
         test_reconcile_materializes_configured_keeper_without_meta;
       test_case "reconcile does not double-start materialized keeper" `Quick

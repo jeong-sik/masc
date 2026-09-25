@@ -81,24 +81,26 @@ let reconcile_keepalive_keepers
     try
       match read_effective_meta ctx.config name with
       | Ok (Some meta) when not meta.paused ->
-        (* Starting a keeper that is not running is a boot, so it meets the
-           refusal autoboot applies ([Keeper_runtime.load_or_materialize_boot_meta]);
-           otherwise a keeper refused at autoboot would start here one sweep
-           later. A keeper the sweep already owns is not judged: this path
-           does not stop a running keeper. Materialized meta arrives through
-           [load_or_materialize_keeper_meta], which judges it itself. *)
+        (* Starting a keeper that is not running is a boot, so it goes
+           through the boot judgment autoboot applies
+           ([load_or_materialize_keeper_meta] is
+           [Keeper_runtime.load_or_materialize_boot_meta]); otherwise a
+           keeper refused at autoboot would start here one sweep later. That
+           judgment also records a refusal where
+           [Keeper_runtime.boot_meta_failure_for] reads it. A keeper the sweep
+           already owns is not judged: this path does not stop a running
+           keeper. *)
         if dominated_by_sweep meta
         then ()
         else (
-          match
-            Keeper_sandbox_image_admission.boot_refusal ~base_path meta
-          with
-          | None -> reconcile_meta meta
-          | Some error ->
-            Log.Keeper.warn
-              "reconcile: keeper %s rejected: %s"
-              meta.name
-              (Keeper_sandbox_image_resolver.error_to_string error))
+          match load_or_materialize_keeper_meta ctx name with
+          | Ok (Some _) -> reconcile_meta meta
+          | Ok None ->
+            Log.Keeper.debug
+              "reconcile: keeper %s lost its meta before its boot judgment"
+              name
+          | Error err ->
+            Log.Keeper.warn "reconcile: keeper %s not started: %s" name err)
       | Ok (Some _) -> ()
       | Ok None ->
         (match load_or_materialize_keeper_meta ctx name with

@@ -40,7 +40,9 @@ type wire_message =
       ; result : Yojson.Safe.t
       }
   | Response_error of
-      { id : request_id
+      { id : request_id option
+        (** [None] for JSON-RPC's [null] id: an error the server could not
+            tie to a request, such as a line it could not parse. *)
       ; code : int
       ; message : string
       ; data : Yojson.Safe.t option
@@ -67,7 +69,26 @@ type client_info =
   ; version : string
   }
 
-val initialize_request : id:int -> client_info -> Yojson.Safe.t
+(** A grantable connection capability. MSP leaves this set open, so a name
+    the host grants that MASC does not know is kept verbatim. *)
+type capability =
+  | Session_mcp
+      (** Required before [session/start] or [session/resume] may carry
+          [config.mcpServers]; without the grant the host fails the whole
+          command with [capabilityRequired] (-32010). *)
+  | User_shell
+  | Session_list_stream
+  | Unrecognized_capability of string
+
+val initialize_request
+  :  id:int
+  -> client_info
+  -> requested_capabilities:capability list
+  -> user_input_dialogs:bool
+  -> Yojson.Safe.t
+(** [user_input_dialogs:false] tells the host this client cannot answer a
+    [userInput/request], so the host does not send one. Absent on the wire
+    means capable, so [true] leaves the member off. *)
 
 val initialized_notification : Yojson.Safe.t
 (** Sent once after the [initialize] response. *)
@@ -174,6 +195,8 @@ type initialize_result =
   ; user_agent : string
   ; muse_home : string
   ; schema_fingerprint : string
+  ; granted_capabilities : capability list
+    (** Fixed for the connection's lifetime. *)
   }
 
 val parse_initialize_result : Yojson.Safe.t -> (initialize_result, error) result

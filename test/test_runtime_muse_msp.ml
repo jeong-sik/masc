@@ -132,11 +132,6 @@ let test_text_run_single_turn () =
 (* The frames MASC writes must be the frames the conformance corpus writes. *)
 let test_client_frames_match_corpus () =
   let name = "text-run-single-turn" in
-  check
-    json
-    "initialize"
-    (client_frame_with_method name "initialize")
-    (Msp.initialize_request ~id:1 { name = "conformance"; version = "0.0.0" });
   check json "initialized" (client_frame_with_method name "initialized") Msp.initialized_notification;
   check
     json
@@ -159,6 +154,48 @@ let test_client_frames_match_corpus () =
        ~command_id:"018f6a1e-9b3c-7c21-a54a-2f30bd3c9f10"
        ~input:[ Msp.Text "Run the agent test suite and summarize failures" ]
        ~reasoning_effort:None)
+;;
+
+(* MASC asks for [sessionMcp] so a session may carry the MCP bridge; the
+   corpus shows the same handshake shape with another capability. *)
+let test_capability_handshake () =
+  let name = "handshake-liststream-granted" in
+  check
+    json
+    "initialize"
+    (client_frame_with_method name "initialize")
+    (Msp.initialize_request
+       ~id:1
+       { name = "conformance"; version = "0.0.0" }
+       ~requested_capabilities:[ Msp.Session_list_stream ]
+       ~user_input_dialogs:true);
+  let init =
+    ok_or_fail
+      (Msp.parse_initialize_result (response_result (Msp.Int_id 1) (server_frames name)))
+  in
+  check
+    bool
+    "granted"
+    true
+    (init.granted_capabilities = [ Msp.Session_list_stream ]);
+  let frame =
+    Msp.initialize_request
+      ~id:1
+      { name = "masc"; version = "0" }
+      ~requested_capabilities:[ Msp.Session_mcp ]
+      ~user_input_dialogs:false
+  in
+  check
+    json
+    "masc capabilities"
+    (Yojson.Safe.from_string
+       {|{"requestedCapabilities":["sessionMcp"],"userInputDialogs":false}|})
+    (match frame with
+     | `Assoc fields ->
+       (match List.assoc "params" fields with
+        | `Assoc params -> List.assoc "capabilities" params
+        | _ -> fail "params is not an object")
+     | _ -> fail "frame is not an object")
 ;;
 
 let test_approval_round_trip () =
@@ -251,6 +288,13 @@ let test_wire_refusals () =
   parse_error {|{"jsonrpc":"2.0","id":1.5,"result":{}}|};
   parse_error {|{"jsonrpc":"2.0"}|};
   parse_error "not json";
+  parse_error {|{"jsonrpc":"2.0","id":null,"result":{}}|};
+  (match
+     Msp.parse_wire_line
+       {|{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error","data":null}}|}
+   with
+   | Ok (Msp.Response_error { id = None; code = -32700; data = None; _ }) -> ()
+   | _ -> fail "a null-id error response must be read, with null data as absent");
   let failed_without_error =
     `Assoc
       [ "sessionId", `String "s"
@@ -358,6 +402,7 @@ let () =
     [ ( "corpus"
       , [ test_case "text run single turn" `Quick test_text_run_single_turn
         ; test_case "client frames match corpus" `Quick test_client_frames_match_corpus
+        ; test_case "capability handshake" `Quick test_capability_handshake
         ; test_case "approval round trip" `Quick test_approval_round_trip
         ; test_case "provider failure turn" `Quick test_provider_failure_turn
         ; test_case "unknown item kind is kept" `Quick test_unknown_item_kind_is_kept

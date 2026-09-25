@@ -78,7 +78,7 @@ type wire_message =
       ; result : Yojson.Safe.t
       }
   | Response_error of
-      { id : request_id
+      { id : request_id option
       ; code : int
       ; message : string
       ; data : Yojson.Safe.t option
@@ -105,7 +105,11 @@ let parse_rpc_error id fields =
   let* error_fields = assoc_at stage error_json in
   let* message = required_text stage "message" error_fields in
   let* code = required_int stage "code" error_fields in
-  let data = List.assoc_opt "data" error_fields in
+  let data =
+    match List.assoc_opt "data" error_fields with
+    | None | Some `Null -> None
+    | Some data -> Some data
+  in
   Ok (Response_error { id; code; message; data })
 ;;
 
@@ -128,10 +132,14 @@ let parse_wire_line line =
   | Some id, Some (`String method_) ->
     let* id = request_id_of_json stage id in
     Ok (Server_request { id; method_; params = params_of fields })
+  | Some `Null, None ->
+    (match List.assoc_opt "error" fields with
+     | Some _ -> parse_rpc_error None fields
+     | None -> fail stage "only an error response may carry a null id")
   | Some id, None ->
     let* id = request_id_of_json stage id in
     (match List.assoc_opt "error" fields with
-     | Some _ -> parse_rpc_error id fields
+     | Some _ -> parse_rpc_error (Some id) fields
      | None ->
        let* result = required_member stage "result" fields in
        Ok (Response { id; result }))
@@ -157,11 +165,40 @@ type client_info =
   ; version : string
   }
 
-let initialize_request ~id { name; version } =
+type capability =
+  | Session_mcp
+  | User_shell
+  | Session_list_stream
+  | Unrecognized_capability of string
+
+let capability_to_string = function
+  | Session_mcp -> "sessionMcp"
+  | User_shell -> "userShell"
+  | Session_list_stream -> "sessionListStream"
+  | Unrecognized_capability name -> name
+;;
+
+let capability_of_string = function
+  | "sessionMcp" -> Session_mcp
+  | "userShell" -> User_shell
+  | "sessionListStream" -> Session_list_stream
+  | name -> Unrecognized_capability name
+;;
+
+let initialize_request ~id { name; version } ~requested_capabilities ~user_input_dialogs =
   request
     ~id
     ~method_:"initialize"
-    [ "clientInfo", `Assoc [ "name", `String name; "version", `String version ] ]
+    [ "clientInfo", `Assoc [ "name", `String name; "version", `String version ]
+    ; ( "capabilities"
+      , `Assoc
+          (( "requestedCapabilities"
+           , `List
+               (List.map
+                  (fun capability -> `String (capability_to_string capability))
+                  requested_capabilities) )
+           :: (if user_input_dialogs then [] else [ "userInputDialogs", `Bool false ])) )
+    ]
 ;;
 
 let initialized_notification =
@@ -331,6 +368,7 @@ type initialize_result =
   ; user_agent : string
   ; muse_home : string
   ; schema_fingerprint : string
+  ; granted_capabilities : capability list
   }
 
 let parse_initialize_result json =
@@ -344,7 +382,18 @@ let parse_initialize_result json =
   let* schema = required_member stage "schema" fields in
   let* schema = assoc_at stage schema in
   let* schema_fingerprint = required_string stage "fingerprint" schema in
-  Ok { server_version; user_agent; muse_home; schema_fingerprint }
+  let* granted_capabilities =
+    match List.assoc_opt "grantedCapabilities" fields with
+    | Some (`List names) ->
+      map_result
+        (function
+          | `String name -> Ok (capability_of_string name)
+          | _ -> fail stage "grantedCapabilities must hold strings")
+        names
+    | Some _ -> fail stage "field \"grantedCapabilities\" must be an array"
+    | None -> fail stage "missing field \"grantedCapabilities\""
+  in
+  Ok { server_version; user_agent; muse_home; schema_fingerprint; granted_capabilities }
 ;;
 
 type session =

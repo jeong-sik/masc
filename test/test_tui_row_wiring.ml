@@ -224,18 +224,26 @@ let test_the_overview_row_counts_every_approval_list () =
          ~binding_name:"render_overview"
          ~callee:"Masc_tui_types.approvals_surface_pending");
   (* Every list the walk can come up short or long on has to be able to mark
-     the count unreliable. The gate poll was the one left out: a failed fetch
-     fills gate_error and leaves the previous rows standing, so the row drew a
-     bare number over a list the server no longer holds. *)
-  Alcotest.(check int) "every approval source can mark the count unreliable" 6
+     the count unreliable, and the strip has to drop its Approvals entry on
+     the same judgement. Both ask Masc_tui_types.approvals_reading_current.
+     Two copies of the check drift: at fe6315aa69 (2026-09-26) the strip's
+     copy left the Gate queue out while this row's copy counted it. *)
+  Alcotest.(check int) "the row asks the shared reading predicate" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_overview"
+       ~callee:"Masc_tui_types.approvals_reading_current");
+  Alcotest.(check int) "and judges no approval source failure on its own" 0
     (reads ~binding_name:"render_overview"
        ~fields:
-         [ "approvals_error"
+         [ "approval_snapshot"
+         ; "approvals_error"
+         ; "keeper_tool_approvals_observed"
          ; "keeper_tool_approvals_error"
-         ; "asks_snapshot"
-         ; "asks_error"
+         ; "gate_snapshot_observed"
          ; "gate_error"
          ; "gate_queue_unavailable"
+         ; "asks_snapshot"
+         ; "asks_error"
          ])
 
 (* The briefing answers with two lists that carry the same incidents, and the

@@ -648,13 +648,7 @@ let render_overview (state : state) =
         let approval_count =
           let on_screen = Masc_tui_types.approvals_surface_pending state in
           let source_unread =
-            Option.is_none state.approval_snapshot
-            || Option.is_some state.approvals_error
-            || Option.is_some state.keeper_tool_approvals_error
-            || Option.is_none state.asks_snapshot
-            || Option.is_some state.asks_error
-            || Option.is_some state.gate_error
-            || Option.is_some state.gate_queue_unavailable
+            not (Masc_tui_types.approvals_reading_current state)
           in
           if source_unread then Printf.sprintf "%d?" on_screen
           else string_of_int on_screen

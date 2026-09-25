@@ -1483,7 +1483,11 @@ let approvals_reading_is_current state =
       ; aps_total_count = 0
       ; aps_hidden_count = 0
       };
+  state.keeper_tool_approvals_observed <- true;
   state.keeper_tool_approvals_error <- None;
+  state.gate_snapshot_observed <- true;
+  state.gate_error <- None;
+  state.gate_queue_unavailable <- None;
   state.asks_snapshot <-
     Some { Masc.Tui_decode.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
   state.asks_error <- None
@@ -1509,6 +1513,28 @@ let test_the_ring_keeps_approvals_until_a_reading_empties_it () =
   state.asks_error <- None;
   state.approval_snapshot <- None;
   Alcotest.(check bool) "an unread confirm queue keeps it" true
+    (approvals_in_ring state);
+  (* The durable Gate queue is the fourth list the count walks. Its rows are
+     the ones that keep while nobody watches, so an unreadable Gate store is
+     the case where a missing entry misleads the most. *)
+  approvals_reading_is_current state;
+  state.gate_error <- Some "gate poll failed";
+  Alcotest.(check bool) "a failed Gate poll keeps it" true
+    (approvals_in_ring state);
+  state.gate_error <- None;
+  state.gate_queue_unavailable <- Some "approval queue store unreadable";
+  Alcotest.(check bool) "a Gate queue the server could not read keeps it" true
+    (approvals_in_ring state);
+  state.gate_queue_unavailable <- None;
+  state.gate_snapshot_observed <- false;
+  Alcotest.(check bool) "a Gate queue not read yet keeps it" true
+    (approvals_in_ring state);
+  state.gate_snapshot_observed <- true;
+  state.keeper_tool_approvals_observed <- false;
+  Alcotest.(check bool) "held calls not read yet keep it" true
+    (approvals_in_ring state);
+  state.keeper_tool_approvals_observed <- true;
+  Alcotest.(check bool) "every list read and empty drops it again" false
     (approvals_in_ring state)
 
 let test_browser_lanes_highlight_config () =

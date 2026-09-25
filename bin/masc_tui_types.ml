@@ -10575,14 +10575,24 @@ let approvals_surface_pending (state : state) =
   List.length (approval_items state) + approvals_open_question_count state
 
 (* Whether every list the count is taken over was read. The count is a
-   reading of what is waiting only when all three came back: the confirm
-   queue, the held calls, and the questions. The surface's own title already
-   parts the two -- it says "confirm queue unread", "held calls stale",
-   "questions unread" beside the number -- and the strip asked the number
-   alone. *)
+   reading of what is waiting only when all four came back: the confirm
+   queue, the held calls, the durable Gate queue, and the questions. A list
+   not read yet, a failed poll, and a Gate store the server could not open
+   ([gate_queue_unavailable], sent with a null queue) all leave the count
+   without a source behind it.
+
+   The strip entry and the Overview "Approvals:" row both call this, so the
+   entry leaves the strip exactly when the row draws its count without "?".
+   An unreadable Gate store with every other list empty keeps the entry:
+   an entry that is gone reads as "nothing is waiting". *)
 let approvals_reading_current (state : state) =
   Option.is_some state.approval_snapshot
+  && Option.is_none state.approvals_error
+  && state.keeper_tool_approvals_observed
   && Option.is_none state.keeper_tool_approvals_error
+  && state.gate_snapshot_observed
+  && Option.is_none state.gate_error
+  && Option.is_none state.gate_queue_unavailable
   && (match approvals_questions_reading state with
       | Questions_current -> true
       | Questions_unread | Questions_stale -> false)

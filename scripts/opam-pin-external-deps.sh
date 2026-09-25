@@ -107,7 +107,8 @@ fi
 
 # --- Pin SHAs (bump these when upstream changes are needed) ---
 readonly GRPC_DIRECT_SHA="d7269ebebf9e4688486cc6591c66e794607e7b0f"
-readonly WS_DIRECT_SHA="05e01cf008d4a5024474d13cee35cda42e2bea09"
+# d812d6f = ws-direct v0.2.0 (Endpoint.Wsd.send_text_bigstring).
+readonly WS_DIRECT_SHA="d812d6fec4153efc11235661e0d4b4d0d789c45b"
 # MSX emulator core (Z80 + V9938 + MSX2 machine). Path-pinned locally for
 # core development; SHA-pinned here for CI.
 # 4e2799a = ocaml-msx #21: slot-aware disk BIOS dispatch and random reads;

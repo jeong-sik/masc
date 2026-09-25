@@ -554,11 +554,15 @@ let rec dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_ch
             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
             | exception exn ->
               { output_files = None; status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
-            | Sandbox_target.Transport_failed { reason = _; stdout; stderr; output_files = _ } ->
-              (* The lane never delivered a command result; surface it the way
-                 an exception is -- a failed status with the error already in
-                 stderr -- so a boxed command is not read as a clean run. *)
-              { output_files = None; status = Unix.WEXITED 1; stdout; stderr }
+            | Sandbox_target.Transport_failed { failure; reason = _; stdout; stderr; output_files = _ } ->
+              (* The lane never delivered a command result; surface it with the
+                 error already in stderr, so a boxed command is not read as a
+                 clean run. A timeout keeps the timeout status. *)
+              { output_files = None
+              ; status = Sandbox_target.status_of_transport_failure failure
+              ; stdout
+              ; stderr
+              }
             | Sandbox_target.Ran { status; stdout; stderr; output_files = _ } ->
               (match
                  ( deliver_capture attachments.stdout_to stdout
@@ -673,9 +677,13 @@ let rec dispatch_simple ?base_host_env ?timeout_sec ?stdin_content ?on_output_ch
              }
          | Sandbox_target.Ran { status; stdout; stderr; output_files } ->
              apply_redirect_plan redirect_plan { status; stdout; stderr; output_files }
-         | Sandbox_target.Transport_failed { reason = _; stdout; stderr; output_files } ->
+         | Sandbox_target.Transport_failed { failure; reason = _; stdout; stderr; output_files } ->
              apply_redirect_plan redirect_plan
-               { status = Unix.WEXITED 1; stdout; stderr; output_files })))
+               { status = Sandbox_target.status_of_transport_failure failure
+               ; stdout
+               ; stderr
+               ; output_files
+               })))
   in
   emit_split_stderr_captured_output on_output_chunk emitted ~child_stderr:subst_stderr
     { result with stderr = subst_stderr ^ result.stderr }

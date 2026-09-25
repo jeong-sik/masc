@@ -142,7 +142,7 @@ type aggregate =
 
 type raw_entry =
   { model : string
-  ; inference_identity : Cost_ledger.inference_identity option
+  ; inference_key : Cost_ledger.inference_key option
   ; ts_unix : float
   ; outcome : string
   ; stop_reason : string option

@@ -1014,6 +1014,39 @@ let test_duplicate_exact_identity_is_excluded_and_diagnosed () =
         diagnostics.identity_conflict_rows)
 ;;
 
+(* A failed first attempt and the winning one land in the same turn and may
+   share an ordinal. The winner's settlement pairs with the decision; the
+   loser's reading is its own spend and is counted, not dropped as a
+   conflict. *)
+let test_an_attempt_reading_beside_the_turn_is_not_a_conflict () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "attempt-reading" in
+    let ts = now_unix () in
+    write_decisions
+      path
+      [ success_entry ~model:"same-model" ~ts ~identity_seed:"attempt-turn" () ];
+    let attempt_row =
+      match cost_entry ~model:"same-model" ~ts:(ts -. 1.0) ~identity_seed:"attempt-turn" () with
+      | `Assoc fields ->
+        `Assoc
+          (("usage_projection", `String "resolved_attempt_delta")
+           :: ("lane_attempt_index", `Int 0)
+           :: ("reading_index", `Int 0)
+           :: List.remove_assoc "usage_projection" fields)
+      | json -> json
+    in
+    write_costs
+      base
+      [ cost_entry ~model:"same-model" ~ts ~identity_seed:"attempt-turn" (); attempt_row ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    check int "the paired turn and the attempt reading" 2 agg.total_entries;
+    match agg.cost_read with
+    | Error error ->
+      failf "cost store read failed: %s" (Dated_jsonl.read_error_to_string error)
+    | Ok diagnostics -> check int "no conflict" 0 diagnostics.identity_conflict_rows)
+;;
+
 let test_cost_read_diagnostics_reach_api () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
@@ -1552,7 +1585,7 @@ let test_prompt_feedback_is_cost_independent () =
 let test_usage_signal_uses_tokens_not_cost () =
   let entry : Model_inference_metrics_entry.raw_entry =
     { model = "runtime"
-    ; inference_identity = None
+    ; inference_key = None
     ; ts_unix = 0.0
     ; outcome = "success"
     ; stop_reason = None
@@ -1636,6 +1669,8 @@ let () =
         test_nearby_equal_usage_without_identity_match_stays_distinct;
       test_case "duplicate exact identity is excluded" `Quick
         test_duplicate_exact_identity_is_excluded_and_diagnosed;
+      test_case "an attempt reading beside the turn is not a conflict" `Quick
+        test_an_attempt_reading_beside_the_turn_is_not_a_conflict;
       test_case "cost read diagnostics reach API" `Quick
         test_cost_read_diagnostics_reach_api;
       test_case "cost read failure is not empty success" `Quick

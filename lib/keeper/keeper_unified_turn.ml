@@ -1402,6 +1402,24 @@ let run_keeper_cycle
                       ~core_error:err
                       ()
                   in
+                  (* The failed turn's attempts spent too. Their readings are
+                     resolved against the cursor the turn started from; the
+                     totals and the cursor ride the failure's own commit, and
+                     the rows are written once that commit holds. *)
+                  let resolved_spend, usage_cursor =
+                    Keeper_turn_spend.resolve
+                      ~cursor:meta.runtime.usage_cursor
+                      ~observed_at:(Time_compat.now ())
+                      (match turn_state.degraded_retry_settled with
+                       | Some (settled : Keeper_agent_run.turn_settlement) -> settled.spend
+                       | None -> [])
+                  in
+                  let updated_meta =
+                    Keeper_unified_metrics.with_attempt_spend
+                      updated_meta
+                      ~resolved:resolved_spend
+                      ~usage_cursor
+                  in
                   let e_str = Agent_core.Error.to_string err in
                   let terminal_reason =
                     Keeper_turn_terminal.of_failure
@@ -1434,6 +1452,14 @@ let run_keeper_cycle
                     ~before:meta
                     ~after:updated_meta
                   |> ignore;
+                  Keeper_turn_spend_ledger.write
+                    ~masc_root:
+                      (Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path)
+                    ~agent_name:meta.name
+                    ~task_id:(Option.map Keeper_id.Task_id.to_string meta.current_task_id)
+                    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                    ~keeper_turn_id
+                    resolved_spend;
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string WriteMetaCycleFailures)
                     ~labels:[ "keeper", meta.name; "site", Keeper_write_meta_cycle_failure_site.(to_label Turn_failure) ]

@@ -383,6 +383,134 @@ let test_per_request_readings_leave_the_cursor_alone () =
   check (option (pair string int)) "no cursor" None (cursor_input cursor)
 ;;
 
+let test_a_response_without_usage_resolves_as_missing () =
+  let t =
+    match
+      Keeper_turn_spend.observe_agent_core_response
+        started
+        ~response_id:"r-1"
+        ~ordinal:1
+        ~model:"agent-core-fixture"
+        None
+    with
+    | Ok t -> t
+    | Error Keeper_turn_spend.No_attempt_started -> fail "a response found no attempt"
+  in
+  let resolved, _ = resolve t in
+  check
+    (list (pair string (option int)))
+    "no count, no delta"
+    [ "usage_missing", None ]
+    (delta_inputs resolved)
+;;
+
+let meta_fixture () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "spend-keeper"; "trace_id", `String "trace-spend" ])
+  with
+  | Ok meta -> meta
+  | Error err -> failf "meta fixture: %s" err
+;;
+
+(* A failed turn's resolved readings join the running totals, and the cursor
+   moves to where they left the conversation. *)
+let test_a_failed_turns_spend_joins_the_totals () =
+  let t = observe started (report (counted ~input:100 ~output:10)) in
+  let t =
+    match
+      Keeper_turn_spend.observe_agent_core_response
+        (second_attempt t)
+        ~response_id:"r-1"
+        ~ordinal:1
+        ~model:"agent-core-fixture"
+        (Some { (usage ~input:5 ~output:1) with cost_usd = Some 0.25 })
+    with
+    | Ok t -> t
+    | Error Keeper_turn_spend.No_attempt_started -> fail "a response found no attempt"
+  in
+  let resolved, usage_cursor = resolve t in
+  let meta = meta_fixture () in
+  let before = meta.runtime.usage in
+  let after =
+    (Keeper_unified_metrics.with_attempt_spend meta ~resolved ~usage_cursor).runtime
+  in
+  check int "input" (before.total_input_tokens + 105) after.usage.total_input_tokens;
+  check int "output" (before.total_output_tokens + 11) after.usage.total_output_tokens;
+  check (float 1e-9) "cost" (before.total_cost_usd +. 0.25) after.usage.total_cost_usd;
+  check int "turns are the failure's to count" before.total_turns after.usage.total_turns;
+  check (option (pair string int)) "the cursor" (Some ("thread-1", 100))
+    (cursor_input after.usage_cursor)
+;;
+
+let with_temp_dir f =
+  let dir = Filename.temp_file "masc-turn-spend-" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote dir)))
+    (fun () -> f dir)
+;;
+
+(* A shrink retry opens a second thread inside one attempt and numbers its
+   client turn 1 again. Each reading still gets its own row, under its own
+   key, so neither is dropped as a conflict. *)
+let test_attempt_rows_decode_under_distinct_keys () =
+  with_temp_dir (fun masc_root ->
+    let t =
+      List.fold_left
+        observe
+        started
+        [ report ~conversation_id:"thread-1" (counted ~input:100 ~output:10)
+        ; report ~conversation_id:"thread-2" (counted ~input:40 ~output:4)
+        ]
+    in
+    let resolved, _ = resolve t in
+    Keeper_turn_spend_ledger.write
+      ~masc_root
+      ~agent_name:"spend-keeper"
+      ~task_id:None
+      ~trace_id:"trace-spend"
+      ~keeper_turn_id:7
+      resolved;
+    let jsons = Dated_jsonl.read_recent (Cost_ledger.store_of_masc_root masc_root) 10 in
+    let rows =
+      List.map
+        (fun json ->
+           match Cost_ledger.of_json json with
+           | Ok row -> row
+           | Error error -> failf "cost row: %s" (Cost_ledger.decode_error_to_string error))
+        jsons
+    in
+    let readings =
+      List.sort compare
+        (List.map
+           (fun (row : Cost_ledger.t) ->
+              match row.usage_projection, row.usage with
+              | ( Cost_ledger.Resolved_attempt_delta { lane_attempt_index; reading_index }
+                , Cost_ledger.Usage_reported { input_tokens; _ } ) ->
+                lane_attempt_index, reading_index, input_tokens
+              | Cost_ledger.Resolved_attempt_delta _, Cost_ledger.Usage_missing ->
+                fail "a resolved reading was written as missing"
+              | (Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_delta), _ ->
+                fail "an attempt reading was written as another projection")
+           rows)
+    in
+    check
+      (list (triple int int int))
+      "one row per reading"
+      [ 0, 0, 100; 0, 1, 40 ]
+      readings;
+    let keys = List.filter_map Cost_ledger.inference_key rows in
+    check int "each row has its own key" 2
+      (List.length (List.sort_uniq Cost_ledger.compare_inference_key keys));
+    List.iter
+      (fun json ->
+         check string "the row keeps how it resolved" "exact_cost_unavailable"
+           (Yojson.Safe.Util.(json |> member "resolution_status" |> to_string)))
+      jsons)
+;;
+
 let () =
   run
     "Keeper_turn_spend"
@@ -416,6 +544,14 @@ let () =
             test_a_fill_that_ends_the_turn_leaves_the_cursor_at_zero
         ; test_case "per-request readings leave the cursor alone" `Quick
             test_per_request_readings_leave_the_cursor_alone
+        ; test_case "a response without usage resolves as missing" `Quick
+            test_a_response_without_usage_resolves_as_missing
+        ] )
+    ; ( "failed turn"
+      , [ test_case "a failed turn's spend joins the totals" `Quick
+            test_a_failed_turns_spend_joins_the_totals
+        ; test_case "attempt rows decode under distinct keys" `Quick
+            test_attempt_rows_decode_under_distinct_keys
         ] )
     ]
 ;;

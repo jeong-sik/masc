@@ -88,3 +88,47 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
       };
     };
   }
+
+(* What a failed turn's attempts spent, resolved. The deltas join the
+   running totals the way a successful turn's delta does, and the cursor
+   moves to where the attempts left the conversation counter, so the next
+   turn resolves from there rather than counting this turn's spend again. *)
+let with_attempt_spend (meta : keeper_meta)
+    ~(resolved : Keeper_turn_spend.resolved list)
+    ~(usage_cursor : Keeper_usage_resolution.cursor option) : keeper_meta =
+  let input_tokens, output_tokens, total_tokens, cost_usd =
+    List.fold_left
+      (fun (input, output, total, cost) (resolved : Keeper_turn_spend.resolved) ->
+         match resolved.resolution.delta with
+         | Some delta ->
+           ( input + delta.input_tokens
+           , output + delta.output_tokens
+           , total
+             + Inference_utils.total_tokens
+                 (Keeper_usage_resolution.api_usage_of_sample delta)
+           , cost +. Option.value ~default:0.0 delta.cost_usd )
+         | None -> input, output, total, cost)
+      (0, 0, 0, 0.0)
+      resolved
+  in
+  let rt = meta.runtime in
+  let updated =
+    { meta with
+      runtime =
+        { rt with
+          usage =
+            { rt.usage with
+              total_input_tokens = rt.usage.total_input_tokens + input_tokens
+            ; total_output_tokens = rt.usage.total_output_tokens + output_tokens
+            ; total_tokens = rt.usage.total_tokens + total_tokens
+            ; total_cost_usd = rt.usage.total_cost_usd +. cost_usd
+            }
+        ; usage_cursor
+        }
+    }
+  in
+  record_keeper_total_cost_usd
+    ~keeper_name:updated.name
+    ~total_cost_usd:updated.runtime.usage.total_cost_usd;
+  updated
+;;

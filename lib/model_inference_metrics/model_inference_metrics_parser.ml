@@ -58,10 +58,11 @@ let success_inference_identity fields telemetry_fields =
          && agent_core_turn_ordinal >= 0 ->
     Ok
       (Some
-         { Cost_ledger.trace_id = trace_id
-         ; keeper_turn_id
-         ; agent_core_turn_ordinal
-         })
+         (Cost_ledger.Turn_inference
+            { Cost_ledger.trace_id = trace_id
+            ; keeper_turn_id
+            ; agent_core_turn_ordinal
+            }))
   | _ -> Error Missing_success_inference_identity
 ;;
 
@@ -140,7 +141,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
            in
            Ok
              { model
-             ; inference_identity = None
+             ; inference_key = None
              ; ts_unix = ts
              ; outcome = "error"
              ; stop_reason = json_string_field_opt "stop_reason" tfields
@@ -263,15 +264,15 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
 	           match outcome_opt with
 	           | None -> Error Missing_outcome
 	           | Some outcome ->
-	             let inference_identity =
+	             let inference_key =
 	               if String.equal outcome "success"
 	               then success_inference_identity fields tfields
 	               else Ok None
 	             in
 	             Result.map
-	               (fun inference_identity ->
+	               (fun inference_key ->
 	                  { model
-	             ; inference_identity
+	             ; inference_key
 	             ; ts_unix = ts
 	             ; outcome
              ; stop_reason = json_string_field_opt "stop_reason" tfields
@@ -301,7 +302,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              ; streaming_inter_chunk_count = json_int_field_opt "streaming_inter_chunk_count" tfields
 	             ; streaming_inter_chunk_avg_ms = json_float_field_opt "streaming_inter_chunk_avg_ms" tfields
 	             })
-	               inference_identity)
+	               inference_key)
        | _ -> Error No_telemetry_object)
     | _ -> Error Not_assoc)
 ;;
@@ -372,7 +373,7 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
     in
     Ok
       { model = row.model
-      ; inference_identity = Cost_ledger.inference_identity row
+      ; inference_key = Cost_ledger.inference_key row
       ; ts_unix = row.ts_unix
       ; outcome = "success"
       ; stop_reason = None

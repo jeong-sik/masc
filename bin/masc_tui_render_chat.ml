@@ -1119,7 +1119,6 @@ let keeper_message_tool_activity_details state ~keeper_name
                  | Masc_tui_execute_result.Stored reference ->
                      said "output" (Masc_tui_execute_result.stored_text reference) "")
                result.output
-           ; Option.map (served "stderr") result.stderr
            ])
     @ [ Option.map (fun (label, value) -> said label value "") result_field
       ; Some (said "identity" identity "")

@@ -126,13 +126,18 @@ let failure_data
 ;;
 
 let with_gate_authorization authorization result =
-  { result with
-    metadata =
-      Some
-        (Keeper_gate.authorization_metadata
-           ?producer_metadata:result.metadata
-           authorization)
-  }
+  match result.disposition with
+  | Tool_result.Completed () | Tool_result.Deferred () ->
+    { result with
+      metadata =
+        Some
+          (Keeper_gate.authorization_metadata
+             ?producer_metadata:result.metadata
+             authorization)
+    }
+  | Tool_result.Failed _ ->
+    Keeper_gate.observe_authorization_of_failed_result authorization;
+    result
 ;;
 
 let with_surface_post_receipt target result =

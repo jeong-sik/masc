@@ -758,15 +758,6 @@ let rec dispatch_event_with_audit_internal
          })
   | Some entry ->
     let now = Time_compat.now () in
-    (* Retain the last auto-rule summary emitted with a [Context_measured]
-       event so downstream read-only observers (RFC-0003 composite
-       observer) can project it without reading history files. Other
-       events leave the field untouched. *)
-    let last_context_actions =
-      match event with
-      | Keeper_state_machine.Context_measured { context_actions; _ } -> Some (now, context_actions)
-      | _ -> entry.last_context_actions
-    in
     let pending_turn_measurement = pending_measurement_after_event now entry event in
     let result =
         Keeper_state_machine.apply_event
@@ -824,7 +815,6 @@ let rec dispatch_event_with_audit_internal
               phase = tr.new_phase
             ; conditions = tr.updated_conditions
             ; transition_seq = new_seq
-            ; last_context_actions
             ; pending_turn_measurement
             }
         with
@@ -1018,7 +1008,6 @@ let rec dispatch_event_with_audit_internal
             { entry with
               conditions = tr.updated_conditions
             ; transition_seq = new_seq
-            ; last_context_actions
             ; pending_turn_measurement
             }
         with

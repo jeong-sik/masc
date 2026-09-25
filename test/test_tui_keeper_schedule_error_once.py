@@ -52,6 +52,11 @@ def run(executable: str) -> None:
                 raise AssertionError(f"Automation lost the {kind} cause: {frame!r}")
             if frame.count(failure) != 1:
                 raise AssertionError(f"Automation repeated the verdict: {frame!r}")
+            # The source is named once in the whole frame, not only once
+            # in front of "load failed:": a cause that still carries its
+            # own "keeper schedule" prefix names the source twice.
+            if frame.count(b"keeper schedule") != 1:
+                raise AssertionError(f"Automation named the source twice: {frame!r}")
             if b"schedules unavailable: keeper schedule load failed:" in frame:
                 raise AssertionError(f"Automation repeated the status: {frame!r}")
             h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")

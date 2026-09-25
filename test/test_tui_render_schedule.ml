@@ -2335,6 +2335,28 @@ let test_an_absent_date_does_not_move_the_age () =
     (Masc_tui_message_layout.display_width with_both)
     (Masc_tui_message_layout.display_width without_date)
 
+(* A list pane's index: what the row is about, then what parts it from its
+   neighbours. The Approvals index drew the tool alone, and a queue holds one
+   row per held call, so calls from different Keepers can share a tool name.
+
+   The parting reading goes last because the pane folds from the middle and
+   keeps the tail: with the asker in front, such rows would share
+   their opening and fold alike again. *)
+let test_rows_alike_but_for_the_asker_are_parted_by_it () =
+  let room =
+    Masc_tui_frame.inner_width ~cols:Masc_tui_roster_pane.pane_cols
+  in
+  let fold label = Masc_tui_message_layout.fit_middle room label in
+  let first =
+    Schedule.sidebar_row_label ~about:"tool_execute" ~apart:(Some "tui-developer")
+  and second =
+    Schedule.sidebar_row_label ~about:"tool_execute" ~apart:(Some "ocaml-agent-ic")
+  in
+  check bool "the two rows part" true (fold first <> fold second);
+  check string "and the tool still leads" "tool_execute  tui-developer" first;
+  check string "an unnamed asker leaves the label as it was" "tool_execute"
+    (Schedule.sidebar_row_label ~about:"tool_execute" ~apart:None)
+
 (* A post with no time has no age. Read as the epoch, it drew twenty thousand
    days folded into the column as "2…d09h". *)
 let test_a_board_post_without_a_time_has_no_age () =
@@ -2522,6 +2544,8 @@ let () =
             test_capped_page_cannot_report_an_empty_store
         ; test_case "wake readings stay four separate answers" `Quick
             test_wake_readings_stay_four_separate_answers
+        ; test_case "rows alike but for the asker are parted by it" `Quick
+            test_rows_alike_but_for_the_asker_are_parted_by_it
         ; test_case "a board post without a time has no age" `Quick
             test_a_board_post_without_a_time_has_no_age
         ; test_case "a held schedule says what it waits for" `Quick

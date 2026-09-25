@@ -404,7 +404,17 @@ let for_surface = function
       (* The shared tail was missing here while the renderer's own footer
          string carried it, so the sheet and the footer disagreed about
          whether r/q worked on this screen. *)
-      [ b Navigate "j/k" "scroll"; b Act "Left / Esc" "back" ] @ listing_meta
+      (* The page and edge keys have arms of this screen's own (masc_tui.ml:
+         [home] and [end] set [log_scroll], and the page dispatcher walks the
+         tail window), and the table named none of them. Rows are drawn newest
+         first, so these two are not the top and bottom of a list: Home is
+         now and End is the oldest row the tail window holds. *)
+      [ b Navigate "j/k" "scroll"
+      ; b Navigate "PgUp/PgDn" "page"
+      ; b Navigate "Home/End" "now / oldest"
+      ; b Act "Left / Esc" "back"
+      ]
+      @ listing_meta
   | Keepers Keeper_calls ->
       [ b Navigate "j/k" "scroll"
       ; b Navigate "Home/End" "top/bottom"

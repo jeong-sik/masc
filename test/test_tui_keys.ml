@@ -93,6 +93,27 @@ let test_every_surface_answers () =
         (Masc_tui_keys.for_surface surface <> []))
     every_surface
 
+(* Keeper logs reads a tail window and has arms of its own for the keys that
+   move it: [home] and [end] set [log_scroll] and the page dispatcher walks
+   the window. The table named only [j/k], so three keys that answer on this
+   screen were on no footer and in no sheet section. The labels say what the
+   keys do here rather than what they do on a row list: rows are newest
+   first, so Home is now and End the oldest row held. *)
+let test_keeper_logs_names_the_keys_that_move_its_reading () =
+  let hints = Masc_tui_keys.footer_hints (Keepers Keeper_logs) in
+  List.iter
+    (fun needle ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the Keeper logs footer names %S" needle)
+        true
+        (let n = String.length needle and h = String.length hints in
+         let rec scan i =
+           i + n <= h
+           && (String.equal (String.sub hints i n) needle || scan (i + 1))
+         in
+         scan 0))
+    [ "j/k:scroll"; "PgUp/PgDn:page"; "Home/End:now / oldest"; "Left / Esc:back" ]
+
 let test_no_surface_repeats_a_key () =
   List.iter
     (fun surface ->
@@ -2969,6 +2990,8 @@ let () =
             `Quick test_every_enter_atom_exception_names_a_sheet_surface
         ; Alcotest.test_case "every surface answers" `Quick
             test_every_surface_answers
+        ; Alcotest.test_case "Keeper logs names the keys that move it" `Quick
+            test_keeper_logs_names_the_keys_that_move_its_reading
         ; Alcotest.test_case "no surface repeats a key" `Quick
             test_no_surface_repeats_a_key
         ; Alcotest.test_case "one spelling per key" `Quick

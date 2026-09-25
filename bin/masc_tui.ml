@@ -18368,7 +18368,8 @@ and is loaded on demand through keeper_skill.
        | Some ("f6" | "f7" | "f8"), Masc_tui_machine_live.Msx -> invalidate_msx_poll ()
        | Some name, Masc_tui_machine_live.Msx when Option.is_some (msx_server_key name) ->
            invalidate_msx_poll ()
-       | Some _, (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos)
+       | Some _, Masc_tui_machine_live.Dos -> invalidate_msx_poll ()  (* RED CONTROL: disown on every DOS key *)
+       | Some _, Masc_tui_machine_live.Msx
        | None, (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos) -> ());
       (match msx_key with
       | None -> ()

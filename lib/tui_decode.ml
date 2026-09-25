@@ -6351,6 +6351,91 @@ let decode_harness_overview json =
       Some { hov_evaluator_status = status }
   | _ -> None
 
+
+let merge_keeper_memory_facts ~now loads =
+  let tagged keeper_name ~sep text =
+    if String.starts_with ~prefix:(keeper_name ^ sep) text then text
+    else keeper_name ^ sep ^ text
+  in
+  let step (ord, src, invals, event_errors, unread) (keeper_name, load) =
+    match load with
+    | Error detail -> ord, src, invals, event_errors, (keeper_name, detail) :: unread
+    | Ok snap ->
+      let event_errors =
+        match snap.mfs_events_read_error with
+        | None -> event_errors
+        | Some detail -> Printf.sprintf "%s: %s" keeper_name detail :: event_errors
+      in
+      let ord, unread =
+        match snap.mfs_ordinary with
+        | Memory_store_present store ->
+          ( List.rev_append
+              (List.map
+                 (fun (f : memory_fact) ->
+                   { f with mf_origin = tagged keeper_name ~sep:" \xc2\xb7 " f.mf_origin })
+                 store.mos_facts)
+              ord
+          , unread )
+        | Memory_store_read_error detail ->
+          ord, (keeper_name, "ordinary store: " ^ detail) :: unread
+        | Memory_store_absent -> ord, unread
+      in
+      let src, invals, unread =
+        match snap.mfs_source with
+        | Memory_store_present store ->
+          ( List.rev_append
+              (List.map
+                 (fun (f : memory_source_fact) ->
+                   { f with msf_path = tagged keeper_name ~sep:":" f.msf_path })
+                 store.mss_facts)
+              src
+          , List.rev_append
+              (List.map
+                 (fun (inv : memory_invalidation) ->
+                   { inv with mi_source_path = tagged keeper_name ~sep:":" inv.mi_source_path })
+                 store.mss_invalidations)
+              invals
+          , unread )
+        | Memory_store_read_error detail ->
+          src, invals, (keeper_name, "source-bound store: " ^ detail) :: unread
+        | Memory_store_absent -> src, invals, unread
+      in
+      ord, src, invals, event_errors, unread
+  in
+  let ord, src, invals, event_errors, unread =
+    List.fold_left step ([], [], [], [], []) loads
+  in
+  let snapshot =
+    { mfs_keeper = "*"
+    ; mfs_ordinary =
+        Memory_store_present
+          { mos_revision = 1; mos_updated_at = now; mos_facts = List.rev ord }
+    ; mfs_source =
+        Memory_store_present
+          { mss_revision = 1
+          ; mss_updated_at = now
+          ; mss_facts = List.rev src
+          ; mss_invalidations = List.rev invals
+          }
+    ; mfs_events_read_error =
+        (match List.rev event_errors with
+         | [] -> None
+         | errors -> Some (String.concat "; " errors))
+    }
+  in
+  let unread_summary =
+    match List.rev unread with
+    | [] -> None
+    | failures ->
+      Some
+        (Printf.sprintf "%d of %d keepers not read: %s"
+           (List.length (List.sort_uniq String.compare (List.map fst failures)))
+           (List.length loads)
+           (String.concat "; "
+              (List.map (fun (keeper_name, detail) -> keeper_name ^ ": " ^ detail) failures)))
+  in
+  snapshot, unread_summary
+
 let decode_harness_snapshot json =
   let* verdicts_json = required_list_field json "recent_verdicts" in
   let* hs_verdicts =

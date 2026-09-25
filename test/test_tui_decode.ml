@@ -5530,6 +5530,78 @@ let test_decode_memory_fact_refuses_an_unknown_category () =
       | Ok _ | Error _ -> Alcotest.failf "%s did not decode" word)
     Masc.Keeper_memory_os_types.all_categories
 
+(* The "all keepers" Memory view merges per-keeper listings. A keeper that
+   could not be read is named beside the facts that were read; a keeper with
+   no memory yet is not a failure. *)
+let merge_fixture_fact claim : Tui_decode.memory_fact =
+  { Tui_decode.mf_claim = claim
+  ; mf_category = Masc.Keeper_memory_os_types.Fact
+  ; mf_origin = "authored"
+  ; mf_first_seen = 1.
+  ; mf_last_seen = 1.
+  ; mf_memory_id = "mem-" ^ claim
+  ; mf_events = Tui_decode.no_memory_fact_events
+  }
+
+let merge_fixture_snapshot ?(ordinary = Tui_decode.Memory_store_absent) keeper =
+  { Tui_decode.mfs_keeper = keeper
+  ; mfs_ordinary = ordinary
+  ; mfs_source = Tui_decode.Memory_store_absent
+  ; mfs_events_read_error = None
+  }
+
+let merged_claims (snapshot : Tui_decode.memory_fact_snapshot) =
+  match snapshot.Tui_decode.mfs_ordinary with
+  | Tui_decode.Memory_store_present store ->
+    List.map (fun (f : Tui_decode.memory_fact) -> f.Tui_decode.mf_origin, f.mf_claim)
+      store.Tui_decode.mos_facts
+  | Tui_decode.Memory_store_absent | Tui_decode.Memory_store_read_error _ ->
+    Alcotest.fail "the merge is always a present store"
+
+let test_merge_keeper_memory_facts_names_unread_keepers () =
+  let present claims =
+    Tui_decode.Memory_store_present
+      { Tui_decode.mos_revision = 3
+      ; mos_updated_at = 1.
+      ; mos_facts = List.map merge_fixture_fact claims
+      }
+  in
+  let snapshot, unread =
+    Tui_decode.merge_keeper_memory_facts ~now:10.
+      [ "alpha", Ok (merge_fixture_snapshot ~ordinary:(present [ "a1" ]) "alpha")
+      ; "beta", Error "connection refused"
+      ; ( "gamma"
+        , Ok
+            { (merge_fixture_snapshot "gamma") with
+              Tui_decode.mfs_ordinary = Tui_decode.Memory_store_read_error "unreadable"
+            ; mfs_source = Tui_decode.Memory_store_read_error "unreadable"
+            } )
+      ; "delta", Ok (merge_fixture_snapshot "delta")
+      ]
+  in
+  Alcotest.(check (list (pair string string)))
+    "facts read stay, tagged with their keeper"
+    [ "alpha \xc2\xb7 authored", "a1" ]
+    (merged_claims snapshot);
+  match unread with
+  | None -> Alcotest.fail "unread keepers were not reported"
+  | Some summary ->
+    Alcotest.(check bool) "each unread keeper counted once, absent is not unread" true
+      (String.starts_with ~prefix:"2 of 4 keepers not read: " summary);
+    List.iter
+      (fun needle ->
+        Alcotest.(check bool) ("names " ^ needle) true
+          (String_util.contains_substring summary needle))
+      [ "beta: connection refused"; "gamma: ordinary store: unreadable";
+        "gamma: source-bound store: unreadable" ]
+
+let test_merge_keeper_memory_facts_all_read () =
+  let _, unread =
+    Tui_decode.merge_keeper_memory_facts ~now:10.
+      [ "alpha", Ok (merge_fixture_snapshot "alpha") ]
+  in
+  Alcotest.(check (option string)) "nothing unread" None unread
+
 let test_decode_memory_facts_keeps_both_stores () =
   let ordinary =
     `Assoc
@@ -11989,6 +12061,10 @@ let () =
           test_every_lane_draws_its_own_answer;
         Alcotest.test_case "standalone lanes refuse an unknown lane id" `Quick
           test_decode_standalone_lanes_refuses_an_unknown_lane_id;
+        Alcotest.test_case "merge names unread keepers" `Quick
+          test_merge_keeper_memory_facts_names_unread_keepers;
+        Alcotest.test_case "merge with every keeper read" `Quick
+          test_merge_keeper_memory_facts_all_read;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
         Alcotest.test_case "memory fact refuses an unknown category" `Quick

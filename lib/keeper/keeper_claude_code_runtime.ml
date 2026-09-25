@@ -529,8 +529,13 @@ let request_context_of_request_input (input : Runtime_claude_code.request_input)
   =
   { input_tokens =
       input.input_tokens + input.cache_creation_input_tokens + input.cache_read_input_tokens
-  ; cache_creation_input_tokens = input.cache_creation_input_tokens
-  ; cache_read_input_tokens = input.cache_read_input_tokens
+  ; cache =
+      Some
+        { Runtime_observation.cache_creation_input_tokens =
+            input.cache_creation_input_tokens
+        ; cache_read_input_tokens = input.cache_read_input_tokens
+        }
+  ; output_tokens = None (* an assistant frame's output is a streaming snapshot *)
   }
 ;;
 

@@ -1053,6 +1053,50 @@ let fusion_row ~state_style columns values =
 let fusion_sidebar_label ~status ~time ~keeper ~run_id =
   Printf.sprintf "[%s] %s @%s %s" status time keeper run_id
 
+(* Task Review and Verdicts drew a row's task id and nothing else, and both
+   lists hold a task once per submission. Measured on the live history
+   2026-09-24: 200 Task Review rows carry 113 distinct ids, 45 of them more
+   than once, and seven rows are task-1663 -- one submitter, no stated
+   intent. The Verdicts list is shorter and collides too: of eight rows one
+   task carries two verdicts, at the same gate, parted only by what each one
+   said.
+
+   [apart] is what parts this row from its siblings. It has to hold still
+   while the reader looks at it, which an age does not: [age_text] spells
+   seconds under an hour, so an index row read "5m03s" and was a different
+   row a second later. And it has to be its own value rather than a reading
+   of one, because two rows minutes apart round to the same age.
+
+   A row with nothing to part it keeps the id alone rather than inventing a
+   mark for it. *)
+let task_history_sidebar_label ~task_id ~apart =
+  match apart with None -> task_id | Some apart -> task_id ^ "  " ^ apart
+
+let verdict_sidebar_labels rows =
+  List.mapi
+    (fun index (task_id, clock) ->
+      let same (other_id, other_clock) =
+        String.equal task_id other_id && String.equal clock other_clock
+      in
+      let siblings = List.length (List.filter same rows) in
+      let apart =
+        if siblings = 1 then clock
+        else
+          let earlier =
+            List.filteri (fun other_index row -> other_index < index && same row) rows
+            |> List.length
+          in
+          (* A second-resolution clock can name several verdicts. Keep the
+             date and minute, then number those rows within this snapshot. *)
+          let minute =
+            if String.length clock > 3 then String.sub clock 0 (String.length clock - 3)
+            else clock
+          in
+          Printf.sprintf "%s#%d" minute (earlier + 1)
+      in
+      task_history_sidebar_label ~task_id ~apart:(Some apart))
+    rows
+
 let fusion_pipeline_diagram
     ?(glyph_done = "●")
     ?(glyph_active = "◐")

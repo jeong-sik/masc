@@ -5521,11 +5521,18 @@
  ; and a byte offset would report the header and its own cell as misaligned.
  ; masc_tui_table so the gap between columns is asked of the contract that
  ; sets it, not spelled again here.
+ ; masc_tui_frame and masc_tui_roster_pane so the list pane's label room is
+ ; asked of the two contracts that set it rather than counted here.
+ ; masc_tui_render_prim for the caret lead that room is narrower by, and for
+ ; the minute clock a Verdicts row is parted from its siblings with.
  (libraries
   alcotest
+  masc_tui_frame
   masc_tui_layout
   masc_tui_message_layout
+  masc_tui_render_prim
   masc_tui_render_schedule
+  masc_tui_roster_pane
   masc_tui_table))
 
 (test

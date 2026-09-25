@@ -9157,7 +9157,15 @@ let render_verification_detail (state : state) request =
         match state.verification with
         | None -> []
         | Some snapshot ->
-          List.map (fun (row : Tui_decode.verification_request) -> row.Tui_decode.vr_task_id)
+          List.map
+            (fun (row : Tui_decode.verification_request) ->
+              (* The request id is one per row and never moves. The age it
+                 replaced rounded two requests six minutes apart to the same
+                 "1d12h", and spelled seconds under an hour, so an index row
+                 changed while the reader was looking at it. *)
+              Render_schedule.task_history_sidebar_label
+                ~task_id:row.Tui_decode.vr_task_id
+                ~apart:(Some row.Tui_decode.vr_request_id))
             snapshot.Tui_decode.vs_requests
       in
       let left_buf = Buffer.create 1024 in
@@ -9637,8 +9645,13 @@ let render_harness_detail (state : state) verdict =
         match state.harness with
         | None -> []
         | Some snapshot ->
-          List.map (fun (row : Tui_decode.harness_verdict) -> row.Tui_decode.hv_task_id)
-            snapshot.Tui_decode.hs_verdicts
+          (* A verdict has no id of its own on the wire. The notes hash is
+             shared by repeat verdicts on one submission, and a clock alone
+             can name several verdicts recorded in the same second. *)
+          snapshot.Tui_decode.hs_verdicts
+          |> List.map (fun (row : Tui_decode.harness_verdict) ->
+               row.hv_task_id, lane_run_clock row.hv_at)
+          |> Render_schedule.verdict_sidebar_labels
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in

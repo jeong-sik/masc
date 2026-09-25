@@ -2447,6 +2447,7 @@ let fusion_run_clock run =
     tm.Unix.tm_hour tm.Unix.tm_min
 
 
+
 let fusion_run_duration ~now run =
   match run.fur_status, run.fur_finished_at with
   | Fusion_running, _ -> Message_layout.span_text (now -. run.fur_started_at) ^ " running"

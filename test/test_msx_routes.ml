@@ -571,6 +571,134 @@ let test_press_route_names_the_resolved_actor () =
             (List.mem "operator" (ledger_whos ())))))
 ;;
 
+let test_encoded_pixel_snapshot () =
+  let base_path = Filename.temp_dir "msx-encoded-frame-" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Lane.eject () : (unit, Lane.error) result);
+      remove_tree base_path)
+    (fun () ->
+      let ledger_dir = Filename.concat base_path "ledger" in
+      let require = function
+        | Ok value -> value
+        | Error e -> fail (Lane.error_to_string e)
+      in
+      let pixels json =
+        match member "rgb_base64" json with
+        | Some (`String encoded) -> encoded
+        | _ -> fail "missing encoded pixels"
+      in
+      (* Original synthetic firmware jumps into an original 16 KiB cartridge.
+         The guest enables text display and changes R7 between palette colors 2
+         and 3 once per VBlank. Thus advancing one frame changes actual pixels,
+         rather than merely allocating another all-black buffer. *)
+      let roms_dir = Filename.concat base_path "pixel-bios" in
+      Sys.mkdir roms_dir 0o755;
+      let write_code bytes offset code =
+        List.iteri (fun i n -> Bytes.set bytes (offset + i) (Char.chr n)) code
+      in
+      let bios = Bytes.make 32768 '\000' in
+      write_code bios 0 [ 0xc3; 0x10; 0x40 ]; (* JP 4010; cartridge page is slot 2 *)
+      Out_channel.with_open_bin
+        (Filename.concat roms_dir "cbios_main_msx2.rom")
+        (fun oc -> output_bytes oc bios);
+      List.iter
+        (fun name ->
+          Out_channel.with_open_bin
+            (Filename.concat roms_dir name)
+            (fun oc -> output_bytes oc (Bytes.make 16384 '\000')))
+        [ "cbios_logo_msx2.rom"; "cbios_sub.rom" ];
+      let cart = Bytes.make 16384 '\000' in
+      write_code cart 0 [ 0x41; 0x42; 0x10; 0x40 ];
+      write_code
+        cart
+        0x10
+        [ 0xf3; 0x06; 0x02 (* DI; LD B,2 *)
+        ; 0x3e; 0x50; 0xd3; 0x99 (* text mode, display enabled *)
+        ; 0x3e; 0x81; 0xd3; 0x99 (* write VDP register 1 *)
+        ; 0xdb; 0x99; 0xe6; 0x80; 0x28; 0xfa (* 401B: wait for VBlank *)
+        ; 0x78; 0xee; 0x01; 0x47 (* toggle color 2 / 3 *)
+        ; 0xd3; 0x99; 0x3e; 0x87; 0xd3; 0x99 (* write VDP register 7 *)
+        ; 0xc3; 0x1b; 0x40
+        ];
+      let cart_path = Filename.concat base_path "pixel-toggle.rom" in
+      Out_channel.with_open_bin cart_path (fun oc -> output_bytes oc cart);
+      ignore
+        (require
+           (Msx_lane.load
+              ~ledger_dir
+              ~roms_dir:(Some roms_dir)
+              ~cart_path:(Some cart_path)
+              ~disk_path:None));
+      let save_path = Filename.concat base_path "before.json" in
+      ignore (require (Lane.save ~path:save_path));
+      let first_number = current_frame_number () in
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          let pool =
+            Eio.Executor_pool.create
+              ~sw
+              ~domain_count:1
+              (Eio.Stdenv.domain_mgr env)
+          in
+          Executor_pool_ref.For_testing.with_pool pool (fun () ->
+            let status, first_tick =
+              Route.tick_response
+                ~body:{|{"frames":2,"pixel_response":"retained"}|}
+            in
+            check bool "real guest tick succeeds" true (status = `OK);
+            assert_pixels_kind "inline" first_tick;
+            let _, same_pixels =
+              Route.tick_response ~body:(retained_request ~frames:2 first_tick)
+            in
+            assert_pixels_kind "retained" same_pixels;
+            let _, changed_pixels =
+              Route.tick_response ~body:(retained_request same_pixels)
+            in
+            assert_pixels_kind "inline" changed_pixels;
+            let pixel_fields = pixels_object changed_pixels in
+            let rgb =
+              match List.assoc "rgb_base64" pixel_fields with
+              | `String encoded -> Base64.decode_exn encoded
+              | _ -> fail "missing inline bytes"
+            in
+            (match Lane.frame () with
+             | Some actual ->
+               check string "changed tick pixels match guest" actual.rgb rgb
+             | None -> fail "guest disappeared");
+            check
+              bool
+              "changed pixels have exact SHA256"
+              true
+              (List.assoc "revision" pixel_fields
+              = `String Digestif.SHA256.(to_hex (digest_string rgb)));
+            let status, full_tick = Route.tick_response ~body:"{}" in
+            check bool "full frame tick succeeds" true (status = `OK);
+            (match Lane.frame () with
+             | Some frame ->
+               check
+                 string
+                 "encoding agrees with current RGB"
+                 frame.rgb
+                 (Base64.decode_exn (pixels full_tick))
+             | None -> fail "machine disappeared"))));
+      ignore (require (Lane.restore ~path:save_path ~ledger_dir));
+      ignore (require (Lane.step ~frames:1));
+      check int "clock remains live" (first_number + 1) (current_frame_number ());
+      ignore (require (Lane.restore ~path:save_path ~ledger_dir));
+      check int "restored clock" first_number (current_frame_number ());
+      ignore (require (Lane.eject ()));
+      check bool "eject leaves machine empty" true (Lane.frame () = None);
+      ignore
+        (require
+           (Lane.load
+              ~ledger_dir
+              ~roms_dir:None
+              ~cart_path:None
+              ~disk_path:None));
+      check bool "replacement machine loaded" true (Lane.frame () <> None))
+;;
+
 let () =
   run
     "msx routes"
@@ -748,6 +876,10 @@ let () =
             "accepted ticks advance once on the worker and return pixels"
             `Quick
             test_tick_worker_advances_and_returns_frame
+        ; test_case
+            "synthetic guest tick and pixel snapshots"
+            `Quick
+            test_encoded_pixel_snapshot
         ] )
     ]
 ;;

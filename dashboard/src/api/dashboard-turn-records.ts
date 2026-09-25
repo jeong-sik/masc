@@ -18,6 +18,7 @@ export const TURN_PROMPT_BLOCK_IDS = [
   'temporal_summary',
   'memory_os_recall',
   'operator_note',
+  'skill_compositions',
 ] as const
 
 export type TurnPromptBlockId = (typeof TURN_PROMPT_BLOCK_IDS)[number]
@@ -28,19 +29,25 @@ export function decodeTurnPromptBlockId(raw: unknown): TurnPromptBlockId | null 
     : null
 }
 
+// The input components that carry no payload, as
+// [input_component_id_to_string] (lib/types/turn_record.ml) spells them.
+export const TURN_INPUT_COMPONENT_LITERALS = [
+  'tool_schemas',
+  'message_user',
+  'message_system',
+  'message_assistant_text',
+  'message_thinking',
+  'message_redacted_thinking',
+  'message_tool_use',
+  'message_tool_result',
+  'message_image',
+  'message_document',
+  'message_audio',
+] as const
+
 export type TurnInputComponentId =
   | `prompt.${TurnPromptBlockId}`
-  | 'tool_schemas'
-  | 'message_user'
-  | 'message_system'
-  | 'message_assistant_text'
-  | 'message_thinking'
-  | 'message_redacted_thinking'
-  | 'message_tool_use'
-  | 'message_tool_result'
-  | 'message_image'
-  | 'message_document'
-  | 'message_audio'
+  | (typeof TURN_INPUT_COMPONENT_LITERALS)[number]
 
 export type TurnBlock = {
   block: TurnPromptBlockId
@@ -395,28 +402,20 @@ function decodeTurnBlockList(raw: unknown): TurnBlock[] | null {
     : null
 }
 
-function decodeTurnInputComponentId(raw: unknown): TurnInputComponentId | null {
-  switch (raw) {
-    case 'prompt.keeper_instructions':
-    case 'prompt.dynamic_context':
-    case 'prompt.temporal_summary':
-    case 'prompt.memory_os_recall':
-    case 'prompt.operator_note':
-    case 'tool_schemas':
-    case 'message_user':
-    case 'message_system':
-    case 'message_assistant_text':
-    case 'message_thinking':
-    case 'message_redacted_thinking':
-    case 'message_tool_use':
-    case 'message_tool_result':
-    case 'message_image':
-    case 'message_document':
-    case 'message_audio':
-      return raw
-    default:
-      return null
-  }
+// Mirrors [input_component_id_of_string] (lib/types/turn_record.ml): a prompt
+// component is the block id behind a fixed prefix, so it is parsed through
+// decodeTurnPromptBlockId instead of listed a second time. One rejected
+// component fails the whole turn-records response, so every row of that
+// Keeper disappears, not only the rows that carry the component.
+const TURN_PROMPT_COMPONENT_PREFIX = 'prompt.'
+
+export function decodeTurnInputComponentId(raw: unknown): TurnInputComponentId | null {
+  if (typeof raw !== 'string') return null
+  const literal = TURN_INPUT_COMPONENT_LITERALS.find(component => component === raw)
+  if (literal !== undefined) return literal
+  if (!raw.startsWith(TURN_PROMPT_COMPONENT_PREFIX)) return null
+  const block = decodeTurnPromptBlockId(raw.slice(TURN_PROMPT_COMPONENT_PREFIX.length))
+  return block === null ? null : (`prompt.${block}` as const)
 }
 
 function decodeTurnInputComponents(raw: unknown): TurnInputComponent[] | null {

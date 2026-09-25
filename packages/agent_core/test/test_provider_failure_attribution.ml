@@ -335,8 +335,8 @@ let test_closed_ownership_matrix () =
              ; reason = Llm_provider.Retry.Unknown_invalid_request
              })));
   check_detailed_ownership
-    "response parse is attempt local"
-    Attribution.Attempt_local
+    "response parse is not attempt owned"
+    Attribution.Unclassified
     (Attribution.of_response_parse_error
        ~binding:with_credential
        (Error.Provider (Llm_provider.Error.ParseError { detail = "parse detail" })));

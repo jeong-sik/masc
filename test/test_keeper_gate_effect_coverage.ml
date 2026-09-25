@@ -310,8 +310,10 @@ let test_the_rest_of_the_lane_stays_behind_it () =
   | Error detail -> fail ("a declared slot was refused: " ^ detail)
 
 let test_a_slot_the_lane_does_not_offer_is_refused () =
-  (* Quietly falling back would leave an operator believing this Keeper is
-     judged by a model it has never been judged by. *)
+  (* Refused when the operator sets it: accepting it would leave them believing
+     this Keeper is judged by a model it has never been judged by. A slot that
+     leaves the lane later is a different case; [apply] then walks the
+     declared order and logs the stale preference. *)
   match preferred_order "some.model" with
   | Ok _ -> fail "accepted a slot the lane never declared"
   | Error detail ->

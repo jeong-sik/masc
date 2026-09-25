@@ -936,7 +936,10 @@
  (name masc_tui_render_schedule)
  (wrapped false)
  (modules masc_tui_render_schedule)
- (libraries masc_tui_message_layout masc_tui_table masc_tui_theme))
+ ; masc_tui_scroll so the keeper detail's clamp is the shared one rather than
+ ; a second copy of the same arithmetic.
+ (libraries masc_tui_message_layout masc_tui_scroll masc_tui_table
+  masc_tui_theme))
 
 (library
  (name masc_tui_frame_timing)
@@ -1203,7 +1206,7 @@
  (name masc_tui_keeper_config)
  (wrapped false)
  (modules masc_tui_keeper_config)
- (libraries yojson masc_tui_theme masc.string_util))
+ (libraries yojson masc masc_tui_theme masc.string_util))
 
 (library
  (name masc_tui_keeper_sandbox)
@@ -1250,6 +1253,9 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries digestif mtime.clock.os masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+  ;; [threshold_cols] is the width two panes need: the Board read layout is
+  ;; decided here so the footer and the frame cannot disagree about it.
+  masc_tui_roster_pane
   masc_tui_overview_tasks
   masc_tui_machine_live
   masc_tui_connector_unbind
@@ -1611,6 +1617,21 @@
  (wrapped false)
  (modules masc_tui_repository_pulls)
  (libraries unix masc masc_tui_types masc_tui_ansi yojson))
+;; The Overview's spend reading (GET /api/v1/dashboard/keeper-costs),
+;; decoder and Team row tags. A library so a test can decode the server's
+;; own encoder output.
+(library
+ (name masc_tui_keeper_spend)
+ (wrapped false)
+ (modules masc_tui_keeper_spend)
+ (libraries
+  masc
+  masc.dashboard_utils
+  masc_tui_types
+  masc_tui_ansi
+  masc_tui_message_layout
+  yojson))
+
 
 (executable
  (name masc_tui)
@@ -1624,6 +1645,7 @@
  (libraries
   masc_tui_pick_list
   masc_tui_repository_pulls
+  masc_tui_keeper_spend
   digestif
   masc.string_util
   masc.keeper_runtime

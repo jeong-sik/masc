@@ -296,22 +296,6 @@ let rec runtime_trace_public_json = function
 let first_string_opt values =
   List.find_map (fun value -> value) values
 
-let string_has_prefix = Server_dashboard_http_json_utils.string_has_prefix
-
-let claim_status_of_output output =
-  let result =
-    match Json_util.get_string output "result" with
-    | Some value -> String.trim value
-    | None -> ""
-  in
-  match Json_util.assoc_member_opt "claimed_task" output with
-  | Some _ -> "claimed"
-  | None when string_has_prefix ~prefix:"No eligible tasks" result -> "no_eligible"
-  | None when string_has_prefix ~prefix:"No unclaimed tasks" result -> "no_unclaimed"
-  | None when string_has_prefix ~prefix:"Error:" result -> "error"
-  | None when result = "" -> "unknown"
-  | None -> "observed"
-
 let runtime_manifest_public_json row =
   Keeper_runtime_manifest.public_to_json row
 

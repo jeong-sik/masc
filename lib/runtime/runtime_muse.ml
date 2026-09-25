@@ -438,7 +438,7 @@ let terminate_spawned_process ~clock proc =
          (* See above: the turn already ended; this await only reaps the kill. *)
          Eio.Process.await proc |> ignore
        with
-       | EioCancel.Cancelled _ as exn -> raise exn
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
          Log.Runtime_agent.debug "Muse forced reap failed: %s" (Printexc.to_string exn))
     | Eio.Cancel.Cancelled _ as exn -> raise exn

@@ -253,6 +253,7 @@ let read_scope ~codex ~muse ~fetch { scope; how } =
   | Muse exec ->
     (* No prompt is ever sent on this connection, so the exception text
        cannot quote one; the Codex arm's reasoning applies unchanged. *)
+    let scope_label = Runtime_quota_window.scope_to_string scope in
     (match muse ~scope exec with
      | Ok () -> ()
      | Error detail ->

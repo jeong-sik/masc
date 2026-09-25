@@ -60,6 +60,9 @@ let broadcast_resolved_turn_complete
       ; key_tool_calls_made, `Int tool_calls_made
       ; ( key_cache_read_tokens
         , usage_field (fun usage -> usage.Keeper_usage_resolution.cache_read_input_tokens) )
+      ; ( key_cache_creation_tokens
+        , usage_field (fun usage ->
+            usage.Keeper_usage_resolution.cache_creation_input_tokens) )
       ; key_cache_n, `Null
       ; key_prompt_n, `Null
       ; key_total_turns, `Int total_turns

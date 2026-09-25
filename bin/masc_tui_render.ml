@@ -7351,9 +7351,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
            ^ Ansi.reset);
     add_row "Lane first:"
       (match
-         List.filter_map
-           (fun (keeper, lane_slot) ->
-             if String.equal keeper k.k_name then Some lane_slot else None)
+         List.filter
+           (fun (first : Tui_decode.keeper_exact_lane_first) ->
+             String.equal first.Tui_decode.kel_keeper k.k_name)
            state.keeper_exact_lane_firsts
        with
        | [] -> Ansi.dim ^ "lane order" ^ Ansi.reset
@@ -7362,9 +7362,17 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
            ^ Terminal_text.single_line
                (String.concat ", "
                   (List.map
-                     (fun (lane_id, slot_id) -> lane_id ^ " \xe2\x86\x92 " ^ slot_id)
+                     (fun (first : Tui_decode.keeper_exact_lane_first) ->
+                       first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
+                       ^ first.kel_slot_id)
                      firsts))
            ^ Ansi.reset);
+    (match state.keeper_gate_settings_unread with
+     | None -> ()
+     | Some reason ->
+         add_row "Gate settings:"
+           (Theme.bad () ^ "unread \xc2\xb7 "
+            ^ Terminal_text.single_line reason ^ Ansi.reset));
     add_empty ();
 
     (* Current work section *)

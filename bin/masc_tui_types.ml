@@ -5802,9 +5802,11 @@ type state = {
   mutable runtime_params_cursor: int;
   mutable runtime_param_edit: runtime_param_edit option;
   mutable runtime_params_notice: (bool * string) option;
-  mutable keeper_exact_lane_firsts: (string * (string * string)) list;
-      (** (keeper, (lane_id, slot_id)): the slot a Keeper reaches first in one
-          exact-output lane. *)
+  mutable keeper_exact_lane_firsts: Tui_decode.keeper_exact_lane_first list;
+  mutable keeper_gate_settings_unread: string option;
+      (** [Some reason] until the per-Keeper Gate settings are read, and after
+          a read fails. The last known settings stay on screen beside it, so a
+          pane never passes the defaults off as a reading. *)
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
   (* One per background listing that replaces a whole set: the held-call
      queue and the tool-mode (YOLO) stances. [approval_flow] says whether a
@@ -7914,6 +7916,7 @@ let create_state
   runtime_params_notice = None;
   keeper_gate_modes = [];
   keeper_exact_lane_firsts = [];
+  keeper_gate_settings_unread = Some "not read yet";
   approval_flow = Masc_tui_operator_projection.Flow.initial;
   approvals_order = Masc_tui_operator_projection.Listing_order.initial;
   tool_modes_order = Masc_tui_operator_projection.Listing_order.initial;

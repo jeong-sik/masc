@@ -2150,7 +2150,7 @@ type async_msg =
   (* Its own message rather than a field on the stance one: the two come from
      different endpoints and one failing must not blank the other. *)
   | Keeper_gate_settings_loaded of
-      (((string * string) list * (string * (string * string)) list), string) result
+      (((string * string) list * Masc.Tui_decode.keeper_exact_lane_first list), string) result
   | Keeper_tool_modes_loaded of
       ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result
       * Approval.Listing_order.ticket
@@ -15046,12 +15046,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match result with
        | Ok (modes, exact_lanes) ->
            state.keeper_gate_modes <- modes;
-           state.keeper_exact_lane_firsts <- exact_lanes
-       | Error _ ->
+           state.keeper_exact_lane_firsts <- exact_lanes;
+           state.keeper_gate_settings_unread <- None
+       | Error detail ->
            (* Keep the last known settings rather than showing every Keeper as
               following the workspace, which is the looser reading and the one
-              an operator would act on. *)
-           ())
+              an operator would act on. The pane says the read failed: before
+              the first successful read, the "last known" values are the
+              defaults. *)
+           state.keeper_gate_settings_unread <- Some detail)
   | Keeper_tool_modes_loaded (result, ticket) ->
       (* Dropped when a press has opened since the fetch went out -- it
          describes the stance from before that press, including a press that

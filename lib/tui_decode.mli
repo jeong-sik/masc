@@ -2033,10 +2033,17 @@ type keeper_tool_approval = {
   kta_timeout_sec : float;
 }
 
+(** The slot one Keeper reaches first in one exact-output lane. *)
+type keeper_exact_lane_first = {
+  kel_keeper : string;
+  kel_lane_id : string;
+  kel_slot_id : string;
+}
+
 val decode_keeper_gate_settings :
   Yojson.Safe.t ->
-  ((string * string) list * (string * (string * string)) list, string) result
-(** [(keeper, mode) list, (keeper, (lane_id, slot_id)) list] from
+  ((string * string) list * keeper_exact_lane_first list, string) result
+(** [(keeper, mode) list, exact-lane firsts] from
     [/api/v1/dashboard/gate/keeper-settings] ([modes] and [exact_lanes]). A
     list whose [*_state] says [unavailable] is an [Error], never an empty
     list.

@@ -8601,6 +8601,12 @@ let decode_gate_snapshot json =
    effect under, and it survives a restart. Both lists carry only Keepers
    somebody singled out, so an empty one means everybody follows the
    workspace. *)
+type keeper_exact_lane_first = {
+  kel_keeper : string;
+  kel_lane_id : string;
+  kel_slot_id : string;
+}
+
 let decode_keeper_gate_settings json =
   (* An unreadable store answers with an empty list beside
      [state = "unavailable"]. Read as a list alone, that is "nobody singled
@@ -8638,10 +8644,10 @@ let decode_keeper_gate_settings json =
   in
   let* exact_lanes =
     rows "exact_lanes" (fun item ->
-      let* keeper = required_string_field item "keeper_name" in
-      let* lane_id = required_string_field item "lane_id" in
-      let* slot_id = required_string_field item "slot_id" in
-      Ok (keeper, (lane_id, slot_id)))
+      let* kel_keeper = required_string_field item "keeper_name" in
+      let* kel_lane_id = required_string_field item "lane_id" in
+      let* kel_slot_id = required_string_field item "slot_id" in
+      Ok { kel_keeper; kel_lane_id; kel_slot_id })
   in
   Ok (modes, exact_lanes)
 

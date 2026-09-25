@@ -10762,7 +10762,11 @@ let test_decode_keeper_gate_settings_reads_both_lists () =
     Alcotest.(check (list (pair string string)))
       "modes" [ ("echo", "manual") ] modes;
     Alcotest.(check (list (pair string (pair string string))))
-      "exact lanes" [ ("echo", ("hitl_auto_judge", "glm-coding.glm-5-turbo")) ] exact_lanes
+      "exact lanes" [ ("echo", ("hitl_auto_judge", "glm-coding.glm-5-turbo")) ]
+      (List.map
+         (fun (first : Tui_decode.keeper_exact_lane_first) ->
+           first.Tui_decode.kel_keeper, (first.kel_lane_id, first.kel_slot_id))
+         exact_lanes)
 
 (* An unreadable store answers an empty list beside state=unavailable. Read
    as the list alone, that is "nobody singled out". *)

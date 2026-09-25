@@ -698,9 +698,20 @@ let render_overview (state : state) =
               (overview_pulse_text state ~now:(Unix.gettimeofday ()))
           else ""
         in
+        (* A Keeper directory that did not list leaves no brief and no unread
+           row, so its count is 0 by absence, not by reading; the cell names
+           the failure instead of that 0 (#38120). *)
+        let keepers_cell =
+          match o.ov_keeper_listing with
+          | Masc.Keeper_snapshot_unread.Unreadable detail ->
+              Printf.sprintf "%sunlisted%s (%s)" Ansi.yellow Ansi.reset detail
+          | Masc.Keeper_snapshot_unread.Listed
+          | Masc.Keeper_snapshot_unread.Not_listed ->
+              Printf.sprintf "%d%s" o.ov_keepers keeper_note
+        in
         Printf.sprintf
-          "  Health: %s%s%s  Keepers: %d%s  MCP agents: %d  Approvals: %s%s"
-          health_color health_label Ansi.reset o.ov_keepers keeper_note
+          "  Health: %s%s%s  Keepers: %s  MCP agents: %d  Approvals: %s%s"
+          health_color health_label Ansi.reset keepers_cell
           o.ov_mcp_agents approval_count pulse_suffix
   in
   box_line buf cols summary_line;

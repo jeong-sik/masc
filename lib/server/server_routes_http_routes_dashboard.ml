@@ -2811,14 +2811,7 @@ let add_routes ~sw ~clock router =
            match Keeper_exact_lane_preference.all ~base_path with
            | Ok rows ->
              ( `List
-                 (List.map
-                    (fun (row : Keeper_exact_lane_preference.t) ->
-                      `Assoc
-                        [ "keeper_name", `String row.keeper_name
-                        ; "lane_id", `String row.lane_id
-                        ; "slot_id", `String row.slot_id
-                        ])
-                    rows)
+                 (List.map Keeper_exact_lane_preference.to_projection_json rows)
              , `Assoc [ "state", `String "ready" ] )
            | Error detail ->
              ( `List []

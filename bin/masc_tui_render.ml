@@ -1255,6 +1255,8 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
       (* The highlight names the task this detail shows, not the cursor: a
          todo task opened from the palette or a link has no row here, and
          the row the cursor last rested on would be a different task. *)
+      (* The id follows each title because the shared sidebar fold keeps the
+         tail, so titles with the same opening and ending still differ. *)
       write_list_sidebar_selection left_buf ~rows ~cols:left_cols
         ~title:"Tasks" ~focused:false
         (* [Overview_tasks.rows] drops what is done, cancelled or still todo.
@@ -1264,8 +1266,8 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
         ~labels:
           (List.map
              (fun (row : Tui_decode.task) ->
-               Render_schedule.task_list_sidebar_label ~title:row.title
-                 ~task_id:row.id)
+               Render_schedule.sidebar_row_label ~about:row.title
+                 ~apart:(Some row.id))
              (Overview_tasks.rows state.tasks))
         ~selection:(Overview_tasks.row_of state.tasks ~task_id:task.id);
       let answer =
@@ -1419,11 +1421,23 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
 
 (* The queue stays beside the ask. Reading one used to hide the rest, and the
    rest is what tells an operator whether this one is the urgent one. *)
+(* Who asked, beside what they asked for. The label was the tool alone, and a
+   queue holds one row per held call. Many calls can name the same tool while
+   different Keepers wait. The full-width list row beside this pane already
+   draws the asker; only the index dropped it.
+
+   The asker goes after the tool because the pane folds a label from the
+   middle and keeps its tail (Render_schedule.sidebar_row_label). *)
 let approval_sidebar_label (row : approval_row) =
-  match row with
-  | Keeper_tool_row held -> held.Tui_decode.kta_tool
-  | Gate_row pending -> pending.Tui_decode.gp_display_tool
-  | Operator_row item -> item.ap_action_type
+  let about, apart =
+    match row with
+    | Keeper_tool_row held ->
+      held.Tui_decode.kta_tool, held.Tui_decode.kta_keeper
+    | Gate_row pending ->
+      pending.Tui_decode.gp_display_tool, pending.Tui_decode.gp_keeper
+    | Operator_row item -> item.ap_action_type, item.ap_actor
+  in
+  Render_schedule.sidebar_row_label ~about ~apart:(Some apart)
 
 let render_approval_detail (state : state) (row : approval_row) =
   let terminal_rows, cols = get_terminal_size () in

@@ -1603,6 +1603,15 @@ describe('ApprovalsSurface', () => {
           slot_id: 'glm-coding.glm-5-turbo',
           updated_by: 'vincent',
           updated_at: '2026-08-27T05:00:00Z',
+          offered: true,
+        },
+        {
+          keeper_name: 'exampleorg',
+          lane_id: 'librarian_exact',
+          slot_id: 'removed.slot',
+          updated_by: 'vincent',
+          updated_at: '2026-08-27T05:00:00Z',
+          offered: false,
         },
       ],
     })
@@ -1616,9 +1625,13 @@ describe('ApprovalsSurface', () => {
     // The label an operator picked in the mode control, not the wire value.
     expect(modeRows[0]?.textContent).toContain('Human')
     const exactLaneRows = container.querySelectorAll('[data-testid="keeper-exact-lane-row"]')
-    expect(exactLaneRows.length).toBe(1)
+    expect(exactLaneRows.length).toBe(2)
     expect(exactLaneRows[0]?.textContent).toContain('hitl_auto_judge')
     expect(exactLaneRows[0]?.textContent).toContain('glm-coding.glm-5-turbo')
+    expect(exactLaneRows[0]?.textContent).not.toContain('레인에 없음')
+    // A preference the lane no longer offers has no effect; the row says so.
+    expect(exactLaneRows[1]?.textContent).toContain('removed.slot')
+    expect(exactLaneRows[1]?.textContent).toContain('레인에 없음')
   })
 
   it('says nobody was singled out rather than showing nothing', async () => {

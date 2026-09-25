@@ -2952,6 +2952,7 @@
 (include stanzas/test_runtime_antigravity.inc)
 (include stanzas/test_runtime_antigravity_home.inc)
 (include stanzas/test_runtime_antigravity_context.inc)
+(include stanzas/test_runtime_muse_msp.inc)
 (include stanzas/test_runtime_official_client_mcp_http.inc)
 (include stanzas/test_runtime_claude_code_config.inc)
 (include stanzas/test_keeper_antigravity_runtime.inc)
@@ -5700,6 +5701,7 @@
 (include stanzas/test_tui_coordinator_status_row.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_planning_summary_rows.inc)
+(include stanzas/test_tui_planning_goal_window.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
 
@@ -6239,6 +6241,7 @@
  (libraries masc alcotest eio eio.mock))
 (include stanzas/test_browser_webdriver.inc)
 (include stanzas/test_browser_cdp.inc)
+(include stanzas/test_browser_stagehand_session.inc)
 (include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)

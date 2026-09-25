@@ -56,7 +56,7 @@ let row_error_to_string = function
 
 let error_to_string = function
   | Storage_error error ->
-      "metrics storage read failed: " ^ Dated_jsonl.read_error_to_string error
+      "metrics storage: " ^ Dated_jsonl.read_error_to_string error
   | Row_errors { physical_rows; errors } ->
       (* Two counts, because they name two different faults. A misfiled row is
          readable and in the wrong Keeper's store; an unreadable row is damage

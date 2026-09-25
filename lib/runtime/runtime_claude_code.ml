@@ -189,6 +189,10 @@ type stream_event =
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Usage_windows_reported of Runtime_provider_usage_window.report
+  | Usage_reported of
+      { model : string
+      ; usage : turn_usage
+      }
   | Turn_finished of { text : string }
 
 let emit_stream_event on_stream_event event =
@@ -1014,7 +1018,7 @@ let terminal_reason_to_wire = function
 ;;
 
 let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
-    ~response_emitted fields =
+    ~response_emitted ~usage fields =
   let stage = "result message" in
   let* subtype = required_string stage "subtype" fields in
   let* is_error = required_bool stage "is_error" fields in
@@ -1046,7 +1050,6 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
       | None | Some `Null -> result
       | Some value -> Some (Yojson.Safe.to_string value)
     in
-    let usage = turn_usage_of_fields fields in
     let structurally_quota_blocked =
       Option.equal Int.equal api_error_status (Some 429)
       || Option.exists
@@ -1208,12 +1211,23 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
       ~stream_started ~response_emitted
   | "result" ->
+    (* The result frame is the only place the turn's spend is reported, and
+       it arrives on failures too (a quota refusal, a provider error after
+       tool calls). It is reported here, before the frame decides whether the
+       turn succeeded, so a failed turn still reports what it spent. A frame
+       with no measured model response reports none: nothing was answered. *)
+    let usage = turn_usage_of_fields fields in
+    (match assistant_model, usage with
+     | Some model, Some usage ->
+       emit_stream_event on_stream_event (Usage_reported { model; usage })
+     | None, _ | Some _, None -> ());
     let parsed_result =
       parse_result
         ~expected_session_id
         ~rate_limit
         ~tool_effect_attempted:(!tool_call_count > 0 || !native_tool_attempted)
         ~response_emitted:!response_emitted
+        ~usage
         fields
     in
     let* turn_id, result, usage =

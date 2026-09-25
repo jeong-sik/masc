@@ -60,6 +60,6 @@ let checkpoint_owner = function
 
 let usage_report = function
   | Agent_core _ -> Each_agent_core_response
-  | Codex_app_server _ -> Client_usage_stream
-  | Claude_code _ | Antigravity_cli _ -> Client_turn_result
+  | Codex_app_server _ | Claude_code _ -> Client_usage_stream
+  | Antigravity_cli _ -> Client_turn_result
 ;;

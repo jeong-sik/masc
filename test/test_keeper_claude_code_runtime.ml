@@ -297,6 +297,7 @@ let content_of_wire_message raw =
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
     ?event_capture ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
+    ?on_official_client_usage_report
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?on_request_attribution ?official_client_continuation ~base_path ~cli_path ~goal () =
   Masc_test_deps.declare_fixture_keeper
@@ -343,6 +344,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ?runtime_manifest_append
                            ?raw_trace
                            ?on_official_client_native_action
+                           ?on_official_client_usage_report
                            ?on_request_attribution
                            ?official_client_continuation
                            ~sw
@@ -408,6 +410,38 @@ let test_result_only_usage_keeps_client_turn_scope () =
       ]
     ~expected_scope:"turn_total"
     ~input_tokens:123498 ~output_tokens:789 ~cache_read_input_tokens:42 ()
+;;
+
+(* A quota refusal after the model already answered once still carries the
+   turn's spend on its result frame. The turn driver hands it to the Keeper's
+   usage observer although the turn fails, with the inclusive input the
+   ledger reads (5000 exclusive + 4000 cache read). *)
+let test_refused_turn_reports_its_spend_to_the_keeper () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let reports = ref [] in
+       let on_official_client_usage_report ~official_turn:_ ~model
+           (usage : Agent_core.Types.api_usage) =
+         reports := (model, usage.input_tokens, usage.output_tokens) :: !reports
+       in
+       with_fixture
+         [ Emit (assistant ~turn_id:"quota-usage" "partial answer")
+         ; Emit rate_limit_rejected
+         ; Emit
+             {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-quota-usage","result":"not inspected","api_error_status":429,"terminal_reason":"api_error","usage":{"input_tokens":5000,"output_tokens":30,"cache_read_input_tokens":4000}}|}
+         ]
+         (fun cli_path ->
+            (match
+               run_keeper_turn ~on_official_client_usage_report ~base_path ~cli_path
+                 ~goal:"QUOTA_USAGE" ()
+             with
+             | Error _ -> ()
+             | Ok _ -> fail "quota refusal completed the turn");
+            check (list (triple string int int)) "the refused turn's spend, once"
+              [ "claude-fixture", 9000, 30 ]
+              (List.rev !reports)))
 ;;
 
 (* Claude Code 2.1.280, 2026-09-23: one client turn of two provider requests.
@@ -2831,6 +2865,8 @@ let () =
     ; ( "usage scope"
       , [ test_case "result-only usage keeps client-turn scope" `Quick
             test_result_only_usage_keeps_client_turn_scope
+        ; test_case "refused turn reports its spend to the Keeper" `Quick
+            test_refused_turn_reports_its_spend_to_the_keeper
         ; test_case "real two-request turn routes spend and occupancy apart" `Quick
             test_real_two_request_turn_routes_spend_and_occupancy_apart
         ; test_case "assistant usage without result usage keeps spend unavailable" `Quick

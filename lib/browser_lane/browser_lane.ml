@@ -454,8 +454,18 @@ let server_lanes_expected =
   String.concat " or " (List.map (fun lane -> Lane_name.to_wire (server_lane_name lane)) [ Server_automation; Server_stagehand ])
 ;;
 
-(* [None] for a string that is no lane name and for the live lane. *)
-let server_lane_of_wire raw = Option.bind (Lane_name.of_wire raw) server_lane_of_name
+let server_lane_refused = "lane must be " ^ server_lanes_expected
+
+(* A wire lane name as a server lane, or why not. Models often reach for live
+   here, since the read tools default to it, so that refusal says whose
+   browser it is. *)
+let parse_server_lane raw =
+  match Lane_name.of_wire raw with
+  | Some Lane_name.Live -> Error ("the live browser belongs to the operator; " ^ server_lane_refused)
+  | Some ((Lane_name.Automation | Lane_name.Stagehand) as name) ->
+    Option.to_result ~none:server_lane_refused (server_lane_of_name name)
+  | None -> Error server_lane_refused
+;;
 
 (* Opening waits for Chromium, CDP, and Stagehand's own bounded attach. The
    generic server-lane deadline can expire while those are still running,

@@ -146,13 +146,12 @@ let handle_tabs ~base_path ~tool_name ~start_time args : Tool_result.result =
    (verb_allowed_on_live). A missing lane is automation, as both tools
    declare. *)
 let issue_on_server_lane ~tool_name ~start_time args ~verb ~timeout_sec =
-  let refused = "lane must be " ^ Browser_lane.server_lanes_expected in
   let lane = match args with
     | `Assoc fields ->
       (match List.assoc_opt "lane" fields with
        | None -> Ok Browser_lane.Server_automation
-       | Some (`String raw) -> Option.to_result ~none:refused (Browser_lane.server_lane_of_wire raw)
-       | Some _ -> Error refused)
+       | Some (`String raw) -> Browser_lane.parse_server_lane raw
+       | Some _ -> Error Browser_lane.server_lane_refused)
     | _ -> Error "browser arguments must be an object" in
   match lane with
   | Error detail -> make_input_err ~tool_name ~start_time detail

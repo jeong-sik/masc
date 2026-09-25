@@ -386,7 +386,7 @@ let search_marker_styled (state : state) =
          | None -> Ansi.dim)
         marker Ansi.reset
 
-let footer_line ?(status = []) (state : state) ~max_cells ~hints =
+let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the
      door back. One seam for every surface, which is what makes the setting
      a setting instead of per-screen behaviour. *)
@@ -525,7 +525,7 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
             }
         ]
   in
-  Masc_tui_footer.line ?literal_prefix ?action_text
+  Masc_tui_footer.line ?literal_prefix ?action_text ?position
     ~status:(status @ identity @ conflict @ answering @ answered)
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 
@@ -730,7 +730,7 @@ let surface_strip (state : state) ~cols =
   Buffer.add_char parts ' ';
   if lo > 0 then
     Buffer.add_string parts
-      (Printf.sprintf "%s\xe2\x80\xb9%d%s " Ansi.dim lo Ansi.reset);
+      (Printf.sprintf "%s%s%s " Ansi.dim (hidden_before_mark lo) Ansi.reset);
   for i = lo to hi do
     if i > lo then Buffer.add_string parts "  ";
     let surface, _ = ring.(i) in
@@ -752,7 +752,7 @@ let surface_strip (state : state) ~cols =
   done;
   if hi < n - 1 then
     Buffer.add_string parts
-      (Printf.sprintf " %s%d\xe2\x80\xba%s" Ansi.dim (n - 1 - hi) Ansi.reset);
+      (Printf.sprintf " %s%s%s" Ansi.dim (hidden_after_mark (n - 1 - hi)) Ansi.reset);
   (match burn_hud_text state with
    | None -> ()
    | Some hud_raw ->
@@ -1249,6 +1249,16 @@ let coordinator_status_row (state : state) ~style status =
   "  coordinator " ^ connection_badge state ^ "  " ^ style ^ status ^ Ansi.reset
 
 
+(* The rows a buffer holds. A surface that lays a block out against a height
+   declared beside the drawing loses whatever the two disagree by: the ask
+   section drew its header into the one row left over and pushed every
+   question off-screen, and the Approvals surface spent its Gate lane rows
+   twice and left its footer floating two rows above the composer. Reading the
+   height back off the buffer is what the surfaces use instead.
+
+   A last line with no newline after it is a row: the terminal draws it, and a
+   footer is written that way. Counting newlines alone was a second reading of
+   this one question, off by that row, and the two lived under two names. *)
 let count_frame_lines buf =
   let len = Buffer.length buf in
   if len = 0 then 0
@@ -1399,6 +1409,16 @@ let listing_rows_below_the_body = 3
    [None] draws no row as selected.
    [focused] says whether the arrow keys are pointed here, which is a
    different question from which row is open. *)
+(* What a row draws before its label when the cursor is on it. The fold below
+   measures this instead of counting its cells here, so the two cannot drift
+   apart, and the mark is the one the rest of the file draws rather than a
+   second spelling of its bytes. *)
+let sidebar_caret_lead = " " ^ Masc_tui_theme.Glyph.current_entry ^ " "
+
+(* Every row folds to the room the widest lead leaves, so the fold does not
+   move when the cursor does. *)
+let sidebar_row_lead_cells = Message_layout.display_width sidebar_caret_lead
+
 (* How many rows an index is holding, and how many the surface holds. Three
    surfaces draw a server page beside a detail -- the Board's fifty posts,
    the Schedules page, the Task Review page -- and each one's index said the
@@ -1427,7 +1447,9 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
      sentence; which pane hears them is this one glyph. *)
   framed_line buf cols
     ((if focused then Ansi.bold else Ansi.dim)
-     ^ Printf.sprintf " %s%s %s" (if focused then "\xe2\x96\xb8 " else "") title
+     ^ Printf.sprintf " %s%s %s"
+         (if focused then Masc_tui_theme.Glyph.current_entry ^ " " else "")
+         title
          (list_count_text ~loaded:(List.length labels) ~holding)
      ^ Ansi.reset);
   framed_divider buf cols;
@@ -1444,8 +1466,23 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
     | Some label ->
       (* A separate name for the sanitized text. Shadowing [label] left four
          uses that read as raw ones to anything checking by name, the reader
-         included. *)
-      let drawn = Terminal_text.single_line label in
+         included.
+
+         Folded from the middle, the way a table folds a name: the frame
+         cuts a tail, and a reader's index is a column of names whose ends
+         are what part them. Measured on the live Board, 50 posts: a tail cut
+         left nine rows in three groups a reader could not tell apart -- four
+         read "#verification Approved task...", three "#verification Verify:
+         wkbl ..." -- and folding from the middle leaves all fifty distinct.
+
+         Every row folds to the same room whether or not the cursor is on it.
+         The caret takes two cells more than the plain lead, so a label
+         fitted to the wider room re-folded as the cursor passed over it. *)
+      let drawn =
+        Message_layout.fit_middle
+          (max 1 (framed_inner_width cols - sidebar_row_lead_cells))
+          (Terminal_text.single_line label)
+      in
       framed_line buf cols
         (if Option.equal Int.equal selection (Some (first + i)) then
            if focused then
@@ -1454,7 +1491,7 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
                  (max 0 (cols - 5 - Message_layout.display_width drawn))
                  ' '
              ^ Ansi.reset
-           else Ansi.bold ^ " \xe2\x96\xb8 " ^ drawn ^ Ansi.reset
+           else Ansi.bold ^ sidebar_caret_lead ^ drawn ^ Ansi.reset
          else " " ^ drawn)
     | None -> framed_empty buf cols
   done;
@@ -1602,15 +1639,6 @@ let selected_ask_question (state : state) =
       | None -> None
       | Some (row : Masc.Tui_decode.ask_row) ->
           List.nth_opt row.Masc.Tui_decode.ar_questions state.ask_question_cursor)
-
-
-(* Drawn into its own buffer so the pane above can be told how many rows it
-   has to give up. Counting the rows a second way is what let the section draw
-   its header into the one row left over and push every question off-screen. *)
-let ask_section_rows buf =
-  let n = ref 0 in
-  String.iter (fun c -> if c = '\n' then incr n) (Buffer.contents buf);
-  !n
 
 
 let draw_ask_text_entry buf cols ~draft ~question (entry : ask_text_entry) =
@@ -1772,7 +1800,7 @@ let draw_ask_context buf cols ~(row : Masc.Tui_decode.ask_row) =
 let ask_block f =
   let b = Buffer.create 256 in
   f b;
-  (Buffer.contents b, ask_section_rows b)
+  (Buffer.contents b, count_frame_lines b)
 
 
 let question_hints (state : state) =
@@ -2357,7 +2385,7 @@ let system_log_level_style : Masc.Tui_decode.system_log_level -> string = functi
 
 let system_log_category_text (entry : Masc.Tui_decode.system_log_entry) =
   match entry.sl_category with
-  | None -> "-"
+  | None -> Masc_tui_theme.Glyph.no_value
   | Some category -> category
 
 
@@ -2419,6 +2447,7 @@ let fusion_run_clock run =
     tm.Unix.tm_hour tm.Unix.tm_min
 
 
+
 let fusion_run_duration ~now run =
   match run.fur_status, run.fur_finished_at with
   | Fusion_running, _ -> Message_layout.span_text (now -. run.fur_started_at) ^ " running"
@@ -2428,7 +2457,7 @@ let fusion_run_duration ~now run =
 
 
 let fusion_run_age ~now run =
-  Option.value ~default:"\xe2\x80\x94"
+  Option.value ~default:Masc_tui_theme.Glyph.no_value
     (Message_layout.age_text ~now ~since:run.fur_started_at)
 
 
@@ -2899,6 +2928,34 @@ let config_pane_strip ~cols ~before ~after (state : state) =
       ~width:(tab_strip_width ~cols ~before:(before ^ config_pane_keys) ~after)
       (config_pane_tabs state)
 
+(* What a Config pane's title row draws in [room] cells: the name the pane is
+   known by, and the reading it has to add beside it.
+
+   The reading gives way first and is cut with a mark. The name is not cut --
+   it is drawn whole or it is not drawn. A cut name is not a reading: at
+   eighty columns the row read "MASC Conf" and a mark, which says nothing the
+   tab strip a row above does not already say, and it still spent the cells
+   the strip needs to name the pane the reader is on -- one of eleven panes
+   was drawn beside that stub, where at sixty columns, the name gone
+   entirely, three were. This is the rule the footer states for its own row:
+   what has a second way to be found gives way to what has none. *)
+let config_pane_title_head ~room ~name ~reading =
+  let cells text =
+    Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
+  in
+  let gap = cells tab_strip_gap in
+  let name_row = name ^ tab_strip_gap in
+  if cells name_row > room then ""
+  else
+    let left = room - cells name_row in
+    if reading = "" || left <= gap then name_row
+    else if cells reading + gap <= left then name_row ^ reading ^ tab_strip_gap
+    else
+      name_row
+      ^ Masc_tui_message_layout.fit_width reading (left - gap)
+      ^ tab_strip_gap
+
+
 (* The whole title row a Config pane draws: its name, the strip, and the badge
    at the end -- with the file it is reading and the clock between them where
    the pane has those to show. Eleven panes built this row and nine of them
@@ -2906,7 +2963,8 @@ let config_pane_strip ~cols ~before ~after (state : state) =
    none of them could tell the strip to leave room for it: at a hundred
    columns the strip took the row and the frame cut the badge, the clock and
    half of "(load failed)" with it. Built once, the row knows both halves. *)
-let config_pane_title ~cols ~before ?(note = "") ?(clock = "") (state : state) =
+let config_pane_title ~cols ~name ?(reading = "") ?(note = "") ?(clock = "")
+    (state : state) =
   let piece text = if text = "" then "" else "  " ^ text in
   let cells text =
     Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
@@ -2933,21 +2991,13 @@ let config_pane_title ~cols ~before ?(note = "") ?(clock = "") (state : state) =
      read "@p@" and "@them@" where it meant prompts and themes. The strip
      cannot say it was cut that far; it has already spent its marks. *)
   let strip_floor = tab_strip_min_width (config_pane_tabs state) in
-  (* What the title gives way with is its tail. Every pane spells this row the
-     same way -- the name it is known by, then whatever reading it has to add
-     -- so cutting from the right spends the reading before it reaches the
-     name, and the cut mark says it happened. *)
+  (* What the title gives way with is its tail: the reading first, and then
+     the name whole. [config_pane_title_head] owns that order. *)
   let before =
     let room =
       framed_inner_width cols - cells config_pane_keys - strip_floor - cells tail
     in
-    if cells before <= room then before
-    else
-      (* The gap the title carries at its end is what holds it off the keys,
-         and cutting takes the end. It is put back, so a cut title reads
-         "... 주 프 …  9:Runtime" rather than running into the key. *)
-      let gap = cells tab_strip_gap in
-      Masc_tui_message_layout.fit_width before (max 0 (room - gap)) ^ tab_strip_gap
+    config_pane_title_head ~room ~name ~reading
   in
   let note =
     if note = "" then ""
@@ -3249,6 +3299,10 @@ let context_next_request_lines ?(show_scale_note = false) ~cols ~scale
      else [])
   @ [ "" ]
 
+
+(* The width of a token figure in the recent-turns rows. "1.2M" and the
+   no-value mark both sit in it, so the rows line up on the same column. *)
+let token_cell_width = 7
 
 let context_composition_lines ~cols ~turn_back
     ~(forecast : (Masc_tui_context_inspector.forecast, string) result)
@@ -3715,19 +3769,25 @@ let context_composition_lines ~cols ~turn_back
           ]
       | _, Some input ->
           fact
-            (Printf.sprintf "%s #%-4d %s  in %-7s  cache read %-7s  out %s"
+            (* fit_width, not %-7s: the cells hold the no-value mark, which is
+               three bytes and one column, and byte padding would end the row
+               two cells short of where the unset ones end. *)
+            (Printf.sprintf "%s #%-4d %s  in %s  cache read %s  out %s"
                (if index = turn_back then Masc_tui_theme.Glyph.current_entry else " ")
                recent.turn ts
-               (Inspector.format_tokens input)
-               (match recent.cache_read with
-                 | Some tokens -> Inspector.format_tokens tokens
-                 | None -> "-")
+               (Message_layout.fit_width (Inspector.format_tokens input)
+                  token_cell_width)
+               (Message_layout.fit_width
+                  (match recent.cache_read with
+                   | Some tokens -> Inspector.format_tokens tokens
+                   | None -> Masc_tui_theme.Glyph.no_value)
+                  token_cell_width)
                (* The request's own output when reported; otherwise the
                   client turn's, marked so it is not read as one request's. *)
                (match recent.output_tokens, recent.turn_output_tokens with
                  | Some tokens, _ -> Inspector.format_tokens tokens
                  | None, Some tokens -> "turn " ^ Inspector.format_tokens tokens
-                 | None, None -> "-"))
+                 | None, None -> Masc_tui_theme.Glyph.no_value))
       | _, None ->
           [ (if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " ")
             ^ Ansi.dim
@@ -3753,7 +3813,7 @@ let context_composition_lines ~cols ~turn_back
           let latest_tokens =
             match selection.Inspector.recent with
             | { input_tokens = Some n; _ } :: _ -> Inspector.format_tokens n
-            | _ -> "-"
+            | _ -> Masc_tui_theme.Glyph.no_value
           in
           [ Printf.sprintf "  %sVelocity:%s %s  %s(%d turns recorded)  ·  latest %s tokens%s"
               Ansi.dim Ansi.reset

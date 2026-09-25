@@ -21,19 +21,40 @@ type source =
   | Lane_output of { id : string; installation_id : string; output_id : string option }
   | Browser_document of { id : string; selection : browser_selection;
       tab_id : int; target_id : string; environment : string; request_id : string }
+type kind = Snapshot_file_kind | Msx_capture_kind | Dos_capture_kind
+  | Lane_output_kind | Browser_document_kind
+
+let kind_to_string = function
+  | Snapshot_file_kind -> "snapshot_file"
+  | Msx_capture_kind -> "msx_capture"
+  | Dos_capture_kind -> "dos_capture"
+  | Lane_output_kind -> "lane_output"
+  | Browser_document_kind -> "browser_document"
+
+let kind_of_string = function
+  | "snapshot_file" -> Some Snapshot_file_kind
+  | "msx_capture" -> Some Msx_capture_kind
+  | "dos_capture" -> Some Dos_capture_kind
+  | "lane_output" -> Some Lane_output_kind
+  | "browser_document" -> Some Browser_document_kind
+  | _ -> None
+
 let text fields key = match List.assoc_opt key fields with
   | Some (`String value) when String.trim value <> "" -> Ok value
   | _ -> Error (key ^ " requires a non-blank string")
 let parse_source = function
   | `Assoc fields ->
       let* id = text fields "source_id" in
-      (match List.assoc_opt "kind" fields with
-       | Some (`String "snapshot_file") -> let* path = text fields "path" in
+      let kind = match List.assoc_opt "kind" fields with
+        | Some (`String name) -> kind_of_string name
+        | Some _ | None -> None in
+      (match kind with
+       | Some Snapshot_file_kind -> let* path = text fields "path" in
            if Filename.is_relative path then Error "snapshot_file path must be absolute"
            else Ok (Snapshot_file {id;path})
-       | Some (`String "msx_capture") -> Ok (Msx_capture {id})
-       | Some (`String "dos_capture") -> Ok (Dos_capture {id})
-       | Some (`String "lane_output") ->
+       | Some Msx_capture_kind -> Ok (Msx_capture {id})
+       | Some Dos_capture_kind -> Ok (Dos_capture {id})
+       | Some Lane_output_kind ->
            let names = List.map fst fields in
            let* () = if List.length names <> List.length (List.sort_uniq String.compare names)
              || List.exists (fun name -> not (List.mem name
@@ -46,7 +67,7 @@ let parse_source = function
            (match List.assoc_opt "selection" fields with
             | Some (`String "latest_completed") -> Ok (Lane_output {id;installation_id;output_id})
             | _ -> Error "lane_output selection must be latest_completed")
-       | Some (`String "browser_document") ->
+       | Some Browser_document_kind ->
            let* client_id = match List.assoc_opt "client_id" fields with
              | None | Some `Null -> Ok None
              | Some (`String value) ->
@@ -69,7 +90,7 @@ let parse_source = function
            let* environment = text fields "environment" in
            let* request_id = text fields "request_id" in
            Ok (Browser_document {id;selection;tab_id;target_id;environment;request_id})
-       | _ -> Error "unknown observation source kind")
+       | None -> Error "unknown observation source kind")
   | _ -> Error "source requires an object"
 let parse = function
   | `Assoc fields ->
@@ -82,6 +103,17 @@ let parse = function
   | _ -> Error "binding requires an object"
 let source_id = function Snapshot_file {id;_} | Msx_capture {id} | Dos_capture {id}
   | Lane_output {id;_} | Browser_document {id;_} -> id
+type live_reader = Msx_screen | Dos_screen
+
+let kind_of_live_reader = function
+  | Msx_screen -> Msx_capture_kind
+  | Dos_screen -> Dos_capture_kind
+
+let live_screen_of_kind = function
+  | Msx_capture_kind -> Some Msx_screen
+  | Dos_capture_kind -> Some Dos_screen
+  | Snapshot_file_kind | Lane_output_kind | Browser_document_kind -> None
+
 type activity = Tool_completed | Msx_changed | Dos_changed | Browser_changed
 type refresh_interest = source list
 let refresh_interest = parse
@@ -103,12 +135,14 @@ let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = 
   | Misc_dos_click | Misc_dos_type
   (* Handing the controller on changes no pixel, but the capture carries the
      holder, so a watcher would keep showing the old one. *)
-  | Misc_dos_pass -> Dos_changed
+  | Misc_dos_pass
+  (* A restore replaces the machine a watcher shows. *)
+  | Misc_dos_restore -> Dos_changed
   | Misc_browser_session | Misc_browser_goto | Misc_browser_act
   | Misc_browser_interact -> Browser_changed
   | Misc_msx_save | Misc_msx_screen | Misc_msx_peek | Misc_msx_ram_diff
   | Misc_browser_tabs | Misc_browser_read
-  | Misc_dos_screen | Misc_dos_peek
+  | Misc_dos_screen | Misc_dos_peek | Misc_dos_save
   | Misc_lane_declaration_read | Misc_lane_declaration_save | Misc_lane_attach
   | Misc_lane_inspect | Misc_lane_observe | Misc_lane_slice | Misc_lane_detach
   | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status | Misc_lane_updates

@@ -27,7 +27,7 @@ Keeper 는 `sandbox_image` 에 적힌 이미지 안에서 명령을 실행한다
 2. **Keeper 는 배포 목록의 이름을 고른다.** 최종 이미지 이름(`base`, `ocaml`,
    `rust`, `web`, `media`)은 저장소의 배포 파일이 정한다. 현재 배포 파일에는
    `base` 와 `ocaml` 만 있다. 그 이름이 이 호스트에서 어떤
-   태그와 digest 인지는 별도 호스트 파일이 정한다. Keeper TOML 의
+   태그인지는 별도 호스트 파일이 정한다. Keeper TOML 의
    `sandbox_image` 는 이름만 받는다. 버전을 올리고 내릴 때는 호스트 파일만
    바뀐다(§2.3).
 3. **런타임은 실제로 뜬 이미지의 digest 를 기록하고 보여 준다.** 설정한 이미지와
@@ -39,9 +39,9 @@ Keeper 는 `sandbox_image` 에 적힌 이미지 안에서 명령을 실행한다
    띄워 도구를 실행해 보고, 그 결과를 이미지에 넣는다. 실행이 실패하면 빌드가
    실패한다(§2.6).
 
-첫 promote/rollback 구현은 Apple `container` 와 Docker daemon 저장소를 다룬다.
-microVM Keeper 의 실행 기록이 91,344건이고 docker 는 88건이다(§1.4 와 같은 기간).
-nerdctl_kata 와 microsandbox 는 아직 digest 를 읽어 승격하는 경로가 없다(§2.3, §6).
+`promote` 는 그 저장소에 태그가 있는지만 확인하고 목록을 바꾼다. digest 를 읽지
+않으므로 저장소마다 따로 구현할 것이 없다(§2.3). microVM Keeper 의 실행 기록이
+91,344건이고 docker 는 88건이다(§1.4 와 같은 기간).
 턴 안에서 패키지를 설치하는 길은 이 RFC 가 열지 않는다(§3).
 
 ## 1. 기준선 (2026-09-24)
@@ -217,14 +217,15 @@ sandbox-images/
   8자를 쓴다. 이 길이는 코드에서 이름 붙은 상수로 둔다. 전체 해시는 라벨에 남긴다.
 - 모든 `FROM` 은 digest 로 고정한다(`ubuntu:24.04@sha256:…`,
   `ocaml/opam:ubuntu-24.04-ocaml-5.5@sha256:…`). `rust`·`web`·`media` 의 `FROM` 은
-  빌드 인자로 받는다. 빌드 명령이 라이브 목록에서 `base` 의 ref 와 digest 를 읽어
-  넘긴다. 부모 digest 가 해시에 들어가므로, `base` 가 바뀌면 자식 태그도 바뀐다.
+  빌드 인자로 받는다. 빌드 명령이 라이브 목록에서 `base` 의 ref 를 읽고, 그 ref 의
+  digest 는 저장소에서 읽어 넘긴다. 부모 digest 가 해시에 들어가므로, `base` 가 바뀌면
+  자식 태그도 바뀐다.
 - 시각을 넣는 이유: 레시피가 같아도 `apt-get` 은 그날의 패키지를 받는다. 해시만
   쓰면 내용이 다른 두 빌드가 같은 태그를 갖는다. 시각은 분 단위다.
 - 같은 태그가 이미 저장소에 있으면 빌드를 거절한다. 덮어쓰기는 하지 않는다.
   두 빌드가 같은 분에 같은 레시피로 겹치면 확인과 태그 붙이기 사이에 한쪽이 이길
-  수 있다. 이 경우에도 `promote` 는 저장소에 실제로 남은 digest 를 읽으므로, 목록이
-  다른 내용을 가리키지는 않는다.
+  수 있다. 이 경우 목록의 태그는 이긴 쪽 빌드를 가리키고, 무엇으로 떴는지는 VM 이
+  뜰 때 기록하는 실제 digest 에 남는다(§2.4 의 2).
 - 라벨: `org.opencontainers.image.version`(태그 값), `.revision`(저장소 커밋),
   `.created`, `.base.name`, `.base.digest`, `masc.sandbox.inputs_sha256`(해시 전체).
 
@@ -234,7 +235,7 @@ sandbox-images/
 배포하며 바이너리에도 들어간다. 설정 루트의 `sandbox-images.toml` 은 이 호스트에서
 승격한 빌드만 보관한다. 이름은 배포 파일에서 **매번** 읽고, 빌드 정보는 호스트
 파일이 있으면 읽어 합친다. 호스트 파일이 아직 없으면 이름은 그대로 보이되 승격된
-빌드는 없다. 레지스트리를 쓰지 않으므로 digest 는 빌드한 호스트의 파일에만 둔다.
+빌드는 없다. 호스트 파일은 이름마다 저장소별 태그 하나만 적는다.
 
 ```toml
 # 배포 파일: config/sandbox-images.toml
@@ -246,15 +247,15 @@ sandbox-images/
 # 호스트 파일: <config-root>/sandbox-images.toml
 [images.ocaml.apple_container]
 reference = "masc-sandbox-ocaml:20260924T1130Z-3f9a1c07"
-digest    = "sha256:…"              # 저장소가 떠 있는 VM 에 대해 보고하는 digest
-previous  = { reference = "…", digest = "sha256:…" }
 ```
 
 - 저장소(store) 이름은 `docker` 와 microVM 백엔드 이름(`apple_container`,
-  `nerdctl_kata`, `microsandbox`)이다. 첫 CLI 구현(#38761)은 Docker daemon 과 Apple
-  `container` 의 digest 를 읽어 promote/rollback 한다. nerdctl_kata 는 빌드는
-  가능하지만 digest 를 읽어 promote 할 수 없고, microsandbox 는 빌드 명령도 없다.
-  두 백엔드는 지원 경로를 더하기 전까지 새 이름으로 부팅할 수 없다.
+  `nerdctl_kata`, `microsandbox`)이다. 목록에 digest 를 두지 않는다. 태그를 덮어쓰지
+  않으므로(§2.2) promote 는 늘 다른 태그 문자열을 적고, 런타임은 태그 비교만으로 바뀐
+  빌드를 안다(§2.4 의 2). 저장소마다 digest 를 읽는 법이 달라서, 목록에 digest 를
+  두면 그 코드가 없는 저장소(nerdctl_kata, microsandbox)에서 promote 가 막힌다.
+  microsandbox 는 빌드 명령이 없어, 다른 곳에서 만든 OCI 를 `msb load` 한 뒤 그
+  태그를 promote 한다.
 - 배포 파일에 빌드를 적거나 호스트 파일에 승격 빌드가 없는 이름만 적으면 파서가
   거절한다. 배포 파일에서 사라진 이름의 호스트 빌드는 해석·승격할 수 없지만,
   파일을 저장할 때도 지우지 않고 `orphaned_builds` 로 보존한다(#38745).
@@ -268,8 +269,8 @@ previous  = { reference = "…", digest = "sha256:…" }
 
 - Keeper TOML 은 이름만 적는다: `sandbox_image = "ocaml"`. 이 필드는 태그를 받지 않는다.
   배포 이름 목록에 없는 이름이면 #38572 와 같은 자리에서 로드를 거절한다.
-- 파서는 모르는 키, 빈 digest, digest 모양이 아닌 값을 에러로 돌려준다. 빈 값을
-  기본값으로 채우지 않는다.
+- 파서는 모르는 키와 모양이 틀린 값을 에러로 돌려준다. 빈 값을 기본값으로 채우지
+  않는다.
 - 특정 Keeper 만 옛 버전에 묶어야 하면 배포 이름 목록에 이름을 하나 더 만든다. 어떤
   이미지든 목록에서 보인다.
 - `MASC_KEEPER_SANDBOX_DOCKER_IMAGE` 와 내장 기본값 `masc-sandbox:general` 은
@@ -297,10 +298,15 @@ previous  = { reference = "…", digest = "sha256:…" }
    - 턴 안에서 한 번만 찾는 까닭: 턴 중간에 promote 가 들어와도 한 턴의 컨테이너가 두
      빌드로 갈리지 않는다. promote 는 다음 턴부터 닿는다.
    - promote 된 빌드가 있으면 그 `reference` 로 띄운다.
-   - `Not_built_on_host` 면 띄우지 않는다. Docker·Apple 에서는 사유에 운영자가 칠
-     빌드 명령(`masc sandbox-image --recipe <이름>`, 필요하면 `--source`·`--runtime`)
-     과 `promote` 를 함께 적는다. nerdctl_kata·microsandbox 에서는 지원되는
-     승격 경로가 없다고 알린다(#38770).
+   - 모르는 이름이나 이 저장소에 promote 된 빌드가 없는 이름은 **부팅**에서 거절한다
+     (`keeper up`, 자동 부팅. #38572 와 같은 자리). 그 Keeper 는 돌지 않고, TUI 는
+     이미 있는 준비 필요 표시(`keeper_declared_roster.ml` 의 `Sandbox_check_required`,
+     화면의 `Preparation:` 줄)로 보여 준다. 사유에는 운영자가 칠 빌드 명령(`masc
+     sandbox-image --recipe <이름>`, 필요하면 `--source`·`--runtime`)과 `promote` 를
+     적는다. microsandbox 는 `msb load` 뒤 promote 를 적는다.
+   - 턴에서 다시 확인하는 것은 부팅 뒤에 목록이 바뀐 경우 하나다. 그때의 거절은 그 턴
+     한 번으로 끝나고, Keeper 는 부팅 판정으로 돌아간다. 깨어날 때마다 같은 거절이
+     쌓이지 않는다.
    - 라이브 목록을 읽지 못하면 띄우지 않는다. 권위 있는 저장소를 못 읽으면 진행하지
      않는다(constitution `authoritative_read_only`).
    - 이름이 목록에 없으면 목록에 있는 이름을 함께 적어 거절한다.
@@ -308,21 +314,20 @@ previous  = { reference = "…", digest = "sha256:…" }
      멈추지 않는다. 실패는 컨테이너를 실제로 띄우는 순간에 드러난다.
    - docker keeper 는 `keeper up` 에서 이름이 풀리는지 먼저 본다. preflight 를 꺼도
      이 확인은 한다. 목록 읽기는 daemon 을 건드리지 않는다.
-2. 백엔드가 `ref@digest` 로 실행을 받으면 digest 로 띄운다. nerdctl 은 이미 받는다
-   (`keeper_sandbox_microvm.ml:532-546`). Apple `container` 는 확인하지 않았다(§8).
-   받지 않으면 `ref` 로 띄운다.
-3. VM 이 뜨면 `container list` 가 보고하는 실제 digest 를 `microvm_boot` 에 기록한다.
-   `Image_changed` 도 이 digest 와 목록의 digest 를 비교한다(#36993 의 image 축을 이
-   RFC 가 가져온다). 서버 재시작 뒤에는 지금처럼 VM 을 새로 띄우므로 따로 비교할
-   곳이 없다.
-4. 실행 영수증, `masc_keeper_status` 의 `sandbox_live`, TUI 는 세 값을 함께 보여 준다.
-   목록 이름, 목록의 digest, **실제로 뜬 VM 의 digest** 다. 둘이 다르면
-   `Image_drift { configured; running }` 상태로 보여 준다. §1.3 의 몇 분이 이렇게 드러난다.
+2. VM 이 뜨면 `container list` 가 보고하는 실제 digest 를 `microvm_boot` 에 기록한다.
+   이 값은 기록하고 보여 주기만 한다. `Image_changed` 는 목록의 태그와 떠 있는 VM 의
+   태그를 비교한다. 태그를 덮어쓰지 않으므로 태그가 다르면 빌드가 다르다(#36993 의
+   image 축을 이 RFC 가 가져온다). 서버 재시작 뒤에는 지금처럼 VM 을 새로 띄우므로
+   따로 비교할 곳이 없다.
+3. 실행 영수증, `masc_keeper_status` 의 `sandbox_live`, TUI 는 목록 이름, 목록의 태그,
+   **실제로 뜬 VM 의 태그와 digest** 를 함께 보여 준다. 목록의 태그와 뜬 VM 의 태그가
+   다르면 `Image_drift { configured; running }` 상태로 보여 준다. §1.3 의 몇 분이
+   이렇게 드러난다.
 
 이미지 저장소에 목록의 `ref` 가 없으면 VM 을 띄우지 않고 `Image_missing_from_store
 { name; ref }` 로 거절한다. 지금 런타임이 `general` 을 직접 빌드하는 경로
 (`keeper_sandbox_microvm.ml:620-651`)는 지운다. 그 경로로는 목록의 `ref`(시각이
-들어간 태그)도, 목록의 digest 도 만들 수 없다. 처음 설치한 호스트에서는 sandbox
+들어간 태그)를 만들 수 없다. 처음 설치한 호스트에서는 sandbox
 마법사(`sandbox_readiness.ml`)가 `base` 의 빌드와 promote 를 운영자에게 묻고 실행한다.
 INSTALL 문서도 이 순서로 고친다.
 
@@ -364,8 +369,8 @@ probe = ["ocaml", "-vnum"]
 - 실행 결과(도구 이름, 출력한 버전 문자열)를 `/etc/masc/image.json` 에 담아 이미지의
   마지막 레이어로 굽는다. Keeper 는 VM 안에서 이 파일을 읽어 쓸 수 있는 도구를
   확인한다. 운영자는 `masc sandbox-image show <이름>` 과 `sandbox_live` 로 같은 내용을
-  본다. `show` 는 자식 이미지의 `base.digest` 가 지금 목록의 `base` digest 와 같은지도
-  보여 준다. `base` 를 올린 뒤 다시 빌드하지 않은 자식이 여기서 보인다.
+  본다. `show` 는 자식 이미지의 `base.digest` 가 지금 목록의 `base` 태그를 저장소에서
+  읽은 digest 와 같은지도 보여 준다. `base` 를 올린 뒤 다시 빌드하지 않은 자식이 여기서 보인다.
 - `scripts/check-sandbox-ocaml-version.sh`, `check-sandbox-dune-version.sh` 는 남긴다.
   두 스크립트는 모든 PR 의 lint 에서 돌고(`scripts/ci/run-lint-suite.sh:478,482`),
   `masc.opam` 만 바꾼 PR 에서도 이미지와 저장소의 어긋남을 잡는다. 가리키는 파일만
@@ -374,14 +379,13 @@ probe = ["ocaml", "-vnum"]
 ### 2.7 빌드, 올리기, 되돌리기
 
 - `masc sandbox-image build <이름> [--runtime apple_container]`: `inputs` 만 담은
-  컨텍스트로 빌드하고 §2.6 확인을 돌린 뒤, 태그와 digest 를 출력한다. 목록은 고치지
-  않는다.
-- `masc sandbox-image promote <이름> <태그>`: 저장소에서 그 태그의 digest 를 읽어
-  호스트 파일의 한 항목을 바꾸고, 바뀌기 전 값을 `previous` 에 남긴다. CLI 가
-  호스트 파일을 직접 잠그고 CAS·원자 교체한다(#38745, #38761). 바뀐 이미지는
-  각 Keeper 의 다음 턴에 들어간다(§2.4 의 3).
-- `masc sandbox-image rollback <이름>`: 지금 값과 `previous` 를 맞바꾼다. 새 이미지로
-  턴이 깨지면 운영자가 이 명령 하나로 되돌린다. 자동으로 되돌리지는 않는다. 부팅
+  컨텍스트로 빌드하고 §2.6 확인을 돌린 뒤, 태그를 출력한다. 목록은 고치지 않는다.
+- `masc sandbox-image promote <이름> <태그>`: 그 저장소에 태그가 있는지 확인하고
+  호스트 파일의 한 항목을 바꾼다. CLI 가 호스트 파일을 직접 잠그고 CAS·원자
+  교체한다(#38745, #38761). 바뀐 이미지는 각 Keeper 의 다음 턴에 들어간다(§2.4 의 2).
+- 되돌리기도 `promote` 다: `masc sandbox-image promote <이름> <옛 태그>`. 태그를
+  덮어쓰지 않으니 옛 이미지는 prune 전까지 저장소에 남고, `masc.sandbox.inputs_sha256`
+  라벨이 붙은 이미지 목록에서 시각 순으로 보인다. 자동으로 되돌리지는 않는다. 부팅
   실패는 이미 typed 사유로 남으니, 사람이 그 사유를 보고 정한다.
 - CI 는 `sandbox-images/**`, 모든 `inputs` 가 가리키는 파일(`masc.opam`,
   `masc.opam.locked`, `scripts/opam-pin-from-lock.sh`), `dune-project` 중 하나라도 바뀌면
@@ -394,8 +398,8 @@ probe = ["ocaml", "-vnum"]
 ### 2.8 오래된 이미지 정리
 
 - `masc sandbox-image prune` 은 `masc.sandbox.inputs_sha256` 라벨이 있는 이미지만
-  후보로 본다. 이름 앞부분으로 고르지 않는다. 그중 라이브 목록의 `ref`·`previous`
-  어디에도 없고, 떠 있는 VM 도 쓰지 않는 이미지를 지운다.
+  후보로 본다. 이름 앞부분으로 고르지 않는다. 그중 라이브 목록의 `ref` 가 아니고,
+  떠 있는 VM 도 쓰지 않는 이미지를 지운다.
 - 기본은 지울 목록만 보여 준다. `--yes` 가 있을 때만 지운다. 자동으로 지우지 않고,
   "최근 N개만 남긴다" 같은 개수 기준도 두지 않는다.
 - 한계: 이미지 저장소는 호스트에 하나지만 라이브 목록은 base path 마다 있다. 같은
@@ -413,16 +417,16 @@ constitution `<gates>` 는 하드 게이트를 기본으로 두지 말라고 한
 |---|---|---|---|
 | 같은 태그가 있으면 빌드 거절 | 운영자 빌드 명령 | 태그가 다시 덮어써진다. §1.2 의 사고가 그대로 남는다 | 둔다. 이것이 "덮어쓰지 않는다"의 정의다 |
 | 도구 실행 실패면 빌드 실패 | 운영자 빌드 명령 | 약속한 도구가 없는 이미지가 목록에 올라간다 | 둔다. Keeper 턴이 아니라 빌드 시점이라 Keeper 흐름을 막지 않는다 |
-| 모르는 이름, 올리지 않은 이름, 목록을 못 읽음 → 턴 거절 | 턴 받을 때 | 예전처럼 아무 이미지로 조용히 뜬다 | 둔다. #38572 와 같은 자리이고, constitution `strict_parse_no_default`·`authoritative_read_only` 를 따른다 |
-| 목록의 digest 와 실제 digest 가 다르면 부팅 거절 | VM 띄울 때 | 다른 이미지로 뜬다 | **두지 않는다.** 실제 digest 를 기록하고 `Image_drift` 로 보여 주면 무엇으로 돌았는지 남는다. 막으면 태그 경쟁 하나로 Keeper 가 턴을 못 돈다 |
+| 모르는 이름, 올리지 않은 이름, 목록을 못 읽음 → 부팅 거절 | `keeper up`, 자동 부팅 | 예전처럼 아무 이미지로 조용히 뜬다. 턴에서 거절하면 깨어날 때마다 같은 거절이 쌓인다 | 둔다. #38572 와 같은 자리이고, constitution `strict_parse_no_default`·`authoritative_read_only` 를 따른다. 턴에서는 부팅 뒤 목록이 바뀐 경우만 한 번 거절한다 |
+| 목록의 태그와 실제로 뜬 VM 이 다르면 부팅 거절 | VM 띄울 때 | 다른 이미지로 뜬다 | **두지 않는다.** 실제 태그와 digest 를 기록하고 `Image_drift` 로 보여 주면 무엇으로 돌았는지 남는다. 막으면 태그 경쟁 하나로 Keeper 가 턴을 못 돈다 |
 
 ## 3. 하지 않는 것
 
 - **턴 안 패키지 설치를 지원하지 않는다.** §1.5 처럼 Keeper 가 자기 폴더에 도구를
   까는 일은 지금도 되고, 막지 않는다. 다만 그 경로를 위한 환경 변수나 폴더를 만들지
   않는다. 필요한 도구는 레시피에 넣고 버전을 올린다.
-- **레지스트리에 올리지 않는다.** 이미지는 운영 호스트의 저장소에만 있다. 그래서
-  저장소가 배포하는 이름 목록에는 digest 가 없고, 호스트의 승격 파일에는 있다(§2.3).
+- **레지스트리에 올리지 않는다.** 이미지는 운영 호스트의 저장소에만 있다. 목록
+  어디에도 digest 를 두지 않고, 실제 digest 는 VM 이 뜰 때 기록한다(§2.3, §2.4).
 - **Keeper 별 버전을 자동으로 올리지 않는다.** 목록을 바꾸는 건 운영자다.
 - **턴 도중 설정 변경이 다음 턴부터 들어가는 동작은 바꾸지 않는다.** 그 사이의
   차이를 보이게 하는 것까지만 한다(§2.4 의 4).
@@ -436,6 +440,8 @@ constitution `<gates>` 는 하드 게이트를 기본으로 두지 말라고 한
 | 모든 도구를 넣은 이미지 하나 | 목록이 한 줄이다 | Rust·Postgres·libreoffice 가 모든 Keeper VM 에 들어간다. `:local` 이 이미 1.6GB 급이다 | 버림 |
 | 턴 안 설치를 공식 지원한다(`/masc-work` 에 prefix) | Keeper 가 스스로 해결한다 | 무엇이 깔렸는지 재현할 수 없다. §1.5 의 opam 복사본 같은 것이 Keeper 마다 생긴다 | 버림(§3) |
 | 저장소가 배포하는 이름 목록에 digest 까지 넣는다 | 배포 파일 하나로 이름과 빌드를 정한다 | 레지스트리가 없으니 다른 호스트와 CI 에서 그 digest 의 빌드를 쓸 수 없다 | 버림(§2.3) |
+| 호스트 목록에 태그와 digest 를 함께 적는다 | 누가 같은 태그를 손으로 덮어쓰면 목록에서 보인다 | 태그를 덮어쓰지 않으니 digest 를 읽는 런타임 코드가 없다. 저장소마다 읽는 법이 달라 nerdctl_kata·microsandbox 에서 promote 가 막힌다 | 버림. 덮어쓰기는 VM 이 뜰 때 기록하는 digest 로 보인다(§2.4) |
+| 목록에 직전 빌드(`previous`)를 두고 `rollback` 명령을 둔다 | 한 단계 되돌리기가 명령 하나다 | 옛 태그로 promote 하는 것과 같은 일에 필드·CAS 상태·명령·prune 대상이 하나씩 더 생긴다. 두 번 되돌리면 원래로 돌아오는 동작은 설명하기 어렵다 | 버림. 되돌리기는 promote 다(§2.7) |
 
 ## 5. 비슷한 제품 사례
 
@@ -482,13 +488,13 @@ constitution `<gates>` 는 하드 게이트를 기본으로 두지 말라고 한
 | 단계 | 내용 | 의존 |
 |---|---|---|
 | A | `sandbox-images/` 레시피·`common-packages.txt`·`tools.toml`, 태그 계산, `masc sandbox-image build`, §2.6 확인, 바이너리에 `base` 레시피를 dune rule 로 넣기 | — |
-| B1a | 배포 이름 목록과 별도 호스트 승격 파일의 파서·타입·이름 해석·promote·rollback·저장(#38745) | — |
-| B1b-1 | Docker·Apple `container` 의 `masc sandbox-image promote`/`rollback` 명령, 배포 목록과 레시피 이름 일치 검사(#38761) | A, B1a |
+| B1a | 배포 이름 목록과 별도 호스트 승격 파일의 파서·타입·이름 해석·promote·저장(#38745) | — |
+| B1b-1 | `masc sandbox-image promote` 명령, 배포 목록과 레시피 이름 일치 검사(#38761) | A, B1a |
 | B1b-2a | 이름을 목록에서 찾아 promote 된 빌드를 돌려주는 해석기와 typed 거절(#38770) | B1b-1 |
-| B1b-2b | 컨테이너를 띄우는 곳이 모두 해석기를 쓴다. 턴마다 한 번 찾는다. env·내장 기본값·`image_source` 삭제(#38798). nerdctl_kata·microsandbox 의 승격 경로가 생기기 전에는 그 백엔드를 쓰는 Keeper 의 전환을 완료할 수 없다 | B1b-2a |
+| B1b-2b | 컨테이너를 띄우는 곳이 모두 해석기를 쓴다. 턴마다 한 번 찾는다. env·내장 기본값·`image_source` 삭제(#38798). | B1b-2a |
 | B2 | `sandbox_image = "` 98곳과 관련 스크립트·문서를 이름으로 바꾸는 스크립트와 그 결과, TOML 을 읽을 때 이름 모양이 아니면 거절. B1b-2b 와 함께 배포한다 | B1b-2b |
-| B1b-3 | setup 이 `base` 를 빌드해 목록에 올림, microVM 자동 빌드 삭제, 모든 profile 의 `keeper up` 이름 확인 | B2 |
-| C | 실제 digest 기록·비교, `Image_drift`, 상태·영수증·TUI 표시(#36993 image 축) | B1b-2 |
+| B1b-3 | setup 이 `base` 를 빌드해 목록에 올림, microVM 자동 빌드 삭제, 모르는 이름·promote 안 된 이름을 모든 profile 의 부팅에서 거절 | B2 |
+| C | 실제 태그·digest 기록, 태그 비교, `Image_drift`, 상태·영수증·TUI 표시(#36993 image 축) | B1b-2 |
 | D | `rust`, `web`, `media` 이미지, 크기 실측 | A |
 | E | CI 트리거 확장, 모든 이미지 빌드·확인, CI 의 테스트용 이미지를 목록으로 쓰기 | A, B1b-2 |
 | F | `prune` | B1b-1 |
@@ -498,13 +504,12 @@ constitution `<gates>` 는 하드 게이트를 기본으로 두지 말라고 한
 - A: 레시피 입력 하나를 바꾸면 태그가 바뀌고, 안 바꾸면 해시가 같다. 같은 태그로
   다시 빌드하면 거절된다. `tools.toml` 의 `probe` 가 실패하는 이미지는 태그가 남지
   않는다. 쓰기 권한이 필요한 `probe` 는 Keeper 제약에서 실패한다.
-- B1: 배포 목록에 없는 이름과 태그 문자열을 적은 Keeper 설정, 빌드 항목에 빈
-  digest 를 적은 호스트 파일은 각각 로드가 거절된다.
-  아직 올린 빌드가 없는 이름을 쓴 Keeper 는 턴이 `Image_not_built_on_host` 로 거절되고, 사유에
-  칠 명령이 있다.
-- C: 같은 태그를 다른 이미지로 덮어쓴 뒤 턴을 돌리면 VM 은 뜨고, 상태는
-  `Image_drift` 에 두 digest 를 보여 준다. 목록의 digest 를 바꾸면 다음 턴에 VM 이
-  바뀐다.
+- B1: 배포 목록에 없는 이름과 태그 문자열을 적은 Keeper 설정, 모르는 키를 적은
+  호스트 파일은 각각 로드가 거절된다. 아직 올린 빌드가 없는 이름을 쓴 Keeper 는
+  부팅이 거절되고, 사유에 칠 명령이 있다. 부팅 뒤 목록에서 빌드가 빠지면 그 턴 한
+  번만 거절된다.
+- C: 목록의 태그를 바꾸면 다음 턴에 VM 이 바뀐다. 같은 태그를 손으로 다른 이미지로
+  덮어쓴 뒤 턴을 돌리면 VM 은 뜨고, 기록된 digest 가 바뀐 것이 상태에 보인다.
 - 운영 실측: 목록을 바꾼 뒤 `container list` 의 digest 와 `sandbox_live` 의 digest 가
   모든 Keeper 에서 같은지 확인하고, TUI 스크린샷을 남긴다.
 - 효과: 적용 2주 뒤 §1.4 와 같은 방법으로 다시 센다. 공통 도구 행이 0 이 되는지 본다.
@@ -522,5 +527,5 @@ constitution `<gates>` 는 하드 게이트를 기본으로 두지 말라고 한
 
 남은 질문:
 
-1. Apple `container` 가 `ref@sha256:…` 형태로 실행을 받는지 확인하지 않았다. 받으면
-   §2.4 의 2 에서 digest 로 직접 띄운다. 단계 C 에서 확인한다.
+1. (정함, 09-25) 목록에 digest 를 두지 않는다. 실행은 태그로 하고, digest 는 VM 이
+   뜰 때 기록만 한다(§2.3, §2.4).

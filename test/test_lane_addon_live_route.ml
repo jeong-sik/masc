@@ -7,6 +7,7 @@
 open Alcotest
 module Lane = Msx_lane
 module Routes = Server_routes_http_routes_lane_addons
+module Sources = Masc.Lane_addon_sources
 
 let remove_tree path =
   let rec go path =
@@ -169,11 +170,11 @@ let test_decode_live_query () =
   let decode = Routes.decode_live_query in
   List.iter
     (fun reader ->
-      let kind = Lane_addon_sources.kind_of_live_reader reader in
-      let wire = Lane_addon_sources.kind_to_string kind in
+      let kind = Sources.kind_of_live_reader reader in
+      let wire = Sources.kind_to_string kind in
       check bool (wire ^ " maps back to its live reader") true
-        (Lane_addon_sources.kind_of_string wire = Some kind
-         && Lane_addon_sources.live_screen_of_kind kind = Some reader))
+        (Sources.kind_of_string wire = Some kind
+         && Sources.live_screen_of_kind kind = Some reader))
     [Routes.Msx_screen; Routes.Dos_screen];
   check bool "msx_capture with no since" true
     (decode ["source_kind", "msx_capture"] = Ok (Routes.Msx_screen, None));

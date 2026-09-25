@@ -193,19 +193,22 @@ let remove_record_if_owned ~record_path ~pid =
    server's own profile starts empty. Either way it is made owner-only: it
    holds cookies. *)
 let prepare_profile ~masc_root (config : Browser_configuration.stagehand) =
-  let profile, fresh =
+  let profile =
     match config.profile with
-    | Some profile -> profile, false
-    | None -> Process.server_profile ~masc_root, true
+    | Some path -> Process.Operator_profile path
+    | None -> Process.Server_profile (Process.server_profile ~masc_root)
   in
+  let path = Process.profile_path profile in
   match
-    if fresh then Fs_compat.remove_tree profile;
-    Fs_compat.mkdir_p profile;
-    Unix.chmod profile owner_only;
-    Fs_compat.remove_tree (Filename.concat profile Process.devtools_port_file)
+    (match profile with
+     | Process.Server_profile _ -> Fs_compat.remove_tree path
+     | Process.Operator_profile _ -> ());
+    Fs_compat.mkdir_p path;
+    Unix.chmod path owner_only;
+    Fs_compat.remove_tree (Filename.concat path Process.devtools_port_file)
   with
   | () -> Ok profile
-  | exception ((Eio.Io _ | Unix.Unix_error _ | Sys_error _) as exn) -> io_error ("cannot prepare the profile " ^ profile) exn
+  | exception ((Eio.Io _ | Unix.Unix_error _ | Sys_error _) as exn) -> io_error ("cannot prepare the profile " ^ path) exn
 ;;
 
 let await_devtools_endpoint ~clock ~profile ~process =
@@ -277,9 +280,9 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
       Result.map_error
         (fun detail -> Printf.sprintf "cannot record Chromium pid %d in %s: %s" pid record_path detail)
         (Fs_compat.save_file_atomic record_path
-           (Process.owner_to_string { Process.pid; chrome = config.chrome; profile }))
+           (Process.owner_to_string { Process.pid; chrome = config.chrome; profile = Process.profile_path profile }))
     in
-    let* port, path = await_devtools_endpoint ~clock ~profile ~process in
+    let* port, path = await_devtools_endpoint ~clock ~profile:(Process.profile_path profile) ~process in
     let url = Process.browser_ws_url ~port ~path in
     let session = Session.create ~sw ~clock ~worker_wait_s:service_worker_wait_s ~init_answer_s ~model ~log in
     let* cdp =

@@ -8,7 +8,7 @@ let profile = "/ws/.masc/browser-lane/stagehand-profile"
 let extension_id = String.make 32 'h'
 
 let test_argv () =
-  let argv = P.argv ~chrome ~profile ~extension_id ~headless:true in
+  let argv = P.argv ~chrome ~profile:(P.Server_profile profile) ~extension_id ~headless:true in
   check string "the executable comes first" chrome (List.hd argv);
   check bool "headless" true (List.mem "--headless=new" argv);
   check bool "the port is Chrome's choice" true (List.mem "--remote-debugging-port=0" argv);
@@ -18,7 +18,13 @@ let test_argv () =
   check bool "no origin wildcard" false (List.exists (String.equal "--remote-allow-origins=*") argv);
   check bool "the profile" true (List.mem ("--user-data-dir=" ^ profile) argv);
   check bool "headed when asked" false
-    (List.mem "--headless=new" (P.argv ~chrome ~profile ~extension_id ~headless:false))
+    (List.mem "--headless=new" (P.argv ~chrome ~profile:(P.Server_profile profile) ~extension_id ~headless:false));
+  check bool "background tabs keep their timers" true (List.mem "--disable-background-timer-throttling" argv);
+  check bool "a server profile asks macOS for no Keychain" true (List.mem "--use-mock-keychain" argv);
+  let operator = P.argv ~chrome ~profile:(P.Operator_profile "/Users/me/chrome-work") ~extension_id ~headless:true in
+  check bool "an operator's profile keeps its own password store" false
+    (List.exists (fun flag -> List.mem flag operator) [ "--use-mock-keychain"; "--password-store=basic" ]);
+  check bool "the operator's profile" true (List.mem "--user-data-dir=/Users/me/chrome-work" operator)
 ;;
 
 let test_devtools_endpoint () =
@@ -45,7 +51,7 @@ let test_leftover () =
   (match P.owner_of_string (P.owner_to_string owner) with
    | Ok read -> check bool "the record round-trips" true (read = owner)
    | Error detail -> fail detail);
-  let running = String.concat " " (P.argv ~chrome ~profile ~extension_id ~headless:true) in
+  let running = String.concat " " (P.argv ~chrome ~profile:(P.Server_profile profile) ~extension_id ~headless:true) in
   check leftover "the recorded browser" (P.Stop_recorded_browser 4242) (P.leftover owner ~command:(Some running));
   check leftover "another profile" P.Not_the_recorded_browser
     (P.leftover owner ~command:(Some (chrome ^ " --user-data-dir=/elsewhere")));

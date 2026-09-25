@@ -250,6 +250,30 @@ let test_response_json_extractor_object_rejects_array () =
   | Ok _ -> Alcotest.fail "expected object shape error"
 ;;
 
+(* A tool result is an execution payload, not the answer. It used to be
+   joined to the Text block before parsing, so a turn carrying both could
+   not parse as JSON (#27868). *)
+let test_response_json_extractor_ignores_tool_result () =
+  let extract = Structured.response_json_extractor ~shape:Structured.Object_json () in
+  let resp =
+    make_response
+      [ ToolResult
+          { tool_use_id = "t1"
+          ; content = "tool stdout, not JSON"
+          ; outcome = Tool_succeeded
+          ; json = None
+          ; content_blocks = None
+          }
+      ; Text {|{"value": 42}|}
+      ]
+  in
+  match extract resp with
+  | Ok (`Assoc fields) ->
+    Alcotest.(check bool) "value field present" true (List.mem_assoc "value" fields)
+  | Ok _ -> Alcotest.fail "expected JSON object"
+  | Error e -> Alcotest.fail e
+;;
+
 let test_text_extractor_success () =
   let extract =
     Structured.text_extractor (fun s ->
@@ -348,6 +372,10 @@ let () =
             "response_json_extractor object rejects array"
             `Quick
             test_response_json_extractor_object_rejects_array
+        ; Alcotest.test_case
+            "response_json_extractor ignores tool result"
+            `Quick
+            test_response_json_extractor_ignores_tool_result
         ; Alcotest.test_case "text_extractor success" `Quick test_text_extractor_success
         ; Alcotest.test_case "text_extractor none" `Quick test_text_extractor_none
         ; Alcotest.test_case

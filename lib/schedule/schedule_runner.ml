@@ -240,29 +240,22 @@ type seen_primary_failure =
   | Seen_unparseable of string
 
 let load_seen_primary config =
-  let path = signal_seen_path config in
-  if not (Workspace_utils.path_exists config path)
-  then Error Seen_absent
-  else (
-    match Workspace_utils.read_json_result config path with
-    | Error msg -> Error (Seen_unparseable msg)
-    | Ok json ->
-      (match parse_seen_json json with
-       | Ok keys -> Ok keys
-       | Error msg -> Error (Seen_unparseable msg)))
+  match Workspace_utils.read_json_doc config (signal_seen_path config) with
+  | Error error -> Error (Seen_unparseable (Workspace_utils.json_doc_error_to_string error))
+  | Ok None -> Error Seen_absent
+  | Ok (Some json) ->
+    (match parse_seen_json json with
+     | Ok keys -> Ok keys
+     | Error msg -> Error (Seen_unparseable msg))
 ;;
 
 let load_seen_recovery config =
-  let path = signal_seen_recovery_path config in
-  if not (Workspace_utils.path_exists config path)
-  then None
-  else (
-    match Workspace_utils.read_json_result config path with
-    | Error _ -> None
-    | Ok json ->
-      (match parse_seen_json json with
-       | Ok keys -> Some keys
-       | Error _ -> None))
+  match Workspace_utils.read_json_doc config (signal_seen_recovery_path config) with
+  | Error _ | Ok None -> None
+  | Ok (Some json) ->
+    (match parse_seen_json json with
+     | Ok keys -> Some keys
+     | Error _ -> None)
 ;;
 
 (* Self-recovering read (#26686 item 1). An absent primary is a fresh store:

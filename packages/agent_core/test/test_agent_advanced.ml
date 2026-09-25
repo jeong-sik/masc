@@ -660,9 +660,12 @@ let test_assistant_checkpoint_failure_suppresses_release_and_tool () =
   Eio.Switch.run
   @@ fun sw ->
   let trace = Raw_trace.create ~path:trace_path () |> Result.get_ok in
+  let rejected = ref None in
   let checkpoint_sink (snapshot : Agent.checkpoint_snapshot) =
     match snapshot.stage with
-    | Agent.After_assistant_collected -> Error "assistant checkpoint rejected"
+    | Agent.After_assistant_collected ->
+      rejected := Some snapshot.checkpoint;
+      Error "assistant checkpoint rejected"
     | Agent.After_tool_results_appended
     | Agent.After_context_injection
     | Agent.After_rejected_response_dropped -> Ok ()
@@ -707,7 +710,17 @@ let test_assistant_checkpoint_failure_suppresses_release_and_tool () =
   Alcotest.(check (list string))
     "lease release suppressed"
     [ "provider" ]
-    (List.rev !lease_events)
+    (List.rev !lease_events);
+  (* The sink saw the collected turn, so live state already holds it. *)
+  match !rejected with
+  | None -> Alcotest.fail "assistant checkpoint was not emitted"
+  | Some checkpoint ->
+    let live = Agent.state agent in
+    Alcotest.(check int) "live turn count matches snapshot"
+      checkpoint.Checkpoint.turn_count live.turn_count;
+    Alcotest.(check int) "live messages match snapshot"
+      (List.length checkpoint.Checkpoint.messages) (List.length live.messages);
+    Alcotest.(check int) "turn advanced" 1 live.turn_count
 ;;
 
 let test_release_callback_failure_prevents_tool_execution () =

@@ -184,13 +184,31 @@ let cost_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=50)
     ("request_latency_ms", `Int latency_ms);
   ] @ tok_fields)
 
-let error_entry ~runtime_id ~ts () =
+(* The decision record's [provider_context]: the assigned lane, and the
+   runtime that answered ([`Not_observed] writes [null], as the producer does
+   for a turn with no answerer; [`Field_absent] leaves the field out;
+   [`Malformed v] writes a value that is neither). *)
+let provider_context_json ~runtime_id ~answerer =
+  let answerer_fields =
+    match answerer with
+    | `Answered executed_runtime_id ->
+      [ ("executed_runtime_id", `String executed_runtime_id) ]
+    | `Not_observed -> [ ("executed_runtime_id", `Null) ]
+    | `Field_absent -> []
+    | `Malformed value -> [ ("executed_runtime_id", value) ]
+  in
+  `Assoc
+    (("runtime_id", `String runtime_id)
+     :: ("selected_model", `Null)
+     :: answerer_fields)
+
+let error_entry ~runtime_id ~answerer ~ts () =
   `Assoc [
     ("ts_unix", `Float ts);
     ("tool_call_count", `Int 0);
     ("tools_used", `List []);
+    ("provider_context", provider_context_json ~runtime_id ~answerer);
     ("telemetry", `Assoc [
-      ("runtime_id", `String runtime_id);
       ("error_category", `String "timeout");
       ("outcome", `String "error");
       ("usage_reported", `Bool false);
@@ -237,7 +255,7 @@ let success_entry_without_usage ~model ~ts
     ] @ diag_fields));
   ]
 
-let success_entry_without_model ~runtime_id ~ts ?(tool_count = 1) () =
+let success_entry_without_model ~runtime_id ~answerer ~ts ?(tool_count = 1) () =
   let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ~model:runtime_id ~ts ()
   in
@@ -247,11 +265,11 @@ let success_entry_without_model ~runtime_id ~ts ?(tool_count = 1) () =
     ("turn_id", `Int keeper_turn_id);
     ("tool_call_count", `Int tool_count);
     ("tools_used", `List [ `String "masc_board_comment" ]);
+    ("provider_context", provider_context_json ~runtime_id ~answerer);
     ( "telemetry",
       `Assoc [
         ("model_used", `Null);
         ("selected_model", `Null);
-        ("runtime_id", `String runtime_id);
         ("outcome", `String "success");
         ("turn_count", `Int 1);
         ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
@@ -263,7 +281,7 @@ let success_entry_without_model ~runtime_id ~ts ?(tool_count = 1) () =
       ] );
   ]
 
-let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
+let sparse_provider_context_entry ~outcome ~runtime_id ~answerer ~ts () =
   let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ~model:runtime_id ~ts ()
   in
@@ -282,11 +300,7 @@ let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
     ("outcome", `String outcome);
     ("tool_call_count", `Int 0);
     ("tools_used", `List []);
-    ( "provider_context",
-      `Assoc [
-        ("runtime_id", `String runtime_id);
-        ("selected_model", `Null);
-      ] );
+    ("provider_context", provider_context_json ~runtime_id ~answerer);
     ( "telemetry",
       `Assoc ([
         ("outcome", `String outcome);
@@ -498,12 +512,13 @@ let test_error_turns_counted () =
     let ts = now_unix () in
     write_decisions path [
       success_entry ~model:"qwen-35b" ~ts:(ts -. 20.0) ();
-      error_entry ~runtime_id:"local_only" ~ts:(ts -. 10.0) ();
+      error_entry ~runtime_id:"local_only" ~answerer:(`Answered "local_only")
+        ~ts:(ts -. 10.0) ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 2 agg.total_entries;
     check int "total_error_entries" 1 agg.total_error_entries;
-    (* Error attributed to the dispatched runtime_id *)
+    (* Error attributed to the runtime that answered *)
     let error_model = List.find_opt (fun (s : M.model_stats) ->
       s.model_id = "local_only (runtime)") agg.models in
     check bool "error model found" true (Option.is_some error_model);
@@ -774,13 +789,14 @@ let test_coverage_diagnostics_survive_aggregation () =
     check string "recent json stage" "agent_core"
       (recent_json |> member "coverage_stage" |> to_string))
 
-let test_success_without_model_uses_runtime_attribution () =
+let test_success_without_model_names_the_answering_runtime () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
     let path = make_keeper_dir base "null_model" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry_without_model ~runtime_id:"runtime.glm-coding-with-spark"
+      success_entry_without_model ~runtime_id:"runtime.glm-coding"
+        ~answerer:(`Answered "runtime.glm-coding-with-spark")
         ~ts:(ts -. 5.0) ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
@@ -796,22 +812,6 @@ let test_success_without_model_uses_runtime_attribution () =
       (Some "missing_usage_and_inference")
       s.primary_coverage_reason)
 
-(* Same row, plus the candidate that actually answered on that lane. *)
-let executed_runtime_entry ~outcome ~runtime_id ~executed_runtime_id ~ts () =
-  match sparse_provider_context_entry ~outcome ~runtime_id ~ts () with
-  | `Assoc fields ->
-    `Assoc
-      (List.map
-         (fun (key, value) ->
-            match key, value with
-            | "provider_context", `Assoc nested ->
-              ( key
-              , `Assoc
-                  (("executed_runtime_id", `String executed_runtime_id) :: nested) )
-            | _ -> key, value)
-         fields)
-  | other -> other
-
 let test_provider_context_attribution_survives_sparse_telemetry () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
@@ -819,10 +819,10 @@ let test_provider_context_attribution_survives_sparse_telemetry () =
     let ts = now_unix () in
     write_decisions path [
       sparse_provider_context_entry ~outcome:"success"
-        ~runtime_id:"runtime.coding_plan"
+        ~runtime_id:"runtime.coding_plan" ~answerer:(`Answered "runtime.coding_plan")
         ~ts:(ts -. 5.0) ();
       sparse_provider_context_entry ~outcome:"error"
-        ~runtime_id:"runtime.coding_plan"
+        ~runtime_id:"runtime.coding_plan" ~answerer:(`Answered "runtime.coding_plan")
         ~ts:(ts -. 10.0) ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
@@ -846,13 +846,13 @@ let test_error_attribution_names_the_candidate_not_the_lane () =
     let path = make_keeper_dir base "executed_runtime" in
     let ts = now_unix () in
     write_decisions path [
-      executed_runtime_entry ~outcome:"error"
+      sparse_provider_context_entry ~outcome:"error"
         ~runtime_id:"glm-coding.glm-5.3"
-        ~executed_runtime_id:"claude_code.claude-sonnet-5"
+        ~answerer:(`Answered "claude_code.claude-sonnet-5")
         ~ts:(ts -. 5.0) ();
-      executed_runtime_entry ~outcome:"error"
+      sparse_provider_context_entry ~outcome:"error"
         ~runtime_id:"glm-coding.glm-5.3"
-        ~executed_runtime_id:"deepseek.deepseek-v4-flash"
+        ~answerer:(`Answered "deepseek.deepseek-v4-flash")
         ~ts:(ts -. 10.0) ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
@@ -865,6 +865,52 @@ let test_error_attribution_names_the_candidate_not_the_lane () =
       ; "deepseek.deepseek-v4-flash (runtime)"
       ]
       named)
+
+(* #38570: a turn with no answering runtime carries the same unobserved
+   label as the turn-latency counter's [runtime_profile], for errors and for
+   successes that surfaced no model. The assigned lane never stands in; a row
+   that does not record the answerer at all is refused, typed. *)
+let test_unobserved_answerer_is_not_the_lane () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "unobserved_runtime" in
+    let ts = now_unix () in
+    write_decisions path [
+      error_entry ~runtime_id:"glm-coding.glm-5.3" ~answerer:`Not_observed
+        ~ts:(ts -. 5.0) ();
+      success_entry_without_model ~runtime_id:"glm-coding.glm-5.3"
+        ~answerer:`Not_observed ~ts:(ts -. 10.0) ();
+    ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    check int "both rows retained" 2 agg.total_entries;
+    check (list string) "one bucket, shared with the latency label"
+      [ Runtime_answerer.to_label Runtime_answerer.Not_observed ^ " (runtime)" ]
+      (List.map (fun (s : M.model_stats) -> s.model_id) agg.models);
+    let refusal row =
+      match
+        Model_inference_metrics_parser.parse_telemetry_entry row ~since_unix:0.0
+      with
+      | Ok _ -> "accepted"
+      | Error error -> Model_inference_metrics_entry.parse_error_label error
+    in
+    check string "an error row with only the lane is refused"
+      "missing_error_model_attribution"
+      (refusal
+         (error_entry ~runtime_id:"glm-coding.glm-5.3" ~answerer:`Field_absent
+            ~ts ()));
+    check string "a model-less success row with only the lane is refused"
+      "missing_success_model"
+      (refusal
+         (success_entry_without_model ~runtime_id:"glm-coding.glm-5.3"
+            ~answerer:`Field_absent ~ts ()));
+    List.iter
+      (fun (label, value) ->
+         check string (label ^ ": a malformed answerer is refused as such, not as absent")
+           "invalid_executed_runtime_id"
+           (refusal
+              (error_entry ~runtime_id:"glm-coding.glm-5.3"
+                 ~answerer:(`Malformed value) ~ts ())))
+      [ "a number", `Int 5; "a blank string", `String "  " ])
 
 let test_cost_ledger_backfills_wall_tok_per_sec () =
   let base = test_dir () in
@@ -1012,6 +1058,39 @@ let test_duplicate_exact_identity_is_excluded_and_diagnosed () =
     | Ok diagnostics ->
       check int "all conflicting rows diagnosed" 3
         diagnostics.identity_conflict_rows)
+;;
+
+(* A failed first attempt and the winning one land in the same turn and may
+   share an ordinal. The winner's settlement pairs with the decision; the
+   loser's reading is its own spend and is counted, not dropped as a
+   conflict. *)
+let test_an_attempt_reading_beside_the_turn_is_not_a_conflict () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "attempt-reading" in
+    let ts = now_unix () in
+    write_decisions
+      path
+      [ success_entry ~model:"same-model" ~ts ~identity_seed:"attempt-turn" () ];
+    let attempt_row =
+      match cost_entry ~model:"same-model" ~ts:(ts -. 1.0) ~identity_seed:"attempt-turn" () with
+      | `Assoc fields ->
+        `Assoc
+          (("usage_projection", `String "resolved_attempt_delta")
+           :: ("lane_attempt_index", `Int 0)
+           :: ("reading_index", `Int 0)
+           :: List.remove_assoc "usage_projection" fields)
+      | json -> json
+    in
+    write_costs
+      base
+      [ cost_entry ~model:"same-model" ~ts ~identity_seed:"attempt-turn" (); attempt_row ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    check int "the paired turn and the attempt reading" 2 agg.total_entries;
+    match agg.cost_read with
+    | Error error ->
+      failf "cost store read failed: %s" (Dated_jsonl.read_error_to_string error)
+    | Ok diagnostics -> check int "no conflict" 0 diagnostics.identity_conflict_rows)
 ;;
 
 let test_cost_read_diagnostics_reach_api () =
@@ -1552,7 +1631,7 @@ let test_prompt_feedback_is_cost_independent () =
 let test_usage_signal_uses_tokens_not_cost () =
   let entry : Model_inference_metrics_entry.raw_entry =
     { model = "runtime"
-    ; inference_identity = None
+    ; inference_key = None
     ; ts_unix = 0.0
     ; outcome = "success"
     ; stop_reason = None
@@ -1612,12 +1691,14 @@ let () =
       test_case "prompt tps and peak memory aggregates" `Quick test_prompt_tps_and_peak_memory_aggregates;
       test_case "missing usage serializes unknowns" `Quick test_missing_usage_serializes_unknowns;
       test_case "coverage diagnostics survive aggregation" `Quick test_coverage_diagnostics_survive_aggregation;
-      test_case "success without model uses runtime attribution" `Quick
-        test_success_without_model_uses_runtime_attribution;
+      test_case "success without model names the answering runtime" `Quick
+        test_success_without_model_names_the_answering_runtime;
       test_case "provider_context attribution survives sparse telemetry" `Quick
         test_provider_context_attribution_survives_sparse_telemetry;
       test_case "error attribution names the candidate not the lane" `Quick
         test_error_attribution_names_the_candidate_not_the_lane;
+      test_case "unobserved answerer is not the lane" `Quick
+        test_unobserved_answerer_is_not_the_lane;
       test_case "decision parser reads current hw-decode field" `Quick
         test_hw_decode_parser_reads_current_field;
       test_case "cost parser reads current hw-decode field" `Quick
@@ -1636,6 +1717,8 @@ let () =
         test_nearby_equal_usage_without_identity_match_stays_distinct;
       test_case "duplicate exact identity is excluded" `Quick
         test_duplicate_exact_identity_is_excluded_and_diagnosed;
+      test_case "an attempt reading beside the turn is not a conflict" `Quick
+        test_an_attempt_reading_beside_the_turn_is_not_a_conflict;
       test_case "cost read diagnostics reach API" `Quick
         test_cost_read_diagnostics_reach_api;
       test_case "cost read failure is not empty success" `Quick

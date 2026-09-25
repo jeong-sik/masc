@@ -265,43 +265,41 @@ type load_outcome =
   | Loaded of state
   | Undecodable of string
 
+let read_state config path =
+  match Workspace_utils.read_json_doc config path with
+  | Error error -> Error (Workspace_utils.json_doc_error_to_string error)
+  | Ok None -> Ok None
+  | Ok (Some json) -> state_of_yojson json |> Result.map Option.some
+
 let load_state config : load_outcome =
   ensure_dirs config;
-  let read path =
-    let* json = Workspace_utils.read_json_result config path in
-    state_of_yojson json
-  in
-  let path = verifications_path config in
   let recovery = verifications_recovery_path config in
-  let recover primary_detail =
-    if Workspace_utils.path_exists config recovery then
-      match read recovery with
-      | Ok state ->
-          Log.Misc.warn "goal_verification: historical recovery read (%s) from %s"
-            primary_detail recovery;
-          Loaded state
-      | Error detail -> Undecodable (primary_detail ^ "; recovery: " ^ detail)
-    else Undecodable primary_detail
+  let recovered ~primary_detail = function
+    | Ok (Some state) ->
+        Log.Misc.warn "goal_verification: historical recovery read (%s) from %s"
+          primary_detail recovery;
+        Loaded state
+    | Ok None -> Undecodable primary_detail
+    | Error detail -> Undecodable (primary_detail ^ "; recovery: " ^ detail)
   in
-  if Workspace_utils.path_exists config path then
-    match read path with
-    | Ok state -> Loaded state
-    | Error detail -> recover detail
-  else if Workspace_utils.path_exists config recovery then
-    recover "primary ledger is missing"
-  else Loaded (default_state ())
+  match read_state config (verifications_path config) with
+  | Ok (Some state) -> Loaded state
+  | Error detail -> recovered ~primary_detail:detail (read_state config recovery)
+  | Ok None ->
+      (match read_state config recovery with
+       | Ok None -> Loaded (default_state ())
+       | (Ok (Some _) | Error _) as recovery_read ->
+           recovered ~primary_detail:"primary ledger is missing" recovery_read)
 
 let load_primary_state config =
   ensure_dirs config;
-  let path = verifications_path config in
-  if Workspace_utils.path_exists config path then
-    match Workspace_utils.read_json_result config path with
-    | Error detail -> Undecodable detail
-    | Ok json -> (match state_of_yojson json with
-        | Ok state -> Loaded state | Error detail -> Undecodable detail)
-  else if Workspace_utils.path_exists config (verifications_recovery_path config) then
-    Undecodable "primary ledger is missing while its recovery mirror exists"
-  else Loaded (default_state ())
+  match read_state config (verifications_path config) with
+  | Error detail -> Undecodable detail
+  | Ok (Some state) -> Loaded state
+  | Ok None ->
+      if Workspace_utils.path_exists config (verifications_recovery_path config) then
+        Undecodable "primary ledger is missing while its recovery mirror exists"
+      else Loaded (default_state ())
 
 let undecodable_store_error config detail =
   Printf.sprintf

@@ -462,6 +462,39 @@ let test_utf8_suffix_skips_a_partial_first_character () =
   check string "no budget, nothing kept" ""
     (String_util.utf8_suffix ~max_bytes:0 korean_title)
 
+(* [utf8_complete_prefix] is the head-side cut: a head buffer keeps the first
+   N bytes of Execute output and the byte after them is gone, so only the
+   last character's own lead byte can say it was cut. *)
+let test_utf8_complete_prefix_drops_a_cut_last_character () =
+  check string "two of three Hangul bytes go" "ab"
+    (String_util.utf8_complete_prefix "ab\xea\xb0");
+  check string "three of four emoji bytes go" ""
+    (String_util.utf8_complete_prefix "\xf0\x9f\x98");
+  check string "a whole last character stays" "a\xea\xb0\x80"
+    (String_util.utf8_complete_prefix "a\xea\xb0\x80");
+  check string "ASCII stays" "abc" (String_util.utf8_complete_prefix "abc");
+  check string "empty stays" "" (String_util.utf8_complete_prefix "")
+
+let test_utf8_complete_prefix_keeps_bytes_that_are_not_utf8 () =
+  check string "continuation bytes with no lead in reach stay" "\x80\x80\x80\x80"
+    (String_util.utf8_complete_prefix "\x80\x80\x80\x80");
+  check string "a byte that opens no sequence stays" "a\xff"
+    (String_util.utf8_complete_prefix "a\xff")
+
+(* Every byte cut of valid UTF-8 leaves a valid prefix, and only the cut
+   character goes. *)
+let test_utf8_complete_prefix_every_cut_is_valid () =
+  let text = "a가😀é나€z" in
+  for cut = 0 to String.length text do
+    let head = String.sub text 0 cut in
+    let kept = String_util.utf8_complete_prefix head in
+    if not (String_util.is_valid_utf8 kept) then
+      Alcotest.failf "cut %d kept invalid %S" cut kept;
+    if String.length head - String.length kept >= 4 then
+      Alcotest.failf "cut %d dropped %d bytes" cut
+        (String.length head - String.length kept)
+  done
+
 let () =
   run "string_util"
     [ ( "utf8_char_boundary",
@@ -543,4 +576,10 @@ let () =
           test_case "utf8_suffix cuts a Hangul tail between characters" `Quick
             test_utf8_suffix_hangul_tail;
           test_case "utf8_suffix skips a partial first character" `Quick
-            test_utf8_suffix_skips_a_partial_first_character ] ) ]
+            test_utf8_suffix_skips_a_partial_first_character;
+          test_case "utf8_complete_prefix drops a cut last character" `Quick
+            test_utf8_complete_prefix_drops_a_cut_last_character;
+          test_case "utf8_complete_prefix keeps bytes that are not UTF-8"
+            `Quick test_utf8_complete_prefix_keeps_bytes_that_are_not_utf8;
+          test_case "utf8_complete_prefix leaves every cut valid" `Quick
+            test_utf8_complete_prefix_every_cut_is_valid ] ) ]

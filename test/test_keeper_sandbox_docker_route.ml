@@ -715,6 +715,50 @@ let test_execute_rejects_factory_profile_drift_in_every_direction () =
 
 
 
+(* A promoted build names a new persistent container. Once it runs, the ones
+   an earlier build named are removed and the running one is kept; a listing
+   line that is not <id><tab><name> is reported, not skipped. *)
+let test_superseded_persistent_containers_are_removed () =
+  let dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) @@ fun () ->
+  let log_path = Filename.concat dir "docker.log" in
+  let script ~listing =
+    Printf.sprintf
+      "#!/bin/sh\n\
+       printf '%%s\\n' \"$*\" >> \"$MASC_KEEPER_TEST_DOCKER_LOG\"\n\
+       if [ \"$1\" = \"ps\" ]; then printf '%s'; exit 0; fi\n\
+       if [ \"$1\" = \"rm\" ]; then exit 0; fi\n\
+       printf 'unexpected docker invocation: %%s\\n' \"$1\" >&2\n\
+       exit 2\n"
+      listing
+  in
+  let remove () =
+    with_eio_fs @@ fun () ->
+    with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+    Keeper_sandbox_runtime.remove_superseded_persistent_containers
+      ~keeper_name:"acme-sandbox" ~base_path:dir ~keep:"masc-acme-new"
+      ~timeout_sec:5.0 ()
+  in
+  with_fake_docker (script ~listing:"id-old\\tmasc-acme-old\\nid-new\\tmasc-acme-new\\n")
+    (fun () ->
+       (match remove () with
+        | Ok () -> ()
+        | Error detail -> Alcotest.fail detail);
+       let removed =
+         read_file log_path |> String.split_on_char '\n'
+         |> List.filter (fun line -> String.length line > 3 && String.sub line 0 3 = "rm ")
+       in
+       Alcotest.(check (list string)) "only the superseded container is removed"
+         [ "rm -f -v id-old" ] removed;
+       Alcotest.(check bool) "the listing asks for this keeper's persistent containers" true
+         (message_mentions "masc.mcp.kind=persistent" (read_file log_path)));
+  with_fake_docker (script ~listing:"not-a-listing-line\\n") (fun () ->
+    match remove () with
+    | Ok () -> Alcotest.fail "an unreadable listing line was skipped"
+    | Error detail ->
+      Alcotest.(check bool) "the unreadable line is named" true
+        (message_mentions "not-a-listing-line" detail))
+
 let test_execute_routes_through_docker () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
@@ -2590,6 +2634,8 @@ let () =
         [
           Alcotest.test_case "rg no-match remains successful" `Quick
             test_rg_no_match_remains_successful_in_docker_route;
+          Alcotest.test_case "a promote's superseded persistent containers are removed" `Quick
+            test_superseded_persistent_containers_are_removed;
           Alcotest.test_case "unknown workspace op is unsupported before docker" `Quick
             test_unknown_workspace_op_is_unsupported_before_docker;
           Alcotest.test_case

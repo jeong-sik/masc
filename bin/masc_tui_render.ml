@@ -7421,7 +7421,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                (String.concat ", "
                   (List.map
                      (fun (first : Tui_decode.keeper_exact_lane_first) ->
-                       first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
+                       (* The marker leads: a narrow pane cuts the row's
+                          tail, and the slot id is the part it can lose. *)
+                       (if first.kel_offered then ""
+                        else "not offered, lane order \xc2\xb7 ")
+                       ^ first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
                        ^ first.kel_slot_id)
                      firsts))
            ^ Ansi.reset);

@@ -168,7 +168,7 @@ fi
 
 footer="$(printf '\n\n---\napprove-guard: head `%s` · `%s` · %d check-runs completed+success · workflow runs %s' \
   "$head" "$slot" "$n_runs" "$(IFS=,; echo "${wf_ids[*]}")")"
-[ -z "$replaced" ] || footer="${footer} · replaces own CHANGES_REQUESTED ${replaced}"
+[ -z "$replaced" ] || footer="${footer} · replaces review ${replaced}"
 if [ "$check_only" -eq 1 ]; then
   echo "WOULD APPROVE #${pr} head ${head} (${n_runs} check-runs, workflow runs ${wf_ids[*]})"
   exit 0

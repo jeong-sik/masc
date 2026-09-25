@@ -31,10 +31,6 @@ val feed : decoder -> char -> t option
     the marker has to be consumed, or the tail of the paste arrives as
     keystrokes -- and counted in [dropped] instead of kept. *)
 
-val finish_unterminated : decoder -> t
-(** Keep all bytes received so far, including a partial closing marker, when
-    the operator explicitly ends an incomplete paste. *)
-
 val snapshot_payload : decoder -> t
 (** Copy only confirmed payload bytes for a recoverable draft. A partial
     end marker remains in the decoder so later bytes can still close it. *)

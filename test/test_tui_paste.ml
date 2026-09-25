@@ -18,14 +18,15 @@ let of_string bytes =
     end
 ;;
 
-(* The reader feeds the decoder one byte at a time and ends an unterminated
-   paste with [finish_unterminated] on the operator's Ctrl-C. These tests do
-   the same, with the stream running dry standing in for that Ctrl-C. *)
+(* The reader feeds the decoder one byte at a time. When the operator's
+   Ctrl-C recovers a paste whose end marker never came, it restores
+   [snapshot_payload] as the draft. These tests do the same, with the stream
+   running dry standing in for that Ctrl-C. *)
 let read_from next_byte =
   let decoder = Masc_tui_paste.create () in
   let rec loop () =
     match next_byte () with
-    | None -> Masc_tui_paste.finish_unterminated decoder
+    | None -> Masc_tui_paste.snapshot_payload decoder
     | Some byte -> (
         match Masc_tui_paste.feed decoder byte with
         | Some paste -> paste
@@ -83,17 +84,12 @@ let test_a_broken_match_returns_its_bytes () =
   check string "the partial marker is text" "a\x1b[2b" paste.Masc_tui_paste.text
 ;;
 
-let test_a_partial_marker_before_the_end_is_text () =
+(* The recovered draft holds only confirmed payload. A partial end marker
+   stays in the decoder, where the late rest of the marker can still close
+   it; it is not typed into the draft. *)
+let test_a_partial_marker_is_not_in_the_recovered_draft () =
   let paste = read "tail\x1b[20" in
-  check string "kept as typed" "tail\x1b[20" paste.Masc_tui_paste.text
-;;
-
-let test_interrupted_decoder_keeps_partial_marker () =
-  let decoder = Masc_tui_paste.create () in
-  String.iter (fun byte -> ignore (Masc_tui_paste.feed decoder byte))
-    "tail\x1b[20";
-  let paste = Masc_tui_paste.finish_unterminated decoder in
-  check string "kept for the draft" "tail\x1b[20" paste.Masc_tui_paste.text
+  check string "payload only" "tail" paste.Masc_tui_paste.text
 ;;
 
 let test_snapshot_excludes_partial_marker_for_late_end () =
@@ -213,10 +209,8 @@ let () =
         ; test_case "the marker ends it" `Quick test_the_marker_ends_it
         ; test_case "a broken match returns its bytes" `Quick
             test_a_broken_match_returns_its_bytes
-        ; test_case "a partial marker before the end is text" `Quick
-            test_a_partial_marker_before_the_end_is_text
-        ; test_case "interrupted decoder keeps partial marker" `Quick
-            test_interrupted_decoder_keeps_partial_marker
+        ; test_case "a partial marker is not in the recovered draft" `Quick
+            test_a_partial_marker_is_not_in_the_recovered_draft
         ; test_case "snapshot excludes partial marker for late end" `Quick
             test_snapshot_excludes_partial_marker_for_late_end
         ; test_case "an unterminated paste keeps what arrived" `Quick

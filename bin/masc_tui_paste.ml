@@ -60,14 +60,6 @@ let contents decoder =
   { text = newlines_normalized (Buffer.contents decoder.text);
     dropped = decoder.dropped }
 
-let finish_unterminated decoder =
-  (* A terminal can lose the end marker partway through. Those bytes still
-     belong to the draft if the operator ends the stalled paste explicitly. *)
-  if decoder.matched > 0 then
-    keep decoder (String.sub end_marker 0 decoder.matched);
-  decoder.matched <- 0;
-  contents decoder
-
 let snapshot_payload decoder = contents decoder
 
 let feed decoder byte =

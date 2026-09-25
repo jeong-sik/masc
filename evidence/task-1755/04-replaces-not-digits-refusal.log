@@ -1,0 +1,4 @@
+REFUSED #5 head 0123456789abcdef0123456789abcdef01234567
+  - --replaces must be a review id (digits), got 'abc'
+  - --body file missing or empty
+rc=2

@@ -436,6 +436,16 @@ val count_noun : ?plural:string -> int -> string -> string
 (** [count_noun 1 "line"] is ["1 line"], [count_noun 2 "line"] is ["2 lines"].
     [?plural] names an irregular plural: [count_noun ~plural:"entries" 3 "entry"]. *)
 
+val compact_count : int -> string
+(** A figure read at a glance rather than counted digit by digit:
+    [compact_count 411465] is ["411.5k"], [compact_count 358] is ["358"].
+
+    Through 99,994,999,999 the result fits the six-character "≈%6s tok"
+    column. Larger counts widen. Each rung changes where the format below
+    it would round past that column: 999,950 reads ["1.00M"] rather than
+    ["1000.0k"]. {!Masc_tui_context_inspector}'s [format_tokens] delegates
+    to this function. *)
+
 val cut_mark : string
 (** What a cut leaves behind in place of the text it dropped.
 

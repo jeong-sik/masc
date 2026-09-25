@@ -608,6 +608,35 @@ let count_noun ?plural count singular =
   in
   Printf.sprintf "%d %s" count noun
 
+(* A token figure a reader reads at a glance rather than counts digit by
+   digit. Thousands keep a tenth so nearby readings such as 73.9k and 73.2k
+   remain distinct. *)
+let thousand = 1_000
+let million = 1_000_000
+
+(* Up to 99,994,999,999 the figure fits the six-character "\xe2\x89\x88%6s tok"
+   column. A figure changes rung as soon as the previous format would round
+   it to a seventh character: 999,950 reads "1.00M" rather than "1000.0k",
+   99,995,000 reads "100.0M" rather than "100.00M", and 999,950,000 reads
+   "1.00B" rather than "1000.0M".
+
+   The boundaries match the precision each column reserves, so two views of
+   the same token count do not disagree near a rounding threshold. *)
+let rung_billion = 999_950_000
+let rung_hundred_million = 99_995_000
+let rung_million = 999_950
+
+let compact_count n =
+  if n >= rung_billion then
+    Printf.sprintf "%.2fB" (float_of_int n /. 1_000_000_000.)
+  else if n >= rung_hundred_million then
+    Printf.sprintf "%.1fM" (float_of_int n /. float_of_int million)
+  else if n >= rung_million then
+    Printf.sprintf "%.2fM" (float_of_int n /. float_of_int million)
+  else if n >= thousand then
+    Printf.sprintf "%.1fk" (float_of_int n /. float_of_int thousand)
+  else string_of_int n
+
 let cut_mark = "…"
 let cut_mark_cells = display_width cut_mark
 

@@ -638,16 +638,11 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           model_input_measurement_of_string raw)
       in
       let* front_atom_digest =
-        nullable "front_atom_digest" fields (fun name json ->
-          match json with
-          | `Null -> Ok None
-          | _ ->
-            let* value = as_sha256_digest name json in
-            Ok (Some value))
+        nullable "front_atom_digest" fields as_sha256_digest
       in
       let* model_input_window =
         match transmitted_atoms, total_atoms, measurement, front_atom_digest with
-        | Some transmitted_atoms, Some total_atoms, Some measurement, Some front_atom_digest ->
+        | Some transmitted_atoms, Some total_atoms, Some measurement, front_atom_digest ->
           if transmitted_atoms > total_atoms
           then Error "turn_record: transmitted_atoms cannot exceed total_atoms"
           else if front_atom_digest = None && transmitted_atoms <> 0

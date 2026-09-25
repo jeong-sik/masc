@@ -54,6 +54,7 @@ type error_code =
   | Conflict              (** Resource state conflict (e.g. already claimed) *)
   | Rate_limited          (** Too many requests *)
   | Timeout               (** Operation timed out *)
+  | External_service_unavailable (** An external service or transport is unavailable *)
   | Not_implemented       (** Feature exists in schema but not in runtime *)
   | Internal_error        (** Unexpected server-side failure *)
   | Precondition_failed   (** Required precondition not met (e.g. workspace not session-bound) *)
@@ -68,6 +69,7 @@ let error_code_to_string = function
   | Conflict -> "conflict"
   | Rate_limited -> "rate_limited"
   | Timeout -> "timeout"
+  | External_service_unavailable -> "external_service_unavailable"
   | Not_implemented -> "not_implemented"
   | Internal_error -> "internal_error"
   | Precondition_failed -> "precondition_failed"
@@ -78,7 +80,8 @@ let failure_class_of_error_code : error_code -> Tool_result.tool_failure_class =
   | Validation_error | Not_found | Auth_required | Permission_denied ->
     Tool_result.Policy_rejection
   | Conflict | Precondition_failed -> Tool_result.Workflow_rejection
-  | Rate_limited | Timeout | Unavailable -> Tool_result.Dependency_unavailable
+  | Rate_limited | Timeout | External_service_unavailable | Unavailable ->
+    Tool_result.Dependency_unavailable
   | Internal_error | Not_implemented -> Tool_result.Runtime_failure
 
 (** {1 Raw JSON String Builders}

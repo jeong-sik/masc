@@ -189,6 +189,7 @@ type stream_event =
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
   | Usage_windows_reported of Runtime_provider_usage_window.report
+  | Conversation_compacted
   | Turn_finished of { text : string }
 
 let emit_stream_event on_stream_event event =
@@ -1300,7 +1301,21 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
       ~native_tool_attempted ~on_turn_started ~on_stream_event ~stream_started
       ~response_emitted
-  | "system" | "tool_progress" ->
+  | "system" ->
+    (* [compact_boundary] is the client's own record that it summarised the
+       conversation: what the session held as sent before it is now a
+       summary. Other system frames are informational. *)
+    let* subtype = optional_string "system message" "subtype" fields in
+    (match subtype with
+     | Some "compact_boundary" -> emit_stream_event on_stream_event Conversation_compacted
+     | Some _ | None -> ());
+    await_terminal
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
+      ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~stream_started
+      ~response_emitted
+  | "tool_progress" ->
     (* Claude Code emits [tool_progress] while a built-in tool is still
        running.  It is observation-only: tool ownership and completion still
        arrive through assistant/user messages.  Consume it as stream activity

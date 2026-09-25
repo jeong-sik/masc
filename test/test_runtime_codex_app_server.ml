@@ -4352,27 +4352,22 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
        check string "start config includes current context"
          (system_prompt ^ "\n\n" ^ posture_note ^ "\n\n" ^ envelope dynamic_context)
          start_instructions;
-       let current_prefix = "UPDATED_SYSTEM_PROMPT\n\n" ^ posture_note ^ "\n\n" ^ envelope "UPDATED_CONTEXT" in
-       check bool "resume replaces instructions and current context" true
-         (String.starts_with ~prefix:current_prefix resume_instructions);
-       let external_snapshot = resume_instructions |> String.split_on_char '\n'
-         |> List.find_map (fun line -> match Yojson.Safe.from_string line with
-           | `Assoc fields as json when List.assoc_opt "schema" fields =
-               Some (`String "masc.official-client-canonical-context.v1") -> Some json
-           | _ -> None | exception Yojson.Json_error _ -> None)
-         |> function Some value -> value | None -> fail "missing external canonical snapshot" in
-       let exact_messages = `List (List.map Keeper_official_client_context_codec.to_json native_history) in
-       check string "native exchange and completed effect receipt remain exact"
-         (Yojson.Safe.to_string exact_messages)
-         (Yojson.Safe.Util.member "messages" external_snapshot |> Yojson.Safe.to_string);
-       let expected_digest = exact_messages |> Yojson.Safe.to_string
-         |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+       (* The thread holds the conversation, so the resumed instructions name
+          only the current system prompt; the per-turn context rides in front
+          of the goal (checked below). *)
+       check string "resume sends the current instructions and no conversation"
+         ("UPDATED_SYSTEM_PROMPT\n\n" ^ posture_note)
+         resume_instructions;
+       let expected_digest =
+         `List (List.map Keeper_official_client_context_codec.to_json native_history)
+         |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
        (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"codex-fixture" with
         | Ok (Some {context_frontier=Some frontier; _}) ->
-          check string "durable frontier matches transmitted snapshot" expected_digest frontier.snapshot_sha256;
+          check string "durable frontier names the canonical history MASC held"
+            expected_digest frontier.snapshot_sha256;
           check int "frontier records all canonical messages" 4 frontier.message_count;
-          check bool "frontier records replaceable channel" true
-            (frontier.delivery = Keeper_official_client_session_store.Replaced_configuration);
+          check bool "frontier records that the thread holds the conversation" true
+            (frontier.delivery = Keeper_official_client_session_store.Held_by_vendor_session);
           check bool "only settled vendor turn acknowledges context" true
             (frontier.acknowledged_turn = Some {session_id="thread-1";turn_id="turn-2"})
         | Ok _ -> fail "missing durable context frontier"
@@ -4416,7 +4411,9 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
         | Absent | Invalid | Duplicate ->
           fail "dynamic context lost its typed provenance");
        check string "start prompt stays exact" goal (turn_prompt start_capture);
-       check string "resume prompt stays exact" goal (turn_prompt resume_capture))
+       check string "resume prompt carries the current context in front of the goal"
+         ("SYSTEM:\n" ^ envelope "UPDATED_CONTEXT" ^ "\n\n" ^ goal)
+         (turn_prompt resume_capture))
 ;;
 
 (* A changed tool surface must not RESUME the settled thread. It used to be

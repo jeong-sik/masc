@@ -118,6 +118,12 @@ let workspace_root ~(config : Workspace.config) ~(meta : keeper_meta) =
    bookkeeping namespace. This does not look at the keeper's tree: callers ask
    it only for a path the tree refused, so a name the tree accepts keeps its
    meaning whatever a declared root's spelling covers. *)
+let declared_path_of_endpoint (endpoint : Exec_ssh_endpoint.t) path =
+  if Filename.is_relative path
+  then None
+  else Exec_policy_paths.extra_root_path ~extra_roots:endpoint.allowed_paths path
+;;
+
 let declared_endpoint_path ~(config : Workspace.config) ~(meta : keeper_meta) path =
   match meta.sandbox_profile with
   | Docker | Micro_vm -> Ok None
@@ -129,7 +135,7 @@ let declared_endpoint_path ~(config : Workspace.config) ~(meta : keeper_meta) pa
         Keeper_sandbox_ssh.resolve_endpoint
           ~base_path:config.base_path ~keeper_name:meta.name
       in
-      Ok (Exec_policy_paths.extra_root_path ~extra_roots:endpoint.allowed_paths path)
+      Ok (declared_path_of_endpoint endpoint path)
 ;;
 
 (* A file tool names a path with [path] and an optional [cwd]. Only an

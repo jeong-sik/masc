@@ -19,6 +19,8 @@ val invalid_sha256_to_string : invalid_sha256 -> string
 type fetch_error =
   | Invalid_sha256 of invalid_sha256
   | Owned_read_failed of Fs_compat.owned_regular_file_read_error
+  | Too_large of { path : string; actual : int; maximum : int }
+  | Invalid_max_bytes of int
   | Integrity_mismatch of {
       path : string;
       expected : string;
@@ -126,8 +128,9 @@ val put_file_durable : t -> path:string -> mime:string -> Tool_output.artifact_r
     raise [Sys_error] without returning a reference. Invalid media types raise
     [Invalid_argument]; cancellation propagates.
 
-    This bounds ingestion memory only. The first uncached {!fetch_range} still
-    validates its artifact with a whole-file read. *)
+    This bounds ingestion memory only. The first uncached {!fetch_range}
+    validates its artifact with a streaming digest, not a whole-file
+    materialisation. *)
 
 module For_testing : sig
   val put_file_durable
@@ -147,6 +150,19 @@ val fetch : t -> sha256:string -> (string option, fetch_error) result
     parent chain and [lstat]/[fstat] identity before and after descriptor I/O.
     Read and content-integrity failures remain typed. Cancellation propagates. *)
 
+val fetch_bounded :
+  t -> sha256:string -> max_bytes:int -> (string option, fetch_error) result
+(** Validate the digest while reading at most [max_bytes] through one owned
+    descriptor. An oversized file returns [Too_large] before whole-file
+    allocation. Negative bounds return [Invalid_max_bytes]. This does not
+    populate the snapshot cache used by {!fetch_range}. *)
+
+val max_served_bytes : int
+(** Largest artifact the HTTP artifact routes materialise in one response.
+    A writer that records a reference for a reader behind those routes — a
+    Board attachment, which the dashboard opens only through them — refuses
+    anything larger, so every accepted reference is one the reader can open. *)
+
 type range =
   { content : string
   ; total_bytes : int
@@ -159,12 +175,15 @@ val fetch_range :
   max_bytes:int ->
   (range option, fetch_error) result
 (** Read at most [max_bytes] from [offset]. The first uncached read performs a
-    whole-file sha256 validation; later pages whose owned descriptor snapshot
-    is unchanged use bounded range I/O. The validation cache is bounded, so an
-    evicted or changed snapshot is revalidated before any bytes are returned,
-    preserving {!fetch}'s content-address integrity without hashing the whole
-    artifact on every page. Bounds and filesystem failures remain typed.
-    Cancellation propagates. *)
+    streaming whole-file sha256 validation through a fixed-size buffer and
+    never materialises the artifact; later pages whose owned descriptor
+    snapshot is unchanged use bounded range I/O. A nonexistent shard fails
+    fast on the initial range-read descriptor open, before any content is
+    read. The validation cache is bounded, so an evicted or changed snapshot
+    is revalidated before any bytes are returned, preserving {!fetch}'s
+    content-address integrity without hashing the whole artifact on every
+    page. Bounds and filesystem failures remain typed. Cancellation
+    propagates. *)
 
 val list_all : t -> string list
 (** List all sha256 hashes currently in the store. O(n) in store size.

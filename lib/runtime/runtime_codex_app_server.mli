@@ -144,6 +144,12 @@ type turn_result =
   ; usage : turn_usage option
     (* The turn's thread/tokenUsage/updated frames, folded; [None] when none
        arrived before turn/completed. *)
+  ; model_context_window : int option
+    (* The model window the newest of those frames named
+       ([tokenUsage.modelContextWindow]), apart from MASC's own shaping
+       ceiling; [None] when none named one. The context that window holds is
+       the newest [last]: its [input_tokens + output_tokens], or the
+       estimate after a compaction. Never the thread's cumulative total. *)
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =

@@ -522,19 +522,21 @@ let test_tools_footer_carries_the_keeper_axis () =
     (Masc_tui_keys.footer_hints Tools)
 
 let test_resources_footer_steps_through_detail () =
-  let tail =
-    "  h/l:pane  Ctrl-W:focus  J/K:scroll text  [ / ]:previous / next"
-    ^ "  PgUp/PgDn:page  Home/End:top/bottom  Enter:read  Esc:back"
-  in
+  let panes = "  h/l:pane  Ctrl-W:focus  J/K:scroll text" in
+  (* [[ / ]] reads the resource before or after the open one, and the
+     dispatcher answers it only with the text focused, so the list footer
+     does not offer it. *)
+  let step = "  [ / ]:previous / next" in
+  let tail = "  PgUp/PgDn:page  Home/End:top/bottom  Enter:read  Esc:back" in
   let meta = "  r:reload  Tab:next  q:quit" in
-  check str "list names its search and adjacent detail navigation"
-    ("j/k:move" ^ tail ^ "  /:find  n / N:next / previous match" ^ meta)
+  check str "list names its search and not the adjacent-detail step"
+    ("j/k:move" ^ panes ^ tail ^ "  /:find  n / N:next / previous match" ^ meta)
     (Masc_tui_keys.footer_hints_resources ~detail_focus:false);
   (* The text has no cursor for a match to land on, so it says no [/] --
      the same answer [surface_row_texts] gives for that focus. Both ends
      still answer Home and End, which move the reading. *)
-  check str "the text names scrolling without a row search"
-    ("j/k:scroll text" ^ tail ^ meta)
+  check str "the text names scrolling and the step it answers"
+    ("j/k:scroll text" ^ panes ^ step ^ tail ^ meta)
     (Masc_tui_keys.footer_hints_resources ~detail_focus:true)
 
 (* Changes drew a literal in the renderer, and a literal names a fixed set at

@@ -1154,6 +1154,7 @@ let run_best_effort
       ?(on_cli_input_limit = fun _ -> ())
       ?(on_not_committed = fun _ -> ())
       ?(on_continuity_committed = fun ~served_by:_ _ -> ())
+      ?(on_context_committed = fun _ -> ())
       ?durable_range_id
       ?official_range_id
       ?cli_runner
@@ -1306,6 +1307,7 @@ let run_best_effort
                   proposed) with
               | Ok working ->
                 context_write := Committed (Keeper_librarian_context.version working);
+                on_context_committed (Keeper_librarian_context.version working);
                 (match Domain_pool_ref.submit_io_or_inline (fun () ->
                    Keeper_librarian_context_recall.publish ~base_path ~keepers_dir ~keeper_name:keeper_id working) with
                  | Ok () -> ()

@@ -190,6 +190,7 @@
  (libraries
   alcotest
   masc
+  masc.masc_core
   masc.runtime
   masc_server
   masc.skill_config
@@ -2542,7 +2543,7 @@
 
 (include stanzas/test_machine_checkpoint.inc)
 
-(include stanzas/test_msx_frame_route.inc)
+(include stanzas/test_msx_routes.inc)
 
 (include stanzas/test_lane_addon_live_route.inc)
 
@@ -5809,7 +5810,7 @@
 (test
  (name test_skill_source_config)
  (modules test_skill_source_config)
- (libraries alcotest masc.skill_config masc.keeper_toml yojson))
+ (libraries alcotest masc.skill_config masc.keeper_toml masc.masc_core yojson))
 
 (test
  (name test_skill_source_runtime_integration)

@@ -8690,6 +8690,9 @@ type keeper_exact_lane_first = {
   kel_keeper : string;
   kel_lane_id : string;
   kel_slot_id : string;
+  kel_offered : bool;
+      (** [false]: the published lane no longer offers [kel_slot_id], so the
+          lane walks its declared order and this row has no effect. *)
 }
 
 let decode_keeper_gate_settings json =
@@ -8732,7 +8735,8 @@ let decode_keeper_gate_settings json =
       let* kel_keeper = required_string_field item "keeper_name" in
       let* kel_lane_id = required_string_field item "lane_id" in
       let* kel_slot_id = required_string_field item "slot_id" in
-      Ok { kel_keeper; kel_lane_id; kel_slot_id })
+      let* kel_offered = required_bool_field item "offered" in
+      Ok { kel_keeper; kel_lane_id; kel_slot_id; kel_offered })
   in
   Ok (modes, exact_lanes)
 

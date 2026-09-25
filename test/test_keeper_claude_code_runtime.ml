@@ -2555,6 +2555,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
   ; selected_model = None
   ; finish_reason = Some "completed"
   ; context_window = None
+  ; provider_context_window = None
   ; price_input_per_million = None
   ; price_output_per_million = None
   ; request_latency_ms = None

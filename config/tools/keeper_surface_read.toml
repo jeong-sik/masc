@@ -12,8 +12,8 @@ type = "string"
 required = true
 description = """
 Lane label exactly as shown in Connected Surfaces or chat history source: \
-'dashboard', 'discord', 'slack', or another connector's channel label. Rows \
-written before source labelling carry no label and are not returned."""
+'dashboard', 'discord', 'slack', or another connector's channel label. Only \
+rows with a typed surface whose lane label matches are returned."""
 
 [[params]]
 name = "limit"

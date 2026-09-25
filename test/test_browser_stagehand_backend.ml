@@ -15,11 +15,15 @@ type fake_session = { mutable stopped : bool; log : Session.event -> unit }
 type opening = Opens | Fails | Raises
 
 exception Opener_bug
+exception Close_bug
+
+(* How the fake runtime meets stagehand.close. *)
+type closing = Answers | Silent | Raises_on_close
 
 type behaviour =
   { mutable opening : opening
   ; mutable open_gate : unit Eio.Promise.t option
-  ; mutable close_answers : bool
+  ; mutable close : closing
   ; mutable act_cancelled : bool
   }
 
@@ -42,7 +46,7 @@ let with_backend ?(configure = ignore) f =
   let clock = env#clock in
   Eio.Switch.run
   @@ fun sw ->
-  let behaviour = { opening = Opens; open_gate = None; close_answers = true; act_cancelled = false } in
+  let behaviour = { opening = Opens; open_gate = None; close = Answers; act_cancelled = false } in
   configure behaviour;
   let sessions = ref [] in
   let never, _ = Eio.Promise.create () in
@@ -63,7 +67,10 @@ let with_backend ?(configure = ignore) f =
     | Wire.Context_active_page -> Ok page
     | Wire.Page_evaluate _ -> Ok summary
     | Wire.Close ->
-      if behaviour.close_answers then Ok (`Assoc [ "closed", `Bool true ]) else Eio.Promise.await never
+      (match behaviour.close with
+       | Answers -> Ok (`Assoc [ "closed", `Bool true ])
+       | Silent -> Eio.Promise.await never
+       | Raises_on_close -> raise Close_bug)
     | Wire.Act _ ->
       (match Eio.Promise.await never with
        | answer -> answer
@@ -256,13 +263,47 @@ let test_a_queued_caller_leaves_the_session_open () =
 ;;
 
 let test_close_does_not_wait_forever () =
-  with_backend ~configure:(fun behaviour -> behaviour.close_answers <- false)
+  with_backend ~configure:(fun behaviour -> behaviour.close <- Silent)
   @@ fun h ->
   ignore (data (Backend.execute h.backend open_));
   let closed = data (Backend.execute h.backend Lane.Session_close) in
   check bool "closed" true (flag "closed" closed);
   check bool "the runtime's silence is reported" true (text "runtime" closed <> "closed");
   check bool "the browser stopped anyway" true (the_session h).stopped
+;;
+
+(* A close whose runtime call raised still stops the browser and leaves the
+   backend closed, not stuck closing. *)
+let test_close_that_raises_still_closes () =
+  with_backend ~configure:(fun behaviour -> behaviour.close <- Raises_on_close)
+  @@ fun h ->
+  ignore (data (Backend.execute h.backend open_));
+  let closed = data (Backend.execute h.backend Lane.Session_close) in
+  check bool "closed" true (flag "closed" closed);
+  check bool "the failure is reported" true (String.starts_with ~prefix:"did not close" (text "runtime" closed));
+  check bool "the browser stopped" true (the_session h).stopped;
+  h.behaviour.close <- Answers;
+  check bool "the next open starts a new session" false (flag "reused" (data (Backend.execute h.backend open_)))
+;;
+
+(* A session that stopped working is let go: its browser stops, status keeps
+   the reason, and the next open starts a new session instead of reusing
+   one every page verb would find gone. *)
+let test_an_ended_session_is_let_go () =
+  with_backend
+  @@ fun h ->
+  ignore (data (Backend.execute h.backend open_));
+  let first = the_session h in
+  first.log (Session.Worker_detached);
+  h.settle ();
+  check bool "the browser stopped" true first.stopped;
+  let status = data (Backend.execute h.backend Lane.Session_status) in
+  check bool "closed" false (flag "open" status);
+  check string "why" "the service worker went away" (text "ended" status);
+  check bool "the next open is new" false (flag "reused" (data (Backend.execute h.backend open_)));
+  check int "two sessions" 2 (List.length !(h.sessions));
+  check bool "a working session says nothing ended" true
+    (Yojson.Safe.Util.member "ended" (data (Backend.execute h.backend Lane.Session_status)) = `Null)
 ;;
 
 let test_status_reports_an_ended_session () =
@@ -296,6 +337,8 @@ let () =
       test_case "page verbs take turns" `Quick test_page_verbs_take_turns;
       test_case "a caller who leaves while queued leaves the session open" `Quick test_a_queued_caller_leaves_the_session_open;
       test_case "status reports why a session ended" `Quick test_status_reports_an_ended_session;
+      test_case "a close that raises still closes" `Quick test_close_that_raises_still_closes;
+      test_case "an ended session is let go" `Quick test_an_ended_session_is_let_go;
       test_case "status reports an answer the session could not deliver" `Quick test_status_reports_an_undelivered_answer;
     ];
     "callers", [ test_case "a sentence whose caller leaves retires its session" `Quick test_sentence_caller_retires_its_session ];

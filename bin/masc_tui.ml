@@ -843,7 +843,11 @@ let read_apc_body reader =
 
 (** Read one key, one paste, or one thing the terminal said back. *)
 let read_input ?(timeout = 0.1) reader () : input_event option =
-  Eio_guard.run_in_systhread ~label:"tui-read-key" (fun () ->
+  (* The reader belongs to this fiber. Keeping it here lets readiness use
+     [await_readable] and the Eio timer; moving the whole decoder to a system
+     thread also moves buffered keys and every frame-deadline poll there.
+     Only readiness races the timer: the consuming Unix.read stays after it. *)
+  Eio_guard.with_named_switch "tui-read-key" (fun () ->
       let key name = Some (Key name) in
       let rec continue_paste paste =
         match take_input_byte reader ~timeout with
@@ -5469,7 +5473,7 @@ let refresh_browser_lane state ~mailbox =
   | Some view when not (Browser_lane_view.busy view) ->
       state.browser_lane <- Some (Browser_lane_view.refresh view);
       launch_browser_lane state ~mailbox
-        (match view.source with Live -> Discover Read_after_discovery | Automation -> Read)
+        (match view.source with Live -> Discover Read_after_discovery | Automation | Stagehand -> Read)
   | Some _ | None -> ()
 
 let open_browser_lane state ~mailbox =
@@ -7826,7 +7830,8 @@ let launch_runtime_lane_write state ~mailbox ~written write =
 let runtime_picker_close_keys = [ "e"; "E" ]
 
 let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane_pick)
-    ~runtime_id ~existing =
+    ~(runtime : Masc.Tui_decode.runtime_option) ~existing =
+  let runtime_id = runtime.Masc.Tui_decode.ro_id in
   let lane = Masc_tui_types.runtime_lane_pick_name pick in
   let written =
     match pick with
@@ -7835,6 +7840,11 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
     | Masc_tui_types.Pick_media_failover | Masc_tui_types.Pick_route_default ->
         Masc_tui_types.Runtime_surface_list
   in
+  match Masc_tui_types.runtime_pick_availability state pick runtime with
+  | Masc_tui_types.Pick_refused detail ->
+    (* Drawn disabled in the picker; the writer would refuse it anyway. *)
+    state.runtime_lane_notice <- Some (Masc_tui_types.Lane_write_refused detail)
+  | Masc_tui_types.Pick_available ->
   if Masc_tui_types.runtime_lane_write_busy state then
     (* A conversation lane's write is [existing] plus the pick, and
        [existing] is the order the list last read; writing it before the
@@ -9516,7 +9526,8 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
     | Some (width, height) when width > 0 && height > 0 ->
         (match shot.source with
          | Browser_lane_view.Live -> "click: link   drag: requires automation"
-         | Browser_lane_view.Automation -> "click: link   drag: move")
+         | Browser_lane_view.Automation -> "click: link   drag: move"
+         | Browser_lane_view.Stagehand -> "click/drag: not served on the stagehand lane")
     | _ -> "click/drag unavailable: terminal cell geometry unknown" in
   let wheel_hint = match !image_cell_pixels with
     | Some (width,height) when width > 0 && height > 0 -> "wheel:pane"
@@ -20761,8 +20772,7 @@ and is loaded on demand through keeper_skill.
                      state.runtime_lane_pick <- Some (pick, list)
                  | Masc_tui_pick_list.Chosen runtime ->
                      launch_runtime_lane_pick state ~mailbox:async_messages
-                       ~pick ~runtime_id:runtime.Masc.Tui_decode.ro_id
-                       ~existing:already
+                       ~pick ~runtime ~existing:already
                  | Masc_tui_pick_list.Dismissed ->
                      state.runtime_lane_pick <- None))
        | Some k

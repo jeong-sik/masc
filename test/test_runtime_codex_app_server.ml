@@ -3212,6 +3212,22 @@ let run_production_keeper_turn_with_predecessor ~http_requests ~base_path ~trace
     ~http_requests ~base_path ~trace_id ~user_message ~cli_path ~model ~turn_instructions
 ;;
 
+(* The turn's result and the settlement it came out in, whose readings the
+   Keeper resolves the turn's spend from. *)
+let run_production_keeper_turn_settled ~base_path ~trace_id ~user_message ~cli_path ~model
+    ~turn_instructions =
+  let settled = ref None in
+  let result =
+    run_production_keeper_turn_with_projection ~write_cost_ledger:false
+      ~after_turn:(fun settlement -> settled := Some settlement)
+      ~dynamic_context_for_tools:None ~http_requests:None ~base_path ~trace_id ~user_message
+      ~cli_path ~model ~turn_instructions
+  in
+  match !settled with
+  | Some settlement -> result, settlement
+  | None -> fail "the production turn settled nothing"
+;;
+
 let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~model
     ~turn_instructions =
   run_production_keeper_turn_with_predecessor ~http_requests:None ~base_path
@@ -5095,7 +5111,7 @@ let test_production_keeper_reports_codex_token_usage () =
          ]
          (fun cli_path ->
             match
-              run_production_keeper_turn
+              run_production_keeper_turn_settled
                 ~base_path
                 ~trace_id:"codex-production-usage-1"
                 ~user_message:
@@ -5104,18 +5120,34 @@ let test_production_keeper_reports_codex_token_usage () =
                 ~model:"gpt-fixture"
                 ~turn_instructions:None
             with
-            | Error error -> fail (Agent_core.Error.to_string error)
-            | Ok result ->
+            | Error error, _ -> fail (Agent_core.Error.to_string error)
+            | Ok result, settlement ->
               check bool "usage reported" true result.Keeper_agent_run.usage_reported;
               check int "thread input" 9000 result.usage.input_tokens;
               check int "thread output" 700 result.usage.output_tokens;
               check int "thread cache read" 8000 result.usage.cache_read_input_tokens;
               check string "conversation-cumulative scope" "conversation_cumulative"
                 (Runtime_usage_scope.to_string result.usage_scope);
-              (match result.usage_basis with
-               | Keeper_usage_resolution.Conversation_counter
-                   { conversation_id = "thread-1"; position = Keeper_usage_resolution.Fresh; _ } -> ()
-               | _ -> fail "a Codex spend is not keyed by its thread and position");
+              (match
+                 (Keeper_turn_spend.resolve_turn
+                    ~cursor:None
+                    ~observed_at:0.0
+                    settlement.Keeper_agent_run.spend)
+                   .turn_reading
+               with
+               | Some
+                   { reading =
+                       { basis =
+                           Keeper_usage_resolution.Conversation_counter
+                             { conversation_id = "thread-1"
+                             ; position = Keeper_usage_resolution.Fresh
+                             ; _
+                             }
+                       ; _
+                       }
+                   ; _
+                   } -> ()
+               | Some _ | None -> fail "a Codex spend is not keyed by its thread and position");
               (match result.runtime_observation with
                | Some observation ->
                  check string "observation scope" "conversation_cumulative"
@@ -5532,12 +5564,12 @@ let test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread () =
   let run_turn ~trace_id ~user_message lines =
     with_fixture lines (fun cli_path ->
       match
-        run_production_keeper_turn
+        run_production_keeper_turn_settled
           ~base_path ~trace_id ~user_message ~cli_path ~model:"gpt-fixture"
           ~turn_instructions:None
       with
-      | Error error -> fail (Agent_core.Error.to_string error)
-      | Ok result -> result)
+      | Error error, _ -> fail (Agent_core.Error.to_string error)
+      | Ok _, settlement -> settlement.Keeper_agent_run.spend)
   in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -5552,24 +5584,29 @@ let test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread () =
            [ init_result; account_chatgpt; thread_result; resumed_turn_result
            ; resumed_item_completed; resumed_token_usage_updated; resumed_turn_completed ]
        in
-       (match second.Keeper_agent_run.usage_basis with
-        | Keeper_usage_resolution.Conversation_counter
-            { conversation_id = "thread-1"; position = Keeper_usage_resolution.Resumed; _ } -> ()
-        | _ -> fail "the resumed turn is not keyed to its thread as resumed");
-       let resolve ~cursor (result : Keeper_agent_run.run_result) =
-         Keeper_usage_resolution.resolve
-           ~cursor
-           ~basis:result.usage_basis
-           ~observation:(Some (Keeper_usage_resolution.sample_of_api_usage result.usage))
-           ~observed_at:0.0
+       let first_turn =
+         Keeper_turn_spend.resolve_turn ~cursor:None ~observed_at:0.0 first
        in
-       let _, cursor = resolve ~cursor:None first in
-       let resolution, _ = resolve ~cursor second in
-       match resolution.Keeper_usage_resolution.delta with
-       | Some delta ->
+       let second_turn =
+         Keeper_turn_spend.resolve_turn ~cursor:first_turn.cursor ~observed_at:0.0 second
+       in
+       match second_turn.turn_reading with
+       | Some
+           { reading =
+               { basis =
+                   Keeper_usage_resolution.Conversation_counter
+                     { conversation_id = "thread-1"
+                     ; position = Keeper_usage_resolution.Resumed
+                     ; _
+                     }
+               ; _
+               }
+           ; resolution = { delta = Some delta; _ }
+           ; _
+           } ->
          check int "input the second turn added" 2000 delta.input_tokens;
          check int "output the second turn added" 40 delta.output_tokens
-       | None -> fail "the resumed turn resolved no spend")
+       | Some _ | None -> fail "the resumed turn is not resolved against its thread")
 ;;
 
 let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =

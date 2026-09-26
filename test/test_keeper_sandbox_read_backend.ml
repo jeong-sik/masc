@@ -300,7 +300,6 @@ let test_read_directory_names_a_real_listing_tool () =
    (exercised without invoking docker) ──────────────────────────── *)
 
 let test_run_command_empty_argv_errors () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
@@ -330,8 +329,11 @@ let test_run_command_empty_image_errors () =
   with
   | Ok _ -> Alcotest.fail "expected image-config error"
   | Error msg ->
-      Alcotest.(check bool) "mentions docker image" true
-        (let needle = "docker image" in
+      (* An absent/blank sandbox_image is Keeper_sandbox_image_resolver's
+         Not_declared case, not a raw docker-image complaint: the image is
+         now a catalog name, not a tag the caller hands docker directly. *)
+      Alcotest.(check bool) "mentions sandbox_image is not set" true
+        (let needle = "sandbox_image is not set" in
          let nlen = String.length needle in
          let mlen = String.length msg in
          let rec loop i =
@@ -1881,14 +1883,38 @@ let test_docker_workspace_state_mount_args_expose_safe_subset () =
   Alcotest.(check bool) "does not mount auth" false
     (List.exists (fun spec -> String_util.contains_substring spec "/auth/") specs)
 
-let test_docker_preflight_reports_ready_image () =
+(* An image name the host catalog could not resolve is the image check's
+   failure, and its reason reaches both the record and the admission refusal
+   rather than being dropped for a missing tag. *)
+let test_docker_preflight_keeps_the_unresolved_reason () =
   with_fake_docker fake_docker_preflight_ok_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  match Keeper_sandbox_runtime.docker_preflight ~timeout_sec:5.0 () with
+  let reason = "sandbox_image \"rust\" is not in the image catalog" in
+  match Keeper_sandbox_runtime.docker_preflight ~image:(Error reason) ~timeout_sec:5.0 () with
+  | None -> Alcotest.fail "expected docker preflight report"
+  | Some preflight ->
+    Alcotest.(check bool) "not ok" false preflight.ok;
+    Alcotest.(check (result string string)) "the reason is kept" (Error reason)
+      preflight.image;
+    (match Keeper_sandbox_runtime.docker_preflight_rejection preflight with
+     | None -> Alcotest.fail "an unresolved image was not refused"
+     | Some refusal ->
+       Alcotest.(check bool) "the refusal carries the reason" true
+         (String_util.contains_substring refusal reason));
+    let json = Keeper_sandbox_runtime.docker_preflight_to_yojson preflight in
+    Alcotest.(check string) "the JSON names the reason" reason
+      (Yojson.Safe.Util.(json |> member "image_unresolved" |> to_string))
+
+let test_docker_preflight_reports_ready_image () =
+  with_fake_docker fake_docker_preflight_ok_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  match Keeper_sandbox_runtime.docker_preflight ~image:(Ok "alpine:test") ~timeout_sec:5.0 () with
   | None -> Alcotest.fail "expected docker preflight report"
   | Some preflight ->
     Alcotest.(check bool) "preflight ok" true preflight.ok;
@@ -1908,30 +1934,24 @@ let test_docker_preflight_reports_ready_image () =
 let test_docker_preflight_respects_custom_image_argument () =
   with_fake_docker fake_docker_preflight_custom_image_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  (match Keeper_sandbox_runtime.docker_preflight ~timeout_sec:5.0 () with
-   | None -> Alcotest.fail "expected docker preflight report"
-   | Some preflight ->
-     Alcotest.(check bool) "default image fails on custom mock" false preflight.ok;
-     Alcotest.(check bool) "default image absent" false preflight.image_present);
-  match Keeper_sandbox_runtime.docker_preflight ~image:"custom:test" ~timeout_sec:5.0 () with
+  match Keeper_sandbox_runtime.docker_preflight ~image:(Ok "custom:test") ~timeout_sec:5.0 () with
   | None -> Alcotest.fail "expected docker preflight report"
   | Some preflight ->
     Alcotest.(check bool) "custom image succeeds" true preflight.ok;
     Alcotest.(check bool) "custom image present" true preflight.image_present;
-    Alcotest.(check string) "preflight record image matches custom" "custom:test" preflight.image
+    Alcotest.(check (result string string)) "preflight record image matches custom"
+      (Ok "custom:test") preflight.image
 
 let test_docker_preflight_surfaces_image_inspect_error () =
   with_fake_docker fake_docker_preflight_missing_image_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  match Keeper_sandbox_runtime.docker_preflight ~timeout_sec:5.0 () with
+  match Keeper_sandbox_runtime.docker_preflight ~image:(Ok "missing:test") ~timeout_sec:5.0 () with
   | None -> Alcotest.fail "expected docker preflight report"
   | Some preflight ->
       Alcotest.(check bool) "preflight fails" false preflight.ok;
@@ -1948,11 +1968,10 @@ let test_docker_preflight_surfaces_image_inspect_error () =
 let test_docker_preflight_does_not_infer_daemon_state_from_stderr () =
   with_fake_docker fake_docker_preflight_daemon_unavailable_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  match Keeper_sandbox_runtime.docker_preflight ~timeout_sec:5.0 () with
+  match Keeper_sandbox_runtime.docker_preflight ~image:(Ok "alpine:test") ~timeout_sec:5.0 () with
   | None -> Alcotest.fail "expected docker preflight report"
   | Some preflight ->
       Alcotest.(check bool) "preflight fails" false preflight.ok;
@@ -1964,11 +1983,10 @@ let test_docker_preflight_does_not_infer_daemon_state_from_stderr () =
 let test_docker_preflight_classifies_image_inspect_timeout () =
   with_fake_docker fake_docker_preflight_image_timeout_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  match Keeper_sandbox_runtime.docker_preflight ~timeout_sec:5.0 () with
+  match Keeper_sandbox_runtime.docker_preflight ~image:(Ok "alpine:test") ~timeout_sec:5.0 () with
   | None -> Alcotest.fail "expected docker preflight report"
   | Some preflight ->
       Alcotest.(check bool) "preflight fails" false preflight.ok;
@@ -1980,8 +1998,9 @@ let test_docker_preflight_classifies_image_inspect_timeout () =
 
 let test_run_command_nonzero_exit_errors_by_default () =
   with_fake_docker fake_docker_exit_1_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
     Keeper_sandbox_read_backend.run_command_with_status ~config ~meta
@@ -2004,8 +2023,9 @@ let test_run_command_nonzero_exit_errors_by_default () =
 
 let test_run_command_allows_configured_nonzero_exit () =
   with_fake_docker fake_docker_exit_1_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
     Keeper_sandbox_read_backend.run_command_with_status
@@ -2027,8 +2047,9 @@ let test_run_command_allows_configured_nonzero_exit () =
 
 let test_run_command_preserves_bare_command_argv () =
   with_fake_docker fake_docker_echo_command_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
     Keeper_sandbox_read_backend.run_command_with_status ~config ~meta
@@ -2055,8 +2076,9 @@ let test_run_command_preserves_bare_command_argv () =
    [cat] argv passes every assertion except this one. *)
 let test_read_asks_the_sandbox_for_a_bounded_prefix () =
   with_fake_docker fake_docker_echo_command_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_path = Filename.concat host_root "scratch/oversize.bin" in
@@ -2085,11 +2107,12 @@ let test_read_asks_the_sandbox_for_a_bounded_prefix () =
 
 let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
   with_fake_docker fake_docker_slow_run_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   let log_path = fake_docker_log_path () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let result = ref None in
@@ -2128,11 +2151,12 @@ let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
 
 let test_run_command_projects_keeper_secret_dir () =
   with_fake_docker fake_docker_log_run_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   let log_path = fake_docker_log_path () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let secret_root =
@@ -2176,10 +2200,11 @@ let test_run_command_projects_keeper_secret_dir () =
 
 let test_run_command_scrubs_sensitive_env () =
   with_fake_docker fake_docker_env_dump_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "GH_TOKEN" "ghp_secret" @@ fun () ->
   with_env "ANTHROPIC_API_KEY" "sk-ant-secret" @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   let log_path = fake_docker_log_path () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
@@ -2198,11 +2223,12 @@ let test_run_command_scrubs_sensitive_env () =
 
 let test_turn_runtime_reuses_single_container () =
   with_fake_docker fake_docker_turn_runtime_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   let log_path = fake_docker_log_path () in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_config_dir =
@@ -2277,11 +2303,12 @@ let test_turn_runtime_reuses_single_container () =
 
 let test_typed_guest_target_leaves_image_preflight_to_runtime_creation () =
   with_fake_docker fake_docker_turn_runtime_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   let base, config, meta = setup_config "typed-target-preflight" in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   let log_path = fake_docker_log_path () in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir host_root;
@@ -2340,7 +2367,6 @@ let test_typed_guest_target_leaves_image_preflight_to_runtime_creation () =
 
 let test_streaming_exec_validates_cached_container_before_retry () =
   with_fake_docker fake_docker_stale_streaming_retry_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
@@ -2355,7 +2381,7 @@ let test_streaming_exec_validates_cached_container_before_retry () =
   ensure_dir host_config_dir;
   with_env "KEEPER_DOCKER_INSPECT_COUNT" inspect_count_path @@ fun () ->
   with_env "KEEPER_DOCKER_EXEC_COUNT" exec_count_path @@ fun () ->
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~image:(Ok "alpine:test") () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
@@ -2391,7 +2417,6 @@ let test_streaming_exec_validates_cached_container_before_retry () =
 
 let test_streaming_exec_preserves_split_stderr () =
   with_fake_docker fake_docker_turn_runtime_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
@@ -2402,7 +2427,7 @@ let test_streaming_exec_preserves_split_stderr () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~image:(Ok "alpine:test") () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
@@ -2433,7 +2458,6 @@ let test_streaming_exec_preserves_split_stderr () =
 
 let test_streaming_exec_forwards_timeout_to_split_exec () =
   with_fake_docker fake_docker_streaming_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
@@ -2444,7 +2468,7 @@ let test_streaming_exec_forwards_timeout_to_split_exec () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~image:(Ok "alpine:test") () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
@@ -2469,7 +2493,6 @@ let test_streaming_exec_forwards_timeout_to_split_exec () =
 
 let test_streaming_pipeline_forwards_timeout_to_split_exec () =
   with_fake_docker fake_docker_streaming_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
@@ -2480,7 +2503,7 @@ let test_streaming_pipeline_forwards_timeout_to_split_exec () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~image:(Ok "alpine:test") () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
@@ -2514,7 +2537,6 @@ let test_streaming_pipeline_forwards_timeout_to_split_exec () =
 
 let test_streaming_exec_restarts_stopped_container_before_exec () =
   with_fake_docker fake_docker_stopped_streaming_retry_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
@@ -2525,7 +2547,7 @@ let test_streaming_exec_restarts_stopped_container_before_exec () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~image:(Ok "alpine:test") () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
@@ -2561,7 +2583,6 @@ let test_streaming_exec_restarts_stopped_container_before_exec () =
 
 let test_streaming_exec_surfaces_process_failure_once () =
   with_fake_docker fake_docker_streaming_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
@@ -2577,7 +2598,7 @@ let test_streaming_exec_surfaces_process_failure_once () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~image:(Ok "alpine:test") () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
@@ -2612,7 +2633,6 @@ let test_streaming_exec_surfaces_process_failure_once () =
 
 let test_streaming_exec_keeps_successful_progress_live () =
   with_fake_docker fake_docker_streaming_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
@@ -2623,7 +2643,7 @@ let test_streaming_exec_keeps_successful_progress_live () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~image:(Ok "alpine:test") () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
@@ -2666,7 +2686,6 @@ let test_streaming_exec_keeps_successful_progress_live () =
 
 let test_streaming_exec_keeps_sparse_progress_live () =
   with_fake_docker fake_docker_streaming_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
@@ -2677,7 +2696,7 @@ let test_streaming_exec_keeps_sparse_progress_live () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~image:(Ok "alpine:test") () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
@@ -2763,12 +2782,13 @@ let test_relaxed_fs_helpers () =
 
 let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
   with_fake_docker fake_docker_turn_runtime_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "true" @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   let log_path = fake_docker_log_path () in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir host_root;
@@ -2858,8 +2878,9 @@ let test_complete_binary_failure_has_safe_diagnostic () =
     let base_path = temp_dir () in
     Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
       let config = Workspace.default_config base_path in
+      Masc_test_deps.write_sandbox_image_catalog ~base_path [ ("base", "alpine:test") ];
       let meta = { (make_meta ~name:"binary-error" ~sandbox:Keeper_types_profile_sandbox.Docker)
-        with sandbox_image = Some "alpine:test" } in
+        with sandbox_image = Some "base" } in
       let path = Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "partial.png" in
       match Keeper_sandbox_read_backend.read_complete_file ~config ~meta ~host_path:path ~timeout_sec:5. () with
       | Ok _ -> Alcotest.fail "failed binary process was accepted"
@@ -2885,8 +2906,9 @@ esac
     let base_path = temp_dir () in
     Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
       let config = Workspace.default_config base_path in
+      Masc_test_deps.write_sandbox_image_catalog ~base_path [ ("base", "alpine:test") ];
       let meta = { (make_meta ~name:"raw-prefix" ~sandbox:Keeper_types_profile_sandbox.Docker)
-        with sandbox_image = Some "alpine:test" } in
+        with sandbox_image = Some "base" } in
       let path = Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "capture" in
       match Keeper_sandbox_read_backend.read_raw_prefix ~config ~meta ~host_path:path
           ~max_bytes:4 ~timeout_sec:5. () with
@@ -3115,6 +3137,8 @@ let run_tests ~clock () =
         [
           Alcotest.test_case "ready image reports ok" `Quick
             test_docker_preflight_reports_ready_image;
+          Alcotest.test_case "an unresolved image keeps its reason" `Quick
+            test_docker_preflight_keeps_the_unresolved_reason;
           Alcotest.test_case "custom image argument is respected" `Quick
             test_docker_preflight_respects_custom_image_argument;
           Alcotest.test_case "image inspect error stays structural" `Quick

@@ -230,9 +230,13 @@ val complete :
   partition:t ->
   item:completed_item ->
   (exact_transition, string) result
-(** Commit [Completed] only from [Bound] when the candidate identity and all
+(** Commit [Completed] from [Bound] when the candidate identity and all
     four opaque judgment provenance fields exactly match the durable binding.
-    Only [Fsync_completed] confirms that the judgment can leave worker memory. *)
+    A judgment with no HTTP receipt completes from [Unbound] or [Bound]; a
+    CLI tail answer also completes from [Advancing], because the tail runs
+    only after AGENT_CORE ended the HTTP walk and the named next slot is never
+    dispatched. Only [Fsync_completed] confirms that the judgment can leave
+    worker memory. *)
 
 val complete_existing_judgment :
   now:float ->

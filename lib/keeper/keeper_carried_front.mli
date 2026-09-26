@@ -59,9 +59,12 @@ type source =
 
 type seed =
   { first_atom : int
-  ; front_digest : string
-        (** The opening-message digest of [first_atom] in the history the
-            front was measured on. *)
+  ; front_digest : string option
+        (** [Some] when the opening-message digest of [first_atom] is known in
+            the history the front was measured on; [None] names no front — a
+            floor seed (#39013), whose [first_atom] is the history's atom
+            count at the floor turn and is past every atom of a history that
+            has grown since. *)
   ; source : source
   }
 
@@ -224,8 +227,9 @@ val read_seed
 (** Why {!for_history} dropped a seed. *)
 type dropped_front =
   | Front_atom_missing
-      (** The history has no atom at [first_atom]: it is shorter than the
-          front. *)
+      (** The history has no atom at [first_atom], or the seed names no front
+          at all: a floor seed (#39013) always drops this way, whatever the
+          history holds. *)
   | Front_message_differs
       (** The atom at [first_atom] opens with another message: atoms before
           the front were removed or replaced. *)
@@ -234,11 +238,12 @@ val for_history
   :  digest_at:(int -> string option)
   -> seed
   -> (seed, dropped_front) result
-(** The seed when [digest_at seed.first_atom] is [Some seed.front_digest],
-    where [digest_at] is {!Runtime_model_input_tail_window.atom_opening_digest}
-    over the history in hand; otherwise why not. A dropped position names no
-    atom of this history, and carrying the newest atom alone from there
-    would never widen again, so the caller starts over as with no seed. *)
+(** The seed when it names a front and [digest_at seed.first_atom] is [Some]
+    that front, where [digest_at] is
+    {!Runtime_model_input_tail_window.atom_opening_digest} over the history
+    in hand; otherwise why not. A dropped position names no atom of this
+    history, and carrying the newest atom alone from there would never widen
+    again, so the caller starts over as with no seed. *)
 
 val dropped_front_to_string : dropped_front -> string
 

@@ -173,7 +173,7 @@ let target_kind_of_input input target =
           | Some (_, Directory_target) -> "directory"
           | None -> "tool"))
 
-let action_radius_json ~tool_name ~input ~success ~duration_ms ?error
+let action_radius_json ~tool_name ~input ~duration_ms ?error
     ?sandbox_target () : Yojson.Safe.t =
   let action_key =
     first_string_field [ "action"; "action_key"; "op"; "cmd"; "command" ] input
@@ -188,7 +188,6 @@ let action_radius_json ~tool_name ~input ~success ~duration_ms ?error
       ("target_path", string_opt_json (Option.map fst target));
       ("sandbox_target", string_opt_json sandbox_target);
       ("observed_paths", Json_util.json_string_list (collect_observed_paths input));
-      ("success", `Bool success);
       ("duration_ms", `Float duration_ms);
       ("error", string_opt_json error);
     ]

@@ -3139,6 +3139,9 @@ let run_tests ~clock () =
           Alcotest.test_case "read lane still rejects exit 1" `Quick
             test_read_lane_still_rejects_exit_1;
         ] );
+      ( "defined but never registered until task-1768",
+          [ Alcotest.test_case "run command scrubs sensitive env" `Quick test_run_command_scrubs_sensitive_env
+          ] );
     ]
 
 let () =

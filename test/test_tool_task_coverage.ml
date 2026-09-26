@@ -183,7 +183,7 @@ let make_task_contract ?(strict = false) ?(completion_contract = [])
 
 let add_priority_task ctx ~title =
   let result =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("title", `String title);
@@ -194,12 +194,12 @@ let add_priority_task ctx ~title =
 
 let start_task_001 ctx =
   let claim =
-    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ ("task_id", `String "task-001") ])
   in
   if not (Tool_result.is_success claim) then failwith (Tool_result.message claim);
   let start =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -225,7 +225,7 @@ let add_goal_linked_task ctx ~goal_id ~title =
   let result =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ "title", `String title; "goal_id", `String goal_id ])
   in
@@ -363,7 +363,7 @@ let () = test "keeper dispatch keeps task author distinct from actor identity" (
 let () = test "handle_add_task_returns_structured_task_id" (fun () ->
   let ctx = make_test_ctx () in
   let result =
-    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [ ("title", `String "Structured task")
         ; ("priority", `Int 2)
@@ -383,12 +383,12 @@ let () = test "handle_add_task_returns_structured_task_id" (fun () ->
 let () = test "handle_add_task_preserves_identical_titles_as_distinct_tasks" (fun () ->
   let ctx = make_test_ctx () in
   let first =
-    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ ("title", `String "Duplicate contract task") ])
   in
   if not (Tool_result.is_success first) then failwith (Tool_result.message first);
   let second =
-    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ ("title", `String "Duplicate contract task") ])
   in
   if not (Tool_result.is_success second) then failwith (Tool_result.message second);
@@ -487,7 +487,7 @@ let () = test "auto_claim_hard_filter_survives_scope_fallback" (fun () ->
 let () = test "handle_batch_add_tasks_returns_structured_task_ids" (fun () ->
   let ctx = make_test_ctx () in
   let result =
-    Task.Tool.handle_batch_add_tasks ~tool_name:"masc_batch_add_tasks" ~start_time:0.0 ctx
+    Task.Tool.handle_batch_add_tasks ~tool_name:"masc_batch_add_tasks" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ( "tasks",
@@ -583,7 +583,7 @@ let () = test "task_history_events_json_returns_empty_for_missing_task" (fun () 
 let () = test "dispatch_transition_claim" (fun () ->
   let ctx = make_test_ctx () in
   (* First add a task *)
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Claim test")]) in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Claim test")]) in
   let args = `Assoc [("task_id", `String "task-001"); ("action", `String "claim")] in
   match Task.Tool.dispatch ctx ~name:"masc_transition" ~args with
   | Some _ -> () (* May fail if task doesn't exist *)
@@ -603,7 +603,7 @@ let () = test "dispatch_claim_next" (fun () ->
 let () = test "handle_add_task_persists_contract" (fun () ->
   let ctx = make_test_ctx () in
   let result =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("title", `String "Strict task");
@@ -635,7 +635,7 @@ let () = test "handle_add_task_persists_contract" (fun () ->
 let () = test "handle_add_task_omits_contract_when_unstated" (fun () ->
   let ctx = make_test_ctx () in
   let result =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("title", `String "Unstated criteria task");
@@ -658,7 +658,7 @@ let () = test "handle_add_task_omits_contract_when_unstated" (fun () ->
 let () = test "handle_batch_add_tasks_omits_contract_when_unstated" (fun () ->
   let ctx = make_test_ctx () in
   let result =
-    Task.Tool.handle_batch_add_tasks ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_batch_add_tasks ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ( "tasks",
@@ -690,16 +690,16 @@ let () = test "handle_batch_add_tasks_omits_contract_when_unstated" (fun () ->
 let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("title", `String "Strict release task");
           ("contract", `Assoc [ ("strict", `Bool true) ]);
         ])
   in
-  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [ ("task_id", `String "task-001") ]) in
   let result_missing =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -709,7 +709,7 @@ let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun 
   assert (not (Tool_result.is_success result_missing));
   assert (str_contains (Tool_result.message result_missing) "handoff_context.summary");
   let result_release =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -753,12 +753,12 @@ let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun 
 let () = test "handle_transition_rejects_blank_evidence_ref_entries" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ ("title", `String "Blank evidence entries task") ])
   in
-  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [ ("task_id", `String "task-001") ]) in
   let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -784,13 +784,13 @@ let () = test "handle_transition_rejects_blank_evidence_ref_entries" (fun () ->
 let () = test "handle_transition_rejects_unresolvable_evidence_ref_entries" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ ("title", `String "Unresolvable evidence task") ])
   in
-  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [ ("task_id", `String "task-001") ]) in
   let reject reference =
     let result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc
           [
             ("task_id", `String "task-001");
@@ -828,12 +828,12 @@ let () = test "handle_transition_rejects_unresolvable_evidence_ref_entries" (fun
 let () = test "handle_transition_accepts_resolvable_evidence_ref_forms" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ ("title", `String "Resolvable evidence task") ])
   in
-  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [ ("task_id", `String "task-001") ]) in
   let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -858,11 +858,11 @@ let () = test "handle_transition_accepts_resolvable_evidence_ref_forms" (fun () 
 let () = test "handle_transition_entry_action_rejects_blank_evidence_ref_entries" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ ("title", `String "Entry action blank evidence task") ])
   in
   let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -883,12 +883,12 @@ let () = test "handle_transition_entry_action_rejects_blank_evidence_ref_entries
 let () = test "handle_transition_accepts_explicit_empty_evidence_refs" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ ("title", `String "Explicit empty evidence task") ])
   in
-  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [ ("task_id", `String "task-001") ]) in
   let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -919,11 +919,11 @@ let () = test "handle_transition_start_on_todo_points_at_claim_first" (fun () ->
     | [] -> -1
   in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ ("title", `String "Start-without-claim") ])
   in
   let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -965,11 +965,11 @@ let () = test "handle_transition_release_by_nonowner_stays_tool-neutral"
      caller's next tool. *)
   let ctx_owner = make_test_ctx_with_agent "owner-agent" in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx_owner
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx_owner
       (`Assoc [ ("title", `String "Owned-by-other") ])
   in
   let _ =
-    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx_owner
+    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx_owner
       (`Assoc [ ("task_id", `String "task-001") ])
   in
   (* A separate context for a different agent against the SAME config,
@@ -978,7 +978,7 @@ let () = test "handle_transition_release_by_nonowner_stays_tool-neutral"
     { ctx_owner with Task.Tool.agent_name = "other-agent" }
   in
   let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx_other
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx_other
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -1004,11 +1004,11 @@ let () = test "handle_transition_force_release_is_not_a_public_escape_hatch"
     (fun () ->
   let ctx_owner = make_test_ctx_with_agent "owner-agent" in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx_owner
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx_owner
       (`Assoc [ ("title", `String "Force-release owned task") ])
   in
   let _ =
-    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx_owner
+    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx_owner
       (`Assoc [ ("task_id", `String "task-001") ])
   in
   (* The name is only a second agent. `force` is rejected on the argument list
@@ -1019,7 +1019,7 @@ let () = test "handle_transition_force_release_is_not_a_public_escape_hatch"
   let result =
     Task.Tool.handle_transition
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx_admin
       (`Assoc
          [
@@ -1048,14 +1048,14 @@ let () = test "handle_transition_submit_does_not_have_a_disable_bypass"
     (fun () ->
   let ctx = make_test_ctx_with_agent "owner-agent" in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ ("title", `String "Verification disabled gate") ])
   in
   start_task_001 ctx;
   let result =
     Task.Tool.handle_transition
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc
         [
@@ -1088,7 +1088,7 @@ let () = test "handle_transition_submit_rejects_registered_keeper_alias"
     let _ =
       Task.Tool.handle_add_task
         ~tool_name:"test_tool"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         ctx
         (`Assoc [ ("title", `String "Canonical submit identity") ])
     in
@@ -1104,7 +1104,7 @@ let () = test "handle_transition_submit_rejects_registered_keeper_alias"
     let result =
       Task.Tool.handle_transition
         ~tool_name:"test_tool"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         alias_ctx
         (`Assoc
            [
@@ -1140,7 +1140,7 @@ let () = test "keeper_reconciliation_ignores_prefix_matched_agent"
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ "title", `String "Foreign prefix owner" ])
   in
@@ -1185,7 +1185,7 @@ let () = test "keeper_reconciliation_accepts_short_keeper_identity"
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ "title", `String "Short keeper identity owner" ])
   in
@@ -1221,13 +1221,13 @@ let () = test "handle_transition_expected_version_mismatch_does_not_retry_withou
     (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ ("title", `String "CAS guarded task") ])
   in
   let result =
     Task.Tool.handle_transition
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc
          [
@@ -1256,19 +1256,19 @@ let () = test "handle_transition_release_synthesizes_summary_from_notes" (fun ()
      agent runtime to retry the exact same payload shape. *)
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("title", `String "Strict release with notes only");
           ("contract", `Assoc [ ("strict", `Bool true) ]);
         ])
   in
-  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [ ("task_id", `String "task-001") ]) in
   let synthesized_note =
     "blocked on fixture reproduction; hand off to fixture-capable keeper"
   in
   let result_release =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -1293,17 +1293,17 @@ let () = test "handle_transition_release_prefers_notes_then_reason_for_synthesis
      collapses to the first line only. *)
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("title", `String "Strict release with both notes and reason");
           ("contract", `Assoc [ ("strict", `Bool true) ]);
         ])
   in
-  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [ ("task_id", `String "task-001") ]) in
   let notes_line = "notes-line-should-win" in
   let result_release =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -1331,11 +1331,11 @@ let () = test "handle_transition_release_prefers_notes_then_reason_for_synthesis
 let () = test "handle_transition_claim_does_not_require_summary" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ ("title", `String "Entry-class action") ])
   in
   let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -1351,11 +1351,11 @@ let () = test "handle_transition_claim_does_not_require_summary" (fun () ->
 let () = test "handle_transition_claim_with_empty_handoff_context_ok" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ ("title", `String "Entry with empty context") ])
   in
   let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -1375,18 +1375,18 @@ let () = test "handle_transition_claim_with_empty_handoff_context_ok" (fun () ->
 let () = test "handle_transition_release_empty_summary_error_includes_example" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("title", `String "Strict release task");
           ("contract", `Assoc [ ("strict", `Bool true) ]);
         ])
   in
-  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let _ = Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [ ("task_id", `String "task-001") ]) in
   (* Empty-string summary must also fail, and error must include a payload example
      so the agent runtime can self-correct instead of retrying the same partial payload. *)
   let result_empty =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -1408,7 +1408,7 @@ let () = test "handle_transition_release_empty_summary_error_includes_example" (
 let () = test "handle_transition_done_prefers_ownership_error_over_completion_gate" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("title", `String "Strict owned task");
@@ -1422,7 +1422,7 @@ let () = test "handle_transition_done_prefers_ownership_error_over_completion_ga
   in
   let _ = Workspace.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
   let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -1438,7 +1438,7 @@ let () = test "handle_transition_done_prefers_ownership_error_over_completion_ga
 let () = test "handle_transition_strict_done_reaches_lifecycle_submission_error" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("title", `String "Strict completion task");
@@ -1451,11 +1451,11 @@ let () = test "handle_transition_strict_done_reaches_lifecycle_submission_error"
         ])
   in
   let _ =
-    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ ("task_id", `String "task-001") ])
   in
   let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -1479,7 +1479,7 @@ let () = test "handle_transition_strict_done_reaches_lifecycle_submission_error"
 let () = test "handle_transition_force_is_not_a_done_action" (fun () ->
   let ctx = make_test_ctx_with_agent "admin-agent" in
   let add_result =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ "title", `String "Forced Done LLM task" ])
   in
   if not (Tool_result.is_success add_result)
@@ -1491,7 +1491,7 @@ let () = test "handle_transition_force_is_not_a_done_action" (fun () ->
        reviewer_called := true;
        Ok {Task.Anti_rationalization.selected_runtime_id="test-evaluator-runtime";verdict=Some (Task.Anti_rationalization.Approve "")});
   let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [ "task_id", `String "task-001"
         ; "action", `String "done"
@@ -1517,7 +1517,7 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
   (
     let ctx = make_test_ctx () in
     let _ =
-      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc
           [
             ("title", `String "Awaiting verification task");
@@ -1556,7 +1556,7 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
          ("setup submit should reach AwaitingVerification: "
           ^ Masc_domain.masc_error_to_string e));
     let result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc
           [
             ("task_id", `String "task-001");
@@ -1603,7 +1603,7 @@ let () = test "agent verdict verbs remain refused after terminal completion" (fu
   List.iter
     (fun action ->
       let result =
-        Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0
+        Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ())
           verifier_ctx
           (`Assoc
             [
@@ -1624,14 +1624,14 @@ let () = test "operator verdict path replaces verifier agent actions" (fun () ->
     let worker_ctx = make_test_ctx_with_agent "worker" in
     let verifier_ctx = { worker_ctx with Task.Tool.agent_name = "verifier" } in
     let _ =
-      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 worker_ctx
+      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) worker_ctx
         (`Assoc [ ("title", `String "Verifier may approve") ])
     in
     let _ =
       Workspace.claim_task worker_ctx.config ~agent_name:"worker" ~task_id:"task-001"
     in
     let submit_result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0
+      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ())
         worker_ctx
         (`Assoc
           [
@@ -1645,13 +1645,13 @@ let () = test "operator verdict path replaces verifier agent actions" (fun () ->
     let claim_result =
       Task.Tool.handle_claim
         ~tool_name:"keeper_task_claim"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         verifier_ctx
         (`Assoc [ "task_id", `String "task-001" ])
     in
     assert (not (Tool_result.is_success claim_result));
     let result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0
+      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ())
         verifier_ctx
         (`Assoc
           [
@@ -1701,7 +1701,7 @@ let awaiting_snapshot ctx task_id =
 let submit_for_verification ctx ~task_id ~notes =
   Task.Tool.handle_transition
     ~tool_name:"test_tool"
-    ~start_time:0.0
+    ~start_time:(Tool_timing.start ())
     ctx
     (`Assoc
       [ "task_id", `String task_id
@@ -1714,7 +1714,7 @@ let resubmit_fixture () =
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ "title", `String "Resubmittable deliverable" ])
   in
@@ -1860,7 +1860,7 @@ let () =
        let submit_result =
          Task.Tool.handle_transition
            ~tool_name:"test_tool"
-           ~start_time:0.0
+           ~start_time:(Tool_timing.start ())
            worker_ctx
            (`Assoc
               [ "task_id", `String "task-001"
@@ -1892,9 +1892,9 @@ let () =
 
 let () = test "handle_claim_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Claim direct")]) in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Claim direct")]) in
   let result =
-    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001")])
+    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001")])
   in
   assert (Tool_result.is_success result);
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
@@ -1905,14 +1905,14 @@ let () = test "keeper_claim_does_not_clobber_planning_current_task" (fun () ->
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ ("title", `String "Operator task") ])
   in
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ ("title", `String "Keeper task") ])
   in
@@ -1927,7 +1927,7 @@ let () = test "keeper_claim_does_not_clobber_planning_current_task" (fun () ->
   let result =
     Task.Tool.handle_claim
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       keeper_ctx
       (`Assoc [ ("task_id", `String "task-002") ])
   in
@@ -1939,14 +1939,14 @@ let () = test "keeper_alias_claim_updates_planning_as_exact_agent" (fun () ->
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ ("title", `String "Operator task") ])
   in
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ ("title", `String "Keeper task") ])
   in
@@ -1963,7 +1963,7 @@ let () = test "keeper_alias_claim_updates_planning_as_exact_agent" (fun () ->
   let result =
     Task.Tool.handle_claim
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       keeper_ctx
       (`Assoc [ ("task_id", `String "task-002") ])
   in
@@ -1975,14 +1975,14 @@ let () = test "keeper_generated_alias_claim_updates_planning_as_exact_agent" (fu
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ ("title", `String "Operator task") ])
   in
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ ("title", `String "Keeper task") ])
   in
@@ -2002,7 +2002,7 @@ let () = test "keeper_generated_alias_claim_updates_planning_as_exact_agent" (fu
   let result =
     Task.Tool.handle_claim
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       keeper_ctx
       (`Assoc [ ("task_id", `String "task-002") ])
   in
@@ -2014,14 +2014,14 @@ let () = test "keeper_separator_alias_claim_updates_planning_as_exact_agent" (fu
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ ("title", `String "Operator task") ])
   in
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ ("title", `String "Keeper task") ])
   in
@@ -2041,7 +2041,7 @@ let () = test "keeper_separator_alias_claim_updates_planning_as_exact_agent" (fu
   let result =
     Task.Tool.handle_claim
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       keeper_ctx
       (`Assoc [ ("task_id", `String "task-002") ])
   in
@@ -2053,14 +2053,14 @@ let () = test "keeper_shaped_non_keeper_claim_updates_planning_current_task" (fu
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ ("title", `String "Operator task") ])
   in
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ ("title", `String "Spoofed keeper task") ])
   in
@@ -2076,7 +2076,7 @@ let () = test "keeper_shaped_non_keeper_claim_updates_planning_current_task" (fu
   let result =
     Task.Tool.handle_claim
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       spoof_ctx
       (`Assoc [ ("task_id", `String "task-002") ])
   in
@@ -2088,21 +2088,21 @@ let () = test "handle_claim_rejects_when_agent_already_has_active_task" (fun () 
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ ("title", `String "First active task") ])
   in
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ ("title", `String "Second active task") ])
   in
   let first =
     Task.Tool.handle_claim
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ ("task_id", `String "task-001") ])
   in
@@ -2110,7 +2110,7 @@ let () = test "handle_claim_rejects_when_agent_already_has_active_task" (fun () 
   let second =
     Task.Tool.handle_claim
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc [ ("task_id", `String "task-002") ])
   in
@@ -2142,10 +2142,10 @@ let () = test "handle_claim_rejects_when_agent_already_has_active_task" (fun () 
 let () = test "handle_claim_rejects_removed_agent_role_argument" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("title", `String "Claim role arg") ])
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [ ("title", `String "Claim role arg") ])
   in
   let result =
-    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -2158,8 +2158,8 @@ let () = test "handle_claim_rejects_removed_agent_role_argument" (fun () ->
 
 let () = test "handle_claim_next_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Claim next")]) in
-  let result = Task.Tool.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc []) in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Claim next")]) in
+  let result = Task.Tool.handle_claim_next ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc []) in
   assert (Tool_result.is_success result);
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
@@ -2167,9 +2167,9 @@ let () = test "handle_claim_next_sets_planning_current_task" (fun () ->
 let () = test "handle_claim_next_returns_claim_observation" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("title", `String "Claim observed") ])
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [ ("title", `String "Claim observed") ])
   in
-  let claim_result = Task.Tool.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc []) in
+  let claim_result = Task.Tool.handle_claim_next ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc []) in
   if not (Tool_result.is_success claim_result) then failwith (Tool_result.message claim_result);
   let prefix = "claim_observation=" in
   let line =
@@ -2215,7 +2215,7 @@ let () =
   test "handle_claim_next_reports_internal_errors_as_tool_failure" (fun () ->
     let ctx = make_test_ctx () in
     let add_result =
-      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc [ ("title", `String "Claim next internal error") ])
     in
     if not (Tool_result.is_success add_result) then failwith (Tool_result.message add_result);
@@ -2231,7 +2231,7 @@ let () =
     let result =
       Task.Tool.handle_claim_next
         ~tool_name:"test_tool"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         ctx
         (`Assoc [])
     in
@@ -2258,10 +2258,10 @@ let () = test "handle_claim_next_accepts_open_claims" (fun () ->
   | Ok () -> ()
   | Error e -> failwith ("write_meta failed: " ^ e));
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ ("title", `String "Open claim task") ])
   in
-  let result = Task.Tool.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc []) in
+  let result = Task.Tool.handle_claim_next ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc []) in
   assert (Tool_result.is_success result);
   match Workspace.get_tasks_raw ctx.config with
   | [ task ] -> (
@@ -2273,9 +2273,9 @@ let () = test "handle_claim_next_accepts_open_claims" (fun () ->
 
 let () = test "transition_claim_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Transition claim")]) in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Transition claim")]) in
   let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [("task_id", `String "task-001"); ("action", `String "claim")])
   in
   assert (Tool_result.is_success result);
@@ -2288,7 +2288,7 @@ let () = test "transition_missing_task_clears_stale_current_task" (fun () ->
    | Ok () -> ()
    | Error msg -> failwith msg);
   let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [("task_id", `String "task-1468"); ("action", `String "start")])
   in
   assert (not (Tool_result.is_success result));
@@ -2343,7 +2343,7 @@ let () = test "transition_submit_for_verification_todo_rejects_instead_of_alias"
     add_priority_task ctx ~title:"No action alias";
     let result =
       Task.Tool.handle_transition
-        ~tool_name:"test_tool" ~start_time:0.0
+        ~tool_name:"test_tool" ~start_time:(Tool_timing.start ())
         ctx
         (`Assoc
           [
@@ -2371,7 +2371,7 @@ let () = test "transition_submit_pr_evidence_is_retired" (fun () ->
     add_priority_task ctx ~title:"CLI approval follow-up";
     let result =
       Task.Tool.handle_transition
-        ~tool_name:"test_tool" ~start_time:0.0
+        ~tool_name:"test_tool" ~start_time:(Tool_timing.start ())
         ctx
         (`Assoc
           [
@@ -2390,7 +2390,7 @@ let () = test "transition_pr_url_top_level_is_retired" (fun () ->
   add_priority_task ctx ~title:"No transport pr_url alias";
   let result =
     Task.Tool.handle_transition
-      ~tool_name:"test_tool" ~start_time:0.0
+      ~tool_name:"test_tool" ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc
         [
@@ -2411,7 +2411,7 @@ let () = test "transition_claim_clears_legacy_cycle_do_not_reclaim_reason" (fun 
   (
     let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     let result =
-      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc
           [
             ("title", `String "Strict accessor PR evidence");
@@ -2421,7 +2421,7 @@ let () = test "transition_claim_clears_legacy_cycle_do_not_reclaim_reason" (fun 
     if not (Tool_result.is_success result) then failwith (Tool_result.message result);
     set_only_task_do_not_reclaim_reason ctx "auto: 3 releases";
     let claim_result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc
           [
             ("task_id", `String "task-001");
@@ -2437,7 +2437,7 @@ let () = test "transition_release_free_text_not_found_stays_reclaimable" (fun ()
   (
     let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     let result =
-      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc
           [
             ("title", `String "Missing worktree recovery");
@@ -2446,7 +2446,7 @@ let () = test "transition_release_free_text_not_found_stays_reclaimable" (fun ()
     in
     if not (Tool_result.is_success result) then failwith (Tool_result.message result);
     let claim_result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc
           [
             ("task_id", `String "task-001");
@@ -2455,7 +2455,7 @@ let () = test "transition_release_free_text_not_found_stays_reclaimable" (fun ()
     in
     if not (Tool_result.is_success claim_result) then failwith (Tool_result.message claim_result);
     let release_result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc
           [
             ("task_id", `String "task-001");
@@ -2474,7 +2474,7 @@ let () = test "transition_release_free_text_not_found_stays_reclaimable" (fun ()
     assert_task_todo ctx;
     assert ((only_task ctx).do_not_reclaim_reason = None);
     let reclaim_result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc
           [
             ("task_id", `String "task-001");
@@ -2493,7 +2493,7 @@ let () = test "transition_release_block_reclaim_data_survives_reclaim" (fun () -
   (
     let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     let result =
-      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc
           [
             ("title", `String "Terminal mismatch");
@@ -2502,7 +2502,7 @@ let () = test "transition_release_block_reclaim_data_survives_reclaim" (fun () -
     in
     if not (Tool_result.is_success result) then failwith (Tool_result.message result);
     let claim_result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc
           [
             ("task_id", `String "task-001");
@@ -2511,7 +2511,7 @@ let () = test "transition_release_block_reclaim_data_survives_reclaim" (fun () -
     in
     if not (Tool_result.is_success claim_result) then failwith (Tool_result.message claim_result);
     let release_result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc
           [
             ("task_id", `String "task-001");
@@ -2531,7 +2531,7 @@ let () = test "transition_release_block_reclaim_data_survives_reclaim" (fun () -
        = Some "upstream PR already completed this scope");
     assert ((only_task ctx).reclaim_policy = Some Masc_domain.Block_reclaim);
     let reclaim_result =
-      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc
           [
             ("task_id", `String "task-001");
@@ -2568,14 +2568,14 @@ let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface
 
 let () = test "transition_release_clears_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Transition release")]) in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Transition release")]) in
   let claim_result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [("task_id", `String "task-001"); ("action", `String "claim")])
   in
   assert (Tool_result.is_success claim_result);
   let release_result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [("task_id", `String "task-001"); ("action", `String "release")])
   in
   assert (Tool_result.is_success release_result);
@@ -2584,9 +2584,9 @@ let () = test "transition_release_clears_planning_current_task" (fun () ->
 
 let () = test "transition_accepts_underscore_prefixed_internal_markers" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Marker test")]) in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Marker test")]) in
   let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [
         ("task_id", `String "task-001");
         ("action", `String "claim");
@@ -2600,9 +2600,9 @@ let () = test "transition_accepts_underscore_prefixed_internal_markers" (fun () 
 
 let () = test "transition_still_rejects_plain_unknown_arguments" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Reject test")]) in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Reject test")]) in
   let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [
         ("task_id", `String "task-001");
         ("action", `String "claim");
@@ -2616,11 +2616,11 @@ let () = test "transition_still_rejects_plain_unknown_arguments" (fun () ->
 let () = test "transition_rejects_caller_controlled_agent_name" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [("title", `String "Identity contract test")])
   in
   let result =
-    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
         [ ("task_id", `String "task-001")
         ; ("action", `String "claim")
@@ -2637,10 +2637,10 @@ let () = test "transition_rejects_caller_controlled_agent_name" (fun () ->
 (* Test handle_done returns owner guidance when another agent owns the task *)
 let () = test "handle_done_owned_by_other_guidance" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Done test")]) in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Done test")]) in
   let _ = Workspace.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
   let result =
-    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "currently owned by other-agent")
@@ -2649,9 +2649,9 @@ let () = test "handle_done_owned_by_other_guidance" (fun () ->
 (* Test handle_done on a todo task reports typed state without choosing a tool. *)
 let () = test "handle_done_todo_rejection_is_tool-neutral" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Todo test")]) in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Todo test")]) in
   let result =
-    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "still todo");
@@ -2670,7 +2670,7 @@ let () = test "handle_done_todo_rejection_is_tool-neutral" (fun () ->
 (* Test handle_done reports already-done guidance instead of generic not-claimed *)
 let () = test "handle_done_already_done_guidance" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Done test")]) in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Done test")]) in
   let _ = Workspace.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
   let _ =
     Workspace.transition_task_r ctx.config ~agent_name:"other-agent"
@@ -2690,7 +2690,7 @@ let () = test "handle_done_already_done_guidance" (fun () ->
       ()
   in
   let result =
-    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "already done by other-agent")
@@ -2699,10 +2699,10 @@ let () = test "handle_done_already_done_guidance" (fun () ->
 (* Test handle_done reports cancelled-task guidance instead of generic not-claimed *)
 let () = test "handle_done_cancelled_guidance" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Cancelled test")]) in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Cancelled test")]) in
   let _ = Workspace.transition_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~action:Masc_domain.Cancel ~reason:"stop" () in
   let result =
-    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "was cancelled by test-agent")
@@ -2715,7 +2715,7 @@ let () = test "handle_done_cancelled_guidance" (fun () ->
 let () = test "handle_transition_cancel_metric_carries_the_stated_reason" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc [ ("title", `String "Stop me") ])
   in
   start_task_001 ctx;
@@ -2737,7 +2737,7 @@ let () = test "handle_transition_cancel_metric_carries_the_stated_reason" (fun (
               ~handoff_to:_ ->
             recorded := (success, error_message) :: !recorded);
        let result =
-         Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+         Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
            (`Assoc
              [ ("task_id", `String "task-001")
              ; ("action", `String "cancel")
@@ -2794,7 +2794,7 @@ let () = test "handle_batch_add_tasks" (fun () ->
       `Assoc [("title", `String "Task 2"); ("priority", `Int 2)];
     ])
   ] in
-  let batch_result = Task.Tool.handle_batch_add_tasks ~tool_name:"test_tool" ~start_time:0.0 ctx args in
+  let batch_result = Task.Tool.handle_batch_add_tasks ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx args in
   assert (Tool_result.is_success batch_result)
 )
 
@@ -2814,7 +2814,7 @@ let () = test "handle_batch_add_tasks_rejects_removed_role_fields" (fun () ->
             ] );
       ]
   in
-  let result = Task.Tool.handle_batch_add_tasks ~tool_name:"test_tool" ~start_time:0.0 ctx args in
+  let result = Task.Tool.handle_batch_add_tasks ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx args in
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "required_role is no longer supported")
 )
@@ -2835,7 +2835,7 @@ let () = test "handle_batch_add_tasks_rejects_unknown_item_fields" (fun () ->
             ] );
       ]
   in
-  let result = Task.Tool.handle_batch_add_tasks ~tool_name:"test_tool" ~start_time:0.0 ctx args in
+  let result = Task.Tool.handle_batch_add_tasks ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx args in
   assert (not (Tool_result.is_success result));
   assert
     (str_contains (Tool_result.message result)
@@ -2858,7 +2858,7 @@ let () = test "handle_batch_add_tasks_rejects_removed_contract_field" (fun () ->
   let result =
     Task.Tool.handle_batch_add_tasks
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       args
   in
@@ -2885,7 +2885,7 @@ let () = test "handle_batch_add_tasks_rejects_duplicate_contract_field" (fun () 
   let result =
     Task.Tool.handle_batch_add_tasks
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ctx
       args
   in
@@ -2930,9 +2930,9 @@ let () = test "get_int_opt_missing" (fun () ->
 let () = test "claim_next_returns_no_unclaimed_when_all_tasks_terminal" (fun () ->
   let ctx = make_test_ctx () in
   (* Create a task, mark it as done *)
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Done task")]) in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Done task")]) in
   seed_trace_evidence ctx "done-task";
-  let _ = Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [
+  let _ = Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [
     ("task_id", `String "task-001");
     ("action", `String "done");
     ("notes", `String "Completed");
@@ -2945,7 +2945,7 @@ let () = test "claim_next_returns_no_unclaimed_when_all_tasks_terminal" (fun () 
   ]) in
   (* Now try to claim next from a different agent in same workspace *)
   let agent2_ctx = make_test_ctx_with_agent "agent-2" in
-  let msg_result = Task.Tool.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 agent2_ctx (`Assoc []) in
+  let msg_result = Task.Tool.handle_claim_next ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) agent2_ctx (`Assoc []) in
   (* Should report no unclaimed tasks (success=true, message contains "No") *)
   assert (String.length (Tool_result.message msg_result) > 0);
   match String.index_opt (Tool_result.message msg_result) 'N' with
@@ -2956,10 +2956,10 @@ let () = test "claim_next_returns_no_unclaimed_when_all_tasks_terminal" (fun () 
 (* Regression: claim_next should properly skip cancelled tasks and only claim todo *)
 let () = test "claim_next_filters_out_cancelled_tasks" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Cancelled task")]) in
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Cancelled task")]) in
   let _ = Workspace.transition_task_r ctx.config ~agent_name:ctx.agent_name ~task_id:"task-001" ~action:Masc_domain.Cancel ~reason:"not needed" () in
   let agent2_ctx = make_test_ctx_with_agent "agent-claim-2" in
-  let msg_result = Task.Tool.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 agent2_ctx (`Assoc []) in
+  let msg_result = Task.Tool.handle_claim_next ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) agent2_ctx (`Assoc []) in
   match String.index_opt (Tool_result.message msg_result) 'N' with
   | Some _ -> () (* "No unclaimed" is correct *)
   | None -> failwith (Printf.sprintf "Expected no tasks available, got: %s" (Tool_result.message msg_result))
@@ -2977,7 +2977,7 @@ let () =
     let submitted =
       Task.Tool.handle_transition
         ~tool_name:"test_tool"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         ctx
         (`Assoc
           [ "task_id", `String "task-001"
@@ -3001,7 +3001,7 @@ let () =
          let refused =
            Task.Tool.handle_transition
              ~tool_name:"test_tool"
-             ~start_time:0.0
+             ~start_time:(Tool_timing.start ())
              verifier_ctx
              (`Assoc [ "task_id", `String "task-001"; "action", `String verb ])
          in
@@ -3129,14 +3129,14 @@ let () =
             ignore
               (Task.Tool.handle_add_task
                  ~tool_name:"test_tool"
-                 ~start_time:0.0
+                 ~start_time:(Tool_timing.start ())
                  ctx
                  (`Assoc [ "title", `String title ])))
          [ "Held work"; "Tempting other work" ];
        let held =
          Task.Tool.handle_claim
            ~tool_name:"keeper_task_claim"
-           ~start_time:0.0
+           ~start_time:(Tool_timing.start ())
            ctx
            (`Assoc [ "task_id", `String "task-001" ])
        in
@@ -3144,7 +3144,7 @@ let () =
        let refused =
          Task.Tool.handle_claim
            ~tool_name:"keeper_task_claim"
-           ~start_time:0.0
+           ~start_time:(Tool_timing.start ())
            ctx
            (`Assoc [ "task_id", `String "task-002" ])
        in

@@ -222,7 +222,7 @@ let with_external_gate_tool_result
   | Error (Gate_deferred deferred) ->
     Keeper_gate_deferred_payload.to_tool_result
       ~tool_name:operation
-      ~start_time:(Time_compat.now ())
+      ~start_time:(Tool_timing.start ())
       deferred
   | Error (Gate_unavailable blocked) ->
     tool_result_error
@@ -262,7 +262,7 @@ let with_external_gate_tool_result_option
     Some
       (Keeper_gate_deferred_payload.to_tool_result
          ~tool_name:operation
-         ~start_time:(Time_compat.now ())
+         ~start_time:(Tool_timing.start ())
          deferred)
   | Error (Gate_unavailable blocked) ->
     Some
@@ -394,7 +394,7 @@ let handle_web_search_with_outcome
     ~call_summary:(network_read_call_summary (Replay_web_search args))
   @@ fun () ->
   let tool_name = "masc_web_search" in
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   Tool_misc_web_search.handle ~tool_name ~start_time args
   |> Tool_misc_web_enrichment.enrich_result_if_requested
        ~tool_name
@@ -425,7 +425,7 @@ let handle_web_fetch_with_outcome
   @@ fun () ->
   Tool_misc_web_fetch.handle
     ~tool_name:"masc_web_fetch"
-    ~start_time:(Time_compat.now ())
+    ~start_time:(Tool_timing.start ())
     args
   |> Keeper_tool_execution.of_tool_result
 ;;
@@ -471,13 +471,13 @@ let handle_memory_retract_with_outcome
 let handle_browser_tabs_with_outcome ~(config : Workspace.config) ~args =
   Keeper_tool_execution.of_tool_result
     (Tool_misc_browser_lane.handle_tabs ~base_path:config.base_path
-       ~tool_name:"masc_browser_tabs" ~start_time:0.0 args)
+       ~tool_name:"masc_browser_tabs" ~start_time:(Tool_timing.start ()) args)
 ;;
 
 let handle_browser_read_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
   let result =
     Tool_misc_browser_lane.handle_read_with_retention ~base_path:config.base_path
-      ~keeper_name:meta.name ~tool_name:"masc_browser_read" ~start_time:0.0 args
+      ~keeper_name:meta.name ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ()) args
   in
   (* Downloads carry normalized references to durable files. The result's
      manifest must be persisted by this producer before provider projection,
@@ -494,19 +494,20 @@ let handle_browser_read_with_outcome ~(config : Workspace.config) ~(meta : keepe
 
 let handle_browser_session_with_outcome ~args =
   Keeper_tool_execution.of_tool_result
-    (Tool_misc_browser_lane.handle_session ~tool_name:"masc_browser_session" ~start_time:0.0 args)
+    (Tool_misc_browser_lane.handle_session ~tool_name:"masc_browser_session"
+       ~start_time:(Tool_timing.start ()) args)
 ;;
 
 let handle_browser_interact_with_outcome ~(config : Workspace.config) ~args =
   let result, failure_effect_disposition =
     Tool_misc_browser_lane.handle_interact_with_phase ~base_path:config.base_path
-      ~tool_name:"masc_browser_interact" ~start_time:0.0 args in
+      ~tool_name:"masc_browser_interact" ~start_time:(Tool_timing.start ()) args in
   Keeper_tool_execution.of_tool_result ~failure_effect_disposition result
 ;;
 
 let handle_browser_goto_with_outcome ~args =
   Keeper_tool_execution.of_tool_result
-    (Tool_misc_browser_lane.handle_goto ~tool_name:"masc_browser_goto" ~start_time:0.0 args)
+    (Tool_misc_browser_lane.handle_goto ~tool_name:"masc_browser_goto" ~start_time:(Tool_timing.start ()) args)
 ;;
 
 let handle_browser_instruct_with_outcome ~args =
@@ -519,7 +520,7 @@ let handle_browser_act_with_outcome ~turn_sandbox_factory ~(config : Workspace.c
   let invoke ?upload_paths () =
     let result, failure_effect_disposition =
       Tool_misc_browser_lane.handle_act_with_phase ?upload_paths ~base_path:config.base_path
-        ~tool_name:"masc_browser_act" ~start_time:0.0 args in
+        ~tool_name:"masc_browser_act" ~start_time:(Tool_timing.start ()) args in
     Keeper_tool_execution.of_tool_result ~failure_effect_disposition result in
   match Browser_lane.Action.parse args with
   | Ok (Browser_lane.Action.On_tab {interaction=Upload {paths;_};_}) ->
@@ -548,7 +549,7 @@ let handle_library_search_with_outcome ~(config : Workspace.config) ~(meta : kee
   Keeper_tool_execution.of_tool_result
     (Tool_library.handle_search
        ~tool_name:"keeper_library_search"
-       ~start_time:0.0
+       ~start_time:(Tool_timing.start ())
        Tool_library.{ base_path = config.base_path; agent_name = meta.name }
        args)
 ;;
@@ -557,7 +558,7 @@ let handle_library_read_with_outcome ~(config : Workspace.config) ~(meta : keepe
   Keeper_tool_execution.of_tool_result
     (Tool_library.handle_read
        ~tool_name:"keeper_library_read"
-       ~start_time:0.0
+       ~start_time:(Tool_timing.start ())
        Tool_library.{ base_path = config.base_path; agent_name = meta.name }
        args)
 ;;
@@ -1933,10 +1934,10 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
   (match Tool_schemas_misc.misc_operation_of_tool_name name with
    | Some Tool_schemas_misc.Misc_msx_screen ->
      Some (Keeper_msx_screen.handle ~keeper_name:meta.name
-       ~tool_name:name ~start_time:(Time_compat.now ()) args)
+       ~tool_name:name ~start_time:(Tool_timing.start ()) args)
    | Some Tool_schemas_misc.Misc_dos_screen ->
      Some (Keeper_dos_screen.handle ~keeper_name:meta.name ~base_path:config.base_path
-       ~tool_name:name ~start_time:(Time_compat.now ()) args)
+       ~tool_name:name ~start_time:(Tool_timing.start ()) args)
    | Some
        Tool_schemas_misc.(
          ( Misc_dos_load | Misc_dos_eject | Misc_dos_step | Misc_dos_pass
@@ -2265,6 +2266,7 @@ let masc_file_failure message =
 ;;
 
 let handle_masc_file_with_outcome ~name ~args () =
+  let start_time = Tool_timing.start () in
   let require_env key =
     (* The key is the caller's, but the floor is the same: a value set in
        runtime.toml has to answer here too, or masc_file refuses a variable the
@@ -2297,7 +2299,7 @@ let handle_masc_file_with_outcome ~name ~args () =
             Keeper_tool_execution.of_tool_result
               (Tool_result.make_ok
                  ~tool_name:name
-                 ~start_time:0.0
+                 ~start_time
                  ~data:
                    (`Assoc
                       [ ("ok", `Bool true)
@@ -2320,7 +2322,7 @@ let handle_masc_file_with_outcome ~name ~args () =
             Keeper_tool_execution.of_tool_result
               (Tool_result.make_ok
                  ~tool_name:name
-                 ~start_time:0.0
+                 ~start_time
                  ~data:(`Assoc [ ("ok", `Bool true); ("file_id", `String file_id) ])
                  ())
           | Ok false -> masc_file_failure "deletion not confirmed"
@@ -2345,7 +2347,7 @@ let handle_masc_file_with_outcome ~name ~args () =
            Keeper_tool_execution.of_tool_result
              (Tool_result.make_ok
                 ~tool_name:name
-                ~start_time:0.0
+                ~start_time
                 ~data:(`Assoc [ ("ok", `Bool true); ("count", `Int (List.length rows)); ("files", `List rows) ])
                 ())))
     | _ -> masc_file_failure ("unknown file tool " ^ name))

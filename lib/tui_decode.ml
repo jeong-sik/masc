@@ -1229,6 +1229,15 @@ let short_timestamp_of_unix_for_terminal ~localtime unix_seconds =
     tm.Unix.tm_sec
 ;;
 
+(* {!clock_timestamp_for_terminal}'s [HH:MM:SS] shape, for a time the wire
+   carries as a number rather than an RFC 3339 string -- the same pairing
+   {!short_timestamp_of_unix_for_terminal} already is for
+   {!short_timestamp_for_terminal}. *)
+let clock_timestamp_of_unix_for_terminal ~localtime unix_seconds =
+  let tm = localtime unix_seconds in
+  Printf.sprintf "%02d:%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+;;
+
 (* The date and time beside a record, in the zone the operator's terminal is
    in. It sliced the first nineteen bytes of the server's RFC 3339 string, which
    kept a UTC reading and dropped the [Z] that said so -- "2026-08-22T00:03:00"
@@ -9466,7 +9475,7 @@ type preset_manifest =
   ; pm_description : string
   ; pm_created_at : string
   ; pm_override_count : int
-  ; pm_override_keys : string list option
+  ; pm_override_keys : string list
         (** Which prompts the preset overrides. [None] on a manifest written
             before the server named them, which is not the same as [Some []]:
             unknown against none. *)
@@ -9561,17 +9570,7 @@ let decode_preset_manifest json =
   let* pm_description = required_string_field json "description" in
   let* pm_created_at = required_string_field json "created_at" in
   let* pm_override_count = required_int_field json "override_count" in
-  let pm_override_keys =
-    match Yojson.Safe.Util.member "override_keys" json with
-    | `List items ->
-      Some
-        (List.filter_map
-           (function
-             | `String key -> Some key
-             | _ -> None)
-           items)
-    | `Null | _ -> None
-  in
+  let* pm_override_keys = decode_string_list json "override_keys" in
   let* pm_keepers = decode_string_list json "keepers" in
   let* pm_assignment_count = required_int_field json "assignment_count" in
   let* pm_lane_count = required_int_field json "lane_count" in

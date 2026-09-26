@@ -688,6 +688,131 @@ let check_each_atom_once body =
       (occurrences ~sub:(narrowing_atom_text mark) body))
     narrowing_marks
 
+(* One completed turn, during which a counterpart spoke, on a lane of one CLI
+   slot whose answers [runner] gives. *)
+let with_counterpart_turn ~counterpart f =
+  let open Masc in
+  let module F = Exact_output_fixture in
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
+  F.with_official_client_runtimes @@ fun () ->
+  with_source @@ fun env config save _append _boundary ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  let base_path = config.Masc.Workspace.base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Fs_compat.mkdir_p keepers_dir;
+  Out_channel.with_open_bin (Filename.concat keepers_dir (keeper_name ^ ".toml")) (fun oc ->
+    Printf.fprintf oc "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\nsandbox_image = \"masc-sandbox:general\"\n"
+      keeper_name "Preserve evidence." "docker");
+  Masc.Keeper_types_profile.invalidate_keeper_profile_defaults_cache keeper_name;
+  let meta = Masc_test_deps.meta_of_json_fixture
+    (`Assoc ["name", `String keeper_name; "trace_id", `String trace_id]) |> get in
+  Masc.Keeper_meta_store.replace_snapshot config meta |> get;
+  let registry = Exact_lane_run_registry.create
+    ~path:(Filename.concat base_path Exact_lane_run_registry.storage_filename) () in
+  (match Exact_lane_run_registry.install_global registry with
+   | Ok () | Error Exact_lane_run_registry.Already_installed -> ());
+  let root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
+  Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
+  Prompt_defaults.init ();
+  ignore (F.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
+    ~cli_slot_ids:[F.cli_primary_runtime]
+    (F.resolver_snapshot ~source:"continuity-counterpart" []));
+  Keeper_chat_store.append_user_message ~base_dir:base_path ~keeper_name ~content:counterpart
+    ~speaker:({ speaker_id = Some "external"; speaker_name = Some "External";
+                speaker_authority = Keeper_chat_store.External } : Keeper_chat_store.speaker)
+    ();
+  (* The turn ends after the counterpart spoke. *)
+  let turn = [message "turn-1"] in
+  save turn;
+  B.append ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+    {B.recorded_at = Time_compat.now () +. 60.;
+     event = B.Turn_ended {turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+       history_at_start = B.Fresh_history; position = B.position_of_messages turn |> get}}
+  |> Result.map_error B.append_error_to_string |> get;
+  let continuity runner =
+    Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity
+      ~cli_runner:runner ~base_path ~keeper_name () in
+  f ~config ~continuity
+
+let memory_answer = {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":"s"}|}
+
+let durable_reads config ~commit =
+  let module Consumer = Masc.Keeper_librarian_durable_consumer in
+  match Consumer.consume_one ~config ~keeper_name ~commit with
+  | Ok (Consumer.Progress_advanced progress) -> progress.position.end_atom
+  | Ok (Consumer.Nothing_to_read | Consumer.Baseline_advanced _ | Consumer.Memory_not_committed
+       | Consumer.Official_advanced _) ->
+    fail "the durable pass did not move past the turn"
+  | Error error -> fail (Consumer.error_to_string error)
+
+(* A continuity pass that saves Memory is the only pass that reads its atoms:
+   the durable pass moves past them afterwards without reading them again
+   (#39179). A counterpart who spoke during the turn has to reach this pass,
+   or no Memory pass ever sees what they said. *)
+let test_a_memory_pass_carries_the_counterparts_of_its_turn () =
+  let counterpart = "counterpart-promised-the-release-notes-by-friday" in
+  with_counterpart_turn ~counterpart @@ fun ~config ~continuity ->
+  let prompts = ref [] in
+  continuity (fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt ->
+    prompts := !prompts @ [prompt];
+    Ok memory_answer);
+  (match !prompts with
+   | [prompt] ->
+     check bool "the Memory pass carries the counterpart who spoke during its turn" true
+       (contains ~sub:counterpart prompt)
+   | _ -> fail "expected one Memory pass");
+  check (option int) "the pass saved and published the turn" (Some 1)
+    (Option.map (fun (saved : S.t) -> saved.end_atom) (P.read ~config ~keeper_name |> get));
+  check int "the durable pass moves past the saved turn without the model" 1
+    (durable_reads config ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+       fail "the durable pass sent the saved turn again"))
+
+(* The CLI slot reports a limit the turn fits without its counterpart and not
+   with it, and the turn is one atom, so no smaller unit can leave the
+   counterpart out. After the refusal this round leaves the turn's Memory to
+   the durable pass rather than reading the refusal as a disagreement with
+   its own measurement. The durable pass reads the turn with the counterpart,
+   and the next continuity pass, now Context-only, publishes the turn. *)
+let test_a_turn_too_large_with_its_counterparts_is_left_to_the_durable_pass () =
+  let module Codex = Runtime_codex_app_server in
+  let module O = Masc.Keeper_continuity_observation in
+  let module Current = Masc.Keeper_memory_os_current in
+  let counterpart = "counterpart-marker-" ^ String.make 4000 'x' in
+  with_counterpart_turn ~counterpart @@ fun ~config ~continuity ->
+  let calls = ref 0 in
+  continuity (fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt ->
+    incr calls;
+    let actual_chars = Codex.prompt_char_count prompt |> get in
+    Error (Masc.Fusion_official_client.Codex_failure (Codex.Rpc_error
+      {method_="turn/start"; code=Some (-32602); message="fixture capacity";
+       data=Some (`Assoc ["input_error_code", `String "input_too_large";
+         "actual_chars", `Int actual_chars;
+         "max_chars", `Int (actual_chars - String.length counterpart)])})));
+  check int "the slot refuses once" 1 !calls;
+  check bool "no snapshot is published" true (P.read ~config ~keeper_name |> get = None);
+  check bool "the turn's Memory is left to the durable pass" true
+    ((O.latest_synthesis ~config ~keeper_name |> some).state = O.Not_committed);
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path in
+  let received = ref [] in
+  check int "the durable pass reads the turn" 1
+    (durable_reads config ~commit:(fun ~expected_revision:_ ~range_id ~official_range_id
+       (input : Masc.Keeper_librarian.input) ->
+       received := List.map (fun (o : Masc.Keeper_counterpart_observation.t) -> o.content)
+           input.counterpart_observations;
+       match Current.apply_disposition ~revisions:[] ?durable_range_id:range_id
+               ?official_range_id ~absorbed:[] ~keepers_dir ~keeper_id:keeper_name ~now:1001.
+               ~source:{kind = Current.Librarian; trace_id} ~new_claims:[] () with
+       | Ok _ -> true
+       | Error detail -> fail detail));
+  check bool "with the counterpart the continuity pass could not carry" true
+    (List.mem counterpart !received);
+  continuity (fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+    Ok {|{"working_state":"s"}|});
+  check (option int) "the next continuity pass publishes the turn Context-only" (Some 1)
+    (Option.map (fun (saved : S.t) -> saved.end_atom) (P.read ~config ~keeper_name |> get))
+
 (* A continuity range whose Memory the durable pass already committed is a
    Context-only pass (#38184). It asks for the working state alone: the
    request names no Memory output field, the conversation travels once, and
@@ -1079,6 +1204,10 @@ let () = run "production continuity pair"
     test_case "a refused width carries to the next pass" `Quick test_refused_width_carries_to_the_next_pass;
     test_case "a waiting unit ends the catch-up after a commit" `Quick
       test_a_waiting_unit_ends_the_catch_up_after_a_commit;
+    test_case "a Memory pass carries the counterparts of its turn" `Quick
+      test_a_memory_pass_carries_the_counterparts_of_its_turn;
+    test_case "a turn too large with its counterparts is left to the durable pass" `Quick
+      test_a_turn_too_large_with_its_counterparts_is_left_to_the_durable_pass;
     test_case "a committed range asks for the working state alone" `Quick
       test_a_committed_range_asks_for_the_working_state_alone;
     test_case "a continuity pass carries tool turns folded once" `Quick

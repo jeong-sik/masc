@@ -253,7 +253,9 @@ let codex_dynamic_tool ~observe_effect_attempted ~observe_successful_tool_comple
            code. The handler may commit and then raise or be cancelled, so
            observing only its returned value would reopen a duplicate-effect
            window. *)
-        observe_effect_attempted ();
+        (match tool.call_effect input with
+         | Agent_core.Tool.Read_only -> ()
+         | Agent_core.Tool.Effect_possible -> observe_effect_attempted ());
         let result = tool.call ~call_id input in
         (* This is evidence that the handler returned a successful tool result,
            which is sufficient to accept a tool-only provider terminal. It is
@@ -1312,9 +1314,30 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           (internal_error
              "Codex host stop arrived without an acknowledged provider turn")
     in
+    let settle_cancellation exn =
+      let backtrace = Printexc.get_raw_backtrace () in
+      recovery_failure
+        := (if Keeper_owner_signals.is_owner_cancel_reason exn then
+              Keeper_official_client_session_store.Owner_stopped_turn
+            else Keeper_official_client_session_store.Transport_interrupted);
+      let detail = "Codex turn cancelled: " ^ Printexc.to_string exn in
+      (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
+       | Ok () -> ()
+       | Error recovery_detail ->
+         Log.Keeper.error
+           ~keeper_name
+           "Codex cancellation recovery persistence failed: %s"
+           recovery_detail);
+      (match
+         Eio.Cancel.protect (fun () ->
+           finish_raw_error ~keeper_name raw_trace_run (internal_error detail))
+       with
+       | () -> ());
+      Printexc.raise_with_backtrace exn backtrace
+    in
     let turn_result =
       try
-        let on_stream_event =
+        let observe_stream =
           codex_stream_callback
           ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
@@ -1323,6 +1346,18 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
              | Runtime_codex_app_server.Start -> Keeper_usage_resolution.Fresh
              | Runtime_codex_app_server.Resume _ -> Keeper_usage_resolution.Resumed)
           on_event
+        in
+        let on_stream_event event =
+          (* Native actions do not carry a MASC tool producer's read-only
+             contract. Keep their effects fenced, including a completed item
+             whose start was not observed. *)
+          (match event with
+           | Runtime_codex_app_server.Native_tool_started _
+           | Native_tool_finished _ -> observe_effect_attempted ()
+           | Turn_started _ | Text_delta _ | Dynamic_tool_started _
+           | Dynamic_tool_finished _ | Elicitation_cancelled _
+           | Usage_windows_reported _ | Usage_reported _ | Turn_finished _ -> ());
+          Option.iter (fun observe -> observe event) observe_stream
         in
         (match
        Runtime_codex_app_server.run_turn
@@ -1334,7 +1369,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
          ~thread_mode
          ~history
          ~developer_context
-         ?on_stream_event
+         ~on_stream_event
          ~on_thread_ready:(fun ~thread_id ->
            update_session "active transition" (fun expected ->
              Keeper_official_client_session_store.mark_active
@@ -1501,27 +1536,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       (* A stop the owner raised is not an ambiguity: it knows the turn did
          not finish and why. Only an unexplained cancellation needs an
          operator to adjudicate what the transport left behind (#28012). *)
-      | Eio.Cancel.Cancelled _ as exn ->
-        let backtrace = Printexc.get_raw_backtrace () in
-        recovery_failure
-          := (match exn with
-              | Eio.Cancel.Cancelled Keeper_owner_signals.Stop_active_child ->
-                Keeper_official_client_session_store.Owner_stopped_turn
-              | _ -> Keeper_official_client_session_store.Transport_interrupted);
-        let detail = "Codex turn cancelled: " ^ Printexc.to_string exn in
-        (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
-         | Ok () -> ()
-         | Error recovery_detail ->
-           Log.Keeper.error
-             ~keeper_name
-             "Codex cancellation recovery persistence failed: %s"
-             recovery_detail);
-        (match
-           Eio.Cancel.protect (fun () ->
-             finish_raw_error ~keeper_name raw_trace_run (internal_error detail))
-         with
-         | () -> ());
-        Printexc.raise_with_backtrace exn backtrace
+      | Eio.Cancel.Cancelled _ as exn -> settle_cancellation exn
+      | exn when Keeper_owner_signals.is_owner_cancel_reason exn ->
+        settle_cancellation exn
     in
     let turn_result =
       match turn_result with
@@ -1674,6 +1691,9 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
             previous_capacity_bytes
             capacity_bytes)
       ~attempt:(fun ~capacity:capacity_bytes ->
+        (* A read in an abandoned attempt cannot certify a tool-only answer
+           from the next one. Effect evidence remains cumulative. *)
+        Atomic.set successful_tool_completion No_successful_tool_completion;
         run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~official_client_continuation
           ~required_native_posture
           ~runtime_id

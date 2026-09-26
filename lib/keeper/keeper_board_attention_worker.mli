@@ -23,6 +23,16 @@ type step =
       { candidate_id : string
       ; reason : Keeper_board_attention_partition.blocked_reason
       }
+  | Judgment_deferred of
+      { candidate_id : string
+      ; detail : string
+      }
+      (** Every slot the lane walked refused for its account's standing: an
+          HTTP rate limit, quota, full capacity or payment refusal, then a
+          typed CLI quota or usage-limit refusal. The partition is [Ready] again at the
+          next generation and the candidate stays Pending, not quarantined.
+          [detail] is the lane's sentence, the one its run record closed
+          with. *)
 
 type retry_reason =
   | Exact_claim_contended
@@ -45,13 +55,29 @@ type drain_outcome =
       ; reason : retry_reason
       ; progress : drain_progress
       }
+  | Lane_deferred of
+      { candidate_id : string
+      ; progress : drain_progress
+      }
 (** [Drained] clears the contention re-arms; [Retry_later] keeps the durable
     partition undrained and re-arms the contention timer, so the same worker
     re-inspects it (see [apply_drain_rearm]). A generation that moved under the
     worker arrives here as [Retry_later { reason = Selected_generation_changed }]
     and is retried, not abandoned. The ledger stays the work authority in both
     cases. Both carry the progress made before the verdict: contention after
-    ten judgments is not the same event as contention on the first visit. *)
+    ten judgments is not the same event as contention on the first visit.
+
+    [Lane_deferred] ends the drain at the first [Judgment_deferred] step: the
+    deferred root is the oldest Ready root that needs the lane, so another
+    iteration would claim it straight back into the same exhausted lane.
+    Ready roots that need no lane call (their candidate is already judged,
+    consumed, quarantined or absent) are claimed before any root that does,
+    so they never wait behind it. It arms no timer. Liveness
+    comes from the wakes that already exist: the next Board signal recorded
+    for this Keeper, a resume, or process start claims the root again, and a
+    lane that has a free binding by then judges it. A wake timed to the
+    earliest slot release needs each exact-lane slot to record its rest,
+    which the lane does not do yet. *)
 
 type rearm_schedule =
   | Rearm_scheduled of { delay_s : float }
@@ -104,8 +130,8 @@ val run :
     Setup or durability errors end this lifecycle instead of awaiting another
     wake. Exact claim contention schedules one generation-keyed delayed wake on
     the worker switch; it never recursively claims a sibling in the same turn.
-    Cancellation performs no partition I/O: process-start recovery releases an
-    unbound claim and quarantines every durably bound execution. Process recovery
+    Cancellation performs no partition I/O: process-start recovery returns every
+    cut claim, bound or not, to [Ready]. Process recovery
     ownership is released when the lifecycle ends or is cancelled. *)
 
 val settle_completed_snapshot :
@@ -242,7 +268,9 @@ module For_testing : sig
     (drain_outcome, string) result
   (** Drain every currently claimable root. Terminal failures remain Blocked and
       completion durability failures return without re-entering AGENT_CORE. Exact claim
-      contention returns [Retry_later] without recursive same-turn retry. *)
+      contention returns [Retry_later] without recursive same-turn retry. A lane
+      whose every slot refused for its account's standing returns [Lane_deferred] with
+      the root [Ready] and its candidate Pending. *)
 
   val drain_available_with_process :
     yield:(unit -> unit) ->

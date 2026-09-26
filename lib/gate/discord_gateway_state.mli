@@ -266,7 +266,11 @@ type gateway_effect =
 type config =
   { token : string
   ; intents : intent list
-  ; bot_user_id : string option  (** Filled in after first READY. *)
+  ; bot_user_id : string option
+      (** Filled in after first READY. While [None], MESSAGE_CREATE and
+          MESSAGE_REACTION_ADD dispatches are held in {!t} and routed, in
+          arrival order, once READY names the bot — the self-echo guard never
+          judges an event without the bot's identity. *)
   ; trigger_policy : trigger_policy
   }
 
@@ -290,7 +294,8 @@ val trigger_policy_to_string : trigger_policy -> string
 
 type t
 (** Opaque state. Carries [connection_state], [config], last sequence,
-    reconnect backoff history (for exponential growth), bot identity. *)
+    reconnect backoff history (for exponential growth), bot identity,
+    dispatches deferred until READY. *)
 
 val create : config:config -> t
 

@@ -2635,7 +2635,7 @@ network_mode = "none"
     Out_channel.output_string oc toml_content);
   let probed_image = ref None in
   let docker_preflight ~image ~timeout_sec:_ () =
-    probed_image := Result.to_option image;
+    probed_image := Some image;
     Some (preflight_fixture ~ok:true)
   in
   let args =
@@ -2662,7 +2662,7 @@ network_mode = "none"
          (Some "base") parsed.profile_defaults.sandbox_image
      | Error result -> fail (Keeper_types_profile.tool_result_body result));
     let failing_docker_preflight ~image ~timeout_sec:_ () =
-      probed_image := Result.to_option image;
+      probed_image := Some image;
       Some (preflight_fixture ~ok:false)
     in
     (match Keeper_turn_up_args.parse ~docker_preflight:failing_docker_preflight ctx args with

@@ -2827,7 +2827,7 @@ let validate_muse_prompt_budgets
     let provider = List.find_opt (fun (p : Runtime_schema.provider) -> p.id = binding.provider_id) providers in
     let model = List.find_opt (fun (m : Runtime_schema.model_spec) -> m.id = binding.model_id) models in
     match provider,model with
-    | Some {api_format = Runtime_schema.Muse_serve_runtime; _},Some model
+    | Some {api_format = Runtime_schema.Muse_serve_runtime; enabled=true; _},Some model
       when binding.enabled && Option.is_none model.max_prompt_bytes ->
       error ("models." ^ model.id ^ ".max-prompt-bytes")
         "Muse bindings require an explicit positive input byte budget (max-prompt-bytes)"

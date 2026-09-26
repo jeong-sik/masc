@@ -1591,7 +1591,9 @@ def select_connections(binary, inventory, timeout, credentials=None):
             refresh_models = False
             print(terminal_text(origin) + '\nListed models are checked with a real response and tool call before saving.', file=sys.stderr)
             options = [model_choice_label(item) for item in models]
-            actions = ['Refresh model list', 'Back to connection selection', 'Advanced: enter an exact model ID']
+            actions = ['Refresh model list', 'Back to connection selection']
+            if source['choice'] != 'muse':
+                actions.append('Advanced: enter an exact model ID')
             can_replace_key = credentials is not None and CHOICES[source['choice']][1] is None
             if can_replace_key:
                 actions.append('Save or replace API key (hidden)')

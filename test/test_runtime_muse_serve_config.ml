@@ -155,7 +155,9 @@ let test_missing_prompt_budget_is_rejected_before_save () =
     (List.mem "models.muse-spark.max-prompt-bytes"
       (parse_error_paths (runtime_toml ~model_extra:"" ())));
   check (list string) "declared positive bytes admit the config" []
-    (parse_error_paths (runtime_toml ()))
+    (parse_error_paths (runtime_toml ()));
+  check (list string) "disabled provider does not require dormant input capacity" []
+    (parse_error_paths (runtime_toml ~provider_extra:"enabled = false" ~model_extra:"" ()))
 ;;
 
 let test_declared_credentials_are_refused () =

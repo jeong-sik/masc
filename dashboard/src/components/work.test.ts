@@ -121,6 +121,8 @@ function goalTreeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
     metric: null,
     target_value: null,
     due_date: null,
+    criterion_revision: 'revision-default',
+    measurement: { state: 'not_recorded' },
     tasks: [],
     task_count: 0,
     task_done_count: 0,

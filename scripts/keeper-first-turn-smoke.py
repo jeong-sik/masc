@@ -28,6 +28,27 @@ class SmokeError(RuntimeError):
     pass
 
 
+def ledger_execution_evidence(base, keeper, tool_use_id):
+    """One Execute call's audit fields from the tool-call ledger.
+
+    Shell receipts are recorded there for every call; the ToolResult the model
+    reads carries them only when they are unusual (masc#39035). The row is
+    committed before the result reaches the model.
+    """
+    found = []
+    for path in sorted((base / '.masc/tool_calls').rglob('*.jsonl')):
+        for line in path.read_text().splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if (row.get('keeper') == keeper and row.get('tool_use_id') == tool_use_id
+                    and isinstance(row.get('execution_evidence'), dict)):
+                found.append(row['execution_evidence'])
+    if len(found) != 1:
+        raise SmokeError(f'expected one ledger execution_evidence for {tool_use_id}, found {len(found)}')
+    return found[0]
+
+
 def objects(value):
     """Decode structured envelopes and stdout JSON without substring verdicts."""
     if isinstance(value, dict):
@@ -313,17 +334,14 @@ def kata_proof(args, fixture, base, output, runtime_env, server):
         raise SmokeError('guest release shim mount is not read-only')
     if Path(shim_mount['source']).resolve() != base / '.masc/microvm/shim':
         raise SmokeError('guest did not mount this workspace release shim')
-    tool_results = [m for req in fixture.requests for m in req.get('messages', [])
-                    if m.get('role') == 'tool' and m.get('tool_call_id') == fixture.call_id]
-    evidence = [obj['shim_execution_evidence'] for obj in objects(tool_results)
-                if isinstance(obj.get('shim_execution_evidence'), dict)]
-    receipts = [entry for group in evidence if group.get('status') == 'recorded'
-                for entry in group.get('receipts', [])]
+    shim = ledger_execution_evidence(base, args.keeper, fixture.call_id).get(
+        'shim_execution_evidence') or {}
+    receipts = shim.get('receipts', []) if shim.get('status') == 'recorded' else []
     if not any(entry.get('status') == 'observed'
                and entry.get('receipt', {}).get('boundary') == 'sandbox_applied'
                and entry.get('outcome') == {'exit': 0, 'signal': None, 'timed_out': False, 'shim_error': False}
                for entry in receipts):
-        raise SmokeError('actual Execute ToolResult has no successful shim execution receipt')
+        raise SmokeError('actual Execute call has no successful shim execution receipt in the ledger')
     (output / 'shim-execution-receipts.json').write_text(json.dumps(receipts, indent=2))
     projection = kata_path_projection(base, args.keeper, work_mount['destination'])
     proof_path = str(projection.guest_cwd(fixture.proof['cwd']) / fixture.filename)

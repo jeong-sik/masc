@@ -407,7 +407,7 @@ let publish_registry
       resolver_snapshot
   =
   let lane : Runtime_schema.exact_output_lane_decl =
-    { id = lane_id; slot_ids; cli_slot_ids; max_output_tokens }
+    { id = lane_id; slot_ids; cli_slot_ids; max_output_tokens; thinking = None }
   in
   match Runtime_exact_output_registry.publish ~lanes:[ lane ] resolver_snapshot with
   | Ok registry -> registry

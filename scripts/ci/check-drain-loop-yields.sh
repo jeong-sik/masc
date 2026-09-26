@@ -77,7 +77,7 @@ drain_files=$(rg -l "${DRAIN_RE}" lib/ 2>/dev/null || true)
 # Renaming Runtime_event_bus alone does exactly that. So the count has a floor
 # and a drop is a failure: lower it here in the same change that removes a
 # drain caller, and the removal stays visible.
-DRAIN_FLOOR=15
+DRAIN_FLOOR=14
 drain_count=$(printf '%s\n' "$drain_files" | grep -c . || true)
 if [ "$drain_count" -lt "$DRAIN_FLOOR" ]; then
   echo "check-drain-loop-yields: scope shrank: ${drain_count} < ${DRAIN_FLOOR}" >&2

@@ -124,7 +124,6 @@ let expire_execution_warmup () =
   surface.Server_dashboard_http_cache.current <-
     { (Server_dashboard_http_cache.snapshot surface) with
       last_attempt_unix = Some stale_attempt_ts
-    ; last_attempt_at = Some "stale_attempt_for_test"
     }
 
 let create_keeper env sw state name =

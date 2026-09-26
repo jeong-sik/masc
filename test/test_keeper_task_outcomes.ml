@@ -360,12 +360,15 @@ let test_tasks_list_names_the_newest_tasks () =
        let page = ids_of "snapshot" in
        let newest = ids_of "new_tasks" in
        check int "the page holds the limit" 2 (List.length page);
-       check int "the newest window names every visible task" 4 (List.length newest);
-       check int "new_tasks_count agrees" 4 U.(data |> member "new_tasks_count" |> to_int);
-       (* The page is the two oldest; the newest window leads with a task the
-          page does not carry. *)
-       check bool "the newest row is off the page" false (List.mem (List.hd newest) page);
-       (* Both windows describe the same four tasks. *)
+       (* The page is the two oldest; the newest window names only the two
+          rows the page does not carry, so no row travels twice. *)
+       check int "the newest window names the off-page tasks" 2 (List.length newest);
+       check int "new_tasks_count agrees" 2 U.(data |> member "new_tasks_count" |> to_int);
+       check bool
+         "no newest row repeats a page row"
+         false
+         (List.exists (fun id -> List.mem id page) newest);
+       (* Together the two windows describe all four tasks. *)
        check int
          "both windows describe the same backlog"
          4

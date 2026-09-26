@@ -49,7 +49,7 @@ let parse = function
         let* () = excludes ["selector";"text";"x";"y";"documentId";"nodeId";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "activate_tab requires expectedUrl" in
         let* () = match base.route with Browser_lane.Live_route _ -> Ok ()
-          | Browser_lane.Automation_route -> Error "activate_tab requires live lane" in
+          | Browser_lane.Automation_route | Browser_lane.Stagehand_route -> Error "activate_tab requires live lane" in
         Ok Browser_lane.Activate_tab
       | Some (`String "click") ->
         let* () = excludes ["text"; "x"; "y"; "point"; "from"; "to"; "viewport"] in

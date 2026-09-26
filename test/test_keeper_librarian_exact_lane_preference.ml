@@ -119,7 +119,7 @@ let test_keeper_preference_reorders_the_librarian_lane () =
          [ { Runtime_schema.id = "librarian_exact"
            ; slot_ids = [ "librarian-default"; "librarian-preferred" ]
            ; cli_slot_ids = []
-           ; max_output_tokens = Some 4_096
+           ; max_output_tokens = Some 4_096; thinking = None
            }
          ]
        snapshot
@@ -274,7 +274,7 @@ let test_context_commits_when_memory_store_fails () =
          [ { Runtime_schema.id = "librarian_exact"
            ; slot_ids = [ "librarian-context" ]
            ; cli_slot_ids = []
-           ; max_output_tokens = Some 4_096
+           ; max_output_tokens = Some 4_096; thinking = None
            } ]
        snapshot
    with
@@ -389,7 +389,7 @@ let test_memory_commits_when_working_contexts_slip slip () =
          [ { Runtime_schema.id = "librarian_exact"
            ; slot_ids = [ "librarian-answering"; "librarian-successor" ]
            ; cli_slot_ids = []
-           ; max_output_tokens = Some 4_096
+           ; max_output_tokens = Some 4_096; thinking = None
            } ]
        snapshot
    with
@@ -501,7 +501,7 @@ let test_excluded_last_slot_preserves_domain_failure () =
            [ { Runtime_schema.id = "librarian_exact"
              ; slot_ids = slots
              ; cli_slot_ids = []
-             ; max_output_tokens = Some 4_096
+             ; max_output_tokens = Some 4_096; thinking = None
              } ]
          snapshot
      with
@@ -540,9 +540,13 @@ let test_excluded_last_slot_preserves_domain_failure () =
      check (list string)
        "the refused slot is reported, not fatal"
        [ "librarian-bad" ]
-       (List.map fst preflight.Runtime.unusable);
+       (List.map (fun (refusal : Runtime.slot_refusal) -> refusal.slot_id)
+          preflight.Runtime.unusable);
      (match preflight.Runtime.unusable with
-      | [ (_, reason) ] ->
+      | [ refusal ] ->
+        let reason =
+          Agent_core.Exact_output.admission_error_reason refusal.cause
+        in
         check bool
           "the refusal names its kind"
           true
@@ -604,7 +608,7 @@ let test_an_empty_ladder_reports_nothing () =
   match Runtime.preflight_slots ~requirement:ordinary_requirement ~selected_slots:[] ~messages:[ message ] with
   | Ok preflight ->
     check int "no selected slots" 0 (List.length preflight.Runtime.selected_slots);
-    check (list (pair string string)) "nothing to exclude" [] preflight.Runtime.unusable
+    check int "nothing to exclude" 0 (List.length preflight.Runtime.unusable)
   | Error error -> fail (Runtime.extraction_error_to_string error)
 ;;
 

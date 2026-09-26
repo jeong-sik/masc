@@ -3405,10 +3405,12 @@ let sandbox_image_ensure_exit ~base_path runtime =
             (Printf.sprintf
                "sandbox-image: could not ask the image store whether %s is there (%s)."
                reference detail))
-     | Error (Keeper_sandbox_image_resolver.Not_built_on_host _) -> build_and_promote ()
+     | Error (Keeper_sandbox_image_resolver.Unresolved
+                (Keeper_sandbox_image_catalog.Not_built_on_host _)) -> build_and_promote ()
      | Error
          (( Keeper_sandbox_image_resolver.Not_declared
-          | Keeper_sandbox_image_resolver.Unknown_image _
+          | Keeper_sandbox_image_resolver.Unresolved
+              (Keeper_sandbox_image_catalog.Unknown_image _)
           | Keeper_sandbox_image_resolver.No_image_store _
           | Keeper_sandbox_image_resolver.Catalog_unreadable _ )
           as error) ->

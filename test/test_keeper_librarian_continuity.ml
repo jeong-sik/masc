@@ -378,7 +378,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
     if String.equal runtime_id F.cli_secondary_runtime then
       match P.read ~config ~keeper_name |> get with
       | Some saved when saved.end_atom = 3 -> alternative_bytes := Some actual_chars; Ok answer
-      | _ -> Error (Masc.Fusion_official_client.Setup_failure (Provider_error "fixture unavailable"))
+      | _ -> Error (Masc.Fusion_official_client.Setup_failure "fixture unavailable")
     else (
       incr final_calls;
       if actual_chars > max_chars then (
@@ -1017,7 +1017,7 @@ let test_an_api_commit_releases_the_cli_limit () =
     | 2 ->
       Ok {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":"s"}|}
     | _ ->
-      Error (Masc.Fusion_official_client.Setup_failure (Provider_error "fixture unavailable"))
+      Error (Masc.Fusion_official_client.Setup_failure "fixture unavailable")
   in
   narrowing_fixture ~cli_slot_ids:[ F.cli_primary_runtime ] ~cli_runner ~slot_count:1
     ~answer:(fun _index _body -> if !api_up then `OK, accepted_answer else quota ())

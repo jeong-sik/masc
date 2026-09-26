@@ -14,11 +14,8 @@
 type error =
   | Not_declared  (** The Keeper's [sandbox_image] is absent or blank. *)
   | Catalog_unreadable of Keeper_sandbox_image_catalog.load_error
-  | Unknown_image of { name : string; known : string list }
-      (** The catalog has no such name. [known] lists the names it has. *)
-  | Not_built_on_host of { name : string; store : Keeper_sandbox_image_catalog.store }
-      (** The name is in the catalog, and nothing is promoted for it in the
-          store this Keeper's containers start from. *)
+  | Unresolved of Keeper_sandbox_image_catalog.missing
+      (** The catalog found no promoted build. Carries its exact typed reason. *)
   | No_image_store of { keeper : string; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile }
       (** The profile starts no container ([remote_ssh]), or it is [microvm]
           with no [microvm_backend], so there is no store to look in. *)

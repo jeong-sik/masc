@@ -745,7 +745,7 @@ describe('RuntimeTomlEditor', () => {
   })
 
   it('moves a declared Librarian slot through routing and saves its provider deadline separately', async () => {
-    const laneSource = `${richSourceText.replaceAll('providers.runpod_mtp', 'providers."runpod_mtp"')}\n[providers.codex_subscription]\nprotocol = "codex-app-server"\ncommand = "codex"\n\n[models.luna]\napi-name = "gpt-6-luna"\nmax-context = 272000\n\n[codex_subscription.luna]\n\n[runtime.exact_output_lanes.librarian_exact]\nslots = ["runpod_mtp.qwen", "openai.gpt"]\ncli_slots = ["codex_subscription.luna"]\n`
+    const laneSource = `${richSourceText.replaceAll('providers.runpod_mtp', 'providers . "runpod_mtp"')}\n[providers.codex_subscription]\nprotocol = "codex-app-server"\ncommand = "codex"\n\n[models.luna]\napi-name = "gpt-6-luna"\nmax-context = 272000\n\n[codex_subscription.luna]\n\n[runtime.exact_output_lanes.librarian_exact]\nslots = ["runpod_mtp.qwen", "openai.gpt"]\ncli_slots = ["codex_subscription.luna"]\n`
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...baseConfig, source_text: laneSource })
     apiMocks.fetchStandaloneLanes.mockResolvedValueOnce(laneSnapshot())
       .mockResolvedValue(laneSnapshot(['openai.gpt', 'runpod_mtp.qwen']))
@@ -774,6 +774,26 @@ describe('RuntimeTomlEditor', () => {
     expect(saved).toContain('slots = ["runpod_mtp.qwen", "openai.gpt"]')
     expect(saved).not.toContain('[providers.runpod_mtp]')
     expect(getRuntimeTomlKey(saved, 'providers.runpod_mtp', 'exact-body-timeout-s')).toBe('1200')
+  })
+
+  it('keeps malformed raw drafts visible and disables structured edits until repaired', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect((container.querySelector('textarea') as HTMLTextAreaElement)?.value).toBe(richSourceText))
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    const malformed = `${richSourceText}\n[providers.\n`
+    fireEvent.input(textarea, { target: { value: malformed } })
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-parse-error"]')?.textContent).toContain('TOML'))
+    expect(textarea.value).toBe(malformed)
+    expect(container.querySelector('[data-testid="runtime-toml-impact-preview"]')).toBeNull()
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    const controls = Array.from(container.querySelectorAll('[data-testid="runtime-toml-structured"] input, [data-testid="runtime-toml-structured"] select'))
+    expect(controls.length).toBeGreaterThan(0)
+    expect(controls.every(control => (control as HTMLInputElement).disabled)).toBe(true)
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+    expect(apiMocks.patchRuntimeRouting).not.toHaveBeenCalled()
+    fireEvent.input(textarea, { target: { value: richSourceText } })
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-parse-error"]')).toBeNull())
   })
 
   it('sends a new runtime to server classification and shows a lane rejection', async () => {

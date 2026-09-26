@@ -315,6 +315,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     setNotice(null)
     try {
       const environment = parseRuntimeTomlEnvironment(config.source_text)
+      if (environment.parseError !== null) throw new Error(environment.parseError)
       const currentRuntimeId = environment.assignments[keeperName]
       const expectedAssignmentRevision = {
         state: 'runtime_config_present' as const,
@@ -341,15 +342,27 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     }
   }
 
+  function editDraft(edit: (current: string) => string) {
+    setNotice(null)
+    setDraft(current => {
+      try {
+        const next = edit(current)
+        setError(null)
+        return next
+      } catch (error: unknown) {
+        setError(errorToString(error))
+        return current
+      }
+    })
+  }
+
   function handleBindingFieldChange(
     runtimeId: string,
     field: RuntimeBindingEditableField,
     value: string | number | boolean | null,
   ) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => setRuntimeTomlBindingField(current, runtimeId, field, value))
-    setNotice(null)
-    setError(null)
+    editDraft(current => setRuntimeTomlBindingField(current, runtimeId, field, value))
   }
 
   async function handleExactSlotAction(laneId: string, action: RuntimeExactSlotAction,
@@ -370,9 +383,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
 
   function handleExactBodyDeadlineChange(providerId: string, seconds: number | null) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => setRuntimeTomlProviderField(current, providerId, 'exact-body-timeout-s', seconds))
-    setNotice(null)
-    setError(null)
+    editDraft(current => setRuntimeTomlProviderField(current, providerId, 'exact-body-timeout-s', seconds))
   }
 
   // The three handlers below mutate the draft the same way handleBindingFieldChange
@@ -382,7 +393,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   // -> Runtime.save_config_text path (RFC-0273 §3.2: reuse, don't reimplement).
   function handleAddProvider(input: NewRuntimeProviderInput) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => {
+    editDraft(current => {
       let next = setRuntimeTomlProviderField(current, input.id, 'display-name', input.displayName || input.id)
       next = setRuntimeTomlProviderField(next, input.id, 'protocol', input.protocol)
       next = setRuntimeTomlProviderField(next, input.id, input.transportKind, input.transportValue)
@@ -406,8 +417,6 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
       }
       return next
     })
-    setNotice(null)
-    setError(null)
   }
 
   function handleProviderOptionChange(
@@ -416,14 +425,12 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     value: string | number | null,
   ) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => setRuntimeTomlProviderField(current, providerId, field, value))
-    setNotice(null)
-    setError(null)
+    editDraft(current => setRuntimeTomlProviderField(current, providerId, field, value))
   }
 
   function handleAddModel(input: NewRuntimeModelInput) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => {
+    editDraft(current => {
       let next = setRuntimeTomlModelField(current, input.id, 'api-name', input.apiName || input.id)
       next = setRuntimeTomlModelField(next, input.id, 'max-context', input.maxContext)
       next = setRuntimeTomlModelField(next, input.id, 'tools-support', input.toolsSupport)
@@ -434,22 +441,16 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
       }
       return next
     })
-    setNotice(null)
-    setError(null)
   }
 
   function handleAddBinding(providerId: string, modelId: string) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => createRuntimeTomlBinding(current, providerId, modelId))
-    setNotice(null)
-    setError(null)
+    editDraft(current => createRuntimeTomlBinding(current, providerId, modelId))
   }
 
   function handleDeleteProvider(providerId: string) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => cascadeDeleteProvider(current, providerId))
-    setNotice(null)
-    setError(null)
+    editDraft(current => cascadeDeleteProvider(current, providerId))
   }
 
   function handleProviderTransportChange(
@@ -458,16 +459,12 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     value: string,
   ) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => setRuntimeTomlProviderField(current, providerId, field, value))
-    setNotice(null)
-    setError(null)
+    editDraft(current => setRuntimeTomlProviderField(current, providerId, field, value))
   }
 
   function handleProviderEnabledChange(providerId: string, enabled: boolean) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => setRuntimeTomlProviderField(current, providerId, 'enabled', enabled))
-    setNotice(null)
-    setError(null)
+    editDraft(current => setRuntimeTomlProviderField(current, providerId, 'enabled', enabled))
   }
 
   function handleProviderCredentialChange(
@@ -476,9 +473,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     value: string,
   ) {
     if (saving || loadState !== 'loaded') return
-    setDraft(current => setRuntimeTomlProviderCredential(current, providerId, credentialType, value))
-    setNotice(null)
-    setError(null)
+    editDraft(current => setRuntimeTomlProviderCredential(current, providerId, credentialType, value))
   }
 
   async function handleRefresh() {
@@ -563,8 +558,8 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     [config, dirty, draft],
   )
   const environment = useMemo(() => parseRuntimeTomlEnvironment(draft), [draft])
-  const runtimeCount = enabledRuntimeIds(environment).length
-  const providerCount = environment.providers.length
+  const runtimeCount = environment.parseError === null ? enabledRuntimeIds(environment).length : '—'
+  const providerCount = environment.parseError === null ? environment.providers.length : '—'
   const keeperSettings = config?.keeper_settings ?? []
   const keeperPendingCount = keeperSettings.filter(setting =>
     setting.application_status === 'pending_restart'
@@ -655,6 +650,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
         <span>${stats.charCount} chars</span>
         <span>${dirty ? 'unsaved' : 'synced'}</span>
       </div>
+      ${environment.parseError !== null ? html`<p role="alert" data-testid="runtime-toml-parse-error">${environment.parseError}</p>` : null}
       ${impact ? html`<${RuntimeTomlImpactPreview} impact=${impact} />` : null}
     </div>
   `
@@ -790,7 +786,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
                 sourceText=${draft}
                 providerProtocols=${config.provider_protocols}
                 section=${structuredSection}
-                disabled=${loadState !== 'loaded'}
+                disabled=${loadState !== 'loaded' || environment.parseError !== null}
                 draftDirty=${dirty}
                 saving=${saving}
                 onRoutingChange=${(lane: RuntimeRoutingLane, runtimeId: string | null) => {
@@ -813,7 +809,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
 
             <div class=${section === 'lanes' ? '' : 'hidden'} data-testid="runtime-toml-lanes">
               ${exactLaneError ? html`<p role="alert">Lane 투영을 읽지 못했습니다: ${exactLaneError}</p>` : null}
-              ${exactLanes && laneRuntimes ? html`<${RuntimeExactLaneEditor}
+              ${environment.parseError !== null ? html`<p role="alert">${environment.parseError}</p>` : exactLanes && laneRuntimes ? html`<${RuntimeExactLaneEditor}
                 sourceText=${draft} lanes=${exactLanes} runtimes=${laneRuntimes}
                 slotsDisabled=${saving || loadState !== 'loaded' || dirty}
                 deadlineDisabled=${saving || loadState !== 'loaded'}

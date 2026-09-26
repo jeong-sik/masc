@@ -1066,7 +1066,11 @@ let replace_keeper_rows_and_rebuild_briefs ~now_ts ~keeper_rows ~keepers_json fi
 ;;
 
 let running_keeper_names (config : Workspace.config) =
-  Keeper_meta_store.keeper_names config
+  (match Keeper_meta_store.keeper_names_result config with
+   | Ok names -> names
+   | Error detail ->
+     Log.Keeper.warn "running_keeper_names: keeper names unread: %s" detail;
+     [])
   |> List.filter_map (fun name ->
     match Keeper_meta_store.read_meta config name with
     | Ok (Some meta) when Keeper_status_bridge.runtime_keepalive_running config meta ->

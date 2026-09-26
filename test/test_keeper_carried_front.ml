@@ -755,11 +755,12 @@ let test_a_floor_seed_drops_as_atom_missing_on_its_own_history () =
     (Front.for_history ~digest_at:(Window.atom_opening_digest history) floor)
 ;;
 
-(* [first_atom] of a floor seed is the floor turn's total, and the next turn
-   appends at least one atom, so a history the floor seed is read against is
-   at least one atom longer than the seed's position: the position is a
-   length, not an index, and [for_history] answers "no atom" rather than
-   "another message" for it. *)
+(* [first_atom] of a floor seed is the floor turn's total: a length, not an
+   index. The next turn's history is at least one atom longer than that
+   total, and the position even names an atom that exists there — yet
+   [for_history] answers "no atom" rather than "another message": a [None]
+   digest reads no messages at all. This is the reason the #39166 sentinel
+   got wrong, which read as a corrupted history. *)
 let test_history_after_a_floor_is_at_least_the_floor_total_plus_one () =
   with_turn_record_store @@ fun config store ->
   Dated_jsonl.append store
@@ -786,9 +787,8 @@ let test_history_after_a_floor_is_at_least_the_floor_total_plus_one () =
   check bool "the floor seed names no front" true
     (Option.is_none front.Front.front_digest);
   let history = exchanges (front.Front.first_atom + 1) in
-  check int "the floor total indexes past this history's newest atom"
-    front.Front.first_atom
-    (List.length history);
+  check bool "the next turn's history is at least the floor total plus one"
+    true (List.length history >= front.Front.first_atom + 1);
   check kept_or_dropped "and the position itself is why it drops, not the messages"
     (Error Front.Front_atom_missing)
     (Front.for_history ~digest_at:(Window.atom_opening_digest history) front)
@@ -976,6 +976,8 @@ let () =
             test_read_seed_keeps_boundary_errors_out_of_the_record_count
         ; test_case "a seed read reports each failure once" `Quick
             test_a_seed_read_reports_each_failure_once
+        ; test_case "a floor seed drops as atom missing on its own history" `Quick
+            test_a_floor_seed_drops_as_atom_missing_on_its_own_history
         ] )
     ; ( "front"
       , [ test_case "of_ledger" `Quick test_of_ledger_reads_the_last_request_front
@@ -992,6 +994,8 @@ let () =
         ; test_case "origin json" `Quick test_origin_json_names_its_kind
         ; test_case "only an unknown start origin warns" `Quick
             test_only_an_unknown_start_origin_warns
+        ; test_case "history after a floor is at least the floor total plus one" `Quick
+            test_history_after_a_floor_is_at_least_the_floor_total_plus_one
         ] )
     ]
 ;;

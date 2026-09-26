@@ -82,7 +82,7 @@ def run(args):
             write_json(out / "identity.json", {
                 **identity, "port": port, "base": str(base), "model_endpoint": endpoint,
                 "environment_keys": sorted(env), "tasks": args.tasks, "cycles": args.cycles,
-                "encoding": args.encoding, "text_kind": args.text_kind,
+                "encoding": args.encoding, "text_kind": args.text_kind, "workers": args.workers,
                 "runner_sha256": digest(Path(__file__)), "fixture_sha256": digest(fixture_path)})
             with (out / "server.log").open("wb") as log, (out / "requests.jsonl").open("w") as receipts:
                 process = subprocess.Popen([str(binary), "--host", "127.0.0.1", "--base-path",
@@ -183,6 +183,20 @@ def run(args):
                         and health["build"]["binary_commit_source"] == "embedded"
                         and health["build"]["executable_sha256"] == identity["sha256"][binary.name]
                         and health["keeper_fibers"] == 0, "server identity or isolation mismatch")
+                # Persist ordinary agent records in this owned workspace. The
+                # fixed old signal makes every worker visible as needing
+                # attention, without launching Keeper fibers or model calls.
+                workers = [{"id": None, "name": f"fixture-worker-{n:04d}",
+                            "agent_type": "fixture", "status": "active", "capabilities": [],
+                            "current_task": None, "session_bound_at": "2001-09-09T01:46:40Z",
+                            "last_seen": "2001-09-09T01:46:40Z", "meta": None}
+                           for n in range(args.workers)]
+                write_json(out / "worker-fixture.json", workers)
+                agents_dir = base / ".masc/agents"
+                require(agents_dir.is_dir() and not list(agents_dir.glob("*.json")),
+                        "fixture agents directory is absent or not empty")
+                for worker in workers:
+                    write_json(agents_dir / (worker["name"] + ".json"), worker)
                 primary = base / ".masc/tasks/backlog.json"
                 initial_revision = json.loads(primary.read_text())["version"]
                 token, _, row = request("GET", "/api/v1/dashboard/dev-token")
@@ -201,6 +215,9 @@ def run(args):
                 extra = {"Accept-Encoding": args.encoding}
                 primed, _, row = request("GET", "/api/v1/dashboard/execution", extra=extra, phase="prime")
                 require(row["status"] == 200 and len(primed["tasks"]) == args.tasks, "seed count mismatch")
+                expected_names = sorted(worker["name"] for worker in workers)
+                require(sorted(agent["name"] for agent in primed["agents"]) == expected_names,
+                        "execution did not read the seeded workers")
                 generation = primed["execution_publication_generation"]
                 for cycle in range(1, args.cycles + 1):
                     tool("masc_add_task", {"title": f"Synthetic invalidation {cycle:04d}",
@@ -267,6 +284,10 @@ def run(args):
                 path = base / ".masc/tasks" / name
                 if path.is_file():
                     (out / name).write_bytes(path.read_bytes())
+            agents_dir = base / ".masc/agents"
+            if agents_dir.is_dir():
+                write_json(out / "workers-after.json", [json.loads(path.read_text())
+                           for path in sorted(agents_dir.glob("*.json"))])
         require(cleanup["reaped"] and cleanup["server_returncode"] == 0 and cleanup["stub_stopped"],
                 "server cleanup did not finish cleanly")
         require(all(x == {"method": "GET", "path": "/v1/models"} for x in model_requests),
@@ -288,10 +309,12 @@ def main():
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--tasks", type=int, default=250)
     parser.add_argument("--cycles", type=int, default=20)
+    parser.add_argument("--workers", type=int, default=0)
     parser.add_argument("--encoding", choices=("identity", "gzip"), required=True)
     parser.add_argument("--text-kind", choices=("ascii", "multilingual"), required=True)
     args = parser.parse_args()
-    require(args.tasks > 0 and args.cycles > 0, "tasks/cycles must be positive")
+    require(args.tasks > 0 and args.cycles > 0 and args.workers >= 0,
+            "tasks/cycles must be positive and workers nonnegative")
 
     def interrupted(signum, _frame):
         raise SystemExit(128 + signum)

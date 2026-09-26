@@ -308,6 +308,37 @@ let utf8_suffix ~max_bytes s =
     let start = first_boundary (max 0 (len - max_bytes)) in
     if start = 0 then s else String.sub s start (len - start)
 
+(* The longest UTF-8 sequence. A cut leaves at most this many bytes minus one
+   of the character it lands in. *)
+let utf8_max_sequence_bytes = 4
+
+(* The length of the sequence a lead byte opens; [None] for a byte that opens
+   none (a continuation byte, or 0xF8..0xFF). *)
+let utf8_sequence_length c =
+  let b = Char.code c in
+  if b land 0x80 = 0 then Some 1
+  else if b land 0xE0 = 0xC0 then Some 2
+  else if b land 0xF0 = 0xE0 then Some 3
+  else if b land 0xF8 = 0xF0 then Some 4
+  else None
+
+(* Walk back over the last bytes to the lead byte of the last character. Only
+   a lead byte that opens more bytes than remain marks a cut; a run of
+   continuation bytes with no lead in reach is not one, so it is kept. *)
+let utf8_complete_prefix s =
+  let len = String.length s in
+  let lowest_lead = max 0 (len - (utf8_max_sequence_bytes - 1)) in
+  let rec scan i =
+    if i < lowest_lead then len
+    else if (Char.code s.[i] land 0xC0) = 0x80 then scan (i - 1)
+    else
+      match utf8_sequence_length s.[i] with
+      | Some n when i + n > len -> i
+      | Some _ | None -> len
+  in
+  let cut = scan (len - 1) in
+  if cut = len then s else String.sub s 0 cut
+
 (* U+FFFD REPLACEMENT CHARACTER: what Unicode designates for a malformed
    sequence a decoder had to give up on. *)
 let utf8_replacement_char = "\xEF\xBF\xBD"

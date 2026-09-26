@@ -1912,7 +1912,13 @@ type observer_status =
       since : float;
       events : int;  (** frames received on this stream *)
     }
-  | Observer_closed of {
+  | Observer_closed_before_answer of {
+      reason : string;
+          (** why it failed while opening: the server never answered this
+              stream, so there is no count of what it delivered *)
+      at : float;
+    }
+  | Observer_closed_after_live of {
       reason : string;
       at : float;
       events : int;  (** frames the stream delivered before it closed *)
@@ -7310,8 +7316,13 @@ let promoted_inflight_for_keeper state keeper_name =
 
 let working_chat_for_keeper state keeper_name =
   List.find_opt (fun entry ->
+    let streaming =
+      match entry.phase with
+      | Turn_streaming -> true
+      | Turn_reconciling -> false
+    in
     String.equal entry.sent_request.keeper_name keeper_name
-    && entry.phase = Turn_streaming
+    && streaming
     && Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript = Working)
     state.msg_inflight
 
@@ -8414,14 +8425,22 @@ let field_missing_reading ~error =
    surface's title in that frame, and the Logs tab of this very surface, reads
    "(load failed)" or "(not loaded)".
 
+   A feed that closed while opening never answered either, and its reason is
+   the failure: with nothing held it reads "(load failed)", the way a refused
+   read does on every other surface, and not "(0 rows \xc2\xb7 0 events held)"
+   above a row saying the feed closed before any event arrived.
+
    Held frames outlive the stream that delivered them, so a closed feed, or one
    switched back off, with frames in hand still has a reading to report. Only
    the state before any answer, with nothing held, has none. *)
 let activity_title_reading ~observer ~shown ~held =
   match observer, held with
   | (Observer_off | Observer_opening), 0 -> title_missing_reading ~error:None
-  | (Observer_off | Observer_opening | Observer_live _ | Observer_closed _), _
-    ->
+  | Observer_closed_before_answer { reason; _ }, 0 ->
+    title_missing_reading ~error:(Some reason)
+  | ( ( Observer_off | Observer_opening | Observer_live _
+      | Observer_closed_before_answer _ | Observer_closed_after_live _ ),
+      _ ) ->
     Printf.sprintf "(%s \xc2\xb7 %s held)"
       (Masc_tui_message_layout.count_noun shown "row")
       (Masc_tui_message_layout.count_noun held "event")
@@ -10696,7 +10715,8 @@ let surface_row_texts (state : state) : surface -> string list option =
         match state.context_inspector_reading with
         | Some
             ( _
-            , { Masc_tui_context_inspector.provider_input = Ok input; _ } ) ->
+            , Masc_tui_context_inspector.Turn_read
+                { provider_input = Ok input; _ } ) ->
             let labels =
               List.map
                 (fun (item : Masc_tui_context_inspector.exact_input_item) ->
@@ -11215,20 +11235,57 @@ let keeper_message_activity_rows (state : state) =
    row the pane never drew, and the status area gained a blank line while the
    footer sat one row off (#37741).
 
-   Both read this now. The filter is keyed on the execution id rather than the
-   keeper, so a second message to the same keeper still gets its row, and a
-   request to some other keeper cannot be swallowed by it: an execution id
-   belongs to one turn. *)
+   Both read this now. Requests sharing one server execution occupy one row
+   with a member count; a distinct queued execution keeps its own row. The
+   filter and grouping use execution id rather than keeper, so a request to
+   another keeper cannot be swallowed by the current turn. *)
+type inflight_group =
+  { representative : inflight
+  ; count : int
+  ; reconciling_count : int
+  }
+
 let keeper_message_inflight_drawn (state : state) =
-  match state.msg_live with
-  | Some live
-    when state.msg_target_keeper_name = Some (turn_log_keeper_name live) ->
-    let drawn_by_transcript = turn_log_execution_id live in
-    List.filter
-      (fun entry ->
-        not (String.equal drawn_by_transcript (turn_log_execution_id entry.log)))
-      state.msg_inflight
-  | Some _ | None -> state.msg_inflight
+  let uncovered =
+    match state.msg_live with
+    | Some live
+      when state.msg_target_keeper_name = Some (turn_log_keeper_name live) ->
+      let drawn_by_transcript = turn_log_execution_id live in
+      List.filter
+        (fun entry ->
+          not (String.equal drawn_by_transcript (turn_log_execution_id entry.log)))
+        state.msg_inflight
+    | Some _ | None -> state.msg_inflight
+  in
+  List.fold_left
+    (fun groups entry ->
+      let execution_id = turn_log_execution_id entry.log in
+      let same_execution group =
+        String.equal
+          (turn_log_execution_id group.representative.log)
+          execution_id
+      in
+      let reconciling =
+        match entry.phase with
+        | Turn_reconciling -> 1
+        | Turn_streaming -> 0
+      in
+      if List.exists same_execution groups then
+        List.map
+          (fun group ->
+            if same_execution group then
+              { representative =
+                  (if entry.sent_at < group.representative.sent_at then entry
+                   else group.representative)
+              ; count = group.count + 1
+              ; reconciling_count = group.reconciling_count + reconciling
+              }
+            else group)
+          groups
+      else
+        groups
+        @ [ { representative = entry; count = 1; reconciling_count = reconciling } ])
+    [] uncovered
 
 let keeper_message_status_rows (state : state) =
   let unavailable_target =

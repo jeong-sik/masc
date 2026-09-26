@@ -77,7 +77,7 @@ def write_ready_keeper(root: Path, name: str) -> None:
             [
                 "[keeper]",
                 'sandbox_profile = "docker"',
-                'sandbox_image = "masc-sandbox:general"',
+                'sandbox_image = "base"',
                 'network_mode = "inherit"',
                 "",
             ]

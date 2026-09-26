@@ -252,8 +252,15 @@ let timeline ~width ~goal_id
                      (Message_layout.fit_width subject subject_column)
                      (headline ~subject event)))
               events
-        | Ok (Tui_decode.Goal_timeline_unavailable detail) ->
-            wrapped ~width Unreadable ("  timeline unavailable: " ^ detail)
+        | Ok (Tui_decode.Goal_timeline_unavailable failure) ->
+            let message = match failure with
+              | Tui_decode.Goal_source_failure (Goal_store_unavailable view) ->
+                  "Cause: " ^ Tui_decode.goal_store_unavailable_view_to_string view
+              | Tui_decode.Goal_source_failure (Goal_task_links_unavailable detail) ->
+                  "Linked tasks unavailable · Cause: " ^ detail
+              | Tui_decode.Approval_queue_failure detail ->
+                  "Approval queue unavailable · Cause: " ^ detail in
+            wrapped ~width Unreadable ("  " ^ message)
         | Error err ->
             wrapped ~width Unreadable ("  timeline load failed: " ^ err))
     | _ -> [ { tone = Quiet; text = "  loading..." } ]

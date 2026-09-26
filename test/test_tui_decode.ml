@@ -1433,8 +1433,10 @@ let test_goal_store_unavailable_preserves_source_detail () =
    | Error message -> Alcotest.(check string) "planning source failure" rendered message
    | Ok _ -> Alcotest.fail "unavailable Goal store became a planning snapshot");
   match Tui_decode.decode_goal_detail_timeline json with
-  | Ok (Tui_decode.Goal_timeline_unavailable message) ->
-      Alcotest.(check string) "detail source failure is not a Gate failure" rendered message
+  | Ok (Tui_decode.Goal_timeline_unavailable
+      (Tui_decode.Goal_source_failure (Tui_decode.Goal_store_unavailable view))) ->
+      Alcotest.(check string) "detail source failure is not a Gate failure"
+        rendered (Tui_decode.goal_store_unavailable_view_to_string view)
   | _ -> Alcotest.fail "Goal detail source failure was not preserved"
 
 let test_goal_store_unavailable_rejects_unknown_or_mismatched_tokens () =
@@ -1468,8 +1470,9 @@ let test_goal_link_source_unavailable_preserves_detail () =
   let json = `Assoc [ "ok", `Bool false; "error_code", `String "goal_task_links_unavailable";
                       "error", `String detail ] in
   match Tui_decode.decode_goal_detail_timeline json with
-  | Ok (Tui_decode.Goal_timeline_unavailable message) ->
-      Alcotest.(check string) "link source failure is retained" detail message
+  | Ok (Tui_decode.Goal_timeline_unavailable
+      (Tui_decode.Goal_source_failure (Tui_decode.Goal_task_links_unavailable actual))) ->
+      Alcotest.(check string) "link source failure is retained" detail actual
   | _ -> Alcotest.fail "link source failure became an empty or successful detail"
 
 let test_decode_planning_snapshot_current_contract () =
@@ -11224,7 +11227,8 @@ let test_goal_timeline_null_is_unavailable_with_detail () =
          "timeline":null}|}
   in
   match Masc.Tui_decode.decode_goal_detail_timeline json with
-  | Ok (Masc.Tui_decode.Goal_timeline_unavailable detail) ->
+  | Ok (Masc.Tui_decode.Goal_timeline_unavailable
+      (Masc.Tui_decode.Approval_queue_failure detail)) ->
       Alcotest.(check string) "detail" "queue store unreadable" detail
   | Ok (Masc.Tui_decode.Goal_timeline_ready _) ->
       Alcotest.fail "a null timeline decoded as ready"

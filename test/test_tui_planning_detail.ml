@@ -323,6 +323,33 @@ let contains needle text =
   let rec go i = i + n <= h && (String.sub text i n = needle || go (i + 1)) in
   go 0
 
+let test_timeline_unavailable_renders_its_cause_once () =
+  let rows failure =
+    texts
+      (Detail.timeline ~width:200 ~goal_id:"goal-1"
+         (Some
+            ( "goal-1"
+            , Ok (Proof.Goal_timeline_unavailable failure) )))
+  in
+  let store : Proof.goal_store_unavailable_view =
+    { gsu_file="goals.json";gsu_reason=Proof.Unreadable_view;
+      gsu_mirror=Proof.Mirror_absent_view;
+      gsu_reset_step=Goal_store_unavailable.Reset_goal_store } in
+  let store_rows = rows (Proof.Goal_source_failure (Proof.Goal_store_unavailable store)) in
+  check_bool "the Goal store's verdict appears once" true
+    (List.mem ("  Cause: " ^ Proof.goal_store_unavailable_view_to_string store) store_rows);
+  check_bool "the pane does not prepend another verdict" false
+    (List.exists (contains "timeline unavailable") store_rows);
+  let links_rows = rows (Proof.Goal_source_failure
+      (Proof.Goal_task_links_unavailable "primary registry is missing")) in
+  check_bool "link failure has one explicit verdict and its raw cause" true
+    (List.mem "  Linked tasks unavailable · Cause: primary registry is missing"
+       links_rows);
+  let queue_rows = rows (Proof.Approval_queue_failure "queue store unreadable") in
+  check_bool "queue failure has one explicit verdict and its raw cause" true
+    (List.mem "  Approval queue unavailable · Cause: queue store unreadable"
+       queue_rows)
+
 (* A goal's own creation event carries its kind in the subject column and in
    the summary, so the row said it twice: "goal_created  Goal Event \xc2\xb7
    goal_created". Every goal has one. *)
@@ -375,6 +402,8 @@ let () =
     [ ( "body"
       , [ Alcotest.test_case "a summary that repeats the subject is dropped"
             `Quick test_a_summary_that_repeats_the_subject_is_dropped
+        ; Alcotest.test_case "timeline failure renders the source cause once"
+            `Quick test_timeline_unavailable_renders_its_cause_once
         ; Alcotest.test_case "a summary that says more than the subject stays"
             `Quick test_a_summary_that_says_more_than_the_subject_stays
         ; Alcotest.test_case "every verdict draws something" `Quick

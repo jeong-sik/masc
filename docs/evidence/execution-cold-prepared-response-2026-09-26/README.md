@@ -36,14 +36,16 @@ consistent with the existing HTTP representation handling and
 - The first fallback starts without matching prepared bytes, then must return
   the same identity/gzip string objects as the warmed route, with matching
   ETag, headers and JSON metadata. This proves byte reuse, not latency.
-- A separate case invalidates both projection and byte caches, runs the real
-  first projection compute, then verifies its successful publication and
+- A separate case invalidates both projection and byte caches, runs the cold
+  compute/publication path with the `execution_smoke` fixture, then verifies
+  its successful publication and
   identical identity bytes/ETag on a subsequent warm read.
 - Existing preparation scenarios now check reuse against the exact selected
   snapshot: workspace mismatch, invalidation inside preparation, and a newer
   ready snapshot all reject the old selection.
 - Existing force, timeout, parameterized actor and generation checks remain.
 
-Source parsing and whitespace checks pass. Compiled CI and independent review
-are pending. Codec preparation, cold projection time, scheduling/GC and network
+Source parsing and whitespace checks pass. Compiled CI is pending. Independent adversarial and response reviews found
+no source defect; the added first-compute case uses a fixture projection.
+The tests do not execute an HTTP fiber race through the final wire response. Codec preparation, cold projection time, scheduling/GC and network
 cost remain; no 0.1ms achievement or deployed performance improvement is claimed.

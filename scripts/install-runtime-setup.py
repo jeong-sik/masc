@@ -1429,7 +1429,8 @@ def source_models(binary, source, timeout, refresh=False):
         # A workspace declaration is relevant only in this exact connection.
         if existing_rows:
             for existing in existing_rows:
-                context = model['context'] or existing['max_context']
+                context = (model['context'] if choice == 'muse' else
+                           model['context'] or existing['max_context'])
                 label = model['label'] + (' — ' + existing['id'] if len(existing_rows) > 1 else '')
                 rows.append(dict(model, label=label, context=context,
                                  existing=None if source.get('credential_replaced') else existing))
@@ -1441,7 +1442,8 @@ def source_models(binary, source, timeout, refresh=False):
         if not any(item.get('existing', {}).get('id') == row['id'] for item in rows if item.get('existing')):
             duplicates = sum(other['model'] == row['model'] for other in declared_rows) > 1
             label = row['model'] + (' — ' + row['id'] if duplicates else '')
-            rows.append(dict(id=row['model'], label=label, context=row['max_context'],
+            rows.append(dict(id=row['model'], label=label,
+                             context=None if choice == 'muse' else row['max_context'],
                              existing=None if source.get('credential_replaced') else row))
     for row in rows:
         # Rejoin even catalog suggestions through this connection's publisher;

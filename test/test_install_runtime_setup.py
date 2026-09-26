@@ -823,6 +823,32 @@ class SelectedNativeAccounts(unittest.TestCase):
              contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
             SETUP.select_model('/masc', 'muse')
 
+    def test_new_muse_binding_uses_observed_context_not_declared_context(self):
+        for tools in [False, True]:
+            for observed in [[], [dict(id='reported', label='Reported', context=None)],
+                             [dict(id='reported', label='Reported', context=8192)]]:
+                with self.subTest(tools=tools, observed=observed):
+                    existing = dict(id='muse.existing', model='reported', tools=tools,
+                                    max_context=999999, max_prompt_bytes=32768)
+                    source = dict(choice='muse', command='muse', account_home='/selected', rows=[existing])
+                    with patch.object(SETUP, 'muse_models', return_value=(observed, 'providerCatalog')):
+                        rows, _ = SETUP.source_models('/masc', source, 10)
+                    self.assertEqual(len(rows), 1)
+                    context = observed[0]['context'] if observed else None
+                    self.assertEqual(rows[0]['context'], context)
+                    with patch.object(SETUP, 'render', return_value=('muse.new', 'toml')) as render, \
+                         patch.object(SETUP, 'ask_text', return_value='32768'):
+                        if tools:
+                            self.assertEqual(SETUP.resolve_model_spec(source, rows[0], 10), ('muse.existing', None))
+                            render.assert_not_called()
+                        elif context is None:
+                            with self.assertRaises(SETUP.SetupError):
+                                SETUP.resolve_model_spec(source, rows[0], 10)
+                            render.assert_not_called()
+                        else:
+                            _, spec = SETUP.resolve_model_spec(source, rows[0], 10)
+                            self.assertEqual(spec['max_context'], 8192)
+
     def test_existing_muse_binding_requires_declared_byte_capacity(self):
         source = dict(choice='muse')
         existing = dict(id='muse.selected', tools=True, max_prompt_bytes=45678)

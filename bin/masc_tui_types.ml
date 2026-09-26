@@ -1935,7 +1935,11 @@ let observer_replay_description = function
   | Observer_replay_scoped { replay = Sse_wire.Fresh; _ } ->
       "Replay: live from connection; earlier history not loaded"
   | Observer_replay_scoped { replay = Sse_wire.Resumed; _ } ->
-      "Replay: retained window resumed; history completeness unknown"
+      "Replay: resumed; no event expired while disconnected"
+  | Observer_replay_scoped { replay = Sse_wire.Resumed_after_gap { missed_through }; _ } ->
+      Printf.sprintf
+        "Replay resumed after a gap: events up to #%d expired while disconnected"
+        missed_through
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Instance_changed; _ } ->
       "Replay reset: server instance changed; disconnected history not recovered"
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Unscoped_cursor; _ } ->

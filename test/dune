@@ -155,7 +155,7 @@
 (test
  (name test_sse_observer_epoch)
  (modules test_sse_observer_epoch)
- (libraries alcotest masc masc.sse_wire masc_test_deps eio))
+ (libraries alcotest masc masc.sse_wire masc.time_compat masc_test_deps eio))
 
 (test
  (name test_server_standalone_lane_projection)

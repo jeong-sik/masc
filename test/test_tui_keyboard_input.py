@@ -14018,7 +14018,7 @@ def run_observer_reconnect_regression(executable: str) -> None:
             drain_until_quiet(process, master_fd, output)
             plain = screen_text(bytes(output))
             for needle in (b"Tool use ID: before-disconnect", b"output-before-disconnect",
-                           b"retained window resumed; history completeness unknown"):
+                           b"resumed; no event expired while disconnected"):
                 if needle not in plain:
                     raise AssertionError(f"Replayed call retargeted selection or lost replay coverage: {plain!r}")
             releases[1].set()

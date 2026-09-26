@@ -20,3 +20,4 @@ let append_decision_record = Keeper_unified_metrics_decision.append_decision_rec
 let update_metrics_from_result = Keeper_unified_metrics_result.update_metrics_from_result
 let append_metrics_snapshot = Keeper_unified_metrics_snapshot.append_metrics_snapshot
 let update_metrics_from_failure = Keeper_unified_metrics_failure.update_metrics_from_failure
+let with_attempt_spend = Keeper_unified_metrics_failure.with_attempt_spend

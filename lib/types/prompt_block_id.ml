@@ -68,3 +68,12 @@ let injected_on_post_tool_round = function
   | Dynamic_context | Temporal_summary | Memory_os_recall | Skill_compositions -> false
   | Keeper_instructions | Operator_note -> true
 ;;
+
+(* See the mli. [Keeper_instructions] never enters the extra-context assembly
+   a resume carries; it answers [false] because a resumed session already holds
+   the system prompt it recorded at its first launch. *)
+let resent_when_held = function
+  | Keeper_instructions | Dynamic_context | Temporal_summary | Memory_os_recall
+  | Skill_compositions -> false
+  | Operator_note -> true
+;;

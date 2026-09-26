@@ -18,7 +18,7 @@ spec.loader.exec_module(acceptance)
 def listing_trace(tool_input):
     identity = dict(worker_run_id='worker', session_id='session', tool_use_id='tool',
                     tool_name='Execute')
-    result = dict(ok=True, via='docker', sandbox_profile='docker',
+    result = dict(ok=True,
                   status=dict(kind='exit', code=0), cwd='/home/keeper/playground/imp',
                   output_completeness='complete', output=(
                       '/home/keeper/playground/imp\n'
@@ -27,6 +27,13 @@ def listing_trace(tool_input):
     return [dict(identity, record_type='tool_execution_started', tool_input=tool_input),
             dict(identity, record_type='tool_execution_finished', tool_error=False,
                  tool_result=json.dumps(result))]
+
+
+def docker_evidence(trace):
+    # The ledger's execution_evidence for each finished call: the route is
+    # recorded there, not in the text the model reads (masc#39035).
+    return {event['tool_use_id']: dict(via='docker', sandbox_profile='docker')
+            for event in trace if event.get('record_type') == 'tool_execution_finished'}
 
 
 class DirectoryEvidence(unittest.TestCase):
@@ -38,7 +45,9 @@ class DirectoryEvidence(unittest.TestCase):
         for value in inputs:
             with self.subTest(value=value):
                 trace = listing_trace(value)
-                self.assertEqual(acceptance.directory_execution(trace)['completion'], trace[1])
+                self.assertEqual(
+                    acceptance.directory_execution(trace, docker_evidence(trace))['completion'],
+                    trace[1])
 
     def test_separate_calls_require_same_turn_and_cwd(self):
         pwd = listing_trace({'argv': ['pwd']})
@@ -51,7 +60,8 @@ class DirectoryEvidence(unittest.TestCase):
         result = json.loads(ls[1]['tool_result'])
         result['output'] = result['output'].split('\n', 1)[1]
         ls[1]['tool_result'] = json.dumps(result)
-        proof = acceptance.directory_execution(pwd + ls)
+        evidence = docker_evidence(pwd + ls)
+        proof = acceptance.directory_execution(pwd + ls, evidence)
         self.assertEqual(proof['pwd']['completion'], pwd[1])
         self.assertEqual(proof['listing']['completion'], ls[1])
         for field in ('worker_run_id', 'session_id'):
@@ -59,8 +69,12 @@ class DirectoryEvidence(unittest.TestCase):
             for event in mismatched:
                 event[field] = 'another-turn'
             with self.subTest(field=field), self.assertRaises(RuntimeError):
-                acceptance.directory_execution(pwd + mismatched)
-        for field, value in [('cwd', '/tmp'), ('via', 'host'),
+                acceptance.directory_execution(pwd + mismatched, evidence)
+        routed = copy.deepcopy(evidence)
+        routed['listing-tool']['via'] = 'host'
+        with self.subTest(field='via'), self.assertRaises(RuntimeError):
+            acceptance.directory_execution(pwd + ls, routed)
+        for field, value in [('cwd', '/tmp'),
                              ('status', dict(kind='exit', code=1)),
                              ('output_completeness', 'truncated')]:
             mismatched = copy.deepcopy(ls)
@@ -68,7 +82,7 @@ class DirectoryEvidence(unittest.TestCase):
             result[field] = value
             mismatched[1]['tool_result'] = json.dumps(result)
             with self.subTest(field=field), self.assertRaises(RuntimeError):
-                acceptance.directory_execution(pwd + mismatched)
+                acceptance.directory_execution(pwd + mismatched, evidence)
 
     def test_nonlisting_or_arbitrary_argv_rejected(self):
         for value in ({'command': 'pwd'}, {'command': 'ls -la'},
@@ -78,13 +92,21 @@ class DirectoryEvidence(unittest.TestCase):
                       {'argv': ['sh', '-lc', 'pwd; ls -la', 'extra']},
                       {'argv': ['sh', '-lc', 'pwd; ls /tmp']},
                       {'argv': ['sh', '-lc', 'pwd | ls -la']}):
+            trace = listing_trace(value)
             with self.subTest(value=value), self.assertRaises(RuntimeError):
-                acceptance.directory_execution(listing_trace(value))
+                acceptance.directory_execution(trace, docker_evidence(trace))
 
     def test_completion_and_identity_must_match(self):
         original = listing_trace({'argv': ['sh', '-lc', 'pwd; ls -la']})
-        for field, value in [('via', 'host'), ('sandbox_profile', 'remote_ssh'),
-                             ('status', dict(kind='exit', code=1)),
+        evidence = docker_evidence(original)
+        for field, value in [('via', 'host'), ('sandbox_profile', 'remote_ssh')]:
+            routed = copy.deepcopy(evidence)
+            routed['tool'][field] = value
+            with self.subTest(field=field), self.assertRaises(RuntimeError):
+                acceptance.directory_execution(original, routed)
+        with self.subTest(field='missing evidence'), self.assertRaises(RuntimeError):
+            acceptance.directory_execution(original, {})
+        for field, value in [('status', dict(kind='exit', code=1)),
                              ('cwd', '/tmp'), ('output_completeness', 'truncated'),
                              ('output', '/home/keeper/playground/imp\n')]:
             trace = copy.deepcopy(original)
@@ -92,12 +114,43 @@ class DirectoryEvidence(unittest.TestCase):
             result[field] = value
             trace[1]['tool_result'] = json.dumps(result)
             with self.subTest(field=field), self.assertRaises(RuntimeError):
-                acceptance.directory_execution(trace)
+                acceptance.directory_execution(trace, evidence)
         for field in ('worker_run_id', 'session_id', 'tool_use_id'):
             trace = copy.deepcopy(original)
             trace[1][field] = 'unrelated'
             with self.subTest(field=field), self.assertRaises(RuntimeError):
-                acceptance.directory_execution(trace)
+                acceptance.directory_execution(trace, evidence)
+
+
+class LedgerExecutionEvidence(unittest.TestCase):
+    def write_rows(self, base, rows):
+        path = base / '.masc/tool_calls/2026-09/25.jsonl'
+        path.parent.mkdir(parents=True)
+        path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+
+    def test_reads_only_imp_execute_rows(self):
+        with tempfile.TemporaryDirectory() as root:
+            base, output = Path(root) / 'workspace', Path(root) / 'evidence'
+            output.mkdir(parents=True)
+            docker = dict(via='docker', sandbox_profile='docker')
+            self.write_rows(base, [
+                dict(keeper='imp', tool='Execute', tool_use_id='a', execution_evidence=docker),
+                dict(keeper='other', tool='Execute', tool_use_id='b', execution_evidence=docker),
+                dict(keeper='imp', tool='Read', tool_use_id='c', execution_evidence=docker),
+                dict(keeper='imp', tool='Execute', tool_use_id='d')])
+            self.assertEqual(acceptance.ledger_execution_evidence(base, output), {'a': docker})
+            self.assertEqual(json.loads((output / 'execution-evidence.json').read_text()),
+                             {'a': docker})
+
+    def test_two_rows_for_one_call_are_refused(self):
+        with tempfile.TemporaryDirectory() as root:
+            base, output = Path(root) / 'workspace', Path(root) / 'evidence'
+            output.mkdir(parents=True)
+            row = dict(keeper='imp', tool='Execute', tool_use_id='a',
+                       execution_evidence=dict(via='docker', sandbox_profile='docker'))
+            self.write_rows(base, [row, row])
+            with self.assertRaises(RuntimeError):
+                acceptance.ledger_execution_evidence(base, output)
 
 
 class ExistingWorkspace(unittest.TestCase):

@@ -29,7 +29,13 @@ val format_event_encoded : ?id:int -> ?event_type:string -> encoded_json -> stri
 
 type observer_cursor = { instance_id : string; event_id : int }
 type observer_reset = Instance_changed | Unscoped_cursor
-type observer_replay = Fresh | Resumed | Reset of observer_reset
+type observer_replay =
+  | Fresh
+  | Resumed  (** No event after the cursor left the retained window. *)
+  | Resumed_after_gap of { missed_through : int }
+      (** The window dropped events up to [missed_through], past the cursor.
+          The replay holds what is left after it. *)
+  | Reset of observer_reset
 type observer_handshake = { instance_id : string; replay : observer_replay }
 
 val observer_cursor_headers : observer_cursor option -> (string * string) list
@@ -43,8 +49,14 @@ val negotiate_observer :
 (** The returned cursor is the only cursor suitable for both registration and
     replay. A cursor from another or unspecified instance is discarded before
     either path can suppress new events. [Fresh] and [Reset] start live only.
-    [Resumed] reads the retained replay window; it does not prove that no events
-    have expired from that window. *)
+    [Resumed] reads the retained replay window; whether events after the
+    cursor expired from it is known only after the replay is read, and
+    {!observer_after_replay} records it. *)
+
+val observer_after_replay :
+  observer_handshake -> missed_through:int option -> observer_handshake
+(** A [Resumed] handshake becomes [Resumed_after_gap] when the replay found
+    events dropped past the cursor. Any other handshake is unchanged. *)
 
 val observer_response_headers : observer_handshake -> (string * string) list
 

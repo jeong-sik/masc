@@ -156,6 +156,15 @@ let provided =
   ; "shasum", "perl"
   ; "gtimeout", "gtimeout"
   ; "fd", "fd-find"
+    (* not-found count over 93,111 Execute records, 2026-09-10..24 *)
+  ; "file", "file"
+  ; "xxd", "xxd"
+  ; "time", "time"
+  ; "ip", "iproute2"
+  ; "ss", "iproute2"
+  ; "dig", "bind9-dnsutils"
+  ; "nslookup", "bind9-dnsutils"
+  ; "pip3", "python3-pip"
   ]
 ;;
 
@@ -250,6 +259,13 @@ let measured_usage =
        classified above -- dune and zsh are shipped now, actionlint is refused
        with a reason. *)
   ; "actionlint", 1
+    (* Commands that failed with "not found" in the Execute records of
+       2026-09-10..24 (93,111 records), counted only where the command itself
+       named the tool. *)
+  ; "file", 20
+  ; "ip", 22
+  ; "time", 8
+  ; "xxd", 7
   ]
 ;;
 

@@ -70,6 +70,9 @@ let note_end ended event =
     | Session.Connection_ended reason -> Some ("the connection ended: " ^ reason)
     (* The session ends with an answer it could not deliver. *)
     | Session.Reply_not_delivered detail -> Some ("an answer to the extension was not delivered: " ^ detail)
+    (* The session ends when a call whose caller left never answers. *)
+    | Session.Abandoned_call_unanswered { method_; waited_s } ->
+      Some (Printf.sprintf "an abandoned %s call did not answer within %.0fs" method_ waited_s)
     | Session.Runtime_ready _ | Session.Model_request_refused _ | Session.Model_failed _ | Session.Unsupported_request _
     | Session.Unsupported_notification _ | Session.Extension_log _ | Session.Malformed_message _
     | Session.Unexpected_response _ | Session.Abandoned_call_ended _ | Session.Malformed_cdp_event _ -> None
@@ -98,6 +101,9 @@ let run_session t ~headless ~opened ~resolve_opened =
      | Session.Abandoned_call_ended _ ->
        incr abandoned_answers;
        Eio.Condition.broadcast abandoned_answered
+     (* Not an answer. The session ends with it, and [note_end] lets it go;
+        a waiter that then times out finds the session already replaced. *)
+     | Session.Abandoned_call_unanswered _
      | Session.Runtime_ready _ | Session.Model_request_refused _ | Session.Model_failed _
      | Session.Unsupported_request _ | Session.Unsupported_notification _ | Session.Extension_log _
      | Session.Malformed_message _ | Session.Unexpected_response _ | Session.Reply_not_delivered _
@@ -215,7 +221,7 @@ let page t ~began verb =
   Fun.protect ~finally:(fun () -> Eio.Semaphore.release t.verbs) (fun () ->
     match t.state with
     | Open opened ->
-      began ();
+      began opened;
       Executor.execute ~tabs:t.tabs ~call:(t.call opened.session) verb
     | Closed | Opening | Closing -> no_session)
 ;;
@@ -258,26 +264,22 @@ let retire_sentence_session t expected =
   | Closed | Opening | Closing | Open _ -> ()
 ;;
 
-let retire_unanswered_sentence t expected =
-  match expected with
-  | None -> ()
-  | Some expected ->
-    let answers_before = !(expected.abandoned_answers) in
-    let answered () =
-      Eio.Condition.loop_no_mutex expected.abandoned_answered (fun () ->
-        if !(expected.abandoned_answers) = answers_before then None else Some ())
-    in
-    (match
-       Eio.Fiber.first
-         (fun () ->
-           answered ();
-           `Answered)
-         (fun () ->
-           t.sleep abandoned_sentence_wait_s;
-           `Unanswered)
-     with
-     | `Answered -> ()
-     | `Unanswered -> retire_sentence_session t expected)
+let retire_unanswered_sentence t ~expected ~answers_before =
+  let answered () =
+    Eio.Condition.loop_no_mutex expected.abandoned_answered (fun () ->
+      if !(expected.abandoned_answers) = answers_before then None else Some ())
+  in
+  match
+    Eio.Fiber.first
+      (fun () ->
+        answered ();
+        `Answered)
+      (fun () ->
+        t.sleep abandoned_sentence_wait_s;
+        `Unanswered)
+  with
+  | `Answered -> ()
+  | `Unanswered -> retire_sentence_session t expected
 ;;
 
 let serve t { verb; reply; caller_left } =
@@ -293,8 +295,12 @@ let serve t { verb; reply; caller_left } =
   | Browser_lane.Page_capture _ | Browser_lane.Page_scene _ | Browser_lane.Page_interact _ | Browser_lane.Page_goto _
   | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _ | Browser_lane.Page_instruct _
   | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ ->
-    let requested_session = match t.state with Open opened -> Some opened | Closed | Opening | Closing -> None in
     let progress = ref Queued in
+    (* Capture the actual session after obtaining the verb slot. A queued
+       request may begin after a close and reopen. Capture the answer count
+       before dispatch too: an abandoned reply can arrive while the losing
+       work fiber is being cancelled, before [Watched_work.run] returns. *)
+    let began_session = ref None in
     (* A caller that leaves cancels the call it asked for; the session then
        holds it as abandoned until the runtime answers it, or until the
        sentence's session is retired below for want of an answer. *)
@@ -303,12 +309,18 @@ let serve t { verb; reply; caller_left } =
          ~watcher:(fun () ->
            Eio.Promise.await caller_left;
            None)
-         (fun () -> Some (guarded (fun () -> page t ~began:(fun () -> progress := Began) verb)))
+         (fun () -> Some (guarded (fun () -> page t ~began:(fun opened ->
+           progress := Began;
+           began_session := Some (opened, !(opened.abandoned_answers))) verb)))
      with
      | Some answer -> Eio.Promise.resolve reply answer
      | None ->
        (match !progress with
-        | Began when is_sentence verb -> retire_unanswered_sentence t requested_session
+        | Began when is_sentence verb ->
+          (match !began_session with
+           | Some (expected, answers_before) ->
+             retire_unanswered_sentence t ~expected ~answers_before
+           | None -> ())
         | Began | Queued -> ()))
 ;;
 

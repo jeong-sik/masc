@@ -1,0 +1,113 @@
+{
+  "profile_source": "c7bdc04f78e3b6c09abae94e28852b37f8274da7",
+  "same_footer_at_PR_base": "afbeddb74ce810204afdd5716972eeac592e7270",
+  "footer_sha256": "b39f53990efbdac8a683f13a6a48f16cd08d333f419431ee76d0854743740da4",
+  "original_profile_sha256": "e932e99636b6ba341f125e5e9deac643c1d41a90a639a9038b4a1f66751fab72",
+  "sample_coordinates": [
+    {
+      "line": 135,
+      "text": "    + !       : |   + !     | 3 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 28  [0x100e2be84]"
+    },
+    {
+      "line": 141,
+      "text": "    + !       : |   + !     | 1 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 132  [0x100e2beec]"
+    },
+    {
+      "line": 334,
+      "text": "    + !       : | 116 camlMasc_tui_footer$fun_1189  (in masc_tui.exe) + 44  [0x100e2c0c4]"
+    },
+    {
+      "line": 335,
+      "text": "    + !       : | + 44 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 28  [0x100e2be84]"
+    },
+    {
+      "line": 355,
+      "text": "    + !       : | + ! 2 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 28,60  [0x100e2be84,0x100e2bea4]"
+    },
+    {
+      "line": 371,
+      "text": "    + !       : | + 22 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 132  [0x100e2beec]"
+    },
+    {
+      "line": 372,
+      "text": "    + !       : | + ! 10 camlMasc_tui_footer$key_atoms_717  (in masc_tui.exe) + 120  [0x100e2bde8]"
+    },
+    {
+      "line": 385,
+      "text": "    + !       : | + ! 5 camlMasc_tui_footer$key_atoms_717  (in masc_tui.exe) + 36  [0x100e2bd94]"
+    },
+    {
+      "line": 392,
+      "text": "    + !       : | + ! : 1 camlMasc_tui_footer$key_atoms_717  (in masc_tui.exe) + 56  [0x100e2bda8]"
+    },
+    {
+      "line": 402,
+      "text": "    + !       : | + ! 2 camlMasc_tui_footer$key_atoms_717  (in masc_tui.exe) + 0  [0x100e2bd70]"
+    },
+    {
+      "line": 407,
+      "text": "    + !       : | + 7 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 80  [0x100e2beb8]"
+    },
+    {
+      "line": 408,
+      "text": "    + !       : | + ! 5 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 80  [0x100e2beb8]"
+    },
+    {
+      "line": 411,
+      "text": "    + !       : | + 4 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 120  [0x100e2bee0]"
+    },
+    {
+      "line": 415,
+      "text": "    + !       : | + ! 1 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 120  [0x100e2bee0]"
+    },
+    {
+      "line": 420,
+      "text": "    + !       : | + 1 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 124  [0x100e2bee4]"
+    },
+    {
+      "line": 581,
+      "text": "    + !       : | +     ! :   | 2 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 28  [0x100e2be84]"
+    },
+    {
+      "line": 1527,
+      "text": "    + !       : | 1 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 132  [0x100e2beec]"
+    },
+    {
+      "line": 1724,
+      "text": "    + !       : 2 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 224  [0x100e2bf48]"
+    },
+    {
+      "line": 2033,
+      "text": "    + !       : | 1 camlMasc_tui_footer$key_atoms_717  (in masc_tui.exe) + 36  [0x100e2bd94]"
+    },
+    {
+      "line": 2377,
+      "text": "    + !       : |               1 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 124  [0x100e2bee4]"
+    },
+    {
+      "line": 2414,
+      "text": "    + !       : | 1 camlMasc_tui_footer$key_atoms_717  (in masc_tui.exe) + 120  [0x100e2bde8]"
+    },
+    {
+      "line": 2570,
+      "text": "    + !       : | 1 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 28  [0x100e2be84]"
+    },
+    {
+      "line": 2586,
+      "text": "    + !       : | 1 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 28  [0x100e2be84]"
+    },
+    {
+      "line": 2604,
+      "text": "    + !       : | 1 camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 28  [0x100e2be84]"
+    },
+    {
+      "line": 2875,
+      "text": "    + !       : 1 camlMasc_tui_footer$key_atoms_717  (in masc_tui.exe) + 148  [0x100e2be04]"
+    },
+    {
+      "line": 3371,
+      "text": "        6       camlMasc_tui_footer$item_is_pinned_721  (in masc_tui.exe) + 28  [0x100e2be84]"
+    }
+  ],
+  "scope": "Sample coordinates demonstrate a still-active classification path; sample counts are not a per-frame cost, dominant-bottleneck estimate or before/after performance result."
+}

@@ -255,7 +255,8 @@ let () =
                     ~message:
                       "unknown exact-output lane: verifer_exact (expected one of \
                        librarian_exact, hitl_auto_judge, board_attention_exact, \
-                       workspace_curator_exact, verifier_exact)"
+                       workspace_curator_exact, verifier_exact, \
+                       browser_stagehand_exact)"
                     body)
                 [ {|{"lane":"exact/verifer_exact","runtime_ids":["runpod_mtp.qwen"]}|}
                 ; {|{"lane":"exact/verifer_exact","action":"append","runtime_id":"runpod_mtp.qwen"}|}

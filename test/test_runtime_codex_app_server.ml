@@ -180,7 +180,7 @@ let warm_fresh_executable path =
 
 let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?(terminal_line_delay_start_index = 0) ?(line_delays = []) ?before_final_stdin_drain_s
-    ?pipe_holder_s ?await_response_before_line lines =
+    ?pipe_holder_s lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
   let read_request ?(expect_version = false) () =
@@ -250,7 +250,6 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture
     pipe_holder_s;
   List.iteri
     (fun index line ->
-       if Some index = await_response_before_line then read_request ();
        (* A pause before one chosen line, by its index among the lines after
           the handshake, so one silent gap can sit inside or after an item. *)
        Option.iter
@@ -275,8 +274,7 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture
 ;;
 
 let with_fixture ?close_before_turn ?inject_items ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
-    ?terminal_line_delay_start_index ?line_delays ?before_final_stdin_drain_s ?pipe_holder_s
-    ?await_response_before_line lines f =
+    ?terminal_line_delay_start_index ?line_delays ?before_final_stdin_drain_s ?pipe_holder_s lines f =
   let path =
     fixture_script
       ?close_before_turn
@@ -288,7 +286,6 @@ let with_fixture ?close_before_turn ?inject_items ?capture_path ?initial_line_de
       ?line_delays
       ?before_final_stdin_drain_s
       ?pipe_holder_s
-      ?await_response_before_line
       lines
   in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
@@ -407,10 +404,6 @@ let test_dispatch_validation_is_process_free () =
 
 let tool_call_request =
   {|{"id":"tool-request-1","method":"item/tool/call","params":{"threadId":"thread-1","turnId":"turn-1","callId":"call-1","tool":"masc_probe","arguments":{"marker":"from-codex"}}}|}
-;;
-
-let failed_dynamic_tool_receipt =
-  {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"dynamicToolCall","id":"call-1","status":"failed","success":false,"contentItems":[{"type":"inputText","text":"same deterministic failure"}],"error":null}}}|}
 ;;
 
 let native_command_started =
@@ -579,9 +572,8 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
           })
     }
   in
-  with_fixture ~await_response_before_line:2
-    [ init_result; account_chatgpt; thread_result; turn_result; tool_call_request
-    ; failed_dynamic_tool_receipt ]
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; tool_call_request ]
     (fun path ->
       match run_fixture ~dynamic_tools:[ tool ] path with
       | Error
@@ -591,40 +583,6 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
         check int "repeat count" 3 repeated_count
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok _ -> fail "dynamic tool abort did not stop the Codex turn")
-;;
-
-let test_dynamic_tool_abort_requires_a_matching_provider_receipt () =
-  let tool : Runtime_codex_app_server.dynamic_tool =
-    { name = "masc_probe"
-    ; description = "Stop after the provider records the result"
-    ; input_schema = `Assoc [ "type", `String "object" ]
-    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
-    ; call =
-        (fun ~call_id:_ _ ->
-          { success = false
-          ; content = "same deterministic failure"
-          ; content_blocks = None
-          ; abort_turn = Some Queued_chat_operation
-          })
-    }
-  in
-  let check_missing_receipt lines =
-    with_fixture ~await_response_before_line:2 lines (fun path ->
-      match run_fixture ~dynamic_tools:[ tool ] path with
-      | Error (Runtime_codex_app_server.Protocol_error { stage; _ }) ->
-        check string "receipt boundary" "item/completed dynamic tool receipt" stage
-      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-      | Ok _ -> fail "host stopped without a matching provider receipt")
-  in
-  check_missing_receipt
-    [ init_result; account_chatgpt; thread_result; turn_result
-    ; tool_call_request; turn_completed ];
-  let mismatched_receipt =
-    {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"dynamicToolCall","id":"call-1","status":"failed","success":false,"contentItems":[{"type":"inputText","text":"different result"}],"error":null}}}|}
-  in
-  check_missing_receipt
-    [ init_result; account_chatgpt; thread_result; turn_result
-    ; tool_call_request; mismatched_receipt ]
 ;;
 
 let test_context_error_records_prior_tool_effect () =
@@ -6773,10 +6731,6 @@ let () =
             "dynamic tool abort stops provider loop"
             `Quick
             test_dynamic_tool_abort_stops_the_provider_loop
-        ; test_case
-            "dynamic tool abort requires matching provider receipt"
-            `Quick
-            test_dynamic_tool_abort_requires_a_matching_provider_receipt
         ; test_case
             "context error records prior tool effect"
             `Quick

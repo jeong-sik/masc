@@ -786,39 +786,44 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     >/dev/null \
     || fail "self-test expected success: runtime_config_seed_before_stop"
 
-  # The #39311 shape: the seed with the bound it had before #39040.
-  over_bound_config_root="$fixture_root/runtime-config-over-bound"
-  write_schedules "$over_bound_config_root" succeeded
-  mkdir -p "$over_bound_config_root/.masc/config"
-  sed -E 's/^resource-read-max-bytes = [0-9]+$/resource-read-max-bytes = 65536/' \
-    "$REPO_ROOT/config/runtime.toml" \
-    >"$over_bound_config_root/.masc/config/runtime.toml"
-  grep -qx 'resource-read-max-bytes = 65536' \
-    "$over_bound_config_root/.masc/config/runtime.toml" \
-    || fail "self-test fixture has no over-bound resource-read-max-bytes line"
+  # Refusal remains meaningful when the Skill read bound is derived: the
+  # source cannot escape its anchor, regardless of the old key's policy.
+  invalid_source_config_root="$fixture_root/runtime-config-invalid-source"
+  write_schedules "$invalid_source_config_root" succeeded
+  mkdir -p "$invalid_source_config_root/.masc/config"
+  cp "$REPO_ROOT/config/runtime.toml" \
+    "$invalid_source_config_root/.masc/config/runtime.toml"
+  cat >>"$invalid_source_config_root/.masc/config/runtime.toml" <<'INVALID_SKILL_SOURCE'
+
+[[skills.sources]]
+id = "preflight-invalid"
+anchor = "base-path"
+path = "../escape"
+access = "read-only"
+INVALID_SKILL_SOURCE
   expect_failure_contains \
-    runtime_config_over_bound \
-    "$over_bound_config_root" \
+    runtime_config_invalid_source \
+    "$invalid_source_config_root" \
     "$RUNTIME_CONFIG_REJECTED" \
     "$RUNTIME_CONFIG_NEXT_UNDER_LEASE" \
-    "[skills] resource-read-max-bytes = 65536" \
+    ".path contains a parent-directory component" \
     ".masc/config/runtime.toml"
   if runtime_config_output="$("$PREFLIGHT_HELPER" \
       lease-run \
-      --base-path "$over_bound_config_root" \
+      --base-path "$invalid_source_config_root" \
       -- \
       env -u MASC_DEPLOYMENT_LEASE_OWNER_PID \
-      "$0" --base-path "$over_bound_config_root" --runtime-config-only \
+      "$0" --base-path "$invalid_source_config_root" --runtime-config-only \
       2>&1)"
   then
-    fail "self-test expected failure: runtime_config_over_bound_before_stop"
+    fail "self-test expected failure: runtime_config_invalid_source_before_stop"
   fi
   for expected_text in \
     "$RUNTIME_CONFIG_REJECTED" \
     "$RUNTIME_CONFIG_NEXT_BEFORE_STOP" \
-    "[skills] resource-read-max-bytes = 65536"; do
+    ".path contains a parent-directory component"; do
     [[ "$runtime_config_output" == *"$expected_text"* ]] \
-      || fail "self-test failure omitted expected detail for runtime_config_over_bound_before_stop: $expected_text"
+      || fail "self-test failure omitted expected detail for runtime_config_invalid_source_before_stop: $expected_text"
   done
 
   # A missing runtime.toml is one boot writes, unless seeding is off.

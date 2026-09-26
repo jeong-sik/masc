@@ -70,34 +70,31 @@ let test_seed_passes exe () = with_workspace (fun root ->
   reports output "runtime.toml accepted path=";
   reports output ".masc/config/runtime.toml")
 
-(* The #39311 shape: the seed with the Skill resource bound it had before
-   #39040 narrowed the key. *)
-let over_bound_seed () =
-  let is_bound line = String.starts_with ~prefix:"resource-read-max-bytes =" line in
-  let lines = String.split_on_char '\n' (seed ()) in
-  check int "the seed declares the Skill resource bound once" 1
-    (List.length (List.filter is_bound lines));
-  lines
-  |> List.map (fun line -> if is_bound line then "resource-read-max-bytes = 65536" else line)
-  |> String.concat "\n"
+(* A persistently invalid source, independent of the retired read-bound
+   key. The valid shipped seed is otherwise unchanged. *)
+let invalid_source_seed () =
+  seed ()
+  ^ "\n[[skills.sources]]\nid = \"preflight-invalid\"\nanchor = \"base-path\"\npath = \"../escape\"\naccess = \"read-only\"\n"
 
-let test_over_bound_refused exe () = with_workspace (fun root ->
-  write_runtime_config root (over_bound_seed ());
-  let output = refuses "the pre-#39040 bound is refused" (run_helper exe root []) in
-  reports output "[skills] resource-read-max-bytes = 65536";
+let test_invalid_source_refused exe () = with_workspace (fun root ->
+  write_runtime_config root (invalid_source_seed ());
+  let output = refuses "an escaping Skill source is refused" (run_helper exe root []) in
+  reports output "skills.sources[";
+  reports output ".path contains a parent-directory component";
   reports output "runtime.toml refused path=";
-  reports output ".masc/config/runtime.toml")
+  reports output (Filename.concat root ".masc/config/runtime.toml"))
 
 (* A relative BasePath names the same file as the absolute one. Before it was
    made absolute, the resolver read <dir>/<dir>/.masc/config and found nothing
    there. *)
 let test_relative_base_path_reads_the_file exe () = with_workspace (fun root ->
-  write_runtime_config root (over_bound_seed ());
+  write_runtime_config root (invalid_source_seed ());
   let output =
     refuses "a relative BasePath reads the real file"
       (invoke ~cwd:(Filename.dirname root) exe root (Filename.basename root) [])
   in
-  reports output "[skills] resource-read-max-bytes = 65536")
+  reports output ".path contains a parent-directory component";
+  reports output (Filename.concat root ".masc/config/runtime.toml"))
 
 (* The raw save checks the Keeper settings before the runtime half, and boot
    refuses to start on them, so a key the registry does not know is refused
@@ -213,8 +210,8 @@ let () =
   run "deployment runtime config"
     ["validate-runtime-config",
      [test_case "the shipped seed passes" `Quick (test_seed_passes exe);
-      test_case "an over-bound Skill resource bound is refused" `Quick
-        (test_over_bound_refused exe);
+      test_case "an escaping Skill source is refused" `Quick
+        (test_invalid_source_refused exe);
       test_case "a relative BasePath reads the real file" `Quick
         (test_relative_base_path_reads_the_file exe);
       test_case "an unknown Keeper setting is refused" `Quick

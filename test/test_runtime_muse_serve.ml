@@ -15,6 +15,7 @@ type step =
   | Write of string  (** Write one frame. *)
   | Stderr of string
   | Exit_with of int
+  | Mark_spawned of string
   | Expect_launch of { home : string; native_read : bool }
 
 let init_frame ~granted =
@@ -100,6 +101,7 @@ let script_text ~capture steps =
       | Write frame -> line (Printf.sprintf "printf '%%s\\n' %s" (shell_quote frame))
       | Stderr text -> line (Printf.sprintf "printf '%%s\\n' %s >&2" (shell_quote text))
       | Exit_with code -> line (Printf.sprintf "exit %d" code)
+      | Mark_spawned path -> line (Printf.sprintf "touch %s" (shell_quote path))
       | Expect_launch { home; native_read } ->
         List.iter
           (fun (key, expected) ->
@@ -112,7 +114,7 @@ let script_text ~capture steps =
           ];
         line "[ -z \"${META_API_KEY+x}\" ] || exit 96";
         line (Printf.sprintf "case \"$XDG_CONFIG_HOME\" in %s/*) ;; *) exit 94 ;; esac"
-          (shell_quote (Filename.concat home ".local/state/masc/muse-config")));
+          (shell_quote (Filename.concat (Unix.realpath home) ".local/state/masc/muse-config")));
         line "[ -r \"$XDG_CONFIG_HOME/muse/auth.json\" ] || exit 94";
         line "[ -r \"$XDG_CONFIG_HOME/muse/settings.json\" ] || exit 94";
         line "[ \"$TMPDIR\" = \"$XDG_CONFIG_HOME/tmp\" ] || exit 94";
@@ -158,7 +160,7 @@ let config ?account_home ?(native = Runtime_native_tools.Native_read) () =
   }
 ;;
 
-let run_scripted ?session_mode ?account_home ?mcp_servers ?on_session_ready ?on_stream_event ?native steps check_result =
+let run_scripted ?session_mode ?account_home ?prepared_home ?mcp_servers ?on_session_ready ?on_stream_event ?native steps check_result =
   with_script steps (fun ~dir ~requests ->
     Eio_main.run (fun env ->
       let result =
@@ -170,7 +172,7 @@ let run_scripted ?session_mode ?account_home ?mcp_servers ?on_session_ready ?on_
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
-          (config ?account_home ?native ())
+          {(config ?account_home ?native ()) with prepared_home}
           ~workspace_root:dir
           ~prompt:"say MASC_MUSE_OK"
           ~images:[]
@@ -370,6 +372,46 @@ let test_selected_homes_do_not_inherit_other_account_roots () =
         ])
 ;;
 
+let test_prepared_home_is_bound_to_exact_selected_account () =
+  let root = Filename.temp_dir "muse-prepared-account-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let account name =
+      let home = Filename.concat root name in
+      Fs_compat.mkdir_p (Filename.concat home ".config/muse");
+      let channel = open_out_gen [Open_wronly; Open_creat; Open_excl] 0o600
+        (Filename.concat home ".config/muse/auth.json") in
+      Fun.protect ~finally:(fun () -> close_out_noerr channel) (fun () ->
+        output_string channel {|{"schema_version":1,"providers":{"meta":{"api_key":"SYNTHETIC-ONLY"}}}|});
+      home in
+    let home_a = account "a" and home_b = account "b" in
+    let alias_a = Filename.concat root "alias-a" in
+    Unix.symlink home_a alias_a;
+    let prepare home = Eio_main.run (fun _ ->
+      match Runtime_muse_home.prepare ~account_home:home with
+      | Ok value -> value | Error error -> fail (Runtime_muse_home.error_to_string error)) in
+    let prepared = prepare home_a and prepared_alias = prepare alias_a in
+    check string "configured alias is retained separately" alias_a (Runtime_muse_home.account_home prepared_alias);
+    let spawn_marker = Filename.concat root "unexpected-spawn" in
+    List.iter (fun account_home ->
+      run_scripted ~account_home ~prepared_home:prepared [Mark_spawned spawn_marker] (fun result requests ->
+        (match result with
+         | Error (Serve.Invalid_config detail) -> check string "account mismatch is explicit"
+             "prepared_home does not match the selected account_home" detail
+         | Error error -> fail (Serve.error_to_string error)
+         | Ok _ -> fail "mixed-account configuration launched");
+        check int "mismatch sends no initialize or session request" 0 (List.length requests);
+        check bool "mismatch never starts the child process" false (Sys.file_exists spawn_marker)))
+      [home_b; alias_a];
+    List.iter (fun (home, prepared_home) ->
+      run_scripted ~account_home:home ~prepared_home
+        (Expect_launch {home; native_read=true} :: handshake_and_session ~granted:[]
+         @ [Write agent_completed; Write turn_completed])
+        (fun result _ -> match result with
+         | Ok turn -> check string "matching account completes" "MASC_MUSE_OK" turn.text
+         | Error error -> fail (Serve.error_to_string error)))
+      [home_a, prepared; alias_a, prepared_alias])
+;;
+
 let test_invalid_account_home_is_refused () =
   List.iter (fun account_home -> run_scripted ~account_home []
     (fun result requests ->
@@ -442,6 +484,7 @@ let () =
         ; test_case "native none is config error" `Quick test_native_none_is_config_error
         ; test_case "selected account home isolates child roots and posture" `Quick
             test_selected_homes_do_not_inherit_other_account_roots
+        ; test_case "prepared HOME matches selected account" `Quick test_prepared_home_is_bound_to_exact_selected_account
         ; test_case "invalid account home is refused" `Quick test_invalid_account_home_is_refused
         ; test_case "non-durable host is refused before session admission" `Quick
             test_nondurable_handshake_never_begins_a_session

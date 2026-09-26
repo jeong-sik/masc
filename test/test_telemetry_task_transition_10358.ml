@@ -184,7 +184,7 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
     Unix.mkdir base_path 0o755;
     let ctx = make_ctx base_path in
     let result =
-      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("title", `String "Telemetry task") ])
+      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [ ("title", `String "Telemetry task") ])
     in
     if not (Tool_result.is_success result) then Alcotest.fail (Tool_result.message result);
     run_transition ctx ~task_id:"task-001" ~action:"claim" ();

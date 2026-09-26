@@ -1,0 +1,21 @@
+{
+  "baseline": "56884cdc2d82d8b4b3f9b64597c6e770228e9712",
+  "candidate": "0782db656ccf5c9da1ee743ea21ef932567c978a",
+  "PR_source_head": "887d52fed1f73d7191018ded9ea67433dbef848c",
+  "changed_product_paths": [
+    "bin/masc_tui_message_layout.ml",
+    "bin/masc_tui_scroll.ml"
+  ],
+  "candidate_and_PR_sha256": {
+    "bin/masc_tui_message_layout.ml": "43c58160a3638dfb528a6b33391ac957c34933f6fa6cc3ee576fbfb284a6eb0d",
+    "bin/masc_tui_scroll.ml": "1156bfda9453c631a1b037d53b073749f56e1e23cea7d03bd8ccb63d659d3080"
+  },
+  "baseline_decoded_assembly_sha256": "2e9fbe3731216322d23324bdc34149c0d147e3c5f01c12c5bf4bc6a7216d58ed",
+  "candidate_decoded_assembly_sha256": "59b7879e94a88751346ea8c7ac3b9a161af27dc56bb0e7dd35746e3e38b0a780",
+  "static_generic_bound_branches": {
+    "baseline": 93,
+    "candidate": 0
+  },
+  "selection": "Whole otool symbol bodies for the two product modules and Stdlib.Int min/max, not all linked code.",
+  "scope": "Direct b/bl branch sites to Stdlib.min/max only; not dynamic invocations, allocation or latency. Other generic comparisons may remain. Isolated probe product tree is older than the PR base."
+}

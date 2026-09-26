@@ -21,6 +21,22 @@ only the two synthetic backlog copies, health, server log and receipts remain.
 The ephemeral dashboard token is neither an input from the operator nor a
 recorded response.
 
+`server_tasks` and `server_workers` set the initial task count and synthetic
+active-agent count (defaults 250 and 0). They are also `--tasks` and `--workers`
+on the driver/session commands. Workers are ordinary agent JSON records in the
+owned workspace, not Keeper processes. Their fixed 2001 presence timestamps
+make their attention rows visible. Every execution response must contain all
+seeded workers with unchanged status/identity fields, zero owned-task counts
+and no offline rows; the fixture uses Todo tasks only. The final agent files
+must match the initial fixture. This exercises per-agent task scanning but
+does not measure claimed-task map updates or live Keeper behavior.
+
+The driver retains full agent/brief receipts and compares them between builds,
+including row order. Only `last_signal_age_sec`, derived from each render's
+clock, is removed from that semantic comparison; the original value remains
+in every HTTP receipt. Workload size is recorded in identity, plan and summary.
+Runs with different worker/task counts are separate experiments.
+
 ## Measurement phases
 
 1. Add one task, then read the first and cached execution projection. Validate

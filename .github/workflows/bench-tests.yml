@@ -18,13 +18,41 @@ on:
       - 'lib/exec_ssh_protocol/exec_ssh_protocol.ml'
       - '.github/workflows/bench-tests.yml'
   workflow_dispatch:
+    inputs:
+      compare_tui:
+        description: Compare two existing macOS ARM runtime artifacts
+        type: boolean
+        default: false
+      baseline_run:
+        type: string
+        description: Baseline Release workflow run ID
+      baseline_artifact:
+        type: string
+        description: Baseline runtime-probe artifact ID
+      baseline_commit:
+        type: string
+        description: Expected full baseline source commit
+      candidate_run:
+        type: string
+        description: Candidate Release workflow run ID
+      candidate_artifact:
+        type: string
+        description: Candidate runtime-probe artifact ID
+      candidate_commit:
+        type: string
+        description: Expected full candidate source commit
+      repetitions:
+        type: string
+        description: Repetitions per binary, alternating order
+        default: '3'
 permissions:
   contents: read
 concurrency:
-  group: bench-tests-${{ github.ref }}
+  group: bench-tests-${{ inputs.compare_tui && 'compare-tui' || 'pytest' }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   pytest:
+    if: ${{ !inputs.compare_tui }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -56,3 +84,62 @@ jobs:
               print(f"::error::skipped in CI: {name}")
           sys.exit(1 if skipped else 0)
           PY
+  compare-tui:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui }}
+    runs-on: macos-14
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - name: Install binary runtime libraries
+        run: brew install gmp libpq openssl@3 zstd
+      - name: Download baseline
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ inputs.baseline_artifact }}
+          run-id: ${{ inputs.baseline_run }}
+          github-token: ${{ github.token }}
+          path: runtime-baseline
+      - name: Download candidate
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ inputs.candidate_artifact }}
+          run-id: ${{ inputs.candidate_run }}
+          github-token: ${{ github.token }}
+          path: runtime-candidate
+      - name: Record source artifact metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASELINE_ARTIFACT: ${{ inputs.baseline_artifact }}
+          CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$BASELINE_ARTIFACT" > runtime-baseline/artifact.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$CANDIDATE_ARTIFACT" > runtime-candidate/artifact.json
+      - name: Verify identity and compare acknowledged frames
+        env:
+          BASELINE_RUN: ${{ inputs.baseline_run }}
+          BASELINE_ARTIFACT: ${{ inputs.baseline_artifact }}
+          BASELINE_COMMIT: ${{ inputs.baseline_commit }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+          CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          REPETITIONS: ${{ inputs.repetitions }}
+        run: |
+          exec python3 scripts/harness/perf/compare_tui_artifacts.py \
+            --baseline runtime-baseline --baseline-run "$BASELINE_RUN" \
+            --baseline-artifact "$BASELINE_ARTIFACT" --baseline-commit "$BASELINE_COMMIT" \
+            --candidate runtime-candidate --candidate-run "$CANDIDATE_RUN" \
+            --candidate-artifact "$CANDIDATE_ARTIFACT" --candidate-commit "$CANDIDATE_COMMIT" \
+            --repetitions "$REPETITIONS" --output-dir comparison-results
+      - name: Retain raw observations and identity receipts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tui-artifact-comparison-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: comparison-results/
+          if-no-files-found: warn

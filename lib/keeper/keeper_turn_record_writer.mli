@@ -36,6 +36,7 @@ val write :
   selected_model:string option ->
   finish_reason:string option ->
   context_window:int option ->
+  ?provider_context_window:int ->
   price_input_per_million:float option ->
   price_output_per_million:float option ->
   request_latency_ms:int option ->

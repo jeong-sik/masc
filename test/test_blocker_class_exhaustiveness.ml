@@ -24,7 +24,6 @@ let all_variants : blocker_class list =
   ; Runtime_exhausted All_providers_failed
   ; Runtime_exhausted Candidates_filtered_after_cycles
   ; Runtime_exhausted Session_conflict
-  ; Capacity_backpressure
   ; Fiber_unresolved
   ; Agent_core_context_window_exceeded
   ; Agent_core_unrecognized_stop_reason
@@ -92,138 +91,9 @@ let test_unknown_string () =
   | Some _ -> fail "expected None for unknown string"
 ;;
 
-(* ── Variant count pin ─────────────────────────────────────────── *)
-
-(* ── agent-core error → blocker_class mapping exhaustiveness ────────────── *)
-
-module CoreError = Agent_core.Error
-module CoreRetry = Agent_core.Retry
 module KSB = Masc.Keeper_status_bridge_blocker
 module KTD = Masc.Keeper_turn_driver
 module Reg = Masc.Keeper_registry
-
-let terminal_invocation tool_use_id =
-  Agent_core.Tool_contract.Invocation.create
-    ~tool_use_id
-    ~turn:3
-    ~schedule:
-      { planned_index = 1
-      ; batch_index = 0
-      ; batch_size = 1
-      ; execution_mode = Agent_core.Tool_contract.Serial
-      }
-    ~completion:
-      (Agent_core.Tool_contract.Terminal_after_success
-         Agent_core.Tool_contract.Effect_outcome_unknown)
-;;
-
-(** Every [Agent_core.Error.Agent _] sub-variant must have an explicit blocker
-    decision through the two-layer pipeline in [blocker_class_of_core_error]:
-    1. [classify_masc_internal_error] — for runtime-layer structured errors
-    2. Direct agent-core pattern match — for Agent sub-variants
-
-    When a new Agent sub-variant is added to agent core, this test forces the
-    developer to decide: map it to a blocker_class or list why it is an
-    observation/control checkpoint for which [None] is correct. *)
-
-let all_sdk_agent_variants : (string * CoreError.t) list =
-  [ ( "UnrecognizedStopReason"
-    , CoreError.Agent (CoreError.UnrecognizedStopReason { reason = "abrupt" }) )
-  ; ( "HookExecutionFailed"
-    , CoreError.Agent
-        (CoreError.HookExecutionFailed
-           { hook_name = "post_tool_use"
-           ; stage = "execute"
-           ; tool_name = Some "Execute"
-           ; tool_use_id = Some "tool-1"
-           ; detail = "hook failed"
-           }) )
-  ; ( "TerminalToolEffectFailed"
-    , CoreError.Agent
-        (CoreError.TerminalToolEffectFailed
-           { tool_use_id = "tool-terminal"
-           ; effect_disposition = CoreError.proven_post_terminal_effect
-           ; detail = "terminal effect failed"
-           }) )
-  ; ( "TerminalToolDurabilityFailed"
-    , CoreError.Agent
-        (CoreError.TerminalToolDurabilityFailed
-           { invocation = terminal_invocation "tool-durable"
-           ; effect_disposition = CoreError.unknown_terminal_effect
-           ; detail = "receipt persistence failed"
-           }) )
-  ; ( "GuardrailViolation"
-    , CoreError.Agent (CoreError.GuardrailViolation { validator = "content_filter"; reason = "toxic" }) )
-  ; ( "TripwireViolation"
-    , CoreError.Agent (CoreError.TripwireViolation { tripwire = "disallow_shell"; reason = "exec detected" }) )
-  ; ( "InputRequired"
-    , CoreError.Agent
-        (CoreError.InputRequired
-           { request_id = "req-1"
-           ; participant_name = Some "user"
-           ; question = "What should I do?"
-           ; schema = None
-           ; timeout_s = None
-           ; created_at = 0.0
-           }) )
-  ]
-;;
-
-let agent_variants_with_no_runtime_blocker =
-  [ "HookExecutionFailed" ]
-
-let test_all_agent_variants_classified_intentionally () =
-  List.iter
-    (fun (label, core_error) ->
-       let expected_none =
-         List.exists (fun allowed -> String.equal allowed label)
-           agent_variants_with_no_runtime_blocker
-       in
-       match KSB.blocker_class_of_core_error core_error, expected_none with
-       | Some _, false -> ()
-       | None, true -> ()
-       | Some klass, true ->
-         failf
-           "Agent sub-variant %S unexpectedly mapped to blocker_class %S"
-           label
-           (blocker_class_to_string klass)
-       | None, false ->
-         failf
-           "Agent sub-variant %S returned None from blocker_class_of_core_error — \
-            either map it to a blocker_class or document why None is correct"
-           label)
-    all_sdk_agent_variants
-;;
-
-(** Pin the Agent sub-variant count so additions are visible in diffs.
-    When agent core adds a new [Agent] sub-variant, bump this number and add it
-    to [all_sdk_agent_variants]. *)
-let expected_agent_variant_count = 7
-
-let test_agent_variant_count_pin () =
-  let count = List.length all_sdk_agent_variants in
-  check int
-    "Agent sub-variant count (pin — bump when Agent Core adds new Agent variants)"
-    expected_agent_variant_count count
-;;
-
-let test_api_timeout_prose_does_not_map_to_agent_timeout () =
-  let api_timeout =
-    CoreError.Api
-      (CoreRetry.Timeout
-         { message =
-             "Turn wall-clock budget exhausted during runtime attempt \
-              (budget=554.9s)"
-         ; phase = Some Llm_provider.Http_client.Http_operation
-         })
-  in
-  check (option string)
-    "API timeout prose does not synthesize an agent blocker"
-    None
-    (KSB.blocker_class_of_core_error api_timeout
-     |> Option.map blocker_class_to_string)
-;;
-
 
 (* ── Provider runtime record classification ────────────────────── *)
 
@@ -355,6 +225,90 @@ let test_masc_accept_rejected_provider_record_does_not_reparse_detail () =
     surface.KSB.blocker_class
 ;;
 
+(* ── Agent_core agent_error decision (#38940 review) ────────────── *)
+
+(* Every [Agent_core.Error.agent_error] constructor is decided here, on the
+   live path: [classify_masc_internal_error] is what turns a core error into a
+   typed internal error, and so into a runtime blocker. The match below has no
+   catch-all, so a constructor added to agent core fails to compile until
+   someone decides whether it reaches the operator as a typed internal error
+   ([true]) or only through the turn receipt ([false]). The test then holds
+   the live function to that decision. *)
+let reaches_typed_internal_error : Agent_core.Error.agent_error -> bool = function
+  | Agent_core.Error.TerminalToolEffectFailed _
+  | Agent_core.Error.TerminalToolDurabilityFailed _ -> true
+  | Agent_core.Error.UnrecognizedStopReason _
+  | Agent_core.Error.ToolRoundLimitExceeded _
+  | Agent_core.Error.HookExecutionFailed _
+  | Agent_core.Error.GuardrailViolation _
+  | Agent_core.Error.TripwireViolation _
+  | Agent_core.Error.InputRequired _ -> false
+;;
+
+let one_of_each_agent_error : Agent_core.Error.agent_error list =
+  let module E = Agent_core.Error in
+  let invocation =
+    Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"tool-durable"
+      ~turn:3
+      ~schedule:
+        { planned_index = 1
+        ; batch_index = 0
+        ; batch_size = 1
+        ; execution_mode = Agent_core.Tool_contract.Serial
+        }
+      ~completion:
+        (Agent_core.Tool_contract.Terminal_after_success
+           Agent_core.Tool_contract.Effect_outcome_unknown)
+  in
+  [ E.UnrecognizedStopReason { reason = "abrupt" }
+  ; E.ToolRoundLimitExceeded { rounds = 9; limit = 8 }
+  ; E.HookExecutionFailed
+      { hook_name = "post_tool_use"
+      ; stage = "execute"
+      ; tool_name = Some "Execute"
+      ; tool_use_id = Some "tool-1"
+      ; detail = "hook failed"
+      }
+  ; E.TerminalToolEffectFailed
+      { tool_use_id = "tool-terminal"
+      ; effect_disposition = E.proven_post_terminal_effect
+      ; detail = "terminal effect failed"
+      }
+  ; E.TerminalToolDurabilityFailed
+      { invocation
+      ; effect_disposition = E.unknown_terminal_effect
+      ; detail = "receipt persistence failed"
+      }
+  ; E.GuardrailViolation { validator = "content_filter"; reason = "toxic" }
+  ; E.TripwireViolation { tripwire = "disallow_shell"; reason = "exec detected" }
+  ; E.InputRequired
+      { request_id = "req-1"
+      ; participant_name = Some "user"
+      ; question = "What should I do?"
+      ; schema = None
+      ; timeout_s = None
+      ; created_at = 0.0
+      }
+  ]
+;;
+
+let test_agent_errors_follow_their_decision () =
+  List.iter
+    (fun agent_error ->
+       let expected = reaches_typed_internal_error agent_error in
+       let actual =
+         Option.is_some
+           (KTD.classify_masc_internal_error (Agent_core.Error.Agent agent_error))
+       in
+       check
+         bool
+         (Agent_core.Error.to_string (Agent_core.Error.Agent agent_error))
+         expected
+         actual)
+    one_of_each_agent_error
+;;
+
 (* ── Runner ────────────────────────────────────────────────────── *)
 
 let () =
@@ -364,13 +318,6 @@ let () =
       , [ test_case "round-trip" `Quick test_roundtrip
         ; test_case "string uniqueness" `Quick test_string_uniqueness
         ; test_case "unknown string returns None" `Quick test_unknown_string
-        ] )
-    ; ( "core_error_mapping"
-      , [ test_case "all Agent variants are intentionally classified" `Quick
-            test_all_agent_variants_classified_intentionally
-        ; test_case "Agent variant count pin" `Quick test_agent_variant_count_pin
-        ; test_case "API timeout prose does not synthesize agent timeout" `Quick
-            test_api_timeout_prose_does_not_map_to_agent_timeout
         ] )
     ; ( "provider_runtime_record"
       , [ test_case "typed reason reaches runtime_exhausted" `Quick
@@ -387,6 +334,10 @@ let () =
             test_provider_timeout_detail_without_code_does_not_map_to_turn_timeout
         ; test_case "provider runtime detail is not reparsed" `Quick
             test_masc_accept_rejected_provider_record_does_not_reparse_detail
+        ] )
+    ; ( "agent_error_decision"
+      , [ test_case "every agent_error follows its decision" `Quick
+            test_agent_errors_follow_their_decision
         ] )
     ]
 ;;

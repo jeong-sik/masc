@@ -384,18 +384,24 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
     let next_tool_index = ref 1 in
     let tool_indexes = Hashtbl.create 8 in
     let native_tool_indexes = Hashtbl.create 8 in
-    let streamed_text = Buffer.create 256 in
+    (* Each agentMessage item is one assistant message; a commentary item and
+       the final answer after it are two. *)
+    let text_stream = Keeper_official_client_text_stream.create ~equal:String.equal () in
+    let emit_text text =
+      emit
+        (Agent_core.Types.ContentBlockDelta
+           { index = 0; delta = Agent_core.Types.TextDelta text })
+    in
     Some
       (function
         | Runtime_codex_app_server.Turn_started { turn_id; model } ->
           emit (Agent_core.Types.MessageStart { id = turn_id; model; usage = None })
-        | Runtime_codex_app_server.Text_delta text ->
-          Buffer.add_string streamed_text text;
-          emit
-            (Agent_core.Types.ContentBlockDelta
-               { index = 0; delta = Agent_core.Types.TextDelta text })
+        | Runtime_codex_app_server.Text_delta { item_id; delta } ->
+          emit_text
+            (Keeper_official_client_text_stream.forward text_stream ~message:item_id delta)
         | Runtime_codex_app_server.Dynamic_tool_started
             { call_id; tool_name; arguments } ->
+          Keeper_official_client_text_stream.tool_row text_stream;
           let index = !next_tool_index in
           incr next_tool_index;
           Hashtbl.replace tool_indexes call_id index;
@@ -470,20 +476,9 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
         | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
           report_usage ~thread_id ~turn_id ~model frame
         | Runtime_codex_app_server.Turn_finished { text } ->
-          let streamed = Buffer.contents streamed_text in
-          if String.starts_with ~prefix:streamed text
-          then begin
-            let suffix_length = String.length text - String.length streamed in
-            if suffix_length > 0
-            then
-              emit
-                (Agent_core.Types.ContentBlockDelta
-                   { index = 0
-                   ; delta =
-                       Agent_core.Types.TextDelta
-                         (String.sub text (String.length streamed) suffix_length)
-                   })
-          end;
+          Option.iter
+            emit_text
+            (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
           emit
             (Agent_core.Types.MessageDelta
                { stop_reason = Some Agent_core.Types.EndTurn; usage = None });
@@ -952,52 +947,62 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
        0.156.1, 2026-09-25: a resumed thread's requests carried none of them
        until its compaction wrote them into the replacement history), so the
        carried messages stay out of them and the compacted thread never holds a
-       stale copy of what the prompt carries. *)
-    let* developer_messages, history =
-      project_messages
-        (match thread_mode with
-         | Runtime_codex_app_server.Start -> prepared.messages
-         | Runtime_codex_app_server.Resume _ ->
-           (* Runtime_codex_app_server drops history on Resume. Only
-              non-carried System messages can enter developerInstructions;
-              formatting the held conversation here would allocate it again. *)
-           List.filter
-             (fun (message : Agent_core.Types.message) ->
-                not (Host.is_carried_on_resume message)
-                && match message.role with
-                   | Agent_core.Types.System -> true
-                   | Agent_core.Types.User | Agent_core.Types.Assistant
-                   | Agent_core.Types.Tool -> false)
-             prepared.messages)
+       stale copy of what the prompt carries.
+
+       History can contain large tool results. Projecting, encoding and hashing
+       it is CPU work over immutable messages; keeping it on the owner domain
+       stalls HTTP, SSE and every other Keeper sharing that scheduler. *)
+    let* history, context_frontier, composed_developer_instructions =
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        let* developer_messages, history =
+          project_messages
+            (match thread_mode with
+             | Runtime_codex_app_server.Start -> prepared.messages
+             | Runtime_codex_app_server.Resume _ ->
+               (* Runtime_codex_app_server drops history on Resume. Only
+                  non-carried System messages can enter developerInstructions;
+                  formatting the held conversation here would allocate it again. *)
+               List.filter
+                 (fun (message : Agent_core.Types.message) ->
+                    not (Host.is_carried_on_resume message)
+                    && match message.role with
+                       | Agent_core.Types.System -> true
+                       | Agent_core.Types.User | Agent_core.Types.Assistant
+                       | Agent_core.Types.Tool -> false)
+                 prepared.messages)
+        in
+        let snapshot_messages =
+          List.filter (fun message -> not (Host.is_composed_system_context message))
+            prepared.messages in
+        let snapshot_sha256 =
+          `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages)
+          |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+        let context_frontier : Keeper_official_client_session_store.context_frontier =
+          { snapshot_sha256; message_count = List.length snapshot_messages;
+            delivery = (match thread_mode with
+              | Runtime_codex_app_server.Start -> Prepared_start_context
+              | Runtime_codex_app_server.Resume _ -> Held_by_vendor_session);
+            acknowledged_turn = None; held_context = [] } in
+        (* [None] here means "send no developerInstructions": [optional_field]
+           omits the member and the app-server runs the thread on Codex's own
+           default instructions. The probe and fusion callers build [None] on
+           purpose and do not pass through here. This composition always carries
+           [prepared.system_prompt], which [Host.prepare_turn] refused when blank,
+           so the joined text is never empty. A check on the joined text could
+           not see a blank keeper prompt behind the posture note this lane
+           appends (#33165). *)
+        let composed_developer_instructions =
+          compose_developer_instructions developer_messages |> String.trim
+        in
+        Ok (history, context_frontier, composed_developer_instructions))
     in
     let prompt =
       match thread_mode with
       | Runtime_codex_app_server.Start -> prompt
       | Runtime_codex_app_server.Resume _ ->
-        Host.resume_prompt ~goal:prompt prepared.messages
-    in
-    let snapshot_messages =
-      List.filter (fun message -> not (Host.is_composed_system_context message))
-        prepared.messages in
-    let snapshot_sha256 =
-      `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages)
-      |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
-    let context_frontier : Keeper_official_client_session_store.context_frontier =
-      { snapshot_sha256; message_count = List.length snapshot_messages;
-        delivery = (match thread_mode with
-          | Runtime_codex_app_server.Start -> Prepared_start_context
-          | Runtime_codex_app_server.Resume _ -> Held_by_vendor_session);
-        acknowledged_turn = None } in
-    (* [None] here means "send no developerInstructions": [optional_field]
-       omits the member and the app-server runs the thread on Codex's own
-       default instructions. The probe and fusion callers build [None] on
-       purpose and do not pass through here. This composition always carries
-       [prepared.system_prompt], which [Host.prepare_turn] refused when blank,
-       so the joined text is never empty. A check on the joined text could
-       not see a blank keeper prompt behind the posture note this lane
-       appends (#33165). *)
-    let composed_developer_instructions =
-      compose_developer_instructions developer_messages |> String.trim
+        (* Codex keeps no held-context record yet: every carried context is
+           re-sent on each resume. *)
+        (Host.resume_prompt ~goal:prompt ~held:[] prepared.messages).prompt
     in
     let developer_instructions = Some composed_developer_instructions in
     (* The window already fits; this is the account checked once more before
@@ -1489,6 +1494,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
               | Some _ -> Runtime_usage_scope.Conversation_cumulative
               | None -> Runtime_usage_scope.Usage_scope_unavailable)
            ?request_context
+           ?reported_context_window:turn.model_context_window
            ()
        in
        Ok

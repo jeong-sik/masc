@@ -422,9 +422,11 @@ let carry_from_history ~carry_window ~entries history =
    and comes back must come back in the slot it left. *)
 let already_used_from_history ~carry_window ~entries ~receipts history =
   let carried_names, dropped = carry_from_history ~carry_window ~entries history in
-  (* Successful loads stay callable until their own dispatch or a changed
-     work/surface scope. Sibling calls say nothing about whether a loaded
-     tool is still needed. Carry diagnostics describe actual use separately. *)
+  (* Successful loads stay callable until their own dispatch, a changed
+     work/surface scope, or the end of the turn after the one that made them
+     ([Keeper_tool_load_receipts.create]). Sibling calls say nothing about
+     whether a loaded tool is still needed. Carry diagnostics describe actual
+     use separately. *)
   let pending = Keeper_tool_load_receipts.pending_names receipts in
   let placed_name name =
     List.exists (String.equal name) carried_names

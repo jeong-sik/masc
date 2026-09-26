@@ -116,7 +116,55 @@ let memory_updated_text = function
 let recall_tokens bytes =
   Masc_tui_token_scale.format_estimate Masc_tui_token_scale.fleet bytes
 ;;
-let memory_context_lines (k : memory_keeper_health) =
+(* One break, and no more. The block sits under the list and is paid for out
+   of the same frame, so a reading never takes more than two rows. At a
+   terminal wide enough to draw the roster, the Librarian row and an alert
+   each need one break; a narrower one folds the middle (see [clause_rows]). *)
+let maximum_rows_for_a_reading = 2
+
+(* A row of the keeper block, given as its clauses rather than as the joined
+   string: [pack_clauses] keeps a clause whose own text holds the mark whole,
+   which it cannot do for a row that has already been joined. The block was
+   drawn one row per reading and cut at the frame: the Librarian row lost
+   "failed N since server start", the tail #36497 records as reading like a
+   running total, and a server alert lost the half that says what to do about
+   it.
+
+   An alert is one sentence and arrives as one clause; [pack_clauses] wraps a
+   clause too wide for a row rather than cutting it. Continuation rows carry
+   the same two-space indent as the first.
+
+   A reading that packs into more rows than the block pays for keeps its
+   first row and its last, with the cut mark between them, the way a roster
+   name folds its middle (#38469). The first row says which reading it is;
+   the last holds the clause that changes what the others mean. Joined back
+   into one row instead, the frame cut that tail again -- at 80 columns, the
+   commonest terminal, the Librarian row still ended "failed N". The fold
+   draws exactly two rows, so it holds for any [maximum_rows_for_a_reading]
+   of two or more. *)
+let clause_rows ~cols clauses =
+  let indent = "  " in
+  let fold = Message_layout.cut_mark ^ " " in
+  let lead_cells =
+    max (Message_layout.display_width indent) (Message_layout.display_width fold)
+  in
+  let rows =
+    Message_layout.pack_clauses
+      ~max_cells:(max 1 (framed_inner_width cols - lead_cells))
+      clauses
+  in
+  match rows with
+  | first :: rest when List.length rows > maximum_rows_for_a_reading ->
+    let last = List.fold_left (fun _ row -> row) first rest in
+    [ indent ^ first; fold ^ last ]
+  | rows -> List.map (fun row -> indent ^ row) rows
+
+type memory_context_projection =
+  { rows : string list
+  ; stalled_row : (int * string) option
+  }
+
+let memory_context_lines ~cols (k : memory_keeper_health) =
   let current_line =
     Printf.sprintf "  %s · %s · snapshot r%d · recall %s tok · updated %s"
       k.mkh_keeper_id (memory_state_label (memory_state k)) k.mkh_revision
@@ -132,7 +180,7 @@ let memory_context_lines (k : memory_keeper_health) =
   (* RFC librarian-lifecycle §4.9: how far behind, when that was counted,
      and what the journal last said. A count the durable drain could not take prints
      as "unread ?" rather than as zero. *)
-  let librarian_line =
+  let librarian_clauses =
     let librarian = k.mkh_librarian in
     let unread =
       match librarian.mlh_unread_atom_turns, librarian.mlh_unread_official_turns with
@@ -147,19 +195,20 @@ let memory_context_lines (k : memory_keeper_health) =
       | Some atoms -> Printf.sprintf "continuity behind %d" atoms
       | None -> "continuity behind ?"
     in
-    Printf.sprintf
-      "  Librarian · %s · %s · %s · measured %s · Memory saved %s · last failure %s · failed %d since server start"
-      (match librarian.mlh_state with
+    [ "Librarian"
+    ; (match librarian.mlh_state with
        | Some state -> librarian_pass_end_words state
        | None -> "not measured")
-      unread
-      continuity
-      (memory_updated_text librarian.mlh_measured_at)
-      (memory_updated_text librarian.mlh_last_success_at)
-      (match librarian.mlh_last_failure_kind with
-       | Some kind -> librarian_failure_words kind
-       | None -> Masc_tui_theme.Glyph.no_value)
-      k.mkh_librarian_failures
+    ; unread
+    ; continuity
+    ; "measured " ^ memory_updated_text librarian.mlh_measured_at
+    ; "Memory saved " ^ memory_updated_text librarian.mlh_last_success_at
+    ; "last failure "
+      ^ (match librarian.mlh_last_failure_kind with
+         | Some kind -> librarian_failure_words kind
+         | None -> Masc_tui_theme.Glyph.no_value)
+    ; Printf.sprintf "failed %d since server start" k.mkh_librarian_failures
+    ]
   in
   (* RFC librarian-lifecycle §4.10: the atoms requests skip while the
      Librarian stands behind the start the provider last accepted. An alarm,
@@ -282,7 +331,7 @@ let memory_context_lines (k : memory_keeper_health) =
   let alert_lines =
     List.map
       (fun (a : memory_alert) ->
-        Printf.sprintf "  [%s] %s \xe2\x80\x94 %s"
+        Printf.sprintf "[%s] %s \xe2\x80\x94 %s"
           (match Masc.Tui_decode.memory_alert_severity a.ma_code with
            | `Warn -> "warn"
            | `Error -> "error")
@@ -302,9 +351,27 @@ let memory_context_lines (k : memory_keeper_health) =
           k.mkh_source_read_error
       ]
   in
-  [current_line; facts_line; source_line; librarian_line] @ librarian_stalled_lines
-  @ librarian_cause_lines @ context_lines
-  @ (vision_line :: (read_error_lines @ alert_lines))
+  (* Only the rows whose tail changes what the row claims are broken. The
+     Librarian row ends in "failed N since server start", and a cut leaves
+     "failed N", which reads as a running total (#36497); an alert is one
+     sentence from the server and a cut takes the half that says what to do.
+     The readings around them end in a timestamp or a byte count, where a cut
+     costs a value rather than the meaning of the ones before it, and
+     breaking every row would double the block at the widths a terminal is
+     likely to have. *)
+  let librarian_rows = clause_rows ~cols librarian_clauses in
+  { rows =
+      [ current_line; facts_line; source_line ]
+      @ librarian_rows
+      @ librarian_stalled_lines
+      @ librarian_cause_lines @ context_lines
+      @ (vision_line :: read_error_lines)
+      @ List.concat_map (fun sentence -> clause_rows ~cols [ sentence ]) alert_lines
+  ; stalled_row =
+      (match librarian_stalled_lines with
+       | row :: _ -> Some (3 + List.length librarian_rows, row)
+       | [] -> None)
+  }
 
 type memory_state = Masc_tui_types.memory_state =
   | Memory_ordinary | Memory_warning | Memory_degraded | Memory_no_current
@@ -782,10 +849,130 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
   total @ readings
 
 
-let memory_overview_scrolled ~cols ?cursor (state : state) =
+(* Both counts are the length of what this module draws: the fleet header
+   above the list, and the selected keeper's block below it. Neither is a
+   count of readings -- a reading breaks into as many rows as the frame
+   gives it. *)
+(* The header and selected Keeper's detail share one finite body with the
+   roster. If their wrapped rows do not fit, show both ends when there is room
+   and say how many rows are hidden. A one-row slot shows only that omission,
+   rather than pretending that a clipped alert is complete. *)
+let fold_memory_rows ~subject ~max_rows rows =
+  let count = List.length rows in
+  if count <= max_rows then rows
+  else if max_rows <= 0 then []
+  else
+    let leading = (max_rows - 1) / 2 in
+    let trailing = max_rows - 1 - leading in
+    let hidden = count - leading - trailing in
+    let note =
+      Printf.sprintf "  … %d %s rows hidden; enlarge terminal" hidden subject
+    in
+    List.filteri (fun index _ -> index < leading) rows
+    @ [ note ]
+    @ List.filteri (fun index _ -> index >= count - trailing) rows
+
+(* A stalled gap is the actionable reading in the selected Keeper's block.
+   Keep its typed row when the body budget folds the surrounding detail; the
+   generic first/last fold could otherwise hide it in the middle. *)
+let fold_memory_context_rows ~max_rows context =
+  let rows = context.rows in
+  let count = List.length rows in
+  match context.stalled_row with
+  | None -> fold_memory_rows ~subject:"Keeper detail" ~max_rows rows
+  | Some _ when count <= max_rows -> rows
+  | Some _ when max_rows <= 1 ->
+    fold_memory_rows ~subject:"Keeper detail" ~max_rows rows
+  | Some (stalled_index, stalled_row) ->
+    let extra = max_rows - 2 in
+    let before = min stalled_index (extra / 2) in
+    let after = min (count - stalled_index - 1) (extra - before) in
+    let before = min stalled_index (extra - after) in
+    let hidden = count - before - after - 1 in
+    let note =
+      Printf.sprintf "  … %d Keeper detail rows hidden; enlarge terminal" hidden
+    in
+    List.filteri (fun index _ -> index < before) rows
+    @ [ note; stalled_row ]
+    @ List.filteri (fun index _ -> index >= count - after) rows
+
+let memory_refused_keeper_lines (state : state) =
+  match state.memory_health with
+  | Some { mhs_refused_keepers = []; _ } | None -> []
+  | Some { mhs_refused_keepers = refused; _ } ->
+    List.map
+      (fun refusal ->
+        Printf.sprintf "  %s · row not read: %s"
+          (match refusal.mkr_keeper_id with
+           | Some keeper_id -> Terminal_text.single_line keeper_id
+           | None -> "(keeper id not read)")
+          (Terminal_text.single_line refusal.mkr_reason))
+      refused
+
+type memory_overview_projection =
+  { header : string list
+  ; refused : string list
+  ; refused_divider : bool
+  ; context : string list
+  }
+
+let refused_rows projection =
+  List.length projection.refused + if projection.refused_divider then 1 else 0
+
+let memory_overview_rows ~cols ~budget ?cursor (state : state) =
+  let keepers = visible_memory_keepers state in
+  let cursor = Option.value cursor ~default:state.memory_health_cursor in
+  let context =
+    match List.nth_opt keepers (max 0 (min cursor (List.length keepers - 1))) with
+    | None -> { rows = []; stalled_row = None }
+    | Some keeper -> memory_context_lines ~cols keeper
+  in
+  let all_refused = memory_refused_keeper_lines state in
+  let base = memory_overview_scrolled ~header_rows:0 ~refused_rows:0 ~context_rows:0 state in
+  (* The context divider needs a row only when the detail itself is shown. *)
+  let fixed_rows = base.sc_chrome - Masc_tui_frame.chrome_rows in
+  (* A nonempty list needs one selected row; a longer list also needs its
+     overflow line. The empty state needs one explanation row. *)
+  let list_rows = if List.length keepers > 1 then 2 else 1 in
+  (* Reserve a visible count when decoding rejected rows. The rejection
+     block spends any additional room after the summary and before detail. *)
+  let refused_min = if all_refused = [] then 0 else 1 in
+  (* Preserve an omission count and the stalled-gap row, plus their divider,
+     before the fleet summary and rejected rows spend the remaining body. *)
+  let context_reserve =
+    if Option.is_some context.stalled_row then 3 else 0
+  in
+  let header =
+    memory_fleet_header_rows ~cols state
+    |> fold_memory_rows ~subject:"Memory summary"
+         ~max_rows:(max 0 (budget - fixed_rows - list_rows - refused_min - context_reserve))
+  in
+  let refused_available =
+    max 0 (budget - fixed_rows - list_rows - List.length header - context_reserve)
+  in
+  let refused =
+    fold_memory_rows ~subject:"rejected Keeper"
+      ~max_rows:(if refused_available > 1 then refused_available - 1 else refused_available)
+      all_refused
+  in
+  let refused_divider = refused <> [] && refused_available > 1 in
+  let refused_spent = List.length refused + if refused_divider then 1 else 0 in
+  let context =
+    let available =
+      budget - fixed_rows - list_rows - List.length header - refused_spent
+    in
+    if context.rows = [] || available <= 1 then []
+    else
+      fold_memory_context_rows ~max_rows:(available - 1) context
+  in
+  { header; refused; refused_divider; context }
+
+let memory_overview_scrolled ~cols ~budget ?cursor (state : state) =
+  let projection = memory_overview_rows ~cols ~budget ?cursor state in
   memory_overview_scrolled
-    ~header_rows:(List.length (memory_fleet_header_rows ~cols state))
-    ?cursor state
+    ~header_rows:(List.length projection.header)
+    ~refused_rows:(refused_rows projection)
+    ~context_rows:(List.length projection.context) state
 
 let render_memory_body ~cols ~budget (state : state)
     ~(push : string -> unit)
@@ -810,7 +997,8 @@ let render_memory_body ~cols ~budget (state : state)
       (Theme.recede ()) Ansi.reset
       (Theme.recede ()) Ansi.reset
   in
-  List.iter push (memory_fleet_header_rows ~cols state);
+  let projection = memory_overview_rows ~cols ~budget state in
+  List.iter push projection.header;
   push info_bar;
   let search_bar =
     (* The one value the list was filtered by. [visible_memory_keepers] narrows
@@ -841,30 +1029,17 @@ let render_memory_body ~cols ~budget (state : state)
        push_styled ~style:(Theme.bad ())
          ("  " ^ Terminal_text.single_line detail);
        push_divider ());
-  (* A keeper row the decoder refused is drawn as one line naming the keeper
-     and the reason; the rows that decoded are drawn below as usual. *)
-  (match state.memory_health with
-   | Some { mhs_refused_keepers = []; _ } | None -> ()
-   | Some { mhs_refused_keepers = refused; _ } ->
-       List.iter
-         (fun refusal ->
-           push_styled ~style:(Theme.bad ())
-             (Printf.sprintf "  %s · row not read: %s"
-                (match refusal.mkr_keeper_id with
-                 | Some keeper_id -> Terminal_text.single_line keeper_id
-                 | None -> "(keeper id not read)")
-                (Terminal_text.single_line refusal.mkr_reason)))
-         refused;
-       push_divider ());
+  (* The rejected rows use the same bounded projection as scroll layout. An
+     omitted block retains its count, and never pushes the roster offscreen. *)
+  List.iter (push_styled ~style:(Theme.bad ())) projection.refused;
+  if projection.refused_divider then push_divider ();
   let cursor =
     if shown = 0 then 0 else max 0 (min state.memory_health_cursor (shown - 1))
   in
-  let context_lines =
-    match List.nth_opt keepers cursor with
-    | None -> []
-    | Some k -> memory_context_lines k
-  in
-  let layout = memory_overview_scrolled ~cols ~cursor state in
+  let layout = Masc_tui_types.memory_overview_scrolled
+      ~header_rows:(List.length projection.header)
+      ~refused_rows:(refused_rows projection)
+      ~context_rows:(List.length projection.context) state in
   let rows = budget + Masc_tui_frame.chrome_rows in
   let available = max 1 (rows - layout.sc_chrome) in
   let overflowing = shown > available in
@@ -910,7 +1085,7 @@ let render_memory_body ~cols ~budget (state : state)
       push_styled ~style:(Theme.recede ())
         (Printf.sprintf "[keepers %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
   end;
-  (match context_lines with
+  (match projection.context with
    | [] -> ()
    | lines ->
        push_divider ();

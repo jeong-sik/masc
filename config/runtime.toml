@@ -11,9 +11,10 @@
 
 [skills]
 # keeper_skill returns raw resource bytes on the provider wire and carries
-# reference/digest evidence as metadata, so this explicit bound aligns with the
-# shared 64 KiB inline tool-result boundary without JSON-envelope expansion.
-resource-read-max-bytes = 65536
+# reference/digest evidence as metadata. A resource over the shared 16 KiB
+# inline tool-result boundary (Common.max_tool_result_wire_bytes) is refused
+# after it is read, so this bound matches that boundary.
+resource-read-max-bytes = 16384
 
 # Skill sources are searched in this declared order. The runtime has no hidden
 # source roots; existing workspaces must add the sources they want explicitly.
@@ -212,12 +213,14 @@ path = "/models"
 type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
 
-# Usage windows for the operator view, read once at server start with no
-# model call. Undocumented endpoint; Ollama's own client calls it. The decoder
-# supports the observed session/weekly shape and reports other shapes as errors.
+# Usage windows for the operator view, read at server start with no model
+# call, then again refresh-s seconds after each read. Undocumented
+# endpoint; Ollama's own client calls it. The decoder supports the observed
+# session/weekly shape and reports other shapes as errors.
 [providers.ollama_cloud.usage-read]
 shape = "ollama-usage"
 url = "https://ollama.com/api/usage"
+refresh-s = 600.0
 
 [providers.deepseek]
 display-name = "DeepSeek API"
@@ -261,11 +264,13 @@ path = "/models"
 type = "env"
 key = "ZAI_API_KEY"
 
-# Usage windows for the operator view, read once at server start with no
-# model call. Undocumented endpoint; Z.AI's own coding plugin calls it.
+# Usage windows for the operator view, read at server start with no model
+# call, then again refresh-s seconds after each read. Undocumented
+# endpoint; Z.AI's own coding plugin calls it.
 [providers.glm-coding.usage-read]
 shape = "zai-quota-limit"
 url = "https://api.z.ai/api/monitor/usage/quota/limit"
+refresh-s = 600.0
 
 [providers.kimi_coding]
 display-name = "Kimi For Coding Subscription"
@@ -282,11 +287,13 @@ exact-body-timeout-s = 1200.0
 type = "env"
 key = "KIMI_API_KEY"
 
-# Usage windows for the operator view, read once at server start with no
-# model call. Undocumented endpoint; Kimi's own CLI calls it.
+# Usage windows for the operator view, read at server start with no model
+# call, then again refresh-s seconds after each read. Undocumented
+# endpoint; Kimi's own CLI calls it.
 [providers.kimi_coding.usage-read]
 shape = "kimi-coding-usages"
 url = "https://api.kimi.com/coding/v1/usages"
+refresh-s = 600.0
 
 [providers.ollama]
 display-name = "Local Ollama"
@@ -1568,10 +1575,11 @@ streaming = true
 max-output-tokens = 128000
 
 [glm-coding.glm-5-3]
-# The deployment has carried these three since before this table existed, and
-# an empty binding does not mean "defaults" — it means whatever the runtime
-# falls back to. #37039 measured that shape on another lane: a runtime that
-# declares no capacity takes max_int and sends the whole history every turn.
+# The marks are read only by a turn with no Librarian continuity, which a
+# Keeper turn on a trace always has (Keeper_turn_driver_try_provider
+# .evict_at_turn_boundary); such a turn starts at the absorbed point or the
+# turn boundary. RFC keeper-context-window-in-tokens §13.2 removes the marks
+# once its §13.7 preconditions hold.
 context-high-water-tokens = 100000
 context-low-water-tokens = 70000
 max-concurrent = 4
@@ -2437,11 +2445,13 @@ path = "/models"
 type = "env"
 key = "OPENROUTER_API_KEY"
 
-# Usage windows for the operator view, read once at server start with no
-# model call. Documented at openrouter.ai/docs/api-reference/limits.
+# Usage windows for the operator view, read at server start with no model
+# call, then again refresh-s seconds after each read. Documented at
+# openrouter.ai/docs/api-reference/limits.
 [providers.openrouter.usage-read]
 shape = "openrouter-key"
 url = "https://openrouter.ai/api/v1/key"
+refresh-s = 600.0
 
 # OpenRouter identifies the calling app by these two headers and attributes
 # usage to it. Both were accepted (HTTP 200) on all twelve probed models.

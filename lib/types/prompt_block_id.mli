@@ -79,3 +79,15 @@ val injected_on_post_tool_round : t -> bool
     [[Temporal]] line, however long those tools ran. An official client gets
     the assembly once per dispatch, and its own tool loop runs on that one
     reading. *)
+
+val resent_when_held : t -> bool
+(** Whether a resumed official-client session is sent this block again when
+    the bytes it holds from an earlier turn are the same.
+
+    A resumed vendor session stores every prompt it was sent as conversation
+    history, so a block re-sent unchanged on every resume grew the session by
+    one copy per turn. Recurring state blocks answer [false]: an unchanged copy
+    adds nothing the session does not already hold. [Operator_note] answers
+    [true]: a note is someone speaking, and an operator repeating the same
+    words is a new utterance, not a copy of the earlier one. A new constructor
+    must declare its class here. *)

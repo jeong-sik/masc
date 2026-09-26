@@ -256,11 +256,16 @@ async function fetchIdeBridgeRunActivityEvents(
   if (!scoped) return { events: EMPTY_ACTIVITY, ok: true }
   const settled = await Promise.allSettled(sources)
   const events: RunActivityEvent[] = []
+  const seenKeys = new Map<string, number>()
   let ok = true
   for (const result of settled) {
     if (result.status === 'fulfilled') {
       for (const event of result.value) {
-        events.push(mapIdeBridgeEvent(event, workspaceId, events.length, scoped))
+        const key = bridgeEventKey(event)
+        const occurrence = seenKeys.get(key) ?? 0
+        seenKeys.set(key, occurrence + 1)
+        const id = occurrence === 0 ? key : `${key}-${occurrence}`
+        events.push(mapIdeBridgeEvent(event, workspaceId, id, scoped))
       }
     } else {
       ok = false
@@ -278,14 +283,33 @@ function mergeRunActivityEvents(
   return [...graphEvents, ...bridgeEvents].sort(compareRunActivityEvents)
 }
 
+/**
+ * Stored bridge rows carry no id of their own, so the server derives one
+ * from their content when serving a page. It must not depend on position in the
+ * page: a poll that brings one new event shifts every older one. Current
+ * servers hash the stored row into an opaque event_id, including differences
+ * in tool outcome or output without placing output text in a URL. The id is
+ * the focus `source_id` a context jump carries and the timeline's tie-break.
+ * Older servers have no id; their fallback names the public coarse fields.
+ * Fully identical rows have no wire identity to tell apart, so only those
+ * use an occurrence count.
+ */
+function bridgeEventKey(event: IdeBridgeEvent): string {
+  if (event.event_id !== null) return `ide-${event.event_id}`
+  const what = event.type === 'tool'
+    ? `${event.tool_name}-${event.file_path ?? ''}`
+    : event.phase
+  return `ide-${event.type}-${event.keeper_id}-${event.turn_id}-${event.timestamp_ms}-${what}`
+}
+
 function mapIdeBridgeEvent(
   event: IdeBridgeEvent,
   workspaceId: string,
-  index: number,
+  id: string,
   codebase: string,
 ): RunActivityEvent {
   return {
-    id: `ide-${event.type}-${event.turn_id}-${event.timestamp_ms}-${index}`,
+    id,
     codebase,
     run_id: workspaceId,
     timestamp_ms: event.timestamp_ms,
@@ -307,7 +331,7 @@ function bridgeEventTarget(event: IdeBridgeEvent): string {
 function bridgeEventDetail(event: IdeBridgeEvent): string {
   if (event.type === 'tool') {
     const outcome = event.typed_outcome || event.outcome
-    return `${outcome}: ${event.summary}`
+    return event.summary ? `${outcome}: ${event.summary}` : outcome
   }
   return [event.phase, event.model_used, event.stop_reason]
     .filter((item): item is string => typeof item === 'string' && item.trim() !== '')

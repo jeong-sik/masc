@@ -296,6 +296,24 @@ type stimulus = {
   payload : stimulus_payload;
 }
 
+let scheduled_wake (stimulus : stimulus) =
+  match stimulus.payload with
+  | Schedule_due wake -> Some wake
+  | Board_signal _
+  | Board_attention _
+  | Bootstrap
+  | Fusion_completed _
+  | Connector_attention _
+  | Hitl_resolved _
+  | Ask_answered _
+  | Completion_authority_rejected _
+  | Task_outcome _
+  | Task_cancelled _
+  | Workspace_message _
+  | Delegate_completed _
+  | Composition_completed _ -> None
+;;
+
 type t =
   { front : stimulus list
   ; back_rev : stimulus list

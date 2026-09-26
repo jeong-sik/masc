@@ -3,7 +3,7 @@ open Alcotest
 let handle ?(extract_mode = "markdown") ?(max_chars = 5_000) url =
   Eio_main.run @@ fun _env ->
   Masc.Tool_misc_web_fetch.handle ~tool_name:"masc_web_fetch"
-    ~start_time:(Unix.gettimeofday ())
+    ~start_time:(Tool_timing.start ())
     (`Assoc
        [
          ("url", `String url);
@@ -102,7 +102,7 @@ let test_extraction_matches_on_the_pool () =
         let call () =
           Masc.Tool_misc_web_fetch.handle
             ~tool_name:"masc_web_fetch"
-            ~start_time:(Unix.gettimeofday ())
+            ~start_time:(Tool_timing.start ())
             (`Assoc
                [ "url", `String url
                ; "extractMode", `String "markdown"

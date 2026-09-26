@@ -6925,7 +6925,7 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
   | Keepers Keeper_message -> None
   (* Metrics was here for want of a report, and that reason had gone stale:
      [render_metrics] already answers [Metrics_scroll] through
-     [surface_chrome]'s [clamped] callback, so the generic End sentinel is
+     [surface_chrome]'s [Self_scrolled] overflow, so the generic End sentinel is
      corrected after drawing exactly as the other reading panes are. *)
   | Metrics -> pane (fun v -> Metrics_scroll v)
   (* The voice pane is lines the frame lays out; its wizard takes its own keys

@@ -5677,11 +5677,25 @@ let render_exact_lane_provider_editor (state : state) editor =
   let lane = Masc_tui_types.slot_editor_target_name editor.Masc_tui_types.se_target in
   let entries = Masc_tui_types.slot_editor_rows state in
   let count = List.length entries in
+  let group_rows kind title =
+    let rows =
+      entries
+      |> List.mapi (fun index row -> index, row)
+      |> List.filter (fun (_, row) -> row.Masc_tui_types.sr_kind = kind)
+    in
+    (None, Printf.sprintf "  %s (%d)" title (List.length rows))
+    :: List.map (fun (index, row) -> Some index, row.Masc_tui_types.sr_slot) rows
+  in
+  let display_rows =
+    group_rows Masc_tui_types.Catalog_slot "HTTP slots · tried first"
+    @ group_rows Masc_tui_types.Official_client_slot
+        "CLI slots · tried after every HTTP slot"
+  in
   box_top buf cols;
   box_line buf cols (screen_title " MASC Lanes / Providers");
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.info ())
-    (Printf.sprintf "  %s · HTTP first, then CLI after HTTP exhaustion"
+    (Printf.sprintf "  [runtime.exact_output_lanes.%s] · HTTP then CLI"
        (Terminal_text.single_line lane));
   (match state.lanes_action_error with
    | None -> ()
@@ -5742,18 +5756,32 @@ let render_exact_lane_provider_editor (state : state) editor =
      (* Reserve a key line and the frame bottom; at least the selected row
         stays visible on a short terminal. The ordinal places the moving
         window in the complete declaration. *)
-     let visible = max 1 (min count (rows - count_frame_lines buf - 3)) in
+     let visible =
+       max 1 (min (List.length display_rows) (rows - count_frame_lines buf - 3))
+     in
+     let selected_display_index =
+       display_rows
+       |> List.find_mapi (fun display_index (index, _) ->
+            if index = Some editor.Masc_tui_types.se_cursor
+            then Some display_index
+            else None)
+       |> Option.value ~default:0
+     in
      let first =
-       min (max 0 (count - visible))
-         (max 0 (editor.Masc_tui_types.se_cursor - (visible / 2)))
+       min (max 0 (List.length display_rows - visible))
+         (max 0 (selected_display_index - (visible / 2)))
      in
      if entries = [] then
        box_line_styled buf cols ~style:(Theme.recede ())
          "  no provider slots declared; a adds one"
      else
-       entries
-       |> List.iteri (fun index (row : Masc_tui_types.slot_editor_row) ->
-            if index >= first && index < first + visible then (
+       display_rows
+       |> List.iteri (fun display_index (index, label) ->
+            if display_index >= first && display_index < first + visible then (
+              match index with
+              | None -> box_line_styled buf cols ~style:(Theme.info ()) label
+              | Some index ->
+              let row = List.nth entries index in
               let kind =
                 match row.Masc_tui_types.sr_kind with
                 | Masc_tui_types.Catalog_slot -> "HTTP"
@@ -5772,7 +5800,7 @@ let render_exact_lane_provider_editor (state : state) editor =
               then box_line_selected buf cols line
               else box_line buf cols line));
      box_line_styled buf cols ~style:(Theme.recede ())
-       "  j/k select · a add · x drop · J/K reorder within group · d HTTP provider · Esc close");
+       "  j/k select · a add · x drop · J/K reorder in group · Enter/d slot config · e lane config · Esc close");
   for _ = 1 to max 0 (rows - count_frame_lines buf - 2) do
     box_empty buf cols
   done;

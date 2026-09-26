@@ -511,9 +511,9 @@ let for_surface = function
           ~help:"add a candidate to this lane's walk order"
       ; b Act "s" "providers"
           ~help:"edit declared HTTP and CLI provider slots: a adds, x drops, \
-                 J/K reorders within each group, d opens the selected HTTP \
-                 slot's provider table where exact-body-timeout-s lives, Esc \
-                 closes; HTTP runs before CLI"
+                 J/K reorders within each group, Enter/d opens the selected \
+                 slot's config table, e opens the lane table, Esc closes; \
+                 HTTP runs before CLI"
         (* The lane detail spent four rows on the file's shape and on this
            key, the same two sentences under every lane. They are here, where
            the key is. *)

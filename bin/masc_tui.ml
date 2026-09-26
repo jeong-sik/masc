@@ -16994,6 +16994,57 @@ let main
                 launch_runtime_config_load state ~mailbox:async_messages
               | Error detail -> report_action state "error" ("save failed: " ^ detail))))))
   in
+  let open_selected_slot_config () =
+    match Masc_tui_types.slot_editor_cursor_row state with
+    | None -> show_lanes_action_error state "No slot is selected"
+    | Some { sr_kind = Masc_tui_types.Media_route_slot; _ } ->
+      show_lanes_action_error state "Select an exact lane provider slot"
+    | Some { sr_slot; sr_kind = (Masc_tui_types.Catalog_slot
+                             | Masc_tui_types.Official_client_slot) as kind; _ } ->
+      (* Runtime.toml validates provider ids as dot-free and runtime ids as
+         <provider>.<model>; model ids may contain dots. Read the declared
+         slot itself so a dropped slot can still open the table that needs
+         repair, even before the catalogue's asynchronous read finishes. *)
+      let path =
+        match String.index_opt sr_slot '.' with
+        | Some boundary
+          when boundary > 0 && boundary < String.length sr_slot - 1 ->
+          let provider_id = String.sub sr_slot 0 boundary in
+          let model_id =
+            String.sub sr_slot (boundary + 1)
+              (String.length sr_slot - boundary - 1)
+          in
+          (match kind with
+           | Masc_tui_types.Catalog_slot -> Some [ "providers"; provider_id ]
+           | Masc_tui_types.Official_client_slot -> Some [ provider_id; model_id ]
+           | Masc_tui_types.Media_route_slot -> None)
+        | Some _ | None -> None
+      in
+      (match path with
+       | None ->
+         show_lanes_action_error state
+           (Printf.sprintf "%s has no runtime binding table" sr_slot)
+       | Some path ->
+           let section = runtime_config_path_text path in
+           state.lanes_action_error <- None;
+           state.view <- Config;
+           state.config_pane <- Config_runtime;
+           state.runtime_config_jump_section <- Some path;
+           (match state.runtime_config_view, state.runtime_config_view_error with
+            | (None | Some _), Some _ | None, None ->
+              add_event state "info"
+                (Printf.sprintf "loading runtime.toml for [%s]" section);
+              launch_runtime_config_load state ~mailbox:async_messages
+            | Some _, None ->
+              (match apply_runtime_config_jump state with
+               | Some (_, true) ->
+                 add_event state "info"
+                   (Printf.sprintf "runtime.toml at [%s] - e to edit" section)
+               | Some (_, false) ->
+                 report_action state "error"
+                   (Printf.sprintf "runtime.toml has no [%s] section" section)
+               | None -> ())))
+  in
   let selected_runtime_param () =
     List.nth_opt state.runtime_params state.runtime_params_cursor
   in
@@ -23783,8 +23834,12 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | Lanes_run_detail _ | Lanes_measurement_detail _ -> ()
                  | Lanes_overview ->
-                     open_lanes_standalone_selection state
-                       ~mailbox:async_messages)
+                     (match state.slot_editor, state.runtime_lane_pick with
+                      | Some _, None -> open_selected_slot_config ()
+                      | Some _, Some _ -> ()
+                      | None, (None | Some _) ->
+                        open_lanes_standalone_selection state
+                          ~mailbox:async_messages))
             | Approvals ->
                 (* The list draws the ask on one row; this is where the whole
                    thing is readable before [y] answers it. *)
@@ -24868,55 +24923,10 @@ and is loaded on demand through keeper_skill.
        | Some "d"
          when state.view = Lanes && state.lanes_mode = Lanes_overview
               && Option.is_some state.slot_editor ->
-           (* Open the selected HTTP slot's [providers.<id>] table, where its
-              request deadline (exact-body-timeout-s) lives. The picker owns
-              focus while it is open, so [d] there does not reach the slot
-              under it. The table key is the catalogue's provider id for that
-              runtime, not a piece of the runtime id. *)
-           (match state.runtime_lane_pick with
-            | Some _ -> ()
-            | None ->
-              (match Masc_tui_types.slot_editor_cursor_row state with
-               | Some { sr_kind = Masc_tui_types.Catalog_slot; sr_slot; _ } ->
-                 (match
-                    List.find_opt
-                      (fun (runtime : Masc.Tui_decode.runtime_option) ->
-                         String.equal runtime.Masc.Tui_decode.ro_id sr_slot)
-                      state.runtime_catalog
-                  with
-                  | Some runtime ->
-                    let path = [ "providers"; runtime.Masc.Tui_decode.ro_provider_id ] in
-                    let section = runtime_config_path_text path in
-                    state.lanes_action_error <- None;
-                    state.view <- Config;
-                    state.config_pane <- Config_runtime;
-                    state.runtime_config_jump_section <- Some path;
-                    (match state.runtime_config_view with
-                     | None ->
-                       add_event state "info"
-                         (Printf.sprintf "loading runtime.toml for [%s]" section);
-                       launch_runtime_config_load state ~mailbox:async_messages
-                     | Some _ ->
-                       (match apply_runtime_config_jump state with
-                        | Some (_, true) ->
-                          add_event state "info"
-                            (Printf.sprintf "runtime.toml at [%s] - e to edit" section)
-                        | Some (_, false) ->
-                          report_action state "error"
-                            (Printf.sprintf "runtime.toml has no [%s] section" section)
-                        | None -> ()))
-                  | None ->
-                    show_lanes_action_error state
-                      (Printf.sprintf "%s is not in the runtime catalogue" sr_slot))
-               | Some
-                   { sr_kind =
-                       (Masc_tui_types.Official_client_slot
-                       | Masc_tui_types.Media_route_slot)
-                   ; _
-                   } ->
-                 show_lanes_action_error state
-                   "Select an HTTP slot to open its provider table"
-               | None -> show_lanes_action_error state "No slot is selected"))
+           (* The picker owns focus while it is open. A selected HTTP slot
+              opens its provider deadline; a CLI slot opens its own binding. *)
+           if Option.is_none state.runtime_lane_pick then
+             open_selected_slot_config ()
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
               inside the keeper-action pipeline: the loop is inside the

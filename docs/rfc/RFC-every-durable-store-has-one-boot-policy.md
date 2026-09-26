@@ -8,7 +8,7 @@ author: claude-main
 
 # RFC: 모든 영속 store 가 부팅 정책을 한 목록에서 받는다
 
-- 관련: #32504 (부팅 때 한 자리에서 reconcile), #32463, #32461, RFC-0420, RFC-0444, #38595 · #38612, #38986, #39224
+- 관련: #32504 (부팅 때 한 자리에서 reconcile), #37900, #32463, #32461, RFC-0420, RFC-0444, #38595 · #38612, #38986, #39224
 - 범위: 부팅 reconcile(`Keeper_store_boot_reconcile`)과 배포 preflight(`bin/deployment_preflight_helper.ml`)가 검사하는 store 목록과 각 store 의 부팅 정책. 각 store 의 스키마는 바꾸지 않는다.
 
 ## 무슨 일이 있었나 (사람이 읽는 서두)
@@ -20,60 +20,75 @@ author: claude-main
 
 그래서 셸에서 `masc start` 로 띄우면, preflight 라면 멈췄을 파일 14개를 아무도 보지 않고 부팅이 끝난다. 그 파일들은 몇 시간 뒤 어느 Keeper 의 어느 읽기에서 따로따로 터진다.
 
-2026-09-26 에 실제로 그렇게 터졌다.
+2026-09-26 에 실제로 그렇게 터졌다. 시각은 모두 KST 다.
 
 - #38986 이 official-client session(`keepers/<name>/official-client-runtime/session.json`)의 스키마를 v1 에서 v2 로 올렸다. PR 본문에 "Fresh state required" 라고 적혀 있었다.
-- 새 바이너리는 10:53 KST 에 설치만 되고, 서버는 옛 바이너리로 14:09 까지 v1 파일을 계속 썼다.
+- 새 바이너리는 10:53 에 설치만 되고, 서버는 옛 바이너리로 14:09 까지 v1 파일을 계속 썼다.
 - 14:09:38 에 `deploy.sh` 를 거치지 않은 `masc start` 로 새 바이너리가 떴다. 부팅은 이 store 를 보지 않았다.
-- Claude Code·Codex·Antigravity Keeper 16개가 40분 동안 턴마다 실패했다(185줄). 운영자 복구 API(`Restart_fresh`)도 먼저 이 파일을 읽어야 해서 쓸 수 없었다.
-- 24개 파일을 손으로 옮기고 나서야 돌았다 (#32504 댓글).
+- `session.json` 24개가 전부 v1 이었다. 그중 14:11~14:51 에 턴을 시도한 Claude Code·Codex·Antigravity Keeper 16개가 턴마다 실패했다(실패 로그 185줄).
+- 운영자 복구 API(`Restart_fresh`)도 먼저 이 파일을 읽어야 해서 쓸 수 없었다.
+- 파일 24개를 손으로 옮기고 나서야 돌았다 (#32504 댓글).
 
-이 RFC 의 첫 분류(09-24)는 이 store 를 부팅이 막지 않는 쪽(`Degrade_typed`)에 두었다. 규칙이 "실패를 typed 로 드러내는가"와 "못 읽는 파일 위에 쓰는가"만 물었기 때문이다. 이 store 는 둘 다 통과한다. 하지만 못 읽는 동안 Keeper 가 턴을 아예 돌지 못한다. 그래서 규칙에 (c)를 더했다.
+이 store 는 읽기 실패를 typed 로 보여 주고, 못 읽는 파일 위에 아무것도 쓰지 않는다. RFC-0444 의 두 질문만 물으면 부팅이 막을 이유가 없다. 하지만 못 읽는 동안 Keeper 가 턴을 아예 돌지 못한다. 그래서 세 번째 질문을 더한다.
+
+이 RFC 는 14개를 모두 부팅에서 읽게 하지 않는다. 못 읽어도 Keeper 가 턴을 도는 store 는 실행 중에 처음 읽는 쪽이 알게 둔다. 부팅이 막는 것은 Keeper 를 멈추거나 잃은 것을 덮어쓰는 store 다.
 
 ## 1. 분류
 
 store 마다 세 가지를 묻는다.
 
 - **(a)** 읽기 실패를 모든 소비자가 typed 로 보여 주는가 (RFC-0444 §2.4)
-- **(b)** 모든 쓰기가 못 읽는 파일 위에 쓰지 않는가 (RFC-0444 §2.4)
-- **(c)** 못 읽는 동안 그 Keeper 가 턴을 도는가
+- **(b)** 모든 쓰기가 못 읽는 파일을 거부하는가 (RFC-0444 §2.4). 못 읽는 파일을 옆으로 옮기고 새로 쓰거나, 없는 것으로 보고 다시 만드는 쓰기는 거부가 아니다.
+- **(c)** 못 읽는 동안에도 Keeper 가 턴을 도는가. 워크스페이스 전체가 쓰는 store(gate pending, board, goal, World constitution)는 그 store 를 읽는 모든 Keeper 를 본다.
 
 정책은 이렇게 정한다.
 
-- (b) 나 (c) 가 **아니오** 면 `Refuse_boot` 다. 부팅이 모든 파일을 읽고, 하나라도 못 읽으면 뜨지 않는다. 쓰는 쪽이 잃은 것을 덮어쓰거나 Keeper 가 멈추는 일은, Keeper 루프가 돌기 전에 한 번 막는 편이 낫다.
-- goal store 는 `Degrade_typed` 다. RFC-0444 가 부팅마다 INFO 한 줄을 요구해서, 부팅이 한 번 읽고 알린다.
+- (b) 나 (c) 가 **아니오** 면 `Refuse_boot` 다. 부팅이 모든 파일을 읽고, 하나라도 못 읽으면 뜨지 않는다.
+- goal store 는 `Degrade_typed` 다. (a)(b)(c) 가 모두 예라서 규칙으로는 `Preflight_only` 와 같다. RFC-0444 가 부팅마다 INFO 한 줄로 보이게 하기로 해서(0444 판정 3), 부팅이 한 번 읽고 알린다. 파일 하나라 부팅 비용이 없다. 배포 preflight 는 이 store 를 읽지 않는다. RFC-0444 §5 가 적었듯, 이 store 에서 멈추면 운영자가 리셋을 서두르게 된다.
 - 나머지는 `Preflight_only` 다. 부팅은 읽지 않는다. 배포 preflight 만 미리 읽는다.
 - (a) 가 **아니오** 인 store 는 정책과 따로, 소비자를 고칠 결함이다. 소비자가 실패를 빈 값으로 바꾸면 Keeper 는 틀린 전제로 돈다. store 마다 PR 하나로 고친다.
 
 | store | (a) | (b) | (c) 턴 | 부팅 정책 | (a) 를 깨는 곳 |
 |---|---|---|---|---|---|
 | keeper meta | — | 아니오 | 멈춤 | Refuse_boot (0420) | — |
-| memory current | — | 아니오 | 돎 (recall 빠짐) | Refuse_boot (0420) | — |
+| memory current | — | 아니오 | 돈다 (recall 빠짐) | Refuse_boot (0420) | — |
 | official-client session | 예 | 예 | **멈춤** | **Refuse_boot** | — |
-| goal store | 예 | 예 | 돎 | Degrade_typed (0444) | — |
-| memory-source current | 아니오 | 예 | 돎 | Preflight_only | `keeper_tool_memory_runtime.ml:830-835`, `keeper_memory_os_recall.ml:72-80` |
-| board posts | 아니오 | 예 (#38612) | 돎 | Preflight_only | 대부분의 board 읽기가 부분 상태를 완전한 것처럼 씀 |
-| turn records | 아니오 | 예 (append) | 돎 | Preflight_only | `keeper_autonomous_turn_source.ml:460-481`, `keeper_next_request_forecast.ml:351-361` |
-| turn boundaries | 아니오 | 예 (append) | 돎 (맥락이 줄어듦) | Preflight_only | `keeper_checkpoint_purge.ml:269-274` |
-| Librarian progress | 아니오 | 예 | 돎 (Librarian 멈춤) | Preflight_only | `keeper_librarian_continuity.ml:99-104`, `server_dashboard_http_keeper_memory_health.ml:201`, `keeper_turn_driver_try_provider.ml:268-276` |
-| turn fragments | 아니오 | 예 (append) | 돎 (Librarian 멈춤) | Preflight_only | `keeper_status_detail.ml:522`, `dashboard_http_keeper_metrics.ml:112` |
-| Librarian range receipts | 예 | 예 | 돎 (Memory 쓰기 도구 실패) | Preflight_only | — |
-| disposition receipts | 예 | 예 | 돎 (턴 경로에 없음) | Preflight_only | — |
-| provider-input | 거의 | 예 (append) | 돎 | Preflight_only | — |
-| official Librarian progress | 예 | 예 | 돎 (턴 경로에 없음) | Preflight_only | — |
-| absorbed facts | 예 | 예 (append) | 돎 | Preflight_only | — |
-| memory OS events | 예 | 예 (append) | 돎 | Preflight_only | — |
-| gate pending | 예 | 예 | 돎 (Gate 가 필요한 도구만 실패) | Preflight_only | — |
+| Keeper checkpoint | — | — | **멈춤** | Refuse_boot (PR-3) | — |
+| Keeper event queue | — | — | **멈춤** | Refuse_boot (PR-3) | — |
+| World constitution | — | — | **멈춤** (모든 Keeper) | Refuse_boot (PR-3) | — |
+| goal store | 예 | 예 | 돈다 | Degrade_typed (0444) | — |
+| memory-source current | 아니오 | 예 | 돈다 | Preflight_only | `keeper_tool_memory_runtime.ml:830-835`, `keeper_memory_os_recall.ml:72-80` |
+| board posts | 아니오 | 예 (#38612) | 돈다 | Preflight_only | 대부분의 board 읽기가 부분 상태를 완전한 것처럼 씀 |
+| turn records | 아니오 | 예 (append) | 돈다 | Preflight_only | `keeper_autonomous_turn_source.ml:460-481`, `keeper_next_request_forecast.ml:351-361` |
+| turn boundaries | 아니오 | 예 (append) | 돈다 (맥락이 줄어듦) | Preflight_only | `keeper_checkpoint_purge.ml:269-274` |
+| Librarian progress | 아니오 | 예 | 돈다 (Librarian 멈춤) | Preflight_only | `keeper_librarian_continuity.ml:99-104`, `server_dashboard_http_keeper_memory_health.ml:201`, `keeper_turn_driver_try_provider.ml:268-276` |
+| turn fragments | 아니오 | 예 (append) | 돈다 (Librarian 멈춤) | Preflight_only | `keeper_status_detail.ml:522`, `dashboard_http_keeper_metrics.ml:112` |
+| Librarian range receipts | 예 | 예 | 돈다 (Memory 쓰기 도구 실패) | Preflight_only | — |
+| disposition receipts | 예 | 예 | 돈다 (턴 경로에 없음) | Preflight_only | — |
+| provider-input | 거의 | 예 (append) | 돈다 | Preflight_only | — |
+| official Librarian progress | 예 | 예 | 돈다 (턴 경로에 없음) | Preflight_only | — |
+| absorbed facts | 예 | 예 (append) | 돈다 | Preflight_only | — |
+| memory OS events | 예 | 예 (append) | 돈다 | Preflight_only | — |
+| gate pending | 예 | 예 | 돈다 (Gate 가 필요한 도구만 실패) | Preflight_only | — |
 
-(c) 칸의 근거는 2026-09-26 조사다(6장). 턴이 멈추는 곳:
+- "—" 는 조사하지 않았다는 뜻이다. (c) 가 아니오면 정책이 이미 정해져서 (a)(b) 를 보지 않았다.
+- (a) 칸의 file:line 은 09-24 조사 커밋 `eba5fb56ad` 기준이다. 지금은 줄이 옮겨진 곳이 있다. 소비자를 고치는 PR 이 그때의 위치를 다시 찾는다.
+- (b) 아니오의 근거
+  - keeper meta: 부팅이 스키마가 안 맞는 meta 를 없는 것으로 보고 선언에서 Keeper 를 다시 만든다 (`keeper_owner_registry.ml:96-101`).
+  - memory current: Memory 쓰기가 못 읽는 스냅숏을 옆으로 옮기고 빈 상태에서 새로 쓴다 (`keeper_memory_os_current.ml:1895-1945`).
 
-- keeper meta: `keeper_heartbeat_loop.ml:858-868` 이 dispatch 전에 meta 를 다시 읽고, `keeper_unified_turn_execution.ml:50-56` 이 provider 호출 전에 턴을 거절한다.
-- official-client session: `keeper_claude_code_runtime.ml:669-674`, `keeper_codex_runtime.ml:770-774`, `keeper_antigravity_runtime.ml:468-472` 가 runtime 을 만들지 못하고 `Internal` 오류로 턴을 끝낸다.
+(c) 근거는 2026-09-26 조사다(6장). 턴이 멈추는 곳:
 
-아직 목록에 없는 store 도 있다. 4장 PR-3 에서 다룬다.
+- keeper meta: `keeper_heartbeat_loop.ml:858-868` 이 dispatch 전에 meta 를 다시 읽는다. `keeper_unified_turn_execution.ml:50-56` 이 provider 호출 전에 턴을 거절한다.
+- official-client session: `keeper_claude_code_runtime.ml:669-674`, `keeper_codex_runtime.ml:770-774`, `keeper_antigravity_runtime.ml:468-472` 가 runtime 을 만들지 못한다. `Internal` 오류는 다음 lane 후보로 넘어가지 않아서(`keeper_turn_driver_try_runtime.ml:84-98`) 턴이 끝난다.
+- Keeper checkpoint: `keeper_run_context.ml:100-106` 이 `Superseded_version` 말고는 모든 읽기 실패를 `Checkpoint_unread` 로 올린다. `keeper_agent_run.ml:952-973` 이 그걸 `not_dispatched` 로 끝낸다. 2026-09-23 checkpoint v10→v11 사고가 이것이다 (#37900 댓글).
+- Keeper event queue: `keeper_event_queue_persistence.ml:349-377` 이 못 읽는 스냅숏을 그대로 두고 오류를 돌려준다. `keeper_heartbeat_stimulus_intake.ml:1060-1069` 가 `Pending_selection_failed` 로 바꾸고, `keeper_heartbeat_loop.ml:80-88` 이 매 cycle 턴을 돌리지 않는다. 2026-09-22 event-queue v18→v19 사고가 이것이다 (#37900).
+- World constitution: `keeper_unified_prompt.ml:1359-1366` 의 읽기 실패가 `keeper_agent_run.ml:966-973` 에서 `not_dispatched` 가 된다. 워크스페이스 파일 하나라서 못 읽으면 모든 Keeper 가 멈춘다.
 
-- **World constitution store**: `keeper_unified_prompt.ml:1359-1366` 에서 읽기 실패가 dispatch 전에 턴을 거절한다. (c) 가 아니오라서 `Refuse_boot` 후보다. 경로와 소비자를 다시 확인한 뒤 넣는다.
-- **board comments**, **memory-journal**: preflight 도 읽지 않는다. 읽는 함수부터 만들어야 한다 (#38595, #38596).
+아직 목록에 없는 store 는 4장 PR-3 에서 다룬다.
+
+- 체크포인트, event queue, World constitution: (c) 가 아니오라서 `Refuse_boot` 다. event queue 는 지금 preflight 셸이 `validate-current-queue`·`validate-current-wal` 로 따로 읽는다. 목록에 넣으면서 그 두 subcommand 를 지운다. 체크포인트는 어디서도 미리 읽지 않는다.
+- board comments, memory-journal: preflight 도 읽지 않는다. 읽는 함수부터 만들어야 한다 (#38595, #38596). (c) 는 조사하지 않았다.
 
 ## 2. 설계
 
@@ -81,7 +96,7 @@ store 마다 세 가지를 묻는다.
 
 `lib/keeper/keeper_durable_store.ml` 에 모든 store 를 둔다. 부팅 reconcile 과 배포 preflight 는 이 목록을 읽기만 하고, 자기 목록을 따로 갖지 않는다.
 
-정책은 GADT 의 타입 인덱스로 들고 있다. store 를 다른 정책으로 옮기면 그 store 를 다루는 examiner 를 고칠 때까지 컴파일이 실패한다. `[@@deriving enumerate]` 는 GADT 에 붙지 않으므로 목록용 평평한 `Id.t` 를 따로 두고, 두 방향 exhaustive match 로 둘을 묶는다.
+정책은 GADT 의 타입 인덱스다. store 마다 읽는 법(`reader`)을 인덱스가 붙은 생성자로 돌려주고, 정책은 거기서 나온다. `Degrade_typed` 인덱스에는 preflight 가 쓸 읽는 법이 없는 생성자 하나만 있다. 그래서 goal store 를 preflight 가 읽는 코드는 컴파일되지 않는다.
 
 ```ocaml
 type refuse_boot = [ `Refuse_boot ]
@@ -93,76 +108,93 @@ type _ t =
   | Memory_current : refuse_boot t
   | Goal_store : degrade_typed t
   | Official_client_session : preflight_only t   (* PR-2 에서 refuse_boot *)
-  (* ... 17개 전부 *)
+  (* ... *)
 
-module Id : sig
-  type t = Keeper_meta | Memory_current | Goal_store | (* ... *)
-  val all : t list   (* [@@deriving enumerate] *)
-end
+type _ reader =
+  | Refusing_reader : store_scan -> refuse_boot reader
+  | Preflight_reader : store_scan -> preflight_only reader
+  | Reported_at_boot : degrade_typed reader
 
+type _ boot_policy =
+  | Refuse_boot : refuse_boot boot_policy
+  | Degrade_typed : degrade_typed boot_policy
+  | Preflight_only : preflight_only boot_policy
+
+val policy : 'a t -> 'a boot_policy          (* reader 에서 나온다 *)
+val preflight_scan : _ t -> base_path:string -> (report, string) result option
+
+module Id : sig type t = Keeper_meta | Memory_current | Goal_store (* ... *) val all : t list end
 type any = Any : _ t -> any
-val id : _ t -> Id.t          (* exhaustive *)
-val of_id : Id.t -> any       (* exhaustive *)
-val all : any list            (* List.map of_id Id.all *)
-val policy : 'a t -> 'a boot_policy
-val name : _ t -> string
-val on_refusal : _ t -> string
-val scan : _ t -> base_path:string -> (report, string) result
+val all : any list                            (* List.map of_id Id.all *)
 ```
 
-손으로 쓴 목록이 없으므로 "preflight 에는 넣고 부팅에는 빠뜨리는" 일이 생기지 않는다. `Id.t` 에 생성자를 더하면 `of_id` 가, `t` 에 더하면 `id`·`policy`·`name`·`scan` 이 컴파일을 막는다.
+`[@@deriving enumerate]` 는 GADT 에 붙지 않으므로 목록용 평평한 `Id.t` 를 따로 두고, 두 방향 exhaustive match(`id`, `of_id`)로 둘을 묶는다. 손으로 쓴 목록이 없으므로 "preflight 에는 넣고 부팅에는 빠뜨리는" 일이 생기지 않는다.
+
+컴파일러가 막는 것:
+- `t` 에 생성자를 더하면 `id`·`reader`·`name` 이 채워질 때까지 컴파일되지 않는다.
+- store 의 인덱스를 `refuse_boot` 로 바꾸면 `reader` 가 `Refusing_reader` 를 요구한다. 부팅 reconcile 의 `refuse_boot` 전용 match 세 곳(이름, 검사, 옮기는 법)도 새 store 를 요구한다.
 
 ### 2.2 부팅은 `Refuse_boot` 만 읽는다
 
 부팅 reconcile 은 `all` 을 돌며 정책으로 나눈다.
 
-- `Refuse_boot`: 모든 파일을 읽는다. 못 읽는 파일이 있으면 부팅을 거절하고 경로와 이유를 찍는다. `--accept-store-quarantine` 을 주면 그 파일을 옆으로 옮기고 뜬다 (RFC-0420).
+- `Refuse_boot`: 모든 파일을 읽는다. 못 읽는 파일이 있으면 부팅을 거절하고 store·Keeper·경로·이유를 줄마다 찍는다. `--accept-store-quarantine` 을 주면 그 파일을 옆으로 옮기고 뜬다 (RFC-0420).
 - `Degrade_typed`: 한 번 읽고, 못 읽으면 INFO 한 줄을 남긴다 (RFC-0444).
 - `Preflight_only`: 읽지 않는다.
 
-옮기는 방법은 `Refuse_boot` store 마다 exhaustive match 로 정한다. 옮길 방법이 없는 store 는 `Refuse_boot` 로 올릴 수 없다. 컴파일러가 옮기는 코드를 요구하기 때문이다.
+`Refuse_boot` store 는 옮기는 방법을 코드로 가져야 컴파일된다. 옮기는 것은 이름 바꾸기라서 바이트는 `.rejected-<ts>` 에 남는다. 파일이 여럿인 store 는 함께 옮긴다(event queue 는 스냅숏과 WAL).
 
 - keeper meta: `<path>.rejected-<ts>` 로 이름을 바꾼다.
 - memory current: `Keeper_memory_os_current.move_aside_for_keepers_dir`.
-- official-client session (PR-2): 저장소 잠금(`official-client-runtime.lock`)을 잡고 `session.json` 을 `<path>.rejected-<ts>` 로 옮긴다. 파일이 없으면 다음 턴은 새 vendor 세션을 연다. 이 store 의 fresh state 가 그것이다 (#38986 "Fresh state required").
+- official-client session (PR-2): 저장소 잠금(`official-client-runtime.lock`)을 잡고 `session.json` 을 `<path>.rejected-<ts>` 로 옮긴다. 이 store 의 fresh state 는 파일이 없는 상태다. 다음 claim 이 새 vendor 세션을 연다 (#38986 "Fresh state required"). 파일은 cluster 와 상관없이 `Common.keepers_runtime_dir_of_base` 아래에 있고, preflight 와 부팅은 store 의 `stored_bindings` 하나로 찾는다.
 
-**부팅 비용.** 라이브 저장소에서 preflight 전체 스캔은 60초였고, 대부분 provider-input(3.4GB)이었다(6장). `Refuse_boot` 세 store 는 합쳐 몇 MB 다. 그래서 부팅은 `Refuse_boot` 만 동기로 읽고, `Preflight_only` 는 읽지 않는다. 부팅에서 `Preflight_only` 를 읽어 WARN 을 찍어도 그 store 의 Keeper 는 어차피 돌고, 고쳐지는 것은 없다. 재시작마다 60초를 쓸 이유가 없다.
+**부팅 비용.**
+- 잰 것: 라이브 저장소에서 preflight 전체 스캔이 60초였다. 크기는 provider-input 3.4GB, turn records 57MB 이고, `Refuse_boot` 세 store 는 keeper meta 156KB, memory current 3.5MB, session 24KB 다.
+- 재지 않은 것: store 별 스캔 시간. 크기로 보면 60초의 대부분은 provider-input 일 것이다.
+- 그래서 부팅은 `Refuse_boot` 만 동기로 읽는다. `Preflight_only` 는 부팅에서 읽어 WARN 을 찍어도 그 store 의 Keeper 는 어차피 돌고, 고쳐지는 것은 없다.
 
 ### 2.3 배포 preflight 와 부팅이 같은 판정을 쓴다
 
-preflight 의 `scan` 과 `on_refusal` 문구는 `Keeper_durable_store` 로 옮긴다. preflight 는 정책과 상관없이 모든 store 를 읽고, 하나라도 못 읽으면 배포를 멈춘다. 배포는 운영자가 지켜보는 자리라 멈춰도 된다.
+preflight 의 `scan` 과 `on_refusal` 문구는 `Keeper_durable_store` 로 옮긴다. preflight 는 `Refuse_boot` 와 `Preflight_only` store 를 모두 읽고, 하나라도 못 읽으면 배포를 멈춘다. `Degrade_typed` store 는 읽지 않는다(2.1, 1장).
 
-- goal store 도 preflight 대상이 된다. 부팅에서는 INFO 뿐이지만, 배포는 이 build 가 못 읽는 `goals.json` 에서 멈춘다. `Goal_store.validate_state_json` 로 읽고, 경로는 부팅과 같은 cluster 규칙(`Workspace_utils.masc_root_dir_from`)으로 구한다.
 - keeper meta 와 memory current 는 부팅과 preflight 가 파일을 찾는 길이 다르다(부팅은 `Workspace.config`, preflight 는 `base_path`). 같은 fixture 에서 둘이 같은 파일을 거절한다는 테스트로 묶는다.
+- `Preflight_only` store 는 preflight 만 미리 읽는다. preflight helper 가 서버와 같은 build 여야 판정이 맞다. 설치 스크립트가 helper 를 같이 설치하지 않는 문제는 #39224 다.
 
 ## 3. 판정 기준
 
 1. `rg -n 'durable_stores =' bin/deployment_preflight_helper.ml` 0줄. preflight 는 `Keeper_durable_store.all` 을 쓴다.
 2. `Keeper_durable_store.all` 의 모든 store 가 `id` 로 `Id.all` 과 같은 순서의 같은 값을 돌려주고, 이름이 서로 다르다는 테스트.
-3. 같은 fixture 에서 부팅이 지목한 `Refuse_boot` 파일을 preflight 도 거절한다는 테스트. goal store 는 부팅이 INFO 만 남기는 파일을 preflight 가 거절한다.
-4. PR-2: v1 `session.json` 을 둔 base path 로 준비 단계를 돌리면 플래그 없이는 거절하고, 표준 오류에 그 경로와 거절 이유가 있다. 파일 digest 는 그대로다. `--accept-store-quarantine` 을 주면 파일이 옮겨지고, 그 Keeper 의 다음 claim 은 새 세션으로 시작한다.
-5. 소비자 수정 PR 은 1장 마지막 열의 해당 소비자를 고치고, 읽기 실패가 typed 로 보이는 것을 테스트로 보인다.
+3. 같은 fixture 에서 부팅이 지목한 `Refuse_boot` 파일을 preflight 도 거절하고, 부팅이 INFO 만 남기는 goal store 는 preflight 가 읽지 않는다는 테스트.
+4. PR-2: v1 `session.json` 을 둔 base path 로 `Keeper_store_boot_reconcile.examine`·`admit` 을 돌리면 플래그 없이는 거절하고, 거절 문구에 Keeper 와 경로가 있다. 파일 digest 는 그대로다. `quarantine` 뒤에는 파일이 없고, 옮긴 사본이 같은 바이트를 가지며, `load` 는 `None` 이다.
+5. PR-3: 체크포인트·event queue·World constitution 을 못 읽는 fixture 로 부팅이 거절하고, preflight 의 `validate-current-queue`·`validate-current-wal` 이 사라진다.
+6. 소비자 수정 PR 은 1장 마지막 열의 해당 소비자를 고치고, 읽기 실패가 typed 로 보이는 것을 테스트로 보인다.
 
 ## 4. 단계
 
-- **PR-1 목록**: `Keeper_durable_store`(`id`, `all`, `t`, `policy`, `name`, `on_refusal`, `scan`)와 `Keeper_durable_store_scan`(store 별 읽는 법, preflight 에서 옮김). preflight 와 부팅 reconcile 이 이 목록을 쓴다. 부팅 동작은 바뀌지 않는다. preflight 는 goal store 를 새로 읽는다. 판정 1·2·3.
+- **PR-1 목록**: `Keeper_durable_store`(`t`, `reader`, `policy`, `Id`, `all`, `name`, `on_refusal`, `preflight_scan`)와 `Keeper_durable_store_scan`(store 별 읽는 법, preflight 에서 옮김). preflight 와 부팅 reconcile 이 이 목록을 쓴다. 부팅과 preflight 의 동작은 바뀌지 않는다. 판정 1·2·3.
 - **PR-2 세션**: official-client session 을 `Refuse_boot` 로 올리고, 잠금을 잡고 옮기는 방법을 더한다. 판정 4.
-- **PR-3 목록에 없는 store**: World constitution store(`Refuse_boot` 후보), board comments, memory-journal(#38596). 읽는 함수가 먼저 있어야 한다.
-- **PR-4~ 소비자**: 1장 마지막 열의 소비자를 store 별로 고친다. 판정 5.
+- **PR-3 턴을 멈추는 나머지**: 체크포인트, event queue(스냅숏+WAL), World constitution 을 목록에 넣고 `Refuse_boot` 로 둔다. 판정 5.
+- **PR-4 읽는 함수가 없는 store**: board comments, memory-journal(#38596). (c) 부터 조사한다.
+- **PR-5~ 소비자**: 1장 마지막 열의 소비자를 store 별로 고친다. 판정 6.
 - 별도 결함: #38597(memory events), #38598(preflight 문구), #39224(설치된 preflight helper 가 서버보다 오래됨).
 
 ## 5. 반론과 답
 
-- **"RFC-0444 규칙대로 (a) 를 못 채운 8개를 `Refuse_boot` 로 올리면 된다."** 8개 모두 못 읽는 동안에도 Keeper 는 돈다. 한 Keeper 의 turn record 한 줄 때문에 fleet 전체가 서면, 운영자는 부팅을 위해 파일을 서둘러 옮기고, 월별 jsonl 이나 진행 커서를 옮기면 데이터를 잃는다. 이 8개의 결함은 소비자에 있으니 소비자를 고친다.
-- **"그럼 8개를 `Degrade_typed` 로 선언하면 된다."** 규칙 (a) 를 못 채운다. 선언만 바꾸는 건 규칙을 무시하는 일이다. 부팅이 읽지 않는다는 점은 `Preflight_only` 가 그대로 말한다.
-- **"(c) 는 Keeper 하나의 사정인데 fleet 전체를 세운다."** 오늘처럼 스키마 hard cut 은 모든 Keeper 의 파일을 한꺼번에 못 읽게 만든다. 그때 부팅이 서지 않으면 운영자는 Keeper 가 돌기 전에 한 번 결정한다. 서지 않는 게 싫으면 `--accept-store-quarantine` 한 번으로 fresh state 로 뜬다. 부팅이 서지 않는 쪽이, 16개 Keeper 가 40분 동안 조용히 실패하는 쪽보다 복구가 빠르다.
+- **"RFC-0444 규칙대로 (a) 를 못 채운 6개를 `Refuse_boot` 로 올리면 된다."** 6개 모두 못 읽는 동안에도 Keeper 는 턴을 돈다. 한 Keeper 의 turn record 한 줄 때문에 fleet 전체가 서면, 운영자는 부팅을 위해 파일을 서둘러 옮기고, 월별 jsonl 이나 진행 커서를 옮기면 멀쩡한 행까지 안 읽히게 된다. 이 6개의 결함은 소비자에 있으니 소비자를 고친다.
+- **"그럼 6개를 `Degrade_typed` 로 선언하면 된다."** 규칙 (a) 를 못 채운다. 선언만 바꾸는 건 규칙을 무시하는 일이다. 부팅이 읽지 않는다는 점은 `Preflight_only` 가 그대로 말한다.
+- **"(c) 로 부팅을 막으면 파일 하나 때문에 fleet 전체가 선다."** 맞다. 그래서 (c) 는 Keeper 를 이미 멈추는 store 에만 쓴다. 이런 store 를 못 읽으면 부팅을 막지 않아도 그 Keeper 는 돌지 못한다. 막으면 달라지는 건 두 가지다. 운영자가 Keeper 가 돌기 전에 파일 목록을 한 번에 보고, 조용히 쌓이는 실패 로그가 없다. 오늘 같은 스키마 hard cut 은 모든 Keeper 의 파일을 한꺼번에 못 읽게 만드니, 이때는 막는 쪽이 복구가 빠를 것이다(재지 않은 추론이다).
+- **"`--accept-store-quarantine` 하나가 값싼 격리와 비싼 격리를 같이 허락한다."** 맞다. 세션을 옮기면 vendor 대화 하나를 잃고, memory current 를 옮기면 그 Keeper 가 빈 기억으로 뜬다. 플래그는 RFC-0420 §4.3 대로 하나다. 대신 거절 문구가 store 와 경로를 줄마다 보여 주고, 운영자는 그걸 본 뒤에 플래그를 준다. store 별 플래그는 이 RFC 범위 밖이다.
+- **"게이트 없이 운영자 복구가 못 읽는 세션을 치우게 하면 된다."** `masc_keeper_clear` 는 이미 못 읽는 `session.json` 을 잠금 아래에서 지운다(`keeper_official_client_session_store.ml:886-912`). 하지만 Keeper 의 대화 기록까지 지우고, 운영자가 Keeper 마다 실패를 본 뒤에야 부를 수 있다. 오늘은 40분 동안 16개 Keeper 가 실패한 뒤였다. `Restart_fresh` 가 못 읽는 파일을 받게 하는 것도 같은 문제가 있다. 부팅 거절은 첫 턴 전에 한 번에 보여 준다.
 - **"부팅이 hard cut 을 알아서 실행하면 검사도 필요 없다."** 2026-09-05 에 부팅이 memory snapshot 15개를 알아서 옮겼고, Keeper 들은 빈 기억으로 떴다 (RFC-0420). 옮기는 결정은 운영자가 한다.
-- **헌법.** `hardcoded_path`: 경로는 기존 path 함수. `string_matching`: 분기는 전부 variant. `budget_gate`: 횟수·시간 조건 없음. `legacy_residue`: 목록 두 개를 지우고 하나를 둔다. `gates`: 부팅 거부는 Keeper 가 턴을 못 돌거나 잃은 것을 덮어쓰는 store 에만 건다.
+- **헌법.**
+  - `gates`: `<default>` 는 하드 게이팅을 기본으로 두지 않는다. 이 RFC 는 새 게이트를 만들지 않고, RFC-0420 의 부팅 거절이 보는 store 를 넓힌다. `<allow>` 는 실익이 크고 연속성이 좋아질 때 허락한다. 넓히는 기준 (c) 가 `failure_conditions` 첫 줄 "Keeper 가 턴을 못 돈다" 그 자체다. `<order>` 는 success_bar 뒤에 하나씩 더하라고 한다. 그래서 PR-2 는 store 하나만 올린다. (c) 로 부팅 거절을 넓히는 결정은 2026-09-26 운영자가 내렸다.
+  - `projects.md` 는 "없을 때 durable truth 가 손상되는 경우에만 Gate 를 더한다" 고 한다. official-client session 은 (b) 가 예라서 durable truth 는 손상되지 않는다. 이 RFC 의 근거는 가용성(c)이고, 그래서 운영자 결정으로 적는다.
+  - `hardcoded_path`: 경로는 기존 path 함수. `string_matching`: 분기는 전부 variant. `budget_gate`: 횟수·시간 조건 없음. `legacy_residue`: 목록 두 개를 지우고 하나를 둔다. RFC-0444 §2.4 의 규칙 문장도 이 RFC 를 가리키게 고친다.
 
 ## 6. 근거
 
 - 첫 분류: 2026-09-24, origin/main `eba5fb56ad`, preflight store 16개 + memory-journal. 에이전트 세 명이 store 를 나눠 소비자와 writer 를 전수로 읽었다.
-- (c) 조사: 2026-09-26, origin/main `dae899d581`. 17개 store 의 턴 경로 reader 를 전수로 읽었다(빌드·실행 없이). 멈춤은 keeper meta 와 official-client session 둘이다.
-- 2026-09-26 사고: #32504 댓글. 첫 실패 05:11:34Z, 복구 05:51:46Z. 파일 24개를 `backups-hardcut-20260926T055146Z-official-client-session-v1/` 로 옮긴 뒤 binding 실패 0건.
-- 부팅 비용: 2026-09-26 05:54Z, 설치된 `masc-deployment-preflight-helper validate-stores --base-path=/Users/dancer/me`. real 60.06s, user 55.81s. `keepers/*/provider-inputs` 3,488,888KB(249 파일), `turn-records` 57,260KB, `official-client-runtime` 24KB(24 파일), `memory-current.json` 합계 3.5MB. 설치된 helper 는 09-07 빌드라 거절 수(23,767)는 의미가 없고(#39224), 시간만 하한으로 본다.
+- (c) 조사: 2026-09-26, origin/main `dae899d581`. 17개 store 의 턴 경로 reader 를 읽었다(빌드·실행 없이). 멈춤은 keeper meta 와 official-client session 이다. 같은 날 적대적 리뷰가 목록 밖의 체크포인트·event queue 를 더 찾았고, World constitution 은 조사 중에 나왔다. 셋 다 코드로 다시 확인했다. 턴 경로 전체를 다 봤다고 보장하지는 않는다.
+- 2026-09-26 사고: #32504 댓글. 첫 실패 14:11:34 KST(05:11:34Z), 복구 14:51:46 KST(05:51:46Z). 파일 24개를 `backups-hardcut-20260926T055146Z-official-client-session-v1/` 로 옮긴 뒤 binding 실패 0건.
+- 부팅 비용: 2026-09-26 14:54 KST, 설치된 `masc-deployment-preflight-helper validate-stores --base-path=/Users/dancer/me`. real 60.06s, user 55.81s. 크기는 `du` 로 쟀다: `keepers/*/provider-inputs` 3,488,888KB(249 파일), `turn-records` 57,260KB, `keepers/*.json` 156KB(24 파일), `memory-current.json` 합계 3.5MB, `official-client-runtime` 24KB(24 파일). 설치된 helper 는 09-07 빌드라 거절 수(23,767)는 의미가 없고(#39224), 시간만 하한으로 본다.
 - preflight 목록: `bin/deployment_preflight_helper.ml` `durable_stores` (16개). 부팅 목록: `lib/keeper/keeper_store_boot_reconcile.ml` GADT (3개).

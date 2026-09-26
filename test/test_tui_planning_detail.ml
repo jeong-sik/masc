@@ -336,18 +336,20 @@ let test_timeline_unavailable_renders_its_cause_once () =
       gsu_mirror=Proof.Mirror_absent_view;
       gsu_reset_step=Goal_store_unavailable.Reset_goal_store } in
   let store_rows = rows (Proof.Goal_source_failure (Proof.Goal_store_unavailable store)) in
+  (* [Detail.wrapped] reflows through [wrap_words], which drops the two-space
+     indent every timeline row is given, so the pane shows the verdict bare. *)
   check_bool "the Goal store's verdict appears once" true
-    (List.mem ("  Cause: " ^ Proof.goal_store_unavailable_view_to_string store) store_rows);
+    (List.mem ("Cause: " ^ Proof.goal_store_unavailable_view_to_string store) store_rows);
   check_bool "the pane does not prepend another verdict" false
     (List.exists (contains "timeline unavailable") store_rows);
   let links_rows = rows (Proof.Goal_source_failure
       (Proof.Goal_task_links_unavailable "primary registry is missing")) in
   check_bool "link failure has one explicit verdict and its raw cause" true
-    (List.mem "  Linked tasks unavailable · Cause: primary registry is missing"
+    (List.mem "Linked tasks unavailable · Cause: primary registry is missing"
        links_rows);
   let queue_rows = rows (Proof.Approval_queue_failure "queue store unreadable") in
   check_bool "queue failure has one explicit verdict and its raw cause" true
-    (List.mem "  Approval queue unavailable · Cause: queue store unreadable"
+    (List.mem "Approval queue unavailable · Cause: queue store unreadable"
        queue_rows)
 
 (* A goal's own creation event carries its kind in the subject column and in

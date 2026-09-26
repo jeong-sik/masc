@@ -1,0 +1,70 @@
+{
+  "README.md": {
+    "sha256": "c7cfb5b4078c868ba8c19ff0d915ab6411bb34d8064e1f914d9b17882de747aa",
+    "bytes": 9024
+  },
+  "baseline-artifact.json": {
+    "sha256": "adf848147c724f095b7511c49139e763552c9c5af038c9495ffdf3f9876e82de",
+    "bytes": 852
+  },
+  "baseline-manifest.json": {
+    "sha256": "798e38f87ae065baa64c5dbc91c85189f2503a58167b7dc94a7e7226de82f3be",
+    "bytes": 425
+  },
+  "candidate-artifact.json": {
+    "sha256": "9fbacbac645a34ae19f0b820cd7c7a66e0a268052e6dcc43f94bea52f01b3cec",
+    "bytes": 856
+  },
+  "candidate-manifest.json": {
+    "sha256": "256cdd8c9e80cf0b0a94d2a1b48b12efbb4529c56ad72a3ebffa874a2ef7f8f7",
+    "bytes": 425
+  },
+  "compare.py": {
+    "sha256": "cb8dc4c62ca53494e835419beb1776cc95b855edfb4e7327484e45459d7636db",
+    "bytes": 3749
+  },
+  "persisted-backlogs.json": {
+    "sha256": "540ebeb9d7a7bbdcf91da621af4349cf96365c9e9520efd3e6d32f5556ccafe2",
+    "bytes": 9627
+  },
+  "persisted-backlogs.tar.xz": {
+    "sha256": "490453f4f21bd3be801797f9969a1d0427b16febf0d068b33a5ca493def39471",
+    "bytes": 16608
+  },
+  "plan.json": {
+    "sha256": "59baca9df901d65465c52b4d1e6c8e13f0b4733e3814d530cb9044c2fe4fac79",
+    "bytes": 21851
+  },
+  "receipt-files.json": {
+    "sha256": "9bd913d6a44be5c9eccaf1fa08de9430b593b55ccbcf43639ecdecb224bfe27a",
+    "bytes": 64878
+  },
+  "receipts.tar.xz": {
+    "sha256": "fbff44eccb66fea337f83e1180177c5c55ab87dac2f63d2c5ca119d75974f7f1",
+    "bytes": 228012
+  },
+  "restore.py": {
+    "sha256": "1f5388873e650e68977f4096ae9ff77d0a4ab1b498025d8139cda079f5d00228",
+    "bytes": 1199
+  },
+  "runtime-fixture.toml": {
+    "sha256": "3cc6877c5057c6148927e24b8951958a0859e7fd5bbf1ed48d5c22a5c056f2ed",
+    "bytes": 3088
+  },
+  "session.py": {
+    "sha256": "3b3f10d420b2c9d26c2c6e09f76b50af8285d6f05618a952b52bb0f74fda123a",
+    "bytes": 10104
+  },
+  "source-scope.json": {
+    "sha256": "40fc8e5e5bb7d57efa7702dbf560d5c4e7469c8869e70b473835839466532473",
+    "bytes": 2119
+  },
+  "summarize.py": {
+    "sha256": "8d48d019ed5cd78d822d9703a8f8c019bca0842fb15fae7300f39d5e74c9ff87",
+    "bytes": 6162
+  },
+  "summary.json": {
+    "sha256": "afe7c331659b8b98b19e9c4cd398edc3b2e98c8737fdf217b8d488f06cd570e4",
+    "bytes": 40397
+  }
+}

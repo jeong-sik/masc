@@ -10,6 +10,15 @@
  (action (run python3 %{dep:test_dashboard_observation_quota.py} --binary %{dep:../bin/main_eio.exe})))
 
 (rule
+ (alias runtest-test_sandbox_image_cli)
+ (deps test_sandbox_image_cli.py ../bin/main_eio.exe)
+ (action (run python3 %{dep:test_sandbox_image_cli.py} %{dep:../bin/main_eio.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_sandbox_image_cli)))
+
+(rule
  (alias runtest-tool-call-sequence-miner)
  (deps test_tool_call_sequence_miner.py ../scripts/tool-call-sequence-miner.py)
  (action (run python3 %{dep:test_tool_call_sequence_miner.py})))
@@ -243,10 +252,7 @@
 (test
  (name test_tui_keeper_sandbox)
  (modules test_tui_keeper_sandbox)
- ; masc.config for Env_config_sandbox.Runtime.image_source_strings: the
- ; reader's image_source is parallel to the server's, and the suite is what
- ; holds the two spellings together.
- (libraries alcotest masc masc.config masc_tui_keeper_sandbox yojson str))
+ (libraries alcotest masc masc_tui_keeper_sandbox yojson str))
 
 (tests
  (names
@@ -4513,6 +4519,11 @@
  (deps
   test_tui_keyboard_scenario_selection.py
   test_tui_keyboard_input.py
+  test_tui_keyboard_general_pty.py
+  test_tui_keyboard_surfaces_pty.py
+  test_tui_keyboard_overview_pty.py
+  test_tui_keyboard_rosters_pty.py
+  test_tui_keyboard_board_terminal_pty.py
   dune
   (glob_files stanzas/*.inc))
  (action
@@ -6261,6 +6272,7 @@
 (include stanzas/test_browser_webdriver.inc)
 (include stanzas/test_browser_cdp.inc)
 (include stanzas/test_browser_stagehand_session.inc)
+(include stanzas/test_browser_stagehand_model.inc)
 (include stanzas/test_browser_chromium_process.inc)
 (include stanzas/test_server_browser_stagehand.inc)
 (include stanzas/test_browser_controls.inc)

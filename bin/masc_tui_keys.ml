@@ -155,7 +155,7 @@ let runtime_keys =
       (b Act "f" "default runtime"
          ~help:"replace [runtime].default, what a keeper with no assignment walks")
   ; Keeper_lanes_only
-      (b Act "m" "vision fleet"
+      (b Act "m" "vision runtimes"
          ~help:"edit [runtime].media_failover in the slot editor; refused while \
                 boot dropped one of its entries")
   ; Keeper_lanes_only

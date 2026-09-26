@@ -43,9 +43,9 @@ missing-reason fallback. Existing agenda tests retain strip/row agreement.
 ## Verification limits
 
 The changed OCaml files pass syntax parsing and the diff whitespace check.
-Compiled tests and candidate PTY measurements are pending CI. No local OCaml
-build was run. No latency gain, live-runtime deployment, physical-display
-measurement, or 0.1ms completion is claimed.
+Compiled tests remain subject to CI. The candidate PTY comparison is recorded
+below. No local OCaml build was run. No general latency gain, live-runtime
+deployment, physical-display measurement, or 0.1ms completion is claimed.
 
 ## First comparison attempt
 
@@ -53,3 +53,12 @@ measurement, or 0.1ms completion is claimed.
 baseline repetition 3 startup, before that session measured any input. Four
 completed sessions are retained without a full aggregate. A single retry
 36257181447 uses the same artifacts and observer; its data remains separate.
+
+## Completed comparison retry
+
+[Retry 36257181447](comparison-retry-36257181447/README.md) completed all three
+pairs: 600 acknowledged frames and six draft-preservation checks. Overall
+median/p95 were 0.4552295/1.047834 ms for baseline and 0.432229/0.838542 ms for
+candidate. Info median and maxima were higher; every candidate observation
+still exceeded 0.1 ms. The full receipts, source scope and mixed results are
+retained separately from the failed attempt.

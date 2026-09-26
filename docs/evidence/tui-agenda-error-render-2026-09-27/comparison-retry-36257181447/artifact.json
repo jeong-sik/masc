@@ -1,0 +1,20 @@
+{
+  "id": 10911239266,
+  "node_id": "MDg6QXJ0aWZhY3QxMDkxMTIzOTI2Ng==",
+  "name": "tui-artifact-comparison-36257181447-attempt-1",
+  "size_in_bytes": 36537,
+  "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10911239266",
+  "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10911239266/zip",
+  "expired": false,
+  "digest": "sha256:c8109e5be4b0f80c7fcf4c0fc236fc7c95826b8fd96fd5f4d3d2bf5c015b5c50",
+  "created_at": "2026-09-26T17:09:49Z",
+  "updated_at": "2026-09-26T17:09:49Z",
+  "expires_at": "2026-12-25T16:55:20Z",
+  "workflow_run": {
+    "id": 36257181447,
+    "repository_id": 1136640865,
+    "head_repository_id": 1136640865,
+    "head_branch": "perf/tui-corrected-observer-harness-20260926",
+    "head_sha": "304f5f6f67edcb38e3b2ad5da6759d64f73a4983"
+  }
+}

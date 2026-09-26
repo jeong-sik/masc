@@ -368,7 +368,9 @@ let overlay ~now ~localtime ~cols t =
     match t.confirming with
     | Not_read -> [ quiet "not loaded yet" ]
     | Read_failed reason -> [ failure ~cols reason ]
-    | Read [] -> [ quiet "no goal is waiting for your confirmation" ]
+    (* Short enough for the narrowest panel, like the other notes: a quiet
+       row is not fitted. *)
+    | Read [] -> [ quiet "no goal awaits confirmation" ]
     | Read rows ->
       List.map
         (fun (row : goal_to_confirm) ->

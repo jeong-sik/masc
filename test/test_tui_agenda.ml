@@ -410,8 +410,10 @@ let test_empty_sections_answer_in_words () =
   check bool "the wake section answers" true (contains ~needle:"nothing is scheduled" text);
   check bool "so does the held-call section" true
     (contains ~needle:"no keeper is holding a call" text);
+  check bool "so does the goal section" true
+    (contains ~needle:"no goal awaits confirmation" text);
   check bool "and the stuck section" true (contains ~needle:"no task is stuck on you" text);
-  check int "all three headings are still drawn" 3 (List.length (tones_of lines Agenda.Heading))
+  check int "all four headings are still drawn" 4 (List.length (tones_of lines Agenda.Heading))
 ;;
 
 (* An empty section is an answer only once its list was read. With the server
@@ -659,7 +661,7 @@ let test_a_goal_to_confirm_is_waiting_on_the_operator () =
 
 let test_the_goal_section_answers_in_words () =
   check bool "an empty list read is an answer" true
-    (contains ~needle:"no goal is waiting for your confirmation"
+    (contains ~needle:"no goal awaits confirmation"
        (joined (overlay_of (with_goals []))));
   let unread =
     joined
@@ -671,7 +673,7 @@ let test_the_goal_section_answers_in_words () =
             ~stalled:(Agenda.Read [])))
   in
   check bool "a list nobody read does not say it is empty" false
-    (contains ~needle:"no goal is waiting for your confirmation" unread)
+    (contains ~needle:"no goal awaits confirmation" unread)
 ;;
 
 let test_the_stuck_section_answers_in_words () =

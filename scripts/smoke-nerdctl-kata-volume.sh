@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Opt-in real Linux Kata persistence/isolation proof; requires an existing image.
-# Usage: scripts/smoke-nerdctl-kata-volume.sh [masc-sandbox:general]
+# Usage: scripts/smoke-nerdctl-kata-volume.sh [masc-sandbox-test:ci]
 set -euo pipefail
-image="${1:-masc-sandbox:general}"
+image="${1:-masc-sandbox-test:ci}"
 [ "$(uname -s)" = Linux ] || { echo 'Linux host required' >&2; exit 1; }
 command -v nerdctl >/dev/null
 command -v python3 >/dev/null

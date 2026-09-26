@@ -121,11 +121,9 @@ readonly WS_DIRECT_SHA="d812d6fec4153efc11235661e0d4b4d0d789c45b"
 # C-BIOS boot that found it leaked game code into the 720-frame warm-up and
 # the replay landed on that polluted state (Sangokushi II cold-boot stall
 # pc=e1dc); boot_disk now mounts the ROM at replay time (ocaml-msx #37).
-# cab7f9f moves the pin from #37 to #41: #38/#39 (NMS8250 ROM/FDC path), #40
-# (fixed-page-0 BIOS vectors served as implicit CALSLT, task-1564) and #41
-# (SNSMAT 0x0024, task-1762). Sangokushi II second-unit deploy prompt ignored
-# keys because the deployed core was still #37.
-readonly OCAML_MSX_SHA="cab7f9f36828b005f5885793ddf5cf541fde9149"
+# 50ba535 moves the pin to ocaml-msx #42: versioned checkpoints retain v1
+# restore support and write v2, so checkpoints saved before masc v0.41.0 can load.
+readonly OCAML_MSX_SHA="50ba5354b35cdeb1c8350f6a359ae819df256b8a"
 # DOS emulator core (8086 + BIOS/DOS interrupt surface + CGA/EGA/VGA video).
 # Path-pinned locally for core development; SHA-pinned here for CI.
 # d887e45 = ocaml-dos #11: keys have names, so lib/dos_lane can take "up" and

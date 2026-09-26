@@ -537,7 +537,6 @@ let test_a_keeper_that_cannot_start_says_why () =
     in
     (match refused_start "no catalog" ~config_root ~store:apple (Some "ocaml") with
      | Resolver.Unresolved (Not_built_on_host _) as e ->
-
        mentions "no catalog" (Resolver.error_to_string e) "masc sandbox-image promote"
      | e -> fail ("no catalog: " ^ Resolver.error_to_string e));
     write_catalog config_root host_promoted_ocaml;
@@ -549,7 +548,6 @@ let test_a_keeper_that_cannot_start_says_why () =
      | e -> fail ("blank: " ^ Resolver.error_to_string e));
     (match refused_start "rust" ~config_root ~store:apple (Some "rust") with
      | Resolver.Unresolved (Unknown_image { name = "rust"; known = [ "base"; "ocaml" ] }) -> ()
-
      | e -> fail ("rust: " ^ Resolver.error_to_string e));
     let base_on_apple = refusal "base" ~store:apple (Some "base") in
     mentions "base" base_on_apple "masc sandbox-image --recipe base --runtime apple_container`";

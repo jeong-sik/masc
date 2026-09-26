@@ -3411,7 +3411,6 @@ let sandbox_image_ensure_exit ~base_path runtime =
          (( Keeper_sandbox_image_resolver.Not_declared
           | Keeper_sandbox_image_resolver.Unresolved
               (Keeper_sandbox_image_catalog.Unknown_image _)
-
           | Keeper_sandbox_image_resolver.No_image_store _
           | Keeper_sandbox_image_resolver.Catalog_unreadable _ )
           as error) ->
@@ -3745,6 +3744,20 @@ let setup_validate_runtime base_path =
            | Some (Runtime_verification.Unavailable (Missing_credential _)), Some (Runtime_schema.Env key) ->
              Printf.eprintf "Missing model credential: %s. Set this variable in the shell that starts MASC.\n" key
            | _ -> ());
+          (* Name the cause: a rate limit only needs a wait, a refused key
+             needs a new one, and the operator cannot tell them apart from
+             the sentence below alone. *)
+          Option.iter
+            (fun failure ->
+               Printf.eprintf "%s: %s\n%!"
+                 (Runtime_verification.failure_code failure)
+                 (Runtime_verification.failure_message failure);
+               (* The detail carries the provider's retry hint or the usage
+                  window's reopen time, which the setup wizard already shows. *)
+               Option.iter
+                 (Printf.eprintf "  %s\n%!")
+                 (Runtime_verification.failure_detail failure))
+            result.failure;
           prerr_endline "The selected model did not pass its real response/tool check. Run masc runtime-verify for details or choose another connection in the installer.");
         code
 

@@ -308,18 +308,6 @@ val probe_container_state_optional
   -> unit
   -> (docker_container_state, string) result
 
-val remove_superseded_persistent_containers
-  :  keeper_name:string
-  -> base_path:string
-  -> keep:string
-  -> timeout_sec:float
-  -> unit
-  -> (unit, string) result
-(** Remove this keeper's persistent containers other than the one named
-    [keep]. A promoted build or a changed network mode names a new container,
-    and the old one is never adopted again. Call it once [keep] is running,
-    so a new container that fails to start leaves the old one in place. *)
-
 val remove_persistent_containers
   :  keeper_name:string
   -> base_path:string

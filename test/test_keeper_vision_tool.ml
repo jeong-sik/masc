@@ -2243,7 +2243,7 @@ let test_browser_screenshot_reaches_vision_reader () =
 
 let test_browser_screenshot_requires_keeper_owner () =
   let result = Masc.Tool_misc_browser_lane.handle_read
-      ~base_path:(Filename.get_temp_dir_name ()) ~tool_name:"masc_browser_read" ~start_time:0.
+      ~base_path:(Filename.get_temp_dir_name ()) ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ())
       (`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
   match result with
   | Tool_result.Failed failure -> assert (failure.message = "screenshot requires an owning Keeper")

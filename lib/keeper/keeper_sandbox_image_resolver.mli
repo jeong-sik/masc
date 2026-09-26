@@ -16,7 +16,6 @@ type error =
   | Catalog_unreadable of Keeper_sandbox_image_catalog.load_error
   | Unresolved of Keeper_sandbox_image_catalog.missing
       (** The catalog found no promoted build. Carries its exact typed reason. *)
-
   | No_image_store of { keeper : string; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile }
       (** The profile starts no container ([remote_ssh]), or it is [microvm]
           with no [microvm_backend], so there is no store to look in. *)

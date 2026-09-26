@@ -4,7 +4,6 @@ type error =
   | Not_declared
   | Catalog_unreadable of Catalog.load_error
   | Unresolved of Catalog.missing
-
   | No_image_store of { keeper : string; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile }
 
 (* A microVM runtime's store is chosen on the command line; Docker's is the
@@ -24,14 +23,12 @@ let error_to_string = function
      names an image from the host's image catalog (sandbox-images.toml)."
   | Catalog_unreadable error -> Catalog.load_error_to_string error
   | Unresolved (Catalog.Unknown_image { name; known }) ->
-
     Printf.sprintf "sandbox_image %S is not in the image catalog (it has: %s)." name
       (match known with [] -> "no names" | names -> String.concat ", " names)
   (* Promote records a tag the store already has. msb has no build command,
      so its build arrives through [msb load]; every other store is built into
      by [masc sandbox-image]. *)
   | Unresolved (Catalog.Not_built_on_host { name; store = (Catalog.Microvm Keeper_microvm_backend.Microsandbox as store) }) ->
-
     Printf.sprintf
       "nothing is promoted for %S in the microsandbox image store. The msb CLI \
        has no image build command, so MASC cannot build one: build the image \
@@ -39,7 +36,6 @@ let error_to_string = function
        with `masc sandbox-image promote %s <tag>%s`."
       name name (runtime_flag store)
   | Unresolved (Catalog.Not_built_on_host
-
       { name
       ; store =
           ( Catalog.Docker_daemon
@@ -47,7 +43,6 @@ let error_to_string = function
               (Keeper_microvm_backend.Apple_container | Keeper_microvm_backend.Nerdctl_kata) )
           as store
       }) ->
-
     Printf.sprintf
       "nothing is promoted for %S in the %s image store. Build it with \
        `masc sandbox-image --recipe %s%s%s` and record the tag it prints with \
@@ -82,7 +77,6 @@ let resolve ~config_root ~store declared =
      | Error error -> Error (Catalog_unreadable error)
      | Ok catalog ->
        Catalog.resolve catalog ~name ~store |> Result.map_error (fun missing -> Unresolved missing))
-
 
 let store_of_meta (meta : Keeper_meta_contract.keeper_meta) =
   match meta.Keeper_meta_contract.sandbox_profile, meta.Keeper_meta_contract.microvm_backend with

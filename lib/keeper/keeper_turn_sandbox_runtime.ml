@@ -402,7 +402,6 @@ let image t = t.image
    turn runtimes keep their cached container until that turn ends. Teardown
    lists by label rather than by name and takes all builds that remain: a new
    turn cannot know whether another turn still uses an older container. *)
-
 let docker_container_name_for_image (t : t) ~image =
   Keeper_sandbox_container_name.make
     (Keeper_sandbox_container_name.Docker_persistent
@@ -2024,27 +2023,6 @@ let start_container ?timeout_sec (t : t) =
                  with
                  | Ok () ->
                    set_state t (Running { container_name });
-                   (* The new container runs, so the ones an earlier build
-                      or network mode named are not coming back. A failed
-                      removal leaves them to teardown; it does not undo a
-                      start that worked. *)
-                   (match
-                      Keeper_sandbox_runtime.remove_superseded_persistent_containers
-                        ~keeper_name:t.meta.name
-                        ~base_path:t.config.base_path
-                        ~keep:container_name
-                        ~timeout_sec:
-                          (Env_config_sandbox.Shell_timeout.timeout_sec
-                             ~bucket:Env_config_sandbox.Shell_timeout.Cleanup_rm
-                             ())
-                        ()
-                    with
-                    | Ok () -> ()
-                    | Error detail ->
-                      Log.Keeper.warn
-                        ~keeper_name:t.meta.name
-                        "superseded sandbox containers were not removed: %s"
-                        detail);
                    Ok container_name
                  | Error inspect_out ->
                    (* Inspect failed after a successful `docker run`. Without

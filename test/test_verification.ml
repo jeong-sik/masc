@@ -1735,7 +1735,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                  ~input:(`Assoc [ "path", `String "evidence.md" ])
                  (Tool_result.ok
                     ~tool_name:"verification_read_file"
-                    ~start_time:0.0
+                    ~start_time:(Tool_timing.start ())
                     "verified evidence");
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok {Masc.Task.Anti_rationalization.selected_runtime_id="test-system-evaluator";verdict=Some (Masc.Task.Anti_rationalization.Approve "")});

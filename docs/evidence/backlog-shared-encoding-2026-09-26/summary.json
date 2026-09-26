@@ -1,0 +1,1792 @@
+{
+  "groups": {
+    "ascii-identity-baseline-mutation": {
+      "wire_ms": {
+        "n": 60,
+        "min": 17.222917,
+        "median": 19.5,
+        "p95": 24.76725,
+        "max": 27.594208
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 17.2145,
+        "median": 19.491271,
+        "p95": 24.755458,
+        "max": 27.581833
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.0075,
+        "median": 0.0094165,
+        "p95": 0.012375,
+        "max": 0.027666
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 1304,
+        "median": 1304.0,
+        "p95": 1304,
+        "max": 1304
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 1304,
+        "median": 1304.0,
+        "p95": 1304,
+        "max": 1304
+      },
+      "observed_content_encoding": [
+        "identity"
+      ]
+    },
+    "ascii-identity-baseline-cold": {
+      "wire_ms": {
+        "n": 60,
+        "min": 8.516375,
+        "median": 11.773708,
+        "p95": 14.214375,
+        "max": 15.000416
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 8.493916,
+        "median": 11.747979,
+        "p95": 14.189083,
+        "max": 14.977
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.016292,
+        "median": 0.022688,
+        "p95": 0.0385,
+        "max": 0.060541
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 143271,
+        "median": 146100.5,
+        "p95": 148679,
+        "max": 148980
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143271,
+        "median": 146100.5,
+        "p95": 148679,
+        "max": 148980
+      },
+      "observed_content_encoding": [
+        "identity"
+      ],
+      "server_compute_ms": {
+        "n": 60,
+        "min": 7.976,
+        "median": 11.21,
+        "p95": 13.538,
+        "max": 14.3
+      }
+    },
+    "ascii-identity-baseline-warm": {
+      "wire_ms": {
+        "n": 60,
+        "min": 0.397667,
+        "median": 0.480688,
+        "p95": 0.66525,
+        "max": 0.711167
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 0.385375,
+        "median": 0.466229,
+        "p95": 0.645667,
+        "max": 0.696875
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.010458,
+        "median": 0.014791499999999999,
+        "p95": 0.018959,
+        "max": 0.021459
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 143271,
+        "median": 146100.5,
+        "p95": 148679,
+        "max": 148980
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143271,
+        "median": 146100.5,
+        "p95": 148679,
+        "max": 148980
+      },
+      "observed_content_encoding": [
+        "identity"
+      ]
+    },
+    "ascii-identity-candidate-mutation": {
+      "wire_ms": {
+        "n": 60,
+        "min": 13.48275,
+        "median": 16.128396000000002,
+        "p95": 59.480375,
+        "max": 88.709833
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 13.473834,
+        "median": 16.118167,
+        "p95": 59.467416,
+        "max": 88.699833
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.008167,
+        "median": 0.01025,
+        "p95": 0.012959,
+        "max": 0.015458
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 1304,
+        "median": 1304.0,
+        "p95": 1304,
+        "max": 1304
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 1304,
+        "median": 1304.0,
+        "p95": 1304,
+        "max": 1304
+      },
+      "observed_content_encoding": [
+        "identity"
+      ]
+    },
+    "ascii-identity-candidate-cold": {
+      "wire_ms": {
+        "n": 60,
+        "min": 11.4775,
+        "median": 13.0924785,
+        "p95": 18.553041,
+        "max": 21.884917
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 11.457042,
+        "median": 13.0696245,
+        "p95": 18.527625,
+        "max": 21.858708
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.018375,
+        "median": 0.024417,
+        "p95": 0.035792,
+        "max": 0.076
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 143271,
+        "median": 146100.5,
+        "p95": 148679,
+        "max": 148980
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143271,
+        "median": 146100.5,
+        "p95": 148679,
+        "max": 148980
+      },
+      "observed_content_encoding": [
+        "identity"
+      ],
+      "server_compute_ms": {
+        "n": 60,
+        "min": 10.937,
+        "median": 12.501999999999999,
+        "p95": 17.753,
+        "max": 20.988
+      }
+    },
+    "ascii-identity-candidate-warm": {
+      "wire_ms": {
+        "n": 60,
+        "min": 0.449125,
+        "median": 0.562021,
+        "p95": 0.984709,
+        "max": 1.284708
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 0.434417,
+        "median": 0.5472295,
+        "p95": 0.964875,
+        "max": 1.268375
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.011709,
+        "median": 0.0164165,
+        "p95": 0.037083,
+        "max": 0.070042
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 143271,
+        "median": 146100.5,
+        "p95": 148679,
+        "max": 148980
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143271,
+        "median": 146100.5,
+        "p95": 148679,
+        "max": 148980
+      },
+      "observed_content_encoding": [
+        "identity"
+      ]
+    },
+    "ascii-gzip-baseline-mutation": {
+      "wire_ms": {
+        "n": 60,
+        "min": 16.70875,
+        "median": 19.4781665,
+        "p95": 26.130583,
+        "max": 109.197834
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 16.698709,
+        "median": 19.466979000000002,
+        "p95": 26.117417,
+        "max": 109.188084
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.007958,
+        "median": 0.0100625,
+        "p95": 0.013166,
+        "max": 0.013542
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 1304,
+        "median": 1304.0,
+        "p95": 1304,
+        "max": 1305
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 1304,
+        "median": 1304.0,
+        "p95": 1304,
+        "max": 1305
+      },
+      "observed_content_encoding": [
+        "identity"
+      ]
+    },
+    "ascii-gzip-baseline-cold": {
+      "wire_ms": {
+        "n": 60,
+        "min": 7.658667,
+        "median": 12.0893125,
+        "p95": 15.5775,
+        "max": 16.561334
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 7.65,
+        "median": 12.078686999999999,
+        "p95": 15.564834,
+        "max": 16.547042
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.007917,
+        "median": 0.0108125,
+        "p95": 0.013583,
+        "max": 0.014292
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 15861,
+        "median": 16037.0,
+        "p95": 16179,
+        "max": 16186
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143255,
+        "median": 146084.5,
+        "p95": 148663,
+        "max": 148964
+      },
+      "observed_content_encoding": [
+        "gzip"
+      ],
+      "server_compute_ms": {
+        "n": 60,
+        "min": 7.151,
+        "median": 11.536999999999999,
+        "p95": 14.889,
+        "max": 15.659
+      }
+    },
+    "ascii-gzip-baseline-warm": {
+      "wire_ms": {
+        "n": 60,
+        "min": 0.390417,
+        "median": 0.494604,
+        "p95": 0.683167,
+        "max": 1.200959
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 0.38725,
+        "median": 0.4883545,
+        "p95": 0.676417,
+        "max": 1.195375
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.003167,
+        "median": 0.0047705000000000004,
+        "p95": 0.008125,
+        "max": 0.041666
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 15861,
+        "median": 16037.0,
+        "p95": 16179,
+        "max": 16186
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143255,
+        "median": 146084.5,
+        "p95": 148663,
+        "max": 148964
+      },
+      "observed_content_encoding": [
+        "gzip"
+      ]
+    },
+    "ascii-gzip-candidate-mutation": {
+      "wire_ms": {
+        "n": 60,
+        "min": 14.256333,
+        "median": 17.8365625,
+        "p95": 22.124083,
+        "max": 30.79375
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 14.24775,
+        "median": 17.825458,
+        "p95": 22.112625,
+        "max": 30.78275
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.008583,
+        "median": 0.0105,
+        "p95": 0.012875,
+        "max": 0.014209
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 1304,
+        "median": 1304.0,
+        "p95": 1304,
+        "max": 1304
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 1304,
+        "median": 1304.0,
+        "p95": 1304,
+        "max": 1304
+      },
+      "observed_content_encoding": [
+        "identity"
+      ]
+    },
+    "ascii-gzip-candidate-cold": {
+      "wire_ms": {
+        "n": 60,
+        "min": 9.381042,
+        "median": 13.103354,
+        "p95": 15.314417,
+        "max": 15.537708
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 9.371542,
+        "median": 13.090875,
+        "p95": 15.302083,
+        "max": 15.525708
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.008375,
+        "median": 0.0114795,
+        "p95": 0.0165,
+        "max": 0.045875
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 15847,
+        "median": 16010.0,
+        "p95": 16129,
+        "max": 16194
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143255,
+        "median": 146089.5,
+        "p95": 148673,
+        "max": 148974
+      },
+      "observed_content_encoding": [
+        "gzip"
+      ],
+      "server_compute_ms": {
+        "n": 60,
+        "min": 8.841,
+        "median": 12.482,
+        "p95": 14.36,
+        "max": 14.882
+      }
+    },
+    "ascii-gzip-candidate-warm": {
+      "wire_ms": {
+        "n": 60,
+        "min": 0.4145,
+        "median": 0.5438755,
+        "p95": 0.656875,
+        "max": 0.797042
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 0.41075,
+        "median": 0.5377715,
+        "p95": 0.646667,
+        "max": 0.790708
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.003458,
+        "median": 0.0058755000000000005,
+        "p95": 0.008834,
+        "max": 0.010208
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 15847,
+        "median": 16010.0,
+        "p95": 16129,
+        "max": 16194
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143255,
+        "median": 146089.5,
+        "p95": 148673,
+        "max": 148974
+      },
+      "observed_content_encoding": [
+        "gzip"
+      ]
+    },
+    "multilingual-identity-baseline-mutation": {
+      "wire_ms": {
+        "n": 60,
+        "min": 16.904583,
+        "median": 18.728082999999998,
+        "p95": 20.443833,
+        "max": 21.835209
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 16.896208,
+        "median": 18.7182705,
+        "p95": 20.43475,
+        "max": 21.825042
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.007333,
+        "median": 0.0093545,
+        "p95": 0.011625,
+        "max": 0.070666
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 1304,
+        "median": 1304.0,
+        "p95": 1304,
+        "max": 1304
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 1304,
+        "median": 1304.0,
+        "p95": 1304,
+        "max": 1304
+      },
+      "observed_content_encoding": [
+        "identity"
+      ]
+    },
+    "multilingual-identity-baseline-cold": {
+      "wire_ms": {
+        "n": 60,
+        "min": 7.745,
+        "median": 12.313354499999999,
+        "p95": 13.276667,
+        "max": 14.65775
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 7.724208,
+        "median": 12.291042000000001,
+        "p95": 13.257125,
+        "max": 14.631584
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.016958,
+        "median": 0.0219165,
+        "p95": 0.028708,
+        "max": 0.060416
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 143299,
+        "median": 146116.0,
+        "p95": 148678,
+        "max": 148978
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143299,
+        "median": 146116.0,
+        "p95": 148678,
+        "max": 148978
+      },
+      "observed_content_encoding": [
+        "identity"
+      ],
+      "server_compute_ms": {
+        "n": 60,
+        "min": 7.203,
+        "median": 11.715,
+        "p95": 12.621,
+        "max": 14.03
+      }
+    },
+    "multilingual-identity-baseline-warm": {
+      "wire_ms": {
+        "n": 60,
+        "min": 0.443667,
+        "median": 0.519417,
+        "p95": 0.768875,
+        "max": 2.419333
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 0.430959,
+        "median": 0.5038125,
+        "p95": 0.723,
+        "max": 2.397708
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.010917,
+        "median": 0.014562,
+        "p95": 0.021625,
+        "max": 0.045875
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 143299,
+        "median": 146116.0,
+        "p95": 148678,
+        "max": 148978
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143299,
+        "median": 146116.0,
+        "p95": 148678,
+        "max": 148978
+      },
+      "observed_content_encoding": [
+        "identity"
+      ]
+    },
+    "multilingual-identity-candidate-mutation": {
+      "wire_ms": {
+        "n": 60,
+        "min": 12.186083,
+        "median": 14.4545625,
+        "p95": 44.960167,
+        "max": 84.404333
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 12.178083,
+        "median": 14.4449585,
+        "p95": 44.947583,
+        "max": 84.38625
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.005708,
+        "median": 0.009458,
+        "p95": 0.017125,
+        "max": 0.044125
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 1304,
+        "median": 1304.0,
+        "p95": 1304,
+        "max": 1304
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 1304,
+        "median": 1304.0,
+        "p95": 1304,
+        "max": 1304
+      },
+      "observed_content_encoding": [
+        "identity"
+      ]
+    },
+    "multilingual-identity-candidate-cold": {
+      "wire_ms": {
+        "n": 60,
+        "min": 11.772958,
+        "median": 12.821771,
+        "p95": 22.929833,
+        "max": 29.305
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 11.74775,
+        "median": 12.799812,
+        "p95": 22.902833,
+        "max": 29.265
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.015333,
+        "median": 0.0249165,
+        "p95": 0.044166,
+        "max": 0.08575
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 143299,
+        "median": 146126.5,
+        "p95": 148703,
+        "max": 149003
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143299,
+        "median": 146126.5,
+        "p95": 148703,
+        "max": 149003
+      },
+      "observed_content_encoding": [
+        "identity"
+      ],
+      "server_compute_ms": {
+        "n": 60,
+        "min": 11.172,
+        "median": 12.2395,
+        "p95": 21.639,
+        "max": 27.629
+      }
+    },
+    "multilingual-identity-candidate-warm": {
+      "wire_ms": {
+        "n": 60,
+        "min": 0.425334,
+        "median": 0.570979,
+        "p95": 2.605458,
+        "max": 3.647791
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 0.415167,
+        "median": 0.5551455000000001,
+        "p95": 2.583875,
+        "max": 3.609083
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.010167,
+        "median": 0.0168125,
+        "p95": 0.052916,
+        "max": 0.215
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 143299,
+        "median": 146126.5,
+        "p95": 148703,
+        "max": 149003
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143299,
+        "median": 146126.5,
+        "p95": 148703,
+        "max": 149003
+      },
+      "observed_content_encoding": [
+        "identity"
+      ]
+    },
+    "multilingual-gzip-baseline-mutation": {
+      "wire_ms": {
+        "n": 60,
+        "min": 16.38175,
+        "median": 21.012938,
+        "p95": 78.914667,
+        "max": 98.405458
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 16.372792,
+        "median": 21.0029375,
+        "p95": 78.904833,
+        "max": 98.38825
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.006625,
+        "median": 0.0098545,
+        "p95": 0.017083,
+        "max": 0.03525
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 1304,
+        "median": 1304.0,
+        "p95": 1304,
+        "max": 1304
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 1304,
+        "median": 1304.0,
+        "p95": 1304,
+        "max": 1304
+      },
+      "observed_content_encoding": [
+        "identity"
+      ]
+    },
+    "multilingual-gzip-baseline-cold": {
+      "wire_ms": {
+        "n": 60,
+        "min": 11.651334,
+        "median": 12.7577915,
+        "p95": 19.371125,
+        "max": 25.836333
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 11.642792,
+        "median": 12.7481665,
+        "p95": 19.351458,
+        "max": 25.818375
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.007167,
+        "median": 0.010562499999999999,
+        "p95": 0.019208,
+        "max": 0.024625
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 15888,
+        "median": 16038.5,
+        "p95": 16160,
+        "max": 16193
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143283,
+        "median": 146112.5,
+        "p95": 148691,
+        "max": 148992
+      },
+      "observed_content_encoding": [
+        "gzip"
+      ],
+      "server_compute_ms": {
+        "n": 60,
+        "min": 11.117,
+        "median": 12.163499999999999,
+        "p95": 18.458,
+        "max": 24.932
+      }
+    },
+    "multilingual-gzip-baseline-warm": {
+      "wire_ms": {
+        "n": 60,
+        "min": 0.401333,
+        "median": 0.499375,
+        "p95": 2.152,
+        "max": 12.370542
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 0.397291,
+        "median": 0.493292,
+        "p95": 2.14175,
+        "max": 12.355084
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.002917,
+        "median": 0.005396,
+        "p95": 0.013875,
+        "max": 0.028917
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 15888,
+        "median": 16038.5,
+        "p95": 16160,
+        "max": 16193
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143283,
+        "median": 146112.5,
+        "p95": 148691,
+        "max": 148992
+      },
+      "observed_content_encoding": [
+        "gzip"
+      ]
+    },
+    "multilingual-gzip-candidate-mutation": {
+      "wire_ms": {
+        "n": 60,
+        "min": 12.916541,
+        "median": 19.286875000000002,
+        "p95": 45.787375,
+        "max": 53.485292
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 12.904958,
+        "median": 19.2758545,
+        "p95": 45.778042,
+        "max": 53.466625
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.008041,
+        "median": 0.010875,
+        "p95": 0.017959,
+        "max": 0.062042
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 1304,
+        "median": 1304.0,
+        "p95": 1304,
+        "max": 1304
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 1304,
+        "median": 1304.0,
+        "p95": 1304,
+        "max": 1304
+      },
+      "observed_content_encoding": [
+        "identity"
+      ]
+    },
+    "multilingual-gzip-candidate-cold": {
+      "wire_ms": {
+        "n": 60,
+        "min": 8.505375,
+        "median": 13.794145499999999,
+        "p95": 25.422208,
+        "max": 29.316208
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 8.493833,
+        "median": 13.784375,
+        "p95": 25.411042,
+        "max": 29.2975
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.008458,
+        "median": 0.01125,
+        "p95": 0.018791,
+        "max": 0.019875
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 15887,
+        "median": 16056.0,
+        "p95": 16161,
+        "max": 16182
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143283,
+        "median": 146128.0,
+        "p95": 148702,
+        "max": 149003
+      },
+      "observed_content_encoding": [
+        "gzip"
+      ],
+      "server_compute_ms": {
+        "n": 60,
+        "min": 7.923,
+        "median": 13.229500000000002,
+        "p95": 24.385,
+        "max": 28.392
+      }
+    },
+    "multilingual-gzip-candidate-warm": {
+      "wire_ms": {
+        "n": 60,
+        "min": 0.426042,
+        "median": 0.5895625,
+        "p95": 3.333375,
+        "max": 6.064
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 0.422292,
+        "median": 0.5811040000000001,
+        "p95": 3.30475,
+        "max": 6.049958
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.003625,
+        "median": 0.0072085,
+        "p95": 0.014958,
+        "max": 0.028625
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 15887,
+        "median": 16056.0,
+        "p95": 16161,
+        "max": 16182
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143283,
+        "median": 146128.0,
+        "p95": 148702,
+        "max": 149003
+      },
+      "observed_content_encoding": [
+        "gzip"
+      ]
+    }
+  },
+  "sessions": [
+    {
+      "name": "ascii-identity-1-before",
+      "text_kind": "ascii",
+      "requested_encoding": "identity",
+      "role": "baseline",
+      "repetition": 1,
+      "session": "ascii-identity-1-before",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 19.108417,
+          "median": 22.119437499999997,
+          "p95": 25.662333,
+          "max": 27.594208
+        },
+        "cold": {
+          "n": 20,
+          "min": 8.516375,
+          "median": 13.029146,
+          "p95": 14.634541,
+          "max": 15.000416
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.397667,
+          "median": 0.5472085,
+          "p95": 0.665792,
+          "max": 0.709167
+        }
+      }
+    },
+    {
+      "name": "ascii-identity-1-after_",
+      "text_kind": "ascii",
+      "requested_encoding": "identity",
+      "role": "candidate",
+      "repetition": 1,
+      "session": "ascii-identity-1-after_",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 13.48275,
+          "median": 15.0770625,
+          "p95": 17.579042,
+          "max": 18.153916
+        },
+        "cold": {
+          "n": 20,
+          "min": 11.4775,
+          "median": 12.337917000000001,
+          "p95": 13.614708,
+          "max": 13.698125
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.449959,
+          "median": 0.5164165000000001,
+          "p95": 0.595125,
+          "max": 0.600041
+        }
+      }
+    },
+    {
+      "name": "ascii-identity-2-after_",
+      "text_kind": "ascii",
+      "requested_encoding": "identity",
+      "role": "candidate",
+      "repetition": 2,
+      "session": "ascii-identity-2-after_",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 14.531917,
+          "median": 15.757812000000001,
+          "p95": 17.667708,
+          "max": 18.332375
+        },
+        "cold": {
+          "n": 20,
+          "min": 11.760167,
+          "median": 13.057500000000001,
+          "p95": 13.9535,
+          "max": 14.072833
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.449125,
+          "median": 0.530437,
+          "p95": 0.687458,
+          "max": 0.895417
+        }
+      }
+    },
+    {
+      "name": "ascii-identity-2-before",
+      "text_kind": "ascii",
+      "requested_encoding": "identity",
+      "role": "baseline",
+      "repetition": 2,
+      "session": "ascii-identity-2-before",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 17.222917,
+          "median": 18.492520499999998,
+          "p95": 21.168167,
+          "max": 22.354833
+        },
+        "cold": {
+          "n": 20,
+          "min": 11.079125,
+          "median": 11.5935205,
+          "p95": 12.340917,
+          "max": 12.861333
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.426917,
+          "median": 0.4679795,
+          "p95": 0.614125,
+          "max": 0.659875
+        }
+      }
+    },
+    {
+      "name": "ascii-identity-3-before",
+      "text_kind": "ascii",
+      "requested_encoding": "identity",
+      "role": "baseline",
+      "repetition": 3,
+      "session": "ascii-identity-3-before",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 17.447125,
+          "median": 19.218125,
+          "p95": 20.323708,
+          "max": 21.416584
+        },
+        "cold": {
+          "n": 20,
+          "min": 8.803333,
+          "median": 11.5501045,
+          "p95": 12.105875,
+          "max": 12.415083
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.402834,
+          "median": 0.463125,
+          "p95": 0.561458,
+          "max": 0.711167
+        }
+      }
+    },
+    {
+      "name": "ascii-identity-3-after_",
+      "text_kind": "ascii",
+      "requested_encoding": "identity",
+      "role": "candidate",
+      "repetition": 3,
+      "session": "ascii-identity-3-after_",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 15.7905,
+          "median": 22.171833499999998,
+          "p95": 72.980875,
+          "max": 88.709833
+        },
+        "cold": {
+          "n": 20,
+          "min": 14.175208,
+          "median": 15.581708500000001,
+          "p95": 20.038458,
+          "max": 21.884917
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.518959,
+          "median": 0.7562705000000001,
+          "p95": 1.262583,
+          "max": 1.284708
+        }
+      }
+    },
+    {
+      "name": "ascii-gzip-1-before",
+      "text_kind": "ascii",
+      "requested_encoding": "gzip",
+      "role": "baseline",
+      "repetition": 1,
+      "session": "ascii-gzip-1-before",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 16.70875,
+          "median": 19.4322085,
+          "p95": 25.212583,
+          "max": 26.559417
+        },
+        "cold": {
+          "n": 20,
+          "min": 7.658667,
+          "median": 12.229875,
+          "p95": 15.854667,
+          "max": 16.0775
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.421583,
+          "median": 0.47725,
+          "p95": 0.694709,
+          "max": 0.745083
+        }
+      }
+    },
+    {
+      "name": "ascii-gzip-1-after_",
+      "text_kind": "ascii",
+      "requested_encoding": "gzip",
+      "role": "candidate",
+      "repetition": 1,
+      "session": "ascii-gzip-1-after_",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 15.985209,
+          "median": 18.072646,
+          "p95": 22.124083,
+          "max": 25.14075
+        },
+        "cold": {
+          "n": 20,
+          "min": 9.381042,
+          "median": 14.078896,
+          "p95": 15.329375,
+          "max": 15.537708
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.460708,
+          "median": 0.5607915,
+          "p95": 0.725292,
+          "max": 0.797042
+        }
+      }
+    },
+    {
+      "name": "ascii-gzip-2-after_",
+      "text_kind": "ascii",
+      "requested_encoding": "gzip",
+      "role": "candidate",
+      "repetition": 2,
+      "session": "ascii-gzip-2-after_",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 16.882917,
+          "median": 19.544145999999998,
+          "p95": 23.381125,
+          "max": 30.79375
+        },
+        "cold": {
+          "n": 20,
+          "min": 9.559958,
+          "median": 13.523167,
+          "p95": 15.078583,
+          "max": 15.494166
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.504167,
+          "median": 0.5808335,
+          "p95": 0.65025,
+          "max": 0.656875
+        }
+      }
+    },
+    {
+      "name": "ascii-gzip-2-before",
+      "text_kind": "ascii",
+      "requested_encoding": "gzip",
+      "role": "baseline",
+      "repetition": 2,
+      "session": "ascii-gzip-2-before",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 17.795625,
+          "median": 19.2290835,
+          "p95": 21.254792,
+          "max": 27.052334
+        },
+        "cold": {
+          "n": 20,
+          "min": 8.378042,
+          "median": 11.689562500000001,
+          "p95": 12.929042,
+          "max": 13.024416
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.418,
+          "median": 0.4841875,
+          "p95": 0.550292,
+          "max": 1.200959
+        }
+      }
+    },
+    {
+      "name": "ascii-gzip-3-before",
+      "text_kind": "ascii",
+      "requested_encoding": "gzip",
+      "role": "baseline",
+      "repetition": 3,
+      "session": "ascii-gzip-3-before",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 17.805375,
+          "median": 20.37125,
+          "p95": 26.130583,
+          "max": 109.197834
+        },
+        "cold": {
+          "n": 20,
+          "min": 7.887084,
+          "median": 12.350854,
+          "p95": 15.150667,
+          "max": 16.561334
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.390417,
+          "median": 0.509834,
+          "p95": 0.6335,
+          "max": 0.683167
+        }
+      }
+    },
+    {
+      "name": "ascii-gzip-3-after_",
+      "text_kind": "ascii",
+      "requested_encoding": "gzip",
+      "role": "candidate",
+      "repetition": 3,
+      "session": "ascii-gzip-3-after_",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 14.256333,
+          "median": 15.305665999999999,
+          "p95": 18.360458,
+          "max": 19.785375
+        },
+        "cold": {
+          "n": 20,
+          "min": 11.578875,
+          "median": 12.2576665,
+          "p95": 12.727541,
+          "max": 12.89325
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.4145,
+          "median": 0.511125,
+          "p95": 0.58925,
+          "max": 0.714292
+        }
+      }
+    },
+    {
+      "name": "multilingual-identity-1-before",
+      "text_kind": "multilingual",
+      "requested_encoding": "identity",
+      "role": "baseline",
+      "repetition": 1,
+      "session": "multilingual-identity-1-before",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 17.367208,
+          "median": 18.573228999999998,
+          "p95": 20.443833,
+          "max": 21.666542
+        },
+        "cold": {
+          "n": 20,
+          "min": 7.745,
+          "median": 12.325396,
+          "p95": 13.276667,
+          "max": 14.65775
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.443667,
+          "median": 0.5372085,
+          "p95": 0.631084,
+          "max": 0.768875
+        }
+      }
+    },
+    {
+      "name": "multilingual-identity-1-after_",
+      "text_kind": "multilingual",
+      "requested_encoding": "identity",
+      "role": "candidate",
+      "repetition": 1,
+      "session": "multilingual-identity-1-after_",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 12.186083,
+          "median": 13.747062,
+          "p95": 15.219416,
+          "max": 16.015042
+        },
+        "cold": {
+          "n": 20,
+          "min": 11.86725,
+          "median": 12.4056665,
+          "p95": 13.209916,
+          "max": 14.482917
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.425334,
+          "median": 0.497979,
+          "p95": 0.672541,
+          "max": 0.821541
+        }
+      }
+    },
+    {
+      "name": "multilingual-identity-2-after_",
+      "text_kind": "multilingual",
+      "requested_encoding": "identity",
+      "role": "candidate",
+      "repetition": 2,
+      "session": "multilingual-identity-2-after_",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 12.504583,
+          "median": 13.5668545,
+          "p95": 17.083875,
+          "max": 40.637292
+        },
+        "cold": {
+          "n": 20,
+          "min": 11.772958,
+          "median": 12.6783335,
+          "p95": 13.138042,
+          "max": 23.268875
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.442542,
+          "median": 0.5380830000000001,
+          "p95": 0.599916,
+          "max": 2.552708
+        }
+      }
+    },
+    {
+      "name": "multilingual-identity-2-before",
+      "text_kind": "multilingual",
+      "requested_encoding": "identity",
+      "role": "baseline",
+      "repetition": 2,
+      "session": "multilingual-identity-2-before",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 17.931542,
+          "median": 19.465167,
+          "p95": 20.279416,
+          "max": 21.835209
+        },
+        "cold": {
+          "n": 20,
+          "min": 7.993417,
+          "median": 12.275208,
+          "p95": 13.247125,
+          "max": 13.361917
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.450667,
+          "median": 0.511687,
+          "p95": 0.651583,
+          "max": 0.945666
+        }
+      }
+    },
+    {
+      "name": "multilingual-identity-3-before",
+      "text_kind": "multilingual",
+      "requested_encoding": "identity",
+      "role": "baseline",
+      "repetition": 3,
+      "session": "multilingual-identity-3-before",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 16.904583,
+          "median": 18.637646,
+          "p95": 20.076458,
+          "max": 20.919
+        },
+        "cold": {
+          "n": 20,
+          "min": 8.033334,
+          "median": 12.329875000000001,
+          "p95": 12.981084,
+          "max": 13.315417
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.457125,
+          "median": 0.509146,
+          "p95": 0.829209,
+          "max": 2.419333
+        }
+      }
+    },
+    {
+      "name": "multilingual-identity-3-after_",
+      "text_kind": "multilingual",
+      "requested_encoding": "identity",
+      "role": "candidate",
+      "repetition": 3,
+      "session": "multilingual-identity-3-after_",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 19.503875,
+          "median": 32.8512915,
+          "p95": 58.666209,
+          "max": 84.404333
+        },
+        "cold": {
+          "n": 20,
+          "min": 14.205167,
+          "median": 17.3326875,
+          "p95": 28.807458,
+          "max": 29.305
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.598417,
+          "median": 0.9520625,
+          "p95": 3.406917,
+          "max": 3.647791
+        }
+      }
+    },
+    {
+      "name": "multilingual-gzip-1-before",
+      "text_kind": "multilingual",
+      "requested_encoding": "gzip",
+      "role": "baseline",
+      "repetition": 1,
+      "session": "multilingual-gzip-1-before",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 20.806167,
+          "median": 22.309021,
+          "p95": 27.564125,
+          "max": 78.914667
+        },
+        "cold": {
+          "n": 20,
+          "min": 12.725625,
+          "median": 13.4340205,
+          "p95": 14.806708,
+          "max": 14.890708
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.497,
+          "median": 0.5621659999999999,
+          "p95": 1.0885,
+          "max": 1.234042
+        }
+      }
+    },
+    {
+      "name": "multilingual-gzip-1-after_",
+      "text_kind": "multilingual",
+      "requested_encoding": "gzip",
+      "role": "candidate",
+      "repetition": 1,
+      "session": "multilingual-gzip-1-after_",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 14.339916,
+          "median": 17.337313,
+          "p95": 22.850875,
+          "max": 23.15675
+        },
+        "cold": {
+          "n": 20,
+          "min": 8.505375,
+          "median": 13.338417,
+          "p95": 15.563583,
+          "max": 22.297209
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.453,
+          "median": 0.5296460000000001,
+          "p95": 0.652667,
+          "max": 0.759083
+        }
+      }
+    },
+    {
+      "name": "multilingual-gzip-2-after_",
+      "text_kind": "multilingual",
+      "requested_encoding": "gzip",
+      "role": "candidate",
+      "repetition": 2,
+      "session": "multilingual-gzip-2-after_",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 12.916541,
+          "median": 14.909645999999999,
+          "p95": 30.831333,
+          "max": 37.561458
+        },
+        "cold": {
+          "n": 20,
+          "min": 11.960625,
+          "median": 12.944396,
+          "p95": 14.424083,
+          "max": 14.435333
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.426042,
+          "median": 0.524375,
+          "p95": 0.636042,
+          "max": 6.064
+        }
+      }
+    },
+    {
+      "name": "multilingual-gzip-2-before",
+      "text_kind": "multilingual",
+      "requested_encoding": "gzip",
+      "role": "baseline",
+      "repetition": 2,
+      "session": "multilingual-gzip-2-before",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 17.579083,
+          "median": 19.452604,
+          "p95": 95.39,
+          "max": 98.405458
+        },
+        "cold": {
+          "n": 20,
+          "min": 12.002875,
+          "median": 12.728021,
+          "p95": 22.722833,
+          "max": 25.836333
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.414542,
+          "median": 0.4957915,
+          "p95": 2.214959,
+          "max": 2.278375
+        }
+      }
+    },
+    {
+      "name": "multilingual-gzip-3-before",
+      "text_kind": "multilingual",
+      "requested_encoding": "gzip",
+      "role": "baseline",
+      "repetition": 3,
+      "session": "multilingual-gzip-3-before",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 16.38175,
+          "median": 18.064062,
+          "p95": 47.691458,
+          "max": 66.328667
+        },
+        "cold": {
+          "n": 20,
+          "min": 11.651334,
+          "median": 12.112625000000001,
+          "p95": 12.578791,
+          "max": 12.884458
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.401333,
+          "median": 0.447708,
+          "p95": 0.535,
+          "max": 12.370542
+        }
+      }
+    },
+    {
+      "name": "multilingual-gzip-3-after_",
+      "text_kind": "multilingual",
+      "requested_encoding": "gzip",
+      "role": "candidate",
+      "repetition": 3,
+      "session": "multilingual-gzip-3-after_",
+      "timings": {
+        "mutation": {
+          "n": 20,
+          "min": 28.35475,
+          "median": 37.374624999999995,
+          "p95": 48.9095,
+          "max": 53.485292
+        },
+        "cold": {
+          "n": 20,
+          "min": 18.900209,
+          "median": 22.600958,
+          "p95": 29.013834,
+          "max": 29.316208
+        },
+        "warm": {
+          "n": 20,
+          "min": 0.692709,
+          "median": 1.1380625,
+          "p95": 3.337666,
+          "max": 4.295333
+        }
+      }
+    }
+  ],
+  "identities": {
+    "baseline": [
+      "8c23cd524c28048a0f3a859fb86f4e001428c9a9",
+      "9faff2af0dbf26d6c6b7325cb061110e22494cb9cc8a1f271d11e83a5cd256f2",
+      10907429339,
+      36246971815
+    ],
+    "candidate": [
+      "c1997e8d770fe7c6c60677563956409b97cb0eb5",
+      "889e6b1358174c86020707fa8c8249275b83f1953e8728b623a6493357280188",
+      10908661001,
+      36248257971
+    ]
+  },
+  "checks": {
+    "sessions": 24,
+    "GET_observations": 960,
+    "mutation_observations": 480,
+    "p95_definition": "nearest rank sorted[ceil(.95*n)-1]",
+    "same_inputs_within_text_kind": true,
+    "same_task_fields_except_created_updated_at_within_text_kind": true,
+    "first_warm_parsed_body_equal": true,
+    "first_route_miss_warm_cache_hit": true,
+    "all_owned_servers_reaped_exit_zero": true,
+    "scope": "fresh TCP per request; measured before connection request through full response body read; JSON parsing/decompression excluded. No pooling across text kind, requested encoding or phase."
+  }
+}

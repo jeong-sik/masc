@@ -428,22 +428,32 @@ module Syntax = struct
 end
 
 let strip_sgr text =
-  (* Rows carry only SGR sequences (ESC '[' … 'm'); a scanner is enough. *)
-  let buf = Buffer.create (String.length text) in
+  (* Rows carry only SGR sequences (ESC '[' … 'm'). Copy ordinary spans,
+     preserving their bytes, and allocate the buffer only after finding an opener. *)
   let length = String.length text in
-  let rec go i =
-    if i >= length then ()
-    else if Char.equal text.[i] '\027' && i + 1 < length
-            && Char.equal text.[i + 1] '[' then (
-      let j = ref (i + 2) in
-      while !j < length && not (Char.equal text.[!j] 'm') do incr j done;
-      go (min length (!j + 1)))
-    else (
-      Buffer.add_char buf text.[i];
-      go (i + 1))
+  let rec next_sgr offset =
+    match String.index_from_opt text offset '\027' with
+    | Some i when i + 1 < length && Char.equal text.[i + 1] '[' -> Some i
+    | Some i -> next_sgr (i + 1)
+    | None -> None
   in
-  go 0;
-  Buffer.contents buf
+  match next_sgr 0 with
+  | None -> text
+  | Some first ->
+      let buf = Buffer.create length in
+      let rec copy_span start opener =
+        Buffer.add_substring buf text start (opener - start);
+        match String.index_from_opt text (opener + 2) 'm' with
+        | None -> Buffer.contents buf
+        | Some stop ->
+            let start = stop + 1 in
+            match next_sgr start with
+            | Some opener -> copy_span start opener
+            | None ->
+                Buffer.add_substring buf text start (length - start);
+                Buffer.contents buf
+      in
+      copy_span 0 first
 
 module Glyph = struct
   (* How far a piece of work has got: not started, being worked, finished,

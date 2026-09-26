@@ -165,16 +165,16 @@ let () =
   Browser_lane.install_stagehand_executor (Some (Backend.execute backend));
   let args fields = `Assoc fields in
   let lane = "lane", `String "stagehand" in
-  let tabs () = tool "BrowserTabs" (Tools.handle_tabs ~base_path:out ~tool_name:"masc_browser_tabs" ~start_time:0.0 (args [ lane ])) in
-  let session action = tool "BrowserSession" (Tools.handle_session ~tool_name:"masc_browser_session" ~start_time:0.0 (args [ "action", `String action; lane ])) in
-  let instruct fields = tool "BrowserInstruct" (Tools.handle_instruct ~tool_name:"masc_browser_instruct" ~start_time:0.0 (args fields)) in
+  let tabs () = tool "BrowserTabs" (Tools.handle_tabs ~base_path:out ~tool_name:"masc_browser_tabs" ~start_time:(Tool_timing.start ()) (args [ lane ])) in
+  let session action = tool "BrowserSession" (Tools.handle_session ~tool_name:"masc_browser_session" ~start_time:(Tool_timing.start ()) (args [ "action", `String action; lane ])) in
+  let instruct fields = tool "BrowserInstruct" (Tools.handle_instruct ~tool_name:"masc_browser_instruct" ~start_time:(Tool_timing.start ()) (args fields)) in
   let interact fields =
     tool "BrowserInteract"
-      (Tools.handle_interact ~base_path:out ~tool_name:"masc_browser_interact" ~start_time:0.0 (args (lane :: fields)))
+      (Tools.handle_interact ~base_path:out ~tool_name:"masc_browser_interact" ~start_time:(Tool_timing.start ()) (args (lane :: fields)))
   in
   let goto_fixture () =
     tool "BrowserGoto"
-      (Tools.handle_goto ~tool_name:"masc_browser_goto" ~start_time:0.0 (args [ "url", `String fixture_url; lane ]))
+      (Tools.handle_goto ~tool_name:"masc_browser_goto" ~start_time:(Tool_timing.start ()) (args [ "url", `String fixture_url; lane ]))
   in
   let title_at tab_id expected =
     let* listed = tabs () in
@@ -199,7 +199,7 @@ let () =
    | Ok (tab_id, _) ->
      let read mode =
        tool "BrowserRead"
-         (Tools.handle_read ~base_path:out ~tool_name:"masc_browser_read" ~start_time:0.0
+         (Tools.handle_read ~base_path:out ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ())
             (args [ lane; "tabId", `Int tab_id; "mode", `String mode ]))
      in
      let observed_viewport () =
@@ -234,7 +234,7 @@ let () =
      record "a page script's throw reaches the caller by its reason"
        (match
           tool "BrowserRead"
-            (Tools.handle_read ~base_path:out ~tool_name:"masc_browser_read" ~start_time:0.0
+            (Tools.handle_read ~base_path:out ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ())
                (args
                   [ lane; "tabId", `Int tab_id; "mode", `String "scene"
                   ; "scope", `Assoc [ "documentId", `String "stale-document"; "nodeId", `String "n0" ]

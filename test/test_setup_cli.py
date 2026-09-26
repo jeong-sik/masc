@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -46,6 +47,53 @@ class Setup(unittest.TestCase):
                                      '--cli-path', str(client)], capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 3, result.stderr)
             self.assertFalse((home / '.config/muse/auth.json').exists())
+
+    def test_muse_vendor_install_discovery_and_config_exit(self):
+        assert BINARY is not None
+        for config_exit in (False, True):
+            with self.subTest(config_exit=config_exit), tempfile.TemporaryDirectory(prefix='masc-muse-vendor-') as tmp:
+                home = Path(tmp)
+                auth = home / '.config/muse/auth.json'
+                auth.parent.mkdir(parents=True, mode=0o700)
+                auth.write_text(json.dumps({'schema_version': 1, 'providers': {
+                    'meta': {'api_key': 'SYNTHETIC-LOCAL-ONLY'}}}))
+                auth.chmod(0o600)
+                client = home / '.local/bin/muse'
+                client.parent.mkdir(parents=True, mode=0o700)
+                client.write_text('#!' + sys.executable + '\n' + ("""
+import sys
+sys.stdin.readline()
+sys.stderr.write('fixture invalid configuration\\n')
+sys.exit(3)
+""" if config_exit else """
+import json, sys
+def read():
+    return json.loads(sys.stdin.readline())
+def reply(request, result):
+    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': result}), flush=True)
+request = read()
+assert request['method'] == 'initialize'
+reply(request, {'serverInfo': {'name': 'fixture', 'version': '1.4.0'},
+    'userAgent': 'fixture', 'museHome': 'fixture', 'sessionDurability': 'ephemeral',
+    'schema': {'version': 1, 'fingerprint': 'fixture'}, 'grantedCapabilities': []})
+assert read()['method'] == 'initialized'
+request = read()
+assert request['method'] == 'model/list'
+reply(request, {'source': 'fakeCatalog', 'providerId': 'meta', 'profileId': None, 'models': []})
+for line in sys.stdin:
+    pass
+"""))
+                client.chmod(0o700)
+                env = {'PATH': '/usr/bin:/bin', 'HOME': str(home)}
+                result = subprocess.run([BINARY, 'runtime-muse-models', '--account-home', str(home),
+                                         '--cli-path', 'muse'], env=env,
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 1 if config_exit else 0, result.stderr)
+                if config_exit:
+                    self.assertIn('exit 3 (config or credential)', result.stderr)
+                else:
+                    self.assertEqual(json.loads(result.stdout)['source'], 'fakeCatalog')
+                    self.assertFalse(json.loads(result.stdout)['invocation_verified'])
 
     def test_muse_metadata_deadline_cli_boundary(self):
         assert BINARY is not None

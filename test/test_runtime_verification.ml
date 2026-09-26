@@ -1032,7 +1032,7 @@ tools-support = true
        "muse-auth-retryable", Some "client_not_authenticated";
        "muse-retryable", Some "provider_overloaded";
        "muse-rejected", Some "provider_rejected";
-       "muse-credential-exit", Some "client_not_authenticated";
+       "muse-credential-exit", Some "provider_rejected";
        "muse-wrong-model", Some "provider_rejected";
        "muse-hang", Some "timed_out"];
     Unix.unlink source;

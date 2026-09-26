@@ -113,7 +113,7 @@ Dashboard, Work, Keepers, Usage, Board, Workspace, System 이다. 이 RFC 는 �
 | 글자 맞추기·자르기·채우기 | 최상위 함수 약 24개 + 지역 함수 약 15개. 두 개는 칸이 아니라 바이트를 센다 | `Message_layout.fit_width` |
 | 스크롤 상한 계산 | 정본 옆에 약 46곳. `render.ml` 의 35곳은 정본을 부르지 않는다 | `Masc_tui_scroll` |
 | 스크롤·커서 상태 필드 | `mutable *_scroll` 51개, `mutable *_cursor` 45개(`bin/masc_tui_types.ml`) | 없음 |
-| 막대·게이지 | 6개 | 없음 |
+| 막대·게이지 | 7개 | 없음 |
 | "못 읽음" 생성자 | `Masc_tui_fetched` 옆에 `*_unread` 생성자 14개(이번 주 5개 추가) | `Masc_tui_fetched` |
 | Keeper 목록을 그리는 곳 | 7곳, 상태 어휘 4벌 | 없음 |
 | footer 힌트 | `~hints:"…"` 직접 문자열 14곳이 키 표를 지나친다 | `Masc_tui_keys` |
@@ -343,7 +343,7 @@ ID 열은 기본 우선순위를 가장 낮게 둔다. ID 는 복사 키로 가�
 
 ### 5.8 막대 하나
 
-막대·게이지 6벌(`ansi.ml:747`, `chart.ml:135`, `context_bars.ml:137/143/162`,
+막대·게이지 7벌(`ansi.ml:747`, `chart.ml:135`, `context_bars.ml:137/143/162`,
 `overview_providers.ml:43`, `overview_goals.ml:78`)을 `Masc_tui_chart.bar` 하나로 모은다.
 막대 옆에는 늘 숫자를 쓴다. 사용량 퍼센트에는 `사용` 을 붙인다. 지금 들어오는 사용량 값은 모두 사용한 비율이다
 (`Runtime_provider_usage_window.utilization`).
@@ -363,7 +363,7 @@ ID 열은 기본 우선순위를 가장 낮게 둔다. ID 는 복사 키로 가�
 ─ 최근 ─────────────────────────────
 ■ code-reviewer   turn 791  6.2s  no calls
 × pr-updater      turn failed · antigravity_cli
-쉬는 Keeper 12 · 오프라인 1
+쉬는 Keeper 10 · 오프라인 1
 ```
 
 - 상태 어휘는 Keepers 목록과 같다(§4.2).

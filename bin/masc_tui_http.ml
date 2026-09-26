@@ -1744,7 +1744,7 @@ let post_runtime_lane_action ~host ~port fields =
 ;;
 
 (** POST /api/v1/runtime/config/routing for [\[runtime\].media_failover]: the
-    vision read fleet, in order. The endpoint takes the whole list for this
+    vision runtimes, in order. The endpoint takes the whole list for this
     route -- it has no per-entry action -- so a caller must know it is sending
     everything the file should hold. *)
 let set_media_failover ~(host : string) ~(port : int) ~(runtime_ids : string list)

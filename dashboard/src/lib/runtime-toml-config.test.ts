@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { getStaticTOMLValue, parseTOML } from 'toml-eslint-parser'
 import {
   createRuntimeTomlBinding,
   deleteRuntimeTomlKey,
@@ -56,6 +57,70 @@ describe('runtime TOML dashboard editing helpers', () => {
       expect(edited).not.toContain('[providers.runpod_mtp]')
       expect(getRuntimeTomlKey(edited, 'providers.runpod_mtp', 'exact-body-timeout-s')).toBe('1200')
     }
+  })
+
+  it.each(['providers . "runpod_mtp"', "'providers' . 'runpod_mtp'", 'providers . "runpod\\u005fmtp"'])('edits semantic provider table %s without duplicating it', header => {
+    const source = sourceText.replaceAll('providers.runpod_mtp', header)
+    const edited = setRuntimeTomlProviderField(source, 'runpod_mtp', 'exact-body-timeout-s', 15)
+    const decoded = getStaticTOMLValue(parseTOML(edited))
+    expect(decoded).toMatchObject({ providers: { runpod_mtp: { 'exact-body-timeout-s': 15 } } })
+    expect(edited).toContain(`[${header}]`)
+    expect(edited).not.toContain('[providers.runpod_mtp]')
+    expect(parseRuntimeTomlEnvironment(edited).providers[0]?.id).toBe('runpod_mtp')
+  })
+
+  it('uses decoded keys and source ranges for value edits while preserving comments', () => {
+    const source = String.raw`[providers . "p"]
+"exact\u002dbody-timeout-s" = 10 # keep this operator note
+note = """
+[providers.p]
+exact-body-timeout-s = 900
+"""
+`
+    const edited = setRuntimeTomlProviderField(source, 'p', 'exact-body-timeout-s', 15)
+    expect(edited).toContain(String.raw`"exact\u002dbody-timeout-s" = 15 # keep this operator note`)
+    expect(getRuntimeTomlKey(edited, 'providers.p', 'exact-body-timeout-s')).toBe('15')
+    expect(getStaticTOMLValue(parseTOML(edited))).toMatchObject({ providers: { p: { 'exact-body-timeout-s': 15 } } })
+    expect(edited).toContain('exact-body-timeout-s = 900')
+    expect(parseRuntimeTomlEnvironment(edited).providers.map(provider => provider.id)).toEqual(['p'])
+  })
+
+  it('deletes a provider by parsed table identity, including escaped keys and bindings', () => {
+    const source = String.raw`[runtime]
+default = 'p.m'
+[runtime . assignments]
+"nick\u0030cave" = 'p.m'
+[providers . "\u0070"]
+protocol = 'openai-http'
+[providers . "p" . credentials]
+type = 'env'
+key = 'FIXTURE_TOKEN'
+['p' . "m"]
+`
+    const edited = cascadeDeleteProvider(source, 'p')
+    const parsed = getStaticTOMLValue(parseTOML(edited))
+    expect(parsed).toEqual({ runtime: { assignments: {} } })
+  })
+
+  it('preserves dotted model identity through model and binding edits', () => {
+    const source = `[providers.p]\nprotocol='openai-http'\n[models."m.v1"]\napi-name='m.v1'\nmax-context=128000\n[p."m.v1"]\nmax-concurrent=2\n`
+    const edited = setRuntimeTomlBindingField(setRuntimeTomlModelField(source, 'm.v1', 'max-context', 64000), 'p.m.v1', 'max-concurrent', 3)
+    expect(getStaticTOMLValue(parseTOML(edited))).toMatchObject({ models: { 'm.v1': { 'max-context': 64000 } }, p: { 'm.v1': { 'max-concurrent': 3 } } })
+    expect(parseRuntimeTomlEnvironment(edited).models[0]?.id).toBe('m.v1')
+    expect(createRuntimeTomlBinding(edited, 'p', 'm.v1')).toBe(edited)
+  })
+
+  it('projects quoted provider keys in a draft without reparsing their contents as TOML syntax', () => {
+    const source = `[providers."draft provider"]\nprotocol='openai-http'\n[providers."draft provider".credentials]\ntype='env'\nkey='FIXTURE_KEY'\n`
+    const edited = setRuntimeTomlProviderField(source, 'draft provider', 'exact-body-timeout-s', 15)
+    expect(parseRuntimeTomlEnvironment(edited).providers[0]).toMatchObject({
+      id: 'draft provider', protocol: 'openai-http', credentialKey: 'FIXTURE_KEY',
+    })
+    expect(getStaticTOMLValue(parseTOML(edited))).toMatchObject({ providers: { 'draft provider': { 'exact-body-timeout-s': 15 } } })
+  })
+
+  it('refuses to create a binding that an inline table already owns', () => {
+    expect(() => createRuntimeTomlBinding('p = { m = { enabled = true } }', 'p', 'm')).toThrow()
   })
 
   it('projects provider, model, and binding fields from runtime.toml source', () => {
@@ -216,22 +281,40 @@ candidates = ["rt-c"]
 
 [runtime.lanes.mixed]
 candidates = ["rt-a", 3]
-
-[runtime.lanes.twice]
-candidates = ["rt-a"]
-candidates = ["rt-b"]
 `
 
     expect(declaredRuntimeLaneCandidates(withLanes, 'coding')).toEqual(['rt-a', 'rt-x', 'rt-b'])
     expect(declaredRuntimeLaneCandidates(withLanes, 'vision.fast')).toEqual(['rt-c'])
     expect(declaredRuntimeLaneCandidates(withLanes, 'mixed')).toBeNull()
-    expect(declaredRuntimeLaneCandidates(withLanes, 'twice')).toBeNull()
+    expect(declaredRuntimeLaneCandidates(
+      '[runtime.lanes.twice]\ncandidates = ["rt-a"]\ncandidates = ["rt-b"]\n',
+      'twice',
+    )).toBeNull()
     expect(declaredRuntimeLaneCandidates(withLanes, 'missing')).toBeNull()
     expect(declaredRuntimeLaneCandidates(
       '[runtime]\nlanes = { coding = { candidates = ["rt-a"] } }\n',
       'coding',
     )).toBeNull()
-    expect(declaredRuntimeLaneCandidates('[runtime.lanes."a\\"b"]\ncandidates = ["rt-a"]\n', 'a"b')).toBeNull()
+    expect(declaredRuntimeLaneCandidates('[runtime.lanes."a\\"b"]\ncandidates = ["rt-a"]\n', 'a"b')).toEqual(['rt-a'])
+  })
+
+  it('uses parsed TOML identity and arrays for lane declarations', () => {
+    const source = String.raw`description = """
+[runtime.lanes.fake]
+candidates = ["not-real"]
+"""
+[ runtime . lanes . "coded\u002elane" ]
+"candidates" = ["rt\u002da", 'unadmitted#slot', "rt-b"]
+[runtime.lanes.other.child]
+candidates = ["not-a-lane"]
+`
+    expect(parseRuntimeTomlEnvironment(source).laneIds).toEqual(['coded.lane'])
+    expect(declaredRuntimeLaneCandidates(source, 'coded.lane')).toEqual(['rt-a', 'unadmitted#slot', 'rt-b'])
+    expect(declaredRuntimeLaneCandidates(source, 'fake')).toBeNull()
+    expect(declaredRuntimeLaneCandidates(source, 'other')).toBeNull()
+    const invalid = source + '\n[runtime.lanes.bad]\ncandidates = ["a"\n'
+    expect(declaredRuntimeLaneCandidates(invalid, 'coded.lane')).toBeNull()
+    expect(parseRuntimeTomlEnvironment(invalid).laneIds).toEqual([])
   })
 
   it('updates an existing quoted-key assignment line in place instead of appending a duplicate', () => {
@@ -303,7 +386,7 @@ sangsu = "runpod_mtp.qwen"
     )
   })
 
-  it('warns instead of silently dropping a line keyLineMatch still cannot parse', () => {
+  it('reports malformed TOML without publishing a partial assignment projection', () => {
     const withMalformedLine = `${sourceText}
 
 [runtime.assignments]
@@ -313,10 +396,11 @@ this line has no equals sign
 
     const environment = parseRuntimeTomlEnvironment(withMalformedLine)
 
-    expect(environment.assignments).toEqual({
-      nick0cave: 'ollama_cloud.deepseek-v4-flash',
-    })
-    expect(environment.warnings.some(w => w.includes('[runtime.assignments]'))).toBe(true)
+    expect(environment.assignments).toEqual({})
+    expect(environment.parseError).toMatch(/TOML \d+:\d+:/)
+    expect(environment.warnings).toEqual([environment.parseError])
+    expect(() => setRuntimeTomlDefault(withMalformedLine, 'p.m')).toThrow()
+    expect(runtimeTomlImpactSummary(sourceText, withMalformedLine)).toBeNull()
   })
 
   it('patches the runtime default without touching other sections', () => {
@@ -411,15 +495,15 @@ api-name = "extra"
 
     const impact = runtimeTomlImpactSummary(sourceText, next)
 
-    expect(impact.defaultRuntimeChanged).toBe(true)
-    expect(impact.defaultRuntimeBefore).toBe('runpod_mtp.qwen')
-    expect(impact.defaultRuntimeAfter).toBe('openai.gpt')
-    expect(impact.runtimeAssignmentsChanged).toBe(true)
-    expect(impact.providerCountDelta).toBe(0)
-    expect(impact.modelCountDelta).toBe(1)
-    expect(impact.bindingCountDelta).toBe(0)
-    expect(impact.lineDelta).toBeGreaterThan(0)
-    expect(impact.charDelta).toBeGreaterThan(0)
+    expect(impact?.defaultRuntimeChanged).toBe(true)
+    expect(impact?.defaultRuntimeBefore).toBe('runpod_mtp.qwen')
+    expect(impact?.defaultRuntimeAfter).toBe('openai.gpt')
+    expect(impact?.runtimeAssignmentsChanged).toBe(true)
+    expect(impact?.providerCountDelta).toBe(0)
+    expect(impact?.modelCountDelta).toBe(1)
+    expect(impact?.bindingCountDelta).toBe(0)
+    expect(impact?.lineDelta).toBeGreaterThan(0)
+    expect(impact?.charDelta).toBeGreaterThan(0)
   })
 
   it('does not report assignment-only reformatting as an assignment change', () => {
@@ -436,7 +520,7 @@ sangsu = "runpod_mtp.qwen"
 
     const impact = runtimeTomlImpactSummary(before, after)
 
-    expect(impact.runtimeAssignmentsChanged).toBe(false)
+    expect(impact?.runtimeAssignmentsChanged).toBe(false)
   })
 
   it('cascades provider deletion to credentials, bindings, and default runtime', () => {

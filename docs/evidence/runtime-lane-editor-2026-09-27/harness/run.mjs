@@ -12,9 +12,9 @@ const checkout=path.resolve(process.argv[2]);
 const out=path.resolve(process.argv[3]);
 const dashboard=path.join(checkout,'dashboard');
 const harness=path.dirname(fileURLToPath(import.meta.url));
-const sourceCommit='af7a80c4b87b9729a468e62f70f0c033cf1d6d64';
 const git=(...args)=>execFileSync('git',args,{cwd:checkout,encoding:'utf8'}).trim();
-// Later documentation-only heads are allowed; product source and lock must match.
+const sourceCommit=git('rev-parse','HEAD');
+// Record the actual committed source; never measure uncommitted product edits.
 git('diff','--exit-code',sourceCommit,'--','dashboard/src','dashboard/pnpm-lock.yaml');
 const require=createRequire(path.join(dashboard,'package.json'));
 const {chromium}=require('playwright');

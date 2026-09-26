@@ -1801,7 +1801,7 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
     set_size (60, 120);
     let draw ?(columns = 120) ?(tool_visibility = Tui_types.Tools_full)
         ?(outcome = Masc_tui_keeper_chat_transcript.Returned)
-        ?(execution_id = Some "exec-1") result =
+        ?(execution_id = Some "exec-1") ?(tool_name = "Execute") result =
       set_size (60, columns);
       let state =
         Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
@@ -1831,7 +1831,7 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
        | Error detail -> fail ("the calls fixture did not decode: " ^ detail));
       let activity =
         Masc_tui_keeper_chat_transcript.make_tool_activity ?execution_id
-          ~call_id:(Some "call-1") ~tool_name:"Execute"
+          ~call_id:(Some "call-1") ~tool_name
           ~args:{|{"argv":["git","log"]}|} ~outcome
           ~duration:None ()
       in
@@ -1922,6 +1922,7 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
     let plain =
       draw ~columns:50 ~tool_visibility:Tui_types.Tools_results
         ~execution_id:None
+        ~tool_name:"keeper_artifact_read_with_a_very_long_name"
         {|{"ok":true,"status":{"kind":"exit","code":0},"output":"UNJOINED_RESULT","typed":true}|}
     in
     let has affix = List.exists (Astring.String.is_infix ~affix) plain in

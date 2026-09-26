@@ -71,10 +71,6 @@ val terminal_effect_boundary_decision
     envelope. *)
 
 module For_testing : sig
-  val person_queued_probe :
-    turn_kind:Turn_record.turn_kind ->
-    yield_requested:(unit -> (yield_request option, string) result) option ->
-    (unit -> bool) option
   val native_tool_boundary :
     keeper_name:string ->
     repetition_execution:Keeper_repetition_scope.Execution.t option ->

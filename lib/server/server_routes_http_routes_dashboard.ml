@@ -993,7 +993,8 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
   | Ok (Runtime_route_runtime_ids (Runtime_named_lane lane_id, runtime_ids))
     ->
     (match Runtime.set_runtime_lane_candidates ~lane_id ~runtime_ids () with
-     | Error msg ->
+     | Error error ->
+       let msg = Runtime.lane_set_error_to_string error in
        audit_runtime_config_write state agent_name
          ~operation:
            (Runtime_config_routing_list
@@ -1007,6 +1008,21 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
            (Runtime_config_routing_list
               (Runtime_named_lane lane_id, runtime_ids))
          ~receipt req reqd)
+  | Ok (Runtime_route_named_lane_set_if_revision (lane_id, runtime_ids, revision)) ->
+    let operation = Runtime_config_routing_list (Runtime_named_lane lane_id, runtime_ids) in
+    (match Runtime.set_runtime_lane_candidates ~lane_id ~runtime_ids
+             ~expected_source_revision:revision () with
+     | Error error ->
+       let msg = Runtime.lane_set_error_to_string error in
+       audit_runtime_config_write state agent_name ~operation ~text:body_str
+         ~outcome:(Audit_log.Failure msg) ();
+       respond_dashboard_error
+         ~status:(match error with
+                  | Runtime.Lane_set_revision_conflict _ -> `Conflict
+                  | Runtime.Lane_set_invalid _ -> `Bad_request)
+         ~request:req reqd msg
+     | Ok receipt ->
+       respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
   | Ok (Runtime_route_runtime_id (Runtime_exact_lane _, _)) ->
     respond_dashboard_error ~status:`Bad_request ~request:req reqd
       "exact-output lane runtime_ids required"
@@ -1186,6 +1202,8 @@ module For_testing = struct
           , match runtime_id with None -> [] | Some value -> [ value ] )
     | Ok (Runtime_route_runtime_ids (lane, runtime_ids)) ->
         Ok (lane_string lane, "runtime_ids", runtime_ids)
+    | Ok (Runtime_route_named_lane_set_if_revision (lane_id, runtime_ids, _)) ->
+        Ok (lane_id, "runtime_ids_if_revision", runtime_ids)
     | Ok (Runtime_route_lane_created (lane_id, runtime_ids)) ->
         Ok (lane_id, "create", runtime_ids)
     | Ok (Runtime_route_lane_removed lane_id) -> Ok (lane_id, "remove", [])

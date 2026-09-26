@@ -200,6 +200,64 @@ describe('RuntimeEnvironmentEditor assignments section', () => {
 
     render(null, container)
   })
+
+  // RFC-0457: an assignment may name a declared lane. The select lists lanes
+  // in their own group and shows a lane-assigned keeper's lane, not the first
+  // runtime id.
+  it('offers declared lanes as assignment targets and shows a lane assignment as its value', () => {
+    keepers.value = [
+      { name: 'nick0cave', status: 'idle' },
+      { name: 'issue_king', status: 'idle' },
+    ]
+    const onAssignmentChange = vi.fn()
+    const sourceText = sourceTextWithQuotedAssignments
+      .replace('"nick0cave" = "ollama_cloud.deepseek-v4-flash"', '"nick0cave" = "coding"')
+      + `
+[runtime.lanes.coding]
+candidates = ["ollama_cloud.deepseek-v4-flash", "ollama_cloud.minimax-m3"]
+
+[runtime.lanes."ollama_cloud.minimax-m3"]
+candidates = ["ollama_cloud.minimax-m3"]
+`
+
+    const container = document.createElement('div')
+    mountEditor(container, { sourceText, onAssignmentChange })
+
+    const select = container.querySelector('[aria-label="nick0cave 런타임 배정"]') as HTMLSelectElement
+    expect(select.value).toBe('coding')
+    const groups = Array.from(select.querySelectorAll('optgroup'))
+    expect(groups.map(group => group.label)).toEqual(['레인', '런타임'])
+    expect(Array.from(groups[0]!.querySelectorAll('option')).map(option => option.value))
+      .toEqual(['coding', 'ollama_cloud.minimax-m3'])
+    // A lane shadowing a runtime id is listed once, as the lane it resolves to.
+    expect(Array.from(groups[1]!.querySelectorAll('option')).map(option => option.value))
+      .toEqual(['ollama_cloud.deepseek-v4-flash'])
+    expect(select.textContent).not.toContain('알 수 없음')
+
+    fireEvent.change(
+      container.querySelector('[aria-label="issue_king 런타임 배정"]') as HTMLSelectElement,
+      { target: { value: 'coding' } },
+    )
+    expect(onAssignmentChange).toHaveBeenLastCalledWith('issue_king', 'coding')
+
+    render(null, container)
+  })
+
+  it('keeps an assignment the file names but nothing declares as its own option', () => {
+    keepers.value = [{ name: 'nick0cave', status: 'idle' }]
+    const sourceText = sourceTextWithQuotedAssignments
+      .replace('"nick0cave" = "ollama_cloud.deepseek-v4-flash"', '"nick0cave" = "gone"')
+
+    const container = document.createElement('div')
+    mountEditor(container, { sourceText })
+
+    const select = container.querySelector('[aria-label="nick0cave 런타임 배정"]') as HTMLSelectElement
+    expect(select.value).toBe('gone')
+    expect(select.querySelector('optgroup')).toBeNull()
+    expect(select.options[0]?.textContent).toBe('gone (알 수 없음)')
+
+    render(null, container)
+  })
 })
 
 const sourceWithCapabilities = `[runtime]

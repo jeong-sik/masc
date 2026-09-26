@@ -60,6 +60,10 @@ export interface RuntimeTomlBinding {
 export interface RuntimeTomlEnvironment {
   defaultRuntimeId: string
   assignments: Record<string, string>
+  // Declared [runtime.lanes.<id>] table names. Since RFC-0457 a keeper
+  // assignment may name a lane: the server validates assignments lane first,
+  // runtime second (runtime.ml assignment_references, Lane_then_runtime).
+  laneIds: string[]
   providers: RuntimeTomlProvider[]
   models: RuntimeTomlModel[]
   bindings: RuntimeTomlBinding[]
@@ -209,6 +213,48 @@ function modelIds(document: TomlDocument): string[] {
   return tableIds(document, 'models')
 }
 
+// Identity comes from the same parsed TOML paths as providers and models.
+// Only a lane's own standard table is an editable declaration.
+function laneSections(document: TomlDocument): TomlSection[] {
+  return document.sections.filter(section =>
+    section.kind === 'standard' && section.path.length === 3
+    && section.path[0] === 'runtime' && section.path[1] === 'lanes')
+}
+
+function laneIdsFromDocument(document: TomlDocument): string[] {
+  return laneSections(document).map(section => section.path[2]!)
+}
+
+function laneCandidatesFromDocument(document: TomlDocument, laneId: string): string[] | null {
+  const section = laneSections(document).find(section => section.path[2] === laneId)
+  if (!section) return null
+  const entry = entryOf(section, 'candidates')
+  if (!entry) return null
+  const values = getStaticTOMLValue(entry.value)
+  return Array.isArray(values) && values.every((value): value is string => typeof value === 'string')
+    ? values : null
+}
+
+// Invalid TOML never supplies a partial order for a whole-lane write. The
+// environment reader reports its parse error separately on the surface.
+export function declaredRuntimeLanes(sourceText: string): Map<string, string[] | null> {
+  try {
+    const document = parseDocument(sourceText)
+    return new Map(laneIdsFromDocument(document).map(id => [id, laneCandidatesFromDocument(document, id)]))
+  } catch (error) {
+    if (!(error instanceof ParseError)) throw error
+    return new Map()
+  }
+}
+
+export function declaredRuntimeLaneCandidates(sourceText: string, laneId: string): string[] | null {
+  return declaredRuntimeLanes(sourceText).get(laneId) ?? null
+}
+
+export function declaredRuntimeLaneIds(sourceText: string): string[] {
+  return [...declaredRuntimeLanes(sourceText).keys()]
+}
+
 function bindingSections(document: TomlDocument): Array<{ providerId: string; modelId: string; section: string }> {
   return document.sections.flatMap(section => {
     const [providerId, modelId] = section.path
@@ -312,7 +358,7 @@ export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvi
   } catch (error) {
     if (!(error instanceof ParseError)) throw error
     const parseError = `TOML ${error.lineNumber}:${error.column + 1}: ${error.message}`
-    return { defaultRuntimeId: '', assignments: {}, providers: [], models: [], bindings: [], warnings: [parseError], parseError }
+    return { defaultRuntimeId: '', assignments: {}, laneIds: [], providers: [], models: [], bindings: [], warnings: [parseError], parseError }
   }
   const runtimeValues = sectionValues(document, 'runtime')
   const assignmentValues = sectionValues(document, 'runtime.assignments')
@@ -330,6 +376,7 @@ export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvi
   return {
     defaultRuntimeId: asString(runtimeValues.default),
     assignments,
+    laneIds: laneIdsFromDocument(document),
     providers,
     models,
     bindings,

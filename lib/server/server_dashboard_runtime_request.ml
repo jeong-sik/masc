@@ -74,6 +74,7 @@ let parse_runtime_route_lane lane =
 type runtime_route_body =
   | Runtime_route_runtime_id of runtime_route_lane * string option
   | Runtime_route_runtime_ids of runtime_route_lane * string list
+  | Runtime_route_named_lane_set_if_revision of string * string list * string
   | Runtime_route_lane_created of string * string list
   | Runtime_route_lane_removed of string
   | Runtime_route_lane_renamed of string * string
@@ -155,7 +156,16 @@ let parse_set_route_body json lane =
   | Error _ as err -> err
   | Ok parsed_lane ->
     (match parsed_lane with
-     | Runtime_named_lane _ | Runtime_media_failover | Runtime_exact_lane _ ->
+     | Runtime_named_lane lane_id ->
+       (match required_string_array_field json "runtime_ids" with
+        | Error _ as err -> err
+        | Ok runtime_ids ->
+          (match Json_util.assoc_member_opt "expected_source_revision" json with
+           | None -> Ok (Runtime_route_runtime_ids (parsed_lane, runtime_ids))
+           | Some (`String revision) when String_util.is_lowercase_sha256_hex revision ->
+             Ok (Runtime_route_named_lane_set_if_revision (lane_id, runtime_ids, revision))
+           | Some _ -> Error "expected_source_revision must be lowercase SHA-256 hex"))
+     | Runtime_media_failover | Runtime_exact_lane _ ->
        (match required_string_array_field json "runtime_ids" with
         | Error _ as err -> err
         | Ok runtime_ids -> Ok (Runtime_route_runtime_ids (parsed_lane, runtime_ids)))

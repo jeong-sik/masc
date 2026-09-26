@@ -73,6 +73,8 @@ assert "unsandboxed(*)" not in permissions["deny"]
 POLICY
 conversation=conversation-antigravity-fixture
 turns=1
+resuming=0
+turn_counter="$HOME/fixture-vendor-turn-count"
 mode=
 sandbox=0
 slash_commands_disabled=0
@@ -90,13 +92,17 @@ for arg in "$@"; do
     --disable-slash-commands) slash_commands_disabled=1 ;;
     --new-project) new_project=1 ;;
     --conversation) expect_conversation=1 ;;
-    conversation-antigravity-fixture) turns=73 ;;
+    conversation-antigravity-fixture) resuming=1 ;;
   esac
 done
 test "$expect_mode" -eq 0
 test "$mode" = plan
 test "$sandbox" -eq 1
 test "$slash_commands_disabled" -eq 1
+if [ "$resuming" -eq 1 ]; then
+  previous_turns=$(cat "$turn_counter")
+  if [ "$previous_turns" -eq 1 ]; then turns=73; else turns=$((previous_turns + 1)); fi
+fi
 if [ "$turns" -eq 1 ]; then test "$new_project" -eq 1; else test "$new_project" -eq 0; fi
 cat > %s
 printf '{"event":"init","conversation_id":"%%s","init":{"model":"gemini-fixture","cwd":%s,"tools":["call_mcp_tool"],"permission_mode":"always-proceed"}}\n' "$conversation"
@@ -140,6 +146,7 @@ PY
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":0,"state":"DONE","step_type":"system_message"}}\n' "$conversation"
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"DONE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
+printf '%%s\n' "$turns" > "$turn_counter"
 printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"MASC_ANTIGRAVITY_KEEPER_OK","error":null,"num_turns":%%d,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":40,"total_tokens":16}}}\n' "$conversation" "$turns"
 |}
       (shell_quote
@@ -614,10 +621,10 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       check string "the refused Gate continuation never reaches the CLI"
                         prompt_before_gate (In_channel.with_open_bin
                           (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all);
-                      (* The fixture answers 73 cumulative turns only when
-                         asked to resume its conversation; a fresh start
-                         reports 1. The control resume runs last, so the
-                         checks below read a session settled at ordinal 73. *)
+                      (* The fixture jumps to 73 on the first resume to prove
+                         provider counts differ from the local ordinal, then
+                         increments on later resumes. Fresh starts reset to 1.
+                         The final control is a first resume, settled at 73. *)
                       let run_context ?(hooks = hooks) ~goal (system_prompt, initial_messages) =
                         match Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
@@ -645,7 +652,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         (Fs_compat.load_file (Runtime_antigravity_home.oauth_path old_home));
                       write_file ~mode:0o600 oauth_source
                         (Masc_test_deps.antigravity_oauth_fixture ~revision:"source-refresh" "operator-oauth-fixture");
-                      check int "ordinary source OAuth refresh resumes the existing session" 73
+                      check int "ordinary source OAuth refresh resumes the existing session" 74
                         (run_context ~goal:"Keep this account after OAuth refresh" unchanged_context);
                       check string "source refresh retains native credential rotation"
                         (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "operator-oauth-fixture")

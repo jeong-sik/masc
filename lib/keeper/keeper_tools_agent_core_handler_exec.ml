@@ -40,7 +40,7 @@ let execute_with_observers_with_authority
       ()
   : execution_result
   =
-  let t0 = Time_compat.now () in
+  let t0 = Tool_timing.start () in
   let invocation_fields = agent_core_invocation_fields agent_core_invocation in
   (* #35456: the parent invocation's identity rides into the dispatch context
      so in-process sub-calls (vision candidate attempts) can join their
@@ -391,7 +391,7 @@ let execute_with_observers_with_authority
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     let ts = Time_compat.now () in
-    let duration_ms = int_of_float ((ts -. t0) *. 1000.0) in
+    let duration_ms = int_of_float ((ts -. Tool_timing.started_at t0) *. 1000.0) in
     let error_text = Printexc.to_string exn in
     let exception_result =
       Tool_result.make_err

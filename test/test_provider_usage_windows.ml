@@ -367,8 +367,8 @@ let test_kimi_coding_usages () =
     (refused Usage.decode_kimi_coding_usages
        {|{"limits":[],"usage":{"limit":"10","used":"11"}}|});
   check (list string) "a count left out is read from the other one"
-    [ "limit=- five_hour fraction 0 resets=1789952947"
-    ; "limit=- label \"usage (provider resetTime)\" fraction 1 resets=1790215747"
+    [ "limit=- five_hour fraction 0 resets=1789952947 role=gates"
+    ; "limit=- label \"usage (provider resetTime)\" fraction 1 resets=1790215747 role=gates"
     ]
     (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
        kimi_coding_usages_zero_counts_left_out);
@@ -385,11 +385,11 @@ let test_kimi_coding_usages () =
     (refused Usage.decode_kimi_coding_usages
        {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","remaining":"101"}}]}|});
   check (list string) "a null count is a count left out"
-    [ "limit=- five_hour fraction 0.25 resets=-" ]
+    [ "limit=- five_hour fraction 0.25 resets=- role=gates" ]
     (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
        {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":null,"remaining":"75"}}]}|});
   check (list string) "no remaining is all of the limit used"
-    [ "limit=- five_hour fraction 1 resets=-" ]
+    [ "limit=- five_hour fraction 1 resets=- role=gates" ]
     (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
        {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","remaining":"0"}}]}|});
   check string "used above limit is refused when remaining is present too"

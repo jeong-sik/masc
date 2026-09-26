@@ -60,7 +60,17 @@ jobs:
       - name: Install native build dependencies
         run: |
           brew install flock gmp libpq openssl@3 zstd
-          echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$(brew --prefix libpq)/lib/pkgconfig" >> "$GITHUB_ENV"
+          openssl_prefix="$(brew --prefix openssl@3)"
+          libpq_prefix="$(brew --prefix libpq)"
+          # Match the release build: piaf's C stubs also need the keg-only
+          # OpenSSL headers and libraries, beyond pkg-config discovery.
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
       - name: Pin and install OCaml dependencies
         run: |
           scripts/opam-pin-external-deps.sh --with-bisect

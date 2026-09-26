@@ -1574,6 +1574,7 @@ let run_keeper_cycle
                       ~degraded_retry_applied
                       ~degraded_retry_deferred
                       ~keeper_turn_id
+                      ~spend:attempt_spend
                       execution_outcome
                   in
                   (match success with

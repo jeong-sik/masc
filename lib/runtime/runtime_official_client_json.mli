@@ -68,6 +68,18 @@ module Make (E : Error) : sig
       stay control flow rather than turning into a reported protocol failure. *)
 end
 
-val bounded_tail : limit:int -> string -> string -> string
-(** [bounded_tail ~limit current addition] appends and keeps the last [limit]
-    bytes. Used for the rolling stderr tail each runtime reports on failure. *)
+module Stderr : sig
+  type t
+
+  val create : limit:int -> t
+  val append : t -> string -> unit
+  val contents : t -> string
+  (** Bounded diagnostic capture shared by official clients. Mask the whole
+      captured stream before exposing or shortening it: a credential or PEM
+      block may span reads and lines. Once raw input exceeds [limit], discard
+      it and return an omission marker, never a suffix whose secret prefix
+      was lost. An ordinary short diagnostic needs no trailing newline.
+      [contents] contains at most [limit] UTF-8 bytes. [create] requires a
+      positive limit. This masks recognized secret shapes; it does not claim
+      that arbitrary unlabelled text cannot be a credential. *)
+end

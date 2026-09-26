@@ -1057,6 +1057,77 @@ let test_empty_success_stderr_tail_cuts_at_a_character_boundary () =
        | Ok _ -> fail "blank SUCCESS with a Korean stderr was admitted")
 ;;
 
+(* Both detail sinks share the structural masker used by the other log sinks. *)
+let test_stderr_tail_redacts_sensitive_lines () =
+  let redacted = Runtime_antigravity.redact_stderr_tail in
+  check string "empty diagnostic" "" (redacted "");
+  check string "Authorization keeps context and masks its value"
+    "Authorization: [REDACTED]" (redacted "Authorization: Bearer ya29.aBcDeFgHi");
+  check string "lowercase bearer is masked"
+    "Authorization: [REDACTED]" (redacted "Authorization: bearer ya29.synthetic");
+  check string "opaque token assignment is masked"
+    "token=[REDACTED]" (redacted "token=opaque-fixture-value");
+  check string "opaque environment API key is masked"
+    "VENDOR_API_KEY=[REDACTED]" (redacted "VENDOR_API_KEY=opaque-fixture-value");
+  check string "standalone GitHub token is masked"
+    "failure: [REDACTED]" (redacted "failure: ghp_syntheticfixture");
+  check string "standalone API key is masked"
+    "failure: [REDACTED]" (redacted "failure: sk-syntheticfixture");
+  check string "ordinary diagnostics remain readable"
+    "spawn: /tmp/fixture/agy: no such file"
+    (redacted "spawn: /tmp/fixture/agy: no such file");
+  check string "other lines are preserved"
+    "line1 stays\nAuthorization: [REDACTED]\nline3 stays"
+    (redacted "line1 stays\nAuthorization: Bearer sk-fixture\nline3 stays")
+;;
+
+(* End to end: the 8KB Process_exited detail and the 200-byte empty-success
+   tail share the same redaction point, so a fixture stderr carrying a
+   credential produces a detail an operator can paste without leaking. *)
+let test_process_exit_detail_masks_the_stderr_line () =
+  with_fixture
+    ~exit_code:1
+    ~stderr_line:"Authorization: Bearer ya29.aBcDeFgHi"
+    (* No result event: with a parsed result the blank-success arm would own
+       this shape, so this fixture pins the bare process-exit path, whose
+       detail is exactly the stderr tail. *)
+    [ init () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Process_exited detail) ->
+         check bool "detail carries the exit code" true
+           (String.starts_with ~prefix:"exit code 1: " detail);
+         check bool "detail masks the credential" true
+           (String_util.contains_substring detail "[REDACTED]");
+         check bool "detail never carries the token" true
+           (not (String_util.contains_substring detail "ya29"))
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "a blank result after a nonzero exit was admitted")
+;;
+
+(* The same redaction point owns the empty-success path (#39164): a blank
+   result with a credential-bearing stderr must produce a Turn_failed
+   detail the operator can paste without leaking. *)
+let test_empty_success_detail_masks_the_stderr_line () =
+  with_fixture
+    ~stderr_line:"Authorization: Bearer ya29.aBcDeFgHi"
+    [ init (); result ~response:"" () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Turn_failed detail) ->
+         check bool
+           "detail carries the empty-success prefix" true
+           (String.starts_with
+              ~prefix:"successful result response has no deliverable content"
+              detail);
+         check bool "detail masks the credential" true
+           (String_util.contains_substring detail "[REDACTED]");
+         check bool "detail never carries the token" true
+           (not (String_util.contains_substring detail "ya29"))
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "a blank result was admitted")
+;;
+
 let test_duplicate_keys_fail_closed () =
   let duplicate =
     {|{"event":"init","event":"init","conversation_id":"conversation-1","init":{"model":"gemini-fixture","cwd":"/tmp","permission_mode":"always-proceed"}}|}
@@ -1558,6 +1629,18 @@ let () =
             "an empty success stderr tail cuts at a character boundary"
             `Quick
             test_empty_success_stderr_tail_cuts_at_a_character_boundary
+        ; test_case
+            "a stderr tail with credentials is redacted line by line"
+            `Quick
+            test_stderr_tail_redacts_sensitive_lines
+        ; test_case
+            "a process exit detail masks the stderr line"
+            `Quick
+            test_process_exit_detail_masks_the_stderr_line
+        ; test_case
+            "an empty success detail masks the stderr line"
+            `Quick
+            test_empty_success_detail_masks_the_stderr_line
         ] )
     ; "live official client", [ test_case "official agy start and resume" `Slow test_live_start_and_resume ]
     ]

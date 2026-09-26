@@ -11346,6 +11346,15 @@ let test_verification_evidence_unavailable_and_unknown_kind () =
    | Ok (Masc.Tui_decode.Evidence_access_unavailable reason) ->
        Alcotest.(check string) "reason" "snapshot invalid" reason
    | Ok _ | Error _ -> Alcotest.fail "unavailable access did not decode");
+  List.iter (fun source ->
+    match Masc.Tui_decode.decode_verification_evidence
+      (Yojson.Safe.from_string source) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "an unreadable state invented its missing cause")
+    [ {|{"result":{"evidence":{"access":"unavailable"}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable","reference":"artifact:gone"}]}}}|}
+    ];
   match
     Masc.Tui_decode.decode_verification_evidence
       (Yojson.Safe.from_string

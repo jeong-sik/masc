@@ -62,6 +62,9 @@ type event =
   | Extension_log of Yojson.Safe.t option
   | Malformed_message of string
   | Unexpected_response of { id : int }
+  | Cancelled_call_answered of { method_ : string; rejected : bool }
+      (** The reply arrived before the cancelled caller resumed. No call
+          remains abandoned; owners must not retire the session for this call. *)
   | Abandoned_call_ended of { method_ : string; rejected : bool }
       (** The reply of a call whose caller had left. *)
   | Abandoned_call_unanswered of { method_ : string; waited_s : float }

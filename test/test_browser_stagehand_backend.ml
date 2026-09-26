@@ -85,7 +85,7 @@ let with_backend ?(configure = ignore) ?(call_hook = fun _ -> None) f =
           | exception (Eio.Cancel.Cancelled _ as exn) ->
             behaviour.act_cancelled <- true;
             if behaviour.answer_on_cancel then
-              session.log (Session.Abandoned_call_ended
+              session.log (Session.Cancelled_call_answered
                 { method_ = "stagehand.act"; rejected = false });
             raise exn)
        | Wire.Observe _ | Wire.Extract _ | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_click _

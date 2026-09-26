@@ -428,6 +428,7 @@ let test_dynamic_tool_callback ?(worker_pool = false) () =
           ; "properties", `Assoc [ "marker", `Assoc [ "type", `String "string" ] ]
           ; "required", `List [ `String "marker" ]
           ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:id input ->
           check bool "tool callback remains on the protocol owner" true
@@ -558,6 +559,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { success = false
@@ -588,6 +590,7 @@ let test_context_error_records_prior_tool_effect () =
     { name = "masc_probe"
     ; description = "Record one deterministic tool effect"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { Runtime_codex_app_server.success = true
@@ -615,6 +618,64 @@ let test_context_error_records_prior_tool_effect () =
          ()
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "context overflow after a tool effect was not reported")
+;;
+
+let test_read_only_overflow_contract () =
+  let completed_failure =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
+  in
+  let notification_failure =
+    {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}|}
+  in
+  List.iter (fun terminal ->
+    List.iter (fun (call_effect, expected) ->
+      let tool : Runtime_codex_app_server.dynamic_tool =
+        { name = "masc_probe"; description = "Declared effect fixture"
+        ; input_schema = `Assoc [ "type", `String "object" ]
+        ; call_effect = (fun _ -> call_effect)
+        ; call = (fun ~call_id:_ _ ->
+            { success = true; content = "observed"; content_blocks = None; abort_turn = None })
+        }
+      in
+      with_fixture
+        [ init_result; account_chatgpt; thread_result; turn_result; tool_call_request; terminal ]
+        (fun path -> match run_fixture ~dynamic_tools:[tool] path with
+         | Error (Runtime_codex_app_server.Context_window_exceeded {tool_effect_attempted; _}) ->
+           check bool "effect contract reaches both terminal forms" expected tool_effect_attempted
+         | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+         | Ok _ -> fail "overflow unexpectedly succeeded"))
+      [ Agent_core.Tool.Read_only, false; Agent_core.Tool.Effect_possible, true ])
+    [ completed_failure; notification_failure ]
+;;
+
+let test_native_effect_before_overflow () =
+  let overflow =
+    {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}|}
+  in
+  let read : Runtime_codex_app_server.dynamic_tool =
+    { name = "masc_probe"; description = "Read before a native action"
+    ; input_schema = `Assoc ["type", `String "object"]
+    ; call_effect = (fun _ -> Agent_core.Tool.Read_only)
+    ; call = (fun ~call_id:_ _ ->
+        {success = true; content = "read"; content_blocks = None; abort_turn = None}) }
+  in
+  List.iter (fun method_ ->
+    List.iter (fun (kind, expected) ->
+      let item = Yojson.Safe.to_string (`Assoc [
+        "method", `String method_; "params", `Assoc [
+          "threadId", `String "thread-1"; "turnId", `String "turn-1";
+          "item", `Assoc ["type", `String kind; "id", `String "native-effect"]]]) in
+      with_fixture
+        [init_result; account_chatgpt; thread_result; turn_result; tool_call_request; item; overflow]
+        (fun path -> match run_fixture ~dynamic_tools:[read] path with
+         | Error (Runtime_codex_app_server.Context_window_exceeded {tool_effect_attempted; _}) ->
+           check bool (method_ ^ " " ^ kind ^ " effect boundary") expected tool_effect_attempted
+         | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+         | Ok _ -> fail "overflow unexpectedly succeeded"))
+      [ "commandExecution", true; "collabAgentToolCall", true;
+        "imageGeneration", true; "futureToolItem", true;
+        "reasoning", false; "dynamicToolCall", false ])
+    ["item/started"; "item/completed"]
 ;;
 
 let test_prompt_char_count () =
@@ -1327,7 +1388,8 @@ let test_thread_resume_sends_dynamic_tools () =
          { name = "masc_probe"
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
-         ; call =
+         ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
              (fun ~call_id:_ _ ->
                { success = true; content = "unused"; content_blocks = None; abort_turn = None })
          }
@@ -1383,7 +1445,8 @@ let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
          { name
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
-         ; call =
+         ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
              (fun ~call_id:_ _ ->
                { success = true; content = "unused"; content_blocks = None; abort_turn = None })
          }
@@ -1588,6 +1651,7 @@ let test_elicitation_cancel_then_dynamic_tool () =
       let tool : Runtime_codex_app_server.dynamic_tool =
         { name = "masc_probe"; description = "MASC tool after unavailable host input";
           input_schema = `Assoc ["type", `String "object"];
+          call_effect = (fun _ -> Agent_core.Tool.Effect_possible);
           call = (fun ~call_id:_ _ -> incr calls;
             { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None }) } in
       (match run_fixture ~dynamic_tools:[tool]
@@ -1904,6 +1968,7 @@ let test_dynamic_tool_bytes_counts_name_description_and_schema () =
     { Runtime_codex_app_server.name
     ; description
     ; input_schema = schema
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { Runtime_codex_app_server.success = true
@@ -2481,6 +2546,7 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
     { name = "masc_probe"
     ; description = "Return enough data to fill an unread transport pipe"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { success = true
@@ -2548,6 +2614,30 @@ let test_callback_timeout_origin_is_preserved_without_deadline () =
            |> ignore)))
 ;;
 
+let test_operator_interrupt_callback_keeps_typed_cause () =
+  with_fixture [ init_result; account_chatgpt; thread_result ] (fun path ->
+    let interrupt = Keeper_registry_types.Operator_interrupt in
+    let backtrace = Printexc.get_callstack 0 in
+    let combined = Eio.Exn.Multiple
+      [ (Eio.Cancel.Cancelled interrupt, backtrace)
+      ; (Stdlib.Fun.Finally_raised (Eio.Cancel.Cancelled interrupt), backtrace) ] in
+    let raised =
+      try
+        Eio_main.run (fun env ->
+          let config = { (Runtime_codex_app_server.default_config ()) with
+            cli_path = path; timeout_s = None } in
+          Runtime_codex_app_server.run_turn
+            ~mgr:(Eio.Stdenv.process_mgr env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+            ~on_thread_ready:(fun ~thread_id:_ -> raise combined)
+            config ~prompt:"fixture" ~images:[] |> ignore);
+        None
+      with exn -> Some exn in
+    check bool "combined operator interrupt survives the Codex transport" true
+      (Option.fold ~none:false ~some:Keeper_registry_types.is_operator_interrupt raised))
+;;
+
 let test_terminal_error_notification_uses_official_context_error_enum () =
   let terminal =
     {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}|}
@@ -2613,6 +2703,7 @@ let test_rate_limit_updates_are_reported_without_changing_the_turn () =
               ; windows =
                   [ { limit_id = Some "codex"
                     ; kind = Five_hour
+                    ; role = Gates_model_calls
                     ; utilization = Percent 100
                     ; resets_at = Some 1790200000
                     }
@@ -3121,8 +3212,9 @@ let write_fixture_file path content =
     (fun () -> output_string output content)
 ;;
 
-let fixture_tool ?(parameters = []) ~name ~description () =
+let fixture_tool ?descriptor ?(parameters = []) ~name ~description () =
   Agent_core.Tool.create
+    ?descriptor
     ~name
     ~description
     ~parameters
@@ -3476,12 +3568,18 @@ supports_native_streaming = false
    composition would run the turn under Codex's built-in instructions with
    masc's tool surface attached (#33165). The sibling suites for the other two
    official clients name a fixture prompt the same way. *)
+(* A session trace whose boundary store holds no completed turn: the
+   official-client lanes read the turn boundary as atom 0, so the whole
+   offered history is the carried range. A turn with no trace carries the
+   newest atom alone ([Keeper_turn_driver.For_testing.official_client_turn_start]). *)
+let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
+
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
-    ?(initial_messages = []) ?base_path ?raw_trace_path
+    ?(initial_messages = []) ?base_path ?raw_trace_path ?session_id
     ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
-    ~model () =
+    ~model ?accept () =
   let owns_base_path = Option.is_none base_path in
   let base_path =
     Option.value base_path ~default:(temp_workspace "masc-codex-session-")
@@ -3534,10 +3632,12 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ~agent_core_tools:tools
                       ~initial_messages
                       ?model_input_projection
+                      ?accept
                       ?hooks
                       ?context_injector
                       ?context
                       ?raw_trace
+                      ?session_id
                       ?on_event
                       ?on_request_attribution
                       ~sw
@@ -3626,7 +3726,7 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
        | Ok _ -> fail "Keeper retried a context overflow after a tool effect")
 ;;
 
-let test_keeper_shrinks_history_after_typed_context_error () =
+let check_keeper_shrinks_history_after_typed_context_error ~read_only_tool () =
   let capture_path = Filename.temp_file "masc-codex-shrink-requests-" ".jsonl" in
   Fun.protect
     ~finally:(fun () -> Sys.remove capture_path)
@@ -3643,15 +3743,23 @@ let test_keeper_shrinks_history_after_typed_context_error () =
            Agent_core.Types.user_msg
              (Printf.sprintf "%02d:%s" index (String.make 4_096 'x')))
        in
+       let tools =
+         if read_only_tool then
+           [ fixture_tool
+               ~descriptor:(Agent_core.Tool.ordinary_descriptor
+                 ~call_effect:(fun _ -> Agent_core.Tool.Read_only)
+                 Agent_core.Tool_contract.Serial)
+               ~name:"masc_probe" ~description:"Read-only fixture" () ]
+         else []
+       in
        with_fixture_sequence
          ~capture_path
-         [ init_result
+         ([ init_result
          ; account_chatgpt
          ; thread_result
          ; injected
          ; turn_after_injection
-         ; overflow
-         ]
+         ] @ (if read_only_tool then [ tool_call_request ] else []) @ [ overflow ])
          [ init_result
          ; account_chatgpt
          ; thread_result
@@ -3663,7 +3771,9 @@ let test_keeper_shrinks_history_after_typed_context_error () =
          (fun cli_path ->
             match
               run_keeper_turn
+                ~tools
                 ~initial_messages
+                ~session_id:fixture_trace_with_no_completed_turn
                 ~keeper_name:"codex-fixture-same-size-shrink"
                 ~cli_path
                 ~model:"gpt-fixture"
@@ -3703,6 +3813,53 @@ let test_keeper_shrinks_history_after_typed_context_error () =
          failf
            "expected two history injections, got counts=[%s]"
            (counts |> List.map string_of_int |> String.concat ","))
+;;
+
+let test_keeper_shrinks_history_after_typed_context_error () =
+  check_keeper_shrinks_history_after_typed_context_error ~read_only_tool:false ()
+;;
+
+let test_keeper_shrinks_after_read_only_tool () =
+  check_keeper_shrinks_history_after_typed_context_error ~read_only_tool:true ()
+;;
+
+let test_tool_completion_evidence_belongs_to_retry () =
+  List.iter (fun second_succeeds ->
+    let calls = ref 0 and acceptance_calls = ref 0 in
+    let tool = Agent_core.Tool.create
+      ~descriptor:(Agent_core.Tool.ordinary_descriptor
+        ~call_effect:(fun _ -> Agent_core.Tool.Read_only) Agent_core.Tool_contract.Serial)
+      ~name:"masc_probe" ~description:"Read with an attempt-local outcome" ~parameters:[]
+      (fun _ ->
+        incr calls;
+        if !calls = 1 || second_succeeds then
+          Ok {Agent_core.Types.content = "read"; content_blocks = None; _meta = None}
+        else Error {Agent_core.Types.message = "read failed"; recoverable = true; error_class = None})
+    in
+    let injected = {|{"id":4,"result":{}}|} in
+    let started = {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|} in
+    let overflow =
+      {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
+    in
+    let empty_completed =
+      {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"completed"}}}|}
+    in
+    let handshake = [init_result; account_chatgpt; thread_result; injected; started] in
+    with_fixture_sequence
+      (handshake @ [tool_call_request; overflow])
+      (handshake @ [tool_call_request; empty_completed])
+      (fun cli_path ->
+        let result = run_keeper_turn ~tools:[tool]
+          ~session_id:fixture_trace_with_no_completed_turn
+          ~accept:(fun _ -> incr acceptance_calls; false)
+          ~initial_messages:(List.init 64 (fun _ -> Agent_core.Types.user_msg (String.make 4096 'x')))
+          ~cli_path ~model:"gpt-fixture" () in
+        check int "both attempts executed their read" 2 !calls;
+        check int "only this attempt's successful tool bypasses text acceptance"
+          (if second_succeeds then 0 else 1) !acceptance_calls;
+        check bool "a prior successful read cannot accept the failed retry"
+          second_succeeds (Result.is_ok result)))
+    [false; true]
 ;;
 
 let test_keeper_shrinks_lopsided_history_at_atom_boundary () =
@@ -5975,7 +6132,8 @@ let test_live_dynamic_tool_subscription () =
       ; description = "Return the exact marker MASC_TOOL_RESULT"
       ; input_schema =
           `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
-      ; call =
+      ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
           (fun ~call_id:_ _ ->
             incr tool_calls;
             { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
@@ -6499,6 +6657,8 @@ let () =
             "callback timeout origin is preserved without deadline"
             `Quick
             test_callback_timeout_origin_is_preserved_without_deadline
+        ; test_case "operator interrupt callback keeps typed cause" `Quick
+            test_operator_interrupt_callback_keeps_typed_cause
         ; test_case
             "terminal error notification uses official context error enum"
             `Quick
@@ -6575,6 +6735,10 @@ let () =
             "context error records prior tool effect"
             `Quick
             test_context_error_records_prior_tool_effect
+        ; test_case "read-only contract controls both overflow terminals" `Quick
+            test_read_only_overflow_contract
+        ; test_case "native effects remain fenced before overflow" `Quick
+            test_native_effect_before_overflow
         ; test_case "developer context preserves authority and history" `Quick
             test_developer_context_preserves_authority_and_history
         ; test_case "history injects before turn" `Quick test_history_is_injected_before_turn
@@ -6616,6 +6780,10 @@ let () =
             "Keeper shrinks history after typed context error"
             `Quick
             test_keeper_shrinks_history_after_typed_context_error
+        ; test_case "Keeper shrinks after a declared read-only tool" `Quick
+            test_keeper_shrinks_after_read_only_tool
+        ; test_case "tool completion evidence belongs to its retry" `Quick
+            test_tool_completion_evidence_belongs_to_retry
         ; test_case
             "Keeper shrinks lopsided history at an atom boundary"
             `Quick

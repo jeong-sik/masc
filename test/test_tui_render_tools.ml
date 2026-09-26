@@ -38,6 +38,30 @@ let test_the_strip_is_the_shared_drawing () =
     (Masc_tui_theme.strip_sgr
        (Masc_tui_render_tools.tools_pane_strip ~cols:120 (make_state ())))
 
+let test_skill_catalog_failure_stage_uses_one_verdict () =
+  let state = make_state () in
+  state.tools_pane <- Tools_usage;
+  let shown failure =
+    state.skills_catalog_error <- Some failure;
+    Masc_tui_render_tools.tools_display_lines state
+    |> List.map snd
+    |> List.find_opt (fun line ->
+           contains " Skill catalog" line || contains " Response invalid:" line)
+    |> Option.value ~default:""
+  in
+  Alcotest.(check string) "transport cause is not prefixed with a second failure"
+    " Skill catalog: GET failed: connection refused"
+    (shown (Skills_catalog_read.Fetch "GET failed: connection refused"));
+  Alcotest.(check string) "invalid payload is a response error"
+    " Response invalid: skills catalog has unknown schema \"wrong\""
+    (match Masc.Tui_decode.decode_skills_catalog
+             (`Assoc [ "schema", `String "wrong" ]) with
+     | Error detail -> shown (Skills_catalog_read.Invalid_payload detail)
+     | Ok _ -> Alcotest.fail "unknown schema decoded");
+  Alcotest.(check string) "unavailable switch is a read failure"
+    " Skill catalog read failed: Eio switch is unavailable"
+    (shown (Skills_catalog_read.Launch_failure "Eio switch is unavailable"))
+
 (* The Keeper surface line says which of the two missing readings it is. It
    said "not loaded" under a failed inventory read. *)
 let test_the_surface_line_tells_a_failed_read_from_an_unread_one () =
@@ -95,6 +119,28 @@ let usage_pane_lines ~shadows =
    | Error detail -> Alcotest.failf "decode failed: %s" detail);
   state.tools_pane <- Tools_usage;
   Masc_tui_render_tools.tools_display_lines state |> List.map snd
+
+let test_skill_catalog_failure_keeps_one_cause_and_marks_stale_reading () =
+  let state = make_state () in
+  state.tools_pane <- Tools_usage;
+  state.skills_catalog_error <- Some (Skills_catalog_read.Fetch "HTTP 503");
+  let lines () = Masc_tui_render_tools.tools_display_lines state |> List.map snd in
+  let error_line () =
+    lines ()
+    |> List.find_opt (contains "Skill catalog:")
+    |> Option.value ~default:""
+  in
+  Alcotest.(check string) "request cause once" " Skill catalog: HTTP 503"
+    (error_line ());
+  Alcotest.(check bool) "no reading stated once" true
+    (List.mem " Skill Usage — no catalog reading" (lines ()));
+  (match Masc.Tui_decode.decode_skills_catalog (skills_catalog_with ~shadows:[]) with
+   | Ok catalog -> state.skills_catalog <- Some catalog
+   | Error detail -> Alcotest.failf "decode failed: %s" detail);
+  Alcotest.(check string) "stale reading stays distinct from refresh cause"
+    " Skill catalog: HTTP 503" (error_line ());
+  Alcotest.(check bool) "previous reading marked stale" true
+    (List.mem " Previous catalog reading (stale)" (lines ()))
 
 let index_of needle haystack =
   let n = String.length needle in
@@ -277,5 +323,9 @@ let () =
             test_the_screen_names_a_configured_skill_that_is_not_there
         ; Alcotest.test_case "the origin column names a skill tool's source" `Quick
             test_the_origin_column_names_the_source_of_a_skill_tool
+        ; Alcotest.test_case "skill catalog failure stage has one verdict" `Quick
+            test_skill_catalog_failure_stage_uses_one_verdict
+        ; Alcotest.test_case "skill catalog retains stale reading" `Quick
+            test_skill_catalog_failure_keeps_one_cause_and_marks_stale_reading
         ] )
     ]

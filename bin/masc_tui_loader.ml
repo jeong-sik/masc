@@ -1457,10 +1457,12 @@ let load_tools ~(host : string) ~(port : int) ?keeper () :
 
 (** Load the workspace skills catalog for the Tools screen tracking views. *)
 let load_skills_catalog ~(host : string) ~(port : int) :
-    (Tui_decode.skills_catalog, string) result =
+    (Tui_decode.skills_catalog, Skills_catalog_read.failure) result =
   match fetch_skills_catalog ~host ~port with
-  | Error err -> Error ("skills catalog load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_skills_catalog json
+  | Error detail -> Error (Skills_catalog_read.Fetch detail)
+  | Ok json ->
+      Tui_decode.decode_skills_catalog json
+      |> Result.map_error (fun detail -> Skills_catalog_read.Invalid_payload detail)
 
 (** Load connector status from /api/v1/gate/connectors *)
 let load_connectors ~(host : string) ~(port : int) :

@@ -2130,7 +2130,8 @@ type async_msg =
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
   | Tools_loaded of int * string option * (Masc.Tui_decode.tool_snapshot, string) result
-  | Skills_catalog_loaded of int * (Masc.Tui_decode.skills_catalog, string) result
+  | Skills_catalog_loaded of
+      int * (Masc.Tui_decode.skills_catalog, Masc_tui_types.Skills_catalog_read.failure) result
   | Tools_async_observation_loaded of int * (Tui_decode.async_request_observation, string) result
   | Runtime_lane_slots_written of
       Masc_tui_types.runtime_lane_list * (unit, string) result
@@ -3586,7 +3587,8 @@ let launch_tools_load ?(force = true) state ~mailbox =
       let result =
         try Masc_tui_loader.load_skills_catalog ~host ~port with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
+        | exn ->
+            Error (Masc_tui_types.Skills_catalog_read.Launch_failure (Printexc.to_string exn))
       in
       enqueue_async mailbox (Skills_catalog_loaded (generation, result))
     in
@@ -3597,7 +3599,12 @@ let launch_tools_load ?(force = true) state ~mailbox =
      | None ->
          let error = Error "Eio switch is unavailable" in
          enqueue_async mailbox (Tools_loaded (generation, keeper, error));
-         enqueue_async mailbox (Skills_catalog_loaded (generation, error));
+         enqueue_async mailbox
+           (Skills_catalog_loaded
+              ( generation,
+                Error
+                  (Masc_tui_types.Skills_catalog_read.Launch_failure
+                     "Eio switch is unavailable") ));
          enqueue_async mailbox (Tools_async_observation_loaded (generation, error)))
   end
 

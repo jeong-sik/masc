@@ -187,20 +187,24 @@ let messages prepared = prepared.unread
 type turn_window = { after : float option; through : float }
 (* A unit that stops inside its turn carries no window; the unit that
    finishes the turn carries the whole turn's, from the turn-end line at or
-   before its start, so each turn's window is read once. *)
+   before its start, so each turn's window is read once. Of several lines at
+   one atom the latest is taken, as [Keeper_turn_boundaries.witness_line]
+   takes it for the durable pass's bounds, so the two passes' windows meet. *)
 let turn_window prepared =
   let cut = prepared.covering_cut in
   if prepared.end_atom <> cut.cut_end_atom then None
   else
-    let after = R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines
-        ~messages:prepared.messages prepared.range
-      |> List.fold_left (fun latest (earlier : R.atom_cut) ->
-        if earlier.cut_end_atom > prepared.start_atom then latest
-        else match latest with
-          | Some (kept : R.atom_cut) when kept.cut_end_atom >= earlier.cut_end_atom -> latest
-          | Some _ | None -> Some earlier) None
-      |> Option.map (fun (start : R.atom_cut) -> start.cut_recorded_at) in
-    Some { after; through = cut.cut_recorded_at }
+    let cuts = R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines
+        ~messages:prepared.messages prepared.range in
+    let latest_at_or_before bound = List.fold_left (fun found (line : R.atom_cut) ->
+      if line.cut_end_atom > bound then found
+      else match found with
+        | Some (kept : R.atom_cut) when kept.cut_end_atom > line.cut_end_atom -> found
+        | Some _ | None -> Some line) None cuts in
+    let recorded_at (line : R.atom_cut) = line.cut_recorded_at in
+    Some { after = Option.map recorded_at (latest_at_or_before prepared.start_atom);
+           through = Option.fold ~none:cut.cut_recorded_at ~some:recorded_at
+               (latest_at_or_before cut.cut_end_atom) }
 let turn_ref prepared = prepared.covering_cut.cut_turn_ref
 let start_atom prepared = prepared.start_atom
 let completed_end_atom prepared = prepared.range.end_atom

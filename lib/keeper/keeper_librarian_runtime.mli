@@ -98,11 +98,14 @@ type not_committed =
 
 val fit_continuity :
   capacity:Keeper_lane_cli_oneshot.input_capacity -> base_path:string -> keeper_id:string ->
-  input:Keeper_librarian.input -> Keeper_librarian_continuity.prepared ->
+  input_for:(Keeper_librarian_continuity.prepared -> (Keeper_librarian.input, string) result) ->
+  Keeper_librarian_continuity.prepared ->
   (Keeper_librarian_continuity.prepared option, string) result
 (** Fit the complete rendered CLI prompt to a reported character limit while its
-    runtime remains declared in the lane. Returns [None] if no safe source fits.
-    Does not dispatch a provider or change Memory receipts. *)
+    runtime remains declared in the lane. Each candidate is measured with the
+    input [input_for] gives it, so what a Memory pass over that candidate
+    carries counts. Returns [None] if no safe source fits. Does not dispatch a
+    provider or change Memory receipts. *)
 
 val run_best_effort
   :  ?write_scope:write_scope

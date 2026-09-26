@@ -88,6 +88,8 @@ Keeper에 보이는 이름은 CamelCase이고, MCP 등록 이름은 `masc_browse
 
 `BrowserInteract`의 click/fill과 `BrowserAct`의 요소 조작에는 관측한 selector를 사용하며, 정확히 하나의 요소와 일치해야 합니다. `BrowserInteract`의 `expectedUrl`에 직전에 읽은 URL을 넣으면 중간에 페이지가 이동한 경우 거부합니다. fill은 페이지 이벤트를 발생시키지만 자체적으로 Enter를 누르거나 submit하지 않습니다. 오류가 발생한 경우도 포함해 조작 후에는 페이지를 읽거나 캡처한 뒤 재시도 여부를 결정합니다.
 
+selector click·fill은 JavaScript 이벤트(`isTrusted=false`)를 보냅니다. 사이트가 사용자 입력만 받는다면 `BrowserRead`로 위치를 확인하고 `click_at` 같은 viewport 좌표 입력을 사용한 뒤, 페이지를 다시 읽어 효과를 확인합니다.
+
 ## TUI 리더
 
 `Ctrl-^`(Ctrl-Shift-6), `:` → `go Browser Lane`, 또는 Connectors의 `B`로 엽니다. 처음에는 live 소스입니다. `b`로 Firefox/Zen 연결 선택기를 열고 `j`/`k`와 Enter로 선택합니다. 선택기의 `r`은 재탐색, Esc는 리더로 복귀입니다. 읽기와 캡처는 선택한 연결에 고정되며, 연결이 끊어지면 새 연결을 명시적으로 선택해야 합니다.

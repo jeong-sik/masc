@@ -165,6 +165,9 @@ actions; a selector must match exactly one element. For `BrowserInteract`, pass
 `expectedUrl` from the last read to reject intervening navigation. Fill emits page
 events and does not itself press Enter or submit. Read or capture the page after
 an action, including an error, before deciding whether to retry.
+Selector click and fill emit JavaScript events (`isTrusted=false`). If a site
+requires user input, locate the control with `BrowserRead`, use viewport
+coordinates such as `click_at`, then read the page again to verify the effect.
 
 ## TUI reader
 

@@ -235,11 +235,30 @@ let test_write_context_places_inputs () =
 (* The repository's own recipes: every COPY source is a listed input, so the
    build context carries it and its bytes are in the tag. *)
 let rec find_source_root dir hops =
-  if Sys.file_exists (Filename.concat dir "sandbox-images/ocaml/Dockerfile") then Some dir
+  let has_repository_recipe_file relative =
+    Sys.file_exists (Filename.concat dir relative)
+  in
+  if
+    has_repository_recipe_file "sandbox-images/ocaml/Dockerfile"
+    && has_repository_recipe_file "sandbox-images/ocaml/inputs"
+    && has_repository_recipe_file "masc.opam"
+  then Some dir
   else if hops = 0 then None
   else
     let parent = Filename.dirname dir in
     if String.equal parent dir then None else find_source_root parent (hops - 1)
+
+let test_find_source_root_skips_partial_tree () =
+  with_source
+    [ "sandbox-images/ocaml/Dockerfile", "dockerfile"
+    ; "sandbox-images/ocaml/inputs", "masc.opam"
+    ; "masc.opam", "opam metadata"
+    ; "_build/default/sandbox-images/ocaml/Dockerfile", "partial dockerfile"
+    ]
+    (fun source ->
+      let partial_tree = Filename.concat source "_build/default" in
+      check (option string) "partial tree is skipped" (Some source)
+        (find_source_root partial_tree 8))
 
 let copy_sources dockerfile =
   String.split_on_char '\n' dockerfile
@@ -292,6 +311,8 @@ let () =
         ; test_case "links to files inside the checkout still load" `Quick
             test_load_keeps_links_to_files_inside_checkout
         ; test_case "write_context places nested inputs" `Quick test_write_context_places_inputs
+        ; test_case "partial build trees are skipped" `Quick
+            test_find_source_root_skips_partial_tree
         ; test_case "repository recipes list their COPY sources" `Quick
             test_repository_recipes_list_their_copy_sources
         ] )

@@ -365,7 +365,10 @@ let read_codex_in_background ~clock ~cwd ~scope codex =
             (fun () ->
               (* A raise here would fail the server's root switch; a read
                  that goes wrong is only an unanswered observation. *)
-              match read_codex ~mgr:Posix_spawn_process_mgr.mgr ~clock ~cwd ~scope codex with
+              match read_codex
+                ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
+                  ~grace_seconds:Process_eio.child_exit_grace_seconds)
+                ~clock ~cwd ~scope codex with
               | Ok () -> ()
               | Error detail ->
                 Log.Runtime_agent.warn

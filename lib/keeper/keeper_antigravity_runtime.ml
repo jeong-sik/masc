@@ -866,7 +866,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
            |> Result.map (fun released -> session_state := released))
       | Ambiguous | Fatal -> require_recovery detail
     in
-    let process_mgr = Posix_spawn_process_mgr.mgr in
+    let process_mgr = (Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds) in
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
     let started_at = Time_compat.now () in
       let stream =

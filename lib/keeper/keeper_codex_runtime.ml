@@ -1359,7 +1359,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         in
         (match
        Runtime_codex_app_server.run_turn
-         ~mgr:Posix_spawn_process_mgr.mgr
+         ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
+           ~grace_seconds:Process_eio.child_exit_grace_seconds)
          ~clock
          ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
          ~dynamic_tools

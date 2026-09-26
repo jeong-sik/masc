@@ -136,14 +136,6 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
   (* The host stopped this turn on purpose. Nothing about the provider failed,
      so there is no other candidate that would do better. *)
   | Keeper_internal_error.Host_stopped_turn _ -> exhaust_failure Internal_opaque
-  (* A person queued behind this autonomous turn before its provider produced
-     anything (RFC-0441). The abandoned candidate did not fail, so the route
-     notes no rest or demotion against it (Exhausted_visible_alive notes
-     none). The walk itself stops in [Keeper_turn_driver], which ends the lane
-     on this error ahead of any overflow; the keeper settles the turn as
-     skipped, not failed (#38094). *)
-  | Keeper_internal_error.Preempted_before_first_token _ ->
-    exhaust_failure Internal_opaque
   (* The runtime's transport closed. [route_of_provider_error] answers
      [observe_retry Server_error] for agent-core's [ProviderUnavailable]; the
      typed value must not change which runtime is tried next, so it answers

@@ -6461,12 +6461,6 @@ let decode_verification_request json =
   let* vr_task_id = required_string_field json "task_id" in
   let* vr_task_title = required_string_field json "task_title" in
   let* vr_submitted_by = required_string_field json "submitted_by" in
-  (* [null] is a history-view row: that view joins no backlog, so nothing
-     names the verdict the row waits on. The awaiting view joins it and every
-     row carries a word (Dashboard_verification.filter_by_view). A word
-     outside the pair is kept as itself rather than folded into either intent,
-     so a vocabulary this build does not know reaches the screen as that
-     word. *)
   let* vr_created_at = required_string_field json "created_at" in
   let* vr_required_artifacts =
     decode_string_name_list json "required_artifacts"

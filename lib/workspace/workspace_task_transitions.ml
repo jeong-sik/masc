@@ -242,18 +242,6 @@ let transition_task_outcome_r
                         verifier."
                        task_id
                        agent_name)))
-          | Error Workspace_task_lifecycle.Verdict_rejection_reason_required ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    "a rejection verdict requires a non-empty reason explaining \
-                     what must be fixed"))
-          | Error Workspace_task_lifecycle.Verdict_authority_identity_required ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    "a completion verdict requires a non-empty authenticated \
-                     authority identity"))
           | Error Workspace_task_lifecycle.Cancel_reason_required ->
             Error
               (Masc_domain.Task
@@ -261,13 +249,6 @@ let transition_task_outcome_r
                     "cancel requires a stated reason: pass reason, or state it in \
                      handoff_context (summary or reason). The Task's author is \
                      told that sentence and nothing else"))
-          | Error
-              (Workspace_task_lifecycle.Verification_id_mismatch
-                 { expected; actual }) ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.VerificationSuperseded
-                    { task_id; requested = expected; current = actual }))
           | Error Workspace_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with
@@ -839,14 +820,7 @@ let commit_verdict_r
                  (Masc_domain.Task
                     (Masc_domain.Task_error.VerificationSuperseded
                        { task_id; requested = expected; current = actual }))
-             | Error
-                 Workspace_task_lifecycle.Verification_pending_verdict
-             | Error
-                 Workspace_task_lifecycle.Cancel_reason_required
-             | Error
-                 Workspace_task_lifecycle.Verification_submission_required
-             | Error
-                 Workspace_task_lifecycle.Invalid_transition ->
+             | Error Workspace_task_lifecycle.Not_awaiting_verdict ->
                Error
                  (Masc_domain.Task
                     (Masc_domain.Task_error.InvalidState

@@ -1,11 +1,14 @@
 type invalid =
   | Verification_submission_required
   | Verification_pending_verdict
+  | Cancel_reason_required
+  | Invalid_transition
+
+type verdict_invalid =
   | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
-  | Cancel_reason_required
   | Verification_id_mismatch of { expected : string; actual : string }
-  | Invalid_transition
+  | Not_awaiting_verdict
 
 type decision =
   { new_status : Masc_domain.task_status
@@ -256,7 +259,7 @@ let decide_verdict
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _
   | Masc_domain.Done _
-  | Masc_domain.Cancelled _ -> Error Invalid_transition
+  | Masc_domain.Cancelled _ -> Error Not_awaiting_verdict
 ;;
 
 let valid_next_actions ~same_agent ~task_status =

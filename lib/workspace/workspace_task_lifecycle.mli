@@ -8,14 +8,20 @@ type invalid =
   | Verification_pending_verdict
       (** Agent actions cannot resolve an [AwaitingVerification] obligation;
           the completion-authority entry point owns its verdict. *)
-  | Verdict_authority_identity_required
-  | Verdict_rejection_reason_required
   | Cancel_reason_required
       (** The holder cancels its own Task without a stated reason. The
           cancellation ends the Task at once, and the reason is the only thing
           its author is told. *)
-  | Verification_id_mismatch of { expected : string; actual : string }
   | Invalid_transition
+
+(** Why a verdict does not commit. Only the verdict path produces these, and
+    it produces nothing else. *)
+type verdict_invalid =
+  | Verdict_authority_identity_required
+  | Verdict_rejection_reason_required
+  | Verification_id_mismatch of { expected : string; actual : string }
+      (** The verdict names a submission the producer has since replaced. *)
+  | Not_awaiting_verdict  (** The Task is not [AwaitingVerification]. *)
 
 type decision =
   { new_status : Masc_domain.task_status
@@ -80,7 +86,7 @@ val decide_verdict
   -> task_status:Masc_domain.task_status
   -> now:string
   -> notes:string
-  -> (verdict_decision, invalid) result
+  -> (verdict_decision, verdict_invalid) result
 
 val valid_next_actions
   :  same_agent:bool

@@ -282,19 +282,24 @@ run_gate() {
 
   # A holder's cancel ends the Task (RFC-0417 §4.1), and the incoming reader
   # has no field for a submission that asked to stop: a row still waiting
-  # with intent=cancel would be read as a completion and judged as one.
-  local backlog_path="$runtime_root/tasks/backlog.json"
-  if [[ -e "$backlog_path" || -L "$backlog_path" ]]; then
+  # with intent=cancel would be read as a completion and judged as one. The
+  # recovery snapshot is read when the primary does not decode, so it is
+  # checked too.
+  local backlog_path
+  local pending_stop_report
+  for backlog_path in "$runtime_root/tasks/backlog.json" "$runtime_root/tasks/backlog.json.last-good"; do
+    [[ -e "$backlog_path" || -L "$backlog_path" ]] || continue
     [[ -f "$backlog_path" && ! -L "$backlog_path" ]] \
       || fail "task backlog is not an exact regular file: $backlog_path"
-    local pending_stop_ids
-    pending_stop_ids="$(jq -r \
-      '[.tasks[]? | select(.status == "awaiting_verification" and .intent == "cancel") | .id] | join(" ")' \
+    pending_stop_report="$(jq -r \
+      '[.tasks[]? | select(.status == "awaiting_verification" and .intent == "cancel")]
+       | if length == 0 then ""
+         else "\(length) cancel claim(s): \(map(.id // "(no id)") | join(" "))" end' \
       "$backlog_path")" \
       || fail "task backlog could not be inspected: $backlog_path"
-    [[ -z "$pending_stop_ids" ]] \
-      || fail "task backlog holds cancel claims the incoming binary would read as completions; approve each with POST /api/v1/verification/verdict on the running binary, then redeploy: $pending_stop_ids"
-  fi
+    [[ -z "$pending_stop_report" ]] \
+      || fail "task backlog holds $pending_stop_report ($backlog_path). This build would read them as completions. Close each on the build that made them before deploying this one: POST /api/v1/verification/verdict, approve, or reject a claim whose record states no reason"
+  done
 
   printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d current_owners=%d keeper_meta=%d in_progress=%d%s\n' \
     "$BASE_PATH" "$schedule_ledger_count" "$signal_file_count" \
@@ -531,7 +536,19 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
       {id: "task-9", status: "cancelled"}]}' \
     >"$pending_stop_root/.masc/tasks/backlog.json"
   expect_failure_contains pending_cancel_claim "$pending_stop_root" \
-    "holds cancel claims" "task-7"
+    "1 cancel claim(s): task-7" "backlog.json"
+
+  # The recovery snapshot is read when the primary does not decode, so a
+  # cancel claim left only there is refused too, and one with no id is
+  # still counted.
+  pending_stop_snapshot_root="$fixture_root/backlog-pending-stop-snapshot"
+  write_schedules "$pending_stop_snapshot_root" running
+  mkdir -p "$pending_stop_snapshot_root/.masc/tasks"
+  jq -n '{tasks: []}' >"$pending_stop_snapshot_root/.masc/tasks/backlog.json"
+  jq -n '{tasks: [{status: "awaiting_verification", intent: "cancel"}]}' \
+    >"$pending_stop_snapshot_root/.masc/tasks/backlog.json.last-good"
+  expect_failure_contains pending_cancel_claim_in_snapshot \
+    "$pending_stop_snapshot_root" "1 cancel claim(s): (no id)" "backlog.json.last-good"
 
   pending_completion_root="$fixture_root/backlog-pending-completion"
   write_schedules "$pending_completion_root" running

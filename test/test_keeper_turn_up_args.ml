@@ -2574,7 +2574,7 @@ let test_boot_refuses_a_name_its_store_cannot_resolve () =
    | None -> ()
    | Some error -> fail ("a promoted name was refused: " ^ R.error_to_string error));
   (match refusal (meta ~profile:Keeper_types_profile_sandbox.Docker (Some "rust")) with
-   | Some (R.Unknown_image _) -> ()
+   | Some (R.Unresolved (Keeper_sandbox_image_catalog.Unknown_image _)) -> ()
    | Some error -> fail ("an unknown name was refused for another reason: " ^ R.error_to_string error)
    | None -> fail "a name the catalog lacks booted");
   (match
@@ -2582,7 +2582,7 @@ let test_boot_refuses_a_name_its_store_cannot_resolve () =
        (meta ~profile:Keeper_types_profile_sandbox.Micro_vm
           ~backend:Keeper_microvm_backend.Apple_container (Some "base"))
    with
-   | Some (R.Not_built_on_host _) -> ()
+   | Some (R.Unresolved (Keeper_sandbox_image_catalog.Not_built_on_host _)) -> ()
    | Some error -> fail ("a guest's unbuilt name was refused for another reason: " ^ R.error_to_string error)
    | None -> fail "a guest booted on a build promoted only in Docker's store");
   (match

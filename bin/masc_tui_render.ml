@@ -706,7 +706,7 @@ let render_overview (state : state) =
         let keepers_cell =
           match o.ov_keeper_listing with
           | Masc.Keeper_snapshot_unread.Unreadable detail ->
-              Printf.sprintf "%sunlisted%s (%s)" Ansi.yellow Ansi.reset detail
+              Printf.sprintf "%sunlisted%s (%s)" (Theme.warn ()) Ansi.reset detail
           | Masc.Keeper_snapshot_unread.Listed
           | Masc.Keeper_snapshot_unread.Not_listed ->
               Printf.sprintf "%d%s" o.ov_keepers keeper_note

@@ -35,6 +35,7 @@ CHOICES = {
     'claude_code': ('claude-code', 'claude'),
     'codex': ('codex-app-server', 'codex'),
     'antigravity': ('antigravity-cli', 'agy'),
+    'muse': ('muse-serve', 'muse'),
 }
 
 
@@ -612,11 +613,11 @@ def pick(title, labels, multiple=False, defaults=()):
 
 PROTOCOL_CHOICES = {'ollama-http': 'ollama', 'openai-compatible-http': 'openai_compatible',
                     'claude-code': 'claude_code', 'codex-app-server': 'codex',
-                    'antigravity-cli': 'antigravity'}
+                    'antigravity-cli': 'antigravity', 'muse-serve': 'muse'}
 
-# The three official clients, by the name `masc prerequisite-actions` and
+# The four official clients, by the name `masc prerequisite-actions` and
 # `masc runtime-client-path` take.
-OFFICIAL_CLIENTS = {'claude_code': 'claude-code', 'codex': 'codex', 'antigravity': 'antigravity'}
+OFFICIAL_CLIENTS = {'claude_code': 'claude-code', 'codex': 'codex', 'antigravity': 'antigravity', 'muse': 'muse-code'}
 
 
 def official_client_path(binary, choice, command):
@@ -652,7 +653,7 @@ def connection_sources(binary, inventory):
                           choice=PROTOCOL_CHOICES.get(row['protocol']), endpoint=row.get('endpoint') or '',
                           command=row.get('command') or '', api_key_env=row.get('api_key_env') or '',
                           credential_kind=row.get('credential_kind', 'unknown'),
-                          credential_file=row.get('credential_file'), provider_kind=row.get('provider_kind'),
+                          credential_file=row.get('credential_file'), account_home=row.get('account_home'), provider_kind=row.get('provider_kind'),
                           rows=[])
             sources.append(source)
         source['rows'].append(row)
@@ -666,7 +667,7 @@ def connection_sources(binary, inventory):
                       endpoint=integration.get('endpoint') or '', command=integration.get('command') or '',
                       api_key_env=integration.get('api_key_env') or '',
                       credential_kind=integration.get('credential_kind', 'env' if integration.get('api_key_env') else 'none'),
-                      credential_file=integration.get('credential_file'),
+                      credential_file=integration.get('credential_file'), account_home=integration.get('account_home'),
                       provider_kind=integration.get('provider_kind'),
                       origin=integration['origin'], setup_support=integration['setup_support'], rows=[])
         # A catalog-advertised new connection carries the provider's own name,
@@ -685,7 +686,7 @@ def connection_sources(binary, inventory):
         if not any(item['endpoint'].rstrip('/') == endpoint for item in sources):
             sources.append(dict(provider_id=None, label=label, choice=choice, endpoint=endpoint,
                                 command='', api_key_env='', rows=[]))
-    for choice, command, label in [('codex', 'codex', 'Codex'), ('claude_code', 'claude', 'Claude Code')]:
+    for choice, command, label in [('codex', 'codex', 'Codex'), ('claude_code', 'claude', 'Claude Code'), ('muse', 'muse', 'Muse Code')]:
         if not any(item['choice'] == choice for item in sources) and official_client_path(binary, choice, command):
             sources.append(dict(provider_id=None, label=label, choice=choice, endpoint='',
                                 command=command, api_key_env='', rows=[]))
@@ -1140,6 +1141,28 @@ def execute_prerequisite(binary, dependency, action_id, workspace_args=(), base_
     return state
 
 
+def select_native_account(source):
+    source = dict(source)
+    if source.get('account_home'):
+        return source
+    choice = source['choice']
+    home = os.environ.get('HOME', '')
+    default = ({'claude_code': os.environ.get('CLAUDE_CONFIG_DIR') or str(Path(home) / '.claude'),
+                'codex': os.environ.get('CODEX_HOME') or str(Path(home) / '.codex'),
+                'muse': home}).get(choice)
+    if default and not Path(default).is_absolute():
+        default = str(Path.cwd() / default)
+    selected = pick(source['label'] + ': select the CLI account',
+                    ['Use this server CLI account: ' + (default or '(unavailable)'),
+                     'Select another existing account directory'])[0]
+    account_home = default if selected == 0 else ask_text('Absolute account directory (Claude CLAUDE_CONFIG_DIR, Codex CODEX_HOME, Muse HOME)')
+    if not isinstance(account_home, str) or not account_home or account_home.strip() != account_home or not Path(account_home).is_absolute() or not Path(account_home).is_dir():
+        raise SetupError('Select an existing absolute account directory, sign in with the official CLI, then retry')
+    source['account_home'] = account_home
+    source['credential_replaced'] = True
+    return source
+
+
 def prepare_connection(binary, source, credentials):
     source = dict(source)
     if source.get('setup_support') == 'unsupported' or source['choice'] is None:
@@ -1158,7 +1181,7 @@ def prepare_connection(binary, source, credentials):
         source['command'] = path
         if source['choice'] == 'antigravity':
             return prepare_antigravity_account(source, credentials)
-        return source
+        return select_native_account(source)
     if not source['endpoint']:
         urls = ['http://127.0.0.1:8000/v1', 'http://127.0.0.1:8080/v1']
         selected = pick('Choose the running local server address', urls + ['Another API URL'])[0]
@@ -1230,7 +1253,10 @@ def native_serving_context(binary, source, model, timeout, load=False):
 
 
 def refresh_codex_models(binary, source):
-    result = subprocess.run([str(binary), 'runtime-codex-models', '--cli-path', source.get('command') or 'codex'],
+    arguments = [str(binary), 'runtime-codex-models', '--cli-path', source.get('command') or 'codex']
+    if source.get('account_home'):
+        arguments += ['--account-home', source['account_home']]
+    result = subprocess.run(arguments,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if result.returncode:
         raise SetupError('Codex online model refresh unavailable; using cached or bundled metadata.')
@@ -1250,6 +1276,33 @@ def refresh_codex_models(binary, source):
         return rows, source_text
     except (ValueError, TypeError, KeyError):
         raise SetupError('Codex refresh returned invalid metadata; using cached or bundled metadata.')
+
+
+def muse_models(binary, source):
+    if not source.get('account_home'):
+        raise SetupError('Select a Muse account before discovering models')
+    result = subprocess.run([str(binary), 'runtime-muse-models', '--cli-path', source.get('command') or 'muse',
+                             '--account-home', source['account_home']],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        receipt = json.loads(result.stdout)
+        if (result.returncode or receipt.get('schema') != 'masc.muse_models.v1'
+                or receipt.get('source') not in ('providerCatalog', 'bundledCatalog', 'configCatalog')
+                or receipt.get('account_availability_verified') is not False
+                or receipt.get('invocation_verified') is not False
+                or not isinstance(receipt.get('models'), list)):
+            raise ValueError('unsupported model catalog')
+        rows = receipt['models']
+        seen = set()
+        for row in rows:
+            if (not isinstance(row, dict) or not model_text(row.get('id')) or row['id'] in seen
+                    or not model_text(row.get('label'))
+                    or (row.get('context') is not None and not positive_integer(row['context']))):
+                raise ValueError('invalid model metadata')
+            seen.add(row['id'])
+        return rows, 'Muse ' + receipt['source'] + ' metadata; account and model invocation are not yet verified'
+    except (ValueError, TypeError, KeyError):
+        raise SetupError('Muse did not report a usable provider, bundled or configured model catalog')
 
 
 def release_metadata(source, model_id):
@@ -1291,7 +1344,9 @@ def source_models(binary, source, timeout, refresh=False):
     """One source's model list: discovery belongs to the native runtime;
     curated catalog rows lead, workspace bindings are matched onto the rest."""
     choice = source.get('choice')
-    if refresh and choice == 'codex':
+    if choice == 'muse':
+        observed, origin = muse_models(binary, source)
+    elif refresh and choice == 'codex':
         try:
             observed, origin = refresh_codex_models(binary, source)
         except SetupError as error:
@@ -1326,7 +1381,7 @@ def source_models(binary, source, timeout, refresh=False):
             rows.append(dict(id=row['id'], label=row.get('label') or row['id'],
                              context=context, existing=None, catalog=row))
     # An account switch invalidates both membership and effective CLI context.
-    declared_rows = [] if choice == 'antigravity' and source.get('credential_replaced') else source['rows']
+    declared_rows = [] if choice in OFFICIAL_CLIENTS and source.get('credential_replaced') else source['rows']
     for model in observed:
         if model['id'] in curated_ids:
             continue
@@ -1396,7 +1451,7 @@ def resolve_model_spec(source, model, timeout, binary=None):
     context = model.get('context')
     if choice == 'antigravity' and binary:
         context = antigravity_context(binary, source, model['id'])
-    if not positive_integer(context) and binary and source.get('provider_id') and choice != 'ollama':
+    if not positive_integer(context) and binary and source.get('provider_id') and choice not in ('ollama', 'muse'):
         result = subprocess.run([str(binary), 'runtime-model-info', model['id'], '--provider', source['provider_id']],
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if result.returncode == 0:
@@ -1416,6 +1471,8 @@ def resolve_model_spec(source, model, timeout, binary=None):
             context = native_serving_context(binary, source, model['id'], timeout)['context']
         except SetupError:
             context = None
+    if not positive_integer(context) and choice == 'muse':
+        raise SetupError('Muse did not report a positive context for this model; select another reported model')
     if not positive_integer(context):
         action = pick('The server did not report its configured context window.',
                       ['Return to model selection', 'Advanced: enter the documented server limit'])[0]
@@ -1425,12 +1482,20 @@ def resolve_model_spec(source, model, timeout, binary=None):
             answer = ask_text('Configured context tokens (for example, 8192 only if your server declares that limit)')
             context = int(answer) if answer.isascii() and answer.isdigit() else None
     spec = dict(choice=choice, model=model['id'], max_context=context, tools=True,
-                streaming=choice in ('claude_code', 'codex', 'antigravity'))
+                streaming=choice in ('claude_code', 'codex', 'antigravity', 'muse'))
     if CHOICES[choice][1] is None:
         spec.update(endpoint=source['endpoint'])
         spec.update({key: source[key] for key in ('api_key_env', 'credential_file', 'provider_kind') if source.get(key)})
     elif source['command']:
         spec['command'] = source['command']
+    if source.get('account_home'):
+        spec['account_home'] = source['account_home']
+    if choice == 'muse':
+        prompt_bytes = None
+        while not positive_integer(prompt_bytes):
+            answer = ask_text('Muse maximum input bytes (operator-defined; not inferred from token context)')
+            prompt_bytes = int(answer) if answer.isascii() and answer.isdigit() else None
+        spec['max_prompt_bytes'] = prompt_bytes
     if choice == 'antigravity':
         spec.update(credential_file=source['credential_file'], timeout_s=source['provider_timeout_s'])
     return render(spec, binary)[0], spec
@@ -1539,8 +1604,24 @@ def login_command(binary, runtime_id, specs, inventory):
         if row is None:
             return None
         choice, command = PROTOCOL_CHOICES.get(row['protocol']), row.get('command')
-    arguments = {'claude_code': ['auth', 'login'], 'codex': ['login', '--device-auth']}.get(choice)
+    arguments = {'claude_code': ['auth', 'login'], 'codex': ['login', '--device-auth'], 'muse': ['login']}.get(choice)
     return [command] + arguments if command and arguments else None
+
+
+def login_environment(binary, runtime_id, specs, inventory):
+    spec = next((spec for spec in specs if render(spec, binary)[0] == runtime_id), None)
+    row = spec or next((row for row in inventory['runtimes'] if row['id'] == runtime_id), {})
+    choice = row.get('choice') or PROTOCOL_CHOICES.get(row.get('protocol'))
+    variable = {'claude_code': 'CLAUDE_CONFIG_DIR', 'codex': 'CODEX_HOME', 'muse': 'HOME'}.get(choice)
+    environment = dict(os.environ)
+    if variable and row.get('account_home'):
+        environment[variable] = row['account_home']
+        if choice == 'muse':
+            for key, suffix in [('XDG_CONFIG_HOME', '.config'), ('XDG_DATA_HOME', '.local/share'),
+                                ('XDG_CACHE_HOME', '.cache'), ('XDG_STATE_HOME', '.local/state'),
+                                ('XDG_RUNTIME_DIR', '.local/run')]:
+                environment[key] = os.path.join(row['account_home'], suffix)
+    return environment
 
 
 def wizard(binary, base_path, timeout, quick_model=None):
@@ -1628,7 +1709,7 @@ def wizard_with_credentials(binary, base_path, timeout, credentials, quick_model
                         return dict(configured=False, readiness='deferred', base_path=str(base_path))
                     elif action == 4 and login:
                         print('The official client will handle sign-in. MASC does not ask for your password.', file=sys.stderr)
-                        if subprocess.run(login, stdout=sys.stderr).returncode != 0:
+                        if subprocess.run(login, stdout=sys.stderr, env=login_environment(binary, error.runtime_id, specs, inventory)).returncode != 0:
                             print('Sign-in did not finish. Your model choices are still selected.', file=sys.stderr)
         except (SetupError, OSError, ValueError, URLError) as error:
             if not isinstance(error, SetupError):

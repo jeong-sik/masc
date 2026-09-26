@@ -9,7 +9,9 @@ let ( let* ) = Result.bind
 let reference_to_string (Reference value) = value
 let reference_of_string value = if Auth.is_generated_token_shape value then Ok (Reference value) else Error Invalid_reference
 type imported = { credential_file:string; timeout_s:float; catalog:Yojson.Safe.t }
-type binding = { credential_file:string; timeout_s:float }
+type binding =
+  | Antigravity_account of { credential_file:string; timeout_s:float }
+  | Native_home of { account_home:string }
 let filesystem action = try action () with Unix.Unix_error _ | Sys_error _ -> Error Private_storage_unavailable
 let directory ~create path =
   if create then (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ());
@@ -57,6 +59,26 @@ let create ~workspace ~integration_id ~cli_path ~import = filesystem (fun () ->
     Auth.save_private_text_file (manifest directory_path) (Yojson.Safe.to_string data);
     retained:=true;
     Ok (reference,imported.catalog)))
+let lease_home ~workspace ~integration_id ~cli_path ~account_home = filesystem (fun () ->
+  let* account_home = Runtime_account_home.of_string account_home
+    |> Result.map_error (fun _ -> Invalid_reference) in
+  let info = Unix.stat account_home in
+  if info.st_kind <> Unix.S_DIR || info.st_uid <> Unix.geteuid () then Error Invalid_reference else
+  let workspace = Unix.realpath workspace in
+  let* root = root ~create:true () in
+  Eio.Switch.run (fun sw ->
+    let reference = Reference (Auth.generate_token ()) in
+    let directory_path = Filename.concat root (reference_to_string reference) in
+    Unix.mkdir directory_path 0o700;
+    let retained = ref false in
+    Eio.Switch.on_release sw (fun () -> if not !retained then Fs_compat.remove_tree directory_path);
+    let data = `Assoc ["schema", `String "masc.setup_native_home_reference.v1";
+      "workspace", `String workspace; "integration_id", `String integration_id;
+      "cli_path", `String cli_path; "account_home", `String account_home] in
+    Auth.save_private_text_file (manifest directory_path) (Yojson.Safe.to_string data);
+    retained := true;
+    Ok reference))
+
 let resolve ~workspace ~integration_id ~cli_path (Reference reference) = filesystem (fun () ->
   let workspace=Unix.realpath workspace in
   let* root=root ~create:false () in
@@ -73,6 +95,15 @@ let resolve ~workspace ~integration_id ~cli_path (Reference reference) = filesys
     then Error Scope_mismatch else
     (match value "credential_file",value "timeout_s" with
      | `String path,`Float timeout_s when Float.is_finite timeout_s && timeout_s>0. ->
-       let* credential_file=credential ~directory:directory_path path in Ok {credential_file;timeout_s}
+       let* credential_file=credential ~directory:directory_path path in Ok (Antigravity_account {credential_file;timeout_s})
      | _ -> Error Invalid_reference)
+  | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=
+      List.sort String.compare ["schema";"workspace";"integration_id";"cli_path";"account_home"] ->
+    let value key=List.assoc key fields in
+    if value "schema"<>`String "masc.setup_native_home_reference.v1" then Error Invalid_reference
+    else if value "workspace"<>`String workspace || value "integration_id"<>`String integration_id
+      || value "cli_path"<>`String cli_path then Error Scope_mismatch
+    else (match value "account_home" with
+      | `String account_home when Runtime_account_home.is_valid account_home -> Ok (Native_home {account_home})
+      | _ -> Error Invalid_reference)
   | _ -> Error Invalid_reference)

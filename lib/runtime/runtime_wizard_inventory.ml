@@ -61,6 +61,12 @@ let credential_fields ~include_credential_references = function
   | Some (Runtime_schema.Inline _) -> [ "credential_kind", `String "inline" ]
   | None -> [ "credential_kind", `String "none" ]
 
+let account_fields ~include_credential_references account_home =
+  ["account_configured", `Bool (Option.is_some account_home)]
+  @ (match account_home with
+     | Some home when include_credential_references -> ["account_home", `String home]
+     | Some _ | None -> [])
+
 let integrations_json ~include_credential_references (config : Runtime_schema.config) =
   let catalog = Catalog_binding.all () in
   let configured =
@@ -69,11 +75,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
         match provider.api_format with
         | Runtime_schema.Antigravity_cli_runtime | Messages_api | Chat_completions_api | Ollama_api
         | Codex_app_server_runtime | Claude_code_runtime
-        | Gemini_api | Vertex_gemini_api -> true
-        (* Setup offers no Muse Code connection and readiness cannot verify
-           one (Runtime_verification), so a declared provider is listed as
-           unsupported for both. *)
-        | Muse_serve_runtime -> false
+        | Gemini_api | Vertex_gemini_api | Muse_serve_runtime -> true
       in
       let fields =
         match provider.transport with
@@ -83,7 +85,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
       let credential = credential_fields ~include_credential_references provider.credentials in
       integration_json config ~id:provider.id ~display_name:provider.display_name
         ~protocol:(Some provider.protocol) ~origin:"runtime_config" ~supported
-        (fields @ credential @ http_fields provider @ [ "enabled", `Bool provider.enabled ])) config.providers
+        (fields @ credential @ account_fields ~include_credential_references provider.account_home @ http_fields provider @ [ "enabled", `Bool provider.enabled ])) config.providers
   in
   let declared id =
     List.exists (fun (provider : Runtime_schema.provider) -> String.equal provider.id id)
@@ -117,6 +119,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
   let clients =
     [ "codex", "Codex", "codex-app-server", Some "codex", true
     ; "claude-code", "Claude Code", "claude-code", Some "claude", true
+    ; "muse-code", "Muse Code", "muse-serve", Some "muse", true
     ; "antigravity", "Antigravity", "antigravity-cli", Some "agy", true
     ; "vllm", "vLLM", "openai-compatible-http", None, true
     ; "rapid-mlx", "RapidMLX", "openai-compatible-http", None, true
@@ -171,6 +174,7 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
                     ; "streaming", `Bool model.streaming
                     ]
                     @ transport
+                    @ account_fields ~include_credential_references provider.account_home
                     @ http_fields provider
                     @ credential))
            | _ -> None))

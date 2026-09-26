@@ -603,7 +603,10 @@ class CodexExplicitRefresh(unittest.TestCase):
     def test_native_refresh_has_no_old_cache_or_turn_and_preserves_source(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
-            original = home / '.codex'
+            ambient = home / '.codex'
+            ambient.mkdir()
+            (ambient / 'auth.json').write_text('{"fixture":"wrong-ambient"}')
+            original = home / 'selected-codex'
             original.mkdir()
             (original / 'auth.json').write_text('{"fixture":"private"}')
             (original / 'auth.json').chmod(0o600)
@@ -614,6 +617,7 @@ class CodexExplicitRefresh(unittest.TestCase):
 import json, os, pathlib, sys
 home = pathlib.Path(os.environ['CODEX_HOME'])
 assert home != pathlib.Path(os.environ['HOME']) / '.codex'
+assert json.loads((home / 'auth.json').read_text()) == {'fixture': 'private'}
 assert not (home / 'models_cache.json').exists()
 for line in sys.stdin:
     request = json.loads(line)
@@ -628,8 +632,8 @@ for line in sys.stdin:
     print(json.dumps({'id':request['id'],'result':result}), flush=True)
 ''')
             client.chmod(0o700)
-            result = subprocess.run([BINARY, 'runtime-codex-models', '--cli-path', str(client)],
-                env=dict(os.environ, HOME=str(home), CODEX_HOME=str(original)), capture_output=True, text=True, timeout=30)
+            result = subprocess.run([BINARY, 'runtime-codex-models', '--cli-path', str(client), '--account-home', str(original)],
+                env=dict(os.environ, HOME=str(home), CODEX_HOME=str(ambient)), capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
             receipt = json.loads(result.stdout)
             self.assertEqual(receipt['source'], 'isolated_cli_cache')
@@ -637,6 +641,81 @@ for line in sys.stdin:
             self.assertEqual(receipt['models'][0]['context'], 272000)
             self.assertEqual(before, {p.name: p.read_bytes() for p in original.iterdir()})
             self.assertNotIn('private', result.stdout)
+
+
+class SelectedNativeAccounts(unittest.TestCase):
+    def test_muse_client_selection_uses_registered_name(self):
+        receipt = json.dumps(dict(schema='masc.runtime_client_path.v1', path='/owned/muse'))
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, receipt, '')) as run:
+            self.assertEqual(SETUP.official_client_path('/masc', 'muse', 'muse'), '/owned/muse')
+        self.assertEqual(run.call_args.args[0], ['/masc', 'runtime-client-path', '--client', 'muse-code', '--command', 'muse'])
+
+    def test_declared_home_survives_without_reselection(self):
+        source = dict(choice='muse', account_home='/declared/../selected/', label='Muse')
+        with patch.object(SETUP, 'pick', side_effect=AssertionError('declared account must survive')):
+            self.assertEqual(SETUP.select_native_account(source), source)
+
+    def test_new_account_requires_explicit_selection(self):
+        with tempfile.TemporaryDirectory() as home:
+            with patch.dict(os.environ, {'HOME': home}), patch.object(SETUP, 'pick', return_value=[0]) as pick:
+                selected = SETUP.select_native_account(dict(choice='muse', label='Muse'))
+            pick.assert_called_once()
+            self.assertEqual(selected['account_home'], home)
+            self.assertTrue(selected['credential_replaced'])
+
+    def test_muse_catalog_source_is_not_account_verification(self):
+        source = dict(choice='muse', command='/owned/muse', account_home='/selected', rows=[])
+        receipt = dict(schema='masc.muse_models.v1', source='providerCatalog',
+                       invocation_verified=False, account_availability_verified=False,
+                       models=[dict(id='reported', label='Reported', context=8192),
+                               dict(id='unknown', label='Unknown', context=None)])
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt), '')) as run:
+            rows, origin = SETUP.muse_models('/owned/masc', source)
+        self.assertEqual(rows[1]['context'], None)
+        self.assertIn('not yet verified', origin)
+        self.assertEqual(run.call_args.args[0][-2:], ['--account-home', '/selected'])
+        for catalog_source in ['fakeCatalog', 'unresolvedCatalog', 'futureCatalog']:
+            with self.subTest(source=catalog_source), patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(dict(receipt, source=catalog_source)), '')):
+                with self.assertRaises(SETUP.SetupError):
+                    SETUP.muse_models('/owned/masc', source)
+
+    def test_reselected_account_does_not_inherit_prior_membership_or_context(self):
+        source = dict(choice='codex', command='codex', account_home='/selected', credential_replaced=True,
+                      rows=[dict(id='prior.shared', model='shared', max_context=999999, tools=True),
+                            dict(id='prior.absent', model='absent', max_context=999999, tools=True)])
+        with patch.object(SETUP, 'catalog_models', return_value=[dict(id='shared', label='Shared', context=None)]):
+            rows, _ = SETUP.source_models('/masc', source, 10)
+        self.assertEqual([row['id'] for row in rows], ['shared'])
+        self.assertIsNone(rows[0]['context'])
+        self.assertIsNone(rows[0]['existing'])
+
+    def test_muse_byte_budget_is_operator_input_and_unknown_context_refused(self):
+        source = dict(choice='muse', command='muse', account_home='/selected', rows=[])
+        with patch.object(SETUP, 'ask_text', return_value='45678') as ask, patch.object(SETUP, 'render', return_value=('runtime', 'toml')):
+            _, spec = SETUP.resolve_model_spec(source, dict(id='selected', context=8192), 10)
+        ask.assert_called_once()
+        self.assertEqual(spec['max_prompt_bytes'], 45678)
+        self.assertEqual(spec['account_home'], '/selected')
+        with patch.object(SETUP, 'ask_text', side_effect=AssertionError('no invented context')):
+            with self.assertRaises(SETUP.SetupError):
+                SETUP.resolve_model_spec(source, dict(id='unknown', context=None), 10)
+
+    def test_native_sign_in_uses_selected_account_environment(self):
+        for protocol, variable, command in [('muse-serve', 'HOME', ['muse', 'login']),
+                ('codex-app-server', 'CODEX_HOME', ['codex', 'login', '--device-auth']),
+                ('claude-code', 'CLAUDE_CONFIG_DIR', ['claude', 'auth', 'login'])]:
+            with self.subTest(protocol=protocol):
+                inventory = dict(runtimes=[dict(id='selected', protocol=protocol,
+                    command=command[0], account_home='/selected/account')])
+                self.assertEqual(SETUP.login_command('/masc', 'selected', [], inventory), command)
+                with patch.dict(os.environ, {key: '/wrong-account' for key in ['HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME', 'XDG_RUNTIME_DIR']}):
+                    environment = SETUP.login_environment('/masc', 'selected', [], inventory)
+                self.assertEqual(environment[variable], '/selected/account')
+                if protocol == 'muse-serve':
+                    for key, suffix in [('XDG_CONFIG_HOME', '.config'), ('XDG_DATA_HOME', '.local/share'),
+                                        ('XDG_CACHE_HOME', '.cache'), ('XDG_STATE_HOME', '.local/state'),
+                                        ('XDG_RUNTIME_DIR', '.local/run')]:
+                        self.assertEqual(environment[key], '/selected/account/' + suffix)
 
 
 class ModelReleaseSelection(unittest.TestCase):

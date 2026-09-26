@@ -12,7 +12,8 @@ type access =
   | Read_write
 
 type resource_read_max_bytes = private int
-(** Strictly positive configured bound for one deferred Skill resource read. *)
+(** Bound for one deferred Skill resource read. Always
+    {!Common.max_tool_result_wire_bytes}: it is derived, not configured. *)
 
 type source = private
   { id : source_id
@@ -58,12 +59,6 @@ type anchor_rejection =
 
 type diagnostic =
   | Toml_syntax of string
-  | Missing_resource_read_max_bytes
-  | Invalid_resource_read_max_bytes_type of value_kind
-  | Non_positive_resource_read_max_bytes of int
-  | Resource_read_max_bytes_over_inline_boundary of int
-      (** Above {!Common.max_tool_result_wire_bytes}: a resource that size is
-          read and then refused on the inline tool-result boundary. *)
   | Unexpected_skill_field of string
   | Invalid_sources_type of value_kind
   | Invalid_source_entry_type of
@@ -119,7 +114,13 @@ type resolved_source =
   ; resolution : resolution
   }
 
+type notice = Ignored_resource_read_max_bytes
+(** [[skills] resource-read-max-bytes] is present. It is ignored for one
+    version and refused after that (#39284). *)
+
 val parse_text : string -> (t, diagnostic list) result
+val parse_text_with_notices : string -> (t * notice list, diagnostic list) result
+(** [parse_text] plus the keys that were accepted but ignored. *)
 val validate_text : string -> (unit, diagnostic list) result
 val read_only_absolute_source :
   id:source_id -> path:string -> (source, path_rejection) result
@@ -150,3 +151,12 @@ val rejection_message : config_path:string -> diagnostic list -> string
 (** One line naming every diagnostic and then the runtime.toml that carries
     them. The save path (HTTP 400) and the boot WARN both print this line, so
     an operator reads the same key and file in either place. *)
+
+val notice_to_string : notice -> string
+val notice_message : config_path:string -> notice list -> string
+(** Same shape as {!rejection_message}, for keys that are ignored. *)
+
+module For_testing : sig
+  val with_resource_read_max_bytes : int -> t -> t
+  (** A smaller bound than the derived one, to exercise the oversize path. *)
+end

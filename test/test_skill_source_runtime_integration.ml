@@ -102,8 +102,7 @@ default = "local.sample"
 ;;
 
 (* #39269 (d): the shipped seed, read as is, passes the same precondition a
-   runtime config save runs. #39040 tightened the bound and the seed together;
-   this pins that they stay together. *)
+   runtime config save runs. *)
 let test_seed_passes_save_precondition () =
   let root = repo_root_from (Sys.getcwd ()) in
   let path = Filename.concat root "config/runtime.toml" in
@@ -112,22 +111,29 @@ let test_seed_passes_save_precondition () =
   | Error detail -> fail ("seed config/runtime.toml refused by save precondition: " ^ detail)
 ;;
 
-(* #39269 (b): the 400 a save returns names the key and the file first, so a
+(* A [skills] table the save and the boot refuse for a reason that stays:
+   a non-table [skills.sources]. *)
+let rejected_text =
+  {|[skills]
+sources = "lots"
+
+[runtime]
+default = "local.sample"
+|}
+;;
+
+(* #39269 (b): the 400 a save returns names the key and the file, so a
    one-line surface that cuts the tail still says what to fix. *)
-let test_over_bound_save_names_key_and_file () =
+let test_rejected_save_names_key_and_file () =
   match
     Runtime.validate_config_text
       ~runtime_config_path:"/tmp/live/runtime.toml"
-      over_bound_text
+      rejected_text
   with
-  | Ok () -> fail "save precondition accepted a bound over the inline boundary"
+  | Ok () -> fail "save precondition accepted a non-table skills.sources"
   | Error detail ->
-    check bool "names the key and value" true
-      (String_util.contains_substring detail "[skills] resource-read-max-bytes = 65536");
-    check bool "names the fix" true
-      (String_util.contains_substring
-         detail
-         (Printf.sprintf "set it to %d or less" Common.max_tool_result_wire_bytes));
+    check bool "names the key" true
+      (String_util.contains_substring detail "skills.sources must be an array of tables");
     check bool "names the file" true
       (String_util.contains_substring detail "(file: /tmp/live/runtime.toml)")
 ;;
@@ -136,12 +142,12 @@ let test_over_bound_save_names_key_and_file () =
    reason and the file, not a bare diagnostic count. *)
 let test_boot_warns_with_reason_and_file () =
   let diagnostics =
-    match Skill_source_config.parse_text over_bound_text with
-    | Ok _ -> fail "over-bound Skill config parsed"
+    match Skill_source_config.parse_text rejected_text with
+    | Ok _ -> fail "non-table skills.sources parsed"
     | Error diagnostics -> diagnostics
   in
   let snapshot =
-    Skill_catalog_snapshot.config_rejected ~source_text:over_bound_text ~diagnostics
+    Skill_catalog_snapshot.config_rejected ~source_text:rejected_text ~diagnostics
   in
   match
     Server_skill_snapshot_runtime.boot_report
@@ -150,10 +156,43 @@ let test_boot_warns_with_reason_and_file () =
   with
   | Server_skill_snapshot_runtime.Boot_warn, line ->
     check bool "reason in WARN" true
-      (String_util.contains_substring line "[skills] resource-read-max-bytes = 65536");
+      (String_util.contains_substring line "skills.sources must be an array of tables");
     check bool "file in WARN" true
       (String_util.contains_substring line "/tmp/live/runtime.toml")
   | (Boot_info | Boot_error), line -> fail ("rejected Skill config was not a WARN: " ^ line)
+;;
+
+(* task-1779 B: a live runtime.toml that still sets the old bound saves, and
+   the boot says once that the key is ignored and which file carries it. The
+   seed has no such key and says nothing. *)
+let test_legacy_bound_saves_and_warns_at_boot () =
+  (match
+     Runtime.validate_config_text
+       ~runtime_config_path:"/tmp/live/runtime.toml"
+       over_bound_text
+   with
+   | Ok () -> ()
+   | Error detail -> fail ("legacy resource-read-max-bytes was refused: " ^ detail));
+  (match
+     Server_skill_snapshot_runtime.boot_notice
+       ~runtime_config_path:"/tmp/live/runtime.toml"
+       ~source_text:over_bound_text
+   with
+   | None -> fail "legacy resource-read-max-bytes produced no boot WARN"
+   | Some line ->
+     check bool "WARN names the key" true
+       (String_util.contains_substring line "[skills] resource-read-max-bytes is ignored");
+     check bool "WARN names the follow-up" true
+       (String_util.contains_substring line "#39284");
+     check bool "WARN names the file" true
+       (String_util.contains_substring line "(file: /tmp/live/runtime.toml)"));
+  let root = repo_root_from (Sys.getcwd ()) in
+  let seed = Filename.concat root "config/runtime.toml" in
+  check bool "seed has no ignored key" true
+    (Option.is_none
+       (Server_skill_snapshot_runtime.boot_notice
+          ~runtime_config_path:seed
+          ~source_text:(read_file seed)))
 ;;
 
 let () =
@@ -166,10 +205,12 @@ let () =
             test_runtime_save_precondition_rejects_skill_config
         ; test_case "seed passes save precondition" `Quick
             test_seed_passes_save_precondition
-        ; test_case "over-bound save names key and file" `Quick
-            test_over_bound_save_names_key_and_file
+        ; test_case "rejected save names key and file" `Quick
+            test_rejected_save_names_key_and_file
         ; test_case "boot warns with reason and file" `Quick
             test_boot_warns_with_reason_and_file
+        ; test_case "legacy bound saves and warns at boot" `Quick
+            test_legacy_bound_saves_and_warns_at_boot
         ] )
     ]
 ;;

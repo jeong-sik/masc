@@ -327,15 +327,16 @@ let test_revisions_track_only_skill_truth () =
     true
     (Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision first)
      <> Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision skill_change));
-  check bool "resource bound changes config revision" true
-    (Snapshot.config_revision first |> Option.get |> Snapshot.config_revision_to_string
-     <> (Snapshot.config_revision resource_bound_change
-         |> Option.get
-         |> Snapshot.config_revision_to_string));
-  check bool "resource bound changes snapshot revision" true
-    (Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision first)
-     <> Snapshot.snapshot_revision_to_string
-          (Snapshot.snapshot_revision resource_bound_change))
+  (* task-1779 B: the key is ignored, so a different value is not Skill truth. *)
+  check string "ignored resource bound keeps config revision"
+    (Snapshot.config_revision first |> Option.get |> Snapshot.config_revision_to_string)
+    (Snapshot.config_revision resource_bound_change
+     |> Option.get
+     |> Snapshot.config_revision_to_string);
+  check string "ignored resource bound keeps snapshot revision"
+    (Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision first))
+    (Snapshot.snapshot_revision_to_string
+       (Snapshot.snapshot_revision resource_bound_change))
 ;;
 
 let test_exact_duplicate_is_rejected () =
@@ -513,7 +514,7 @@ let test_unreadable_config_still_produces_a_snapshot () =
    source revision they were produced from: an operator reading the catalog
    has to be able to tell which text was refused. *)
 let test_rejected_config_keeps_its_diagnostics () =
-  let bad = "[skills]\nresource-read-max-bytes = \"lots\"\n" in
+  let bad = "[skills]\nsources = \"lots\"\n" in
   let diagnostics =
     match Skill_source_config.parse_text bad with
     | Error diagnostics -> diagnostics

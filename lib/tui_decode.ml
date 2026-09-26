@@ -2762,7 +2762,7 @@ type runtime_context_source =
   | Runtime_context_capability
   | Runtime_context_clamped
 
-type exact_slot_group = Exact_http_slots | Exact_cli_slots
+type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
 type runtime_option = {
   ro_id : string;
@@ -4917,11 +4917,12 @@ let decode_runtime_option ~default_id json =
   let* ro_provider_id = required_string_field json "provider_id" in
   let* ro_model = required_string_field json "model" in
   let* ro_exact_slot_group =
-    let* group = required_string_field json "exact_slot_group" in
+    let* group = required_nullable_string_field json "exact_slot_group" in
     match group with
-    | "slots" -> Ok Exact_http_slots
-    | "cli_slots" -> Ok Exact_cli_slots
-    | _ -> Error (Printf.sprintf "unknown exact_slot_group %S" group)
+    | Some "slots" -> Ok Exact_http_slots
+    | Some "cli_slots" -> Ok Exact_cli_slots
+    | None -> Ok Exact_output_unsupported
+    | Some group -> Error (Printf.sprintf "unknown exact_slot_group %S" group)
   in
   let* ro_effective_max_context = required_int_field json "effective_max_context" in
   let* context_source = required_string_field json "max_context_source" in

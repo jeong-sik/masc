@@ -4516,10 +4516,6 @@ let exact_slot_list_of_api_format = function
   | Runtime_schema.Vertex_gemini_api -> Catalog_slots
 ;;
 
-let exact_slot_list_key_of_api_format api_format =
-  exact_slot_list_key (exact_slot_list_of_api_format api_format)
-;;
-
 (* The list of an exact lane a runtime of this format may be written into,
    if any. Every exact-output call hands the client an output schema, so a
    format without the channel for one goes into neither list
@@ -4530,6 +4526,10 @@ let exact_slot_list_admitting api_format =
   match Runtime_schema.api_format_output_schema_channel api_format with
   | Runtime_schema.No_output_schema_channel -> None
   | Runtime_schema.Holds_output_schema -> Some (exact_slot_list_of_api_format api_format)
+;;
+
+let exact_slot_list_key_of_api_format api_format =
+  Option.map exact_slot_list_key (exact_slot_list_admitting api_format)
 ;;
 
 let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bind_imp = false) ~runtime_id () =

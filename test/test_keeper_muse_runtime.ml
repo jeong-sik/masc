@@ -929,6 +929,63 @@ let with_scripted_host ?(fixture = []) f =
                   f ~base_path)))))
 ;;
 
+let test_declared_muse_runtime_routes_keeper_turns () =
+  with_scripted_host @@ fun ~base_path ->
+  let runtime_path = Filename.concat base_path "runtime.toml" in
+  let declaration = Printf.sprintf
+    {|[providers.muse_fixture]
+protocol = "muse-serve"
+command = %S
+account-home = %S
+is-non-interactive = true
+[models.fixture]
+api-name = "muse-fixture-1"
+max-context = 200000
+max-prompt-bytes = 1048576
+tools-support = true
+streaming = true
+[muse_fixture.fixture]
+[runtime]
+default = "muse_fixture.fixture"
+|} (launcher ~base_path) (Filename.concat base_path "account-home") in
+  write_file ~mode:0o600 runtime_path declaration;
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> () | Error detail -> fail detail);
+  let observed = ref `Null in
+  let tool = masc_probe_tool observed in
+  let env = match Eio_context.get_env_opt () with
+    | Some env -> env | None -> fail "fixture Eio environment is missing" in
+  let hooks = { Agent_core.Hooks.empty with before_turn_params = Some
+    (fun _ -> Agent_core.Hooks.AdjustParams
+      { Agent_core.Hooks.default_turn_params with
+        system_prompt_override = Some "MUSE_ROUTED_EFFECTIVE_SYSTEM_PROMPT" }) } in
+  let run () = Eio.Switch.run (fun sw ->
+    match Keeper_turn_driver.run_named ~walk_owner:Keeper_turn_driver.One_shot_walk
+      ~runtime_id ~keeper_name ~base_path ~goal:"Call masc_probe once"
+      ~system_prompt:"" ~hooks
+      ~tools:[tool] ~agent_core_tools:[tool]
+      ~initial_messages:[user_message "MUSE_ROUTED_HISTORY"]
+      ~context:(Agent_core.Context.create ()) ~sw ~net:(Eio.Stdenv.net env) () with
+    | Ok selected -> selected.Keeper_turn_driver.run_result
+    | Error error -> fail (Agent_core.Error.to_string error)) in
+  let first = run () in
+  check string "routed reply" "MASC_MUSE_KEEPER_OK" (response_text first);
+  check (option bool) "routed start" (Some false) first.session_resumed;
+  check string "routed MCP tool reached MASC" {|{"marker":"from-muse"}|}
+    (Yojson.Safe.to_string !observed);
+  let _, _, first_count = settled_turn ~base_path in
+  check int "routed first durable ordinal" 1 first_count;
+  let prompt = read_text (Filename.concat base_path "start-prompt.txt") in
+  check bool "effective hook instructions reach the client" true
+    (String_util.contains_substring prompt "MUSE_ROUTED_EFFECTIVE_SYSTEM_PROMPT");
+  check bool "native coordinate survives the hook override" true
+    (String_util.contains_substring prompt "Muse native tools use host workspace");
+  let second = run () in
+  check (option bool) "routed resume" (Some true) second.session_resumed;
+  let _, _, second_count = settled_turn ~base_path in
+  check int "routed second durable ordinal" 2 second_count
+;;
+
 let scenario name = [ "scenario", `String name ]
 
 (* The recovery row a failed turn left: its failure and the host turn it
@@ -1355,6 +1412,8 @@ let () =
     ; ( "scripted host"
       , [ test_case "start and resume through muse serve with a MASC tool" `Quick
             test_turn_through_scripted_host
+        ; test_case "declared Muse runtime routes and resumes Keeper turns" `Quick
+            test_declared_muse_runtime_routes_keeper_turns
         ] )
     ; ( "turn endings"
       , [ test_case "a host that exits mid-turn leaves recovery" `Quick

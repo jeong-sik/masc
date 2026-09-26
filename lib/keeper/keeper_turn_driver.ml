@@ -2589,12 +2589,8 @@ let run_named
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
               on_request_attribution
           in
-          let workspace =
-            if String.trim system_prompt = ""
-            then Error (Keeper_official_client_host.config_error ~field:"system_prompt"
-              "system prompt must not be blank")
-            else muse_native_workspace ~base_path ~keeper_name ~required_native_posture
-              ~account_home:execution.account_home in
+          let workspace = muse_native_workspace ~base_path ~keeper_name
+              ~required_native_posture ~account_home:execution.account_home in
           match workspace with
           | Error error ->
             { Keeper_muse_runtime.result = Error error
@@ -2620,7 +2616,8 @@ let run_named
             ~base_path
             ~goal
             ~goal_blocks
-            ~system_prompt:(system_prompt ^ "\n\n" ^ native_context)
+            ~native_workspace_context:native_context
+            ~system_prompt
             ~tools
             ~initial_messages
             ~model_input_projection

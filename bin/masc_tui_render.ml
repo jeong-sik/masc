@@ -5715,6 +5715,7 @@ let render_exact_lane_provider_editor (state : state) editor =
               match runtime.ro_exact_slot_group with
               | Tui_decode.Exact_http_slots -> "HTTP tail"
               | Tui_decode.Exact_cli_slots -> "CLI tail"
+              | Tui_decode.Exact_output_unsupported -> "no output schema"
             in
             let line note =
               Printf.sprintf "  %s [%s] %s · %s / %s%s"

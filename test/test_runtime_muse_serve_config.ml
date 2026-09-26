@@ -122,6 +122,8 @@ let test_materializes_the_muse_serve_owner () =
      | Runtime_execution.Claude_code _
      | Runtime_execution.Antigravity_cli _ ->
        fail "muse-serve was materialized as another execution owner");
+    check (option string) "Muse is absent from exact-output slot groups" None
+      (Runtime.exact_slot_list_key_of_api_format default.provider.api_format);
     check string "execution label" "muse_serve" (Runtime_execution.label default.execution);
     check bool "the official client owns the session" true
       (Runtime_execution.checkpoint_owner default.execution

@@ -10,7 +10,8 @@ the list back whole.
 
 SOURCE_MODULES names the files this scenario stands over. PR CI picks the suite
 up from those paths, so a change to the key wiring, the surface state or the
-overlay render has to pass here.
+overlay render has to pass here, and so does the wheel: a notch over the
+reading moves it, not the list it covers.
 """
 import os
 import re
@@ -138,6 +139,26 @@ def run(executable: str) -> None:
             raise AssertionError(
                 "k did not walk the reading back: "
                 f"{scrolled_first}- then {back_first}-")
+
+        # A wheel notch moves this reading the way j does, a row a notch. The
+        # wheel used to arrive as a key only list arms knew, so over this
+        # reading it moved the fact list hidden behind it and the window stood
+        # still. Every fact here carries the same claim, so a list move would
+        # leave the window exactly where it was.
+        os.write(master_fd, b"\x1b[<65;20;10M" * 3)
+        h.drain_until_quiet(process, master_fd, output)
+        wheel_first, _wheel_last, wheel_total = detail_window(output)
+        if wheel_total != total or wheel_first != back_first + 3:
+            raise AssertionError(
+                "three wheel notches did not scroll the reading three rows: "
+                f"{back_first}- then {wheel_first}-")
+        os.write(master_fd, b"\x1b[<64;20;10M")
+        h.drain_until_quiet(process, master_fd, output)
+        up_first, _up_last, up_total = detail_window(output)
+        if up_total != total or up_first != wheel_first - 1:
+            raise AssertionError(
+                "a wheel notch up did not walk the reading back a row: "
+                f"{wheel_first}- then {up_first}-")
 
         # G opens the claim's tail in one step, the way g opens its head.
         os.write(master_fd, b"G")

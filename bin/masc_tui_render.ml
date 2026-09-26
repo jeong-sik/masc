@@ -5185,7 +5185,7 @@ let render_keeper_list (state : state) =
    | Some (Fleet_measured { fleet; freshness }), None ->
        let tone =
          if fleet.fs_operator_action_required then (Theme.bad ())
-         else if String.equal fleet.fs_status "ok" then (Theme.ok ())
+         else if Masc_tui_fleet_line.status_is_ok fleet.fs_status then (Theme.ok ())
          else (Theme.warn ())
        in
        let blocker =
@@ -5196,7 +5196,8 @@ let render_keeper_list (state : state) =
        box_line buf cols
          (Printf.sprintf
             "%s  fleet %s%s   running %d/%d   turn capacity %d/%d%s%s%s" tone
-            fleet.fs_status Ansi.reset fleet.fs_running_count
+            (Masc_tui_fleet_line.status_text fleet.fs_status)
+            Ansi.reset fleet.fs_running_count
             fleet.fs_bootable_count
             (fleet.fs_target_reaction_capacity
             - fleet.fs_reaction_capacity_shortfall)

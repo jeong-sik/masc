@@ -15,7 +15,7 @@ let contains needle text =
 let fleet ?blocker ?(failing = 0) ?(retrying = 0) ?(config_blocked = 0)
     ?(session_recovery = 0) ?(owners_without_fiber = 0) ?(scan_errors = 0) ()
     : Tui_decode.fleet_safety =
-  { fs_status = "ok"
+  { fs_status = Tui_decode.Fleet_status Health_status.Ok
   ; fs_blocker = blocker
   ; fs_operator_action_required = false
   ; fs_bootable_count = 12
@@ -221,6 +221,29 @@ let test_the_servers_reason_is_drawn_as_text () =
           check bool "no raw escape in an unknown word" false
             (String.contains word '\027'))
 
+(* The header's colour came from [String.equal status "ok"], so any word but
+   "ok" drew as a warning and nothing named the grades. Only [ok] is healthy;
+   a word this build does not know is drawn as written, not as a grade. *)
+let test_only_ok_is_healthy () =
+  check bool "ok" true
+    (Masc_tui_fleet_line.status_is_ok (Tui_decode.Fleet_status Health_status.Ok));
+  check bool "degraded" false
+    (Masc_tui_fleet_line.status_is_ok
+       (Tui_decode.Fleet_status Health_status.Degraded));
+  check bool "a word this build does not know" false
+    (Masc_tui_fleet_line.status_is_ok (Tui_decode.Unrecognised_fleet_status "ok!"))
+
+let test_the_status_word_is_the_grade_or_the_servers_word () =
+  check string "a grade" "blocked"
+    (Masc_tui_fleet_line.status_text (Tui_decode.Fleet_status Health_status.Blocked));
+  check string "an unknown word as the server wrote it" "held"
+    (Masc_tui_fleet_line.status_text (Tui_decode.Unrecognised_fleet_status "held"));
+  check bool "with no raw escape in it" false
+    (String.contains
+       (Masc_tui_fleet_line.status_text
+          (Tui_decode.Unrecognised_fleet_status "x\027[2Jy"))
+       '\027')
+
 let () =
   run "tui fleet line"
     [ ( "blocker names"
@@ -266,6 +289,11 @@ let () =
             test_an_unknown_snapshot_word_is_drawn_by_name
         ; test_case "the server's reason is drawn as text" `Quick
             test_the_servers_reason_is_drawn_as_text
+        ] )
+    ; ( "status"
+      , [ test_case "only ok is healthy" `Quick test_only_ok_is_healthy
+        ; test_case "the status word is the grade or the server's word" `Quick
+            test_the_status_word_is_the_grade_or_the_servers_word
         ] )
     ; ( "failing"
       , [ test_case "names only the classes that hold a keeper" `Quick

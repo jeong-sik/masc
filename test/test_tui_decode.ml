@@ -1624,7 +1624,8 @@ let test_decode_fleet_safety_carries_both_name_lists () =
   let fleet =
     measured (Tui_decode.decode_fleet_safety (fleet_safety_json ()))
   in
-  Alcotest.(check string) "status" "degraded" fleet.fs_status;
+  Alcotest.(check bool) "status is read as a grade" true
+    (fleet.fs_status = Tui_decode.Fleet_status Health_status.Degraded);
   Alcotest.(check bool) "the blocker is read as the reason it names" true
     (fleet.fs_blocker
      = Some

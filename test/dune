@@ -5528,7 +5528,7 @@
 (test
  (name test_tui_fleet_line)
  (modules test_tui_fleet_line)
- (libraries alcotest masc masc_tui_fleet_line))
+ (libraries alcotest masc masc.masc_types masc_tui_fleet_line))
 
 (include stanzas/test_tui_fleet_reading_says_when_it_was_measured.inc)
 

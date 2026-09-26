@@ -1,0 +1,104 @@
+
+/private/tmp/masc-sanitize-artifact-36246971815/main_eio.exe:	file format mach-o arm64
+
+Disassembly of section __TEXT,__text:
+
+0000000101579e08 <_camlSafe_ops$first_repair_1023>:
+101579e08:     	ldr	x16, [x28, #0x28]
+101579e0c:     	add	x16, x16, #0x158
+101579e10:     	cmp	sp, x16
+101579e14:     	b.lo	0x101579df8 <_camlSafe_ops$sanitize_text_utf8_1019+0x148>
+101579e18:     	stur	x30, [sp, #-0x8]
+101579e1c:     	sub	sp, sp, #0x20
+101579e20:     	mov	x2, x0
+101579e24:     	ldr	x16, [x28]
+101579e28:     	cmp	x27, x16
+101579e2c:     	b.ls	0x101579f74 <_camlSafe_ops$first_repair_1023+0x16c>
+101579e30:     	ldr	x3, [x1, #0x18]
+101579e34:     	cmp	x2, x3
+101579e38:     	b.lt	0x101579e50 <_camlSafe_ops$first_repair_1023+0x48>
+101579e3c:     	orr	x0, xzr, #0x1
+101579e40:     	add	sp, sp, #0x20
+101579e44:     	ldur	x30, [sp, #-0x8]
+101579e48:     	and	x30, x30, #0xffffffffffffff
+101579e4c:     	ret
+101579e50:     	str	x1, [sp]
+101579e54:     	str	x2, [sp, #0x8]
+101579e58:     	asr	x3, x2, #1
+101579e5c:     	ldr	x0, [x1, #0x10]
+101579e60:     	ldur	x5, [x0, #-0x8]
+101579e64:     	lsr	x6, x5, #10
+101579e68:     	lsl	x7, x6, #3
+101579e6c:     	sub	x8, x7, #0x1
+101579e70:     	add	x9, x0, x8
+101579e74:     	ldrb	w10, [x9]
+101579e78:     	sub	x11, x8, x10
+101579e7c:     	cmp	x11, x3
+101579e80:     	b.ls	0x101579f7c <_camlSafe_ops$first_repair_1023+0x174>
+101579e84:     	add	x12, x0, x3
+101579e88:     	ldrb	w13, [x12]
+101579e8c:     	orr	x14, xzr, #0x1
+101579e90:     	add	x15, x14, x13, lsl #1
+101579e94:     	cmp	x15, #0x101
+101579e98:     	b.ge	0x101579ef0 <_camlSafe_ops$first_repair_1023+0xe8>
+101579e9c:     	mov	x0, x15
+101579ea0:     	bl	0x101579c58 <_camlSafe_ops$is_disallowed_control_char_1003>
+101579ea4:     	cmp	x0, #0x1
+101579ea8:     	b.eq	0x101579ee0 <_camlSafe_ops$first_repair_1023+0xd8>
+101579eac:     	ldr	x16, [x28]
+101579eb0:     	sub	x27, x27, #0x10
+101579eb4:     	cmp	x27, x16
+101579eb8:     	b.lo	0x101579f6c <_camlSafe_ops$first_repair_1023+0x164>
+101579ebc:     	add	x0, x27, #0x8
+101579ec0:     	orr	x23, xzr, #0x400
+101579ec4:     	stur	x23, [x0, #-0x8]
+101579ec8:     	ldr	x25, [sp, #0x8]
+101579ecc:     	str	x25, [x0]
+101579ed0:     	add	sp, sp, #0x20
+101579ed4:     	ldur	x30, [sp, #-0x8]
+101579ed8:     	and	x30, x30, #0xffffffffffffff
+101579edc:     	ret
+101579ee0:     	ldr	x0, [sp, #0x8]
+101579ee4:     	add	x0, x0, #0x2
+101579ee8:     	ldr	x1, [sp]
+101579eec:     	b	0x101579e20 <_camlSafe_ops$first_repair_1023+0x18>
+101579ef0:     	mov	x1, x2
+101579ef4:     	bl	0x10172da30 <_camlStdlib__Bytes$get_utf_8_uchar_1071>
+101579ef8:     	lsr	x21, x0, #24
+101579efc:     	orr	x22, x21, #0x1
+101579f00:     	and	x23, x22, #0xf
+101579f04:     	cmp	x23, #0x1
+101579f08:     	b.le	0x101579f30 <_camlSafe_ops$first_repair_1023+0x128>
+101579f0c:     	lsr	x24, x0, #27
+101579f10:     	orr	x25, x24, #0x1
+101579f14:     	cmp	x25, #0x3
+101579f18:     	b.ne	0x101579f30 <_camlSafe_ops$first_repair_1023+0x128>
+101579f1c:     	ldr	x2, [sp, #0x8]
+101579f20:     	add	x0, x2, x23
+101579f24:     	sub	x0, x0, #0x1
+101579f28:     	ldr	x1, [sp]
+101579f2c:     	b	0x101579e20 <_camlSafe_ops$first_repair_1023+0x18>
+101579f30:     	ldr	x16, [x28]
+101579f34:     	sub	x27, x27, #0x10
+101579f38:     	cmp	x27, x16
+101579f3c:     	b.lo	0x101579f64 <_camlSafe_ops$first_repair_1023+0x15c>
+101579f40:     	add	x0, x27, #0x8
+101579f44:     	orr	x3, xzr, #0x400
+101579f48:     	stur	x3, [x0, #-0x8]
+101579f4c:     	ldr	x4, [sp, #0x8]
+101579f50:     	str	x4, [x0]
+101579f54:     	add	sp, sp, #0x20
+101579f58:     	ldur	x30, [sp, #-0x8]
+101579f5c:     	and	x30, x30, #0xffffffffffffff
+101579f60:     	ret
+101579f64:     	bl	0x101844748 <_caml_call_gc>
+101579f68:     	b	0x101579f40 <_camlSafe_ops$first_repair_1023+0x138>
+101579f6c:     	bl	0x101844748 <_caml_call_gc>
+101579f70:     	b	0x101579ebc <_camlSafe_ops$first_repair_1023+0xb4>
+101579f74:     	bl	0x101844748 <_caml_call_gc>
+101579f78:     	b	0x101579e30 <_camlSafe_ops$first_repair_1023+0x28>
+101579f7c:     	bl	0x101844d20 <_caml_ml_array_bound_error>
+101579f80:     	mov	x16, #0x24              ; =36
+101579f84:     	stp	x16, x30, [sp, #-0x10]!
+101579f88:     	bl	0x10184457c <_caml_system__code_begin>
+101579f8c:     	ldp	x16, x30, [sp], #0x10

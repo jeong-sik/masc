@@ -5757,6 +5757,10 @@ type state = {
      screen showing it would be state nobody can see. *)
   mutable followed_from: (surface * string option) option;
   mutable keeper_cursor: int;
+  (* The first Keepers list row on screen, as the last frame drew it
+     ([Keeper_list_scroll]). A cursor move to a row already on screen leaves
+     the window where it is. *)
+  mutable keeper_list_scroll: int;
   (* The runtime picker: the keeper it is choosing for, its cursor and typed
      filter over the declared lanes and the dispatchable catalogue, and the
      catalogue itself with where every keeper points today. Loaded when the
@@ -7942,6 +7946,7 @@ let create_state
   view = Overview;
   followed_from = None;
   keeper_cursor = 0;
+  keeper_list_scroll = 0;
   runtime_pick_keeper = None;
   runtime_pick_list = Masc_tui_pick_list.closed;
   runtime_catalog = [];
@@ -8751,6 +8756,11 @@ type clamped_scroll =
      it -- later endpoints, the probe's last rows, the footer -- could not be
      reached. *)
   | Voice_scroll of int
+  (* The Keepers list window, which the frame keeps still while the cursor
+     is on it. Worked out from the cursor alone, the cursor sat on the bottom
+     row once the list scrolled, and choosing a row above it moved the whole
+     window: a second press at the same place named another Keeper. *)
+  | Keeper_list_scroll of int
 
 (* What End names on a surface whose rows the drawing counts: a row past any
    real end, so the frame's own clamp reports the last one back. The keypress
@@ -8808,6 +8818,7 @@ let apply_clamped_scroll (state : state) = function
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
+  | Keeper_list_scroll value -> state.keeper_list_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
    fewer than the chrome alone says. The number of rows the list keeps lives

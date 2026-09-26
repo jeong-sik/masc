@@ -124,6 +124,7 @@ let clamped_scroll_now (state : state) = function
   | Patch_modal_scroll _ -> Patch_modal_scroll state.patch_modal_scroll
   | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
   | Voice_scroll _ -> Voice_scroll state.config_scroll
+  | Keeper_list_scroll _ -> Keeper_list_scroll state.keeper_list_scroll
 
 (* Where one wheel notch leaves a reader: as far as [j] or [k] moves it, one
    row. The wheel used to arrive as a key that only list arms knew, so over an
@@ -173,7 +174,7 @@ let reader_after_wheel (reader : clamped_scroll)
      notch keeps reaching them as that key. *)
   | Keeper_detail _ | Keeper_calls _ -> None
   (* List scrolls: the notch moves the list's cursor as the arrow does. *)
-  | Acting _ | Acting_selection _ -> None
+  | Acting _ | Acting_selection _ | Keeper_list_scroll _ -> None
   (* Resources has panes of its own that [h] and [l] move between. *)
   | Resource_scroll _ -> None
 

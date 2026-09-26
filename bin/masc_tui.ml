@@ -10904,6 +10904,9 @@ let press_marked_target state ~base_path ~mailbox (target : press_target) =
           (fun (keeper : keeper) -> String.equal keeper.k_name name)
           state.keepers
       with
+      (* A press read against a list frame after a key in the same burst
+         left the list (Enter opened a Keeper) is not the list's any more. *)
+      | Some _ when state.view <> Keepers Keeper_list -> ()
       | None -> ()
       | Some index when index = state.keeper_cursor ->
           Option.iter

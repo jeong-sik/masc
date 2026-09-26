@@ -2571,7 +2571,61 @@ def pressing_a_row_chooses_then_opens_it(
     )
     press_label_on_screen(
         process, master_fd, output, b"beta", row=beta_row,
-        needle=re.compile(rb"Keepers \xe2\x96\xb8 (?:\x1b\[[0-9;]*m)*beta"),
+        needle=b"Keepers \xe2\x96\xb8 \x1b[1mbeta",
+    )
+    os.write(master_fd, b"q")
+
+
+# More Keepers than the list has rows, so the list scrolls.
+LONG_ROSTER_CREW = tuple("crew-%02d" % index for index in range(40))
+
+
+def seed_long_roster(base_path: str) -> None:
+    keepers_path = Path(base_path) / ".masc" / "keepers"
+    for name in LONG_ROSTER_CREW:
+        (keepers_path / f"{name}.json").write_text(
+            json.dumps(keeper_metadata(name)), encoding="utf-8"
+        )
+
+
+def pressing_a_row_of_a_scrolled_list_opens_it(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """The second press lands on the Keeper the first one chose.
+
+    The window was worked out from the cursor alone, which held the cursor on
+    the bottom row once the list had scrolled. Choosing the top row moved the
+    window, so the second press at the same place named another Keeper."""
+    wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    last = LONG_ROSTER_CREW[-1].encode()
+    notches = b"\x1b[<65;5;5M" * (len(LONG_ROSTER_CREW) + 2)
+    send_and_wait(process, master_fd, output, notches, keeper_row_selected(last))
+    drain_until_quiet(process, master_fd, output)
+    rows = screen_rows(bytes(output))
+    crew_rows = [
+        (number, match.group(0))
+        for number, text in sorted(rows.items())
+        for match in [re.search(rb"crew-\d\d", text)]
+        if match is not None
+    ]
+    if len(crew_rows) < 2 or crew_rows[-1][1] != last:
+        raise AssertionError(
+            f"the list did not scroll to its end: {screen_text(bytes(output))!r}"
+        )
+    top_row, top_name = crew_rows[0]
+    press_label_on_screen(
+        process, master_fd, output, top_name, row=top_row,
+        needle=keeper_row_selected(top_name),
+    )
+    press_label_on_screen(
+        process, master_fd, output, top_name, row=top_row,
+        needle=b"Keepers \xe2\x96\xb8 \x1b[1m" + top_name,
     )
     os.write(master_fd, b"q")
 
@@ -15918,6 +15972,13 @@ def run_keyboard_regression(executable: str) -> None:
         description="pressing a row chooses, then opens it",
         interact=pressing_a_row_chooses_then_opens_it,
         http_fixtures=compact_input_gate_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="pressing a row of a scrolled list opens it",
+        interact=pressing_a_row_of_a_scrolled_list_opens_it,
+        http_fixtures=compact_input_gate_http_fixtures(),
+        prepare_workspace=seed_long_roster,
     )
     run_terminal_scenario(
         executable,

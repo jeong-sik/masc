@@ -5300,9 +5300,14 @@ let render_keeper_list (state : state) =
      roster draws nothing and the line would push the frame past its budget. *)
   let overflowing = list_rows > 0 && keeper_count > list_rows in
   let keeper_rows = if overflowing then max 0 (list_rows - 1) else list_rows in
+  (* The window stays where the last frame drew it while the cursor is on it,
+     and moves only as far as the cursor needs. *)
   let scroll_offset =
-    if keeper_rows > 0 && state.keeper_cursor >= keeper_rows then
-      state.keeper_cursor - keeper_rows + 1
+    if keeper_rows > 0 then
+      min
+        (max 0 (keeper_count - keeper_rows))
+        (Masc_tui_scroll.ensure_visible ~cursor:state.keeper_cursor
+           ~height:keeper_rows state.keeper_list_scroll)
     else 0
   in
   let keepers_window = Rows.of_list ~first:scroll_offset ~height:keeper_rows state.keepers in
@@ -5385,8 +5390,8 @@ let render_keeper_list (state : state) =
        ~max_cells:cols
        ~hints:(keeper_control_hints ~offers_back:false state selected_reading));
 
-  finish_surface state ~surface_key:"keeper-list" ~rows:terminal_rows
-      ~cols buf
+  finish_surface state ~clamped:(Keeper_list_scroll scroll_offset)
+    ~surface_key:"keeper-list" ~rows:terminal_rows ~cols buf
 
 (* Through the semantic names, not the colour names. A raw [Ansi.red] is the
    terminal's red whatever the page behind it is; [Theme.bad ()] is the same

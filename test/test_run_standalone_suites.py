@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Staging tests never compile OCaml; --compile-fixtures adds CI-only link proof."""
 import importlib.util
+import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -36,6 +38,7 @@ class NamespaceFixtures(unittest.TestCase):
             "lib/beta/helper.ml": "let value = Util.value + Alpha.answer\n",
             "lib/beta/util.ml": "let value = 100\n",
             "test/test_namespace.ml": "let () = assert (Alpha.answer = 21); assert (Beta.Helper.value = 121)\n",
+            "test/dune": "(test (name test_namespace) (libraries beta test.alpha alpha))",
         }
         for name, body in files.items():
             self.write(name, body)
@@ -182,6 +185,72 @@ class NamespaceFixtures(unittest.TestCase):
         result = runner.build_and_run(self.plan, str(self.root), str(self.root), str(self.work))
         self.assertIsNone(result.built, "hidden internal module unexpectedly compiled")
         self.assertIn("Unbound module Alpha.Util", result.summary + result.detail)
+
+
+class ExecutionEnvironmentFixtures(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name) / "checkout"
+        self.work = Path(self.tmp.name) / "work"
+        self.work.mkdir()
+        (self.root / "test/stanzas").mkdir(parents=True)
+        self.plan = runner.Plan("test_environment")
+
+    def declare(self, text):
+        (self.root / "test/dune").write_text(text)
+
+    def test_directory_and_nested_action_environment_reach_real_child(self):
+        self.declare('''
+        (env (_ (env-vars (CLEARED "") (OVERRIDDEN directory))))
+        (include stanzas/shared.inc)
+        ''')
+        (self.root / "test/stanzas/shared.inc").write_text('''
+        (test (name test_sibling)
+          (action (setenv SIBLING_ONLY wrong (run %{test}))))
+        (test (name test_environment)
+          (action (setenv OVERRIDDEN outer
+            (setenv OVERRIDDEN "inner value"
+              (setenv MASC_TUI_FRAME_TIMING "frame timing.report" (run %{test}))))))
+        ''')
+        keys = ["CLEARED", "OVERRIDDEN", "MASC_TUI_FRAME_TIMING", "SIBLING_ONLY", "DUNE_SOURCEROOT"]
+        child = self.work / "test_environment.exe"
+        child.write_text(
+            f"#!{sys.executable}\nimport json, os\nfrom pathlib import Path\n"
+            f"Path('environment.json').write_text(json.dumps({{k: os.environ.get(k) for k in {keys!r}}}))\n")
+        child.chmod(0o700)
+        inspected_root = str(self.root / "inspected-source")
+        Path(inspected_root).mkdir()
+        with patch.dict(os.environ, {"CLEARED": "inherited", "OVERRIDDEN": "inherited",
+                                     "MASC_TUI_FRAME_TIMING": "inherited"}), \
+                patch.object(runner, "stage_plan"), \
+                patch.object(runner, "compile_commands", return_value=[[sys.executable, "-c", "pass"]]):
+            outcome = runner.build_and_run(self.plan, str(self.root), inspected_root, str(self.work))
+        self.assertIs(outcome.built, True, outcome)
+        self.assertEqual(json.loads((self.work / "environment.json").read_text()), {
+            "CLEARED": "", "OVERRIDDEN": "inner value",
+            "MASC_TUI_FRAME_TIMING": "frame timing.report", "SIBLING_ONLY": None,
+            "DUNE_SOURCEROOT": inspected_root,
+        })
+
+    def test_unresolvable_environment_never_compiles_or_runs(self):
+        for value in ("%{exe:other.exe}", "%{dep:fixture.json}"):
+            with self.subTest(value=value):
+                self.declare(f"(test (name test_environment) (action (setenv FIXTURE {value} (run %{{test}}))))")
+                with patch.object(runner, "stage_plan") as stage:
+                    outcome = runner.build_and_run(self.plan, str(self.root), str(self.root), str(self.work))
+                stage.assert_not_called()
+                self.assertIsNone(outcome.built)
+                self.assertIn("test environment:", outcome.summary)
+                self.assertIn(value, outcome.summary)
+
+    def test_unknown_suite_never_borrows_another_environment(self):
+        self.declare("(test (name test_sibling))")
+        with patch.object(runner, "stage_plan") as stage:
+            outcome = runner.build_and_run(self.plan, str(self.root), str(self.root), str(self.work))
+        stage.assert_not_called()
+        self.assertIsNone(outcome.built)
+        self.assertIn("no (test)/(tests) stanza declares", outcome.summary)
 
 
 class GeneratedSourceFixtures(unittest.TestCase):

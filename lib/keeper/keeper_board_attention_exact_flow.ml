@@ -459,7 +459,7 @@ let walk_cli_slots ?runner ~base_path ~cli_slots prepared =
          ~validate:(verdict_of_batch_output prepared.candidate)
          ~on_failure:(fun failure ->
            Log.Keeper.warn ~keeper_name:prepared.candidate.keeper_name
-             "board attention cli lane-slot failed: %s"
+             "board attention fallback: %s"
              (Keeper_lane_cli_oneshot.failure_to_string failure))
          ()
      with

@@ -1510,8 +1510,7 @@ let test_cli_exhaustion_preserves_prior_domain_rejection () =
          ; failures =
              [ Masc.Keeper_lane_cli_oneshot.Execution_failed
                  { runtime_id = "claude_code.claude-sonnet-5"
-                 ; cause = Masc.Fusion_official_client.Setup_failure
-                     (Provider_error "client unavailable")
+                 ; cause = Masc.Fusion_official_client.Setup_failure "client unavailable"
                  }
              ]
          })
@@ -1581,8 +1580,7 @@ let test_cli_exhaustion_preserves_prior_provenance_mismatch () =
          ; failures =
              [ Masc.Keeper_lane_cli_oneshot.Execution_failed
                  { runtime_id = "claude_code.claude-sonnet-5"
-                 ; cause = Masc.Fusion_official_client.Setup_failure
-                     (Provider_error "client unavailable")
+                 ; cause = Masc.Fusion_official_client.Setup_failure "client unavailable"
                  }
              ]
          })

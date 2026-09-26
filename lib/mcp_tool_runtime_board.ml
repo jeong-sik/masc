@@ -233,7 +233,9 @@ let enforce_caller_identity ~tool ~field ~agent_name arguments =
   | _ -> arguments
 
 let ensure_board_post_author ~agent_name arguments =
-  enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
+  enforce_caller_identity
+    ~tool:(Tool_name.Board_name.to_string Tool_name.Board_name.Board_post)
+    ~field:"author"
     ~agent_name arguments
 
 (* [sw] and [clock] used to sit here beside the others, under an [ignore] and a
@@ -263,8 +265,9 @@ let bind_caller_identity ~name ~agent_name arguments =
 
 let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~name ~start_time =
   let arguments = bind_caller_identity ~name ~agent_name arguments in
-  match (name : string) with
-  | "masc_board_post" ->
+  match Tool_name.Board_name.of_string name with
+  | None -> None
+  | Some Tool_name.Board_name.Board_post ->
       let result_tr = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name arguments in
       let result_tr =
         if Tool_result.is_success result_tr then begin
@@ -333,7 +336,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       in
       Some result_tr
 
-  | "masc_board_comment" ->
+  | Some Tool_name.Board_name.Board_comment ->
       let result_tr = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name arguments in
       let result_tr =
         if Tool_result.is_success result_tr then begin
@@ -401,18 +404,18 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       in
       Some result_tr
 
-  | "masc_board_vote" | "masc_board_comment_vote" ->
+  | Some ((Tool_name.Board_name.Board_vote | Tool_name.Board_name.Board_comment_vote) as vote_name) ->
       let result_tr = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name arguments in
       (* Record vote activity as a fitness metric (Issue #1861). *)
       let result_tr =
         if Tool_result.is_success result_tr then begin
         let voter = Safe_ops.json_string ~default:"anonymous" "voter" arguments in
-        let target_id =
-          if String.equal name "masc_board_vote" then
-            Safe_ops.json_string ~default:"unknown" "post_id" arguments
-          else
-            Safe_ops.json_string ~default:"unknown" "comment_id" arguments
+        let target_field, subject_kind =
+          match vote_name with
+          | Tool_name.Board_name.Board_vote -> "post_id", "post"
+          | _ -> "comment_id", "comment"
         in
+        let target_id = Safe_ops.json_string ~default:"unknown" target_field arguments in
         (try
            let now = Time_compat.now () in
            let metric : Metrics_store_eio.task_metric = {
@@ -431,9 +434,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Misc.error "board_vote fitness record failed: %s"
              (Stdlib.Printexc.to_string exn));
-        let subject_kind =
-          if String.equal name "masc_board_vote" then "post" else "comment"
-        in
         result_after_activity_projection
           ~tool_name:name
           ~start_time
@@ -457,7 +457,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       in
       Some result_tr
 
-  | "masc_board_delete" ->
+  | Some Tool_name.Board_name.Board_delete ->
       let result_tr = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name arguments in
       let result_tr =
         if Tool_result.is_success result_tr then begin
@@ -487,7 +487,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       in
       Some result_tr
 
-  | "masc_board_post_get" ->
+  | Some Tool_name.Board_name.Board_post_get ->
       (* The read carries the caller's own vote back as a "내 투표" marker.
          The identity is the server's, through the same rewrite as vote's
          [voter]: a model-supplied viewer is corrected, never trusted —
@@ -497,25 +497,25 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       in
       Some (Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name arguments)
 
-  | "masc_board_list"
-  | "masc_board_stats"
-  | "masc_board_search" | "masc_board_profile"
-  | "masc_board_hearths"
-  | "masc_board_curation_read"
-  | "masc_board_curation_submit"
-  | "masc_board_reaction"
-  | "masc_board_sub_board_create"
-  | "masc_board_sub_board_list"
-  | "masc_board_sub_board_get"
-  | "masc_board_sub_board_update"
-  | "masc_board_sub_board_delete"
+  | Some
+      ( Tool_name.Board_name.Board_list
+      | Tool_name.Board_name.Board_stats
+      | Tool_name.Board_name.Board_search
+      | Tool_name.Board_name.Board_profile
+      | Tool_name.Board_name.Board_hearths
+      | Tool_name.Board_name.Board_curation_read
+      | Tool_name.Board_name.Board_curation_submit
+      | Tool_name.Board_name.Board_reaction
+      | Tool_name.Board_name.Board_sub_board_create
+      | Tool_name.Board_name.Board_sub_board_list
+      | Tool_name.Board_name.Board_sub_board_get
+      | Tool_name.Board_name.Board_sub_board_update
+      | Tool_name.Board_name.Board_sub_board_delete
   (* masc_board_post_update runs through the same author-identity rewrite as
      masc_board_post above; masc_board_cleanup is the admin retention pass.
      Both were routable by [Board_tool.handle_tool] all along but had no arm
      here, so the MCP endpoint misreported them as
      "Unknown tool (registry inconsistency)". *)
-  | "masc_board_post_update"
-  | "masc_board_cleanup" ->
+      | Tool_name.Board_name.Board_post_update
+      | Tool_name.Board_name.Board_cleanup ) ->
       Some (Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name arguments)
-
-  | _ -> None

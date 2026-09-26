@@ -738,16 +738,17 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     |> fun execution -> execution.Masc.Keeper_tool_execution.raw_output
     |> Yojson.Safe.from_string
   in
-  let render () =
+  let render_at ~now =
     Masc.Keeper_memory_os_recall.render_if_enabled
       ~config
       ~meta
       ~keepers_dir
       ~keeper_id:meta.name
-      ~now:(Time_compat.now ())
+      ~now
       ()
     |> Option.value ~default:""
   in
+  let render () = render_at ~now:(Time_compat.now ()) in
   write_source "region=us-west-1\n";
   let first_write = write_claim "The deployment region is us-west-1." in
   Alcotest.(check string)
@@ -791,6 +792,10 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     "source digest is visible"
     true
     (contains ~needle:"source_sha256=sha256:" first_prompt);
+  Alcotest.(check string)
+    "unchanged memory renders the same block at a later clock"
+    first_prompt
+    (render_at ~now:(Time_compat.now () +. 3600.0));
   write_source "region=eu-west-1\n";
   let invalidated_prompt = render () in
   Alcotest.(check bool)
@@ -801,6 +806,10 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     "typed invalidation persists in recall"
     true
     (contains ~needle:"reason=source_changed" invalidated_prompt);
+  Alcotest.(check string)
+    "a retained invalidation renders the same block at a later clock"
+    invalidated_prompt
+    (render_at ~now:(Time_compat.now () +. 3600.0));
   let stale_search =
     Runtime.keeper_memory_search_json
       ~config

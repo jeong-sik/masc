@@ -288,9 +288,11 @@ status: reference
 
 **Board Attention Candidate (Board 판정 후보)**
 : Board_attention lane이 판정할 게시물 하나. 어떤 모델 호출보다 먼저 durable하게
-  저장되고, 생애가 `Pending → Judged → Consumed`다. exact-flow 실패가 확정되면 먼저
-  격리(`Quarantine`, 상태값 `Quarantined`) 상태가 되고, 운영자 소유의 복구가 이전 도메인 상태를 잃지
-  않고 `Requeue_requested`를 거쳐 `Requeued`로 올린다. 판정은 소유 lane이 그 후보
+  저장되고, 생애가 `Pending → Judged → Consumed`다. 다시 해도 같은 결과가 나올 실패일
+  때만 격리(`Quarantine`, 상태값 `Quarantined`) 상태가 되고, 운영자 소유의 복구가 이전 도메인 상태를 잃지
+  않고 `Requeue_requested`를 거쳐 `Requeued`로 올린다. 레인이 거친 모든 슬롯이 계정 사정(쿼터
+  소진, 속도 제한, 과부하, 결제 거절)으로 거절했으면 후보는 `Pending`으로 남아 다음 판정을
+  기다린다. 판정은 소유 lane이 그 후보
   판정을 durable하게 적용·소비할 때만 넘어가고, 전달 실패는 마지막 실패 증거를 남길
   뿐 후보를 소비하지 않는다. 대기 작업에는 벽시계 만료가 없다. **`Runtime` 항목과
   다른 뜻이다** — 코드가 `candidate`라는 한 단어를 두 곳에 쓴다. 여기서는 판정 대상
@@ -313,20 +315,29 @@ status: reference
     일치하는 후보가 아직 `Resumable_pending`이면 `ensure_roots`가 같은 결정론적 식별자의
     다음 `generation`으로 `Ready`를 다시 연다. 후보가 `Resumable_judged`나
     `Requeued_resumable`이면 `ensure_roots`는 이 루트를 건드리지 않는다.
+  - `Running`에서 `Ready`로 돌아가는 길은 둘이다. 재시작 복구는 진행 정도와 상관없이
+    끊긴 실행을 모두 돌려보낸다. 레인이 거친 모든 슬롯이 계정 사정으로 거절하면 워커가
+    `defer`로 돌려보낸다. 판정은 읽기만 하는 모델 호출이라 다시 보내도 토큰만 더 쓴다.
+  - 워커는 `Ready` 루트 가운데 모델 호출이 필요 없는 루트(이미 판정·소비·격리됐거나
+    원장에 없는 후보)를 먼저 처리한다. 그다음 가장 오래된 `Pending` 후보의 루트를 잡는다.
   - 경계: 이 상태 머신은 Candidate 생애주기(`Pending → Judged → Consumed`,
     `Quarantined`)와 다른 층위다.
   → [Keeper_board_attention_partition](../../lib/keeper/keeper_board_attention_partition.mli)
 
 **Board Attention Quarantine (Board 판정 격리)**
-: Board attention 판정 워커가 정상적으로 완료할 수 없는 후보(`candidate`)와 파티션을
-  격리 보관하는 상태 및 그 인벤토리. 워커는 격리된 항목을 스스로 재시도하지 않으며,
-  오직 운영자의 재투입(`requeue`) 요청으로만 풀려난다(#38260·#38262).
+: 다시 시도해도 고칠 수 없는 실패로 판정을 끝내지 못한 후보(`candidate`)와 파티션을
+  따로 보관하는 상태와 그 목록이다. 워커는 격리된 항목을 스스로 다시 시도하지 않고,
+  운영자가 재투입(`requeue`)해야만 풀린다(#38260·#38262). 슬롯이 전부 쉬는 중이라
+  못 한 판정은 격리하지 않는다. 파티션이 `Ready`로 돌아가고, 그 Keeper에 다음 Board
+  신호가 오거나 재개·재시작하면 다시 판정한다.
   - 격리 원인 카테고리(`quarantine_failure_category`): 닫힌 12개 값이다.
-    `Candidate_membership_conflict`·`Durable_partition_invariant`·`Exact_setup_unavailable`·`Exact_flow_replayed`·`Exact_lane_exhausted`(모든
-    HTTP 슬롯 및 CLI tail 거부로 모델 슬롯 소진)·`Exact_flow_bookkeeping_failed`(장부
+    `Candidate_membership_conflict`·`Durable_partition_invariant`·`Exact_setup_unavailable`·`Exact_flow_replayed`·`Exact_lane_exhausted`(슬롯이
+    모두 실패했지만 전부 계정 사정으로 거절한 것은 아님. 입력 크기·형식 거절, 결과를 알 수 없는
+    요청, 쓸 수 없는 답, 타입으로 읽을 수 없는 CLI 거절이 여기에 든다)·`Exact_flow_bookkeeping_failed`(장부
     기록 실패)·`Exact_completion_failed`(완료 단계 실패)·`Domain_output_invalid`·`Execution_provenance_mismatch`·`Unexpected_worker_failure`·`Exact_execution_quarantined`(호출
-    단계 미기록)·`Exact_execution_interrupted`(프로세스 재시작으로 바인딩된 실행이
-    끊김. 읽기 전용 모델 호출이라 토큰 외 부작용 없이 재투입 가능).
+    단계 미기록)·`Exact_execution_interrupted`(프로세스 재시작으로 끊긴 실행. 재시작
+    복구가 끊긴 실행을 `Ready`로 돌려보내므로 새 행은 이 값을 받지 않는다. 원장에 남은
+    행은 재투입으로 푼다).
   - TUI 표시 및 복구:
     - Keeper Info 탭에 원인 카테고리별로 집계(건수, 최장 경과 시간, 파티션 ID, 재투입
       대기 수)되어 표시된다. 수백 건의 슬롯 소진 행이 화면을 덮지 않도록 카테고리당 한 줄로 묶는다.

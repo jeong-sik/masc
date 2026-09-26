@@ -375,38 +375,38 @@ let test_oversized_task_skill_is_unavailable_not_a_failed_turn () =
       Masc.Keeper_skill_catalog.error_to_string error
     | _ -> fail "the oversized Task Skill was not kept as one typed unavailable row"
   in
-  match
-    Selection.exact_task_surfaces
-      ~snapshot:skill_snapshot
-      ~tool_deny:[]
-      ~sandbox_profile:Masc.Keeper_types_profile.Docker
-      ~skill_names:None
-      ~selection
-      ~current_task:Inputs.No_current_task
-      ~held_task_skills
-  with
-  | [ ( "task-held"
-      , [ { Masc.Keeper_skill_catalog.reference = readable
-          ; availability = Masc.Keeper_skill_catalog.Instruction_tool
-          }
-        ; { Masc.Keeper_skill_catalog.reference = unavailable
-          ; availability = Masc.Keeper_skill_catalog.Exact_unavailable { diagnostic }
-          }
-        ] ) ] ->
-    check bool "the readable Skill is offered through keeper_skill" true
-      (Reference.equal readable guide_reference);
-    check bool "the oversized Skill is listed on its Task" true
-      (Reference.equal unavailable huge_reference);
+  let surfaces =
+    match
+      Selection.exact_task_surfaces
+        ~snapshot:skill_snapshot
+        ~tool_deny:[]
+        ~sandbox_profile:Masc.Keeper_types_profile.Docker
+        ~skill_names:None
+        ~selection
+        ~current_task:Inputs.No_current_task
+        ~held_task_skills
+    with
+    | [ ("task-held", surfaces) ] -> surfaces
+    | tasks -> failf "expected one held Task surface, got %d" (List.length tasks)
+  in
+  let surface_of reference =
+    List.find_opt
+      (fun (surface : Masc.Keeper_skill_catalog.exact_surface) ->
+         Reference.equal surface.reference reference)
+      surfaces
+  in
+  check int "the Task lists both pinned Skills and nothing else" 2 (List.length surfaces);
+  (match surface_of guide_reference with
+   | Some { availability = Masc.Keeper_skill_catalog.Instruction_tool; _ } -> ()
+   | Some _ | None -> fail "the readable Task Skill is not offered through keeper_skill");
+  match surface_of huge_reference with
+  | Some { availability = Masc.Keeper_skill_catalog.Exact_unavailable { diagnostic }; _ } ->
     check string "the prompt row gives the size refusal as the reason" reason diagnostic
-  | surfaces ->
+  | Some _ | None ->
     failf
       "the Task's prompt surface did not list the oversized Skill as unavailable: %s"
       (Yojson.Safe.to_string
-         (`List
-            (List.concat_map
-               (fun (_, entries) ->
-                  List.map Masc.Keeper_skill_catalog.exact_surface_to_yojson entries)
-               surfaces)))
+         (`List (List.map Masc.Keeper_skill_catalog.exact_surface_to_yojson surfaces)))
 ;;
 
 let test_shadow_reference_selects_shadow_not_effective_winner () =

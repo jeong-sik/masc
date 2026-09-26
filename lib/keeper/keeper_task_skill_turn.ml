@@ -136,6 +136,28 @@ let resolve_observations ~snapshot ~current_task ~held_task_skills =
   loop [] (current @ held)
 ;;
 
+let unprojectable_to_string (row : unprojectable) =
+  let pinned_by =
+    match row.task_ids with
+    | [] -> ""
+    | task_ids -> " for task " ^ String.concat "," task_ids
+  in
+  Printf.sprintf
+    "Task Skill %s is unavailable%s: %s"
+    (Skill_reference.to_yojson row.reference |> Yojson.Safe.to_string)
+    pinned_by
+    (Keeper_skill_catalog.error_to_string row.error)
+;;
+
+let unprojectable_to_yojson (row : unprojectable) =
+  `Assoc
+    [ "reference", Skill_reference.to_yojson row.reference
+    ; "task_ids", `List (List.map (fun task_id -> `String task_id) row.task_ids)
+    ; "error_code", `String (Keeper_skill_catalog.error_code row.error)
+    ; "detail", `String (Keeper_skill_catalog.error_to_string row.error)
+    ]
+;;
+
 let error_code = function
   | Reference_resolution_failed
       { error = Skill_catalog_snapshot.Identity_not_found _; _ } ->

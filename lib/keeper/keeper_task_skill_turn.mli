@@ -5,8 +5,10 @@ type error =
       { reference : Skill_reference.t
       ; error : Skill_catalog_snapshot.reference_resolution_error
       }
-      (** The only admission error: the exact reference names no entry of
-          the frozen snapshot. *)
+      (** The only admission error: the exact reference does not resolve in
+          the frozen snapshot. No entry has its identity
+          ([Identity_not_found]), or the entry that does has another content
+          revision ([Content_revision_mismatch]). *)
 
 type selected = private
   { reference : Skill_reference.t
@@ -60,6 +62,13 @@ val empty : t
 val merge : t list -> t
 (** Preserve Task order while deduplicating identical exact references, in
     both [selected] and [unprojectable]. *)
+
+val unprojectable_to_string : unprojectable -> string
+(** One line naming the reference, the Tasks that pinned it, and the catalog
+    error. *)
+
+val unprojectable_to_yojson : unprojectable -> Yojson.Safe.t
+(** [reference], [task_ids], the catalog [error_code] and its [detail]. *)
 
 val error_code : error -> string
 val error_to_string : error -> string

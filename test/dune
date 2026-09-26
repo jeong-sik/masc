@@ -5848,7 +5848,7 @@
 (test
  (name test_goal_tool_toml_parity)
  (modules test_goal_tool_toml_parity)
- (libraries alcotest yojson masc.tool_schemas masc.tool_spawn masc_types))
+ (libraries alcotest yojson masc.tool_schemas masc.tool_spawn masc_types masc.masc_tool_dispatch masc.embedded_config))
 
 (test
  (name test_keeper_task_skill_block)

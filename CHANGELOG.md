@@ -144,6 +144,7 @@
 - Prepare HTTP/1 JSON and cached HTML compression on the shared CPU pool, preserving caller-owned writes and immediate identity, small-body and conditional responses. How fast responses are while that pool is busy with
   Keeper work has not been measured yet (#38878).
 - Run HTTP/2 request and body-completion work outside the connection reader so CPU compression waits can coexist with other streams and control frames; cancel request work when connection I/O ends while preserving durable server work. Each stream runs under its own switch; a peer RST_STREAM releases that stream's entry and cancels its work and child fibers, so reset-and-reopen no longer accumulates request fibers (#38886).
+- Keep TUI input decoding and readiness deadlines on the owner Eio fiber, avoiding system-thread dispatch for buffered keys while preserving partial Unicode, paste and terminal cleanup behavior (#38889).
 
 ### Removed
 

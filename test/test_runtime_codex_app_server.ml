@@ -2614,6 +2614,30 @@ let test_callback_timeout_origin_is_preserved_without_deadline () =
            |> ignore)))
 ;;
 
+let test_operator_interrupt_callback_keeps_typed_cause () =
+  with_fixture [ init_result; account_chatgpt; thread_result ] (fun path ->
+    let interrupt = Keeper_registry_types.Operator_interrupt in
+    let backtrace = Printexc.get_callstack 0 in
+    let combined = Eio.Exn.Multiple
+      [ (Eio.Cancel.Cancelled interrupt, backtrace)
+      ; (Stdlib.Fun.Finally_raised (Eio.Cancel.Cancelled interrupt), backtrace) ] in
+    let raised =
+      try
+        Eio_main.run (fun env ->
+          let config = { (Runtime_codex_app_server.default_config ()) with
+            cli_path = path; timeout_s = None } in
+          Runtime_codex_app_server.run_turn
+            ~mgr:(Eio.Stdenv.process_mgr env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+            ~on_thread_ready:(fun ~thread_id:_ -> raise combined)
+            config ~prompt:"fixture" ~images:[] |> ignore);
+        None
+      with exn -> Some exn in
+    check bool "combined operator interrupt survives the Codex transport" true
+      (Option.fold ~none:false ~some:Keeper_registry_types.is_operator_interrupt raised))
+;;
+
 let test_terminal_error_notification_uses_official_context_error_enum () =
   let terminal =
     {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}|}
@@ -6633,6 +6657,8 @@ let () =
             "callback timeout origin is preserved without deadline"
             `Quick
             test_callback_timeout_origin_is_preserved_without_deadline
+        ; test_case "operator interrupt callback keeps typed cause" `Quick
+            test_operator_interrupt_callback_keeps_typed_cause
         ; test_case
             "terminal error notification uses official context error enum"
             `Quick

@@ -23,10 +23,11 @@ SOURCE_MODULES = (
     "bin/masc_tui.ml",
     "bin/masc_tui_keys.ml",
     "bin/masc_tui_render.ml",
+    "bin/masc_tui_render_prim.ml",
     "bin/masc_tui_types.ml",
 )
 
-DETAIL_ROWS_RE = re.compile(rb"\[detail rows (\d+)-(\d+)/(\d+)\]")
+DETAIL_ROWS_RE = re.compile(rb"\[lines (\d+)-(\d+)/(\d+)\]")
 
 # The list shows this claim in its own block; the point of the surface is that
 # the whole claim no longer fits there, so a window and a scroll have to exist.
@@ -101,7 +102,7 @@ def run(executable: str) -> None:
         h.drain_until_quiet(process, master_fd, output)
 
         h.send_and_wait(process, master_fd, output, b"\r", b"FACT DETAIL")
-        h.wait_for_output(process, master_fd, output, b"[detail rows",
+        h.wait_for_output(process, master_fd, output, b"[lines ",
                           start=0, timeout=5.0)
         h.drain_until_quiet(process, master_fd, output)
         plain = plain_screen(output)

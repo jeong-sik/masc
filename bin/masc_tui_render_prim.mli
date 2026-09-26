@@ -220,8 +220,35 @@ type chrome_frame = Chrome_screen | Chrome_overlay
 (** [Chrome_screen] draws rules without a box, for a surface that is the whole
     screen. [Chrome_overlay] keeps the box, for an overlay opened over one. *)
 
+(** What a body does with rows past its budget. Required, so every surface
+    says it at the call: a body that fits, one the keypress windows and one
+    that was silently losing its tail used to read the same (#35716). *)
+type overflow =
+  | Fits
+      (** The body fits its budget. Rows past it are not drawn; the last row
+          of the budget says how many the screen could not hold. *)
+  | Paged_by_cursor
+      (** The body windows its rows against [~budget] and the keypress bounds
+          the cursor or scroll that picks the window through
+          {!Masc_tui_scroll}. A body that miscounts is cut as [Fits] is. *)
+  | Scrolled of { scroll : int; report : int -> Masc_tui_types.clamped_scroll }
+      (** The body pushes every row it has. The contract shows the window
+          from [scroll], held inside the rows there are, draws the
+          ["[lines a-b/n]"] row under it when they overflow, and reports the
+          scroll it drew from through [report]. *)
+  | Self_scrolled of (unit -> Masc_tui_types.clamped_scroll)
+      (** The body windows part of itself under rows it pins, which the
+          contract cannot tell apart from the window. The thunk is read after
+          the body has drawn, the only moment it can say what it clamped to. *)
+
+val surface_window_height :
+  Masc_tui_types.state -> terminal_rows:int -> count:int -> int
+(** The window a {!Scrolled} body gets out of [count] rows: the budget, less
+    the position row when they overflow. A key handler that bounds the scroll
+    asks this, the number the frame draws with. *)
+
 val surface_chrome :
-  ?clamped:(unit -> Masc_tui_types.clamped_scroll option) ->
+  overflow:overflow ->
   ?frame:chrome_frame ->
   Masc_tui_types.state ->
   terminal_rows:int ->
@@ -231,8 +258,6 @@ val surface_chrome :
   hints:string ->
   body:(budget:int -> chrome_body -> unit) ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
-(** [clamped] is read after the body has drawn, which is the only moment a
-    surface whose rows the drawing counts can say what it clamped to. *)
 
 val connection_badge : Masc_tui_types.state -> string
 

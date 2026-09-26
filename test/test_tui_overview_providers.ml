@@ -47,6 +47,7 @@ let runtime ?resets ~scope ~exhausted id : Tui_decode.runtime_option =
   { ro_id = id
   ; ro_provider = "p"
   ; ro_model = id
+  ; ro_exact_slot_group = Tui_decode.Exact_http_slots
   ; ro_effective_max_context = 200_000
   ; ro_max_context_source = Tui_decode.Runtime_context_capability
   ; ro_max_output_tokens = None

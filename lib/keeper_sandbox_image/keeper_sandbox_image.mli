@@ -21,18 +21,19 @@
     cannot install what it finds missing. *)
 
 val default_tag : string
-(** ["masc-sandbox:general"] — the tag {!build_argv} uses when the caller names
-    none. Not yet the runtime default; a Keeper reaches it through
-    [sandbox_image] or [MASC_KEEPER_SANDBOX_DOCKER_IMAGE]. *)
+(** ["masc-sandbox:general"] — the image the shipped Keepers name. [masc
+    setup] builds it when the store lacks it, and the Apple Container runtime
+    does on a Keeper's first boot; nothing rebuilds it once it is there. *)
 
 val dockerfile : string
 (** The recipe, read at build time from [sandbox-images/base/Dockerfile]. It
     carries no [COPY]: it builds from stdin with no context, which
     is what lets an installed binary build it with no checkout anywhere. *)
 
-val build_argv : tag:string -> string list
+val build_argv : ?labels:(string * string) list -> tag:string -> unit -> string list
 (** Arguments after the docker command for [docker build -t <tag> -]. The
-    trailing ["-"] is the context: the caller feeds {!dockerfile} to stdin. *)
+    trailing ["-"] is the context: the caller feeds {!dockerfile} to stdin.
+    Each label becomes one [--label key=value]. *)
 
 val write_recipe_into : dir:string -> string
 (** Write {!dockerfile} as [<dir>/Dockerfile] and answer that path. For the
@@ -41,7 +42,8 @@ val write_recipe_into : dir:string -> string
     context stays what [-] gives docker, the recipe and nothing more. *)
 
 val context_directory_build_argv :
-  tag:string -> dockerfile:string -> context:string -> string list
+  ?labels:(string * string) list ->
+  tag:string -> dockerfile:string -> context:string -> unit -> string list
 (** Arguments after a runtime command that takes a directory rather than
     stdin: [build -t <tag> -f <dockerfile> <context>]. Apple's [container
     build] is one — its usage line takes a context directory and it offers no

@@ -326,7 +326,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
-let run_fixture ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
+let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
     ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?wall_clock_ceiling_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
@@ -345,6 +345,7 @@ let run_fixture ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thr
     let config =
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
+      ; account_home
       ; isolated_home
       ; native
       ; developer_instructions
@@ -427,6 +428,7 @@ let test_dynamic_tool_callback ?(worker_pool = false) () =
           ; "properties", `Assoc [ "marker", `Assoc [ "type", `String "string" ] ]
           ; "required", `List [ `String "marker" ]
           ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:id input ->
           check bool "tool callback remains on the protocol owner" true
@@ -557,6 +559,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { success = false
@@ -587,6 +590,7 @@ let test_context_error_records_prior_tool_effect () =
     { name = "masc_probe"
     ; description = "Record one deterministic tool effect"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { Runtime_codex_app_server.success = true
@@ -614,6 +618,64 @@ let test_context_error_records_prior_tool_effect () =
          ()
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "context overflow after a tool effect was not reported")
+;;
+
+let test_read_only_overflow_contract () =
+  let completed_failure =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
+  in
+  let notification_failure =
+    {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}|}
+  in
+  List.iter (fun terminal ->
+    List.iter (fun (call_effect, expected) ->
+      let tool : Runtime_codex_app_server.dynamic_tool =
+        { name = "masc_probe"; description = "Declared effect fixture"
+        ; input_schema = `Assoc [ "type", `String "object" ]
+        ; call_effect = (fun _ -> call_effect)
+        ; call = (fun ~call_id:_ _ ->
+            { success = true; content = "observed"; content_blocks = None; abort_turn = None })
+        }
+      in
+      with_fixture
+        [ init_result; account_chatgpt; thread_result; turn_result; tool_call_request; terminal ]
+        (fun path -> match run_fixture ~dynamic_tools:[tool] path with
+         | Error (Runtime_codex_app_server.Context_window_exceeded {tool_effect_attempted; _}) ->
+           check bool "effect contract reaches both terminal forms" expected tool_effect_attempted
+         | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+         | Ok _ -> fail "overflow unexpectedly succeeded"))
+      [ Agent_core.Tool.Read_only, false; Agent_core.Tool.Effect_possible, true ])
+    [ completed_failure; notification_failure ]
+;;
+
+let test_native_effect_before_overflow () =
+  let overflow =
+    {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}|}
+  in
+  let read : Runtime_codex_app_server.dynamic_tool =
+    { name = "masc_probe"; description = "Read before a native action"
+    ; input_schema = `Assoc ["type", `String "object"]
+    ; call_effect = (fun _ -> Agent_core.Tool.Read_only)
+    ; call = (fun ~call_id:_ _ ->
+        {success = true; content = "read"; content_blocks = None; abort_turn = None}) }
+  in
+  List.iter (fun method_ ->
+    List.iter (fun (kind, expected) ->
+      let item = Yojson.Safe.to_string (`Assoc [
+        "method", `String method_; "params", `Assoc [
+          "threadId", `String "thread-1"; "turnId", `String "turn-1";
+          "item", `Assoc ["type", `String kind; "id", `String "native-effect"]]]) in
+      with_fixture
+        [init_result; account_chatgpt; thread_result; turn_result; tool_call_request; item; overflow]
+        (fun path -> match run_fixture ~dynamic_tools:[read] path with
+         | Error (Runtime_codex_app_server.Context_window_exceeded {tool_effect_attempted; _}) ->
+           check bool (method_ ^ " " ^ kind ^ " effect boundary") expected tool_effect_attempted
+         | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+         | Ok _ -> fail "overflow unexpectedly succeeded"))
+      [ "commandExecution", true; "collabAgentToolCall", true;
+        "imageGeneration", true; "futureToolItem", true;
+        "reasoning", false; "dynamicToolCall", false ])
+    ["item/started"; "item/completed"]
 ;;
 
 let test_prompt_char_count () =
@@ -1265,7 +1327,7 @@ let test_background_read_outlives_the_turn () =
           let clock = Eio.Stdenv.clock env in
           let cwd = Eio.Path.(Eio.Stdenv.fs env / "/tmp") in
           let codex =
-            ({ cli_path = path; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
+            ({ cli_path = path; account_home = None; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
           in
           let recorded =
             Eio.Switch.run (fun root_sw ->
@@ -1326,7 +1388,8 @@ let test_thread_resume_sends_dynamic_tools () =
          { name = "masc_probe"
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
-         ; call =
+         ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
              (fun ~call_id:_ _ ->
                { success = true; content = "unused"; content_blocks = None; abort_turn = None })
          }
@@ -1382,7 +1445,8 @@ let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
          { name
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
-         ; call =
+         ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
              (fun ~call_id:_ _ ->
                { success = true; content = "unused"; content_blocks = None; abort_turn = None })
          }
@@ -1587,6 +1651,7 @@ let test_elicitation_cancel_then_dynamic_tool () =
       let tool : Runtime_codex_app_server.dynamic_tool =
         { name = "masc_probe"; description = "MASC tool after unavailable host input";
           input_schema = `Assoc ["type", `String "object"];
+          call_effect = (fun _ -> Agent_core.Tool.Effect_possible);
           call = (fun ~call_id:_ _ -> incr calls;
             { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None }) } in
       (match run_fixture ~dynamic_tools:[tool]
@@ -1903,6 +1968,7 @@ let test_dynamic_tool_bytes_counts_name_description_and_schema () =
     { Runtime_codex_app_server.name
     ; description
     ; input_schema = schema
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { Runtime_codex_app_server.success = true
@@ -2480,6 +2546,7 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
     { name = "masc_probe"
     ; description = "Return enough data to fill an unread transport pipe"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { success = true
@@ -2612,6 +2679,7 @@ let test_rate_limit_updates_are_reported_without_changing_the_turn () =
               ; windows =
                   [ { limit_id = Some "codex"
                     ; kind = Five_hour
+                    ; role = Gates_model_calls
                     ; utilization = Percent 100
                     ; resets_at = Some 1790200000
                     }
@@ -3042,9 +3110,75 @@ let test_readiness_home_overrides_inherited_home () =
         output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
         close_out output;
         Unix.chmod wrapper 0o700;
-        match run_fixture ~isolated_home wrapper with
-        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-        | Ok _ -> ()))
+        Masc_test_deps.with_process_env "HOME" (Some "") (fun () ->
+          Masc_test_deps.with_process_env "CODEX_HOME" (Some "") (fun () ->
+            (match run_fixture ~isolated_home wrapper with
+             | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+             | Ok _ -> ());
+            match run_fixture ~isolated_home:"relative-readiness-home" wrapper with
+            | Error (Runtime_codex_app_server.Invalid_config _) -> ()
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok _ -> fail "relative isolated home was accepted"))))
+;;
+
+let test_account_home_does_not_apply_readiness_overrides () =
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+    (fun fixture ->
+      let wrapper = Filename.temp_file "masc-codex-account-wrapper-" ".sh" in
+      Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+        let output = open_out_bin wrapper in
+        output_string output "#!/bin/sh\nset -eu\n";
+        output_string output "[ \"$CODEX_HOME\" = /tmp/codex-account-one ] || exit 75\n";
+        output_string output "[ -z \"${OPENAI_API_KEY:-}\" ] || exit 76\n";
+        output_string output "[ -z \"${AWS_ACCESS_KEY_ID:-}\" ] || exit 80\n";
+        output_string output "case \"$*\" in *'cli_auth_credentials_store'*) exit 77;; esac\n";
+        output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+        close_out output;
+        Unix.chmod wrapper 0o700;
+        Masc_test_deps.with_process_env "OPENAI_API_KEY" (Some "fixture-host-key") (fun () ->
+          Masc_test_deps.with_process_env "AWS_ACCESS_KEY_ID" (Some "fixture-host-aws-key") (fun () ->
+            match run_fixture ~account_home:"/tmp/codex-account-one" wrapper with
+            | Ok _ -> ()
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)))))
+;;
+
+let test_account_home_passes_its_declared_provider_key () =
+  let home = Filename.temp_file "masc-codex-declared-home-" "" in
+  Sys.remove home;
+  Unix.mkdir home 0o700;
+  let config_path = Filename.concat home "config.toml" in
+  let previous = Sys.getenv_opt "OPENAI_API_KEY" in
+  let previous_aws = Sys.getenv_opt "AWS_ACCESS_KEY_ID" in
+  Unix.putenv "OPENAI_API_KEY" "fixture-selected-key";
+  Unix.putenv "AWS_ACCESS_KEY_ID" "fixture-selected-aws-key";
+  Fun.protect ~finally:(fun () ->
+    Unix.putenv "OPENAI_API_KEY" (Option.value previous ~default:"");
+    Unix.putenv "AWS_ACCESS_KEY_ID" (Option.value previous_aws ~default:"");
+    Sys.remove config_path;
+    Unix.rmdir home) (fun () ->
+    let output = open_out_bin config_path in
+    output_string output
+      "[model_providers.selected]\nenv_key = \"OPENAI_API_KEY\"\n\
+       [model_providers.bedrock]\nenv_key = \"AWS_ACCESS_KEY_ID\"\n";
+    close_out output;
+    with_fixture
+      [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+      (fun fixture ->
+        let wrapper = Filename.temp_file "masc-codex-declared-wrapper-" ".sh" in
+        Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+          let output = open_out_bin wrapper in
+          output_string output "#!/bin/sh\nset -eu\n";
+          output_string output ("[ \"$CODEX_HOME\" = " ^ shell_quote home ^ " ] || exit 78\n");
+          output_string output "[ \"$OPENAI_API_KEY\" = fixture-selected-key ] || exit 79\n";
+          output_string output
+            "[ \"$AWS_ACCESS_KEY_ID\" = fixture-selected-aws-key ] || exit 81\n";
+          output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+          close_out output;
+          Unix.chmod wrapper 0o700;
+          match run_fixture ~account_home:home wrapper with
+          | Ok _ -> ()
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error))))
 ;;
 
 let write_fixture_file path content =
@@ -3054,8 +3188,9 @@ let write_fixture_file path content =
     (fun () -> output_string output content)
 ;;
 
-let fixture_tool ?(parameters = []) ~name ~description () =
+let fixture_tool ?descriptor ?(parameters = []) ~name ~description () =
   Agent_core.Tool.create
+    ?descriptor
     ~name
     ~description
     ~parameters
@@ -3210,6 +3345,22 @@ let run_production_keeper_turn_with_predecessor ~http_requests ~base_path ~trace
     ~user_message ~cli_path ~model ~turn_instructions =
   run_production_keeper_turn_with_projection ~write_cost_ledger:false ~after_turn:ignore ~dynamic_context_for_tools:None
     ~http_requests ~base_path ~trace_id ~user_message ~cli_path ~model ~turn_instructions
+;;
+
+(* The turn's result and the settlement it came out in, whose readings the
+   Keeper resolves the turn's spend from. *)
+let run_production_keeper_turn_settled ~base_path ~trace_id ~user_message ~cli_path ~model
+    ~turn_instructions =
+  let settled = ref None in
+  let result =
+    run_production_keeper_turn_with_projection ~write_cost_ledger:false
+      ~after_turn:(fun settlement -> settled := Some settlement)
+      ~dynamic_context_for_tools:None ~http_requests:None ~base_path ~trace_id ~user_message
+      ~cli_path ~model ~turn_instructions
+  in
+  match !settled with
+  | Some settlement -> result, settlement
+  | None -> fail "the production turn settled nothing"
 ;;
 
 let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~model
@@ -3548,7 +3699,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
     ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
-    ~model () =
+    ~model ?accept () =
   let owns_base_path = Option.is_none base_path in
   let base_path =
     Option.value base_path ~default:(temp_workspace "masc-codex-session-")
@@ -3601,6 +3752,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ~agent_core_tools:tools
                       ~initial_messages
                       ?model_input_projection
+                      ?accept
                       ?hooks
                       ?context_injector
                       ?context
@@ -3694,7 +3846,7 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
        | Ok _ -> fail "Keeper retried a context overflow after a tool effect")
 ;;
 
-let test_keeper_shrinks_history_after_typed_context_error () =
+let check_keeper_shrinks_history_after_typed_context_error ~read_only_tool () =
   let capture_path = Filename.temp_file "masc-codex-shrink-requests-" ".jsonl" in
   Fun.protect
     ~finally:(fun () -> Sys.remove capture_path)
@@ -3711,15 +3863,23 @@ let test_keeper_shrinks_history_after_typed_context_error () =
            Agent_core.Types.user_msg
              (Printf.sprintf "%02d:%s" index (String.make 4_096 'x')))
        in
+       let tools =
+         if read_only_tool then
+           [ fixture_tool
+               ~descriptor:(Agent_core.Tool.ordinary_descriptor
+                 ~call_effect:(fun _ -> Agent_core.Tool.Read_only)
+                 Agent_core.Tool_contract.Serial)
+               ~name:"masc_probe" ~description:"Read-only fixture" () ]
+         else []
+       in
        with_fixture_sequence
          ~capture_path
-         [ init_result
+         ([ init_result
          ; account_chatgpt
          ; thread_result
          ; injected
          ; turn_after_injection
-         ; overflow
-         ]
+         ] @ (if read_only_tool then [ tool_call_request ] else []) @ [ overflow ])
          [ init_result
          ; account_chatgpt
          ; thread_result
@@ -3731,6 +3891,7 @@ let test_keeper_shrinks_history_after_typed_context_error () =
          (fun cli_path ->
             match
               run_keeper_turn
+                ~tools
                 ~initial_messages
                 ~session_id:fixture_trace_with_no_completed_turn
                 ~keeper_name:"codex-fixture-same-size-shrink"
@@ -3772,6 +3933,53 @@ let test_keeper_shrinks_history_after_typed_context_error () =
          failf
            "expected two history injections, got counts=[%s]"
            (counts |> List.map string_of_int |> String.concat ","))
+;;
+
+let test_keeper_shrinks_history_after_typed_context_error () =
+  check_keeper_shrinks_history_after_typed_context_error ~read_only_tool:false ()
+;;
+
+let test_keeper_shrinks_after_read_only_tool () =
+  check_keeper_shrinks_history_after_typed_context_error ~read_only_tool:true ()
+;;
+
+let test_tool_completion_evidence_belongs_to_retry () =
+  List.iter (fun second_succeeds ->
+    let calls = ref 0 and acceptance_calls = ref 0 in
+    let tool = Agent_core.Tool.create
+      ~descriptor:(Agent_core.Tool.ordinary_descriptor
+        ~call_effect:(fun _ -> Agent_core.Tool.Read_only) Agent_core.Tool_contract.Serial)
+      ~name:"masc_probe" ~description:"Read with an attempt-local outcome" ~parameters:[]
+      (fun _ ->
+        incr calls;
+        if !calls = 1 || second_succeeds then
+          Ok {Agent_core.Types.content = "read"; content_blocks = None; _meta = None}
+        else Error {Agent_core.Types.message = "read failed"; recoverable = true; error_class = None})
+    in
+    let injected = {|{"id":4,"result":{}}|} in
+    let started = {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|} in
+    let overflow =
+      {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
+    in
+    let empty_completed =
+      {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"completed"}}}|}
+    in
+    let handshake = [init_result; account_chatgpt; thread_result; injected; started] in
+    with_fixture_sequence
+      (handshake @ [tool_call_request; overflow])
+      (handshake @ [tool_call_request; empty_completed])
+      (fun cli_path ->
+        let result = run_keeper_turn ~tools:[tool]
+          ~session_id:fixture_trace_with_no_completed_turn
+          ~accept:(fun _ -> incr acceptance_calls; false)
+          ~initial_messages:(List.init 64 (fun _ -> Agent_core.Types.user_msg (String.make 4096 'x')))
+          ~cli_path ~model:"gpt-fixture" () in
+        check int "both attempts executed their read" 2 !calls;
+        check int "only this attempt's successful tool bypasses text acceptance"
+          (if second_succeeds then 0 else 1) !acceptance_calls;
+        check bool "a prior successful read cannot accept the failed retry"
+          second_succeeds (Result.is_ok result)))
+    [false; true]
 ;;
 
 let test_keeper_shrinks_lopsided_history_at_atom_boundary () =
@@ -5249,7 +5457,7 @@ let test_production_keeper_reports_codex_token_usage () =
          ]
          (fun cli_path ->
             match
-              run_production_keeper_turn
+              run_production_keeper_turn_settled
                 ~base_path
                 ~trace_id:"codex-production-usage-1"
                 ~user_message:
@@ -5258,18 +5466,34 @@ let test_production_keeper_reports_codex_token_usage () =
                 ~model:"gpt-fixture"
                 ~turn_instructions:None
             with
-            | Error error -> fail (Agent_core.Error.to_string error)
-            | Ok result ->
+            | Error error, _ -> fail (Agent_core.Error.to_string error)
+            | Ok result, settlement ->
               check bool "usage reported" true result.Keeper_agent_run.usage_reported;
               check int "thread input" 9000 result.usage.input_tokens;
               check int "thread output" 700 result.usage.output_tokens;
               check int "thread cache read" 8000 result.usage.cache_read_input_tokens;
               check string "conversation-cumulative scope" "conversation_cumulative"
                 (Runtime_usage_scope.to_string result.usage_scope);
-              (match result.usage_basis with
-               | Keeper_usage_resolution.Conversation_counter
-                   { conversation_id = "thread-1"; position = Keeper_usage_resolution.Fresh; _ } -> ()
-               | _ -> fail "a Codex spend is not keyed by its thread and position");
+              (match
+                 (Keeper_turn_spend.resolve_turn
+                    ~cursor:None
+                    ~observed_at:0.0
+                    settlement.Keeper_agent_run.spend)
+                   .turn_reading
+               with
+               | Some
+                   { reading =
+                       { basis =
+                           Keeper_usage_resolution.Conversation_counter
+                             { conversation_id = "thread-1"
+                             ; position = Keeper_usage_resolution.Fresh
+                             ; _
+                             }
+                       ; _
+                       }
+                   ; _
+                   } -> ()
+               | Some _ | None -> fail "a Codex spend is not keyed by its thread and position");
               (match result.runtime_observation with
                | Some observation ->
                  check string "observation scope" "conversation_cumulative"
@@ -5686,12 +5910,12 @@ let test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread () =
   let run_turn ~trace_id ~user_message lines =
     with_fixture lines (fun cli_path ->
       match
-        run_production_keeper_turn
+        run_production_keeper_turn_settled
           ~base_path ~trace_id ~user_message ~cli_path ~model:"gpt-fixture"
           ~turn_instructions:None
       with
-      | Error error -> fail (Agent_core.Error.to_string error)
-      | Ok result -> result)
+      | Error error, _ -> fail (Agent_core.Error.to_string error)
+      | Ok _, settlement -> settlement.Keeper_agent_run.spend)
   in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -5706,24 +5930,29 @@ let test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread () =
            [ init_result; account_chatgpt; thread_result; resumed_turn_result
            ; resumed_item_completed; resumed_token_usage_updated; resumed_turn_completed ]
        in
-       (match second.Keeper_agent_run.usage_basis with
-        | Keeper_usage_resolution.Conversation_counter
-            { conversation_id = "thread-1"; position = Keeper_usage_resolution.Resumed; _ } -> ()
-        | _ -> fail "the resumed turn is not keyed to its thread as resumed");
-       let resolve ~cursor (result : Keeper_agent_run.run_result) =
-         Keeper_usage_resolution.resolve
-           ~cursor
-           ~basis:result.usage_basis
-           ~observation:(Some (Keeper_usage_resolution.sample_of_api_usage result.usage))
-           ~observed_at:0.0
+       let first_turn =
+         Keeper_turn_spend.resolve_turn ~cursor:None ~observed_at:0.0 first
        in
-       let _, cursor = resolve ~cursor:None first in
-       let resolution, _ = resolve ~cursor second in
-       match resolution.Keeper_usage_resolution.delta with
-       | Some delta ->
+       let second_turn =
+         Keeper_turn_spend.resolve_turn ~cursor:first_turn.cursor ~observed_at:0.0 second
+       in
+       match second_turn.turn_reading with
+       | Some
+           { reading =
+               { basis =
+                   Keeper_usage_resolution.Conversation_counter
+                     { conversation_id = "thread-1"
+                     ; position = Keeper_usage_resolution.Resumed
+                     ; _
+                     }
+               ; _
+               }
+           ; resolution = { delta = Some delta; _ }
+           ; _
+           } ->
          check int "input the second turn added" 2000 delta.input_tokens;
          check int "output the second turn added" 40 delta.output_tokens
-       | None -> fail "the resumed turn resolved no spend")
+       | Some _ | None -> fail "the resumed turn is not resolved against its thread")
 ;;
 
 let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
@@ -6025,7 +6254,8 @@ let test_live_dynamic_tool_subscription () =
       ; description = "Return the exact marker MASC_TOOL_RESULT"
       ; input_schema =
           `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
-      ; call =
+      ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
           (fun ~call_id:_ _ ->
             incr tool_calls;
             { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
@@ -6424,6 +6654,10 @@ let () =
             "readiness private home overrides inherited home"
             `Quick
             test_readiness_home_overrides_inherited_home
+        ; test_case "selected account home keeps normal CLI configuration" `Quick
+            test_account_home_does_not_apply_readiness_overrides
+        ; test_case "selected home admits its declared provider key" `Quick
+            test_account_home_passes_its_declared_provider_key
         ; test_case
             "child environment is allowlisted"
             `Quick
@@ -6623,6 +6857,10 @@ let () =
             "context error records prior tool effect"
             `Quick
             test_context_error_records_prior_tool_effect
+        ; test_case "read-only contract controls both overflow terminals" `Quick
+            test_read_only_overflow_contract
+        ; test_case "native effects remain fenced before overflow" `Quick
+            test_native_effect_before_overflow
         ; test_case "developer context preserves authority and history" `Quick
             test_developer_context_preserves_authority_and_history
         ; test_case "history injects before turn" `Quick test_history_is_injected_before_turn
@@ -6664,6 +6902,10 @@ let () =
             "Keeper shrinks history after typed context error"
             `Quick
             test_keeper_shrinks_history_after_typed_context_error
+        ; test_case "Keeper shrinks after a declared read-only tool" `Quick
+            test_keeper_shrinks_after_read_only_tool
+        ; test_case "tool completion evidence belongs to its retry" `Quick
+            test_tool_completion_evidence_belongs_to_retry
         ; test_case
             "Keeper shrinks lopsided history at an atom boundary"
             `Quick

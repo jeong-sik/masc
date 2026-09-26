@@ -199,4 +199,7 @@ let () =
       test_case "get_float" `Quick test_env_get_float;
       test_case "get_bool" `Quick test_env_get_bool;
     ];
+    ( "defined but never registered until task-1768",
+        [ Alcotest.test_case "config of json" `Quick test_config_of_json
+        ] );
   ]

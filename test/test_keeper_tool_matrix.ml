@@ -422,7 +422,7 @@ let sandbox_image_preparation =
     log_progress "building test sandbox image %s" Cases.sandbox_image;
     let argv =
       Array.of_list
-        ("docker" :: Keeper_sandbox_image.build_argv ~tag:Cases.sandbox_image)
+        ("docker" :: Keeper_sandbox_image.build_argv ~tag:Cases.sandbox_image ())
     in
     let channel = Unix.open_process_args_out "docker" argv in
     let status = ref (Unix.WEXITED 1) in

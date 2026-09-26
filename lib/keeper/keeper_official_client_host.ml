@@ -1284,6 +1284,7 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
@@ -1673,6 +1674,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
   { name = tool.schema.name
   ; description = tool.schema.description
   ; input_schema = Yojson.Safe.Util.member "input_schema" (Agent_core.Tool.schema_to_json tool)
+  ; call_effect = Agent_core.Tool.call_effect tool
   ; call =
       (fun ~call_id input ->
         let schedule : Agent_core.Tool_contract.schedule =

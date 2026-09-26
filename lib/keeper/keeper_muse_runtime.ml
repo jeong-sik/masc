@@ -101,6 +101,13 @@ let runtime_error_to_core_error (error : Serve.error) =
          ; error_type = Some "session_model_mismatch"
          ; detail = Serve.error_to_string error
          })
+  | Serve.Session_workspace_mismatch _ ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = provider_name
+         ; error_type = Some "session_workspace_mismatch"
+         ; detail = Serve.error_to_string error
+         })
   | Serve.Auth_required detail
   | Serve.Turn_failed { Msp.kind = Msp.Auth_required; message = detail; retryable = _ } ->
     Agent_core.Error.Provider
@@ -234,6 +241,7 @@ let recovery_failure_of_runtime_error ?current (error : Serve.error) =
   | Serve.Process_exited { status = Some Serve.Exit_usage; _ } -> Session_store.Protocol_failed
   | Serve.Turn_failed {retryable=true; _} -> Session_store.Retryable_turn_failed
   | Serve.Session_model_mismatch _
+  | Serve.Session_workspace_mismatch _
   | Serve.Auth_required _
   | Serve.Turn_failed _
   | Serve.Process_exited
@@ -275,6 +283,7 @@ let failure_leaves_effects_unknown ~admission (error : Serve.error) =
      | Serve.Protocol_error _
      | Serve.Capability_not_granted _
      | Serve.Session_model_mismatch _
+     | Serve.Session_workspace_mismatch _
      | Serve.Auth_required _
      | Serve.Turn_failed _
      | Serve.Turn_cancelled
@@ -292,6 +301,7 @@ let failure_leaves_effects_unknown ~admission (error : Serve.error) =
      | Serve.Rpc_error _
      | Serve.Capability_not_granted _
      | Serve.Session_model_mismatch _
+     | Serve.Session_workspace_mismatch _
      | Serve.Auth_required _
      | Serve.Turn_failed _
      | Serve.Turn_cancelled
@@ -575,7 +585,7 @@ type mcp_blocks =
           are not streamed. *)
   | Streaming
 
-let stream_projection ~keeper_name ~runtime_id ~configured_model ~raw_trace_run ~turn_count
+let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~raw_trace_run ~turn_count
     ~on_native_action ~on_usage_report ~on_turn_started ~on_message_started ~position on_event =
   let emit event = Option.iter (fun callback -> callback event) on_event in
   let next_tool_index = ref 1 in
@@ -688,11 +698,12 @@ let stream_projection ~keeper_name ~runtime_id ~configured_model ~raw_trace_run 
             runtime_label
             tool_name
             (approval_decision_label decision)
-        | Serve.Subscription_usage_observed _ ->
-          (* The host's subscription window is not recorded from here:
-             Runtime_provider_usage_window has no Muse Code scope, and
-             adding one with its read path is stack step 5/5. *)
-          ()
+        | Serve.Subscription_usage_observed usage ->
+          Option.iter (fun scope ->
+            Option.iter (fun reset_ms ->
+              Runtime_quota_window.note_exhausted ~scope
+                ~resets_at:(float_of_int reset_ms /. 1000.))
+              (Msp.exhausted_subscription_reset_ms usage)) quota_scope
         | Serve.Usage_reported { session_id; turn_id; usage } ->
           (* [turn/completed] usage is "the turn's aggregate token usage,
              summed across the turn's model completions" (msp.d.ts,
@@ -754,6 +765,7 @@ let phase_name : Session_store.phase -> string = function
 
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+    ~max_prompt_bytes ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
     ~turn_start ~pre_tool_rejects ~base_path ~workspace_root ~native_workspace_context ~goal ~goal_blocks ~system_prompt ~tools
     ~initial_messages ~model_input_projection ~on_transmitted_model_input ~hooks
@@ -843,7 +855,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let hook_turn_count = claim_plan.turn_count in
     let* prepared =
       Host.prepare_turn
-        ~configured_reasoning_effort:(Runtime_inference.resolve_reasoning_effort ~runtime_id)
+        ~configured_reasoning_effort
         ~runtime_label
         ~keeper_name
         ~turn_count:hook_turn_count
@@ -945,7 +957,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       | [], (true | false) | _ :: _, true -> Ok ()
     in
     let* capacity_bytes =
-      match Runtime_inference.resolve_max_prompt_bytes ~runtime_id with
+      match max_prompt_bytes with
       | Some capacity_bytes -> Ok capacity_bytes
       | None -> Error (config_error ~field:"max_prompt_bytes" undeclared_capacity_detail)
     in
@@ -1050,7 +1062,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
            [0] removes it: the deadline notices a host that went silent, it
            does not cap legitimate work. Absent leaves the configured bound. *)
         timeout_s =
-          (match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
+          (match turn_timeout_s with
            | None -> config.timeout_s
            | Some seconds when seconds <= 0.0 -> None
            | Some seconds -> Some seconds)
@@ -1209,6 +1221,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     in
     let stream =
       stream_projection
+        ~quota_scope:(Some quota_scope)
         ~keeper_name
         ~runtime_id
         ~configured_model:config.model
@@ -1581,7 +1594,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
 ;;
 
 let run ?official_task_reference ~accepts_image_input ?required_native_posture
-    ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~workspace_root ?native_workspace_context ~goal
+    ?official_client_continuation ~runtime_id ~max_prompt_bytes ~configured_reasoning_effort
+    ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~workspace_root ?native_workspace_context ~goal
     ~goal_blocks ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
@@ -1615,6 +1629,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture
         ~required_native_posture
         ~official_client_continuation
         ~runtime_id
+        ~max_prompt_bytes ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
         ~keeper_name
         ~on_model_input_window_observation
         ~carried_front_seed
@@ -1655,7 +1670,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture
 
 module For_testing = struct
   let test_projection ~turn_count ~position ~on_usage_report on_event =
-    stream_projection
+    stream_projection ~quota_scope:None
       ~keeper_name:"test"
       ~runtime_id:"muse.test"
       ~configured_model:None

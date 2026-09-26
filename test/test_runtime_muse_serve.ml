@@ -160,7 +160,7 @@ let config ?account_home ?(native = Runtime_native_tools.Native_read) () =
   }
 ;;
 
-let run_scripted ?session_mode ?account_home ?prepared_home ?mcp_servers ?on_session_ready ?on_stream_event ?native steps check_result =
+let run_scripted ?model ?(workspace_root = "/w") ?session_mode ?account_home ?prepared_home ?mcp_servers ?on_session_ready ?on_prompt_sent ?on_stream_event ?native steps check_result =
   with_script steps (fun ~dir ~requests ->
     Eio_main.run (fun env ->
       let result =
@@ -168,12 +168,13 @@ let run_scripted ?session_mode ?account_home ?prepared_home ?mcp_servers ?on_ses
           ?session_mode
           ?mcp_servers
           ?on_session_ready
+          ?on_prompt_sent
           ?on_stream_event
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
-          {(config ?account_home ?native ()) with prepared_home}
-          ~workspace_root:dir
+          {(config ?account_home ?native ()) with prepared_home; model}
+          ~workspace_root
           ~prompt:"say MASC_MUSE_OK"
           ~images:[]
       in
@@ -423,6 +424,56 @@ let test_invalid_account_home_is_refused () =
     [ "relative-account"; "/absolute/account "; " /absolute/account" ]
 ;;
 
+let test_session_identity_is_verified_before_admission () =
+  let frame ~model ~workspace =
+    Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 2;
+      "result", `Assoc ["session", `Assoc ["sessionId", `String "s-1";
+        "modelId", model; "workspaceRoot", workspace]]]) in
+  let with_id id source = match Yojson.Safe.from_string source with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("id", `Int id) :: List.remove_assoc "id" fields))
+    | _ -> fail "fixture response must be an object" in
+  List.iter (fun session_mode ->
+    let prefix result = [Read; Write (init_frame ~granted:[]); Read; Read; Write result] in
+    List.iter (fun (model, workspace, expected) ->
+      let ready = ref false and sent = ref false in
+      run_scripted ~model:"requested-model" ~workspace_root:"/requested-workspace" ~session_mode
+        ~on_session_ready:(fun ~session_id:_ -> ready := true; Ok ())
+        ~on_prompt_sent:(fun () -> sent := true)
+        (prefix (frame ~model ~workspace))
+        (fun result requests ->
+          (match expected, result with
+           | `Model reported, Error (Serve.Session_model_mismatch {requested; resumed}) ->
+             check string "requested model" "requested-model" requested;
+             check (option string) "reported model" reported resumed
+           | `Workspace reported, Error (Serve.Session_workspace_mismatch {requested; reported=actual}) ->
+             check string "requested workspace" "/requested-workspace" requested;
+             check (option string) "reported workspace" reported actual
+           | _, Error error -> fail (Serve.error_to_string error)
+           | _, Ok _ -> fail "mismatched session dispatched a turn");
+          check bool "identity mismatch never persists session" false !ready;
+          check bool "identity mismatch never acknowledges a prompt" false !sent;
+          check int "only initialize, initialized and session open are sent" 3 (List.length requests)))
+      [`String "wrong-model", `String "/requested-workspace", `Model (Some "wrong-model");
+       `Null, `String "/requested-workspace", `Model None;
+       `String "requested-model", `String "/wrong-workspace", `Workspace (Some "/wrong-workspace");
+       `String "requested-model", `Null, `Workspace None];
+    let ready = ref 0 in
+    let resume_steps, turn_id = match session_mode with
+      | Serve.Start -> [], 3
+      | Serve.Resume _ -> [Read; Write {|{"jsonrpc":"2.0","id":3,"result":{}}|}], 4 in
+    run_scripted ~model:"requested-model" ~workspace_root:"/requested-workspace" ~session_mode
+      ~on_session_ready:(fun ~session_id:_ -> incr ready; Ok ())
+      (prefix (frame ~model:(`String "requested-model") ~workspace:(`String "/requested-workspace"))
+       @ resume_steps @ [Read; Write (with_id turn_id turn_ack); Write turn_started;
+                          Write agent_completed; Write turn_completed])
+      (fun result requests ->
+        (match result with Ok turn -> check string "matching session completes" "MASC_MUSE_OK" turn.text
+         | Error error -> fail (Serve.error_to_string error));
+        check int "matching identity persists once" 1 !ready;
+        ignore (request_with_method "turn/start" requests)))
+    [Serve.Start; Serve.Resume {session_id="s-1"}]
+;;
+
 let test_nondurable_handshake_never_begins_a_session () =
   let frame = Yojson.Safe.from_string (init_frame ~granted:[]) in
   let frame_fields = Yojson.Safe.Util.to_assoc frame in
@@ -484,6 +535,7 @@ let () =
         ; test_case "native none is config error" `Quick test_native_none_is_config_error
         ; test_case "selected account home isolates child roots and posture" `Quick
             test_selected_homes_do_not_inherit_other_account_roots
+        ; test_case "session identity is verified before admission" `Quick test_session_identity_is_verified_before_admission
         ; test_case "prepared HOME matches selected account" `Quick test_prepared_home_is_bound_to_exact_selected_account
         ; test_case "invalid account home is refused" `Quick test_invalid_account_home_is_refused
         ; test_case "non-durable host is refused before session admission" `Quick

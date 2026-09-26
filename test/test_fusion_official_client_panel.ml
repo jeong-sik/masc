@@ -581,6 +581,9 @@ send({"jsonrpc": "2.0", "id": turn["id"], "result": {
     "startedNewTurn": True, "disposition": "started"}})
 notify("turn/started", {"sessionId": "panel-session", "turnId": turn_id,
                         "commandId": turn_id, "viewCursor": "v:2"})
+notify("usage/changed", {"observedAtMs": 100000, "tier": "fixture",
+    "window": {"usedPercent": 100, "resetsAtMs": 500000, "windowDurationMins": 5},
+    "weekly": {"usedPercent": 99, "resetsAtMs": 900000}})
 notify("item/completed", {"sessionId": "panel-session", "viewCursor": "v:3", "item": {
     "itemId": "m-1", "kind": "agentMessage", "turnId": turn_id, "revision": 1,
     "status": "completed", "text": "MUSE_PANEL_ANSWER"}})
@@ -721,6 +724,40 @@ let test_muse_code_panelist_reaches_muse_serve () =
     (List.sort Int.compare order) order
 ;;
 
+let test_muse_frozen_candidate_and_quota_scope () =
+  with_muse_runtime ~muse_cli:muse_panel_launcher (fun ~base_dir ->
+    Runtime_quota_window.reset_for_testing ();
+    let selected = match Runtime.get_runtime_by_id muse_runtime_id with
+      | Some runtime -> runtime | None -> fail "Muse fixture missing" in
+    let replacement_path = Filename.concat base_dir "reload.toml" in
+    write_file ~path:replacement_path ~perm:0o600 {|
+[providers.reloaded]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.reloaded]
+api-name = "synthetic-replacement"
+max-context = 4096
+[reloaded.reloaded]
+[runtime]
+default = "reloaded.reloaded"
+|};
+    (match Runtime.init_default ~config_path:replacement_path with
+     | Ok () -> () | Error detail -> fail detail);
+    check bool "selected id removed from registry" true
+      (Option.is_none (Runtime.get_runtime_by_id muse_runtime_id));
+    (match in_eio_context (fun () -> Masc.Fusion_official_client.run_with_images
+       ~images:[] ~base_dir ~runtime:selected ~system_prompt:"" ~prompt:"ping" ()) with
+     | Ok response -> check string "frozen model/effort/budget still run" "MUSE_PANEL_ANSWER" response.text
+     | Error failure -> fail (Masc.Fusion_official_client.failure_detail ~runtime_id:muse_runtime_id failure));
+    check (option (float 0.)) "Fusion charges captured account scope only" (Some 500.)
+      (Runtime_quota_window.active_until ~scope:selected.quota_scope ~now:100.);
+    check bool "other HOME is unaffected" false (Runtime_quota_window.is_exhausted
+      ~scope:(Runtime_quota_window.scope_of_muse_home (Filename.concat base_dir "other")) ~now:100.);
+    check bool "Fusion provider reset expires" false
+      (Runtime_quota_window.is_exhausted ~scope:selected.quota_scope ~now:500.);
+    Runtime_quota_window.reset_for_testing ())
+;;
+
 (* A Muse Code panelist's session works in a fresh empty directory, not in
    [base_dir], which holds [.masc]: the host's working directory and the
    session's workspace root are that directory, and it is gone once the call
@@ -857,7 +894,7 @@ let test_muse_framed_prompt_capacity_before_spawning () =
           ~runtime_id:runtime.Runtime.id failure)
       | Ok _ -> fail "undeclared or oversized Muse input reached host" in
     refused runtime;
-    refused {runtime with id="unregistered-muse-binding"};
+    refused {runtime with model={runtime.model with max_prompt_bytes=None}};
     check bool "over-budget and missing-budget inputs never spawn" false
       (Sys.file_exists !marker));
   with_muse_runtime ~max_prompt_bytes:framed_bytes ~muse_cli:muse_panel_launcher
@@ -1266,6 +1303,7 @@ let () =
             "Muse Code panelist reaches muse serve"
             `Quick
             test_muse_code_panelist_reaches_muse_serve
+        ; test_case "Muse frozen candidate and account quota" `Quick test_muse_frozen_candidate_and_quota_scope
         ; test_case "Muse judge parse failure retains paid usage" `Quick
             test_muse_judge_parse_failure_retains_reported_usage
         ; test_case

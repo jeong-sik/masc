@@ -575,10 +575,143 @@ let test_official_client_probe_declines_an_operator_only_tool () =
     failf "expected Not_on_surface, got: %s" (Probe.invocation_error_to_string e)
 ;;
 
+let muse_capability_fixture = {|#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import sys
+import urllib.request
+
+mode = Path(sys.argv[0]).name
+assert sys.argv[1:] == ["serve", "--disable-write", "--disable-shell"]
+account_dir = Path(os.environ["HOME"])
+config_dir = Path(os.environ["XDG_CONFIG_HOME"])
+assert config_dir.is_relative_to(account_dir / ".local/state/masc/muse-config")
+assert Path(os.environ["TMPDIR"]) == config_dir / "tmp"
+assert json.loads((config_dir / "muse/settings.json").read_text())["permissions"]["default_profile"] == ":ask-me"
+workspace = Path.cwd()
+assert workspace.name.startswith("muse-readiness-")
+assert workspace.stat().st_mode & 0o777 == 0o700
+
+def read():
+    return json.loads(sys.stdin.readline())
+
+def emit(frame):
+    print(json.dumps(frame), flush=True)
+
+def reply(request, result):
+    emit({"jsonrpc": "2.0", "id": request["id"], "result": result})
+
+def notify(method, **params):
+    emit({"jsonrpc": "2.0", "method": method, "params": {"sessionId": "s-readiness", "viewCursor": "v:1", **params}})
+
+request = read()
+assert request["method"] == "initialize"
+assert request["params"]["capabilities"]["requestedCapabilities"] == ["sessionMcp"]
+reply(request, {"serverInfo": {"name": "muse-session-server", "version": "1.4.0"},
+    "userAgent": "fixture/1", "museHome": str(account_dir), "platformFamily": "unix", "platformOs": "linux",
+    "schema": {"version": 1, "fingerprint": "sha256:fixture"}, "grantedCapabilities": ["sessionMcp"],
+    "experimentalApi": False, "sessionDurability": "durable"})
+assert read()["method"] == "initialized"
+request = read()
+assert request["method"] == "session/start"
+params = request["params"]
+assert Path(params["workspaceRoot"]) == workspace
+assert params["approvalMode"] == "promptUnmatched"
+assert list(params["config"]["mcpServers"]) == ["masc"]
+server = params["config"]["mcpServers"]["masc"]
+assert server["transport"] == "streamableHttp" and server["mode"] == "required"
+model = params["modelId"]
+reply(request, {"session": {"sessionId": "s-readiness", "status": "idle", "turnCount": 0,
+    "modelId": model, "workspaceRoot": str(workspace)}, "viewCursor": "v:1"})
+request = read()
+assert request["method"] == "turn/start"
+assert "masc_board_list" in str(request["params"]["input"])
+reply(request, {"commandId": request["params"]["commandId"], "status": "accepted", "turnId": "t-readiness",
+    "startedNewTurn": True, "disposition": "started"})
+notify("turn/started", turnId="t-readiness", commandId=request["params"]["commandId"])
+text = "masc_board_list was called (untrusted reply-only claim)"
+if mode != "muse-no-tool":
+    headers = {**server["headers"], "Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+    def rpc(method, params, request_id=None):
+        payload = {"jsonrpc": "2.0", "method": method, "params": params}
+        if request_id is not None:
+            payload["id"] = request_id
+        req = urllib.request.Request(server["url"], data=json.dumps(payload).encode(), headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            body = response.read()
+        return json.loads(body) if body else None
+    rpc("initialize", {"protocolVersion": "2025-11-25", "clientInfo": {"name": "muse-readiness-fixture", "version": "1"}, "capabilities": {}}, 1)
+    headers["MCP-Protocol-Version"] = "2025-11-25"
+    rpc("notifications/initialized", {})
+    listed = rpc("tools/list", {}, 2)
+    assert [tool["name"] for tool in listed["result"]["tools"]] == ["masc_board_list"]
+    result = rpc("tools/call", {"name": "masc_board_list", "arguments": {}}, 3)
+    text = result["result"]["content"][0]["text"]
+    assert text == "probe acknowledged; no side effect performed"
+notify("item/completed", item={"itemId": "m-readiness", "kind": "agentMessage", "turnId": "t-readiness",
+    "revision": 1, "status": "completed", "text": text})
+notify("turn/completed", turnId="t-readiness", terminal="completed")
+for line in sys.stdin:
+    pass
+|}
+;;
+
+let test_muse_probe_uses_actual_mcp_callback () =
+  let base_path = Filename.temp_dir "muse-capability-probe-" "" |> Unix.realpath in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot; Fs_compat.remove_tree base_path) (fun () ->
+    let account_home = Filename.concat base_path "account" in
+    Fs_compat.mkdir_p (Filename.concat account_home ".config/muse");
+    let auth = Filename.concat account_home ".config/muse/auth.json" in
+    write_file auth {|{"schema_version":1,"providers":{"meta":{"api_key":"synthetic-capability"}}}|};
+    Unix.chmod auth 0o600;
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw (fun () ->
+        Eio_context.set_env env;
+        let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock:env#clock
+          ~grace_seconds:Process_eio.child_exit_grace_seconds in
+        List.iter (fun (mode, expected) ->
+          let cli_path = Filename.concat base_path mode in
+          write_file cli_path muse_capability_fixture; Unix.chmod cli_path 0o700;
+          let runtime_path = Filename.concat base_path "runtime.toml" in
+          write_file runtime_path (Printf.sprintf {|
+[providers.muse]
+protocol = "muse-serve"
+command = %S
+account-home = %S
+is-non-interactive = true
+[models.fixture]
+api-name = "fixture-selected-model"
+max-context = 4096
+max-prompt-bytes = 1048576
+tools-support = true
+[muse.fixture]
+[runtime]
+default = "muse.fixture"
+|} cli_path account_home);
+          (match Runtime.init_default ~config_path:runtime_path with
+           | Ok () -> () | Error detail -> fail detail);
+          let result = Probe.probe_muse_invocation ~net:env#net ~secure_random:env#secure_random
+            ~mgr ~clock:env#clock ~fs:env#fs ~base_path ~now:Unix.gettimeofday
+            ~runtime_id:"muse.fixture" ~tool:"masc_board_list" ~prompt:"Call masc_board_list once." () in
+          (match expected, result with
+           | `Called, Ok (Probe.Tool_invoked {tool="masc_board_list"; _}) -> ()
+           | `Not_called, Ok (Probe.Replied_no_tool _) -> ()
+           | _, Ok result -> fail (Probe.invocation_to_string result)
+           | _, Error error -> fail (Probe.invocation_error_to_string error));
+          check bool "probe workspace released after child exit" false
+            (Array.exists (String.starts_with ~prefix:"muse-readiness-") (Sys.readdir base_path)))
+          ["muse-called", `Called; "muse-no-tool", `Not_called];
+        check bool "probe owns no durable Keeper session" false
+          (Sys.file_exists (Common.masc_dir_from_base_path ~base_path))))))
+;;
+
 let () =
   run
     "keeper_capability_probe"
-    [ ( "probe_surface"
+    [ ( "Muse actual MCP", [test_case "callback evidence differs from reply claim" `Quick test_muse_probe_uses_actual_mcp_callback] )
+    ; ( "probe_surface"
       , [ test_case "board_list is projected" `Quick test_board_list_is_projected
         ; test_case "operator-only is distinguished" `Quick test_operator_only_is_not_a_runtime_failure
         ; test_case "transport alias names its projection" `Quick test_transport_alias_names_its_projection

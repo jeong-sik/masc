@@ -161,7 +161,7 @@ let antigravity_config ~base_dir ~runtime_id ~override_s ~output_schema
   }
 ;;
 
-let muse_config ~runtime_id ~override_s (execution : Runtime_execution.muse_serve)
+let muse_config ~(model_settings : Runtime_schema.model_spec) ~override_s (execution : Runtime_execution.muse_serve)
   : Runtime_muse_serve.config
   =
   { (Runtime_muse_serve.default_config ()) with
@@ -173,7 +173,11 @@ let muse_config ~runtime_id ~override_s (execution : Runtime_execution.muse_serv
     native = Runtime_native_tools.muse_default
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =
-      resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
+      (match override_s, model_settings.turn_timeout_s with
+       | Some seconds, _ -> Some seconds
+       | None, None -> Some execution.timeout_s
+       | None, Some seconds when seconds <= 0. -> None
+       | None, Some seconds -> Some seconds)
   }
 ;;
 
@@ -213,9 +217,9 @@ let optional_usage convert = function
   | Some usage -> convert usage
   | None -> Fusion_types.zero_usage
 
-let muse_reasoning_effort ~runtime_id ~model =
+let muse_reasoning_effort ~requested ~model =
   Runtime_inference.clamp_reasoning_effort_to_catalog ~model_id:(Some model)
-    ~requested:(Runtime_inference.resolve_reasoning_effort ~runtime_id)
+    ~requested
   |> Option.map (function
     | Llm_provider.Reasoning_effort.None_ -> Runtime_muse_msp.Effort_none
     | Minimal -> Effort_minimal | Low -> Effort_low | Medium -> Effort_medium
@@ -410,13 +414,13 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
          "Muse Code's session protocol has no output-schema channel, so a \
           schema-held answer cannot be asked of it")
   | Runtime_execution.Muse_serve execution ->
-    let config = muse_config ~runtime_id ~override_s:timeout_s execution in
+    let config = muse_config ~model_settings:runtime.model ~override_s:timeout_s execution in
     let* prompt =
       framed_prompt ~system_prompt ~prompt
       |> Result.map_error (fun detail -> Setup_failure detail)
     in
     let* () =
-      match Runtime_inference.resolve_max_prompt_bytes ~runtime_id with
+      match runtime.model.max_prompt_bytes with
       | None ->
         Error (Muse_failure (Runtime_muse_serve.Invalid_config
           "Muse Code requires the model's declared max-prompt-bytes"))
@@ -437,7 +441,14 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
       Ok root) in
     (match
        Runtime_muse_serve.run_turn
-         ?reasoning_effort:(muse_reasoning_effort ~runtime_id ~model:execution.model)
+         ?reasoning_effort:(muse_reasoning_effort
+           ~requested:runtime.model.reasoning_effort ~model:execution.model)
+         ~on_stream_event:(function
+           | Runtime_muse_serve.Subscription_usage_observed usage ->
+             Option.iter (fun reset_ms -> Runtime_quota_window.note_exhausted
+               ~scope:quota_scope ~resets_at:(float_of_int reset_ms /. 1000.))
+               (Runtime_muse_msp.exhausted_subscription_reset_ms usage)
+           | _ -> ())
          ~mgr
          ~clock
          ~cwd:Eio.Path.(Eio.Stdenv.fs env / panel_root)

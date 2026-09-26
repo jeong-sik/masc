@@ -831,6 +831,17 @@ let parse_subscription_usage stage fields =
     }
 ;;
 
+let exhausted_subscription_reset_ms usage =
+  (* Provider percentage semantics, not a MASC spending budget. *)
+  let exhausted percent reset = percent >= 100 && reset > usage.observed_at_ms in
+  match exhausted usage.window.used_percent usage.window.resets_at_ms,
+        exhausted usage.weekly.weekly_used_percent usage.weekly.weekly_resets_at_ms with
+  | false, false -> None
+  | true, false -> Some usage.window.resets_at_ms
+  | false, true -> Some usage.weekly.weekly_resets_at_ms
+  | true, true -> Some (max usage.window.resets_at_ms usage.weekly.weekly_resets_at_ms)
+;;
+
 type notification =
   | Turn_started of
       { session_id : string

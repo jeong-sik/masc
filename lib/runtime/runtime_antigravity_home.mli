@@ -63,6 +63,12 @@ val prepare
     not exist; an existing managed file must itself be an effective-user-owned
     regular 0600 file and is never overwritten by preparation. *)
 
+val prepare_account
+  : runtime_root:string -> owner_leaf:string -> oauth_source:string -> (t, error) result
+(** Prepare and validate the selected account without changing permissions.
+    Session candidates use this before their claim; only the admitted owner
+    may subsequently publish its native policy with [prepare_native_tools]. *)
+
 val prepare_for_login : runtime_root:string -> owner_leaf:string -> (t, error) result
 (** Prepare the private official-client HOME without fabricating an OAuth seed.
     Only an explicit sign-in action may use it to launch the interactive CLI. *)
@@ -75,6 +81,10 @@ type native_workspace = Shared_workspace of string | Private_workspace
 
 val canonical_workspace : string -> (string, error) result
 (** Absolute directory without symbolic links or permission-pattern syntax. *)
+
+val prepare_native_workspace : t -> workspace:native_workspace -> (string, error) result
+(** Validate the shared cwd or create its private directory without publishing
+    permission rules. A losing session candidate cannot change an active policy. *)
 
 val prepare_native_tools
   : t -> posture:Runtime_native_tools.posture -> workspace:native_workspace

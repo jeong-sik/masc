@@ -548,7 +548,6 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let native_workspace_note = native_workspace_note ^
       " Explicit operator-granted additional native directories: " ^
       Yojson.Safe.to_string (`List (List.map (fun path -> `String path) add_dirs)) in
-    let system_prompt = system_prompt ^ "\n\n" ^ native_workspace_note in
     let tool_surface_sha256 =
       Session_store.tool_surface_sha256 ~account_home ~native_posture tools
     in
@@ -561,44 +560,6 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let claim_plan =
       Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256
     in
-    (* This CLI offers no replaceable configuration channel. A vendor session
-       that settled against another canonical history or system prompt is
-       superseded by a fresh one seeded from the canonical source; ephemeral
-       world context remains on the existing per-turn prompt path. *)
-    let snapshot = `Assoc ["system_prompt", `String system_prompt;
-      "messages", `List (List.map Keeper_official_client_context_codec.to_json initial_messages)] in
-    let snapshot_sha256 = snapshot |> Yojson.Safe.to_string
-      |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
-    let admission_error reason = config_error
-        ~field:"official_client_session.context_admission"
-        (Session_store.context_admission_error_to_string reason) in
-    (* A Gate continuation is bound to its original vendor session: completion
-       requires that session to settle again, so a fresh one would run the
-       effects and then fail. It keeps the refusal, before any dispatch. *)
-    let* reconciled_plan = match official_client_continuation with
-      | Some _ when Option.is_some claim_plan.previous_settlement ->
-        Session_store.validate_unchanged_context ~expected:stored_session ~snapshot_sha256
-        |> Result.map (fun () -> claim_plan)
-        |> Result.map_error admission_error
-      | Some _ | None ->
-        Ok (Session_store.reconcile_context claim_plan ~expected:stored_session ~snapshot_sha256) in
-    (match claim_plan.previous_settlement, reconciled_plan.previous_settlement with
-     | Some { session_id; _ }, None ->
-       Log.Keeper.info
-         "antigravity: keeper=%s vendor session %s did not settle against the current canonical history and system prompt; starting a fresh session"
-         keeper_name session_id
-     | Some _, Some _ | None, (Some _ | None) -> ());
-    let claim_plan = reconciled_plan in
-    let conversation_mode =
-      match claim_plan.previous_settlement with
-      | None -> Runtime_antigravity.Start
-      | Some { session_id; _ } ->
-        Runtime_antigravity.Resume { conversation_id = session_id }
-    in
-    let is_resume = Option.is_some claim_plan.previous_settlement in
-    let context_frontier : Session_store.context_frontier =
-      {snapshot_sha256; message_count=List.length initial_messages;
-       delivery=Canonical_source_guard; acknowledged_turn=None; held_context=[]} in
     let turn_count = claim_plan.turn_count in
     let* goal =
       match goal_blocks with
@@ -631,9 +592,56 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~system_prompt
         ~tools
         ~initial_messages
-        ~model_input_projection:(if is_resume then model_input_projection else None)
+        ~model_input_projection:None
         ~hooks:(Some hooks)
     in
+    (* Hooks may replace the system prompt or append an ordinary Nudge. Bind
+       the final non-carried composition, and retain the mandatory workspace
+       note after a system-prompt override. Hooks run once with the candidate
+       ordinal; their output determines whether the vendor session can resume. *)
+    let prepared = { prepared with Host.system_prompt =
+      prepared.system_prompt ^ "\n\n" ^ native_workspace_note } in
+    (* This CLI offers no replaceable configuration channel. A vendor session
+       that settled against another canonical history or system prompt is
+       superseded by a fresh one seeded from the canonical source; ephemeral
+       world context remains on the existing per-turn prompt path. *)
+    let snapshot_messages = List.filter
+        (fun message -> not (Host.is_carried_on_resume message)) prepared.messages in
+    let snapshot = `Assoc ["system_prompt", `String prepared.system_prompt;
+      "messages", `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages)] in
+    let snapshot_sha256 = snapshot |> Yojson.Safe.to_string
+      |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+    let admission_error reason = config_error
+        ~field:"official_client_session.context_admission"
+        (Session_store.context_admission_error_to_string reason) in
+    (* A Gate continuation is bound to its original vendor session: completion
+       requires that session to settle again, so a fresh one would run the
+       effects and then fail. It keeps the refusal, before any dispatch. *)
+    let* reconciled_plan = match official_client_continuation with
+      | Some _ when Option.is_some claim_plan.previous_settlement ->
+        Session_store.validate_unchanged_context ~expected:stored_session ~snapshot_sha256
+        |> Result.map (fun () -> claim_plan)
+        |> Result.map_error admission_error
+      | Some _ | None ->
+        Ok (Session_store.reconcile_context claim_plan ~expected:stored_session ~snapshot_sha256) in
+    (match claim_plan.previous_settlement, reconciled_plan.previous_settlement with
+     | Some { session_id; _ }, None ->
+       Log.Keeper.info
+         "antigravity: keeper=%s vendor session %s did not settle against the current canonical history and system prompt; starting a fresh session"
+         keeper_name session_id
+     | Some _, Some _ | None, (Some _ | None) -> ());
+    let claim_plan = reconciled_plan in
+    let conversation_mode =
+      match claim_plan.previous_settlement with
+      | None -> Runtime_antigravity.Start
+      | Some { session_id; _ } ->
+        Runtime_antigravity.Resume { conversation_id = session_id }
+    in
+    let is_resume = Option.is_some claim_plan.previous_settlement in
+    let context_frontier : Session_store.context_frontier =
+      {snapshot_sha256; message_count=List.length snapshot_messages;
+       delivery=Canonical_source_guard; acknowledged_turn=None; held_context=[]} in
+    let turn_count = claim_plan.turn_count in
     let* () =
       match prepared.reasoning_effort with
       | None -> Ok ()
@@ -649,8 +657,16 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
              "Antigravity effort must be declared by its runtime provider")
     in
     let* prepared =
-      if is_resume
-      then Ok prepared
+      if is_resume then
+        (match model_input_projection with
+         | None -> Ok prepared
+         | Some project ->
+           let* messages =
+             try project prepared.messages with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn -> Error (Host.internal_error
+                 (runtime_label ^ " runtime model input projection raised: " ^ Printexc.to_string exn)) in
+           Ok {prepared with messages})
       else
         let* capacity_projection =
           capacity_bounded_model_input_projection
@@ -744,7 +760,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ()
     in
     let* home =
-      Runtime_antigravity_home.prepare
+      Runtime_antigravity_home.prepare_account
         ~runtime_root
         ~owner_leaf
         ~oauth_source:config.oauth_source
@@ -764,8 +780,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
          | Unix.Unix_error (error, _, _) ->
            Error (config_error ~field:"native_workspace" (Unix.error_message error)))
       | _ -> Ok () in
-    let* native_cwd = Runtime_antigravity_home.prepare_native_tools home
-        ~posture:native_posture ~workspace:native_workspace ~additional_workspaces:add_dirs
+    let* native_cwd = Eio_guard.run_in_systhread ~label:"antigravity-native-workspace" (fun () ->
+        Runtime_antigravity_home.prepare_native_workspace home ~workspace:native_workspace)
       |> Result.map_error home_error_to_core_error in
     (* Only the states that changed something or explain a later stall are
        worth a line; [Present] is every turn after the first. *)
@@ -1033,6 +1049,13 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
              "Antigravity host stop arrived without an admitted provider turn")
     in
     let run_client () =
+      (* Permission publication belongs to the successful durable claim only. *)
+      let* _native_cwd = Eio_guard.run_in_systhread ~label:"antigravity-native-policy" (fun () ->
+          Runtime_antigravity_home.prepare_native_tools home
+            ~posture:native_posture ~workspace:native_workspace ~additional_workspaces:add_dirs)
+        |> Result.map_error (fun error ->
+             recovery_failure := Session_store.State_persistence_failed;
+             home_error_to_core_error error) in
       let cleanup_error = ref None in
       let turn_result =
         Eio.Switch.run (fun sw ->

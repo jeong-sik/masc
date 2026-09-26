@@ -179,7 +179,7 @@ export function OfficialClientSessionPanel() {
             <div><span class="text-[var(--color-fg-muted)]">runtime</span> · <span class="mono">${session.runtime_id}</span></div>
             <div><span class="text-[var(--color-fg-muted)]">completed turns</span> · ${session.turn_count}</div>
             <div><span class="text-[var(--color-fg-muted)]">updated</span> · ${timestampText(session.updated_at)}</div>
-            <div title=${session.tool_surface_sha256}><span class="text-[var(--color-fg-muted)]">tool surface</span> · <span class="mono">${compactHash(session.tool_surface_sha256)}</span></div>
+            <div title=${session.session_binding_sha256}><span class="text-[var(--color-fg-muted)]">session binding</span> · <span class="mono">${compactHash(session.session_binding_sha256)}</span></div>
             ${ownerEpoch ? html`<div title=${ownerEpoch}><span class="text-[var(--color-fg-muted)]">process epoch</span> · <span class="mono">${compactHash(ownerEpoch)}</span></div>` : null}
             ${sessionId ? html`<div><span class="text-[var(--color-fg-muted)]">session</span> · <span class="mono">${sessionId}</span></div>` : null}
             ${turnId ? html`<div><span class="text-[var(--color-fg-muted)]">turn</span> · <span class="mono">${turnId}</span></div>` : null}

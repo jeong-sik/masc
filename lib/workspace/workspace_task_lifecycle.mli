@@ -53,7 +53,9 @@ val decide
   -> action:Masc_domain.task_action
   -> now:string
   -> notes:string
-  -> reason:string
+  -> reason:string option
+      (** The stated reason, [None] when the caller stated none. A holder's
+          cancel is refused without one. *)
   -> (decision, invalid) result
 
 (** A verdict decision plus the typed authority provenance the caller records.

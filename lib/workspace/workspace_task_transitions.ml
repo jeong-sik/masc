@@ -231,7 +231,7 @@ let transition_task_outcome_r
               ~action
               ~now
               ~notes
-              ~reason:(Option.value stated_reason ~default:"")
+              ~reason:stated_reason
           with
           | Ok decision -> Ok decision
           | Error Workspace_task_lifecycle.Verification_submission_required ->

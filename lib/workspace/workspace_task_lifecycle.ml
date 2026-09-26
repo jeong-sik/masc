@@ -21,9 +21,8 @@ let done_status ~assignee ~now ~notes =
     { assignee; completed_at = now; notes = option_of_non_empty notes }
 ;;
 
-let cancelled_status ~agent_name ~now ~reason =
-  Masc_domain.Cancelled
-    { cancelled_by = agent_name; cancelled_at = now; reason = option_of_non_empty reason }
+let cancelled_status ~agent_name ~now ~(reason : string option) =
+  Masc_domain.Cancelled { cancelled_by = agent_name; cancelled_at = now; reason }
 ;;
 
 type claim_resolution =
@@ -125,9 +124,10 @@ let decide
       | Masc_domain.AwaitingVerification { assignee; _ } ) ) ->
     if not (same_agent assignee)
     then Error Invalid_transition
-    else if String.equal (String.trim reason) ""
-    then Error Cancel_reason_required
-    else ok (cancelled_status ~agent_name ~now ~reason)
+    else (
+      match reason with
+      | None -> Error Cancel_reason_required
+      | Some _ -> ok (cancelled_status ~agent_name ~now ~reason))
   | Masc_domain.Cancel, Masc_domain.Done _ -> Error Invalid_transition
   | ( Masc_domain.Release
     , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _}) ) ->
@@ -276,7 +276,7 @@ let decide_verdict
                     ~producer:assignee
                     ~verification_id:actual_verification_id
                     { new_status =
-                        cancelled_status ~agent_name:assignee ~now ~reason
+                        cancelled_status ~agent_name:assignee ~now ~reason:(Some reason)
                     ; set_current = None
                     }
                 | Workspace_verification_store.Cancellation_reason_unreadable detail ->
@@ -313,7 +313,7 @@ let valid_next_actions ~same_agent ~task_status =
         ~action
         ~now:""
         ~notes:"preview"
-        ~reason:"preview"
+        ~reason:(Some "preview")
     with
     (* An action the FSM admits but that leaves the status where it is -- Claim
        on a Task you already hold, Start on one already started, Release on a

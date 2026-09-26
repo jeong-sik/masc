@@ -11,7 +11,7 @@ let producer_stated ~verification_id:_ =
 
 let decide
       ?(notes = "evidence at /tmp/proof")
-      ?(reason = "")
+      ?reason
       ~same_agent
       ~task_status
       ~action
@@ -99,9 +99,9 @@ let test_cancel_of_a_pending_submission_ends_the_task () =
 ;;
 
 let test_holder_cancel_requires_a_reason () =
-  decide ~reason:"  " ~same_agent:true ~task_status:in_progress ~action:D.Cancel ()
+  decide ~same_agent:true ~task_status:in_progress ~action:D.Cancel ()
   |> expect_error L.Cancel_reason_required;
-  decide ~reason:"" ~same_agent:true ~task_status:awaiting ~action:D.Cancel ()
+  decide ~same_agent:true ~task_status:awaiting ~action:D.Cancel ()
   |> expect_error L.Cancel_reason_required
 ;;
 

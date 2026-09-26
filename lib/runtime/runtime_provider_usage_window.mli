@@ -4,7 +4,8 @@
     [account/rateLimits/updated] report, during a turn, how much of each
     usage window the account has used and when the window resets.  The
     Codex app-server also answers [account/rateLimits/read] without a turn,
-    and four HTTP providers answer a usage endpoint without a model call
+    four HTTP providers answer a usage endpoint without a model call, and
+    the Antigravity CLI answers a print-mode [/usage] without a turn
     ({!Runtime_provider_usage_read}).  This module decodes those reports at
     the wire and keeps the latest one per quota scope and window, with the
     time MASC heard it.
@@ -42,6 +43,8 @@ type source =
   | Zai_quota_limit_read  (** Z.AI [GET /api/monitor/usage/quota/limit]. *)
   | Kimi_coding_usages_read  (** Kimi [GET /coding/v1/usages]. *)
   | Ollama_usage_read  (** Ollama [GET https://ollama.com/api/usage]. *)
+  | Antigravity_usage_read
+      (** Antigravity [agy -p "/usage" --output-format json], no turn. *)
 
 type window =
   { limit_id : string option
@@ -142,6 +145,17 @@ val decode_ollama_usage : Yojson.Safe.t -> (report, decode_error) result
     [limits.weekly.usage] a {!Seven_day} window, each a {!Fraction} that
     must be within [0..1].  No
     reset time is stated. *)
+
+val decode_antigravity_usage : Yojson.Safe.t -> (report, decode_error) result
+(** The whole JSON answer of [agy -p "/usage" --output-format json] (agy
+    1.1.11 or later). [status] must be [SUCCESS]; [num_turns] must be 0, because an agy that sends "/usage" to
+    the model as a prompt answers with a turn; [command.name] must be
+    [usage]. Each [command.data.groups[].buckets[]] is one window: [id] is
+    its [limit_id]; [window] ["5h"] is {!Five_hour} and ["weekly"]
+    {!Seven_day}, any other value is refused; {!Fraction} is
+    [1 - remaining_fraction], [remaining_fraction] within [0..1];
+    [reset_time] (RFC 3339, optional) is [resets_at]. A bucket with
+    [disabled: true] does not currently apply and yields no window. *)
 
 type recorded =
   { window : window

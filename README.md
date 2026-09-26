@@ -93,6 +93,8 @@ bash /tmp/masc-install.sh --version "$TAG"
 
 Optional inspection: run `less /tmp/masc-install.sh` before installation. Press `q` to exit, then run the `bash` installation command above.
 
+If a model check fails, the wizard names the cause. For a yellow **Rate limit (temporary)** or **Provider busy**, wait and *Retry*. For **No answer in time**, retry once; if it keeps timing out, check the endpoint or choose a smaller model. A red cause (credential refused, quota used up, not signed in) needs the fix it names. You can exclude that connection and continue, or choose *Configure later* and run `masc setup` afterwards. A running check shows its elapsed seconds, so a slow provider is not a frozen installer. `NO_COLOR=1` gives plain output.
+
 For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command.
 
 The installer installs into `~/.local/bin` by default and offers to add it to your

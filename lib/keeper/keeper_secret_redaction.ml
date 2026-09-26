@@ -367,6 +367,17 @@ let exact_value_at redaction text index =
 
 let emit_bounded_prefix state emitted stop =
   let pending = Buffer.contents state.pending_line in
+  (* Each emitted piece reaches its reader as a separate string (a dashboard
+     row, a JSON field in an SSE event), so the piece must end between
+     characters: a cut inside a Hangul syllable showed as U+FFFD at the end of
+     one piece and the start of the next. Moving the cut back keeps at most
+     three more bytes pending. A prefix with no character boundary in it is
+     not UTF-8, and the byte cut stands so the pending line stays bounded. *)
+  let stop =
+    match String_util.utf8_char_boundary pending stop with
+    | 0 -> stop
+    | boundary -> boundary
+  in
   let safely_redacted = Buffer.create stop in
   let cursor = ref 0 in
   while !cursor < stop do

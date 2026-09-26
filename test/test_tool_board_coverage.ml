@@ -243,6 +243,11 @@ let json_member_list json key =
   | `List values -> values
   | _ -> Alcotest.failf "expected list field %s" key
 
+let json_lacks_field json key =
+  match json with
+  | `Assoc fields -> not (List.mem_assoc key fields)
+  | _ -> false
+
 (* RFC-0393: keeper-ness is a registry lookup, not a name shape. With no
    registered keeper, the old wrapper spelling is an ordinary agent name —
    nothing is recovered from the string. *)
@@ -319,7 +324,9 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   Alcotest.(check int) "post reaction count" 1
     (json_member_int post_summary "count");
   Alcotest.(check bool) "post reaction selected" true
-    (json_member_bool post_summary "has_reacted");
+    (json_member_bool post_summary "reacted");
+  Alcotest.(check bool) "post reaction has one selection field" true
+    (json_lacks_field post_summary "has_reacted");
   let comment_reactions =
     Server_utils.board_reactions_for_comment ~voter:(Some "reactor") ~comment_id
   in
@@ -334,7 +341,9 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   Alcotest.(check string) "comment reaction emoji" "👏"
     (json_member_string comment_summary "emoji");
   Alcotest.(check bool) "comment reaction selected" true
-    (json_member_bool comment_summary "has_reacted")
+    (json_member_bool comment_summary "reacted");
+  Alcotest.(check bool) "comment reaction has one selection field" true
+    (json_lacks_field comment_summary "has_reacted")
 
 let test_inline_board_post_author_rewrites_caller_claim () =
   let args =
@@ -451,6 +460,236 @@ let test_post_create_metadata_payload () =
     Yojson.Safe.Util.(json |> member "post_kind" |> to_string);
   Alcotest.(check string) "source meta kept" "keeper_autonomy"
     Yojson.Safe.Util.(json |> member "meta" |> member "source" |> to_string)
+
+let test_post_create_typed_attachments () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let base =
+    [ "content", `String "Typed attachments"
+    ; "author", `String "tester"
+    ]
+  in
+  let post attachments =
+    dispatch_result "masc_board_post"
+      (make_args (base @ [ "attachments", `List attachments ]))
+  in
+  let image =
+    `Assoc
+      [ "kind", `String "image"
+      ; "url", `String "https://cdn.example.test/image.png"
+      ]
+  in
+  let result = post [ image ] in
+  Alcotest.(check bool) "HTTPS image accepted" true (Tool_result.is_success result);
+  let stored =
+    Yojson.Safe.Util.
+      (Tool_result.data result |> member "meta" |> member "attachments")
+  in
+  Alcotest.(check bool)
+    "typed image stored and read"
+    true
+    (Yojson.Safe.equal stored (`List [ image ]));
+  let blob =
+    match
+      Tool_blob_store.put
+        (Tool_blob_store.create ~base_path:_test_base_path)
+        ~bytes:"attachment bytes"
+        ~mime:"application/octet-stream"
+    with
+    | Tool_output.Stored reference -> reference
+    | Tool_output.Inline _ -> Alcotest.fail "artifact was not stored"
+  in
+  let artifact =
+    `Assoc
+      [ "kind", `String "external_link"
+      ; "sha256", `String blob.sha256
+      ]
+  in
+  let artifact_result = post [ artifact ] in
+  Alcotest.(check bool)
+    "existing artifact accepted"
+    true
+    (Tool_result.is_success artifact_result);
+  let stored_artifact =
+    Yojson.Safe.Util.
+      (Tool_result.data artifact_result |> member "meta" |> member "attachments")
+  in
+  (match stored_artifact with
+   | `List [ `Assoc fields ] ->
+     (match List.assoc_opt "artifact" fields with
+      | Some json ->
+        (match Tool_output.normalized_artifact_ref_of_json json with
+         | Tool_output.Decoded_normalized_artifact_ref reference ->
+           Alcotest.(check string) "stored artifact hash" blob.sha256 reference.sha256
+         | _ -> Alcotest.fail "stored artifact lacks canonical reference")
+      | None -> Alcotest.fail "stored artifact missing")
+   | _ -> Alcotest.fail "stored attachment list malformed");
+  let store = Tool_blob_store.create ~base_path:_test_base_path in
+  let child =
+    Tool_blob_store.put_durable store ~bytes:"manifest child" ~mime:"text/plain"
+  in
+  let structured_content =
+    `Assoc [ "output_artifact", Tool_output.normalized_artifact_ref_to_json child ]
+  in
+  let manifest =
+    Tool_blob_store.put_durable store
+      ~bytes:
+        (Tool_output.artifact_manifest_to_json
+           ~content:"manifest child" ~structured_content
+         |> Yojson.Safe.to_string)
+      ~mime:Tool_output.artifact_manifest_mime
+  in
+  let manifest_result =
+    post
+      [ `Assoc
+          [ "kind", `String "external_link"
+          ; "sha256", `String manifest.sha256
+          ]
+      ]
+  in
+  Alcotest.(check bool) "canonical manifest accepted" true
+    (Tool_result.is_success manifest_result);
+  let stored_manifest =
+    Yojson.Safe.Util.
+      (Tool_result.data manifest_result |> member "meta" |> member "attachments")
+  in
+  (match stored_manifest with
+   | `List [ `Assoc fields ] ->
+     (match List.assoc_opt "artifact" fields with
+      | Some json ->
+        (match Tool_output.normalized_artifact_ref_of_json json with
+         | Tool_output.Decoded_normalized_artifact_ref reference ->
+           Alcotest.(check string) "manifest MIME survives Board post"
+             Tool_output.artifact_manifest_mime reference.mime
+         | _ -> Alcotest.fail "manifest reference is malformed")
+      | None -> Alcotest.fail "manifest attachment missing")
+   | _ -> Alcotest.fail "manifest attachment list malformed");
+  List.iter
+    (fun url ->
+      let unsafe =
+        post
+          [ `Assoc
+              [ "kind", `String "image"
+              ; "url", `String url
+              ]
+          ]
+      in
+      Alcotest.(check bool) ("unsafe URL rejected: " ^ url) false
+        (Tool_result.is_success unsafe);
+      check_failure_class
+        "unsafe URL is workflow rejection"
+        (Some "workflow_rejection")
+        unsafe)
+    [ "javascript:alert(1)"; "data:image/png;base64,AAA"; "http://example.test/a.png" ];
+  let missing =
+    post
+      [ `Assoc
+          [ "kind", `String "image"
+          ; "sha256", `String (String.make 64 'f')
+          ]
+      ]
+  in
+  Alcotest.(check bool) "missing artifact rejected" false
+    (Tool_result.is_success missing);
+  Alcotest.(check bool) "missing artifact named" true
+    (String_util.contains_substring
+       (Tool_result.message missing)
+       "artifact not found");
+  let youtube_artifact =
+    post
+      [ `Assoc
+          [ "kind", `String "youtube"
+          ; "sha256", `String blob.sha256
+          ]
+      ]
+  in
+  Alcotest.(check bool) "youtube artifact rejected" false
+    (Tool_result.is_success youtube_artifact);
+  Alcotest.(check bool) "youtube rejection asks for url" true
+    (String_util.contains_substring
+       (Tool_result.message youtube_artifact)
+       "kind youtube needs url");
+  (* The same missing artifact as above, on a post that fails its own title
+     check: the title is reported, so no blob was looked up for it. Before the
+     reorder this said "artifact not found". *)
+  let blank_title =
+    dispatch_result "masc_board_post"
+      (make_args
+         (base
+          @ [ "title", `String "   "
+            ; "attachments",
+              `List
+                [ `Assoc
+                    [ "kind", `String "image"
+                    ; "sha256", `String (String.make 64 'f')
+                    ]
+                ]
+            ]))
+  in
+  Alcotest.(check bool) "blank title rejected" false
+    (Tool_result.is_success blank_title);
+  Alcotest.(check bool) "title checked before artifact lookup" true
+    (String_util.contains_substring
+       (Tool_result.message blank_title)
+       "Title must not be empty");
+  let raw =
+    dispatch_result "masc_board_post"
+      (make_args
+         (base @
+          [ "meta", `Assoc [ "attachments", `List [ image ] ] ]))
+  in
+  Alcotest.(check bool) "raw meta attachments rejected" false
+    (Tool_result.is_success raw)
+
+(* The bound is inclusive: an artifact exactly [max_artifact_bytes] long is
+   read and recorded, one byte over is refused with its size. Production
+   passes Tool_blob_store.max_served_bytes, the HTTP route's limit. *)
+let test_attachment_artifact_read_bound () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let payload = "twelve bytes" in
+  let blob =
+    match
+      Tool_blob_store.put
+        (Tool_blob_store.create ~base_path:_test_base_path)
+        ~bytes:payload
+        ~mime:"application/octet-stream"
+    with
+    | Tool_output.Stored reference -> reference
+    | Tool_output.Inline _ -> Alcotest.fail "artifact was not stored"
+  in
+  let entries =
+    [ { Board_tool_attachment.kind = Board_tool_attachment.Image
+      ; source = Board_tool_attachment.Artifact_sha256 blob.sha256
+      }
+    ]
+  in
+  let resolve max_artifact_bytes =
+    Board_tool_attachment.resolve
+      ~base_path:_test_base_path
+      ~max_artifact_bytes
+      entries
+  in
+  let size = String.length payload in
+  (match resolve (size - 1) with
+   | Error (Board_tool_attachment.Artifact_too_large { index; bytes; maximum }) ->
+     Alcotest.(check int) "refused entry index" 0 index;
+     Alcotest.(check int) "refused size" size bytes;
+     Alcotest.(check int) "refused bound" (size - 1) maximum
+   | Error error ->
+     Alcotest.failf "one byte over: unexpected error %s"
+       (Board_tool_attachment.error_to_string error)
+   | Ok _ -> Alcotest.fail "one byte over the bound was accepted");
+  match resolve size with
+  | Ok [ Board_tool_attachment.Artifact { kind = Board_tool_attachment.Image; reference } ] ->
+    Alcotest.(check int) "recorded size" size reference.Tool_output.bytes;
+    Alcotest.(check string) "recorded hash" blob.sha256 reference.Tool_output.sha256
+  | Ok _ -> Alcotest.fail "exact bound resolved to an unexpected shape"
+  | Error error ->
+    Alcotest.failf "exact bound refused: %s"
+      (Board_tool_attachment.error_to_string error)
 
 (* Regression guard: board_post must return STRUCTURED [data] (`Assoc), not a
    `String that embeds stringified JSON. The `String form double-encodes the
@@ -1609,10 +1848,26 @@ let test_post_get_comment_pages_carry_their_range () =
     ~returned:5
     ~total:105
     ~next_offset:None;
+  (* A reader that finished the thread asks at its end to learn whether
+     anything new arrived. That is a page, not a failure: it names the
+     thread's size, so it cannot read as a thread without comments. Past the
+     end is still refused. *)
+  let end_page = read ~label:"end of the thread" [ "comment_offset", `Int 105 ] in
+  check_page
+    ~label:"the end of the thread"
+    end_page
+    ~offset:105
+    ~returned:0
+    ~total:105
+    ~next_offset:None;
+  Alcotest.(check bool) "the end page names the thread's size" true
+    (contains end_page.body "[no comments from offset 105: the thread has 105 now.]");
+  Alcotest.(check bool) "the end page does not say the thread has no comments" false
+    (contains end_page.body "No comments.");
   check_get_rejected
-    ~label:"offset at the end"
+    ~label:"offset past the end"
     post_id
-    [ "comment_offset", `Int 105 ]
+    [ "comment_offset", `Int 106 ]
     "the thread now has 105 comments, at offsets 0-104";
   check_get_rejected
     ~label:"negative offset"
@@ -1648,6 +1903,171 @@ let test_post_get_comment_pages_carry_their_range () =
     empty_post_id
     [ "comment_offset", `Int 1 ]
     "the thread has no comments"
+
+(* The thread in the order a page reads it, oldest first. Comments made in the
+   same instant are ordered by id, so the order is read back, not assumed. *)
+let thread_comment_ids post_id =
+  match Board_dispatch.get_post_and_comments ~post_id with
+  | Ok (_post, comments) ->
+    List.map (fun (comment : Board.comment) -> Board.Comment_id.to_string comment.id) comments
+  | Error error -> Alcotest.failf "thread %s: %s" post_id (Board_tool.board_error_to_string error)
+
+(* A reader that has seen a comment asks for what came after it, without
+   knowing where it sits. 33% of the live reads returned only comments the
+   same Keeper had already read (#39075). *)
+let test_post_get_reads_after_a_seen_comment () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:12 in
+  let ids = thread_comment_ids post_id in
+  let id_at index = List.nth ids index in
+  let read ~label args =
+    read_page ~result_boundary:Tool_output.Sent_to_client ~label post_id args
+  in
+  let after_fifth = read ~label:"after the fifth" [ "after_comment_id", `String (id_at 4) ] in
+  check_page
+    ~label:"after the fifth"
+    after_fifth
+    ~offset:5
+    ~returned:7
+    ~total:12
+    ~next_offset:None;
+  Alcotest.(check bool) "the anchor is not read again" false
+    (contains after_fifth.body (id_at 4));
+  Alcotest.(check bool) "the comment after it is read" true
+    (contains after_fifth.body (id_at 5));
+  Alcotest.(check bool) "a read that continues names the post in one line" false
+    (contains after_fifth.body "[12 replies]");
+  check_page
+    ~label:"after the fifth, three at a time"
+    (read
+       ~label:"after the fifth, limited"
+       [ "after_comment_id", `String (id_at 4); "comment_limit", `Int 3 ])
+    ~offset:5
+    ~returned:3
+    ~total:12
+    ~next_offset:(Some 8);
+  let nothing_new = read ~label:"after the newest" [ "after_comment_id", `String (id_at 11) ] in
+  check_page
+    ~label:"after the newest"
+    nothing_new
+    ~offset:12
+    ~returned:0
+    ~total:12
+    ~next_offset:None;
+  Alcotest.(check bool) "nothing new is the end page, which names the thread's size" true
+    (contains nothing_new.body "[no comments from offset 12: the thread has 12 now.]");
+  (* The same anchor on the next read returns only what arrived since. *)
+  let newer = add_comment_id ~post_id "comment-013" in
+  Alcotest.(check (option string)) "the new comment is the newest in the thread"
+    (Some newer)
+    (List.nth_opt (thread_comment_ids post_id) 12);
+  let one_new = read ~label:"one new" [ "after_comment_id", `String (id_at 11) ] in
+  check_page ~label:"one new comment" one_new ~offset:12 ~returned:1 ~total:13 ~next_offset:None;
+  Alcotest.(check bool) "the new comment is the one read" true (contains one_new.body newer);
+  check_get_rejected
+    ~label:"an id this thread never had"
+    post_id
+    [ "after_comment_id", `String ("c-" ^ String.make 32 'a') ]
+    "names no comment of";
+  List.iter
+    (fun (label, args, expected) -> check_get_rejected ~label post_id args expected)
+    [ ( "an id no comment could have"
+      , [ "after_comment_id", `String "c-placeholder" ]
+      , "after_comment_id \"c-placeholder\" is not a comment id" )
+    ; ( "an id that is not a string"
+      , [ "after_comment_id", `Int 5 ]
+      , "after_comment_id must be a string (got int)" )
+    ; ( "an id beside an offset"
+      , [ "after_comment_id", `String (id_at 4); "comment_offset", `Int 0 ]
+      , "after_comment_id cannot be sent with comment_offset" )
+    ]
+
+(* A reader that does not know the thread asks for its newest comments
+   without first reading the count. The live ledger had 503 same-turn pairs
+   of an offset-0 read followed by a read of the end (#39075); the post body
+   comes with the newest comments so the first read is not needed. *)
+let test_post_get_reads_the_newest_comments () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:12 in
+  let ids = thread_comment_ids post_id in
+  let id_at index = List.nth ids index in
+  let read ~label args =
+    read_page ~result_boundary:Tool_output.Sent_to_client ~label post_id args
+  in
+  let newest = read ~label:"newest three" [ "comment_tail", `Int 3 ] in
+  check_page ~label:"newest three" newest ~offset:9 ~returned:3 ~total:12 ~next_offset:None;
+  Alcotest.(check bool) "the last three are read" true
+    (List.for_all (contains newest.body) [ id_at 9; id_at 10; id_at 11 ]);
+  Alcotest.(check bool) "the one before them is not" false (contains newest.body (id_at 8));
+  Alcotest.(check bool) "the newest comments carry the post body" true
+    (contains newest.body "[12 replies]");
+  check_page
+    ~label:"a tail longer than the thread"
+    (read ~label:"newest fifty" [ "comment_tail", `Int 50 ])
+    ~offset:0
+    ~returned:12
+    ~total:12
+    ~next_offset:None;
+  let empty_post_id = create_post_with_comments ~count:0 in
+  let empty =
+    read_page
+      ~result_boundary:Tool_output.Sent_to_client
+      ~label:"newest of an empty thread"
+      empty_post_id
+      [ "comment_tail", `Int 5 ]
+  in
+  check_page ~label:"newest of an empty thread" empty ~offset:0 ~returned:0 ~total:0 ~next_offset:None;
+  Alcotest.(check bool) "an empty thread says so" true (contains empty.body "No comments.");
+  List.iter
+    (fun (label, args, expected) -> check_get_rejected ~label post_id args expected)
+    [ "zero", [ "comment_tail", `Int 0 ], "comment_tail must be between 1 and 100 (got 0)"
+    ; "over the page cap", [ "comment_tail", `Int 101 ], "comment_tail must be between 1 and 100 (got 101)"
+    ; ( "beside a default offset"
+      , [ "comment_tail", `Int 3; "comment_offset", `Int 0 ]
+      , "comment_tail cannot be sent with comment_offset" )
+    ; ( "beside a limit"
+      , [ "comment_tail", `Int 3; "comment_limit", `Int 3 ]
+      , "comment_tail cannot be sent with comment_limit: comment_tail is already the number" )
+    ; ( "beside an anchor"
+      , [ "comment_tail", `Int 3; "after_comment_id", `String (id_at 4) ]
+      , "comment_tail cannot be sent with after_comment_id" )
+    ]
+
+(* The newest comments end at the thread's end. When the lane's budget cuts
+   the page, the oldest of them are left out, and the position line names
+   where the page starts so the rest stays reachable by offset. *)
+let test_post_get_newest_comments_cut_by_the_budget_keep_the_newest () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let comment_count = 30 in
+  let post_id, _ids = create_thread_of_long_comments ~count:comment_count in
+  let ids = thread_comment_ids post_id in
+  let page =
+    read_page
+      ~result_boundary:official_client_lane
+      ~label:"newest on the official-client lane"
+      post_id
+      [ "comment_tail", `Int comment_count ]
+  in
+  Alcotest.(check bool) "the budget cut the page" true
+    (page.returned > 0 && page.returned < comment_count);
+  check_page
+    ~label:"a cut page of the newest"
+    page
+    ~offset:(comment_count - page.returned)
+    ~returned:page.returned
+    ~total:comment_count
+    ~next_offset:None;
+  Alcotest.(check bool) "the newest comment is on it" true
+    (contains page.body (List.nth ids (comment_count - 1)));
+  Alcotest.(check bool) "the oldest comment is not" false (contains page.body (List.nth ids 0));
+  Alcotest.(check bool) "the page fits the lane" true
+    (String.length page.body <= Tool_output.result_ceiling_bytes official_client_lane)
 
 (* A value that is present but is not a JSON integer is refused by name. It
    used to fall back to the default page, so a caller that sent null or 2.9
@@ -1930,8 +2350,9 @@ let test_post_get_a_body_larger_than_the_page_still_advances () =
 
 (* The TTL sweep is the one thing that removes a comment from a live thread.
    An offset is a position, so a sweep between two reads moves the thread under
-   it; the next page counts the thread as it is now, an offset past the new end
-   says so, and the sweep schedules its removal for the next flush. *)
+   it; the next page counts the thread as it is now, the old last offset reads
+   as the new end, one past it is refused, and the sweep schedules its removal
+   for the next flush. *)
 let test_post_get_a_sweep_between_pages_shows_in_the_next_page () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1981,10 +2402,23 @@ let test_post_get_a_sweep_between_pages_shows_in_the_next_page () =
       [ "comment_offset", `Int page_limit; "comment_limit", `Int page_limit ]
   in
   Alcotest.(check int) "the next page counts the thread as it is now" remaining next.total;
-  check_get_rejected
+  (* The old last offset is the new end: an empty page that counts the
+     thread as it is now. One past it is refused. *)
+  check_page
     ~label:"the old last offset"
+    (read_page
+       ~result_boundary:Tool_output.Sent_to_client
+       ~label:"the old last offset"
+       post_id
+       [ "comment_offset", `Int remaining ])
+    ~offset:remaining
+    ~returned:0
+    ~total:remaining
+    ~next_offset:None;
+  check_get_rejected
+    ~label:"past the new end"
     post_id
-    [ "comment_offset", `Int remaining ]
+    [ "comment_offset", `Int (remaining + 1) ]
     (Printf.sprintf
        "the thread now has %d comments, at offsets 0-%d"
        remaining
@@ -2521,6 +2955,10 @@ let () =
           Alcotest.test_case "create success" `Quick test_post_create_success;
           Alcotest.test_case "create structured payload" `Quick
             test_post_create_metadata_payload;
+          Alcotest.test_case "create typed attachments" `Quick
+            test_post_create_typed_attachments;
+          Alcotest.test_case "attachment artifact read bound" `Quick
+            test_attachment_artifact_read_bound;
           Alcotest.test_case "create data is structured not double-encoded" `Quick
             test_post_create_data_is_structured;
           Alcotest.test_case "projection failure preserves primary effect" `Quick
@@ -2577,6 +3015,18 @@ let () =
             "get comment pages carry their range"
             `Quick
             test_post_get_comment_pages_carry_their_range;
+          Alcotest.test_case
+            "get reads after a seen comment"
+            `Quick
+            test_post_get_reads_after_a_seen_comment;
+          Alcotest.test_case
+            "get reads the newest comments"
+            `Quick
+            test_post_get_reads_the_newest_comments;
+          Alcotest.test_case
+            "get newest comments cut by the budget keep the newest"
+            `Quick
+            test_post_get_newest_comments_cut_by_the_budget_keep_the_newest;
           Alcotest.test_case
             "get refuses page arguments that are not integers"
             `Quick

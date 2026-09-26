@@ -303,14 +303,21 @@ module Limits = struct
 end
 
 module Comment_page = struct
+  type start =
+    | From_offset of int
+    | Latest
+    | After_comment of Comment_id.t
+
   type request =
-    { offset : int
+    { start : start
     ; limit : int
     }
 
   type argument =
     | Comment_offset
     | Comment_limit
+    | Comment_tail
+    | After_comment_id
 
   type request_error =
     | Arguments_not_an_object
@@ -322,18 +329,30 @@ module Comment_page = struct
         { argument : argument
         ; literal : string
         }
+    | Not_a_string of
+        { argument : argument
+        ; given : string
+        }
+    | Not_a_comment_id of string
     | Negative_offset of int
     | Limit_out_of_bounds of int
+    | Tail_out_of_bounds of int
+    | Conflicting_arguments of
+        { given : argument
+        ; conflicts_with : argument
+        }
 
   let argument_name = function
     | Comment_offset -> "comment_offset"
     | Comment_limit -> "comment_limit"
+    | Comment_tail -> "comment_tail"
+    | After_comment_id -> "after_comment_id"
   ;;
 
-  let integer_argument (fields : (string * Yojson.Safe.t) list) argument ~absent =
+  let integer_argument (fields : (string * Yojson.Safe.t) list) argument =
     match List.assoc_opt (argument_name argument) fields with
-    | None -> Ok absent
-    | Some (`Int value) -> Ok value
+    | None -> Ok None
+    | Some (`Int value) -> Ok (Some value)
     | Some (`Intlit literal) -> Error (Integer_out_of_range { argument; literal })
     (* A JSON number with no fractional part is an integer, which is the rule
        the tool-call validator applies before a call reaches a handler
@@ -345,34 +364,70 @@ module Comment_page = struct
       when Float.is_finite value
            && Float.is_integer value
            && value >= Float.of_int Int.min_int
-           && value < Float.of_int Int.max_int -> Ok (int_of_float value)
+           && value < Float.of_int Int.max_int -> Ok (Some (int_of_float value))
     | Some (`Float value) when Float.is_finite value && Float.is_integer value ->
       Error (Integer_out_of_range { argument; literal = Printf.sprintf "%.0f" value })
     | Some ((`Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _) as value) ->
       Error (Not_an_integer { argument; given = Json_util.kind_name value })
   ;;
 
+  (* The id is parsed here, where the call arrives, so a read never looks up
+     an id the store could not have minted. *)
+  let comment_id_argument (fields : (string * Yojson.Safe.t) list) =
+    match List.assoc_opt (argument_name After_comment_id) fields with
+    | None -> Ok None
+    | Some (`String raw) ->
+      (match Comment_id.of_string raw with
+       | Ok comment_id -> Ok (Some comment_id)
+       | Error _ -> Error (Not_a_comment_id raw))
+    | Some ((`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) as value)
+      ->
+      Error (Not_a_string { argument = After_comment_id; given = Json_util.kind_name value })
+  ;;
+
+  let bounded_limit = function
+    | None -> Ok Limits.default_comment_page_limit
+    | Some limit when limit < 1 || limit > Limits.max_comment_page_limit ->
+      Error (Limit_out_of_bounds limit)
+    | Some limit -> Ok limit
+  ;;
+
+  let conflict given conflicts_with = Error (Conflicting_arguments { given; conflicts_with })
+
+  (* Each of comment_offset, comment_tail and after_comment_id says where the
+     page starts, so two of them in one call name two pages. The call is
+     refused rather than one of them winning: a winner the caller did not
+     pick reads a page it did not ask for. comment_tail is also the page's
+     size, so comment_limit beside it is a second size. *)
   let request_of_args (args : Yojson.Safe.t) =
     match args with
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
       Error Arguments_not_an_object
     | `Assoc fields ->
-      (match integer_argument fields Comment_offset ~absent:0 with
-       | Error error -> Error error
-       | Ok offset ->
-         (match
-            integer_argument
-              fields
-              Comment_limit
-              ~absent:Limits.default_comment_page_limit
-          with
-          | Error error -> Error error
-          | Ok limit ->
-            if offset < 0
-            then Error (Negative_offset offset)
-            else if limit < 1 || limit > Limits.max_comment_page_limit
-            then Error (Limit_out_of_bounds limit)
-            else Ok { offset; limit }))
+      let ( let* ) = Result.bind in
+      let* offset = integer_argument fields Comment_offset in
+      let* limit = integer_argument fields Comment_limit in
+      let* tail = integer_argument fields Comment_tail in
+      let* after = comment_id_argument fields in
+      (match tail, after, offset, limit with
+       | Some _, Some _, _, _ -> conflict Comment_tail After_comment_id
+       | Some _, None, Some _, _ -> conflict Comment_tail Comment_offset
+       | Some _, None, None, Some _ -> conflict Comment_tail Comment_limit
+       | Some count, None, None, None ->
+         if count < 1 || count > Limits.max_comment_page_limit
+         then Error (Tail_out_of_bounds count)
+         else Ok { start = Latest; limit = count }
+       | None, Some _, Some _, _ -> conflict After_comment_id Comment_offset
+       | None, Some comment_id, None, limit ->
+         let* limit = bounded_limit limit in
+         Ok { start = After_comment comment_id; limit }
+       | None, None, Some offset, _ when offset < 0 -> Error (Negative_offset offset)
+       | None, None, Some offset, limit ->
+         let* limit = bounded_limit limit in
+         Ok { start = From_offset offset; limit }
+       | None, None, None, limit ->
+         let* limit = bounded_limit limit in
+         Ok { start = From_offset 0; limit })
   ;;
 
   let request_error_to_string = function
@@ -384,6 +439,14 @@ module Comment_page = struct
         "%s must be an integer this server can hold (got %s)"
         (argument_name argument)
         literal
+    | Not_a_string { argument; given } ->
+      Printf.sprintf "%s must be a string (got %s)" (argument_name argument) given
+    | Not_a_comment_id raw ->
+      Printf.sprintf
+        "after_comment_id %S is not a comment id; expected %s, the id a thread \
+         page prints beside each comment"
+        raw
+        Comment_id.accepted_format
     | Negative_offset offset ->
       Printf.sprintf "comment_offset must be 0 or greater (got %d)" offset
     | Limit_out_of_bounds limit ->
@@ -391,6 +454,20 @@ module Comment_page = struct
         "comment_limit must be between 1 and %d (got %d)"
         Limits.max_comment_page_limit
         limit
+    | Tail_out_of_bounds count ->
+      Printf.sprintf
+        "comment_tail must be between 1 and %d (got %d)"
+        Limits.max_comment_page_limit
+        count
+    | Conflicting_arguments { given; conflicts_with } ->
+      Printf.sprintf
+        "%s cannot be sent with %s: %s"
+        (argument_name given)
+        (argument_name conflicts_with)
+        (match conflicts_with with
+         | Comment_limit -> "comment_tail is already the number of comments to read."
+         | Comment_offset | Comment_tail | After_comment_id ->
+           "each one says where the page starts. Send only one of them.")
   ;;
 
   type 'a page =
@@ -406,49 +483,80 @@ module Comment_page = struct
         { requested : int
         ; total : int
         }
+    | Comment_not_found of
+        { comment_id : Comment_id.t
+        ; total : int
+        }
 
   let accept_every_page (_ : 'a page) = true
 
-  let select ?(fits = accept_every_page) (request : request) items =
+  let select ?(fits = accept_every_page) ~comment_id_of (request : request) items =
     let total = List.length items in
-    let after_offset =
-      List.filteri (fun index _ -> index >= request.offset) items
-    in
-    let available = List.length after_offset in
-    let page_of taken =
-      let reached = request.offset + List.length taken in
-      { offset = request.offset
+    let page_of ~first ~count =
+      let taken = List.filteri (fun index _ -> index >= first && index < first + count) items in
+      let reached = first + List.length taken in
+      { offset = first
       ; items = taken
       ; total
       ; next_offset = (if reached < total then Some reached else None)
       }
     in
-    let prefix count = List.filteri (fun index _ -> index < count) after_offset in
-    if request.offset > 0 && request.offset >= total
-    then Offset_out_of_range { requested = request.offset; total }
-    else (
-      let most = min request.limit available in
-      (* A page never stops before its first item, so one item is always
-         taken and the search starts above it. The rest is a halving search
-         for the longest page [fits] accepts: rendering a candidate costs as
-         much as the page is large, and extending one item at a time rendered
-         it once per comment. *)
+    (* A page never stops before its first item, so one item is always taken
+       and the search starts above it. The rest is a halving search for the
+       longest page [fits] accepts: rendering a candidate costs as much as the
+       page is large, and extending one item at a time rendered it once per
+       comment. *)
+    let longest_count ~most page_of_count =
       let rec longest_fitting low high best =
         if low > high
         then best
         else (
           let midpoint = low + ((high - low) / 2) in
-          if fits (page_of (prefix midpoint))
+          if fits (page_of_count midpoint)
           then longest_fitting (midpoint + 1) high midpoint
           else longest_fitting low (midpoint - 1) best)
       in
-      let taken =
-        match most with
-        | 0 -> []
-        | 1 -> prefix 1
-        | _ -> prefix (longest_fitting 2 most 1)
+      match most with
+      | 0 -> 0
+      | 1 -> 1
+      | _ -> longest_fitting 2 most 1
+    in
+    let forward first =
+      let count =
+        longest_count
+          ~most:(min request.limit (total - first))
+          (fun count -> page_of ~first ~count)
       in
-      Page (page_of taken))
+      Page (page_of ~first ~count)
+    in
+    let is_wanted wanted item =
+      match comment_id_of item with
+      | Some id -> String.equal id (Comment_id.to_string wanted)
+      | None -> false
+    in
+    match request.start with
+    (* [total] is the end of the thread: an empty page that names the
+       thread's size. Only an offset past it names nothing. *)
+    | From_offset offset when offset > total ->
+      Offset_out_of_range { requested = offset; total }
+    | From_offset offset -> forward offset
+    (* The anchor's own position is resolved on this read, so a sweep that
+       moved it still starts the page right after it. The newest comment
+       anchors an empty end page, which is how a reader learns nothing new
+       arrived. *)
+    | After_comment wanted ->
+      (match List.find_index (is_wanted wanted) items with
+       | Some index -> forward (index + 1)
+       | None -> Comment_not_found { comment_id = wanted; total })
+    (* The page ends at the thread's end and grows backwards, so a page the
+       budget cuts keeps the newest comments and names where it starts. *)
+    | Latest ->
+      let count =
+        longest_count
+          ~most:(min request.limit total)
+          (fun count -> page_of ~first:(total - count) ~count)
+      in
+      Page (page_of ~first:(total - count) ~count)
   ;;
 
   module Position = struct
@@ -502,7 +610,14 @@ module Comment_page = struct
 
     let line position =
       match position.returned, position.next_offset with
-      | 0, _ -> "[no comments]"
+      | 0, _ ->
+        (match position.total with
+         | 0 -> "[no comments]"
+         | total ->
+           Printf.sprintf
+             "[no comments from offset %d: the thread has %d now.]"
+             position.offset
+             total)
       | returned, Some next ->
         Printf.sprintf
           "[comments %d-%d of %d. Read the rest with comment_offset=%d.]"

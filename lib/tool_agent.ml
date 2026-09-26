@@ -12,29 +12,12 @@ type context = {
    [json_ok]    : Yojson.Safe.t passes as [~data:json] first-class
                   (drops the [Yojson.Safe.to_string] round-trip).
    [text_ok]    : opaque text remains [`String body].
-   [workflow_err_envelope] : error wrapped through
-                  [Tool_args.error_response_typed ~code msg].  Both
-                  call sites (Not_found in get_metrics,
-                  Validation_error in agent_card) are caller-input
-                  rejections.
+   A failure is [Tool_args.error_result_typed], which takes the class from
+   the error code.
 *)
 
 let json_ok ~tool_name ~start_time (json : Yojson.Safe.t) : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data:json ()
-
-let workflow_err_envelope ~tool_name ~start_time ~code msg : Tool_result.result =
-  let data =
-    Tool_args.error_assoc
-      [ "error_code", `String (Tool_args.error_code_to_string code)
-      ; "message", `String msg
-      ]
-  in
-  Tool_result.make_err
-    ~tool_name
-    ~class_:Tool_result.Workflow_rejection
-    ~start_time
-    ~data
-    (Yojson.Safe.to_string data)
 
 (* RFC-0393: an agent is looked up under exactly the name the caller
    supplied. The wrapped [keeper-<name>-agent] spellings and the
@@ -85,18 +68,9 @@ let agent_card_action_of_string raw =
 let handle_get_metrics ?(tool_name = Tool_schemas_agent.tool_name Get_metrics) ?(start_time = 0.0) ctx args
   : Tool_result.result
   =
-  (* Original used [let*! target = get_string_required] which
-     wrapped "agent_name is required" as a raw message with no envelope.
-     Existing
-     test [test_get_metrics_missing_agent_name] parses
-     [result.message] as JSON expecting [status = "error"], i.e.
-     it was already broken on the raw-message path.  Promote here
-     to [workflow_err_envelope ~code:Validation_error] so the
-     envelope is present *and* the failure_class is correctly
-     [Workflow_rejection]. *)
   let target = get_string args "agent_name" "" in
   if String.equal target "" then
-    workflow_err_envelope ~tool_name ~start_time ~code:Validation_error
+    error_result_typed ~tool_name ~start_time ~code:Validation_error
       "agent_name is required"
   else
     let days = get_int args "days" 7 in
@@ -105,7 +79,7 @@ let handle_get_metrics ?(tool_name = Tool_schemas_agent.tool_name Get_metrics) ?
         json_ok ~tool_name ~start_time
           (Metrics_store_eio.agent_metrics_to_yojson metrics)
     | None ->
-        workflow_err_envelope
+        error_result_typed
           ~tool_name
           ~start_time
           ~code:Not_found
@@ -226,7 +200,7 @@ let handle_agent_card ?(tool_name = Tool_schemas_agent.tool_name Agent_card) ?(s
   let action_raw = get_string args "action" "get" in
   match agent_card_action_of_string action_raw with
   | None ->
-      workflow_err_envelope
+      error_result_typed
         ~tool_name
         ~start_time
         ~code:Validation_error

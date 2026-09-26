@@ -36,6 +36,12 @@ def check(rows: dict[int, bytes], where: str) -> None:
 
 def run(executable: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
+    # The feed has to answer before it has a count to carry: one refused while
+    # opening reads "failed to open" with no number, so the scenario serves the
+    # MCP handshake and a stream that delivers its frames and closes.
+    observer = h.observer_http_fixtures()
+    fixtures["/mcp"] = observer["/mcp"]
+    fixtures["/mcp?sse_kind=observer"] = observer["/mcp?sse_kind=observer"]
 
     def interact(process, fd, _slave, output, _base_path):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)

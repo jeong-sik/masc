@@ -39,6 +39,7 @@ describe('ide API', () => {
           summary: 'ran command',
           file_path: 'lib/a.ml',
           timestamp_ms: '1717400000000',
+          event_id: 'a'.repeat(64),
         }],
       },
     })
@@ -62,6 +63,7 @@ describe('ide API', () => {
       keeper_id: 'sangsu',
       turn_id: 'turn-1',
       timestamp_ms: 1717400000000,
+      event_id: 'a'.repeat(64),
     })])
   })
 
@@ -89,6 +91,54 @@ describe('ide API', () => {
     })
 
     await expect(fetchIdeEvents()).rejects.toThrow(
+      'fetchIdeEvents returned malformed event at index 0',
+    )
+  })
+
+  // A tool that printed nothing is written with summary "" (ide_bridge.ml
+  // keeps the output head verbatim). Rejecting that row threw away the
+  // whole page of events, so one quiet tool call blanked the timeline.
+  it('fetchIdeEvents keeps a tool row whose output was empty', async () => {
+    stubFetch({
+      ok: true,
+      data: {
+        events: [{
+          type: 'tool',
+          tool_name: 'execute',
+          keeper_id: 'sangsu',
+          turn_id: 'turn-1',
+          outcome: 'success',
+          typed_outcome: 'progress',
+          latency_ms: 5,
+          summary: '',
+          file_path: 'lib/a.ml',
+          timestamp_ms: 1717400000000,
+        }],
+      },
+    })
+
+    const events = await fetchIdeEvents({ codebase: 'github.com_jeong-sik_masc' })
+    expect(events).toEqual([expect.objectContaining({ type: 'tool', summary: null })])
+  })
+
+  it('fetchIdeEvents still rejects a tool row with no summary field', async () => {
+    stubFetch({
+      ok: true,
+      data: {
+        events: [{
+          type: 'tool',
+          tool_name: 'execute',
+          keeper_id: 'sangsu',
+          turn_id: 'turn-1',
+          outcome: 'success',
+          typed_outcome: 'progress',
+          latency_ms: 5,
+          timestamp_ms: 1717400000000,
+        }],
+      },
+    })
+
+    await expect(fetchIdeEvents({ codebase: 'github.com_jeong-sik_masc' })).rejects.toThrow(
       'fetchIdeEvents returned malformed event at index 0',
     )
   })

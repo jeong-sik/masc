@@ -132,22 +132,16 @@ type BoardPostMeta = Record<string, unknown> & {
   judgment?: unknown
 }
 
-/**
- * RFC-0000 §3.1 board attachment carrier — the wire shape of one entry in
- * `meta.attachments` (OCaml `Board_attachment_meta`). `kind` is a closed set.
- */
+/** Decoded Board attachment written through the typed post argument. */
 export type BoardAttachmentKind = 'image' | 'video' | 'youtube' | 'external_link'
 
+export type BoardAttachmentSource =
+  | { kind: 'url'; url: string; name?: string; sizeBytes?: number; width?: number | null; height?: number | null }
+  | { kind: 'artifact'; sha256: string; bytes: number; mime: string }
+
 export interface BoardAttachment {
-  id: string
   kind: BoardAttachmentKind
-  origin_url: string
-  origin_name: string
-  origin_size_bytes: number
-  mime_type: string
-  width: number | null
-  height: number | null
-  created_at: number
+  source: BoardAttachmentSource
 }
 
 /**
@@ -236,7 +230,6 @@ export interface BoardReactionSummary {
   emoji: string
   count: number
   reacted: boolean
-  has_reacted: boolean
   recent_user_ids: string[]
 }
 
@@ -428,7 +421,6 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   // for anything absent, so eleven real classes arrived and were dropped.
   // `test_blocker_class_mirror` fails if the server gains another one.
   'agent_core_input_required',
-  'capacity_backpressure',
   'gate_replay_repair_required',
   'incomplete_tool_transcript',
   'internal_bridge_exception',
@@ -1351,7 +1343,6 @@ export interface Keeper {
   active_model?: string
   active_model_label?: string | null
   last_model_used?: string
-  last_model_used_label?: string | null
   next_model_hint?: string | null
   runtime_id?: string | null
   runtime_ref?: RuntimeRef | null
@@ -1390,7 +1381,6 @@ export interface Keeper {
   updated_at?: string
   keeper_age_s?: number
   last_turn_ago_s?: number
-  last_handoff_ago_s?: number
   last_proactive_ago_s?: number
   last_proactive_reason?: string | null
   last_proactive_preview?: string | null
@@ -1438,7 +1428,6 @@ export interface Keeper {
   conversation_tail_count?: number
   k2k_count?: number
   k2k_mentions?: Array<{ keeper: string; count: number }>
-  handoff_count_total?: number
   metrics_window?: MetricsWindow
   // Metrics time-series (from backend metrics_series)
   metrics_series?: KeeperMetricPoint[]
@@ -1537,7 +1526,6 @@ interface KeeperConfigExecution {
   models: string[]
   active_model: string
   active_model_label?: string | null
-  last_model_used_label?: string | null
   verify: boolean
   selected_runtime_id: string
   selected_runtime_canonical: string
@@ -1610,7 +1598,6 @@ interface KeeperConfigRuntime {
   fiber_health: string
   runtime_blocker_class?: KeeperRuntimeBlockerClass | null
   active_model_label?: string | null
-  last_model_used_label?: string | null
   runtime_blocker_summary?: string | null
 }
 

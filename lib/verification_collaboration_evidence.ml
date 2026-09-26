@@ -165,6 +165,16 @@ let submitted_source ~submitted_evidence reference =
   | [] -> Error (Access_denied "source was not captured in this verification submission")
   | _ -> Error (Storage_failed "duplicate submitted collaboration identity")
 
+(* A submitted comment is the object [Board.comment_to_yojson] wrote, so its
+   id is the ["id"] string. *)
+let submitted_comment_id : Yojson.Safe.t -> string option = function
+  | `Assoc fields ->
+    (match List.assoc_opt "id" fields with
+     | Some (`String id) -> Some id
+     | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _)
+     | None -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+
 let read_board ~submitted_evidence ~args = protect (fun () ->
   let* post_id = required_id args "post_id" in
   let* request = Board.Comment_page.request_of_args args
@@ -176,10 +186,14 @@ let read_board ~submitted_evidence ~args = protect (fun () ->
       let* () = match Board.post_of_yojson post with
         | Some decoded when Board.Post_id.to_string decoded.id = post_id -> Ok ()
         | _ -> Error (Storage_failed "submitted Board identity does not match reference") in
-      (match Board.Comment_page.select request comments with
+      (match Board.Comment_page.select ~comment_id_of:submitted_comment_id request comments with
        | Board.Comment_page.Offset_out_of_range { requested; total } ->
          Error (Invalid_request (Printf.sprintf
            "comment_offset %d names no comment: the submitted thread has %d" requested total))
+       | Board.Comment_page.Comment_not_found { comment_id; total } ->
+         Error (Invalid_request (Printf.sprintf
+           "after_comment_id %s names no comment: the submitted thread has %d"
+           (Board.Comment_id.to_string comment_id) total))
        | Board.Comment_page.Page page ->
          page_source ~args (`Assoc ["source", `String "board"; "post", post;
            "comments", `List page.Board.Comment_page.items;

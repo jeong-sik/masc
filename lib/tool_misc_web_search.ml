@@ -285,6 +285,19 @@ let take_results limit hits =
   in
   loop limit [] hits
 
+(* A snippet is the preview a caller picks results by. Ollama sends page
+   text in the field read as the snippet. The bound sits above the longest
+   snippet an engine writes itself, so those pass whole and only page text
+   is cut. It counts bytes, marker included, so a CJK snippet is cut at
+   about a third as many characters.
+   Page text is what [includeContent] fetches, capped by [contentMaxChars]. *)
+let snippet_max_bytes = 1024
+let snippet_cut_marker = "…"
+
+let bound_snippet snippet =
+  String_util.utf8_safe ~max_bytes:snippet_max_bytes ~suffix:snippet_cut_marker snippet
+  |> String_util.to_string
+
 let normalize_hits ~source tuples =
   tuples
   |> List.filter (fun (title, url, _snippet) -> not (String.equal title "") && valid_search_result_url url)
@@ -292,7 +305,7 @@ let normalize_hits ~source tuples =
          {
            title;
            url;
-           snippet = clean_search_text snippet;
+           snippet = clean_search_text snippet |> bound_snippet;
            source;
            rank = idx + 1;
            published_at = None;
@@ -399,25 +412,8 @@ let endpoint_error ~fallback detail =
   let detail = redact_transport_error_detail detail |> String.trim in
   if String.equal detail "" then fallback else Printf.sprintf "%s (%s)" fallback detail
 
-let searxng_default_url = Masc_network_defaults.searxng_default_url
-
-let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
-
-let searxng_base_url () =
-  let url =
-    match Env_config_core.raw_value_opt "MASC_SEARXNG_URL" with
-    | Some raw ->
-        let normalized = raw |> String.trim |> strip_trailing_slashes in
-        if String.equal normalized "" then searxng_default_url else normalized
-    | None -> searxng_default_url
-  in
-  match Uri.scheme (Uri.of_string url) |> Option.map String.lowercase_ascii with
-  | Some "http" | Some "https" -> Ok url
-  | _ ->
-      Error (Printf.sprintf "MASC_SEARXNG_URL must use http or https scheme (got: %s)" url)
-
 let fetch_searxng ~timeout_sec ~query =
-  match searxng_base_url () with
+  match Env_config_runtime.Tools.searxng_base_url () with
   | Error msg -> Error (Config msg)
   | Ok base ->
       let search_url =

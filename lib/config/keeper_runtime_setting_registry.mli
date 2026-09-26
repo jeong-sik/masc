@@ -34,9 +34,17 @@ type exposure =
   | Toml_and_env of string
   | Env_only
 
+(** How {!effective_value} reads a row: [Reader] renders the owning typed
+    accessor the runtime consumer calls; [Credential_presence] reports only
+    whether the variable holds a non-blank value. *)
+type effective =
+  | Reader of (unit -> string)
+  | Credential_presence
+
 type setting =
   { env_name : string
   ; exposure : exposure
+  ; effective : effective
   ; value_kind : value_kind
   ; value_range : value_range
   ; default_display : string
@@ -57,6 +65,16 @@ val toml_env_mappings : (string * string) list
 
 val toml_key_opt : setting -> string option
 val find_by_toml_key : string -> setting option
+
+val provider_default_display : string
+(** Rendering of a setting left unset so the selected runtime keeps its
+    provider default (the thinking request). *)
+
+val effective_value : setting -> string
+(** The value the row's runtime consumer reads, rendered for operators. Never
+    echoes raw process input: a malformed or clamped value shows as its owner
+    resolves it, and a credential only as ["(set)"] or ["(none)"].
+    @raise Env_config_core.Config_error when the owner rejects the input. *)
 
 val value_kind_label : value_kind -> string
 val value_range_label : value_range -> string

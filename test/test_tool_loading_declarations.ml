@@ -185,6 +185,24 @@ let test_the_tools_that_load_deferred_tools_are_never_deferred () =
     ]
 ;;
 
+(* The two request controls beside the Skill compositions declare deferral in
+   their own files, and the composition surface reads it from there by these
+   names. If either file went missing, [loading_of_tool] would answer
+   Always_loaded and the control would ride in every request with nothing
+   reporting it. *)
+let test_the_composition_request_controls_are_deferred () =
+  List.iter
+    (fun name ->
+       check
+         loading
+         (name ^ " is held back until named")
+         Tool_definition_toml.Deferrable
+         (Tool_loading_declarations.loading_of_tool name))
+    [ Keeper_tool_composition_catalog.status_tool_name
+    ; Keeper_tool_composition_catalog.cancel_tool_name
+    ]
+;;
+
 let () =
   run
     "tool loading declarations"
@@ -202,6 +220,8 @@ let () =
             test_a_well_formed_file_reads_through_the_same_door
         ; test_case "the tools that load deferred tools are never deferred" `Quick
             test_the_tools_that_load_deferred_tools_are_never_deferred
+        ; test_case "the composition request controls are deferred" `Quick
+            test_the_composition_request_controls_are_deferred
         ] )
     ]
 ;;

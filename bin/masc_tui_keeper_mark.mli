@@ -9,21 +9,38 @@
 val glyph : paused:bool -> Masc.Tui_decode.keeper_health_reading option -> string
 (** [None] is a roster that was not read -- not a health nothing could name. *)
 
-(** What a roster row's HEALTH cell draws while its keeper has a turn open. *)
+(** How a roster row's HEALTH mark reads while its keeper has a turn open.
+    The word beside the mark is the health word in every case, the one the
+    roster header counts; how long the turn has run is {!turn_clock}'s. *)
 type open_turn =
   | Worked
-      (** A moving mark and how long the turn has run. *)
+      (** A moving mark in the working colour. *)
   | Worked_while_failing
-      (** A moving mark and the health word. The keepalive is running the
-          next attempt, and the row still reads as failing where the roster
-          header counts it. *)
+      (** A moving mark in the keeper's next-action colour. The keepalive is
+          running the next attempt, and the row still reads as failing where
+          the roster header counts it. *)
   | Left_open
-      (** A still mark and how long the turn has been open. Nothing works
-          it: the keeper behind it is offline. *)
+      (** A still mark in the failure colour. Nothing works the turn: the
+          keeper behind it is offline. *)
 
 val open_turn : Masc.Tui_decode.keeper_health_reading option -> open_turn
 (** [None] is a roster that was not read; its open turn is drawn as worked,
     the turn reading being the only one there is. *)
+
+(** Which instant a roster row's TURN cell counts from. *)
+type turn_clock =
+  | Open_turn_started of float
+      (** A turn is open now; the cell is how long it has run. *)
+  | Last_turn_recorded of float
+      (** No turn is open; the cell is the time since the last recorded turn,
+          which may have failed. *)
+  | No_turn_recorded
+
+val turn_clock :
+  turn:Masc.Tui_decode.keeper_turn_state option -> last_turn_at:float option -> turn_clock
+(** An open turn wins over the last recorded one. [turn] is [None] when the
+    turns poll has no row for the keeper; an unavailable turn reading is not
+    an open turn. *)
 
 val legend : (string * string) list
 (** Each mark and the word the wide surfaces print beside it, in the order a

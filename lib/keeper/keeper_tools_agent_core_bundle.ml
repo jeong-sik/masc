@@ -441,7 +441,7 @@ let make_tool_bundle_for_descriptors_with_policy
       descriptors
   in
   let descriptor_tools = List.map fst descriptor_tools_with_loading in
-  let composition_tools =
+  let composition_tools_with_loading =
     let instruction_skills =
       Keeper_tool_composition_surface.instruction_skills_of_catalog skill_catalog
     in
@@ -516,6 +516,7 @@ let make_tool_bundle_for_descriptors_with_policy
         ~on_externalization_error:mark_completed_terminal_externalization_failed
         ()
   in
+  let composition_tools = List.map fst composition_tools_with_loading in
   (* Identity tools are external effects by definition; they join the turn
      only behind the durable Gate. A row whose provider said "read only"
      runs as before, everything else defers to the approvals queue. The
@@ -550,10 +551,11 @@ let make_tool_bundle_for_descriptors_with_policy
 
      Two sources, one answer. An attached tool is held back by default: a
      Keeper is handed its services' entire lists, 145 tools and 142,257 bytes
-     on the Keeper the RFC measured. A built-in is held back when its own
-     [config/tools/<name>.toml] declares [defer_loading = true] -- of 89
-     built-ins on one Keeper, 33 went a whole day uncalled, 21,601 bytes
-     charged to every request of every turn.
+     on the Keeper the RFC measured. A built-in is held back when it declares
+     [defer_loading = true]: a descriptor or the Skill reader in its own
+     [config/tools/<name>.toml], a Skill composition in its composition
+     block -- of 89 built-ins on one Keeper, 33 went a whole day uncalled,
+     21,601 bytes charged to every request of every turn.
 
      The listing does not record which source a tool came from, and the model
      is not told. Holding a tool back is a property of the tool. *)
@@ -562,23 +564,22 @@ let make_tool_bundle_for_descriptors_with_policy
     | Tool_definition_toml.Always_loaded -> false
   in
   let deferred_builtin_tools, always_loaded_builtin_tools =
-    (* Both families, because both are declared the same way. Splitting only
-       the descriptors would leave a [defer_loading = true] in a composition
-       tool's file that nothing honours and nothing reports -- a declaration
-       is either read wherever it can be written or it is a trap. A
-       composition tool is declared under its own model-visible name. *)
-    let deferred_descriptors, loaded_descriptors =
+    (* Both families, each paired with its declaration where it was built:
+       a descriptor's from [config/tools/<internal name>.toml], a Skill
+       composition's from its composition block, and the Skill reader and
+       request controls beside the compositions from their own tool files.
+       Splitting only the descriptors would leave a [defer_loading = true]
+       that nothing honours and nothing reports -- a declaration is either
+       read wherever it can be written or it is a trap. *)
+    let split tools_with_loading =
       let deferred, loaded =
-        List.partition (fun (_, loading) -> deferrable loading) descriptor_tools_with_loading
+        List.partition (fun (_, loading) -> deferrable loading) tools_with_loading
       in
       List.map fst deferred, List.map fst loaded
     in
+    let deferred_descriptors, loaded_descriptors = split descriptor_tools_with_loading in
     let deferred_compositions, loaded_compositions =
-      List.partition
-        (fun (tool : Agent_core.Tool.t) ->
-           deferrable
-             (Tool_loading_declarations.loading_of_tool tool.Agent_core.Tool.schema.name))
-        composition_tools
+      split composition_tools_with_loading
     in
     deferred_descriptors @ deferred_compositions, loaded_descriptors @ loaded_compositions
   in
@@ -613,6 +614,7 @@ let make_tool_bundle_for_descriptors_with_policy
           ~restored:surface.load_receipts
           ~trace_id:meta.runtime.trace_id
           ~task_id:meta.current_task_id
+          ~keeper_turn:surface.keeper_turn_id
           ~current_task_id:(fun () ->
             match
               Keeper_owner_registry.get

@@ -1,4 +1,5 @@
-(** Unit tests for the shared exact-output flow error rendering. *)
+(** Exact-output flow error rendering as masc callers print it: the
+    AGENT_CORE renderers with masc's redacted raw-body excerpt. *)
 
 module Detail = Masc.Keeper_exact_flow_detail
 module Exact_output = Agent_core.Exact_output
@@ -8,14 +9,14 @@ let test_execution_cause_detail () =
   Alcotest.(check string)
     "refused"
     "provider refused (http_status=413 refusal=request_body_refused)"
-    (Detail.execution_cause_detail
+    (Exact_output.execution_error_cause_to_string
        (Exact_output.Provider_response_refused
           { http_status = 413; refusal = Exact_output.Request_body_refused }));
   (* The line an operator reads when a lane dies on quota. *)
   Alcotest.(check string)
     "rate limited"
     "provider refused (http_status=429 refusal=rate_limited)"
-    (Detail.execution_cause_detail
+    (Exact_output.execution_error_cause_to_string
        (Exact_output.Provider_response_refused
           { http_status = 429; refusal = Exact_output.Rate_limited }));
   (* A provider error that is not an HTTP refusal names its typed kind, so a
@@ -24,7 +25,7 @@ let test_execution_cause_detail () =
   Alcotest.(check string)
     "completion, network"
     "completion failed (network_error:dns_failure, not sent)"
-    (Detail.execution_cause_detail
+    (Exact_output.execution_error_cause_to_string
        (Exact_output.Completion_failed
           { error = Http.NetworkError { message = "resolve failed"; kind = Http.Dns_failure }
           ; dispatch = Exact_output.No_generation_dispatch
@@ -32,7 +33,7 @@ let test_execution_cause_detail () =
   Alcotest.(check string)
     "completion, empty"
     "completion failed (empty_completion:end_turn, sent)"
-    (Detail.execution_cause_detail
+    (Exact_output.execution_error_cause_to_string
        (Exact_output.Completion_failed
           { error =
               Http.ProviderFailure
@@ -45,21 +46,21 @@ let test_execution_cause_detail () =
   Alcotest.(check string)
     "ambiguous"
     "ambiguous output (candidates=2)"
-    (Detail.execution_cause_detail (Exact_output.Ambiguous_output 2))
+    (Exact_output.execution_error_cause_to_string (Exact_output.Ambiguous_output 2))
 ;;
 
 let test_bookkeeping_start_causes_keep_their_payloads () =
   Alcotest.(check string)
     "call id detail"
     "call_id_generation_failed detail=\"random source unavailable\""
-    (Detail.attempt_start_error_detail
+    (Exact_output.start_attempt_error_to_string
        (Exact_output.Call_id_generation_failed "random source unavailable"));
   let operation_id_failure =
-    Detail.measurement_start_error_detail
+    Exact_output.measurement_start_error_to_string
       (Exact_output.Measurement_operation_id_generation_failed "operation id unavailable")
   in
   let missing_clock =
-    Detail.measurement_start_error_detail
+    Exact_output.measurement_start_error_to_string
       Exact_output.Measurement_clock_required_for_timeout
   in
   Alcotest.(check string)
@@ -148,8 +149,8 @@ let test_raw_response_excerpt_cuts_on_utf8_boundary () =
 ;;
 
 (* The distinct execution causes reach the advance line through
-   [execution_cause_detail]. The execution-failed branch of
-   [advance_failure_kind] cannot be built here — [flow_attempt_snapshot] is a
+   [Exact_output.execution_error_cause_to_string]. The execution-failed
+   branch of the advance renderer cannot be built here — [flow_attempt_snapshot] is a
    private agent-core type with no constructor — so this test pins that every
    cause the branch can receive still renders apart from every other. A
    single shared label is what made them indistinguishable in the log,
@@ -197,7 +198,7 @@ let test_every_execution_cause_renders_distinctly () =
     ; Internal_non_json_output
     ]
   in
-  let rendered = List.map Detail.execution_cause_detail causes in
+  let rendered = List.map Exact_output.execution_error_cause_to_string causes in
   let unique = List.sort_uniq String.compare rendered in
   Alcotest.(check int)
     "every cause keeps its own wording"
@@ -209,13 +210,13 @@ let test_every_execution_cause_renders_distinctly () =
     "quota refusal and truncated output are not the same string"
     false
     (String.equal
-       (Detail.execution_cause_detail
+       (Exact_output.execution_error_cause_to_string
           (Completion_failed
              { error =
                  Http.ProviderFailure { kind = Http.Hard_quota { retry_after = None }; message = "" }
              ; dispatch = Generation_dispatch_started
              }))
-       (Detail.execution_cause_detail Incomplete_output))
+       (Exact_output.execution_error_cause_to_string Incomplete_output))
 ;;
 
 let require_ok label = function
@@ -284,7 +285,8 @@ let test_rejection_cause_reaches_terminal_and_intermediate_detail () =
   with
   | Error
       (Exact_output.Flow_execution_terminal
-        { cause = Exact_output.Flow_candidates_exhausted { rejection; evidence }
+        { cause =
+            (Exact_output.Flow_candidates_exhausted { rejection = _; evidence } as cause)
         ; prior_rejections = _
         }) ->
     Alcotest.(check string)
@@ -292,16 +294,19 @@ let test_rejection_cause_reaches_terminal_and_intermediate_detail () =
       "advance=missing-first->missing-last kind=candidate_rejected \
        cause=missing_target_credential(target_ref=\"missing-first\" \
        environment_variable=\"MISSING_FLOW_KEY\")"
-      (Detail.flow_evidence_detail evidence);
+      (Exact_output.flow_evidence_to_string evidence);
     Alcotest.(check string)
       "terminal rejection keeps its typed preparation cause"
-      "slot=missing-last runtime slot unavailable \
+      "candidates_exhausted: slot=missing-last runtime slot unavailable \
        cause=missing_target_credential(target_ref=\"missing-last\" \
        environment_variable=\"MISSING_FLOW_KEY\"); \
        flow=[advance=missing-first->missing-last kind=candidate_rejected \
        cause=missing_target_credential(target_ref=\"missing-first\" \
        environment_variable=\"MISSING_FLOW_KEY\")]"
-      (Detail.candidates_exhausted_detail ~rejection ~evidence)
+      (Exact_output.flow_execution_error_to_string
+         ~callback_error_to_string:Fun.id
+         ~raw_response_to_string:Detail.raw_response_excerpt
+         cause)
   | Ok _ | Error _ -> Alcotest.fail "missing credentials did not exhaust the exact flow"
 ;;
 

@@ -3,6 +3,7 @@ import { useRef, useEffect, useMemo, useState } from 'preact/hooks'
 import { useSignalValue, useStoreSubscription } from './use-signal-value'
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
+import { Transaction } from '@codemirror/state'
 import type { CodeDocumentStore } from './code-document-store'
 import type { KeeperLineOwnershipStore } from './keeper-line-ownership-store'
 import { ideEditorSelection } from './ide-editor-selection'
@@ -32,7 +33,8 @@ import { globalPresenceSnapshot } from './keeper-presence-store'
 import { ideContextFocus, type IdeContextFocus } from './ide-state'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
 import { ideReplayUntilMs } from './ide-replay-state'
-import { IdeFindPanel } from './ide-editor-find'
+import { IdeFindPanel, ideFindReveal } from './ide-editor-find'
+import { findMatchExt, setFindMatch } from './ide-editor-find-highlight'
 import {
   BlameTimeline,
   LayerOverlaySummary,
@@ -236,11 +238,14 @@ export function IdeEditor({
               contextFocus=${currentFileFocus}
               traceActive=${activeLayers.has('keeper-trace')}
               traceEvents=${replayTraceEvents}
+              findOpen=${findOpen}
             />`
       }
     </div>
   `
 }
+
+const FIND_REVEAL_USER_EVENT = 'select.find'
 
 // ── CM6 read-only editor ──────────────────────────────────────────
 // Preact ref-based mount — no vDOM conflict with CM6's DOM management.
@@ -255,6 +260,7 @@ function CodeMirrorEditor({
   contextFocus,
   traceActive = false,
   traceEvents = EMPTY_TRACE_EVENTS,
+  findOpen = false,
 }: {
   readonly documentStore: CodeDocumentStore
   readonly ownershipStore: KeeperLineOwnershipStore
@@ -265,6 +271,7 @@ function CodeMirrorEditor({
   readonly contextFocus?: IdeContextFocus | null
   readonly traceActive?: boolean
   readonly traceEvents?: ReadonlyArray<KeeperTraceEvent>
+  readonly findOpen?: boolean
 }) {
   const containerRef = useRef<HTMLElement>(null)
   const editorRef = useRef<EditorView | null>(null)
@@ -315,10 +322,14 @@ function CodeMirrorEditor({
           lang,
           lspExtension({ filePath: mountFilePath }),
           contextFocusLineExt(),
+          findMatchExt(),
           EditorView.updateListener.of((update) => {
             // Publish the human selection as 1-based line numbers for the
             // surfaces that talk about "these lines" (interject).
-            if (update.selectionSet || update.docChanged) {
+            // A find reveal moves the selection to show a match; it is not
+            // the operator choosing lines to talk about.
+            const fromFind = update.transactions.some(tr => tr.isUserEvent(FIND_REVEAL_USER_EVENT))
+            if ((update.selectionSet || update.docChanged) && !fromFind) {
               const main = update.state.selection.main
               ideEditorSelection.value = {
                 filePath: mountFilePath,
@@ -425,6 +436,47 @@ function CodeMirrorEditor({
     documentStore,
     ready,
   ])
+
+  // Find in file: select the current match and bring it into view. Focus
+  // stays in the find box so Enter keeps walking the matches.
+  const findReveal = useSignalValue(ideFindReveal)
+  // A new CodeMirror view needs the mark again, but a remount must not
+  // re-select or re-scroll to a reveal the operator has since moved away from.
+  const appliedReveal = useRef<{ seq: number; view: EditorView } | null>(null)
+  useEffect(() => {
+    const view = editorRef.current
+    if (!view || !ready) return
+    if (findReveal === null) {
+      appliedReveal.current = null
+      view.dispatch({ effects: setFindMatch.of(null) })
+      return
+    }
+    if (appliedReveal.current?.seq === findReveal.seq
+      && appliedReveal.current.view === view) return
+    if (findReveal.filePath !== documentStore.document().file_path) return
+    if (findReveal.line < 1 || findReveal.line > view.state.doc.lines) return
+    const line = view.state.doc.line(findReveal.line)
+    const from = Math.min(line.from + findReveal.column, line.to)
+    const to = Math.min(from + findReveal.length, line.to)
+    const firstReveal = appliedReveal.current?.seq !== findReveal.seq
+    appliedReveal.current = { seq: findReveal.seq, view }
+    if (firstReveal) {
+      view.dispatch({
+        selection: { anchor: from, head: to },
+        effects: [setFindMatch.of({ from, to }), EditorView.scrollIntoView(from, { y: 'center' })],
+        annotations: Transaction.userEvent.of(FIND_REVEAL_USER_EVENT),
+      })
+    } else {
+      view.dispatch({ effects: setFindMatch.of({ from, to }) })
+    }
+  }, [documentStore, findReveal, ready])
+
+  // Closing find hands focus back to the code it was searching.
+  const wasFindOpen = useRef(findOpen)
+  useEffect(() => {
+    if (wasFindOpen.current && !findOpen && ready) editorRef.current?.focus()
+    wasFindOpen.current = findOpen
+  }, [findOpen, ready])
 
   useStoreSubscription(documentStore.subscribe)
   useStoreSubscription(ownershipStore.subscribe)

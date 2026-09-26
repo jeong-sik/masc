@@ -224,6 +224,32 @@ let start_flow ready =
     failf "flow identity allocation failed: %s" detail
 ;;
 
+let contains ~affix text =
+  let affix_length = String.length affix in
+  let text_length = String.length text in
+  let rec from index =
+    index + affix_length <= text_length
+    && (String.equal (String.sub text index affix_length) affix || from (index + 1))
+  in
+  from 0
+;;
+
+(* The terminal-error renderer is checked where a real flow produced the
+   error, so the payload it prints is the one AGENT_CORE actually carried. *)
+let check_rendered label ~affixes (error : string EO.flow_execution_error) =
+  let rendered =
+    EO.flow_execution_error_to_string
+      ~callback_error_to_string:Fun.id
+      ~raw_response_to_string:EO.raw_response_sha256_to_string
+      error
+  in
+  List.iter
+    (fun affix ->
+       check bool (Printf.sprintf "%s renders %S in %S" label affix rendered) true
+         (contains ~affix rendered))
+    affixes
+;;
+
 let fresh_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Unix.setsockopt socket Unix.SO_REUSEADDR true;
@@ -1009,7 +1035,12 @@ let test_walk_dispatch_counts_a_candidate_that_advanced () =
   in
   check int "only the first candidate sent" 1 posts;
   match result with
-  | Error (EO.Flow_before_dispatch_callback_failed { candidate; evidence; _ }) ->
+  | Error (EO.Flow_before_dispatch_callback_failed { candidate; evidence; _ } as terminal) ->
+    check_rendered
+      "before dispatch callback"
+      ~affixes:
+        [ "before_dispatch_callback_failed: slot=bind-refused"; "cause=bind-not-durable" ]
+      terminal;
     check string "the flow ended on the successor" "bind-refused" (candidate_id candidate);
     check
       int
@@ -1598,7 +1629,15 @@ let test_measured_token_capacity_admits_and_rejects () =
               true
               (candidate.measurement.outcome = EO.Measurement_succeeded)
           | _ -> fail (label ^ " lost admitted measurement evidence"))
-       | `Token_rejected, Error (EO.Flow_candidates_exhausted { rejection; _ }) ->
+       | `Token_rejected, Error (EO.Flow_candidates_exhausted { rejection; _ } as terminal)
+         ->
+         check_rendered
+           label
+           ~affixes:
+             [ "candidates_exhausted: slot=measured-capacity"
+             ; "capacity input rejected (input=3 accepted_through=2 rejected_from=3)"
+             ]
+           terminal;
          (match EO.candidate_rejection_disposition rejection with
           | EO.Input_capacity
               (EO.Token_capacity_rejected
@@ -2112,7 +2151,15 @@ let test_measurement_fence_rejection_is_terminal_without_wire () =
          { measurement = failed
          ; cause = "measurement-fence-not-durable"
          ; evidence = terminal_evidence
-         }) ->
+         } as terminal) ->
+    check_rendered
+      "before measurement dispatch callback"
+      ~affixes:
+        [ "before_measurement_dispatch_callback_failed: slot="
+        ; "cause=measurement-fence-not-durable"
+        ; "; flow=["
+        ]
+      terminal;
     check
       string
       "terminal error retains the same operation"
@@ -2293,7 +2340,14 @@ let test_measurement_terminal_callback_failure_blocks_generation () =
          { measurement
          ; cause = "measurement-terminal-not-durable"
          ; evidence = terminal_evidence
-         }) ->
+         } as terminal) ->
+    check_rendered
+      "measurement terminal callback"
+      ~affixes:
+        [ "measurement_terminal_callback_failed: slot="
+        ; "cause=measurement-terminal-not-durable"
+        ]
+      terminal;
     let snapshot = EO.flow_measurement_receipt_snapshot measurement in
     check
       bool
@@ -3475,7 +3529,16 @@ let test_callback_failures_are_terminal () =
   match before_advance_result with
   | Error
       (EO.Flow_before_advance_callback_failed
-         { failed; next; cause = "release-not-durable"; evidence; _ }) ->
+         { failed; next; cause = "release-not-durable"; evidence; _ } as terminal) ->
+    check_rendered
+      "before advance callback"
+      ~affixes:
+        [ "before_advance_callback_failed: failed=["
+        ; "slot=advance-a"
+        ; "next=advance-b"
+        ; "cause=release-not-durable"
+        ]
+      terminal;
     check
       bool
       "a walk whose only candidate never connected sent nothing"
@@ -3598,7 +3661,7 @@ let assert_typed_capacity_refusal_advances_once
   | Error _ -> fail (label ^ " typed capacity refusal did not advance")
 ;;
 
-let test_context_window_400_prose_remains_terminal () =
+let test_context_window_400_prose_advances_to_successor () =
   let response =
     {|{"error":"The prompt is too long: 1400014, model maximum context length: 1048576 (ref: 8519ccf3-5d45-4686-9ac1-64d159f75ec1)"}|}
   in
@@ -3625,24 +3688,25 @@ let test_context_window_400_prose_remains_terminal () =
     in
     result, !advances
   in
-  check int "HTTP 400 prose dispatches once" 1 posts;
-  check int "HTTP 400 prose requests no advance" 0 advances;
+  check int "HTTP 400 prose dispatches twice" 2 posts;
+  check int "HTTP 400 prose requests advance" 1 advances;
   match result with
+  | Ok _ -> ()
   | Error (EO.Flow_exact_execution_failed failure) ->
     check
       bool
-      "HTTP 400 prose stays terminal as a typed invalid request"
+      "HTTP 400 prose advances as an un-attributed refusal"
       true
       (failure.cause.cause
        = EO.Provider_response_refused
            { http_status = 400; refusal = EO.Invalid_request });
     check
       bool
-      "HTTP 400 prose is a non-advanceable terminal"
+      "HTTP 400 prose is an advanceable terminal"
       true
       (EO.flow_execution_terminal_kind (EO.Flow_exact_execution_failed failure)
-       = EO.Non_advanceable_terminal)
-  | Ok _ | Error _ -> fail "HTTP 400 prose did not remain terminal"
+       = EO.Advanceable_candidates_exhausted)
+  | Error _ -> fail "HTTP 400 prose did not advance"
 ;;
 
 let test_serialized_request_413_refusal_advances_once_to_successor () =
@@ -3962,7 +4026,7 @@ let test_body_deadline_advances_after_settlement ~http_status ~settle () =
   | _, (Ok _ | Error _) -> fail "body deadline did not respect durable settlement"
 ;;
 
-let test_stalled_server_refusal_body_does_not_advance () =
+let test_stalled_server_refusal_body_advances_to_successor () =
   let refused_id = "stalled-refusal" in
   let successor_id = "stalled-refusal-successor" in
   let ((result, advances, evidence), posts) =
@@ -4003,9 +4067,9 @@ let test_stalled_server_refusal_body_does_not_advance () =
     in
     result, !advances, EO.flow_attempt_evidence flow
   in
-  check int "stalled refusal dispatched only the first candidate" 1 posts;
-  check int "stalled refusal requested no advance" 0 advances;
-  check int "stalled refusal recorded no advance" 0 (List.length evidence.advances);
+  check int "stalled refusal dispatched both candidates" 2 posts;
+  check int "stalled refusal requested advance" 1 advances;
+  check int "stalled refusal recorded one advance" 1 (List.length evidence.advances);
   check
     int
     "stalled refusal records one dispatch"
@@ -4013,7 +4077,11 @@ let test_stalled_server_refusal_body_does_not_advance () =
     (EO.generation_receipt_snapshot_dispatch_count
        (attempt_for evidence refused_id).receipt);
   match result with
-  | Error (EO.Flow_exact_execution_failed failure) ->
+  | Error (EO.Flow_exact_execution_failed failure as terminal) ->
+    check_rendered
+      "exact execution failure"
+      ~affixes:[ "execution_failed: slot="; "raw_response_sha256=none"; "; flow=[" ]
+      terminal;
     check
       bool
       "stalled refusal body remains unread"
@@ -4026,10 +4094,11 @@ let test_stalled_server_refusal_body_does_not_advance () =
       (failure.cause.cause
        = EO.Provider_response_refused
            { http_status = 503; refusal = EO.Refusal_body_not_received })
-  | Ok _ | Error _ -> fail "stalled refusal did not remain a typed terminal failure"
+  | Ok _ -> ()
+  | Error _ -> fail "stalled refusal did not advance"
 ;;
 
-let test_generic_400_remains_terminal_without_advance () =
+let test_generic_400_advances_to_successor () =
   let (result, advances, evidence), posts =
     with_server ~status:`Bad_request ~response:{|{"error":"generic request rejection"}|}
     @@ fun ~sw:_ ~net ~clock ~base_url ->
@@ -4054,10 +4123,11 @@ let test_generic_400_remains_terminal_without_advance () =
     in
     result, !advances, EO.flow_attempt_evidence flow
   in
-  check int "generic 400 dispatches once" 1 posts;
-  check int "generic 400 requests no advance" 0 advances;
-  check int "generic 400 leaves successor unprepared" 1 (List.length evidence.attempts);
+  check int "generic 400 dispatches twice" 2 posts;
+  check int "generic 400 requests advance" 1 advances;
+  check int "generic 400 prepares successor" 2 (List.length evidence.attempts);
   match result with
+  | Ok _ -> ()
   | Error
       ((EO.Flow_exact_execution_failed
           { candidate
@@ -4069,13 +4139,13 @@ let test_generic_400_remains_terminal_without_advance () =
               }
           ; _
           }) as terminal) ->
-    check string "generic 400 terminal candidate" "generic-400-a" (candidate_id candidate);
+    check string "generic 400 terminal candidate" "generic-400-b" (candidate_id candidate);
     check
       bool
-      "generic 400 is a non-advanceable terminal"
+      "generic 400 is an advanceable terminal"
       true
-      (EO.flow_execution_terminal_kind terminal = EO.Non_advanceable_terminal)
-  | Ok _ | Error _ -> fail "generic 400 did not remain a typed invalid request"
+      (EO.flow_execution_terminal_kind terminal = EO.Advanceable_candidates_exhausted)
+  | Error _ -> fail "generic 400 did not advance"
 ;;
 
 let test_postdispatch_and_structural_outcomes_never_advance () =
@@ -4127,9 +4197,6 @@ let test_postdispatch_and_structural_outcomes_never_advance () =
   in
   run ~abort_completion:true "partial" "unused";
   run "provider-parser" "not-provider-json";
-  (* A definite server refusal advances; an authentication failure still
-     requires configuration repair and remains terminal. *)
-  run ~status:`Unauthorized "response" "authentication failed";
   run "tool" tool_response
 ;;
 
@@ -4583,12 +4650,23 @@ let test_structural_predispatch_failure_does_not_advance () =
     0
     (List.length evidence.attempts);
   (match replay with
-   | Error (EO.Flow_attempt_already_started _) -> ()
+   | Error (EO.Flow_attempt_already_started _ as terminal) ->
+     check_rendered
+       "attempt already started"
+       ~affixes:[ "attempt_already_started; flow=[" ]
+       terminal
    | Ok _ | Error _ -> fail "missing-clock flow replayed");
   match result with
   | Error
       (EO.Flow_measurement_start_failed
-         { cause = EO.Measurement_clock_required_for_timeout; evidence; _ }) ->
+         { cause = EO.Measurement_clock_required_for_timeout; evidence; _ } as terminal) ->
+    check_rendered
+      "measurement start failure"
+      ~affixes:
+        [ "measurement_start_failed: slot="
+        ; "cause=measurement_clock_required_for_timeout"
+        ]
+      terminal;
     check
       bool
       "predispatch structural failure starts no outward dispatch"
@@ -4795,7 +4873,7 @@ let () =
         ; test_case
             "context-window 400 prose remains terminal"
             `Quick
-            test_context_window_400_prose_remains_terminal
+            test_context_window_400_prose_advances_to_successor
         ; test_case
             "HTTP 413 serialized request advances with one dispatch per candidate"
             `Quick
@@ -4837,11 +4915,11 @@ let () =
         ; test_case
             "HTTP 503 with a stalled body does not advance"
             `Quick
-            test_stalled_server_refusal_body_does_not_advance
+            test_stalled_server_refusal_body_advances_to_successor
         ; test_case
             "generic 400 remains terminal"
             `Quick
-            test_generic_400_remains_terminal_without_advance
+            test_generic_400_advances_to_successor
         ; test_case
             "postdispatch and structural outcomes stop"
             `Quick

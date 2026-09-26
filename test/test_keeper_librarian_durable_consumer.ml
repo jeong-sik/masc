@@ -295,6 +295,202 @@ let test_failed_commit_and_restart_retry_the_same_range () =
   check (list string) "restart reads identical range" !first !after_restart
 ;;
 
+(* #32461. A decode rejection is the one failure the write path can recover:
+   the commit below re-reads under the store lock and the quarantine branch in
+   [update_locked_with_error] moves the undecodable bytes aside, then the
+   replacement writes a fresh revision-1 snapshot. Feeding the empty current
+   in with no expected revision is what routes the pass through that branch
+   instead of skipping the write and leaving the keeper wedged. *)
+let test_undecodable_current_snapshot_routes_through_write_path_quarantine () =
+  with_workspace @@ fun config ->
+  let module Current = Masc.Keeper_memory_os_current in
+  let trace_id = "trace-undecodable-quarantine" in
+  let memory_keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
+  (* A real writer produced a readable revision-2 snapshot; the next write
+     lands on a decode rejection when the file is damaged in place. *)
+  let write_claims claims =
+    let module Memory = Masc.Keeper_memory_os_types in
+    let facts =
+      List.map
+        (fun claim ->
+           Memory.observed
+             ~claim
+             ~category:Memory.Fact
+             ~now:1.
+             ~origin:{ kind = Memory.Authored; trace_id })
+        claims
+    in
+    match
+      Current.apply_disposition
+        ~revisions:[]
+        ~keepers_dir:memory_keepers_dir
+        ~keeper_id:keeper_name
+        ~now:1.
+        ~source:{ kind = Current.Librarian; trace_id }
+        ~new_claims:facts
+        ~absorbed:[]
+        ()
+    with
+    | Ok (disposition : Current.disposition) -> disposition.snapshot
+    | Error detail -> fail detail
+  in
+  let seeded = write_claims [ "seed fact" ] in
+  check int "seed revision" 1 seeded.revision;
+  (* The first pass commits its readable snapshot before the damage is
+     planted: it leaves a durable position to advance from, and a failed
+     pass here would narrow the next one to the oldest cut point. *)
+  establish_progress config ~trace_id "before";
+  let messages = [ message "before"; message "undecodable" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  let damaged = write_claims [ "seed fact"; "damaged" ] in
+  check int "damaged revision" 2 damaged.revision;
+  (* The counterpart reader insists both stores exist even when empty; the
+     fixture workspace has neither because no counterpart row was written. *)
+  Fs_compat.mkdir_p config.Workspace.base_path;
+  Fs_compat.mkdir_p
+    (Keeper_chat_store.chat_path
+       ~base_dir:config.Workspace.base_path
+       ~keeper_name
+     |> Filename.dirname);
+  Fs_compat.mkdir_p
+    (Keeper_external_attention.attention_path
+       ~base_path:config.Workspace.base_path
+       ~keeper_name
+     |> Filename.dirname);
+  let snapshot_path =
+    Filename.concat memory_keepers_dir (keeper_name ^ ".memory-current.json")
+  in
+  (match Fs_compat.save_file_atomic snapshot_path "{" with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  (* Positive control: the real store calls this undecodable. *)
+  (match
+     Current.read_for_keepers_dir ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "damaged snapshot unexpectedly decoded");
+  let commits = ref 0 in
+  let commit ~expected_revision:_ ~range_id ~official_range_id input =
+    incr commits;
+    match
+      Current.apply_disposition
+        ~revisions:[]
+        ?durable_range_id:range_id
+        ?official_range_id
+        ~absorbed:[]
+        ~keepers_dir:memory_keepers_dir
+        ~keeper_id:keeper_name
+        ~now:(Float.of_int !commits)
+        ~source:
+          { kind = Current.Librarian
+          ; trace_id = Ids.Turn_ref.trace_id input.Masc.Keeper_librarian.turn_ref
+          }
+        ~new_claims:[]
+        ()
+    with
+    | Ok _ -> true
+    | Error detail -> fail detail
+  in
+  (match consume config commit with
+   | Consumer.Progress_advanced progress ->
+     check int "unread range advances" 2 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Memory_not_committed -> fail "undecodable snapshot blocked the pass");
+  check int "memory commit ran once" 1 !commits;
+  let recovered =
+    match
+      Current.read_for_keepers_dir ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name
+    with
+    | Ok (Some snapshot) -> snapshot
+    | Ok None -> fail "quarantine left no replacement snapshot"
+    | Error detail -> fail detail
+  in
+  check int "quarantine writes a fresh revision-1 snapshot" 1 recovered.revision;
+  let snapshot_basename = keeper_name ^ ".memory-current.json" in
+  check bool "the rejected bytes moved aside" true
+    (List.exists
+       (fun name ->
+          let prefix =
+            String.sub
+              name
+              0
+              (min (String.length name) (String.length snapshot_basename))
+          in
+          Fs_compat.file_exists (Filename.concat memory_keepers_dir name)
+          && String.equal prefix snapshot_basename
+          && not (String.equal name snapshot_basename))
+       (Array.to_list (Sys.readdir memory_keepers_dir)))
+;;
+
+(* An I/O failure is the other classification: the store the writer would
+   replace cannot even be read, so replacing it would destroy state blindly.
+   The pass must stop before any Memory commit and before its position moves,
+   and the offending path must survive for an operator. *)
+let test_unreadable_current_snapshot_stops_the_pass_before_commit () =
+  with_workspace @@ fun config ->
+  let module Current = Masc.Keeper_memory_os_current in
+  let trace_id = "trace-io-unreadable-stop" in
+  let memory_keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
+  establish_progress config ~trace_id "before";
+  let messages = [ message "before"; message "unreadable" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  save_checkpoint config ~trace_id messages 2;
+  Fs_compat.mkdir_p config.Workspace.base_path;
+  Fs_compat.mkdir_p
+    (Keeper_chat_store.chat_path
+       ~base_dir:config.Workspace.base_path
+       ~keeper_name
+     |> Filename.dirname);
+  Fs_compat.mkdir_p
+    (Keeper_external_attention.attention_path
+       ~base_path:config.Workspace.base_path
+       ~keeper_name
+     |> Filename.dirname);
+  let snapshot_path =
+    Filename.concat memory_keepers_dir (keeper_name ^ ".memory-current.json")
+  in
+  (* The snapshot path is a directory: every read of it fails with a
+     filesystem error, which is what a locked or unpluggable store looks
+     like from inside this process. *)
+  Fs_compat.mkdir_p snapshot_path;
+  (* Positive control: the classified read names this an I/O failure, not a
+     decode rejection. *)
+  (match
+     Current.read_classified ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name
+   with
+   | Current.Io_unreadable _ -> ()
+   | Current.No_snapshot | Current.Readable _ | Current.Undecodable _ ->
+     fail "a directory in place of the snapshot was not classified as unreadable");
+  let commits = ref 0 in
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+         incr commits;
+         true)
+   with
+   | Error (Consumer.Memory_snapshot_unreadable _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "an unreadable snapshot did not stop the pass");
+  check int "no Memory commit ran" 0 !commits;
+  (match read_progress config with
+   | Some progress ->
+     check int "the position stays before the unreadable snapshot" 1
+       progress.position.end_atom
+   | None -> fail "the stopped pass removed progress");
+  check bool "the offending path is untouched" true (Sys.is_directory snapshot_path)
+;;
+
 let test_committed_range_recovers_after_progress_write_failure () =
   with_workspace @@ fun config ->
   let module Current = Masc.Keeper_memory_os_current in
@@ -2236,6 +2432,62 @@ let test_an_official_only_keeper_is_read_from_its_fragments () =
   | Consumer.Memory_not_committed -> fail "read turns were read again"
 ;;
 
+(* An official-client turn that failed after its tools ran: its input is a
+   fragment from the start of the turn, it kept no assistant text, and the
+   error path writes its tool observations and its end line. The Librarian
+   reads that turn like any other, and the turn after it too. *)
+let test_a_failed_official_turn_is_read () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-official-failed" in
+  write_meta config trace_id;
+  let failed_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1 in
+  History.persist_message ~keeper_name ~turn_ref:failed_ref ~source:"direct_user"
+    (session config trace_id) (message "q-failed");
+  let detail tool_name : Masc.Keeper_agent_result.tool_call_detail =
+    { tool_name
+    ; provider = "fixture"
+    ; execution_outcome = Tool_result.Ok
+    ; typed_outcome = None
+    ; latency_ms = 0.
+    ; task_id = None
+    ; route_evidence = None
+    ; input_fingerprint = None
+    ; output_fingerprint = None
+    }
+  in
+  Masc.Keeper_agent_run_finalize_response.record_errored_official_turn_boundary
+    ~config
+    ~meta:(meta trace_id)
+    ~turn_ref:failed_ref
+    ~session:(session config trace_id)
+    ~tool_observations:[ detail "fixture_effect" ]
+    ~history_at_start:Boundaries.Continued_history
+    ~restart_notice_pending:(Atomic.make false);
+  write_official_turn config ~trace_id ~turn:2 ~user:"q2" ~assistant:"a2" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:(Time_compat.now ());
+  let carried = ref [] in
+  let tools = ref [] in
+  (match
+     consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
+       carried := text_markers input;
+       tools :=
+         List.map
+           (fun (o : Masc.Keeper_librarian.tool_observation) -> o.tool_name)
+           input.tool_observations;
+       true)
+   with
+   | Consumer.Official_advanced { official; _ } ->
+     check int "the position passes both end lines" 2 official.boundary_line
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Progress_advanced _
+   | Consumer.Memory_not_committed -> fail "the failed turn left nothing to read");
+  check (list string) "the failed turn's input, then the next turn" [ "q-failed"; "q2"; "a2" ]
+    !carried;
+  check (list string) "the tool the failed turn called" [ "fixture_effect" ] !tools
+;;
+
 (* RFC §10-3's counterexample: T1 Agent-Core, T2 official-client, T3
    Agent-Core. One pass hands the Librarian T2 then T3, by the order of
    their end lines, and moves both positions. *)
@@ -2722,6 +2974,10 @@ let () =
             test_unread_turns_counts_what_a_pass_has_left
         ; test_case "failed commit and restart retry exact range" `Quick
             test_failed_commit_and_restart_retry_the_same_range
+        ; test_case "undecodable current routes through write-path quarantine" `Quick
+            test_undecodable_current_snapshot_routes_through_write_path_quarantine
+        ; test_case "unreadable current stops the pass before commit" `Quick
+            test_unreadable_current_snapshot_stops_the_pass_before_commit
         ; test_case "committed range repairs failed progress after restart" `Quick
             test_committed_range_recovers_after_progress_write_failure
         ; test_case "committed wide range repairs before retry narrowing" `Quick
@@ -2798,6 +3054,8 @@ let () =
             (test_official_turns_skip_unchanged_atom_checkpoint ~with_atoms:false)
         ; test_case "an official-only keeper is read from its fragments" `Quick
             test_an_official_only_keeper_is_read_from_its_fragments
+        ; test_case "a failed official turn is read" `Quick
+            test_a_failed_official_turn_is_read
         ; test_case "a mixed keeper is read in line order" `Quick
             test_a_mixed_keeper_is_read_in_line_order
         ; test_case "official receipt recovers failed cursor write" `Quick

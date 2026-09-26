@@ -11,8 +11,8 @@ type request =
 type t = {
   min_interval_ns : int64;
   mutable pending : request option;
-  mutable preempt_deadline : bool;
   mutable last_rendered_at_ns : int64 option;
+  mutable last_was_input : bool;
 }
 
 let create ~min_interval_ns () =
@@ -20,23 +20,15 @@ let create ~min_interval_ns () =
     invalid_arg "render interval must be non-negative";
   { min_interval_ns;
     pending = Some Force;
-    preempt_deadline = true;
     last_rendered_at_ns = None;
+    last_was_input = false;
   }
 
 let request schedule request =
   match request, schedule.pending with
-  | Force, _ ->
-      schedule.pending <- Some Force;
-      schedule.preempt_deadline <- true
-  | Input, Some Background ->
-      (* User input supersedes a scheduled background paint, matching pi's
-         immediate-render path without turning a byte burst into one write per
-         byte. Subsequent input inside the same frame window still coalesces. *)
-      schedule.pending <- Some Input;
-      schedule.preempt_deadline <- true
+  | Force, _ -> schedule.pending <- Some Force
   | Input, Some Force -> ()
-  | Input, Some Input | Input, None -> schedule.pending <- Some Input
+  | Input, Some (Input | Background) | Input, None -> schedule.pending <- Some Input
   | Background, None -> schedule.pending <- Some Background
   | Background, Some (Input | Background | Force) -> ()
 
@@ -45,39 +37,48 @@ let deadline schedule =
     (fun rendered_at -> Int64.add rendered_at schedule.min_interval_ns)
     schedule.last_rendered_at_ns
 
-let take schedule ~now_ns =
+let take ~input_pending schedule ~now_ns =
+  let render () =
+    schedule.last_was_input <- schedule.pending = Some Input;
+    schedule.pending <- None;
+    schedule.last_rendered_at_ns <- Some now_ns;
+    Render
+  in
   match schedule.pending with
   | None -> Idle
-  | Some _ ->
+  | Some Force -> render ()
+  | Some Input when not input_pending && not schedule.last_was_input -> render ()
+  | Some (Input | Background) ->
+    (* Drain the bytes from one terminal read before painting their result.
+       The first input frame preempts a recent background frame. Subsequent
+       input frames keep the interval even when each event arrives alone. *)
     match deadline schedule with
-    | Some due
-      when (not schedule.preempt_deadline) && Int64.compare now_ns due < 0 ->
+    | Some due when Int64.compare now_ns due < 0 ->
         Wait_until due
-    | None | Some _ ->
-        schedule.pending <- None;
-        schedule.preempt_deadline <- false;
-        schedule.last_rendered_at_ns <- Some now_ns;
-        Render
+    | None | Some _ -> render ()
 
 let input_timeout_seconds schedule ~now_ns ~maximum =
   let maximum = max 0.0 maximum in
   match schedule.pending with
   | None -> maximum
-  | Some _ when schedule.preempt_deadline -> 0.0
-  | Some _ ->
-    match deadline schedule with
-    | None -> 0.0
-    | Some due ->
-        let remaining_ns = Int64.sub due now_ns in
-        if Int64.compare remaining_ns 0L <= 0 then 0.0
-        else
-          min maximum (Int64.to_float remaining_ns /. 1_000_000_000.0)
+  | Some Force -> 0.0
+  | Some Input when not schedule.last_was_input -> 0.0
+  | Some (Input | Background) ->
+    (match deadline schedule with
+     | None -> 0.0
+     | Some due ->
+       let remaining_ns = Int64.sub due now_ns in
+       if Int64.compare remaining_ns 0L <= 0 then 0.0
+       else min maximum (Int64.to_float remaining_ns /. 1_000_000_000.0))
 
+(* The shared clamp, not a second copy of it. This was written out here --
+   the floor on both inputs, the maximum, the clamp -- and read the same as
+   [Masc_tui_scroll.normalize] four lines above its own definition. A scroll
+   rule kept in two places is a rule that can differ in one of them, and the
+   count of views that clamp their own scroll is what an enumeration of the
+   ones without a window reading has to walk (#38623). *)
 let normalize_keeper_detail_scroll ~line_count ~content_height scroll =
-  let line_count = max 0 line_count in
-  let content_height = max 0 content_height in
-  let maximum_scroll = max 0 (line_count - content_height) in
-  max 0 (min scroll maximum_scroll)
+  Masc_tui_scroll.normalize ~count:line_count ~height:content_height scroll
 
 (* A repeated action writes the same line again and again — six manual
    refreshes spent six of the eleven event rows saying one thing. Consecutive
@@ -158,37 +159,40 @@ let overview_goal_chrome_rows = 1
 (* The Providers section's title row and the divider under it. *)
 let overview_providers_chrome_rows = 2
 
-let allocate_overview ~terminal_rows ~attention_count ~goal_count
-    ~team_count ~providers_count ~task_count ~has_task_error =
-  (* Ten rows are invariant chrome. What is left is shared by the Attention
-     panel and the task block, and whatever neither needs becomes
-     filler so the frame reaches the bottom of the terminal.
+(* A block's first row: the Attention panel's first item or its empty note,
+   the GOALS headline, the first stuck Keeper. Without it the block does not
+   say what it is for; the rest of what it counts its title already says. *)
+let overview_leading_rows = 1
 
-     The blocks are bounded by how many items they have, not by a constant.
-     They used to stop at six and five rows whatever the terminal offered, so a
-     44-row window drew 22 rows of frame and left its own footer sitting in the
-     middle of the screen with the backlog cut off above it. *)
+(* The Tasks block's first held task and the backlog line beside it: the
+   task says what is held, the backlog line says how much waits and for how
+   long. *)
+let overview_task_floor_rows = 2
+
+(* A block drawn with its chrome costs its rows and the chrome; a block of no
+   rows costs nothing. *)
+let with_chrome ~chrome rows = if rows > 0 then rows + chrome else 0
+
+(* The rows of a block the allocator gave [given] to, chrome taken off. A
+   block that cannot fit one row under its chrome is not drawn, and its rows
+   stay blank: handing them to the blocks below would take them back the
+   moment the block fits, and those blocks would shrink as the terminal grew
+   (#38911). *)
+let drawn_under_chrome ~chrome given = if given > chrome then given - chrome else 0
+
+let allocate_overview ~terminal_rows ~attention_count ~goal_count
+    ~team_count ~team_stuck ~providers_count ~task_count ~has_task_error =
+  (* Ten rows are invariant chrome. What is left is shared by the blocks in
+     the order they are served -- the Attention panel, GOALS, Providers,
+     Team, Tasks -- and whatever none of them needs becomes filler so the
+     frame reaches the bottom of the terminal. The blocks are bounded by how
+     many items they have, not by a constant. *)
   let available = max 0 (terminal_rows - overview_fixed_rows) in
   let desired_panel_rows = max 1 attention_count in
   let desired_task_error_rows = if has_task_error then 1 else 0 in
   let desired_task_rows =
     if task_count <= 0 then if has_task_error then 0 else 1 else task_count
   in
-  let desired_task_block_rows =
-    desired_task_error_rows + desired_task_rows
-  in
-  (* The task block is held back before the panel is measured: what it wants,
-     but never more than half the viewport. The panel then takes what is left.
-
-     The panel used to stop at six rows whatever the terminal offered, which
-     wasted a tall window; removing that cap let it grow without bound, and on
-     a short viewport it starved the backlog -- eight panel rows pushed the
-     fifth task off a 23-row screen. Reserving by what the tasks want rather than by
-     a fixed fraction keeps all three cases: a tall terminal gives both blocks
-     everything they ask for and turns the rest into filler, a 23-row one still
-     shows five tasks however many attention items arrive, and a viewport with three
-     spare rows still spends two of them on attention, which is the alert
-     surface and wins when almost nothing fits. *)
   (* The panel keeps its six-row ceiling. #29696 removed it so a tall window
      would not waste rows, but the rows it wasted were the frame's, not the
      panel's -- the filler below fixes that -- and letting the panel grow
@@ -196,84 +200,89 @@ let allocate_overview ~terminal_rows ~attention_count ~goal_count
      the Overview scenarios pin. Growth here bought nothing the filler does not
      already give and broke what the cap was holding. *)
   let desired_panel_rows = min overview_panel_row_cap desired_panel_rows in
-  let reserved_task_rows = min desired_task_block_rows 1 in
-  let attention_rows =
-    min desired_panel_rows (max 0 (available - reserved_task_rows))
+  (* Every block is first paid the rows it cannot give up, and only then do
+     the blocks grow, in the same order, so a block above can never take the
+     rows a block below needs to say what it is for.
+
+     The panel is the alert surface and is served first. GOALS answers
+     whether the fleet's work moves any goal and keeps its headline; its
+     rows are cut from the bottom, so the headline is the last to go.
+     Providers is served before Team, in the order it is drawn: a shut
+     provider account is the reason a Keeper in Team is stuck, and exhausted
+     accounts sort first inside the section, so the rows it keeps are the
+     ones that explain Team. Team is drawn whole or not at all -- a title and
+     a divider with no row between them would be chrome that says nothing --
+     and keeps its first stuck Keeper, which is the row that says someone
+     needs the operator; its title counts the rest. *)
+  let module Layout = Masc_tui_layout in
+  let attention =
+    { Layout.floor = min desired_panel_rows overview_leading_rows
+    ; want = desired_panel_rows
+    }
   in
-  (* The Team block answers who is doing what, which the backlog below it
-     cannot: it is sized by its keeper rows, after the one task row held back
-     above, and it is drawn whole or not at all -- a title and a divider with
-     no row between them would be chrome that says nothing. *)
-  (* GOALS answers whether the fleet's work moves any goal. It is drawn above
-     the alert panel, but the panel is the alert surface and is served first;
-     GOALS is served next, ahead of the Team and task blocks and after the one
-     task row held back above. Its rows are cut from the bottom, so the
-     headline is the last to go. *)
-  let goal_rows =
-    if goal_count <= 0 then 0
-    else
-      let room =
-        available - attention_rows - reserved_task_rows
-        - overview_goal_chrome_rows
+  let goals =
+    { Layout.floor =
+        with_chrome ~chrome:overview_goal_chrome_rows
+          (min goal_count overview_leading_rows)
+    ; want = with_chrome ~chrome:overview_goal_chrome_rows goal_count
+    }
+  in
+  let providers =
+    { Layout.floor = 0
+    ; want = with_chrome ~chrome:overview_providers_chrome_rows providers_count
+    }
+  in
+  let team =
+    { Layout.floor =
+        (if team_stuck then
+           with_chrome ~chrome:overview_team_chrome_rows
+             (min team_count overview_leading_rows)
+         else 0)
+    ; want = with_chrome ~chrome:overview_team_chrome_rows team_count
+    }
+  in
+  let tasks =
+    { Layout.floor =
+        desired_task_error_rows
+        + min desired_task_rows overview_task_floor_rows
+    ; want = desired_task_error_rows + desired_task_rows
+    }
+  in
+  match
+    Layout.allocate ~budget:available
+      [ attention; goals; providers; team; tasks ]
+  with
+  | { Layout.rows =
+        [ attention_rows; goal_given; providers_given; team_given; task_block_rows ]
+    ; filler
+    } ->
+      let goal_rows =
+        drawn_under_chrome ~chrome:overview_goal_chrome_rows goal_given
       in
-      if room <= 0 then 0 else min goal_count room
-  in
-  let goal_block_rows =
-    if goal_rows > 0 then goal_rows + overview_goal_chrome_rows else 0
-  in
-  (* The Providers section is served after GOALS and before Team, in the
-     order it is drawn. A shut provider account is the reason a Keeper in
-     Team is stuck; served after Team, a crowded viewport drew the stuck
-     Keeper and cut the reason. Exhausted accounts sort first inside the
-     section, so the rows it keeps are the ones that explain Team. *)
-  let providers_rows =
-    if providers_count <= 0 then 0
-    else
-      let room =
-        available - attention_rows - reserved_task_rows - goal_block_rows
-        - overview_providers_chrome_rows
+      let providers_rows =
+        drawn_under_chrome ~chrome:overview_providers_chrome_rows providers_given
       in
-      if room <= 0 then 0 else min providers_count room
-  in
-  let providers_block_rows =
-    if providers_rows > 0 then providers_rows + overview_providers_chrome_rows
-    else 0
-  in
-  let team_rows =
-    if team_count <= 0 then 0
-    else
-      let room =
-        available - attention_rows - goal_block_rows - providers_block_rows
-        - reserved_task_rows - overview_team_chrome_rows
+      let team_rows =
+        drawn_under_chrome ~chrome:overview_team_chrome_rows team_given
       in
-      if room <= 0 then 0 else min team_count room
-  in
-  let team_block_rows =
-    if team_rows > 0 then team_rows + overview_team_chrome_rows else 0
-  in
-  let task_block_rows =
-    min desired_task_block_rows
-      (max 0
-         (available - attention_rows - goal_block_rows - team_block_rows
-        - providers_block_rows))
-  in
-  let task_error_rows = min desired_task_error_rows task_block_rows in
-  let task_rows =
-    min desired_task_rows (max 0 (task_block_rows - task_error_rows))
-  in
-  let filler_rows =
-    max 0
-      (available - attention_rows - goal_block_rows - team_block_rows
-     - providers_block_rows - task_error_rows - task_rows)
-  in
-  { attention_rows
-  ; goal_rows
-  ; team_rows
-  ; providers_rows
-  ; task_error_rows
-  ; task_rows
-  ; filler_rows
-  }
+      let undrawn =
+        goal_given
+        - with_chrome ~chrome:overview_goal_chrome_rows goal_rows
+        + providers_given
+        - with_chrome ~chrome:overview_providers_chrome_rows providers_rows
+        + team_given
+        - with_chrome ~chrome:overview_team_chrome_rows team_rows
+      in
+      let task_error_rows = min desired_task_error_rows task_block_rows in
+      { attention_rows
+      ; goal_rows
+      ; team_rows
+      ; providers_rows
+      ; task_error_rows
+      ; task_rows = task_block_rows - task_error_rows
+      ; filler_rows = filler + undrawn
+      }
+  | _ -> invalid_arg "allocate_overview: one count per block"
 
 (* Detail lines under the Team block (a repository's pull requests) are worth
    drawing but not worth a backlog row: they take only rows that would
@@ -1039,6 +1048,50 @@ let fusion_row ~state_style columns values =
 let fusion_sidebar_label ~status ~time ~keeper ~run_id =
   Printf.sprintf "[%s] %s @%s %s" status time keeper run_id
 
+(* Task Review and Verdicts drew a row's task id and nothing else, and both
+   lists hold a task once per submission. Measured on the live history
+   2026-09-24: 200 Task Review rows carry 113 distinct ids, 45 of them more
+   than once, and seven rows are task-1663 -- one submitter, no stated
+   intent. The Verdicts list is shorter and collides too: of eight rows one
+   task carries two verdicts, at the same gate, parted only by what each one
+   said.
+
+   [apart] is what parts this row from its siblings. It has to hold still
+   while the reader looks at it, which an age does not: [age_text] spells
+   seconds under an hour, so an index row read "5m03s" and was a different
+   row a second later. And it has to be its own value rather than a reading
+   of one, because two rows minutes apart round to the same age.
+
+   A row with nothing to part it keeps the id alone rather than inventing a
+   mark for it. *)
+let task_history_sidebar_label ~task_id ~apart =
+  match apart with None -> task_id | Some apart -> task_id ^ "  " ^ apart
+
+let verdict_sidebar_labels rows =
+  List.mapi
+    (fun index (task_id, clock) ->
+      let same (other_id, other_clock) =
+        String.equal task_id other_id && String.equal clock other_clock
+      in
+      let siblings = List.length (List.filter same rows) in
+      let apart =
+        if siblings = 1 then clock
+        else
+          let earlier =
+            List.filteri (fun other_index row -> other_index < index && same row) rows
+            |> List.length
+          in
+          (* A second-resolution clock can name several verdicts. Keep the
+             date and minute, then number those rows within this snapshot. *)
+          let minute =
+            if String.length clock > 3 then String.sub clock 0 (String.length clock - 3)
+            else clock
+          in
+          Printf.sprintf "%s#%d" minute (earlier + 1)
+      in
+      task_history_sidebar_label ~task_id ~apart:(Some apart))
+    rows
+
 let fusion_pipeline_diagram
     ?(glyph_done = "●")
     ?(glyph_active = "◐")
@@ -1344,7 +1397,26 @@ let board_cells ?(styles = board_no_styles) ~age_header ~title_width values =
    to this cell. *)
 let board_age_text ~now = function
   | Some at -> Masc_tui_message_layout.span_text (now -. at)
-  | None -> "\xe2\x80\x94"
+  | None -> Masc_tui_theme.Glyph.no_value
+
+(* A list pane's row label: what the row is about, then the reading that
+   parts it from its neighbours. The pane folds a label from the middle and
+   keeps its tail, so the parting reading goes last -- in front it folds away
+   whenever the neighbours share an opening, which is the ordinary case for a
+   column of rows that are alike enough to need parting at all.
+
+   The full-width list rows put the same reading first, where nothing folds.
+   These two orders are not a disagreement: one draws in the room it has, the
+   other in the room a fold leaves.
+
+   [apart] is an option because a row may have nothing to be parted by -- a
+   verdict whose clock the codec could not read, an asker the wire did not
+   name -- and that row keeps its subject alone rather than trailing a
+   separator with nothing after it. An empty string would say the same thing
+   in a second vocabulary, and would leave every caller deciding which of the
+   two absences it holds. *)
+let sidebar_row_label ~about ~apart =
+  match apart with None -> about | Some apart -> about ^ "  " ^ apart
 
 let board_title_width ~inner_width =
   (* The header word does not move the column: [board_age_width] is fixed and
@@ -1488,6 +1560,14 @@ let schedule_hold_tag ~due = "held since " ^ due
 let schedule_hold_reading ~due =
   schedule_hold_tag ~due ^ ": the keeper has not taken the previous wake yet"
 
+(* #34642: a schedule held on its target's shutdown fence. *)
+let schedule_fence_hold_reading ~due ~target ~fence_owner =
+  Printf.sprintf
+    "%s: %s is shutting down (%s) and takes no wakes until that finishes"
+    (schedule_hold_tag ~due)
+    target
+    fence_owner
+
 (* The same hold when the runner has not read its list again since (#38411).
    A tick that fails keeps the list without looking, so the hold is drawn at
    the time it was [checked], not as the present. The due column beside the
@@ -1497,3 +1577,12 @@ let schedule_hold_as_of_tag ~checked = "held as of " ^ checked
 let schedule_hold_as_of_reading ~checked =
   schedule_hold_as_of_tag ~checked
   ^ ": the keeper had not taken the previous wake by then"
+
+(* The fence hold drawn the same way, at the time it was [checked]: a failed
+   tick does not re-read why it held either (#38411, #34642). *)
+let schedule_fence_hold_as_of_reading ~checked ~target ~fence_owner =
+  Printf.sprintf
+    "%s: %s was shutting down (%s) and took no wakes until that finished"
+    (schedule_hold_as_of_tag ~checked)
+    target
+    fence_owner

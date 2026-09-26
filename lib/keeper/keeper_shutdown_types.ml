@@ -110,6 +110,7 @@ type failure_stage =
   | Task_settlement
   | Pending_confirm_cleanup
   | Approval_summary_retirement
+  | Meta_read
   | Meta_update
   | Meta_remove
   | Session_remove
@@ -119,6 +120,15 @@ type failure =
   { stage : failure_stage
   ; detail : string
   }
+
+type blocked_replay =
+  | Replay_unsettled_tasks
+  | Replay_settled_tasks
+
+type boot_replay_abandonment =
+  | Newer_operation of Operation_id.t
+  | Keeper_trace_changed
+  | Keeper_claimed_new_tasks of Keeper_id.Task_id.t list
 
 type lane_outcome =
   | Lane_completed
@@ -181,6 +191,10 @@ type supersession =
       { actor : string
       ; unreconciled_turn : active_turn
       }
+  | Boot_replay_abandoned of
+      { blocked : failure
+      ; abandonment : boot_replay_abandonment
+      }
 
 type phase =
   | Prepared
@@ -235,19 +249,31 @@ type invariant_error =
 let schema_version = 8
 
 (* A [Blocked] shutdown holds the admission fence only while the failure left
-   durable truth half-torn-down. A failure that happened before the shutdown
-   mutated anything durable is retryable: the Keeper may boot again, and the
-   operation is replayed or superseded. [Task_discovery] and [Record_persist]
-   are read/persist steps with no Keeper state behind them; [Meta_update] and
-   [Pending_confirm_cleanup] are idempotent -- a failed metadata read wrote
-   nothing, and a failed pending-confirm sweep is re-run on the next attempt.
-   Every stage from [Task_settlement] onward mutates durable state (task
-   ownership, lanes, metadata, session, registry) and keeps the fence. *)
-let failure_stage_requires_admission_fence = function
+   durable truth half-torn-down. The stages below failed before cleanup
+   touched metadata, session or registry, so boot recovery replays them from
+   a phase whose remaining steps are safe to run again
+   ([Keeper_shutdown_runtime.recover_operation]). Between boots they do not
+   hold the fence, so a replay that fails again still lets the Keeper boot.
+
+   [Replay_unsettled_tasks]: the failure came before or without task
+   settlement. [Task_discovery] and [Record_persist] have no producer that
+   settles anything, and [Meta_read] is the metadata read that opens
+   settlement. Replay re-derives which owned tasks already carry this
+   operation's release receipt and settles the rest.
+
+   [Replay_settled_tasks]: [Meta_update] and [Pending_confirm_cleanup] are
+   produced only by cleanup preparation, which runs after settlement returned
+   every owned task. Replay resumes with all owned tasks settled, so no task
+   is released twice.
+
+   Every other stage mutated task ownership, lanes, metadata, session or
+   registry, keeps the fence, and is not replayed. *)
+let failure_stage_boot_replay = function
   | Task_discovery
   | Record_persist
+  | Meta_read -> Some Replay_unsettled_tasks
   | Meta_update
-  | Pending_confirm_cleanup -> false
+  | Pending_confirm_cleanup -> Some Replay_settled_tasks
   | Turn_cancel
   | Lane_cancel
   | Turn_join
@@ -258,7 +284,37 @@ let failure_stage_requires_admission_fence = function
   | Approval_summary_retirement
   | Meta_remove
   | Session_remove
-  | Registry_unregister -> true
+  | Registry_unregister -> None
+;;
+
+let failure_stage_requires_admission_fence stage =
+  match failure_stage_boot_replay stage with
+  | None -> true
+  | Some (Replay_unsettled_tasks | Replay_settled_tasks) -> false
+;;
+
+let boot_replay operation =
+  match operation.phase with
+  | Blocked { stage; _ } -> failure_stage_boot_replay stage
+  | Prepared
+  | Joining_lanes
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Finalized _
+  | Owner_absent _
+  | Operator_absence_acknowledged _
+  | Superseded _ -> None
+;;
+
+let boot_replay_abandonment_to_string = function
+  | Newer_operation operation_id ->
+    "newer_operation:" ^ Operation_id.to_string operation_id
+  | Keeper_trace_changed -> "keeper_trace_changed"
+  | Keeper_claimed_new_tasks task_ids ->
+    "keeper_claimed_new_tasks:"
+    ^ String.concat "," (List.map Keeper_id.Task_id.to_string task_ids)
 ;;
 
 let requires_admission_fence operation =
@@ -456,6 +512,10 @@ let rec validate operation =
          | Operator_stop_remove_meta
          | Supervisor_cleanup ) as cleanup_reason ->
          Error (Superseded_cleanup_reason_mismatch cleanup_reason))
+    | Superseded (Boot_replay_abandoned _) ->
+      (* Boot recovery abandons a replay for any intent it would have
+         replayed, so every cleanup reason is valid here. *)
+      Ok ()
     | Prepared
     | Joining_lanes
     | Joined_idle
@@ -661,6 +721,7 @@ let failure_stage_to_string = function
   | Task_settlement -> "task_settlement"
   | Pending_confirm_cleanup -> "pending_confirm_cleanup"
   | Approval_summary_retirement -> "approval_summary_retirement"
+  | Meta_read -> "meta_read"
   | Meta_update -> "meta_update"
   | Meta_remove -> "meta_remove"
   | Session_remove -> "session_remove"
@@ -679,6 +740,7 @@ let failure_stage_of_string = function
   | "task_settlement" -> Ok Task_settlement
   | "pending_confirm_cleanup" -> Ok Pending_confirm_cleanup
   | "approval_summary_retirement" -> Ok Approval_summary_retirement
+  | "meta_read" -> Ok Meta_read
   | "meta_update" -> Ok Meta_update
   | "meta_remove" -> Ok Meta_remove
   | "session_remove" -> Ok Session_remove

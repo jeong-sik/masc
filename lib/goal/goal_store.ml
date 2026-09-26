@@ -338,10 +338,9 @@ let unavailable_to_string = Goal_store_unavailable.to_string
 
 (* {2 Reading a file with its errno}
 
-   The shared read chain ([Workspace_utils.read_json_result] →
-   [Safe_ops.read_file_safe] → [Fs_compat.load_file]) renders every failure
-   to a sentence and reads a missing or blank file as [`Assoc []], so neither
-   [Unreadable of Unix.error] nor the absent/blank split can come out of it.
+   The shared read chain ([Workspace_utils.read_json_doc] →
+   [Safe_ops.read_file_result] → [Fs_compat.load_file]) renders every read
+   failure to a sentence, so [Unreadable of Unix.error] cannot come out of it.
    The store opens the file itself. The read is inline on the calling
    fiber: goals.json holds the current set only (97 rows ≈ 40 KB on
    2026-09-08), well under the reads that measured on the main domain
@@ -669,25 +668,19 @@ let blank_opt = function
   | Some raw -> String.trim raw = ""
 
 let upsert_goal config ?id ?title ?metric ?target_value ?due_date
-    ?priority ?phase () =
+    ?priority () =
   let is_new_goal = id = None in
   if is_new_goal && (title = None || title = Some "") then
     Error (Rejected "title required for new goal")
   else
-    (* DET-OK: typed optional API param (not parsed input) — a new goal
-       without an explicit phase starts Executing, same as the removed match. *)
-    let default_phase = Option.value phase ~default:Goal_phase.Executing in
     let now = Masc_domain.now_iso () in
         let resolved_id = Option.value id ~default:(gen_goal_id ()) in
-        let was_created = ref false in
+        let upserted = ref None in
         let refusal = ref None in
         let state_result =
           update_state config (fun state ->
               match find_goal_in state.goals resolved_id with
               | Some existing ->
-                  (* DET-OK: typed optional param — omitted phase preserves
-                     the stored phase (same arm the removed match had). *)
-                  let next_phase = Option.value phase ~default:existing.phase in
                   let next_goal =
                       {
                         existing with
@@ -704,7 +697,6 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         priority =
                           clamp_priority
                             (Option.value priority ~default:existing.priority);
-                        phase = next_phase;
                         updated_at = now;
                       }
                   in
@@ -713,6 +705,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                     || not (Option.equal String.equal existing.metric next_goal.metric)
                     || not (Option.equal String.equal existing.target_value next_goal.target_value)
                   in
+                  upserted := Some (`updated existing.phase);
                   let next_goal =
                     if not criterion_changed then next_goal
                     else
@@ -758,14 +751,14 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         target_value;
                         due_date;
                         priority = clamp_priority (Option.value priority ~default:3);
-                        phase = default_phase;
+                        phase = Goal_phase.Executing;
                         last_review_note = None;
                         last_review_at = None;
                         created_at = now;
                         updated_at = now;
                       }
                   in
-                  was_created := true;
+                  upserted := Some `created;
                   {
                     version = state.version + 1;
                     updated_at = now;
@@ -778,10 +771,9 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
           (match !refusal with
            | Some msg -> Error (Rejected msg)
            | None ->
-          (match find_goal_in state.goals resolved_id with
-          | Some goal ->
-              Ok (goal, if !was_created then `created else `updated)
-          | None ->
+          (match find_goal_in state.goals resolved_id, !upserted with
+          | Some goal, Some upserted -> Ok (goal, upserted)
+          | Some _, None | None, (Some _ | None) ->
               Error (Rejected "failed to save goal"))))
 
 let compute_rollup goals =

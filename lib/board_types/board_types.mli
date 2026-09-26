@@ -249,16 +249,27 @@ end
     and the verifier's read of a submitted Board snapshot both page through
     it, so an offset means the same thing on either surface. *)
 module Comment_page : sig
+  (** Where a page starts. [From_offset] counts from the oldest comment;
+      [Latest] is the page that ends at the newest comment; [After_comment]
+      starts right after the named comment, wherever it sits on this read. *)
+  type start =
+    | From_offset of int
+    | Latest
+    | After_comment of Comment_id.t
+
   type request = private
-    { offset : int
+    { start : start
     ; limit : int
     }
-  (** Built only by {!request_of_args}: [offset >= 0] and
-      [1 <= limit <= Limits.max_comment_page_limit]. *)
+  (** Built only by {!request_of_args}: a [From_offset] is [>= 0] and
+      [1 <= limit <= Limits.max_comment_page_limit]. For [Latest], [limit] is
+      the [comment_tail] count. *)
 
   type argument =
     | Comment_offset
     | Comment_limit
+    | Comment_tail
+    | After_comment_id
 
   type request_error =
     | Arguments_not_an_object
@@ -271,14 +282,30 @@ module Comment_page : sig
         { argument : argument
         ; literal : string
         }
+    | Not_a_string of
+        { argument : argument
+        ; given : string
+        }
+    | Not_a_comment_id of string
+        (** [after_comment_id] is not in the shape {!Comment_id} mints. *)
     | Negative_offset of int
     | Limit_out_of_bounds of int
+    | Tail_out_of_bounds of int
+    | Conflicting_arguments of
+        { given : argument
+        ; conflicts_with : argument
+        }
+        (** Two arguments that each say where the page starts, or
+            [comment_tail] beside [comment_limit]. Neither wins. *)
 
   val request_of_args : Yojson.Safe.t -> (request, request_error) result
-  (** Reads [comment_offset] (absent: [0]) and [comment_limit] (absent:
-      {!Limits.default_comment_page_limit}) from a tool call's arguments. A
-      value that is present but is not a JSON integer literal is refused, so
-      [null], ["abc"], [true] and [2.9] never turn into a page. *)
+  (** Reads [comment_offset] (absent: [0]), [comment_limit] (absent:
+      {!Limits.default_comment_page_limit}), [comment_tail] and
+      [after_comment_id] from a tool call's arguments. A count or offset that
+      is present but is not a JSON integer is refused, so [null], ["abc"],
+      [true] and [2.9] never turn into a page; [after_comment_id] must be a
+      string in the shape {!Comment_id} mints. [comment_tail] goes alone;
+      [after_comment_id] takes a [comment_limit] and no [comment_offset]. *)
 
   val request_error_to_string : request_error -> string
 
@@ -296,20 +323,40 @@ module Comment_page : sig
         { requested : int
         ; total : int
         }
-        (** [requested] names no comment. Offset [0] of an empty thread is a
-            [Page] with no items; every other offset at or past [total] is
-            this case, so an empty page is never mistaken for a thread that
-            lost its comments. *)
+        (** [requested] is past the end of the thread. Offset [total] is the
+            end itself: a [Page] with no items whose {!Position.line} names
+            [total], so it is never mistaken for a thread without comments.
+            Nothing past it is clamped to it. Offsets are positions in the
+            thread as it is at the read; a sweep that removes comments moves
+            every later one down, at the end as anywhere else. *)
+    | Comment_not_found of
+        { comment_id : Comment_id.t
+        ; total : int
+        }
+        (** No comment of this thread has the [After_comment] id: it was
+            never here, or a sweep removed it. *)
 
-  val select : ?fits:('a page -> bool) -> request -> 'a list -> 'a t
-  (** Items from [offset], at most [limit] of them: the longest page [fits]
-      accepts, [next_offset] included, found by halving ([fits] defaults to
-      accepting every page). A page never stops before its first item: an item
-      larger than the budget is delivered whole and the tool-output boundary
-      decides how it travels, so no comment becomes unreadable. Every page
-      returned is one [fits] accepted; the halving finds the longest such page
-      when [fits] stays false once it turns false, which a page whose size
-      grows with each item satisfies. *)
+  val select
+    :  ?fits:('a page -> bool)
+    -> comment_id_of:('a -> string option)
+    -> request
+    -> 'a list
+    -> 'a t
+  (** At most [limit] items from where [request] starts: the longest page
+      [fits] accepts, [next_offset] included, found by halving ([fits]
+      defaults to accepting every page). [comment_id_of] names an item's
+      comment id for an [After_comment] start. A [Latest] page ends at the
+      last item, so the budget trims its oldest items; a page from any other
+      start is trimmed at its end. A page never stops before its first item:
+      an item larger than the budget is delivered whole and the tool-output
+      boundary decides how it travels, so no comment becomes unreadable.
+      Every page returned is one [fits] accepted; the halving finds the
+      longest such page when [fits] stays false once it turns false, which a
+      page whose size grows with each item satisfies. A page read forward
+      grows with each item. A [Latest] page need not: an older item added to
+      it can be the parent of replies already on it, and a reply printed under
+      its parent is shorter than one that names it. Such a page may then hold
+      fewer items than would fit, never more. *)
 
   (** Where a page sits in its thread. Both reading surfaces return it, and a
       caller reads it back without parsing the page's text. *)
@@ -332,8 +379,10 @@ module Comment_page : sig
 
     val line : t -> string
     (** The one line a text page carries, naming the range it holds and the
-        [comment_offset] that continues it. Every text rendering of a page
-        uses this printer, so the sentence cannot drift between surfaces. *)
+        [comment_offset] that continues it. A page at the end of a non-empty
+        thread names the thread's size at the read. Every text rendering of a
+        page uses this printer, so the sentence cannot drift between
+        surfaces. *)
 
     val metadata_key : string
     (** ["masc.comment_page"]. *)

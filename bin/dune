@@ -252,6 +252,13 @@
   eio
   eio_main))
 
+;; Lane CLI slot probe argument parsing, a library so tests can pin every
+;; rejection without running the probe.
+(library
+ (name masc_lane_cli_probe_args)
+ (wrapped false)
+ (modules masc_lane_cli_probe_args))
+
 ;; Lane CLI slot probe.  A declared [cli_slots] runtime is the one transport an
 ;; operator cannot reach with curl: masc admits the subscription, spawns the
 ;; client, carries the lane schema as prompt text and parses the reply with no
@@ -270,6 +277,7 @@
   masc.runtime
   masc.fusion_core
   masc_eio_context
+  masc_lane_cli_probe_args
   agent_core
   unix
   yojson

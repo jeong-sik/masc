@@ -152,9 +152,23 @@ let log_toml_discovery_error_once ~file ~error =
     true
   end
 
+let logged_missing_keepers_dir : (string, unit) Hashtbl.t = Hashtbl.create 4
+
 let discover_keepers_toml_with_paths (dir : string)
     : (string * keeper_toml_discovery) list =
-  if not (Fs_compat.file_exists dir && Sys.is_directory dir) then []
+  if not (Fs_compat.file_exists dir && Sys.is_directory dir)
+  then (
+    (* A missing keepers directory is a misconfiguration, not an empty
+       roster: say so once per process instead of returning silence that
+       downstream reports as zero keepers and missing declarations. *)
+    if not (Hashtbl.mem logged_missing_keepers_dir dir)
+    then (
+      Hashtbl.add logged_missing_keepers_dir dir ();
+      Log.Keeper.warn
+        "toml_loader: keepers directory %s is missing or not a directory: \
+         fleet scan finds zero keepers"
+        dir);
+    [])
   else
     dir
     |> Sys.readdir

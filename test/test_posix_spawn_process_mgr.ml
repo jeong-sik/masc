@@ -294,6 +294,39 @@ let test_group_normal_exit_reaps_in_long_lived_switch () =
       assert_descendant_stopped env descendant))
 ;;
 
+(* An official-client adapter is cancelled by its turn owner, even when the
+   vendor leader and an MCP child have both stopped writing to the pipes.
+   Returning from the cancelled switch must leave neither process running. *)
+let test_client_switch_cancel_reaps_leader_and_stops_descendant () =
+  with_group_fixture (fun env marker ->
+    let clock = Eio.Stdenv.clock env in
+    let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds in
+    let leader = ref None in
+    let descendant = ref None in
+    Eio.Switch.run (fun siblings ->
+      let sibling = Eio.Process.spawn ~sw:siblings Posix_spawn_process_mgr.mgr
+        [ "/bin/sleep"; "60" ] in
+      Eio.Fiber.first
+        (fun () -> Eio.Switch.run (fun sw ->
+          let proc = Eio.Process.spawn ~sw mgr
+            [ "python3"; "-c"; group_fixture; marker; "ignore" ] in
+          leader := Some (Eio.Process.pid proc);
+          ignore (Eio.Process.await proc)))
+        (fun () -> descendant := Some (wait_for_marker clock marker));
+      (match !descendant with
+       | Some pid -> assert_descendant_stopped env pid
+       | None -> fail "client cancellation fixture never became ready");
+      (match !leader with
+       | None -> fail "client leader was not recorded"
+       | Some pid ->
+         (match Unix.waitpid [ Unix.WNOHANG ] pid with
+          | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()
+          | _ -> fail "cancelled client leader was not reaped"));
+      Unix.kill (Eio.Process.pid sibling) 0;
+      Eio.Process.signal sibling Sys.sigkill))
+;;
+
 let test_native_command_cancel_cleans_closed_pipe_descendant () =
   with_group_fixture (fun env marker ->
     let clock = Eio.Stdenv.clock env in
@@ -320,6 +353,8 @@ let () =
             test_group_explicit_kill_reaps_leader_and_stops_descendant
         ; test_case "normal leaders reap inside a long-lived switch" `Quick
             test_group_normal_exit_reaps_in_long_lived_switch
+        ; test_case "client switch cancellation owns leader and descendants" `Quick
+            test_client_switch_cancel_reaps_leader_and_stops_descendant
         ; test_case "native command cancellation cleans its group" `Quick
             test_native_command_cancel_cleans_closed_pipe_descendant ])
     ; ( "parity with eio_posix"

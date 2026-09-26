@@ -256,7 +256,8 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
   in
   let* env, clock = eio_context ()
     |> Result.map_error (fun detail -> Setup_failure detail) in
-  let mgr = Posix_spawn_process_mgr.mgr in
+  let mgr = (Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds) in
   let cwd = Eio.Path.(Eio.Stdenv.fs env / base_dir) in
   match execution with
   | Runtime_execution.Agent_core _ ->

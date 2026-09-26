@@ -10,7 +10,7 @@ type error =
   }
 
 let ( let* ) = Result.bind
-let schema = "masc.dashboard.official-client-session.v1"
+let schema = "masc.dashboard.official-client-session.v2"
 
 let error kind code message = Error { kind; code; message }
 

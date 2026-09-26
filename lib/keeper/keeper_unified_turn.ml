@@ -1330,9 +1330,12 @@ let run_keeper_cycle
                     then Log.Keeper.warn
                     else Log.Keeper.error
                   in
-                  (* [final_execution.runtime_id] names the deferred-lane
-                     assignment this cycle was budgeted under, not
-                     necessarily the concrete candidate
+                  (* [final_execution.runtime_id] names the assignment this
+                     cycle was budgeted under, except on a cycle that took a
+                     deferred suffix: that execution is keyed by the
+                     suffix's first runtime, so [lane=] takes the deferring
+                     assignment from [deferred_runtime_lane] instead. Neither
+                     is necessarily the concrete candidate
                      [attempt_runtime_candidates] dispatched: a lane keyed by
                      one runtime id walks a different candidate first when
                      the head rests or a deferred suffix starts elsewhere.
@@ -1348,6 +1351,7 @@ let run_keeper_cycle
                      candidate alone. *)
                   let runtime_attribution =
                     keeper_cycle_failed_runtime_attribution
+                      ~entry_deferred_runtime_lane:deferred_runtime_lane
                       ~deferred_runtime_lane:turn_state.deferred_runtime_lane
                       ~lane_runtime_id:final_execution.runtime_id
                       ~runtime_attempt_errors:turn_state.runtime_attempt_errors

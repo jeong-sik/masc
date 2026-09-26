@@ -1234,7 +1234,7 @@ self_test() {
   # The harness brings the suites that name it: scenario selection and
   # request teardown are checked without opening a terminal.
   check "an edited terminal scenario is selected" \
-    "test/test_tui_fixture_shutdown.py test/test_tui_keyboard_input.py test/test_tui_keyboard_scenario_selection.py" \
+    "test/test_tui_fixture_shutdown.py test/test_tui_keyboard_input.py test/test_tui_keyboard_scenario_selection.py test/test_tui_stall_observation.py" \
     "test/test_tui_keyboard_input.py"
   check_direct "an edited suite stays direct before attribution expands selection" \
     "test/test_tui_keyboard_input.py" \

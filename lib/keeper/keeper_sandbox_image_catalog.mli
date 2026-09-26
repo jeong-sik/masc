@@ -94,10 +94,6 @@ val shipped_file_name : string
 (** ["sandbox-images.toml"]: the image names, embedded from [config/] and read
     from the binary. *)
 
-val shipped_file_name : string
-(** ["sandbox-images.toml"]: the image names, embedded from [config/] and read
-    from the binary. *)
-
 val file_name : string
 (** ["sandbox-image-builds.toml"], directly under the config root: this
     host's promoted builds. A different name from {!shipped_file_name}, so the

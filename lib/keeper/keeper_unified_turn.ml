@@ -90,7 +90,6 @@ let execution_boundary_of_turn_failure error =
       (* Both are reported by the runtime client, which is the agent-core
          side of this boundary. *)
       | Keeper_internal_error.Host_stopped_turn _
-      | Keeper_internal_error.Preempted_before_first_token _
       | Keeper_internal_error.Runtime_connection_closed _ )
   | None ->
     Keeper_runtime_failure_route.Agent_core_execution
@@ -1188,37 +1187,6 @@ let run_keeper_cycle
                   in
                   post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
                   Ok (Turn_input_required committed), turn_state
-                | Error err when EC.is_preempted_before_first_token err ->
-                  (* The turn yielded to a queued person before its provider
-                     produced anything (RFC-0441, #38094). It did no work and
-                     nothing failed: the execution already ended the FSM as
-                     cancelled, and [Turn_skipped] leaves the admitted source
-                     batch pending, so the input runs fresh on a later cycle.
-                     No failure counter moves and no pending message is
-                     acknowledged. *)
-                  finalize_trajectory_acc
-                    ~config
-                    ~keeper_name:meta.name
-                    trajectory_acc
-                    (Trajectory.Gated "preempted_by_person");
-                  Otel_metric_store.inc_counter
-                    Keeper_metrics.(to_string Turns)
-                    ~labels:[ "keeper", meta.name; "outcome", "preempted_by_person" ]
-                    ();
-                  (* The attempt already wrote under [keeper_turn_id] (manifest,
-                     receipt, turn record, FSM), so the turn id is spent: the
-                     next cycle must not write under the same one. Only the
-                     counter moves -- no failure, latency or proactive
-                     bookkeeping, since nothing failed. *)
-                  let committed =
-                    commit_turn_with_attempt_spend
-                      ~config
-                      ~keeper_turn_id
-                      ~before:meta
-                      ~attempt_spend
-                      (Keeper_turn_spend_commit.count_turn meta)
-                  in
-                  Ok (Turn_skipped committed), turn_state
                 | Error err ->
                   (match
                      require_last_execution_for_finalize

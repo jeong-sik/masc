@@ -19,7 +19,6 @@ type core_termination_semantics =
   | Agent_core_guardrail_violation
   | Agent_core_tripwire_violation
   | Agent_core_input_required
-  | Preempted_by_person
   | Core_error_failure
 
 val core_termination_semantics

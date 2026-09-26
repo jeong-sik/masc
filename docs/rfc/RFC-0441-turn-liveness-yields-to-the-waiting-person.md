@@ -59,6 +59,10 @@ The hydrate path (post-reload, `hydrateTrackedKeeperChatOperation`) already mark
 A running turn owes the person waiting on it, at every tool boundary:
 
 1. **Yield order** (highest first): claimed owner operations → approved HITL resolutions → pending `Connector_attention`. A nonempty-`Woken` turn yields to none of its own wake payloads.
+   If the provider has not reached a resumable boundary, the admitted turn keeps
+   running; a newly queued message waits for a settled tool boundary or turn
+   completion. Existing no-progress timeouts still diagnose a stalled provider
+   independently of the queued message.
 2. **Honest liveness**: anyone waiting on the turn sees the turn's actual activity (tool calls, queue state), never an inference of death from their own feed's silence.
 3. **Duration is not this policy's axis**: a turn that is *progressing* may run long; a turn that *cannot* progress is #29230's ceiling. Priority and observability here, duration there.
 

@@ -690,6 +690,12 @@ let find_dynamic_tool tools name =
   List.find_opt (fun (tool : dynamic_tool) -> String.equal tool.name name) tools
 ;;
 
+type dynamic_tool_receipt =
+  { call_id : string
+  ; success : bool
+  ; content_items : Yojson.Safe.t list
+  }
+
 let send_dynamic_tool_response io ~id (result : dynamic_tool_result) =
   let success, content_items =
     match Runtime_official_client_tool.codex_content_items
@@ -705,7 +711,8 @@ let send_dynamic_tool_response io ~id (result : dynamic_tool_result) =
        [ "id", id
        ; "result", `Assoc
            [ "success", `Bool success; "contentItems", `List content_items ]
-       ])
+       ]);
+  success, content_items
 ;;
 
 let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count ~tool_effect_attempted
@@ -750,10 +757,12 @@ let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count ~too
       in
       incr tool_call_count;
       emit_stream_event on_stream_event (Dynamic_tool_finished { call_id });
-      send_dynamic_tool_response io ~id result;
+      let success, content_items = send_dynamic_tool_response io ~id result in
       (match result.abort_turn with
-       | None -> Ok ()
-       | Some stop -> Error (Stopped_by_host stop))
+       | None -> Ok None
+       | Some stop ->
+         let receipt = { call_id; success; content_items } in
+         Ok (Some (stop, receipt)))
 ;;
 
 let rec await_response io ~id ~method_ =
@@ -997,6 +1006,58 @@ let active_turn_item ~stage ~thread_id ~turn_id params =
   if item_thread_id <> thread_id || item_turn_id <> turn_id
   then protocol_error stage "item identity does not match the active turn"
   else required_member stage "item" fields
+;;
+
+(* A host stop closes the app-server process. Its JSON-RPC response being
+   written only proves that the pipe accepted bytes. Codex emits this item
+   after it has consumed the response and attached it to the active turn.
+   Wait for that exact call and payload before making the thread resumable. *)
+let rec await_dynamic_tool_receipt io ~thread_id ~turn_id receipt =
+  let stage = "item/completed dynamic tool receipt" in
+  let* message = io.receive () in
+  match message with
+  | Notification { method_ = "item/completed"; params } ->
+    let* item = active_turn_item ~stage ~thread_id ~turn_id params in
+    let* kind = item_kind_of_item ~stage item in
+    (match kind with
+     | Dynamic_tool_item ->
+       let* fields = assoc_at stage item in
+       let* call_id = required_string stage "id" fields in
+       if not (String.equal call_id receipt.call_id)
+       then await_dynamic_tool_receipt io ~thread_id ~turn_id receipt
+       else
+         let* status = required_string stage "status" fields in
+         let* success = required_bool stage "success" fields in
+         let* content = required_member stage "contentItems" fields in
+         let* content_items =
+           match content with
+           | `List items -> Ok items
+           | _ -> protocol_error stage "contentItems must be an array"
+         in
+         let no_error =
+           match List.assoc_opt "error" fields with
+           | None | Some `Null -> true
+           | Some _ -> false
+         in
+         if success = receipt.success
+            && String.equal status (if success then "completed" else "failed")
+            && content_items = receipt.content_items
+            && no_error
+         then Ok ()
+         else protocol_error stage "completed item does not match the host response"
+     | Command_execution | File_change | Mcp_tool_call | Sleep | Model_item
+     | Unclassified_item _ ->
+       await_dynamic_tool_receipt io ~thread_id ~turn_id receipt)
+  | Notification { method_ = "turn/completed"; _ } ->
+    protocol_error stage "turn completed before the dynamic tool response was recorded"
+  | Notification { method_ = "error"; _ } ->
+    protocol_error stage "provider error before the dynamic tool response was recorded"
+  | Notification _ -> await_dynamic_tool_receipt io ~thread_id ~turn_id receipt
+  | Server_request { id; method_; _ } ->
+    reject_server_request io id;
+    Error (Unsupported_server_request method_)
+  | Response _ | Response_error _ ->
+    protocol_error stage "received an unsolicited JSON-RPC response"
 ;;
 
 let messages_of_items ~stage = function
@@ -1341,7 +1402,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~m
   | Response _ | Response_error _ ->
     protocol_error "turn" "received an unsolicited JSON-RPC response"
   | Server_request { id; method_ = "item/tool/call"; params } ->
-    let* () =
+    let* host_stop =
       handle_dynamic_tool_call
         io
         ~tools
@@ -1352,18 +1413,23 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~m
         ~id
         params
     in
-    await_turn_terminal
-      io
-      ~tools
-      ~tool_call_count ~tool_effect_attempted ~model_context_window
-      ~thread_id
-      ~turn_id
-      ~model
-      ~seen_final
-      ~seen_fallback
-      ~seen_usage
-      ~open_tool_call_ids
-      ~on_stream_event
+    (match host_stop with
+     | Some (stop, receipt) ->
+       let* () = await_dynamic_tool_receipt io ~thread_id ~turn_id receipt in
+       Error (Stopped_by_host stop)
+     | None ->
+       await_turn_terminal
+         io
+         ~tools
+         ~tool_call_count ~tool_effect_attempted ~model_context_window
+         ~thread_id
+         ~turn_id
+         ~model
+         ~seen_final
+         ~seen_fallback
+         ~seen_usage
+         ~open_tool_call_ids
+         ~on_stream_event)
   | Server_request { id; method_ = "mcpServer/elicitation/request"; params } ->
     let* () = cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params in
     await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model

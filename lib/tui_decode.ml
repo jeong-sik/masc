@@ -1940,33 +1940,42 @@ let sgr_left_release parameters final =
     reading moved the list behind it.
 
     Each byte is offset by 32, and the buttons are SGR's numbers: wheel-up 64,
-    wheel-down 65, a plain left press 0. X10 has one release code, 3, for
-    whichever button went up; it is read as the left button's, because a
-    release that no left press opened finishes nothing. Modified buttons,
-    drags and the other buttons stay [None], as does a position byte below the
-    offset. The caller consumes the three bytes whatever this returns. *)
+    wheel-down 65, a plain left press 0. Any other press -- middle, right, or
+    a button held with shift, meta or ctrl -- is [X10_other_press]: no surface
+    reads it, but its release comes next and must not be taken for the left
+    button's. X10 has one release code, 3 in the button bits, for whichever
+    button went up, so which press a release ends is the reader's to track.
+    Motion reports, the horizontal wheel and a position byte below the offset
+    stay [None]. The caller consumes the three bytes whatever this returns. *)
 type x10_mouse =
   | X10_wheel of wheel_direction * int * int
   | X10_left_press of int * int
+  | X10_other_press
   | X10_release of int * int
 
 let x10_byte_offset = 32
+let x10_button_bits = 3
+let x10_release_code = 3
+let x10_motion_bit = 32
+let x10_wheel_bit = 64
 let x10_left_press_button = 0
-let x10_release_button = 3
 let x10_wheel_up_button = 64
 let x10_wheel_down_button = 65
 
 let x10_mouse_report ~(button : char) ~(column : char) ~(row : char)
     : x10_mouse option =
   let decoded byte = Char.code byte - x10_byte_offset in
-  let row = decoded row and column = decoded column and button = decoded button in
-  if row <= 0 || column <= 0 then None
-  else if button = x10_wheel_up_button then Some (X10_wheel (Wheel_up, row, column))
-  else if button = x10_wheel_down_button then
-    Some (X10_wheel (Wheel_down, row, column))
-  else if button = x10_left_press_button then Some (X10_left_press (row, column))
-  else if button = x10_release_button then Some (X10_release (row, column))
-  else None
+  let row = decoded row and column = decoded column and code = decoded button in
+  if row <= 0 || column <= 0 || code land x10_motion_bit <> 0 then None
+  else if code land x10_wheel_bit <> 0 then
+    if code = x10_wheel_up_button then Some (X10_wheel (Wheel_up, row, column))
+    else if code = x10_wheel_down_button then
+      Some (X10_wheel (Wheel_down, row, column))
+    else None
+  else if code land x10_button_bits = x10_release_code then
+    Some (X10_release (row, column))
+  else if code = x10_left_press_button then Some (X10_left_press (row, column))
+  else Some X10_other_press
 ;;
 
 let missing_field key =

@@ -158,7 +158,26 @@ let test_x10_mouse () =
 let test_x10_mouse_short_on_idle () =
   let decoder = D.create () in
   check_events "report head" [] (feed_all decoder "\x1b[M");
-  check_events "no button byte" [ "key unknown-esc" ] (D.idle decoder)
+  check_events "no button byte" [ "key unknown-esc" ] (D.idle decoder);
+  (* A wheel button with no position is not acted on: where it happened is
+     what decides whether it scrolls a pane or the surface. *)
+  check_events "button byte only" [] (feed_all decoder "\x1b[M`");
+  check_events "no column" [ "key unknown-esc" ] (D.idle decoder);
+  check_events "button and column" [] (feed_all decoder "\x1b[M`*");
+  check_events "no row" [ "key unknown-esc" ] (D.idle decoder)
+
+(* X10 has one release code for every button. A right click is not the left
+   button's release, and a right click made while the left button is held
+   leaves that press open for its own release. *)
+let test_x10_release_ends_the_press_made_last () =
+  let report button = Printf.sprintf "\x1b[M%c*%%" (Char.chr (32 + button)) in
+  let left = 0 and right = 2 and release = 3 in
+  check_events "a right click releases nothing"
+    [ "key unknown-esc"; "key unknown-esc" ]
+    (decode (report right ^ report release));
+  check_events "left held across a right click"
+    [ "press 5,10"; "key unknown-esc"; "key unknown-esc"; "release 5,10" ]
+    (decode (report left ^ report right ^ report release ^ report release))
 
 let test_csi_overflow_is_escape () =
   check_events "parameters past the bound" [ "key esc"; "key x" ]
@@ -233,7 +252,9 @@ let () =
       ( "mouse",
         [ test_case "SGR" `Quick test_sgr_mouse;
           test_case "X10" `Quick test_x10_mouse;
-          test_case "X10 short on idle" `Quick test_x10_mouse_short_on_idle ] );
+          test_case "X10 short on idle" `Quick test_x10_mouse_short_on_idle;
+          test_case "X10 release ends the press made last" `Quick
+            test_x10_release_ends_the_press_made_last ] );
       ( "cancel",
         [ test_case "drops a held sequence" `Quick test_cancel_drops_a_held_sequence ] )
     ]

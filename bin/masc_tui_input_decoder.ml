@@ -33,7 +33,9 @@ type state =
   | Escape
   | Csi of Buffer.t
   | Ss3
-  | X10 of char list  (** Bytes after [CSI M], newest first. *)
+  | X10_awaiting_button  (** [CSI M] read; the three report bytes follow. *)
+  | X10_awaiting_column of char  (** The button byte. *)
+  | X10_awaiting_row of char * char  (** The button and column bytes. *)
   | Osc of body
   | Apc_prefix
   | Apc of body
@@ -41,9 +43,13 @@ type state =
   | In_paste of Masc_tui_paste.decoder
   | Draining_paste of Masc_tui_paste.decoder
 
-type t = { mutable state : state }
+(* An X10 press whose release has not come. X10 sends one release code for
+   every button, so the release ends the press made last. *)
+type held_button = Held_left | Held_other
 
-let create () = { state = Ground }
+type t = { mutable state : state; mutable x10_held : held_button list }
+
+let create () = { state = Ground; x10_held = [] }
 
 (* The same bound [read_input] used: CSI parameters for every key and reply we
    read fit well inside it. *)
@@ -52,7 +58,9 @@ let csi_parameters_max_bytes = 16
 (* Every reply the protocol defines is short; the probe used this bound. *)
 let body_max_bytes = 4096
 
-let x10_report_bytes = 3
+(* Left, middle and right: a report cannot hold more presses open, so a list
+   longer than this is one whose releases never arrived. *)
+let x10_buttons = 3
 let escape = '\x1b'
 let bell = '\x07'
 let string_terminator_final = '\\'
@@ -93,7 +101,7 @@ let complete_csi t parameters final =
     []
   end
   else if String.equal parameters x10_parameters && final = x10_final then begin
-    t.state <- X10 [];
+    t.state <- X10_awaiting_button;
     []
   end
   else if String.length parameters > 0 && parameters.[0] = '<' then
@@ -116,20 +124,31 @@ let complete_csi t parameters final =
     | None -> csi_key parameters final
   else csi_key parameters final
 
-let x10_event bytes =
-  (* [bytes] is newest first: the button arrived first, then the column and
-     the row. A report cut short by [idle] has no position to act at. *)
-  match List.rev bytes with
-  | [ button; column; row ] -> (
-      match Masc.Tui_decode.x10_mouse_report ~button ~column ~row with
-      | Some (Masc.Tui_decode.X10_wheel (direction, row, column)) ->
-          [ Mouse_wheel (direction, row, column) ]
-      | Some (Masc.Tui_decode.X10_left_press (row, column)) ->
-          [ Mouse_left_press (row, column) ]
-      | Some (Masc.Tui_decode.X10_release (row, column)) ->
+let hold t button =
+  t.x10_held <- List.filteri (fun index _ -> index < x10_buttons) (button :: t.x10_held)
+
+(* A release is the left button's only when the press it ends is a left one:
+   SGR says which button went up, and X10 leaves it to the order of presses. *)
+let x10_event t ~button ~column ~row =
+  match Masc.Tui_decode.x10_mouse_report ~button ~column ~row with
+  | Some (Masc.Tui_decode.X10_wheel (direction, row, column)) ->
+      [ Mouse_wheel (direction, row, column) ]
+  | Some (Masc.Tui_decode.X10_left_press (row, column)) ->
+      hold t Held_left;
+      [ Mouse_left_press (row, column) ]
+  | Some Masc.Tui_decode.X10_other_press ->
+      hold t Held_other;
+      key "unknown-esc"
+  | Some (Masc.Tui_decode.X10_release (row, column)) -> (
+      match t.x10_held with
+      | Held_left :: rest ->
+          t.x10_held <- rest;
           [ Mouse_left_release (row, column) ]
-      | None -> key "unknown-esc")
-  | [] | [ _ ] | [ _; _ ] | _ :: _ :: _ :: _ :: _ -> key "unknown-esc"
+      | Held_other :: rest ->
+          t.x10_held <- rest;
+          key "unknown-esc"
+      | [] -> key "unknown-esc")
+  | None -> key "unknown-esc"
 
 (* Feed one byte of a string-terminated body. [Some body] once [ESC \\] (or
    BEL, where [bell_terminates]) closes it. *)
@@ -205,16 +224,15 @@ let rec feed t byte =
   | Ss3 ->
       t.state <- Ground;
       csi_key "" byte
-  | X10 bytes ->
-      let bytes = byte :: bytes in
-      if List.length bytes = x10_report_bytes then begin
-        t.state <- Ground;
-        x10_event bytes
-      end
-      else begin
-        t.state <- X10 bytes;
-        []
-      end
+  | X10_awaiting_button ->
+      t.state <- X10_awaiting_column byte;
+      []
+  | X10_awaiting_column button ->
+      t.state <- X10_awaiting_row (button, byte);
+      []
+  | X10_awaiting_row (button, column) ->
+      t.state <- Ground;
+      x10_event t ~button ~column ~row:byte
   | Osc body -> (
       match body_byte body ~bell_terminates:true byte with
       | Some body ->
@@ -289,9 +307,10 @@ let idle t =
   | Escape | Ss3 | Apc_prefix ->
       t.state <- Ground;
       key "esc"
-  | X10 bytes ->
+  (* A report cut short has no position to act at. *)
+  | X10_awaiting_button | X10_awaiting_column _ | X10_awaiting_row _ ->
       t.state <- Ground;
-      x10_event bytes
+      key "unknown-esc"
   (* A terminal sends a reply in one burst. A body with a gap in it is not
      one we asked for, and holding it open would swallow the keys typed
      after Alt+] or Alt+_. *)
@@ -306,7 +325,7 @@ let idle t =
 let pending t =
   match t.state with
   | Ground -> None
-  | Escape | Ss3 | X10 _ | Osc _ | Apc_prefix | Apc _ -> Some Prefix
+  | Escape | Ss3 | X10_awaiting_button | X10_awaiting_column _ | X10_awaiting_row _ | Osc _ | Apc_prefix | Apc _ -> Some Prefix
   | Csi _ -> Some Sequence
   | Utf8 _ -> Some Character
   | In_paste _ -> Some Pasting
@@ -314,7 +333,7 @@ let pending t =
 
 let cancel_pending t =
   match t.state with
-  | Escape | Csi _ | Ss3 | X10 _ | Osc _ | Apc_prefix | Apc _ -> t.state <- Ground
+  | Escape | Csi _ | Ss3 | X10_awaiting_button | X10_awaiting_column _ | X10_awaiting_row _ | Osc _ | Apc_prefix | Apc _ -> t.state <- Ground
   | Ground | Utf8 _ | In_paste _ | Draining_paste _ -> ()
 
 let recover_paste t =
@@ -322,13 +341,13 @@ let recover_paste t =
   | In_paste decoder ->
       t.state <- Draining_paste decoder;
       Some (Masc_tui_paste.snapshot_payload decoder)
-  | Ground | Escape | Csi _ | Ss3 | X10 _ | Osc _ | Apc_prefix | Apc _ | Utf8 _
+  | Ground | Escape | Csi _ | Ss3 | X10_awaiting_button | X10_awaiting_column _ | X10_awaiting_row _ | Osc _ | Apc_prefix | Apc _ | Utf8 _
   | Draining_paste _ ->
       None
 
 let abandon_draining t =
   match t.state with
   | Draining_paste _ -> t.state <- Ground
-  | Ground | Escape | Csi _ | Ss3 | X10 _ | Osc _ | Apc_prefix | Apc _ | Utf8 _
+  | Ground | Escape | Csi _ | Ss3 | X10_awaiting_button | X10_awaiting_column _ | X10_awaiting_row _ | Osc _ | Apc_prefix | Apc _ | Utf8 _
   | In_paste _ ->
       ()

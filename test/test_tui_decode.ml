@@ -2617,6 +2617,7 @@ let x10_mouse =
           Format.fprintf formatter "%s %d,%d" (Tui_decode.wheel_key direction) row column
       | Tui_decode.X10_left_press (row, column) ->
           Format.fprintf formatter "press %d,%d" row column
+      | Tui_decode.X10_other_press -> Format.fprintf formatter "other press"
       | Tui_decode.X10_release (row, column) ->
           Format.fprintf formatter "release %d,%d" row column)
     ( = )
@@ -2635,16 +2636,27 @@ let test_x10_left_press_and_release_carry_their_position () =
     (x10 ~button:0 ~column:4 ~row:3);
   Alcotest.(check (option x10_mouse)) "the one release code"
     (Some (Tui_decode.X10_release (3, 4)))
-    (x10 ~button:3 ~column:4 ~row:3)
+    (x10 ~button:3 ~column:4 ~row:3);
+  Alcotest.(check (option x10_mouse)) "a release with shift held"
+    (Some (Tui_decode.X10_release (3, 4)))
+    (x10 ~button:(3 + 4) ~column:4 ~row:3)
 
-(* Middle and right presses, shift/meta/ctrl chords, drags and the horizontal
-   wheel are gestures no surface reads. *)
-let test_x10_chords_drags_and_other_buttons_stay_unclaimed () =
+(* Middle and right presses and shift/meta/ctrl chords are presses no surface
+   reads, but their release follows and must not be the left button's. *)
+let test_x10_other_presses_are_named_so_their_release_is_not_left () =
+  List.iter
+    (fun button ->
+      Alcotest.(check (option x10_mouse)) (Printf.sprintf "button %d" button)
+        (Some Tui_decode.X10_other_press) (x10 ~button ~column:4 ~row:3))
+    [ 1; 2; 4; 8; 16 ]
+
+(* Motion reports and the horizontal wheel are gestures no surface reads. *)
+let test_x10_motion_and_the_horizontal_wheel_stay_unclaimed () =
   List.iter
     (fun button ->
       Alcotest.(check (option x10_mouse)) (Printf.sprintf "button %d" button)
         None (x10 ~button ~column:4 ~row:3))
-    [ 1; 2; 4; 8; 16; 32; 35; 66; 67 ]
+    [ 32; 35; 66; 67 ]
 
 (* A byte at the offset itself names column or row 0, which no cell is. *)
 let test_x10_position_below_one_is_unclaimed () =
@@ -12533,8 +12545,10 @@ let () =
           test_x10_wheel_carries_its_position;
         Alcotest.test_case "left press and release carry their position" `Quick
           test_x10_left_press_and_release_carry_their_position;
-        Alcotest.test_case "chords, drags and other buttons stay unclaimed" `Quick
-          test_x10_chords_drags_and_other_buttons_stay_unclaimed;
+        Alcotest.test_case "other presses are named so their release is not left"
+          `Quick test_x10_other_presses_are_named_so_their_release_is_not_left;
+        Alcotest.test_case "motion and the horizontal wheel stay unclaimed" `Quick
+          test_x10_motion_and_the_horizontal_wheel_stay_unclaimed;
         Alcotest.test_case "a position below one is unclaimed" `Quick
           test_x10_position_below_one_is_unclaimed;
         Alcotest.test_case "agrees with the SGR decoder" `Quick

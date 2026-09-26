@@ -1033,6 +1033,90 @@ let test_paused_keeper_with_high_context_is_not_pressure () =
            ]
          |> List.map (fun row -> row |> member "name" |> to_string)))
 
+let test_worker_support_tracks_each_exact_assignee_across_renders () =
+  let now_ts = 1_000_000_000.0 in
+  let stamp = Types.iso8601_of_unix_seconds now_ts in
+  let agent ?(status = Types.Inactive) ?current_task ~age name : Types.agent =
+    { id = None; name; agent_type = "fixture"; status; capabilities = []
+    ; current_task; session_bound_at = stamp
+    ; last_seen = Types.iso8601_of_unix_seconds (now_ts -. age); meta = None
+    }
+  in
+  let task id task_status : Types.task =
+    { id; title = id; description = ""; task_status; priority = 3; files = []
+    ; created_at = stamp; created_by = None; predecessor_task_id = None
+    ; contract = None; execution_links = Types.no_execution_links
+    ; handoff_context = None; cycle_count = 0; reclaim_policy = None
+    ; do_not_reclaim_reason = None; skills = []
+    }
+  in
+  let claimed assignee = Types.Claimed { assignee; claimed_at = stamp } in
+  let started assignee = Types.InProgress { assignee; started_at = stamp } in
+  let tasks =
+    [ task "a-claim" (claimed "alpha"); task "a-start" (started "alpha")
+    ; task "upper-claim" (claimed "Alpha")
+    ; task "unlisted" (claimed "alpha ")
+    ; task "beta-start" (started "beta"); task "healthy-start" (started "healthy")
+    ; task "todo" Types.Todo
+    ; task "submitted"
+        (Types.AwaitingVerification
+           { assignee = "terminal"; started_at = stamp; submitted_at = stamp
+           ; intent = Types.Complete_task; verification_id = "v-submitted" })
+    ; task "done"
+        (Types.Done { assignee = "terminal"; completed_at = stamp; notes = None })
+    ; task "cancelled"
+        (Types.Cancelled
+           { cancelled_by = "terminal"; cancelled_at = stamp; reason = None })
+    ]
+  in
+  let agents =
+    [ agent ~age:4. "Alpha"; agent ~age:5. "terminal"; agent ~age:3. "alpha"
+    ; agent ~age:2. " alpha "
+    ; agent ~status:Types.Active ~age:0. "healthy"
+    ; agent ~current_task:"explicit-work" ~age:1. "beta"
+    ]
+  in
+  let message =
+    { (make_message ~seq:1 ~from_agent:" ALPHA " ~content:"ready to continue" ())
+      with timestamp = stamp }
+  in
+  let render ~tasks ~agents =
+    Dashboard_execution_builders.build_worker_support_briefs
+      ~now_ts ~tasks ~agents ~messages:[ message ]
+    |> List.map (fun (row : Dashboard_execution_helpers.worker_context) -> row.json)
+  in
+  let rows = render ~tasks ~agents in
+  let open Yojson.Safe.Util in
+  check (list string) "attention ordering is stable and healthy work is omitted"
+    [ "Alpha"; "alpha"; " alpha "; "beta"; "terminal" ]
+    (List.map (fun row -> row |> member "name" |> to_string) rows);
+  List.iter2
+    (fun row (count, focus) ->
+      check int "only this exact owner's claimed/started tasks count" count
+        (row |> member "active_task_count" |> to_int);
+      check string "ownership count and explicit focus stay aligned" focus
+        (row |> member "focus" |> to_string);
+      check string "offline workers remain offline" "offline"
+        (row |> member "state" |> to_string))
+    rows
+    [ 1, "1 claimed tasks waiting for explicit current_task"
+    ; 2, "2 claimed tasks waiting for explicit current_task"
+    ; 0, "ready to continue"
+    ; 1, "explicit-work"
+    ; 0, "Idle / waiting for assignment"
+    ];
+  let empty_tasks = render ~tasks:[] ~agents in
+  check (list int) "the next render has no retained ownership counts"
+    [ 0; 0; 0; 0; 0 ]
+    (List.map (fun row -> row |> member "active_task_count" |> to_int) empty_tasks);
+  let beta_only = render ~tasks ~agents:[ List.nth agents 5 ] in
+  check (list string) "a render only returns its supplied agents" [ "beta" ]
+    (List.map (fun row -> row |> member "name" |> to_string) beta_only);
+  check bool "an intervening render cannot change an earlier result" true
+    (Yojson.Safe.equal (`List rows) (`List (render ~tasks ~agents)));
+  check bool "an empty fleet has no worker briefs" true
+    (render ~tasks ~agents:[] = [])
+
 let () =
   Alcotest.run "Dashboard Mission"
     [
@@ -1083,6 +1167,8 @@ let () =
         ] );
       ( "execution render",
         [
+          Alcotest.test_case "worker support keeps exact ownership across renders"
+            `Quick test_worker_support_tracks_each_exact_assignee_across_renders;
           Alcotest.test_case "declared keeper does not take down the render"
             `Quick test_execution_render_with_a_declared_keeper;
           Alcotest.test_case "enrich leaves a declaration row without runtime fields"

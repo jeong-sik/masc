@@ -76,18 +76,30 @@ let last_message_map messages =
     messages;
   table
 
-let active_task_count tasks agent_name =
+module Agent_name_map = Set_util.StringMap
+
+let active_task_counts ~agents tasks =
+  (* Index only names this render will read. An unlisted assignee must not
+     grow the index, and task ownership is case-sensitive even though the
+     message lookup above normalizes sender names. *)
+  let counts =
+    List.fold_left
+      (fun counts (agent : Masc_domain.agent) ->
+        Agent_name_map.add agent.name 0 counts)
+      Agent_name_map.empty agents
+  in
   List.fold_left
-    (fun acc (task : Masc_domain.task) ->
-      match task.task_status, task_assignee task with
-      | (Claimed _ | InProgress _), Some assignee when assignee = agent_name -> acc + 1
-      | _ -> acc)
-    0 tasks
+    (fun counts (task : Masc_domain.task) ->
+      match task.task_status with
+      | Claimed { assignee; _ } | InProgress { assignee; _ } ->
+        Agent_name_map.update assignee (Option.map Int.succ) counts
+      | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> counts)
+    counts tasks
 
 let worker_state_of_agent
     ~(now_ts : float)
     ~(messages_by_agent : (string, float * Masc_domain.message) Hashtbl.t)
-    ~(tasks : Masc_domain.task list)
+    ~(active_task_count : int)
     (agent : Masc_domain.agent) : worker_context =
   let key = String.lowercase_ascii (String.trim agent.name) in
   let message_opt = Hashtbl.find_opt messages_by_agent key in
@@ -129,7 +141,6 @@ let worker_state_of_agent
     else
       "none"
   in
-  let active_task_count = active_task_count tasks agent.name in
   let recent_output_preview =
     match message_opt with
     | Some (_, message) -> String_util.trim_nonempty (compact_text message.content)
@@ -471,9 +482,15 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
 let build_worker_support_briefs ~(now_ts : float) ~(tasks : Masc_domain.task list)
     ~(agents : Masc_domain.agent list) ~(messages : Masc_domain.message list) :
     worker_context list =
+  match agents with
+  | [] -> []
+  | _ :: _ ->
   let messages_by_agent = last_message_map messages in
+  let counts = active_task_counts ~agents tasks in
   agents
-  |> List.map (worker_state_of_agent ~now_ts ~messages_by_agent ~tasks)
+  |> List.map (fun (agent : Masc_domain.agent) ->
+         let active_task_count = Agent_name_map.find agent.name counts in
+         worker_state_of_agent ~now_ts ~messages_by_agent ~active_task_count agent)
   |> List.filter (fun (row : worker_context) -> string_field "tone" row.json <> "ok")
   |> List.sort (fun (left : worker_context) (right : worker_context) ->
          let by_tone = Int.compare right.tone_rank left.tone_rank in

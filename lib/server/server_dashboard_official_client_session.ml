@@ -117,7 +117,7 @@ let binding_json (binding : Keeper_official_client_session_store.t) =
     ; "runtime_id", `String binding.runtime_id
     ; "phase", phase_json binding.phase
     ; "turn_count", `Int binding.turn_count
-    ; "tool_surface_sha256", `String binding.tool_surface_sha256
+    ; "session_binding_sha256", `String binding.tool_surface_sha256
     ; ( "last_recovery_resolution"
       , Option.fold
           ~none:`Null

@@ -135,7 +135,7 @@ Keeper-facing names use CamelCase; the MCP registration names use `masc_browser_
 | --- | --- | --- |
 | `BrowserTabs` | `masc_browser_tabs` | All three: list tabs and discover the live connection identity |
 | `BrowserRead` | `masc_browser_read` | All three: text, visible elements, scene or regions, or a viewport PNG. Frames, dialogs and downloads: automation |
-| `BrowserInteract` | `masc_browser_interact` | Live and automation: click, fill, or scroll one explicit tab |
+| `BrowserInteract` | `masc_browser_interact` | All three: click, fill, scroll, pointer input or follow a link in one explicit tab. activate_tab: live |
 | `BrowserSession` | `masc_browser_session` | Automation or stagehand: open, close, or check the session |
 | `BrowserGoto` | `masc_browser_goto` | Automation or stagehand: navigate to an HTTP(S) URL |
 | `BrowserAct` | `masc_browser_act` | Automation: open/close tabs, click, fill, press, select, scroll, back, forward, or reload |
@@ -165,6 +165,9 @@ actions; a selector must match exactly one element. For `BrowserInteract`, pass
 `expectedUrl` from the last read to reject intervening navigation. Fill emits page
 events and does not itself press Enter or submit. Read or capture the page after
 an action, including an error, before deciding whether to retry.
+Selector click and fill emit JavaScript events (`isTrusted=false`). If a site
+requires user input, locate the control with `BrowserRead`, use viewport
+coordinates such as `click_at`, then read the page again to verify the effect.
 
 ## TUI reader
 

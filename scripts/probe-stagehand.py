@@ -38,12 +38,25 @@ if match is None:
     sys.exit("the installer printed no extension path")
 extension = match.group(1)
 
-# The button's handler is what the probe reads back after act: the title only
-# changes when the click the model chose reached this page.
+# Each native action changes the title only after the page observes its input.
 FIXTURE = b"""<!doctype html><html><head><meta charset="utf-8"><title>Stagehand fixture</title></head><body>
 <h1>Order form</h1><p>Plan price: 42 USD</p>
-<label for="email">Email</label><input id="email" type="email">
-<button id="submit" onclick="document.body.dataset.clicked='yes';document.title='clicked'">Submit order</button>
+<label for="email">Email</label><input id="email" type="email"
+  oninput="document.title=this.value==='probe@example.test'?'filled':'unexpected fill'">
+<button id="submit" style="position:fixed;left:20vw;top:20vh;width:100px;height:40px;box-sizing:border-box"
+  onclick="document.body.dataset.clicked='yes';document.title='clicked'">Submit order</button>
+<div id="drag-source" draggable="true"
+  style="position:fixed;left:20vw;top:55vh;width:70px;height:40px;background:#789"
+  onpointerdown="document.body.dataset.dragStarted='yes'"
+  ondragstart="event.dataTransfer.setData('text/plain','stagehand-probe')">Drag source</div>
+<div id="drop-target"
+  style="position:fixed;left:45vw;top:55vh;width:100px;height:60px;background:#9b8"
+  ondragover="event.preventDefault()"
+  ondrop="event.preventDefault();if(event.dataTransfer.getData('text/plain')==='stagehand-probe'){document.title='dragged';document.getElementById('drag-result').textContent='Drag completed'}"
+  onpointerup="if(document.body.dataset.dragStarted==='yes'){document.title='dragged';document.getElementById('drag-result').textContent='Drag completed'}">Drop target</div>
+<p id="scroll-result">Scroll not observed</p><p id="drag-result">Drag not observed</p>
+<div style="height:220vh" aria-hidden="true"></div>
+<script>addEventListener('scroll',()=>{if(scrollY>30){document.title='scrolled';document.getElementById('scroll-result').textContent='Scroll confirmed'}})</script>
 </body></html>"""
 
 

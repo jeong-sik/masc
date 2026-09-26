@@ -348,7 +348,9 @@ open Alcotest
    own run pins the total. No headroom. *)
 (* BrowserRead adds 12 rendered bytes for the stagehand lane enum. The parent
    ceiling is 126,230; this sum is checked by the exact-head CI suite. *)
-let ceiling_bytes = 126_242
+(* BrowserInteract adds 8 rendered bytes for its stagehand lane enum and
+   browser tab description. The exact-head CI suite checks this sum. *)
+let ceiling_bytes = 126_250
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

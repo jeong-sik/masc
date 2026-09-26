@@ -79,7 +79,7 @@ def fetch(root, *, repository, repository_id, source, run_id, artifact_id):
         (root / name).write_bytes(subprocess.check_output(
             ["gh", "api", f"repos/{repository}/actions/{suffix}"]))
     with (root / "artifact.zip").open("wb") as output:
-        subprocess.run(["gh", "api", f"repos/{repository}/actions/artifacts/{artifact_id}/zip",
-                        "--allow-escape-sequences"], stdout=output, check=True)
+        subprocess.run(["gh", "api", f"repos/{repository}/actions/artifacts/{artifact_id}/zip"],
+                       stdout=output, check=True)
     return verify(root, source=source, run_id=run_id, artifact_id=artifact_id,
                   repository_id=repository_id)

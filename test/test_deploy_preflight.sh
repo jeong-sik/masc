@@ -85,6 +85,9 @@ cat > "$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe" <<'
 case "$1" in
     build-commit) echo fixture-commit ;;
     durable-filenames) printf 'snapshot=fixture-snapshot.json\nwal=fixture-wal.jsonl\n' ;;
+    resolve-workspace)
+        printf 'workspace=resolved\nroot=%s\nsource=explicit_cli\n' "$3"
+        ;;
     validate-runtime-config)
         echo "runtime.toml refused path=fixture/runtime.toml: fixture refusal"
         exit 1

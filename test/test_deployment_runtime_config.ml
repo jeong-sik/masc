@@ -12,8 +12,9 @@ let write path text = Out_channel.with_open_bin path (fun out -> output_string o
 let absolute path =
   if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path
 
-(* [cwd] is where the helper starts, for a relative BasePath. *)
-let invoke ?cwd exe root argument extra =
+(* [cwd] is where the helper starts, for a relative BasePath. The output files
+   go under [root]. *)
+let run ?cwd exe root args =
   let stdout_path = Filename.concat root "stdout" in
   let stderr_path = Filename.concat root "stderr" in
   let output = Unix.openfile stdout_path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600 in
@@ -24,10 +25,12 @@ let invoke ?cwd exe root argument extra =
     ~finally:(fun () -> Sys.chdir previous_cwd; Unix.close output; Unix.close errors)
     (fun () ->
       Option.iter Sys.chdir cwd;
-      let argv = exe :: "validate-runtime-config" :: "--base-path" :: argument :: extra in
-      let pid = Unix.create_process exe (Array.of_list argv) Unix.stdin output errors in
+      let pid = Unix.create_process exe (Array.of_list (exe :: args)) Unix.stdin output errors in
       snd (Unix.waitpid [] pid)) in
   status, read stdout_path ^ read stderr_path
+
+let invoke ?cwd exe root argument extra =
+  run ?cwd exe root ("validate-runtime-config" :: "--base-path" :: argument :: extra)
 
 let run_helper exe root extra = invoke exe root root extra
 
@@ -205,6 +208,30 @@ let test_missing_config_dir_needs_empty_workspace exe () =
       in
       reports output "empty_workspace=allowed"))
 
+(* install-local-build checks the workspace masc itself would use when none is
+   named, and asks the helper which one that is, so the order lives in
+   Workspace_root alone. *)
+let test_resolve_workspace_follows_masc exe () = with_workspace (fun root ->
+  let workspace = Filename.concat root "recorded workspace" in
+  Fs_compat.mkdir_p (Filename.concat workspace ".masc/config");
+  let canonical = Unix.realpath workspace in
+  let xdg = Filename.concat root "xdg" in
+  Fs_compat.mkdir_p (Filename.concat xdg "masc");
+  let resolve extra = run ~cwd:root exe root ("resolve-workspace" :: extra) in
+  with_env [ "MASC_BASE_PATH", None; "XDG_CONFIG_HOME", Some xdg ] (fun () ->
+    let output = passes "no workspace is an answer" (resolve []) in
+    reports output "workspace=none";
+    write (Filename.concat xdg "masc/default-base-path") (canonical ^ "\n");
+    let output = passes "the recorded default" (resolve []) in
+    reports output "workspace=resolved";
+    reports output ("root=" ^ canonical);
+    reports output "source=persisted_default";
+    let output = passes "a named workspace" (resolve [ "--base-path"; workspace ]) in
+    reports output "source=explicit_cli";
+    with_env [ "MASC_BASE_PATH", Some workspace ] (fun () ->
+      let output = passes "MASC_BASE_PATH" (resolve []) in
+      reports output "source=explicit_env")))
+
 let () =
   let exe = Sys.getenv "MASC_TEST_DEPLOYMENT_PREFLIGHT_EXE" in
   run "deployment runtime config"
@@ -223,5 +250,7 @@ let () =
         (test_absent_without_seeding_needs_empty_workspace exe);
       test_case "empty bootstrap follows boot's config-root decision" `Quick
         (test_empty_bootstrap_follows_boot exe);
+      test_case "resolve-workspace follows masc's order" `Quick
+        (test_resolve_workspace_follows_masc exe);
       test_case "a missing MASC_CONFIG_DIR needs an empty workspace" `Quick
         (test_missing_config_dir_needs_empty_workspace exe)]]

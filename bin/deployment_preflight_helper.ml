@@ -934,6 +934,37 @@ let validate_runtime_config_cmd =
          $ allow_empty_workspace))
 ;;
 
+(* The workspace masc would run against, found the way every masc command
+   finds it ([Workspace_root]: --base-path, MASC_BASE_PATH, a current directory
+   holding .masc/config, then the recorded default). A local install asks this
+   before it checks runtime.toml, so the shell does not restate the order.
+   Finding none is an answer, not a failure: [workspace=none], exit 0. *)
+let resolve_workspace requested =
+  match Workspace_root.resolve_current ~flag:requested with
+  | Ok workspace ->
+    Printf.printf
+      "workspace=resolved\nroot=%s\nsource=%s\n%!"
+      workspace.Workspace_root.root
+      (Workspace_root.source_label workspace.Workspace_root.source)
+  | Error (Workspace_root.No_workspace _ | Workspace_root.Unanchored _) ->
+    Printf.printf "workspace=none\n%!"
+;;
+
+let requested_base_path =
+  let doc =
+    "Workspace named on the command line. Without it, the one masc itself \
+     would use."
+  in
+  Arg.(value & opt (some string) None & info [ "base-path" ] ~docv:"PATH" ~doc)
+;;
+
+let resolve_workspace_cmd =
+  let doc = "print the workspace masc would run against and where it came from" in
+  Cmd.v
+    (Cmd.info "resolve-workspace" ~doc)
+    Term.(const resolve_workspace $ requested_base_path)
+;;
+
 (* A hard-cut field leaves rows no current decoder can read. [replay] refuses
    to compact while such a row is on disk and the row only leaves through
    compaction, so the store keeps it and its retention bound stops applying —
@@ -1143,5 +1174,6 @@ let () =
           ; cut_run_registries_cmd
           ; validate_stores_cmd
           ; validate_runtime_config_cmd
+          ; resolve_workspace_cmd
           ]))
 ;;

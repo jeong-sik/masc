@@ -19,19 +19,54 @@ def executable(path, text):
     return path
 
 
-# Stands in for the new build's deployment preflight helper: the gate asks it
-# for its identity and filenames, then for the runtime.toml verdict.
-def preflight_helper(build, verdict_exit=0):
+# Stands in for the new build's deployment preflight helper and records every
+# call in helper-calls beside it. install-local-build asks it which workspace
+# masc would use; the gate asks for its identity and filenames, then for the
+# runtime.toml verdict. [unnamed_workspace] is what resolve-workspace answers
+# without --base-path: a (root, source) pair, or None for no workspace. An
+# [old] helper predates the check and knows neither subcommand.
+def preflight_helper(build, verdict_exit=0, unnamed_workspace=None, old=False):
     path = build / "deployment_preflight_helper.exe"
+    if unnamed_workspace is None:
+        unnamed = "printf 'workspace=none\\n'"
+    else:
+        root, source = unnamed_workspace
+        unnamed = f"printf 'workspace=resolved\\nroot=%s\\nsource=%s\\n' '{root}' '{source}'"
+    resolve = ("" if old else
+               "  resolve-workspace)\n"
+               "    if [ \"$2\" = --base-path ]; then\n"
+               "      printf 'workspace=resolved\\nroot=%s\\nsource=explicit_cli\\n' \"$3\"\n"
+               f"    else {unnamed}; fi ;;\n")
+    validate = ("" if old else
+                f"  validate-runtime-config) echo 'runtime.toml fixture verdict'; exit {verdict_exit} ;;\n")
     path.write_text("#!/bin/sh\n"
+                    "printf '%s\\n' \"$*\" >> \"$(dirname \"$0\")/helper-calls\"\n"
                     "case \"$1\" in\n"
                     "  build-commit) echo fixture-commit ;;\n"
                     "  durable-filenames) printf 'snapshot=fixture-snapshot.json\\nwal=fixture-wal.jsonl\\n' ;;\n"
-                    f"  validate-runtime-config) echo 'runtime.toml fixture verdict'; exit {verdict_exit} ;;\n"
+                    + resolve + validate +
                     "  *) echo \"unexpected helper call: $*\" >&2; exit 2 ;;\n"
                     "esac\n")
     path.chmod(0o755)
     return path
+
+
+def helper_calls(build):
+    calls = build / "helper-calls"
+    return calls.read_text().splitlines() if calls.exists() else []
+
+
+def binaries(build):
+    for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe"):
+        executable(build / exe, exe)
+
+
+# Neither the operator's MASC_BASE_PATH nor their recorded default may reach
+# a case that means to name no workspace.
+def unnamed_env(root):
+    env = {key: value for key, value in os.environ.items() if key != "MASC_BASE_PATH"}
+    env["XDG_CONFIG_HOME"] = str(root / "xdg")
+    return env
 
 
 def workspace(root):
@@ -119,22 +154,97 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertIn("nothing was stopped or installed", result.stderr)
             self.assertFalse(prefix.exists(), "a build that refused the live runtime.toml was installed")
 
-    def test_no_workspace_to_check_installs_nothing(self):
+    # Without --base-path the check runs on the workspace masc itself would use,
+    # as the helper resolves it, and the install goes ahead once it passes.
+    def test_an_unnamed_workspace_is_resolved_like_masc_and_checked(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             build = root / "build"
             build.mkdir()
-            for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe"):
-                executable(build / exe, exe)
-            preflight_helper(build)
+            binaries(build)
+            recorded = workspace(root)
+            preflight_helper(build, unnamed_workspace=(recorded, "persisted_default"))
             prefix = root / "prefix"
-            env = {key: value for key, value in os.environ.items() if key != "MASC_BASE_PATH"}
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
                                      "--prefix", str(prefix), "--manifest-dir", str(root / "absent")],
-                                    env=env, capture_output=True, text=True)
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("--base-path DIR or MASC_BASE_PATH", result.stderr)
-            self.assertFalse(prefix.exists())
+                                    env=unnamed_env(root), cwd=root, check=True, capture_output=True, text=True)
+            self.assertIn(f"checking runtime.toml of {recorded} (workspace from persisted_default)", result.stdout)
+            self.assertIn(f"validate-runtime-config --base-path {recorded}", helper_calls(build))
+            self.assertTrue((prefix / "masc").is_file())
+
+    # #39431 makes these two refusals in the next version. Until then the
+    # install says why it did not check, once, and installs as main does.
+    def test_no_workspace_found_warns_skips_the_check_and_installs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            preflight_helper(build, verdict_exit=1)
+            prefix = root / "prefix"
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent")],
+                                    env=unnamed_env(root), cwd=root, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            warnings = [line for line in result.stderr.splitlines() if "WARN" in line]
+            self.assertEqual(len(warnings), 1, result.stderr)
+            self.assertIn("--base-path DIR or set MASC_BASE_PATH", warnings[0])
+            self.assertIn("issues/39431", warnings[0])
+            self.assertFalse(any(call.startswith("validate-runtime-config") for call in helper_calls(build)))
+            self.assertTrue((prefix / "masc").is_file())
+
+    def test_skip_build_without_the_helper_warns_skips_the_check_and_installs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            prefix = root / "prefix"
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--base-path", str(workspace(root))],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            warnings = [line for line in result.stderr.splitlines() if "WARN" in line]
+            self.assertEqual(len(warnings), 1, result.stderr)
+            self.assertIn(str(build / "deployment_preflight_helper.exe"), warnings[0])
+            self.assertIn("issues/39431", warnings[0])
+            self.assertTrue((prefix / "masc").is_file())
+
+    def test_skip_build_with_a_helper_older_than_the_check_warns_and_installs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            preflight_helper(build, old=True)
+            prefix = root / "prefix"
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--base-path", str(workspace(root))],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            warnings = [line for line in result.stderr.splitlines() if "WARN" in line]
+            self.assertEqual(len(warnings), 1, result.stderr)
+            self.assertIn("predates the check", warnings[0])
+            self.assertTrue((prefix / "masc").is_file())
+
+    # A named workspace that does not exist yet has no runtime.toml to judge;
+    # the server creates it on its first start.
+    def test_a_named_workspace_not_created_yet_is_reported_and_installed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            preflight_helper(build, verdict_exit=1)
+            prefix = root / "prefix"
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--base-path", str(root / "not yet")],
+                                    check=True, capture_output=True, text=True)
+            self.assertIn("does not exist yet", result.stdout)
+            self.assertTrue((prefix / "masc").is_file())
 
     def test_unknown_option_is_refused_before_anything_is_installed(self):
         with tempfile.TemporaryDirectory() as temporary:

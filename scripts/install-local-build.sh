@@ -14,7 +14,9 @@
 #
 # Before anything is replaced, the new build judges the runtime.toml of the
 # workspace its server runs on (#39311). A refusal leaves every binary and
-# process as it was.
+# process as it was. Until #39431 makes the check required, an install that
+# cannot run it (no workspace found, no helper in --build-dir) says so on one
+# WARN line and installs as before.
 #
 # Usage: scripts/install-local-build.sh [--prefix DIR] [--manifest-dir DIR]
 #                                       [--skip-build] [--build-dir DIR] [--base-path DIR]
@@ -24,14 +26,15 @@
 #   --build-dir     directory holding main_eio.exe, masc_tui.exe, masc_browser_host.exe
 #                   and deployment_preflight_helper.exe (default <repo>/_build/default/bin)
 #   --base-path     workspace whose runtime.toml the new build must accept
-#                   (default $MASC_BASE_PATH)
+#                   (default: the one masc would use -- MASC_BASE_PATH, a current
+#                   directory holding .masc/config, then the recorded default)
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 prefix="$HOME/.local/bin"
 build_dir="$repo/_build/default/bin"
 skip_build=false
-base_path="${MASC_BASE_PATH:-}"
+base_path=""
 case "$(uname -s)" in
   Darwin) manifest_dir="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts" ;;
   Linux) manifest_dir="$HOME/.mozilla/native-messaging-hosts" ;;
@@ -45,7 +48,7 @@ while [ $# -gt 0 ]; do
     --build-dir) build_dir=${2:?--build-dir needs a directory}; shift 2 ;;
     --skip-build) skip_build=true; shift ;;
     --base-path) base_path=${2:?--base-path needs a directory}; shift 2 ;;
-    -h|--help) sed -n '19,27p' "$0"; exit 0 ;;
+    -h|--help) sed -n '21,30p' "$0"; exit 0 ;;
     *) echo "install-local-build: unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -64,15 +67,48 @@ if [ "$skip_build" = false ]; then
 fi
 
 # Nothing is replaced or restarted yet, so the running server's editor can
-# still change a value this build refuses.
-if [ -z "$base_path" ]; then
-  echo "install-local-build: name the workspace whose runtime.toml this build must accept (--base-path DIR or MASC_BASE_PATH)" >&2
-  exit 2
+# still change a value this build refuses. The helper names the workspace the
+# way masc does; this script only reads its answer.
+preflight_helper="$build_dir/deployment_preflight_helper.exe"
+required_from="required from the next version: https://github.com/jeong-sik/masc/issues/39431"
+if [ ! -x "$preflight_helper" ]; then
+  echo "install-local-build: WARN runtime.toml not checked: $preflight_helper is missing; build it or drop --skip-build ($required_from)" >&2
+else
+  resolve_args=(resolve-workspace)
+  if [ -n "$base_path" ]; then
+    resolve_args+=(--base-path "$base_path")
+  fi
+  resolution=$("$preflight_helper" "${resolve_args[@]}" 2>/dev/null) || resolution=""
+  workspace_state=""
+  workspace_root=""
+  workspace_source=""
+  while IFS='=' read -r key value; do
+    case "$key" in
+      workspace) workspace_state=$value ;;
+      root) workspace_root=$value ;;
+      source) workspace_source=$value ;;
+    esac
+  done <<< "$resolution"
+  case "$workspace_state" in
+    resolved)
+      if [ -d "$workspace_root" ]; then
+        echo "install-local-build: checking runtime.toml of $workspace_root (workspace from $workspace_source)"
+        MASC_DEPLOYMENT_PREFLIGHT_HELPER="$preflight_helper" \
+          "$repo/scripts/check-runtime-deployment-preflight.sh" \
+          --base-path "$workspace_root" \
+          --runtime-config-only
+      else
+        echo "install-local-build: runtime.toml not checked: workspace $workspace_root (from $workspace_source) does not exist yet"
+      fi
+      ;;
+    none)
+      echo "install-local-build: WARN runtime.toml not checked: no workspace found; pass --base-path DIR or set MASC_BASE_PATH ($required_from)" >&2
+      ;;
+    *)
+      echo "install-local-build: WARN runtime.toml not checked: $preflight_helper predates the check (no resolve-workspace); build it or drop --skip-build ($required_from)" >&2
+      ;;
+  esac
 fi
-MASC_DEPLOYMENT_PREFLIGHT_HELPER="$build_dir/deployment_preflight_helper.exe" \
-  "$repo/scripts/check-runtime-deployment-preflight.sh" \
-  --base-path "$base_path" \
-  --runtime-config-only
 
 mkdir -p "$prefix"
 install -m 755 "$build_dir/main_eio.exe" "$prefix/masc"

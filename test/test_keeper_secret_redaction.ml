@@ -427,6 +427,27 @@ let test_stream_emits_bounded_unterminated_output () =
   Alcotest.(check string) "streaming preserves ordinary bytes" input
     (emitted ^ trailing)
 
+(* A 9,000-byte line of Hangul crosses the first bounded flush at byte 8,192;
+   the old cut kept 4,096 bytes, the middle of a syllable. Each emitted piece
+   reaches its reader as a separate string, so each one must decode. *)
+let test_stream_bounded_flush_keeps_characters_whole () =
+  let hangul = String.concat "" (List.init 3_000 (fun _ -> "\xea\xb0\x80")) in
+  let state = R.create_stream_state R.empty in
+  let pieces = List.init 3 (fun _ -> R.redact_stream_chunk state hangul) in
+  let trailing = R.redact_stream_finish state in
+  Alcotest.(check bool) "the line streams before finish" true
+    (List.exists (fun piece -> String.length piece > 0) pieces);
+  List.iteri
+    (fun index piece ->
+       Alcotest.(check bool)
+         (Printf.sprintf "piece %d decodes as UTF-8" index)
+         true
+         (String_util.is_valid_utf8 piece))
+    (pieces @ [ trailing ]);
+  Alcotest.(check string) "no byte is lost across the pieces"
+    (String.concat "" [ hangul; hangul; hangul ])
+    (String.concat "" pieces ^ trailing)
+
 let test_stream_emits_carriage_return_progress () =
   let state = R.create_stream_state R.empty in
   let emitted = R.redact_stream_chunk state "step 1\rstep 2\rpartial" in
@@ -472,6 +493,168 @@ let test_stream_bounds_overlapping_repeated_secret () =
   not_contains "repeated secret bytes do not escape" (emitted ^ trailing) secret;
   contains "repeated secret produces markers" emitted "[REDACTED]"
 
+(* [Keeper_stream_text_redaction] over provider stream events. *)
+module Stream_text = Masc.Keeper_stream_text_redaction
+
+let delta index delta = Agent_core.Types.ContentBlockDelta { index; delta }
+let text_delta index text = delta index (Agent_core.Types.TextDelta text)
+
+(* What a reader of one channel receives: the forwarded deltas, in order. *)
+let forwarded select events =
+  events
+  |> List.filter_map (function
+    | Agent_core.Types.ContentBlockDelta { delta; _ } -> select delta
+    | _ -> None)
+  |> String.concat ""
+
+let forwarded_text =
+  forwarded (function Agent_core.Types.TextDelta text -> Some text | _ -> None)
+
+let forwarded_thinking =
+  forwarded (function Agent_core.Types.ThinkingDelta text -> Some text | _ -> None)
+
+let forwarded_tool_arguments =
+  forwarded (function Agent_core.Types.InputJsonDelta text -> Some text | _ -> None)
+
+let with_exact_secret ~keeper_name secret f =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let root = secret_root_default ~base ~keeper_name in
+  write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") (secret ^ "\n");
+  f (R.snapshot ~base_path:base ~keeper_name)
+
+let feed stream events = List.concat_map (Stream_text.on_event stream) events
+
+(* Two Codex [item/agentMessage/delta] chunks, each holding half of a secret.
+   Redacting each delta on its own saw no exact value in either half. *)
+let test_stream_text_redacts_an_exact_secret_split_across_deltas () =
+  let secret = "split-across-two-deltas-0123" in
+  with_exact_secret ~keeper_name:"stream-text-exact" secret @@ fun redaction ->
+  let first = "use split-across-" and second = "two-deltas-0123 for the push" in
+  Alcotest.(check string) "the first half alone passes plain redaction" first
+    (R.redact_text redaction first);
+  Alcotest.(check string) "the second half alone passes plain redaction" second
+    (R.redact_text redaction second);
+  let events =
+    feed (Stream_text.create redaction)
+      [ text_delta 0 first
+      ; text_delta 0 second
+      ; Agent_core.Types.ContentBlockStop { index = 0 }
+      ]
+  in
+  Alcotest.(check string) "the reader receives the text with the secret replaced"
+    "use [REDACTED] for the push" (forwarded_text events);
+  not_contains "no part of the secret is forwarded" (forwarded_text events)
+    "two-deltas-0123";
+  match List.rev events with
+  | Agent_core.Types.ContentBlockStop { index = 0 } :: _ -> ()
+  | _ -> Alcotest.fail "the block stop follows the text it released"
+
+(* A pattern split before its body: [ghp_] alone has no body to match and the
+   body alone has no prefix. *)
+let test_stream_text_redacts_a_pattern_split_across_deltas () =
+  let first = "use ghp_" and second = "abcDEF123456789xyz now\n" in
+  Alcotest.(check string) "the body alone passes plain redaction" second
+    (R.redact_text R.empty second);
+  let events =
+    feed (Stream_text.create R.empty) [ text_delta 0 first; text_delta 0 second ]
+  in
+  Alcotest.(check string) "the finished line arrives redacted" "use [REDACTED] now\n"
+    (forwarded_text events)
+
+let test_stream_text_redacts_split_thinking_and_tool_arguments () =
+  let secret = "reasoning-split-secret-7788" in
+  with_exact_secret ~keeper_name:"stream-text-channels" secret @@ fun redaction ->
+  let events =
+    feed (Stream_text.create redaction)
+      [ delta 0 (Agent_core.Types.ThinkingDelta "I will pass reasoning-split-")
+      ; delta 0 (Agent_core.Types.ThinkingDelta "secret-7788 to the command")
+      ; Agent_core.Types.ContentBlockStop { index = 0 }
+      ; Agent_core.Types.ContentBlockStart
+          { index = 1
+          ; content_type = "tool_use"
+          ; tool_id = Some "call-1"
+          ; tool_name = Some "Execute"
+          }
+      ; delta 1 (Agent_core.Types.InputJsonDelta "{\"command\":\"echo reasoning-split-")
+      ; delta 1 (Agent_core.Types.InputJsonDelta "secret-7788\"}")
+      ; Agent_core.Types.ContentBlockStop { index = 1 }
+      ]
+  in
+  Alcotest.(check string) "thinking is redacted across its deltas"
+    "I will pass [REDACTED] to the command" (forwarded_thinking events);
+  Alcotest.(check string) "tool arguments are redacted across their deltas"
+    "{\"command\":\"echo [REDACTED]\"}" (forwarded_tool_arguments events)
+
+(* Provider chunks can cut a Hangul syllable in two. Text with no secret comes
+   out byte for byte, a line at a time, and the unfinished last line at the
+   stop reason. *)
+let test_stream_text_passes_korean_through_whole () =
+  with_exact_secret ~keeper_name:"stream-text-korean" "unrelated-secret-value-5550"
+  @@ fun redaction ->
+  let first_line = "안녕하세요, 키퍼입니다.\n" in
+  let korean = first_line ^ "비밀이 없는 문장은 그대로예요" in
+  let cut_in_a_syllable = 7 in
+  let second_cut = String.length korean - 5 in
+  let events =
+    feed (Stream_text.create redaction)
+      [ text_delta 0 (String.sub korean 0 cut_in_a_syllable)
+      ; text_delta 0 (String.sub korean cut_in_a_syllable (second_cut - cut_in_a_syllable))
+      ; text_delta 0 (String.sub korean second_cut (String.length korean - second_cut))
+      ; Agent_core.Types.MessageDelta
+          { stop_reason = Some Agent_core.Types.EndTurn; usage = None }
+      ]
+  in
+  Alcotest.(check string) "the text arrives unchanged and complete" korean
+    (forwarded_text events);
+  match events with
+  | Agent_core.Types.ContentBlockDelta { delta = Agent_core.Types.TextDelta line; _ } :: _ ->
+    Alcotest.(check string) "the finished first line is released first" first_line line
+  | _ -> Alcotest.fail "no text delta was forwarded first"
+
+let test_stream_text_releases_held_text_in_order () =
+  let stream = Stream_text.create R.empty in
+  Alcotest.(check int) "an unfinished line is held" 0
+    (List.length (Stream_text.on_event stream (text_delta 0 "before the tool")));
+  (match Stream_text.on_event stream Agent_core.Types.Ping with
+   | [ Agent_core.Types.Ping ] -> ()
+   | _ -> Alcotest.fail "a ping passes without releasing the line");
+  (match
+     Stream_text.on_event stream
+       (Agent_core.Types.ContentBlockStart
+          { index = 1; content_type = "tool_use"; tool_id = Some "call-1"; tool_name = Some "Execute" })
+   with
+   | [ Agent_core.Types.ContentBlockDelta
+         { index = 0; delta = Agent_core.Types.TextDelta "before the tool" }
+     ; Agent_core.Types.ContentBlockStart { index = 1; _ }
+     ] -> ()
+   | _ -> Alcotest.fail "another block's start releases the held text first");
+  let (_ : Agent_core.Types.sse_event list) =
+    Stream_text.on_event stream (text_delta 0 "cut off")
+  in
+  (match Stream_text.flush stream with
+   | [ Agent_core.Types.ContentBlockDelta
+         { index = 0; delta = Agent_core.Types.TextDelta "cut off" }
+     ] -> ()
+   | _ -> Alcotest.fail "flush releases what a stream without a stop still held");
+  Alcotest.(check int) "nothing is held after a flush" 0
+    (List.length (Stream_text.flush stream))
+
+let test_stream_text_releases_under_the_scope_it_arrived_in () =
+  let stream = Stream_text.Scoped.create R.empty in
+  Alcotest.(check int) "an unfinished line is held" 0
+    (List.length (Stream_text.Scoped.on_event stream ~stream_scope:1 (text_delta 0 "scope one")));
+  match
+    Stream_text.Scoped.on_event stream ~stream_scope:2
+      (Agent_core.Types.MessageStart { id = "m2"; model = "model"; usage = None })
+  with
+  | [ (1, Agent_core.Types.ContentBlockDelta
+          { index = 0; delta = Agent_core.Types.TextDelta "scope one" })
+    ; (2, Agent_core.Types.MessageStart _)
+    ] -> ()
+  | _ -> Alcotest.fail "held text is released under its own scope before the next one"
+
 let () =
   Alcotest.run
     "keeper secret redaction"
@@ -510,11 +693,25 @@ let () =
             `Quick test_identity_key_is_visible_with_the_switch_off;
           Alcotest.test_case "bounds unterminated stream buffering" `Quick
             test_stream_emits_bounded_unterminated_output;
+          Alcotest.test_case "bounded flush keeps characters whole" `Quick
+            test_stream_bounded_flush_keeps_characters_whole;
           Alcotest.test_case "streams carriage-return progress" `Quick
             test_stream_emits_carriage_return_progress;
           Alcotest.test_case "redacts a secret crossing a bounded flush" `Quick
             test_stream_redacts_secret_crossing_bounded_flush;
           Alcotest.test_case "bounds an overlapping repeated secret" `Quick
             test_stream_bounds_overlapping_repeated_secret;
+          Alcotest.test_case "stream text: exact secret split across deltas" `Quick
+            test_stream_text_redacts_an_exact_secret_split_across_deltas;
+          Alcotest.test_case "stream text: pattern split across deltas" `Quick
+            test_stream_text_redacts_a_pattern_split_across_deltas;
+          Alcotest.test_case "stream text: thinking and tool arguments" `Quick
+            test_stream_text_redacts_split_thinking_and_tool_arguments;
+          Alcotest.test_case "stream text: Korean passes through whole" `Quick
+            test_stream_text_passes_korean_through_whole;
+          Alcotest.test_case "stream text: held text is released in order" `Quick
+            test_stream_text_releases_held_text_in_order;
+          Alcotest.test_case "stream text: released under its own scope" `Quick
+            test_stream_text_releases_under_the_scope_it_arrived_in;
         ] )
     ]

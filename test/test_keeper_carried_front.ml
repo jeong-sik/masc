@@ -39,6 +39,7 @@ let record
   ; selected_model = None
   ; finish_reason = finish
   ; context_window = None
+  ; provider_context_window = None
   ; price_input_per_million = None
   ; price_output_per_million = None
   ; request_latency_ms = None
@@ -53,7 +54,7 @@ let record
            { Turn_record.transmitted_atoms
            ; total_atoms
            ; measurement = Turn_record.Wire_shape
-           ; front_atom_digest = recorded_digest (total_atoms - transmitted_atoms)
+           ; front_atom_digest = Some (recorded_digest (total_atoms - transmitted_atoms))
            })
         window
   ; response_observed_model_input =
@@ -66,7 +67,7 @@ let record
                ; total_atoms
                ; measurement = Turn_record.Wire_shape
                ; front_atom_digest =
-                   recorded_digest (total_atoms - transmitted_atoms)
+                   Some (recorded_digest (total_atoms - transmitted_atoms))
                }
            }
        | true, None | false, _ -> None)
@@ -189,7 +190,7 @@ let test_a_later_unanswered_attempt_does_not_replace_the_same_turns_response () 
               { transmitted_atoms = 30
               ; total_atoms = 100
               ; measurement = Wire_shape
-              ; front_atom_digest = recorded_digest 70
+              ; front_atom_digest = Some (recorded_digest 70)
               }
           }
     }
@@ -377,7 +378,7 @@ let test_a_removed_runtimes_response_names_the_current_history () =
         Turn_record.response_observed_model_input =
           Some
             { observation with
-              window = { observation.window with front_atom_digest = front_digest }
+              window = { observation.window with front_atom_digest = Some front_digest }
             }
       }
   in
@@ -488,7 +489,7 @@ let test_read_seed_keeps_a_response_beyond_unobserved_rows () =
     { transmitted_atoms = total_atoms - 8
     ; total_atoms
     ; measurement = Turn_record.Wire_shape
-    ; front_atom_digest = (seed_at persisted 8).front_digest
+    ; front_atom_digest = Some ((seed_at persisted 8).front_digest)
     }
   in
   let observed =
@@ -517,7 +518,10 @@ let test_read_seed_keeps_a_response_beyond_unobserved_rows () =
   check (option int) "the retained response supplies front 8" (Some 8)
     (Option.map (fun (front : Front.seed) -> front.first_atom) read.Front.seed);
   let front = Option.get read.Front.seed in
-  check string "the front names the same persisted atom" window.front_atom_digest
+  check string "the front names the same persisted atom"
+    (match window.front_atom_digest with
+     | Some digest -> digest
+     | None -> fail "the fixture window names its front")
     front.front_digest;
   check source "the observed turn supplies the seed" (Front.Turn_record { turn = 1 })
     front.source;
@@ -551,7 +555,7 @@ let test_a_restarted_turn_starts_at_the_recorded_accepted_start () =
     { transmitted_atoms = total_atoms - 8
     ; total_atoms
     ; measurement = Turn_record.Wire_shape
-    ; front_atom_digest = (seed_at persisted 8).front_digest
+    ; front_atom_digest = Some ((seed_at persisted 8).front_digest)
     }
   in
   Dated_jsonl.append store
@@ -690,6 +694,46 @@ let test_read_seed_stops_at_previous_trace () =
   check bool "the prior trace does not supply a seed" true (Option.is_none read.Front.seed);
   check bool "rows older than the trace boundary are not decoded" true
     (Option.is_none read.Front.unreadable)
+;;
+
+(* #39013: a floor turn is an answer, not silence. The last response on the
+   trace carried none of its history — the ceiling reached its zero-prior-
+   history floor — so the seed read must stop there and hand back that fact,
+   instead of walking past it to an older front the floor had just made
+   untenable. The floor names no front, so [for_history] drops it the usual
+   way and the request starts over; resurrecting turn 1's front would resend
+   every atom the floor had skipped. *)
+let test_read_seed_stops_at_a_floor_response () =
+  with_turn_record_store @@ fun config store ->
+  Dated_jsonl.append store
+    (Turn_record.to_json (record ~turn:1 (Some (30, 100))));
+  let strip window = { window with Turn_record.front_atom_digest = None } in
+  let base = record ~turn:2 (Some (0, 100)) in
+  let floor =
+    { base with
+      Turn_record.model_input_window = Option.map strip base.Turn_record.model_input_window;
+      Turn_record.response_observed_model_input =
+        Option.map
+          (fun observed ->
+             { observed with Turn_record.window = strip observed.Turn_record.window })
+          base.Turn_record.response_observed_model_input
+    }
+  in
+  Dated_jsonl.append store (Turn_record.to_json floor);
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  check bool "every visited record decodes" true (Option.is_none read.Front.unreadable);
+  let front =
+    match read.Front.seed with
+    | Some front -> front
+    | None -> Alcotest.fail "the floor response is itself an answer"
+  in
+  check int "the newest observation wins: the floor's own boundary" 100
+    front.Front.first_atom;
+  check source "named by the floor turn" (Front.Turn_record { turn = 2 })
+    front.Front.source;
+  check kept_or_dropped "a front no atom names starts over as with no seed"
+    (Error Front.Front_atom_missing)
+    (Front.for_history ~digest_at:(Window.atom_opening_digest (exchanges 5)) front)
 ;;
 
 let test_read_seed_keeps_boundary_errors_out_of_the_record_count () =

@@ -326,6 +326,22 @@ val retry_blocked_auto_judge :
     mode, authenticated workspace, non-blank operator identity, and exact
     approval row identity must all match. No cadence or restart hook calls it. *)
 
+(** Why one owner's Auto Judge drain stopped without starting more work. *)
+type auto_judge_drain_blocker =
+  | Drain_owner_at_capacity of string list
+      (** Active worker approval ids holding every owner slot. *)
+  | Drain_entry_changed of string
+  | Drain_entry_missing of string
+  | Drain_start_failed of string * string  (** approval id, reason *)
+  | Drain_mode_manual
+  | Drain_mode_always_allow
+
+(** One drained owner and the typed blocker its drain reported. *)
+type auto_judge_owner_blocker =
+  { keeper_name : string
+  ; blocker : auto_judge_drain_blocker
+  }
+
 type auto_judge_owner_failure =
   { keeper_name : string
   ; approval_id : string option
@@ -335,12 +351,17 @@ type auto_judge_owner_failure =
 type auto_judge_workspace_drain_report =
   { started_ids : string list
   ; failures : auto_judge_owner_failure list
+  ; blockers : auto_judge_owner_blocker list
   }
 
 type operator_recovery_report =
   { started_ids : string list
   ; queued : int
   ; failures : auto_judge_owner_failure list
+  ; blockers : auto_judge_owner_blocker list
+      (** Per-owner typed reason the drain stopped short, so an operator
+          recovery that starts nothing still says which owner is blocked
+          and why. *)
   }
 
 (** After an explicit operator selection of Auto Judge, fill the bounded worker
@@ -361,6 +382,13 @@ val authorization_metadata
   :  ?producer_metadata:Yojson.Safe.t
   -> authorization
   -> Yojson.Safe.t
+
+(** Log an already committed authorization whose tool then failed. A failed
+    result's metadata is rendered into the model-visible failure text, so the
+    Gate decision and its audit receipts are kept in the log instead of being
+    attached to that result. Failed audit appends are additionally published
+    at decision time ([allow]). *)
+val observe_authorization_of_failed_result : authorization -> unit
 
 module For_testing : sig
   type exact_completion =
@@ -396,6 +424,7 @@ module For_testing : sig
   type owner_drain_outcome =
     { started_ids : string list
     ; failures : (string * string) list
+    ; blocker : auto_judge_drain_blocker option
     }
 
   val drain_auto_judge_owners_with
@@ -406,7 +435,8 @@ module For_testing : sig
     -> (string * string) list
     -> auto_judge_workspace_drain_report
   (** Drain every supplied workspace/Keeper owner even when an earlier owner
-      fails, preserving both successful starts and typed owner-local failures. *)
+      fails, preserving successful starts, typed owner-local failures, and
+      each owner's typed drain blocker. *)
 
   type hitl_worker_spawner =
     sw:Eio.Switch.t ->

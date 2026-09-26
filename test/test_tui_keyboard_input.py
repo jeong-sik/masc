@@ -3613,17 +3613,16 @@ def assert_row_budgeted_surfaces(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    # At 16 rows the Attention panel holds three of the six items. The
-    # smallest surface the TUI draws is 15 rows, where it drops the composer
-    # and keeps the same three, so three is the tightest this panel gets. The
-    # budget checked here is that the panel stops where its rows stop: the
-    # third item is the last one drawn and the fourth is not. GOALS is served
-    # after the panel and the one held task row, so at this height it gets no
-    # row (4 spare rows: 3 attention + 1 task) and the count is unchanged.
-    for expected in (b"attention-1", b"attention-3", b"5 todo", b"q:quit"):
+    # At 16 rows the Overview has four rows to share, and each block is paid
+    # the rows it cannot give up before any block grows: the Attention
+    # panel's first item, the GOALS headline and its divider, and the one
+    # Tasks row left, which draws the backlog line. The budget checked here
+    # is that the panel stops where its rows stop: the first item is the
+    # last one drawn and the second is not.
+    for expected in (b"attention-1", b"GOALS", b"5 todo", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
-    if b"attention-4" in overview:
+    if b"attention-2" in overview:
         raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
 
     resize_and_wait(
@@ -8459,7 +8458,12 @@ def chat_clarity_http_fixtures() -> HttpFixtures:
     )
     fixtures["/api/v1/dashboard/gate/keeper-settings"] = (
         200,
-        {"modes": [], "judges": []},
+        {
+            "modes": [],
+            "modes_state": {"state": "ready"},
+            "exact_lanes": [],
+            "exact_lanes_state": {"state": "ready"},
+        },
     )
     fixtures["/api/v1/keepers/tool-approval-mode"] = (200, {"overrides": []})
     fixtures["/api/v1/keepers/alpha/tool-calls?limit=100"] = (
@@ -13644,15 +13648,25 @@ def fusion_list_detail_interaction(
         # terminal gives this footer 144 cells. Status yields before hints,
         # then copy/search yield before pinned exits. A wider frame must still
         # show those controls; check both states on the actual footer row.
+        # [ / ] steps the open run and the dispatcher answers it only with a
+        # detail open, so the run list does not offer it -- the open run's own
+        # footer does.
         footer_head = (
-            b"j/k:move  PgUp/PgDn:page  [ / ]:previous / next  "
+            b"j/k:move  PgUp/PgDn:page  "
             b"K:calling Keeper  B:Board evidence  Home/End:top/bottom  "
             b"Enter:open"
         )
         exits = (b"Esc:back", b"q:quit")
         secondary = (b"Y:copy", b"/:find", b"n / N:next / previous match")
+        # 144 cells fit all but the longest of the three once [ / ] left this
+        # row: the key answers only with a run open, and the cell it was
+        # holding is a cell a usable key can have. The order is what this
+        # pins -- the search pair yields before copy, and both before the
+        # exits -- not how many survive at one width.
+        at_200 = (b"Y:copy", b"/:find")
         for columns, required, omitted in (
-                (200, exits, secondary), (280, exits + secondary, ())):
+                (200, exits + at_200, (b"n / N:next / previous match",)),
+                (280, exits + secondary, ())):
             resize_and_wait(
                 process, master_fd, output, rows=30, columns=columns,
                 needle=b"MASC Fusion", controls=(FULL_REDRAW,),

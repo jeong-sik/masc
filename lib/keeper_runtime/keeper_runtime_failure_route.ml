@@ -25,6 +25,7 @@ type rotate_class =
   | Request_refused
   | Provider_wire_defect
   | Server_error_not_transient
+  | Context_window_exceeded
 
 type fence_disposition =
   | Fenced_effect_attempted
@@ -32,7 +33,6 @@ type fence_disposition =
 
 type terminal_class =
   | Deterministic_request
-  | Context_overflow
   | Session_claim_refused
   | Transcript_refused
   | Contract_violation
@@ -232,8 +232,7 @@ let api_error_retry_after (api : Llm_provider.Retry.api_error) =
    well. The rich per-class comments from the previous hand-written match
    live on the [rotate_class] / [retry_class] / [terminal_class] type
    declarations and the .mli docstrings. *)
-let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
-  let exhaust_failure = exhaust ~err ~provenance:Agent_core_api_error in
+let route_of_api_error (api : Llm_provider.Retry.api_error) =
   (* Intended, not a pass-through: the wait hint belongs to the source
      constructor and the class belongs to [Candidate_fault], so every
      [observe_retry] arm forwards whatever hint the constructor carried
@@ -252,7 +251,11 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
   | Llm_provider.Candidate_fault.Binding Capacity -> observe Provider_capacity
   | Llm_provider.Candidate_fault.Binding Server -> observe Server_error
   | Llm_provider.Candidate_fault.Binding Window ->
-    exhaust_failure Context_overflow
+    (* The request did not fit this binding's window. A later candidate with
+       a larger window can serve the same turn, and the walk moves on
+       ([Keeper_turn_driver_try_runtime.context_overflow_should_try_next]),
+       so the route rotates with it (#38984). *)
+    rotate Context_window_exceeded
   | Llm_provider.Candidate_fault.Binding Body_limit ->
     rotate Request_refused
   | Llm_provider.Candidate_fault.Binding Admission -> rotate Admission
@@ -370,7 +373,7 @@ let route_of_error_family ~boundary (err : Agent_core.Error.t) : route =
     exhaust ~err ~provenance:(provenance_for_boundary boundary provenance) terminal
   in
   match err with
-  | Agent_core.Error.Api api -> route_of_api_error ~err api
+  | Agent_core.Error.Api api -> route_of_api_error api
   | Agent_core.Error.Provider p -> route_of_provider_error ~err p
   | Agent_core.Error.Mcp _ ->
     exhaust_failure Agent_core_mcp_error Protocol_error
@@ -476,10 +479,10 @@ let rotate_class_label = function
   | Request_refused -> "request_refused"
   | Provider_wire_defect -> "provider_wire_defect"
   | Server_error_not_transient -> "server_error_not_transient"
+  | Context_window_exceeded -> "context_overflow"
 
 let terminal_class_label = function
   | Deterministic_request -> "deterministic_request"
-  | Context_overflow -> "context_overflow"
   | Session_claim_refused -> "session_claim_refused"
   | Transcript_refused -> "transcript_refused"
   | Contract_violation -> "contract_violation"
@@ -562,6 +565,8 @@ let response_observed = function
         record. *)
      | Server_error_not_transient
      (* a 5xx: nothing the model said is on record. *)
+     | Context_window_exceeded
+     (* the request did not fit the window: no generation. *)
      | Runtime_exhausted ->
        (* a whole-runtime exhaustion wrapper: it carries no answer. *)
        false
@@ -582,8 +587,6 @@ let response_observed = function
     (match terminal with
      | Deterministic_request
      (* invalid request or input capacity: refused before any generation. *)
-     | Context_overflow
-     (* the request did not fit the window: no generation. *)
      | Session_claim_refused
      (* the durable local session claim was refused before dispatch; the
         model did not see the turn input or its replay evidence. *)
@@ -697,15 +700,16 @@ let route_resumes_on_same_path = function
      | Provider_reported_failure
      | Request_refused
      | Provider_wire_defect
-     | Server_error_not_transient ->
-       (* the credential, the model, the client session, the request body,
+     | Server_error_not_transient
+     | Context_window_exceeded ->
+       (* the credential, the model, the client session, the request body
+          or its size against this window,
           the provider's wire or its own non-transient answer: the same path
           answers the same way after any wait. *)
        false)
   | Exhausted_visible_alive { terminal; provenance = _; detail = _ } ->
     (match terminal with
      | Deterministic_request
-     | Context_overflow
      | Session_claim_refused
      | Transcript_refused
      | Contract_violation

@@ -435,6 +435,66 @@ let test_utf8_prefix_korean_boundary () =
   check bool "boundary cut drops only the split character" true
     (String.equal boundary_cut (String.sub message 0 49))
 
+(* [utf8_suffix] is the tail-side cut: a ring buffer keeps the last N bytes of
+   Execute output, and N bytes back from the end of a line of Hangul is the
+   middle of a syllable two times in three. *)
+let test_utf8_suffix_hangul_tail () =
+  let hangul = String.concat "" (List.init 100 (fun _ -> "\xea\xb0\x80")) in
+  check bool "a byte cut splits a character" false
+    (String_util.is_valid_utf8
+       (String.sub hangul (String.length hangul - 50) 50));
+  let tail = String_util.utf8_suffix ~max_bytes:50 hangul in
+  check bool "the tail decodes" true (String_util.is_valid_utf8 tail);
+  check int "the tail keeps every whole character that fits" 48
+    (String.length tail);
+  check bool "the tail is the end of the input" true
+    (String.ends_with ~suffix:tail hangul)
+
+let test_utf8_suffix_skips_a_partial_first_character () =
+  (* The last two bytes of one syllable, then two whole syllables: the shape
+     a ring tail has once the ring overwrote the syllable's first byte. *)
+  let ring_tail = "\xb0\x80\xea\xb0\x80\xeb\x82\x98" in
+  check string "the partial character goes, the whole ones stay"
+    "\xea\xb0\x80\xeb\x82\x98"
+    (String_util.utf8_suffix ~max_bytes:64 ring_tail);
+  check string "valid input that fits comes back as is" korean_title
+    (String_util.utf8_suffix ~max_bytes:64 korean_title);
+  check string "no budget, nothing kept" ""
+    (String_util.utf8_suffix ~max_bytes:0 korean_title)
+
+(* [utf8_complete_prefix] is the head-side cut: a head buffer keeps the first
+   N bytes of Execute output and the byte after them is gone, so only the
+   last character's own lead byte can say it was cut. *)
+let test_utf8_complete_prefix_drops_a_cut_last_character () =
+  check string "two of three Hangul bytes go" "ab"
+    (String_util.utf8_complete_prefix "ab\xea\xb0");
+  check string "three of four emoji bytes go" ""
+    (String_util.utf8_complete_prefix "\xf0\x9f\x98");
+  check string "a whole last character stays" "a\xea\xb0\x80"
+    (String_util.utf8_complete_prefix "a\xea\xb0\x80");
+  check string "ASCII stays" "abc" (String_util.utf8_complete_prefix "abc");
+  check string "empty stays" "" (String_util.utf8_complete_prefix "")
+
+let test_utf8_complete_prefix_keeps_bytes_that_are_not_utf8 () =
+  check string "continuation bytes with no lead in reach stay" "\x80\x80\x80\x80"
+    (String_util.utf8_complete_prefix "\x80\x80\x80\x80");
+  check string "a byte that opens no sequence stays" "a\xff"
+    (String_util.utf8_complete_prefix "a\xff")
+
+(* Every byte cut of valid UTF-8 leaves a valid prefix, and only the cut
+   character goes. *)
+let test_utf8_complete_prefix_every_cut_is_valid () =
+  let text = "a가😀é나€z" in
+  for cut = 0 to String.length text do
+    let head = String.sub text 0 cut in
+    let kept = String_util.utf8_complete_prefix head in
+    if not (String_util.is_valid_utf8 kept) then
+      Alcotest.failf "cut %d kept invalid %S" cut kept;
+    if String.length head - String.length kept >= 4 then
+      Alcotest.failf "cut %d dropped %d bytes" cut
+        (String.length head - String.length kept)
+  done
+
 let () =
   run "string_util"
     [ ( "utf8_char_boundary",
@@ -512,4 +572,14 @@ let () =
       ( "utf8_boundary",
         [ test_case "is_valid_utf8 basics" `Quick test_is_valid_utf8_basic;
           test_case "Korean 50-byte cut regression" `Quick
-            test_utf8_prefix_korean_boundary ] ) ]
+            test_utf8_prefix_korean_boundary;
+          test_case "utf8_suffix cuts a Hangul tail between characters" `Quick
+            test_utf8_suffix_hangul_tail;
+          test_case "utf8_suffix skips a partial first character" `Quick
+            test_utf8_suffix_skips_a_partial_first_character;
+          test_case "utf8_complete_prefix drops a cut last character" `Quick
+            test_utf8_complete_prefix_drops_a_cut_last_character;
+          test_case "utf8_complete_prefix keeps bytes that are not UTF-8"
+            `Quick test_utf8_complete_prefix_keeps_bytes_that_are_not_utf8;
+          test_case "utf8_complete_prefix leaves every cut valid" `Quick
+            test_utf8_complete_prefix_every_cut_is_valid ] ) ]

@@ -38,6 +38,7 @@ import {
   keeperStreamStartedAt,
   keeperStreamLastEventAt,
   keeperThreads,
+  isKeeperChatHistoryPending,
   setRecordValue,
 } from '../keeper-state'
 import { isAutonomousTurnEntry, isDefaultVisibleConversationEntry } from '../keeper-state'
@@ -686,6 +687,9 @@ export function KeeperConversationPanel({
       ? '검색어와 일치하는 메시지 없음'
       : '표시할 대화 없음'
   const hydrating = keeperHydrating.value[keeperName] ?? false
+  // Loading vs empty: until the first chat-history hydration settles, an empty
+  // thread is a hard-refresh artifact, not an authoritative absence (#26276).
+  const historyPending = isKeeperChatHistoryPending(keeperName)
   const error = keeperActionErrors.value[keeperName]
   const renderError = (extraClass = 'mt-2') => {
     if (!error) return null
@@ -857,6 +861,7 @@ export function KeeperConversationPanel({
               keeperName=${keeperName}
               entries=${transcriptEntries}
               emptyText=${transcriptEmptyText}
+              hydrating=${historyPending}
               showMetadata=${showMetadata}
               variant="messenger"
               size="primary"
@@ -972,6 +977,7 @@ export function KeeperConversationPanel({
           keeperName=${keeperName}
           entries=${transcriptEntries}
           emptyText=${transcriptEmptyText}
+          hydrating=${historyPending}
           showMetadata=${showMetadata}
           variant="messenger"
           size="primary"
@@ -1079,6 +1085,7 @@ export function KeeperConversationPanel({
             keeperName=${keeperName}
             entries=${transcriptEntries}
             emptyText=${transcriptEmptyText}
+            hydrating=${historyPending}
             showMetadata=${showMetadata}
             variant="messenger"
             size="default"

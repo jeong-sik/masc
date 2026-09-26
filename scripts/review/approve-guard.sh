@@ -13,26 +13,32 @@
 #      line is a literal R1 verdict line for this head:
 #        verdict: PASS head: <--head> run: <workflow run id on --head> by: <keeper>
 #      where <keeper> is not this account's login (#38975, 2026-09-26)
-#   6. no account has an open CHANGES_REQUESTED on the PR -- except this
+#   6. ci-freshness.py admits the exact PR-check against live main
+#   7. no account has an open CHANGES_REQUESTED on the PR -- except this
 #      account's own one when --replace-own-cr names exactly that review id
 # Skips (exit 0, no write) if this account already APPROVED that exact SHA.
 #
 # Usage:
 #   approve-guard.sh --repo O/R --pr N --head SHA40 --body FILE
-#                    [--replace-own-cr REVIEW_ID]
+#                    [--replace-own-cr REVIEW_ID] [--git-dir DIR]
+#   approve-guard.sh --check --run PR_CHECK_ID ...
 #   approve-guard.sh --check ...   # evaluate only, never writes (safe probe)
 # Exit: 0 approved/skipped/would-approve, 2 refused (reasons on stderr), 1 infra error.
 # Env: GUARD_GH overrides the gh binary (tests use a fake).
-# Needs only bash + gh: every JSON read uses gh's built-in --jq and the POST uses
-# gh -f/-F fields, so a lane without a standalone jq binary can still approve.
+# Needs bash + gh + git + Python 3. JSON uses gh --jq or the Python standard
+# library; POST uses gh -f/-F, so no standalone jq is required.
 # gh_json runs inside $( ); every caller ends with `|| exit 1` so a transport
 # error stops the guard with exit 1 instead of turning into false refusals.
 set -u
 GH="${GUARD_GH:-gh}"
-check_only=0; repo=""; pr=""; head=""; body=""; replace_cr=""
+here="$(cd "$(dirname "$0")" && pwd)"
+check_only=0; repo=""; pr=""; head=""; body=""; replace_cr=""; cited_run=""
+gitdir="${GUARD_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --check) check_only=1; shift ;;
+    --run) cited_run="${2-}"; shift 2 ;;
+    --git-dir) gitdir="${2-}"; shift 2 ;;
     --repo) repo="${2-}"; shift 2 ;;
     --pr) pr="${2-}"; shift 2 ;;
     --head) head="${2-}"; shift 2 ;;
@@ -193,6 +199,7 @@ me="$(gh_json user '.login')" || exit 1
 # the caller must name that review id with --replace-own-cr; knowing the id is
 # the proof the review was read, and the footer records it. A named id that is
 # not this account's open CR refuses too: the caller's view is out of date.
+check_open_change_requests() {
 revs="$(gh_json "repos/${repo}/pulls/${pr}/reviews?per_page=100" '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") | [.user.login, (.id|tostring), .state] | @tsv')" || exit 1
 revs="$(printf '%s\n' "$revs" | sort -t "$(printf '\t')" -k1,1 -k2,2nr | awk -F '\t' 'NF && !seen[$1]++')"
 replaced=""
@@ -209,6 +216,8 @@ done <<<"$revs"
 if [ -n "$replace_cr" ] && [ "$replaced" != "$replace_cr" ]; then
   refuse "--replace-own-cr ${replace_cr} does not name an open CHANGES_REQUESTED from ${me}"
 fi
+}
+check_open_change_requests
 # The verdict's run must be a workflow run on this head (a PASS carried from an
 # older head names that head's run), and by: must name the Keeper that judged,
 # not the shared account: '${me}' says nothing about which lane read the diff.
@@ -221,6 +230,35 @@ if [ "$check_only" -eq 0 ]; then
 fi
 [ ${#reasons[@]} -eq 0 ] || finish_refused
 
+# A successful head is insufficient after main changes its build inputs.
+# --check callers may name a run; otherwise use the current PR-check run.
+if [ "$check_only" -eq 1 ]; then
+  v_run="$cited_run"
+  if [ -z "$v_run" ]; then
+    v_run="$(printf '%s\n' "$wf" | awk -F '\t' '$9=="pull_request" && $10==".github/workflows/pr-check.yml" { print $7; exit }')"
+  fi
+fi
+[[ "$v_run" =~ ^[1-9][0-9]*$ ]] || refuse "no explicit successful PR-check run for freshness"
+[ ${#reasons[@]} -eq 0 ] || finish_refused
+freshness=$(GUARD_GH="$GH" python3 "$here/ci-freshness.py" --repo "$repo" --pr "$pr" \
+  --head "$head" --run "$v_run" --git-dir "$gitdir")
+fresh_rc=$?
+if [ "$fresh_rc" -ne 0 ]; then
+  refuse "CI freshness: $freshness"
+  finish_refused
+fi
+
+check_structured_verdict() {
+source "$here/review-verdict.sh"
+latest_verdict=$(verdict_for "$pr" "$head") || exit 1
+read -r latest_state _latest_run _latest_by <<<"$latest_verdict"
+if [ -n "$latest_state" ] && [ "$latest_state" != PASS ]; then
+  refuse "latest structured verdict is ${latest_state}; publish an explicit trusted review response before approval"
+fi
+}
+check_structured_verdict
+[ ${#reasons[@]} -eq 0 ] || finish_refused
+
 # ---- 6. idempotence: already approved this SHA? ----
 dup="$(gh_json "repos/${repo}/pulls/${pr}/reviews?per_page=100" ".[] | select(.user.login == \"${me}\" and .state == \"APPROVED\" and .commit_id == \"${head}\") | .id")" || exit 1
 if [ -n "$dup" ]; then
@@ -230,6 +268,7 @@ fi
 
 footer="$(printf '\n\n---\napprove-guard: head `%s` · %d check-runs completed+success · workflow runs %s' \
   "$head" "$n_runs" "$(IFS=,; echo "${wf_ids[*]}")")"
+footer="${footer} · freshness ${freshness}"
 [ -z "$replaced" ] || footer="${footer} · replaces own CHANGES_REQUESTED ${replaced}"
 [ -z "$(printf '%s' "$dispatch_skips" | tr -d ' ')" ] || footer="${footer} · dispatch-only skipped:${dispatch_skips}"
 if [ "$check_only" -eq 1 ]; then
@@ -237,7 +276,10 @@ if [ "$check_only" -eq 1 ]; then
   exit 0
 fi
 
-# ---- 7. write, then read back ----
+# ---- 7. revalidate shared-account CR authority after freshness, then write ----
+check_open_change_requests
+check_structured_verdict
+[ ${#reasons[@]} -eq 0 ] || finish_refused
 if ! resp="$({ cat "$body"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/${repo}/pulls/${pr}/reviews" \
     -f event=APPROVE -f "commit_id=${head}" -F body=@- \
     --jq '[(.id|tostring), .state, .commit_id] | @tsv' 2>&1)"; then

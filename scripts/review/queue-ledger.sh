@@ -35,14 +35,8 @@
 # Cancelled rows are ignored too: two runs on one head can start in the same
 # second and the loser is cancelled (#39049), so a cancelled row says nothing.
 #
-# Stale (condition 3) is counted from the earliest createdAt of this head's
-# non-skipped, non-cancelled pull_request workflow runs, and against the PR's
-# full file list (re-read past gh's 100-file cap).
-# test/dune exception (R1 §5): test/dune does not
-# count when the PR's own change to it and every main change to it since the
-# check start only add lines, `git merge-tree` of PR head and main is clean, and
-# the merged tree's test/dune declares no test name twice (leader c-f17dc594:
-# add-only + clean merge still breaks dune when both sides add the same name).
+# Freshness is evaluated by ci-freshness.py using the cited PR-check creation
+# time and immutable live main identity. No test/dune or clean-merge exemption.
 #
 # Usage:
 #   queue-ledger.sh --git-dir DIR [--repo O/R] [--limit N] [--format tsv|md]
@@ -116,34 +110,7 @@ open_crs() {
   return "${PIPESTATUS[0]}"
 }
 
-# Newest structured verdict for this head; malformed evidence never grants PASS.
-verdict_for() { # pr head
-  local lines
-  lines=$( { "$GH" api --paginate "repos/$repo/issues/$1/comments" --jq '.[] | [(.updated_at // .created_at), .body] | @tsv' &&
-             "$GH" api --paginate "repos/$repo/pulls/$1/reviews" --jq '.[] | [.submitted_at, .body] | @tsv'; } ) || return 1
-  printf '%s\n' "$lines" | awk -F'\t' -v head="$2" '
-    { body=$2; sub(/\\n.*/, "", body); sub(/\\r$/, "", body)
-      n=split(body, w, " ")
-      names_head=0; head_fields=0
-      for (i=3; i<n; i++) if (w[i]=="head:") {
-        head_fields++; if (w[i+1]==head) names_head=1
-      }
-      if (w[1]=="verdict:" && names_head) {
-        state=w[2]; run="-"; by="-"
-        if (state=="PASS" || state=="FAIL") {
-          if (body ~ /^verdict: (PASS|FAIL) head: [0-9a-f]+ run: [1-9][0-9]* by: [A-Za-z0-9._-]+$/ &&
-              n==8 && head_fields==1 && w[3]=="head:" && w[4]==head &&
-              w[5]=="run:" && w[6] ~ /^[1-9][0-9]*$/ &&
-              w[7]=="by:" && w[8] ~ /^[A-Za-z0-9._-]+$/) { run=w[6]; by=w[8] }
-          else state="INVALID"
-        } else if (state!="HOLD" && state!="COMMENT") state="UNKNOWN"
-        # Conflicting decisions in the same API timestamp cannot grant PASS.
-        if ($1 > t || ($1==t && state!="PASS")) {
-          t=$1; v=state" "run" "by
-        }
-      } }
-    END { print v }'
-}
+source "$(dirname "$0")/review-verdict.sh"
 
 # Is run <id> a finished, successful, non-all-skipped run on <head>? -> yes/no
 run_counts() { # run head
@@ -155,86 +122,7 @@ run_counts() { # run head
   printf '%s\n' "$jobs" | grep -qx success && echo yes || echo no
 }
 
-# stdin: a dune file. Succeeds when no name from `(name X)` or `(names a b c)`
-# appears twice. Comments (`;` to end of line) are dropped; a stanza may span lines.
-# `(alias (name runtest) ...)` stanzas are skipped: dune merges aliases, so a
-# repeated alias name is legal. Names inside `(include x.inc)` files are not read.
-# An empty name list fails: a tree we could not read must not grant the exemption.
-dune_names_unique() {
-  local names
-  names=$(sed 's/;.*//' | tr '\n' ' ' |
-    sed -E 's/\(alias[[:space:]]+\(name[[:space:]]+[^()]*\)//g' |
-    grep -oE '\((name|names)[[:space:]]+[^()]*\)' |
-    sed -E 's/^\((name|names)[[:space:]]+//; s/\)$//' | tr -s ' \t' '\n' | grep .) || return 1
-  [ -z "$(sort <<<"$names" | uniq -d)" ]
-}
-
-# These are inputs consumed by pr-check.yml: the setup action hashes the root
-# opam manifests, lock, root Dune inputs and pin script; pin/install actions execute
-# their own scripts, and setup invokes the cache-freshness script. A change to
-# these inputs invalidates earlier OCaml evidence even without a shared .ml file.
-# Keep docs-only PRs separate: this is dependency coverage, not a global gate.
-stale_dependencies() ( # changed-main-paths pr-files
-  set -o pipefail
-  printf '%s\n' "$2" | tr ',' '\n' | grep -E '\.(ml|mli)$' >/dev/null || return 0
-  printf '%s\n' "$1" | awk '
-    /^(masc\.opam\.locked|dune|dune-workspace|dune-project|[^\/]+\.opam)$/ ||
-    /^scripts\/(opam-pin-external-deps\.sh|ci\/opam-cache-freshness\.sh)$/ ||
-    /^\.github\/actions\/(setup-ocaml-toolchain|pin-ocaml-deps|install-ocaml-deps)\// ||
-    /^\.github\/workflows\/pr-check\.yml$/ { print }
-  ' | sort -u | paste -sd, -
-)
-
-# Files the PR touches that main changed after <since>; test/dune dropped per R1 §5.
-stale_files() { # since files head changed-main-paths
-  local changed hit
-  changed="$4"
-  hit=$(printf '%s\n' "$changed" | sort -u | grep -Fx -f <(tr ',' '\n' <<<"$2") || true)
-  if printf '%s\n' "$hit" | grep -qx 'test/dune'; then
-    # Every git read must succeed and be non-empty: an empty revision would make
-    # `git diff` fail, the grep see nothing, and the exemption be granted.
-    local base_c mb pr_diff main_diff
-    base_c=$(git -C "$gitdir" rev-list -1 --before="$1" origin/main) && [ -n "$base_c" ] || return 1
-    git -C "$gitdir" cat-file -e "$3^{commit}" 2>/dev/null || return 1
-    mb=$(git -C "$gitdir" merge-base "$3" origin/main) && [ -n "$mb" ] || return 1
-    pr_diff=$(git -C "$gitdir" diff "$mb" "$3" -- test/dune) || return 1
-    main_diff=$(git -C "$gitdir" diff "$base_c" origin/main -- test/dune) || return 1
-    local tree merged
-    if ! grep -q '^-[^-]' <<<"$pr_diff" && ! grep -q '^-[^-]' <<<"$main_diff" &&
-       tree=$(git -C "$gitdir" merge-tree --write-tree "$3" origin/main 2>/dev/null) &&
-       merged=$(git -C "$gitdir" show "${tree%%$'\n'*}:test/dune") &&
-       dune_names_unique <<<"$merged"; then
-      hit=$(printf '%s\n' "$hit" | grep -vx 'test/dune' || true)
-    fi
-  fi
-  printf '%s\n' "$hit" | grep -c . || true
-}
-
-# R1 counts overlap from the run's createdAt, not a job's startedAt (later).
-# Earliest createdAt among this head's pull_request runs that did not end
-# skipped/cancelled; falls back to the rollup start only if that is earlier.
-window_start() { # head started -> ISO time
-  local t
-  t=$("$GH" api "repos/$repo/actions/runs?head_sha=$1&event=pull_request&per_page=100" \
-      --jq '[.workflow_runs[] | select(.conclusion != "cancelled" and .conclusion != "skipped") | .created_at] | min // ""') || return 1
-  [ -n "$t" ] || return 1
-  if [ -n "$2" ] && [[ "$2" < "$t" ]]; then echo "$2"; else echo "$t"; fi
-}
-
-# gh pr list --json files stops at 100 per PR; re-read the full list past that.
-full_files() { # pr files -> comma list
-  local n
-  n=$(tr ',' '\n' <<<"$2" | grep -c . || true)
-  if [ "$n" -lt 100 ]; then echo "$2"; return 0; fi
-  "$GH" api --paginate "repos/$repo/pulls/$1/files?per_page=100" --jq '.[].filename' | paste -sd, -
-  return "${PIPESTATUS[0]}"
-}
-
 heads=$(printf '%s\n' "$rows" | awk -F'\t' '{print $5"\t"$1}')
-# Heads of the base=main PRs in one fetch, so the test/dune check can diff and
-# merge-tree them. A failed fetch leaves those rows unknown:stale, not green.
-refspecs=$(printf '%s\n' "$rows" | awk -F'\t' '$3=="main"{printf "+refs/pull/%s/head:refs/remotes/pr/%s\n", $1, $1}')
-[ -z "$refspecs" ] || git -C "$gitdir" fetch -q origin $refspecs || echo "PR head fetch failed" >&2
 [ "$fmt" = md ] && { printf '| PR | author | waits on | age h | checks | stale files | verdict |\n|---|---|---|---|---|---|---|\n'; }
 [ "$fmt" = tsv ] && printf 'pr\tauthor\twaits_on\tage_h\tchecks\tstale_files\tverdict\n'
 
@@ -248,13 +136,6 @@ printf '%s\n' "$rows" | while IFS=$'\t' read -r num author base head _branch che
   elif ! cr=$(open_crs "$num"); then waits="unknown:reviews"
   elif [ -n "$cr" ]; then waits="cr:$cr"
   elif [ "$checks" != ok ]; then waits="ci:$checks"
-  elif ! since=$(window_start "$head" "$started"); then stale="?"; waits="unknown:run"
-  elif ! files=$(full_files "$num" "$files"); then stale="?"; waits="unknown:files"
-  elif ! changed=$(git -C "$gitdir" log origin/main --since="$since" --name-only --format=); then stale="?"; waits="unknown:stale"
-  elif ! stale=$(stale_files "$since" "$files" "$head" "$changed"); then stale="?"; waits="unknown:stale"
-  elif [ "$stale" -gt 0 ]; then waits="stale:$stale"
-  elif ! dependencies=$(stale_dependencies "$changed" "$files"); then waits="unknown:dependencies"
-  elif [ -n "$dependencies" ]; then waits="dependency:$dependencies"
   elif ! v=$(verdict_for "$num" "$head"); then waits="unknown:verdict"
   else
     read -r vstate vrun vby <<<"$v"
@@ -263,7 +144,12 @@ printf '%s\n' "$rows" | while IFS=$'\t' read -r num author base head _branch che
     if [ "${vstate:-}" != PASS ]; then waits="review"
     elif ! ok=$(run_counts "$vrun" "$head"); then waits="unknown:run"
     elif [ "$ok" != yes ]; then waits="review"; verdict="PASS run $vrun not countable"
-    else waits="merge"; fi
+    else
+      freshness=$(GUARD_GH="$GH" python3 "$(dirname "$0")/ci-freshness.py" \
+        --repo "$repo" --pr "$num" --head "$head" --run "$vrun" --git-dir "$gitdir" --format ledger) || freshness=$'unknown:freshness\t?'
+      IFS=$'\t' read -r waits stale <<<"$freshness"
+      [ "$waits" != fresh ] || waits="merge"
+    fi
   fi
   if [ "$fmt" = md ]; then printf '| #%s | %s | %s | %s | %s | %s | %s |\n' "$num" "$author" "$waits" "$age" "$checks" "$stale" "$verdict"
   else printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$num" "$author" "$waits" "$age" "$checks" "$stale" "$verdict"; fi

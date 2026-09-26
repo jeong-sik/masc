@@ -44,13 +44,18 @@ class QueueLedgerTest(unittest.TestCase):
         self.fake.write_text("""#!/usr/bin/env python3
 import json, os, subprocess, sys
 args = sys.argv[1:]
-query = args[args.index('--jq') + 1]
+query = args[args.index('--jq') + 1] if '--jq' in args else '.'
 fixtures = json.load(open(os.environ['LEDGER_FIXTURES']))
 if args[:2] == ['pr', 'list']:
     key = 'prs'
 elif args[0] == 'api':
     endpoint = next(a for a in args[1:] if a.startswith('repos/'))
-    if endpoint.endswith('/reviews'): key = 'reviews'
+    if '/check-suites/' in endpoint: key = 'suite'
+    elif '/check-runs?' in endpoint: key = 'checks'
+    elif endpoint.endswith('/commits/main'): key = 'main'
+    elif '/files?' in endpoint: key = 'files'
+    elif endpoint.endswith('/pulls/1'): key = 'pull'
+    elif endpoint.endswith('/reviews'): key = 'reviews'
     elif endpoint.endswith('/comments'): key = 'comments'
     elif '/actions/runs?' in endpoint: key = 'runs'
     elif endpoint.endswith('/jobs'): key = 'jobs'
@@ -58,6 +63,14 @@ elif args[0] == 'api':
     else: raise SystemExit('unexpected endpoint: ' + endpoint)
 else: raise SystemExit('read-only fixture refuses: ' + repr(args))
 if key == fixtures.get('fail'): raise SystemExit('injected read failure')
+if key == 'main' and 'main_after_read' in fixtures:
+    old = fixtures['main']
+    fixtures['main'] = fixtures.pop('main_after_read')
+    json.dump(fixtures, open(os.environ['LEDGER_FIXTURES'], 'w'))
+    print(json.dumps(old)); raise SystemExit(0)
+if key == 'files' and 'files_pages' in fixtures:
+    for page in fixtures['files_pages']: print(json.dumps(page))
+    raise SystemExit(0)
 result = subprocess.run([os.environ['LEDGER_JQ'], '-r', query],
     input=json.dumps(fixtures[key]), text=True)
 raise SystemExit(result.returncode)
@@ -100,6 +113,7 @@ raise SystemExit(result.returncode)
 
     def message(self, body, time="2026-01-01T00:40:00Z", **fields):
         return dict(body=body, created_at=time, submitted_at=time,
+                    author_association=fields.pop("author_association", "COLLABORATOR"),
                     user={"login": "review-account"}, state="COMMENTED", **fields)
 
     def ledger(self, comments=None, reviews=None, fail=None):
@@ -112,7 +126,11 @@ raise SystemExit(result.returncode)
             "comments": comments if comments is not None else [self.message(self.verdict())],
             "reviews": reviews or [],
             "runs": {"workflow_runs": [{"created_at": RUN_TIME, "conclusion": "success"}]},
-            "run": {"head_sha": self.head, "status": "completed", "conclusion": "success"},
+            "run": {"id": 900, "head_sha": self.head, "status": "completed", "conclusion": "success",
+                    "created_at": RUN_TIME, "event": "pull_request", "path": ".github/workflows/pr-check.yml", "pull_requests": [{"number": 1}]},
+            "pull": {"state": "open", "draft": False, "merged": False,
+                     "head": {"sha": self.head}, "base": {"ref": "main"}, "changed_files": 1},
+            "main": {"sha": self.git("rev-parse", "main")}, "files": [{"filename": self.path}],
             "jobs": {"jobs": [{"conclusion": "success"}]}, "fail": fail,
         }
         self.fixtures.write_text(json.dumps(data))
@@ -161,6 +179,16 @@ raise SystemExit(result.returncode)
         row = self.ledger(reviews=[self.message(self.verdict("HOLD"))])
         self.assertEqual(row["verdict"], "HOLD")
 
+    def test_outsider_or_unknown_pass_cannot_clear_trusted_hold(self):
+        for association in ["NONE", "CONTRIBUTOR", "UNKNOWN", None]:
+            with self.subTest(association=association):
+                row = self.ledger(
+                    reviews=[self.message(self.verdict()), self.message(
+                        self.verdict("HOLD"), "2026-01-01T00:45:00Z")],
+                    comments=[self.message(self.verdict(), "2026-01-01T00:50:00Z",
+                                           author_association=association)])
+                self.assertEqual((row["waits_on"], row["verdict"]), ("review", "UNTRUSTED by reviewer"))
+
     def test_new_pass_after_hold_counts(self):
         row = self.ledger(comments=[self.message(self.verdict("HOLD"))],
                           reviews=[self.message(self.verdict(), "2026-01-01T00:50:00Z")])
@@ -177,6 +205,10 @@ raise SystemExit(result.returncode)
         self.assertEqual(self.ledger()["waits_on"],
                          "dependency:.github/actions/install-ocaml-deps/install.sh")
 
+    def test_selected_test_runner_is_a_build_evidence_dependency(self):
+        self.main_change("scripts/ci/run-edited-tests.sh")
+        self.assertEqual(self.ledger()["waits_on"], "dependency:scripts/ci/run-edited-tests.sh")
+
     def test_root_dune_policy_invalidates_ocaml_run(self):
         self.main_change("dune")
         self.assertEqual(self.ledger()["waits_on"], "dependency:dune")
@@ -192,6 +224,13 @@ raise SystemExit(result.returncode)
 
     def test_dependency_before_run_and_unrelated_main_change(self):
         self.main_change("masc.opam.locked", "2026-01-01T00:20:00Z")
+        code, receipt = self.freshness()
+        self.assertEqual(code, 2)
+        self.assertEqual(receipt["commits"][0]["reason"], "graph_overlap_unverified_tested_base")
+        self.git("checkout", "-q", "fixture-pr")
+        self.git("merge", "--no-edit", "main")
+        self.head = self.git("rev-parse", "HEAD")
+        self.git("checkout", "-q", "main")
         self.main_change("docs/unrelated.md")
         self.assertEqual(self.ledger()["waits_on"], "merge")
 
@@ -199,6 +238,110 @@ raise SystemExit(result.returncode)
         self.assertEqual(self.ledger(fail="comments")["waits_on"], "unknown:verdict")
         self.main_change("lib/example.ml")
         self.assertEqual(self.ledger()["waits_on"], "stale:1")
+
+    def test_distinct_add_only_dune_includes_still_require_new_run(self):
+        registrations = "(test (name first))\n" + "; separate registrations\n" * 8 + "(test (name last))\n"
+        self.write("test/dune", registrations)
+        self.commit("base test registration", "2026-01-01T00:05:00Z")
+        self.base = self.git("rev-parse", "HEAD")
+        self.git("checkout", "-q", "-B", "fixture-pr", self.base)
+        self.write("test/dune", registrations.replace("(name first))", "(name first))\n(include backend.inc)"))
+        self.commit("PR include", "2026-01-01T00:10:00Z")
+        self.head, self.path = self.git("rev-parse", "HEAD"), "test/dune"
+        self.git("checkout", "-q", "main")
+        self.write("test/dune", registrations + "(include asset-worker.inc)\n")
+        self.commit("main include", "2026-01-01T01:00:00Z")
+        # The historical exemption would admit this exact clean, add-only shape.
+        self.git("merge-tree", "--write-tree", self.head, "main")
+        for revision in (self.head, "main"):
+            delta = self.git("diff", self.base, revision, "--", "test/dune")
+            self.assertFalse(any(line.startswith("-") and not line.startswith("---")
+                                 for line in delta.splitlines()))
+        self.git("push", "-q", "origin", "main")
+        self.assertEqual(self.ledger()["waits_on"], "stale:1")
+
+    def freshness(self, mutate=lambda data: None):
+        self.ledger()  # write the same API fixture used by the real ledger
+        data = json.loads(self.fixtures.read_text())
+        mutate(data)
+        self.fixtures.write_text(json.dumps(data))
+        result = subprocess.run(["python3", str(SCRIPT.with_name("ci-freshness.py")),
+                                 "--repo", "o/r", "--pr", "1", "--head", self.head,
+                                 "--run", "900", "--git-dir", str(self.repo)],
+                                env=dict(self.env, GUARD_GH=str(self.fake)), text=True,
+                                capture_output=True, timeout=20)
+        return result.returncode, json.loads(result.stdout)
+
+    def test_created_at_not_delayed_job_or_rerun_start(self):
+        self.main_change("lib/example.ml")
+        code, receipt = self.freshness(lambda d: d["run"].update(
+            run_started_at="2026-01-01T02:00:00Z"))
+        self.assertEqual(code, 2)
+        self.assertEqual(receipt["created_at"], RUN_TIME)
+        self.assertEqual(receipt["overlap"], ["lib/example.ml"])
+
+    def test_merge_commit_cannot_hide_paths(self):
+        self.git("checkout", "-qb", "later")
+        self.write("lib/example.ml", "let value = 3\n")
+        self.commit("old side commit", "2026-01-01T00:20:00Z")
+        self.git("checkout", "-q", "main")
+        self.git("merge", "--no-ff", "-m", "main integration", "later",
+                 env=dict(os.environ, GIT_AUTHOR_DATE="2026-01-01T01:00:00Z",
+                          GIT_COMMITTER_DATE="2026-01-01T01:00:00Z"))
+        self.git("push", "-q", "origin", "main")
+        code, receipt = self.freshness()
+        self.assertEqual(code, 2)
+        self.assertEqual(receipt["commits"][0]["sha"], self.git("rev-parse", "main"))
+
+    def test_unavailable_or_wrong_run_cannot_grant_freshness(self):
+        for mutation in [lambda d: d.update(fail="main"),
+                         lambda d: d["run"].pop("created_at"),
+                         lambda d: d["run"].update(event="workflow_dispatch"),
+                         lambda d: d["run"].update(pull_requests=[{"number": 2}]),
+                         lambda d: d["run"].update(path=".github/workflows/test.yml"),
+                         lambda d: d["pull"].update(changed_files=101),
+                         lambda d: d["pull"].update(state="closed")]:
+            with self.subTest(mutation=mutation):
+                code, receipt = self.freshness(mutation)
+                self.assertEqual((code, receipt["status"]), (1, "unavailable"))
+
+    def test_mutable_association_head_and_base_are_not_checkout_evidence(self):
+        code, receipt = self.freshness(lambda d: d["run"].update(pull_requests=[{
+            "number": 1, "head": {"sha": "a" * 40}, "base": {"sha": "b" * 40}}]))
+        self.assertEqual((code, receipt["status"]), (0, "fresh"))
+
+    def test_missing_association_requires_matching_suite_and_branch(self):
+        def linkage(d):
+            d["pull"]["head"]["ref"] = "fixture-pr"
+            d["run"].update(pull_requests=[], head_branch="fixture-pr", check_suite_id=123)
+            d["suite"] = {"head_sha": self.head}
+            d["checks"] = {"check_runs": [{"head_sha": self.head, "check_suite": {"id": 123}}]}
+        self.assertEqual(self.freshness(linkage)[0], 0)
+        def wrong(d):
+            linkage(d)
+            d["checks"]["check_runs"][0]["check_suite"]["id"] = 456
+        self.assertEqual(self.freshness(wrong)[0], 1)
+
+    def test_main_move_during_read_refuses(self):
+        code, receipt = self.freshness(lambda d: d.update(main_after_read={"sha": self.head}))
+        self.assertEqual(code, 1)
+        self.assertEqual(receipt["reason"], "pr_or_main_moved_during_check")
+
+    def test_all_api_file_pages_are_read(self):
+        self.main_change("second.ml")
+        def pages(d):
+            d["pull"]["changed_files"] = 2
+            d["files_pages"] = [[{"filename": self.path}], [{"filename": "second.ml"}]]
+        code, receipt = self.freshness(pages)
+        self.assertEqual(code, 2)
+        self.assertEqual(receipt["overlap"], ["second.ml"])
+
+    def test_rename_previous_path_is_not_lost(self):
+        self.main_change("lib/old.ml")
+        code, receipt = self.freshness(lambda d: d["files"][0].update(
+            previous_filename="lib/old.ml"))
+        self.assertEqual(code, 2)
+        self.assertIn("lib/old.ml", receipt["overlap"])
 
 
 if __name__ == "__main__":

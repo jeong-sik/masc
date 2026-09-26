@@ -29,6 +29,7 @@ while [ $# -gt 0 ]; do
     --jq) jqf="$2"; shift 2 ;;
     --input) echo "fake gh: --input is not how the guard posts" >&2; exit 1 ;;
     -f|-F) case "$2" in
+             merge_method=*|sha=*) : ;;
              event=*) ev="${2#event=}" ;;
              commit_id=*) cid="${2#commit_id=}" ;;
              body=@-) body_src=stdin ;;
@@ -46,6 +47,27 @@ if [ -n "${FAKE_FAIL:-}" ]; then
   case "$ep" in $FAKE_FAIL) echo "HTTP 502: Bad Gateway (fake)" >&2; exit 1 ;; esac
 fi
 case "$ep" in
+  */commits/main)
+    n=$(cat "$d/main_reads" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$d/main_reads"
+    if [ -f "$d/late_cr" ]; then
+      "$FAKE_JQ" -n --arg h "$FAKE_HEAD" '[{id:999,state:"CHANGES_REQUESTED",commit_id:$h,user:{login:"pangyo-preachers"}}]' > "$d/reviews.json"
+    fi
+    if { [ -f "$d/late_hold" ] && [ "$n" -ge 3 ]; } || [ -f "$d/late_approval_hold" ]; then
+      "$FAKE_JQ" -n --arg h "$FAKE_HEAD" '[{created_at:"2026-01-01T00:55:00Z",body:("verdict: HOLD head: "+$h+" run: 900 by: keeper")}]' > "$d/comments.json"
+    fi
+    printf '{"sha":"%s"}\n' "$FAKE_MAIN" | "$FAKE_JQ" -r "$jqf"; exit ;;
+  */files\?*) echo '[{"filename":"pr.ml"}]' | "$FAKE_JQ" -r "$jqf"; exit ;;
+  */actions/runs/[0-9]*)
+    id="${ep##*/}"
+    "$FAKE_JQ" --argjson id "$id" --arg h "$FAKE_HEAD" '
+      .workflow_runs[] | select(.id==$id) |
+      . + {head_sha:$h,pull_requests:[{number:5}],created_at:"2026-01-01T00:30:00Z",event:"pull_request",path:".github/workflows/pr-check.yml"}' "$d/actions.json" | "$FAKE_JQ" -r "$jqf"; exit ;;
+  */comments*) f=comments ;;
+  */merge-async)
+    [ "$method" = PUT ] || exit 1
+    echo called > "$d/merged"
+    echo '{"uuid":"fixture-merge"}'
+    exit ;;
   */check-runs*) f=checkruns ;;
   */actions/runs*) f=actions ;;
   user) f=user ;;
@@ -61,21 +83,44 @@ case "$ep" in
   *) echo "fake gh: no fixture for $ep" >&2; exit 1 ;;
 esac
 [ -f "$d/$f.json" ] || { echo "fake gh: missing $f.json" >&2; exit 1; }
-"$FAKE_JQ" -r "$jqf" "$d/$f.json"
+if [ "$f" = actions ]; then
+  "$FAKE_JQ" '.workflow_runs |= map(. + {event:(.event//"pull_request"),path:(.path//".github/workflows/pr-check.yml")})' "$d/$f.json" | "$FAKE_JQ" -r "$jqf"
+else
+  "$FAKE_JQ" -r "$jqf" "$d/$f.json"
+fi
 EOF
 chmod +x "$work/gh"
 
-H=0123456789abcdef0123456789abcdef01234567
+# A real immutable graph backs freshness; API fixtures only name its objects.
+git init -q -b main "$work/repo"
+git -C "$work/repo" config core.hooksPath "$work/no-hooks"
+git -C "$work/repo" config commit.gpgSign false
+git -C "$work/repo" config user.name fixture
+git -C "$work/repo" config user.email fixture@example.invalid
+echo base > "$work/repo/base"
+git -C "$work/repo" add .
+GIT_AUTHOR_DATE=2026-01-01T00:00:00Z GIT_COMMITTER_DATE=2026-01-01T00:00:00Z git -C "$work/repo" commit -qm base
+export FAKE_MAIN="$(git -C "$work/repo" rev-parse HEAD)"
+git -C "$work/repo" checkout -qb pr
+echo changed > "$work/repo/pr.ml"
+git -C "$work/repo" add .
+GIT_AUTHOR_DATE=2026-01-01T00:10:00Z GIT_COMMITTER_DATE=2026-01-01T00:10:00Z git -C "$work/repo" commit -qm pr
+H="$(git -C "$work/repo" rev-parse HEAD)"
+export FAKE_HEAD="$H" GUARD_REPO_ROOT="$work/repo"
+git init -q --bare "$work/remote.git"
+git -C "$work/repo" remote add origin "$work/remote.git"
+git -C "$work/repo" push -q origin main pr
 H2=fedcba9876543210fedcba9876543210fedcba98
 pass=0; fail=0
 
 setup() { # setup <casedir>: default happy fixtures
   local d="$1"; mkdir -p "$d"
-  echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\"}}" >"$d/pull.json"
+  echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"changed_files\":1,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\"}}" >"$d/pull.json"
   echo '{"check_runs":[{"name":"dune build @check","status":"completed","conclusion":"success","id":11},{"name":"lint suite","status":"completed","conclusion":"success","id":12}]}' >"$d/checkruns.json"
   echo '{"workflow_runs":[{"workflow_id":1,"run_number":10,"name":"PR Check","status":"completed","conclusion":"success","id":900}]}' >"$d/actions.json"
   echo '{"login":"pangyo-preachers"}' >"$d/user.json"
   echo '[]' >"$d/reviews.json"
+  echo '[]' >"$d/comments.json"
   echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/postresp.json"
   echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/reviewget.json"
   printf 'verdict: PASS head: %s run: 900 by: selftest-keeper\nLGTM, file:line evidence\n' "$H" >"$d/body.md"
@@ -84,7 +129,7 @@ setup() { # setup <casedir>: default happy fixtures
 run_case() { # run_case <name> <want_rc> <needle> <want_post 0|1> <casedir> [guard args...]
   local name="$1" want="$2" needle="$3" wpost="$4" d="$5"; shift 5
   local out rc posted=0
-  out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" "$@" 2>&1)"; rc=$?
+  out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --git-dir "$work/repo" "$@" 2>&1)"; rc=$?
   [ -f "$d/posted.json" ] && posted=1
   local masked=0
   [ "$want" = 1 ] && printf '%s' "$out" | grep -qF -- "REFUSED" && masked=1
@@ -99,7 +144,7 @@ run_case() { # run_case <name> <want_rc> <needle> <want_post 0|1> <casedir> [gua
 d="$work/happy"; setup "$d"
 run_case happy 0 "APPROVED #5 head $H review 777" 1 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/happy-footer"; setup "$d"
-FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --repo o/r --pr 5 --head "$H" --body "$d/body.md" >/dev/null 2>&1
+FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --git-dir "$work/repo" --repo o/r --pr 5 --head "$H" --body "$d/body.md" >/dev/null 2>&1
 if jq -e --arg h "$H" '.event=="APPROVE" and .commit_id==$h and (.body|contains("run")) and (.body|contains("approve-guard: head"))' "$d/posted.json" >/dev/null; then pass=$((pass+1)); echo "ok   posted-payload"; else fail=$((fail+1)); echo "FAIL posted-payload"; cat "$d/posted.json"; fi
 
 d="$work/check"; setup "$d"
@@ -243,17 +288,18 @@ jobs:
 EOF
 mkcase() { # mkcase <dir> <suite-event> <suite-path>
   local d="$1" ev="$2" p="$3"; mkdir -p "$d"
-  echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\"}}" >"$d/pull.json"
+  echo "{\"state\":\"open\",\"draft\":false,\"merged\":false,\"changed_files\":1,\"base\":{\"ref\":\"main\"},\"head\":{\"sha\":\"$H\"}}" >"$d/pull.json"
   echo "{\"workflow_runs\":[{\"workflow_id\":1,\"run_number\":10,\"name\":\"PR check\",\"status\":\"completed\",\"conclusion\":\"success\",\"id\":900,\"check_suite_id\":55,\"event\":\"$ev\",\"path\":\"$p\"}]}" >"$d/actions.json"
   echo '{"check_runs":[{"name":"dune build @check","status":"completed","conclusion":"success","id":60,"check_suite":{"id":55}},{"name":"compare-tui","status":"completed","conclusion":"skipped","id":61,"check_suite":{"id":55}}]}' >"$d/checkruns.json"
   echo '{"login":"pangyo-preachers"}' >"$d/user.json"
   echo '[]' >"$d/reviews.json"
+  echo '[]' >"$d/comments.json"
   echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/postresp.json"
   echo "{\"id\":777,\"state\":\"APPROVED\",\"commit_id\":\"$H\"}" >"$d/reviewget.json"
   printf 'verdict: PASS head: %s run: 900 by: selftest-keeper\nLGTM, file:line evidence\n' "$H" >"$d/body.md"
 }
 d="$work/dispatchskip"; mkcase "$d" pull_request ".github/workflows/pr-check.yml"
-out="$(GUARD_REPO_ROOT="$wfroot" FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
+out="$(GUARD_REPO_ROOT="$wfroot" FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --git-dir "$work/repo" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
 if [ "$rc" = 0 ] && [ -f "$d/posted.json" ] && "$JQ" -e '.body|endswith(" · dispatch-only skipped: compare-tui")' "$d/posted.json" >/dev/null; then pass=$((pass+1)); echo "ok   dispatch-only-job-skipped-approves"; else fail=$((fail+1)); echo "FAIL dispatch-only-job-skipped-approves (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/     /'; cat "$d/posted.json" 2>/dev/null; fi
 d="$work/requiredskip"; mkcase "$d" pull_request ".github/workflows/other.yml"
 run_case required-job-skipped-refuses 2 "check 'compare-tui' is completed/skipped (check-run 61)" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
@@ -267,7 +313,7 @@ run_case old-slot-argument-stops 1 "unknown argument: --slot" 0 "$d" --repo o/r 
 
 # ---- lane without jq: the guard must still post (code-reviewer P1 on #38625) ----
 d="$work/nojq-case"; setup "$d"
-out="$(PATH="$work/nojq:$PATH" FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
+out="$(PATH="$work/nojq:$PATH" FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --git-dir "$work/repo" --repo o/r --pr 5 --head "$H" --body "$d/body.md" 2>&1)"; rc=$?
 if [ "$rc" = 0 ] && [ -f "$d/posted.json" ] && "$JQ" -e --arg h "$H" '.event=="APPROVE" and .commit_id==$h and (.body|startswith("verdict: PASS head: "+$h)) and (.body|contains("approve-guard: head"))' "$d/posted.json" >/dev/null; then
   pass=$((pass+1)); echo "ok   no-jq-still-posts"
 else fail=$((fail+1)); echo "FAIL no-jq-still-posts (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/     /'; fi
@@ -281,6 +327,51 @@ d="$work/userfail"; setup "$d"
 FAKE_FAIL='user' run_case gh-user-fails-no-post 1 "gh api user failed" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
 d="$work/userempty"; setup "$d"; echo '{"login":""}' >"$d/user.json"
 run_case user-empty-no-post 1 "returned no login" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+
+# The merge boundary executes only against this fake API. Its write marker
+# proves a later HOLD and stale evidence cannot reach merge-async.
+merge_case() {
+  local name="$1" want="$2" write="$3" d="$4" rc out actual=0
+  out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$here/merge-guard.sh" --repo o/r --pr 5 \
+    --head "$H" --run 900 --git-dir "$work/repo" 2>&1)"; rc=$?
+  [ -f "$d/merged" ] && actual=1
+  if [ "$rc" = "$want" ] && [ "$actual" = "$write" ]; then
+    pass=$((pass+1)); echo "ok   $name"
+  else fail=$((fail+1)); echo "FAIL $name rc=$rc write=$actual"; echo "$out"; fi
+}
+merge_setup() {
+  setup "$1"
+  "$JQ" -n --arg h "$H" '[{id:888,state:"APPROVED",commit_id:$h,
+    submitted_at:"2026-01-01T00:40:00Z",author_association:"COLLABORATOR",user:{login:"reviewer"},
+    body:("verdict: PASS head: "+$h+" run: 900 by: keeper")} ]' > "$1/reviews.json"
+}
+d="$work/merge-fresh"; merge_setup "$d"
+merge_case merge-fresh 0 1 "$d"
+d="$work/merge-late-hold"; merge_setup "$d"; touch "$d/late_hold"
+merge_case merge-hold-arrives-during-freshness 2 0 "$d"
+d="$work/merge-hold"; merge_setup "$d"
+"$JQ" -n --arg h "$H" '[{created_at:"2026-01-01T00:50:00Z",
+ body:("verdict: HOLD head: "+$h+" run: 900 by: keeper")}]' > "$d/comments.json"
+merge_case merge-later-hold 2 0 "$d"
+d="$work/merge-no-approval"; setup "$d"
+"$JQ" -n --arg h "$H" '[{created_at:"2026-01-01T00:40:00Z",author_association:"COLLABORATOR",
+ body:("verdict: PASS head: "+$h+" run: 900 by: keeper")}]' > "$d/comments.json"
+merge_case merge-no-approval 2 0 "$d"
+d="$work/approval-late-cr"; setup "$d"; touch "$d/late_cr"
+run_case approval-cr-arrives-during-freshness 2 "--replace-own-cr 999" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/approval-late-hold"; setup "$d"; touch "$d/late_approval_hold"
+run_case approval-hold-arrives-during-freshness 2 "latest structured verdict is HOLD" 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+# Main now touches a PR file after the cited run; both write boundaries refuse.
+git -C "$work/repo" checkout -q main
+echo integration > "$work/repo/pr.ml"
+git -C "$work/repo" add .
+GIT_AUTHOR_DATE=2026-01-01T01:00:00Z GIT_COMMITTER_DATE=2026-01-01T01:00:00Z git -C "$work/repo" commit -qm integration
+export FAKE_MAIN="$(git -C "$work/repo" rev-parse HEAD)"
+git -C "$work/repo" push -q origin main
+d="$work/stale-approval"; setup "$d"
+run_case stale-approval-no-post 2 '"status": "stale"' 0 "$d" --repo o/r --pr 5 --head "$H" --body "$d/body.md"
+d="$work/stale-merge"; merge_setup "$d"
+merge_case stale-merge-no-write 2 0 "$d"
 
 echo "pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

@@ -306,7 +306,7 @@ let rec required_shape_issue ~at schema output =
       | Some (`String "number"), (`Int _ | `Intlit _ | `Float _)
       | Some (`String "null"), `Null -> true
       | Some (`String ("object" | "array" | "string" | "boolean" | "integer" | "number" | "null")), _ -> false
-      | Some _ | None -> true
+      | (Some _ | None), _ -> true
     in
     if not type_matches
     then Some (Incompatible_required_shape at)
@@ -651,7 +651,7 @@ let serve ?cli_runner ~net ~clock ~base_path ~resolve_lane params =
       | None -> Exact.Accept success
       | Some issue -> Exact.Reject_and_advance issue
     in
-    let rejection_of_receipt receipt =
+    let rejection_of_receipt (receipt : output_shape_issue Exact.semantic_rejection_receipt) =
       let visit = Exact.flow_success_candidate receipt.Exact.transport_success in
       { slot_id = visit.visit.identity.candidate_id; issue = receipt.rejection }
     in

@@ -1,0 +1,65 @@
+{
+  "policy": "Only owned-workspace, installed-snapshot and CI checkout prefixes normalized. Health snapshots projected to four consumed groups. Original response hashes/json byte counts remain unchanged; any normalized body has separate published_body_sha256/published_json_bytes fields. Wire sizes and timings remain original. Original private receipts passed the strict validator before publishing. Gzip is lossless; no CI provenance for this local smoke.",
+  "files": {
+    "identity.json": {
+      "original_sha256": "d40451f83e95b9e995b5af3d25c2c631064995cc1f512ee3c209bdb89affa8af",
+      "published_decoded_sha256": "2215ac52c0fccbe61b2414d355c2b08ae276d1d523130475c453bf483d096e33",
+      "health_projected": false,
+      "normalized_response_bodies": 0
+    },
+    "health-before.json": {
+      "original_sha256": "e6322eda4e2280a899f98f04646ea0c85d17528b060b2e4df1fc62ad8b36d319",
+      "published_decoded_sha256": "cb887ab85ad624394944ce94e8934cd39883fb9c1d3c1435842ccd9e73b0b579",
+      "health_projected": true,
+      "normalized_response_bodies": 0
+    },
+    "health-after.json": {
+      "original_sha256": "c712af1e997c7bc388b5037d40976ce845073a78c56400aeeb152b1a0deb521d",
+      "published_decoded_sha256": "3db820f4ea2707939eb2428d8f36d404f77e9bbbfc2ee9abe2146af3a3481252",
+      "health_projected": true,
+      "normalized_response_bodies": 0
+    },
+    "cleanup.json": {
+      "original_sha256": "bcbc2ebfa5169f51d7bce62e353f3afef845f76d5ecb954e12b22e0b305125a4",
+      "published_decoded_sha256": "bcbc2ebfa5169f51d7bce62e353f3afef845f76d5ecb954e12b22e0b305125a4",
+      "health_projected": false,
+      "normalized_response_bodies": 0
+    },
+    "success.json": {
+      "original_sha256": "7b74266926e3375ad9501afeb2bb9ead63cd597f03441cd93f9144e58fb572a9",
+      "published_decoded_sha256": "7b74266926e3375ad9501afeb2bb9ead63cd597f03441cd93f9144e58fb572a9",
+      "health_projected": false,
+      "normalized_response_bodies": 0
+    },
+    "validation.json": {
+      "original_sha256": "3b3616cb86a24308a13ae3ad04b23f7647921ad222107e4d2f2f9f0d1911021e",
+      "published_decoded_sha256": "3b3616cb86a24308a13ae3ad04b23f7647921ad222107e4d2f2f9f0d1911021e",
+      "health_projected": false,
+      "normalized_response_bodies": 0
+    },
+    "server.log.gz": {
+      "original_sha256": "7b665e1d2b76996f70b8f95cbdf7a8d20bf0856c289370702c7cf6101af48c6c",
+      "published_decoded_sha256": "12400341294fb5290cfe9d6ad790abbe67b977844e8f082c8f91243e8bbb3a59",
+      "health_projected": false,
+      "normalized_response_bodies": 0
+    },
+    "requests.jsonl.gz": {
+      "original_sha256": "f485585d122aab904c43ef44d0aead3263caff366a1a6f836e946de371672684",
+      "published_decoded_sha256": "ef472baca40755c5e1acd9709bc1719f3890b8c00c102309b8828a10e45296a4",
+      "health_projected": false,
+      "normalized_response_bodies": 7
+    },
+    "backlog.json.gz": {
+      "original_sha256": "59b72ae3249947219911ef4c00d4d0e16f2e94ccc037b5d40ba5d8d95ea2b1c4",
+      "published_decoded_sha256": "59b72ae3249947219911ef4c00d4d0e16f2e94ccc037b5d40ba5d8d95ea2b1c4",
+      "health_projected": false,
+      "normalized_response_bodies": 0
+    },
+    "backlog.json.last-good.gz": {
+      "original_sha256": "59b72ae3249947219911ef4c00d4d0e16f2e94ccc037b5d40ba5d8d95ea2b1c4",
+      "published_decoded_sha256": "59b72ae3249947219911ef4c00d4d0e16f2e94ccc037b5d40ba5d8d95ea2b1c4",
+      "health_projected": false,
+      "normalized_response_bodies": 0
+    }
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "scope": "Single macOS installed-file smoke for harness plumbing. Not Linux execution, a before/after comparison, or candidate behavior.",
+  "accepted_timed_requests": 10,
+  "summary": {
+    "timings": {
+      "mutation": {
+        "n": 2,
+        "min": 13.970375,
+        "median": 14.02725,
+        "p95": 14.084125,
+        "max": 14.084125
+      },
+      "cold": {
+        "n": 2,
+        "min": 11.9945,
+        "median": 12.217375,
+        "p95": 12.44025,
+        "max": 12.44025
+      },
+      "warm": {
+        "n": 2,
+        "min": 0.431416,
+        "median": 0.4721455,
+        "p95": 0.512875,
+        "max": 0.512875
+      },
+      "concurrent_mutation": {
+        "n": 2,
+        "min": 18.304375,
+        "median": 19.384812500000002,
+        "p95": 20.46525,
+        "max": 20.46525
+      },
+      "concurrent_liveness": {
+        "n": 2,
+        "min": 0.586292,
+        "median": 0.6675420000000001,
+        "p95": 0.748792,
+        "max": 0.748792
+      }
+    },
+    "client_overlap_pairs": 2
+  },
+  "final_tasks": 254,
+  "success": {
+    "initial_revision": 1,
+    "final_revision": 18,
+    "final_tasks": 254
+  },
+  "cleanup": {
+    "server_returncode": 0,
+    "reaped": true,
+    "model_requests": [
+      {
+        "method": "GET",
+        "path": "/v1/models"
+      }
+    ],
+    "stub_stopped": true
+  },
+  "response_encodings": [
+    {
+      "phase": "cold",
+      "cycle": 1,
+      "encoding": null
+    },
+    {
+      "phase": "warm",
+      "cycle": 1,
+      "encoding": "gzip"
+    },
+    {
+      "phase": "cold",
+      "cycle": 2,
+      "encoding": null
+    },
+    {
+      "phase": "warm",
+      "cycle": 2,
+      "encoding": "gzip"
+    }
+  ]
+}

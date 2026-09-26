@@ -116,6 +116,7 @@ let schedule_ctx
            ~payload
            ~channel:continuation_channel)
   ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+  ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
   }
 ;;
 
@@ -927,6 +928,7 @@ let test_keeper_wake_target_validation_is_inside_creation_fence () =
              ~payload
              ~channel:None)
     ; admit_keeper_wake_creation
+    ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
     }
   in
   Fun.protect
@@ -1793,7 +1795,14 @@ let test_status_active_lists_every_status_that_is_not_terminal () =
     ~retention_days:Schedule_store.terminal_schedule_retention_days with
    | Ok _ -> ()
    | Error err -> fail (Schedule_store.store_error_to_string err));
-  (match Schedule_service.cancel config ~schedule_id:"sched-gone" with
+  (match
+     Schedule_service.cancel
+       config
+       ~schedule_id:"sched-gone"
+       ~cancelled_by:(human "operator")
+       ~reason:"list fixture"
+       ~withdraw_queued_wakes:(Keeper_schedule_cancel_withdrawal.run config)
+   with
    | Ok _ -> ()
    | Error err -> fail (Schedule_service.service_error_to_string err));
   let list_with args =

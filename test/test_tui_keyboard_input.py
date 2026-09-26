@@ -407,6 +407,30 @@ def screen_header(name: bytes, rest: bytes = b"") -> re.Pattern[bytes]:
     return re.compile(re.escape(name) + rb"(?:\x1b\[[0-9;]*m)*" + re.escape(rest))
 
 
+def empty_gate_snapshot() -> tuple[int, dict[str, object]]:
+    """GET /api/v1/dashboard/gate answering with an empty, readable queue.
+
+    The Approvals surface says "(no pending approvals)", and its title carries
+    no note, only when the Gate queue was read along with the confirm queue,
+    the held calls and the questions. A scenario that leaves this path
+    unserved gets a 503 and a screen that says the Gate queue was not read.
+    The shape follows lib/tui_decode.ml (decode_gate_snapshot).
+    """
+    return (
+        200,
+        {
+            "approval_queue": [],
+            "approval_queue_state": {"state": "ready"},
+            "hitl": {
+                "gate_mode": {"mode": "auto_judge"},
+                "external_gate_mode": {"mode": "manual"},
+            },
+            "approval_rules": [],
+            "approval_rules_state": {"state": "ready"},
+        },
+    )
+
+
 def approvals_header(count: int) -> re.Pattern[bytes]:
     """The Approvals title and the number of asks on it.
 
@@ -1641,6 +1665,9 @@ def approval_selection_http_fixtures() -> tuple[
     # The questions poll is the same: left unanswered, the header says
     # ", questions unread" beside the count.
     fixtures[KEEPER_ASKS_PATH] = (200, {"keeper": None, "open_count": 0, "asks": []})
+    # And the Gate queue: left unanswered, the header says ", Gate queue
+    # unread" beside the count.
+    fixtures["/api/v1/dashboard/gate"] = empty_gate_snapshot()
     return fixtures, initial_items, approval_new
 
 
@@ -10510,10 +10537,13 @@ def standalone_lane_fixture(
         "configured": True,
         "configuration_state": "ready",
         "declared_slots": ["glm-coding.glm-5-turbo"],
+        "declared_cli_slots": [],
+        # Runtime.exact_lane_supports_cli_tail: the workspace curator refuses
+        # a run whose lane declares an official-client slot.
+        "supports_cli_tail": lane_id != "workspace_curator_exact",
         "admitted_slots": ["glm-coding.glm-5-turbo"],
-        # The projection writes four slot lists, not one: what the lane
-        # declares, what admission kept, what it reaches over a CLI, and what
-        # admission dropped. Omitting any list fails the row decode, and the
+        # The projection writes both declared lists and their admission
+        # readings. Omitting any list fails the row decode, and the
         # whole snapshot with it, so the observation matrix simply never
         # draws -- the surface has no per-row gap to show.
         "cli_slots": [],
@@ -12546,11 +12576,16 @@ def runtime_resolved_runtime(
     runtime_id: str,
     provider: str,
     model: str,
+    *,
+    provider_id: str = "fixture-provider",
 ) -> dict[str, object]:
     return {
         "id": runtime_id,
         "provider": provider,
+        # The [providers.<id>] table key; "provider" is its display name.
+        "provider_id": provider_id,
         "model": model,
+        "exact_slot_group": "slots",
         "effective_max_context": 200_000,
         "max_context_source": "capability",
         "max_output_tokens": 8192,
@@ -14018,7 +14053,7 @@ def run_observer_reconnect_regression(executable: str) -> None:
             drain_until_quiet(process, master_fd, output)
             plain = screen_text(bytes(output))
             for needle in (b"Tool use ID: before-disconnect", b"output-before-disconnect",
-                           b"retained window resumed; history completeness unknown"):
+                           b"resumed; no event expired while disconnected"):
                 if needle not in plain:
                     raise AssertionError(f"Replayed call retargeted selection or lost replay coverage: {plain!r}")
             releases[1].set()
@@ -19300,11 +19335,28 @@ def run_fusion_history_regression(executable: str) -> None:
             process, master_fd, output, b"r",
             b"historical Fusion Board identity does not match the selected run and post",
         )
-        stale = resize_and_wait(
+        retained = b"Previous Board reading retained"
+        resize_and_wait(
             process, master_fd, output, rows=111, columns=170,
-            needle=b"Previous Board reading (refresh failed)", controls=(FULL_REDRAW,),
+            needle=retained, controls=(FULL_REDRAW,),
         )
-        if b"different-run-702" in CSI_RE.sub(b"", stale):
+        retained_at = output.rfind(retained)
+        wait_for_output(
+            process, master_fd, output, FRAME_END,
+            start=retained_at + len(retained), timeout=3,
+        )
+        frame_end = output.find(FRAME_END, retained_at) + len(FRAME_END)
+        stale_visible = screen_text(bytes(output[:frame_end]))
+        mismatch = (
+            b"historical Fusion Board identity does not match the selected run and post"
+        )
+        if stale_visible.count(mismatch) != 1 or stale_visible.count(retained) != 1:
+            raise AssertionError(
+                f"Historical Board lost its error or retained reading: {stale_visible!r}"
+            )
+        if b"refresh failed" in stale_visible:
+            raise AssertionError("Historical Board refresh repeated its error verdict")
+        if b"different-run-702" in stale_visible:
             raise AssertionError("mismatched Board origin replaced selected evidence")
         send_and_wait(process, master_fd, output, b"r", b"Observed tokens: 303 input / 202 output")
         all_failed = send_and_wait(

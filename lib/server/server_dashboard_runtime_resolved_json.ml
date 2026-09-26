@@ -16,7 +16,10 @@
 let string_opt_json = Json_util.string_opt_to_json
 let int_opt_json = Json_util.int_opt_to_json
 
-let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
+let runtime_resolution_json ~scope_label (rt : Runtime.t) : Yojson.Safe.t =
+  let exact_slot_group =
+    Runtime.exact_slot_list_key_of_api_format rt.provider.api_format
+  in
   let effective_max_context, source =
     match Runtime.resolve_max_context_of_runtime rt with
     | Some resolution -> resolution
@@ -37,11 +40,16 @@ let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
   let now = Time_compat.now () in
   let quota_exhausted = Runtime_quota_window.is_exhausted ~scope:quota_scope ~now in
   let quota_resets_at = Runtime_quota_window.active_until ~scope:quota_scope ~now in
-  let quota_scope_label = Runtime_quota_window.scope_to_string quota_scope in
+  let quota_scope_label = scope_label quota_scope in
   `Assoc
     [ "id", `String rt.id
     ; "provider", `String rt.provider.display_name
+      (* The [providers.<id>] table this binding belongs to. The display name
+         above is prose; an editor that opens the provider's table needs the
+         key. *)
+    ; "provider_id", `String rt.provider.id
     ; "model", `String rt.model.api_name
+    ; "exact_slot_group", `String exact_slot_group
     ; "effective_max_context", `Int effective_max_context
     ; "max_context_source", `String (Runtime.max_context_source_to_string source)
     ; "max_output_tokens", int_opt_json (Runtime.max_output_tokens_of_runtime_id rt.id)
@@ -249,14 +257,14 @@ let usage_scopes (runtimes : Runtime.t list) =
   configured @ List.map (fun scope -> scope, []) unconfigured
 ;;
 
-let usage_scope_json (scope, providers) : Yojson.Safe.t =
+let usage_scope_json ~scope_label (scope, providers) : Yojson.Safe.t =
   let state, windows =
     match Usage.state ~scope with
     | Not_reported_since_start -> "not_reported_since_start", []
     | Reported (first, rest) -> "reported", List.map usage_window_json (first :: rest)
   in
   `Assoc
-    [ "scope", `String (Runtime_quota_window.scope_to_string scope)
+    [ "scope", `String (scope_label scope)
     ; "providers", Json_util.json_string_list providers
     ; "state", `String state
     ; "windows", `List windows
@@ -264,16 +272,38 @@ let usage_scope_json (scope, providers) : Yojson.Safe.t =
 ;;
 
 let build ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t =
-  let default = Runtime.get_default_runtime () in
+  (* One read of the loaded state: a reload between two reads could pair a
+     default runtime with a list that no longer holds it, and its scope with
+     no label. The default is grouped too; [usage_scopes] adds a provider to a
+     scope once, so it is not counted twice. *)
+  let default, runtimes = Runtime.get_default_and_runtimes () in
+  let scopes = usage_scopes (Option.to_list default @ runtimes) in
+  (* This document can be read without authentication in non-strict mode.
+     Keep account homes and credential-file paths in typed internal scopes;
+     expose only response-local, consistent join keys. Every row below is
+     drawn from the same snapshot [scopes] was, so the missing branch is an
+     invariant violation, not a reload race. *)
+  let public_scope_labels =
+    List.mapi (fun index (scope, _) -> scope, Printf.sprintf "account:%d" (index + 1)) scopes
+  in
+  let scope_label scope =
+    match
+      List.find_opt
+        (fun (known, _) -> Runtime_quota_window.scope_equal known scope)
+        public_scope_labels
+    with
+    | Some (_, label) -> label
+    | None -> failwith "runtime quota scope missing from resolved projection"
+  in
   `Assoc
     [ "generated_at_iso", `String generated_at_iso
     ; "source", `String "/api/v1/runtime/resolved"
     ; "config_path", string_opt_json (Runtime.config_path ())
     ; ( "default_runtime"
       , match default with
-        | Some rt -> runtime_resolution_json rt
+        | Some rt -> runtime_resolution_json ~scope_label rt
         | None -> `Null )
-    ; "runtimes", `List (List.map runtime_resolution_json (Runtime.get_runtimes ()))
+    ; "runtimes", `List (List.map (runtime_resolution_json ~scope_label) runtimes)
       (* [\[runtime\].media_failover] is a route, not a lane: no keeper turn
          dispatches to it, and it has no table of its own. Keep both the active
          fleet and the file's declaration so an operator can distinguish a
@@ -286,6 +316,6 @@ let build ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t =
       , `List (List.map (assignment_json default) (all_keeper_names ~config)) )
     ; "provider_usage_windows_since", `Float Usage.recording_since
     ; ( "provider_usage_windows"
-      , `List (List.map usage_scope_json (usage_scopes (Runtime.get_runtimes ()))) )
+      , `List (List.map (usage_scope_json ~scope_label) scopes) )
     ]
 ;;

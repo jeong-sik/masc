@@ -209,7 +209,7 @@ let test_selected_native_account () = fixture (fun base runtime binary net ->
       | _ -> Alcotest.fail "fixture request must be an object" in
     Alcotest.check Alcotest.bool "failed transaction leaves account available for retry" true
       (Result.is_error (Actions.save ~binary ~base_path:base rejected) && Result.is_ok (resolve ()));
-    ignore (get (Actions.save ~binary ~base_path:base request));
+    let receipt = get (Actions.save ~binary ~base_path:base request) in
     Alcotest.check Alcotest.bool "successful transaction preserves concurrent account selections" true
       (Result.is_ok (resolve ()));
     (match Actions.save ~binary ~base_path:base request with
@@ -220,7 +220,8 @@ let test_selected_native_account () = fixture (fun base runtime binary net ->
     if protocol="muse-serve" then (
       let inventory = Runtime_wizard_inventory.to_json parsed in
       let rows = inventory |> member "runtimes" |> to_list in
-      let selected_row = List.find (fun row -> row |> member "provider_id" = `String id) rows in
+      let saved_runtime_id = receipt |> member "runtime_id" |> to_string in
+      let selected_row = List.find (fun row -> row |> member "id" = `String saved_runtime_id) rows in
       Alcotest.check Alcotest.int "existing model inventory retains explicit byte capacity"
         45678 (selected_row |> member "max_prompt_bytes" |> to_int));
     let homes=List.filter_map (fun (p:Runtime_schema.provider) -> p.account_home) parsed.providers in

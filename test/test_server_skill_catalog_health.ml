@@ -8,17 +8,26 @@
 open Alcotest
 module Health = Server_skill_catalog_health
 
-(* The live value that emptied the catalog: above the inline tool-result
-   boundary a resource is returned through. *)
-let over_boundary_config = "[skills]\nresource-read-max-bytes = 65536\n"
+(* The health rejection contract is independent of the configurable read
+   bound: a source must never escape its declared anchor. *)
+let rejected_config =
+  {|[skills]
+resource-read-max-bytes = 16384
+[[skills.sources]]
+id = "rejected-source"
+anchor = "base-path"
+path = "../escape"
+access = "read-only"
+|}
+;;
 
 let rejected_snapshot () =
-  match Skill_source_config.parse_text over_boundary_config with
-  | Ok _ -> fail "a bound above the inline boundary parsed"
+  match Skill_source_config.parse_text rejected_config with
+  | Ok _ -> fail "a source path escaping its anchor parsed"
   | Error diagnostics ->
     ( diagnostics
     , Skill_catalog_snapshot.config_rejected
-        ~source_text:over_boundary_config
+        ~source_text:rejected_config
         ~diagnostics )
 ;;
 

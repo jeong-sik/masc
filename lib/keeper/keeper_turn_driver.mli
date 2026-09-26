@@ -396,6 +396,16 @@ type attempt_inference_policy =
   }
 
 module For_testing : sig
+  val official_client_turn_start :
+    session_id:string option ->
+    recovery_view:'view option ->
+    read_boundary:(unit -> Keeper_carried_front.turn_start) ->
+    Keeper_carried_front.turn_start
+  (** Where an official client's carried range begins when nothing later
+      names a front: the boundary read from the session trace, and
+      [Turn_boundary_unknown] (the newest atom alone) for a turn with no
+      session trace or with a recovery view, never the whole history. *)
+
   val provider_attempt_dispatch :
     request_serialized:bool ->
     (Runtime_agent.run_result, Agent_core.Error.t) result -> Keeper_attempt_dispatch.t

@@ -21,19 +21,19 @@ val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.resul
 (** JSON success result with [~data:json], consolidated here so sibling
     [Tool_*] modules share one construction path. *)
 val json_ok :
-  tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_result.result
+  tool_name:string -> start_time:Tool_timing.started -> Yojson.Safe.t -> Tool_result.result
 
 (** Handle masc_get_metrics *)
 val handle_get_metrics :
-  ?tool_name:string -> ?start_time:float ->
+  ?tool_name:string -> start_time:Tool_timing.started ->
   context -> Yojson.Safe.t -> Tool_result.result
 
 (** Handle masc_agent_fitness *)
 val handle_agent_fitness :
-  ?tool_name:string -> ?start_time:float ->
+  ?tool_name:string -> start_time:Tool_timing.started ->
   context -> Yojson.Safe.t -> Tool_result.result
 
 (** Handle masc_agent_card *)
 val handle_agent_card :
-  ?tool_name:string -> ?start_time:float ->
+  ?tool_name:string -> start_time:Tool_timing.started ->
   context -> Yojson.Safe.t -> Tool_result.result

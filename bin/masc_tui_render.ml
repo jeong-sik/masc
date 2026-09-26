@@ -45,6 +45,7 @@ module Approval_detail = Masc_tui_approval_detail
 module Planning_detail = Masc_tui_planning_detail
 module Link = Masc_tui_link
 module Status = Masc.Keeper_status_runtime
+module Keeper_snapshot_unread = Masc.Keeper_snapshot_unread
 module Render_tools = Masc_tui_render_tools
 module Span = Masc_tui_span
 module Diff = Masc_tui_diff

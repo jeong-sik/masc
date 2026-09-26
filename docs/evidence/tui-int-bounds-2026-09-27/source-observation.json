@@ -1,0 +1,288 @@
+{
+  "profile_source": "56884cdc2d82d8b4b3f9b64597c6e770228e9712",
+  "pr_base": "a9e0c8941eadf17b2a336b159d71eb022f8185d3",
+  "matching_whole_file_sha256": {
+    "bin/masc_tui_message_layout.ml": "aab56c406ca59c281f63634ae9d09ccde1011415fb5dc676c0aafad7406299ea",
+    "bin/masc_tui_scroll.ml": "68c4b95153514f41ee86391220916a34d766d930e8a279c07afd88a5e01c3f8f"
+  },
+  "native_artifact": {
+    "artifact_id": 10911156552,
+    "run": 36255838724,
+    "zip_sha256": "307957aca067b6464974b537845f163a94e4506a7f61a6ca5e996a04d0ec73bb",
+    "manifest": {
+      "commit": "56884cdc2d82d8b4b3f9b64597c6e770228e9712",
+      "arch": "macos-arm64",
+      "run_attempt": 1,
+      "release_validated": false,
+      "sha256": {
+        "main_eio.exe": "a7831f714dc0dc8e863aa2897cdc878264a76e0956cde44cf6409d26fc5431b8",
+        "masc_tui.exe": "de832b3b56d04844b4ba01ee8077ed7887d097b7ad28d3b29526d3b236e61149",
+        "masc_browser_host.exe": "9dd9d770f58a4c100b35116b3537d30676dbf0fe7c62bf398130d12a715fe320"
+      }
+    },
+    "verified": "metadata, ZIP size/digest/members, source, all three binary hashes"
+  },
+  "sample_coordinates": [
+    {
+      "line": 187,
+      "text": "    + !       : 143 camlStdlib$max_48  (in masc_tui.exe) + 28  [0x105c93594]"
+    },
+    {
+      "line": 190,
+      "text": "    + !       : | + ! 95 compare_val  (in masc_tui.exe) + 1220,64,...  [0x105d9dac4,0x105d9d640,...]"
+    },
+    {
+      "line": 191,
+      "text": "    + !       : | + ! 4 compare_val  (in masc_tui.exe) + 72  [0x105d9d648]"
+    },
+    {
+      "line": 193,
+      "text": "    + !       : | + 25 compare_val  (in masc_tui.exe) + 1268,1256,...  [0x105d9daf4,0x105d9dae8,...]"
+    },
+    {
+      "line": 203,
+      "text": "    + !       : 122 camlStdlib$min_44  (in masc_tui.exe) + 28  [0x105c93544]"
+    },
+    {
+      "line": 206,
+      "text": "    + !       : | + ! 88 compare_val  (in masc_tui.exe) + 1220,456,...  [0x105d9dac4,0x105d9d7c8,...]"
+    },
+    {
+      "line": 207,
+      "text": "    + !       : | + ! 2 compare_val  (in masc_tui.exe) + 72  [0x105d9d648]"
+    },
+    {
+      "line": 210,
+      "text": "    + !       : | + 7 compare_val  (in masc_tui.exe) + 1268  [0x105d9daf4]"
+    },
+    {
+      "line": 333,
+      "text": "    + !       : | + 1 camlStdlib$max_48  (in masc_tui.exe) + 28  [0x105c93594]"
+    },
+    {
+      "line": 334,
+      "text": "    + !       : | +   1 camlStdlib$max_48  (in masc_tui.exe) + 28  [0x105c93594]"
+    },
+    {
+      "line": 817,
+      "text": "    + !       : | 8 camlStdlib$min_44  (in masc_tui.exe) + 28  [0x105c93544]"
+    },
+    {
+      "line": 818,
+      "text": "    + !       : | + 8 camlStdlib$min_44  (in masc_tui.exe) + 28,56  [0x105c93544,0x105c93560]"
+    },
+    {
+      "line": 946,
+      "text": "    + !       : |   + 7 compare_val  (in masc_tui.exe) + 64,52,...  [0x105d9d640,0x105d9d634,...]"
+    },
+    {
+      "line": 947,
+      "text": "    + !       : |   2 compare_val  (in masc_tui.exe) + 1268  [0x105d9daf4]"
+    },
+    {
+      "line": 994,
+      "text": "    + !       : | + ! 3 compare_val  (in masc_tui.exe) + 116,184,...  [0x105d9d674,0x105d9d6b8,...]"
+    },
+    {
+      "line": 995,
+      "text": "    + !       : | + ! 1 compare_val  (in masc_tui.exe) + 664  [0x105d9d898]"
+    },
+    {
+      "line": 997,
+      "text": "    + !       : | + 1 compare_val  (in masc_tui.exe) + 1256  [0x105d9dae8]"
+    },
+    {
+      "line": 1206,
+      "text": "    + !       : | +   4 compare_val  (in masc_tui.exe) + 92,20,...  [0x105d9d65c,0x105d9d614,...]"
+    },
+    {
+      "line": 1420,
+      "text": "    + !       : |     3 compare_val  (in masc_tui.exe) + 924  [0x105d9d99c]"
+    },
+    {
+      "line": 1476,
+      "text": "    + !       : |     3 compare_val  (in masc_tui.exe) + 120,468,...  [0x105d9d678,0x105d9d7d4,...]"
+    },
+    {
+      "line": 1563,
+      "text": "    + !       : |     2 compare_val  (in masc_tui.exe) + 664  [0x105d9d898]"
+    },
+    {
+      "line": 1603,
+      "text": "    + !       : |   2 camlStdlib$min_44  (in masc_tui.exe) + 0  [0x105c93528]"
+    },
+    {
+      "line": 1685,
+      "text": "    + !       : |     2 compare_val  (in masc_tui.exe) + 364,524  [0x105d9d76c,0x105d9d80c]"
+    },
+    {
+      "line": 1919,
+      "text": "    + !       : | 1 camlStdlib$min_44  (in masc_tui.exe) + 28  [0x105c93544]"
+    },
+    {
+      "line": 1920,
+      "text": "    + !       : |   1 camlStdlib$min_44  (in masc_tui.exe) + 64  [0x105c93568]"
+    },
+    {
+      "line": 1977,
+      "text": "    + !       : | 1 camlStdlib$max_48  (in masc_tui.exe) + 28  [0x105c93594]"
+    },
+    {
+      "line": 1978,
+      "text": "    + !       : |   1 camlStdlib$max_48  (in masc_tui.exe) + 44  [0x105c935a4]"
+    },
+    {
+      "line": 2086,
+      "text": "    + !       : | 1 camlStdlib$max_48  (in masc_tui.exe) + 28  [0x105c93594]"
+    },
+    {
+      "line": 2087,
+      "text": "    + !       : |   1 camlStdlib$max_48  (in masc_tui.exe) + 44  [0x105c935a4]"
+    },
+    {
+      "line": 2101,
+      "text": "    + !       : | 1 camlStdlib$min_44  (in masc_tui.exe) + 28  [0x105c93544]"
+    },
+    {
+      "line": 2102,
+      "text": "    + !       : |   1 camlStdlib$min_44  (in masc_tui.exe) + 44  [0x105c93554]"
+    },
+    {
+      "line": 2169,
+      "text": "    + !       : | 1 camlStdlib$min_44  (in masc_tui.exe) + 28  [0x105c93544]"
+    },
+    {
+      "line": 2170,
+      "text": "    + !       : |   1 camlStdlib$min_44  (in masc_tui.exe) + 64  [0x105c93568]"
+    },
+    {
+      "line": 2244,
+      "text": "    + !       : | 1 camlStdlib$min_44  (in masc_tui.exe) + 28  [0x105c93544]"
+    },
+    {
+      "line": 2245,
+      "text": "    + !       : |   1 camlStdlib$min_44  (in masc_tui.exe) + 64  [0x105c93568]"
+    },
+    {
+      "line": 2247,
+      "text": "    + !       : | 1 camlStdlib$min_44  (in masc_tui.exe) + 28  [0x105c93544]"
+    },
+    {
+      "line": 2248,
+      "text": "    + !       : |   1 camlStdlib$min_44  (in masc_tui.exe) + 64  [0x105c93568]"
+    },
+    {
+      "line": 2308,
+      "text": "    + !       : | 1 camlStdlib$min_44  (in masc_tui.exe) + 28  [0x105c93544]"
+    },
+    {
+      "line": 2309,
+      "text": "    + !       : |   1 camlStdlib$min_44  (in masc_tui.exe) + 64  [0x105c93568]"
+    },
+    {
+      "line": 2387,
+      "text": "    + !       : | 1 camlStdlib$max_48  (in masc_tui.exe) + 28  [0x105c93594]"
+    },
+    {
+      "line": 2388,
+      "text": "    + !       : |   1 camlStdlib$max_48  (in masc_tui.exe) + 44  [0x105c935a4]"
+    },
+    {
+      "line": 2414,
+      "text": "    + !       : | 1 camlStdlib$max_48  (in masc_tui.exe) + 28  [0x105c93594]"
+    },
+    {
+      "line": 2415,
+      "text": "    + !       : |   1 camlStdlib$max_48  (in masc_tui.exe) + 44  [0x105c935a4]"
+    },
+    {
+      "line": 2432,
+      "text": "    + !       : | 1 camlStdlib$max_48  (in masc_tui.exe) + 28  [0x105c93594]"
+    },
+    {
+      "line": 2433,
+      "text": "    + !       : |   1 camlStdlib$max_48  (in masc_tui.exe) + 44  [0x105c935a4]"
+    },
+    {
+      "line": 2459,
+      "text": "    + !       : | 1 camlStdlib$min_44  (in masc_tui.exe) + 28  [0x105c93544]"
+    },
+    {
+      "line": 2460,
+      "text": "    + !       : |   1 camlStdlib$min_44  (in masc_tui.exe) + 64  [0x105c93568]"
+    },
+    {
+      "line": 2563,
+      "text": "    + !       : |     1 compare_val  (in masc_tui.exe) + 184  [0x105d9d6b8]"
+    },
+    {
+      "line": 2670,
+      "text": "    + !       : | 1 camlStdlib$max_48  (in masc_tui.exe) + 28  [0x105c93594]"
+    },
+    {
+      "line": 2671,
+      "text": "    + !       : |   1 camlStdlib$max_48  (in masc_tui.exe) + 36  [0x105c9359c]"
+    },
+    {
+      "line": 2685,
+      "text": "    + !       : |     1 compare_val  (in masc_tui.exe) + 120  [0x105d9d678]"
+    },
+    {
+      "line": 2718,
+      "text": "    + !       : |     1 compare_val  (in masc_tui.exe) + 120  [0x105d9d678]"
+    },
+    {
+      "line": 2731,
+      "text": "    + !       : |     1 compare_val  (in masc_tui.exe) + 1284  [0x105d9db04]"
+    },
+    {
+      "line": 2897,
+      "text": "    + !       :     1 compare_val  (in masc_tui.exe) + 372  [0x105d9d774]"
+    },
+    {
+      "line": 3068,
+      "text": "        17       compare_val  (in masc_tui.exe) + 0  [0x105d9d600]"
+    },
+    {
+      "line": 3095,
+      "text": "        9       camlStdlib$min_44  (in masc_tui.exe) + 0  [0x105c93528]"
+    },
+    {
+      "line": 3096,
+      "text": "        9       camlStdlib$min_44  (in masc_tui.exe) + 28  [0x105c93544]"
+    },
+    {
+      "line": 3103,
+      "text": "        8       camlStdlib$max_48  (in masc_tui.exe) + 28  [0x105c93594]"
+    },
+    {
+      "line": 3110,
+      "text": "        7       camlStdlib$max_48  (in masc_tui.exe) + 0  [0x105c93578]"
+    },
+    {
+      "line": 3165,
+      "text": "        compare_val  (in masc_tui.exe)        245"
+    },
+    {
+      "line": 3197,
+      "text": "        camlStdlib$min_44  (in masc_tui.exe)        17"
+    },
+    {
+      "line": 3232,
+      "text": "        camlStdlib$max_48  (in masc_tui.exe)        7"
+    }
+  ],
+  "selected_assembly_decoded_sha256": "2e9fbe3731216322d23324bdc34149c0d147e3c5f01c12c5bf4bc6a7216d58ed",
+  "assembly_command": [
+    "otool",
+    "-tvV",
+    "<ARTIFACT>/masc_tui.exe"
+  ],
+  "assembly_selection": "Whole functions whose symbol has camlMasc_tui_message_layout$, camlMasc_tui_scroll$, camlStdlib__Int$min_ or camlStdlib__Int$max_.",
+  "static_generic_bound_branches": 93,
+  "source_replacements": {
+    "bin/masc_tui_message_layout.ml": 65,
+    "bin/masc_tui_scroll.ml": 21
+  },
+  "scope": "Generic bound comparisons appear in the native sample. Static branch sites are not invocation counts or timings. Sample unwind does not attribute all generic comparisons to these modules. No candidate latency measurement yet."
+}

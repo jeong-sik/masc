@@ -952,7 +952,7 @@ let rejection_result (rejection : rejection) =
     { Tool_result.effect_disposition = Tool_result.Effect_outcome_unknown
     ; class_
     ; message = rejection.message
-    ; data
+    ; data_source = Tool_result.Explicit_data data
     ; metadata = None
     ; tool_name = rejection.tool_name
     ; duration_ms = 0.0

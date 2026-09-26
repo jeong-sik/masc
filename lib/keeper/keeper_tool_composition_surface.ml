@@ -296,9 +296,10 @@ let node_observation_result (node : Executor.node_result) =
       { effect_disposition = Tool_result.Effect_outcome_unknown
       ; class_ = Tool_result.Runtime_failure
       ; message = "Composition node output failed its declared schema"
-      ; data = `Assoc
-          [ "validation_error", plan_execution_error_to_json error
-          ; "producer_result", Tool_result.to_json node.result ]
+      ; data_source = Tool_result.Explicit_data
+          (`Assoc
+            [ "validation_error", plan_execution_error_to_json error
+            ; "producer_result", Tool_result.to_json node.result ])
       ; metadata = Tool_result.metadata node.result
       ; tool_name = node.tool_name
       ; duration_ms = Tool_result.duration_ms node.result }

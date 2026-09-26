@@ -55,7 +55,26 @@ val find_duplicate : ('a * 'b) list -> 'a option
     association list, or [None] when every key is distinct. Callers decide how
     to report the duplicate. *)
 
+(** Keys removed from the schema by #39025. For this one release the reader
+    drops them instead of rejecting the file; the next release deletes this
+    type and rejects both keys again (#39200). *)
+type retired_field =
+  | Trace_history
+  | Last_handoff_ts
+
+val all_retired_fields : retired_field list
+val retired_field_name : retired_field -> string
+
+(** A top-level object holding exactly the current key set once the retired
+    keys are dropped. [retired_fields_dropped] lists, in {!all_retired_fields}
+    order, the retired keys the object carried; [[]] for a current file. *)
+type current_object =
+  { current_fields : (string * Yojson.Safe.t) list
+  ; retired_fields_dropped : retired_field list
+  }
+
 val validate_current_object :
-  Yojson.Safe.t -> ((string * Yojson.Safe.t) list, validation_error) result
-(** Require exactly the current top-level key set. Every field outside that set
-    has the same [Invalid_current] classification. *)
+  Yojson.Safe.t -> (current_object, validation_error) result
+(** Require exactly the current top-level key set, apart from the retired keys,
+    which are dropped and reported. Every other field outside that set has the
+    same [Invalid_current] classification. *)

@@ -120,6 +120,33 @@ let field_name = function
 
 let current_field_names = List.map field_name all_fields
 
+(* Keys #39025 removed from the schema. Every meta file written before it
+   carries both, so for this one release the reader drops them instead of
+   rejecting the file, and the next Owner save writes the file without them.
+   The next release deletes this type and rejects both keys again as fields
+   outside the current schema (#39200). *)
+type retired_field =
+  | Trace_history
+  | Last_handoff_ts
+
+let all_retired_fields = [ Trace_history; Last_handoff_ts ]
+
+let retired_field_name = function
+  | Trace_history -> "trace_history"
+  | Last_handoff_ts -> "last_handoff_ts"
+;;
+
+let retired_field_of_key key =
+  List.find_opt
+    (fun retired -> String.equal (retired_field_name retired) key)
+    all_retired_fields
+;;
+
+type current_object =
+  { current_fields : (string * Yojson.Safe.t) list
+  ; retired_fields_dropped : retired_field list
+  }
+
 let object_of_field_values field_values =
   let supplied = List.map fst field_values in
   if supplied <> all_fields
@@ -151,10 +178,25 @@ let validate_current_object (json : Yojson.Safe.t) =
        Error
          (invalid_currentf "duplicate field %s" key)
      | None ->
-       let present = List.map fst fields in
-        let outside_current =
-         List.filter (fun key -> not (List.mem key current_field_names)) present
+       let current_fields, retired_present, outside_current =
+         List.fold_right
+           (fun ((key, _) as field) (current, retired, outside) ->
+              if List.mem key current_field_names
+              then field :: current, retired, outside
+              else (
+                match retired_field_of_key key with
+                | Some retired_field -> current, retired_field :: retired, outside
+                | None -> current, retired, key :: outside))
+           fields
+           ([], [], [])
        in
+       (* Reported in declaration order, whatever order the file used. *)
+       let retired_fields_dropped =
+         List.filter
+           (fun retired -> List.mem retired retired_present)
+           all_retired_fields
+       in
+       let present = List.map fst current_fields in
        let missing =
          List.filter (fun key -> not (List.mem key present)) current_field_names
        in
@@ -170,7 +212,7 @@ let validate_current_object (json : Yojson.Safe.t) =
            (invalid_currentf
               "missing required fields: %s"
               (String.concat ", " missing))
-       else Ok fields)
+       else Ok { current_fields; retired_fields_dropped })
   | other ->
     Error
       (invalid_currentf

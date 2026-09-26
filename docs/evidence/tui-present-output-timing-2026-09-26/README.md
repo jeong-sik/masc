@@ -48,3 +48,35 @@ Local syntax and whitespace checks pass. No local OCaml build was run.
 Compiled tests and the PTY scenario require CI on the pushed head. The old
 165.06ms observation is the motivation, not evidence that this change has
 identified its cause or achieved the 0.1ms response objective.
+
+## Local diagnostic observation
+
+`local-diagnostic/` retains the raw receipts, stdout/stderr, internal timing,
+identity, runner and recomputed aggregates. Runtime probe artifact `10905313235`
+from [build 36239521218](https://github.com/jeong-sik/masc/actions/runs/36239521218)
+identifies source `53f784617c1867b3ecadb300bc8bd1d0844dd233`, TUI SHA-256
+`88b23dce786b5721e8ac1c5730b9735088141e6324af1e677d9d4ce92dee2bc8`.
+The artifact archive digest and all three manifest binary hashes were checked.
+The manifest explicitly has `release_validated: false`; no binary was installed.
+
+The local macOS ARM probe ran three sessions against harness
+`4d31a42ca9c948d9c1605625dd45c2b6c122d0a3`. Each has ten cycles, 100 acknowledged
+transitions, a checked draft, and 250 retained synthetic Channels names. All
+300 transitions and three draft checks passed. Metadata and channel-fixture
+hashes match across sessions. The diagnostic binary is based on main and does
+not include the separately reviewed drained-input/deferred-tab PRs, so its
+17.1–17.4ms overall input medians are not a comparison with their earlier results.
+
+| Session | Worst Present, ms | Write, ms | Flush, ms | Other, ms | Output bytes |
+|---|---:|---:|---:|---:|---:|
+| 1 | 25.37 | 0.001 | 25.365 | 0.004 | 2589 |
+| 2 | 24.52 | 0.001 | 24.511 | 0.005 | 2589 |
+| 3 | 22.03 | 0.001 | 22.024 | 0.005 | 2589 |
+
+Each maximum is Present ordinal 79 on `keeper-detail`. Nearly all its measured
+wall time is inside flush. This local observation directs the next diagnosis
+toward output/consumer scheduling, rather than attributing this particular tail
+to diff construction. It does not identify the OS-level cause of that wait,
+correlate ordinal 79 with a specific input, or establish the cause of the older
+165.06ms CI observation. There is no physical-display or deployed-runtime proof,
+and the 0.1ms objective remains unmet.

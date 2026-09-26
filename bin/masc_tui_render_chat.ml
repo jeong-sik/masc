@@ -2261,7 +2261,7 @@ let render_keeper_message (state : state) =
     in
     let identity_row =
       String.concat ""
-        (telemetry_keeper ^ identity
+        ((telemetry_keeper ^ identity)
          :: List.filter_map Fun.id
               [ Option.map
                   (fun item ->

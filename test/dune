@@ -6308,6 +6308,7 @@
 (include stanzas/test_browser_stagehand_session.inc)
 (include stanzas/test_browser_stagehand_model.inc)
 (include stanzas/test_browser_stagehand_executor.inc)
+(include stanzas/test_browser_stagehand_backend.inc)
 (include stanzas/test_browser_chromium_process.inc)
 (include stanzas/test_server_browser_stagehand.inc)
 (include stanzas/test_browser_controls.inc)
@@ -6765,6 +6766,7 @@
 (include stanzas/test_tui_input_readiness_pty.inc)
 (include stanzas/test_h2_request_fibers.inc)
 (include stanzas/test_h2_oauth_request_fibers.inc)
+(include stanzas/test_dashboard_asset_worker.inc)
 
 (include stanzas/test_h2_response_window.inc)
 
@@ -7186,6 +7188,16 @@
 (include stanzas/test_official_client_claim_cause.inc)
 
 (include stanzas/test_tui_keeper_current_failure_pty.inc)
+
+(rule
+ (alias runtest-test_tui_verdict_refresh_pty)
+ (deps test_tui_verdict_refresh_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_verdict_refresh_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_verdict_refresh_pty)))
 
 (include stanzas/test_exact_output_runtime_reasoning.inc)
 (include stanzas/test_runtime_exact_lane_backpressure.inc)

@@ -2603,41 +2603,80 @@ let test_sgr_click_and_horizontal_wheel_stay_unclaimed () =
     cases
 
 (* Apple Terminal, the macOS default, answers [?1006;1000h] with the legacy X10
-   shape instead of SGR. The button byte carries the same numbers offset by 32,
-   so the wheel has to be readable from it or the notch is lost -- and the three
-   bytes after [CSI M] have to be consumed by the caller either way, which is
-   what stopped them being typed into the composer. *)
-let test_x10_wheel_up_is_its_own_key () =
-  match Tui_decode.x10_wheel_key (Char.chr (32 + 64)) with
-  | Some "wheel-up" -> ()
-  | Some other -> Alcotest.failf "expected wheel-up, got %s" other
-  | None -> Alcotest.fail "wheel up should claim a key"
+   shape instead of SGR: the button, the column and the row, each a raw byte
+   offset by 32. Reading only the button kept the notch and dropped where it
+   happened, so a press never reached what it was on. *)
+let x10 ~button ~column ~row =
+  Tui_decode.x10_mouse_report ~button:(Char.chr (32 + button))
+    ~column:(Char.chr (32 + column)) ~row:(Char.chr (32 + row))
 
-let test_x10_wheel_down_is_its_own_key () =
-  match Tui_decode.x10_wheel_key (Char.chr (32 + 65)) with
-  | Some "wheel-down" -> ()
-  | Some other -> Alcotest.failf "expected wheel-down, got %s" other
-  | None -> Alcotest.fail "wheel down should claim a key"
+let x10_mouse =
+  Alcotest.testable
+    (fun formatter -> function
+      | Tui_decode.X10_wheel (direction, row, column) ->
+          Format.fprintf formatter "%s %d,%d" (Tui_decode.wheel_key direction) row column
+      | Tui_decode.X10_left_press (row, column) ->
+          Format.fprintf formatter "press %d,%d" row column
+      | Tui_decode.X10_other_press -> Format.fprintf formatter "other press"
+      | Tui_decode.X10_release (row, column) ->
+          Format.fprintf formatter "release %d,%d" row column)
+    ( = )
 
-let test_x10_clicks_and_drags_stay_unclaimed () =
+let test_x10_wheel_carries_its_position () =
+  Alcotest.(check (option x10_mouse)) "wheel up at column 10, row 5"
+    (Some (Tui_decode.X10_wheel (Tui_decode.Wheel_up, 5, 10)))
+    (x10 ~button:64 ~column:10 ~row:5);
+  Alcotest.(check (option x10_mouse)) "wheel down"
+    (Some (Tui_decode.X10_wheel (Tui_decode.Wheel_down, 5, 10)))
+    (x10 ~button:65 ~column:10 ~row:5)
+
+let test_x10_left_press_and_release_carry_their_position () =
+  Alcotest.(check (option x10_mouse)) "a plain left press"
+    (Some (Tui_decode.X10_left_press (3, 4)))
+    (x10 ~button:0 ~column:4 ~row:3);
+  Alcotest.(check (option x10_mouse)) "the one release code"
+    (Some (Tui_decode.X10_release (3, 4)))
+    (x10 ~button:3 ~column:4 ~row:3);
+  Alcotest.(check (option x10_mouse)) "a release with shift held"
+    (Some (Tui_decode.X10_release (3, 4)))
+    (x10 ~button:(3 + 4) ~column:4 ~row:3)
+
+(* Middle and right presses and shift/meta/ctrl chords are presses no surface
+   reads, but their release follows and must not be the left button's. *)
+let test_x10_other_presses_are_named_so_their_release_is_not_left () =
   List.iter
     (fun button ->
-       match Tui_decode.x10_wheel_key (Char.chr (32 + button)) with
-       | None -> ()
-       | Some other ->
-           Alcotest.failf "button %d should stay unclaimed, got %s" button other)
-    [ 0; 1; 2; 3; 32; 35; 66; 67 ]
+      Alcotest.(check (option x10_mouse)) (Printf.sprintf "button %d" button)
+        (Some Tui_decode.X10_other_press) (x10 ~button ~column:4 ~row:3))
+    [ 1; 2; 4; 8; 16 ]
 
-(* The two decoders answer the same physical notch, so they must agree. A
-   terminal that switches encodings between sessions must not change what the
-   wheel does. *)
-let test_x10_and_sgr_agree_on_the_wheel () =
+(* Motion reports and the horizontal wheel are gestures no surface reads. *)
+let test_x10_motion_and_the_horizontal_wheel_stay_unclaimed () =
+  List.iter
+    (fun button ->
+      Alcotest.(check (option x10_mouse)) (Printf.sprintf "button %d" button)
+        None (x10 ~button ~column:4 ~row:3))
+    [ 32; 35; 66; 67 ]
+
+(* A byte at the offset itself names column or row 0, which no cell is. *)
+let test_x10_position_below_one_is_unclaimed () =
+  Alcotest.(check (option x10_mouse)) "column 0" None (x10 ~button:64 ~column:0 ~row:5);
+  Alcotest.(check (option x10_mouse)) "row 0" None (x10 ~button:0 ~column:4 ~row:0)
+
+(* The two decoders answer the same physical notch and press, so they must
+   agree. A terminal that switches encodings must not change what the mouse
+   does. *)
+let test_x10_and_sgr_agree () =
   List.iter
     (fun (button, params) ->
-       let x10 = Tui_decode.x10_wheel_key (Char.chr (32 + button)) in
-       let sgr = sgr_wheel_key params 'M' in
-       Alcotest.(check (option string))
-         (Printf.sprintf "button %d" button) sgr x10)
+      let sgr =
+        match Tui_decode.sgr_wheel_report params 'M', Tui_decode.sgr_left_press params 'M' with
+        | Some (direction, row, column), _ -> Some (Tui_decode.X10_wheel (direction, row, column))
+        | None, Some (row, column) -> Some (Tui_decode.X10_left_press (row, column))
+        | None, None -> None
+      in
+      Alcotest.(check (option x10_mouse)) (Printf.sprintf "button %d" button) sgr
+        (x10 ~button ~column:10 ~row:5))
     [ (64, "<64;10;5"); (65, "<65;10;5"); (0, "<0;10;5"); (66, "<66;10;5") ]
 
 (* The left press is the one report a surface can map to a row. Only the
@@ -2938,6 +2977,28 @@ let test_decode_skills_catalog_keeps_usage_scope () =
        | Error _ -> ()
        | Ok _ -> Alcotest.fail "missing coverage was accepted")
   | _ -> Alcotest.fail "invalid catalog fixture"
+
+(* The async read boundary adds "skills catalog load failed: "; the decoder
+   gives only the cause, so the source is named once on screen. *)
+let test_decode_skills_catalog_errors_carry_only_the_cause () =
+  let error json =
+    match Tui_decode.decode_skills_catalog json with
+    | Error detail -> detail
+    | Ok _ -> Alcotest.fail "a malformed catalog decoded"
+  in
+  Alcotest.(check string) "unknown state"
+    "unknown state \"later\""
+    (error
+       (`Assoc
+          [ ("schema", `String "masc.skill-snapshot/v1")
+          ; ("state", `String "later") ]));
+  Alcotest.(check string) "unexpected field"
+    "response has unexpected field \"extra\""
+    (error
+       (`Assoc
+          [ ("schema", `String "masc.skill-snapshot/v1")
+          ; ("state", `String "uninitialized")
+          ; ("extra", `Bool true) ]))
 
 let test_decode_skills_catalog_reads_the_discovery_roots () =
   let snapshot =
@@ -12519,14 +12580,18 @@ let () =
       ] );
     ( "x10_mouse",
       [
-        Alcotest.test_case "wheel up claims its own key" `Quick
-          test_x10_wheel_up_is_its_own_key;
-        Alcotest.test_case "wheel down claims its own key" `Quick
-          test_x10_wheel_down_is_its_own_key;
-        Alcotest.test_case "clicks and drags stay unclaimed" `Quick
-          test_x10_clicks_and_drags_stay_unclaimed;
+        Alcotest.test_case "the wheel carries its position" `Quick
+          test_x10_wheel_carries_its_position;
+        Alcotest.test_case "left press and release carry their position" `Quick
+          test_x10_left_press_and_release_carry_their_position;
+        Alcotest.test_case "other presses are named so their release is not left"
+          `Quick test_x10_other_presses_are_named_so_their_release_is_not_left;
+        Alcotest.test_case "motion and the horizontal wheel stay unclaimed" `Quick
+          test_x10_motion_and_the_horizontal_wheel_stay_unclaimed;
+        Alcotest.test_case "a position below one is unclaimed" `Quick
+          test_x10_position_below_one_is_unclaimed;
         Alcotest.test_case "agrees with the SGR decoder" `Quick
-          test_x10_and_sgr_agree_on_the_wheel;
+          test_x10_and_sgr_agree;
       ] );
     ( "prompts",
       [
@@ -12677,6 +12742,8 @@ let () =
     ( "skills_catalog",
       [ Alcotest.test_case "retained usage includes ledger coverage and exact gaps" `Quick
           test_decode_skills_catalog_keeps_usage_scope;
+        Alcotest.test_case "errors carry only the cause" `Quick
+          test_decode_skills_catalog_errors_carry_only_the_cause;
         Alcotest.test_case "reads usage rows and the execution flow" `Quick
           test_decode_skills_catalog_reads_usage_and_flow;
         Alcotest.test_case "reads the discovery roots and the config" `Quick

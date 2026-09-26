@@ -1,3 +1,5 @@
+import { getStaticTOMLValue, parseTOML, ParseError, type AST } from 'toml-eslint-parser'
+
 export type RuntimeTomlTransportKind = 'endpoint' | 'command' | 'missing'
 export type RuntimeTomlCredentialType = 'env' | 'file' | 'inline' | 'none'
 
@@ -63,6 +65,7 @@ export interface RuntimeTomlEnvironment {
   models: RuntimeTomlModel[]
   bindings: RuntimeTomlBinding[]
   warnings: string[]
+  parseError: string | null
 }
 
 export interface RuntimeTomlImpactSummary {
@@ -79,11 +82,15 @@ export interface RuntimeTomlImpactSummary {
 
 interface TomlSection {
   readonly name: string
+  readonly kind: AST.TOMLTable['kind']
+  readonly path: readonly string[]
+  readonly entries: readonly AST.TOMLKeyValue[]
   readonly start: number
   readonly end: number
 }
 
 interface TomlDocument {
+  readonly source: string
   readonly lines: string[]
   readonly sections: TomlSection[]
 }
@@ -112,151 +119,68 @@ const RESERVED_TOP_LEVEL = new Set([
   'vision',
 ])
 
+// Parse the complete document so quoted/escaped keys, dotted-key whitespace
+// and apparent table headers inside multiline strings have TOML semantics.
+// Source ranges let edits preserve spelling, comments and unrelated text.
 function parseDocument(sourceText: string): TomlDocument {
+  const ast = parseTOML(sourceText, { tomlVersion: '1.0' })
   const lines = sourceText.split('\n')
-  const headers: Array<{ name: string; index: number }> = []
-  for (let index = 0; index < lines.length; index += 1) {
-    const match = lines[index]?.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/)
-    if (match?.[1]) headers.push({ name: match[1].trim(), index })
-  }
-  const sections = headers.map((header, index): TomlSection => ({
-    name: header.name,
-    start: header.index,
-    end: headers[index + 1]?.index ?? lines.length,
-  }))
-  return { lines, sections }
+  const tables = ast.body[0].body.filter((node): node is AST.TOMLTable => node.type === 'TOMLTable')
+  const sections = tables.map((table, index): TomlSection => {
+    const nextTable = tables[index + 1]
+    return {
+      name: sourceText.slice(...table.key.range),
+      kind: table.kind,
+      path: getStaticTOMLValue(table.key),
+      entries: table.kind === 'standard' ? table.body : [],
+      start: table.loc.start.line - 1,
+      end: nextTable ? nextTable.loc.start.line - 1 : lines.length,
+    }
+  })
+  return { source: sourceText, lines, sections }
 }
 
-function providerSectionName(name: string): string {
-  // Provider ids use [A-Za-z0-9_-]+, but TOML may quote such a key. Match
-  // its logical table while retaining the source spelling for edits.
-  return name.replace(
-    /^providers\.("[A-Za-z0-9_-]+"|'[A-Za-z0-9_-]+')(?=\.|$)/,
-    (_match, quoted: string) => `providers.${quoted.slice(1, -1)}`,
-  )
+function tablePath(name: string): readonly string[] {
+  const table = parseTOML(`[${name}]`, { tomlVersion: '1.0' }).body[0].body[0]
+  if (table?.type !== 'TOMLTable' || table.kind !== 'standard') {
+    throw new Error('Expected a standard TOML table')
+  }
+  return getStaticTOMLValue(table.key)
+}
+
+function samePath(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((part, index) => part === right[index])
 }
 
 function sectionOf(document: TomlDocument, name: string): TomlSection | null {
-  const logicalName = providerSectionName(name)
-  return document.sections.find(section => providerSectionName(section.name) === logicalName) ?? null
+  const path = tablePath(name)
+  return document.sections.find(section => section.kind === 'standard' && samePath(section.path, path)) ?? null
 }
 
-// Bare key (letters/digits/underscore/hyphen) OR a quoted key ("..."/'...').
-// [runtime.assignments] keeper entries are written as quoted keys (e.g.
-// `"nick0cave" = "..."`); the earlier bare-key-only pattern silently failed
-// to match those lines, so sectionValues() returned {} for every quoted
-// entry and every keeper appeared to fall back to [runtime].default.
-function keyLineMatch(line: string): RegExpMatchArray | null {
-  return line.match(/^(\s*)("[^"]*"|'[^']*'|[A-Za-z0-9_-]+)(\s*=\s*)(.*)$/)
+function entryOf(section: TomlSection, key: string): AST.TOMLKeyValue | undefined {
+  return section.entries.find(entry => samePath(getStaticTOMLValue(entry.key), [key]))
 }
 
-// Strip the surrounding quotes from a matched key token so callers compare
-// against the plain keeper/field name regardless of how the TOML author
-// quoted it.
-function dequoteTomlKey(rawKey: string | undefined): string {
-  const trimmed = (rawKey ?? '').trim()
-  if (trimmed.length >= 2) {
-    const first = trimmed[0]
-    const last = trimmed[trimmed.length - 1]
-    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
-      return trimmed.slice(1, -1)
-    }
-  }
-  return trimmed
-}
-
-// TOML bare keys may only contain ASCII letters, digits, underscores, and
-// hyphens (https://toml.io/en/v1.0.0#keys) -- the same charset keyLineMatch
-// accepts unquoted. Anything else must be written as a quoted basic string.
+// Serialization validates new identifiers separately from parsing existing text.
 const BARE_TOML_KEY = /^[A-Za-z0-9_-]+$/
-
-// Serialize a key for a brand-new `key = value` line. JSON.stringify produces
-// a valid TOML basic string for the ASCII range keeper/field names use
-// (matching backslash/double-quote escaping), so a name requiring quoting is
-// never written out as an invalid bare key.
 function serializeTomlKey(key: string): string {
   return BARE_TOML_KEY.test(key) ? key : JSON.stringify(key)
-}
-
-function stripInlineComment(raw: string): string {
-  let quote: '"' | "'" | null = null
-  let escaped = false
-  for (let index = 0; index < raw.length; index += 1) {
-    const char = raw[index]
-    if (escaped) {
-      escaped = false
-      continue
-    }
-    if (char === '\\' && quote === '"') {
-      escaped = true
-      continue
-    }
-    if (char === '"' && quote !== "'") {
-      quote = quote === '"' ? null : '"'
-      continue
-    }
-    if (char === "'" && quote !== '"') {
-      quote = quote === "'" ? null : "'"
-      continue
-    }
-    if (char === '#' && quote === null) return raw.slice(0, index).trim()
-  }
-  return raw.trim()
-}
-
-function parseStringLiteral(raw: string): string | null {
-  const trimmed = raw.trim()
-  if (!trimmed.startsWith('"') || !trimmed.endsWith('"')) return null
-  try {
-    return JSON.parse(trimmed) as string
-  } catch {
-    return trimmed.slice(1, -1)
-  }
-}
-
-function parseTomlScalar(raw: string): TomlScalar {
-  const value = stripInlineComment(raw)
-  const stringValue = parseStringLiteral(value)
-  if (stringValue !== null) return stringValue
-  if (value === 'true') return true
-  if (value === 'false') return false
-  if (/^-?\d+$/.test(value)) return Number.parseInt(value, 10)
-  if (/^-?\d+\.\d+$/.test(value)) return Number.parseFloat(value)
-  return value === '' ? null : value
 }
 
 function sectionValues(document: TomlDocument, name: string): Record<string, TomlScalar> {
   const section = sectionOf(document, name)
   if (!section) return {}
-  const values: Record<string, TomlScalar> = {}
-  for (let index = section.start + 1; index < section.end; index += 1) {
-    const line = document.lines[index] ?? ''
-    const match = keyLineMatch(line)
-    if (!match?.[2] || match[0].trimStart().startsWith('#')) continue
-    values[dequoteTomlKey(match[2])] = parseTomlScalar(match[4] ?? '')
+  const values: Record<string, TomlScalar> = Object.create(null)
+  for (const entry of section.entries) {
+    const path = getStaticTOMLValue(entry.key)
+    const key = path[0]
+    if (path.length !== 1 || key === undefined) continue
+    const value = getStaticTOMLValue(entry.value)
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      values[key] = value
+    }
   }
   return values
-}
-
-// Line numbers (1-indexed) inside a section that are neither blank, a
-// comment, a nested `[...]` header, nor a key = value pair keyLineMatch can
-// read. A non-empty result means the UI is silently under-reporting that
-// section's contents (exactly how the quoted-key keeper assignments went
-// missing) rather than a real absence of data — surface it instead of
-// hiding it behind a default fallback.
-function sectionUnparsedLineNumbers(document: TomlDocument, name: string): number[] {
-  const section = sectionOf(document, name)
-  if (!section) return []
-  const lineNumbers: number[] = []
-  for (let index = section.start + 1; index < section.end; index += 1) {
-    const line = document.lines[index] ?? ''
-    const trimmed = line.trim()
-    if (trimmed === '' || trimmed.startsWith('#')) continue
-    if (/^\[.+\]\s*(#.*)?$/.test(trimmed)) continue
-    if (keyLineMatch(line)) continue
-    lineNumbers.push(index + 1)
-  }
-  return lineNumbers
 }
 
 function asString(value: TomlScalar | undefined, fallback = ''): string {
@@ -271,47 +195,32 @@ function asBoolean(value: TomlScalar | undefined, fallback = false): boolean {
   return typeof value === 'boolean' ? value : fallback
 }
 
+function tableIds(document: TomlDocument, owner: string): string[] {
+  return document.sections.flatMap(section => {
+    const [namespace, id] = section.path
+    return section.kind === 'standard' && section.path.length === 2 && namespace === owner && id !== undefined ? [id] : []
+  })
+}
+
 function providerIds(document: TomlDocument): string[] {
-  return document.sections
-    .map(section => providerSectionName(section.name).match(/^providers\.([A-Za-z0-9_-]+)$/)?.[1])
-    .filter((id): id is string => Boolean(id))
+  return tableIds(document, 'providers')
 }
 
 function modelIds(document: TomlDocument): string[] {
-  return document.sections
-    .map(section => section.name.match(/^models\.([^.]+)$/)?.[1])
-    .filter((id): id is string => Boolean(id))
-}
-
-// Runtime ids use the logical TOML keys, not the source spelling of a table
-// header. A provider/model binding may be written as ["provider".'model'].
-const BINDING_PROVIDER_KEY = '(?:"[A-Za-z0-9_-]+"|\'[A-Za-z0-9_-]+\'|[A-Za-z0-9_-]+)'
-const BINDING_MODEL_KEY = '(?:"[A-Za-z0-9._-]+"|\'[A-Za-z0-9._-]+\'|[A-Za-z0-9_-]+)'
-const BINDING_HEADER = new RegExp(`^(${BINDING_PROVIDER_KEY})\\s*\\.\\s*(${BINDING_MODEL_KEY})$`)
-const BINDING_OWNER = new RegExp(`^(${BINDING_PROVIDER_KEY})\\s*\\.`)
-
-function bindingProviderId(sectionName: string): string | null {
-  const providerKey = sectionName.match(BINDING_OWNER)?.[1]
-  return providerKey ? dequoteTomlKey(providerKey) : null
+  return tableIds(document, 'models')
 }
 
 function bindingSections(document: TomlDocument): Array<{ providerId: string; modelId: string; section: string }> {
-  return document.sections
-    .map(section => {
-      const match = section.name.match(BINDING_HEADER)
-      if (!match) return null
-      const providerId = dequoteTomlKey(match[1])
-      if (RESERVED_TOP_LEVEL.has(providerId)) return null
-      return { providerId, modelId: dequoteTomlKey(match[2]), section: section.name }
-    })
-    .filter((entry): entry is { providerId: string; modelId: string; section: string } => {
-      return Boolean(entry?.providerId && entry.modelId)
-    })
+  return document.sections.flatMap(section => {
+    const [providerId, modelId] = section.path
+    if (section.kind !== 'standard' || section.path.length !== 2 || providerId === undefined || modelId === undefined || RESERVED_TOP_LEVEL.has(providerId)) return []
+    return [{ providerId, modelId, section: section.name }]
+  })
 }
 
 function providerFromDocument(document: TomlDocument, id: string): RuntimeTomlProvider {
-  const values = sectionValues(document, `providers.${id}`)
-  const credentials = sectionValues(document, `providers.${id}.credentials`)
+  const values = sectionValues(document, `providers.${serializeTomlKey(id)}`)
+  const credentials = sectionValues(document, `providers.${serializeTomlKey(id)}.credentials`)
   const endpoint = asString(values.endpoint)
   const command = asString(values.command)
   const credentialType = asString(credentials.type) as RuntimeTomlCredentialType
@@ -342,12 +251,12 @@ function capBoolean(value: TomlScalar | undefined): boolean | null {
 }
 
 function modelFromDocument(document: TomlDocument, id: string): RuntimeTomlModel {
-  const values = sectionValues(document, `models.${id}`)
+  const values = sectionValues(document, `models.${serializeTomlKey(id)}`)
   // Model capabilities live in the nested [models.<id>.capabilities] section,
   // parsed server-side by lib/runtime/runtime_toml.ml:435-451. The earlier
   // reader looked for a `json-support` key on the top-level model table, which
   // never exists in the SSOT config, so JSON-lane validation never fired.
-  const caps = sectionValues(document, `models.${id}.capabilities`)
+  const caps = sectionValues(document, `models.${serializeTomlKey(id)}.capabilities`)
   // thinking-control-format is intentionally NOT read here: Agent Core
   // request-building never consumes runtime.toml's [models.<id>.capabilities]
   // thinking-control-format key (masc #21521 / agentCore models.toml) — it is the
@@ -399,7 +308,14 @@ function bindingFromDocument(
 }
 
 export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvironment {
-  const document = parseDocument(sourceText)
+  let document: TomlDocument
+  try {
+    document = parseDocument(sourceText)
+  } catch (error) {
+    if (!(error instanceof ParseError)) throw error
+    const parseError = `TOML ${error.lineNumber}:${error.column + 1}: ${error.message}`
+    return { defaultRuntimeId: '', assignments: {}, providers: [], models: [], bindings: [], warnings: [parseError], parseError }
+  }
   const runtimeValues = sectionValues(document, 'runtime')
   const assignmentValues = sectionValues(document, 'runtime.assignments')
   const assignments = Object.fromEntries(
@@ -413,13 +329,6 @@ export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvi
   if (providers.length === 0) warnings.push('providers.* section not found')
   if (models.length === 0) warnings.push('models.* section not found')
   if (bindings.length === 0) warnings.push('provider.model binding section not found')
-  const unparsedAssignmentLines = sectionUnparsedLineNumbers(document, 'runtime.assignments')
-  if (unparsedAssignmentLines.length > 0) {
-    warnings.push(
-      `[runtime.assignments] ${unparsedAssignmentLines.length}줄을 keeper = runtime-id 형식으로 읽지 못했습니다 ` +
-        `(줄 ${unparsedAssignmentLines.join(', ')}) — 아래 배정 목록이 실제 runtime.toml과 다를 수 있습니다.`,
-    )
-  }
   return {
     defaultRuntimeId: asString(runtimeValues.default),
     assignments,
@@ -427,6 +336,7 @@ export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvi
     models,
     bindings,
     warnings,
+    parseError: null,
   }
 }
 
@@ -456,11 +366,12 @@ function runtimeAssignmentsSignature(document: TomlDocument): string {
 export function runtimeTomlImpactSummary(
   beforeSourceText: string,
   afterSourceText: string,
-): RuntimeTomlImpactSummary {
-  const beforeDocument = parseDocument(beforeSourceText)
-  const afterDocument = parseDocument(afterSourceText)
+): RuntimeTomlImpactSummary | null {
   const beforeEnvironment = parseRuntimeTomlEnvironment(beforeSourceText)
   const afterEnvironment = parseRuntimeTomlEnvironment(afterSourceText)
+  if (beforeEnvironment.parseError !== null || afterEnvironment.parseError !== null) return null
+  const beforeDocument = parseDocument(beforeSourceText)
+  const afterDocument = parseDocument(afterSourceText)
 
   return {
     defaultRuntimeBefore: beforeEnvironment.defaultRuntimeId,
@@ -490,50 +401,6 @@ function serializeStringArray(values: readonly string[]): string {
   return `[${values.map(serializeString).join(', ')}]`
 }
 
-function tomlArrayValueEndLine(
-  lines: readonly string[],
-  startIndex: number,
-  sectionEnd: number,
-  firstValueRaw: string,
-): number | null {
-  let quote: '"' | "'" | null = null
-  let escaped = false
-  let depth = 0
-  let sawOpen = false
-  for (let index = startIndex; index < sectionEnd; index += 1) {
-    const segment = index === startIndex ? firstValueRaw : lines[index] ?? ''
-    for (let offset = 0; offset < segment.length; offset += 1) {
-      const char = segment[offset]
-      if (escaped) {
-        escaped = false
-        continue
-      }
-      if (char === '\\' && quote === '"') {
-        escaped = true
-        continue
-      }
-      if (char === '"' && quote !== "'") {
-        quote = quote === '"' ? null : '"'
-        continue
-      }
-      if (char === "'" && quote !== '"') {
-        quote = quote === "'" ? null : "'"
-        continue
-      }
-      if (char === '#' && quote === null) break
-      if (quote !== null) continue
-      if (char === '[') {
-        sawOpen = true
-        depth += 1
-      } else if (char === ']' && sawOpen) {
-        depth -= 1
-        if (depth <= 0) return index
-      }
-    }
-  }
-  return sawOpen ? null : startIndex
-}
-
 function joinLines(lines: string[]): string {
   return lines.join('\n')
 }
@@ -547,91 +414,48 @@ function ensureSection(lines: string[], document: TomlDocument, sectionName: str
   nextLines.push(`[${sectionName}]`)
   return {
     lines: nextLines,
-    section: { name: sectionName, start, end: nextLines.length },
+    section: { name: sectionName, kind: 'standard', path: tablePath(sectionName), entries: [], start, end: nextLines.length },
   }
 }
 
-export function setRuntimeTomlKey(
-  sourceText: string,
-  sectionName: string,
-  key: string,
-  value: string | number | boolean,
-): string {
-  const initial = parseDocument(sourceText)
-  const ensured = ensureSection([...initial.lines], initial, sectionName)
-  const lines = ensured.lines
-  const section = ensured.section
-  const serialized = serializeValue(value)
-  for (let index = section.start + 1; index < section.end; index += 1) {
-    const match = keyLineMatch(lines[index] ?? '')
-    if (match && dequoteTomlKey(match[2]) === key) {
-      // Reuse the existing key token verbatim -- do not re-serialize it from
-      // the plain `key` argument. A quoted TOML key is not just cosmetic (it
-      // may carry characters illegal in a bare key, or have been emitted
-      // deliberately by the backend/SSOT writer), so updating only the value
-      // must not silently normalize `"nick0cave"` down to `nick0cave`.
-      lines[index] = `${match[1] ?? ''}${match[2]}${match[3] ?? ' = '}${serialized}`
-      return joinLines(lines)
-    }
-  }
-  lines.splice(section.end, 0, `${serializeTomlKey(key)} = ${serialized}`)
-  return joinLines(lines)
-}
-
-export function setRuntimeTomlStringArrayKey(
-  sourceText: string,
-  sectionName: string,
-  key: string,
-  values: readonly string[],
-): string {
-  const initial = parseDocument(sourceText)
-  const ensured = ensureSection([...initial.lines], initial, sectionName)
-  const lines = ensured.lines
-  const section = ensured.section
-  const serialized = serializeStringArray(values)
-  for (let index = section.start + 1; index < section.end; index += 1) {
-    const match = keyLineMatch(lines[index] ?? '')
-    if (match && dequoteTomlKey(match[2]) === key) {
-      const endIndex = tomlArrayValueEndLine(lines, index, section.end, match[4] ?? '')
-      if (endIndex === null) {
-        throw new Error(`Cannot rewrite unterminated TOML array for [${sectionName}].${key}`)
-      }
-      lines.splice(index, endIndex - index + 1, `${match[1] ?? ''}${match[2]}${match[3] ?? ' = '}${serialized}`)
-      return joinLines(lines)
-    }
-  }
-  lines.splice(section.end, 0, `${serializeTomlKey(key)} = ${serialized}`)
-  return joinLines(lines)
-}
-
-// Read a scalar key from a section as its raw TOML token (inline comment
-// stripped, trimmed). Symmetric reader for setRuntimeTomlKey; callers parse the
-// token (e.g. Number/=== 'true'). Returns undefined when the section or key is
-// absent — never a fabricated default.
-export function getRuntimeTomlKey(
-  sourceText: string,
-  sectionName: string,
-  key: string,
-): string | undefined {
+function replaceValue(sourceText: string, sectionName: string, key: string, serialized: string): string {
   const document = parseDocument(sourceText)
-  const section = sectionOf(document, sectionName)
-  if (!section) return undefined
-  for (let index = section.start + 1; index < section.end; index += 1) {
-    const match = keyLineMatch(document.lines[index] ?? '')
-    if (match && dequoteTomlKey(match[2]) === key) return stripInlineComment(match[4] ?? '').trim()
+  const ensured = ensureSection([...document.lines], document, sectionName)
+  const entry = entryOf(ensured.section, key)
+  let next: string
+  if (entry) {
+    next = sourceText.slice(0, entry.value.range[0]) + serialized + sourceText.slice(entry.value.range[1])
+  } else {
+    ensured.lines.splice(ensured.section.end, 0, `${serializeTomlKey(key)} = ${serialized}`)
+    next = joinLines(ensured.lines)
   }
-  return undefined
+  // A dotted assignment or inline table can already own this logical path
+  // without an editable table declaration. Never emit a duplicate table/key.
+  parseDocument(next)
+  return next
+}
+
+export function setRuntimeTomlKey(sourceText: string, sectionName: string, key: string, value: string | number | boolean): string {
+  return replaceValue(sourceText, sectionName, key, serializeValue(value))
+}
+
+export function setRuntimeTomlStringArrayKey(sourceText: string, sectionName: string, key: string, values: readonly string[]): string {
+  return replaceValue(sourceText, sectionName, key, serializeStringArray(values))
+}
+
+export function getRuntimeTomlKey(sourceText: string, sectionName: string, key: string): string | undefined {
+  const section = sectionOf(parseDocument(sourceText), sectionName)
+  const entry = section ? entryOf(section, key) : undefined
+  return entry ? sourceText.slice(...entry.value.range) : undefined
 }
 
 export function deleteRuntimeTomlKey(sourceText: string, sectionName: string, key: string): string {
   const document = parseDocument(sourceText)
   const section = sectionOf(document, sectionName)
-  if (!section) return sourceText
+  const entry = section ? entryOf(section, key) : undefined
+  if (!entry) return sourceText
   const lines = [...document.lines]
-  for (let index = section.end - 1; index > section.start; index -= 1) {
-    const match = keyLineMatch(lines[index] ?? '')
-    if (match && dequoteTomlKey(match[2]) === key) lines.splice(index, 1)
-  }
+  lines.splice(entry.loc.start.line - 1, entry.loc.end.line - entry.loc.start.line + 1)
   return joinLines(lines)
 }
 
@@ -647,18 +471,12 @@ export function deleteRuntimeTomlSection(sourceText: string, sectionName: string
 export function cascadeDeleteProvider(sourceText: string, providerId: string): string {
   const document = parseDocument(sourceText)
   const env = parseRuntimeTomlEnvironment(sourceText)
-  const prefix = `providers.${providerId}`
-  const prefixDot = `providers.${providerId}.`
   const canDeleteBindingNamespace = !isReservedRuntimeTomlId(providerId)
-  const sectionsToDelete = document.sections
-    .map(s => s.name)
-    .filter(name => {
-      const logicalName = providerSectionName(name)
-      return logicalName === prefix ||
-        logicalName.startsWith(prefixDot) ||
-        (canDeleteBindingNamespace && bindingProviderId(name) === providerId)
-    })
-  
+  const sectionsToDelete = document.sections.filter(section =>
+    (section.path[0] === 'providers' && section.path[1] === providerId)
+    || (canDeleteBindingNamespace && section.path[0] === providerId),
+  ).map(section => section.name)
+
   let next = sourceText
   for (const sec of sectionsToDelete) {
     next = deleteRuntimeTomlSection(next, sec)
@@ -698,7 +516,7 @@ export function setRuntimeTomlProviderField(
   field: 'enabled' | 'display-name' | 'protocol' | 'endpoint' | 'command' | 'is-non-interactive' | 'account-home' | 'agent' | 'effort' | 'timeout-s' | 'exact-body-timeout-s',
   value: string | number | boolean | null,
 ): string {
-  const section = `providers.${providerId}`
+  const section = `providers.${serializeTomlKey(providerId)}`
   if (value === null || value === '') {
     return deleteRuntimeTomlKey(sourceText, section, field)
   }
@@ -719,7 +537,7 @@ export function setRuntimeTomlProviderCredential(
   credentialType: RuntimeTomlCredentialType,
   value: string,
 ): string {
-  const section = `providers.${providerId}.credentials`
+  const section = `providers.${serializeTomlKey(providerId)}.credentials`
   if (credentialType === 'none') return deleteRuntimeTomlSection(sourceText, section)
   const normalizedValue = value.trim()
   if (!normalizedValue) return deleteRuntimeTomlSection(sourceText, section)
@@ -750,14 +568,14 @@ export function setRuntimeTomlModelField(
   // legacy `json-support` field there so dashboard-authored models write the
   // key runtime config actually consumes instead of an ignored top-level key.
   if (field === 'json-support') {
-    const capabilities = `models.${modelId}.capabilities`
+    const capabilities = `models.${serializeTomlKey(modelId)}.capabilities`
     if (value === null) {
       return deleteRuntimeTomlKey(sourceText, capabilities, 'supports-response-format-json')
     }
     return setRuntimeTomlKey(sourceText, capabilities, 'supports-response-format-json', value)
   }
-  if (value === null) return deleteRuntimeTomlKey(sourceText, `models.${modelId}`, field)
-  return setRuntimeTomlKey(sourceText, `models.${modelId}`, field, value)
+  if (value === null) return deleteRuntimeTomlKey(sourceText, `models.${serializeTomlKey(modelId)}`, field)
+  return setRuntimeTomlKey(sourceText, `models.${serializeTomlKey(modelId)}`, field, value)
 }
 
 export function setRuntimeTomlBindingField(
@@ -766,19 +584,17 @@ export function setRuntimeTomlBindingField(
   field: 'enabled' | 'is-default' | 'max-concurrent' | 'keep-alive' | 'num-ctx',
   value: string | number | boolean | null,
 ): string {
-  if (value === null) return deleteRuntimeTomlKey(sourceText, runtimeId, field)
-  return setRuntimeTomlKey(sourceText, runtimeId, field, value)
+  // Runtime identifiers separate a bare provider id from the model id at
+  // the first dot; a model id may itself contain dots and must remain one key.
+  const boundary = runtimeId.indexOf('.')
+  if (boundary <= 0 || boundary === runtimeId.length - 1) throw new Error('Invalid runtime identifier')
+  const table = `${serializeTomlKey(runtimeId.slice(0, boundary))}.${serializeTomlKey(runtimeId.slice(boundary + 1))}`
+  if (value === null) return deleteRuntimeTomlKey(sourceText, table, field)
+  return setRuntimeTomlKey(sourceText, table, field, value)
 }
 
-// runtime.toml ids become TOML table headers ([providers.<id>], [models.<id>],
-// and the binding pin [<providerId>.<modelId>]). parseDocument's section regex
-// and bindingSections' 2-part split both assume an id has no '.', so a bare-key
-// -safe charset is required, not just non-empty. Matches BARE_TOML_KEY above
-// (same TOML bare-key grammar: ASCII letters/digits/underscore/dash, no
-// restriction on the first character) rather than a stricter identifier-style
-// pattern — a leading '_'/'-' is a valid bare key both to keyLineMatch's
-// tokenizer and to the backend TOML parser, so rejecting it here would make
-// this form stricter than the config format it writes into.
+// Newly created provider/model ids use the same bare-key alphabet as the
+// server. Existing table identity comes from the TOML parser above.
 const RUNTIME_TOML_ID_PATTERN = /^[A-Za-z0-9_-]+$/
 
 export function isValidRuntimeTomlIdFormat(id: string): boolean {
@@ -799,6 +615,8 @@ export function createRuntimeTomlBinding(
   modelId: string,
 ): string {
   const document = parseDocument(sourceText)
-  const ensured = ensureSection([...document.lines], document, `${providerId}.${modelId}`)
-  return joinLines(ensured.lines)
+  const ensured = ensureSection([...document.lines], document, `${serializeTomlKey(providerId)}.${serializeTomlKey(modelId)}`)
+  const next = joinLines(ensured.lines)
+  parseDocument(next)
+  return next
 }

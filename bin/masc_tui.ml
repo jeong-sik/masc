@@ -10822,6 +10822,16 @@ let enter_runtime_mode state ~mailbox mode =
   if state.view <> Runtime then goto_surface state ~mailbox Runtime
 ;;
 
+(* The third stop of the same strip: the standalone service lanes, off the
+   ring. The Runtime surface is left on its lane view, which [p] there
+   returns to. *)
+let enter_standalone_lanes state ~mailbox =
+  state.runtime_mode <- Masc_tui_types.Runtime_lanes;
+  state.runtime_cursor <- 0;
+  state.runtime_surface_scroll <- 0;
+  goto_surface state ~mailbox Lanes
+;;
+
 (* What a press on marked text does: the same move the key for that place
    makes. A press on the place already open does nothing -- it is where the
    reader already is, and re-entering would reset its scroll and cursor. A
@@ -10849,6 +10859,8 @@ let press_marked_target state ~mailbox (target : press_target) =
   | Press_runtime_mode mode ->
       if mode <> state.runtime_mode || state.view <> Runtime then
         enter_runtime_mode state ~mailbox mode
+  | Press_standalone_lanes ->
+      if state.view <> Lanes then enter_standalone_lanes state ~mailbox
   | Press_context_tab tab ->
       if tab <> state.context_inspector_tab then
         enter_context_inspector_tab state tab
@@ -18480,9 +18492,9 @@ and is loaded on demand through keeper_skill.
       let text_target = text_input_target state ~compact_viewport in
       let recovered_paste = Option.is_some interrupted_paste in
       (* What a press lands on in the frame on screen. Only marks the
-         terminal was shown can answer, and [render] records none for a frame
-         drawn over a surface, so a modal's press never changes the surface
-         under it. A field taking keys holds the press too: moving away from
+         terminal was shown can answer, and for a frame drawn over a surface
+         [render] keeps only the presses that act inside the overlay, so a
+         modal's press never changes the surface under it. A field taking keys holds the press too: moving away from
          it would leave the next keys typed into a field no longer drawn.
          While the picture or the machine screen is up nothing is drawn, so
          the last frame's marks are not what the terminal shows. *)
@@ -24951,10 +24963,7 @@ and is loaded on demand through keeper_skill.
                 enter_runtime_mode state ~mailbox:async_messages
                   Masc_tui_types.Runtime_all
             | Masc_tui_types.Runtime_all ->
-                state.runtime_mode <- Masc_tui_types.Runtime_lanes;
-                state.runtime_cursor <- 0;
-                state.runtime_surface_scroll <- 0;
-                goto_surface state ~mailbox:async_messages Lanes)
+                enter_standalone_lanes state ~mailbox:async_messages)
        | Some "p" | Some "P" when state.view = Clients ->
            goto_surface state ~mailbox:async_messages Runtime
        | Some "p" | Some "P"

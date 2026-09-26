@@ -19,6 +19,7 @@ type press_target =
   | Press_memory_category of Masc_tui_types.memory_category_filter
   | Press_theme_filter of [ `All | `Dark | `Light ]
   | Press_runtime_mode of Masc_tui_types.runtime_mode
+  | Press_standalone_lanes
   | Press_context_tab of Masc_tui_context_inspector.tab
 
 val press_changes_the_surface : press_target -> bool

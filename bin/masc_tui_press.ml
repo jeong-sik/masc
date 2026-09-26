@@ -5,8 +5,8 @@ open Masc_tui_types
 type ring_edge = Ring_before | Ring_after
 
 (* [Press_surface] is a Tab-ring entry, or a title-strip entry that is a
-   surface of its own (Activity's Events and Logs, Planning's three stops,
-   Standalone lanes). [Press_ring_edge] is the count of ring entries hidden
+   surface of its own (Activity's Events and Logs, Planning's three stops).
+   [Press_ring_edge] is the count of ring entries hidden
    past one edge of a narrow strip. The rest are the entries of one screen's
    own strip, each named by the value its cycle key steps through. *)
 type press_target =
@@ -19,6 +19,7 @@ type press_target =
   | Press_memory_category of memory_category_filter
   | Press_theme_filter of [ `All | `Dark | `Light ]
   | Press_runtime_mode of runtime_mode
+  | Press_standalone_lanes
   | Press_context_tab of Masc_tui_context_inspector.tab
 
 (* An overlay keeps the surface's strip on its first row, and a press there
@@ -27,7 +28,8 @@ type press_target =
 let press_changes_the_surface = function
   | Press_surface _ | Press_ring_edge _ | Press_keeper_tab _
   | Press_config_pane _ | Press_metrics_section _ | Press_tools_pane _
-  | Press_memory_category _ | Press_theme_filter _ | Press_runtime_mode _ ->
+  | Press_memory_category _ | Press_theme_filter _ | Press_runtime_mode _
+  | Press_standalone_lanes ->
       true
   | Press_context_tab _ -> false
 

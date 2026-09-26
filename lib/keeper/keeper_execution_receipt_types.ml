@@ -17,8 +17,6 @@ let outcome_kind_to_string =
   Keeper_execution_receipt_outcome_kind.outcome_kind_to_string
 let outcome_kind_to_tla_receipt =
   Keeper_execution_receipt_outcome_kind.outcome_kind_to_tla_receipt
-let outcome_kind_is_terminal_success =
-  Keeper_execution_receipt_outcome_kind.outcome_kind_is_terminal_success
 
 type error_kind = Error_kind of string
 

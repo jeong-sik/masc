@@ -7191,6 +7191,8 @@
  (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
 
 (include stanzas/test_tui_sidebar_index_fold.inc)
+(include stanzas/test_tui_surface_chrome_overflow.inc)
+
 (rule
  (alias runtest-test_tui_verdict_refresh_pty)
  (deps test_tui_verdict_refresh_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)

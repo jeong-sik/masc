@@ -54,7 +54,11 @@ let install_dir_variable = function
    directory variable when it is set, else ~/.local/bin for each client. *)
 let vendor_directories client =
   match Option.bind (install_dir_variable client) Env_config_core.raw_value_opt with
-  | Some path when String.trim path <> "" -> [ path ]
+  | Some path when String.trim path <> "" ->
+    (* Vendor installers accept relative destinations against setup's cwd.
+       Persist that same destination as an absolute spelling: the eventual
+       native process runs from another workspace. Do not resolve symlinks. *)
+    [ if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path ]
   | Some _ | None ->
     (match Env_config_core.raw_value_opt "HOME" with
      | Some home -> [ Filename.concat home ".local/bin" ]

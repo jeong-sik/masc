@@ -190,6 +190,14 @@
 - Keeper continuation checkpoints now retain their own typed terminal disposition instead of requesting human input. Decision, receipt, Dashboard and composite projections agree while preserving the original yield cause (#39411).
 - Version and documentation checks consume their complete scan output before selecting the first match, preventing an early closed pipe from turning valid release history into SIGPIPE while retaining scan and version validation failures (#39420).
 - The Context Inspector now shows the cause of a connection failure once. It reads `Composition unavailable: turn-records: GET failed: …` instead of adding a second `request failed` in front of the transport message. (#39372)
+- `h` and `l` move the pane focus on Resources and Code below the 110-column
+  split threshold. The one arm behind both keys tested the width before it
+  tested the surface, so the keys were refused on the two screens that draw
+  whichever pane the focus names at every width, while their footers kept
+  naming them; on Code that left an open file with no way back to the tree but
+  `Esc`, which closes the file. Keeper detail keeps the width test, since below
+  the threshold it draws the detail alone and its footer drops the keys
+  (#39139).
 
 ### Documentation
 
@@ -230,6 +238,8 @@
   PTY scenario while retaining the marker and timeline assertions. #39382
 - Compare verified Linux server probe artifacts with isolated HTTP/model/workspace fixtures, full failure receipts, negotiated-encoding checks, and separate mutation, execution-read and concurrent-liveness measurements. (#39409)
 - Let Linux server comparisons seed explicit synthetic worker fleets and task sizes, and verify worker projection order, ownership counts and persisted records alongside HTTP receipts. #39415
+- Move durable Gate approval lifecycle phases and their wire labels into the
+  Keeper contract module while preserving stored row compatibility (#39219).
 
 ### Performance
 

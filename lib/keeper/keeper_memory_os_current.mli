@@ -21,6 +21,20 @@ type source =
   ; trace_id : string
   }
 
+(** Latest committed removal of one memory identity. [Explicit_retract]
+    covers the keeper's retraction and the operator's dashboard cleanup. *)
+type removal =
+  { removed_in_revision : int
+  ; removed_at : float
+  ; removed_by : source
+  ; removed_origin : Keeper_memory_os_types.origin_kind
+  ; drop_reason : string option
+  }
+
+type supersession =
+  | Superseded_current
+  | Target_already_dropped of removal
+
 (** A proposed derived fact that did not survive truth maintenance because no
     complete proof path remained current. [missing_premise_ids] is the union
     of premises absent from the maintained fixed point across its derivations. *)
@@ -54,6 +68,9 @@ type supersede_error =
       (** The incoming claim has the superseded fact's exact bytes, so it
           would name itself as its own successor. *)
   | Supersede_target_not_current of string
+  | Supersede_target_removed of removal
+      (** An explicit write or retraction removed the target. Its receipt is
+          returned without authorizing another successor. *)
   | Supersede_target_not_authored of string
       (** The target is current but was not written by this keeper through
           [keeper_memory_write]; a Librarian copy is the Librarian's to
@@ -63,6 +80,8 @@ type supersede_error =
           complete support path left; the target is among its missing
           premises. A claim cannot rest on the fact it replaces. *)
   | Supersede_unsupported_derivation of support_invalidation
+  | Supersede_journal_unreadable of string
+      (** The latest removal cannot be established from the journal. *)
   | Supersede_persistence_failed of string
 
 type retraction =
@@ -245,23 +264,11 @@ val read_journal_tail :
   -> limit:int
   -> (journal_entry, string) result list
 
-(** How one memory identity left this keeper's current snapshot, from the
-    journal line that removed it: the revision, its commit time, the writer
-    ([removed_by]), the removed fact's origin, and the drop statement's reason
-    when the writer gave one. [removed_by.kind = Explicit_retract] covers the
-    keeper's own retraction and the operator's dashboard cleanup alike. *)
-type removal =
-  { removed_in_revision : int
-  ; removed_at : float
-  ; removed_by : source
-  ; removed_origin : Keeper_memory_os_types.origin_kind
-  ; drop_reason : string option
-  }
-
 (** [Removed]: the latest journal line naming the identity removed it.
     [No_removal_recorded]: no line removed it, or the latest line naming it
     added it; this covers an identity the keeper never had and a missing
-    journal. [Journal_unreadable]: the journal could not be read. *)
+    journal. [Journal_unreadable]: a read or decode failure prevents proving
+    the latest mention. *)
 type removal_lookup =
   | Removed of removal
   | No_removal_recorded
@@ -269,8 +276,10 @@ type removal_lookup =
 
 (** Scan this keeper's journal newest first for the line that removed
     [memory_id], stopping at the first line that names it, as one IO pool job.
-    A line this build cannot decode is passed over, so an undecodable removal
-    line reads as [No_removal_recorded]. *)
+    A malformed or undecodable line stops the search as [Journal_unreadable];
+    an older removal cannot authorize a write past unknown newer evidence.
+    This read-only result grants no write authority. {!supersede_fact} checks
+    it under the same lock as the snapshot update. *)
 val find_removal :
   keepers_dir:string -> keeper_id:string -> string -> removal_lookup
 
@@ -513,7 +522,7 @@ val supersede_fact
   -> source:source
   -> superseded_memory_id:string
   -> Keeper_memory_os_types.fact
-  -> (t, supersede_error) result
+  -> (t * supersession, supersede_error) result
 (** Atomically remove one current keeper-authored fact and insert its
     successor in the same locked update. The successor is added under the
     same rules as {!upsert_fact}: new claim bytes get the incoming
@@ -521,7 +530,13 @@ val supersede_fact
     re-observation of that fact. Derived facts that lose their support with
     the target are removed as in {!retract_fact}. The removal is journaled
     with a [superseded_by] reason in the same commit. Every refusal writes no
-    snapshot and no journal line. *)
+    snapshot and no journal line.
+
+    If the target is absent, its latest journal removal must name a
+    Librarian drop of an authored fact. That permits an ordinary upsert and
+    returns [Target_already_dropped], with no new removal event. Snapshot
+    membership, journal approval and insertion share the same store lock;
+    an explicit removal, injected target or unreadable journal is refused. *)
 
 val retract_facts
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t

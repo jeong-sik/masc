@@ -1566,29 +1566,19 @@ let upsert_explicit_fact
            ~superseded_memory_id
            fact
        with
-       | Ok snapshot -> Ok (snapshot, Superseded superseded_memory_id)
-       | Error (Keeper_memory_os_current.Supersede_target_not_current target) ->
-         (match Keeper_memory_os_current.find_removal ~keepers_dir ~keeper_id target with
-          | Keeper_memory_os_current.Removed removal ->
-            (match removal.removed_by.kind, removal.removed_origin with
-             | Keeper_memory_os_current.Librarian, Keeper_memory_os_types.Authored ->
-               upsert ()
-               |> Result.map (fun snapshot ->
-                 snapshot, Target_already_dropped { memory_id = target; removal })
-             | Keeper_memory_os_current.Librarian, Keeper_memory_os_types.Injected ->
-               Error (Write_supersede_refused Supersedes_not_authored)
-             | ( ( Keeper_memory_os_current.Explicit_write
-                 | Keeper_memory_os_current.Explicit_retract )
-               , ( Keeper_memory_os_types.Authored | Keeper_memory_os_types.Injected ) ) ->
-               Error (Write_supersede_target_removed removal))
-          | Keeper_memory_os_current.No_removal_recorded ->
-            Error (Write_supersede_refused Supersedes_not_current)
-          | Keeper_memory_os_current.Journal_unreadable detail ->
-            Log.Keeper.warn
-              "memory journal unreadable while resolving supersedes keeper=%s: %s"
-              keeper_id
-              detail;
-            Error (Write_supersede_refused Supersedes_not_current))
+       | Ok (snapshot, Keeper_memory_os_current.Superseded_current) ->
+         Ok (snapshot, Superseded superseded_memory_id)
+       | Ok (snapshot, Keeper_memory_os_current.Target_already_dropped removal) ->
+         Ok (snapshot, Target_already_dropped { memory_id = superseded_memory_id; removal })
+       | Error (Keeper_memory_os_current.Supersede_target_not_current _) ->
+         Error (Write_supersede_refused Supersedes_not_current)
+       | Error (Keeper_memory_os_current.Supersede_target_removed removal) ->
+         Error (Write_supersede_target_removed removal)
+       | Error (Keeper_memory_os_current.Supersede_journal_unreadable detail) ->
+         Log.Keeper.warn
+           "memory journal unreadable while resolving supersedes keeper=%s: %s"
+           keeper_id detail;
+         Error (Write_persistence_failed detail)
        | Error Keeper_memory_os_current.Supersede_memory_id_invalid ->
          Error (Write_supersede_refused Supersedes_invalid)
        | Error Keeper_memory_os_current.Supersede_self ->

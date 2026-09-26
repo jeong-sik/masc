@@ -53,9 +53,9 @@ store 마다 세 가지를 묻는다.
 | keeper meta | — | 아니오 | 멈춤 | Refuse_boot (0420) | — |
 | memory current | — | 아니오 | 돈다 (recall 빠짐) | Refuse_boot (0420) | — |
 | official-client session | 예 | 예 | **멈춤** | **Refuse_boot** | — |
-| Keeper checkpoint | — | — | **멈춤** | Refuse_boot (PR-3) | — |
 | Keeper event queue | — | — | **멈춤** | Refuse_boot (PR-3) | — |
-| World constitution | — | — | **멈춤** (모든 Keeper) | Refuse_boot (PR-3) | — |
+| Keeper checkpoint | — | — | **멈춤** (버전을 올리지 않은 변경만) | 정하지 않음 (4장) | — |
+| World constitution | 아니오 | 예 (append) | 돈다 (못 푼 줄은 빠짐) | 목록 밖 | 프롬프트가 `rejected` 줄을 보여 주지 않음 |
 | goal store | 예 | 예 | 돈다 | Degrade_typed (0444) | — |
 | memory-source current | 아니오 | 예 | 돈다 | Preflight_only | `keeper_tool_memory_runtime.ml:830-835`, `keeper_memory_os_recall.ml:72-80` |
 | board posts | 아니오 | 예 (#38612) | 돈다 | Preflight_only | 대부분의 board 읽기가 부분 상태를 완전한 것처럼 씀 |
@@ -81,13 +81,15 @@ store 마다 세 가지를 묻는다.
 
 - keeper meta: `keeper_heartbeat_loop.ml:858-868` 이 dispatch 전에 meta 를 다시 읽는다. `keeper_unified_turn_execution.ml:50-56` 이 provider 호출 전에 턴을 거절한다.
 - official-client session: `keeper_claude_code_runtime.ml:669-674`, `keeper_codex_runtime.ml:770-774`, `keeper_antigravity_runtime.ml:468-472` 가 runtime 을 만들지 못한다. `Internal` 오류는 다음 lane 후보로 넘어가지 않아서(`keeper_turn_driver_try_runtime.ml:84-98`) 턴이 끝난다.
-- Keeper checkpoint: `keeper_run_context.ml:100-106` 이 `Superseded_version` 말고는 모든 읽기 실패를 `Checkpoint_unread` 로 올린다. `keeper_agent_run.ml:952-973` 이 그걸 `not_dispatched` 로 끝낸다. 2026-09-23 checkpoint v10→v11 사고가 이것이다 (#37900 댓글).
-- Keeper event queue: `keeper_event_queue_persistence.ml:349-377` 이 못 읽는 스냅숏을 그대로 두고 오류를 돌려준다. `keeper_heartbeat_stimulus_intake.ml:1060-1069` 가 `Pending_selection_failed` 로 바꾸고, `keeper_heartbeat_loop.ml:80-88` 이 매 cycle 턴을 돌리지 않는다. 2026-09-22 event-queue v18→v19 사고가 이것이다 (#37900).
-- World constitution: `keeper_unified_prompt.ml:1359-1366` 의 읽기 실패가 `keeper_agent_run.ml:966-973` 에서 `not_dispatched` 가 된다. 워크스페이스 파일 하나라서 못 읽으면 모든 Keeper 가 멈춘다.
+- Keeper event queue: `keeper_event_queue_persistence.ml:349-377` 이 못 읽는 스냅숏을 그대로 두고 오류를 돌려준다. `keeper_heartbeat_stimulus_intake.ml:1060-1069` 가 `Pending_selection_failed` 로 바꾸고, `keeper_heartbeat_loop.ml:80-88` 이 매 cycle 턴을 돌리지 않는다. 2026-09-22 event-queue v18→v19 사고가 이것이다 (#37900). 파일 이름(`event-queue-v19.json`)은 두고 payload 표식만 올리면 이 상태가 된다 (`keeper_event_queue_schema.ml`).
+- Keeper checkpoint: `keeper_run_context.ml:100-106` 이 `Superseded_version` 말고는 모든 읽기 실패를 `Checkpoint_unread` 로 올리고, `keeper_agent_run.ml:952-973` 이 그걸 `not_dispatched` 로 끝낸다. 다만 `checkpoint_version` 을 올린 hard cut 은 `Superseded_version` 이 되어 새 맥락으로 돈다. 턴이 멈추는 건 버전을 올리지 않은 codec 변경(`Parse_error`), 더 새 버전(`Newer_version`), 읽기 실패다.
+- World constitution: 턴을 막는 건 파일 자체를 읽지 못할 때(`Unreadable`, I/O 오류)뿐이다 (`keeper_unified_prompt.ml:1359-1366`). 스키마가 바뀌어 못 푸는 줄은 `ledger.rejected` 로 빠지고, 턴은 그 조항 없이 돈다 (`world_constitution_store.ml:125-141`). 그래서 hard cut 으로 턴이 멈추는 store 가 아니다. 파일을 읽지 못하는 경우는 #39230 과 같은 부류다.
 
 아직 목록에 없는 store 는 4장 PR-3 에서 다룬다.
 
-- 체크포인트, event queue, World constitution: (c) 가 아니오라서 `Refuse_boot` 다. event queue 는 지금 preflight 셸이 `validate-current-queue`·`validate-current-wal` 로 따로 읽는다. 목록에 넣으면서 그 두 subcommand 를 지운다. 체크포인트는 어디서도 미리 읽지 않는다.
+- event queue: (c) 가 아니오라서 `Refuse_boot` 다. 지금은 preflight 셸이 `validate-current-queue`·`validate-current-wal` 로 따로 읽는다. 목록에 넣으면서 그 두 subcommand 와 셸 반복문을 지운다. 파일은 Keeper 당 두 개, 합쳐 10MB 라서 부팅 비용이 작다.
+- 체크포인트: 현재 trace 의 checkpoint 는 24개 합쳐 642MB(가장 큰 것 89MB)다. 부팅마다 전부 풀면 2.2 의 전제가 깨진다. 버전을 올린 hard cut 은 이미 새 맥락으로 넘어가므로, 남은 위험은 버전을 올리지 않은 codec 변경이다. 부팅에서 읽을지, codec 을 바꾸면 버전을 올리도록 막을지는 운영자가 정한다.
+- World constitution: hard cut 으로 턴이 멈추지 않아서 이 RFC 의 부팅 정책 대상이 아니다. 프롬프트가 `rejected` 줄을 보여 주지 않는 것은 (a) 결함이다.
 - board comments, memory-journal: preflight 도 읽지 않는다. 읽는 함수부터 만들어야 한다 (#38595, #38596). (c) 는 조사하지 않았다.
 
 ## 2. 설계
@@ -158,14 +160,15 @@ preflight 의 `scan` 과 `on_refusal` 문구는 `Keeper_durable_store` 로 옮�
 2. `Id.all` 을 돌며 모은 `Refuse_boot`·`Degrade_typed` 값이 `Refusing.all`·`Reported.all` 과 하나씩 맞고, 이름이 서로 다르다는 테스트.
 3. 같은 fixture 에서 부팅이 지목한 `Refuse_boot` 파일을 preflight 도 거절하고, 부팅이 INFO 만 남기는 goal store 는 preflight 가 읽지 않는다는 테스트.
 4. PR-2: v1 `session.json` 을 둔 base path 로 `Keeper_store_boot_reconcile.examine`·`admit` 을 돌리면 플래그 없이는 거절하고, 거절 문구에 Keeper 와 경로가 있다. 파일 digest 는 그대로다. `quarantine` 뒤에는 파일이 없고, 옮긴 사본이 같은 바이트를 가지며, `load` 는 `None` 이다.
-5. PR-3: 체크포인트·event queue·World constitution 을 못 읽는 fixture 로 부팅이 거절하고, preflight 의 `validate-current-queue`·`validate-current-wal` 이 사라진다.
+5. PR-3: event queue 를 못 읽는 fixture 로 부팅이 거절하고, 격리하면 스냅숏과 WAL 이 함께 옮겨진다. preflight 의 `validate-current-queue`·`validate-current-wal` 과 셸 반복문이 사라진다.
 6. 소비자 수정 PR 은 1장 마지막 열의 해당 소비자를 고치고, 읽기 실패가 typed 로 보이는 것을 테스트로 보인다.
 
 ## 4. 단계
 
 - **PR-1 목록**: `Keeper_durable_store`(`Id`, `Refusing`, `Reported`, `reader`, `preflight_scan`, `name`, `run`, `on_refusal`). store 별 읽는 법은 preflight 에서 이 모듈로 옮기고 내보내지 않는다. `reader` 가 더는 가리키지 않는 읽는 법은 unused 경고로 빌드가 멈춘다. preflight 와 부팅 reconcile 이 이 목록을 쓴다. 부팅과 preflight 의 동작은 바뀌지 않는다. 판정 1·2·3.
 - **PR-2 세션**: official-client session 을 `Refuse_boot` 로 올리고, 잠금을 잡고 옮기는 방법을 더한다. 판정 4.
-- **PR-3 턴을 멈추는 나머지**: 체크포인트, event queue(스냅숏+WAL), World constitution 을 목록에 넣고 `Refuse_boot` 로 둔다. 판정 5.
+- **PR-3 event queue**: 목록에 넣고 `Refuse_boot` 로 둔다. 격리는 queue 소유자 잠금 아래에서 스냅숏과 WAL 을 함께 옮긴다. 판정 5.
+- **체크포인트**: 운영자 결정을 기다린다 (1장 아래 설명).
 - **PR-4 읽는 함수가 없는 store**: board comments, memory-journal(#38596). (c) 부터 조사한다.
 - **PR-5~ 소비자**: 1장 마지막 열의 소비자를 store 별로 고친다. 판정 6.
 - 별도 결함: #38597(memory events), #38598(preflight 문구), #39224(설치된 preflight helper 가 서버보다 오래됨).
@@ -186,7 +189,7 @@ preflight 의 `scan` 과 `on_refusal` 문구는 `Keeper_durable_store` 로 옮�
 ## 6. 근거
 
 - 첫 분류: 2026-09-24, origin/main `eba5fb56ad`, preflight store 16개 + memory-journal. 에이전트 세 명이 store 를 나눠 소비자와 writer 를 전수로 읽었다.
-- (c) 조사: 2026-09-26, origin/main `dae899d581`. 17개 store 의 턴 경로 reader 를 읽었다(빌드·실행 없이). 멈춤은 keeper meta 와 official-client session 이다. 같은 날 적대적 리뷰가 목록 밖의 체크포인트·event queue 를 더 찾았고, World constitution 은 조사 중에 나왔다. 셋 다 코드로 다시 확인했다. 턴 경로 전체를 다 봤다고 보장하지는 않는다.
+- (c) 조사: 2026-09-26, origin/main `dae899d581`. 17개 store 의 턴 경로 reader 를 읽었다(빌드·실행 없이). 멈춤은 keeper meta 와 official-client session 이다. 같은 날 적대적 리뷰가 목록 밖의 체크포인트·event queue 를 더 찾았고, World constitution 은 조사 중에 나왔다. 셋 다 코드로 다시 확인했고, World constitution 은 파일을 읽지 못할 때만 턴이 멈춘다는 것을 PR-3 준비 중에 확인했다. 턴 경로 전체를 다 봤다고 보장하지는 않는다.
 - 2026-09-26 사고: #32504 댓글. 첫 실패 14:11:34 KST(05:11:34Z), 복구 14:51:46 KST(05:51:46Z). 파일 24개를 `backups-hardcut-20260926T055146Z-official-client-session-v1/` 로 옮긴 뒤 binding 실패 0건.
 - 부팅 비용: 2026-09-26 14:54 KST, 설치된 `masc-deployment-preflight-helper validate-stores --base-path=/Users/dancer/me`. real 60.06s, user 55.81s. 크기는 `du` 로 쟀다: `keepers/*/provider-inputs` 3,488,888KB(249 파일), `turn-records` 57,260KB, `keepers/*.json` 156KB(24 파일), `memory-current.json` 합계 3.5MB, `official-client-runtime` 24KB(24 파일). 설치된 helper 는 09-07 빌드라 거절 수(23,767)는 의미가 없고(#39224), 시간만 하한으로 본다.
 - preflight 목록: `bin/deployment_preflight_helper.ml` `durable_stores` (16개). 부팅 목록: `lib/keeper/keeper_store_boot_reconcile.ml` GADT (3개).

@@ -4,8 +4,6 @@ val outcome_kind_to_string :
   Keeper_execution_receipt_outcome_kind.outcome_kind -> string
 val outcome_kind_to_tla_receipt :
   Keeper_execution_receipt_outcome_kind.outcome_kind -> string
-val outcome_kind_is_terminal_success :
-  Keeper_execution_receipt_outcome_kind.outcome_kind -> bool
 type error_kind = Error_kind of string
 val error_kind_of_string : string -> error_kind
 val error_kind_to_string : error_kind -> string

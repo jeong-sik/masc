@@ -1096,9 +1096,9 @@ let load_schedule_wake_history ~(host : string) ~(port : int)
     decoder reads it and the pane keeps its truncation reading. *)
 let load_schedules_for_target ~(host : string) ~(port : int)
     ~(payload_target : string) : (schedule_snapshot, string) result =
-  match fetch_schedules_for_target ~host ~port ~payload_target with
-  | Error err -> Error ("keeper schedule load failed: " ^ err)
-  | Ok json -> decode_schedule_snapshot json
+  Result.bind
+    (fetch_schedules_for_target ~host ~port ~payload_target)
+    decode_schedule_snapshot
 
 (** Load board post list from /api/v1/board *)
 let load_board_list ~(host : string) ~(port : int)
@@ -1371,6 +1371,10 @@ let load_overview ~(host : string) ~(port : int) :
         let* items = required_list_field json "keepers_unread" in
         Keeper_snapshot_unread.list_of_json (`List items)
       in
+      let* ov_keeper_listing =
+        let* listing = required_object_field json "keepers_listing" in
+        Keeper_snapshot_unread.listing_of_json listing
+      in
       let* ov_workspace_health =
         let* workspace_health = required_string_field summary "workspace_health" in
         decode_workspace_health workspace_health
@@ -1414,6 +1418,7 @@ let load_overview ~(host : string) ~(port : int) :
         {
           ov_workspace_health;
           ov_keepers;
+          ov_keeper_listing;
           ov_keeper_liveness;
           ov_keeper_rows;
           ov_mcp_agents;

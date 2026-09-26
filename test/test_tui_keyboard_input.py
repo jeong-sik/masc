@@ -18634,6 +18634,17 @@ def machine_live_query(path: str) -> tuple[str, LiveMark | None]:
     return query["source_kind"][0], mark
 
 
+def with_live_activity(kind: str, answer: dict[str, object]) -> dict[str, object]:
+    """The live route adds the DOS activity feed to every DOS answer, the
+    no_machine one included (lib/server/server_routes_http_routes_lane_addons.ml
+    [with_activity]); MSX answers carry none. Since #39286 the TUI refuses a
+    DOS answer without the array, so a fixture that leaves it out never draws
+    the DOS row."""
+    if kind == "dos_capture":
+        return dict(answer, activity=[])
+    return answer
+
+
 def machine_live_answer(
     kind: str, body: dict[str, object] | None, since: LiveMark | None, *,
     count: int, frame_number: int | None,
@@ -18642,17 +18653,17 @@ def machine_live_answer(
     picture ([None]: no machine). [count] is the machine's change count, so a
     machine that did not move answers "unchanged"."""
     if body is None:
-        return 200, {"source_kind": kind, "state": "no_machine"}
+        return 200, with_live_activity(kind, {"source_kind": kind, "state": "no_machine"})
     marked = {"source_kind": kind, "change_count": count, "incarnation": LIVE_INCARNATION}
     if since == (count, LIVE_INCARNATION):
-        return 200, dict(marked, state="unchanged")
+        return 200, with_live_activity(kind, dict(marked, state="unchanged"))
     answer: dict[str, object] = dict(marked, state="changed", screen={
         "format": "rgb8", "width": body["width"], "height": body["height"],
         "rgb_base64": body["rgb_base64"],
     })
     if frame_number is not None:
         answer["frame_number"] = frame_number
-    return 200, answer
+    return 200, with_live_activity(kind, answer)
 
 
 def msx_live_fixture(frame: Callable[[], HttpResponse]) -> PathHttpResponse:
@@ -18661,7 +18672,7 @@ def msx_live_fixture(frame: Callable[[], HttpResponse]) -> PathHttpResponse:
     def resolve(path: str) -> HttpResponse:
         kind, since = machine_live_query(path)
         if kind == "dos_capture":
-            return 200, {"source_kind": kind, "state": "no_machine"}
+            return 200, with_live_activity(kind, {"source_kind": kind, "state": "no_machine"})
         if kind != "msx_capture":
             raise AssertionError(f"unexpected source kind: {kind}")
         status, body = frame()

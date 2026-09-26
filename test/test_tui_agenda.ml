@@ -50,10 +50,11 @@ let done_earlier =
    is denied -- so four remain. *)
 let asked_at_1155 = 1787713140.0
 
-let ask ?(asked_at = asked_at_1155) ?(timeout_sec = 300.0) asked_by question
+let ask ?(asked_at = asked_at_1155) ?(timeout_sec = 300.0)
+    ?(tool_call_id = "call-1") asked_by question
   : Agenda.awaiting
   =
-  { asked_by; question; asked_at; timeout_sec }
+  { asked_by; tool_call_id; question; asked_at; timeout_sec }
 ;;
 
 let strip_of ?(now = at_2026_08_26_0300z) ?(cols = 80) t =
@@ -724,6 +725,124 @@ let test_prose_rows_take_no_cursor () =
   check (list int) "an empty agenda opens nothing" []
     (Agenda.target_indexes (overlay_of (with_stuck [])))
 
+(* Refresh the same mutable workspace fields the loader replaces. Selection
+   is the identity from the earlier displayed projection; renderer lookup and
+   Enter lookup must agree even though that projection's row numbers moved. *)
+let agenda_state () =
+  Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
+
+let lines_of_state state = overlay_of (Masc_tui_types.agenda state)
+
+let selected_row state lines =
+  match Agenda.selected_index lines ~selected:state.Masc_tui_types.agenda_selected with
+  | Some row -> row
+  | None -> fail "selected identity should still have a visible row"
+
+let opened_target state lines =
+  Option.map (fun line -> line.Agenda.goes_to)
+    (Agenda.selected_line lines ~selected:state.Masc_tui_types.agenda_selected)
+
+let test_distinct_calls_from_one_keeper_remain_reachable () =
+  let state = agenda_state () in
+  let held tool_call_id : Masc.Tui_decode.keeper_tool_approval =
+    { kta_keeper = "keeper-a"
+    ; kta_tool_call_id = tool_call_id
+    ; kta_tool = "exec"
+    ; kta_args = "{}"
+    ; kta_question = "run?"
+    ; kta_because = None
+    ; kta_asked_at = asked_at_1155
+    ; kta_timeout_sec = 300.
+    }
+  in
+  let first = held "call-a" and second = held "call-b" in
+  state.keeper_tool_approvals_observed <- true;
+  state.keeper_tool_approvals <- [first; second];
+  state.goals_to_confirm <- Agenda.Read [goal ~goal_id:"goal-a" "Proof"];
+  let displayed = lines_of_state state in
+  let advance lines =
+    state.agenda_selected <- Agenda.step lines ~selected:state.agenda_selected Agenda.Next
+  in
+  let target tool_call_id =
+    Agenda.Keeper_holding { keeper = "keeper-a"; tool_call_id }
+  in
+  advance displayed;
+  check bool "first held call is selected" true
+    (opened_target state displayed = Some (target "call-a"));
+  advance displayed;
+  check bool "j reaches the same Keeper's second call" true
+    (opened_target state displayed = Some (target "call-b"));
+  let old_row = selected_row state displayed in
+  advance displayed;
+  check bool "j passes both calls to reach the Goal" true
+    (opened_target state displayed = Some (Agenda.Goal_to_confirm "goal-a"));
+  state.agenda_selected <- Agenda.step displayed ~selected:state.agenda_selected Agenda.Previous;
+  state.keeper_tool_approvals <- [second; first];
+  let refreshed = lines_of_state state in
+  check bool "the selected call moves after refresh" true
+    (selected_row state refreshed <> old_row);
+  check bool "refresh preserves the specific held call" true
+    (opened_target state refreshed = Some (target "call-b"))
+
+let test_goal_selection_survives_refresh_reordering () =
+  let state = agenda_state () in
+  let a = goal ~goal_id:"goal-a" "First proof" in
+  let b = goal ~goal_id:"goal-b" "Second proof" in
+  state.goals_to_confirm <- Agenda.Read [a; b];
+  let displayed = lines_of_state state in
+  state.agenda_selected <- Agenda.step displayed ~selected:Agenda.Nowhere Agenda.Next;
+  let old_row = selected_row state displayed in
+  (* A priority edit changes Goal_store's sorted read. *)
+  state.goals_to_confirm <- Agenda.Read [b; a];
+  let refreshed = lines_of_state state in
+  check bool "the old index now names a different Goal" true
+    (Option.map (fun line -> line.Agenda.goes_to) (List.nth_opt refreshed old_row)
+       = Some (Agenda.Goal_to_confirm "goal-b"));
+  check bool "highlight follows the chosen Goal's new row" true
+    (selected_row state refreshed <> old_row);
+  check bool "Enter still opens the Goal actually selected" true
+    (opened_target state refreshed = Some (Agenda.Goal_to_confirm "goal-a"))
+
+let test_inserted_goals_do_not_retarget_a_selected_task () =
+  let state = agenda_state () in
+  state.goals_to_confirm <- Agenda.Read [];
+  state.operator_stalled <- Some [stuck ~task_id:"shared-id" "Task to inspect"];
+  let displayed = lines_of_state state in
+  state.agenda_selected <- Agenda.step displayed ~selected:Agenda.Nowhere Agenda.Next;
+  let old_row = selected_row state displayed in
+  state.goals_to_confirm <- Agenda.Read
+    [goal ~goal_id:"shared-id" "A Goal with the same opaque ID";
+     goal ~goal_id:"goal-b" "New proof B";
+     goal ~goal_id:"goal-c" "New proof C";
+     goal ~goal_id:"goal-d" "New proof D"];
+  let refreshed = lines_of_state state in
+  check bool "the Task moved below the inserted Goals" true
+    (selected_row state refreshed > old_row);
+  check bool "the constructor and ID both remain authoritative" true
+    (opened_target state refreshed = Some (Agenda.Stuck_task "shared-id"))
+
+let test_removed_goal_does_not_select_its_replacement () =
+  let state = agenda_state () in
+  let a = goal ~goal_id:"goal-a" "Selected proof" in
+  let b = goal ~goal_id:"goal-b" "Other proof" in
+  state.goals_to_confirm <- Agenda.Read [a; b];
+  let displayed = lines_of_state state in
+  state.agenda_selected <- Agenda.step displayed ~selected:Agenda.Nowhere Agenda.Next;
+  state.goals_to_confirm <- Agenda.Read [b];
+  let refreshed = lines_of_state state in
+  check (option int) "no replacement row is highlighted" None
+    (Agenda.selected_index refreshed ~selected:state.agenda_selected);
+  check bool "Enter does not open the Goal now at the old index" true
+    (opened_target state refreshed = None);
+  (* Only an explicit navigation key may choose a new target. *)
+  state.agenda_selected <- Agenda.step refreshed ~selected:state.agenda_selected Agenda.Next;
+  check bool "j deliberately selects the remaining Goal" true
+    (opened_target state refreshed = Some (Agenda.Goal_to_confirm "goal-b"));
+  state.goals_to_confirm <- Agenda.Read [];
+  check bool "an empty reading moves to nowhere" true
+    (Agenda.step (lines_of_state state) ~selected:state.agenda_selected Agenda.Previous
+     = Agenda.Nowhere)
+
 let () =
   run
     "tui agenda"
@@ -802,6 +921,16 @@ let () =
             test_a_goal_to_confirm_is_waiting_on_the_operator
         ; test_case "the section answers in words" `Quick
             test_the_goal_section_answers_in_words
+        ] )
+    ; ( "selection across refreshed agenda projections"
+      , [ test_case "same Keeper calls retain distinct navigation identities" `Quick
+            test_distinct_calls_from_one_keeper_remain_reachable
+        ; test_case "Goal reorder preserves selected identity" `Quick
+            test_goal_selection_survives_refresh_reordering
+        ; test_case "inserted Goals preserve selected Task identity" `Quick
+            test_inserted_goals_do_not_retarget_a_selected_task
+        ; test_case "removed Goal opens no replacement" `Quick
+            test_removed_goal_does_not_select_its_replacement
         ] )
     ]
 ;;

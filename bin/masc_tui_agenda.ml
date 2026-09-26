@@ -24,6 +24,7 @@ type scheduled =
 
 type awaiting =
   { asked_by : string
+  ; tool_call_id : string
   ; question : string
   ; asked_at : float
   ; timeout_sec : float
@@ -210,8 +211,8 @@ type tone =
    than an answer. *)
 type destination =
   | Nowhere
-  | Keeper_holding of string
-      (** the keeper sitting on a tool call only an operator releases *)
+  | Keeper_holding of { keeper : string; tool_call_id : string }
+      (** The exact held call; one Keeper can have several awaiting answers. *)
   | Goal_to_confirm of string  (** the Goal, confirmed on its own detail *)
   | Stuck_task of string  (** the task, read on its own detail *)
 
@@ -339,7 +340,7 @@ let overlay ~now ~localtime ~cols t =
       List.map
         (fun (held : awaiting) ->
            { tone = Question
-           ; goes_to = Keeper_holding held.asked_by
+           ; goes_to = Keeper_holding { keeper = held.asked_by; tool_call_id = held.tool_call_id }
            ; text =
                two_column
                  ~cols
@@ -414,4 +415,38 @@ let target_indexes lines =
         rest
   in
   loop 0 [] lines
+;;
+
+let selected_index lines ~selected =
+  match selected with
+  | Nowhere -> None
+  | Keeper_holding _ | Goal_to_confirm _ | Stuck_task _ ->
+      List.find_index (fun line -> line.goes_to = selected) lines
+;;
+
+let selected_line lines ~selected =
+  Option.bind (selected_index lines ~selected) (List.nth_opt lines)
+;;
+
+type step = Next | Previous
+
+let step lines ~selected direction =
+  let targets =
+    List.filter_map (fun line ->
+      match line.goes_to with
+      | Nowhere -> None
+      | (Keeper_holding _ | Goal_to_confirm _ | Stuck_task _) as target -> Some target)
+      lines
+  in
+  match targets with
+  | [] -> Nowhere
+  | first :: _ ->
+      (match List.find_index (( = ) selected) targets with
+       | None -> first
+       | Some index ->
+           let next = match direction with
+             | Next -> min (List.length targets - 1) (index + 1)
+             | Previous -> max 0 (index - 1)
+           in
+           List.nth targets next)
 ;;

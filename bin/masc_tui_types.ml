@@ -5315,10 +5315,11 @@ type state = {
      the scroll survives only while it is open. *)
   mutable agenda_open: bool;
   mutable agenda_scroll: int;
-  (* The row Enter acts on. Held apart from the scroll because the two move
-     for different reasons: the scroll follows the cursor, and a panel whose
-     rows are mostly prose has a cursor that skips most of them. *)
-  mutable agenda_cursor: int;
+  (* The identity Enter opens, retained across refreshes. Its row is derived
+     from the current projection, so an inserted/reordered Goal cannot take
+     the selection of another Goal or a Task. A removed identity opens nothing
+     until an explicit navigation key selects another target. *)
+  mutable agenda_selected: Masc_tui_agenda.destination;
   (* The [@] answering overlay: the footer badge says that keepers are
      mid-turn, and this says which ones, on which lane, for how long. Modal
      like the agenda sheet, and like it the scroll survives only while it
@@ -7776,7 +7777,7 @@ let create_state
   keeper_deletions = None;
   agenda_open = false;
   agenda_scroll = 0;
-  agenda_cursor = 0;
+  agenda_selected = Masc_tui_agenda.Nowhere;
   hints_visible = true;
   coalesce_queued_input = true;
   user_input_priority_next = true;
@@ -8899,6 +8900,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
         (List.map
            (fun (held : Tui_decode.keeper_tool_approval) ->
               { Masc_tui_agenda.asked_by = held.kta_keeper
+              ; tool_call_id = held.kta_tool_call_id
               ; question = held.kta_tool
               ; asked_at = held.kta_asked_at
               ; timeout_sec = held.kta_timeout_sec

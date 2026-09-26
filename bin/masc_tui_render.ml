@@ -16740,6 +16740,7 @@ let render_answering (state : state) =
 let render_agenda (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let lines = agenda_lines state in
+  let selected = Agenda.selected_index lines ~selected:state.agenda_selected in
   let paint ~selected (line : Agenda.line) =
     let body =
       match line.Agenda.tone with
@@ -16771,10 +16772,16 @@ let render_agenda (state : state) =
       let scroll =
         Masc_tui_scroll.normalize ~count ~height state.agenda_scroll
       in
+      (* A refresh can move the selected identity beyond the old viewport.
+         Reveal its new row without changing which target Enter owns. *)
+      let scroll = match selected with
+        | Some cursor -> Masc_tui_scroll.ensure_visible ~cursor ~height scroll
+        | None -> scroll
+      in
       List.iteri
         (fun index line ->
           if index >= scroll && index < scroll + height then
-            c.push (paint ~selected:(index = state.agenda_cursor) line))
+            c.push (paint ~selected:(selected = Some index) line))
         lines;
       (* What falls off this panel is not more of the same: measured at 24
          rows and 100 columns, the panel drew sixteen of its twenty coming

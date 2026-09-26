@@ -46,6 +46,7 @@ type scheduled =
 
 type awaiting =
   { asked_by : string
+  ; tool_call_id : string
   ; question : string
   ; asked_at : float
   ; timeout_sec : float
@@ -144,8 +145,8 @@ type tone =
     waiting on the operator and had no way to reach any of it. *)
 type destination =
   | Nowhere
-  | Keeper_holding of string
-      (** the keeper sitting on a tool call only an operator releases *)
+  | Keeper_holding of { keeper : string; tool_call_id : string }
+      (** The exact held call; one Keeper can have several awaiting answers. *)
   | Goal_to_confirm of string  (** the Goal, confirmed on its own detail *)
   | Stuck_task of string  (** the task, read on its own detail *)
 
@@ -166,6 +167,21 @@ val overlay :
 val target_indexes : line list -> int list
 (** Indexes of the rows Enter can act on, in display order. The cursor moves
     over these, not over prose. *)
+
+val selected_index : line list -> selected:destination -> int option
+(** The current row of the selected identity. [None] for [Nowhere] or an
+    identity removed by a refresh; a different row never inherits selection. *)
+
+val selected_line : line list -> selected:destination -> line option
+(** The same identity the renderer highlights, revalidated against the latest
+    reading before Enter opens it. A removed selection opens nothing. *)
+
+type step = Next | Previous
+
+val step : line list -> selected:destination -> step -> destination
+(** Explicit cursor movement between actionable identities. An absent or
+    removed selection starts at the first target; no targets yields [Nowhere].
+    Merely replacing a reading does not call this or select a neighbour. *)
 
 val short_who : string -> string
 (** A wake target with its kind prefix removed: ["keeper:edgar.a.poe"] reads

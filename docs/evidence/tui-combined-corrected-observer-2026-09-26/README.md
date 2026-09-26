@@ -5,8 +5,9 @@ passed on macOS ARM with the same observer for both binaries. The 27 downloaded
 raw files are retained unchanged alongside independently recomputed aggregates.
 Each arm performs 300 acknowledged input transitions and three checked drafts.
 Execution order is baseline/candidate, candidate/baseline, baseline/candidate.
-Each session loads 250 synthetic alpha Channels bindings and one beta binding,
-then measures the roster and the Info tab with those bindings retained.
+Each session first measures 60 roster transitions and checks a draft, then
+loads 250 synthetic alpha Channels bindings and one beta binding, returns to
+Info, and measures 40 detail transitions with those bindings retained.
 
 ## Identities and scope
 

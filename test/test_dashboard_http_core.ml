@@ -3102,23 +3102,52 @@ let test_execution_request_resolves_actor_once () =
 let execution_payload_key (payload : Dashboard_cache.cached_payload) =
   Yojson.Safe.Util.(payload.json |> member "cache" |> member "request_cache_key" |> to_string)
 
-let test_execution_default_response_remains_json () =
+let test_execution_default_response_reuses_prepared_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
   with_cached_surface_success
     Server_dashboard_http_execution_surfaces.execution_cache
-    (`Assoc [ "default_marker", `String "last-success" ]) @@ fun () ->
-  match Server_dashboard_http_execution_surfaces.dashboard_execution_http_response
+    (`Assoc [ "default_marker", `String "last-success";
+              "data", `String (String.make 4000 'x') ]) @@ fun () ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  let context = Surface.execution_http_request ~state
+      (request_with_headers "/api/v1/dashboard/execution"
+         ["accept-encoding", "gzip"]) in
+  check bool "selected snapshot has no prepared bytes before first response" true
+    (Option.is_none (Surface.dashboard_execution_cached_http_representation context));
+  match Surface.dashboard_execution_http_response
       ~sw ~clock:(Eio.Stdenv.clock env)
-      (Server_dashboard_http_execution_surfaces.execution_http_request ~state
-         (request "/api/v1/dashboard/execution")) with
-  | Server_dashboard_http_execution_surfaces.Execution_payload _ ->
-    fail "the default light route must return its cached-surface JSON"
-  | Server_dashboard_http_execution_surfaces.Execution_json json ->
+      context with
+  | Surface.Execution_json _ ->
+    fail "the first default response discarded its prepared bytes"
+  | Surface.Execution_payload payload ->
+    let json = payload.json in
     let open Yojson.Safe.Util in
     check string "default snapshot retained" "last-success"
       (json |> member "default_marker" |> to_string);
     check bool "default-light query retained" true
-      (json |> member "query" |> member "default_light_request" |> to_bool)
+      (json |> member "query" |> member "default_light_request" |> to_bool);
+    check bool "identity bytes describe the same JSON" true
+      (Yojson.Safe.from_string payload.raw_json = json);
+    let gzip, headers = Dashboard_cache.select_http_representation
+        ~accept_encoding:(Some "gzip") payload in
+    check (option string) "first response can use gzip" (Some "gzip")
+      (List.assoc_opt "content-encoding" headers);
+    check bool "first compressed response is smaller" true
+      (String.length gzip < String.length payload.raw_json);
+    (match Surface.dashboard_execution_cached_http_representation context with
+     | None -> fail "first response did not leave prepared cache bytes"
+     | Some (warm, etag, warm_headers) ->
+       check bool "first and warm responses share gzip bytes" true (gzip == warm);
+       check string "same ETag" payload.etag etag;
+       check (list (pair string string)) "same representation headers" headers warm_headers);
+    let identity = Surface.execution_http_request ~state
+        (request_with_headers "/api/v1/dashboard/execution"
+           ["accept-encoding", "identity"]) in
+    (match Surface.dashboard_execution_cached_http_representation identity with
+     | None -> fail "identity bytes were not prepared"
+     | Some (warm, _, _) ->
+       check bool "identity bytes are reused without serialization" true
+         (payload.raw_json == warm))
 
 let test_execution_parameterized_payload_reuses_decorated_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
@@ -6805,8 +6834,8 @@ let () =
             test_execution_actor_for_request_canonicalizes_token_owner;
           test_case "execution request resolves actor once" `Quick
             test_execution_request_resolves_actor_once;
-          test_case "execution default response remains JSON" `Quick
-            test_execution_default_response_remains_json;
+          test_case "execution default response reuses prepared bytes" `Quick
+            test_execution_default_response_reuses_prepared_bytes;
           test_case "execution parameterized response reuses decorated bytes" `Quick
             test_execution_parameterized_payload_reuses_decorated_bytes;
           test_case "execution parameterized responses separate queries" `Quick

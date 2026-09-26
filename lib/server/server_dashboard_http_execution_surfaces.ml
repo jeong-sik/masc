@@ -772,11 +772,17 @@ let refresh_execution_default_light_http_body ~config =
     ~prepare:Http_response_payload.prepare ~config ()
 ;;
 
-let cached_execution_or_first_success_json ~clock ~timeout_sec compute =
+type execution_read =
+  | Published_snapshot of Server_dashboard_http_cache.surface_snapshot * Yojson.Safe.t
+  | Unpublished_response of Yojson.Safe.t
+
+let cached_execution_or_first_success ~clock ~timeout_sec compute =
   let cached_success () =
     with_execution_publication_lock (fun () ->
       if execution_surface_has_fresh_success_unlocked ()
-      then Some (Server_dashboard_http_cache.cached_surface_json execution_cache)
+      then Some (Published_snapshot
+        (Server_dashboard_http_cache.snapshot execution_cache,
+         Server_dashboard_http_cache.cached_surface_json execution_cache))
       else None)
   in
   match cached_success () with
@@ -809,7 +815,22 @@ let cached_execution_or_first_success_json ~clock ~timeout_sec compute =
           receive only its own completed pre-invalidation value.  It is left
           unstamped and cannot republish either cache; clients with a mutation
           watermark reject identity-less late responses. *)
-       json)
+       Unpublished_response json)
+;;
+
+let prepared_execution_payload_for_snapshot ~config snapshot =
+  with_execution_publication_lock (fun () ->
+    match !execution_default_light_http with
+    | Ready payload
+      when payload.source.snapshot == snapshot
+           && execution_http_source_matches ~config payload.source
+           && execution_surface_has_fresh_success_unlocked () ->
+      let raw_json, _ = Http_response_payload.select_prepared payload.encoded
+          ~accept_encoding:(Some "identity") in
+      Some { Dashboard_cache.json = payload.response_json;
+             raw_json; etag = payload.etag; origin = Dashboard_cache.Computed;
+             encoded = Some payload.encoded }
+    | Empty | Preparing _ | Ready _ -> None)
 ;;
 
 let with_transport_health_metadata json =
@@ -1364,6 +1385,8 @@ module For_testing = struct
   let refresh_execution_default_light_http_body
         ?(prepare = Http_response_payload.prepare) ~config () =
     refresh_execution_default_light_http_body_with ~prepare ~config ()
+
+  let prepared_payload_for_snapshot = prepared_execution_payload_for_snapshot
 end
 ;;
 
@@ -1577,11 +1600,14 @@ let dashboard_execution_http_response ~sw ~clock context =
     (* Default light mode: stay instant after first success, but avoid
          serving the empty initializing payload forever when proactive warm-up
          misses its first build window. *)
-    let json =
-      cached_execution_or_first_success_json
+    let selected =
+      cached_execution_or_first_success
         ~clock
         ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
         (compute ~light:true)
+    in
+    let json = match selected with
+      | Published_snapshot (_, json) | Unpublished_response json -> json
     in
     let response_json =
       with_execution_metadata
@@ -1591,7 +1617,16 @@ let dashboard_execution_http_response ~sw ~clock context =
         json
     in
     let (_ : Yojson.Safe.t) = refresh_execution_default_light_http_body ~config in
-    Execution_json response_json
+    (* Preparation may yield to a mutation or another publication. Reuse only
+       the selected snapshot's bytes; a newer Ready payload cannot replace
+       this request's already chosen response. A lost/failed publication keeps
+       the JSON fallback, including its original generation and diagnostics. *)
+    (match selected with
+     | Unpublished_response _ -> Execution_json response_json
+     | Published_snapshot (snapshot, _) ->
+       match prepared_execution_payload_for_snapshot ~config snapshot with
+       | Some payload -> Execution_payload payload
+       | None -> Execution_json response_json)
   | _ ->
     (* Authenticated dashboards use this path too. Cache the complete response
        so repeat reads retain its bytes instead of serializing the projection

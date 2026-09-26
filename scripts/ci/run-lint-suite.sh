@@ -64,6 +64,9 @@ run_self_test_when_changed() {
 }
 
 blocking_lints() {
+  run_self_test_when_changed "Review queue ledger readiness" \
+    "scripts/review/queue-ledger.sh scripts/review/test_queue_ledger.py" \
+    python3 scripts/review/test_queue_ledger.py
   run_lint "Installer terminal wizard" python3 test/test_installer_wizard.py
   run_lint "Installer upgrade configuration" python3 test/test_installer_upgrade.py
   run_self_test_when_changed "Stagehand extension installer" \

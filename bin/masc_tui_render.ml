@@ -8856,13 +8856,19 @@ let render_verification_list (state : state) =
   let header =
     match state.verification with
     | None ->
-        Printf.sprintf "%s  %s  %s  %s"
+        let reading_note =
+          match state.verification_error with
+          | None -> title_missing_reading ~error:None
+          | Some _ -> ""
+        in
+        let after =
+          Printf.sprintf "  %s  %s  %s" reading_note timestamp
+            (connection_badge state)
+        in
+        Printf.sprintf "%s%s"
           (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
-             ~after:
-               (Printf.sprintf "  %s  %s  %s"
-                  (title_missing_reading ~error:state.verification_error)
-                  timestamp (connection_badge state)))
-          (title_missing_reading ~error:state.verification_error) timestamp (connection_badge state)
+             ~after)
+          after
     | Some snapshot ->
         (* Both numbers, for the same reason the log surface shows both: "12"
            beside a list of 12 would read as "that is all of them".
@@ -9444,13 +9450,19 @@ let render_harness_list (state : state) =
   let header =
     match state.harness with
     | None ->
-        Printf.sprintf "%s  %s  %s  %s"
+        let reading_note =
+          match state.harness_error with
+          | None -> title_missing_reading ~error:None
+          | Some _ -> ""
+        in
+        let after =
+          Printf.sprintf "  %s  %s  %s" reading_note timestamp
+            (connection_badge state)
+        in
+        Printf.sprintf "%s%s"
           (planning_workspace_title state ~cols ~tab:Planning_verdicts ~window:""
-             ~after:
-               (Printf.sprintf "  %s  %s  %s"
-                  (title_missing_reading ~error:state.harness_error)
-                  timestamp (connection_badge state)))
-          (title_missing_reading ~error:state.harness_error) timestamp (connection_badge state)
+             ~after)
+          after
     | Some snapshot ->
         (* The page and the ledger, apart. This read "(8 verdicts)" while the
            server was reporting 4,197: the eight are the recent page, and
@@ -9897,8 +9909,13 @@ let render_fusion_list (state : state) =
   let header =
     match state.fusion_runs with
     | None ->
+        let reading_note =
+          match state.fusion_error with
+          | None -> title_missing_reading ~error:None
+          | Some _ -> ""
+        in
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Fusion") (title_missing_reading ~error:state.fusion_error) timestamp
+          (screen_title " MASC Fusion") reading_note timestamp
           (connection_badge state)
     | Some _ ->
         let completed_count =

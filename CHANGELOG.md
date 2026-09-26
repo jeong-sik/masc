@@ -13,9 +13,13 @@
   1. In every Keeper TOML, change `sandbox_image = "masc-keeper-sandbox:local"`
      to `"ocaml"` and `"masc-sandbox:general"` to `"base"`. Any other value is
      refused wherever a Keeper TOML, `keeper up` or the config endpoint reads it.
-  2. If this host has no promoted build for that name in the Keeper's image
-     store, run `masc setup` (it builds and promotes `base`) or
-     `masc sandbox-image promote <name> <reference>` for an image you built.
+  2. Check that this host has a promoted build for each name in the Keeper's
+     image store. For `base`, `masc setup` builds and promotes one; it does
+     not build `ocaml`. For `ocaml`, build the recipe from a checkout with
+     `masc sandbox-image --recipe ocaml --source .` and promote the tag it
+     prints with `masc sandbox-image promote ocaml <tag>`. For an image you
+     built yourself, run `masc sandbox-image promote <name> <tag>`. Pass the
+     same `--runtime` to both commands when the Keeper uses a non-default store.
   3. Remove `MASC_KEEPER_SANDBOX_DOCKER_IMAGE` from your environment. It is no
      longer read, and there is no built-in default image any more.
 

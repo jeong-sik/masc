@@ -41,7 +41,7 @@ assignments, or authorization."""
 [[params]]
 name = "sandbox_image"
 type = "string"
-description = "Keeper sandbox container image tag or digest. Required for sandbox_profile docker or microvm unless the keeper TOML already names one; there is no default image. masc-sandbox:general has no language toolchain. Omit to retain the current setting. Applies through the idle lane restart boundary, never replaces a running turn's sandbox."
+description = "Name of the keeper's sandbox image in the host image catalog (sandbox-images.toml), such as base or ocaml; the catalog says which build it is. Required for sandbox_profile docker or microvm unless the keeper TOML already names one; there is no default image. base has no language toolchain. Omit to retain the current setting. Applies through the idle lane restart boundary, never replaces a running turn's sandbox."
 
 [[params]]
 name = "sandbox_profile"

@@ -2063,6 +2063,7 @@ def run_terminal_scenario(
     interact: Interaction,
     confirm_exit: bytes = b"q",
     refresh: float = 60.0,
+    terminal_cols: int = 100,
     http_fixtures: HttpFixtures | None = None,
     http_requests: HttpRequests | None = None,
     prepare_workspace: WorkspaceSetup | None = None,
@@ -2079,7 +2080,7 @@ def run_terminal_scenario(
     output = bytearray()
     process: subprocess.Popen[bytes] | None = None
     try:
-        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, terminal_cols, 0, 0))
         os.set_blocking(master_fd, False)
         with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
             with test_http_endpoint(
@@ -14189,7 +14190,8 @@ def run_http_badge_refresh_regression(executable: str) -> None:
     try:
         run_terminal_scenario(
             executable, description="HTTP badge refresh timing",
-            interact=interact, refresh=0.5, http_fixtures=fixtures,
+            interact=interact, refresh=0.5, terminal_cols=140,
+            http_fixtures=fixtures,
         )
     finally:
         release_slow.set()

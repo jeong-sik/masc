@@ -36,6 +36,9 @@ consistent with the existing HTTP representation handling and
 - The first fallback starts without matching prepared bytes, then must return
   the same identity/gzip string objects as the warmed route, with matching
   ETag, headers and JSON metadata. This proves byte reuse, not latency.
+- A separate case invalidates both projection and byte caches, runs the real
+  first projection compute, then verifies its successful publication and
+  identical identity bytes/ETag on a subsequent warm read.
 - Existing preparation scenarios now check reuse against the exact selected
   snapshot: workspace mismatch, invalidation inside preparation, and a newer
   ready snapshot all reject the old selection.

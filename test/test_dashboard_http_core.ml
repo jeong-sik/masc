@@ -3149,6 +3149,37 @@ let test_execution_default_response_reuses_prepared_bytes () =
        check bool "identity bytes are reused without serialization" true
          (payload.raw_json == warm))
 
+let test_execution_first_compute_reuses_prepared_bytes () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  Surface.invalidate_execution_cache ();
+  Eio_guard.protect ~finally:Surface.invalidate_execution_cache (fun () ->
+    check bool "no successful projection before first compute" true
+      (Option.is_none (Server_dashboard_http_cache.snapshot Surface.execution_cache)
+                        .last_success_unix);
+    let context = Surface.execution_http_request ~state
+        (request_with_headers "/api/v1/dashboard/execution"
+           ["accept-encoding", "identity"]) in
+    let response = Surface.dashboard_execution_http_response
+        ~sw ~clock:(Eio.Stdenv.clock env) context in
+    match response with
+    | Surface.Execution_json _ -> fail "first successful compute discarded prepared bytes"
+    | Surface.Execution_payload payload ->
+      check bool "first compute published a successful projection" true
+        (Option.is_some (Server_dashboard_http_cache.snapshot Surface.execution_cache)
+                          .last_success_unix);
+      let open Yojson.Safe.Util in
+      check bool "default query retained" true
+        (payload.json |> member "query" |> member "default_light_request" |> to_bool);
+      check bool "computed identity bytes match JSON" true
+        (Yojson.Safe.equal payload.json (Yojson.Safe.from_string payload.raw_json));
+      match Surface.dashboard_execution_cached_http_representation context with
+      | None -> fail "first compute did not leave prepared bytes"
+      | Some (warm, etag, _) ->
+        check bool "first compute and warm read reuse identity bytes" true
+          (payload.raw_json == warm);
+        check string "first compute and warm read retain ETag" payload.etag etag)
+
 let test_execution_parameterized_payload_reuses_decorated_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
   let clock = Eio.Stdenv.clock env in
@@ -6836,6 +6867,8 @@ let () =
             test_execution_request_resolves_actor_once;
           test_case "execution default response reuses prepared bytes" `Quick
             test_execution_default_response_reuses_prepared_bytes;
+          test_case "execution first compute reuses prepared bytes" `Quick
+            test_execution_first_compute_reuses_prepared_bytes;
           test_case "execution parameterized response reuses decorated bytes" `Quick
             test_execution_parameterized_payload_reuses_decorated_bytes;
           test_case "execution parameterized responses separate queries" `Quick

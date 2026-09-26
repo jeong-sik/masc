@@ -39,6 +39,11 @@ val run :
   ?terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   ?on_model_input_window_observation:
     (Runtime_model_input_tail_window.window_observation -> unit) ->
+  ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
+  ?librarian_front:Keeper_official_client_host.librarian_front_reader ->
+  ?on_carried_front:
+    (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit) ->
+  turn_start:Keeper_carried_front.turn_start ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
   ?on_official_client_result_handoff:
@@ -53,8 +58,19 @@ val run :
   unit ->
   attempt_outcome
 (** [on_model_input_window_observation] receives how much of the offered
-    history this turn carried. Without it the turn record is written with no
-    window and no input composition, which is what [/context] reads.
+    history a [Start] carried. Without it the turn record is written with no
+    window and no input composition, which is what [/context] reads. A
+    [Resume] sends no history and reports no window.
+
+    A [Start] carries the carried range, not the whole history
+    ({!Keeper_official_client_host.carried_start_range}), and injects it into
+    the new thread; a [Resume] sends none of the history. The range starts
+    where the last answered request's range did ([carried_front_seed]), at the
+    turn's Librarian position ([librarian_front]) when that is later, else at
+    [turn_start]. [on_carried_front] reports the front each [Start]
+    composition cut, before the write, as on the Claude Code lane; a [Resume]
+    reports none. When an overflow retry reaches the zero-history floor, no
+    carried front is reported because no conversation atom is transmitted.
 
     [on_transmitted_model_input] fires once per attempt, after context injection
     is acknowledged and the complete turn/start input is written. Required
@@ -108,4 +124,23 @@ module For_testing : sig
   val recovery_failure_of_attempt :
     thread_mode:Runtime_codex_app_server.thread_mode -> gate_continuation:bool ->
     Runtime_codex_app_server.error -> Keeper_official_client_session_store.recovery_failure
+
+  val carried_projection
+    :  capacity_bytes:int
+    -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
+    -> ?librarian_front:Keeper_official_client_host.librarian_front_reader
+    -> ?on_carried_front:
+         (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit)
+    -> turn_start:Keeper_carried_front.turn_start
+    -> ?on_model_input_window_observation:
+         (Runtime_model_input_tail_window.window_observation -> unit)
+    -> keeper_name:string
+    -> runtime_id:string
+    -> Agent_core.Types.message list
+    -> (Agent_core.Types.message list, Agent_core.Error.t) result
+  (** The history a [Start] carries: the carried range, cut again by a
+      declared ceiling when there is one. *)
+
+  val unbounded_capacity_bytes : int
+  (** [capacity_bytes] for a runtime that declares no max-prompt-bytes. *)
 end

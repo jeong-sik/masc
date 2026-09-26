@@ -1374,6 +1374,10 @@ class CompiledRuntimeSetup(unittest.TestCase):
                     token = base / 'credential-file'
                     token.write_text('fixture-only-token')
                     selected['credential_file'] = str(token)
+                elif choice == 'muse':
+                    account = base / 'selected-muse-account'
+                    account.mkdir(mode=0o700)
+                    selected.update(account_home=str(account), max_prompt_bytes=32768)
                 env = {k: v for k, v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
                 with patch.dict(os.environ, env, clear=True):
                     result = SETUP.configure(BINARY, base, selected)

@@ -277,10 +277,10 @@ let test_the_composer_is_read_from_the_execution_kind () =
     (Front.composer_of_execution agent_core);
   check composer_t "claude code hands over its own list" Front.Hands_over_its_own_list
     (Front.composer_of_execution
-       (Runtime_execution.Claude_code { cli_path = "claude"; model = None; timeout_s = 1. }));
+       (Runtime_execution.Claude_code { cli_path = "claude"; account_home = None; model = None; timeout_s = 1. }));
   check composer_t "codex hands over its own list" Front.Hands_over_its_own_list
     (Front.composer_of_execution
-       (Runtime_execution.Codex_app_server { cli_path = "codex"; model = None; timeout_s = 1. }));
+       (Runtime_execution.Codex_app_server { cli_path = "codex"; account_home = None; model = None; timeout_s = 1. }));
   check composer_t "antigravity hands over its own list" Front.Hands_over_its_own_list
     (Front.composer_of_execution
        (Runtime_execution.Antigravity_cli

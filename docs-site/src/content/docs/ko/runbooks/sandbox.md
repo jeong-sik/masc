@@ -33,19 +33,24 @@ Keeper 가 띄울 microVM 런타임이 없습니다.
 
 ## 샌드박스 이미지
 
-MASC 는 이미지를 같이 배송하지 않습니다. 범용 이미지를 한 번 만듭니다.
+MASC 는 이미지를 같이 배송하지 않습니다. 배포에 든 Keeper 는 `masc-sandbox:general`
+을 적어 두었고, `masc setup` 이 저장소에 그 이미지가 없으면 만듭니다. 손으로 만들 때는
+이렇게 합니다.
 
 ```bash
-masc sandbox-image
+masc sandbox-image --tag masc-sandbox:general
 ```
 
-`masc-sandbox:general` 은 Debian slim 에 `bash`(턴이 `bash -l -s` 로 돕니다),
-`ripgrep`(Grep 도구가 `rg` 없이는 거부합니다), `git`, `curl`, `ca-certificates`,
-`less`, `procps`, `findutils` 를 담습니다. 그 이상은 가정하지 않습니다. 프로젝트의
-툴체인은 그 프로젝트 이미지에 있어야 하고, Keeper 마다 `sandbox_image` 로 가리킵니다.
+무엇이 들었는지는 `sandbox-images/base/Dockerfile` 에 있습니다. 프로젝트의 툴체인은
+그 프로젝트 이미지에 있어야 하고, Keeper 마다 `sandbox_image` 로 가리킵니다.
 
-레시피는 바이너리 안에 있고 빌드 컨텍스트 없이 `docker build -` 로 넘어갑니다. 그래서
-저장소를 받아본 적 없는 기계에서도 똑같이 만들어집니다.
+`--tag` 를 주지 않으면 명령이 빌드 이름을 `masc-sandbox-base:<UTC 분>-<입력 해시>`
+로 붙이고 출력합니다. 어느 쪽이든 이미 저장소에 있는 태그는 거절합니다. 그래서
+Keeper 가 쓰는 이름 아래에서 이미지가 바뀌지 않습니다. 새 태그로 빌드하고 Keeper 가
+그 태그를 가리키게 합니다.
+
+바이너리가 base 레시피를 품고 있고, 빌드 컨텍스트 없이 `docker build -` 로 넘깁니다.
+그래서 저장소를 받아본 적 없는 기계에서도 똑같이 만들어집니다.
 
 **microVM 키퍼는 Docker 스토어를 보지 않습니다.** 런타임마다 자기 이미지 스토어가
 따로라, 위 명령으로 만든 이미지는 microVM 게이트에 안 보입니다. 그 스토어에 만들려면

@@ -61,4 +61,21 @@ describe('runtime-resolved schema', () => {
     expect(() => parseRuntimeResolvedResponse({ ...responseWith(validRuntime), lanes: [lane] }))
       .toThrow(RuntimeResolvedSchemaDriftError)
   })
+
+  it('decodes provider usage by account scope without turning no report into zero', () => {
+    const base = responseWith(validRuntime)
+    const provider_usage_windows = [
+      { scope: 'provider:claude_one', providers: ['claude_one'], state: 'reported', windows: [{
+        limit_id: null, window: { kind: 'five_hour' }, utilization: { unit: 'fraction', value: 0.67 },
+        resets_at: null, observed_at: 1_100, source: 'claude_code.rate_limit_event',
+      }] },
+      { scope: 'provider:codex_two', providers: ['codex_two'], state: 'not_reported_since_start', windows: [] },
+    ]
+    const parsed = parseRuntimeResolvedResponse({ ...base, provider_usage_windows_since: 1_000, provider_usage_windows })
+    expect(parsed.provider_usage_windows?.[0]?.windows[0]?.utilization).toEqual({ unit: 'fraction', value: 0.67 })
+    expect(parsed.provider_usage_windows?.[1]?.state).toBe('not_reported_since_start')
+    expect(() => parseRuntimeResolvedResponse({ ...base, provider_usage_windows: [{
+      ...provider_usage_windows[0], state: 'available',
+    }] })).toThrow(RuntimeResolvedSchemaDriftError)
+  })
 })

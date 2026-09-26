@@ -826,6 +826,34 @@ let test_a_compound_leave_key_without_spaces_is_still_the_door () =
     (contains ~needle:"n / N" line);
   Alcotest.(check bool) "the way out is" true (contains ~needle:"Esc:back" line)
 
+(* A row that has given up every key it may give up is cut from what is left,
+   not from where it started. Measured on the fixture server at sixty cells,
+   Planning's Harness and Verification tabs drew three navigation keys and no
+   way out at all, while the Tasks tab beside them kept [Left / Esc:back] and
+   [q:quit]: the cut fell on the row before any key had been dropped, so it
+   spent the cells on the keys the reader can look up. *)
+let test_a_row_too_narrow_for_its_pinned_keys_is_cut_from_them () =
+  let hints =
+    "j/k:move  v:next Planning tab  PgUp/PgDn:page  Right / Enter:verdict  \
+     Left / Esc:back  y / x:agree / overrule  Y:copy task  /:find  \
+     n / N:next / previous match  r:refresh  Tab:next  q:quit"
+  in
+  let at width =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:width ~port:8935 ~hints ()
+  in
+  let narrow = at 60 in
+  Alcotest.(check bool) "the way out survives the cut" true
+    (contains ~needle:"Esc:back" narrow);
+  Alcotest.(check bool) "the keys it may lose are gone" false
+    (contains ~needle:"v:next Planning tab" narrow);
+  Alcotest.(check bool) "and the reader is told the row was cut" true
+    (contains ~needle:"\xe2\x80\xa6" narrow);
+  (* Twenty more cells hold the pinned set whole, so nothing above is a
+     property of this hint row rather than of the width. *)
+  let wide = at 80 in
+  Alcotest.(check bool) "the quit key returns with the room for it" true
+    (contains ~needle:"q:quit" wide)
+
 let test_a_label_holding_a_colon_still_reads_its_key () =
   (* [Enter:edit / use] is a label with a separator in it. Only the first
      colon ends the key, or an item like this would read as an unpinned one
@@ -1347,6 +1375,8 @@ let tests =
           test_cut_hints_name_the_key_that_shows_them
       ; Alcotest.test_case "the cut keeps the way out" `Quick
           test_the_cut_keeps_the_way_out
+      ; Alcotest.test_case "a row too narrow for its pinned keys is cut from them"
+          `Quick test_a_row_too_narrow_for_its_pinned_keys_is_cut_from_them
       ; Alcotest.test_case "a scroll position outlives a droppable key" `Quick
           test_a_scroll_position_outlives_a_droppable_key
       ; Alcotest.test_case "a row without a position is not shortened for one"

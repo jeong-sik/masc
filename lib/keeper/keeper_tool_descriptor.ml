@@ -1096,10 +1096,10 @@ let public_descriptors =
       ~description:Tool_schemas_misc.browser_goto_schema.description
       ~input_schema:Tool_schemas_misc.browser_goto_schema.input_schema
       ~composable_output:(Json_output { schema = browser_goto_output_schema })
-      (* A navigation reaches the web from the automation profile; the live
-         lane refuses navigation verbs at the state layer. Serial: the
-         automation lane is one browser, and Concurrent here demands a
-         statically read-only tool this is not. *)
+      (* A navigation reaches the web from a browser the server owns
+         (automation or stagehand); the live lane refuses navigation verbs at
+         the state layer. Serial: each server lane is one browser, and
+         Concurrent here demands a statically read-only tool this is not. *)
       ~ordinary_execution_mode:Serial
       ~policy:(policy ~readonly:false ())
       ~executor:In_process
@@ -2742,10 +2742,9 @@ let internal_descriptors : t list =
       ~capability_identity:Internal_name_identity
       "cancel"
       "keeper_task_cancel"
-      (* The name says cancel; the handler issues the cancel action, which
-         now waits for a verdict rather than ending the task on its own. A
-         keeper that finds the premise gone asks here; one that simply cannot
-         finish uses release beside it. *)
+      (* The handler issues the cancel action, which ends a task the keeper
+         holds. A keeper that finds the premise gone stops it here; one that
+         simply cannot finish uses release beside it. *)
       ~readonly:false
   ; task_descriptor
       ~capability_identity:Internal_name_identity

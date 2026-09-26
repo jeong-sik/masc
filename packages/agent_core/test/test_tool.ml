@@ -366,7 +366,17 @@ let test_concurrent_when_admits_only_proven_read_only () =
     string
     "absent input is serial"
     (Tool_contract.show_execution_mode Tool_contract.Serial)
-    (mode `Null)
+    (mode `Null);
+  check
+    bool
+    "the predicate that admits concurrency also certifies the read"
+    true
+    (Tool.call_effect tool (`Assoc [ "mode", `String "read" ]) = Tool.Read_only);
+  check
+    bool
+    "an input it does not prove read-only may have effects"
+    true
+    (Tool.call_effect tool (`Assoc [ "mode", `String "write" ]) = Tool.Effect_possible)
 ;;
 
 let test_concurrent_when_reports_its_shape_not_a_mode () =

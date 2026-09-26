@@ -21,6 +21,7 @@
   dune-build-info
   digestif
   unix
+  uuidm
   logs
   eio
   eio.unix

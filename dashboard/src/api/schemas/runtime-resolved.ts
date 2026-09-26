@@ -75,6 +75,30 @@ const RuntimeAssignmentSchema = object({
   resolved: ResolvedAssignmentTargetSchema,
 })
 
+const ProviderUsageWindowSchema = object({
+  limit_id: nullable(string()),
+  window: union([
+    object({ kind: literal('five_hour') }),
+    object({ kind: literal('seven_day') }),
+    object({ kind: literal('duration_minutes'), minutes: number() }),
+    object({ kind: literal('provider_label'), label: string() }),
+  ]),
+  utilization: union([
+    object({ unit: literal('fraction'), value: number() }),
+    object({ unit: literal('percent'), value: number() }),
+  ]),
+  resets_at: nullable(number()),
+  observed_at: number(),
+  source: string(),
+})
+
+const ProviderUsageScopeSchema = object({
+  scope: string(),
+  providers: array(string()),
+  state: union([literal('reported'), literal('not_reported_since_start')]),
+  windows: array(ProviderUsageWindowSchema),
+})
+
 const RuntimeResolvedResponseSchema = object({
   generated_at_iso: optional(string()),
   source: optional(string()),
@@ -83,6 +107,8 @@ const RuntimeResolvedResponseSchema = object({
   runtimes: array(RuntimeResolutionSchema),
   lanes: array(RuntimeLaneSchema),
   assignments: array(RuntimeAssignmentSchema),
+  provider_usage_windows_since: optional(number()),
+  provider_usage_windows: optional(array(ProviderUsageScopeSchema)),
 })
 
 export type MaxContextSource = InferOutput<typeof MaxContextSourceSchema>
@@ -90,6 +116,8 @@ export type RuntimeResolution = InferOutput<typeof RuntimeResolutionSchema>
 export type RuntimeLaneSnapshot = InferOutput<typeof RuntimeLaneSchema>
 export type ResolvedAssignmentTarget = InferOutput<typeof ResolvedAssignmentTargetSchema>
 export type RuntimeAssignment = InferOutput<typeof RuntimeAssignmentSchema>
+export type ProviderUsageScope = InferOutput<typeof ProviderUsageScopeSchema>
+export type ProviderUsageWindow = InferOutput<typeof ProviderUsageWindowSchema>
 export type RuntimeResolvedResponse = InferOutput<typeof RuntimeResolvedResponseSchema>
 
 export class RuntimeResolvedSchemaDriftError extends SchemaDriftError {

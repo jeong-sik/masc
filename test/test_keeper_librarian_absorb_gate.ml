@@ -422,7 +422,7 @@ let run_runtime_evidence ?fixture_dir () =
       ~lanes:[ { Runtime_schema.id = "librarian_exact"
                ; slot_ids = [ "librarian-absorb-fixture" ]
                ; cli_slot_ids = []
-               ; max_output_tokens = Some 4_096
+               ; max_output_tokens = Some 4_096; thinking = None
                } ] resolver with
      | Ok _ -> ()
      | Error error -> Alcotest.fail
@@ -1778,7 +1778,7 @@ let test_the_runtime_does_not_save_a_copy () =
     ~lanes:[ { Runtime_schema.id = "librarian_exact"
              ; slot_ids = [ "librarian-copy-fixture" ]
              ; cli_slot_ids = []
-             ; max_output_tokens = Some 4_096
+             ; max_output_tokens = Some 4_096; thinking = None
              } ] resolver with
    | Ok _ -> ()
    | Error error -> Alcotest.fail

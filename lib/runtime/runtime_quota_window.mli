@@ -71,8 +71,9 @@ val demote_order :
     place — an unresolved id is not evidence of exhaustion.  Returns the
     input unchanged when no candidate is demoted. *)
 
-(** The scope's own label, for operator-facing projections: which provider
-    row or credential the exhaustion belongs to. *)
+(** The scope's own label for trusted diagnostics. File and official-client
+    scopes can contain absolute paths; public projections must use opaque
+    labels instead. *)
 val scope_to_string : scope -> string
 
 val scope_equal : scope -> scope -> bool
@@ -88,6 +89,15 @@ val scope_of_credential :
     [Inline] carries the secret itself, so it cannot serve as a shared name
     and falls back to the row's [provider_id], as does an absent
     credential. *)
+
+val scope_of_claude_code_home : string option -> scope
+val scope_of_codex_home : string option -> scope
+(** Official-client quota identity is the selected CLI home, not the provider
+    row id. Two rows selecting the same home share observations; selecting a
+    different home under the same row id does not reuse prior observations.
+    Without an explicit home, the process's CLI home environment is sampled
+    at materialization, or the client's default directory under HOME is used.
+    A missing or non-absolute home is rejected before execution. *)
 
 val reset_for_testing : unit -> unit
 (** Drop every remembered window.  Test-only. *)

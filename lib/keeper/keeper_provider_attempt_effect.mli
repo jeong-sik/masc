@@ -6,9 +6,10 @@
 
 type t = Keeper_provider_attempt_effect_core.t =
   | No_effect_observed
-      (** No dynamic tool invocation was observed. *)
+      (** No effect-capable tool invocation was observed. Calls declared read-only
+          by their producer do not close the retry boundary. *)
   | Effect_attempted
-      (** A dynamic tool handler was entered; another candidate could duplicate
+      (** An effect-capable tool handler was entered; another candidate could duplicate
           the effect. *)
   | Observation_unavailable
       (** The adapter cannot prove whether an effect was attempted. *)

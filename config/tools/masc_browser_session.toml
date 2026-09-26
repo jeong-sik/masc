@@ -1,6 +1,6 @@
 name = "masc_browser_session"
 description = """
-Manage the isolated automation Gecko browser; operator live sessions are not managed. Configure browser.geckodriver (the server starts and stops it) and optional browser.binary (e.g. Zen). After open, use BrowserGoto/Read with lane=automation."""
+Manage a server-owned browser. lane=automation: Gecko (configure browser.geckodriver, optional browser.binary e.g. Zen). lane=stagehand: Chromium with the Stagehand runtime (configure [browser.stagehand]). The server starts and stops it; operator live sessions are not managed. After open, use BrowserGoto with the same lane."""
 additional_properties = false
 
 [[params]]
@@ -9,6 +9,12 @@ type = "string"
 enum = ["open", "close", "status"]
 required = true
 description = "open launches; close stops; status observes the session. With none open, status adds driver.ready (true: open can start one now; false: driver.message says why, e.g. \"Session already started\") or driver.error (the driver did not answer)."
+
+[[params]]
+name = "lane"
+type = "string"
+enum = ["automation", "stagehand"]
+default = "automation"
 
 [[params]]
 name = "headless"

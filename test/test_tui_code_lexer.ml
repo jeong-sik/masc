@@ -252,6 +252,57 @@ let test_python_reads_triple_quoted_string () =
     ]
     (Masc_tui_code_lexer.python_lexer "x = \"\"\"doc\"\"\"")
 
+let test_numbered_diff_rows_read_their_gutter_marker () =
+  check seg "a numbered addition"
+    [ ("    -    42 + new", Masc_tui_code_lexer.kind_diff_added) ]
+    (spans "diff" "    -    42 + new");
+  check seg "a numbered removal"
+    [ ("   42     - - old", Masc_tui_code_lexer.kind_diff_removed) ]
+    (spans "diff" "   42     - - old");
+  check seg "numbered context stays plain"
+    [ ("   42    42   same", Masc_tui_code_lexer.kind_code) ]
+    (spans "diff" "   42    42   same");
+  check seg "a numbered pair keeps its kinds across the row break"
+    [ ("   42     - - old", Masc_tui_code_lexer.kind_diff_removed)
+    ; ("    -    42 + new", Masc_tui_code_lexer.kind_diff_added)
+    ]
+    (spans "diff" "   42     - - old\n    -    42 + new")
+
+let test_plain_diff_rows_still_read_their_first_cell () =
+  check seg "plus adds" [ ("+new", Masc_tui_code_lexer.kind_diff_added) ]
+    (spans "diff" "+new");
+  check seg "minus removes" [ ("-old", Masc_tui_code_lexer.kind_diff_removed) ]
+    (spans "diff" "-old");
+  check seg "a hunk header locates" [ ("@@ -1 +1 @@", Masc_tui_code_lexer.kind_comment) ]
+    (spans "diff" "@@ -1 +1 @@");
+  check seg "file headers stay plain"
+    [ ("+++ b/f", Masc_tui_code_lexer.kind_code) ]
+    (spans "diff" "+++ b/f");
+  check seg "and the removed side too"
+    [ ("--- a/f", Masc_tui_code_lexer.kind_code) ]
+    (spans "diff" "--- a/f")
+
+(* The gutter is two strict five-cell columns, a marker at offset twelve,
+   and the trailing space the fourteen-cell gutter ends with. A line that
+   starts with digits but breaks the shape anywhere is source text, not
+   coordinates — however close the likeness. *)
+let test_digit_start_lines_without_a_gutter_stay_plain () =
+  check seg "a letter in the marker cell is not a gutter"
+    [ ("12345 67890 not a gutter", Masc_tui_code_lexer.kind_code) ]
+    (spans "diff" "12345 67890 not a gutter");
+  check seg "a letter in a number cell is not a gutter"
+    [ ("12x45 67890 + trap", Masc_tui_code_lexer.kind_code) ]
+    (spans "diff" "12x45 67890 + trap");
+  check seg "a marker with no trailing space is not a gutter"
+    [ ("12345 67890 +1", Masc_tui_code_lexer.kind_code) ]
+    (spans "diff" "12345 67890 +1");
+  check seg "a blank after digits is not a right-aligned number"
+    [ ("1234  67890 + x", Masc_tui_code_lexer.kind_code) ]
+    (spans "diff" "1234  67890 + x");
+  check seg "a six-digit line overflows its column and loses colour"
+    [ ("123456    42 + x", Masc_tui_code_lexer.kind_code) ]
+    (spans "diff" "123456    42 + x")
+
 (* Every branch of every lexer has to move the cursor. One that does not
    turns opening a file into a frozen TUI, and no assertion catches it: the
    lexer never answers, right or wrong. So this asks the only question that
@@ -323,6 +374,14 @@ let () =
             test_a_nested_comment_ends_at_its_real_close
         ; Alcotest.test_case "capitalised words read as types" `Quick
             test_capitalised_words_read_as_types
+        ] )
+    ; ( "diff"
+      , [ Alcotest.test_case "numbered rows read their gutter marker" `Quick
+            test_numbered_diff_rows_read_their_gutter_marker
+        ; Alcotest.test_case "plain rows still read their first cell" `Quick
+            test_plain_diff_rows_still_read_their_first_cell
+        ; Alcotest.test_case "digit-start lines without a gutter stay plain"
+            `Quick test_digit_start_lines_without_a_gutter_stay_plain
         ] )
     ; ( "rows"
       , [ Alcotest.test_case "rows split at newlines" `Quick

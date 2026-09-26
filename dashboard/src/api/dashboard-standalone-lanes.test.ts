@@ -12,6 +12,8 @@ function row(laneId: string, status = 'idle'): Record<string, unknown> {
     admitted_slots: ['primary'],
     cli_slots: [],
     dropped_slots: [],
+    declared_slots: ['primary', 'rejected'],
+    declared_cli_slots: ['cli-fallback'],
     admission_error: null,
     status,
     retained_run_count: status === 'no_retained_observation' ? 0 : 1,
@@ -53,7 +55,15 @@ describe('standalone lane snapshot decoder', () => {
     expect(parsed.lanes).toHaveLength(5)
     expect(parsed.lanes[0]?.status).toBe('running')
     expect(parsed.lanes[0]?.selectedSlots).toEqual([{ slotId: 'primary', count: 1 }])
+    expect(parsed.lanes[0]?.declaredSlots).toEqual(['primary', 'rejected'])
+    expect(parsed.lanes[0]?.declaredCliSlots).toEqual(['cli-fallback'])
     expect(parsed.lanes[2]?.status).toBe('no_retained_observation')
+  })
+
+  it('refuses a projection without the declared order used by the editor', () => {
+    const missing = snapshot()
+    delete missing.lanes[2]?.declared_cli_slots
+    expect(() => parseStandaloneLanesSnapshot(missing)).toThrow(/declared_cli_slots must be an array/)
   })
 
   it('rejects a projection that claims control semantics', () => {

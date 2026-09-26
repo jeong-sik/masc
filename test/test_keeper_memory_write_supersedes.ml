@@ -407,6 +407,208 @@ let test_librarian_copy_is_not_supersedable () =
   check_nothing_written env ~keeper_id ~before_ids ~before_revision ~before_events:0 label
 ;;
 
+let has_field key = function
+  | `Assoc fields -> List.mem_assoc key fields
+  | _ -> Alcotest.fail "expected JSON object"
+;;
+
+let int_field key json =
+  match json_field key json with
+  | `Int value -> value
+  | _ -> Alcotest.failf "expected int field: %s" key
+;;
+
+(* The Librarian drops a keeper's fact on its own pass, often minutes after
+   the write (live journals, 09-23..26: 44 of the 68 not-current refusals).
+   The keeper then asks for exactly what already holds for the old fact, so
+   the claim is written and the receipt names the drop. *)
+let test_librarian_dropped_target_still_writes_the_claim () =
+  with_env
+  @@ fun env ->
+  let meta = make_meta "supersede-dropped" in
+  let keeper_id = meta.name in
+  let first = write env meta "position: stage 1, checkpoint 3" in
+  check_ok "first write" first;
+  let first_id = string_field "memory_id" first in
+  let reason = "transient position; the save file holds it" in
+  let dropping_revision =
+    match
+      Current.replace
+        ~dropped_statements:[ { Types.memory_id = first_id; reason } ]
+        ~keepers_dir:env.keepers_dir
+        ~keeper_id
+        ~expected_revision:(revision ~keepers_dir:env.keepers_dir ~keeper_id)
+        ~now:(Unix.gettimeofday ())
+        ~source:{ Current.kind = Current.Librarian; trace_id = "pass" }
+        ~facts:[]
+        ()
+    with
+    | Ok (dropped : Current.t) -> dropped.revision
+    | Error detail -> Alcotest.fail detail
+  in
+  let response = write env meta ~supersedes:first_id "position: stage 2, checkpoint 1" in
+  check_ok "the claim is written" response;
+  let second_id = string_field "memory_id" response in
+  Alcotest.(check (list string))
+    "the claim is the only current fact"
+    [ second_id ]
+    (current_ids ~keepers_dir:env.keepers_dir ~keeper_id);
+  Alcotest.(check bool)
+    "no superseded_memory_id: this write removed nothing"
+    false
+    (has_field "superseded_memory_id" response);
+  let removal = json_field "supersedes_already_removed" response in
+  Alcotest.(check string) "names the target" first_id (string_field "memory_id" removal);
+  Alcotest.(check string) "the Librarian removed it" "librarian" (string_field "removed_by" removal);
+  Alcotest.(check int)
+    "in the Librarian's commit"
+    dropping_revision
+    (int_field "removed_in_revision" removal);
+  Alcotest.(check string) "with the Librarian's reason" reason (string_field "reason" removal);
+  Alcotest.(check (list (pair string string)))
+    "no Revised event: the Librarian's drop was not this write's revision"
+    []
+    (revised_events (events_for ~keepers_dir:env.keepers_dir ~keeper_id))
+;;
+
+(* A Librarian copy stays the Librarian's to revise after the Librarian drops
+   it: naming it is refused as not authored, exactly as while it was current,
+   and nothing is written. *)
+let test_dropped_librarian_copy_is_still_not_authored () =
+  with_env
+  @@ fun env ->
+  let meta = make_meta "supersede-dropped-copy" in
+  let keeper_id = meta.name in
+  let injected : Types.fact =
+    Types.observed
+      ~claim:"librarian summary of the session"
+      ~category:Types.Fact
+      ~now:100.
+      ~origin:{ kind = Types.Injected; trace_id = "pass" }
+  in
+  let librarian_pass ?dropped_statements ~expected_revision facts =
+    match
+      Current.replace
+        ?dropped_statements
+        ~keepers_dir:env.keepers_dir
+        ~keeper_id
+        ~expected_revision
+        ~now:(Unix.gettimeofday ())
+        ~source:{ Current.kind = Current.Librarian; trace_id = "pass" }
+        ~facts
+        ()
+    with
+    | Ok (committed : Current.t) -> committed.revision
+    | Error detail -> Alcotest.fail detail
+  in
+  let added = librarian_pass ~expected_revision:None [ injected ] in
+  let _dropped =
+    librarian_pass
+      ~dropped_statements:
+        [ { Types.memory_id = Types.memory_id injected; reason = "stale summary" } ]
+      ~expected_revision:(Some added)
+      []
+  in
+  let before_ids = current_ids ~keepers_dir:env.keepers_dir ~keeper_id in
+  let before_revision = revision ~keepers_dir:env.keepers_dir ~keeper_id in
+  let label = "dropped librarian copy" in
+  check_refused
+    ~error_kind:"supersedes_not_authored"
+    label
+    (write env meta ~supersedes:(Types.memory_id injected) "my own summary");
+  check_nothing_written env ~keeper_id ~before_ids ~before_revision ~before_events:0 label
+;;
+
+(* A target the keeper replaced itself may already have a current successor;
+   writing again would put a second copy beside it. That stays refused, and
+   the refusal names the commit and its "superseded_by" reason. *)
+let test_own_superseded_target_is_refused_with_its_removal () =
+  with_env
+  @@ fun env ->
+  let meta = make_meta "supersede-twice" in
+  let keeper_id = meta.name in
+  let first_id = string_field "memory_id" (write env meta "position: stage 1") in
+  let second = write env meta ~supersedes:first_id "position: stage 2" in
+  check_ok "first supersession" second;
+  let second_id = string_field "memory_id" second in
+  let before_ids = current_ids ~keepers_dir:env.keepers_dir ~keeper_id in
+  let before_revision = revision ~keepers_dir:env.keepers_dir ~keeper_id in
+  let before_events = List.length (events_for ~keepers_dir:env.keepers_dir ~keeper_id) in
+  let label = "the already superseded id again" in
+  let response = write env meta ~supersedes:first_id "position: stage 3" in
+  check_refused ~error_kind:"supersedes_not_current" label response;
+  let removal = json_field "supersedes_removed" response in
+  Alcotest.(check string) "names the target" first_id (string_field "memory_id" removal);
+  Alcotest.(check string)
+    "this keeper's own write removed it"
+    "explicit_write"
+    (string_field "removed_by" removal);
+  Alcotest.(check string)
+    "the reason names the current successor"
+    ("superseded_by " ^ second_id)
+    (string_field "reason" removal);
+  check_nothing_written env ~keeper_id ~before_ids ~before_revision ~before_events label
+;;
+
+(* supersedes accepts only the keeper's own authored facts, so a search match
+   says which kind it is. *)
+let test_search_names_each_current_match_origin () =
+  with_env
+  @@ fun env ->
+  let meta = make_meta "supersede-origin" in
+  let keeper_id = meta.name in
+  let authored_id = string_field "memory_id" (write env meta "harbor status: authored note") in
+  let injected : Types.fact =
+    Types.observed
+      ~claim:"harbor status: librarian summary"
+      ~category:Types.Fact
+      ~now:100.
+      ~origin:{ kind = Types.Injected; trace_id = "pass" }
+  in
+  let current =
+    match snapshot ~keepers_dir:env.keepers_dir ~keeper_id with
+    | Some current -> current
+    | None -> Alcotest.fail "expected the authored write to be current"
+  in
+  (match
+     Current.replace
+       ~keepers_dir:env.keepers_dir
+       ~keeper_id
+       ~expected_revision:(Some current.revision)
+       ~now:(Unix.gettimeofday ())
+       ~source:{ Current.kind = Current.Librarian; trace_id = "pass" }
+       ~facts:(current.facts @ [ injected ])
+       ()
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  let response =
+    Runtime.keeper_memory_search_json
+      ~config:env.config
+      ~meta
+      ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      ~args:
+        (`Assoc
+           [ "query", `String "harbor status"; "source", `String "current"; "limit", `Int 10 ])
+    |> Yojson.Safe.from_string
+  in
+  let origin_of memory_id =
+    match json_field "matches" response with
+    | `List matches ->
+      (match
+         List.find_opt (fun m -> String.equal memory_id (string_field "memory_id" m)) matches
+       with
+       | Some matched -> string_field "origin" matched
+       | None -> Alcotest.failf "no match with memory_id %s" memory_id)
+    | _ -> Alcotest.fail "expected a matches list"
+  in
+  Alcotest.(check string) "the keeper's own write" "authored" (origin_of authored_id);
+  Alcotest.(check string)
+    "the Librarian's copy"
+    "injected"
+    (origin_of (Types.memory_id injected))
+;;
+
 let test_supersedes_cannot_ride_a_source_bound_claim () =
   match
     Runtime.validate_memory_write_args
@@ -449,6 +651,22 @@ let () =
             "a librarian copy is not supersedable"
             `Quick
             test_librarian_copy_is_not_supersedable
+        ; Alcotest.test_case
+            "a target the Librarian dropped still writes the claim"
+            `Quick
+            test_librarian_dropped_target_still_writes_the_claim
+        ; Alcotest.test_case
+            "a dropped librarian copy is still not authored"
+            `Quick
+            test_dropped_librarian_copy_is_still_not_authored
+        ; Alcotest.test_case
+            "an own superseded target is refused with its removal"
+            `Quick
+            test_own_superseded_target_is_refused_with_its_removal
+        ; Alcotest.test_case
+            "search names each current match's origin"
+            `Quick
+            test_search_names_each_current_match_origin
         ; Alcotest.test_case
             "cannot ride a source-bound claim"
             `Quick

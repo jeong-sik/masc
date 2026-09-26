@@ -590,11 +590,26 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
        (* Never cell-cut a conflict into a different path or diagnosis. Only
           surface hints can use the last-resort text truncation. The position
           rides the hints here: a row this narrow has no cells to keep it in,
-          and the marker says the row was cut. *)
+          and the marker says the row was cut.
+
+          What is cut is the row [drop_hint_items] reduced to, not the row it
+          started from. The keys give way as whole items first, and this path
+          is reached only once none of them may give way again -- so the cells
+          left belong to the keys that cannot be dropped. Cutting the original
+          row instead spent them on the keys the reader can look up: measured
+          on the fixture server at sixty cells, Planning's Verification and
+          Harness tabs drew [j/k:move  v:next Planning tab  h:queue / history]
+          and no way out at all, while the Tasks tab beside them kept
+          [Left / Esc:back] and [q:quit]. *)
+       let cut_from =
+         match undroppable_keys hints with
+         | [] -> hints
+         | undroppable -> String.concat "  " undroppable
+       in
        let rendered =
          body
            (with_position_and_marker ~mark_omission position
-              (with_literal_prefix displayed_prefix hints))
+              (with_literal_prefix displayed_prefix cut_from))
            []
        in
        let room = max_cells - Masc_tui_message_layout.display_width more_key in

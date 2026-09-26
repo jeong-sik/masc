@@ -39,6 +39,9 @@ def run(binary: str) -> None:
              "content": LONG_REPLY, "ts": 1787348491.0},
             {"id": "latest-question", "role": "user",
              "content": "new question is not a reply", "ts": 1787348492.0},
+            {"id": "older-autonomous", "role": "assistant",
+             "content": "older autonomous reply", "ts": 1787348490.0,
+             "autonomous_turn": {}},
         ],
     )
 
@@ -47,7 +50,7 @@ def run(binary: str) -> None:
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         h.send_and_wait(process, fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
-        h.wait_for_output(process, fd, output, b"one\\x09two", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"last line", start=0, timeout=10)
         frame = h.send_and_wait(process, fd, output, b"/copy\r", OSC52)
         match = OSC52.search(frame)
         assert match is not None, "the /copy command emitted no OSC 52"

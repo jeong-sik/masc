@@ -14703,16 +14703,26 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Error detail ->
            notice ~kind:Notice_failure ("/copy could not read chat history: " ^ detail)
        | Ok { Keeper_chat_history.rows; _ } ->
-           (* The store appends in order. Timestamps can tie or be absent, so
-              the last reply row is newer than an earlier one regardless of
-              its display clock. *)
+           (* Direct and autonomous rows arrive from separate stores. Their
+              turn sequence orders two recorded turns; otherwise use the
+              display clock and keep append order on an exact tie. *)
+           let newer (row : Keeper_chat_history.row) prior =
+             match row.turn_sequence, prior.Keeper_chat_history.turn_sequence with
+             | Some current, Some previous when current <> previous ->
+                 current > previous
+             | _ -> row.at >= prior.at
+           in
            let newest =
              List.fold_left
                (fun selected (row : Keeper_chat_history.row) ->
                  match row.kind with
                  | Keeper_chat_history.Said_by_keeper
                  | Keeper_chat_history.Autonomous_reply
-                   when row.text <> "" -> Some row
+                   when row.text <> "" ->
+                     (match selected with
+                      | None -> Some row
+                      | Some prior when newer row prior -> Some row
+                      | Some _ -> selected)
                  | Keeper_chat_history.Addressed_to_keeper _
                  | Keeper_chat_history.Delivery_failed _
                  | Keeper_chat_history.Tool_calls _

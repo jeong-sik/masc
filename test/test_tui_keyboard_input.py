@@ -13263,10 +13263,11 @@ def schedule_detail_interaction() -> Interaction:
         # "HTTP [loading...]" and "(not loaded yet - press r)". Waiting on the
         # title let the checks below read that frame, and they failed on a
         # list that had not arrived yet (PR check runs 36250155607,
-        # 36250173553, 36251291941). The needle is the first row fact the
-        # checks below ask for, so the frame returned is a loaded one.
+        # 36250173553, 36251291941). The reaction fact is contiguous in raw
+        # terminal output. The row's "succeeded consumed_ack" crosses an ANSI
+        # style boundary; require that full row text after stripping below.
         listing = palette_go(
-            process, master_fd, output, b"go schedules", b"succeeded consumed_ack"
+            process, master_fd, output, b"go schedules", b"reaction:matched_consumed_ack"
         )
         listing_plain = CSI_RE.sub(b"", listing)
         for needle in (
@@ -17588,10 +17589,11 @@ def run_schedule_delivery_regression(executable: str) -> None:
         # "HTTP [loading...]" and "(not loaded yet - press r)". Waiting on the
         # title let the checks below read that frame, and they failed on a
         # list that had not arrived yet (PR check runs 36250155607,
-        # 36250173553, 36251291941). The needle is the first row fact the
-        # checks below ask for, so the frame returned is a loaded one.
+        # 36250173553, 36251291941). The reaction fact is contiguous in raw
+        # terminal output. The row's "succeeded consumed_ack" crosses an ANSI
+        # style boundary; require that full row text after stripping below.
         listing = palette_go(
-            process, master_fd, output, b"go schedules", b"succeeded consumed_ack"
+            process, master_fd, output, b"go schedules", b"reaction:matched_consumed_ack"
         )
         plain = CSI_RE.sub(b"", listing)
         for needle in (

@@ -301,6 +301,9 @@ let test_a_muse_failure_is_never_a_binding_rest () =
           ; retryable = true
           } )
     ; "auth required", Runtime_muse_serve.Auth_required "login expired"
+    ; ( "workspace mismatch"
+      , Runtime_muse_serve.Session_workspace_mismatch
+          { requested = "/selected/workspace"; reported = Some "/different/workspace" } )
     ; ( "turn timeout"
       , Runtime_muse_serve.Timeout { seconds = 30.0; turn_accepted = true } )
     ]

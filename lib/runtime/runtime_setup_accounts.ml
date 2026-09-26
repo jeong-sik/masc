@@ -74,11 +74,14 @@ let create ~workspace ~integration_id ~cli_path ~import = filesystem (fun () ->
     Auth.save_private_text_file (manifest directory_path) (Yojson.Safe.to_string data);
     retained:=true;
     Ok (reference,imported.catalog)))
-let register_home ~workspace ~integration_id ~cli_path ~account_home = filesystem (fun () ->
+let validate_native_home account_home =
   let* account_home = Runtime_account_home.of_string account_home
     |> Result.map_error (fun _ -> Invalid_reference) in
   let info = Unix.stat account_home in
-  if info.st_kind <> Unix.S_DIR || info.st_uid <> Unix.geteuid () then Error Invalid_reference else
+  if info.st_kind = Unix.S_DIR && info.st_uid = Unix.geteuid ()
+  then Ok account_home else Error Invalid_reference
+let register_home ~workspace ~integration_id ~cli_path ~account_home = filesystem (fun () ->
+  let* account_home = validate_native_home account_home in
   let workspace = Unix.realpath workspace in
   let* root = root ~create:true () in
   let data = `Assoc ["schema", `String "masc.setup_native_home_reference.v1";
@@ -125,6 +128,8 @@ let resolve ~workspace ~integration_id ~cli_path (Reference reference) = filesys
     else if value "workspace"<>`String workspace || value "integration_id"<>`String integration_id
       || value "cli_path"<>`String cli_path then Error Scope_mismatch
     else (match value "account_home" with
-      | `String account_home when Runtime_account_home.is_valid account_home -> Ok (Native_home {account_home})
+      | `String account_home ->
+        let* account_home = validate_native_home account_home in
+        Ok (Native_home {account_home})
       | _ -> Error Invalid_reference)
   | _ -> Error Invalid_reference)

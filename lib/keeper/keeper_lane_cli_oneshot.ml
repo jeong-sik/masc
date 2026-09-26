@@ -112,6 +112,7 @@ let muse_error_is_binding_rest : Runtime_muse_serve.error -> bool = function
   | Runtime_muse_serve.Capability_not_granted _
   | Runtime_muse_serve.Session_not_durable
   | Runtime_muse_serve.Session_model_mismatch _
+  | Runtime_muse_serve.Session_workspace_mismatch _
   | Runtime_muse_serve.Auth_required _
   | Runtime_muse_serve.Turn_failed _
   | Runtime_muse_serve.Turn_cancelled

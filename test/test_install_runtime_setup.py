@@ -650,10 +650,22 @@ class SelectedNativeAccounts(unittest.TestCase):
             self.assertEqual(SETUP.official_client_path('/masc', 'muse', 'muse'), '/owned/muse')
         self.assertEqual(run.call_args.args[0], ['/masc', 'runtime-client-path', '--client', 'muse-code', '--command', 'muse'])
 
-    def test_declared_home_survives_without_reselection(self):
-        source = dict(choice='muse', account_home='/declared/../selected/', label='Muse')
-        with patch.object(SETUP, 'pick', side_effect=AssertionError('declared account must survive')):
-            self.assertEqual(SETUP.select_native_account(source), source)
+    def test_configured_home_remains_default_and_can_be_changed(self):
+        for choice in ['claude_code', 'codex', 'muse']:
+            with self.subTest(choice=choice), tempfile.TemporaryDirectory() as home:
+                configured = Path(home) / 'configured'
+                alternate = Path(home) / 'alternate'
+                configured.mkdir()
+                source = dict(choice=choice, account_home=str(configured), label=choice)
+                with patch.object(SETUP, 'pick', return_value=[0]) as pick:
+                    self.assertEqual(SETUP.select_native_account(source), source)
+                self.assertIn(str(configured), pick.call_args.args[1][0])
+                with patch.object(SETUP, 'pick', return_value=[1]), \
+                     patch.object(SETUP, 'ask_text', return_value=str(alternate)):
+                    changed = SETUP.select_native_account(source)
+                self.assertEqual(changed['account_home'], str(alternate))
+                self.assertTrue(changed['credential_replaced'])
+                self.assertEqual(source['account_home'], str(configured))
 
     def test_new_account_requires_explicit_selection(self):
         with tempfile.TemporaryDirectory() as home:
@@ -788,6 +800,28 @@ class SelectedNativeAccounts(unittest.TestCase):
         self.assertEqual(run.call_args.args[0], ['/masc', 'runtime-muse-models', '--cli-path', 'muse', '--account-home', '/selected', '--timeout-s', '7.5'])
         self.assertIn('providerCatalog', output.getvalue())
         self.assertIn('not yet verified', output.getvalue())
+
+    def test_standalone_muse_rejects_unlisted_id_and_requires_reported_context(self):
+        source = dict(choice='muse', command='muse', account_home='/selected')
+        for answer in ['1', 'reported']:
+            with self.subTest(answer=answer), \
+                 patch.object(SETUP, 'select_native_account', return_value=source), \
+                 patch.object(SETUP, 'muse_models', return_value=([dict(id='reported', label='Reported', context=8192)], 'providerCatalog')), \
+                 patch.object(SETUP.sys, 'stdin', io.StringIO('unlisted\n' + answer + '\n')), \
+                 contextlib.redirect_stderr(io.StringIO()) as output:
+                self.assertEqual(SETUP.select_model('/masc', 'muse'), dict(model='reported', max_context=8192))
+                self.assertIn('Choose a model reported', output.getvalue())
+        for context in [None, 0, True, -1]:
+            with self.subTest(context=context), \
+                 patch.object(SETUP, 'select_native_account', return_value=source), \
+                 patch.object(SETUP, 'muse_models', return_value=([dict(id='reported', label='Reported', context=context)], 'providerCatalog')), \
+                 patch.object(SETUP.sys, 'stdin', io.StringIO('reported\n999999\n')), \
+                 contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
+                SETUP.select_model('/masc', 'muse')
+        with patch.object(SETUP, 'select_native_account', return_value=source), \
+             patch.object(SETUP, 'muse_models', return_value=([], 'providerCatalog')), \
+             contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
+            SETUP.select_model('/masc', 'muse')
 
     def test_existing_muse_binding_requires_declared_byte_capacity(self):
         source = dict(choice='muse')

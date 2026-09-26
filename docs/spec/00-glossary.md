@@ -660,10 +660,12 @@ status: reference
   (`account/rateLimits/updated`)가 턴 도중 wire로 통보한 제공자 자체의 사용량 한도 창
   (`Runtime_provider_usage_window.t`). (quota scope, limit, window)별 최신 관측값과
   수신 시각을 기록하며, `GET /api/v1/runtime/resolved`에 읽기 전용으로 노출된다(#38380).
-  - **관측 권위**: 이것은 순수한 관측(observation)이다. codex-cli 규약에 따라 클라이언트는
-    소진율(utilization)이나 리셋 시각(`resets_at`)으로 복구 시점을 추론해서는 안 되므로,
-    MASC의 라우팅·후보 순서(candidate ordering)·승인(admission)·재시도(retry) 판단은 이 숫자를
-    일절 읽지 않는다. 제공자가 알려준 사실 그대로를 기록하고 보여줄 뿐이다.
+  - **관측 권위**: 이 표는 제공자 사용량 보고의 최신 관측값을 보존한다. 평상시 후보 순서가
+    이 표를 조회하지는 않는다. 다만 HTTP 403 계정 거절(`Authorization_refused`) 뒤 provider가
+    `usage-read`를 선언했으면 Keeper turn walk가 해당 endpoint를 한 번 읽는다(#38975).
+    그 보고에서 모델 호출을 막는 창이 한도까지 소진된 경우에만 별도
+    `Runtime_quota_window` 증거로 기록하고, 이후 후보 순서가 그 증거를 읽어 해당 scope를
+    뒤로 둔다. 소진율이나 리셋 시각만으로 일반 가용성을 추론하는 것은 아니다.
   - **비영속·프로세스 로컬**: 프로세스 메모리에만 존재하며 저장소에 남지 않는다. 프로세스
     기동 후 통보가 한 번도 없었던 scope는 0이나 빈 창으로 꾸며내지 않고
     `Not_reported_since_start`로 명시한다.
@@ -675,7 +677,9 @@ status: reference
     읽기가 끝날 때마다 그 초 뒤에 다시 묻는다(#39144).
   - **Usage Scope와의 구분**: 위의 Usage Scope(MASC가 집계하는 토큰 수의 범위)와 다른 축이다 —
     이쪽은 모델 제공자가 wire로 알려준 자기 계정의 5시간·7일 한도 창이다.
-  → [Runtime_provider_usage_window](../../lib/runtime/runtime_provider_usage_window.mli)
+  → [Runtime_provider_usage_window](../../lib/runtime/runtime_provider_usage_window.mli),
+  [Runtime_provider_usage_read](../../lib/runtime/runtime_provider_usage_read.mli),
+  [Runtime_quota_window](../../lib/runtime/runtime_quota_window.mli)
 
 **Caller Scope**
 : 이벤트를 발행하는 코드가 bus handle에 실어 봉투에 붙는 불투명한 값

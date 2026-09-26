@@ -299,6 +299,10 @@ type execution_error_cause =
   | Provider_response_refused of
       { http_status : int
       ; refusal : provider_refusal
+      ; retry_after_s : float option
+          (** The provider's Retry-After, in seconds, when a [Rate_limited]
+              refusal carried a parseable one; [None] for every other
+              refusal. Not part of flow evidence. *)
       }
   | Incomplete_output
   | Missing_output
@@ -519,6 +523,13 @@ val admitted_target_with_max_tokens : admitted_target -> int -> admitted_target
     output budget, leaving the binding identity untouched. A lane declares its
     own budget; the catalog's [max_output_tokens] is a validation bound and
     must not be sent as the request budget. *)
+
+val admitted_target_with_enable_thinking : admitted_target -> bool -> admitted_target
+(** Rebuild an admitted target with its request [enable_thinking] set to the
+    lane's choice. The target identity still names the slot's declared
+    binding, including its catalog [enable_thinking]; the lane's choice lives
+    in the request body and therefore in the plan fingerprint. The flag reaches
+    the wire only where the model's thinking control can carry it. *)
 
 (** Brand an opaque domain JSON schema. AGENT_CORE never interprets domain keys as a
     provider wire envelope; it always constructs the selected target's wire
@@ -909,6 +920,24 @@ val flow_execution_terminal_kind
 (** Classify why a terminal flow could not continue. This reuses the exact
     typed advancement rule used between candidates; callers never recover the
     distinction from an error string or receipt phase. *)
+
+type flow_binding_standing =
+  | Every_binding_resting
+  | Not_every_binding_resting
+
+val flow_execution_binding_standing
+  :  'callback_error flow_execution_error
+  -> flow_binding_standing
+(** [Every_binding_resting] only when the flow ended on an execution failure
+    and every candidate it visited failed on a refusal of its binding's
+    standing: a rate limit or quota spent ([Rate_limited], [Hard_quota]), a
+    full capacity ([Overloaded], [Capacity_exhausted]), or an account that
+    cannot pay ([Payment_required]). Such a refusal says nothing about the
+    input, so the same input can be served once a binding frees. A visit
+    rejected before dispatch, an input-sized or input-shaped refusal, an
+    unusable answer or an unknown effect makes it [Not_every_binding_resting].
+    This is narrower than {!flow_execution_terminal_kind}, which admits any
+    failure a successor might serve. *)
 
 (** {2 Error renderers}
 

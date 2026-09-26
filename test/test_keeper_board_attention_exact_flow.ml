@@ -678,7 +678,7 @@ let test_mixed_semantic_rejection_and_cli_failure_keep_both_causes () =
       in
       let before = board_attention_run_ids () in
       let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
-        Error (Masc.Fusion_official_client.Setup_failure (Provider_error "client unavailable"))
+        Error (Masc.Fusion_official_client.Setup_failure "client unavailable")
       in
       (match
          Exact_flow.execute
@@ -914,7 +914,7 @@ let test_mixed_cli_failure_keeps_http_evidence () =
       let cli_calls = ref 0 in
       let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
         incr cli_calls;
-        Error (Masc.Fusion_official_client.Setup_failure (Provider_error "client unavailable"))
+        Error (Masc.Fusion_official_client.Setup_failure "client unavailable")
       in
       match
         Exact_flow.execute
@@ -927,9 +927,18 @@ let test_mixed_cli_failure_keeps_http_evidence () =
       with
       | Error
           (Exact_flow.Cli_slots_exhausted
-             { prior_error = Some (Exact_flow.Providers_exhausted { attempts = [ provenance ]; _ })
+             { prior_error =
+                 Some
+                   (Exact_flow.Providers_exhausted
+                     { attempts = [ provenance ]
+                     ; binding_standing = Exact_output.Not_every_binding_resting
+                     ; detail = _
+                     })
              ; failures = [ _ ]
              }) ->
+        (* The HTTP slot answered text that is not JSON. It answered, so the walk
+           is not a resting one and the worker quarantines instead of
+           waiting. *)
         Alcotest.(check string)
           "CLI failure retains the exhausted HTTP receipt"
           http.id

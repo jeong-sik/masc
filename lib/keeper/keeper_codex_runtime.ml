@@ -253,7 +253,9 @@ let codex_dynamic_tool ~observe_effect_attempted ~observe_successful_tool_comple
            code. The handler may commit and then raise or be cancelled, so
            observing only its returned value would reopen a duplicate-effect
            window. *)
-        observe_effect_attempted ();
+        (match tool.call_effect input with
+         | Agent_core.Tool.Read_only -> ()
+         | Agent_core.Tool.Effect_possible -> observe_effect_attempted ());
         let result = tool.call ~call_id input in
         (* This is evidence that the handler returned a successful tool result,
            which is sufficient to accept a tool-only provider terminal. It is
@@ -263,19 +265,11 @@ let codex_dynamic_tool ~observe_effect_attempted ~observe_successful_tool_comple
   }
 ;;
 
-(* A provider's report about its own usage windows, kept for the operator
-   projection ([Runtime_provider_usage_window]). Nothing that routes, orders,
-   admits or retries reads it. A runtime id with no configured quota scope
-   has no account to key the report by, so it is logged and dropped. *)
-let record_usage_windows ~keeper_name ~runtime_id report =
-  match Runtime.quota_scope_of_runtime_id runtime_id with
-  | Some scope ->
-    Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report
-  | None ->
-    Log.Keeper.warn
-      ~keeper_name
-      "Codex usage windows not recorded: runtime %s has no quota scope"
-      runtime_id
+(* A late report stays with the CLI home selected for this turn, even if the
+   provider row is rebound while the app-server is running. *)
+let record_usage_windows ~quota_scope report =
+  Runtime_provider_usage_window.record
+    ~scope:quota_scope ~observed_at:(Time_compat.now ()) report
 ;;
 
 (* A turn refused for spent usage carries no reset time
@@ -284,20 +278,14 @@ let record_usage_windows ~keeper_name ~runtime_id report =
    can still say when it resets without a turn, so ask it once. The read
    outlives this turn ({!Runtime_provider_usage_read.read_codex_in_background}),
    and the refused turn returns without waiting on it. *)
-let read_usage_after_quota_refusal ~keeper_name ~runtime_id ~clock ~cwd config =
-  match Runtime.quota_scope_of_runtime_id runtime_id with
-  | None ->
+let read_usage_after_quota_refusal ~keeper_name ~quota_scope ~clock ~cwd config =
+  match Runtime_provider_usage_read.read_codex_in_background
+          ~clock ~cwd ~scope:quota_scope config with
+  | Runtime_provider_usage_read.Started | Runtime_provider_usage_read.Already_reading -> ()
+  | Runtime_provider_usage_read.No_root_switch ->
     Log.Keeper.warn
       ~keeper_name
-      "Codex usage not read after a quota refusal: runtime %s has no quota scope"
-      runtime_id
-  | Some scope ->
-    (match Runtime_provider_usage_read.read_codex_in_background ~clock ~cwd ~scope config with
-     | Runtime_provider_usage_read.Started | Runtime_provider_usage_read.Already_reading -> ()
-     | Runtime_provider_usage_read.No_root_switch ->
-       Log.Keeper.warn
-         ~keeper_name
-         "Codex usage not read after a quota refusal: no server root switch")
+      "Codex usage not read after a quota refusal: no server root switch"
 ;;
 
 (* The newest request: the context it occupied, in the inclusive convention
@@ -339,7 +327,7 @@ let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
 (* Always installed so usage-window reports and the thread's usage counts are
    recorded. A turn nobody streams, traces or observes gets only those; its
    other events are ignored as before. *)
-let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
+let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
     ~on_usage_report ~position on_event =
   (* The thread's running count, reported under the app-server turn id (the
      identity the completion hook also writes for a Codex turn) and the
@@ -373,7 +361,7 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
     Some
       (function
         | Runtime_codex_app_server.Usage_windows_reported report ->
-          record_usage_windows ~keeper_name ~runtime_id report
+          record_usage_windows ~quota_scope report
         | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
           report_usage ~thread_id ~turn_id ~model frame
         | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
@@ -472,7 +460,7 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
             "Codex MCP request cancelled: host input unavailable (server=%s); the user did not decline it"
             server_name
         | Runtime_codex_app_server.Usage_windows_reported report ->
-          record_usage_windows ~keeper_name ~runtime_id report
+          record_usage_windows ~quota_scope report
         | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
           report_usage ~thread_id ~turn_id ~model frame
         | Runtime_codex_app_server.Turn_finished { text } ->
@@ -490,18 +478,19 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
    budget refusal is the hard quota the Claude Code runtime reports as
    [Quota_blocked]; without this, a Codex head out of weekly usage rotated as
    a generic provider failure every cycle and left no quota evidence.
+   Which failures spend the account is [Runtime_codex_app_server.refused_for_spent_usage],
+   the rule the one-shot CLI path reads too.
    [retry_after] stays [None]: the turn error carries no reset time. *)
-let turn_failure_to_provider_error ~detail codex_error_info =
+let turn_failure_to_provider_error error ~detail codex_error_info =
   let provider = "codex_app_server" in
   let network kind =
     Llm_provider.Error.NetworkError
       { provider; kind; timeout_phase = None; detail }
   in
+  if Runtime_codex_app_server.refused_for_spent_usage error
+  then Llm_provider.Error.HardQuota { provider; retry_after = None; detail }
+  else
   match codex_error_info with
-  | Some
-      ( Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
-      | Runtime_codex_app_server.Codex_error_info.Session_budget_exceeded ) ->
-    Llm_provider.Error.HardQuota { provider; retry_after = None; detail }
   | Some Runtime_codex_app_server.Codex_error_info.Rate_limit_exceeded ->
     Llm_provider.Error.RateLimit { provider; retry_after = None; detail }
   (* An overloaded server is the provider's capacity, the class a 529 and a
@@ -528,6 +517,10 @@ let turn_failure_to_provider_error ~detail codex_error_info =
     network Llm_provider.Http_client.End_of_file
   | Some Runtime_codex_app_server.Codex_error_info.Unauthorized ->
     Llm_provider.Error.AuthError { provider; detail }
+  (* Answered above: these two are the spent-usage refusal. *)
+  | Some
+      ( Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
+      | Runtime_codex_app_server.Codex_error_info.Session_budget_exceeded )
   | Some
       ( Runtime_codex_app_server.Codex_error_info.Bad_request
       | Runtime_codex_app_server.Codex_error_info.Cyber_policy
@@ -607,8 +600,8 @@ let codex_error_to_core_error = function
   (* Effectful failed turns are fenced out of same-turn retry by
      [Keeper_provider_attempt_effect] at the driver level, so this mapping
      stays purely descriptive of what the provider reported. *)
-  | Runtime_codex_app_server.Turn_failed { detail; codex_error_info } ->
-    Agent_core.Error.Provider (turn_failure_to_provider_error ~detail codex_error_info)
+  | Runtime_codex_app_server.Turn_failed { detail; codex_error_info } as error ->
+    Agent_core.Error.Provider (turn_failure_to_provider_error error ~detail codex_error_info)
   | Runtime_codex_app_server.Timeout { seconds; turn_accepted = false } ->
     Agent_core.Error.Api
       (Agent_core.Retry.Timeout
@@ -739,7 +732,7 @@ let native_posture_note = function
   | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
 ;;
 
-let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~declared_max_prompt_bytes ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
@@ -816,6 +809,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     in
     let tool_surface_sha256 =
       Keeper_official_client_session_store.tool_surface_sha256
+        ?account_home:(Runtime_codex_app_server.effective_account_home config.account_home)
         ~native_posture
         tools
     in
@@ -982,7 +976,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             delivery = (match thread_mode with
               | Runtime_codex_app_server.Start -> Prepared_start_context
               | Runtime_codex_app_server.Resume _ -> Held_by_vendor_session);
-            acknowledged_turn = None } in
+            acknowledged_turn = None; held_context = [] } in
         (* [None] here means "send no developerInstructions": [optional_field]
            omits the member and the app-server runs the thread on Codex's own
            default instructions. The probe and fusion callers build [None] on
@@ -1000,7 +994,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       match thread_mode with
       | Runtime_codex_app_server.Start -> prompt
       | Runtime_codex_app_server.Resume _ ->
-        Host.resume_prompt ~goal:prompt prepared.messages
+        (* Codex keeps no held-context record yet: every carried context is
+           re-sent on each resume. *)
+        (Host.resume_prompt ~goal:prompt ~held:[] prepared.messages).prompt
     in
     let developer_instructions = Some composed_developer_instructions in
     (* The window already fits; this is the account checked once more before
@@ -1046,6 +1042,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     in
     let client_config =
       { Runtime_codex_app_server.cli_path = config.cli_path
+      ; account_home = config.account_home
       ; isolated_home = None
       ; model = config.model
       ; native = native_posture
@@ -1319,15 +1316,27 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     in
     let turn_result =
       try
-        let on_stream_event =
+        let observe_stream =
           codex_stream_callback
-          ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action
+          ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
           ~position:
             (match thread_mode with
              | Runtime_codex_app_server.Start -> Keeper_usage_resolution.Fresh
              | Runtime_codex_app_server.Resume _ -> Keeper_usage_resolution.Resumed)
           on_event
+        in
+        let on_stream_event event =
+          (* Native actions do not carry a MASC tool producer's read-only
+             contract. Keep their effects fenced, including a completed item
+             whose start was not observed. *)
+          (match event with
+           | Runtime_codex_app_server.Native_tool_started _
+           | Native_tool_finished _ -> observe_effect_attempted ()
+           | Turn_started _ | Text_delta _ | Dynamic_tool_started _
+           | Dynamic_tool_finished _ | Elicitation_cancelled _
+           | Usage_windows_reported _ | Usage_reported _ | Turn_finished _ -> ());
+          Option.iter (fun observe -> observe event) observe_stream
         in
         (match
        Runtime_codex_app_server.run_turn
@@ -1339,7 +1348,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
          ~thread_mode
          ~history
          ~developer_context
-         ?on_stream_event
+         ~on_stream_event
          ~on_thread_ready:(fun ~thread_id ->
            update_session "active transition" (fun expected ->
              Keeper_official_client_session_store.mark_active
@@ -1381,18 +1390,13 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
      | Error error ->
        (match error with
         | Runtime_codex_app_server.Turn_input_write_failed _ -> observe_transport_uncertain ()
-        | Runtime_codex_app_server.Turn_failed
-            { codex_error_info =
-                Some
-                  Runtime_codex_app_server.Codex_error_info.(
-                    Usage_limit_exceeded | Session_budget_exceeded)
-            ; _
-            } ->
-          read_usage_after_quota_refusal
-            ~keeper_name ~runtime_id ~clock
-            ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
-            config
         | _ -> ());
+       if Runtime_codex_app_server.refused_for_spent_usage error
+       then
+         read_usage_after_quota_refusal
+           ~keeper_name ~quota_scope ~clock
+           ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+           config;
        recovery_failure :=
          recovery_failure_of_attempt ~thread_mode
            ~gate_continuation:(Option.is_some official_client_continuation) error;
@@ -1615,7 +1619,11 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
     ?on_usage_report
-    ~event_bus ~raw_trace ~on_event ~config () =
+    ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.codex_app_server) () =
+  let quota_scope =
+    Runtime_quota_window.scope_of_codex_home
+      (Runtime_codex_app_server.effective_account_home config.account_home)
+  in
   let settled_session = Atomic.make None in
   let on_session_settled value = Atomic.set settled_session (Some value) in
   let effect_disposition =
@@ -1680,9 +1688,13 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
             previous_capacity_bytes
             capacity_bytes)
       ~attempt:(fun ~capacity:capacity_bytes ->
+        (* A read in an abandoned attempt cannot certify a tool-only answer
+           from the next one. Effect evidence remains cumulative. *)
+        Atomic.set successful_tool_completion No_successful_tool_completion;
         run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~official_client_continuation
           ~required_native_posture
           ~runtime_id
+          ~quota_scope
           ~keeper_name
     ~pre_tool_rejects
           ~base_path
@@ -1736,7 +1748,7 @@ module For_testing = struct
     match
       codex_stream_callback
         ~keeper_name:"test"
-        ~runtime_id:"test"
+        ~quota_scope:(Runtime_quota_window.scope_of_codex_home None)
         ~raw_trace_run:None
         ~turn_count
         ~on_native_action:(Some observe)

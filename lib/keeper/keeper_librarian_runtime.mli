@@ -21,13 +21,18 @@ type extraction_error
 
 val extraction_error_to_string : extraction_error -> string
 
-(** Slot ids and refusal reasons on one line, for the exclusion WARN and the
-    all-slots-refused error. *)
-val slot_reason_pairs : ?sep:string -> (string * string) list -> string
+type slot_refusal =
+  { slot_id : string
+  ; cause : Agent_core.Exact_output.admission_error
+  }
+
+(** Render each rejected slot and its typed admission cause once, for the
+    exclusion WARN and the all-slots-refused error. *)
+val slot_reason_pairs : ?sep:string -> slot_refusal list -> string
 
 type preflight_selection =
   { selected_slots : Runtime_exact_output_registry.selected_slot list
-  ; unusable : (string * string) list
+  ; unusable : slot_refusal list
   }
 
 val preflight_slots
@@ -36,7 +41,7 @@ val preflight_slots
   -> messages:Agent_core.Types.message list
   -> (preflight_selection, extraction_error) result
 (** The pre-flight over the ladder: the selected slots whose request projected
-    and the slots this run is without (id and refusal reason). The execution
+    and the slots this run is without (id and typed admission cause). The execution
     flow receives only [selected_slots]; a ladder with no projectable slot at
     all is [Exact_request_projection_failed], naming each refusal. An empty
     ladder reports two empty lists -- the caller routes it to the cli lane.

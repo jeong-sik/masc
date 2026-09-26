@@ -123,7 +123,26 @@ let with_eio f =
 ;;
 
 let projection_failure =
-  "librarian request projection failed for slot=librarian-cli-unreachable reason=librarian-cli-unreachable: wire_admission_rejected:target_request_rejected"
+  "request projection refused by all API slots: librarian-cli-unreachable: wire_admission_rejected:target_request_rejected"
+;;
+
+let test_execution_failure_names_cli_slot_once () =
+  let runtime_id = "codex-cli-fixture" in
+  let check_once cause =
+    let detail = Cli.failure_to_string (Cli.Execution_failed { runtime_id; cause }) in
+    (match Astring.String.cut ~sep:runtime_id detail with
+     | None -> fail "the execution failure omitted its CLI slot"
+     | Some (_, tail) ->
+       check bool "the CLI slot is named once" false
+         (Astring.String.is_infix ~affix:runtime_id tail));
+    check bool "the adapter cause is retained" true
+      (Astring.String.is_infix ~affix:"synthetic failure" detail)
+  in
+  check_once
+    (Masc.Fusion_official_client.Codex_failure
+       (Runtime_codex_app_server.Invalid_config "synthetic failure"));
+  check_once
+    (Masc.Fusion_official_client.Setup_failure "synthetic failure")
 ;;
 
 let invalid_domain_failure () =
@@ -273,9 +292,14 @@ let test_projection_refusal_survives_failed_cli_slots () =
   (match execute ~net ~clock ~base_path ~runner with
    | Ok _ -> fail "a domain-invalid CLI answer must not be accepted"
    | Error error ->
+     let detail = Runtime.For_testing.classified_error_detail error in
      check_detail ~api_failure:projection_failure
-       ~cli_failure:(invalid_domain_failure ())
-       (Runtime.For_testing.classified_error_detail error));
+       ~cli_failure:(invalid_domain_failure ()) detail;
+     (match Astring.String.cut ~sep:"librarian-cli-unreachable" detail with
+      | None -> fail "the rejected API slot is missing"
+      | Some (_, tail) ->
+        check bool "the API slot is named once" false
+          (Astring.String.is_infix ~affix:"librarian-cli-unreachable" tail)));
   check (list string) "the declared CLI slot was attempted"
     [Fixture.cli_primary_runtime] !attempts
 ;;
@@ -302,7 +326,7 @@ let test_domain_failure_kind_survives_failed_cli_slot () =
   let attempts = ref 0 in
   let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     incr attempts;
-    Error (Masc.Fusion_official_client.Setup_failure (Provider_error "synthetic bridge failure"))
+    Error (Masc.Fusion_official_client.Setup_failure "synthetic bridge failure")
   in
   match execute ~net ~clock ~base_path ~runner with
   | Ok _ -> fail "domain-invalid API and failed CLI unexpectedly produced a selection"
@@ -317,8 +341,7 @@ let test_domain_failure_kind_survives_failed_cli_slot () =
       ~cli_failure:
         (Cli.Execution_failed
            { runtime_id = Fixture.cli_primary_runtime
-           ; cause = Masc.Fusion_official_client.Setup_failure
-               (Provider_error "synthetic bridge failure")
+           ; cause = Masc.Fusion_official_client.Setup_failure "synthetic bridge failure"
            })
       (Runtime.For_testing.classified_error_detail error)
 ;;
@@ -449,7 +472,7 @@ let test_cli_prompt_drift_is_not_reported_as_no_cli_declaration () =
   let calls = ref 0 in
   let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     incr calls;
-    Error (Masc.Fusion_official_client.Setup_failure (Provider_error "must not run"))
+    Error (Masc.Fusion_official_client.Setup_failure "must not run")
   in
   match
     Runtime.For_testing.execute_exact_output_classified ~continuity:None
@@ -611,7 +634,9 @@ let () =
   run
     "keeper_librarian_cli_lane"
     [ ( "cli lane slots"
-      , [ test_case "CLI-only librarian selects memory without an HTTP attempt" `Quick
+      , [ test_case "a CLI execution failure names its slot once" `Quick
+            test_execution_failure_names_cli_slot_once
+        ; test_case "CLI-only librarian selects memory without an HTTP attempt" `Quick
           (fun () -> test_cli_slot_answers_after_catalog_exhaustion ~cli_only:true ())
       ; test_case "body deadline reaches HTTP successor and commits Memory" `Quick
           (test_body_timeout_reaches_http_successor ~with_cli:false)
@@ -640,11 +665,11 @@ let () =
             test_domain_invalid_cli_answer_keeps_the_terminal
         ; test_case "no CLI declaration preserves the API failure" `Quick
             (test_failure_reaches_journal ~cli_only:false ~cli_slot_ids:[]
-              ~answer:(Error (Masc.Fusion_official_client.Setup_failure (Provider_error "must not run"))) ~failure:None
+              ~answer:(Error (Masc.Fusion_official_client.Setup_failure "must not run")) ~failure:None
               ~kind:Current.Exact_setup_failure ~calls:0)
         ; test_case "CLI admission refusal reaches journal and exact-run projection" `Quick
             (test_failure_reaches_journal ~cli_only:false
-              ~cli_slot_ids:["missing-cli-runtime"] ~answer:(Error (Masc.Fusion_official_client.Setup_failure (Provider_error "must not run")))
+              ~cli_slot_ids:["missing-cli-runtime"] ~answer:(Error (Masc.Fusion_official_client.Setup_failure "must not run"))
               ~failure:(Some (Cli.Unknown_runtime {runtime_id = "missing-cli-runtime"}))
               ~kind:Current.Exact_setup_failure ~calls:0)
         ; test_case "CLI domain failure reaches journal and exact-run projection" `Quick
@@ -664,10 +689,9 @@ let () =
                 ~requires_token_measurement:true ())
         ; test_case "CLI execution failure reaches journal and exact-run projection" `Quick
             (test_failure_reaches_journal ~cli_only:false
-              ~cli_slot_ids:[Fixture.cli_primary_runtime] ~answer:(Error (Masc.Fusion_official_client.Setup_failure (Provider_error "synthetic bridge failure")))
+              ~cli_slot_ids:[Fixture.cli_primary_runtime] ~answer:(Error (Masc.Fusion_official_client.Setup_failure "synthetic bridge failure"))
               ~failure:(Some (Cli.Execution_failed
-                {runtime_id = Fixture.cli_primary_runtime; cause = Masc.Fusion_official_client.Setup_failure
-                  (Provider_error "synthetic bridge failure")}))
+                {runtime_id = Fixture.cli_primary_runtime; cause = Masc.Fusion_official_client.Setup_failure "synthetic bridge failure"}))
               ~kind:Current.Exact_setup_failure ~calls:1)
         ; test_case "CLI-only failure reaches journal and exact-run projection" `Quick
             (fun () -> test_failure_reaches_journal ~cli_only:true

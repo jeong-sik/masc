@@ -5280,6 +5280,10 @@ type state = {
      the first load answers: an empty list is a fact about the workspace and
      "not looked yet" is not. *)
   mutable operator_stalled: Masc_tui_agenda.stalled list option;
+  (* Goals the verifier proved and only the operator's confirmation closes,
+     read from the goal store on the same load as the tasks, so the agenda
+     names them on every surface rather than only on Planning. *)
+  mutable goals_to_confirm: Masc_tui_agenda.goal_to_confirm Masc_tui_agenda.reading;
   (* Whether the Overview task list owns j/k and which task it has chosen,
      by id. An index into the rows would name another task after a poll
      drops a finished one. *)
@@ -7752,6 +7756,7 @@ let create_state
   tasks_domain = [];
   task_flow = None;
   operator_stalled = None;
+  goals_to_confirm = Masc_tui_agenda.Not_read;
   task_focus = Masc_tui_overview_tasks.No_task_focus;
   task_reading = Masc_tui_overview_tasks.Rows_unread;
   help_open = false;
@@ -8893,7 +8898,8 @@ let agenda (state : state) : Masc_tui_agenda.t =
     | None, None -> Masc_tui_agenda.Not_read
     | Some rows, _ -> Masc_tui_agenda.Read rows
   in
-  Masc_tui_agenda.project ~scheduled ~awaiting ~stalled
+  Masc_tui_agenda.project ~scheduled ~awaiting
+    ~confirming:state.goals_to_confirm ~stalled
 ;;
 
 (* Rows the agenda strip takes from every surface. Added once, here, rather

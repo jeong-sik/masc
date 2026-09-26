@@ -16,12 +16,14 @@ open Alcotest
 module Agenda = struct
   include Masc_tui_agenda
 
-  (* Every case written before the stuck section states the same thing about
-     it: the list was read and it was empty. Shadowing the three-argument
+  (* Every case written before the goal and stuck sections states the same
+     thing about them: the lists were read and they were empty. Shadowing
      [project] here says that once rather than at fifty call sites, and a case
-     that is about stuck tasks calls {!Masc_tui_agenda.project} directly. *)
+     about those sections calls {!Masc_tui_agenda.project} directly. *)
   let project ~scheduled ~awaiting =
-    Masc_tui_agenda.project ~scheduled ~awaiting ~stalled:(Masc_tui_agenda.Read [])
+    Masc_tui_agenda.project ~scheduled ~awaiting
+      ~confirming:(Masc_tui_agenda.Read [])
+      ~stalled:(Masc_tui_agenda.Read [])
   ;;
 end
 
@@ -561,6 +563,7 @@ let with_stuck rows =
   Masc_tui_agenda.project
     ~scheduled:(Agenda.Read [])
     ~awaiting:(Agenda.Read [])
+    ~confirming:(Agenda.Read [])
     ~stalled:(Agenda.Read rows)
 ;;
 
@@ -582,6 +585,7 @@ let test_the_badge_counts_blocked_and_stuck_together () =
     Masc_tui_agenda.project
       ~scheduled:(Agenda.Read [])
       ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ])
+      ~confirming:(Agenda.Read [])
       ~stalled:(Agenda.Read [ stuck "task-348: held by codex-mcp-client, which has no Keeper queue" ])
   in
   match strip_of t with
@@ -591,24 +595,83 @@ let test_the_badge_counts_blocked_and_stuck_together () =
       (contains ~needle:"Awaiting you\xc2\xb72" strip.Agenda.waiting)
 ;;
 
-(* Sixty-two rows is a wall. The oldest few are what the operator reads, and
-   the count is the part that has to be exact. *)
-let test_the_stuck_section_shows_a_few_and_counts_the_rest () =
+(* Every stuck row is drawn, oldest first, and every one takes the cursor.
+   The panel scrolls; a row the cursor cannot reach is work the operator
+   cannot open. *)
+let test_the_stuck_section_draws_every_row () =
   let rows =
     List.init 9 (fun index ->
       stuck
+        ~task_id:(Printf.sprintf "task-%03d" index)
         ~since_iso:(Printf.sprintf "2026-08-%02dT00:00:00Z" (index + 10))
         (Printf.sprintf "task-%03d: held by a session that is gone" index))
   in
   let lines = overlay_of (with_stuck rows) in
-  let text = joined lines in
-  check int "only the oldest few are drawn" 5
-    (List.length
-       (List.filter
-          (fun (line : Agenda.line) ->
-             contains ~needle:"held by a session that is gone" line.Agenda.text)
-          lines));
-  check bool "and the rest are counted" true (contains ~needle:"and 4 more" text)
+  let reached =
+    List.filter_map
+      (fun index ->
+        match List.nth_opt lines index with
+        | Some { Agenda.goes_to = Agenda.Stuck_task task_id; _ } -> Some task_id
+        | Some _ | None -> None)
+      (Agenda.target_indexes lines)
+  in
+  check (list string) "every row, oldest first, takes the cursor"
+    (List.map (fun (row : Agenda.stalled) -> row.Agenda.task_id) rows)
+    reached
+;;
+
+let goal ?(since_iso = "2026-08-25T00:00:00Z") ?(goal_id = "goal-1") title
+  : Agenda.goal_to_confirm =
+  { goal_id; title; since_iso }
+;;
+
+let with_goals goals =
+  Masc_tui_agenda.project
+    ~scheduled:(Agenda.Read [])
+    ~awaiting:(Agenda.Read [])
+    ~confirming:(Agenda.Read goals)
+    ~stalled:(Agenda.Read [])
+;;
+
+(* A Goal the verifier proved waits on the operator's confirmation, so it is
+   something to say on its own, it counts in the badge, and Enter leads to it. *)
+let test_a_goal_to_confirm_is_waiting_on_the_operator () =
+  let t = with_goals [ goal ~goal_id:"goal-9" "v0.38.0 release" ] in
+  check int "a goal to confirm takes the row" 1 (Agenda.rows_taken t);
+  (match strip_of t with
+   | None -> fail "the strip must draw while a goal waits for confirmation"
+   | Some strip ->
+     check bool "and it is counted" true
+       (contains ~needle:"Awaiting you\xc2\xb71" strip.Agenda.waiting));
+  let lines = overlay_of t in
+  check bool "the row names the goal and says it was proved" true
+    (contains ~needle:"v0.38.0 release" (joined lines)
+     && contains ~needle:"the verifier proved it" (joined lines));
+  match Agenda.target_indexes lines with
+  | [ index ] -> (
+      match List.nth_opt lines index with
+      | Some { Agenda.goes_to = Agenda.Goal_to_confirm goal_id; _ } ->
+          check string "Enter leads to the goal" "goal-9" goal_id
+      | Some _ | None -> fail "the goal row leads nowhere")
+  | targets ->
+      failf "expected one row to lead somewhere, got %d" (List.length targets)
+;;
+
+let test_the_goal_section_answers_in_words () =
+  check bool "an empty list read is an answer" true
+    (contains ~needle:"no goal is waiting for your confirmation"
+       (joined (overlay_of (with_goals []))));
+  let unread =
+    joined
+      (overlay_of
+         (Masc_tui_agenda.project
+            ~scheduled:(Agenda.Read [])
+            ~awaiting:(Agenda.Read [])
+            ~confirming:Agenda.Not_read
+            ~stalled:(Agenda.Read [])))
+  in
+  check bool "a list nobody read does not say it is empty" false
+    (contains ~needle:"no goal is waiting for your confirmation" unread)
 ;;
 
 let test_the_stuck_section_answers_in_words () =
@@ -621,6 +684,7 @@ let test_the_stuck_section_answers_in_words () =
          (Masc_tui_agenda.project
             ~scheduled:(Agenda.Read [])
             ~awaiting:(Agenda.Read [])
+            ~confirming:(Agenda.Read [])
             ~stalled:Agenda.Not_read))
   in
   check bool "a list nobody read does not say it is empty" false
@@ -720,8 +784,8 @@ let () =
             test_a_stuck_task_alone_takes_the_row
         ; test_case "the badge counts blocked and stuck together" `Quick
             test_the_badge_counts_blocked_and_stuck_together
-        ; test_case "the section shows a few and counts the rest" `Quick
-            test_the_stuck_section_shows_a_few_and_counts_the_rest
+        ; test_case "the section draws every row" `Quick
+            test_the_stuck_section_draws_every_row
         ; test_case "the section answers in words" `Quick
             test_the_stuck_section_answers_in_words
         ; test_case "a stuck row says how long it has waited" `Quick
@@ -730,6 +794,12 @@ let () =
             test_only_rows_that_lead_somewhere_take_the_cursor
         ; test_case "prose rows take no cursor" `Quick
             test_prose_rows_take_no_cursor
+        ] )
+    ; ( "goals waiting for confirmation"
+      , [ test_case "a goal to confirm is waiting on the operator" `Quick
+            test_a_goal_to_confirm_is_waiting_on_the_operator
+        ; test_case "the section answers in words" `Quick
+            test_the_goal_section_answers_in_words
         ] )
     ]
 ;;

@@ -39,6 +39,13 @@ type stalled =
   ; since_iso : string
   }
 
+(* A Goal the verifier proved and only the operator's confirmation closes. *)
+type goal_to_confirm =
+  { goal_id : string
+  ; title : string
+  ; since_iso : string
+  }
+
 type 'row reading =
   | Not_read
   | Read_failed of string
@@ -47,6 +54,7 @@ type 'row reading =
 type t =
   { coming : scheduled reading  (** earliest first *)
   ; blocked : awaiting reading
+  ; confirming : goal_to_confirm reading
   ; stuck : stalled reading  (** longest wait first *)
   }
 
@@ -78,12 +86,13 @@ let is_coming row = match row.standing with
    somebody else's sort is a strip that changes when their sort does. *)
 let by_time left right = String.compare left.at_iso right.at_iso
 
-let project ~scheduled ~awaiting ~stalled =
+let project ~scheduled ~awaiting ~confirming ~stalled =
   { coming =
       (match scheduled with
        | Read rows -> Read (rows |> List.filter is_coming |> List.sort by_time)
        | (Not_read | Read_failed _) as unread -> unread)
   ; blocked = awaiting
+  ; confirming
   ; stuck = stalled
   }
 ;;
@@ -95,7 +104,10 @@ let next t = match rows_of t.coming with row :: _ -> Some row | [] -> None
    that was never read has no row to name, so the strip stays down for it
    the same way; the overlay is where the difference is said. *)
 let is_silent t =
-  rows_of t.coming = [] && rows_of t.blocked = [] && rows_of t.stuck = []
+  rows_of t.coming = []
+  && rows_of t.blocked = []
+  && rows_of t.confirming = []
+  && rows_of t.stuck = []
 let rows_taken t = if is_silent t then 0 else 1
 
 type strip =
@@ -160,11 +172,15 @@ let strip ~now ~localtime ~cols t =
   if is_silent t
   then None
   else begin
-    (* One number for both: a keeper holding a tool call and a task only the
-       operator can move are the same answer to "is anything waiting on me",
-       and two badges beside each other would make the operator add them up. *)
+    (* One number for all three: a keeper holding a tool call, a Goal waiting
+       for confirmation and a task only the operator can move are the same
+       answer to "is anything waiting on me", and badges beside each other
+       would make the operator add them up. *)
     let waiting =
-      waiting_half (List.length (rows_of t.blocked) + List.length (rows_of t.stuck))
+      waiting_half
+        (List.length (rows_of t.blocked)
+         + List.length (rows_of t.confirming)
+         + List.length (rows_of t.stuck))
     in
     let reserved =
       if waiting = "" then 0 else Masc_tui_message_layout.display_width waiting + 2
@@ -196,6 +212,7 @@ type destination =
   | Nowhere
   | Keeper_holding of string
       (** the keeper sitting on a tool call only an operator releases *)
+  | Goal_to_confirm of string  (** the Goal, confirmed on its own detail *)
   | Stuck_task of string  (** the task, read on its own detail *)
 
 type line =
@@ -272,11 +289,6 @@ let waited ~now since_iso =
       else Printf.sprintf "%dm waiting" (whole / 60))
 ;;
 
-(* Sixty-two rows is not a panel, it is a wall, and the operator reads the
-   oldest few and then goes to the tool. The count is the part that has to be
-   exact; the rows are the part that has to fit. *)
-let stalled_rows_shown = 5
-
 let overlay ~now ~localtime ~cols t =
   let quiet text = { tone = Quiet; text = "  " ^ text; goes_to = Nowhere } in
   (* Why it failed, not only that it did. The reason is beside the flag in the
@@ -341,31 +353,45 @@ let overlay ~now ~localtime ~cols t =
     | Not_read -> [ quiet "not loaded yet" ]
     | Read_failed reason -> [ failure ~cols reason ]
     | Read [] -> [ quiet "no task is stuck on you" ]
+    (* Every row, oldest first. The panel scrolls, and a row the cursor
+       cannot reach is work the operator cannot open. *)
     | Read rows ->
-      let shown = List.filteri (fun index _ -> index < stalled_rows_shown) rows in
-      let hidden = List.length rows - List.length shown in
       List.map
         (fun (row : stalled) ->
            { tone = Question
-           ; goes_to =
-               Stuck_task row.task_id
+           ; goes_to = Stuck_task row.task_id
            ; text = two_column ~cols row.what (waited ~now row.since_iso)
            })
-        shown
-      @
-      if hidden <= 0
-      then []
-      else [ quiet (Printf.sprintf "and %d more \xe2\x80\x94 masc_operator_digest" hidden) ]
+        rows
+  in
+  let goals =
+    match t.confirming with
+    | Not_read -> [ quiet "not loaded yet" ]
+    | Read_failed reason -> [ failure ~cols reason ]
+    | Read [] -> [ quiet "no goal is waiting for your confirmation" ]
+    | Read rows ->
+      List.map
+        (fun (row : goal_to_confirm) ->
+           { tone = Question
+           ; goes_to = Goal_to_confirm row.goal_id
+           ; text =
+               two_column
+                 ~cols
+                 (Printf.sprintf "%s \xe2\x80\x94 the verifier proved it" row.title)
+                 (waited ~now row.since_iso)
+           })
+        rows
   in
   let heading text = { tone = Heading; text; goes_to = Nowhere } in
   let blank = { tone = Quiet; text = ""; goes_to = Nowhere } in
   (heading "Coming up" :: wakes)
-  (* "Awaiting you" is the badge's word for this list and the stuck one
-     together. This heading names its own rows, which say "<keeper> is holding
-     <call>", so the badge's number reads as the two sections under it rather
-     than as this one. *)
+  (* "Awaiting you" is the badge's word for the three lists below together.
+     Each heading names its own rows, so the badge's number reads as the
+     sections under it rather than as any one of them. *)
   @ [ blank; heading "Holding a call" ]
   @ questions
+  @ [ blank; heading "Confirm a goal" ]
+  @ goals
   @ [ blank; heading "Stuck on you" ]
   @ stuck
 ;;
@@ -382,7 +408,7 @@ let target_indexes lines =
         (index + 1)
         (match line.goes_to with
          | Nowhere -> acc
-         | Keeper_holding _ | Stuck_task _ -> index :: acc)
+         | Keeper_holding _ | Goal_to_confirm _ | Stuck_task _ -> index :: acc)
         rest
   in
   loop 0 [] lines

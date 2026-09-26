@@ -67,6 +67,16 @@ type stalled =
 (** A task whose only exit belongs to the operator: work held by an agent with
     no Keeper queue, or a Keeper record that does not decode. *)
 
+type goal_to_confirm =
+  { goal_id : string  (** the Goal the row is about, so a key can open it *)
+  ; title : string
+  ; since_iso : string
+        (** when the Goal last changed: for a Goal waiting here, the moment
+            its proof was recorded *)
+  }
+(** A Goal the verifier proved. Its last step is the operator's confirmation
+    (constitution, goal completion), so it waits on the operator. *)
+
 (** A list as the state holds it. An empty list is an answer only once it was
     read: before the first answer, and after a read that failed with nothing
     earlier to show, the overlay said "nothing is scheduled" about a list no
@@ -83,6 +93,7 @@ type t
 val project :
   scheduled:scheduled reading ->
   awaiting:awaiting reading ->
+  confirming:goal_to_confirm reading ->
   stalled:stalled reading ->
   t
 (** Keeps the earliest {!Coming} row and counts the rest. Rows that are
@@ -91,7 +102,8 @@ val project :
 
 val rows_taken : t -> int
 (** [1] while the strip has something to say, [0] otherwise. The surface gets
-    the row back when it is [0]. A stuck task counts as something to say. *)
+    the row back when it is [0]. A Goal to confirm and a stuck task each count
+    as something to say. *)
 
 (** The strip's two halves, as plain text. Styling belongs to the renderer;
     what goes in each half belongs here. *)
@@ -99,9 +111,9 @@ type strip =
   { clock : string  (** the next wake, or [""] when nothing is scheduled *)
   ; waiting : string
         (** the badge, or [""] when nothing waits on the operator. One count
-            over blocked keepers and stuck tasks together: both answer "is
-            anything waiting on me", and two badges would be an addition the
-            operator has to do. *)
+            over blocked keepers, Goals to confirm and stuck tasks together:
+            all answer "is anything waiting on me", and several badges would
+            be an addition the operator has to do. *)
   }
 
 val strip :
@@ -134,6 +146,7 @@ type destination =
   | Nowhere
   | Keeper_holding of string
       (** the keeper sitting on a tool call only an operator releases *)
+  | Goal_to_confirm of string  (** the Goal, confirmed on its own detail *)
   | Stuck_task of string  (** the task, read on its own detail *)
 
 type line =
@@ -145,12 +158,10 @@ type line =
 val overlay :
   now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> line list
 (** Every wake still coming, earliest first, then everyone blocked on the
-    operator, then the tasks stuck on them. Not just the one the strip names.
-    A section whose list was not read says that instead of saying it is empty.
-
-    The stuck section is the exception to "every": it draws the oldest few and
-    then says how many it did not. Sixty-two rows is a wall, and the list
-    itself belongs to a tool. *)
+    operator, then the Goals waiting for the operator's confirmation, then the
+    tasks stuck on them. Every row of every section, not just the one the strip
+    names; the panel scrolls. A section whose list was not read says that
+    instead of saying it is empty. *)
 
 val target_indexes : line list -> int list
 (** Indexes of the rows Enter can act on, in display order. The cursor moves

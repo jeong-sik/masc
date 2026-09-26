@@ -19725,6 +19725,21 @@ and is loaded on demand through keeper_skill.
                      goto_surface state ~mailbox:async_messages Approvals
                  | Some
                      { Masc_tui_agenda.goes_to =
+                         Masc_tui_agenda.Goal_to_confirm goal_id
+                     ; _
+                     } ->
+                     (* The Goal's detail is where its proof is read and
+                        confirmed, the same landing a followed goal link
+                        gives. *)
+                     close ();
+                     goto_surface state ~mailbox:async_messages Planning;
+                     state.planning_mode <- Planning_detail goal_id;
+                     state.planning_scroll <- 0;
+                     state.goal_timeline <- None;
+                     launch_goal_timeline_load state ~mailbox:async_messages
+                       goal_id
+                 | Some
+                     { Masc_tui_agenda.goes_to =
                          Masc_tui_agenda.Stuck_task task_id
                      ; _
                      } ->

@@ -14141,8 +14141,10 @@ def run_http_badge_refresh_regression(executable: str) -> None:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        # The badge colours its status, so the raw PTY bytes split HTTP from [connected].
+        connected = re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[connected\]")
         wait_for_output(
-            process, master_fd, output, b"HTTP [connected]", start=0, timeout=3.0
+            process, master_fd, output, connected, start=0, timeout=3.0
         )
         first_completed = completed
         prompt_start = len(output)
@@ -14165,19 +14167,21 @@ def run_http_badge_refresh_regression(executable: str) -> None:
             raise AssertionError("the slow refresh did not start")
         slow_start = len(output)
         wait_for_output(
-            process, master_fd, output, b"HTTP [refreshing...]",
+            process, master_fd, output,
+            re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[refreshing\.\.\.\]"),
             start=slow_start, timeout=2.0,
         )
         connected_start = len(output)
         release_slow.set()
         wait_for_output(
-            process, master_fd, output, b"HTTP [connected]",
+            process, master_fd, output, connected,
             start=connected_start, timeout=2.0,
         )
         fail_next.set()
         failure_start = len(output)
         wait_for_output(
-            process, master_fd, output, b"HTTP [refresh failed]",
+            process, master_fd, output,
+            re.compile(rb"HTTP (?:\x1b\[[0-9;]*m)*\[refresh failed\]"),
             start=failure_start, timeout=2.0,
         )
         os.write(master_fd, b"q")

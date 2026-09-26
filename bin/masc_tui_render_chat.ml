@@ -2114,7 +2114,9 @@ let render_keeper_message (state : state) =
     let target_registered =
       keeper_available_for_new_message state keeper_name
     in
-    let status_rows = keeper_message_status_rows state in
+    let command_window = keeper_message_command_window state ~terminal_rows:rows ~terminal_cols:cols in
+    let command_rows = match command_window with None -> 0 | Some (_, entries) -> 2 + List.length entries in
+    let status_rows = keeper_message_status_rows state + command_rows in
     let support_status_rows =
       keeper_message_support_status_rows state ~status_rows
     in
@@ -2197,11 +2199,9 @@ let render_keeper_message (state : state) =
       title, mode_suffix
     in
     let inner_cells = framed_inner_width chat_cols in
-    (* Title and projection are navigation facts. Runtime/gate/context are
-       operational facts. Putting all of them on one row made an ordinary
-       provider id consume the rest of the header and silently lose whatever
-       followed it. Two fixed rows make the hierarchy visible and let the
-       opaque runtime id be the only item that yields width. *)
+    (* Navigation stays above the conversation. Runtime and observed context
+       live below the composer, beside the interaction they describe. Their
+       row keeps its own width budget, so a long runtime cannot hide usage. *)
     let title_row =
       Message_layout.chat_title_row ~inner_cells ~title ~mode_suffix
     in
@@ -2214,9 +2214,10 @@ let render_keeper_message (state : state) =
         with
         | Some { observation = Some observation; error = None } ->
             Observation_layout.context_header_item
-              ~max_cells:(min 32 (max 0 (inner_cells / 3)))
+              ~max_cells:(min 48 (max 0 (inner_cells / 2)))
               ~inspect_key:Masc_tui_keys.context_inspector_label observation
-        | Some _ | None -> None
+        | Some {error = Some _; _} -> Some "Context unavailable"
+        | Some _ | None -> Some "Context —"
     in
     let context_cells =
       match context_item with
@@ -2281,12 +2282,11 @@ let render_keeper_message (state : state) =
     (* Header *)
     box_top chat_buf chat_cols;
     box_line chat_buf chat_cols title_row;
-    box_line chat_buf chat_cols identity_row;
     box_divider chat_buf chat_cols;
 
-    (* Message history. The fixed chrome is 8 rows — box top, two header rows,
-       their divider, the input divider, the composer's first line, box bottom
-       and the footer — and every variable row (status, sending, queue, errors,
+    (* Message history. The fixed chrome is 8 rows — box top, navigation row,
+       its divider, the input divider, composer's first line, box bottom,
+       runtime/context row and key footer — and every variable row (status, sending, queue, errors,
        composer growth) is in [status_rows]. The old constant 10 reserved
        two rows nothing drew, so the pane stopped two short of the
        terminal's bottom edge. [message_viewport_supported] requires the same
@@ -3224,6 +3224,21 @@ let render_keeper_message (state : state) =
       in
       box_line_styled chat_buf chat_cols ~style:(Theme.bad ()) unavailable_message
     end;
+    (match command_window with
+     | None -> ()
+     | Some (menu, entries) ->
+       box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
+         (Printf.sprintf "  Commands  %d/%d" (menu.selected + 1) (List.length menu.items));
+       let label_cells = min 26 (max 8 ((framed_inner_width chat_cols - 5) / 3)) in
+       List.iter (fun (selected, (item : Masc_tui_command.menu_item)) ->
+         let label = fit_width (Terminal_text.single_line item.label) label_cells in
+         let marker = if selected then "› " else "  " in
+         let style = if selected then Masc_tui_theme.tone Masc_tui_theme.Accent ^ Ansi.bold else Theme.recede () in
+         box_line chat_buf chat_cols
+           ("  " ^ style ^ marker ^ label ^ "  "
+            ^ (if selected then Ansi.reset else Theme.recede ())
+            ^ Terminal_text.single_line item.description ^ Ansi.reset)) entries;
+       box_divider chat_buf chat_cols);
     let input = Buffer.contents state.msg_input in
     let composer =
       Message_layout.composer_lines
@@ -3260,6 +3275,8 @@ let render_keeper_message (state : state) =
     in
 
     box_bottom chat_buf chat_cols;
+    Buffer.add_string chat_buf
+      (" " ^ fit_width identity_row (max 0 (chat_cols - 1)) ^ "\n");
 
     (* Footer *)
     let disposition = send_disposition state ~keeper_name in
@@ -3365,7 +3382,9 @@ let render_keeper_message (state : state) =
        actually pressed, which is what tells them how far along the word they
        are. *)
     let slash_hint =
-      slash_hint_text ~restore:Ansi.default_fg (Buffer.contents state.msg_input)
+      match command_window with
+      | Some _ -> Some "↑/↓:select  Tab/Enter:insert  Esc:close"
+      | None -> slash_hint_text ~restore:Ansi.default_fg (Buffer.contents state.msg_input)
     in
     let footer_hints =
       match slash_hint with

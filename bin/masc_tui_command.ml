@@ -654,6 +654,62 @@ let known_sub_arguments ~keeper_names word =
 let with_body body text =
   if String.equal body "" then text else text ^ "\n" ^ body
 
+type menu_state = Menu_idle | Menu_dismissed of string | Menu_selected of { draft : string; index : int }
+type menu_item = { completion : string; label : string; description : string }
+type menu = { items : menu_item list; selected : int }
+
+let menu ~keeper_names ~state text =
+  let dismissed = match state with
+    | Menu_dismissed draft -> String.equal draft text
+    | Menu_idle | Menu_selected _ -> false in
+  if dismissed || String.equal text "" || text.[0] <> slash then None
+  else
+    let first, body = split_first_line text in
+    let line = String.sub first 1 (String.length first - 1) in
+    let word, argument = split_word line in
+    let items =
+      if not (String.contains line ' ') then
+        if List.exists (fun entry -> String.equal entry.word word) spelled_catalog then []
+        else List.filter_map (fun entry ->
+          if String.starts_with ~prefix:word entry.word then
+            let suffix = if String.equal entry.args "" then "" else " " in
+            Some {completion = with_body body ("/" ^ entry.word ^ suffix);
+                  label = "/" ^ entry.word; description = entry.summary}
+          else None) spelled_catalog
+      else if not (String.equal argument "") && String.ends_with ~suffix:" " line then []
+      else
+        let options = known_sub_arguments ~keeper_names word in
+        if List.exists (String.equal argument) options then []
+        else List.filter_map (fun option ->
+          if String.starts_with ~prefix:argument option then
+            let label = "/" ^ word ^ " " ^ option in
+            Some {completion = with_body body label; label;
+                  description = (match List.find_opt (fun entry -> String.equal entry.word word) spelled_catalog with
+                    | Some entry -> entry.summary | None -> "")}
+          else None) options in
+    match items with
+    | [] -> None
+    | _ ->
+      let selected = match state with
+        | Menu_selected {draft; index} when String.equal draft text ->
+          max 0 (min (List.length items - 1) index)
+        | Menu_idle | Menu_dismissed _ | Menu_selected _ -> 0 in
+      Some {items; selected}
+
+let menu_step ~direction ~draft menu =
+  let length = List.length menu.items in
+  let delta = match direction with Next -> 1 | Prev -> length - 1 in
+  Menu_selected {draft; index = (menu.selected + delta) mod length}
+
+let menu_accept menu = (List.nth menu.items menu.selected).completion
+
+let menu_window ~max_rows menu =
+  let count = min (List.length menu.items) (max 0 max_rows) in
+  let first = max 0 (min (menu.selected - count / 2) (List.length menu.items - count)) in
+  menu.items |> List.mapi (fun index item -> index, item)
+  |> List.filter_map (fun (index, item) ->
+    if index >= first && index < first + count then Some (index = menu.selected, item) else None)
+
 let autocomplete ?(direction = Next) ?(keeper_names = []) text =
   if String.length text = 0 || text.[0] <> slash then None
   else

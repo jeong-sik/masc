@@ -1217,6 +1217,7 @@ let reset_message_file_changes state keeper_name =
    by the retarget, and this is when it goes. Passed in because the drain is
    defined with the dispatch path, after this. *)
 let forget_recall (state : state) =
+  state.msg_command_menu <- Masc_tui_command.Menu_idle;
   state.msg_recall_at <- None;
   state.msg_recall_draft <- ("", [], [], None)
 
@@ -1269,6 +1270,7 @@ let leave_keeper_message state ~drain_queue =
   drain_queue ()
 
 let clear_current_message_draft state =
+  state.msg_command_menu <- Masc_tui_command.Menu_idle;
   Buffer.clear state.msg_input;
   discard_recovered_paste_lock state;
   save_message_draft state
@@ -1358,6 +1360,7 @@ let own_typed_messages (state : state) =
   sent
 
 let set_composer_text (state : state) text =
+  state.msg_command_menu <- Masc_tui_command.Menu_idle;
   Buffer.clear state.msg_input;
   Buffer.add_string state.msg_input text
 
@@ -1537,6 +1540,16 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Masc_tui_command.is_slash_navigable ~keeper_names
       (Buffer.contents state.msg_input)
   in
+  let command_menu =
+    let rows, cols = get_terminal_size () in
+    keeper_message_command_window state ~terminal_rows:rows ~terminal_cols:cols |> Option.map fst in
+  let accept_command_menu menu =
+    let completed = Masc_tui_command.menu_accept menu in
+    forget_recall state;
+    Buffer.clear state.msg_input;
+    Buffer.add_string state.msg_input completed;
+    state.msg_command_menu <- Masc_tui_command.Menu_dismissed completed;
+    true in
   match key with
   (* Esc cancels the innermost thing, and a running capture is inside
      everything else here: the operator is mid-utterance, not mid-turn. ^Y
@@ -1554,6 +1567,17 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Buffer.clear state.msg_input;
     discard_recovered_paste_lock state;
     drain_queue ();
+    true
+  | ("up" | "down" | "shift-tab") when Option.is_some command_menu ->
+    Option.iter (fun menu ->
+      let direction = if String.equal key "down" then Masc_tui_command.Next else Masc_tui_command.Prev in
+      state.msg_command_menu <- Masc_tui_command.menu_step ~direction
+        ~draft:(Buffer.contents state.msg_input) menu) command_menu;
+    true
+  | ("\t" | "\r") when Option.is_some command_menu ->
+    (match command_menu with Some menu -> accept_command_menu menu | None -> false)
+  | "esc" when Option.is_some command_menu ->
+    state.msg_command_menu <- Masc_tui_command.Menu_dismissed (Buffer.contents state.msg_input);
     true
   | "\t" -> apply_autocomplete Masc_tui_command.Next
   | "shift-tab" -> apply_autocomplete Masc_tui_command.Prev
@@ -12772,6 +12796,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         match disposition with
         | Masc.Voice_bridge.Discard -> ()
         | Masc.Voice_bridge.Keep_what_was_heard ->
+        state.msg_command_menu <- Masc_tui_command.Menu_idle;
         (* Appended, not replacing: an operator who typed part of a message and
            then spoke the rest keeps both. A separator only where there is
            something to separate. *)
@@ -13119,8 +13144,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Task_dispatch_failed { keeper; detail; original } ->
       (* The operator's words come back to the input so nothing typed is
          lost with the failure. *)
-      Buffer.clear state.msg_input;
-      Buffer.add_string state.msg_input original;
+      set_composer_text state original;
       report_action state "error"
         (Printf.sprintf "task for %s not created: %s" keeper detail)
   | Observer_closed outcome ->

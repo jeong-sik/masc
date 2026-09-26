@@ -27,6 +27,7 @@ let cached_field_names =
     "keeper_event_queue";
     "keeper_terminal_effect_policy";
     "keeper_observability_artifacts";
+    "skill_catalog";
     "paused_keepers";
     "keeper_config_error_count";
     "keeper_config_errors";

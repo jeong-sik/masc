@@ -114,7 +114,7 @@ let with_fixture f =
         "[skills]\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-write\"\n"
       in
       (match Service.refresh ~workspace ~user_home:None
-        ~read_config:(fun () -> Service.Config_text config_text) with
+        ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = config_text }) with
        | Service.Published _ | Unchanged _ -> ()
        | Workspace_retired -> fail "fixture snapshot retired");
       let config = Workspace.default_config base_path in

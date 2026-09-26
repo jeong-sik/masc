@@ -4,8 +4,22 @@ type workspace
 type workspace_error = Config_dir_resolver.canonical_base_path_error
 
 type config_observation =
-  | Config_text of string
-  | Config_unreadable of string
+  | Config_text of
+      { path : string
+      ; source_text : string
+      }
+  | Config_unreadable of
+      { path : string
+      ; detail : string
+      }
+(** What was read and from where. [path] is the runtime.toml the snapshot is
+    built from; it is stored with the published snapshot and named in its log
+    line and health reasons. *)
+
+type published = private
+  { snapshot : Skill_catalog_snapshot.t
+  ; config_path : string
+  }
 
 type publication =
   | Published of Skill_catalog_snapshot.t
@@ -37,7 +51,12 @@ val refresh :
     transaction for one workspace. [read_config] runs after the workspace lock
     is acquired, so an older read failure cannot arrive after and replace a
     newer valid observation. Cancellation abandons the transaction and releases
-    the lock without publishing. *)
+    the lock without publishing.
+
+    Every publication, from here or from [update_additional_sources], is
+    logged by one rule: the first one logs the config state it publishes, and
+    a later one logs only a change of config state, judged against the
+    snapshot it replaced. *)
 
 val refresh_with_sources :
   workspace:workspace -> user_home:string option ->
@@ -59,6 +78,8 @@ val update_additional_sources :
     records the source request and returns an availability diagnostic. *)
 
 val current : workspace:workspace -> Skill_catalog_snapshot.t option
+val current_published : workspace:workspace -> published option
+(** The current snapshot with the runtime.toml path it was built from. *)
 val retire : workspace:workspace -> unit
 (** Remove an inactive workspace slot. The slot is removed only if it is still
     the registered instance for the canonical workspace identity. *)

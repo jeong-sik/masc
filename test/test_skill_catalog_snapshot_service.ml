@@ -71,7 +71,7 @@ let refresh base_path config_text =
   Service.refresh
     ~workspace:(workspace base_path)
     ~user_home:None
-    ~read_config:(fun () -> Service.Config_text config_text)
+    ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = config_text })
 ;;
 
 let test_valid_and_malformed_sources_coexist () =
@@ -198,7 +198,7 @@ let test_refresh_is_serialized_and_latest_call_wins () =
             Condition.wait condition mutex
           done;
           Mutex.unlock mutex;
-          Service.Config_unreadable "old read failed"))
+          Service.Config_unreadable { path = "/fixture/runtime.toml"; detail = "old read failed" }))
   in
   Mutex.lock mutex;
   while not !old_reader_started do
@@ -211,7 +211,7 @@ let test_refresh_is_serialized_and_latest_call_wins () =
       Service.refresh
         ~workspace
         ~user_home:None
-        ~read_config:(fun () -> Service.Config_text valid_text))
+        ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = valid_text }))
   in
   Mutex.lock mutex;
   release_old_reader := true;
@@ -241,7 +241,7 @@ let test_workspace_alias_and_retirement () =
        ~workspace:direct
        ~user_home:None
        ~read_config:(fun () ->
-         Service.Config_text (config (source_row "skills" "skills"))));
+         Service.Config_text { path = "/fixture/runtime.toml"; source_text = config (source_row "skills" "skills") }));
   check bool
     "canonical alias shares current snapshot"
     true
@@ -265,7 +265,7 @@ let test_current_and_retire_do_not_wait_for_refresh_io () =
        ~workspace
        ~user_home:None
        ~read_config:(fun () ->
-         Service.Config_text (config (source_row "skills" "skills"))));
+         Service.Config_text { path = "/fixture/runtime.toml"; source_text = config (source_row "skills" "skills") }));
   let mutex = Mutex.create () in
   let condition = Condition.create () in
   let reader_started = ref false in
@@ -283,7 +283,7 @@ let test_current_and_retire_do_not_wait_for_refresh_io () =
             Condition.wait condition mutex
           done;
           Mutex.unlock mutex;
-          Service.Config_unreadable "refresh completed after retirement"))
+          Service.Config_unreadable { path = "/fixture/runtime.toml"; detail = "refresh completed after retirement" }))
   in
   Mutex.lock mutex;
   while not !reader_started do

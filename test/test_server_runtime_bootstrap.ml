@@ -1715,6 +1715,47 @@ let test_health_json_surfaces_board_event_collection_failure () =
           1
           (light_runtime_collection |> member "failure_count" |> to_int)))
 
+(* #39269: the full builder carries the skill_catalog section, and a rejected
+   [skills] table reaches the top-level operator reasons through it. *)
+let test_health_json_surfaces_rejected_skill_config () =
+  with_temp_dir "health-skill-catalog" (fun dir ->
+    let config_root = make_config_root dir in
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.For_testing.restore_server_state @@ previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
+        Server_auth.For_testing.restore_server_state @@ Some state;
+        let request = Httpun.Request.create `GET "/health" in
+        let open Yojson.Safe.Util in
+        let skill_catalog json = json |> member "skill_catalog" in
+        let unpublished = Server_routes_http_runtime.make_health_json request in
+        Alcotest.(check string) "the full builder carries the section"
+          "masc.skill_catalog.v1"
+          (skill_catalog unpublished |> member "schema" |> to_string);
+        (match
+           Server_skill_snapshot_runtime.refresh_from_observation
+             ~base_path:dir
+             (Runtime.config_observation
+                ~path:(Filename.concat config_root "runtime.toml")
+                "[skills]\nresource-read-max-bytes = 65536\n")
+         with
+         | Ok _ -> ()
+         | Error error ->
+           Alcotest.fail (Server_skill_snapshot_runtime.error_to_string error));
+        let rejected = Server_routes_http_runtime.make_health_json request in
+        Alcotest.(check string) "a rejected [skills] table degrades the section"
+          "degraded"
+          (skill_catalog rejected |> member "status" |> to_string);
+        Alcotest.(check bool) "the rollup carries the section's reason" true
+          (rejected |> member "operator_action_reasons" |> to_list
+           |> List.map to_string
+           |> List.exists (String.starts_with ~prefix:"skill_catalog:"))))
+
 let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
   with_temp_dir "keeper-identity-drift" (fun dir ->
     let config_root = make_config_root dir in
@@ -3746,6 +3787,11 @@ let test_health_response_full_query_uses_snapshot_cache () =
             "invalidated snapshot cannot retain ready overall status"
             "warming"
             (invalidated |> member "overall_status" |> to_string);
+          Alcotest.(check string)
+            "the fallback skill_catalog keeps its schema"
+            "masc.skill_catalog.v1"
+            (invalidated |> member "skill_catalog" |> member "schema"
+             |> to_string);
           Alcotest.(check string)
             "invalidated snapshot reports warming"
             "warming"
@@ -6035,6 +6081,9 @@ let () =
           Alcotest.test_case
             "health json surfaces board event collection failure"
             `Quick test_health_json_surfaces_board_event_collection_failure;
+          Alcotest.test_case
+            "health json surfaces a rejected skill config"
+            `Quick test_health_json_surfaces_rejected_skill_config;
           Alcotest.test_case
             "health json surfaces keeper identity config/meta drift"
             `Quick

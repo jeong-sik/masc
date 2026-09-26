@@ -932,15 +932,9 @@ let initialize_owner_state_blocking
        (Server_skill_snapshot_runtime.error_to_string error)
    | Ok Workspace_retired ->
      Log.Server.warn "Skill snapshot workspace retired during boot publication"
-   | Ok (Published skill_snapshot | Unchanged skill_snapshot) ->
-     (match
-        Server_skill_snapshot_runtime.boot_report
-          ~runtime_config_path:runtime_config_observation.Runtime.path
-          skill_snapshot
-      with
-      | Server_skill_snapshot_runtime.Boot_info, line -> Log.Server.info "%s" line
-      | Server_skill_snapshot_runtime.Boot_warn, line -> Log.Server.warn "%s" line
-      | Server_skill_snapshot_runtime.Boot_error, line -> Log.Server.error "%s" line)));
+   (* The publication logged the config state it published, naming the reason
+      and the runtime.toml path when the [skills] table was rejected. *)
+   | Ok (Published _ | Unchanged _) -> ()));
   (match runtime_initialization, runtime_config_path with
    | Ok _, Some path ->
      (try configure_exact_output_registry ~config_root:(Filename.dirname path) () with

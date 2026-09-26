@@ -107,7 +107,7 @@ let with_workspace
           (Service.refresh
              ~workspace
              ~user_home:None
-             ~read_config:(fun () -> Service.Config_text config_text))
+             ~read_config:(fun () -> Service.Config_text { path = "/fixture/runtime.toml"; source_text = config_text }))
       in
       (match refresh () with
        | Ok (Service.Published _ | Unchanged _) -> ()

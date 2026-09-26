@@ -3018,6 +3018,8 @@
 
 (include stanzas/test_server_slack_trigger_policy.inc)
 
+(include stanzas/test_server_skill_catalog_health.inc)
+
 (include stanzas/test_keeper_keepalive_helpers.inc)
 
 (test
@@ -5875,7 +5877,7 @@
 (test
  (name test_skill_source_runtime_integration)
  (modules test_skill_source_runtime_integration)
- (libraries alcotest masc masc.skill_config masc.skill_snapshot masc.server masc_runtime masc.string_util masc.masc_core))
+ (libraries alcotest masc masc.skill_config masc.skill_snapshot masc.skill_snapshot_service masc.server masc_runtime masc.string_util masc.masc_core masc.masc_log unix))
 
 (test
  (name test_skill_catalog_snapshot)

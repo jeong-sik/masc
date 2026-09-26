@@ -1292,6 +1292,23 @@ let test_changed_explicit_workspace_starts_fresh () =
        |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")))
 ;;
 
+let test_missing_selected_account_auth_requires_sign_in () =
+  with_scripted_host (fun ~base_path ->
+    let auth = Filename.concat base_path "account-home/.config/muse/auth.json" in
+    Unix.unlink auth;
+    let run = run_turn_with ~base_path ~tool:(masc_probe_tool (ref `Null)) () in
+    (match run.outcome.result with
+     | Error (Agent_core.Error.Provider (Llm_provider.Error.AuthError _)) -> ()
+     | Error error -> fail (Agent_core.Error.to_string error)
+     | Ok _ -> fail "missing selected account auth reached the client");
+    check bool "no ambient-account client spawned" false
+      (Sys.file_exists (Filename.concat base_path "selected-home.txt"));
+    check bool "no vendor effect" true
+      (run.outcome.effect_disposition = Keeper_provider_attempt_effect.No_effect_observed);
+    check bool "no durable session claimed" true
+      (match Store.load ~base_path ~keeper_name with Ok None -> true | _ -> false))
+;;
+
 let test_native_none_is_refused_before_spawn () =
   with_scripted_host (fun ~base_path ->
     declare_keeper ~base_path
@@ -1382,6 +1399,7 @@ let () =
       , [ test_case "account switch starts fresh" `Quick test_account_selection_starts_a_fresh_vendor_session
         ; test_case "source relogin starts fresh, refresh survives" `Quick test_source_relogin_starts_fresh_and_preserves_vendor_refresh
         ; test_case "effective system override starts fresh" `Quick test_effective_system_override_starts_fresh
+        ; test_case "missing selected auth requires sign-in before spawn" `Quick test_missing_selected_account_auth_requires_sign_in
         ; test_case "native none refuses before spawn" `Quick test_native_none_is_refused_before_spawn ])
     ; ( "workspace root"
       , [ test_case "the session works in the Keeper's playground" `Quick

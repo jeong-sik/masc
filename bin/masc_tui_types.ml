@@ -449,8 +449,8 @@ type msg_identity =
    for. *)
 type gate_step = {
   gs_approval_id: string;
-  gs_phase: Masc.Keeper_chat_store.approval_lifecycle_phase;
-      (** The store's closed sum, parsed once by the history decoder. *)
+  gs_phase: Keeper_approval_lifecycle.approval_lifecycle_phase;
+      (** The HITL contract's closed sum, parsed once by the history decoder. *)
   gs_tool: string option;
   gs_summary: string option;
 }
@@ -626,7 +626,7 @@ let project_gate_history ~visibility entries =
         let phases = List.map (fun (_, gate) -> gate.gs_phase) steps in
         let has_problem, last_outcome =
           List.fold_left (fun (problem, last) phase ->
-            let open Masc.Keeper_chat_store in
+            let open Keeper_approval_lifecycle in
             match phase with
             | Approval_replay_failed | Approval_replay_indeterminate
             | Approval_replay_applied_with_warning | Approval_resolved_rejected ->
@@ -641,7 +641,7 @@ let project_gate_history ~visibility entries =
         in
         match reversed, has_problem, last_outcome with
         | (last_index, newest) :: _ :: _, false,
-          Some Masc.Keeper_chat_store.Approval_replay_applied ->
+          Some Keeper_approval_lifecycle.Approval_replay_applied ->
             let summary = List.find_map (fun (_, gate) -> gate.gs_summary) reversed in
             Option.map (fun text ->
               last_index, Printf.sprintf "%s · %d steps · Ctrl-D" text (List.length steps))

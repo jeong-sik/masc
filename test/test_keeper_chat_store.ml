@@ -1133,7 +1133,7 @@ let test_window_keeps_tool_lines_of_retained_turns () =
       let lifecycle : K.approval_lifecycle =
         { approval_id = "appr_window"
         ; tool_name = Some "Execute"
-        ; phase = K.Approval_resolved_approved
+        ; phase = Keeper_approval_lifecycle.Approval_resolved_approved
         ; artifact_ref = None
         ; call_summary = None
         }
@@ -3217,7 +3217,7 @@ let test_approval_lifecycle_rows_are_typed_idempotent_system_receipts () =
       let resolved : K.approval_lifecycle =
         { approval_id
         ; tool_name = Some "Execute"
-        ; phase = K.Approval_resolved_approved
+        ; phase = Keeper_approval_lifecycle.Approval_resolved_approved
         ; artifact_ref = None
         ; call_summary = None
         }
@@ -3238,7 +3238,7 @@ let test_approval_lifecycle_rows_are_typed_idempotent_system_receipts () =
        | Ok (K.Already_present _) -> ()
        | Ok (K.Appended _) | Error _ ->
          Alcotest.fail "resolution retry without display metadata conflicted");
-      let conflicting = { resolved with phase = K.Approval_resolved_rejected } in
+      let conflicting = { resolved with phase = Keeper_approval_lifecycle.Approval_resolved_rejected } in
       (match K.append_approval_lifecycle_once ~base_dir ~keeper_name ~lifecycle:conflicting with
        | Error _ -> ()
        | Ok _ -> Alcotest.fail "conflicting resolution reused the lifecycle slot");
@@ -3253,7 +3253,7 @@ let test_approval_lifecycle_rows_are_typed_idempotent_system_receipts () =
       let replay : K.approval_lifecycle =
         { approval_id
         ; tool_name = Some "Execute"
-        ; phase = K.Approval_replay_applied
+        ; phase = Keeper_approval_lifecycle.Approval_replay_applied
         ; artifact_ref = Some artifact_ref
         ; call_summary = None
         }
@@ -3264,7 +3264,7 @@ let test_approval_lifecycle_rows_are_typed_idempotent_system_receipts () =
       let continuation : K.approval_lifecycle =
         { approval_id
         ; tool_name = Some "Execute"
-        ; phase = K.Approval_continuation_recorded
+        ; phase = Keeper_approval_lifecycle.Approval_continuation_recorded
         ; artifact_ref = None
         ; call_summary = None
         }
@@ -3320,7 +3320,7 @@ let test_approval_lifecycle_redacts_and_compares_artifact_preview () =
       let lifecycle : K.approval_lifecycle =
         { approval_id = "appr_preview_redaction"
         ; tool_name = Some ("Execute " ^ secret)
-        ; phase = K.Approval_replay_applied
+        ; phase = Keeper_approval_lifecycle.Approval_replay_applied
         ; artifact_ref = Some artifact_ref
         ; call_summary = Some ("git log -- " ^ secret)
         }
@@ -3362,14 +3362,14 @@ let test_approval_replay_reconciliation_appends_one_typed_correction () =
       let stale : K.approval_lifecycle =
         { approval_id = "appr_replay_correction"
         ; tool_name = Some "tool_execute"
-        ; phase = K.Approval_replay_failed
+        ; phase = Keeper_approval_lifecycle.Approval_replay_failed
         ; artifact_ref = Some (artifact_ref 'd' 955)
         ; call_summary = None
         }
       in
       let canonical : K.approval_lifecycle =
         { stale with
-          phase = K.Approval_replay_applied
+          phase = Keeper_approval_lifecycle.Approval_replay_applied
         ; artifact_ref = Some (artifact_ref 'a' 497)
         }
       in
@@ -3413,7 +3413,7 @@ let test_approval_replay_reconciliation_appends_one_typed_correction () =
        | Ok _ -> Alcotest.fail "stale replay overrode the correction authority");
       let resolution =
         { canonical with
-          phase = K.Approval_resolved_approved
+          phase = Keeper_approval_lifecycle.Approval_resolved_approved
         ; artifact_ref = None
         }
       in
@@ -3437,7 +3437,7 @@ let test_approval_replay_reconciliation_appends_one_typed_correction () =
       in
       Alcotest.(check int) "both replay phases remain visible" 2 (List.length phases);
       (match phases with
-       | [ K.Approval_replay_failed; K.Approval_replay_applied ] -> ()
+       | [ Keeper_approval_lifecycle.Approval_replay_failed; Keeper_approval_lifecycle.Approval_replay_applied ] -> ()
        | _ -> Alcotest.fail "correction did not preserve ordered replay history");
       let slots =
         List.filter_map
@@ -3460,7 +3460,7 @@ let test_approval_replay_reconciliation_appends_one_typed_correction () =
       Alcotest.(check string) "the correction row composes no prose" ""
         correction.content;
       match correction.approval_lifecycle with
-      | Some { phase = K.Approval_replay_applied; _ } -> ()
+      | Some { phase = Keeper_approval_lifecycle.Approval_replay_applied; _ } -> ()
       | Some _ | None ->
         Alcotest.fail "correction row does not carry the canonical phase")
 ;;
@@ -3480,10 +3480,10 @@ let test_all_replay_terminal_phases_roundtrip () =
         |> Result.get_ok
       in
       let phases =
-        [ K.Approval_replay_applied
-        ; K.Approval_replay_applied_with_warning
-        ; K.Approval_replay_failed
-        ; K.Approval_replay_indeterminate
+        [ Keeper_approval_lifecycle.Approval_replay_applied
+        ; Keeper_approval_lifecycle.Approval_replay_applied_with_warning
+        ; Keeper_approval_lifecycle.Approval_replay_failed
+        ; Keeper_approval_lifecycle.Approval_replay_indeterminate
         ]
       in
       List.iteri

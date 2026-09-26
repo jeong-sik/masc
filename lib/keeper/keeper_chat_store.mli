@@ -91,31 +91,14 @@ type stream_lifecycle_event =
   | Run_finished
   | Run_error
 
-(** Durable operator-visible lifecycle of one Gate approval. Request,
-    resolution and replay are distinct phases: a requested call is parked
-    but the turn it was asked on keeps running, an approved request has
-    permission, and its effect is not reported as applied until a replay
-    row exists. The continuation settles once, at the continuation slot:
-    [Approval_continuation_recorded] when the turn that received the replay
-    completed or durably checkpointed, [Approval_continuation_failed] when
-    that turn failed after the provider answered. Either settlement retires
-    the approval's queued wake; a turn that failed before any answer leaves
-    the slot empty so the evidence is delivered again. *)
-type approval_lifecycle_phase =
-  | Approval_requested
-  | Approval_resolved_approved
-  | Approval_resolved_rejected
-  | Approval_replay_applied
-  | Approval_replay_applied_with_warning
-  | Approval_replay_failed
-  | Approval_replay_indeterminate
-  | Approval_continuation_recorded
-  | Approval_continuation_failed
-
+(** One durable row of an approval's lifecycle
+    ({!Keeper_approval_lifecycle.approval_lifecycle_phase}). The store keeps
+    and reads these rows; the phase vocabulary and its labels live in the
+    HITL contract. *)
 type approval_lifecycle =
   { approval_id : string
   ; tool_name : string option
-  ; phase : approval_lifecycle_phase
+  ; phase : Keeper_approval_lifecycle.approval_lifecycle_phase
   ; artifact_ref : Tool_output.artifact_ref option
   ; call_summary : string option
         (** The one line the producing tool stated for its call, from its
@@ -127,14 +110,6 @@ type approval_lifecycle =
             that does not include the request. [None] when the tool stated
             nothing or no request row exists to copy from. *)
   }
-
-val approval_lifecycle_phase_to_label : approval_lifecycle_phase -> string
-(** The durable label one phase is persisted under. *)
-
-val approval_lifecycle_phase_of_label : string -> approval_lifecycle_phase option
-(** The phase a persisted label names. [None] for a label this vocabulary
-    does not hold: a reader treats such a row as undecodable rather than as a
-    phase it can draw. *)
 
 type append_once_result =
   | Appended of { row_id : string }
@@ -328,10 +303,11 @@ val approval_lifecycle_phase_present :
   base_dir:string ->
   keeper_name:string ->
   approval_id:string ->
-  phase:approval_lifecycle_phase ->
+  phase:Keeper_approval_lifecycle.approval_lifecycle_phase ->
   bool
 
-val approval_lifecycle_is_continuation : approval_lifecycle_phase -> bool
+val approval_lifecycle_is_continuation :
+  Keeper_approval_lifecycle.approval_lifecycle_phase -> bool
 (** The two settlements of the continuation slot,
     [Approval_continuation_recorded] and [Approval_continuation_failed]. *)
 

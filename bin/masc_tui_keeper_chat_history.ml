@@ -6,7 +6,7 @@ module Delivery_identity = Keeper_chat_delivery_identity
    by. [test_tui_chat_surface_mirror] compares the kinds decoded here against
    [Surface_ref]'s own JSON, so a variant added there fails a test instead of
    quietly drawing rows with no origin. The Gate phase below takes the other
-   road and names the store's own closed sum directly. *)
+   road and names the HITL contract's closed sum directly. *)
 module Surface = struct
   (* Slack and Discord carry which channel the row came in on. A Keeper can be
      bound to several -- one keeper has five Discord channels -- and without it
@@ -66,7 +66,7 @@ type kind =
   | Reasoning of string list
   | Gate_activity of
       { approval_id : string
-      ; phase : Masc.Keeper_chat_store.approval_lifecycle_phase
+      ; phase : Keeper_approval_lifecycle.approval_lifecycle_phase
       ; tool : string option
       ; summary : string option
       }
@@ -1451,9 +1451,9 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
              lane, where they interleaved with memory commits and read as
              conversation. Rows without the payload keep the neutral lane.
 
-             The phase is parsed here, once, into the store's own closed sum:
-             every reader after this matches on constructors, so a phase the
-             store adds fails their compile instead of drawing as "unknown".
+             The phase is parsed here, once, into the HITL contract's closed
+             sum: every reader after this matches on constructors, so a phase
+             the contract adds fails their compile instead of drawing as "unknown".
              A payload that is present but not a lifecycle -- no approval id
              to fold the step under, or a label the vocabulary does not hold
              -- is an undecodable row and is dropped and counted like any
@@ -1475,7 +1475,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
               in
               let phase =
                 Option.bind (string_field lifecycle "phase")
-                  Masc.Keeper_chat_store.approval_lifecycle_phase_of_label
+                  Keeper_approval_lifecycle.approval_lifecycle_phase_of_label
               in
               match approval_id, phase with
               | Some approval_id, Some phase ->

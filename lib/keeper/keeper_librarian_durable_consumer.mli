@@ -169,6 +169,11 @@ val consume_one
     requires synthesizing that committed input again. A receipt whose official
     identities no longer match the log stops the pass. *)
 
+val tool_observations : Agent_core.Types.message list -> Keeper_librarian.tool_observation list
+(** The tool calls in [messages], each with how its result ended ([Unknown]
+    when no result follows). What a pass hands the Librarian for the atoms it
+    reads; the continuity round's Memory pass uses it for the same atoms. *)
+
 (** Production commit edge. The selected range bypasses the retired recent
     message window; [true] means the current Memory OS snapshot committed. *)
 val commit_with_runtime

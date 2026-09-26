@@ -688,6 +688,75 @@ let check_each_atom_once body =
       (occurrences ~sub:(narrowing_atom_text mark) body))
     narrowing_marks
 
+(* A continuity pass that saves Memory is the only pass that reads its atoms:
+   the durable pass moves past them afterwards without reading them again
+   (#39179). A counterpart who spoke during the turn has to reach this pass,
+   or no Memory pass ever sees what they said. *)
+let test_a_memory_pass_carries_the_counterparts_of_its_turn () =
+  let open Masc in
+  let module F = Exact_output_fixture in
+  let module Consumer = Masc.Keeper_librarian_durable_consumer in
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
+  F.with_official_client_runtimes @@ fun () ->
+  with_source @@ fun env config save _append _boundary ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  let base_path = config.Masc.Workspace.base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Fs_compat.mkdir_p keepers_dir;
+  Out_channel.with_open_bin (Filename.concat keepers_dir (keeper_name ^ ".toml")) (fun oc ->
+    Printf.fprintf oc "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\nsandbox_image = \"masc-sandbox:general\"\n"
+      keeper_name "Preserve evidence." "docker");
+  Masc.Keeper_types_profile.invalidate_keeper_profile_defaults_cache keeper_name;
+  let meta = Masc_test_deps.meta_of_json_fixture
+    (`Assoc ["name", `String keeper_name; "trace_id", `String trace_id]) |> get in
+  Masc.Keeper_meta_store.replace_snapshot config meta |> get;
+  let registry = Exact_lane_run_registry.create
+    ~path:(Filename.concat base_path Exact_lane_run_registry.storage_filename) () in
+  (match Exact_lane_run_registry.install_global registry with
+   | Ok () | Error Exact_lane_run_registry.Already_installed -> ());
+  let root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
+  Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
+  Prompt_defaults.init ();
+  ignore (F.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
+    ~cli_slot_ids:[F.cli_primary_runtime]
+    (F.resolver_snapshot ~source:"continuity-counterpart" []));
+  let counterpart = "counterpart-promised-the-release-notes-by-friday" in
+  Keeper_chat_store.append_user_message ~base_dir:base_path ~keeper_name ~content:counterpart
+    ~speaker:({ speaker_id = Some "external"; speaker_name = Some "External";
+                speaker_authority = Keeper_chat_store.External } : Keeper_chat_store.speaker)
+    ();
+  (* The turn ends after the counterpart spoke. *)
+  let turn = [message "turn-1"] in
+  save turn;
+  B.append ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+    {B.recorded_at = Time_compat.now () +. 60.;
+     event = B.Turn_ended {turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+       history_at_start = B.Fresh_history; position = B.position_of_messages turn |> get}}
+  |> Result.map_error B.append_error_to_string |> get;
+  let prompts = ref [] in
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+    prompts := !prompts @ [prompt];
+    Ok {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":"s"}|} in
+  Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity
+    ~cli_runner:runner ~base_path ~keeper_name ();
+  (match !prompts with
+   | [prompt] ->
+     check bool "the Memory pass carries the counterpart who spoke during its turn" true
+       (contains ~sub:counterpart prompt)
+   | _ -> fail "expected one Memory pass");
+  check (option int) "the pass saved and published the turn" (Some 1)
+    (Option.map (fun (saved : S.t) -> saved.end_atom) (P.read ~config ~keeper_name |> get));
+  match Consumer.consume_one ~config ~keeper_name
+          ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+            fail "the durable pass sent the saved turn again") with
+  | Ok (Consumer.Progress_advanced progress) ->
+    check int "the durable pass moves past the saved turn" 1 progress.position.end_atom
+  | Ok (Consumer.Nothing_to_read | Consumer.Baseline_advanced _ | Consumer.Memory_not_committed
+       | Consumer.Official_advanced _) ->
+    fail "the durable pass did not move past the saved turn"
+  | Error error -> fail (Consumer.error_to_string error)
+
 (* A continuity range whose Memory the durable pass already committed is a
    Context-only pass (#38184). It asks for the working state alone: the
    request names no Memory output field, the conversation travels once, and
@@ -1079,6 +1148,8 @@ let () = run "production continuity pair"
     test_case "a refused width carries to the next pass" `Quick test_refused_width_carries_to_the_next_pass;
     test_case "a waiting unit ends the catch-up after a commit" `Quick
       test_a_waiting_unit_ends_the_catch_up_after_a_commit;
+    test_case "a Memory pass carries the counterparts of its turn" `Quick
+      test_a_memory_pass_carries_the_counterparts_of_its_turn;
     test_case "a committed range asks for the working state alone" `Quick
       test_a_committed_range_asks_for_the_working_state_alone;
     test_case "a continuity pass carries tool turns folded once" `Quick

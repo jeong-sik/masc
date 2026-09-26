@@ -302,8 +302,28 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
         | None -> prepared in
       let* memory_committed = P.memory_committed ~config ~keeper_name selected in
       let* range_id = P.memory_range_id ~config ~keeper_name selected in
+      (* A pass that saves Memory for these atoms is the only one that will:
+         the durable pass moves past them without reading them again. So it
+         carries what the durable pass would have: the tool calls of the same
+         messages, and the counterpart observations of the turn they end
+         (none for a unit that stops inside its turn; the unit that finishes
+         it carries the turn's). A pass whose Memory is already saved needs
+         neither. *)
+      let* tool_observations, counterpart_observations =
+        if memory_committed then Ok ([], [])
+        else
+          let tool_observations =
+            Keeper_librarian_durable_consumer.tool_observations (P.messages selected) in
+          match P.turn_window selected with
+          | None -> Ok (tool_observations, [])
+          | Some { P.after; through } ->
+            Keeper_librarian_input_sources.counterpart_observations_between
+              ~base_dir:base_path ~keeper_name ~after ~before:through
+            |> Result.map (fun counterparts -> tool_observations, counterparts)
+            |> Result.map_error Keeper_librarian_input_sources.read_error_to_string in
       Ok (current, memory_committed, range_id, selected,
-        {input with messages = P.messages selected})) in
+        {input with messages = P.messages selected; tool_observations;
+                    counterpart_observations})) in
     match inputs with
     | Error detail -> report O.Input_unavailable detail
     | Ok (current, memory_committed, range_id, selected, input) ->

@@ -346,11 +346,25 @@ open Alcotest
    BrowserInstruct's +739. BrowserInstruct is only on this branch, so the two
    touch disjoint schemas and the totals add. Not a CI reading; the suite's
    own run pins the total. No headroom. *)
+(* 2026-09-26: +156 rendered bytes, the production renderer's rules replayed
+   on the two changed descriptions (keeper_memory_write's supersedes param
+   +115, keeper_memory_search +41; not a CI reading). A search match now
+   names its origin, and the supersedes param says a Librarian-dropped target
+   still writes the claim. Over 09-23..26, 31% of the 701 supersedes writes
+   were refused; 68 named a fact no longer current (44 of them dropped by the
+   Librarian) and 77 a Librarian copy found through search. No headroom. *)
+(* 2026-09-27: parent main carries the disjoint +156 memory-description
+   bytes above; BrowserInstruct contributes +739. Combined ceiling 126,386
+   is arithmetic (125,647 + 739), not a CI measurement; CI verifies it. *)
+
 (* BrowserRead adds 12 rendered bytes for the stagehand lane enum. The parent
    ceiling is 126,230; this sum is checked by the exact-head CI suite. *)
 (* BrowserInteract adds 8 rendered bytes for its stagehand lane enum and
    browser tab description. The exact-head CI suite checks this sum. *)
-let ceiling_bytes = 126_250
+(* 2026-09-27: parent 126,386 plus the disjoint BrowserRead (+12) and
+   BrowserInteract (+8) schema bytes is 126,406. Computed; CI verifies it. *)
+let ceiling_bytes = 126_406
+
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

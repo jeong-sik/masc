@@ -570,6 +570,30 @@ let test_callback_timeout_origin_is_preserved_without_deadline () =
            |> ignore)))
 ;;
 
+let test_operator_interrupt_callback_keeps_typed_cause () =
+  with_fixture [] (fun path ->
+    let interrupt = Keeper_registry_types.Operator_interrupt in
+    let backtrace = Printexc.get_callstack 0 in
+    let combined = Eio.Exn.Multiple
+      [ (Eio.Cancel.Cancelled interrupt, backtrace)
+      ; (Stdlib.Fun.Finally_raised (Eio.Cancel.Cancelled interrupt), backtrace) ] in
+    let raised =
+      try
+        Eio_main.run (fun env ->
+          let config = { (Runtime_claude_code.default_config ~cwd:"/tmp") with
+            cli_path = path; timeout_s = None } in
+          Runtime_claude_code.run_turn
+            ~mgr:(Eio.Stdenv.process_mgr env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+            ~on_session_ready:(fun ~session_id:_ -> raise combined)
+            config ~prompt:"fixture" ~images:[] |> ignore);
+        None
+      with exn -> Some exn in
+    check bool "combined operator interrupt survives the Claude transport" true
+      (Option.fold ~none:false ~some:Keeper_registry_types.is_operator_interrupt raised))
+;;
+
 (* [dynamic_tool_bytes] measures what the tool declarations add to a request.
    The request-side check #27427 needs is a comparison against a declared
    window, and a size that silently ignores part of what it sends is what made
@@ -580,6 +604,7 @@ let test_dynamic_tool_bytes_counts_every_field () =
     { Runtime_claude_code.name = "ab"
     ; description = "cde"
     ; input_schema = `Assoc [ "f", `String "g" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { Runtime_claude_code.success = true; content = ""; content_blocks = None; abort_turn = None })
@@ -1061,7 +1086,8 @@ let probe_tool call_count : Runtime_claude_code.dynamic_tool =
   { name = "masc_probe"
   ; description = "Return a fixture marker"
   ; input_schema = `Assoc [ "type", `String "object" ]
-  ; call =
+  ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
       (fun ~call_id:_ _ ->
         incr call_count;
         { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
@@ -1414,6 +1440,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { success = false
@@ -1453,6 +1480,7 @@ let test_host_stop_carries_the_newest_request_input () =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { success = false
@@ -1501,6 +1529,7 @@ let test_dynamic_tool_callback () =
           [ "type", `String "object"
           ; "properties", `Assoc [ "marker", `Assoc [ "type", `String "string" ] ]
           ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id input ->
           observed_call_id := Some call_id;
@@ -1534,6 +1563,7 @@ let test_stream_events_preserve_text_and_tool_identity () =
     { name = "masc_probe"
     ; description = "Return a fixture marker"
     ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
@@ -2004,6 +2034,7 @@ let test_dynamic_tool_tokenizer_chars_are_validated () =
     { name = "bad,tool"
     ; description = "invalid fixture"
     ; input_schema = `Assoc []
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
           { success = true; content = "unused"; content_blocks = None; abort_turn = None })
@@ -2090,7 +2121,8 @@ let stub_dynamic_tool =
   { Runtime_claude_code.name = "masc_status"
   ; description = "fixture"
   ; input_schema = `Assoc []
-  ; call =
+  ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
       (fun ~call_id:_ _ ->
         { Runtime_claude_code.success = true
         ; content = "{}"
@@ -2318,6 +2350,8 @@ let () =
             "callback timeout origin is preserved without deadline"
             `Quick
             test_callback_timeout_origin_is_preserved_without_deadline
+        ; test_case "operator interrupt callback keeps typed cause" `Quick
+            test_operator_interrupt_callback_keeps_typed_cause
         ; test_case
             "supported CLI authentication modes"
             `Quick

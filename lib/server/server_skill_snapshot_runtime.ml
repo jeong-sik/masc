@@ -127,3 +127,44 @@ let publish_lane_skills ~config exports =
   | (Published _ | Unchanged _), [] -> Ok ()
   | (Published _ | Unchanged _), _ -> Error (String.concat "; " errors)
 ;;
+
+type boot_level =
+  | Boot_info
+  | Boot_warn
+  | Boot_error
+
+let boot_report ~runtime_config_path snapshot =
+  let snapshot_revision =
+    Skill_catalog_snapshot.snapshot_revision snapshot
+    |> Skill_catalog_snapshot.snapshot_revision_to_string
+  in
+  match Skill_catalog_snapshot.config_state snapshot with
+  | Configured _ ->
+    ( Boot_info
+    , Printf.sprintf
+        "Skill snapshot ready at boot: snapshot_revision=%s catalog_revision=%s skills=%d rejections=%d"
+        snapshot_revision
+        (Skill_catalog_snapshot.catalog_revision snapshot
+         |> Skill_catalog_snapshot.catalog_revision_to_string)
+        (List.length (Skill_catalog_snapshot.entries snapshot))
+        (List.length (Skill_catalog_snapshot.rejections snapshot)) )
+  | Config_rejected { diagnostics; _ } ->
+    (* #39269: this used to print only a diagnostic count, so a rejected
+       [skills] table emptied every Keeper's catalog with no reason in the
+       log. The reason and the file are the whole point of the line. *)
+    ( Boot_warn
+    , Printf.sprintf
+        "Skill catalog is empty for every Keeper until this is fixed. %s \
+         snapshot_revision=%s"
+        (Skill_source_config.rejection_message
+           ~config_path:runtime_config_path
+           diagnostics)
+        snapshot_revision )
+  | Config_unreadable { detail } ->
+    ( Boot_error
+    , Printf.sprintf
+        "Skill snapshot config unreadable at boot: %s (file: %s) snapshot_revision=%s"
+        detail
+        runtime_config_path
+        snapshot_revision )
+;;

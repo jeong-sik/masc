@@ -1718,17 +1718,26 @@ let test_planning_refresh_reconciles_navigation_identity () =
 
 let test_render_loop_uses_monotonic_dirty_schedule () =
   let main_path = "bin/masc_tui.ml" in
-  check int "the render loop queries both buffered input sources" 1
+  check int "the render loop queries buffered and terminal-ready input" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"main" ~callee:"input_reader_has_pending_bytes");
+       ~binding_name:"main" ~callee:"input_reader_has_ready_input");
+  check int "readiness includes the reader's buffered input" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"input_reader_has_ready_input"
+       ~callee:"input_reader_has_pending_bytes");
+  check int "readiness includes bytes waiting in the terminal" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"input_reader_has_ready_input" ~callee:"terminal_has_bytes");
   check int "queued input includes the terminal probe replay" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"input_reader_has_pending_bytes"
        ~callee:"Masc_tui_terminal_probe.has_replay");
-  check int "an incomplete scalar does not postpone a frame" 0
-    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:main_path ~binding_name:"input_reader_has_pending_bytes"
-       ~callees:[] ~fields:[ "partial_scalar" ]);
+  (* A character the decoder holds is awaiting bytes that have not arrived;
+     it is not input ready to act on, so it must not postpone a frame. *)
+  check int "an incomplete character does not postpone a frame" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"input_reader_has_pending_bytes"
+       ~callee:"Masc_tui_input_decoder.pending");
   check bool "main loop reads a monotonic clock" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Mtime_clock.elapsed_ns"

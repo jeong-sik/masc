@@ -2100,7 +2100,10 @@ type overview_spend_reading =
           (** Rows this build could not read; their Keepers draw unknown. *)
       freshness : spend_freshness;
     }
-  | Overview_spend_failed of string
+  | Overview_spend_load_failed of string
+      (** The TUI could not read or decode the keeper-costs response. *)
+  | Overview_spend_compute_failed of string
+      (** The server answered, but could not compute its first spend reading. *)
 
 let cost_reply_is_current ~visible ~current_generation ~reply_generation =
   visible && current_generation = reply_generation
@@ -2110,7 +2113,8 @@ let toggle_cost_visibility ~visible ~generation =
 
 let cost_refresh_needed ~visible = function
   | Overview_spend_unread -> visible
-  | Overview_spend_warming | Overview_spend_read _ | Overview_spend_failed _ -> false
+  | Overview_spend_warming | Overview_spend_read _
+  | Overview_spend_load_failed _ | Overview_spend_compute_failed _ -> false
 
 (** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
     briefing writes [null] for a Keeper with no registry entry (an offline
@@ -2138,6 +2142,10 @@ type overview_keeper = {
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
+  ov_keeper_listing: Masc.Keeper_snapshot_unread.listing;
+      (** The briefing's [keepers_listing]. [Unreadable] means the server
+          could not list the Keeper directory, so [ov_keepers] counts nothing
+          it read rather than an empty fleet (#38120). *)
   ov_keeper_liveness: keeper_liveness_counts;
   ov_keeper_rows: overview_keeper list;
       (** Every [keeper_briefs] row with a name, in the briefing's order. *)
@@ -5478,6 +5486,11 @@ type state = {
   mutable msx_live: Masc_tui_machine_live.view;
   mutable dos_live: Masc_tui_machine_live.view;
   mutable dos_live_in_flight: machine_live_request option;
+  (* Recent Keeper activity on the DOS machine, newest first, from the same
+     live route [dos_live] reads. MSX has no such feed yet (its Lane takes no
+     [~who] on several calls), so there is no [msx_activity] here -- adding
+     one before the server ever fills it would be a field nothing draws. *)
+  mutable dos_activity: Masc_tui_machine_live.activity_entry list;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
@@ -7827,6 +7840,7 @@ let create_state
   msx_live = Masc_tui_machine_live.Unread;
   dos_live = Masc_tui_machine_live.Unread;
   dos_live_in_flight = None;
+  dos_activity = [];
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;
@@ -8745,6 +8759,11 @@ type clamped_scroll =
      it -- later endpoints, the probe's last rows, the footer -- could not be
      reached. *)
   | Voice_scroll of int
+  (* The context inspector's plain shapes are lines the frame lays out of the
+     reading it holds, and the frame windows them. The keypress bounds the
+     scroll against the same window, but a reading that lands shorter leaves
+     the stored value past it until the frame says where it drew from. *)
+  | Context_inspector_scroll of int
 
 (* What End names on a surface whose rows the drawing counts: a row past any
    real end, so the frame's own clamp reports the last one back. The keypress
@@ -8802,6 +8821,7 @@ let apply_clamped_scroll (state : state) = function
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
+  | Context_inspector_scroll value -> state.context_inspector_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
    fewer than the chrome alone says. The number of rows the list keeps lives

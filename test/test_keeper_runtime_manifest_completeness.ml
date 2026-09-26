@@ -160,3 +160,15 @@ let test_runtime_attempt_attribution_public_projection () =
     "projection still redacts unknown keys"
     true
     (projected |> member "not_allowlisted_probe" = `Null)
+
+let () =
+  Alcotest.run "KeeperRuntimeManifestCompleteness"
+    [ ( "defined but never registered until task-1768",
+          [ Alcotest.test_case "mandatory clock refs" `Quick test_mandatory_clock_refs
+          ; Alcotest.test_case "validate completeness pass" `Quick test_validate_completeness_pass
+          ; Alcotest.test_case "validate completeness fail missing key" `Quick test_validate_completeness_fail_missing_key
+          ; Alcotest.test_case "is finished turn" `Quick test_is_finished_turn
+          ; Alcotest.test_case "is complete turn" `Quick test_is_complete_turn
+          ; Alcotest.test_case "runtime attempt attribution public projection" `Quick test_runtime_attempt_attribution_public_projection
+          ] )
+    ]

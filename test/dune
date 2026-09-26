@@ -2545,6 +2545,8 @@
 
 (include stanzas/test_machine_checkpoint.inc)
 
+(include stanzas/test_lane_activity.inc)
+
 (include stanzas/test_msx_routes.inc)
 
 (include stanzas/test_lane_addon_live_route.inc)
@@ -4468,26 +4470,55 @@
  (name runtest)
  (deps (alias runtest-test_tui_keeper_row_selection)))
 
-(rule
- (alias runtest-test_tui_keyboard_input)
+; The named keyboard alias keeps the existing targeted-suite entry point.
+; Each dependency has its own process, so Dune can run the six parts together.
+(alias
+ (name runtest-test_tui_keyboard_input)
  (deps
-  test_tui_keyboard_input.py
-  ../bin/masc_tui.exe)
- (action
-  (run
-   python3
-   %{dep:test_tui_keyboard_input.py}
-   %{dep:../bin/masc_tui.exe})))
+  (alias runtest-test_tui_chat_input_pty)
+  (alias runtest-test_tui_keyboard_general_pty)
+  (alias runtest-test_tui_keyboard_surfaces_pty)
+  (alias runtest-test_tui_keyboard_overview_pty)
+  (alias runtest-test_tui_keyboard_rosters_pty)
+  (alias runtest-test_tui_keyboard_board_terminal_pty)
+))
 
-; Keep the focused alias above for local evidence capture, and make the default
-; test alias run it too. CI asks only for @test/runtest; without this edge the
-; PTY suite compiles its TUI dependency but none of its interaction assertions
-; execute.
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input)))
 
-; The default runtest alias already runs this scenario in the keyboard walk.
+(rule
+ (alias runtest-test_tui_chat_input_pty)
+ (deps test_tui_chat_input_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_chat_input_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
+ (alias runtest-test_tui_keyboard_general_pty)
+ (deps test_tui_keyboard_general_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_keyboard_general_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
+ (alias runtest-test_tui_keyboard_surfaces_pty)
+ (deps test_tui_keyboard_surfaces_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_keyboard_surfaces_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
+ (alias runtest-test_tui_keyboard_overview_pty)
+ (deps test_tui_keyboard_overview_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_keyboard_overview_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
+ (alias runtest-test_tui_keyboard_rosters_pty)
+ (deps test_tui_keyboard_rosters_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_keyboard_rosters_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
+ (alias runtest-test_tui_keyboard_board_terminal_pty)
+ (deps test_tui_keyboard_board_terminal_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_keyboard_board_terminal_pty.py} %{dep:../bin/masc_tui.exe})))
+
+
+; The default runtest alias already runs this scenario through the keyboard aggregate.
 ; The focused alias gives edited-contract PRs that one consumer without
 ; repeating the walk in every full test run.
 (rule
@@ -4513,6 +4544,11 @@
  (deps
   test_tui_keyboard_scenario_selection.py
   test_tui_keyboard_input.py
+  test_tui_keyboard_general_pty.py
+  test_tui_keyboard_surfaces_pty.py
+  test_tui_keyboard_overview_pty.py
+  test_tui_keyboard_rosters_pty.py
+  test_tui_keyboard_board_terminal_pty.py
   dune
   (glob_files stanzas/*.inc))
  (action
@@ -5772,6 +5808,17 @@
   masc_tui_terminal_probe
   masc_tui_graphics))
 
+(test
+ (name test_tui_input_decoder)
+ (modules test_tui_input_decoder)
+ (libraries
+  alcotest
+  masc
+  masc_tui_csi
+  masc_tui_input_decoder
+  masc_tui_paste
+  masc_tui_terminal_palette))
+
 (include stanzas/test_tui_paste_spill.inc)
 (include stanzas/test_keeper_sandbox_root_by_profile.inc)
 
@@ -5822,7 +5869,7 @@
 (test
  (name test_skill_source_runtime_integration)
  (modules test_skill_source_runtime_integration)
- (libraries alcotest masc masc.skill_config masc_runtime masc.string_util))
+ (libraries alcotest masc masc.skill_config masc.skill_snapshot masc.server masc_runtime masc.string_util masc.masc_core))
 
 (test
  (name test_skill_catalog_snapshot)
@@ -7184,3 +7231,4 @@
  (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
 
 (include stanzas/test_tui_sidebar_index_fold.inc)
+(include stanzas/test_tui_surface_chrome_overflow.inc)

@@ -696,6 +696,106 @@ let test_committed_wide_range_recovers_before_retry_narrowing () =
   check int "receipt recovery performs no second Memory commit" 1 !commits
 ;;
 
+(* The continuity round saves Memory itself for a range this round has not
+   committed, then publishes its snapshot. On 2026-09-25 the next durable
+   round sent the same atoms to the model again (jazz-developer: continuity
+   [6416,6455) at Memory revision 1444, durable [6416,6455) at 1447). Here the
+   durable round fails once over turns 2 and 3. The continuity round saves
+   turn 2 and publishes it, then saves turn 3 and stops before publishing, as
+   a server stop between the two writes would leave it. The durable rounds
+   that follow must reach the end of turn 3 without a model call: turn 2
+   through the snapshot, which outlives the receipt the WAL replaced, and
+   turn 3 through that receipt. *)
+let test_memory_the_continuity_round_saved_is_not_sent_again () =
+  with_workspace @@ fun config ->
+  let module Continuity = Masc.Keeper_librarian_continuity in
+  let module Current = Masc.Keeper_memory_os_current in
+  let trace_id = "trace-continuity-saved" in
+  establish_progress config ~trace_id "turn-1";
+  let memory_keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
+  (* What the continuity round writes for one unit whose Memory no durable
+     receipt covers: Memory under its own receipt, then, unless stopped, the
+     snapshot. *)
+  let continuity_saves ~publish =
+    let prepared =
+      match Continuity.prepare ~config ~keeper_name ~trace_id () with
+      | Ok (Some prepared) -> prepared
+      | Ok None -> fail "the continuity round found no completed unit"
+      | Error detail -> failf "continuity prepare: %s" detail
+    in
+    let range_id =
+      match Continuity.memory_range_id ~config ~keeper_name prepared with
+      | Ok range_id -> range_id
+      | Error detail -> failf "continuity receipt identity: %s" detail
+    in
+    (match
+       Current.apply_disposition ~revisions:[]
+         ~durable_range_id:range_id
+         ~absorbed:[]
+         ~keepers_dir:memory_keepers_dir
+         ~keeper_id:keeper_name
+         ~now:(Float.of_int (Continuity.end_atom prepared))
+         ~source:{ kind = Current.Librarian; trace_id }
+         ~new_claims:[]
+         ()
+     with
+     | Ok _ -> ()
+     | Error detail -> failf "continuity Memory save: %s" detail);
+    (if publish
+     then
+       match
+         Continuity.commit ~config ~keeper_name ~prepared ~working_state:"continue"
+       with
+       | Ok _ -> ()
+       | Error detail -> failf "continuity publication: %s" detail);
+    Continuity.end_atom prepared
+  in
+  check int "the continuity round catches up to turn 1" 1 (continuity_saves ~publish:true);
+  let through_two = [ message "turn-1"; message "turn-2" ] in
+  let through_three = through_two @ [ message "turn-3" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 through_two;
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0 through_three;
+  save_checkpoint config ~trace_id through_three 3;
+  (match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> false) with
+   | Consumer.Memory_not_committed -> ()
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Progress_advanced _ -> fail "the failing durable round advanced");
+  check int "the continuity round saves and publishes turn 2" 2
+    (continuity_saves ~publish:true);
+  check int "the continuity round saves turn 3 and stops before publishing" 3
+    (continuity_saves ~publish:false);
+  let sent = ref [] in
+  let commit ~expected_revision:_ ~range_id:_ ~official_range_id:_ input =
+    sent := !sent @ text_markers input;
+    true
+  in
+  (* One advance through the snapshot, one through the receipt, then nothing
+     is left. A round that reads again would reach the model instead. *)
+  let rounds_until_settled = 3 in
+  let rec drain remaining =
+    if remaining = 0
+    then fail "the durable rounds did not settle"
+    else (
+      match consume config commit with
+      | Consumer.Nothing_to_read -> ()
+      | Consumer.Progress_advanced _ -> drain (remaining - 1)
+      | Consumer.Baseline_advanced _
+      | Consumer.Official_advanced _
+      | Consumer.Memory_not_committed -> fail "unexpected durable outcome")
+  in
+  drain rounds_until_settled;
+  check (list string) "no atom the continuity round saved reaches the model again" [] !sent;
+  match read_progress config with
+  | Some progress ->
+    check int "the durable position ends past turn 3" 3 progress.position.end_atom
+  | None -> fail "the durable position disappeared"
+;;
+
 let test_receipt_does_not_cross_restarted_history_with_repeated_endpoint () =
   with_workspace @@ fun config ->
   let module Current = Masc.Keeper_memory_os_current in
@@ -2982,6 +3082,8 @@ let () =
             test_committed_range_recovers_after_progress_write_failure
         ; test_case "committed wide range repairs before retry narrowing" `Quick
             test_committed_wide_range_recovers_before_retry_narrowing
+        ; test_case "Memory the continuity round saved is not sent again" `Quick
+            test_memory_the_continuity_round_saved_is_not_sent_again
         ; test_case "receipt does not cross a restarted repeated endpoint" `Quick
             test_receipt_does_not_cross_restarted_history_with_repeated_endpoint
         ; test_case "historical range does not borrow current task" `Quick

@@ -78,3 +78,25 @@ and pinned scenario with the merged main helper `cdd6271f169c806f6ba19fd2506daad
 Its 100 transitions and draft passed. Those timings are not pooled with the
 controlled comparison above. This smoke checks the combined wait-stall
 diagnostics and readable-wait helper after #39306 merged.
+
+The first smoke's two raw files omit the imported helper identity. Review found
+that attribution gap. A separate rerun in `identified-helper-smoke/` retains
+an identity receipt written before execution, asserting the actual imported
+helper path/hash, scenario hash and binary hash. The runnable invocation is
+`python3 run-merged-helper-smoke.py /path/to/verified/masc_tui.exe /new/output/dir`.
+All 100 transitions and the draft passed again. Both smoke runs are retained
+separately and neither is pooled into the 600-transition comparison.
+
+## Compiled verification scope
+
+[Focused run 36241261804](https://github.com/jeong-sik/masc/actions/runs/36241261804)
+on candidate `f69b7b40a379f3b3ff7fd8060b041d0315b15851` passed the requested
+90 scheduling, 7 active timing, and 44 HTTP AST cases, plus three PTY aliases
+(input readiness, Present timing, tab strip).
+
+Its additional `continue-on-error` standalone step reported 169 passed,
+1 failed and 1346 skipped. `test_tui_frame_timing` failed its active-recording
+assertion: the standalone runner invokes the binary without the stanza's
+`MASC_TUI_FRAME_TIMING` environment, whereas the targeted runner passes it.
+The workflow's green conclusion therefore does not mean every suite passed.
+The standalone environment contract remains a separate verification gap.

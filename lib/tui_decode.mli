@@ -3219,15 +3219,23 @@ val sgr_wheel_report : string -> char -> (wheel_direction * int * int) option
     meant. *)
 val sgr_left_press : string -> char -> (int * int) option
 
-(** Decode the button byte of a legacy X10 mouse report ([CSI M] plus three raw
-    bytes) into [wheel-up] / [wheel-down].
+(** A legacy X10 mouse report, read into the events an SGR report gives.
+    Positions are 1-based and row/column ordered. [X10_other_press] is a
+    middle, right or modified press, which no surface reads. [X10_release] is
+    X10's one release code, which does not say which button went up. *)
+type x10_mouse =
+  | X10_wheel of wheel_direction * int * int
+  | X10_left_press of int * int
+  | X10_other_press
+  | X10_release of int * int
 
-    Terminals without SGR ([?1006]) support answer the tracking request in this
-    older shape; Apple Terminal, the macOS default, is one. The three bytes
-    after [CSI M] must be consumed whatever this returns — left in the stream
-    they are read as ordinary text. Buttons other than the two wheel ones
-    return [None]. *)
-val x10_wheel_key : char -> string option
+(** Decode the three raw bytes after [CSI M]: button, column, row, each offset
+    by 32. Terminals without SGR ([?1006]) support answer the tracking request
+    in this shape; Apple Terminal, the macOS default, is one. Motion reports,
+    the horizontal wheel and a position below 1 are [None]; the caller consumes
+    the bytes either way. *)
+val x10_mouse_report :
+  button:char -> column:char -> row:char -> x10_mouse option
 val required_string_field : Yojson.Safe.t -> string -> (string, string) result
 val optional_string_field :
   Yojson.Safe.t -> string -> (string option, string) result

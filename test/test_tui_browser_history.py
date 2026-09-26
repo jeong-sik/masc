@@ -84,7 +84,8 @@ def run(binary, *, quit_from_history=False, disconnected=False):
 
     def pending_goto(body):
         request = json.loads(body)
-        assert request == {"url": "https://example.org/continued"}
+        # The goto body names the server lane the reader is on.
+        assert request == {"url": "https://example.org/continued", "lane": "automation"}
         requests.append(("goto", request))
         goto_entered.set()
         assert goto_release.wait(timeout=5), "test never released pending navigation"
@@ -168,6 +169,7 @@ def run(binary, *, quit_from_history=False, disconnected=False):
             assert sum(kind == "read" for kind, _ in requests) > reads_before_completion, \
                 "closing history did not resume the deferred read"
             assert sum(kind == "goto" for kind, _ in requests) == 1, "history replayed navigation"
+            read_and_wait(b"c", expected_lane="stagehand")
             read_and_wait(b"l", expected_lane="live")
             h.send_and_wait(process, fd, output, b"s", b"CURRENT SCENE CONTROL")
             h.send_and_wait(process, fd, output, b"h", b"SAVED BETA CONTENT")

@@ -3273,13 +3273,20 @@ let scroll_browser_scene ~host ~port ~view ~tab_id ~expected_url ~delta_y =
   act_browser_viewport ~host ~port ~view ~tab_id ~expected_url
     ~action:(Browser_lane.Scroll {x=0; y=delta_y})
 
-let browser_lane_action ~host ~port operation =
+let browser_lane_action ~host ~port ~source operation =
   let open Masc_tui_types.Browser_lane_view in
+  let lane = "lane", `String (Browser_lane.Lane_name.to_wire source) in
   let request = match operation with
     | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
-    | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
-    | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
-    | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)
+    | Open_session ->
+      let timeout_sec =
+        match source with
+        | Browser_lane.Lane_name.Stagehand -> Browser_lane.Stagehand_open_budget.http_timeout_s
+        | Browser_lane.Lane_name.Automation | Browser_lane.Lane_name.Live -> 65.0
+      in
+      Ok ("session", `Assoc ["action", `String "open"; lane], timeout_sec)
+    | Close_session -> Ok ("session", `Assoc ["action", `String "close"; lane], 65.0)
+    | Goto url -> Ok ("goto", `Assoc ["url", `String url; lane], 65.0)
   in
   let* endpoint, json, timeout_sec = request in
   let body = Yojson.Safe.to_string json in

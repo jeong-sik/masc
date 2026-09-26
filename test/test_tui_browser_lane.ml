@@ -202,6 +202,9 @@ let test_client_connection_ownership () =
   expect "late discovery cannot replace chosen client"
     (accept_clients ~generation:20 (Ok [firefox]) pending = (pending, false));
   expect "automation sends no native client ID" (request_body (switch_source Automation right) = `Assoc ["lane", `String "automation"])
+  ;
+  expect "stagehand sends its lane and no native client ID"
+    (request_body (switch_source Stagehand right) = `Assoc ["lane", `String "stagehand"])
 
 (* The picker's empty row reads the list, not the failure: a discovery that
    failed has no list, and an empty one is an answer. *)

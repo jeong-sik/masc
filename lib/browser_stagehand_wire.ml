@@ -151,6 +151,9 @@ type call =
   | Page_goto of { page_id : string; url : string }
   | Page_screenshot of { page_id : string }
   | Page_evaluate of { page_id : string; expression : string }
+  | Page_click of { page_id : string; x : float; y : float }
+  | Page_scroll of { page_id : string; x : float; y : float; delta_x : float; delta_y : float }
+  | Page_drag_and_drop of { page_id : string; from_x : float; from_y : float; to_x : float; to_y : float }
 
 let method_name = function
   | Close -> "stagehand.close"
@@ -162,6 +165,9 @@ let method_name = function
   | Page_goto _ -> "page.goto"
   | Page_screenshot _ -> "page.screenshot"
   | Page_evaluate _ -> "page.evaluate"
+  | Page_click _ -> "page.click"
+  | Page_scroll _ -> "page.scroll"
+  | Page_drag_and_drop _ -> "page.drag_and_drop"
 ;;
 
 let optional key = function None -> [] | Some value -> [ key, value ]
@@ -170,7 +176,8 @@ let sentence_options timeout = [ "options", `Assoc [ "timeout", `Int (timeout_ms
 
 let sentence_timeout_of_call = function
   | Act { timeout; _ } | Observe { timeout; _ } | Extract { timeout; _ } -> Some timeout
-  | Close | Context_pages | Context_active_page | Page_goto _ | Page_screenshot _ | Page_evaluate _ -> None
+  | Close | Context_pages | Context_active_page | Page_goto _ | Page_screenshot _ | Page_evaluate _ | Page_click _
+  | Page_scroll _ | Page_drag_and_drop _ -> None
 ;;
 
 let call_params = function
@@ -184,11 +191,17 @@ let call_params = function
   | Page_goto { page_id; url } -> `Assoc (page page_id @ [ "url", `String url ])
   | Page_screenshot { page_id } -> `Assoc (page page_id)
   | Page_evaluate { page_id; expression } -> `Assoc (page page_id @ [ "expression", `String expression ])
+  | Page_click { page_id; x; y } -> `Assoc (page page_id @ [ "x", `Float x; "y", `Float y ])
+  | Page_scroll { page_id; x; y; delta_x; delta_y } ->
+    `Assoc (page page_id @ [ "x", `Float x; "y", `Float y; "delta_x", `Float delta_x; "delta_y", `Float delta_y ])
+  | Page_drag_and_drop { page_id; from_x; from_y; to_x; to_y } ->
+    `Assoc (page page_id @ [ "from_x", `Float from_x; "from_y", `Float from_y; "to_x", `Float to_x; "to_y", `Float to_y ])
 ;;
 
 let uses_model = function
   | Act _ | Observe _ | Extract _ -> true
-  | Close | Context_pages | Context_active_page | Page_goto _ | Page_screenshot _ | Page_evaluate _ -> false
+  | Close | Context_pages | Context_active_page | Page_goto _ | Page_screenshot _ | Page_evaluate _ | Page_click _
+  | Page_scroll _ | Page_drag_and_drop _ -> false
 ;;
 
 let jsonrpc = "jsonrpc", `String "2.0"

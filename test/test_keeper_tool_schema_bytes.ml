@@ -356,7 +356,14 @@ open Alcotest
 (* 2026-09-27: parent main carries the disjoint +156 memory-description
    bytes above; BrowserInstruct contributes +739. Combined ceiling 126,386
    is arithmetic (125,647 + 739), not a CI measurement; CI verifies it. *)
-let ceiling_bytes = 126_386
+
+(* BrowserRead adds 12 rendered bytes for the stagehand lane enum. The parent
+   ceiling is 126,230; this sum is checked by the exact-head CI suite. *)
+(* BrowserInteract adds 8 rendered bytes for its stagehand lane enum and
+   browser tab description. The exact-head CI suite checks this sum. *)
+(* 2026-09-27: parent 126,386 plus the disjoint BrowserRead (+12) and
+   BrowserInteract (+8) schema bytes is 126,406. Computed; CI verifies it. *)
+let ceiling_bytes = 126_406
 
 
 let schema_json (schema : Masc_domain.tool_schema) =

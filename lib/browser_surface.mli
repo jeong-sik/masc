@@ -19,7 +19,9 @@ val read : request -> (Yojson.Safe.t, failure) result
 (** Tabs, [selection] as "requested" | "active" | "none_active", the page of the
     selected tab or null, source, clientId and elapsed_ms. *)
 
-val decode_answer : Browser_lane.answer -> (Yojson.Safe.t, string) result
+(** [lane] names the lane the answer came from, so an absent backend is
+    reported the way that lane is set up. *)
+val decode_answer : lane:Browser_lane.Lane_name.t -> Browser_lane.answer -> (Yojson.Safe.t, string) result
 
 val parse_capture_request : Yojson.Safe.t -> (request, string) result
 (** Capture requires an explicit tab ID; it never falls back to an active tab. *)

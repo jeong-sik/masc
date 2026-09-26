@@ -38,6 +38,9 @@ val stop_left_behind : clock:_ Eio.Time.clock -> masc_root:string -> unit
 
 val attach_error_message : Browser_stagehand_session.attach_error -> string
 
+(** One server log line for each session event. *)
+val log_event : Browser_stagehand_session.event -> unit
+
 (** Stops a Chromium a previous server left, then, when [runtime.toml] has
     [\[browser.stagehand\]], installs the Stagehand lane's backend on [sw]
     (RFC-browser-lane-stagehand §3.4). No browser starts until a

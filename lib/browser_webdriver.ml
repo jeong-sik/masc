@@ -347,20 +347,16 @@ let execute_unlocked t = function
         | `Elements -> script t session Browser_page_script.elements []
         | `Frames -> script t session Browser_page_script.frames []
         | `Text cap ->
-          if cap < 1 || cap > 100_000 then Error (Protocol "maxChars must be between 1 and 100000")
-          else script t session
-            "const text=document.body?.innerText ?? ''; const chars=Array.from(text); return {url:location.href,title:document.title,text:chars.slice(0,arguments[0]).join(''),chars:chars.length,truncated:chars.length>arguments[0]};" [`Int cap] in
+          let* cap = Result.map_error (fun detail -> Protocol detail) (Browser_page_script.text_cap (Some cap)) in
+          script t session Browser_page_script.text [`Int cap] in
       match data with
       | `Assoc fields -> Ok (`Assoc (["tabId",`Int id;"framePath",`List (List.map (fun s -> `String s) frame_path)] @ fields))
       | _ -> Error (Protocol "invalid contextual observation"))
   | Browser_lane.Page_read { tab_id; max_chars } ->
     let* session = session t in
     with_tab t session tab_id (fun () ->
-      let cap = Option.value ~default:50_000 max_chars in
-      if cap < 1 || cap > 100_000 then Error (Protocol "maxChars must be between 1 and 100000")
-      else script t session
-        "const text=document.body?.innerText ?? ''; const chars=Array.from(text); return {url:location.href,title:document.title,text:chars.slice(0,arguments[0]).join(''),chars:chars.length,truncated:chars.length>arguments[0]};"
-        [`Int cap])
+      let* cap = Result.map_error (fun detail -> Protocol detail) (Browser_page_script.text_cap max_chars) in
+      script t session Browser_page_script.text [`Int cap])
   | Browser_lane.Page_document {tab_id=id} ->
     (* This optional reader must not run [session] recovery, select another
        window, or reset a frame merely to acquire its observation. *)
@@ -431,7 +427,7 @@ let execute_unlocked t = function
               | None -> Error (Protocol "pointer cleanup did not run")) in
           let* _ = applied in
           let* _ = released in
-          let* after = script t session "return {url:location.href,title:document.title,scrollX,scrollY};" [] in
+          let* after = script t session Browser_interaction.pointer_receipt_script [] in
           let* url_before = string_field "url" before in
           (match after with
            | `Assoc fields -> Ok (`Assoc (("urlBefore",`String url_before) ::

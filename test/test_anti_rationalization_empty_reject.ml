@@ -433,6 +433,25 @@ let test_resend_after_unreadable_refusal_stays_a_violation () =
   Alcotest.(check bool) "a decision that could not be read cannot be matched" true
     (Option.is_some call.violation)
 
+let test_only_the_latest_refusal_counts () =
+  let unreadable_then_reject =
+    run_verdict_calls
+      [ verdict_json "MAYBE"; verdict_json "REJECT"; verdict_json ~reason:"no test" "REJECT" ]
+  in
+  Alcotest.(check bool) "a REJECT refusal after an unreadable one is answered by the resend"
+    true (Option.is_none unreadable_then_reject.violation);
+  let reject_then_unreadable =
+    run_verdict_calls
+      [ verdict_json "REJECT"; verdict_json "MAYBE"; verdict_json ~reason:"no test" "REJECT" ]
+  in
+  Alcotest.(check bool) "a resend after an unreadable latest refusal stays a violation"
+    true (Option.is_some reject_then_unreadable.violation)
+
+let test_flip_to_reasonless_approve_stays_a_violation () =
+  let call = run_verdict_calls [ verdict_json "REJECT"; verdict_json "APPROVE" ] in
+  Alcotest.(check bool) "an APPROVE without a reason after a refused REJECT is a violation"
+    true (Option.is_some call.violation)
+
 let test_second_call_after_a_verdict_is_a_violation () =
   let call =
     run_verdict_calls
@@ -516,5 +535,13 @@ let () =
             "a second call after a verdict is a violation"
             `Quick
             test_second_call_after_a_verdict_is_a_violation
+        ; Alcotest.test_case
+            "only the latest refusal counts"
+            `Quick
+            test_only_the_latest_refusal_counts
+        ; Alcotest.test_case
+            "a flip to a reasonless APPROVE stays a violation"
+            `Quick
+            test_flip_to_reasonless_approve_stays_a_violation
         ] )
     ]

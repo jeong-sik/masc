@@ -208,12 +208,13 @@ val build_prompt
 
 val parse_review_verdict_from_json : Yojson.Safe.t -> (verdict, string) result
 
-(** What one review's [report_review_verdict] calls have established. *)
+(** Which decision a refused [report_review_verdict] call named. *)
 type verdict_refusal =
   | Reject_without_reason
       (** The refused call named REJECT and gave no reason. *)
   | Unreadable_verdict  (** The refused call named no decision that can be read. *)
 
+(** What one review's [report_review_verdict] calls have established. *)
 type verdict_call =
   { recorded : verdict option
   ; refusal : verdict_refusal option
@@ -233,7 +234,7 @@ val step_verdict_call : verdict_call -> Yojson.Safe.t -> verdict_call * verdict_
     violation only when it carries the refused call's decision (a REJECT
     without a reason resent as a REJECT with one). A changed decision, a
     resend after an unreadable refusal, and any call after a recorded verdict
-    keep or set the violation. *)
+    keep or set the violation. Only the latest refusal counts. *)
 
 val outcome_observer_fn : (outcome:string -> runtime:string -> unit) Atomic.t
 

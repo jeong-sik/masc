@@ -383,7 +383,15 @@ let report_review_verdict_schema : Masc_domain.tool_schema =
 ;;
 
 (** Parse review verdict from tool call JSON arguments (deterministic). *)
-let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) result =
+type verdict_refusal =
+  | Reject_without_reason
+  | Unreadable_verdict
+
+(* The verdict and, when it is refused, which decision the refused call named:
+   one reading of the tool call serves both the error text and the resend rule
+   below, so they cannot disagree about what was refused. *)
+let classify_review_verdict_json (args : Yojson.Safe.t)
+  : (verdict, verdict_refusal * string) result =
   try
     let verdict_str =
       match Json_util.assoc_member_opt "verdict" args with
@@ -401,16 +409,26 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
          managed prompt; the pure parse errors below stay inline (RFC §6
          mechanically-derived validation). *)
       if String.equal (String.trim reason) ""
-      then Error (Tool_guidance.to_string Tool_guidance.Reject_verdict_requires_reason)
+      then
+        Error
+          ( Reject_without_reason
+          , Tool_guidance.to_string Tool_guidance.Reject_verdict_requires_reason )
       else Ok (Reject reason)
-    | other -> Error (sprintf "unexpected review verdict value: %s" other)
+    | other -> Error (Unreadable_verdict, sprintf "unexpected review verdict value: %s" other)
   with
-  | Yojson.Safe.Util.Type_error (msg, _) -> Error (sprintf "review verdict JSON type error: %s" msg)
+  | Yojson.Safe.Util.Type_error (msg, _) ->
+    Error (Unreadable_verdict, sprintf "review verdict JSON type error: %s" msg)
   (* RFC-0106 — cancellation MUST propagate; the file's other parsers
      (see line ~244) already do this, so the catch-all here was an
      N-of-M omission within the same module. *)
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (sprintf "review verdict JSON parse error: %s" (Printexc.to_string exn))
+  | exn ->
+    Error
+      (Unreadable_verdict, sprintf "review verdict JSON parse error: %s" (Printexc.to_string exn))
+;;
+
+let parse_review_verdict_from_json args =
+  Result.map_error snd (classify_review_verdict_json args)
 ;;
 
 (* One [report_review_verdict] call against what the review already holds.
@@ -420,11 +438,8 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
    REJECT that now carries one is kept. A resend that changes the decision, or
    follows a refusal whose decision cannot be read, keeps the violation: the
    evaluator reversed or never stated itself, and the completion gate must not
-   open on that. A second call after a recorded verdict is always a violation. *)
-type verdict_refusal =
-  | Reject_without_reason
-  | Unreadable_verdict
-
+   open on that. Only the latest refusal counts: it is the one the resend
+   answers. A second call after a recorded verdict is always a violation. *)
 type verdict_call =
   { recorded : verdict option
   ; refusal : verdict_refusal option
@@ -437,12 +452,6 @@ type verdict_answer =
   | Verdict_refused of { detail : string }
 
 let empty_verdict_call = { recorded = None; refusal = None; violation = None }
-
-let refusal_of_verdict_json (args : Yojson.Safe.t) =
-  match Json_util.assoc_member_opt "verdict" args with
-  | Some (`String "REJECT") -> Reject_without_reason
-  | Some _ | None -> Unreadable_verdict
-;;
 
 let resend_keeps_refused_decision refusal verdict =
   match refusal, verdict with
@@ -460,7 +469,7 @@ let step_verdict_call call args =
     in
     { call with violation = Some detail }, Verdict_already_recorded { detail }
   | None ->
-    (match parse_review_verdict_from_json args with
+    (match classify_review_verdict_json args with
      | Ok verdict ->
        let violation =
          match call.refusal with
@@ -469,8 +478,8 @@ let step_verdict_call call args =
          | Some _ -> call.violation
        in
        { call with recorded = Some verdict; violation }, Verdict_recorded verdict
-     | Error detail ->
-       ( { call with refusal = Some (refusal_of_verdict_json args); violation = Some detail }
+     | Error (refusal, detail) ->
+       ( { call with refusal = Some refusal; violation = Some detail }
        , Verdict_refused { detail } ))
 ;;
 

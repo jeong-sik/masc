@@ -2922,6 +2922,10 @@ let launch_voice_wizard_reread state ~mailbox ~request =
    another -- which is the thing a probe is for. *)
 let voice_wizard_probe_sentence = "음성 연결을 확인합니다"
 
+(* The probe row's first two columns, in display cells. *)
+let voice_probe_endpoint_cells = 20
+let voice_probe_state_cells = 10
+
 let voice_wizard_probe_lines json =
   match json with
   | `Assoc fields -> (
@@ -2954,9 +2958,14 @@ let voice_wizard_probe_lines json =
                     | Some (`String other) -> Terminal_text.single_line other
                     | Some _ | None -> Masc_tui_theme.Glyph.no_value
                   in
+                  (* Padded by display cells: the no-value mark is one column
+                     and three bytes, so a byte-counted field ended short. *)
                   Some
-                    (Printf.sprintf "%-20s %-10s %s" (text "endpoint_id") state
-                       (text "detail"))
+                    (String.concat " "
+                       [ Masc_tui_message_layout.fit_width (text "endpoint_id")
+                           voice_probe_endpoint_cells
+                       ; Masc_tui_message_layout.fit_width state voice_probe_state_cells
+                       ; text "detail" ])
               | _ -> None)
             items
       | Some _ | None -> [])

@@ -87,8 +87,8 @@ let drawn ~height ~selected =
 (* 2026-09-11T12:00Z to the fixture clock. *)
 let oldest_todo_seconds = string_of_int (12 * 24 * 3600) ^ "s"
 
-(* A backlog whose oldest task carries no creation time has no age to give.
-   It drew "oldest ?", a mark no other pane uses for a missing value. *)
+(* A backlog whose oldest task carries no creation time has no age to give,
+   and says so with the mark every pane uses for a missing value. *)
 let test_a_backlog_with_no_creation_time_draws_no_value () =
   check (option string) "the shared no-value mark"
     (Some ("3 todo · oldest " ^ Masc_tui_theme.Glyph.no_value))

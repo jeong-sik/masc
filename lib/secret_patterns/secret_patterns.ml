@@ -45,7 +45,7 @@ let url_credential_re = Re.compile url_credential
     once at init, not rebuilt on every [redact_text] call. [Re] is thread-safe
     (see file header), so sharing compiled regexes across fibers/domains is
     safe — [url_credential_re] already does this. *)
-let bearer = Re.seq [Re.str "Bearer "; Re.rep1 (Re.compl [Re.set " \t\r\n"])]
+let bearer = Re.seq [Re.no_case (Re.str "Bearer "); Re.rep1 (Re.compl [Re.set " \t\r\n"])]
 let bearer_re = Re.compile bearer
 
 let sk = Re.seq [Re.bow; Re.str "sk-"; Re.rep1 (Re.alt [Re.alnum; Re.char '-'])]
@@ -155,8 +155,50 @@ let secret_res =
    first. *)
 let any_secret_re = Re.compile (Re.alt [ url_credential; bearer; sk; awsakia; github_token ])
 
+(* Raw diagnostics also carry opaque credentials as named assignments or HTTP
+   Authorization headers. Match their syntax, using the same sensitive-key
+   vocabulary as JSON, rather than dropping lines that mention a keyword. *)
+let horizontal_space = Re.rep (Re.set " \t")
+
+let authorization_header_re =
+  Re.compile
+    (Re.seq
+       [ Re.group
+           (Re.seq [ Re.bow; Re.no_case (Re.str "authorization")
+                   ; horizontal_space; Re.char ':'; horizontal_space ])
+       ; Re.rep1 (Re.compl [ Re.set "\r\n" ]) ])
+;;
+
+let sensitive_assignment_re =
+  let quoted quote =
+    let content =
+      if Char.equal quote '"' then
+        Re.alt
+          [ Re.seq [ Re.char '\\'; Re.compl [ Re.set "\r\n" ] ]
+          ; Re.compl [ Re.set "\"\\\r\n" ] ]
+      else Re.compl [ Re.set (String.make 1 quote ^ "\r\n") ]
+    in
+    Re.seq [ Re.char quote; Re.rep content; Re.opt (Re.char quote) ]
+  in
+  let environment_prefix = Re.rep (Re.seq [ Re.rep1 Re.alnum; Re.char '_' ]) in
+  Re.compile
+    (Re.seq
+       [ Re.group
+           (Re.seq [ Re.bow; environment_prefix
+                   ; Re.no_case (Re.alt (List.map Re.str sensitive_keys))
+                   ; horizontal_space; Re.char '='; horizontal_space ])
+       ; Re.alt [ quoted '\''; quoted '"'; Re.rep1 (Re.compl [ Re.set " \t\r\n" ]) ] ])
+;;
+
+let redact_named_credentials s =
+  List.fold_left
+    (fun text pattern ->
+       Re.replace pattern text ~f:(fun group -> Re.Group.get group 1 ^ "[REDACTED]"))
+    s [ authorization_header_re; sensitive_assignment_re ]
+;;
+
 let redact_text (s : string) : string =
-  let s = redact_pem_blocks s in
+  let s = redact_named_credentials (redact_pem_blocks s) in
   if Re.execp any_secret_re s
   then List.fold_left (fun acc re -> Re.replace_string re ~by:"[REDACTED]" acc) s secret_res
   else s

@@ -24,6 +24,8 @@ let lane_id = Standalone_lane.to_id Standalone_lane.Browser_stagehand
 let slot_id = "stagehand-fixture.model"
 let second_slot_id = "stagehand-fixture.model-second"
 let answer = `Assoc [ "action", `Null; "twoStep", `Bool false ]
+let extract_answer = `Assoc [ "heading", `String "Order form"; "price", `String "42 USD" ]
+let progress_answer = `Assoc [ "progress", `String "read"; "completed", `Bool true ]
 
 (* One catalog target on the fixture server. [system_prompt] is the model's
    declared support for a system prompt. *)
@@ -212,7 +214,7 @@ let test_unreported_usage_is_left_out () =
   let extract, _, _ = Lazy.force recorded_params in
   List.iter
     (fun (name, usage) ->
-       with_provider (F.Reply (openai_body ~usage))
+       with_provider (F.Reply (openai_body_for ~output:extract_answer ~usage))
        @@ fun ~net ~clock server ->
        let resolved = resolved_lane ~base_url:server.base_url ~system_prompt:true () in
        match generate ~net ~clock resolved extract with
@@ -394,7 +396,7 @@ let test_cli_slot_follows_failed_http_slot () =
   let _, progress, _ = Lazy.force recorded_params in
   let cli_runner : Keeper_lane_cli_oneshot.runner =
     fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
-    Ok (Yojson.Safe.to_string answer)
+    Ok (Yojson.Safe.to_string progress_answer)
   in
   F.with_official_client_runtimes
   @@ fun () ->
@@ -415,7 +417,7 @@ let test_cli_slot_follows_failed_http_slot () =
     Alcotest.(check bool)
       "structured content is the cli answer"
       true
-      (Yojson.Safe.equal answer (U.member "structured_content" result))
+      (Yojson.Safe.equal progress_answer (U.member "structured_content" result))
 ;;
 
 let test_provider_failure_is_a_refusal () =

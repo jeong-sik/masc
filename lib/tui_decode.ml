@@ -11383,7 +11383,11 @@ type goal_timeline_event = {
 
 type goal_timeline =
   | Goal_timeline_ready of goal_timeline_event list
-  | Goal_timeline_unavailable of string
+  | Goal_timeline_unavailable of goal_timeline_unavailability
+
+and goal_timeline_unavailability =
+  | Goal_source_failure of goal_source_failure
+  | Approval_queue_failure of string
 
 let decode_goal_timeline_event json =
   let required field =
@@ -11401,7 +11405,7 @@ let decode_goal_timeline_event json =
 
 let decode_goal_detail_timeline json =
   match decode_goal_source_failure json with
-  | Ok (Some failure) -> Ok (Goal_timeline_unavailable (goal_source_failure_to_string failure))
+  | Ok (Some failure) -> Ok (Goal_timeline_unavailable (Goal_source_failure failure))
   | Error message -> Error message
   | Ok None ->
   match Json_util.assoc_member_opt "timeline" json with
@@ -11409,7 +11413,7 @@ let decode_goal_detail_timeline json =
       let state = member "approval_queue_state" json in
       (match member "state" state, member "operator_detail" state with
        | `String "unavailable", `String detail when String.trim detail <> "" ->
-           Ok (Goal_timeline_unavailable detail)
+           Ok (Goal_timeline_unavailable (Approval_queue_failure detail))
        | _ -> Error "goal detail has a null timeline without an unavailable source state")
   | Some (`List items) ->
       let rec loop acc = function

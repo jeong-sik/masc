@@ -3465,13 +3465,16 @@ type goal_timeline_event = {
   gt_severity : string;  (** producer emits ok | warn | bad; open for renderers *)
 }
 
-(** Goal detail timeline. [`Null] from the server means the approval-queue
-    store could not be read (the same discriminated failure the gate snapshot
-    carries), so it decodes to the explicit unavailable constructor, never an
-    empty list. *)
+(** Goal detail timeline. A Goal source failure retains its source type;
+    [`Null] with an unavailable approval queue retains the queue's detail.
+    Neither failure decodes to an empty event list. *)
 type goal_timeline =
   | Goal_timeline_ready of goal_timeline_event list
-  | Goal_timeline_unavailable of string
+  | Goal_timeline_unavailable of goal_timeline_unavailability
+
+and goal_timeline_unavailability =
+  | Goal_source_failure of goal_source_failure
+  | Approval_queue_failure of string
 
 val decode_goal_detail_timeline : Yojson.Safe.t -> (goal_timeline, string) result
 

@@ -24,6 +24,17 @@ val api_format_reads_max_prompt_bytes : api_format -> bool
     Antigravity, Codex and Muse Code do; no other format does, so a
     declaration on any other runtime bounds nothing the provider checks. *)
 
+type output_schema_channel =
+  | Holds_output_schema
+  | No_output_schema_channel
+
+val api_format_output_schema_channel : api_format -> output_schema_channel
+(** Whether a runtime of this format can be handed a JSON Schema to hold its
+    answer to. Every exact-output call hands one over, so a format without
+    the channel (Muse Code: MSP's [turn/start] has no field for it) stands in
+    no exact-output list. The lane writers, the load check of [cli_slots] and
+    first-run setup all read this one answer. *)
+
 type transport =
   | Http of string
   | Cli of string

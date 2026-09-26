@@ -112,8 +112,27 @@ module Make (E : Error) = struct
 
 end
 
-let bounded_tail ~limit current addition =
-  let combined = current ^ addition in
-  let length = String.length combined in
-  if length <= limit then combined else String.sub combined (length - limit) limit
-;;
+module Stderr = struct
+  type capture = Collecting of string | Omitted
+  type t = { limit : int; mutable capture : capture }
+
+  let create ~limit =
+    if limit <= 0 then invalid_arg "stderr diagnostic limit must be positive";
+    { limit; capture = Collecting "" }
+
+  let append t chunk =
+    match t.capture with
+    | Omitted -> ()
+    | Collecting bytes ->
+      if String.length chunk > t.limit - String.length bytes
+      then t.capture <- Omitted
+      else t.capture <- Collecting (bytes ^ chunk)
+
+  let contents t =
+    let text =
+      match t.capture with
+      | Omitted -> "[stderr omitted: byte limit]"
+      | Collecting bytes -> Secret_patterns.redact_text bytes
+    in
+    String_util.utf8_suffix ~max_bytes:t.limit text
+end

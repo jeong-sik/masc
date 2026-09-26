@@ -232,7 +232,7 @@ end)
 
 open Shared_json
 
-let bounded_tail = Runtime_official_client_json.bounded_tail
+module Stderr = Runtime_official_client_json.Stderr
 
 let required_string ?(nonempty = true) stage name fields =
   match List.assoc_opt name fields with
@@ -621,11 +621,7 @@ let drain_stderr flow tail =
   try
     while true do
       let count = Eio.Flow.single_read flow chunk in
-      tail :=
-        bounded_tail
-          ~limit:stderr_tail_bytes
-          !tail
-          (Cstruct.to_string (Cstruct.sub chunk 0 count))
+      Stderr.append tail (Cstruct.to_string (Cstruct.sub chunk 0 count))
     done
   with
   | End_of_file -> ()
@@ -891,7 +887,7 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
-    let stderr_tail = ref "" in
+    let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
     let proc =
       try
         Eio.Process.spawn
@@ -1040,7 +1036,7 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
         Eio.Process.await proc
     in
     process_settled := true;
-    status, !state, String.trim !stderr_tail)
+    status, !state, String.trim (Stderr.contents stderr_tail))
 ;;
 
 let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd

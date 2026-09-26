@@ -7045,7 +7045,7 @@
 (test
  (name test_runtime_official_client_json)
  (modules test_runtime_official_client_json)
- (libraries masc.runtime alcotest eio eio.mock))
+ (libraries masc.runtime alcotest astring eio eio.mock))
 
 ; Mock clock orders a watcher's wake-up ahead of the work's: the work's
 ; outcome stands.

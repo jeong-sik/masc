@@ -371,7 +371,7 @@ end)
 
 open Shared_json
 
-let bounded_tail = Runtime_official_client_json.bounded_tail
+module Stderr = Runtime_official_client_json.Stderr
 
 let parse_json ~stage text =
   let parsed =
@@ -1537,7 +1537,7 @@ let drain_stderr flow tail =
     while true do
       let count = Eio.Flow.single_read flow chunk in
       let text = Cstruct.to_string (Cstruct.sub chunk 0 count) in
-      tail := bounded_tail ~limit:stderr_tail_bytes !tail text
+      Stderr.append tail text
     done
   with
   | End_of_file -> ()
@@ -1683,7 +1683,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
-    let stderr_tail = ref "" in
+    let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
     let proc =
       try
         Eio.Process.spawn
@@ -1740,7 +1740,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
         |> parse_wire_line
       with
       | End_of_file ->
-        let detail = String.trim !stderr_tail in
+        let detail = String.trim (Stderr.contents stderr_tail) in
         (* A client that dies before the turn is admitted submitted nothing,
            so another candidate may still be tried. [turn_admitted] is the
            same fact the control responses above already read. *)

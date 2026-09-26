@@ -1062,13 +1062,13 @@ let reclaim_apple_work_volume ~run ~volume_name ~image =
         | `Assoc fields :: rest ->
           let id =
             match List.assoc_opt "id" fields with
-            | Some (`String id) -> Some id
+            | Some (`String id) when String.trim id <> "" -> Some id
             | Some _ -> None
             | None ->
               (match List.assoc_opt "configuration" fields with
                | Some (`Assoc config) ->
                  (match List.assoc_opt "id" config with
-                  | Some (`String id) -> Some id
+                  | Some (`String id) when String.trim id <> "" -> Some id
                   | Some _ | None -> None)
                | Some _ | None -> None)
           in

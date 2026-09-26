@@ -1850,6 +1850,8 @@ let test_work_volume_trim_confirms_cleanup () =
        | Ok _ -> Alcotest.fail "unproven cleanup permits a second volume mount")
     [ Unix.WEXITED 0, {|[{"configuration":{"id":"masc-keeper-work-x-trim"}}]|}, ""
     ; Unix.WEXITED 0, "[{}]", ""
+    ; Unix.WEXITED 0, {|[{"id":""}]|}, ""
+    ; Unix.WEXITED 0, {|[{"configuration":{"id":""}}}]|}, ""
     ; Unix.WEXITED 0, "not JSON", ""
     ; Unix.WEXITED 1, "", "container service unavailable"
     ];

@@ -46,6 +46,7 @@ val run :
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
   workspace_root:string ->
+  ?native_workspace_context:string ->
   goal:string ->
   goal_blocks:Agent_core.Types.content_block list option ->
   system_prompt:string ->
@@ -81,7 +82,9 @@ val run :
 (** [workspace_root] is an explicitly selected absolute native directory.
     The caller owns selecting the Keeper's workspace and account home.
     The adapter prepares a managed profile and credential generation before
-    the claim; an absent account home is refused. This adapter selects no host or guest path implicitly.
+    the claim; an absent account home is refused. [native_workspace_context]
+    describes the selected host/guest coordinate to the model and is appended
+    after instruction hooks, so a system prompt override cannot erase it. This adapter selects no host or guest path implicitly.
 
     Account home, opaque sign-in generation, native posture and tools bind session reuse. Canonical
     history, instructions, model and workspace changes start a fresh session;

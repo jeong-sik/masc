@@ -103,7 +103,7 @@ def main():
                 raw.extend(chunk)
             now = time.monotonic()
             if ready is None:
-                marker = raw.find(b'MASC Overview')
+                marker = raw.find(b'MASC Dashboard')
                 if marker >= 0 and raw.find(b'\x1b[?7h', marker) >= 0:
                     ready = now
             if ready is not None and terminated is None:

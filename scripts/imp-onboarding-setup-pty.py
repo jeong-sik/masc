@@ -140,7 +140,7 @@ def measure(args):
         wait_until(ready, 360, 'setup-owned server readiness')
         # A rendered screen title and raw terminal mode distinguish the TUI
         # from setup's own textual instructions mentioning Keepers.
-        marker = b'MASC Overview'
+        marker = b'MASC Dashboard'
         wait_until(lambda: marker in captured and
                    not (termios.tcgetattr(slave)[3] & (termios.ICANON | termios.ECHO)),
                    120, 'real TUI frame and raw terminal mode')

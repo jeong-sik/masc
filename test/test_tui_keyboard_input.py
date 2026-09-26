@@ -12731,7 +12731,7 @@ def runtime_resolved_response(*, runtime_a_in_two_lanes: bool = False) -> HttpRe
             "config_path": "/workspace/config/runtime.toml",
             "default_runtime": runtime_a,
             # The two routes that are not lanes. Both lists are required by
-            # the decoder; empty is a configuration (no vision fleet), and
+            # the decoder; empty is a configuration (no vision runtimes), and
             # the declared list is what the editor writes back.
             "media_failover": [],
             "media_failover_declared": [],

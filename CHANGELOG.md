@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [0.42.0] - 2026-09-26
+## [0.42.0] - 2026-09-27
 
 ### Upgrade notes
 
@@ -22,6 +22,10 @@
      same `--runtime` to both commands when the Keeper uses a non-default store.
   3. Remove `MASC_KEEPER_SANDBOX_DOCKER_IMAGE` from your environment. It is no
      longer read, and there is no built-in default image any more.
+- The Skill resource read limit now follows the inline tool result bound in code (#39285).
+  Delete the `resource-read-max-bytes = 16384` line from `[skills]` in
+  `runtime.toml` (or the same line with another value). This version ignores
+  the key and logs its file path at boot; the next version rejects it (#39284).
 
 ### Fresh state required
 
@@ -60,6 +64,19 @@
   absent name, an unreadable catalog, an unknown name and a name with nothing
   promoted are typed refusals; the last prints the build and promote
   commands (#38770).
+- `Browser_stagehand_backend`: the Stagehand lane's backend owns the
+  session on its own switch and serves Browser Lane verbs for callers on
+  any fiber or domain. A caller that leaves cancels only the page verb it
+  asked for; opening and closing run to the end; close waits five seconds
+  for the runtime before stopping the browser (#38736).
+- Dashboard Settings edits runtime candidate lanes (`[runtime.lanes.<id>]`):
+  reorder, add or remove a candidate, rename, delete and create a lane. An
+  edit applies to the order the file declares with a source revision check,
+  so a concurrent edit cannot be overwritten. A file-only lane or a lane
+  with catalog-unavailable candidates is shown read-only because the routing
+  writer cannot commit it. The keeper assignment picker offers declared lanes
+  (#38892).
+- List merged pull requests missing changelog entries when preparing a release, and report any failure to generate that list (#39133).
 
 ### Changed
 
@@ -82,6 +99,7 @@
   catalog name is refused where a Keeper TOML, `keeper up` or the config
   endpoint reads it. `masc setup` builds `base` and promotes it when the
   catalog has none for the store it sets up (#38795).
+- Queueing a person's chat no longer cancels an in-flight Keeper provider attempt before its first response event. AGENT_CORE can hand off at a checkpointed post-tool boundary; official-client tool-result replay needs separate verification (#39309).
 
 ### Removed
 
@@ -121,6 +139,45 @@
 - A Codex Resume no longer reports a model-input window for history it did not send, and its overflow no longer sizes the fresh-thread retry from that unsent range; the retry carries the whole range (#38822).
 - The dashboard accepts a zero-carried floor observation over nonempty history and preserves the optional provider context-window size instead of rejecting the entire TurnRecord payload (#38822).
 - Preserve a response-certified empty history boundary after Codex context overflow, so the next Keeper turn carries new input without restoring rejected history (#38891).
+- Preserve a shared Stagehand session when its reply arrives before the
+  cancelled caller resumes; report that settlement explicitly so the backend
+  does not later retire an already-answered call. #38736
+- The composed Stagehand cancellation regression now schedules cancellation
+  before reply resolution, then reads the reply before the cancelled Session
+  resumes, exercising the answered-cancellation branch it asserts (#38736).
+- The Tools screen reports a Skills catalog read failure on one line (`skills catalog load failed: <cause>`) instead of labelling it twice, keeps the HTTP status and body of a failed read, and says `Previous catalog reading retained` when an older reading is still shown (#38881).
+- Show each Fusion decision once in Task history, using its recorded decision, choice, and reason (#38896).
+- Antigravity process-exit and empty-success stderr details use the shared
+  structural secret masker before reaching session logs or the dashboard.
+  Standalone key and token values are masked, while ordinary diagnostic
+  text remains readable. When the bounded stderr buffer cuts through a line,
+  that partial leading line is omitted before masking so a credential value
+  cannot survive after its assignment key was truncated (#39256).
+- In terminals that send legacy X10 mouse reports (Apple Terminal), TUI
+  presses and wheel notches now carry the pointer position, so they reach
+  what they are on as SGR reports do: the decoder read only the button byte
+  and dropped the column and row. X10's one release code never says which
+  button went up, so once presses overlap their releases read as no button's:
+  only a left press held alone releases as the left button's (#39257).
+- Task Review now requires two fresh approval presses when a task receives a replacement verification request (#39266).
+- Task Review now discards a stale queue response after a successful verdict so the judged request does not reappear (#39276).
+- Edit runtime TOML by parsed table and key identity, preserving quoted keys, dotted-key whitespace, comments and multiline values instead of creating duplicate tables. (#39280)
+- Keep malformed drafts editable as raw text, show their parse error, and suspend structured edits until the syntax is repaired. (#39280)
+- `keeper_memory_write` now checks an absent supersedes target's latest removal and writes its successor under the same store lock. Unreadable newer journal records refuse the write with their persistence diagnostic instead of falling through to an older Librarian removal. A readable Librarian drop of an authored target still permits the write; explicit removals and injected targets remain refused. (#39289)
+- Declare and promote the sandbox image used by the registry exact-meta Read
+  fixture so it reaches the registry replacement assertion. #39376
+- Muse uses explicitly selected account HOME/XDG roots and disables native writes and shell in read posture. Durable session admission rejects an explicitly ephemeral Muse host before starting or resuming a session. #39383
+- Antigravity binds Keeper sessions to the selected OAuth source and preserves managed refresh credentials within that account. Native read/full permissions use the actual host workspace and explicitly configured additional roots. Read denies writes and commands; full retains vendor sandbox approval boundaries. Endpoint-owned trees remain accessed through MASC tools, with their separate native host workspace stated explicitly. #39386
+- Antigravity preserves workspace guidance after prompt hooks, binds hook-composed context, and publishes native permissions only after its durable session claim. The session API names its account-bound digest `session_binding_sha256`, separate from the computed tool-surface digest (#39386).
+- Antigravity keeps one host hook ordinal across vendor conversation resets, releases claims when native policy publication fails before dispatch, and exposes the renamed session binding under dashboard session schema v2 (#39386).
+- Muse retains vendor credential refreshes in a persistent managed account configuration, changes session identity on external sign-in, and supplies a fixed permission profile with a private temporary directory. #39391
+- A selected Muse HOME may be a symlink to an owned directory; credential and managed-state descendants still require owned regular paths. #39391
+- A keystroke landing in the TUI escape window is read as its own key instead
+  of being dropped after ESC (#39399).
+- Declare and promote the sandbox image used by the Grep `via` discriminator
+  fixture so its Docker search reaches the `via=docker` assertion. #39407
+- Keeper continuation checkpoints now retain their own typed terminal disposition instead of requesting human input. Decision, receipt, Dashboard and composite projections agree while preserving the original yield cause (#39411).
+- Version and documentation checks consume their complete scan output before selecting the first match, preventing an early closed pipe from turning valid release history into SIGPIPE while retaining scan and version validation failures (#39420).
 
 ### Documentation
 
@@ -152,6 +209,10 @@
   them, and run the selector self-test whenever that script changes. #39308
 - Restrict opam cache writes to the default branch; other refs restore without saving another branch copy (#39316).
 - Add a manual Linux x64 probe workflow that uploads release binaries with a verified SHA-256 manifest (#39343).
+- Goal tool TOML parity checks embedded declaration coverage against the Goal_name variant and keeps schema pins by name (#39328).
+- Check the documented bounded reverse speaker badge in the Memory journal
+  PTY scenario while retaining the marker and timeline assertions. #39382
+- Compare verified Linux server probe artifacts with isolated HTTP/model/workspace fixtures, full failure receipts, negotiated-encoding checks, and separate mutation, execution-read and concurrent-liveness measurements. (#39409)
 
 ### Performance
 
@@ -164,6 +225,11 @@
 - Encode backlog JSON once for primary and recovery writes, preserving pretty
   output and commit-aware failure handling (#39330).
 - Reuse plain TUI text and copy whole byte spans when removing SGR styles from selected rows and width calculations. Escape handling and displayed bytes are preserved; paired latency measurement is tracked separately (#39349).
+- Compress dashboard static assets on CPU workers while keeping HTTP/1 and HTTP/2 response writes on their request fibers (#39260).
+- Validate ASCII bytes directly within multilingual text sanitization, and
+  preserve the validated prefix when repairing invalid UTF-8 or controls.
+  Clean strings retain their identity and repair output remains unchanged (#39325).
+- Defer agenda error-text sanitization until its overlay row is rendered, avoiding repeated sanitization during TUI body-height queries (#39374).
 
 ## [0.41.0] - 2026-09-26
 

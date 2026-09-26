@@ -7433,16 +7433,13 @@ def memory_journal_timeline_interaction(
         ):
             if find_needle(plain, pattern) < 0:
                 raise AssertionError(f"Missing {label} label: {plain!r}")
-        # Speaker labels are dim-styled, not reverse-video, in the current
-        # renderer (observed: b"\\x1b[2mYOU"). The colored bold arrow/circle
-        # glyph checked above is what actually marks the causal role; this
-        # only confirms the label itself still renders.
-        for label in (b"YOU",):
-            if b"\x1b[2m" + label not in drawn:
-                raise AssertionError(
-                    f"Direct causal label lost its dim-styled badge {label!r}: "
-                    f"{drawn!r}"
-                )
+        # The conversation badge reverses only the speaker name. The mark's
+        # color and weight end before it, and the badge resets before the rule.
+        badge = b"\x1b[7mYOU\x1b[0m"
+        if badge not in drawn:
+            raise AssertionError(f"Direct causal label lost its bounded reverse badge: {drawn!r}")
+        if "▶".encode() + b"\x1b[0m " + badge not in drawn:
+            raise AssertionError(f"Direct causal mark style leaked into the speaker badge: {drawn!r}")
 
     def interact(
         process: subprocess.Popen[bytes],

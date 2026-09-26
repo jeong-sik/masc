@@ -857,10 +857,11 @@ let test_antigravity_panel_selected_account_and_refresh () =
     with_eio (fun ~sw:_ ~net:_ ->
       List.iter (fun (source, expected) ->
         select source;
-        match Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:agy_runtime
+        let runtime = Runtime.get_runtime_by_id agy_runtime |> Option.get in
+        match Masc.Fusion_official_client.run_with_images ~images:[] ~base_dir ~runtime
             ~system_prompt:"Return the fixture answer." ~prompt:"Selected account." () with
-        | Ok text -> check string "selected account and native refresh observed" expected text
-        | Error error -> fail (Fusion_agent_core.panel_failure_text error))
+        | Ok response -> check string "selected account and native refresh observed" expected response.text
+        | Error error -> fail (Masc.Fusion_official_client.failure_detail ~runtime_id:agy_runtime error))
         [account_a, "SELECTED_A"; account_b, "SELECTED_B"; account_a, "SELECTED_A_REFRESHED"];
       check string "selected source A untouched" "SELECTED_A" (Fs_compat.load_file account_a);
       Unix.unlink account_a;

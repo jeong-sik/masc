@@ -4369,6 +4369,15 @@
  (deps (alias runtest-test_tui_chat_input_safety)))
 
 (rule
+ (alias runtest-test_tui_chat_copy_pty)
+ (deps test_tui_chat_copy_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_chat_copy_pty.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_chat_copy_pty)))
+
+(rule
  (alias runtest-test_tui_snapshot_response_order)
  (deps test_tui_snapshot_response_order.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_snapshot_response_order.py} %{dep:../bin/masc_tui.exe})))

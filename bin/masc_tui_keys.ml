@@ -459,6 +459,8 @@ let for_surface = function
       ; b Act "Ctrl-F" "message metadata"
           ~help:"cycle no clock / inline clock / full timestamp and request id"
       ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
+      ; b Act "/copy" "copy reply"
+          ~help:"send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52"
       ; b Act "Ctrl-Q" "leave"
           ~help:"leave with a turn running, without interrupting it"
       ; (* One key, two focuses, listed once for the reason [Up / Down] above

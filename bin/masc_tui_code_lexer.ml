@@ -455,6 +455,33 @@ let diff_lexer text =
     lines;
   runs_segments runs
 
+(* A diff line that adds or removes, split into its marker and its content:
+   the marker is the fourteen-cell gutter when the line wears one, else the
+   line's own first cell, and the kind is the row's diff side. [None] is
+   every other line — context, hunk and file headers, and the six-digit
+   overflow whose gutter the offsets miss — read whole by [diff_line_kind]. *)
+let diff_changed_split line =
+  let length = String.length line in
+  if length = 0 then None
+  else if
+    length >= 3
+    && (String.sub line 0 3 = "+++" || String.sub line 0 3 = "---")
+  then None
+  else
+    match numbered_gutter_kind line with
+    | Some kind
+      when String.equal kind kind_diff_added
+           || String.equal kind kind_diff_removed ->
+        Some
+          ( String.sub line 0 14
+          , String.sub line 14 (length - 14)
+          , kind )
+    | Some _ | None -> (
+        match line.[0] with
+        | '+' -> Some ("+", String.sub line 1 (length - 1), kind_diff_added)
+        | '-' -> Some ("-", String.sub line 1 (length - 1), kind_diff_removed)
+        | _ -> None)
+
 (* {1 C-family and Python lexers}
 
    These share the shape of [ocaml_lexer] but read the punctuation the curly-
@@ -906,23 +933,6 @@ let sql_lexer text =
   advance 0;
   runs_segments runs
 
-let lexer_of_language (tag : string) =
-  match String.lowercase_ascii (String.trim tag) with
-  | "ocaml" | "ml" | "mli" -> Some ocaml_lexer
-  | "bash" | "sh" | "shell" | "zsh" -> Some bash_lexer
-  | "json" -> Some json_lexer
-  | "diff" | "patch" -> Some diff_lexer
-  | "yaml" | "yml" -> Some yaml_lexer
-  | "toml" -> Some toml_lexer
-  | "sql" -> Some sql_lexer
-  | "c_like" | "typescript" | "ts" | "javascript" | "js" | "tsx" | "jsx"
-  | "go" | "rust" | "rs" | "c" | "cpp" | "java" | "kotlin" | "swift" | "scala"
-  | "php" | "dart" ->
-    Some c_like_lexer
-  | "python" | "py" -> Some python_lexer
-  | _ -> None
-
-
 (* Segments of a lexed fence body, cut into rows at the newlines the lexer
    carried as plain text. Piece order inside a row is the lexer's order, so
    the styling reads left to right as the code does. *)
@@ -938,6 +948,177 @@ let rows_of_segments segments =
          (String.split_on_char '\n' text))
     segments;
   List.rev_map List.rev !rev_rows
+
+(* Which version of the file a changed line belongs to. The two sides lex
+   apart: a string the removed lines leave open says nothing about the
+   added lines, which are the file after the change. *)
+type diff_side = Before | After
+
+(* One line of a diff fence, read for the sub-lexer: a changed line
+   carries its split marker and content, a context line carries the
+   source text it contributes to both versions' bodies, and a boundary
+   line — a hunk or file header, or the trailers around them — carries
+   nothing and ends the hunk in progress. *)
+type diff_row =
+  | Changed of
+      { marker : string; content : string; kind : string; side : diff_side }
+  | Context of string
+  | Boundary
+
+let diff_row_of_line line =
+  match diff_changed_split line with
+  | Some (marker, content, kind) ->
+      let side = if String.equal kind kind_diff_added then After else Before in
+      Changed { marker; content; kind; side }
+  | None -> (
+      match numbered_gutter_kind line with
+      | Some _ -> Context (String.sub line 14 (String.length line - 14))
+      | None ->
+          if String.length line = 0 then Context ""
+          else if Char.equal line.[0] ' ' then
+            Context (String.sub line 1 (String.length line - 1))
+          else Boundary)
+
+(* How a changed line's content was read: sub-lexed rows when its side's
+   body aligned with its lines, else the plain span. Context and
+   boundary lines always read whole, as [diff_lexer] reads them. *)
+type content_read =
+  | Whole_line
+  | Sub_row of segment list
+  | Plain_content
+
+(* One hunk's two bodies, lexed apart and written into [reads] at their
+   lines' positions. Context lines join both bodies — the text the
+   versions share is what resolves the state the changed lines sit in —
+   while each side's changed lines join only their own. A side whose
+   rows do not align with its lines falls its changed lines back to
+   plain rather than hanging one line's colours on another. *)
+let lex_diff_hunk ~sub ~reads hunk =
+  let before_rev = ref [] in
+  let after_rev = ref [] in
+  let push side index content =
+    match side with
+    | Before -> before_rev := (index, content) :: !before_rev
+    | After -> after_rev := (index, content) :: !after_rev
+  in
+  List.iter
+    (fun (index, row) ->
+      match row with
+      | Context content ->
+          push Before None content;
+          push After None content
+      | Changed { content; side; _ } -> push side (Some index) content
+      | Boundary -> ())
+    hunk;
+  let lex_side entries =
+    let changed =
+      List.filter_map
+        (fun (index, _) ->
+          match index with Some i -> Some i | None -> None)
+        entries
+    in
+    match changed with
+    | [] -> ()
+    | changed ->
+        let body = String.concat "\n" (List.map snd entries) in
+        let rows = rows_of_segments (sub body) in
+        if List.length rows = List.length entries then
+          List.iter2
+            (fun (index, _) row ->
+              match index with
+              | Some i -> reads.(i) <- Sub_row row
+              | None -> ())
+            entries rows
+        else List.iter (fun i -> reads.(i) <- Plain_content) changed
+  in
+  lex_side (List.rev !before_rev);
+  lex_side (List.rev !after_rev)
+
+(* A diff fence with a grammar for its content: ["```diff:ocaml"]. Added and
+   removed rows keep their marker's diff kind and gain token colours
+   underneath; every other row reads exactly as [diff_lexer] reads it.
+   Each hunk lexes its before and after versions apart, context lines
+   included, because the state that decides a token — a string the
+   context closes — lives in the version, not in the changed lines
+   alone. State never crosses a hunk boundary or the two sides: what
+   cannot be verified from the hunk reads from a fresh start. *)
+let diff_lexer_with ~sub text =
+  let runs = new_runs kind_code in
+  let add kind s = String.iter (fun c -> runs_add runs kind c) s in
+  let lines = String.split_on_char '\n' text in
+  let rows = List.map diff_row_of_line lines in
+  let count = List.length lines in
+  let reads =
+    Array.of_list
+      (List.map
+         (fun row ->
+           match row with
+           | Changed _ -> Plain_content
+           | Context _ | Boundary -> Whole_line)
+         rows)
+  in
+  let hunk = ref [] in
+  let flush () =
+    (match List.rev !hunk with
+     | [] -> ()
+     | ordered -> lex_diff_hunk ~sub ~reads ordered);
+    hunk := []
+  in
+  List.iteri
+    (fun index row ->
+      match row with
+      | Boundary -> flush ()
+      | Changed _ | Context _ -> hunk := (index, row) :: !hunk)
+    rows;
+  flush ();
+  List.iteri
+    (fun index (line, row) ->
+      (match row with
+       | Changed { marker; content; kind; _ } -> (
+           add kind marker;
+           match reads.(index) with
+           | Sub_row pieces ->
+               List.iter (fun (text, kind) -> add kind text) pieces
+           | Plain_content | Whole_line -> add kind_code content)
+       | Context _ | Boundary -> add (diff_line_kind line) line);
+      (* The newline belongs to no line's colour, as in [diff_lexer]. *)
+      if index < count - 1 then add kind_code "\n")
+    (List.combine lines rows);
+  runs_segments runs
+
+let rec lexer_of_language (tag : string) =
+  let tag = String.lowercase_ascii (String.trim tag) in
+  match String.index_opt tag ':' with
+  | Some colon
+    when String.equal (String.trim (String.sub tag 0 colon)) "diff" -> (
+      let sub =
+        String.trim
+          (String.sub tag (colon + 1) (String.length tag - colon - 1))
+      in
+      (* A diff of a diff is still read by line: the sub-lexer must name a
+         token grammar, and an unknown one leaves the whole-line read rather
+         than guessing. Recursion terminates on strictly shorter tags. *)
+      match sub with
+      | "" | "diff" | "patch" -> Some diff_lexer
+      | sub -> (
+          match lexer_of_language sub with
+          | Some sub_lexer -> Some (diff_lexer_with ~sub:sub_lexer)
+          | None -> Some diff_lexer))
+  | Some _ | None -> (
+      match tag with
+      | "ocaml" | "ml" | "mli" -> Some ocaml_lexer
+      | "bash" | "sh" | "shell" | "zsh" -> Some bash_lexer
+      | "json" -> Some json_lexer
+      | "diff" | "patch" -> Some diff_lexer
+      | "yaml" | "yml" -> Some yaml_lexer
+      | "toml" -> Some toml_lexer
+      | "sql" -> Some sql_lexer
+      | "c_like" | "typescript" | "ts" | "javascript" | "js" | "tsx" | "jsx"
+      | "go" | "rust" | "rs" | "c" | "cpp" | "java" | "kotlin" | "swift"
+      | "scala" | "php" | "dart" ->
+          Some c_like_lexer
+      | "python" | "py" -> Some python_lexer
+      | _ -> None)
 
 
 (* The extension decides the language. Only extensions whose language has a

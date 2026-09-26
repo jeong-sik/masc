@@ -339,6 +339,64 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
   | _ -> Alcotest.fail "owner settlement did not consume and settle the judgment"
 ;;
 
+(* Every HTTP slot was rejected before dispatch, so the partition is left
+   Advancing with no execution anchor, and the CLI tail answered. On main the
+   completion was refused ("cannot bypass pending advancement") and the
+   candidate was quarantined as [Exact_completion_failed]: 126 live rows on
+   2026-09-24, each a judgment the lane had already paid for. *)
+let test_a_cli_answer_after_every_http_slot_was_rejected_completes () =
+  with_temp_base "board-attention-worker-cli-after-rejections" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let visit slot_id ordinal : E.candidate_visit =
+    { flow_id = "flow-cli-after-rejections"
+    ; ordinal
+    ; slot_id
+    ; catalog_generation_fingerprint = "catalog-generation-" ^ slot_id
+    ; catalog_evidence_sha256 = "catalog-evidence-" ^ slot_id
+    ; target_identity_fingerprint = "target-identity-" ^ slot_id
+    }
+  in
+  let first = visit "glm-coding.glm-5.3-flash" 1 in
+  let second = visit "ollama_cloud.deepseek" 2 in
+  let cli_slot = "codex_subscription.gpt-5.6-luna" in
+  let execute ~before_dispatch:_ ~before_advance _candidate =
+    ok
+      "first slot rejected before dispatch"
+      (before_advance ~failed:(E.Predispatch_rejection first) ~next:second);
+    (* The second slot is rejected too. No slot follows it, so AGENT_CORE
+       records no further advance and the walk ends here. *)
+    (match (load_one_partition ~base_path).state with
+     | P.Running
+         { progress = P.Advancing { execution_anchor = None; next; _ }; _ }
+       when same_candidate_visit next second -> ()
+     | _ -> Alcotest.fail "fixture did not leave the walk Advancing");
+    Ok
+      { A.verdict = { J.decision = J.Relevant; rationale = "react to this Board event" }
+      ; slot_id = cli_slot
+      ; source = A.Cli_lane_slot
+      ; judged_at = 2.0
+      }
+  in
+  (match
+     ok
+       "CLI tail after every HTTP slot was rejected"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Judgment_completed { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | W.Judgment_completed _
+   | W.Idle
+   | W.Contended _
+   | W.Rescan_later _
+   | W.Candidate_already_consumed _
+   | W.Partition_blocked _ ->
+     Alcotest.fail "the CLI answer did not complete the partition");
+  match (load_one_partition ~base_path).state with
+  | P.Completed { item; _ } ->
+    Alcotest.(check string) "the answering client is recorded" cli_slot item.judgment.slot_id
+  | _ -> Alcotest.fail "the partition is not Completed"
+;;
+
 (* task-1666: a [Not_relevant] verdict carries nothing across the owner lane
    (nothing is enqueued for the owner to consume --
    keeper_board_attention_candidate.mli: "Relevant judgments cross the owner
@@ -3089,6 +3147,10 @@ let () =
             "bookkeeping failure keeps its cause and the flow sentence"
             `Quick
             test_bookkeeping_failure_keeps_its_cause_and_the_flow_sentence
+        ; Alcotest.test_case
+            "a CLI answer after every HTTP slot was rejected completes"
+            `Quick
+            test_a_cli_answer_after_every_http_slot_was_rejected_completes
         ; Alcotest.test_case
             "payment refusal exhaustion reads apart from interrupt"
             `Quick

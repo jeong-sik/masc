@@ -154,6 +154,8 @@ type error =
 
 val error_to_string : error -> string
 
+val redact_stderr_tail : string -> string
+
 val validate_turn :
   ?conversation_mode:conversation_mode ->
   config ->

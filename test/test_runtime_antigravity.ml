@@ -1034,6 +1034,52 @@ let test_empty_success_stderr_tail_cuts_at_a_character_boundary () =
        | Ok _ -> fail "blank SUCCESS with a Korean stderr was admitted")
 ;;
 
+(* A stderr line that echoes a credential must never reach an error detail.
+   The whole line is replaced by a placeholder; unrelated diagnostics on
+   their own lines survive byte-identical. *)
+let test_stderr_tail_redacts_sensitive_lines () =
+  let redacted = Runtime_antigravity.redact_stderr_tail in
+  check string "no stderr means no detail change" "" (redacted "");
+  check string "an Authorization header line is replaced wholesale" "[redacted]"
+    (redacted "Authorization: Bearer ya29.aBcDeFgHi");
+  check string "a home path line is replaced" "[redacted]"
+    (redacted "spawn: /Users/dancer/bin/agy: no such file");
+  check string "an api key line is replaced in any case" "[redacted]"
+    (redacted "OPENAI_API_KEY=sk-s3cr3t");
+  check string "a bearer line without a header prefix is replaced" "[redacted]"
+    (redacted "bearer token leaked into the log");
+  check string "plain diagnostic lines survive untouched"
+    "antigravity: WARNING model streamed nothing"
+    (redacted "antigravity: WARNING model streamed nothing");
+  check string "only the sensitive line is replaced"
+    "line1 stays\n[redacted]\nline3 stays"
+    (redacted "line1 stays\nAuthorization: Bearer sk-9\nline3 stays")
+;;
+
+(* End to end: the 8KB Process_exited detail and the 200-byte empty-success
+   tail share the same redaction point, so a fixture stderr carrying a
+   credential produces a detail an operator can paste without leaking. *)
+let test_process_exit_detail_masks_the_stderr_line () =
+  with_fixture
+    ~exit_code:1
+    ~stderr_line:"Authorization: Bearer ya29.aBcDeFgHi"
+    (* No result event: with a parsed result the blank-success arm would own
+       this shape, so this fixture pins the bare process-exit path, whose
+       detail is exactly the stderr tail. *)
+    [ init () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Process_exited detail) ->
+         check bool "detail carries the exit code" true
+           (String.starts_with ~prefix:"exit code 1: " detail);
+         check bool "detail masks the credential" true
+           (String_util.contains_substring detail "[redacted]");
+         check bool "detail never carries the token" true
+           (not (String_util.contains_substring detail "ya29"))
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "a blank result after a nonzero exit was admitted")
+;;
+
 let test_duplicate_keys_fail_closed () =
   let duplicate =
     {|{"event":"init","event":"init","conversation_id":"conversation-1","init":{"model":"gemini-fixture","cwd":"/tmp","permission_mode":"always-proceed"}}|}
@@ -1701,6 +1747,14 @@ let () =
             "an empty success stderr tail cuts at a character boundary"
             `Quick
             test_empty_success_stderr_tail_cuts_at_a_character_boundary
+        ; test_case
+            "a stderr tail with credentials is redacted line by line"
+            `Quick
+            test_stderr_tail_redacts_sensitive_lines
+        ; test_case
+            "a process exit detail masks the stderr line"
+            `Quick
+            test_process_exit_detail_masks_the_stderr_line
         ] )
     ; "live official client", [ test_case "official agy start and resume" `Slow test_live_start_and_resume ]
     ]

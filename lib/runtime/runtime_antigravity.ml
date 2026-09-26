@@ -629,6 +629,35 @@ let drain_stderr flow tail =
       (Printexc.to_string exn)
 ;;
 
+(* The stderr tail rides into error details that reach the session log and
+   the dashboard. A CLI failure can echo its caller's environment: an
+   Authorization header from a proxy config, an API key on a command line,
+   a token in a config dump. Lines carrying such markers are replaced
+   wholesale before any detail is assembled; every other line is kept
+   byte-identical so real diagnostics survive. *)
+let stderr_sensitive_markers =
+  [ "authorization:"
+  ; "bearer "
+  ; "api_key"
+  ; "apikey"
+  ; "token="
+  ; "/users/"
+  ; "/home/" ]
+;;
+
+let redact_stderr_tail tail =
+  String.concat "\n"
+    (List.map
+       (fun line ->
+          if
+            List.exists
+              (fun marker -> String_util.contains_substring_ci line marker)
+              stderr_sensitive_markers
+          then "[redacted]"
+          else line)
+       (String.split_on_char '\n' tail))
+;;
+
 let signal_spawned_process proc stdin_w =
   Eio.Cancel.protect (fun () ->
     (try Eio.Flow.close stdin_w with
@@ -1136,5 +1165,6 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent 
     Error (Protocol_error { stage = "process completion"; detail = "missing result event" })
   | (`Exited _ | `Signaled _), _, None ->
     let exit = status_to_string status in
+    let stderr = redact_stderr_tail stderr in
     Error (Process_exited (if stderr = "" then exit else exit ^ ": " ^ stderr))
 ;;

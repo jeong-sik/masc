@@ -36,6 +36,11 @@ tools-support = true
 [openrouter.secondary]
 |}
 
+let candidate runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | Some (runtime : Runtime.t) -> runtime.candidate_backpressure
+  | None -> failf "runtime %s is not in the catalog" runtime_id
+
 let with_lane f =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
@@ -63,12 +68,13 @@ let with_lane f =
     Registry.resolve_lane registry ~lane_id:"board_attention_exact"
     |> require_ok "resolved lane"
   in
+  (* A re-initialised catalog keeps an unchanged row's backpressure cell
+     (Runtime.preserve_candidate), so a rest one test left would leak into
+     the next. Every test starts from empty cells. *)
+  List.iter
+    (fun runtime_id -> Backpressure.note_candidate_success ~candidate:(candidate runtime_id))
+    [ primary; secondary ];
   f resolved
-
-let candidate runtime_id =
-  match Runtime.get_runtime_by_id runtime_id with
-  | Some (runtime : Runtime.t) -> runtime.candidate_backpressure
-  | None -> failf "runtime %s is not in the catalog" runtime_id
 
 let slot_ids (resolved : Registry.resolved_lane) =
   List.map (fun (slot : Registry.selected_slot) -> slot.slot_id) resolved.selected_slots

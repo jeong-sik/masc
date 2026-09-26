@@ -167,17 +167,39 @@ let test_x10_mouse_short_on_idle () =
   check_events "no row" [ "key unknown-esc" ] (D.idle decoder)
 
 (* X10 has one release code for every button. A right click is not the left
-   button's release, and a right click made while the left button is held
-   leaves that press open for its own release. *)
-let test_x10_release_ends_the_press_made_last () =
-  let report button = Printf.sprintf "\x1b[M%c*%%" (Char.chr (32 + button)) in
+   button's release, and once two presses overlap their releases read the
+   same whichever button is lifted first -- so neither order ends as a left
+   release. Only a left press held alone releases as the left button's. *)
+let test_x10_release_after_overlap_is_no_buttons_release () =
+  let report ~button ~column ~row =
+    Printf.sprintf "\x1b[M%c%c%c"
+      (Char.chr (32 + button))
+      (Char.chr (32 + column))
+      (Char.chr (32 + row))
+  in
   let left = 0 and right = 2 and release = 3 in
+  let at button = report ~button ~column:10 ~row:5 in
   check_events "a right click releases nothing"
     [ "key unknown-esc"; "key unknown-esc" ]
-    (decode (report right ^ report release));
-  check_events "left held across a right click"
-    [ "press 5,10"; "key unknown-esc"; "key unknown-esc"; "release 5,10" ]
-    (decode (report left ^ report right ^ report release ^ report release))
+    (decode (at right ^ at release));
+  check_events "the other button lifted first"
+    [ "press 5,10"; "key unknown-esc"; "key unknown-esc"; "key unknown-esc" ]
+    (decode
+       (at left
+       ^ report ~button:right ~column:12 ~row:7
+       ^ report ~button:release ~column:12 ~row:7
+       ^ at release));
+  check_events "the left button lifted first"
+    [ "press 5,10"; "key unknown-esc"; "key unknown-esc"; "key unknown-esc" ]
+    (decode
+       (at left
+       ^ report ~button:right ~column:12 ~row:7
+       ^ at release
+       ^ report ~button:release ~column:12 ~row:7));
+  check_events "a click after the overlap drained releases again"
+    [ "press 5,10"; "key unknown-esc"; "key unknown-esc"; "key unknown-esc";
+      "press 5,10"; "release 5,10" ]
+    (decode (at left ^ at right ^ at release ^ at release ^ at left ^ at release))
 
 let test_csi_overflow_is_escape () =
   check_events "parameters past the bound" [ "key esc"; "key x" ]
@@ -253,8 +275,8 @@ let () =
         [ test_case "SGR" `Quick test_sgr_mouse;
           test_case "X10" `Quick test_x10_mouse;
           test_case "X10 short on idle" `Quick test_x10_mouse_short_on_idle;
-          test_case "X10 release ends the press made last" `Quick
-            test_x10_release_ends_the_press_made_last ] );
+          test_case "X10 release after overlap is no button's release" `Quick
+            test_x10_release_after_overlap_is_no_buttons_release ] );
       ( "cancel",
         [ test_case "drops a held sequence" `Quick test_cancel_drops_a_held_sequence ] )
     ]

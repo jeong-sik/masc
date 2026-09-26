@@ -1944,7 +1944,9 @@ let sgr_left_release parameters final =
     a button held with shift, meta or ctrl -- is [X10_other_press]: no surface
     reads it, but its release comes next and must not be taken for the left
     button's. X10 has one release code, 3 in the button bits, for whichever
-    button went up, so which press a release ends is the reader's to track.
+    button went up, so the reader claims a left release only while the left
+    press is the only one held: once presses overlap, lifting either button
+    first reads the same.
     Motion reports, the horizontal wheel and a position byte below the offset
     stay [None]. The caller consumes the three bytes whatever this returns. *)
 type x10_mouse =

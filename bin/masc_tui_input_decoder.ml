@@ -44,12 +44,20 @@ type state =
   | Draining_paste of Masc_tui_paste.decoder
 
 (* An X10 press whose release has not come. X10 sends one release code for
-   every button, so the release ends the press made last. *)
+   every button, so once two presses overlap no release can be told apart:
+   lifting the left button first reads exactly like lifting the other one
+   first. [x10_ambiguous] marks that overlap and stays set until every held
+   press has its release, so a release is only ever the left button's when
+   the left press is the only one held. *)
 type held_button = Held_left | Held_other
 
-type t = { mutable state : state; mutable x10_held : held_button list }
+type t = {
+  mutable state : state;
+  mutable x10_held : held_button list;
+  mutable x10_ambiguous : bool;
+}
 
-let create () = { state = Ground; x10_held = [] }
+let create () = { state = Ground; x10_held = []; x10_ambiguous = false }
 
 (* The same bound [read_input] used: CSI parameters for every key and reply we
    read fit well inside it. *)
@@ -125,10 +133,15 @@ let complete_csi t parameters final =
   else csi_key parameters final
 
 let hold t button =
+  (match t.x10_held with
+  | [] -> ()
+  | _ :: _ -> t.x10_ambiguous <- true);
   t.x10_held <- List.filteri (fun index _ -> index < x10_buttons) (button :: t.x10_held)
 
-(* A release is the left button's only when the press it ends is a left one:
-   SGR says which button went up, and X10 leaves it to the order of presses. *)
+(* A release is the left button's only when the left press is the only one
+   held: SGR says which button went up, but X10's one release code does not,
+   so after an overlap either order of lifting reads the same and neither
+   release is claimed. *)
 let x10_event t ~button ~column ~row =
   match Masc.Tui_decode.x10_mouse_report ~button ~column ~row with
   | Some (Masc.Tui_decode.X10_wheel (direction, row, column)) ->
@@ -141,13 +154,14 @@ let x10_event t ~button ~column ~row =
       key "unknown-esc"
   | Some (Masc.Tui_decode.X10_release (row, column)) -> (
       match t.x10_held with
-      | Held_left :: rest ->
-          t.x10_held <- rest;
+      | [] -> key "unknown-esc"
+      | [ Held_left ] when not t.x10_ambiguous ->
+          t.x10_held <- [];
           [ Mouse_left_release (row, column) ]
-      | Held_other :: rest ->
+      | _ :: rest ->
           t.x10_held <- rest;
-          key "unknown-esc"
-      | [] -> key "unknown-esc")
+          (match rest with [] -> t.x10_ambiguous <- false | _ :: _ -> ());
+          key "unknown-esc")
   | None -> key "unknown-esc"
 
 (* Feed one byte of a string-terminated body. [Some body] once [ESC \\] (or

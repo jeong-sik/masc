@@ -118,7 +118,8 @@ let setup f =
   let config = Workspace.default_config base in
   ensure_dir (Workspace.keepers_runtime_dir config);
   Masc_test_deps.write_sandbox_image_catalog ~base_path:base
-    [ "base", Keeper_sandbox_image.default_tag ];
+    [ "base", Masc_test_deps.live_sandbox_image_tag ];
+
   let meta = make_meta ~name:"stream-close-keeper" () in
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
   Fun.protect

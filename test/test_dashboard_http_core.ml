@@ -5283,6 +5283,10 @@ let prepare_config_sync_keeper ~sw config name =
   (match Runtime.init_default ~config_path:runtime_path with
    | Ok () -> ()
    | Error error -> fail ("runtime init: " ^ error));
+  (* Keeper up resolves a container profile's image name before it writes
+     anything, so the workspace promotes the one the fixtures name. *)
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
   let meta =
     match
       Masc_test_deps.meta_of_json_fixture
@@ -5314,8 +5318,9 @@ let prepare_config_sync_keeper ~sw config name =
     fail (Masc.Keeper_owner_registry.install_error_to_string error)
 
 (* These fixtures exercise config publication with a valid profile.
-   test/dune disables sandbox preflight, so Docker daemon/image readiness is
-   not part of these transaction tests. Profile validation still applies. *)
+   test/dune disables sandbox preflight, so Docker daemon readiness is not
+   part of these transaction tests. Profile validation still applies, and so
+   does the image name: [prepare_config_sync_keeper] promotes [base]. *)
 let write_config_sync_toml config name =
   let dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
@@ -6042,7 +6047,21 @@ let test_config_post_mid_turn_policy_needs_the_lanes_proxy () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-mid-turn-policy" in
   prepare_config_sync_keeper ~sw config name;
-  let (_ : string) = write_config_sync_toml config name in
+  (* A microVM keeper's image lives in its runtime's store, and a Linux runner
+     has no default runtime, so the TOML names one and that store promotes
+     the image. *)
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
+  in
+  mkdir_p keepers_dir;
+  write_file (Filename.concat keepers_dir (name ^ ".toml"))
+    (Printf.sprintf
+       "[keeper]\nsandbox_profile = \"microvm\"\nmicrovm_backend = \"apple_container\"\nsandbox_image = \"base\"\ninstructions = \"%s config-sync fixture instructions\"\nactivation_mode = \"manual\"\n"
+       name);
+  Masc_test_deps.write_sandbox_image_catalog
+    ~store:(Masc.Keeper_sandbox_image_catalog.Microvm Masc.Keeper_microvm_backend.Apple_container)
+    ~base_path:config.Workspace.base_path
+    [ "base", "alpine:test" ];
   register_running_lane config name;
   Fun.protect ~finally:(fun () -> unregister_lane config name) @@ fun () ->
   let policy = {|{"sandbox_profile":"microvm","network_mode":"policy"}|} in

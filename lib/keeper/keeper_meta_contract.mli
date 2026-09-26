@@ -255,6 +255,14 @@ val effective_meta_of_profile_defaults :
   -> keeper_meta
   -> (keeper_meta, string) result
 
+val microvm_backend_of_profile_defaults :
+  Keeper_types_profile.keeper_profile_defaults -> Keeper_microvm_backend.t option
+(** The runtime a [microvm] Keeper's guest runs on: the declared
+    [microvm_backend], else this host's default. [None] when there is neither;
+    {!effective_meta_of_profile_defaults} refuses a [microvm] Keeper then. The
+    overlay reads this, so a caller that has no meta yet (keeper up) finds the
+    same runtime the overlay would. *)
+
 val missing_required_sandbox_profile_error :
   keeper_name:string ->
   Keeper_types_profile.keeper_profile_defaults ->

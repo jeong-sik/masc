@@ -406,20 +406,61 @@ let phase_label = function
 (* Each runtime keeps its own image store, so the refusal names the CLI that
    was asked. Telling an [msb] keeper to install Apple container -- which the
    Apple-only wording did -- sends the operator to fix a runtime the keeper
-   does not use. *)
-let image_present_result_for backend ~image = function
+   does not use.
+
+   Promote records a tag the store already has, so what differs per runtime
+   is how a build gets into its store: [masc sandbox-image] builds into
+   container's and nerdctl's, and msb has no build command, so a build
+   reaches it through [msb load]. Going back is a promote of an earlier tag
+   the store still has. *)
+let missing_image_recovery backend ~name ~image =
+  let runtime = Backend.to_string backend in
+  match backend, name with
+  | (Backend.Apple_container | Backend.Nerdctl_kata), Some name ->
+    let source =
+      if String.equal name Keeper_sandbox_image_version.(base_embedded.name)
+      then ""
+      else " --source <checkout>"
+    in
+    Printf.sprintf
+      "Next: build a new version with `masc sandbox-image --recipe %s%s \
+       --runtime %s` and promote the tag it prints, or promote an earlier tag \
+       this store still has: `masc sandbox-image promote %s <tag> --runtime \
+       %s`."
+      name source runtime name runtime
+  | (Backend.Apple_container | Backend.Nerdctl_kata), None ->
+    Printf.sprintf
+      "Next: inspect this Keeper's sandbox_image catalog name, then build and \
+       promote a new version for %s."
+      runtime
+  | Backend.Microsandbox, Some name ->
+    Printf.sprintf
+      "Next: restore %s to msb's store from a trusted OCI archive with `msb \
+       load`, or load another build and promote its tag with `masc \
+       sandbox-image promote %s <tag> --runtime %s`. MASC cannot build a \
+       microsandbox image: msb has no build command."
+      image name runtime
+  | Backend.Microsandbox, None ->
+    Printf.sprintf
+      "Next: restore %s to msb's store from a trusted OCI archive with `msb \
+       load`. MASC cannot build a microsandbox image: msb has no build \
+       command."
+      image
+;;
+
+let image_present_result_for backend ~name ~image = function
   | Image_present -> Ok ()
   | Image_missing ->
     Error
       (Printf.sprintf
-         "microvm_image_missing: %s is not in %s's image store. Each microVM \
-          runtime keeps its images apart from Docker's, and none of these \
-          runs has a --pull=never, so running without this check fetches from \
-          a registry instead of failing. Next: build or load the image into \
-          %s before starting a microvm keeper."
+         "microvm_image_missing: %s is the build the host image catalog names \
+          for this Keeper, and it is not in %s's image store. Each microVM \
+          runtime keeps its images apart from Docker's, and none of these runs \
+          has a --pull=never, so running without this check fetches from a \
+          registry instead of failing. %s"
          image
          (Backend.cli_name backend)
-         (Backend.cli_name backend))
+         (missing_image_recovery backend ~name ~image))
   | Image_cli_unavailable ->
     Error
       (Printf.sprintf
@@ -572,86 +613,16 @@ let image_probe_for backend ~image ~timeout_sec =
   classify_image_probe_for backend ~image ~inspect ~listing
 ;;
 
-(* Build the image this binary carries the recipe for, into the store the
-   backend reads.
-
-   The gate below refuses a missing image rather than letting the runtime
-   fetch it, and that refusal is right: none of these runs has --pull=never,
-   so an absent image is a reach for a registry, and on 2026-08-28 that reach
-   came back 401 from registry-1.docker.io -- with credentials present it
-   would have pulled a stranger's image under the keeper's name. Building
-   from the recipe in this binary is not that. The bits are ours, no registry
-   is asked, and the result is the same on every host.
-
-   Only for [Keeper_sandbox_image.default_tag] itself. A keeper naming any
-   other image names one we have no recipe for, and an operator who pointed
-   the default at their own tag would find our recipe written over it.
-
-   Two keepers booting together can both reach here for the same tag. That
-   costs a duplicate build, not a wrong one -- the recipe is the same bytes
-   either way -- so there is no lock here until one is shown to be needed. *)
-let build_recipe_image_for backend ~image ~timeout_sec =
-  match Keeper_microvm_backend.recipe_delivery backend with
-  | Keeper_microvm_backend.Builds_no_images -> Error `No_build_command
-  | Keeper_microvm_backend.On_stdin ->
-    (* Docker's grammar reads the recipe on stdin, which this process spawner
-       does not offer. The context-directory form is what both grammars take,
-       so it is the one used for every runtime that builds at all. *)
-    Error `Not_attempted_here
-  | Keeper_microvm_backend.In_a_context_directory ->
-    let context = Filename.temp_file "masc-sandbox-image-" ".d" in
-    Sys.remove context;
-    Unix.mkdir context 0o700;
-    let cleanup () =
-      (try Sys.remove (Filename.concat context "Dockerfile") with Sys_error _ -> ());
-      try Unix.rmdir context with Unix.Unix_error _ -> ()
-    in
-    Fun.protect ~finally:cleanup (fun () ->
-        let dockerfile = Keeper_sandbox_image.write_recipe_into ~dir:context in
-        let argv =
-          command_argv_for backend
-          @ Keeper_sandbox_image.context_directory_build_argv ~tag:image
-              ~dockerfile ~context ()
-        in
-        match Process_eio.run_argv_with_status_split ~timeout_sec argv with
-        | Unix.WEXITED 0, _, _ -> Ok ()
-        | _, _, stderr -> Error (`Build_failed stderr))
-
-let image_present_for backend ~image ~timeout_sec =
-  match image_probe_for backend ~image ~timeout_sec with
-  | Image_missing when String.equal image Keeper_sandbox_image.default_tag -> (
-    match build_recipe_image_for backend ~image ~timeout_sec with
-    | Ok () ->
-      (* Ask the store again rather than trust the build's exit: the gate's
-         question is whether the image is there, and only the store answers
-         that. *)
-      image_probe_for backend ~image ~timeout_sec
-      |> image_present_result_for backend ~image
-    | Error `No_build_command ->
-      Error
-        (Printf.sprintf
-           "microvm_image_missing: %s is not in %s's image store, and %s \
-            builds no images -- it has pull, load and save and no build. \
-            Next: build the image elsewhere, save it as an OCI archive, and \
-            `%s load` it."
-           image
-           (Backend.cli_name backend)
-           (Backend.cli_name backend)
-           (Backend.cli_name backend))
-    | Error `Not_attempted_here ->
-      image_present_result_for backend ~image Image_missing
-    | Error (`Build_failed stderr) ->
-      Error
-        (Printf.sprintf
-           "microvm_image_build_failed: %s was missing from %s's image store, \
-            and building it from the recipe in this binary failed. Next: run \
-            `masc sandbox-image --runtime %s --tag %s` and read what it says. %s"
-           image
-           (Backend.cli_name backend)
-           (Backend.to_string backend)
-           image
-           (String.trim stderr)))
-  | probe -> image_present_result_for backend ~image probe
+(* The gate refuses a missing image rather than letting the runtime fetch
+   it: none of these runs has --pull=never, so an absent image is a reach for
+   a registry, and on 2026-08-28 that reach came back 401 from
+   registry-1.docker.io -- with credentials present it would have pulled a
+   stranger's image under the keeper's name. Nor does it build one: the image
+   is the build the host catalog has promoted, and only
+   [masc sandbox-image] builds and promotes. *)
+let image_present_for backend ~name ~image ~timeout_sec =
+  image_probe_for backend ~image ~timeout_sec
+  |> image_present_result_for backend ~name ~image
 ;;
 
 (* ── Turn-container argv ─────────────────────────────────────────────

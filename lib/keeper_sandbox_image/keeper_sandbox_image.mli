@@ -20,11 +20,6 @@
     Keeper with [sandbox_image] — the container is read-only, so a turn
     cannot install what it finds missing. *)
 
-val default_tag : string
-(** ["masc-sandbox:general"] — the image the shipped Keepers name. [masc
-    setup] builds it when the store lacks it, and the Apple Container runtime
-    does on a Keeper's first boot; nothing rebuilds it once it is there. *)
-
 val dockerfile : string
 (** The recipe, read at build time from [sandbox-images/base/Dockerfile]. It
     carries no [COPY]: it builds from stdin with no context, which
@@ -35,18 +30,12 @@ val build_argv : ?labels:(string * string) list -> tag:string -> unit -> string 
     trailing ["-"] is the context: the caller feeds {!dockerfile} to stdin.
     Each label becomes one [--label key=value]. *)
 
-val write_recipe_into : dir:string -> string
-(** Write {!dockerfile} as [<dir>/Dockerfile] and answer that path. For the
-    runtimes that take a context directory rather than stdin. [dir] is the
-    caller's to create and to remove, and nothing else belongs in it: the
-    context stays what [-] gives docker, the recipe and nothing more. *)
-
 val context_directory_build_argv :
   ?labels:(string * string) list ->
   tag:string -> dockerfile:string -> context:string -> unit -> string list
 (** Arguments after a runtime command that takes a directory rather than
     stdin: [build -t <tag> -f <dockerfile> <context>]. Apple's [container
     build] is one — its usage line takes a context directory and it offers no
-    [-] — so the caller writes {!dockerfile} to a file and names it here.
+    [-] — so the caller writes the recipe to a file and names it here.
     Which runtimes need this is {!Keeper_microvm_backend.recipe_delivery}'s
     answer, not this module's: it knows the recipe, not the fleet. *)

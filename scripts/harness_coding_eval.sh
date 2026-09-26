@@ -191,10 +191,9 @@ prepare_live_environment() {
   mkdir -p "${TARGET_DIR}" "${CONFIG_DIR}"
   cp -R "${ROOT_DIR}/config/." "${CONFIG_DIR}"
   # The eval Keeper names `base`, which the copied catalog lists with no build.
-  # Promote the general image this host already has, the one the harness ran on
-  # before Keepers named catalog images. The host file holds builds only: the
-  # binary ships the names, `ocaml` included.
-  local base_image="masc-sandbox:general"
+  # Promote the fixture image CI builds into Docker. The host file holds
+  # builds only: the binary ships the names, `ocaml` included.
+  local base_image="masc-sandbox-test:ci"
   if ! docker image inspect "${base_image}" > /dev/null; then
     echo "coding eval failed: ${base_image} is not in Docker's image store; build it with \`masc sandbox-image --tag ${base_image}\`" >&2
     exit 1

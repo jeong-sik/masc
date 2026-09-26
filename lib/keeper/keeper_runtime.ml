@@ -17,6 +17,7 @@ type boot_meta_failure_cause =
   | Config_invalid
   | Sandbox_profile_required
   | Sandbox_image_required
+  | Sandbox_image_unresolved
   | Materialization_failed
 
 let boot_meta_failure_cause_label = function
@@ -25,6 +26,7 @@ let boot_meta_failure_cause_label = function
   | Config_invalid -> "config_invalid"
   | Sandbox_profile_required -> "sandbox_profile_required"
   | Sandbox_image_required -> "sandbox_image_required"
+  | Sandbox_image_unresolved -> "sandbox_image_unresolved"
   | Materialization_failed -> "materialization_failed"
 
 type boot_meta_error = {
@@ -322,7 +324,9 @@ let emit_keeper_meta_overlay_drift ~keeper_name categories =
            ())
       cats
 
-let ensure_keeper_meta_with_cause config name =
+(* The profile defaults travel with the meta so the boot path can make the
+   effective meta from the same read of the keeper TOML that produced it. *)
+let ensure_keeper_meta_and_defaults config name =
   match read_meta config name with
   | Ok (Some meta) ->
     (
@@ -474,7 +478,7 @@ let ensure_keeper_meta_with_cause config name =
              })
       with
       | Ok (Some committed) ->
-        Ok committed
+        Ok (defaults, committed)
       | Ok None ->
         Error
           (boot_meta_error
@@ -491,7 +495,7 @@ let ensure_keeper_meta_with_cause config name =
         Log.Keeper.warn "ensure_keeper_meta: owner re-sync failed: %s" detail;
         Error (boot_meta_error Meta_read_error detail)
     end
-    else Ok overlayed))
+    else Ok (defaults, overlayed)))
   | Ok None ->
     Log.Keeper.warn
       "ensure_keeper_meta: no persistent meta for %s — run keeper_up to initialize" name;
@@ -501,6 +505,83 @@ let ensure_keeper_meta_with_cause config name =
             "no persistent meta for %s — run keeper_up to initialize"
             name))
   | Error msg -> Error (boot_meta_error Meta_read_error msg)
+
+(* Also the running-keeper TOML re-sync in the supervisor sweep, which is why
+   the image is not judged here: a running keeper's config re-sync must not
+   stop on a catalog change. The boot path judges it, below. *)
+let ensure_keeper_meta_with_cause config name =
+  Result.map snd (ensure_keeper_meta_and_defaults config name)
+
+(* Operator decision 2026-09-25, RFC keeper-sandbox-images-have-versions
+   §2.4: a keeper whose container would start from a name this host cannot
+   resolve does not boot, the same place a missing name is refused (#37523).
+   Booting it anyway made every wake fail on the same refusal.
+
+   The store is a property of the effective meta ([microvm_backend] is not in
+   durable meta), and the turn resolves on the effective meta, so boot does
+   too. A keeper whose effective meta cannot be made at all (a microvm with
+   no runtime on this host, a remote_ssh with no endpoint) never runs a turn;
+   the supervisor's reconcile of a keeper with meta already refuses to boot
+   it, and so does this. *)
+let admit_boot_meta config ((defaults, meta) : keeper_profile_defaults * keeper_meta) =
+  match effective_meta_of_profile_defaults defaults meta with
+  | Error detail ->
+    Log.Keeper.warn "%s" detail;
+    Error (boot_meta_error Config_invalid detail)
+  | Ok effective ->
+    (match
+       Keeper_sandbox_image_admission.boot_refusal
+         ~base_path:config.Workspace.base_path effective
+     with
+     | None -> Ok meta
+     | Some error ->
+       let msg =
+         Printf.sprintf "keeper %s rejected: %s" meta.name
+           (Keeper_sandbox_image_resolver.error_to_string error)
+       in
+       Log.Keeper.warn "%s" msg;
+       Error (boot_meta_error Sandbox_image_unresolved msg))
+
+(* The materialization path has no meta yet, so [admit_boot_meta] cannot judge
+   it; [declarative_materialization_args] hands keeper up the same TOML these
+   defaults were read from, and keeper up resolves the declared image before
+   any preflight. Judge it here with the same store rule so the refusal is
+   recorded with its typed cause instead of arriving as keeper up's tool body
+   wrapped in [Materialization_failed]. *)
+let admit_declarative_boot_image config name (defaults : keeper_profile_defaults) =
+  let module Sandbox = Keeper_types_profile_sandbox in
+  let refusal_of_resolution resolution =
+    match resolution with
+    | Ok (_ : Keeper_sandbox_image_catalog.pinned) -> None
+    | Error error ->
+      let msg =
+        Printf.sprintf "keeper %s rejected: %s" name
+          (Keeper_sandbox_image_resolver.error_to_string error)
+      in
+      Log.Keeper.warn "%s" msg;
+      Some (boot_meta_error Sandbox_image_unresolved msg)
+  in
+  match defaults.sandbox_profile with
+  | None | Some Sandbox.Remote_ssh -> None
+  | Some Sandbox.Docker ->
+    refusal_of_resolution
+      (Keeper_sandbox_image_resolver.resolve_in_workspace
+         ~base_path:config.Workspace.base_path
+         ~store:Keeper_sandbox_image_catalog.Docker_daemon
+         defaults.sandbox_image)
+  | Some Sandbox.Micro_vm -> (
+    match microvm_backend_of_profile_defaults defaults with
+    | None ->
+      refusal_of_resolution
+        (Error
+           (Keeper_sandbox_image_resolver.No_image_store
+              { keeper = name; sandbox_profile = Sandbox.Micro_vm }))
+    | Some backend ->
+      refusal_of_resolution
+        (Keeper_sandbox_image_resolver.resolve_in_workspace
+           ~base_path:config.Workspace.base_path
+           ~store:(Keeper_sandbox_image_catalog.Microvm backend)
+           defaults.sandbox_image))
 
 let ensure_keeper_meta config name =
   match ensure_keeper_meta_with_cause config name with
@@ -566,8 +647,11 @@ let park_unreadable_meta_before_rematerialization config name =
 let load_or_materialize_boot_meta (ctx : _ context) name
     : (boot_meta_resolution, string) result =
   let result =
-    match ensure_keeper_meta_with_cause ctx.config name with
-    | Ok meta -> Ok { meta; materialized = false }
+    match ensure_keeper_meta_and_defaults ctx.config name with
+    | Ok resolved ->
+      Result.map
+        (fun meta -> { meta; materialized = false })
+        (admit_boot_meta ctx.config resolved)
     | Error ({ cause = Missing_meta; _ } as original_error) -> (
         match keeper_toml_path_opt_for_config ctx.config name with
         | None -> Error original_error
@@ -578,11 +662,14 @@ let load_or_materialize_boot_meta (ctx : _ context) name
             park_unreadable_meta_before_rematerialization ctx.config name;
             match declarative_materialization_defaults ctx.config name with
             | Error err -> Error err
-            | Ok defaults ->
-            let result =
-              Keeper_turn.handle_keeper_up ctx
-                (declarative_materialization_args name defaults)
-            in
+            | Ok defaults -> (
+              match admit_declarative_boot_image ctx.config name defaults with
+              | Some refusal -> Error refusal
+              | None ->
+              let result =
+                Keeper_turn.handle_keeper_up ctx
+                  (declarative_materialization_args name defaults)
+              in
             if not (tool_result_success result) then
               Error
                 (materialization_failed_boot_error
@@ -604,10 +691,13 @@ let load_or_materialize_boot_meta (ctx : _ context) name
                           "materialized declarative keeper %s from %s but failed to reload meta: %s"
                           name toml_path msg))
               | Ok (Some _) -> (
-                  match ensure_keeper_meta_with_cause ctx.config name with
-                  | Ok meta -> Ok { meta; materialized = true }
+                  match ensure_keeper_meta_and_defaults ctx.config name with
+                  | Ok resolved ->
+                    Result.map
+                      (fun meta -> { meta; materialized = true })
+                      (admit_boot_meta ctx.config resolved)
                   | Error msg ->
-                      Error (materialized_reload_boot_error ~name ~toml_path msg))))
+                      Error (materialized_reload_boot_error ~name ~toml_path msg)))))
     | Error original_error -> Error original_error
   in
   remember_boot_meta_result ctx name result

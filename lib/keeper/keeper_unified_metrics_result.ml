@@ -68,7 +68,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       ( delta.input_tokens
       , delta.output_tokens
       , Inference_utils.total_tokens usage
-      , Option.value ~default:0.0 delta.cost_usd )
+      , Keeper_usage_resolution.reported_cost_usd delta )
     | None -> 0, 0, 0, 0.0
   in
   let has_substantive_tools = has_substantive_tool_calls tool_names in

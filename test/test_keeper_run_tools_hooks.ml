@@ -828,8 +828,11 @@ let test_the_completion_hook_rows_by_attempt () =
         , match usage with
           | Cost_ledger.Usage_missing -> "missing"
           | Cost_ledger.Usage_reported _ -> "reported" )
-      | Ok { Cost_ledger.usage_projection = Cost_ledger.Resolved_delta; _ } ->
-        fail "the completion hook wrote a resolved row"
+      | Ok
+          { Cost_ledger.usage_projection =
+              Cost_ledger.Resolved_delta | Cost_ledger.Resolved_attempt_delta _
+          ; _
+          } -> fail "the completion hook wrote a resolved row"
       | Error error -> failf "cost row: %s" (Cost_ledger.decode_error_to_string error))
   in
   let usage : Agent_core.Types.api_usage =

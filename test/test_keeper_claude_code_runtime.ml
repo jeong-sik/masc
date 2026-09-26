@@ -2431,7 +2431,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
         messages
         (total_atoms - transmitted)
     with
-    | Some digest -> digest
+    | Some digest -> Some digest
     | None -> fail "the record's own history has that atom"
   in
   { execution_ids = []
@@ -2448,6 +2448,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
   ; selected_model = None
   ; finish_reason = Some "completed"
   ; context_window = None
+  ; provider_context_window = None
   ; price_input_per_million = None
   ; price_output_per_million = None
   ; request_latency_ms = None
@@ -2947,7 +2948,7 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
         observation.transmitted_atoms;
       check (option string) (label ^ ": and names atom 60 as its front")
         (Runtime_model_input_tail_window.atom_opening_digest messages 60)
-        (Some observation.front_atom_digest)
+        observation.front_atom_digest
   in
   (match project () with
    | Error error -> fail (Agent_core.Error.to_string error)

@@ -78,12 +78,26 @@ let composer_to_string = function
    enough to go whole loses nothing: seeding its oldest atom and seeding
    nothing both carry everything. *)
 let carried_front_of_window (window : Turn_record.model_input_window) =
-  if window.Turn_record.transmitted_atoms >= window.Turn_record.total_atoms
-  then None
-  else
+  match
+    ( window.Turn_record.transmitted_atoms >= window.Turn_record.total_atoms
+    , window.Turn_record.front_atom_digest )
+  with
+  | _, Some front_atom_digest when
+      window.Turn_record.transmitted_atoms
+      < window.Turn_record.total_atoms ->
     Some
       ( window.Turn_record.total_atoms - window.Turn_record.transmitted_atoms
-      , window.Turn_record.front_atom_digest )
+      , front_atom_digest )
+  | _, None when window.Turn_record.transmitted_atoms = 0 ->
+    (* #39013: the floor is an answer. The record's response carried none of
+       its history — the ceiling reached the zero-prior-history floor — so the
+       newest fact on the trace is "start over", not silence. A seed must name
+       a front, so the boundary carries the empty string and lets
+       [for_history] drop it the usual way: [Front_atom_missing], restart at
+       the turn boundary. Seeding nothing here would let the scan walk past
+       this record and resurrect an older front the floor just made untenable. *)
+    Some (window.Turn_record.total_atoms, "")
+  | _, _ -> None
 ;;
 
 let of_records ~trace_id (records : Turn_record.t list) =

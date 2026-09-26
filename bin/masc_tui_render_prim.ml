@@ -3409,20 +3409,20 @@ let context_composition_lines ~cols ~turn_back
         non_request_token_lines "tokens reported with unknown scope"
     | Runtime_usage_scope.Per_request -> (
         match record.usage.input_tokens, record.context_window with
-        (* A figure above the window is not one request's input: a request
-           that size would have been refused. Drawing it as an occupancy
-           would print 375% of a window. *)
+        (* A figure above MASC's effective shaping ceiling cannot become a
+           percentage of that ceiling. The client may report a different
+           model window; its size is shown separately below. *)
         | Some tokens, Some maximum when maximum > 0 && tokens > maximum ->
             fact
               (Printf.sprintf
-                 "%s tokens counted this turn, more than the %s-token window: \
-                  not one request's count"
+                 "%s provider input tokens exceed the %s-token MASC shaping ceiling; \
+                  ctx-fill against that ceiling is unavailable"
                  (Inspector.format_tokens tokens)
                  (Inspector.format_tokens maximum))
         | Some tokens, Some maximum when maximum > 0 ->
             fact
               (Printf.sprintf
-                 "%s / %s tokens  ·  %.1f%% of the window  ·  %s left"
+                 "%s / %s tokens  ·  %.1f%% of MASC shaping ceiling  ·  %s left"
                  (Inspector.format_tokens tokens)
                  (Inspector.format_tokens maximum)
                  (float tokens /. float maximum *. 100.)
@@ -3435,6 +3435,28 @@ let context_composition_lines ~cols ~turn_back
             [ Printf.sprintf "  %s input tokens; window not observed"
                 (Inspector.format_tokens tokens) ]
         | None, _ -> [ "  Context usage was not reported for this turn" ])
+  in
+  let provider_context_lines =
+    let occupied =
+      Inspector.client_context_tokens ~scope:record.usage.scope
+        ~input_tokens:record.usage.input_tokens
+        ~output_tokens:record.usage.output_tokens
+    in
+    match occupied, record.provider_context_window with
+    (* [Turn_record.of_json] admits only a positive window, so no guard here. *)
+    | Some tokens, Some window ->
+      fact
+        (Printf.sprintf
+           "Client reports active context %s / provider window %s tokens%s; \
+            this is separate from MASC's shaping ceiling"
+           (Inspector.format_tokens tokens)
+           (Inspector.format_tokens window)
+           (if tokens > window then " (over the reported window)" else ""))
+    | None, Some window ->
+      fact
+        (Printf.sprintf "Client reports a %s-token model window; active context unavailable"
+           (Inspector.format_tokens window))
+    | (Some _ | None), None -> []
   in
   let cache_lines =
     let parts =
@@ -3732,7 +3754,7 @@ let context_composition_lines ~cols ~turn_back
          simply reported nothing. One None in the data covers both, so the
          scope -- which the record owns -- decides. *)
       let marker = if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " " in
-      match recent.scope, recent.input_tokens with
+      let usage_lines = match recent.scope, recent.input_tokens with
       | Runtime_usage_scope.Turn_total, _ ->
           [ marker ^ Ansi.dim
             ^ Printf.sprintf " #%-4d %s  client turn total, not per request" recent.turn ts
@@ -3778,6 +3800,23 @@ let context_composition_lines ~cols ~turn_back
                 recent.turn ts
             ^ Ansi.reset
           ]
+      in
+      usage_lines
+      @ (match
+           Inspector.client_context_tokens ~scope:recent.scope
+             ~input_tokens:recent.input_tokens ~output_tokens:recent.output_tokens,
+           recent.provider_context_window
+         with
+         | Some tokens, Some window ->
+           fact
+             (Printf.sprintf "    client ctx %s/%s"
+                (Inspector.format_tokens tokens)
+                (Inspector.format_tokens window))
+         | None, Some window ->
+           fact
+             (Printf.sprintf "    client window %s; active context unavailable"
+                (Inspector.format_tokens window))
+         | (Some _ | None), None -> [])
     in
     let inputs =
       List.filter_map
@@ -3829,6 +3868,7 @@ let context_composition_lines ~cols ~turn_back
           ~caption:"the provider's count of it, then the estimate from the body masc built"
     ]
   @ token_lines
+  @ provider_context_lines
   @ wire_lines
   @ cache_lines
   @ [ "" ]

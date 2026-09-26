@@ -2576,7 +2576,7 @@ let render_board_list (state : state) =
      counted them by hand and counted two rows it no longer draws, so the
      footer stood two rows above the composer. *)
   surface_chrome state ~terminal_rows ~cols ~surface_key:"board-list"
-    ~title:header ~hints:(Masc_tui_keys.footer_hints state.view)
+    ~title:header ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view)
     ~body:(fun ~budget c ->
       (* The header is laid out by the same arithmetic as the rows below it,
          because a header laid out by its own is a header that stops
@@ -3571,16 +3571,16 @@ let render_planning_list (state : state) =
             holds for the roster and the reading panes. The chrome is zero
             here because [content_height] above has already taken it. *)
          let list_rows =
-           (* A short frame may leave no list row at all. When it leaves one
-              row for several goals, use that row to say how many goals are
-              hidden; the selected goal still has its detail row below. *)
+           (* A short frame may leave no list row at all. When it leaves
+              one, that row is the selected goal: the cursor row is what
+              [j/k] and Enter act on, and the count needs a second row. *)
            if content_height <= 0 then 0
-           else if content_height = 1 && count > 1 then 0
+           else if content_height = 1 then 1
            else
              Masc_tui_scroll.content_height ~rows:content_height ~chrome:0
                ~count ~preview_keep:None ~overflow_takes_row:true
          in
-         let overflowing = content_height > 0 && count > list_rows in
+         let overflowing = content_height > 1 && count > list_rows in
          let scroll_offset =
            if list_rows = 0 then 0
            else if state.planning_cursor >= list_rows then
@@ -6628,8 +6628,10 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
     | R.Provided text -> [ "QUESTION PROVIDED"; text ]
     | R.Generated value -> generation "QUESTION GENERATED" value
   in
+  (* The sample header names the failed stage. Retain the stage when the
+     header scrolls away, without repeating the FAILED status. *)
   let failed_generation label (value : R.failed_generation) =
-    [ label ^ " FAILED  " ^ value.error
+    [ label ^ " CAUSE  " ^ value.error
     ; "REQUESTED  " ^ value.request.requested_model ^ "  ·  runtime " ^ value.request.runtime_id
     ] @ prepared value.request
     @ (match value.incomplete_response with
@@ -6663,7 +6665,7 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
         | R.Judge_failed { question; answer; failure } -> Theme.bad (), "JUDGE FAILED",
             question_lines question @ generation "ANSWER" answer
             @ [ "JUDGE REQUESTED  " ^ failure.request.model ^ "  ·  " ^ failure.request.endpoint
-              ; "JUDGE FAILED  " ^ failure.error ]
+              ; "JUDGE CAUSE  " ^ failure.error ]
         | R.Scored { question; answer; judgment } -> Ansi.reset, "SCORED",
             question_lines question @ generation "ANSWER" answer
             @ [ "JUDGE  " ^ judgment.response_model ^ "  ·  " ^ judgment.request.endpoint
@@ -7421,7 +7423,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                (String.concat ", "
                   (List.map
                      (fun (first : Tui_decode.keeper_exact_lane_first) ->
-                       first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
+                       (* The marker leads: a narrow pane cuts the row's
+                          tail, and the slot id is the part it can lose. *)
+                       (if first.kel_offered then ""
+                        else "not offered, lane order \xc2\xb7 ")
+                       ^ first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
                        ^ first.kel_slot_id)
                      firsts))
            ^ Ansi.reset);
@@ -8559,7 +8565,7 @@ let render_system_log_detail (state : state) seq =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints System_logs));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:true System_logs));
   finish_surface state ~clamped:(System_log_detail_scroll scroll)
     ~surface_key:"system-log-detail" ~rows:terminal_rows ~cols buf
 
@@ -8771,7 +8777,8 @@ let render_system_logs (state : state) =
       (Printf.sprintf "[entries %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height total_entries));
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view));
   finish_surface state ~surface_key:"system-logs" ~rows:terminal_rows
       ~cols buf
 
@@ -10016,7 +10023,7 @@ let render_fusion_list (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints Fusion));
+         (Masc_tui_keys.footer_hints ~detail_open:false Fusion));
   finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
 
 (* The panel as marks, one per model, filled where the model answered.

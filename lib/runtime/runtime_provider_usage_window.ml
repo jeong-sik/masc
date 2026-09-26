@@ -298,6 +298,13 @@ let required_as read ~path name fields =
   read ~path:(member_path path name) json
 ;;
 
+(* Absent and null both mean the provider stated no such value. *)
+let optional_as read ~path name fields =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some json -> Result.map Option.some (read ~path:(member_path path name) json)
+;;
+
 (* Absent and null both mean the provider stated no such object. *)
 let optional_object ~path name fields =
   match List.assoc_opt name fields with
@@ -513,12 +520,40 @@ let optional_rfc3339 ~path name fields =
        Error (Wrong_type { path; expected = "an RFC 3339 timestamp" }))
 ;;
 
-(* One Kimi [detail] object, or the top-level [usage]: [used] of [limit]. *)
+(* What a Kimi count object has used of its [limit]. The counts are
+   protobuf JSON (int64 as decimal strings, enums by name), which leaves out
+   a field whose value is zero: on 2026-09-25 the answer, like the body in
+   MoonshotAI/kimi-code#3951, carried [limits[].detail] as limit/remaining
+   (nothing used) and the top-level [usage] as limit/used (nothing left).
+   So either count gives the other; both present must add up to [limit],
+   and neither present is refused. *)
+let kimi_used ~path ~limit fields =
+  let* used = optional_as decimal_string_at ~path "used" fields in
+  let* remaining = optional_as decimal_string_at ~path "remaining" fields in
+  let used_path = member_path path "used" in
+  let remaining_path = member_path path "remaining" in
+  match used, remaining with
+  | Some used, None -> count_within_limit ~path:used_path ~limit used
+  | None, Some remaining ->
+    let* remaining = count_within_limit ~path:remaining_path ~limit remaining in
+    Ok (limit - remaining)
+  | Some used, Some remaining ->
+    let* used = count_within_limit ~path:used_path ~limit used in
+    if used + remaining = limit
+    then Ok used
+    else
+      Error
+        (Unexpected_value
+           { path = remaining_path; expected = Printf.sprintf "%d (limit - used)" (limit - used) })
+  | None, None -> Error (Missing_field { path = member_path path "used or remaining" })
+;;
+
+(* One Kimi [detail] object, or the top-level [usage]: what it used of
+   [limit]. *)
 let kimi_count_window ~path ~kind fields =
-  let* used = required_as decimal_string_at ~path "used" fields in
   let* limit = required_as decimal_string_at ~path "limit" fields in
   let* limit = positive_int ~path:(member_path path "limit") limit in
-  let* used = count_within_limit ~path:(member_path path "used") ~limit used in
+  let* used = kimi_used ~path ~limit fields in
   let* resets_at = optional_rfc3339 ~path "resetTime" fields in
   Ok { limit_id = None; kind; utilization = fraction_of_counts ~used ~limit; resets_at }
 ;;
@@ -549,7 +584,8 @@ let kimi_limit ~path json =
 
 (* Kimi, GET /coding/v1/usages (undocumented; the vendor's own CLI calls it).
    [usages.*.used_ratio] is not read: on the same response it contradicts
-   [limits[].detail] (used 20 of 100 with ratio 0), an open upstream issue,
+   the top-level [usage] (used 100 of 100 with [limit_7d] ratio 0, while the
+   account was refused for its weekly limit), an open upstream issue,
    MoonshotAI/kimi-code#3951.  The top-level [usage] states no window
    length. Its [resetTime] is preserved without guessing the period. *)
 let decode_kimi_coding_usages json =

@@ -94,7 +94,9 @@ export type TurnResponseObservedModelInput = {
   transmitted_atoms: number
   total_atoms: number
   model_input_measurement: TurnModelInputMeasurement
-  front_atom_digest: string
+  // null names no front: the window is a floor — the request transmitted none
+  // of its history (#39166). Legal only beside transmitted_atoms === 0.
+  front_atom_digest: string | null
 }
 export type TurnRecordEntry = {
   execution_ids: string[]
@@ -484,15 +486,19 @@ function decodeTurnResponseObservedModelInput(raw: unknown): TurnResponseObserve
   const transmitted_atoms = decodeNonNegativeSafeInteger(raw.transmitted_atoms)
   const total_atoms = decodeNonNegativeSafeInteger(raw.total_atoms)
   const model_input_measurement = decodeTurnModelInputMeasurement(raw.model_input_measurement)
-  const front_atom_digest = decodeExactNonEmptyString(raw.front_atom_digest)
+  // A null digest is a floor window: the request transmitted none of its
+  // history, so no atom names its front (#39166). Anything else must be a
+  // lowercase sha256 hex string.
+  const front_atom_digest =
+    raw.front_atom_digest === null ? null : decodeExactNonEmptyString(raw.front_atom_digest)
   if (
     runtime_profile === null
     || transmitted_atoms === null
     || total_atoms === null
     || transmitted_atoms > total_atoms
     || model_input_measurement === null
-    || front_atom_digest === null
-    || !/^[0-9a-f]{64}$/.test(front_atom_digest)
+    || (front_atom_digest !== null && !/^[0-9a-f]{64}$/.test(front_atom_digest))
+    || (front_atom_digest === null && transmitted_atoms !== 0)
   ) return null
   return { runtime_profile, transmitted_atoms, total_atoms, model_input_measurement, front_atom_digest }
 }

@@ -307,6 +307,14 @@ val run_heartbeat_loop :
   wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
 module For_testing : sig
+  val provider_wait_interrupt :
+    keeper_name:string ->
+    dispatch_snapshot:Runtime.keeper_dispatch_snapshot ->
+    assignment_id:string ->
+    deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
+    now:float ->
+    (now:float -> bool)
+  (** Revalidate a provider wait against its dispatch and observed path rest. *)
   (** The production retention pass against the durable queue. Counts are
       observations only; no pending source is acknowledged by this pass. *)
   val retain_connector_attention_sources :

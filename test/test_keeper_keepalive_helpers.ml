@@ -386,6 +386,23 @@ let test_stop_still_cuts_a_backoff_sleep () =
        | KKS.Woken | KKS.Timeout -> false))
 ;;
 
+let test_dependency_change_interrupts_provider_rest () =
+  Eio_main.run (fun env ->
+    let stop = Atomic.make false in
+    let wakeup = Atomic.make true in
+    let invalidated = ref false in
+    let outcome =
+      KKS.interruptible_sleep
+        ~wake_policy:KKS.Serve_wakeup_after_duration
+        ~interrupt_when:(fun () -> !invalidated)
+        ~clock:(Eio.Stdenv.clock env) ~stop ~wakeup
+        (fun () -> invalidated := true; 3600.0)
+    in
+    check bool "dependency changes re-evaluate the lane before provider release" true
+      (match outcome with KKS.Woken -> true | KKS.Stopped | KKS.Timeout -> false);
+    check bool "the queued wake is consumed once" false (Atomic.get wakeup))
+;;
+
 let test_board_goal_keyword_overlap_is_not_wake_reason () =
   let meta = make_board_resume_meta "keyword-overlap" in
   let signal : Board_dispatch.board_signal =
@@ -1450,6 +1467,8 @@ let () =
             test_backoff_sleep_without_a_wakeup_times_out
         ; test_case "stop still cuts a backoff sleep" `Quick
             test_stop_still_cuts_a_backoff_sleep
+        ; test_case "dependency change interrupts provider rest" `Quick
+            test_dependency_change_interrupts_provider_rest
         ] )
     ]
 ;;

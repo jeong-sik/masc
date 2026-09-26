@@ -27,6 +27,19 @@ related: ["0433", "0370"]
   기다린다. 그동안 wake 는 잠을 끊지 못한다(#34653 보장 유지).
 - 쉬는 길이는 cadence 에서 뗀다.
 
+### 대기의 의존성이 바뀐 경우 (2026-09-26)
+
+대기는 실패한 dispatch의 배정·후보 순서·binding에 속한다. heartbeat는 턴 진입 전에
+이 값을 한 Runtime snapshot에서 읽는다. 기존 sleep 경계에서 현재 snapshot과
+비교해 배정 변경, 같은 이름의 lane 편집, credential binding 교체를 발견하면
+대기를 끝내고 현재 배정으로 다시 판단한다. 이전 dispatch의 deferred suffix도
+메모리와 durable 저장소에서 해제한다. 관련 없는 설정 변경은 대기를 깨지 않는다.
+
+대기를 시작할 때 관측된 경로의 rest가 다른 실행의 성공으로 풀린 경우에도 재평가한다.
+저장된 rest가 없이 실패 응답만으로 정한 대기는 그 응답의 기한을 유지한다.
+Board·schedule 알림과 cadence 변경은 동일 provider 대기를 조기에 끝내지 않는다.
+stop은 어느 대기든 종료한다. 대기를 깨우는 동작은 Queue source를 ACK하지 않는다.
+
 ## 1. 지금 동작 (2026-09-15 실측, #36583)
 
 ### 1.1 wake 가 턴이 되기까지

@@ -361,6 +361,11 @@ module Deferred_lane_slot = struct
       None
     | Idle | Dispatched -> None
   ;;
+
+  let invalidate slot =
+    clear_durable slot;
+    slot.state := Idle
+  ;;
 end
 
 (* The next dispatch after a failed turn. The decision is
@@ -385,6 +390,32 @@ let after_failure ~now ~assignment_id (failure : Keeper_unified_turn.turn_failur
 ;;
 
 exception Event_queue_cycle_failed of string
+
+(* A provider wait belongs to the dispatch that failed. The runtime snapshot
+   includes same-named lane/binding edits, not only the assignment label.
+   A fresh success can also release an observed path without a config edit.
+   Route-only waits with no stored rest retain their original deadline. *)
+let provider_wait_interrupt
+      ~keeper_name ~dispatch_snapshot ~assignment_id ~deferred_runtime_lane ~now =
+  let walk_rest ~now =
+    match deferred_runtime_lane with
+    | Some lane -> Keeper_turn_driver.deferred_lane_rest ~now lane
+    | None -> Keeper_turn_driver.assignment_walk_rest ~now assignment_id
+  in
+  let was_resting =
+    match walk_rest ~now with
+    | Keeper_turn_driver.Walk_waits_until _ -> true
+    | Keeper_turn_driver.Walk_head_serving _ -> false
+  in
+  fun ~now ->
+    not
+      (Runtime.same_keeper_dispatch dispatch_snapshot
+         (Runtime.keeper_dispatch_snapshot ~keeper_name))
+    || (was_resting
+        && match walk_rest ~now with
+           | Keeper_turn_driver.Walk_head_serving _ -> true
+           | Keeper_turn_driver.Walk_waits_until _ -> false)
+;;
 
 
 (* Which stimuli own a turn-entry reaction. Both halves of the turn read this
@@ -1588,6 +1619,9 @@ let run_heartbeat_loop
             ~assignment_id:(Keeper_meta_contract.runtime_id_of_meta meta_current)
         in
         let wake = cycle_wake ~periodic_due ~deferred_runtime_lane in
+        let dispatch_snapshot =
+          Runtime.keeper_dispatch_snapshot ~keeper_name:m.name
+        in
         let turn_outcome =
           if not admitted_turn
           then
@@ -1756,6 +1790,20 @@ let run_heartbeat_loop
           | Some (Continue_on_deferred_lane _) | None ->
             Keeper_keepalive_signal.Interrupt_on_wakeup
         in
+        let interrupt_when =
+          match turn_outcome.after_failure with
+          | Some (Wait_for_path_release _) ->
+            let assignment_id = Keeper_meta_contract.runtime_id_of_meta turn_outcome.meta in
+            let deferred_runtime_lane =
+              Deferred_lane_slot.for_assignment deferred_runtime_lane_slot ~assignment_id
+            in
+            let invalidated =
+              provider_wait_interrupt ~keeper_name:m.name ~dispatch_snapshot
+                ~assignment_id ~deferred_runtime_lane ~now:(Time_compat.now ())
+            in
+            (fun () -> invalidated ~now:(Time_compat.now ()))
+          | Some (Continue_on_deferred_lane _) | None -> (fun () -> false)
+        in
         (* The cadence handshake stays offered while a path rests: it is also
            how [Keeper_status_runtime.keeper_metric_producer_active] knows a
            failing lane is in its legitimate sleep, and withholding it (#34670)
@@ -1787,16 +1835,22 @@ let run_heartbeat_loop
              Keeper_keepalive_signal.interruptible_sleep
                ~cadence_sleeping
                ~wake_policy
+               ~interrupt_when
                ~clock:ctx.clock
                ~stop
                ~wakeup
                sleep_duration);
+        if not
+             (Runtime.same_keeper_dispatch dispatch_snapshot
+                (Runtime.keeper_dispatch_snapshot ~keeper_name:m.name))
+        then Deferred_lane_slot.invalidate deferred_runtime_lane_slot;
       if Atomic.get stop then () else loop ())
   in
   loop ()
 ;;
 
 module For_testing = struct
+  let provider_wait_interrupt = provider_wait_interrupt
   let retain_connector_attention_sources = retain_connector_attention_sources
   type deferred_lane_slot = Deferred_lane_slot.t
 

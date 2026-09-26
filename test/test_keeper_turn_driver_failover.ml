@@ -293,14 +293,16 @@ max-concurrent = 1
     unread_max_prompt_bytes
     codex_max_prompt_bytes
 
-let runtime_toml_quota_lane_with_shared_credential shared_credential =
+let runtime_toml_quota_lane_with_shared_credential
+    ?(candidate_ids = ["shared_a.test_model"; "shared_b.test_model"; "other.test_model"])
+    shared_credential =
   Printf.sprintf
     {|
 [runtime]
 default = "shared_a.test_model"
 
 [runtime.lanes.quota_lane]
-candidates = [ "shared_a.test_model", "shared_b.test_model", "other.test_model" ]
+candidates = [ %s ]
 
 [providers.shared_a]
 display-name = "Shared account A"
@@ -342,6 +344,7 @@ is-default = true
 
 [other.test_model]
 |}
+    (String.concat ", " (List.map (Printf.sprintf "%S") candidate_ids))
     shared_credential
     shared_credential
 ;;
@@ -3810,6 +3813,97 @@ let test_rate_limit_candidate_survives_unchanged_reload_only () =
       (backpressure_order ["shared_a.test_model"; "other.test_model"]))
 ;;
 
+let test_provider_wait_follows_dispatch_changes_and_path_recovery () =
+  let keeper_name = "wait-dependency" in
+  let config route =
+    runtime_toml_quota_lane
+    ^ Printf.sprintf "\n[runtime.assignments]\n%S = %S\n" keeper_name route
+  in
+  with_runtime_config (config "shared_a.test_model") (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let now = Unix.gettimeofday () in
+      let snapshot () = Runtime.keeper_dispatch_snapshot ~keeper_name in
+      Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 3600.);
+      let original = snapshot () in
+      let interrupt =
+        Masc.Keeper_heartbeat_loop.For_testing.provider_wait_interrupt
+          ~keeper_name ~dispatch_snapshot:original ~assignment_id:"shared_a.test_model"
+          ~deferred_runtime_lane:None ~now
+      in
+      Alcotest.(check bool) "the same refusal keeps its wait" false (interrupt ~now);
+      reload_runtime_config (config "shared_a.test_model");
+      Alcotest.(check bool) "an unchanged reload keeps its wait" false (interrupt ~now);
+      Runtime_candidate_backpressure.note_candidate_success
+        ~candidate:(quota_lane_candidate "shared_a.test_model");
+      Alcotest.(check bool) "an observed recovery ends the old wait" true (interrupt ~now);
+      reload_runtime_config (config "other.test_model");
+      Alcotest.(check bool) "reassignment invalidates the old dispatch" false
+        (Runtime.same_keeper_dispatch original (snapshot ()));
+      reload_runtime_config (config "quota_lane");
+      let lane = snapshot () in
+      let reordered =
+        runtime_toml_quota_lane_with_shared_credential
+          ~candidate_ids:["other.test_model"; "shared_a.test_model"]
+          "SHARED_QUOTA_TEST_KEY"
+        ^ Printf.sprintf "\n[runtime.assignments]\n%S = \"quota_lane\"\n" keeper_name
+      in
+      reload_runtime_config reordered;
+      Alcotest.(check bool) "same lane name with edited candidates differs" false
+        (Runtime.same_keeper_dispatch lane (snapshot ()));
+      let rebound =
+        runtime_toml_quota_lane_with_shared_credential "REBOUND_QUOTA_TEST_KEY"
+        ^ Printf.sprintf "\n[runtime.assignments]\n%S = \"quota_lane\"\n" keeper_name
+      in
+      reload_runtime_config rebound;
+      Alcotest.(check bool) "same IDs with a rebound credential differ" false
+        (Runtime.same_keeper_dispatch lane (snapshot ()))))
+;;
+
+let test_reassignment_releases_an_actual_provider_sleep () =
+  let keeper_name = "sleep-reassignment" in
+  let config route =
+    runtime_toml_quota_lane
+    ^ Printf.sprintf "\n[runtime.assignments]\n%S = %S\n" keeper_name route
+  in
+  with_runtime_config (config "shared_a.test_model") (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 3600.);
+      let interrupt =
+        Masc.Keeper_heartbeat_loop.For_testing.provider_wait_interrupt
+          ~keeper_name
+          ~dispatch_snapshot:(Runtime.keeper_dispatch_snapshot ~keeper_name)
+          ~assignment_id:"shared_a.test_model" ~deferred_runtime_lane:None
+          ~now:(Unix.gettimeofday ())
+      in
+      Eio_main.run (fun env ->
+        let module Signal = Masc.Keeper_keepalive_signal in
+        let clock = Eio.Stdenv.clock env in
+        let sleeping, enter_sleep = Eio.Promise.create () in
+        let wakeup = Atomic.make true in
+        Eio.Time.with_timeout_exn clock 10.0 (fun () ->
+          Eio.Fiber.both
+            (fun () ->
+              let outcome =
+                Signal.interruptible_sleep
+                  ~wake_policy:Signal.Serve_wakeup_after_duration
+                  ~interrupt_when:(fun () -> interrupt ~now:(Unix.gettimeofday ()))
+                  ~clock ~stop:(Atomic.make false) ~wakeup
+                  (fun () -> Eio.Promise.resolve enter_sleep (); 3600.0)
+              in
+              Alcotest.(check bool) "the new assignment releases the sleeping lane" true
+                (match outcome with Signal.Woken -> true | Signal.Stopped | Signal.Timeout -> false);
+              Alcotest.(check bool) "pending hint is consumed" false (Atomic.get wakeup))
+            (fun () ->
+              Eio.Promise.await sleeping;
+              Alcotest.(check bool) "a Board hint alone kept the refusal waiting" true
+                (Atomic.get wakeup);
+              reload_runtime_config (config "other.test_model"))))))
+;;
+
 (* An official client (Codex app server here) has no HTTP identity. A reload
    that leaves its provider, model and binding as they were must keep its
    observation cell, or any runtime.toml save puts a demoted head back at the
@@ -6169,6 +6263,10 @@ let () =
             test_a_same_path_suffix_waits_only_for_a_recorded_rest;
           Alcotest.test_case "rate limit survives only unchanged binding reload" `Quick
             test_rate_limit_candidate_survives_unchanged_reload_only;
+          Alcotest.test_case "provider wait follows dispatch changes and recovery" `Quick
+            test_provider_wait_follows_dispatch_changes_and_path_recovery;
+          Alcotest.test_case "reassignment releases an actual provider sleep" `Quick
+            test_reassignment_releases_an_actual_provider_sleep;
           Alcotest.test_case "official client rate limit survives unchanged reload" `Quick
             test_official_client_rate_limit_survives_unchanged_reload;
           Alcotest.test_case "rate limit identity detects same-reference credential rotation" `Quick

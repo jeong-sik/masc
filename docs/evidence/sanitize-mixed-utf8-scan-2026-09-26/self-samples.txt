@@ -88,4 +88,3 @@ Sort by top of stack, same collapsed (when >= 5):
         caml_string_length  (in main_eio.exe)        5
         guarded_pwrite_np  (in libsystem_kernel.dylib)        5
         mkdirat  (in libsystem_kernel.dylib)        5
-

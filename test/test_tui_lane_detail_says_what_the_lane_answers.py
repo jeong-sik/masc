@@ -55,7 +55,12 @@ def run(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"?", b"MASC Cheat Sheet")
         # The slot-editor help above [e] puts [catalog-ref] below the first
         # viewport. Exercise the sheet's scroll to reach the full [e] hint.
-        h.send_and_wait(process, fd, output, b"jj", IN_THE_SHEET[0])
+        # On a thirty-row terminal the sheet shows 22 lines; [s] wraps to
+        # nine, so [e] starts on sheet line 21 and [catalog-ref] sits on its
+        # sixth wrapped line, line 26. Four presses show lines 5-26, which
+        # still hold [preview-checked] on line 24. A longer Lanes hint above
+        # [e] moves both lines down and needs more presses here.
+        h.send_and_wait(process, fd, output, b"jjjj", IN_THE_SHEET[0])
         h.read_available(fd, output)
         sheet = screen_text(output)
         for needle in IN_THE_SHEET:

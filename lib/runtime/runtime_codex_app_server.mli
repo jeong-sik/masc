@@ -19,9 +19,12 @@ type probe_result =
 
 type config =
   { cli_path : string
+  ; account_home : string option
+    (** Operator-selected Codex login and configuration directory for normal
+        client turns. [None] inherits the process's ordinary Codex home. *)
   ; isolated_home : string option
-    (** Verification-only private CODEX_HOME prepared with auth/provider configuration.
-        Normal turns leave this [None] to retain the user's configured home. *)
+    (** Verification-only private CODEX_HOME prepared with projected auth and
+        provider configuration. Its safe CLI overrides apply only here. *)
   ; model : string option
   ; developer_instructions : string option
   ; native : Runtime_native_tools.posture
@@ -68,6 +71,10 @@ type config =
 
 val default_timeout_s : float
 val default_config : unit -> config
+val effective_account_home : string option -> string option
+(** The CODEX_HOME that a child receives: an explicit account home, the
+    process CODEX_HOME, or the default derived from HOME. Quota ownership
+    uses this same resolution. *)
 
 (** One image attached to a turn. [base64_data] is the raw base64 payload with
     no data-URL prefix and no newlines; the app-server [image] input variant
@@ -183,6 +190,7 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
@@ -355,6 +363,12 @@ val input_capacity_refusal : error -> input_capacity option
     remain ordinary RPC errors. Counts come from the server, never a local cap. *)
 
 val error_to_string : error -> string
+
+val refused_for_spent_usage : error -> bool
+(** [true] when the account refused the turn because its usage is spent: the
+    provider's own [usageLimitExceeded] or [sessionBudgetExceeded]. The
+    refusal states its reset time only in message text, never in a typed
+    field, so a caller that records it records an exhaustion with no end. *)
 
 val validate_turn :
   ?dynamic_tools:dynamic_tool list ->

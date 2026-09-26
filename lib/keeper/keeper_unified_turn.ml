@@ -32,46 +32,15 @@ type turn_failure =
 
 exception Owner_meta_commit_failed of string
 
-let commit_turn_runtime_or_raise ~config ~before ~after =
-  match
-    Keeper_owner_registry.commit_turn_runtime
-      ~base_path:config.Workspace.base_path
-      ~keeper_name:before.Keeper_meta_contract.name
-      ~before
-      ~after
-  with
-  | Ok (Some committed) -> committed
-  | Ok None ->
-    raise
-      (Owner_meta_commit_failed
-         "Keeper Owner removed metadata during failed-turn commit")
-  | Error error ->
-    raise
-      (Owner_meta_commit_failed
-         (Keeper_owner_registry.command_error_to_string error))
-;;
-
-(* A turn that ends outside the success path still spent what its attempts
-   read. The readings are resolved against the cursor the turn started from
-   and ride the turn's own commit; the rows follow once that commit holds, so
-   a commit that fails leaves none for the next turn to count again. *)
+(* A commit that fails leaves the Keeper's durable state behind the turn it
+   just ran; the cycle stops here rather than run on from it. *)
 let commit_turn_with_attempt_spend ~config ~keeper_turn_id ~before ~attempt_spend after =
-  let resolved, usage_cursor =
-    Keeper_turn_spend.resolve
-      ~cursor:before.Keeper_meta_contract.runtime.usage_cursor
-      ~observed_at:(Time_compat.now ())
-      attempt_spend
-  in
-  let after = Keeper_unified_metrics.with_attempt_spend after ~resolved ~usage_cursor in
-  let committed = commit_turn_runtime_or_raise ~config ~before ~after in
-  Keeper_turn_spend_ledger.write
-    ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path)
-    ~agent_name:before.name
-    ~task_id:(Option.map Keeper_id.Task_id.to_string before.current_task_id)
-    ~trace_id:(Keeper_id.Trace_id.to_string before.runtime.trace_id)
-    ~keeper_turn_id
-    resolved;
-  committed
+  match
+    Keeper_turn_spend_commit.commit ~config ~keeper_turn_id ~before ~attempt_spend after
+  with
+  | Ok committed -> committed
+  | Error error ->
+    raise (Owner_meta_commit_failed (Keeper_turn_spend_commit.error_to_string error))
 ;;
 
 let turn_failure_of_error
@@ -1241,26 +1210,13 @@ let run_keeper_cycle
                      next cycle must not write under the same one. Only the
                      counter moves -- no failure, latency or proactive
                      bookkeeping, since nothing failed. *)
-                  let updated_meta =
-                    { meta with
-                      updated_at = now_iso ()
-                    ; runtime =
-                        { meta.runtime with
-                          usage =
-                            { meta.runtime.usage with
-                              total_turns = meta.runtime.usage.total_turns + 1
-                            ; last_turn_ts = Time_compat.now ()
-                            }
-                        }
-                    }
-                  in
                   let committed =
                     commit_turn_with_attempt_spend
                       ~config
                       ~keeper_turn_id
                       ~before:meta
                       ~attempt_spend
-                      updated_meta
+                      (Keeper_turn_spend_commit.count_turn meta)
                   in
                   Ok (Turn_skipped committed), turn_state
                 | Error err ->
@@ -1374,9 +1330,12 @@ let run_keeper_cycle
                     then Log.Keeper.warn
                     else Log.Keeper.error
                   in
-                  (* [final_execution.runtime_id] names the deferred-lane
-                     assignment this cycle was budgeted under, not
-                     necessarily the concrete candidate
+                  (* [final_execution.runtime_id] names the assignment this
+                     cycle was budgeted under, except on a cycle that took a
+                     deferred suffix: that execution is keyed by the
+                     suffix's first runtime, so [lane=] takes the deferring
+                     assignment from [deferred_runtime_lane] instead. Neither
+                     is necessarily the concrete candidate
                      [attempt_runtime_candidates] dispatched: a lane keyed by
                      one runtime id walks a different candidate first when
                      the head rests or a deferred suffix starts elsewhere.
@@ -1392,6 +1351,7 @@ let run_keeper_cycle
                      candidate alone. *)
                   let runtime_attribution =
                     keeper_cycle_failed_runtime_attribution
+                      ~entry_deferred_runtime_lane:deferred_runtime_lane
                       ~deferred_runtime_lane:turn_state.deferred_runtime_lane
                       ~lane_runtime_id:final_execution.runtime_id
                       ~runtime_attempt_errors:turn_state.runtime_attempt_errors
@@ -1574,6 +1534,7 @@ let run_keeper_cycle
                       ~degraded_retry_applied
                       ~degraded_retry_deferred
                       ~keeper_turn_id
+                      ~spend:attempt_spend
                       execution_outcome
                   in
                   (match success with

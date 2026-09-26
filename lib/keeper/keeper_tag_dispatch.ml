@@ -124,6 +124,7 @@ let dispatch
                  ~payload
                  ~channel:None)
         ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+        ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
         }
         ~name
         ~args

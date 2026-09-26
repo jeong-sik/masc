@@ -104,6 +104,7 @@ let claude_config ~base_dir ~runtime_id ~system_prompt ~override_s ~output_schem
   : Runtime_claude_code.config
   =
   { cli_path = execution.cli_path
+  ; account_home = execution.account_home
   ; cwd = base_dir
   ; model = execution.model
   ; native = Runtime_native_tools.claude_code_default
@@ -122,6 +123,7 @@ let codex_config ~runtime_id ~system_prompt ~override_s ~output_schema
   : Runtime_codex_app_server.config
   =
   { cli_path = execution.cli_path
+  ; account_home = execution.account_home
   ; isolated_home = None
   ; model = execution.model
   ; native = Runtime_native_tools.codex_default
@@ -239,6 +241,19 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
      | _ -> ());
     Error (if admission then Claude_admission_failure error else Claude_failure error)
   in
+  (* A Codex account out of usage is the fact a Keeper turn already records
+     for this scope: [Keeper_codex_runtime] reads the refusal as a hard quota
+     with no reset, and the turn driver writes it as an exhaustion with no end.
+     A one-shot turn recorded nothing, so an exact lane's CLI walk sent the
+     next judgment to the spent account first again (2026-09-25: 3,135
+     usageLimitExceeded refusals on codex_subscription.gpt-5.6-luna and 739
+     on codex-gpt-6-luna-xhigh). The next answer on this scope clears the
+     record through [succeeded]. *)
+  let codex_failed error =
+    if Runtime_codex_app_server.refused_for_spent_usage error
+    then Runtime_quota_window.note_observed_exhausted ~scope:quota_scope;
+    Error (Codex_failure error)
+  in
   let* env, clock = eio_context ()
     |> Result.map_error (fun detail -> Setup_failure detail) in
   let mgr = Posix_spawn_process_mgr.mgr in
@@ -291,8 +306,7 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
            ({ media_type = image.media_type; base64_data = image.base64_data }
             : Runtime_codex_app_server.image_input)) images) with
      | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = result.text; model = result.model }
-     | Error error ->
-       Error (Codex_failure error))
+     | Error error -> codex_failed error)
   | Runtime_execution.Antigravity_cli _ when not (List.is_empty images) ->
     Error (Setup_failure "Antigravity transport does not support image input")
   | Runtime_execution.Antigravity_cli execution ->

@@ -21,6 +21,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_types.ml",
     "bin/masc_tui_keys.ml",
     "bin/masc_tui_http.ml",
+    "lib/server/server_standalone_lane_projection.ml",
+    "lib/tui_decode.ml",
 )
 
 ROUTING_PATH = "/api/v1/runtime/config/routing"
@@ -126,6 +128,7 @@ class LaneStore:
         exact = self.exact_lane(EXACT_LANE)
         exact["dropped_slots"] = [DROPPED_SLOT]
         self.exact_declared = {EXACT_LANE: [DROPPED_SLOT, *exact["admitted_slots"]]}
+        self.exact_declared_cli = {EXACT_LANE: []}
         # The projection now carries the file's own order beside the admission
         # lists; the fixture serves the one it tracks.
         exact["declared_slots"] = list(self.exact_declared[EXACT_LANE])
@@ -204,19 +207,43 @@ class LaneStore:
         action = request.get("action", "set")
         with self.lock:
             if lane_id.startswith("exact/"):
-                if action != "append":
-                    raise AssertionError(f"the TUI posted {action!r} to a standalone lane")
                 name = lane_id[len("exact/"):]
                 slot = request["runtime_id"]
-                declared = self.exact_declared[name]
-                if slot in declared:
-                    return 400, {"error": f"{slot} is already a slot of {name}"}
-                declared.append(slot)
                 lane = self.exact_lane(name)
+                declared = self.exact_declared.setdefault(name, list(lane["declared_slots"]))
+                declared_cli = self.exact_declared_cli.setdefault(
+                    name, list(lane["declared_cli_slots"])
+                )
+                if action == "append":
+                    if slot in declared or slot in declared_cli:
+                        return 400, {"error": f"{slot} is already a slot of {name}"}
+                    runtime = next(
+                        (row for row in self.body["runtimes"] if row["id"] == slot), None
+                    )
+                    if runtime is not None and runtime["exact_slot_group"] == "cli_slots":
+                        declared_cli.append(slot)
+                    else:
+                        declared.append(slot)
+                elif action in ("move", "drop"):
+                    source = declared if slot in declared else declared_cli
+                    if slot not in source:
+                        return 400, {"error": f"{slot} is not a slot of {name}"}
+                    if action == "drop":
+                        source.remove(slot)
+                    else:
+                        index = source.index(slot)
+                        neighbor = index + (1 if request["direction"] == "down" else -1)
+                        if neighbor < 0 or neighbor >= len(source):
+                            return 400, {"error": f"{slot} cannot move across slot groups"}
+                        source[index], source[neighbor] = source[neighbor], source[index]
+                else:
+                    raise AssertionError(f"the TUI posted {action!r} to a standalone lane")
                 lane["admitted_slots"] = [
                     s for s in declared if s not in lane["dropped_slots"]
                 ]
                 lane["declared_slots"] = list(declared)
+                lane["declared_cli_slots"] = list(declared_cli)
+                lane["cli_slots"] = list(declared_cli)
                 return 200, commit_receipt()
             declared = [lane for lane in self.lanes if lane["id"] == lane_id]
             if action == "create":
@@ -515,6 +542,234 @@ def run_exact(executable: str) -> None:
     )
 
 
+def run_cli_editor(executable: str) -> None:
+    """The Librarian editor reaches both arrays and explains their boundary."""
+    store = LaneStore()
+    new_cli = "aaa_cli.fixture"
+    store.body["runtimes"].append({
+        **h.runtime_resolved_runtime(new_cli, "Official client", "model"),
+        "exact_slot_group": "cli_slots",
+    })
+    librarian = store.exact_lane("librarian_exact")
+    cli = ["codex_subscription.gpt-6-luna", "claude_code.claude-sonnet-5"] + [
+        f"codex_subscription.extra-{index}" for index in range(8)
+    ]
+    librarian["declared_cli_slots"] = list(cli)
+    librarian["cli_slots"] = list(cli)
+    store.exact_declared["librarian_exact"] = list(librarian["declared_slots"])
+    store.exact_declared_cli["librarian_exact"] = list(cli)
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    requests: h.HttpRequests = []
+
+    def exact_posts() -> list[dict]:
+        return [json.loads(body) for path, body in requests if path == ROUTING_PATH]
+
+    def wait_for_posts(count: int) -> list[dict]:
+        deadline = time.monotonic() + 5.0
+        while len(exact_posts()) < count:
+            if time.monotonic() > deadline:
+                raise AssertionError(f"exact posts: {exact_posts()!r}")
+            time.sleep(0.05)
+        return exact_posts()
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        h.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, b"j", b"HITL")
+        h.send_and_wait(process, fd, output, b"j", b"Librarian")
+        mark = mark_output(fd, output)
+        h.send_and_wait(process, fd, output, b"s", b"MASC Lanes / Providers")
+        h.wait_for_output(process, fd, output,
+                          b"[CLI] codex_subscription.gpt-6-luna", start=mark, timeout=5.0)
+        h.wait_for_output(process, fd, output,
+                          b"[CLI] claude_code.claude-sonnet-5", start=mark, timeout=5.0)
+        h.send_and_wait(process, fd, output, b"j", b"[CLI] codex_subscription.gpt-6-luna")
+        h.send_and_wait(process, fd, output, b"K", b"HTTP slots run first")
+        if exact_posts():
+            raise AssertionError(f"a cross-boundary move posted: {exact_posts()!r}")
+        h.send_and_wait(process, fd, output, b"j", b"[CLI] claude_code.claude-sonnet-5")
+        mark = mark_output(fd, output)
+        os.write(fd, b"K")
+        posted = wait_for_posts(1)
+        expected = [{"lane": "exact/librarian_exact", "action": "move",
+                     "runtime_id": "claude_code.claude-sonnet-5", "direction": "up"}]
+        if posted != expected:
+            raise AssertionError(f"CLI reorder posted {posted!r}, expected {expected!r}")
+        h.wait_for_output(process, fd, output,
+                          b"> 2/11  [CLI] claude_code.claude-sonnet-5", start=mark, timeout=5.0)
+        if store.exact_declared_cli["librarian_exact"] != [cli[1], cli[0], *cli[2:]]:
+            raise AssertionError("the server fixture did not reorder the CLI declaration")
+        h.resize_and_wait(process, fd, output, rows=15, columns=100,
+                          needle=b"MASC Lanes / Providers", controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, b"j" * 9,
+                        b"> 11/11  [CLI] codex_subscription.extra-7")
+        h.send_and_wait(process, fd, output, b"a", b"add provider")
+        h.send_and_wait(process, fd, output, b"e",
+                        b"> 11/11  [CLI] codex_subscription.extra-7")
+        h.send_and_wait(process, fd, output, b"k" * 10,
+                        b"> 1/11  [HTTP]")
+        mark = mark_output(fd, output)
+        h.send_and_wait(process, fd, output, b"a", b"[CLI tail] aaa_cli.fixture")
+        h.wait_for_output(process, fd, output,
+                          b"[HTTP tail] runtime-a", start=mark, timeout=5.0)
+        mark = mark_output(fd, output)
+        os.write(fd, b"\r")
+        posted = wait_for_posts(2)
+        if posted[1] != {"lane": "exact/librarian_exact", "action": "append",
+                         "runtime_id": new_cli}:
+            raise AssertionError(f"CLI append posted {posted[1]!r}")
+        h.wait_for_output(process, fd, output,
+                          b"> 1/12  [HTTP]", start=mark, timeout=5.0)
+        h.send_and_wait(process, fd, output, b"j" * 11,
+                        b"> 12/12  [CLI] aaa_cli.fixture")
+        if store.exact_declared_cli["librarian_exact"][-1] != new_cli:
+            raise AssertionError("new official client did not append to CLI tail")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="Librarian provider editor includes CLI fallback slots",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
+def run_curator_cli_refused(executable: str) -> None:
+    """The workspace curator walks HTTP slots only. The lane projection says
+    so (supports_cli_tail), the picker draws an official client disabled, and
+    Enter on it posts nothing; an HTTP candidate in the same picker still
+    appends."""
+    store = LaneStore()
+    new_cli = "aaa_cli.fixture"
+    store.body["runtimes"].append({
+        **h.runtime_resolved_runtime(new_cli, "Official client", "model"),
+        "exact_slot_group": "cli_slots",
+    })
+    curator = store.exact_lane("workspace_curator_exact")
+    if curator["supports_cli_tail"] is not False:
+        raise AssertionError("the fixture's curator row claims a CLI tail")
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    requests: h.HttpRequests = []
+
+    def exact_posts() -> list[dict]:
+        return [json.loads(body) for path, body in requests if path == ROUTING_PATH]
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        h.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, b"j", b"HITL")
+        h.send_and_wait(process, fd, output, b"j", b"Librarian")
+        h.send_and_wait(process, fd, output, b"j", b"Workspace Curator")
+        h.send_and_wait(process, fd, output, b"s", b"MASC Lanes / Providers")
+        h.send_and_wait(process, fd, output, b"a",
+                        b"> [CLI tail] aaa_cli.fixture")
+        h.send_and_wait(process, fd, output, b"\r",
+                        b"workspace_curator_exact walks HTTP slots only")
+        # The refusal is drawn from the state alone; give a stray write the
+        # time a real one takes to reach the fixture before judging.
+        time.sleep(0.5)
+        if exact_posts():
+            raise AssertionError(f"a CLI pick on the curator posted: {exact_posts()!r}")
+        h.send_and_wait(process, fd, output, b"j", b"> [HTTP tail] runtime-a")
+        os.write(fd, b"\r")
+        deadline = time.monotonic() + 5.0
+        while not exact_posts():
+            if time.monotonic() > deadline:
+                raise AssertionError("the HTTP pick on the curator posted nothing")
+            time.sleep(0.05)
+        expected = [{"lane": "exact/workspace_curator_exact", "action": "append",
+                     "runtime_id": "runtime-a"}]
+        if exact_posts() != expected:
+            raise AssertionError(f"curator posts {exact_posts()!r}, expected {expected!r}")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="Workspace curator picker refuses official-client candidates",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
+def run_provider_jump(executable: str) -> None:
+    """[d] on an HTTP slot opens its [providers.<id>] table in Config. The
+    table key is the catalogue's provider_id, and the header is found by the
+    key path the TOML grammar reads, so a quoted key with a trailing comment
+    is the same table. While the picker is open, [d] stays with it."""
+    store = LaneStore()
+    slot = "glm-coding.glm-5-turbo"
+    store.body["runtimes"].append(
+        h.runtime_resolved_runtime(slot, "GLM Coding", "glm-5-turbo",
+                                   provider_id="glm-coding")
+    )
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    status, config = h.standalone_lane_runtime_config_response()
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (
+        status,
+        {
+            **config,
+            "source_text": config["source_text"]
+            + '\n\n[providers."glm-coding"] # request window\n'
+            + "exact-body-timeout-s = 1200\n",
+        },
+    )
+    requests: h.HttpRequests = []
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        h.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, b"j", b"HITL")
+        h.send_and_wait(process, fd, output, b"j", b"Librarian")
+        h.send_and_wait(process, fd, output, b"s", b"MASC Lanes / Providers")
+        h.wait_for_output(process, fd, output,
+                          b"> 1/1  [HTTP] glm-coding.glm-5-turbo", start=0, timeout=5.0)
+        h.send_and_wait(process, fd, output, b"a", b"add provider")
+        # The picker owns focus: [d] neither jumps nor closes it, so the
+        # [e] after it lands on the picker and returns to the slot rows.
+        os.write(fd, b"d")
+        h.send_and_wait(process, fd, output, b"e",
+                        b"> 1/1  [HTTP] glm-coding.glm-5-turbo")
+        os.write(fd, b"d")
+        # Config colours a header's pieces apart, so the drawn screen, not
+        # the byte stream, is what names the table.
+        wanted = (b'[providers."glm-coding"] # request window',
+                  b"exact-body-timeout-s = 1200")
+        deadline = time.monotonic() + 5.0
+        while True:
+            h.read_available(fd, output)
+            screen = h.screen_text(bytes(output))
+            if all(needle in screen for needle in wanted):
+                break
+            if time.monotonic() > deadline:
+                raise AssertionError("[d] did not open the provider table")
+            time.sleep(0.05)
+        if any(path == ROUTING_PATH for path, _body in requests):
+            raise AssertionError("the provider jump posted a routing write")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="Slot editor opens an HTTP slot's provider table",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
 # SGR mouse wheel notches at column 5, row 5, clear of the Activity pane.
 WHEEL_UP = b"\x1b[<64;5;5M"
 WHEEL_DOWN = b"\x1b[<65;5;5M"
@@ -612,5 +867,8 @@ def run_filter(executable: str) -> None:
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
     run_exact(os.path.abspath(sys.argv[1]))
+    run_cli_editor(os.path.abspath(sys.argv[1]))
+    run_curator_cli_refused(os.path.abspath(sys.argv[1]))
     run_filter(os.path.abspath(sys.argv[1]))
+    run_provider_jump(os.path.abspath(sys.argv[1]))
     print("runtime lane editor: PASS")

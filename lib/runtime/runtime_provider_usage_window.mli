@@ -4,13 +4,16 @@
     [account/rateLimits/updated] report, during a turn, how much of each
     usage window the account has used and when the window resets.  The
     Codex app-server also answers [account/rateLimits/read] without a turn,
-    and four HTTP providers answer a usage endpoint without a model call
+    four HTTP providers answer a usage endpoint without a model call, and
+    the Antigravity CLI answers a print-mode [/usage] without a turn
     ({!Runtime_provider_usage_read}).  This module decodes those reports at
     the wire and keeps the latest one per quota scope and window, with the
     time MASC heard it.
 
     It is an observation.  Routing, candidate ordering, admission and retry
-    do not read it: codex-cli 0.156.0's protocol schema says clients must not
+    do not read this table (a spent window read after an HTTP 403 rests its
+    scope through {!Runtime_provider_usage_read.read_after_account_refusal},
+    on {!Runtime_quota_window}, not here): codex-cli 0.156.0's protocol schema says clients must not
     infer recovery from percentages or reset times, so no availability is
     derived from these numbers.  What the provider said is stored and shown
     as it was said.
@@ -42,12 +45,30 @@ type source =
   | Zai_quota_limit_read  (** Z.AI [GET /api/monitor/usage/quota/limit]. *)
   | Kimi_coding_usages_read  (** Kimi [GET /coding/v1/usages]. *)
   | Ollama_usage_read  (** Ollama [GET https://ollama.com/api/usage]. *)
+  | Antigravity_usage_read
+      (** Antigravity [agy -p "/usage" --output-format json], no turn. *)
+
+(** What a window limits, set by each decoder from the provider's own
+    shape, never from a label. *)
+type window_role =
+  | Gates_model_calls
+      (** Spending it refuses model calls on the account: Claude and Codex
+          windows, OpenRouter's credit limit, Z.AI's TOKENS_LIMIT, both Kimi
+          counts, Ollama's session and weekly usage, Antigravity's 5-hour and
+          weekly buckets. *)
+  | Counts_other_use
+      (** It counts something a model call does not need: Z.AI's
+          TIME_LIMIT (MCP and tool calls), OpenRouter's free-model daily
+          requests. *)
+  | Unclassified_limit
+      (** A Z.AI limit type this decoder does not know. *)
 
 type window =
   { limit_id : string option
         (** Codex [limitId]; one account reports several limits.  Claude Code
             names none. *)
   ; kind : window_kind
+  ; role : window_role
   ; utilization : utilization
   ; resets_at : int option  (** Unix epoch seconds, as reported. *)
   }
@@ -142,6 +163,18 @@ val decode_ollama_usage : Yojson.Safe.t -> (report, decode_error) result
     [limits.weekly.usage] a {!Seven_day} window, each a {!Fraction} that
     must be within [0..1].  No
     reset time is stated. *)
+
+val decode_antigravity_usage : Yojson.Safe.t -> (report, decode_error) result
+(** The whole JSON answer of [agy -p "/usage" --output-format json] (agy
+    1.1.11 or later). [status] must be [SUCCESS]; [num_turns] must be 0, because an agy that sends "/usage" to
+    the model as a prompt answers with a turn; [command.name] must be
+    [usage]. Each [command.data.groups[].buckets[]] is one window: [id] is
+    its [limit_id]; [window] ["5h"] is {!Five_hour} and ["weekly"]
+    {!Seven_day}, any other value is refused; {!Fraction} is
+    [1 - remaining_fraction], [remaining_fraction] within [0..1];
+    [reset_time] (RFC 3339, optional) is [resets_at]. Every window is
+    {!Gates_model_calls}: both limits refuse model calls when spent. A bucket
+    with [disabled: true] does not currently apply and yields no window. *)
 
 type recorded =
   { window : window

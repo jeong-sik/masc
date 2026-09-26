@@ -35,9 +35,13 @@ present. The same run also found a polymorphic method type error in the parent
 H2 fixture; current main already fixes it. The H2 fixture uses `shutdown` before
 joining the connection, following main's repair for a read keeping the FD open.
 
-Static syntax/format and `git diff --check` passed. Behavioral execution awaits
-CI on the updated source; no local OCaml build is run under the constitution
-execution protocol. The previous compile failure is not a behavioral result.
+Static syntax/format and `git diff --check` passed. [Focused CI 36233171450](https://github.com/jeong-sik/masc/actions/runs/36233171450)
+passed on source `892ea1bb71c61dc40486fef7029b363f96174541`:
+All 91 cases passed: asset worker 4, H2 request fibers 7, HTTP server Eio 58
+and compression 22. `focused-ci.txt` preserves the targeted execution log.
+Later changelog/evidence commits do not change the tested source; their PR gates
+still own full-head verification. No local OCaml build was run. This pass repairs
+the earlier compile failure and establishes the fixture behavior above.
 
 ## Limits
 

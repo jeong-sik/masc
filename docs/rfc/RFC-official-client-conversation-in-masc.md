@@ -150,7 +150,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
   - 기본값 `on` 은 2.1.265 부터다. 그 전에는 시스템 프롬프트 플래그를 주면 기록이 꺼졌다.
   - bare mode 는 기록하지 않는다. feature flag 를 받지 않는 공급자(Bedrock, Agent Platform, Foundry)는 2.1.268 전까지 기록하지 않았다.
   - 요약하면 그때부터 마지막으로 띄운 프로세스의 시스템 프롬프트가 쓰인다(§2.6).
-- masc 는 `--system-prompt-snapshot` 을 넘기지 않고(`runtime_claude_code.ml:1296-1349`) CLI 버전도 고정하지 않는다. 그래서 이 동작은 설치된 CLI 버전과 공급자가 정한다.
+- masc 는 `--system-prompt-snapshot on` 을 늘 넘긴다(`Runtime_claude_code.command`, #38986). resume 이 세션이 이미 가진 운반 맥락을 빼고 보내는데(held set), 그게 맞으려면 세션이 첫 실행의 시스템 프롬프트를 기록해 두어야 하기 때문이다. CLI 버전은 고정하지 않는다. 기록하지 않는 CLI 버전·공급자(위 두 줄)에서는 이 전제가 서지 않는다.
 
 **버전별 실측.** resume 턴 첫 요청에서 캐시에 새로 쓴 비율이다. 표본은 2026-09-05~09-11 에 수정된 transcript 이고, 턴 버전은 그 턴 user 항목의 `version` 이다.
 
@@ -262,7 +262,8 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
 
 ### 5.4 턴 맥락 전달 (운영자 결정)
 
-- 모든 Claude Code 실행에 `--system-prompt-snapshot off` 를 넘긴다. 그러면 요청마다 그 실행의 시스템 프롬프트가 쓰인다. CLI 버전과 공급자 기본값에 맡기지 않는다.
+- 모든 Claude Code 실행에 `--system-prompt-snapshot off` 를 넘긴다. 그러면 요청마다 그 실행의 시스템 프롬프트가 쓰인다.
+- 이 안은 held set(#38986)과 같이 쓸 수 없다. held set 은 Start 가 보낸 블록을 세션이 기록했다고 보고 resume 에서 뺀다. `off` 면 그 기록이 없으니, 바뀌지 않은 Memory·Skills 블록이 resume 턴에 어디서도 오지 않는다. `off` 를 고르면 held set 을 걷어 내고 resume 마다 운반 맥락을 전부 보내야 한다. 지금 masc 는 `on` 을 고정해 넘긴다.
 - 켜면: keeper 가 그 턴의 memory recall·dynamic context·operator note 를 받는다.
 - 대가: resume 턴 첫 요청이 세션의 대부분을 다시 쓴다. 2.1.263 까지 중앙값 0.863 이었다(§2.4). 지금 세션 크기(중앙값 374,876 토큰)에서는 그만큼 커진다.
 - 이 대가는 §5.5 로 고정부를 줄이고 §5.7 로 세션 크기를 묶으면 작아진다. 언제 켤지는 운영자가 정한다.
@@ -320,7 +321,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
 | 지금대로 둔다 | 결함 1~6 이 그대로다 |
 | 직전 요청이 W 이하일 때만 resume | §5.7. 여유 크기가 계수가 되고, 결국 매 턴 새 세션에 가깝다 |
 | Claude Code 요약 창을 W 로 (`--autocompact`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`) | LLM 요약이다(RFC-keeper-context-window-in-tokens §1.3). §2.6 에서 967,790 토큰이 5,133 토큰이 됐고 masc 는 무엇이 남았는지 모른다. 문서상 창 하한도 100,000 토큰이다 |
-| `--system-prompt-snapshot off` 만 켠다 | 턴 맥락은 간다. 세션은 계속 자라고, 새 세션 때 일을 잃는 것도 그대로다 |
+| `--system-prompt-snapshot off` 만 켠다 | 턴 맥락은 간다. 세션은 계속 자라고, 새 세션 때 일을 잃는 것도 그대로다. held set(#38986)과 같이 쓸 수 없다(§5.4) |
 | 턴 맥락을 user 메시지로 보낸다 (Antigravity 방식) | transcript 에 턴마다 쌓인다. memory recall 만 턴마다 71,892~210,909 B 다 |
 | 체크포인트 대신 공급자 transcript 를 읽어 씨앗을 만든다 | 공급자 파일 형식에 기대고, 공급자가 요약하면 원문이 없다 |
 | 모델 창(1M) 기준으로 새 세션 (#36688 제안 3) | 운영자는 전송 창을 `W` 로 정했다 |
@@ -362,7 +363,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
 | 1 | 효과 없는 거절은 세션을 지킨다(§5.1) | 없음 | 새 세션과 씨앗 재전송이 준다 |
 | 2 | 도구 표면 흔들림 원인 제거(§5.2) | 원인 조사 | 같다 |
 | 3 | 전송 기록 바로잡기(§5.3) | 없음 | 거의 없다 |
-| 4 | `--system-prompt-snapshot off`(§5.4) | 운영자 결정 | resume 턴마다 세션 대부분을 다시 쓴다 |
+| 4 | `--system-prompt-snapshot off`(§5.4) | 운영자 결정, held set 제거 | resume 턴마다 세션 대부분을 다시 쓴다 |
 | 5 | 고정부 예산(§5.5) | 운영자 결정 | 요청 크기가 준다 |
 | 6 | 턴 대화를 체크포인트에(§5.6) | §8 2·3번 | 체크포인트 쓰기 증가 |
 | 7 | 씨앗을 토큰으로, 매 턴 새 세션, `DISABLE_COMPACT`(§5.7) | 5·6단계 | 요청 하나가 `W + 턴 증가` 안으로 |

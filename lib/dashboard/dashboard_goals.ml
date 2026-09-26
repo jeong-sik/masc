@@ -247,15 +247,21 @@ let verification_projection ~config =
         in
         Goal_verification.record_to_yojson_for_goal ~goal record
 
+let measurement_projection ~config =
+  Goal_measurement.projection (Goal_measurement.load config)
+
 let rec tree_node_to_json ?(events_for_goal = fun _ -> [])
-    ?(verification_for_goal = fun _ -> Goal_verification.ledger_error_to_yojson "proof source not loaded") node =
+    ?(verification_for_goal = fun _ -> Goal_verification.ledger_error_to_yojson "proof source not loaded")
+    ?(measurement_for_goal = fun _ -> `Assoc [ "state", `String "not_loaded" ]) node =
   let goal = node.goal in
   let task_summary = task_summary_to_json node.tasks in
   `Assoc
     [
       ("id", `String goal.id);
       ("title", `String goal.title);
+      ("criterion_revision", `String goal.criterion_revision);
       ("verification", verification_for_goal goal);
+      ("measurement", measurement_for_goal goal);
       ("phase", Goal_phase.to_yojson goal.phase);
       ("phase_color", `String (goal_phase_color goal.phase));
       ("goal_fsm", goal_fsm_to_json goal node);
@@ -284,7 +290,8 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> [])
       ( "children",
         `List
           (List.map
-             (tree_node_to_json ~events_for_goal ~verification_for_goal)
+             (tree_node_to_json ~events_for_goal ~verification_for_goal
+                ~measurement_for_goal)
              node.children) );
       ("child_count", `Int (List.length node.children));
       ("last_activity_at", `String node.last_activity_at);
@@ -321,6 +328,7 @@ let goal_detail_json_ready ~(config : Workspace.config)
   let tasks = Workspace.get_tasks_safe config in
   let events_for_goal = build_goal_events_projection ~config goals in
   let verification_for_goal = verification_projection ~config in
+  let measurement_for_goal = measurement_projection ~config in
   match build_forest ~config ~goals ~tasks ~pending_approvals with
   | Error detail -> Ok (goal_task_links_unavailable_json detail)
   | Ok forest ->
@@ -364,7 +372,8 @@ let goal_detail_json_ready ~(config : Workspace.config)
             ("generated_at", `String (Masc_domain.now_iso ()));
             ( "approval_queue_state",
               Keeper_approval_queue.approval_queue_ready_state_json );
-            ("goal", tree_node_to_json ~events_for_goal ~verification_for_goal node);
+            ("goal", tree_node_to_json ~events_for_goal ~verification_for_goal
+                        ~measurement_for_goal node);
             ("linked_tasks", `List (List.map task_to_tree_json node.tasks));
             ("linked_keepers", `List (List.map goal_detail_keeper_json keeper_details));
             ("approvals", `List approvals);
@@ -412,6 +421,7 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
   let tasks = Workspace.get_tasks_safe config in
   let events_for_goal = build_goal_events_projection ~config goals in
   let verification_for_goal = verification_projection ~config in
+  let measurement_for_goal = measurement_projection ~config in
   match build_forest ~config ~goals ~tasks ~pending_approvals with
   | Error detail -> goal_task_links_unavailable_json detail
   | Ok forest ->
@@ -452,7 +462,8 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
       ( "tree",
         `List
           (List.map
-             (tree_node_to_json ~events_for_goal ~verification_for_goal)
+             (tree_node_to_json ~events_for_goal ~verification_for_goal
+                ~measurement_for_goal)
              forest) );
       ( "summary",
         `Assoc

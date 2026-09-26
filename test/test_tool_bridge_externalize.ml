@@ -340,10 +340,10 @@ let test_failure_recovery_data_reaches_model () =
       | Some expected ->
         Alcotest.(check bool) "independent metadata is retained" true
           (Yojson.Safe.equal expected (payload |> member "masc.payload")))
-    [ None; Some (`Assoc [ "gate", `String "allowed" ]) ]
+    [ None; Some (`Assoc [ "upstream_http_status", `Int 503 ]) ]
 
 let test_to_agent_core_typed_error_preserves_explicit_metadata () =
-  let metadata = `Assoc [ "gate", `Assoc [ "decision", `String "allow" ] ] in
+  let metadata = `Assoc [ "upstream_http_status", `Int 503 ] in
   let tr =
     Tool_result.make_err
       ~tool_name:"test"
@@ -373,14 +373,13 @@ let test_to_agent_core_typed_error_preserves_explicit_metadata () =
       "and so is what to do next"
       runtime_failure_next_move
       (payload |> member "next_move" |> to_string);
-    Alcotest.(check string)
-      "Gate metadata reaches the provider error"
-      "allow"
+    Alcotest.(check int)
+      "producer metadata reaches the provider error"
+      503
       (payload
        |> member "masc.payload"
-       |> member "gate"
-       |> member "decision"
-       |> to_string)
+       |> member "upstream_http_status"
+       |> to_int)
 
 let test_to_agent_core_typed_result_preserves_workflow_rejection () =
   let tr =

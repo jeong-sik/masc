@@ -83,6 +83,29 @@ let acting_pane_row_targets : Masc_tui_acting_pane.row_target array ref = ref [|
 let acting_pane_scroll_max = ref 0
 
 
+(* What a press on marked text does. Each constructor is a place a key
+   already reaches, so a press never does something the keyboard cannot. *)
+type ring_edge = Ring_before | Ring_after
+
+(* [Press_surface] is a Tab-ring entry, or a title-strip entry that is a
+   surface of its own (Activity's Events and Logs). [Press_ring_edge] is the
+   count of ring entries hidden past one edge of a narrow strip. *)
+type press_target =
+  | Press_surface of surface
+  | Press_ring_edge of ring_edge
+  | Press_keeper_tab of keeper_detail_tab
+  | Press_config_pane of config_pane
+
+(* Marks drawn during the frame being built. [render] resets it before
+   drawing and reads it back once the rows are final (Masc_tui_hit). Helpers
+   that only measure a strip -- [tab_strip_min_width] over [config_pane_tabs]
+   -- add marks too, outside [render]; those wait here until the next
+   [render] clears them and never reach a frame. *)
+let press_marks : press_target Masc_tui_hit.registry = Masc_tui_hit.registry ()
+
+let pressable target text = Masc_tui_hit.mark press_marks target text
+
+
 let navigation_rows = 1
 
 
@@ -715,9 +738,13 @@ let surface_strip (state : state) ~cols =
   in
   let parts = Buffer.create 128 in
   Buffer.add_char parts ' ';
+  (* Every entry and both hidden counts are pressable. A press on an entry is
+     Tab walked to it; a press on a count is one Tab step toward that edge. *)
   if lo > 0 then
     Buffer.add_string parts
-      (Printf.sprintf "%s%s%s " Ansi.dim (hidden_before_mark lo) Ansi.reset);
+      (Printf.sprintf "%s%s%s " Ansi.dim
+         (pressable (Press_ring_edge Ring_before) (hidden_before_mark lo))
+         Ansi.reset);
   for i = lo to hi do
     if i > lo then Buffer.add_string parts "  ";
     let surface, _ = ring.(i) in
@@ -726,20 +753,22 @@ let surface_strip (state : state) ~cols =
       | Approvals -> Masc_tui_types.approvals_surface_pending state > 0
       | _ -> false
     in
-    if i = active then
-      Buffer.add_string parts
-        (Ansi.bold
+    let entry =
+      if i = active then
+        Ansi.bold
         ^ (if is_alert then Theme.warn () else Theme.info ())
         ^ Masc_tui_theme.Glyph.current_entry
-        ^ label i ^ Ansi.reset)
-    else if is_alert then
-      Buffer.add_string parts
-        (Ansi.bold ^ (Theme.warn ()) ^ label i ^ Ansi.reset)
-    else Buffer.add_string parts (Ansi.dim ^ label i ^ Ansi.reset)
+        ^ label i ^ Ansi.reset
+      else if is_alert then Ansi.bold ^ (Theme.warn ()) ^ label i ^ Ansi.reset
+      else Ansi.dim ^ label i ^ Ansi.reset
+    in
+    Buffer.add_string parts (pressable (Press_surface surface) entry)
   done;
   if hi < n - 1 then
     Buffer.add_string parts
-      (Printf.sprintf " %s%s%s" Ansi.dim (hidden_after_mark (n - 1 - hi)) Ansi.reset);
+      (Printf.sprintf " %s%s%s" Ansi.dim
+         (pressable (Press_ring_edge Ring_after) (hidden_after_mark (n - 1 - hi)))
+         Ansi.reset);
   Buffer.contents parts
 
 
@@ -2950,7 +2979,10 @@ let path_from_root ~root path =
   else path
 
 let config_pane_tabs (state : state) =
-  List.map (fun (pane, label) -> (label, state.config_pane = pane)) config_panes
+  List.map
+    (fun (pane, label) ->
+      (pressable (Press_config_pane pane) label, state.config_pane = pane))
+    config_panes
 
 let config_pane_strip ~cols ~before ~after (state : state) =
   Ansi.dim ^ config_pane_keys ^ Ansi.reset

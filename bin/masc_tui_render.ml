@@ -8269,7 +8269,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       tab_strip ~width:(tab_strip_width ~cols ~before ~after:"")
         (List.map
            (fun tab ->
-             (Masc_tui_types.keeper_detail_tab_label tab, tab = state.detail_tab))
+             ( pressable (Press_keeper_tab tab)
+                 (Masc_tui_types.keeper_detail_tab_label tab)
+             , tab = state.detail_tab ))
            Masc_tui_types.keeper_detail_tabs)
     in
     let title = before ^ tabs in
@@ -8636,7 +8638,8 @@ let activity_tab_strip ~cols ~on_logs ~after =
     ~width:
       (tab_strip_width ~cols
          ~before:(screen_title " MASC Activity" ^ tab_strip_gap) ~after)
-    [ ("Events", not on_logs); ("Logs", on_logs) ]
+    [ (pressable (Press_surface Acting) "Events", not on_logs)
+    ; (pressable (Press_surface System_logs) "Logs", on_logs) ]
 
 (* The title: the strip, then what the reading on screen holds, after a dot.
    The count used to follow the strip directly, so on Events it sat against
@@ -16871,7 +16874,15 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
       |> List.filteri (fun index _ -> index >= scroll && index < scroll + budget)
       |> List.iter c.push)
 
+(* Whether a frame is a surface or something drawn over one. Only a surface
+   answers presses: an overlay keeps the strip on its first row, and a press
+   there would change the surface under a modal no key can leave that way. *)
+type drawn = Surface_drawn | Overlay_drawn
+
 let render (state : state) =
+  (* Marks number the targets of this frame alone. *)
+  Masc_tui_hit.reset press_marks;
+  let frame, clamped, approval, drawn =
   (* Decide the pane before any surface measures the terminal. Modals draw
      over the whole terminal and the Activity screen, both its tabs,
      already fills its own, so neither reserves the columns. *)
@@ -16885,35 +16896,35 @@ let render (state : state) =
   if Render_schedule.Viewport.requires_compact_frame ~rows
   then
     let frame, clamped = render_terminal_too_small state ~rows ~cols in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else match state.lane_addons with
   | Some view ->
     let frame, clamped = render_lane_addons state view in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   | None -> if state.palette_open then
     let frame, clamped = render_palette state in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else if state.context_inspector_open then
     let frame, clamped = render_context_inspector state in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else if state.keeper_deletions_open then
     let frame, clamped = render_keeper_deletions state in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else if state.help_open then
     let frame, clamped = render_help state in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else if state.agenda_open then
     let frame, clamped = render_agenda state in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else if state.answering_open then
     let frame, clamped = render_answering state in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else if state.patch_modal_open then
     let frame, clamped = render_patch_modal state in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else if state.link_modal_open then
     let frame, clamped = render_link_preview_modal state in
-    (frame, clamped, None)
+    (frame, clamped, None, Overlay_drawn)
   else
     let frame, clamped = render_surface state in
     let presented_approval =
@@ -16926,4 +16937,18 @@ let render (state : state) =
       | Connectors | Runtime | Config | Resources | Code | Tools
       | System_logs -> None
     in
-    (frame, clamped, presented_approval)
+    (frame, clamped, presented_approval, Surface_drawn)
+  in
+  (* The rows are final here, whichever branch drew them: read where each
+     pressable text landed and hand the terminal rows without the marks. *)
+  let lines, presses =
+    Masc_tui_hit.extract press_marks frame.Frame_presenter.lines
+  in
+  (* An overlay still draws the strip on its first row; its marks are removed
+     like any other, and answer no press. *)
+  let presses =
+    match drawn with
+    | Surface_drawn -> presses
+    | Overlay_drawn -> Masc_tui_hit.no_zones
+  in
+  ({ frame with Frame_presenter.lines }, clamped, approval, presses)

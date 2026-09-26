@@ -10564,6 +10564,81 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
   | Detail_runs -> launch_fusion_runs_load state ~mailbox
 ;;
 
+(* Entering a Keeper detail tab, by [ / ] or by a press on its name in the
+   title strip: one way in, so a press reads what the key reads. The scroll
+   belonged to the tab being left. *)
+let enter_keeper_detail_tab state ~mailbox tab =
+  state.detail_tab <- tab;
+  state.detail_scroll <- 0;
+  match selected_keeper state with
+  | Some keeper -> launch_detail_tab_reading state ~mailbox keeper
+  | None -> ()
+;;
+
+(* Entering a Config pane, by [p] or by a press on its name in the title
+   strip. Everything below is what arriving at a pane asks for; the key and
+   the press differ only in which pane they name. *)
+let enter_config_pane state ~mailbox pane =
+  state.config_pane <- pane;
+  state.prompts_cursor <- 0;
+  state.config_scroll <- 0;
+  state.runtime_config_cursor <- 0;
+  state.runtime_params_cursor <- 0;
+  state.runtime_param_edit <- None;
+  state.runtime_params_notice <- None;
+  state.prompts_librarian_input <- None;
+  state.prompts_librarian_input_error <- None;
+  state.prompts_librarian_input_loading <- false;
+  (* Cycling into a pane is entering it. Without this the params pane
+     draws whatever the last load left, which for a first visit is an
+     empty list -- and empty reads as "nothing registered". *)
+  (* Leaving the themes pane ends the preview the same way Esc does.
+     A scheme the reader never picked must not follow them out. *)
+  cancel_theme_preview state;
+  match state.config_pane with
+  | Config_prompts ->
+    (* [start] answers Already_loading for a read in flight, so the
+       launcher is the one that decides whether to ask. *)
+    launch_prompts_load state ~mailbox
+  | Config_presets ->
+    state.presets_cursor <- 0;
+    state.preset_save_draft <- None;
+    state.preset_restore_armed <- None;
+    if state.presets_snapshot = None
+    then launch_presets_load state ~mailbox
+  | Config_params -> launch_runtime_params_load state ~mailbox
+  (* Same first-visit load as the prompts pane. The models table is
+     a projection of runtime.toml, so entering it without the file
+     would draw "(loading)" with nothing on the way. *)
+  | Config_models ->
+    if state.runtime_config_view = None
+    then launch_runtime_config_load state ~mailbox
+  | Config_runtime ->
+    set_runtime_config_cursor_near state ~direction:1 ~target:0
+  (* Re-read rather than move a cursor: this pane has no rows, and
+     what an operator wants from it after starting a local server is
+     a fresh answer. *)
+  | Config_voice -> launch_voice_config_load state ~mailbox
+  | Config_themes -> ()
+;;
+
+(* What a press on marked text does: the same move the key for that place
+   makes. A press on the place already open does nothing -- it is where the
+   reader already is, and re-entering would reset its scroll and cursor. A
+   ring entry pressed from a surface of its family (Metrics under Overview,
+   a Keeper's chat under Keepers) goes to the entry's own surface. *)
+let press_marked_target state ~mailbox (target : press_target) =
+  match target with
+  | Press_surface surface ->
+      if surface <> state.view then goto_surface state ~mailbox surface
+  | Press_ring_edge Ring_before -> cycle_surface state ~mailbox ~backwards:true
+  | Press_ring_edge Ring_after -> cycle_surface state ~mailbox ~backwards:false
+  | Press_keeper_tab tab ->
+      if tab <> state.detail_tab then enter_keeper_detail_tab state ~mailbox tab
+  | Press_config_pane pane ->
+      if pane <> state.config_pane then enter_config_pane state ~mailbox pane
+;;
+
 let refresh_keeper_detail_selection state ~base_path ~mailbox =
   state.keeper_run_cursor <- 0;
   match selected_keeper state with
@@ -16023,6 +16098,10 @@ let main
      the mutable list that an async refresh may install before the next key.
      This is committed only after [Frame_presenter.present] reports output. *)
   let presented_approval = ref None in
+  (* Where each pressable text sits on the frame the terminal last accepted.
+     A press is read against this, never against a frame still being drawn:
+     the same rule the approval row above follows. *)
+  let presented_presses = ref Masc_tui_hit.no_zones in
   let terminal_title = Terminal_title.create () in
   let resize_requested = Atomic.make false in
 
@@ -16289,7 +16368,7 @@ let main
   let commit_presented_approval approval =
     presented_approval := approval
   in
-  let present_frame frame approval =
+  let present_frame frame approval presses =
     let damaged = Terminal_write_repair.consume_damage () in
     let authority_changed =
       Approval_authority.authority_changed
@@ -16307,7 +16386,8 @@ let main
     with
     | Frame_presenter.Presented ->
         state.frames_presented <- state.frames_presented + 1;
-        commit_presented_approval approval
+        commit_presented_approval approval;
+        presented_presses := presses
     | Frame_presenter.Unchanged -> ()
   in
   (* Bind the bearer to the workspace actually opened, before any request is
@@ -18202,6 +18282,23 @@ and is loaded on demand through keeper_skill.
          each did. *)
       let text_target = text_input_target state ~compact_viewport in
       let recovered_paste = Option.is_some interrupted_paste in
+      (* What a press lands on in the frame on screen. Only marks the
+         terminal was shown can answer, and [render] records none for a frame
+         drawn over a surface, so a modal's press never changes the surface
+         under it. A field taking keys holds the press too: moving away from
+         it would leave the next keys typed into a field no longer drawn.
+         While the picture or the machine screen is up nothing is drawn, so
+         the last frame's marks are not what the terminal shows. *)
+      let pressed =
+        match input with
+        | Some (Mouse_left_press (row, column))
+          when (not dismissed_image) && (not compact_viewport)
+               && (not state.image_open) && (not state.msx_open)
+               && Option.is_none msx_key
+               && Option.is_none text_target ->
+            Masc_tui_hit.target_at !presented_presses ~row ~column
+        | Some _ | None -> None
+      in
       (match input with
        | Some (Pasted paste) when Option.is_some state.lane_addons ->
            (match state.lane_addons with
@@ -18373,6 +18470,8 @@ and is loaded on demand through keeper_skill.
             | Some _ | None ->
                 handle_paste ~protect_recovered:recovered_paste state
                   ~base_path ~mailbox:async_messages ~paste)
+       | Some (Mouse_left_press _) when Option.is_some pressed ->
+           Option.iter (press_marked_target state ~mailbox:async_messages) pressed
        (* The wheel over the Activity pane scrolls the pane. The pane is drawn
           under no modal (render reserves it no columns while one is up), so
           the hit test alone says whether the notch is the pane's. *)
@@ -20917,12 +21016,8 @@ and is loaded on demand through keeper_skill.
              find 0 tabs
            in
            let step = if bracket = "]" then 1 else count - 1 in
-           state.detail_tab <- List.nth tabs ((index + step) mod count);
-           state.detail_scroll <- 0;
-           (match selected_keeper state with
-            | Some keeper ->
-                launch_detail_tab_reading state ~mailbox:async_messages keeper
-            | None -> ())
+           enter_keeper_detail_tab state ~mailbox:async_messages
+             (List.nth tabs ((index + step) mod count))
        (* One step through the list a detail was opened from, on every surface
           that has one. Each reuses the same open the Enter arm uses, so a
           step cannot fetch less than an open does. Guarded on the detail
@@ -24724,7 +24819,7 @@ and is loaded on demand through keeper_skill.
               first time it is asked for. *)
            (* Two of the three are files the server reads; the third is this
               reader's own colours, which no server has an opinion about. *)
-           state.config_pane <-
+           enter_config_pane state ~mailbox:async_messages
              (match state.config_pane with
               | Config_runtime -> Config_models
               | Config_models -> Config_params
@@ -24732,47 +24827,7 @@ and is loaded on demand through keeper_skill.
               | Config_prompts -> Config_presets
               | Config_presets -> Config_themes
               | Config_themes -> Config_voice
-              | Config_voice -> Config_runtime);
-           state.prompts_cursor <- 0;
-           state.config_scroll <- 0;
-           state.runtime_config_cursor <- 0;
-           state.runtime_params_cursor <- 0;
-           state.runtime_param_edit <- None;
-           state.runtime_params_notice <- None;
-           state.prompts_librarian_input <- None;
-           state.prompts_librarian_input_error <- None;
-           state.prompts_librarian_input_loading <- false;
-           (* Cycling into a pane is entering it. Without this the params pane
-              draws whatever the last load left, which for a first visit is an
-              empty list -- and empty reads as "nothing registered". *)
-           (* Leaving the themes pane ends the preview the same way Esc does.
-              A scheme the reader never picked must not follow them out. *)
-           cancel_theme_preview state;
-           (match state.config_pane with
-            | Config_prompts ->
-              (* [start] answers Already_loading for a read in flight, so the
-                 launcher is the one that decides whether to ask. *)
-              launch_prompts_load state ~mailbox:async_messages
-            | Config_presets ->
-              state.presets_cursor <- 0;
-              state.preset_save_draft <- None;
-              state.preset_restore_armed <- None;
-              if state.presets_snapshot = None
-              then launch_presets_load state ~mailbox:async_messages
-            | Config_params -> launch_runtime_params_load state ~mailbox:async_messages
-            (* Same first-visit load as the prompts pane. The models table is
-               a projection of runtime.toml, so entering it without the file
-               would draw "(loading)" with nothing on the way. *)
-            | Config_models ->
-              if state.runtime_config_view = None
-              then launch_runtime_config_load state ~mailbox:async_messages
-            | Config_runtime ->
-              set_runtime_config_cursor_near state ~direction:1 ~target:0
-            (* Re-read rather than move a cursor: this pane has no rows, and
-               what an operator wants from it after starting a local server is
-               a fresh answer. *)
-            | Config_voice -> launch_voice_config_load state ~mailbox:async_messages
-            | Config_themes -> ())
+              | Config_voice -> Config_runtime)
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one
@@ -25410,9 +25465,9 @@ and is loaded on demand through keeper_skill.
           drawn now would clear the rows it occupies and leave the rest. *)
        | Render_schedule.Render when state.image_open || state.msx_open -> ()
        | Render_schedule.Render ->
-           let frame, clamped, approval =
+           let frame, clamped, approval, presses =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
-               ~tag:(fun (frame, _, _) -> frame.Frame_presenter.surface_key)
+               ~tag:(fun (frame, _, _, _) -> frame.Frame_presenter.surface_key)
                (fun () ->
                  (* Event folding is frame preparation, so its cost belongs
                     inside Build timing even though only the loop stores it. *)
@@ -25434,7 +25489,7 @@ and is loaded on demand through keeper_skill.
                (terminal_title_snapshot state);
            Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Present
              ~tag:(fun () -> frame.Frame_presenter.surface_key)
-             (fun () -> present_frame frame approval)
+             (fun () -> present_frame frame approval presses)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

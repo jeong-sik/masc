@@ -5736,6 +5736,7 @@
 (include stanzas/test_tui_send_disposition.inc)
 (include stanzas/test_tui_layout.inc)
 (include stanzas/test_tui_scroll.inc)
+(include stanzas/test_tui_hit.inc)
 (include stanzas/test_tui_schedules_hold_says_when_it_was_checked.inc)
 (include stanzas/test_tui_keeper_schedule_error_once.inc)
 (include stanzas/test_tui_rows.inc)

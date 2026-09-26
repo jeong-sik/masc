@@ -2071,7 +2071,8 @@ type async_msg =
   | Keeper_deletions_loaded of int * (Keeper_control.deletion_inventory, string) result
   | Msx_frame_loaded of msx_poll_request
       * (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result
-  | Dos_live_loaded of machine_live_request * (Masc_tui_machine_live.answer, string) result
+  | Dos_live_loaded of machine_live_request
+      * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity_entry list, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
      on every one of these rather than read from the state at delivery: the
      roster cursor moves under a refresh, and a transcript that took several
@@ -8366,7 +8367,7 @@ let render_spectator (state : Masc_tui_types.state) =
         (msx_surface_current ())
   | Masc_tui_machine_live.Dos ->
       Masc_tui_msx.render_live ~write:write_to_terminal ~connection:state.connection_status
-        Masc_tui_machine_live.Dos state.dos_live
+        ~activity:state.dos_activity Masc_tui_machine_live.Dos state.dos_live
 ;;
 
 (* A live read names no mode, media or players. Keep the last tick metadata
@@ -8395,8 +8396,13 @@ let msx_frame_of_live ~previous_live ~previous_frame
    frame alone. *)
 let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
   let result =
-    Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
-      Masc_tui_machine_live.Msx ~since:(Masc_tui_machine_live.since state.msx_live)
+    (* MSX has no activity feed yet ([lib/msx_lane/msx_lane.ml] takes no
+       [~who] on several of its calls, so the server never fills one in) --
+       [fst] drops the always-empty second half rather than storing a field
+       nothing draws. *)
+    Result.map fst
+      (Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
+         Masc_tui_machine_live.Msx ~since:(Masc_tui_machine_live.since state.msx_live))
   in
   (match Masc_tui_machine_live.advance state.msx_live result with
    | None -> ()
@@ -14469,16 +14475,23 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              | Masc_tui_machine_live.Msx -> false
            in
            if request.live_view == !msx_poll_view && request.live_port = state.port
-              && state.msx_open && (state.msx_menu_open || watching_dos) then
+              && state.msx_open && (state.msx_menu_open || watching_dos) then begin
+             (* A failed read leaves [dos_activity] as it was -- the sidebar
+                keeps showing the last activity it had rather than flashing
+                empty on a read that did not answer at all. *)
+             (match result with
+              | Ok (_, activity) -> state.dos_activity <- activity
+              | Error _ -> ());
              (* An unchanged answer draws nothing and decodes no pixels. The
                 read also discovers the DOS watch row while the menu is open. *)
-             (match Masc_tui_machine_live.advance state.dos_live result with
+             (match Masc_tui_machine_live.advance state.dos_live (Result.map fst result) with
               | None -> ()
               | Some view ->
                   state.dos_live <- view;
                   if state.msx_menu_open then
                     Masc_tui_msx.render_menu ~write:write_to_terminal state
                   else render_spectator state)
+           end
            else if state.msx_open && state.msx_menu_open then
              launch_dos_live_poll state ~mailbox
        | Some _ | None -> ())

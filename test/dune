@@ -2965,6 +2965,7 @@
 (include stanzas/test_runtime_antigravity_context.inc)
 (include stanzas/test_runtime_muse_msp.inc)
 (include stanzas/test_runtime_muse_serve.inc)
+(include stanzas/test_runtime_muse_home.inc)
 (include stanzas/test_runtime_official_client_mcp_http.inc)
 (include stanzas/test_runtime_claude_code_config.inc)
 (include stanzas/test_keeper_antigravity_runtime.inc)
@@ -6305,6 +6306,7 @@
 (include stanzas/test_browser_stagehand_session.inc)
 (include stanzas/test_browser_stagehand_model.inc)
 (include stanzas/test_browser_stagehand_executor.inc)
+(include stanzas/test_browser_stagehand_backend.inc)
 (include stanzas/test_browser_chromium_process.inc)
 (include stanzas/test_server_browser_stagehand.inc)
 (include stanzas/test_browser_controls.inc)
@@ -6772,6 +6774,7 @@
 (include stanzas/test_tui_input_readiness_pty.inc)
 (include stanzas/test_h2_request_fibers.inc)
 (include stanzas/test_h2_oauth_request_fibers.inc)
+(include stanzas/test_dashboard_asset_worker.inc)
 
 (include stanzas/test_h2_response_window.inc)
 

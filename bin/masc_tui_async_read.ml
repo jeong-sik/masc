@@ -4,6 +4,7 @@ type source =
   | Connectors
   | Keeper_schedule
   | Runtime_config
+  | Skills_catalog
 
 let source_name = function
   | Keeper_turns -> "keeper turns"
@@ -11,6 +12,7 @@ let source_name = function
   | Connectors -> "connector"
   | Keeper_schedule -> "keeper schedule"
   | Runtime_config -> "runtime config"
+  | Skills_catalog -> "skills catalog"
 
 let attribute source result =
   Result.map_error

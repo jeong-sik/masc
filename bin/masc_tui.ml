@@ -3565,40 +3565,29 @@ let launch_tools_load ?(force = true) state ~mailbox =
       };
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_tools ~host ~port ?keeper () with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Tools_loaded (generation, keeper, result));
-      let async_observation =
-        try Masc_tui_http.fetch_async_request_observation ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Tools_async_observation_loaded (generation, async_observation))
+    (* The async-request observation is read after the inventory, as it
+       always was; the inventory's answer launches it. Both go through the
+       shared launch, so a missing or finished switch still answers each part
+       and the pending read settles instead of staying "loading". *)
+    let launch_async_observation () =
+      Masc_tui_async_read.launch
+        ~deliver:(fun result ->
+          enqueue_async mailbox (Tools_async_observation_loaded (generation, result)))
+        (fun () -> Masc_tui_http.fetch_async_request_observation ~host ~port)
     in
     (* The skills catalog (usage + flows) is a separate read and must not
        delay the tool list: a slow catalog costs its own section, not the
        screen. *)
-    let run_catalog () =
-      let result =
-        try Masc_tui_loader.load_skills_catalog ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Skills_catalog_loaded (generation, result))
-    in
-    (match Eio_context.get_switch_opt () with
-     | Some sw ->
-         Eio.Fiber.fork_daemon ~sw (fun () -> run_catalog (); `Stop_daemon);
-         Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-     | None ->
-         let error = Error "Eio switch is unavailable" in
-         enqueue_async mailbox (Tools_loaded (generation, keeper, error));
-         enqueue_async mailbox (Skills_catalog_loaded (generation, error));
-         enqueue_async mailbox (Tools_async_observation_loaded (generation, error)))
+    Masc_tui_async_read.launch
+      ~source:Masc_tui_async_read.Skills_catalog
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Skills_catalog_loaded (generation, result)))
+      (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port);
+    Masc_tui_async_read.launch
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Tools_loaded (generation, keeper, result));
+        launch_async_observation ())
+      (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ())
   end
 
 let settle_tools_read state ~generation part =

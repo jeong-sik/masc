@@ -1,0 +1,374 @@
+[
+  {
+    "function": "_camlMasc_tui_message_layout$scalar_cell_width_636:",
+    "instruction": "0000000101534d48\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$loop_726:",
+    "instruction": "0000000101534f04\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$loop_726:",
+    "instruction": "0000000101534f1c\tbl\t_camlStdlib$min_44"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$take_scalar_780:",
+    "instruction": "0000000101535630\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$take_cells_1031:",
+    "instruction": "00000001015365c0\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$fit_width_1108:",
+    "instruction": "0000000101536b74\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$fit_width_1108:",
+    "instruction": "0000000101536bd4\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$composer_lines_1168:",
+    "instruction": "0000000101537658\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$composer_lines_1168:",
+    "instruction": "0000000101537698\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$input_viewport_1177:",
+    "instruction": "0000000101537758\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$input_viewport_1177:",
+    "instruction": "00000001015377c8\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$message_history_height_1187:",
+    "instruction": "0000000101537828\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$message_history_height_1187:",
+    "instruction": "0000000101537844\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$chat_title_row_1191:",
+    "instruction": "0000000101537884\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$input_cursor_column_1206:",
+    "instruction": "00000001015379ec\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$input_cursor_column_1206:",
+    "instruction": "0000000101537a1c\tb\t_camlStdlib$min_44"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$chat_role_label_width_1214:",
+    "instruction": "0000000101537a74\tbl\t_camlStdlib$min_44"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$chat_role_label_width_1214:",
+    "instruction": "0000000101537a88\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$fit_middle_1217:",
+    "instruction": "0000000101537c10\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$turn_rail_gutter_1249:",
+    "instruction": "0000000101537da0\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$role_label_mark_cells_inner_2498:",
+    "instruction": "0000000101537df8\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$fun_2504:",
+    "instruction": "0000000101537ea8\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$fit_speaker_inner_2506:",
+    "instruction": "0000000101537f10\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$align_role_label_inner_2513:",
+    "instruction": "0000000101537fcc\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$take_last_1293:",
+    "instruction": "0000000101538100\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$take_last_1293:",
+    "instruction": "0000000101538134\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$wrap_words_1316:",
+    "instruction": "0000000101538448\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$pack_clauses_1347:",
+    "instruction": "0000000101538950\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$journal_rows_1376:",
+    "instruction": "0000000101538e10\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$fun_2592:",
+    "instruction": "0000000101538f68\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$timeline_break_row_1493:",
+    "instruction": "0000000101539dc8\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$origin_gutter_1552:",
+    "instruction": "000000010153a310\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$origin_gutter_1552:",
+    "instruction": "000000010153a344\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$origin_gutter_1552:",
+    "instruction": "000000010153a350\tbl\t_camlStdlib$min_44"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$origin_gutter_1552:",
+    "instruction": "000000010153a374\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$origin_gutter_1552:",
+    "instruction": "000000010153a380\tbl\t_camlStdlib$min_44"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$origin_gutter_1552:",
+    "instruction": "000000010153a3d4\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$origin_gutter_1552:",
+    "instruction": "000000010153a3e8\tbl\t_camlStdlib$min_44"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$origin_gutter_1552:",
+    "instruction": "000000010153a420\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$rows_of_entry_inner_2708:",
+    "instruction": "000000010153a660\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$visible_rows_1687:",
+    "instruction": "000000010153bb28\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$visible_rows_1687:",
+    "instruction": "000000010153bb38\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$total_rows_1704:",
+    "instruction": "000000010153bd80\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$max_scroll_1716:",
+    "instruction": "000000010153bf40\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$max_scroll_1716:",
+    "instruction": "000000010153bf78\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$scrolled_rows_1723:",
+    "instruction": "000000010153bfdc\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$scrolled_rows_1723:",
+    "instruction": "000000010153bfec\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$scrolled_rows_1723:",
+    "instruction": "000000010153c098\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$scrolled_rows_1723:",
+    "instruction": "000000010153c0b0\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$clamp_scroll_1747:",
+    "instruction": "000000010153c328\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$clamp_scroll_1747:",
+    "instruction": "000000010153c338\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$clamp_scroll_1747:",
+    "instruction": "000000010153c3d8\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$clamp_scroll_1747:",
+    "instruction": "000000010153c3ec\tb\t_camlStdlib$min_44"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$clamped_scrolled_rows_1849:",
+    "instruction": "000000010153c950\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$clamped_scrolled_rows_1849:",
+    "instruction": "000000010153c97c\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$clamped_scrolled_rows_1849:",
+    "instruction": "000000010153c98c\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$clamped_scrolled_rows_1849:",
+    "instruction": "000000010153c9e4\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$clamped_scrolled_rows_1849:",
+    "instruction": "000000010153c9f0\tbl\t_camlStdlib$min_44"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$clamped_scrolled_rows_1849:",
+    "instruction": "000000010153ca08\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$clamped_scrolled_rows_1849:",
+    "instruction": "000000010153ca20\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$gather_1867:",
+    "instruction": "000000010153cbd0\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$gather_1867:",
+    "instruction": "000000010153cbe4\tbl\t_camlStdlib$min_44"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$last_page_start_1882:",
+    "instruction": "000000010153cd3c\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$last_page_start_1882:",
+    "instruction": "000000010153cdb0\tb\t_camlStdlib$min_44"
+  },
+  {
+    "function": "_camlMasc_tui_message_layout$walk_1889:",
+    "instruction": "000000010153ce38\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$maximum_274:",
+    "instruction": "00000001015c0ae4\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$normalize_278:",
+    "instruction": "00000001015c0b20\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$normalize_278:",
+    "instruction": "00000001015c0b2c\tbl\t_camlStdlib$min_44"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$normalize_278:",
+    "instruction": "00000001015c0b40\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$down_283:",
+    "instruction": "00000001015c0b98\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$down_283:",
+    "instruction": "00000001015c0ba8\tb\t_camlStdlib$min_44"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$up_288:",
+    "instruction": "00000001015c0bec\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$step_uncounted_293:",
+    "instruction": "00000001015c0bfc\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$page_step_297:",
+    "instruction": "00000001015c0c08\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$page_down_300:",
+    "instruction": "00000001015c0c4c\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$page_down_300:",
+    "instruction": "00000001015c0c88\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$page_down_300:",
+    "instruction": "00000001015c0c98\tb\t_camlStdlib$min_44"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$page_up_305:",
+    "instruction": "00000001015c0cdc\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$page_up_305:",
+    "instruction": "00000001015c0d0c\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$cursor_last_310:",
+    "instruction": "00000001015c0d18\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$cursor_normalized_313:",
+    "instruction": "00000001015c0d54\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$cursor_normalized_313:",
+    "instruction": "00000001015c0d60\tbl\t_camlStdlib$min_44"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$cursor_normalized_313:",
+    "instruction": "00000001015c0d74\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$ensure_visible_330:",
+    "instruction": "00000001015c0e98\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$preview_height_335:",
+    "instruction": "00000001015c0ee4\tbl\t_camlStdlib$min_44"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$preview_height_335:",
+    "instruction": "00000001015c0ef8\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$body_height_339:",
+    "instruction": "00000001015c0f48\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$content_height_343:",
+    "instruction": "00000001015c0f90\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$content_height_343:",
+    "instruction": "00000001015c0fcc\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$content_height_343:",
+    "instruction": "00000001015c0ff8\tb\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$window_text_353:",
+    "instruction": "00000001015c10a0\tbl\t_camlStdlib$min_44"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$window_text_353:",
+    "instruction": "00000001015c10ac\tbl\t_camlStdlib$max_48"
+  },
+  {
+    "function": "_camlMasc_tui_scroll$window_text_353:",
+    "instruction": "00000001015c10cc\tbl\t_camlStdlib$min_44"
+  }
+]

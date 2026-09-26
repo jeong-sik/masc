@@ -287,7 +287,7 @@ let scalar_cell_width scalar =
   if code >= 0x20 && code <= 0x7E then 1
   else if Uucp.Func.is_regional_indicator scalar then 1
   else if Uucp.Emoji.is_emoji_presentation scalar then 2
-  else max 0 (Uucp.Break.tty_width_hint scalar)
+  else Int.max 0 (Uucp.Break.tty_width_hint scalar)
 
 (* A terminal that draws grapheme clusters gives an emoji sequence two cells
    whatever its scalars add up to, and the sum missed in both directions: a
@@ -333,8 +333,8 @@ let scalar_pieces text start_offset end_offset reversed =
     else
       let decoded = String.get_utf_8_uchar text offset in
       let valid = Uchar.utf_decode_is_valid decoded in
-      let scalar_length = max 1 (Uchar.utf_decode_length decoded) in
-      let next = min end_offset (offset + scalar_length) in
+      let scalar_length = Int.max 1 (Uchar.utf_decode_length decoded) in
+      let next = Int.min end_offset (offset + scalar_length) in
       let width =
         if valid then scalar_cell_width (Uchar.utf_decode_uchar decoded) else 1
       in
@@ -423,7 +423,7 @@ let grapheme_pieces text start_offset end_offset reversed =
       cluster_end := !cluster_end + Uchar.utf_8_byte_length scalar;
       let scalar_width = scalar_cell_width scalar in
       width := !width + scalar_width;
-      widest := max !widest scalar_width;
+      widest := Int.max !widest scalar_width;
       let hangul_type = Uucp.Hangul.syllable_type scalar in
       hangul_l := !hangul_l || hangul_type = `L;
       hangul_vt := !hangul_vt || hangul_type = `V || hangul_type = `T;
@@ -603,7 +603,7 @@ let drop_cells text cells =
    Read as a prefix that invents a cell, which is how a row with no mark to
    colour drew its first character twice. *)
 let take_cells text cells =
-  let prefix, _, _ = cell_prefix text (max 0 cells) in
+  let prefix, _, _ = cell_prefix text (Int.max 0 cells) in
   prefix
 
 (* The longest prefix that fits in [cells] without cutting a grapheme, and
@@ -706,13 +706,13 @@ let fit_width text width =
         (* The whole row is printable ASCII with no CSI, so byte offsets and
            display cells agree even at the cut. Styled or Unicode rows still
            need grapheme pieces and the style reset below. *)
-        let room = max 0 (width - cut_mark_cells) in
+        let room = Int.max 0 (width - cut_mark_cells) in
         String.sub text 0 room ^ cut_mark
     | Some _ | None ->
         let pieces = display_pieces text in
         let cells = pieces_width pieces in
         if cells > width then
-          let room = max 0 (width - cut_mark_cells) in
+          let room = Int.max 0 (width - cut_mark_cells) in
           let prefix, prefix_cells, saw_ansi =
             cell_prefix_of_pieces text pieces room
           in
@@ -801,19 +801,19 @@ let dress_bare_links ~open_style ~close_style text =
 let composer_max_rows = 5
 
 let composer_lines ~max_rows input =
-  let max_rows = max 1 max_rows in
+  let max_rows = Int.max 1 max_rows in
   let lines = String.split_on_char '\n' input in
-  let drop = max 0 (List.length lines - max_rows) in
+  let drop = Int.max 0 (List.length lines - max_rows) in
   List.filteri (fun index _ -> index >= drop) lines
 
 let input_viewport ~max_cells input =
-  let max_cells = max 0 max_cells in
+  let max_cells = Int.max 0 max_cells in
   let pieces = display_pieces input in
   if pieces_width pieces <= max_cells then input
   else if max_cells = 0 then ""
   else
     cut_mark
-    ^ cell_suffix_of_pieces input pieces (max 0 (max_cells - cut_mark_cells))
+    ^ cell_suffix_of_pieces input pieces (Int.max 0 (max_cells - cut_mark_cells))
 
 (* The chat pane draws the composer's first line with this prefix and wraps
    continuation lines to the same width, so the caret column is measured from
@@ -836,10 +836,10 @@ let chat_input_box_cells = 2
 let message_fixed_chrome_rows = 8
 
 let message_history_height ~terminal_rows ~status_rows =
-  max 0 (terminal_rows - message_fixed_chrome_rows - max 0 status_rows)
+  Int.max 0 (terminal_rows - message_fixed_chrome_rows - Int.max 0 status_rows)
 
 let chat_title_row ~inner_cells ~title ~mode_suffix =
-  let inner_cells = max 0 inner_cells in
+  let inner_cells = Int.max 0 inner_cells in
   let mode_cells = display_width mode_suffix in
   if mode_cells >= inner_cells then fit_width mode_suffix inner_cells
   else fit_width title (inner_cells - mode_cells) ^ mode_suffix
@@ -875,13 +875,13 @@ let scroll_position ~scrolled_back ~older_exist =
   else Some "(start)"
 
 let input_cursor_column ~terminal_cols ~input =
-  let last_column = max 1 (terminal_cols - 1) in
+  let last_column = Int.max 1 (terminal_cols - 1) in
   (* Three things sit left of the caret: the box, the prompt, and what was
      typed -- and the caret goes one cell past the last of them. Deriving this
      from the prompt alone put it on the prompt's own ">" instead of after the
      text, because the constant it replaced was all three added up rather than
      the prompt's width. *)
-  min last_column
+  Int.min last_column
     (chat_input_box_cells + chat_input_prompt_cells + display_width input + 1)
 
 (* Metadata rows read down the pane as a column: [timestamp] From [origin]
@@ -920,8 +920,8 @@ let chat_role_label_share = 6
 let chat_role_label_budget = 20
 
 let chat_role_label_width ~pane_cells =
-  max chat_role_label_column
-    (min chat_role_label_budget (pane_cells / chat_role_label_share))
+  Int.max chat_role_label_column
+    (Int.min chat_role_label_budget (pane_cells / chat_role_label_share))
 
 (* Keep both ends of [label] in [column] cells, dropping the middle.
 
@@ -956,7 +956,7 @@ let fit_middle column label =
       let tail_width = pieces_width (display_pieces tail) in
       let reset = if saw_ansi then "\x1B[0m" else "" in
       let used = head_width + cut_mark_cells + tail_width in
-      head ^ reset ^ cut_mark ^ tail ^ String.make (max 0 (column - used)) ' '
+      head ^ reset ^ cut_mark ^ tail ^ String.make (Int.max 0 (column - used)) ' '
 
 (* One glyph per speaker, from the vocabulary the Keepers roster and Acting
    already use. Colour carries this distinction better, and NO_COLOR takes
@@ -1059,14 +1059,14 @@ let turn_rail_gutter (piece : turn_rail) =
      so a gutter one cell short does not shrink the margin — it slides the
      clock and the label one cell left, and the row that follows lands in a
      different column than the one the layout reserved. *)
-  drawn ^ String.make (max 0 (turn_rail_cells - display_width drawn)) ' '
+  drawn ^ String.make (Int.max 0 (turn_rail_cells - display_width drawn)) ' '
 
 (* Cells the speaker mark and its separator occupy at the head of a label, or
    zero when the column was too narrow to keep the mark at all. One reader, so
    the renderer that styles the mark and the layout that lays it out cannot
    disagree about where it ends. *)
 let role_label_mark_cells ?(column = chat_role_label_column) ~style () =
-  let column = max 1 column in
+  let column = Int.max 1 column in
   let cells = display_width (speaker_mark style) + 1 in
   if column - cells < 1 then 0 else cells
 
@@ -1077,7 +1077,7 @@ let role_label_mark_cells ?(column = chat_role_label_column) ~style () =
    one arrives. *)
 let widest_speaker_mark_cells =
   List.fold_left
-    (fun widest style -> max widest (display_width (speaker_mark style)))
+    (fun widest style -> Int.max widest (display_width (speaker_mark style)))
     0 all_styles
 
 (* The speaker column names the speaker. Where the row also carries the surface
@@ -1093,12 +1093,12 @@ let fit_speaker ?(column = chat_role_label_column) ~speaker ~surface () =
   match surface with
   | None -> speaker
   | Some surface ->
-      let inner = max 1 (column - widest_speaker_mark_cells - 1) in
+      let inner = Int.max 1 (column - widest_speaker_mark_cells - 1) in
       let joined = speaker ^ " \xc2\xb7 " ^ surface in
       if display_width joined <= inner then joined else speaker
 
 let align_role_label ?(column = chat_role_label_column) ~style label =
-  let column = max 1 column in
+  let column = Int.max 1 column in
   let mark = speaker_mark style in
   (* The mark is paid for out of the badge, not added beside it: the body's
      width is taken from what the badge leaves, so charging it to the label
@@ -1148,7 +1148,7 @@ let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
   && message_history_height ~terminal_rows ~status_rows >= 3
 
 let take_last count values =
-  let drop = max 0 (List.length values - max 0 count) in
+  let drop = Int.max 0 (List.length values - Int.max 0 count) in
   values |> List.filteri (fun index _ -> index >= drop)
 
 let split_cells ~max_cells text =
@@ -1177,7 +1177,7 @@ let split_cells ~max_cells text =
    itself whole, the way this used to for every word of every row -- which
    made a row cost grow with the square of the words in it. *)
 let wrap_words ~max_cells text =
-  let max_cells = max 1 max_cells in
+  let max_cells = Int.max 1 max_cells in
   let current = Buffer.create 128 in
   let current_cells = ref 0 in
   let current_holds_escape = ref false in
@@ -1237,7 +1237,7 @@ let clause_separator = " \xc2\xb7 "
    given. The caller hands over the clauses themselves rather than the joined
    row: a clause whose own text holds the separator stays one clause. *)
 let pack_clauses ~max_cells (clauses : string list) =
-  let room = max 1 max_cells in
+  let room = Int.max 1 max_cells in
   let rows = ref [] in
   let current = ref "" in
   let emit () =
@@ -1296,14 +1296,14 @@ let journal_sign_text = function
    its own. Where the claim's column would be narrower than the lead beside
    it, the claim wraps at the full width under its lead instead. *)
 let journal_rows ~width lines =
-  let width = max 1 width in
+  let width = Int.max 1 width in
   let label = function
     | Journal_fact { category; _ } -> category
     | Journal_drop _ -> journal_drop_label
   in
   let sign_cells = display_width (journal_sign_text Journal_removed) in
   let label_cells =
-    List.fold_left (fun widest line -> max widest (display_width (label line))) 0 lines
+    List.fold_left (fun widest line -> Int.max widest (display_width (label line))) 0 lines
   in
   let lead_cells = sign_cells + 1 + label_cells + journal_column_gap in
   let claim_cells = width - lead_cells in
@@ -1493,7 +1493,7 @@ let timeline_break_row ~(previous : entry option) ~inner_width (entry : entry) =
          moved, not the speaker. *)
       let dash = "\xe2\x94\x84" in
       let lead = dash ^ dash ^ " " ^ label ^ " " in
-      let rule_cells = max 0 (inner_width - display_width lead) in
+      let rule_cells = Int.max 0 (inner_width - display_width lead) in
       let rule = String.concat "" (List.init rule_cells (fun _ -> dash)) in
       let text, _, _ = cell_prefix (lead ^ rule) inner_width in
       Some
@@ -1623,12 +1623,12 @@ let origin_gutter ~origin ~previous ~inner_width entry =
       let rail_cells =
         if role_cells + turn_rail_cells <= spare then turn_rail_cells else 0
       in
-      let ceiling = max 0 (spare - rail_cells) in
+      let ceiling = Int.max 0 (spare - rail_cells) in
       let role_fits = role_cells <= ceiling in
       let label, mark_cells =
         if role_fits then
           ( entry.role_label
-          , min role_cells (max 0 entry.role_label_mark_cells) )
+          , Int.min role_cells (Int.max 0 entry.role_label_mark_cells) )
         else
           (* [role_label_mark_cells] is the producer's typed boundary between
              the speaker mark and the source. Once the whole aligned label no
@@ -1637,7 +1637,7 @@ let origin_gutter ~origin ~previous ~inner_width entry =
              would colour an ellipsis or source byte as though it were a mark. *)
           let source =
             drop_cells entry.role_label
-              (min role_cells (max 0 entry.role_label_mark_cells))
+              (Int.min role_cells (Int.max 0 entry.role_label_mark_cells))
           in
           fit_middle ceiling source, 0
       in
@@ -1646,8 +1646,8 @@ let origin_gutter ~origin ~previous ~inner_width entry =
          [clock ^ entry.role_label], byte for byte. *)
       let clock_cells =
         if role_fits then
-          min (display_width clock)
-            (max 0 (ceiling - display_width label))
+          Int.min (display_width clock)
+            (Int.max 0 (ceiling - display_width label))
         else 0
       in
       (* A partial clock is context, not an identifier. [fit_width] would put
@@ -1656,7 +1656,7 @@ let origin_gutter ~origin ~previous ~inner_width entry =
          and its alignment without inventing a truncation glyph. *)
       let clock = take_cells clock clock_cells in
       let clock =
-        clock ^ String.make (max 0 (clock_cells - display_width clock)) ' '
+        clock ^ String.make (Int.max 0 (clock_cells - display_width clock)) ' '
       in
       let filled = clock ^ label in
       (* Where the kind label starts: past the clock and past the speaker mark.
@@ -1716,7 +1716,7 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     | None -> 0
     | Some (text, rail_cells, _, _) -> rail_cells + display_width text
   in
-  let body_width = max min_body_cells (inner_width - 2 - gutter_width) in
+  let body_width = Int.max min_body_cells (inner_width - 2 - gutter_width) in
   (* Keepers write markdown. Rendering it is the caller's to supply, so this
      module keeps no terminal vocabulary; without it the body is wrapped as the
      plain text it always was. *)
@@ -1953,8 +1953,8 @@ let newest_entry_window ~inner_width ~height rows =
       start @ (gap :: tail)
 
 let visible_rows ?markdown ?origin ~inner_width ~height entries =
-  let inner_width = max 1 inner_width in
-  let height = max 0 height in
+  let inner_width = Int.max 1 inner_width in
+  let height = Int.max 0 height in
   let rec collect remaining selected = function
     | [] -> selected
     | _ when remaining = 0 -> selected
@@ -1974,7 +1974,7 @@ let visible_rows ?markdown ?origin ~inner_width ~height entries =
   collect height [] (List.rev entries)
 
 let total_rows ?markdown ?origin ?previous ~inner_width entries =
-  let inner_width = max 1 inner_width in
+  let inner_width = Int.max 1 inner_width in
   List.fold_left
     (fun (previous, total) entry ->
        ( Some entry
@@ -1984,7 +1984,7 @@ let total_rows ?markdown ?origin ?previous ~inner_width entries =
   |> snd
 
 let max_scroll ?markdown ?origin ~inner_width ~height entries =
-  max 0 (total_rows ?markdown ?origin ~inner_width entries - max 1 height)
+  Int.max 0 (total_rows ?markdown ?origin ~inner_width entries - Int.max 1 height)
 
 (* Nothing older than the newest [from_bottom + height] rows can reach the
    window, so the walk stops once it holds them. Laying out the whole
@@ -1993,8 +1993,8 @@ let max_scroll ?markdown ?origin ~inner_width ~height entries =
 let scrolled_rows ?markdown ?origin ~inner_width ~height ~from_bottom entries =
   if from_bottom <= 0 then visible_rows ?markdown ?origin ~inner_width ~height entries
   else begin
-    let inner_width = max 1 inner_width in
-    let height = max 0 height in
+    let inner_width = Int.max 1 inner_width in
+    let height = Int.max 0 height in
     let wanted = from_bottom + height in
     let rec collect gathered gathered_count = function
       | [] -> gathered, gathered_count
@@ -2007,8 +2007,8 @@ let scrolled_rows ?markdown ?origin ~inner_width ~height ~from_bottom entries =
           collect (rows @ gathered) (gathered_count + List.length rows) older
     in
     let newest, newest_count = collect [] 0 (List.rev entries) in
-    let bottom = max 0 (newest_count - from_bottom) in
-    let first = max 0 (bottom - height) in
+    let bottom = Int.max 0 (newest_count - from_bottom) in
+    let first = Int.max 0 (bottom - height) in
     List.filteri (fun index _ -> index >= first && index < bottom) newest
   end
 
@@ -2020,10 +2020,10 @@ let scrolled_rows ?markdown ?origin ~inner_width ~height ~from_bottom entries =
 let clamp_scroll ?markdown ?origin ~inner_width ~height requested entries =
   if requested <= 0 then requested
   else begin
-    let inner_width = max 1 inner_width in
+    let inner_width = Int.max 1 inner_width in
     (* {!max_scroll} measures against at least one row, and this has to answer
        the same as it does. *)
-    let height = max 1 height in
+    let height = Int.max 1 height in
     let enough = requested + height in
     let rec count total = function
       | [] -> total
@@ -2036,7 +2036,7 @@ let clamp_scroll ?markdown ?origin ~inner_width ~height requested entries =
                     ~previous:(List.nth_opt older 0) entry))
             older
     in
-    min requested (max 0 (count 0 (List.rev entries) - height))
+    Int.min requested (Int.max 0 (count 0 (List.rev entries) - height))
   end
 
 (* How many rows each entry takes, newest first, for one list of entries at
@@ -2123,17 +2123,17 @@ let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entr
   if requested <= 0 then
     requested, visible_rows ?markdown ?origin ~inner_width ~height entries
   else begin
-    let inner_width = max 1 inner_width in
+    let inner_width = Int.max 1 inner_width in
     let origin = Option.value origin ~default:Origin_row in
-    let window_height = max 0 height in
-    let bound_height = max 1 height in
+    let window_height = Int.max 0 height in
+    let bound_height = Int.max 1 height in
     let held = row_counts_for entries ~inner_width ~origin in
     let visited, total =
       count_rows_until held ?markdown ~wanted:(requested + bound_height) ()
     in
-    let from_bottom = min requested (max 0 (total - bound_height)) in
-    let bottom = max 0 (total - from_bottom) in
-    let first = max 0 (bottom - window_height) in
+    let from_bottom = Int.min requested (Int.max 0 (total - bound_height)) in
+    let bottom = Int.max 0 (total - from_bottom) in
+    let first = Int.max 0 (bottom - window_height) in
     let rec gather index before selected =
       if index >= visited then selected
       else begin
@@ -2144,7 +2144,7 @@ let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entr
           if high <= first || low >= bottom then selected
           else begin
             let rows = entry_rows_at held ?markdown index in
-            let take_from = max first low and take_to = min bottom high in
+            let take_from = Int.max first low and take_to = Int.min bottom high in
             let chosen =
               List.filteri
                 (fun offset _ ->
@@ -2166,16 +2166,16 @@ let last_page_start ~height row_costs =
   let count = Array.length costs in
   if count = 0 then 0
   else begin
-    let height = max 1 height in
+    let height = Int.max 1 height in
     let rec walk index used =
       if index < 0 then 0
       else
         (* A row is the least an item can cost; a zero would let the walk
            claim the whole list fits in any height. *)
-        let cost = max 1 costs.(index) in
+        let cost = Int.max 1 costs.(index) in
         if used + cost > height then index + 1 else walk (index - 1) (used + cost)
     in
-    min (count - 1) (walk (count - 1) 0)
+    Int.min (count - 1) (walk (count - 1) 0)
   end
 
 (* One span, in the largest unit that still carries a remainder. Every reading

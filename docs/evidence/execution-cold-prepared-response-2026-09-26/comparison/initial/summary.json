@@ -1,0 +1,593 @@
+{
+  "groups": {
+    "identity-baseline-cold": {
+      "wire_ms": {
+        "n": 60,
+        "min": 8.160333,
+        "median": 13.0131665,
+        "p95": 14.969375,
+        "max": 29.558334
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 8.140458,
+        "median": 12.9658125,
+        "p95": 14.943584,
+        "max": 29.536875
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.016833,
+        "median": 0.0225415,
+        "p95": 0.036875,
+        "max": 0.086
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 143243,
+        "median": 146055.0,
+        "p95": 148601,
+        "max": 148902
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143243,
+        "median": 146055.0,
+        "p95": 148601,
+        "max": 148902
+      },
+      "observed_content_encoding": [
+        "identity"
+      ],
+      "server_compute_ms": {
+        "n": 60,
+        "min": 7.116,
+        "median": 11.7945,
+        "p95": 13.412,
+        "max": 28.367
+      }
+    },
+    "identity-baseline-warm": {
+      "wire_ms": {
+        "n": 60,
+        "min": 0.417042,
+        "median": 0.5257085,
+        "p95": 0.801292,
+        "max": 1.025375
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 0.404625,
+        "median": 0.5103960000000001,
+        "p95": 0.77975,
+        "max": 0.999125
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.011542,
+        "median": 0.014957999999999999,
+        "p95": 0.022208,
+        "max": 0.027875
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 143243,
+        "median": 146055.0,
+        "p95": 148601,
+        "max": 148902
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143243,
+        "median": 146055.0,
+        "p95": 148601,
+        "max": 148902
+      },
+      "observed_content_encoding": [
+        "identity"
+      ]
+    },
+    "identity-candidate-cold": {
+      "wire_ms": {
+        "n": 60,
+        "min": 8.187833,
+        "median": 13.029729,
+        "p95": 13.918833,
+        "max": 14.271875
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 8.165,
+        "median": 13.0076875,
+        "p95": 13.893708,
+        "max": 14.231584
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.018709,
+        "median": 0.023375,
+        "p95": 0.027542,
+        "max": 0.04625
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 143247,
+        "median": 146059.0,
+        "p95": 148620,
+        "max": 148921
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143247,
+        "median": 146059.0,
+        "p95": 148620,
+        "max": 148921
+      },
+      "observed_content_encoding": [
+        "identity"
+      ],
+      "server_compute_ms": {
+        "n": 60,
+        "min": 7.597,
+        "median": 12.41,
+        "p95": 13.284,
+        "max": 13.613
+      }
+    },
+    "identity-candidate-warm": {
+      "wire_ms": {
+        "n": 60,
+        "min": 0.437417,
+        "median": 0.5684375,
+        "p95": 0.675542,
+        "max": 0.73325
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 0.422417,
+        "median": 0.5512705,
+        "p95": 0.653584,
+        "max": 0.714625
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.012833,
+        "median": 0.016583,
+        "p95": 0.021958,
+        "max": 0.030292
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 143247,
+        "median": 146059.0,
+        "p95": 148620,
+        "max": 148921
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143247,
+        "median": 146059.0,
+        "p95": 148620,
+        "max": 148921
+      },
+      "observed_content_encoding": [
+        "identity"
+      ]
+    },
+    "gzip-baseline-cold": {
+      "wire_ms": {
+        "n": 60,
+        "min": 8.456709,
+        "median": 12.732854,
+        "p95": 13.408125,
+        "max": 15.217708
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 8.430459,
+        "median": 12.708208,
+        "p95": 13.388042,
+        "max": 15.088458
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.0175,
+        "median": 0.0223125,
+        "p95": 0.035667,
+        "max": 0.12925
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 143227,
+        "median": 146039.0,
+        "p95": 148595,
+        "max": 148896
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143227,
+        "median": 146039.0,
+        "p95": 148595,
+        "max": 148896
+      },
+      "observed_content_encoding": [
+        "identity"
+      ],
+      "server_compute_ms": {
+        "n": 60,
+        "min": 7.248,
+        "median": 11.6055,
+        "p95": 12.299,
+        "max": 13.836
+      }
+    },
+    "gzip-baseline-warm": {
+      "wire_ms": {
+        "n": 60,
+        "min": 0.3885,
+        "median": 0.48391649999999997,
+        "p95": 0.689083,
+        "max": 1.257
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 0.384917,
+        "median": 0.479271,
+        "p95": 0.6805,
+        "max": 1.249958
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.00325,
+        "median": 0.00475,
+        "p95": 0.007042,
+        "max": 0.008583
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 15875,
+        "median": 16089.0,
+        "p95": 16186,
+        "max": 16208
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143227,
+        "median": 146039.0,
+        "p95": 148595,
+        "max": 148896
+      },
+      "observed_content_encoding": [
+        "gzip"
+      ]
+    },
+    "gzip-candidate-cold": {
+      "wire_ms": {
+        "n": 60,
+        "min": 7.554292,
+        "median": 11.813082999999999,
+        "p95": 12.497083,
+        "max": 14.073833
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 7.546458,
+        "median": 11.8042915,
+        "p95": 12.486833,
+        "max": 14.064542
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.005166,
+        "median": 0.0084375,
+        "p95": 0.011125,
+        "max": 0.01475
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 15895,
+        "median": 16043.0,
+        "p95": 16174,
+        "max": 16204
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143231,
+        "median": 146043.0,
+        "p95": 148559,
+        "max": 148855
+      },
+      "observed_content_encoding": [
+        "gzip"
+      ],
+      "server_compute_ms": {
+        "n": 60,
+        "min": 7.033,
+        "median": 11.317,
+        "p95": 11.91,
+        "max": 13.351
+      }
+    },
+    "gzip-candidate-warm": {
+      "wire_ms": {
+        "n": 60,
+        "min": 0.370375,
+        "median": 0.449396,
+        "p95": 0.539458,
+        "max": 0.635417
+      },
+      "headers_ms": {
+        "n": 60,
+        "min": 0.366792,
+        "median": 0.44560449999999996,
+        "p95": 0.533833,
+        "max": 0.628875
+      },
+      "body_read_ms": {
+        "n": 60,
+        "min": 0.002833,
+        "median": 0.0041245,
+        "p95": 0.006542,
+        "max": 0.011
+      },
+      "wire_bytes": {
+        "n": 60,
+        "min": 15895,
+        "median": 16043.0,
+        "p95": 16174,
+        "max": 16204
+      },
+      "json_bytes": {
+        "n": 60,
+        "min": 143231,
+        "median": 146043.0,
+        "p95": 148559,
+        "max": 148855
+      },
+      "observed_content_encoding": [
+        "gzip"
+      ]
+    }
+  },
+  "sessions": [
+    {
+      "name": "identity-1-baseline",
+      "source": "53f784617c1867b3ecadb300bc8bd1d0844dd233",
+      "binary_sha256": "2d9f684599ef08ce0474c4516430d1bf4bde8212efd4b2572659950ff5e56c75",
+      "cold_wire_ms": {
+        "n": 20,
+        "min": 12.50925,
+        "median": 13.457667,
+        "p95": 14.84975,
+        "max": 15.438042
+      },
+      "warm_wire_ms": {
+        "n": 20,
+        "min": 0.459833,
+        "median": 0.5452295,
+        "p95": 0.801833,
+        "max": 1.025375
+      }
+    },
+    {
+      "name": "identity-1-candidate",
+      "source": "887807abe0bfb2b3d2df7fbca7672faa199aa898",
+      "binary_sha256": "1d0eb19346c7b1663076a44af5c93a9a5d446bcb0c8d56cedcb76ebac81928fa",
+      "cold_wire_ms": {
+        "n": 20,
+        "min": 12.708041,
+        "median": 13.428333,
+        "p95": 14.134458,
+        "max": 14.271875
+      },
+      "warm_wire_ms": {
+        "n": 20,
+        "min": 0.5195,
+        "median": 0.570479,
+        "p95": 0.675542,
+        "max": 0.701625
+      }
+    },
+    {
+      "name": "identity-2-candidate",
+      "source": "887807abe0bfb2b3d2df7fbca7672faa199aa898",
+      "binary_sha256": "1d0eb19346c7b1663076a44af5c93a9a5d446bcb0c8d56cedcb76ebac81928fa",
+      "cold_wire_ms": {
+        "n": 20,
+        "min": 8.187833,
+        "median": 12.3931665,
+        "p95": 13.544708,
+        "max": 13.622166
+      },
+      "warm_wire_ms": {
+        "n": 20,
+        "min": 0.437417,
+        "median": 0.527833,
+        "p95": 0.631458,
+        "max": 0.73325
+      }
+    },
+    {
+      "name": "identity-2-baseline",
+      "source": "53f784617c1867b3ecadb300bc8bd1d0844dd233",
+      "binary_sha256": "2d9f684599ef08ce0474c4516430d1bf4bde8212efd4b2572659950ff5e56c75",
+      "cold_wire_ms": {
+        "n": 20,
+        "min": 8.201292,
+        "median": 12.6522915,
+        "p95": 14.969375,
+        "max": 15.002875
+      },
+      "warm_wire_ms": {
+        "n": 20,
+        "min": 0.417042,
+        "median": 0.508417,
+        "p95": 0.578833,
+        "max": 0.584458
+      }
+    },
+    {
+      "name": "identity-3-baseline",
+      "source": "53f784617c1867b3ecadb300bc8bd1d0844dd233",
+      "binary_sha256": "2d9f684599ef08ce0474c4516430d1bf4bde8212efd4b2572659950ff5e56c75",
+      "cold_wire_ms": {
+        "n": 20,
+        "min": 8.160333,
+        "median": 12.921854,
+        "p95": 14.28125,
+        "max": 29.558334
+      },
+      "warm_wire_ms": {
+        "n": 20,
+        "min": 0.448542,
+        "median": 0.523271,
+        "p95": 0.801292,
+        "max": 0.999625
+      }
+    },
+    {
+      "name": "identity-3-candidate",
+      "source": "887807abe0bfb2b3d2df7fbca7672faa199aa898",
+      "binary_sha256": "1d0eb19346c7b1663076a44af5c93a9a5d446bcb0c8d56cedcb76ebac81928fa",
+      "cold_wire_ms": {
+        "n": 20,
+        "min": 12.290041,
+        "median": 13.0218745,
+        "p95": 13.731917,
+        "max": 13.918833
+      },
+      "warm_wire_ms": {
+        "n": 20,
+        "min": 0.443125,
+        "median": 0.6009375,
+        "p95": 0.659708,
+        "max": 0.686792
+      }
+    },
+    {
+      "name": "gzip-1-baseline",
+      "source": "53f784617c1867b3ecadb300bc8bd1d0844dd233",
+      "binary_sha256": "2d9f684599ef08ce0474c4516430d1bf4bde8212efd4b2572659950ff5e56c75",
+      "cold_wire_ms": {
+        "n": 20,
+        "min": 8.517375,
+        "median": 12.5341875,
+        "p95": 12.958916,
+        "max": 13.022083
+      },
+      "warm_wire_ms": {
+        "n": 20,
+        "min": 0.401667,
+        "median": 0.4848955,
+        "p95": 0.632417,
+        "max": 0.689083
+      }
+    },
+    {
+      "name": "gzip-1-candidate",
+      "source": "887807abe0bfb2b3d2df7fbca7672faa199aa898",
+      "binary_sha256": "1d0eb19346c7b1663076a44af5c93a9a5d446bcb0c8d56cedcb76ebac81928fa",
+      "cold_wire_ms": {
+        "n": 20,
+        "min": 7.554292,
+        "median": 11.850416500000001,
+        "p95": 12.236958,
+        "max": 12.613
+      },
+      "warm_wire_ms": {
+        "n": 20,
+        "min": 0.398709,
+        "median": 0.44675,
+        "p95": 0.539458,
+        "max": 0.635417
+      }
+    },
+    {
+      "name": "gzip-2-candidate",
+      "source": "887807abe0bfb2b3d2df7fbca7672faa199aa898",
+      "binary_sha256": "1d0eb19346c7b1663076a44af5c93a9a5d446bcb0c8d56cedcb76ebac81928fa",
+      "cold_wire_ms": {
+        "n": 20,
+        "min": 7.663042,
+        "median": 11.813082999999999,
+        "p95": 12.497083,
+        "max": 14.073833
+      },
+      "warm_wire_ms": {
+        "n": 20,
+        "min": 0.414417,
+        "median": 0.4479165,
+        "p95": 0.500958,
+        "max": 0.597416
+      }
+    },
+    {
+      "name": "gzip-2-baseline",
+      "source": "53f784617c1867b3ecadb300bc8bd1d0844dd233",
+      "binary_sha256": "2d9f684599ef08ce0474c4516430d1bf4bde8212efd4b2572659950ff5e56c75",
+      "cold_wire_ms": {
+        "n": 20,
+        "min": 8.456709,
+        "median": 12.453271,
+        "p95": 13.686375,
+        "max": 13.699834
+      },
+      "warm_wire_ms": {
+        "n": 20,
+        "min": 0.3885,
+        "median": 0.45858350000000003,
+        "p95": 0.814166,
+        "max": 1.257
+      }
+    },
+    {
+      "name": "gzip-3-baseline",
+      "source": "53f784617c1867b3ecadb300bc8bd1d0844dd233",
+      "binary_sha256": "2d9f684599ef08ce0474c4516430d1bf4bde8212efd4b2572659950ff5e56c75",
+      "cold_wire_ms": {
+        "n": 20,
+        "min": 9.975833,
+        "median": 12.925229000000002,
+        "p95": 13.408125,
+        "max": 15.217708
+      },
+      "warm_wire_ms": {
+        "n": 20,
+        "min": 0.405375,
+        "median": 0.5128125,
+        "p95": 0.603875,
+        "max": 0.759333
+      }
+    },
+    {
+      "name": "gzip-3-candidate",
+      "source": "887807abe0bfb2b3d2df7fbca7672faa199aa898",
+      "binary_sha256": "1d0eb19346c7b1663076a44af5c93a9a5d446bcb0c8d56cedcb76ebac81928fa",
+      "cold_wire_ms": {
+        "n": 20,
+        "min": 11.442875,
+        "median": 11.698395999999999,
+        "p95": 11.982542,
+        "max": 12.633584
+      },
+      "warm_wire_ms": {
+        "n": 20,
+        "min": 0.370375,
+        "median": 0.4525835,
+        "p95": 0.538791,
+        "max": 0.585417
+      }
+    }
+  ],
+  "checks": {
+    "complete_planned_sessions": 12,
+    "all_raw_observations": 480,
+    "same_tool_argument_hashes": true,
+    "same_task_projection_except_created_updated_at": true,
+    "cold_warm_body_identical": true,
+    "cold_cache_compute_present_warm_absent": true,
+    "all_children_reaped_exit_zero": true,
+    "p95_definition": "nearest rank: sorted[ceil(0.95*n)-1]",
+    "tcp_connection": "fresh per GET; timing includes TCP connect, request, headers and full body read; JSON parse and gzip decompression excluded"
+  }
+}

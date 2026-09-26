@@ -45,20 +45,29 @@ consistent with the existing HTTP representation handling and
   ready snapshot all reject the old selection.
 - Existing force, timeout, parameterized actor and generation checks remain.
 
-Source parsing and whitespace checks pass. On head
-`887807abe0bfb2b3d2df7fbca7672faa199aa898`, PR CI `36240341203` and focused
-CI `36240409176` passed (54 Dashboard_cache, 133 dashboard HTTP core, and
-2 execution-publication cases). Main subsequently changed the same HTTP test
-file. Integration with `0dcd3e8467fbd9217d8a8de2f92218afbdac5dfa` preserves
-its typed `Tool_timing.start ()` argument and requires a new CI result.
+Source parsing and whitespace checks pass. Source head
+`887807abe0bfb2b3d2df7fbca7672faa199aa898` passed PR CI `36240341203` and focused
+CI `36240409176` (54 cache, 133 HTTP core, two publication-attempt cases).
+After integrating main's overlapping typed `Tool_timing.start ()` test change,
+head `a488cf8b6b9ea142c3e551f4540737647570cbfc` passed all five PR gates
+`36242653741`. Focused run `36242729288` passed the 54 + 133 cases but ended
+red because I supplied a nonexistent third suite name. Corrected dispatch
+`36243702742` passed the actual two-case publication-attempt suite on the same
+head. The invocation failure remains distinct from those 189 passing cases.
+This later evidence-only commit requires new PR gates.
 Independent adversarial and response reviews found
 no source defect; the added first-compute case uses a fixture projection.
 The tests do not execute an HTTP fiber race through the final wire response. Codec preparation, cold projection time, scheduling/GC and network
 cost remain; no 0.1ms achievement or deployed performance improvement is claimed.
 
-The downloaded candidate server artifact (run `36241015541`, artifact
-`10905529982`, source `887807abe0bfb2b3d2df7fbca7672faa199aa898`) has a verified
-manifest and binary hashes but has not supplied a controlled before/after
-latency result. The review request for first-response median/p95 measurement
-remains open. Normal server startup proactively warms this cache, so an ordinary
-first GET after health readiness does not establish a cold-path measurement.
+## Controlled first-response measurement
+
+The review request is now addressed by [the paired comparison](comparison/README.md):
+12 isolated sessions and 480 GETs with the same synthetic task inputs. The first
+post-mutation identity median was 12.823875 → 12.362959ms and gzip median was
+13.020604 → 12.206542ms, with 60 samples per arm per encoding. **Both first-response
+p95 and max worsened.** Gzip first responses changed from identity to gzip, so
+this is not a measurement of serialization cost alone. The original unequal-path
+experiment is retained separately. Source/binary identity, exact commands,
+all observations, independent review and cleanup evidence are included.
+No general latency improvement, deployment or 0.1ms achievement is claimed.

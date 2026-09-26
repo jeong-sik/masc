@@ -270,12 +270,6 @@ val load_state_result :
     unprojected source-bearing row remains authoritative until the reaction
     projector records and retires it. *)
 
-val validate_state_read_only_result :
-  base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
-(** Decode a current snapshot when present and replay its v6 WAL without
-    checkpointing or WAL compaction. A missing snapshot starts from the WAL
-    row's exact complete pre-transition state, matching {!load_state_result}. *)
-
 val durable_state_exists_result :
   base_path:string -> keeper_name:string -> (bool, string) result
 (** Whether the Keeper's queue snapshot or transition WAL exists. A missing
@@ -288,6 +282,60 @@ val validate_existing_state_read_only_result :
     complete pre-transition state;
     absence of both artifacts is an explicit error, matching
     {!load_state_result}. *)
+
+type durable_file =
+  | Snapshot
+  | Transition_wal
+
+type file_failure =
+  { file : durable_file
+  ; path : string  (** The file the read failed on. *)
+  ; detail : string
+  }
+
+type state_failure =
+  | State_missing of string  (** Neither file exists. *)
+  | File_rejected of file_failure
+      (** The snapshot, or the transition WAL replayed on top of it (or
+          alone), did not read or decode. *)
+
+type read_only_failure =
+  | Owner_unresolved of string
+  | Read_raised of string
+  | State_failed of state_failure
+
+val read_only_failure_to_string : read_only_failure -> string
+
+val validate_existing_state_read_only_classified_result :
+  base_path:string ->
+  keeper_name:string ->
+  (Keeper_event_queue_state.t, read_only_failure) result
+(** {!validate_existing_state_read_only_result} with the failure kept typed,
+    so a boot refusal names the file that failed. The string form is
+    [read_only_failure_to_string] of this one. *)
+
+type moved_aside =
+  { path : string  (** The rejected file, as the read under the lock found it. *)
+  ; rejected_path : string  (** Where [path] went. *)
+  ; moved_with : (string * string) option
+      (** The other file of the pair and where it went, when it existed. *)
+  }
+
+val move_aside_undecodable_result :
+  base_path:string ->
+  keeper_name:string ->
+  rejected_path_of:(string -> string) ->
+  (moved_aside, string) result
+(** Boot quarantine. Under the owner lock, read the durable state again as
+    {!validate_existing_state_read_only_classified_result} does. When a file
+    is still rejected, rename the transition WAL and then the snapshot, each
+    to [rejected_path_of path]; the next load finds no durable state and
+    starts the empty queue. The WAL moves first so a move that stops halfway
+    leaves the snapshot alone: a rejected snapshot refuses the next boot
+    again, and a readable one is the committed state, never one the WAL had
+    replaced. The [Error] of a half-finished move names the file already
+    moved. State that decodes now, or has no files, is left where it is and
+    the result is [Error]. *)
 
 val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->

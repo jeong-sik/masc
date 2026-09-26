@@ -7231,6 +7231,7 @@
 (include stanzas/test_keeper_librarian_capacity_callback.inc)
 
 (include stanzas/test_deployment_store_directories.inc)
+(include stanzas/test_deployment_queue_preflight_mutation.inc)
 
 (test
  (name test_tui_fusion_summary_rows)

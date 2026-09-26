@@ -1232,7 +1232,7 @@ let test_undecodable_primary_retains_wal_and_absence_recovers () =
     (match Persistence.load_state_result ~base_path ~keeper_name with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "valid WAL replaced undecodable primary authority");
-    (match Persistence.validate_state_read_only_result ~base_path ~keeper_name with
+    (match Persistence.validate_existing_state_read_only_result ~base_path ~keeper_name with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "read-only validation ignored undecodable primary");
     (match Persistence.enqueue_stimulus_if_absent_result ~base_path ~keeper_name

@@ -3,8 +3,8 @@
 
     Both readers take their stores from {!Id.all}, which is derived, so a
     store cannot be in the list for one and missing for the other. The
-    helper's other subcommands ([validate-current-meta], the event queue,
-    schedule ledger and signals) still find their own files; RFC
+    helper's other subcommands ([validate-current-meta], the schedule
+    ledger and signals) still find their own files; RFC
     every-durable-store-has-one-boot-policy moves them here in later steps.
 
     {!reader} is the one table. It sends each store to one of three policies
@@ -14,8 +14,9 @@
       passes [--accept-store-quarantine]. Keeper meta and memory current are
       here: without them a keeper starts as another keeper or with empty
       memory, and overwrites what it lost. The official-client session
-      binding is here too: while it does not decode, every turn of its
-      keeper fails. The deploy preflight reads them too.
+      binding and the event queue are here too: while either does not
+      decode, the keeper takes no turn. The deploy preflight reads them
+      too.
 
     - [Degrade_typed]: boot decodes it once and logs one INFO line when it is
       unavailable. Keepers run without it and nothing overwrites it, so the
@@ -49,6 +50,7 @@ module Id : sig
     | Turn_fragments
     | Memory_absorbed
     | Memory_os_events
+    | Keeper_event_queue
   val all : t list
   (** Every constructor in declaration order, derived by
       [\[@@deriving enumerate\]]. *)
@@ -60,6 +62,7 @@ module Refusing : sig
     | Keeper_meta
     | Memory_current
     | Official_client_session
+    | Event_queue
 
 
   val all : t list

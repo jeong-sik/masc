@@ -57,32 +57,6 @@ let validate_signals paths =
   Ok ()
 ;;
 
-let validate_queue ~load ~base_path ~keeper_name =
-  load ~base_path ~keeper_name
-  |> Result.map (fun (_ : Keeper_event_queue_state.t) -> ())
-  |> Result.map_error (fun detail ->
-    `Msg
-      (Printf.sprintf
-         "current event queue production validation rejected keeper=%s base_path=%s: %s"
-         keeper_name
-         base_path
-         detail))
-;;
-
-let validate_current_queue ~base_path ~keeper_name =
-  validate_queue
-    ~load:Keeper_event_queue_persistence.validate_existing_state_read_only_result
-    ~base_path
-    ~keeper_name
-;;
-
-let validate_current_wal ~base_path ~keeper_name =
-  validate_queue
-    ~load:Keeper_event_queue_persistence.validate_state_read_only_result
-    ~base_path
-    ~keeper_name
-;;
-
 (* The two rejection classes call for different operator action, so each
    verdict carries a single-token [class=] label: cmdliner re-wraps the error
    text at the terminal margin and can split a phrase across lines, a token
@@ -547,16 +521,6 @@ let validate_signals_cmd =
     Term.(ret (const (fun paths -> cmdliner_result (validate_signals paths)) $ signal_files))
 ;;
 
-let current_queue_base_path =
-  let doc = "Workspace BasePath containing the current queue owner." in
-  Arg.(required & opt (some dir) None & info [ "base-path" ] ~docv:"PATH" ~doc)
-;;
-
-let current_queue_keeper_name =
-  let doc = "Exact Keeper owner whose snapshot and/or transition WAL must load." in
-  Arg.(required & opt (some string) None & info [ "keeper-name" ] ~docv:"KEEPER" ~doc)
-;;
-
 let durable_filenames_cmd =
   let doc = "print the durable event-queue filenames this binary reads and writes" in
   Cmd.v
@@ -571,32 +535,6 @@ let durable_filenames_cmd =
           Keeper_event_queue_persistence.snapshot_filename
           Keeper_event_queue_persistence.transition_wal_filename)
       $ const ())
-;;
-
-let validate_current_queue_cmd =
-  let doc = "validate a current event-queue through production decode and replay" in
-  Cmd.v
-    (Cmd.info "validate-current-queue" ~doc)
-    Term.(
-      ret
-        (const
-           (fun base_path keeper_name ->
-              cmdliner_result (validate_current_queue ~base_path ~keeper_name))
-         $ current_queue_base_path
-         $ current_queue_keeper_name))
-;;
-
-let validate_current_wal_cmd =
-  let doc = "validate the current WAL with the production empty-state replay path" in
-  Cmd.v
-    (Cmd.info "validate-current-wal" ~doc)
-    Term.(
-      ret
-        (const
-           (fun base_path keeper_name ->
-              cmdliner_result (validate_current_wal ~base_path ~keeper_name))
-         $ current_queue_base_path
-         $ current_queue_keeper_name))
 ;;
 
 let current_meta_file =
@@ -944,8 +882,6 @@ let () =
           ; lease_handoff_cmd
           ; tool_blob_maintenance_cmd
           ; verify_lease_owner_cmd
-          ; validate_current_queue_cmd
-          ; validate_current_wal_cmd
           ; validate_current_meta_cmd
           ; build_commit_cmd
           ; validate_schedule_ledger_cmd

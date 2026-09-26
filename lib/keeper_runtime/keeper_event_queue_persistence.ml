@@ -593,42 +593,90 @@ let load_state_result ~base_path ~keeper_name =
 ;;
 
 
-let read_state_read_only_unlocked ~require_existing owner =
+type durable_file =
+  | Snapshot
+  | Transition_wal
+
+type file_failure =
+  { file : durable_file
+  ; path : string
+  ; detail : string
+  }
+
+type state_failure =
+  | State_missing of string
+  | File_rejected of file_failure
+
+type read_only_failure =
+  | Owner_unresolved of string
+  | Read_raised of string
+  | State_failed of state_failure
+
+let state_failure_to_string = function
+  | State_missing detail | File_rejected { detail; _ } -> detail
+;;
+
+let read_only_failure_to_string = function
+  | Owner_unresolved detail | Read_raised detail -> detail
+  | State_failed failure -> state_failure_to_string failure
+;;
+
+(* The one read-only read. A failure names the file it came from, so boot can
+   point at that file and move it last. *)
+let read_state_read_only_classified_unlocked ~require_existing owner =
+  let rejected file path detail = File_rejected { file; path; detail } in
+  let wal_rejected detail =
+    rejected Transition_wal (transition_wal_path_of_owner owner) detail
+  in
   match read_primary_unlocked owner with
-  | Error _ as error -> error
+  | Error detail -> Error (rejected Snapshot (snapshot_path_of_owner owner) detail)
   | Ok (Primary_current state) ->
-    replay_transition_wal_read_only_unlocked owner state
+    replay_transition_wal_read_only_unlocked owner state |> Result.map_error wal_rejected
   | Ok Primary_absent
     when require_existing && not (durable_state_exists_unlocked owner) ->
     Error
-      (Printf.sprintf
-         "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
-         (keeper_name_of_owner owner)
-         (snapshot_path_of_owner owner)
-         (transition_wal_path_of_owner owner))
+      (State_missing
+         (Printf.sprintf
+            "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (transition_wal_path_of_owner owner)))
   | Ok Primary_absent ->
     replay_transition_wal_read_only_unlocked
       ~wal_only:true
       owner
       State.empty
+    |> Result.map_error wal_rejected
 ;;
 
-let validate_state_read_only_result_with ~require_existing ~base_path ~keeper_name =
+let read_state_read_only_unlocked ~require_existing owner =
+  read_state_read_only_classified_unlocked ~require_existing owner
+  |> Result.map_error state_failure_to_string
+;;
+
+let validate_existing_state_read_only_classified_result ~base_path ~keeper_name =
   match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
+  | Error detail -> Error (Owner_unresolved detail)
   | Ok owner ->
     (try
        Owner_lock.with_durable_lock owner (fun () ->
-         read_state_read_only_unlocked ~require_existing owner)
+         read_state_read_only_classified_unlocked ~require_existing:true owner
+         |> Result.map_error (fun failure -> State_failed failure))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
        Error
-         (Printf.sprintf
-            "event queue read-only validation raised keeper=%s path=%s: %s"
-            (keeper_name_of_owner owner)
-            (snapshot_path_of_owner owner)
-            (Printexc.to_string exn)))
+         (Read_raised
+            (Printf.sprintf
+               "event queue read-only validation raised keeper=%s path=%s: %s"
+               (keeper_name_of_owner owner)
+               (snapshot_path_of_owner owner)
+               (Printexc.to_string exn))))
+;;
+
+let validate_existing_state_read_only_result ~base_path ~keeper_name =
+  validate_existing_state_read_only_classified_result ~base_path ~keeper_name
+  |> Result.map_error read_only_failure_to_string
 ;;
 
 type read_only_observation_error =
@@ -687,20 +735,93 @@ let observe_state_read_only_typed_with ~between_samples ~base_path ~keeper_name 
                (Printexc.to_string exn))))
 ;;
 
-let validate_state_read_only_result ~base_path ~keeper_name =
-  validate_state_read_only_result_with
-    ~require_existing:false
-    ~base_path
-    ~keeper_name
-;;
+type moved_aside =
+  { path : string
+  ; rejected_path : string
+  ; moved_with : (string * string) option
+  }
 
-let validate_existing_state_read_only_result ~base_path ~keeper_name =
-  validate_state_read_only_result_with
-    ~require_existing:true
-    ~base_path
-    ~keeper_name
-;;
+(* Boot quarantine (RFC every-durable-store-has-one-boot-policy): the snapshot
+   and the WAL carry one state, so they move together. Under the owner lock the
+   state is read again the way [validate_existing_state_read_only_result] reads
+   it; state that decodes now, or has no files, is left where it is.
 
+   The WAL always moves first. A move that stops after it leaves the snapshot
+   alone: a rejected snapshot refuses the next boot again, and a readable one
+   is the committed state the WAL was replayed on. The other order could leave
+   a WAL alone, and a WAL replays alone from its first row's pre-state, which
+   is how a WAL rejected only for disagreeing with its snapshot would come back
+   as the queue. The next load after a full move finds no durable state and
+   starts the empty queue. *)
+let move_aside_undecodable_result ~base_path ~keeper_name ~rejected_path_of =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    let rename path =
+      let rejected_path = rejected_path_of path in
+      match Fs_compat.rename path rejected_path with
+      | () -> Ok rejected_path
+      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+      | exception exn ->
+        Error
+          (Printf.sprintf
+             "%s could not be moved to %s: %s"
+             path
+             rejected_path
+             (Printexc.to_string exn))
+    in
+    (* The rejected file is renamed whatever it is, since reading it failed;
+       its partner only when it exists. *)
+    let rename_partner path =
+      if Sys.file_exists path
+      then rename path |> Result.map (fun rejected_path -> Some (path, rejected_path))
+      else Ok None
+    in
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match read_state_read_only_classified_unlocked ~require_existing:true owner with
+         | Ok (_ : State.t) -> Error "the event queue decodes now; it was left in place"
+         | Error (State_missing (_ : string)) ->
+           Error "the event queue has no durable state; nothing was moved"
+         | Error (File_rejected { file = Snapshot; path; detail = _ }) ->
+           (match rename_partner (transition_wal_path_of_owner owner) with
+            | Error _ as error -> error
+            | Ok moved_with ->
+              (match rename path, moved_with with
+               | Ok rejected_path, _ -> Ok { path; rejected_path; moved_with }
+               | Error detail, None -> Error detail
+               | Error detail, Some (wal, rejected_wal) ->
+                 Error
+                   (Printf.sprintf
+                      "%s; %s was already moved to %s and the rejected snapshot \
+                       stays, so the next boot refuses again"
+                      detail
+                      wal
+                      rejected_wal)))
+         | Error (File_rejected { file = Transition_wal; path; detail = _ }) ->
+           (match rename path with
+            | Error _ as error -> error
+            | Ok rejected_path ->
+              (match rename_partner (snapshot_path_of_owner owner) with
+               | Ok moved_with -> Ok { path; rejected_path; moved_with }
+               | Error detail ->
+                 Error
+                   (Printf.sprintf
+                      "%s; the rejected WAL %s was already moved to %s, so the \
+                       snapshot stays and the next load reads it without the WAL"
+                      detail
+                      path
+                      rejected_path))))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue move-aside raised keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (Printexc.to_string exn)))
+;;
 
 let load_with_projection ~projection ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map projection

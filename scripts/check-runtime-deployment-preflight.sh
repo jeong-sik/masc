@@ -127,10 +127,7 @@ run_gate() {
   local signal_row_count=0
   local signal_path
   local rows_in_file
-  local current_owner_count=0
   local keeper_meta_count=0
-  local queue_path
-  local keeper_name
   local in_progress_count_total=0
 
   [[ -d "$BASE_PATH" && ! -L "$BASE_PATH" ]] \
@@ -172,34 +169,6 @@ run_gate() {
         || fail "$KEEPER_META_REJECTED (the helper verdict above names the class and the fix): $meta_path"
       keeper_meta_count=$((keeper_meta_count + 1))
     done < <(find "$keepers_root" -mindepth 1 -maxdepth 1 -name '*.json' -print0)
-
-    while IFS= read -r -d '' queue_path; do
-      [[ -f "$queue_path" && ! -L "$queue_path" ]] \
-        || fail "current queue snapshot is not an exact regular file: $queue_path"
-      keeper_name="${queue_path%/*}"
-      keeper_name="${keeper_name##*/}"
-      "$PREFLIGHT_HELPER" validate-current-queue \
-        --base-path "$BASE_PATH" \
-        --keeper-name "$keeper_name" \
-        || fail "current queue snapshot or transition WAL is invalid: $queue_path"
-      current_owner_count=$((current_owner_count + 1))
-    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name "$QUEUE_SNAPSHOT_FILENAME" -print0)
-
-    while IFS= read -r -d '' queue_path; do
-      [[ -f "$queue_path" && ! -L "$queue_path" ]] \
-        || fail "current transition WAL is not an exact regular file: $queue_path"
-      if [[ -e "$(dirname "$queue_path")/${QUEUE_SNAPSHOT_FILENAME}" \
-            || -L "$(dirname "$queue_path")/${QUEUE_SNAPSHOT_FILENAME}" ]]; then
-        continue
-      fi
-      keeper_name="${queue_path%/*}"
-      keeper_name="${keeper_name##*/}"
-      "$PREFLIGHT_HELPER" validate-current-wal \
-        --base-path "$BASE_PATH" \
-        --keeper-name "$keeper_name" \
-        || fail "current transition WAL is invalid: $queue_path"
-      current_owner_count=$((current_owner_count + 1))
-    done < <(find "$keepers_root" -mindepth 2 -maxdepth 2 -name "$QUEUE_WAL_FILENAME" -print0)
   fi
 
   for schedules_path in \
@@ -280,9 +249,9 @@ run_gate() {
     done < <(find "$candidates_root" -name '*.jsonl' -print0)
   fi
 
-  printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d current_owners=%d keeper_meta=%d in_progress=%d%s\n' \
+  printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d keeper_meta=%d in_progress=%d%s\n' \
     "$BASE_PATH" "$schedule_ledger_count" "$signal_file_count" \
-    "$signal_row_count" "$current_owner_count" "$keeper_meta_count" \
+    "$signal_row_count" "$keeper_meta_count" \
     "$in_progress_count_total" "$(helper_identity)"
 }
 
@@ -580,14 +549,22 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   mkdir -p "$malformed_current_root/.masc/keepers/fixture"
   printf '{not-json\n' \
     >"$malformed_current_root/.masc/keepers/fixture/${QUEUE_SNAPSHOT_FILENAME}"
-  expect_failure malformed_current_queue "$malformed_current_root"
+  expect_failure_contains \
+    malformed_current_queue \
+    "$malformed_current_root" \
+    "keeper event queue rows=1 refused=1" \
+    "durable store validation rejected current runtime state"
 
   malformed_current_wal_root="$fixture_root/malformed-current-wal"
   write_schedules "$malformed_current_wal_root" running
   write_current_queue "$malformed_current_wal_root"
   printf '{not-json\n' \
     >"$malformed_current_wal_root/.masc/keepers/fixture/${QUEUE_WAL_FILENAME}"
-  expect_failure malformed_current_wal "$malformed_current_wal_root"
+  expect_failure_contains \
+    malformed_current_wal \
+    "$malformed_current_wal_root" \
+    "keeper event queue rows=1 refused=1" \
+    "durable store validation rejected current runtime state"
 
   # Each keeper-meta rejection asserts the gate's own verdict prefix (printed
   # by this script, never re-wrapped) plus single tokens from the helper's
@@ -653,7 +630,11 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   mkdir -p "$malformed_wal_only_root/.masc/keepers/fixture"
   printf '{not-json\n' \
     >"$malformed_wal_only_root/.masc/keepers/fixture/${QUEUE_WAL_FILENAME}"
-  expect_failure malformed_wal_without_snapshot "$malformed_wal_only_root"
+  expect_failure_contains \
+    malformed_wal_without_snapshot \
+    "$malformed_wal_only_root" \
+    "keeper event queue rows=1 refused=1" \
+    "durable store validation rejected current runtime state"
 
   malformed_root="$fixture_root/malformed"
   mkdir -p "$malformed_root/.masc"

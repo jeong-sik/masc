@@ -417,6 +417,43 @@ let official_client_session_store =
   }
 ;;
 
+(* Each keeper's queue is a snapshot and a transition WAL that carry one
+   state. [Keeper_event_queue_persistence] keeps an undecodable snapshot and
+   its WAL as they are and returns an error, so registration refuses the
+   keeper, and a running keeper's heartbeat selects no stimulus; it takes no
+   turn until the files are readable (#37900). The read is the persistence's
+   own read-only validation, under its owner lock. *)
+let event_queue_store =
+  { store = "keeper event queue"
+  ; on_refusal =
+      "the keeper is not registered while its queue snapshot or transition \
+       WAL does not decode, and a running one selects no stimulus, so it takes \
+       no turn; the files are kept as they are"
+  ; scan =
+      (fun ~base_path ->
+         let discovery =
+           Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
+             ~base_path
+         in
+         match discovery.read_error with
+         | Some detail -> Error detail
+         | None ->
+           Ok
+             (List.fold_left
+                (fun report keeper_name ->
+                   count_row
+                     report
+                     (Keeper_event_queue_persistence
+                      .validate_existing_state_read_only_result
+                        ~base_path
+                        ~keeper_name
+                      |> Result.map (fun (_ : Keeper_event_queue_state.t) -> ())
+                      |> Result.map_error (fun detail -> keeper_name ^ ": " ^ detail)))
+                empty_report
+                discovery.keeper_names))
+  }
+;;
+
 (* The three position stores the Librarian lifecycle writes per keeper (RFC
    librarian-lifecycle sections 4.6 and 10.3), the turn fragments it consumes,
    and the two memory OS sidecars beside them (RFC-0456) decode field-exact,
@@ -694,6 +731,7 @@ module Id = struct
     | Turn_fragments
     | Memory_absorbed
     | Memory_os_events
+    | Keeper_event_queue
   [@@deriving enumerate]
 end
 
@@ -702,6 +740,7 @@ module Refusing = struct
     | Keeper_meta
     | Memory_current
     | Official_client_session
+    | Event_queue
 
   [@@deriving enumerate]
 end
@@ -737,6 +776,7 @@ let reader : Id.t -> reader = function
   | Id.Turn_fragments -> Preflight_only turn_fragment_store
   | Id.Memory_absorbed -> Preflight_only memory_absorbed_store
   | Id.Memory_os_events -> Preflight_only memory_os_events_store
+  | Id.Keeper_event_queue -> Refuse_boot (Refusing.Event_queue, event_queue_store)
 ;;
 
 let name id =

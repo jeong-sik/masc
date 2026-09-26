@@ -1671,7 +1671,7 @@ let () =
                Alcotest.(check bool) (label ^ " exact rejection detail") true
                  (String_util.contains_substring detail expected)) expected_detail
          | Ok _ -> Alcotest.fail (label ^ " malformed snapshot accepted"));
-        (match Keeper_event_queue_persistence.validate_state_read_only_result
+        (match Keeper_event_queue_persistence.validate_existing_state_read_only_result
                  ~base_path ~keeper_name with
          | Error _ -> ()
          | Ok _ -> Alcotest.fail (label ^ " malformed read-only state accepted"));

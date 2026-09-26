@@ -27,17 +27,17 @@ let schema_of_name name : Masc_domain.tool_schema =
      | Error message -> failwith message)
 ;;
 
-let sandbox_start = schema_of_name "masc_keeper_sandbox_start"
-let sandbox_stop = schema_of_name "masc_keeper_sandbox_stop"
-let status = schema_of_name "masc_keeper_status"
-let audit = schema_of_name "masc_keeper_audit"
-let up = schema_of_name "masc_keeper_up"
-let delegate = schema_of_name "masc_keeper_delegate"
-let delegate_status = schema_of_name "masc_keeper_delegate_status"
-let delegate_cancel = schema_of_name "masc_keeper_delegate_cancel"
-let delegate_list = schema_of_name "masc_keeper_delegate_list"
-let down = schema_of_name "masc_keeper_down"
-let list = schema_of_name "masc_keeper_list"
-let reset = schema_of_name "masc_keeper_reset"
-let msg = schema_of_name "masc_keeper_msg"
-let clear = schema_of_name "masc_keeper_clear"
+let sandbox_start = schema_of_name Keeper_tool_name.(to_string Keeper_sandbox_start)
+let sandbox_stop = schema_of_name Keeper_tool_name.(to_string Keeper_sandbox_stop)
+let status = schema_of_name Keeper_tool_name.(to_string Keeper_status)
+let audit = schema_of_name Keeper_tool_name.(to_string Keeper_audit)
+let up = schema_of_name Keeper_tool_name.(to_string Keeper_up)
+let delegate = schema_of_name Keeper_tool_name.(to_string Keeper_delegate)
+let delegate_status = schema_of_name Keeper_tool_name.(to_string Keeper_delegate_status)
+let delegate_cancel = schema_of_name Keeper_tool_name.(to_string Keeper_delegate_cancel)
+let delegate_list = schema_of_name Keeper_tool_name.(to_string Keeper_delegate_list)
+let down = schema_of_name Keeper_tool_name.(to_string Keeper_down)
+let list = schema_of_name Keeper_tool_name.(to_string Keeper_list)
+let reset = schema_of_name Keeper_tool_name.(to_string Keeper_reset)
+let msg = schema_of_name Keeper_tool_name.(to_string Keeper_msg)
+let clear = schema_of_name Keeper_tool_name.(to_string Keeper_clear)

@@ -4,10 +4,10 @@
     (Agent Core contract pure-core / impure-shell). Every call site resolves a gate
     through {!enabled}, so the enabled decision is never re-derived inline. *)
 
-(** Global lifecycle kill-switches read from the feature-flag registry
-    ([MASC_KEEPER_REACTIVE_ENABLED] for reactive turns, and
-    [MASC_KEEPER_AUTONOMOUS_ENABLED] governing autonomous/proactive/bootstrap).
-    Both flags default to [true]. *)
+(** Global lifecycle kill-switches from their owning readers
+    ({!Env_config_keeper.KeeperReactive.enabled} for reactive turns, and
+    {!Env_config_keeper.KeeperBootstrap.enabled} governing
+    autonomous/proactive/bootstrap). Both default to [true]. *)
 val global : unit -> Keeper_lifecycle_gate.flags
 
 

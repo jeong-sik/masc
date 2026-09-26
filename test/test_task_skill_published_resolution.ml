@@ -67,7 +67,7 @@ let source_row id path =
 ;;
 
 let config_text sources =
-  "[skills]\nresource-read-max-bytes = 65536\n"
+  "[skills]\nresource-read-max-bytes = 16384\n"
   ^ sources
 ;;
 

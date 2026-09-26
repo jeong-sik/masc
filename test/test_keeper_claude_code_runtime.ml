@@ -16,6 +16,10 @@ let assistant ~turn_id text =
     text
 ;;
 
+let compact_boundary =
+  {|{"type":"system","subtype":"compact_boundary","session_id":"__SESSION__","uuid":"compact-1","compact_metadata":{"trigger":"auto","pre_tokens":1}}|}
+;;
+
 let result ~turn_id text =
   Printf.sprintf
     {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":%S,"result":%S,"api_error_status":null}|}
@@ -1725,21 +1729,13 @@ let test_keeper_settles_and_resumes () =
          Fun.protect ~finally:(fun () -> close_in input) (fun () -> input_line input)
        in
        (* Claude Code resumes with the system prompt it recorded at the
-          session's first launch, so what changes per turn rides in front of
-          the resume prompt and the conversation the session holds is not
-          sent again. *)
+          session's first launch, so what changed since the session last held
+          it rides in front of the resume prompt and the conversation the
+          session holds is not sent again. The start put the unchanged turn
+          context in the session, so only the new working state goes. *)
        let resume_prompt = content_of_wire_message raw in
-       let position text =
-         match Astring.String.find_sub ~sub:text resume_prompt with
-         | Some index -> index
-         | None -> fail ("resume prompt is missing " ^ text)
-       in
-       check bool "resume prompt opens with the turn context" true
-         (String.starts_with ~prefix:(rendered carrier) resume_prompt);
-       check bool "the working state follows the turn context" true
-         (position (rendered carrier) < position (rendered working_state));
-       check bool "resume prompt ends with the goal" true
-         (String.ends_with ~suffix:"\n\nSECOND_GOAL" resume_prompt);
+       check string "resume prompt carries only the context the session lacks"
+         (rendered working_state ^ "\n\nSECOND_GOAL") resume_prompt;
        check bool "resume prompt does not replay the conversation" false
          (String_util.contains_substring resume_prompt "Native correction");
        let system_wire = In_channel.with_open_bin system_marker In_channel.input_all in
@@ -1760,17 +1756,61 @@ let test_keeper_settles_and_resumes () =
           fail "a resume reported the conversation the vendor session holds as sent");
        check int "resumed context does not repeat official tool effect" 1 !effect_count;
        let second = load_state base_path in
+       let held_contexts (state : Keeper_official_client_session_store.t) =
+         match state.context_frontier with
+         | Some { held_context; _ } ->
+           List.map
+             (fun (held : Keeper_official_client_session_store.held_context) ->
+                held.context)
+             held_context
+         | None -> fail "no context frontier"
+       in
        (match second.context_frontier with
         | Some {acknowledged_turn=Some receipt;delivery=Held_by_vendor_session;message_count;_} ->
           check string "frontier bound to resumed vendor turn" "turn-2" receipt.turn_id;
           check int "frontier counts the canonical history, not the composed context"
             (List.length native_history) message_count
         | Some _ | None -> fail "a resume did not record that the vendor session holds the context");
+       check bool "the session holds the turn context and the working state" true
+         (held_contexts second
+          = [ Keeper_official_client_session_store.Context_carrier
+            ; Keeper_official_client_session_store.Librarian_working_state
+            ]);
        check int "durable cumulative turns" 2 second.turn_count;
-       match second.phase with
-       | Settled { session_id = settled_session; turn_id = "turn-2" } ->
-         check string "settled session" session_id settled_session
-       | _ -> fail "resumed Claude Code turn did not settle")
+       (match second.phase with
+        | Settled { session_id = settled_session; turn_id = "turn-2" } ->
+          check string "settled session" session_id settled_session
+        | _ -> fail "resumed Claude Code turn did not settle");
+       (* Nothing changed, so the third turn sends the goal alone. The client
+          compacts the conversation during it, so the copies it held are a
+          summary afterwards and the settlement records that it holds none. *)
+       with_fixture
+         ~prompt_marker
+         [ Emit compact_boundary
+         ; Emit (assistant ~turn_id:"turn-3" "MASC_CLAUDE_THIRD")
+         ; Emit (result ~turn_id:"turn-3" "MASC_CLAUDE_THIRD")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[tool]
+               ~initial_messages:(carrier :: working_state :: native_history)
+               ~system_prompt:"Updated core instructions"
+               ~base_path
+               ~cli_path
+               ~goal:"THIRD_GOAL"
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn -> check string "third turn session" session_id turn.session_id);
+       let third_prompt =
+         let input = open_in_bin prompt_marker in
+         Fun.protect ~finally:(fun () -> close_in input) (fun () ->
+           content_of_wire_message (input_line input))
+       in
+       check string "an unchanged context is not sent again" "THIRD_GOAL" third_prompt;
+       check bool "a compacted session holds no carried context" true
+         (held_contexts (load_state base_path) = []))
 ;;
 
 (* The historical task reference only exists on a resume of the operation's
@@ -1797,8 +1837,125 @@ let test_resume_prompt_carries_the_task_reference () =
   in
   check string "reference, then turn context, then the goal; history left out"
     (rendered reference ^ "\n\n" ^ rendered carrier ^ "\n\nGOAL")
-    (Keeper_official_client_host.resume_prompt ~goal:"GOAL"
+    (Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held:[]
        [ reference; message User "held by the vendor session"; carrier ])
+      .prompt
+;;
+
+(* A resumed session stores every prompt it is sent. With the carrier's typed
+   blocks named, a block goes out only when the session does not hold the
+   same bytes, the ones sent together read as one carrier, and an operator
+   note goes out every time it is composed. *)
+let test_resume_prompt_sends_only_changed_blocks () =
+  let blocks texts =
+    [ Prompt_block_id.Memory_os_recall, List.nth texts 0
+    ; Prompt_block_id.Dynamic_context, List.nth texts 1
+    ; Prompt_block_id.Temporal_summary, List.nth texts 2
+    ; Prompt_block_id.Operator_note, List.nth texts 3
+    ]
+  in
+  let turn texts =
+    let blocks = blocks texts in
+    let assembled = String.concat "\n\n" (List.map snd blocks) in
+    let carrier : Agent_core.Types.message =
+      { role = System
+      ; content = [ Text assembled ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+      }
+    in
+    ( Some
+        { Keeper_official_client_host.carrier_sha256 =
+            Digestif.SHA256.(digest_string assembled |> to_hex)
+        ; blocks
+        }
+    , [ message User "held by the vendor session"; carrier ] )
+  in
+  let rendered_blocks texts =
+    Keeper_official_client_host.history_role_label Agent_core.Types.System
+    ^ Keeper_official_client_host.encode_history_message
+        ({ role = System
+         ; content = [ Text (String.concat "\n\n" texts) ]
+         ; name = None
+         ; tool_call_id = None
+         ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+         }
+         : Agent_core.Types.message)
+  in
+  let composed_context, messages = turn [ "MEMORY"; "DYNAMIC"; "CLOCK 1"; "NOTE" ] in
+  let held = Keeper_official_client_host.start_held_context ?composed_context messages in
+  check int "a start holds every block except the note" 3 (List.length held);
+  let composed_context, messages = turn [ "MEMORY"; "DYNAMIC"; "CLOCK 2"; "NOTE" ] in
+  let delivery =
+    Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held ?composed_context messages
+  in
+  check string "the changed clock and the note go; held blocks stay out"
+    (rendered_blocks [ "CLOCK 2"; "NOTE" ] ^ "\n\nGOAL")
+    delivery.prompt;
+  let composed_context, messages = turn [ "MEMORY 2"; "DYNAMIC"; "CLOCK 2"; "NOTE" ] in
+  check string "the session now holds the clock it was sent"
+    (rendered_blocks [ "MEMORY 2"; "NOTE" ] ^ "\n\nGOAL")
+    (Keeper_official_client_host.resume_prompt
+       ~goal:"GOAL" ~held:delivery.held_context ?composed_context messages)
+      .prompt;
+  let _, messages = turn [ "MEMORY 2"; "DYNAMIC"; "CLOCK 2"; "NOTE" ] in
+  check bool "a carrier its assembly does not name is carried whole" true
+    (String_util.contains_substring
+       (Keeper_official_client_host.resume_prompt
+          ~goal:"GOAL" ~held:delivery.held_context messages)
+         .prompt
+       "DYNAMIC")
+;;
+
+(* A turn that sends the whole carrier supersedes the block digests the
+   session held: its latest copy of every block is inside that carrier. When
+   the next turn composes the earlier blocks again, none of them is held. *)
+let test_whole_carrier_supersedes_held_blocks () =
+  let blocks texts =
+    [ Prompt_block_id.Memory_os_recall, List.nth texts 0
+    ; Prompt_block_id.Dynamic_context, List.nth texts 1
+    ]
+  in
+  let carrier_of assembled : Agent_core.Types.message =
+    { role = System
+    ; content = [ Text assembled ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+    }
+  in
+  let turn texts =
+    let blocks = blocks texts in
+    let assembled = String.concat "\n\n" (List.map snd blocks) in
+    ( Some
+        { Keeper_official_client_host.carrier_sha256 =
+            Digestif.SHA256.(digest_string assembled |> to_hex)
+        ; blocks
+        }
+    , [ message User "held by the vendor session"; carrier_of assembled ] )
+  in
+  let rendered texts =
+    Keeper_official_client_host.history_role_label Agent_core.Types.System
+    ^ Keeper_official_client_host.encode_history_message
+        (carrier_of (String.concat "\n\n" texts))
+  in
+  let composed_context, messages = turn [ "RECALL A"; "DYNAMIC" ] in
+  let held = Keeper_official_client_host.start_held_context ?composed_context messages in
+  (* The assembly is not named, so the carrier goes whole. *)
+  let _, messages = turn [ "RECALL B"; "DYNAMIC" ] in
+  let whole =
+    Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held messages
+  in
+  check string "the unnamed carrier is sent whole"
+    (rendered [ "RECALL B"; "DYNAMIC" ] ^ "\n\nGOAL")
+    whole.prompt;
+  let composed_context, messages = turn [ "RECALL A"; "DYNAMIC" ] in
+  check string "every block goes again after the whole carrier"
+    (rendered [ "RECALL A"; "DYNAMIC" ] ^ "\n\nGOAL")
+    (Keeper_official_client_host.resume_prompt
+       ~goal:"GOAL" ~held:whole.held_context ?composed_context messages)
+      .prompt
 ;;
 
 let test_pre_effect_provider_rejection_keeps_failover_open () =
@@ -2431,7 +2588,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
         messages
         (total_atoms - transmitted)
     with
-    | Some digest -> digest
+    | Some digest -> Some digest
     | None -> fail "the record's own history has that atom"
   in
   { execution_ids = []
@@ -2448,6 +2605,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
   ; selected_model = None
   ; finish_reason = Some "completed"
   ; context_window = None
+  ; provider_context_window = None
   ; price_input_per_million = None
   ; price_output_per_million = None
   ; request_latency_ms = None
@@ -2947,7 +3105,7 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
         observation.transmitted_atoms;
       check (option string) (label ^ ": and names atom 60 as its front")
         (Runtime_model_input_tail_window.atom_opening_digest messages 60)
-        (Some observation.front_atom_digest)
+        observation.front_atom_digest
   in
   (match project () with
    | Error error -> fail (Agent_core.Error.to_string error)
@@ -3045,6 +3203,10 @@ let () =
       , [ test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
         ; test_case "resume prompt carries the task reference" `Quick
             test_resume_prompt_carries_the_task_reference
+        ; test_case "resume prompt sends only changed blocks" `Quick
+            test_resume_prompt_sends_only_changed_blocks
+        ; test_case "a whole carrier supersedes held blocks" `Quick
+            test_whole_carrier_supersedes_held_blocks
         ; test_case
             "Agent Core checkpoint starts official-client turn"
             `Quick

@@ -28,7 +28,7 @@ let config_with_resource_read_max_bytes resource_read_max_bytes sources =
          (List.map Skill_source_config.diagnostic_to_string diagnostics))
 ;;
 
-let config = config_with_resource_read_max_bytes 65536
+let config = config_with_resource_read_max_bytes 16384
 
 let document ~name ~description body =
   Printf.sprintf "---\nname: %s\ndescription: %s\n---\n%s" name description body

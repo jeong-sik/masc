@@ -982,7 +982,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             delivery = (match thread_mode with
               | Runtime_codex_app_server.Start -> Prepared_start_context
               | Runtime_codex_app_server.Resume _ -> Held_by_vendor_session);
-            acknowledged_turn = None } in
+            acknowledged_turn = None; held_context = [] } in
         (* [None] here means "send no developerInstructions": [optional_field]
            omits the member and the app-server runs the thread on Codex's own
            default instructions. The probe and fusion callers build [None] on
@@ -1000,7 +1000,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       match thread_mode with
       | Runtime_codex_app_server.Start -> prompt
       | Runtime_codex_app_server.Resume _ ->
-        Host.resume_prompt ~goal:prompt prepared.messages
+        (* Codex keeps no held-context record yet: every carried context is
+           re-sent on each resume. *)
+        (Host.resume_prompt ~goal:prompt ~held:[] prepared.messages).prompt
     in
     let developer_instructions = Some composed_developer_instructions in
     (* The window already fits; this is the account checked once more before
@@ -1492,6 +1494,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
               | Some _ -> Runtime_usage_scope.Conversation_cumulative
               | None -> Runtime_usage_scope.Usage_scope_unavailable)
            ?request_context
+           ?reported_context_window:turn.model_context_window
            ()
        in
        Ok

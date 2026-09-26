@@ -372,7 +372,8 @@ let test_a_halving_answers_whether_the_retry_moves () =
   match !held with
   | Some (seed : Front.seed) ->
     check int "held at the halved front" 8 seed.first_atom;
-    check string "named by the message that opens it" (opener 8) seed.front_digest
+    check string "named by the message that opens it" (opener 8)
+      (Option.get seed.front_digest)
   | None -> fail "the halved seed was not held"
 ;;
 
@@ -721,7 +722,8 @@ let test_boundary_moves_and_cancellation_preserve_the_observed_ledger () =
         let moved =
           Try_provider.For_testing.move_ledger_front working
             ~first_atom:12
-            ~front_digest:(match digest_at 12 with Some digest -> digest | None -> fail "fixture atom missing")
+            ~front_digest:
+              (match digest_at 12 with Some digest -> digest | None -> fail "fixture atom missing")
         in
         check bool "the candidate can narrow again" true moved;
         Eio.Cancel.cancel cancellation Exit;
@@ -797,7 +799,10 @@ let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
           let first_atom = Front.clamp ~atom_count boundary in
           Option.map
             (fun front_digest ->
-               { Front.first_atom; front_digest; source = Front.Turn_start_after_seed_refusal })
+               { Front.first_atom
+               ; front_digest = Some front_digest
+               ; source = Front.Turn_start_after_seed_refusal
+               })
             (digest_at first_atom))
         ~held_front:(fun () -> !held)
         ~restore_front:(fun prior -> held := prior)
@@ -941,7 +946,10 @@ let librarian_turn ?(refusal = overflow) ?(refuses = fun ~atoms:_ -> false)
         let first_atom = Front.clamp ~atom_count boundary in
         Option.map
           (fun front_digest ->
-             { Front.first_atom; front_digest; source = Front.Turn_start_after_librarian_refusal })
+             { Front.first_atom
+             ; front_digest = Some front_digest
+             ; source = Front.Turn_start_after_librarian_refusal
+             })
           (digest_at first_atom))
       ~held_front:(fun () -> !held)
       ~restore_front:(fun prior -> held := prior)
@@ -970,7 +978,7 @@ let librarian_turn ?(refusal = overflow) ?(refuses = fun ~atoms:_ -> false)
     Result.to_option outcome
     |> Option.map (fun first_atom ->
       { Front.first_atom
-      ; front_digest = Option.get (digest_at first_atom)
+      ; front_digest = Some (Option.get (digest_at first_atom))
       ; source = Front.Turn_record { turn = 1 }
       })
   in

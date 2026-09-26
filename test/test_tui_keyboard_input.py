@@ -13650,15 +13650,25 @@ def fusion_list_detail_interaction(
         # terminal gives this footer 144 cells. Status yields before hints,
         # then copy/search yield before pinned exits. A wider frame must still
         # show those controls; check both states on the actual footer row.
+        # [ / ] steps the open run and the dispatcher answers it only with a
+        # detail open, so the run list does not offer it -- the open run's own
+        # footer does.
         footer_head = (
-            b"j/k:move  PgUp/PgDn:page  [ / ]:previous / next  "
+            b"j/k:move  PgUp/PgDn:page  "
             b"K:calling Keeper  B:Board evidence  Home/End:top/bottom  "
             b"Enter:open"
         )
         exits = (b"Esc:back", b"q:quit")
         secondary = (b"Y:copy", b"/:find", b"n / N:next / previous match")
+        # 144 cells fit all but the longest of the three once [ / ] left this
+        # row: the key answers only with a run open, and the cell it was
+        # holding is a cell a usable key can have. The order is what this
+        # pins -- the search pair yields before copy, and both before the
+        # exits -- not how many survive at one width.
+        at_200 = (b"Y:copy", b"/:find")
         for columns, required, omitted in (
-                (200, exits, secondary), (280, exits + secondary, ())):
+                (200, exits + at_200, (b"n / N:next / previous match",)),
+                (280, exits + secondary, ())):
             resize_and_wait(
                 process, master_fd, output, rows=30, columns=columns,
                 needle=b"MASC Fusion", controls=(FULL_REDRAW,),

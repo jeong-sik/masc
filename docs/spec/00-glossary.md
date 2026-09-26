@@ -101,6 +101,7 @@ status: reference
     카운트다운(`D-N due countdown`).
   - 관측 권위: 목표가 자체 지표(`metric`·`target`)를 가지고 있어도 측정값이 보고되지
     않으면 지어내지 않고, 진행 바는 순수하게 연결된 태스크의 완료 수만 측정한다.
+    보고된 측정값은 **Goal Measurement**다.
   - 빈 상태: 활성 목표가 없거나 읽기 실패 시 헤드라인이 그 상태를 명시적으로 표시하며,
     표시 예산(`rows`)을 초과하면 하단부터 생략하고 헤드라인에 그려진 목표 수를 남긴다.
   → [Masc_tui_overview_goals](../../bin/masc_tui_overview_goals.mli)
@@ -951,6 +952,32 @@ status: reference
   없다. Keeper 끼리 같은 이름 공간을 쓴다. 같은 이름에 다시 저장하면 덮어쓴다.
   → [Machine_checkpoint.slot_of_string](../../lib/machine_checkpoint/machine_checkpoint.mli)
 
+**자동 저장 (Autosave)**
+: DOS Lane 이 `autosave` 라는 고정 슬롯에 스스로 쓰는 기계 체크포인트.
+  `masc_dos_load`·`masc_dos_step`·`masc_dos_press`·`masc_dos_click`·`masc_dos_type` 이
+  답을 내고 끝났을 때, 기계를 잠근 그 자리에서 한 번 쓴다. 아래 경우에는 쓰지 않아서
+  이전 자동 저장이 그대로 남는다.
+  - 조종권이 없어 거절됐거나, 인자가 틀렸거나, 기계가 없는 호출.
+  - guest fault 로 멈춘 호출. fault 가 난 기계는 다음 걸음에서 또 fault 라서 이어 할 수 없다.
+  - 프로그램이 이미 끝난 기계. 이어 할 게임이 없다.
+  `masc_dos_restore` 도 쓰지 않는다. 되살린 기계의 다음 호출부터 쓴다.
+  쓰기가 실패해도(예: 디렉터리를 쓸 수 없음) 원래 호출의 결과는 그대로 돌아가고,
+  결과 안에 `autosave: {"saved": false, "reason": ...}` 로만 남는다.
+  기계를 움직이는 다음 호출이 `autosave` 슬롯을 덮어쓴다. 다만 새 기계(incarnation)의
+  첫 자동 저장만은 먼저 그 자리에 있던 파일을 `autosave-prev` 슬롯으로 옮기고 나서 쓴다
+  — 그 파일은 이 기계가 아니라 이전 기계(이전 `load`·`restore`)의 것이라서다. 서버를
+  다시 켠 뒤 프로그램 이름을 넣은 `masc_dos_load` 를 첫 호출로 부르면, 재시작 전 마지막
+  자동 저장은 `autosave-prev` 로 남아 `masc_dos_restore slot=autosave-prev` 로 되살릴 수
+  있다. 같은 기계가 그 뒤 또 자동 저장할 때는 옮기지 않고 `autosave` 를 그대로 갈아 쓴다.
+  기계가 없을 때 — 기계가 필요한 호출의 거절(`masc_dos_screen`·`masc_dos_peek` 등)과
+  프로그램 이름 없이 부른 `masc_dos_load` 의 인벤토리 응답 — 는 이 자동 저장이 있는지,
+  무엇인지(프로그램, 걸음 수, 저장한 사람, 시각), 어떻게 되살리는지
+  (`masc_dos_restore slot=autosave`)를 `autosave` 필드로 알려 준다. 파일이 있는데 읽히지
+  않으면(다른 체크포인트 형식, 손상) `autosave: {"unreadable": 이유}` 로 그렇게 말한다.
+  되살리는 것은 언제나 사람의 몫이고, 서버가 스스로 되살리지 않는다.
+  → [Dos_lane.lookup_autosave](../../lib/dos_lane/dos_lane.mli),
+  [Machine_checkpoint.read_meta](../../lib/machine_checkpoint/machine_checkpoint.mli)
+
 **MSX Lane**
 : 서버 안에 사는 MSX 기계 하나. Keeper 는 `masc_msx_*` 도구로 같은 기계에 키를
   넣고 화면을 읽는다. DOS Lane과 같은 축의 공유 머신으로, Lane Add-on의
@@ -1246,6 +1273,23 @@ status: reference
   확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
   `admits_self_directed_progress`가 이 경계를 정의한다. TUI Overview 투영은
   `Goals 블록 (Overview Goals)`를 따른다.
+
+**Goal Measurement (목표 관측값)**
+: Goal의 선언된 지표(`metric`)를 누가 언제 얼마로 봤는지 남긴 기록 한 건. 값, 증거,
+  기록한 사람, 시각, 그 값을 잰 기준의 `criterion_revision`을 함께 적는다.
+  Keeper는 `masc_goal_measure`로, 운영자는 `POST /api/v1/dashboard/goals/measurements`로
+  남긴다. 증거는 **Evidence Reference** 형식(`artifact:`·`note:`·`board:`·`fusion:`)만
+  받고, 다른 글자는 `Invalid_request`로 거절한다.
+  - 완료가 아니다: 관측은 Goal phase를 바꾸지 않고 목표 달성을 증명하지도 않는다.
+    완료는 **Goal**의 verifier 증명과 사람 확인으로만 정해진다. 그래서 `Completed`·
+    `Dropped` Goal도 관측을 받는다.
+  - Goal 하나에 한 건: 새 관측이 같은 Goal의 이전 관측을 대신한다. 기준이 바뀌면
+    (`criterion_revision`이 달라지면) 옛 관측은 새 기준의 값으로 보이지 않고
+    `not_recorded`가 된다. Goal을 지우면 그 관측도 지운다.
+  - 화면: Goal 트리·상세와 `masc_goal_list`가 `reported`·`not_recorded`·`unavailable`·
+    `not_loaded` 중 하나로 보여 준다. `Goals 블록 (Overview Goals)`의 진행 바는 이 값이
+    아니라 연결된 Task 완료 수다.
+  → [Goal_measurement](../../lib/goal/goal_measurement.mli)
 
 **Schedule (예약)**
 : 정한 시각에 Keeper를 깨우라는 요청. 저장되므로 서버를 다시 켜도 남는다. 만들기·조회·

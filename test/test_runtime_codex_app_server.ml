@@ -71,6 +71,31 @@ let truncated_token_usage_updated =
   {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80}}}}|}
 ;;
 
+(* Ours, each with one breakdown whose counts do not nest, breaking one rule
+   only. The first is an estimate that gained a cached count. *)
+let estimate_with_cached_input_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":0,"cachedInputTokens":500,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":45000},"modelContextWindow":272000}}}|}
+;;
+
+let reasoning_over_output_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":30,"reasoningOutputTokens":80,"totalTokens":1230},"modelContextWindow":272000}}}|}
+;;
+
+let output_without_input_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":0,"cachedInputTokens":0,"outputTokens":80,"reasoningOutputTokens":0,"totalTokens":80},"modelContextWindow":272000}}}|}
+;;
+
+(* Cache reads and writes each fit inside the input, their sum does not: a
+   provider that counts input apart from its cache. *)
+let cache_over_input_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"cacheWriteInputTokens":300,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"modelContextWindow":272000}}}|}
+;;
+
+(* The thread's running count breaks a rule; [last] is a plain request. *)
+let total_reasoning_over_output_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":900,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"modelContextWindow":272000}}}|}
+;;
+
 let resumed_turn_result = {|{"id":4,"result":{"turn":{"id":"turn-2"}}}|}
 
 let resumed_item_completed =
@@ -900,6 +925,8 @@ let test_token_usage_of_this_turn_reaches_the_result () =
          | Some (Runtime_codex_app_server.Thread_count { last = Runtime_codex_app_server.Context_estimate _; _ })
          | Some Runtime_codex_app_server.Thread_count_replaced
          | None -> fail "the turn's request frame was not kept as its count");
+        check (option int) "the frame's model window" (Some 272000)
+          result.model_context_window;
         check string "text still lands" "MASC_SUBSCRIPTION_OK" result.text)
 ;;
 
@@ -1036,6 +1063,33 @@ let test_truncated_token_usage_of_this_turn_fails_closed () =
         check string "stage" "thread/tokenUsage/updated" stage
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok _ -> fail "a half-read breakdown was admitted")
+;;
+
+let test_a_breakdown_whose_counts_do_not_nest_fails_closed () =
+  List.iter
+    (fun (label, frame) ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; frame
+         ; turn_completed
+         ]
+         (fun path ->
+            match run_fixture path with
+            | Error (Runtime_codex_app_server.Protocol_error { stage; _ }) ->
+              check string label "thread/tokenUsage/updated" stage
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok _ -> fail (label ^ " was admitted")))
+    [ "an estimate with cached input", estimate_with_cached_input_token_usage_updated
+    ; "more reasoning than output", reasoning_over_output_token_usage_updated
+    ; "output without input", output_without_input_token_usage_updated
+    ; "cache reads and writes above the input", cache_over_input_token_usage_updated
+    ; "a thread total with more reasoning than output"
+    , total_reasoning_over_output_token_usage_updated
+    ]
 ;;
 
 let test_prompt_transmission_boundary ?(worker_pool = false) () =
@@ -3324,8 +3378,9 @@ supports_native_streaming = false
             { transmitted_atoms = atoms; total_atoms = atoms
             ; measurement = if reject_codex then Wire_shape else Durable_shape
             ; front_atom_digest =
-                Runtime_model_input_tail_window.atom_opening_digest history 0
-                |> Option.get } in
+                Some
+                  (Runtime_model_input_tail_window.atom_opening_digest history 0
+                  |> Option.get) } in
           check bool "last projection retains the exact observed range and digest"
             true (window = expected)
         | None when not http_predecessor && reject_codex -> ()
@@ -5075,8 +5130,30 @@ let test_production_keeper_reports_codex_token_usage () =
                             cache.cache_read_input_tokens)
                          context.cache);
                     check (option int) "its final output" (Some 80) context.output_tokens
-                  | None -> fail "the newest request's occupancy was dropped")
-               | None -> fail "production turn recorded no runtime observation")))
+                  | None -> fail "the newest request's occupancy was dropped");
+                 check (option int) "the client's model window" (Some 272000)
+                   observation.Runtime_observation.reported_context_window
+               | None -> fail "production turn recorded no runtime observation");
+              let rows =
+                Keeper_types_support.keeper_turn_record_store
+                  (Workspace.default_config base_path) "codex-production-fixture"
+                |> fun store -> Dated_jsonl.read_recent store 1
+              in
+              (match rows with
+               | [json] ->
+                 (match Turn_record.of_json json with
+                  | Ok record ->
+                    check (option int) "record keeps MASC's shaping ceiling"
+                      (Some result.max_context) record.context_window;
+                    check (option int) "recorded provider model window"
+                      (Some 272000) record.provider_context_window;
+                    (* The window's occupancy is the newest request's count
+                       (1200 in + 80 out), never the thread total (9000). *)
+                    check (option int) "the record's input is the request's" (Some 1200)
+                      record.usage.input_tokens;
+                    check (option int) "and its output" (Some 80) record.usage.output_tokens
+                  | Error detail -> fail detail)
+               | _ -> fail "production turn did not persist one record")))
 ;;
 
 (* The raw rows the cost ledger holds under [base_path], as (scope, input)
@@ -5097,7 +5174,11 @@ let raw_cost_rows ~base_path =
         | Cost_ledger.Usage_missing -> None
       in
       Some (Runtime_usage_scope.to_string scope, input)
-    | Ok { Cost_ledger.usage_projection = Cost_ledger.Resolved_delta; _ } -> None
+    | Ok
+        { Cost_ledger.usage_projection =
+            Cost_ledger.Resolved_delta | Cost_ledger.Resolved_attempt_delta _
+        ; _
+        } -> None
     | Error error -> failf "cost row: %s" (Cost_ledger.decode_error_to_string error))
   |> List.sort compare
 ;;
@@ -6287,6 +6368,10 @@ let () =
             "a truncated token usage of this turn fails closed"
             `Quick
             test_truncated_token_usage_of_this_turn_fails_closed
+        ; test_case
+            "a breakdown whose counts do not nest fails closed"
+            `Quick
+            test_a_breakdown_whose_counts_do_not_nest_fails_closed
         ; test_case
             "native command stays distinct from dynamic tools"
             `Quick

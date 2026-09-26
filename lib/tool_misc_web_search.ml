@@ -412,25 +412,8 @@ let endpoint_error ~fallback detail =
   let detail = redact_transport_error_detail detail |> String.trim in
   if String.equal detail "" then fallback else Printf.sprintf "%s (%s)" fallback detail
 
-let searxng_default_url = Masc_network_defaults.searxng_default_url
-
-let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
-
-let searxng_base_url () =
-  let url =
-    match Env_config_core.raw_value_opt "MASC_SEARXNG_URL" with
-    | Some raw ->
-        let normalized = raw |> String.trim |> strip_trailing_slashes in
-        if String.equal normalized "" then searxng_default_url else normalized
-    | None -> searxng_default_url
-  in
-  match Uri.scheme (Uri.of_string url) |> Option.map String.lowercase_ascii with
-  | Some "http" | Some "https" -> Ok url
-  | _ ->
-      Error (Printf.sprintf "MASC_SEARXNG_URL must use http or https scheme (got: %s)" url)
-
 let fetch_searxng ~timeout_sec ~query =
-  match searxng_base_url () with
+  match Env_config_runtime.Tools.searxng_base_url () with
   | Error msg -> Error (Config msg)
   | Ok base ->
       let search_url =

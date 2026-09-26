@@ -481,7 +481,7 @@ let test_diff_fence_leaves_file_headers_plain () =
 let test_diff_with_a_grammar_keeps_tokens_on_the_band () =
   check_rows "token colours over the added band"
     (tagged_fence "diff:ocaml"
-       [ "<+>\xe2\x94\x82 <+>+<+><k>let<+><c> x = <+><n>1<+>"
+       [ "<+>\xe2\x94\x82 <+>+</+><+><k>let</k><+><c> x = </c><+><n>1</n><+>"
          ^ String.make 28 ' ' ^ "</+>"
        ])
     (render "```diff:ocaml\n+let x = 1\n```")
@@ -495,15 +495,15 @@ let test_mixed_diff_tail_keeps_the_band_after_a_hard_split () =
   let width = 14 in
   check_rows "split mixed band"
     (tagged_fence ~width "diff:ocaml"
-       [ "<+>\xe2\x94\x82 <+>+<+><c>abcdefghijk<+></+>"
-       ; "<+>\xe2\x94\x82 <c>l<+>" ^ String.make 11 ' ' ^ "</+>"
+       [ "<+>\xe2\x94\x82 <+>+</+><+><c>abcdefghijk</c><+></+>"
+       ; "<+>\xe2\x94\x82 <c>l</c><+>" ^ String.make 11 ' ' ^ "</+>"
        ])
     (render ~width "```diff:ocaml\n+abcdefghijkl\n```")
 
 let test_diff_removed_band_keeps_tokens_underneath () =
   check_rows "token colours over the removed band"
     (tagged_fence "diff:ocaml"
-       [ "<->\xe2\x94\x82 <->-<-><k>let<-><c> y = <-><n>2<->"
+       [ "<->\xe2\x94\x82 <->-</-><-><k>let</k><-><c> y = </c><-><n>2</n><->"
          ^ String.make 28 ' ' ^ "</->"
        ])
     (render "```diff:ocaml\n-let y = 2\n```")
@@ -514,8 +514,8 @@ let test_numbered_mixed_row_wraps_with_its_band () =
   let width = 20 in
   check_rows "numbered mixed band"
     (tagged_fence ~width "diff:ocaml"
-       [ "<+>\xe2\x94\x82 <+>    -    42 + <+><k>let<+><c> <+></+>"
-       ; "<+>\xe2\x94\x82 <c>x = <+><n>1<+>" ^ String.make 13 ' ' ^ "</+>"
+       [ "<+>\xe2\x94\x82 <+>    -    42 + </+><+><k>let</k><+><c> </c><+></+>"
+       ; "<+>\xe2\x94\x82 <c>x = </c><+><n>1</n><+>" ^ String.make 13 ' ' ^ "</+>"
        ])
     (render ~width "```diff:ocaml\n    -    42 + let x = 1\n```")
 
@@ -529,6 +529,66 @@ let test_plain_mixed_diff_keeps_layout_without_colour () =
     ; "\xe2\x94\x94" ^ horizontal 39
     ]
     (render ~palette:Markdown.plain_palette "```diff:ocaml\n+let x = 1\n```")
+
+(* Interpret SGR at each printed byte, so a reset/reopen pair with no visible
+   cell between it cannot be mistaken for a hole in the diff background. *)
+let ansi_cells row =
+  let bold = ref false and italic = ref false and background = ref None in
+  let rec apply = function
+    | [] -> ()
+    | 0 :: rest -> bold := false; italic := false; background := None; apply rest
+    | 1 :: rest -> bold := true; apply rest
+    | 3 :: rest -> italic := true; apply rest
+    | 22 :: rest -> bold := false; apply rest
+    | 23 :: rest -> italic := false; apply rest
+    | 49 :: rest -> background := None; apply rest
+    | 48 :: 5 :: color :: rest -> background := Some color; apply rest
+    | 38 :: 5 :: _color :: rest -> apply rest
+    | code :: rest when code = 2 || code = 39 || (code >= 30 && code <= 37)
+                      || (code >= 90 && code <= 97) -> apply rest
+    | code :: _ -> Alcotest.failf "unexpected fixture SGR %d" code
+  in
+  let rec scan i cells =
+    if i = String.length row then List.rev cells
+    else if row.[i] = '\027' then begin
+      if i + 1 >= String.length row || row.[i + 1] <> '[' then
+        Alcotest.fail "expected CSI in rendered code";
+      let stop = String.index_from row (i + 2) 'm' in
+      let parameters = String.sub row (i + 2) (stop - i - 2) in
+      apply (List.map int_of_string (String.split_on_char ';' parameters));
+      scan (stop + 1) cells
+    end else
+      scan (i + 1) ((row.[i], !bold, !italic, !background) :: cells)
+  in
+  scan 0 []
+
+let test_actual_diff_palette_clears_token_attributes () =
+  let palette = Masc_tui_render_prim.chat_markdown_palette ~closing:"\027[0m" in
+  let comment = "(* comment spans across *)" in
+  let between = " value " and type_name = "Some" in
+  List.iter (fun (marker, background) ->
+    List.iter (fun width ->
+      let source = marker ^ comment ^ between ^ type_name ^ " rest" in
+      let rows = render ~width ~palette ("```diff:ocaml\n" ^ source ^ "\n```") in
+      let body = List.take (List.length rows - 2) (List.drop 1 rows) in
+      let cells = List.concat_map (fun row ->
+        let cells = ansi_cells row in
+        List.iter (fun (_, _, _, actual_background) ->
+          Alcotest.(check (option int)) "every visible cell keeps its diff band"
+            (Some background) actual_background) cells;
+        List.drop (String.length palette.code_gutter) cells) body in
+      let text = String.of_seq (List.to_seq (List.map (fun (c, _, _, _) -> c) cells)) in
+      Alcotest.(check string) "wrapping preserves the source and only pads its end"
+        source (String.trim text);
+      let comment_end = 1 + String.length comment in
+      let type_start = comment_end + String.length between in
+      List.iteri (fun i (_, bold, italic, _) ->
+        Alcotest.(check bool) "italic belongs only to comment bytes, including wraps"
+          (i >= 1 && i < comment_end) italic;
+        Alcotest.(check bool) "bold belongs only to type bytes, never tail or padding"
+          (i >= type_start && i < type_start + String.length type_name) bold) cells
+    ) [80; 20]
+  ) ["+", 22; "-", 52]
 
 let test_untagged_fence_stays_single_span () =
   check_rows "no tag, no colour" [ "<c>\xe2\x94\x82 let x = 1</c>" ]
@@ -860,6 +920,8 @@ let () =
             test_numbered_mixed_row_wraps_with_its_band
         ; Alcotest.test_case "a colourless mixed diff keeps its layout" `Quick
             test_plain_mixed_diff_keeps_layout_without_colour
+        ; Alcotest.test_case "actual diff palette confines token attributes" `Quick
+            test_actual_diff_palette_clears_token_attributes
         ; Alcotest.test_case "an unknown language means no colour" `Quick
             test_unknown_language_stays_single_span
         ; Alcotest.test_case "ocaml strings and constructors" `Quick

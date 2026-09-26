@@ -4154,7 +4154,8 @@
 (test
  (name test_tui_markdown)
  (modules test_tui_markdown)
- (libraries alcotest masc_tui_markdown masc_tui_message_layout))
+ (libraries alcotest masc_tui_markdown masc_tui_message_layout masc_tui_render_prim)
+ (action (setenv MASC_TUI_FORCE_COLOR 1 (run %{test}))))
 
 (test
  (name test_tui_composer)

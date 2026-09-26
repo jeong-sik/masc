@@ -578,15 +578,12 @@ let diff_mixed_kind pieces =
       Some kind
   | _ -> None
 
-(* One mixed diff row: the row's background runs edge to edge while each run
-   keeps its own foreground. Every run closes by reopening the row span —
-   the palette's own closings would restore the ambient row and punch holes
-   in the band. The reopen carries no attribute clear, so a bold type or an
-   italic comment persists to the row's end; bounded by the row closing,
-   and clearing it would need a palette-level reopen span the contract
-   does not have. Wrapped tails refill the same way so a narrow pane cannot
-   turn them back into ordinary code. Cell widths measure the plain text;
-   the escapes are added after the cut, as in [wrap_pieces]. *)
+(* Close each token before restoring the enclosing diff band. The close may
+   reset the background as well as bold/italic; reopening the row span before
+   any next visible cell keeps the band continuous without leaking token
+   attributes. Wrapped tails refill the same way so a narrow pane cannot turn
+   them back into ordinary code. Cell widths measure the plain text; escapes
+   are added after the cut, as in [wrap_pieces]. *)
 let styled_diff_mixed_rows palette ~width kind pieces =
   let gutter = palette.code_gutter in
   let body_width = max 1 (width - Layout.display_width gutter) in
@@ -601,10 +598,10 @@ let styled_diff_mixed_rows palette ~width kind pieces =
                   (fun (text, piece_kind) ->
                     if String.length text = 0 then ""
                     else
-                      let piece_opening, _ =
+                      let piece_opening, piece_closing =
                         span_of_palette palette piece_kind
                       in
-                      piece_opening ^ text ^ opening)
+                      piece_opening ^ text ^ piece_closing ^ opening)
                   row)
          in
          let remaining = max 0 (width - Layout.display_width plain) in

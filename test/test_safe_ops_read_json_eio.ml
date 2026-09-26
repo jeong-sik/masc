@@ -55,7 +55,7 @@ let exercise_large_read ~body ~expected =
   check bool "small sibling read completes with exact Unicode" true
     (small = `Assoc ["small", `String "한글🙂"]);
   let sibling = Eio.Fiber.fork_promise ~sw (fun () -> "progress") in
-  check string "another request fiber runs while parsing waits" "progress"
+  check string "another fiber runs while parsing waits" "progress"
     (Eio.Promise.await_exn sibling);
   check bool "large parse is still waiting" false
     (Eio.Promise.is_resolved parsed);

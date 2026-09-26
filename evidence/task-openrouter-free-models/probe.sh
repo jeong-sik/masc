@@ -12,8 +12,8 @@
 # With no arguments it probes every tool-capable free id in
 # models-snapshot.json. Pass ids to probe only those.
 #
-# Free ids cost no credit, but the account is rate-limited (about 20 requests a
-# minute), so requests are spaced by $GAP seconds (default 3.5). A model the
+# Free ids cost no credit, but the account and providers are rate-limited,
+# so requests are spaced by $GAP seconds (default 3.5). A model the
 # account's privacy settings exclude answers 404 "No endpoints found matching
 # your data policy"; that is recorded as a result, not retried.
 #
@@ -25,10 +25,11 @@
 # status.txt ("key-before" / "key-after"). The PR quotes these values, not the
 # docs table, whose numbers did not survive extraction (Board p-e1e984f7).
 #
-# A 429 is split by origin. With error.metadata.provider_code the provider was
+# A 429 is split by origin. With error.metadata.provider_error_code (or provider_code) the provider was
 # congested (provider_429): the request is retried once after 10 s and the
-# retry decides the case. Without it the account's free limit is spent
-# (platform_429): the probe stops, and every case not yet run is written as
+# retry decides the case. An explicit platform limit is
+# platform_429; absent origin metadata is unknown_429. Either stops the probe,
+# and every case not yet run is written as
 # "unmeasured", never as a failure.
 set -u
 cd "$(dirname "$0")"
@@ -40,7 +41,10 @@ TOOLS='[{"type":"function","function":{"name":"get_weather","description":"Get t
 if [ "$#" -gt 0 ]; then
   ids=("$@")
 else
-  mapfile -t ids < <(jq -r '.[] | select(.supported_parameters | index("tools")) | .id' models-snapshot.json)
+  ids=()
+  while IFS= read -r id; do
+    ids+=("$id")
+  done < <(jq -r '.[] | select(.supported_parameters | index("tools")) | .id' models-snapshot.json)
 fi
 
 post() { # out-file json-body -> prints http code
@@ -56,12 +60,13 @@ key_read() { # label
     | tee -a status.txt
 }
 
-origin_429() { # file -> provider_429 | platform_429
-  if jq -e '.error.metadata.provider_code // empty' "$1" >/dev/null 2>&1; then
-    echo provider_429
-  else
-    echo platform_429
-  fi
+origin_429() { # file -> provider_429 | platform_429 | unknown_429
+  jq -r '
+    .error.metadata as $m |
+    if ($m.provider_error_code // $m.provider_code) != null
+       or $m.limit_source == "upstream_provider_shared_pool" then "provider_429"
+    elif $m.limit_source == "platform" then "platform_429"
+    else "unknown_429" end' "$1"
 }
 
 verdict() { # case file http
@@ -73,7 +78,7 @@ verdict() { # case file http
   case $1 in
     basic) jq -r '"content=" + ((.choices[0].message.content // "null") | tostring | .[0:40]) + " finish=" + (.choices[0].finish_reason // "?")' "$f" ;;
     toolcall) jq -r 'if (.choices[0].message.tool_calls // []) | length > 0 then "tool=" + .choices[0].message.tool_calls[0].function.name else "NO_TOOL_CALL finish=" + (.choices[0].finish_reason // "?") end' "$f" ;;
-    nothink) jq -r '"reasoning_tokens=" + ((.usage.completion_tokens_details.reasoning_tokens // 0) | tostring) + " content=" + ((.choices[0].message.content // "null") | tostring | .[0:20])' "$f" ;;
+    nothink) jq -r '"reasoning_tokens=" + ((.usage.completion_tokens_details.reasoning_tokens // "unreported") | tostring) + " content=" + ((.choices[0].message.content // "null") | tostring | .[0:20])' "$f" ;;
   esac
 }
 
@@ -104,8 +109,8 @@ for id in "${ids[@]}"; do
         http=$(post "$f" "$body")
         note=" [provider_429 on first try; this is the retry]"
       else
-        stopped="platform_429 at $id $case"
-        printf '%s %s 429 platform_429 (account free limit) — stopping\n' "$id" "$case" | tee -a status.txt
+        stopped="$origin at $id $case"
+        printf '%s %s 429 %s — stopping\n' "$id" "$case" "$origin" | tee -a status.txt
         continue
       fi
     fi

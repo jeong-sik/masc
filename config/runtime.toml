@@ -2738,11 +2738,9 @@ reasoning-effort = "high"
 [openrouter.openrouter-glm-5-3-flashx]
 
 # ── OpenRouter free models ───────────────────────────────────────────────────
-# Sixteen ":free" ids for the end of a lane (askc7f672a01024a692). Catalog rows
-# and these entries come from one snapshot through
-# evidence/task-openrouter-free-models/gen_rows.py. Free ids share the
-# account's request limits, so they are fallbacks, not a lane's first choice;
-# lane placement is live operator config, not this file.
+# Three ids passed basic and tool-call probes. See
+# evidence/task-openrouter-free-models/probe-results.json and gen_rows.py.
+# These are available bindings; lane placement remains operator configuration.
 
 [models.openrouter-free-north-mini-code]
 api-name = "cohere/north-mini-code:free"
@@ -2762,42 +2760,6 @@ reasoning-effort = "high"
 
 [openrouter.openrouter-free-dots-3-note-preview]
 
-[models.openrouter-free-gemma-4-26b-a4b-it]
-api-name = "google/gemma-4-26b-a4b-it:free"
-tools-support = true
-thinking-support = true
-streaming = true
-reasoning-effort = "high"
-
-[openrouter.openrouter-free-gemma-4-26b-a4b-it]
-
-[models.openrouter-free-gemma-4-31b-it]
-api-name = "google/gemma-4-31b-it:free"
-tools-support = true
-thinking-support = true
-streaming = true
-reasoning-effort = "high"
-
-[openrouter.openrouter-free-gemma-4-31b-it]
-
-[models.openrouter-free-ling-3-0-flash-fin]
-api-name = "inclusionai/ling-3.0-flash-fin:free"
-tools-support = true
-thinking-support = true
-streaming = true
-reasoning-effort = "high"
-
-[openrouter.openrouter-free-ling-3-0-flash-fin]
-
-[models.openrouter-free-ling-3-0-flash-sante]
-api-name = "inclusionai/ling-3.0-flash-sante:free"
-tools-support = true
-thinking-support = true
-streaming = true
-reasoning-effort = "high"
-
-[openrouter.openrouter-free-ling-3-0-flash-sante]
-
 [models.openrouter-free-lfm-2-5-2-6b]
 api-name = "liquid/lfm-2.5-2.6b:free"
 tools-support = true
@@ -2806,84 +2768,3 @@ streaming = true
 reasoning-effort = "high"
 
 [openrouter.openrouter-free-lfm-2-5-2-6b]
-
-[models.openrouter-free-nemotron-3-nano-omni-30b-a3b-reasoning]
-api-name = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
-tools-support = true
-thinking-support = true
-streaming = true
-reasoning-effort = "high"
-
-[openrouter.openrouter-free-nemotron-3-nano-omni-30b-a3b-reasoning]
-
-[models.openrouter-free-nemotron-3-super-120b-a12b]
-api-name = "nvidia/nemotron-3-super-120b-a12b:free"
-tools-support = true
-thinking-support = true
-streaming = true
-reasoning-effort = "high"
-
-[openrouter.openrouter-free-nemotron-3-super-120b-a12b]
-
-[models.openrouter-free-nemotron-3-ultra-550b-a55b]
-api-name = "nvidia/nemotron-3-ultra-550b-a55b:free"
-tools-support = true
-thinking-support = true
-streaming = true
-reasoning-effort = "high"
-
-[openrouter.openrouter-free-nemotron-3-ultra-550b-a55b]
-
-[models.openrouter-free-nemotron-3-5-lightning]
-api-name = "nvidia/nemotron-3.5-lightning:free"
-tools-support = true
-thinking-support = true
-streaming = true
-reasoning-effort = "high"
-
-[openrouter.openrouter-free-nemotron-3-5-lightning]
-
-[models.openrouter-free-laguna-s-2-1]
-api-name = "poolside/laguna-s-2.1:free"
-tools-support = true
-thinking-support = true
-streaming = true
-reasoning-effort = "high"
-
-[openrouter.openrouter-free-laguna-s-2-1]
-
-[models.openrouter-free-laguna-xs-2-1]
-api-name = "poolside/laguna-xs-2.1:free"
-tools-support = true
-thinking-support = true
-streaming = true
-reasoning-effort = "high"
-
-[openrouter.openrouter-free-laguna-xs-2-1]
-
-[models.openrouter-free-qwen3-8-27b]
-api-name = "qwen/qwen3.8-27b:free"
-tools-support = true
-thinking-support = true
-streaming = true
-reasoning-effort = "high"
-
-[openrouter.openrouter-free-qwen3-8-27b]
-
-[models.openrouter-free-inkling-small]
-api-name = "thinkingmachines/inkling-small:free"
-tools-support = true
-thinking-support = true
-streaming = true
-reasoning-effort = "high"
-
-[openrouter.openrouter-free-inkling-small]
-
-[models.openrouter-free-inkling]
-api-name = "thinkingmachines/inkling:free"
-tools-support = true
-thinking-support = true
-streaming = true
-reasoning-effort = "high"
-
-[openrouter.openrouter-free-inkling]

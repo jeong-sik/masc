@@ -13,9 +13,10 @@ Rules, the same ones the 2026-09-10 OpenRouter rows follow
   - Input modalities only go down: image input is lowered when the gateway
     lists no image input, never raised.
   - The effort ladder is the router's (Capabilities.openrouter_capabilities):
-    "none" is left out until a probe shows the model stops thinking.
-  - Ids without "tools" in supported_parameters get no row: a Keeper lane
-    cannot use them.
+    "none" is included only where probe-results.json records zero reasoning
+    tokens in an accepted nonthinking request.
+  - Only ids admitted in probe-results.json get a row. Metadata alone does
+    not demonstrate the endpoint can actually call tools.
 """
 import json
 import os
@@ -23,6 +24,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SNAPSHOT = os.path.join(HERE, "models-snapshot.json")
+RESULTS = os.path.join(HERE, "probe-results.json")
+PROBES = {row["id"]: row for row in json.load(open(RESULTS))["models"]}
 
 # base claim (openai_chat_extended) -> gateway parameter that must be listed
 PARAM_FLAGS = [
@@ -46,6 +49,7 @@ def runtime_name(model_id):
 def catalog_row(m):
     params = set(m["supported_parameters"])
     inputs = set(m["architecture"]["input_modalities"])
+    efforts = ["none"] + LADDER if PROBES[m["id"]]["none_verified"] else LADDER
     lines = [
         "[[models]]",
         f'id_prefix = "{m["id"]}"',
@@ -58,7 +62,7 @@ def catalog_row(m):
         'reasoning_output_format = "split_reasoning_fields"',
         'reasoning_streaming_format = "delta_details:reasoning"',
         'reasoning_replay = "drop_without_tool"',
-        "accepted_reasoning_efforts = [" + ", ".join(f'"{r}"' for r in LADDER) + "]",
+        "accepted_reasoning_efforts = [" + ", ".join(f'"{r}"' for r in efforts) + "]",
         'thinking_control_format = "reasoning_effort"',
         f'supports_seed = {"true" if "seed" in params else "false"}',
     ]
@@ -89,9 +93,9 @@ def runtime_entry(m):
 
 def main():
     models = json.load(open(SNAPSHOT))
-    usable = [m for m in models if "tools" in m["supported_parameters"]]
+    usable = [m for m in models if PROBES.get(m["id"], {}).get("admitted", False)]
     skipped = [m["id"] for m in models if m not in usable]
-    print(f"# catalog rows ({len(usable)}); skipped without tools: {', '.join(skipped)}")
+    print(f"# catalog rows ({len(usable)}); not admitted by probes: {', '.join(skipped)}")
     print("\n\n".join(catalog_row(m) for m in usable))
     print("\n# ---- runtime.toml ----\n")
     print("\n\n".join(runtime_entry(m) for m in usable))

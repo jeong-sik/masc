@@ -31,8 +31,8 @@ let native_posture_note = function
   | Runtime_native_tools.Native_none | Runtime_native_tools.Native_read ->
     [ Printf.sprintf
         "In this session MASC approves only the tools its %s server lists. \
-         Built-in file writes and shell commands are switched off, and any \
-         other call that asks for approval is rejected."
+         Any other tool call that asks for approval is rejected, and the \
+         turn goes on."
         mcp_server_name
     ]
   | Runtime_native_tools.Native_full -> []

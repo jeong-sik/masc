@@ -79,19 +79,19 @@ val codex_default : posture
 val antigravity_default : posture
 
 val muse_default : posture
-(** [read]. On Muse Code, [read] and [none] run the same session: write and
-    shell are off at launch, and MASC approves only calls to its own tools
-    ({!Runtime_muse_serve.config}). Muse Code offers no read-only built-in
-    set MASC could grant, so [read] is stricter there than on the other
-    clients. A call the host's own rules allow still runs without asking
-    MASC, so the Keeper adapter counts a turn the host took in as a possible
-    effect. *)
+(** [read]. On Muse Code, [read] and [none] run the same session: MASC
+    approves only calls to its own tools and rejects every other call the
+    host asks about ({!Runtime_muse_serve.config}). Muse Code offers no
+    read-only built-in set MASC could grant, so [read] is stricter there
+    than on the other clients. A call the host's own rules allow still runs
+    without asking MASC (a built-in read did, 2026-09-27), so the Keeper
+    adapter counts a turn the host took in as a possible effect. *)
 
 val muse_none_supported : bool
-(** [false]: no switch removes every Muse Code built-in (the launch flags
-    remove write and shell only), and a call the host's own rules allow
-    never reaches MASC, so [none] cannot be promised. A declared [none]
-    degrades to [read], which runs the same session. The one source for
+(** [false]: no switch removes a Muse Code built-in from the model's list,
+    and a call the host's own rules allow never reaches MASC, so [none]
+    cannot be promised. A declared [none] degrades to [read], which runs the
+    same session. The one source for
     {!Runtime_execution.supports_native_none} and the Keeper adapter. *)
 
 val claude_code_read_tool_names : string list

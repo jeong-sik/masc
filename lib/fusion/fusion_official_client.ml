@@ -166,10 +166,11 @@ let muse_config ~runtime_id ~override_s (execution : Runtime_execution.muse_serv
   =
   { cli_path = execution.cli_path
   ; model = Some execution.model
-  ; (* The posture a keeper turn gets by default: write and shell off, and
-       every approval the host raises rejected, since a panelist has no MASC
-       tools. A panelist answers a question; nothing downstream expects
-       files to have changed. *)
+  ; (* The posture a keeper turn gets by default: every approval the host
+       raises is rejected, since a panelist has no MASC tools. Reads the
+       host's own profile allows still run ({!Runtime_muse_serve.config}).
+       A panelist answers a question; nothing downstream expects files to
+       have changed. *)
     native = Runtime_native_tools.muse_default
   ; admission_timeout_s = execution.timeout_s
   ; timeout_s =

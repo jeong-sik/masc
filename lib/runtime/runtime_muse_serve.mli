@@ -16,25 +16,35 @@ type config =
   ; model : string option
     (** [session/start]'s [modelId]. [None] takes the host's default. *)
   ; native : Runtime_native_tools.posture
-    (** Built-in tool posture (RFC-0390). [Native_full] selects [allowAll]
-        and starts the host with its whole built-in surface.
+    (** Built-in tool posture (RFC-0390). [Native_full] selects [allowAll].
 
         [Native_none] and [Native_read] run the same MASC-tools-only
-        session. The host starts with [--disable-write --disable-shell], the
-        session selects [promptUnmatched], and MASC answers each approval
-        the host raises itself: a call whose subject is a tool named exactly
-        like one of the session's MASC tools ({!session_mcp_server}) is
-        allowed once, and every other call is rejected. Muse Code offers no
-        read-only built-in set MASC could grant, so [Native_read] is
-        stricter here than on the other clients, not looser.
+        session. The session selects [promptUnmatched], and MASC answers
+        each approval the host raises itself: a call whose subject is a tool
+        the host names exactly like one of the session's MASC tools
+        ({!session_mcp_server}) is allowed once, and every other call is
+        rejected. A rejection declines only that call and the turn goes on
+        (muse 1.4.0, checked 2026-09-27). Muse Code offers no read-only
+        built-in set MASC could grant, so [Native_read] is stricter here
+        than on the other clients, not looser. MASC never answers with a
+        choice that saves a rule in the operator's files
+        ([approvedForSession], [approvedPolicyAmendment]).
 
-        MSP lets a client select a mode but never state a rule
-        ([ApprovalMode] is closed, "select, never create"). A call the
-        host's own rules already allow therefore runs without an approval
-        reaching MASC; under an operator profile that asks nothing, such as
-        [:unrestricted], that can include a built-in read. MASC never
-        answers with a choice that saves a rule in the operator's files
-        ([approvedForSession], [approvedPolicyAmendment]). *)
+        The host also starts with [--disable-write --disable-shell], a
+        second layer. The flags do not remove a tool from the model's list
+        (checked 2026-09-27), and what they block when a tool is called is
+        not proven: one [write_file] call ended as a failed item citing the
+        write policy, with no turn run without the flags to compare.
+
+        Known gap: MSP lets a client select a mode but never state a rule
+        ([ApprovalMode] is closed), and a call the host's own rules allow
+        never reaches MASC as an approval. Under the operator's
+        [:unrestricted] profile, Muse Code's built-in [read_file] read a
+        file outside the workspace root with no approval request (checked
+        2026-09-27). This posture therefore does not keep reads inside
+        MASC's tools, and Muse Code must not be assigned to a Keeper or a
+        fusion panel until a managed settings folder with a read-only
+        profile closes the gap and that is verified. *)
   ; admission_timeout_s : float
     (** Finite bound on the handshake, the session start or resume, the
         session callback and the complete [turn/start] write. *)
@@ -146,7 +156,11 @@ type turn_result =
   ; text : string  (** The last completed agent message of the turn. *)
   ; usage : Runtime_muse_msp.token_usage option
   ; tool_calls : int
+    (** Tool items the host opened, MASC's own calls and failed ones
+        included. A call MASC rejected opens no item. *)
   ; approvals_decided : int
+    (** Decisions the host accepted, allowed and rejected alike. Each is
+        also an [Approval_decided] event naming its decision. *)
     (** Decisions this client made that the host accepted. One the host had
         already resolved, or one still unanswered when the turn ended, is
         not counted. *)

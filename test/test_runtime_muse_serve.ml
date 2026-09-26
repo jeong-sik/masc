@@ -482,6 +482,15 @@ let approval_with ~id ~approval_id ~tool_name ~subject ~choices =
 
 let tool_subject name = Printf.sprintf {|{"kind":"tool","toolName":%S}|} name
 
+(* The subject and choices muse 1.4.0 sent for [bash] on 2026-09-27. *)
+let shell_subject =
+  {|{"kind":"shell","command":"echo hi","workspaceRoot":"/w","stages":[{"requirementId":{"approvalId":"a-1","sourceIndex":0},"position":1,"totalStages":1,"argv":["echo","hi"],"argvComplete":true,"resolution":{"kind":"unresolved"},"suggestedPrefix":{"argvPrefix":["echo"],"label":"Always allow in this workspace: echo ..."}}]}|}
+;;
+
+let shell_choices =
+  {|[{"choiceId":"allow_once","label":"Allow once","decision":"approved","scope":"once"},{"choiceId":"allow_local_prefix","label":"Always allow in this workspace: echo ...","decision":"approvedPolicyAmendment","scope":"localPersistent","rulePreview":"Always allow in this workspace: echo ..."},{"choiceId":"abort","label":"Reject","decision":"abort","scope":"once","acceptsFeedback":true}]|}
+;;
+
 let decide_result_with ~id ~approval_id =
   Printf.sprintf
     {|{"jsonrpc":"2.0","id":%d,"result":{"commandId":"c","status":"accepted","approvalId":%S,"terminal":true}}|}
@@ -536,6 +545,16 @@ let test_masc_tools_only_approval_policy () =
     (request
        ~tool_name:"read_file"
        ~subject:{|{"kind":"fileAccess","toolName":"read_file","path":"/etc/hosts","access":"read"}|})
+    ~expected:"abort"
+    ~feedback:true;
+  decided_choice
+    ~label:"a shell command"
+    (approval_with
+       ~id:1
+       ~approval_id:"a-1"
+       ~tool_name:"bash"
+       ~subject:shell_subject
+       ~choices:shell_choices)
     ~expected:"abort"
     ~feedback:true;
   decided_choice
@@ -605,6 +624,20 @@ let approval_resolved ~approval_id ~decision =
     decision
 ;;
 
+(* A built-in write the host failed without asking, as muse 1.4.0 did under
+   [--disable-write] on 2026-09-27: an ordinary failed tool item. *)
+let failed_write_item ~revision =
+  Printf.sprintf
+    {|{"jsonrpc":"2.0","method":"%s","params":{"sessionId":"s-1","viewCursor":"v:9","item":{"itemId":"w-1","kind":"toolCall","turnId":"t-1","revision":%d,"status":%S,"tool":"write_file","callId":"call_w-1","args":"{\"content\":\"ok\",\"path\":\"check.txt\"}"%s}}}|}
+    (if revision = 1 then "item/started" else "item/completed")
+    revision
+    (if revision = 1 then "inProgress" else "failed")
+    (if revision = 1
+     then ""
+     else
+       {|,"failureReason":"tool policy denied filesystem write","visibleOutput":"tool failed: tool policy denied filesystem write"|})
+;;
+
 let mcp_tool_item ~status ~revision =
   Printf.sprintf
     {|{"jsonrpc":"2.0","method":"%s","params":{"sessionId":"s-1","viewCursor":"v:7","item":{"itemId":"a-1","kind":"toolCall","turnId":"t-1","revision":%d,"status":%S,"tool":"mcp__masc__ping","callId":"call_a-1","args":"{}"}}}|}
@@ -615,7 +648,9 @@ let mcp_tool_item ~status ~revision =
 
 (* A promptUnmatched turn shaped like the host's frames: the model calls one
    MASC tool, which MASC allows once, then a built-in, which MASC rejects,
-   and the turn still completes with the model's reply. *)
+   then a built-in write the host fails on its own. The turn still completes
+   with the model's reply. A rejected call opens no tool item, so it shows
+   only as a decision. *)
 let test_a_masc_tools_only_turn_completes () =
   let decisions = ref [] in
   run_scripted
@@ -650,6 +685,8 @@ let test_a_masc_tools_only_turn_completes () =
        ; Read (* approval/decide *)
        ; Write (decide_result_with ~id:5 ~approval_id:"a-2")
        ; Write (approval_resolved ~approval_id:"a-2" ~decision:"abort")
+       ; Write (failed_write_item ~revision:1)
+       ; Write (failed_write_item ~revision:2)
        ; Write agent_completed
        ; Write turn_completed
        ])
@@ -657,8 +694,8 @@ let test_a_masc_tools_only_turn_completes () =
        (match result with
         | Ok turn ->
           check string "reply" "MASC_MUSE_OK" turn.text;
-          check int "approvals" 2 turn.approvals_decided;
-          check int "tool calls" 1 turn.tool_calls
+          check int "decisions, the rejection included" 2 turn.approvals_decided;
+          check int "tool items: the MASC call and the failed write" 2 turn.tool_calls
         | Error error -> fail (Serve.error_to_string error));
        check
          bool
@@ -699,8 +736,8 @@ let lines_of path =
   |> List.filter (fun line -> line <> "")
 ;;
 
-(* [muse serve] starts with write and shell off for [none] and [read], and
-   with its whole surface for [full]. Every spawn turns the launcher's
+(* [muse serve] starts with [--disable-write --disable-shell] for [none] and
+   [read], and with no flag for [full]. Every spawn turns the launcher's
    background self-update off. *)
 let test_serve_flags_and_environment () =
   List.iter

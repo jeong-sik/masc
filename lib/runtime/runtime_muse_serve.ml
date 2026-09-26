@@ -241,9 +241,10 @@ let approval_mode_of_posture = function
     Msp.Prompt_unmatched
 ;;
 
-(* The host's sandbox posture is fixed for the process and set only by
-   flags; MSP selects an approval mode per session but cannot remove a
-   built-in tool. Names from [muse serve --help] (muse 1.4.0). *)
+(* A second layer behind the approval answers. The host's sandbox posture
+   is fixed for the process and set only by flags (names from
+   [muse serve --help], muse 1.4.0). They leave the tools in the model's
+   list (checked 2026-09-27); what they block at call time is not proven. *)
 let serve_flags = function
   | Runtime_native_tools.Native_full -> []
   | Runtime_native_tools.Native_read | Runtime_native_tools.Native_none ->

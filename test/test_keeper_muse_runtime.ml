@@ -1410,15 +1410,43 @@ let test_hook_nudges_bind_the_session_but_carried_context_does_not () =
   with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
     let calls = ref 0 in
+    let hook_ordinals = ref [] in
+    let observe_hook name turn = hook_ordinals := (name, turn) :: !hook_ordinals in
     List.iteri (fun index nudge ->
+      hook_ordinals := [];
       let context = Printf.sprintf "TURN_LOCAL_CONTEXT_%d" index in
       let hooks = { Agent_core.Hooks.empty with
-        before_turn = Some (fun _ -> incr calls;
+        before_turn = Some (fun event -> incr calls;
+          (match event with Agent_core.Hooks.BeforeTurn {turn; _} -> observe_hook "before" turn
+           | _ -> fail "unexpected before-turn hook event");
           match nudge with Some text -> Agent_core.Hooks.Nudge text | None -> Continue);
-        before_turn_params = Some (fun _ -> Agent_core.Hooks.AdjustParams
-          { Agent_core.Hooks.default_turn_params with extra_system_context = Some context }) } in
-      (match (run_turn_with ~hooks ~base_path ~tool ()).outcome.result with
-       | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+        before_turn_params = Some (fun event ->
+          (match event with Agent_core.Hooks.BeforeTurnParams {turn; _} -> observe_hook "params" turn
+           | _ -> fail "unexpected params hook event");
+          Agent_core.Hooks.AdjustParams
+            { Agent_core.Hooks.default_turn_params with extra_system_context = Some context });
+        pre_tool_use = Some (fun event ->
+          (match event with Agent_core.Hooks.PreToolUse {invocation; _} ->
+             observe_hook "tool" (Agent_core.Tool_contract.Invocation.turn invocation)
+           | _ -> fail "unexpected tool hook event"); Agent_core.Hooks.Continue);
+        after_turn = Some (fun event ->
+          (match event with Agent_core.Hooks.AfterTurn {turn; _} -> observe_hook "after" turn
+           | _ -> fail "unexpected completion hook event"); Agent_core.Hooks.Continue) } in
+      let run = run_turn_with ~hooks ~base_path ~tool () in
+      (match run.outcome.result with
+       | Ok result ->
+         check int "vendor ordinal follows its actual session" (List.nth [1;1;2;1;2] index) result.turns
+       | Error error -> fail (Agent_core.Error.to_string error));
+      let expected_hook_turn = List.nth [1;2;2;3;2] index in
+      check (list (pair string int)) "host hooks run once with the pre-reconciliation ordinal"
+        (List.map (fun name -> name, expected_hook_turn) ["before"; "params"; "tool"; "after"])
+        (List.rev !hook_ordinals);
+      check int "one terminal usage observation" 1 (List.length run.reports);
+      check bool "native action retains the vendor ordinal" true
+        (List.mem (List.nth [1;1;2;1;2] index, "call-native-1:read_file") run.native_actions);
+      List.iter (fun (report : Keeper_client_usage_report.t) ->
+        check int "usage retains the vendor ordinal" (List.nth [1;1;2;1;2] index) report.official_turn)
+        run.reports;
       let mode = if index = 0 || index = 1 || index = 3 then "start" else "resume" in
       let prompt = read_text (Filename.concat base_path (mode ^ "-prompt.txt")) in
       check bool "each turn transmits its current carried context" true

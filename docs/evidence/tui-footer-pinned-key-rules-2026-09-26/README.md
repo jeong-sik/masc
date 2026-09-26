@@ -40,5 +40,9 @@ behavior assertion remains.
 
 Source parsing and whitespace checks pass. Independent adversarial and response
 reviews found no semantic difference or missed caller after the type change.
-Compiled footer/key tests and a controlled artifact comparison are still needed.
-No local OCaml build, deployment, or measured improvement is claimed.
+The separate controlled comparison in `comparison/` passed 600 transitions and
+six drafts: all-input median 0.356521→0.293833ms. Roster p95 and maximum worsened,
+and every candidate input remains above 0.1ms; the full results and limitations
+are retained there. Integration CI on the compared candidate passed 200
+targeted cases; the main-based PR has separate checks. No local OCaml build
+or deployment occurred.

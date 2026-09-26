@@ -490,18 +490,19 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
    budget refusal is the hard quota the Claude Code runtime reports as
    [Quota_blocked]; without this, a Codex head out of weekly usage rotated as
    a generic provider failure every cycle and left no quota evidence.
+   Which failures spend the account is [Runtime_codex_app_server.refused_for_spent_usage],
+   the rule the one-shot CLI path reads too.
    [retry_after] stays [None]: the turn error carries no reset time. *)
-let turn_failure_to_provider_error ~detail codex_error_info =
+let turn_failure_to_provider_error error ~detail codex_error_info =
   let provider = "codex_app_server" in
   let network kind =
     Llm_provider.Error.NetworkError
       { provider; kind; timeout_phase = None; detail }
   in
+  if Runtime_codex_app_server.refused_for_spent_usage error
+  then Llm_provider.Error.HardQuota { provider; retry_after = None; detail }
+  else
   match codex_error_info with
-  | Some
-      ( Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
-      | Runtime_codex_app_server.Codex_error_info.Session_budget_exceeded ) ->
-    Llm_provider.Error.HardQuota { provider; retry_after = None; detail }
   | Some Runtime_codex_app_server.Codex_error_info.Rate_limit_exceeded ->
     Llm_provider.Error.RateLimit { provider; retry_after = None; detail }
   (* An overloaded server is the provider's capacity, the class a 529 and a
@@ -528,6 +529,10 @@ let turn_failure_to_provider_error ~detail codex_error_info =
     network Llm_provider.Http_client.End_of_file
   | Some Runtime_codex_app_server.Codex_error_info.Unauthorized ->
     Llm_provider.Error.AuthError { provider; detail }
+  (* Answered above: these two are the spent-usage refusal. *)
+  | Some
+      ( Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
+      | Runtime_codex_app_server.Codex_error_info.Session_budget_exceeded )
   | Some
       ( Runtime_codex_app_server.Codex_error_info.Bad_request
       | Runtime_codex_app_server.Codex_error_info.Cyber_policy
@@ -607,8 +612,8 @@ let codex_error_to_core_error = function
   (* Effectful failed turns are fenced out of same-turn retry by
      [Keeper_provider_attempt_effect] at the driver level, so this mapping
      stays purely descriptive of what the provider reported. *)
-  | Runtime_codex_app_server.Turn_failed { detail; codex_error_info } ->
-    Agent_core.Error.Provider (turn_failure_to_provider_error ~detail codex_error_info)
+  | Runtime_codex_app_server.Turn_failed { detail; codex_error_info } as error ->
+    Agent_core.Error.Provider (turn_failure_to_provider_error error ~detail codex_error_info)
   | Runtime_codex_app_server.Timeout { seconds; turn_accepted = false } ->
     Agent_core.Error.Api
       (Agent_core.Retry.Timeout
@@ -1383,18 +1388,13 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
      | Error error ->
        (match error with
         | Runtime_codex_app_server.Turn_input_write_failed _ -> observe_transport_uncertain ()
-        | Runtime_codex_app_server.Turn_failed
-            { codex_error_info =
-                Some
-                  Runtime_codex_app_server.Codex_error_info.(
-                    Usage_limit_exceeded | Session_budget_exceeded)
-            ; _
-            } ->
-          read_usage_after_quota_refusal
-            ~keeper_name ~runtime_id ~clock
-            ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
-            config
         | _ -> ());
+       if Runtime_codex_app_server.refused_for_spent_usage error
+       then
+         read_usage_after_quota_refusal
+           ~keeper_name ~runtime_id ~clock
+           ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+           config;
        recovery_failure :=
          recovery_failure_of_attempt ~thread_mode
            ~gate_continuation:(Option.is_some official_client_continuation) error;

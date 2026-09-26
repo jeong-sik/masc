@@ -187,9 +187,12 @@ let fold_argument ~cap text =
   let width = Message_layout.display_width flat in
   if width <= cap then { fa_text = flat; fa_held_cells = 0 }
   else
-    { fa_text =
-        Printf.sprintf "%s \xe2\x8c\x84 %d\xec\x9e\x90"
-          (Message_layout.take_cells flat cap)
-          (width - cap)
-    ; fa_held_cells = width - cap
+    (* The tail is reserved inside the cap: the drawn line is text plus the
+       held count, not text to the cap with the count past it. The count
+       still names [width - cap] — what the fold is holding, not the pane. *)
+    let held = width - cap in
+    let tail = Printf.sprintf " \xe2\x8c\x84 %d\xec\x9e\x90" held in
+    let tail_cells = Message_layout.display_width tail in
+    { fa_text = Message_layout.take_cells flat (cap - tail_cells) ^ tail
+    ; fa_held_cells = held
     }

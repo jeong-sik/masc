@@ -186,6 +186,21 @@ let test_a_long_argument_folds_and_says_how_much () =
        (Printf.sprintf "%d" (Layout.display_width line - 40)))
 ;;
 
+(* The drawn line is text plus its tail, so the tail is reserved inside the
+   cap rather than appended past it: nothing wraps mid-text with the count
+   split onto the next row. *)
+let test_folded_line_fits_the_cap_including_its_tail () =
+  let line = "tool_execute \xc2\xb7 " ^ String.make 300 'x' in
+  List.iter
+    (fun cap ->
+      let folded = (Gate_text.fold_argument ~cap line).Gate_text.fa_text in
+      check bool
+        (Printf.sprintf "cap %d contains text plus tail" cap)
+        true
+        (Layout.display_width folded <= cap))
+    [ 24; 40; 80; 120 ]
+;;
+
 (* Newlines are what made one argument eight rows. Flattened, the fold decides
    the height rather than the argument's own line breaks. *)
 let test_newlines_are_flattened_before_the_cap_applies () =
@@ -252,6 +267,8 @@ let () =
             test_a_line_within_the_cap_comes_back_whole
         ; test_case "a long argument folds and says how much" `Quick
             test_a_long_argument_folds_and_says_how_much
+        ; test_case "folded line fits the cap including its tail" `Quick
+            test_folded_line_fits_the_cap_including_its_tail
         ; test_case "newlines are flattened before the cap applies" `Quick
             test_newlines_are_flattened_before_the_cap_applies
         ; test_case "the held count is in cells, not rows" `Quick

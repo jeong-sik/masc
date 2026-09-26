@@ -90,10 +90,12 @@ bash /tmp/masc-install.sh --version "$TAG"
 
 선택 사항: 실행 전에 스크립트를 읽으려면 `less /tmp/masc-install.sh`를 실행하세요. `q`를 눌러 나간 다음 위의 `bash` 설치 명령을 실행합니다.
 
+모델 확인이 실패하면 마법사가 원인을 표시합니다. 노란색 **Rate limit (temporary)** 또는 **Provider busy**는 잠시 기다린 뒤 *Retry*를 고르세요. **No answer in time**은 한 번 재시도하고, 계속 시간 초과가 나면 엔드포인트를 확인하거나 더 작은 모델을 고르세요. 빨간색 원인(credential refused, quota used up, not signed in)은 표시된 조치가 필요합니다. 해당 연결만 제외하고 계속하거나 *Configure later*를 고른 뒤 나중에 `masc setup`을 실행할 수 있습니다. 확인 중에는 경과 시간(초)이 표시되므로 느린 프로바이더를 멈춘 설치로 오해하지 않아도 됩니다. `NO_COLOR=1`이면 색 없이 출력합니다.
+
 재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다.
 
 설치 스크립트는 기본으로 `~/.local/bin`에 설치하고 셸 `PATH`에 추가할지 묻습니다.
-그 질문을 건너뛰었다면 `export PATH="$HOME/.local/bin:$PATH"`를 실행하세요
+그 질문을 걸어다면 `export PATH="$HOME/.local/bin:$PATH"`를 실행하세요
 (이 명령에는 설치 옵션을 붙이지 않습니다).
 
 설치 스크립트는 `SHA256SUMS`를 필수로 검증하고 릴리스 실행 파일을 설치한 뒤, 처음 한 번 설정 마법사를 돌립니다(`--no-wizard`로 건너뜁니다).
@@ -346,7 +348,7 @@ Keeper `imp` 하나가 들어 있습니다. 설치 스크립트도 `masc init`�
 [keeper]
 activation_mode = "autonomous"
 sandbox_profile = "docker"
-sandbox_image = "node:22-bookworm"
+sandbox_image = "base"
 network_mode = "none"
 mention_targets = ["operator"]
 
@@ -372,13 +374,17 @@ reviewer = "<provider>.<model>"
   하나입니다. 호스트에서 그냥 도는 프로파일은 없고, 받아들일 프로파일이 없는
   Keeper는 거부됩니다. `remote_ssh` Keeper는 `runtime.toml`의
   `[exec.ssh.endpoints]`에 선언한 `remote_endpoint`를 이름으로 댑니다.
-- **이미지.** `docker`와 `microvm` 턴은 이미지 안에서 돌고, 이미지가 없으면
-  턴마다 `docker_preflight_failed`에서 멈춥니다. `masc sandbox-image`가
-  바이너리에 든 레시피로 `masc-sandbox:general`(Debian 위 bash, ripgrep, git)을
-  만듭니다. `docker`와 `microvm` Keeper는 모두 `sandbox_image`에 이미지를
-  적어야 하고, 적지 않으면 기본값을 받는 대신 거부됩니다. 범용 이미지로
-  충분한 Keeper는 `sandbox_image = "masc-sandbox:general"`을, 프로젝트를
-  빌드해야 하는 Keeper는 그 프로젝트 툴체인 이미지를 적습니다. 컨테이너는 읽기 전용 rootfs, `--cap-drop=ALL`,
+- **이미지.** `docker`와 `microvm` 턴은 이미지 안에서 돕니다. Keeper는
+  `sandbox_image`에 이 호스트의 이미지 목록
+  (`<base-path>/.masc/config/sandbox-images.toml`)에 있는 이름을 적고, 적지
+  않으면 기본값을 받는 대신 거부됩니다. 범용 이미지로 충분한 Keeper는
+  `sandbox_image = "base"`를, MASC를 빌드하는 Keeper는 `"ocaml"`을 적습니다.
+  목록은 저장소별로 각 이름이 어떤 빌드인지 적어 둡니다. `masc setup`은 목록에
+  `base` 빌드가 없으면 바이너리에 든 레시피(`sandbox-images/base/Dockerfile`)로
+  빌드해 목록에 올립니다. 손으로는 `masc sandbox-image`로 다시 쓰지 않는 새
+  태그를 빌드하고 `masc sandbox-image promote <이름> <태그>`로 올립니다. 이름에
+  올린 빌드가 없으면 Keeper는 컨테이너를 띄우지 않고 이 명령을 알려 줍니다.
+  컨테이너는 읽기 전용 rootfs, `--cap-drop=ALL`,
   내 uid로 돌기 때문에 `bash`와 툴체인이 이미지에 미리 있어야 합니다. 턴 도중에
   뭘 설치할 수는 없습니다.
 - **네트워크 모드.** 샌드박스는 `network_mode = "none"`으로 시작합니다. 웹

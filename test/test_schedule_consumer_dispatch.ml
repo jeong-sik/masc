@@ -160,7 +160,7 @@ let declare_keeper_profile config keeper_name =
   if not (Sys.file_exists path)
   then (
     mkdir_p (Filename.dirname path);
-    write_file path "[keeper]\ninstructions = \"test keeper\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n")
+    write_file path "[keeper]\ninstructions = \"test keeper\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n")
 ;;
 
 let persist_keeper_meta ?proactive_enabled config keeper_name =
@@ -1285,7 +1285,7 @@ let test_schedule_cancel_tool_withdraws_the_queued_wake_and_stores_the_cancellat
   let result =
     Tool_schedule.handle_cancel
       ~tool_name:"masc_schedule_cancel"
-      ~start_time:300.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc
         [ "schedule_id", `String request.schedule_id; "reason", `String reason ])
@@ -1380,7 +1380,7 @@ let test_schedule_cancel_mid_turn_leaves_the_taken_wake_to_its_turn () =
   let result =
     Tool_schedule.handle_cancel
       ~tool_name:"masc_schedule_cancel"
-      ~start_time:300.0
+      ~start_time:(Tool_timing.start ())
       ctx
       (`Assoc
         [ "schedule_id", `String request.schedule_id

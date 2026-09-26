@@ -13,7 +13,7 @@ let run ~base_path ~path =
   in
   let base_path = absolute (Env_config_core.normalize_masc_base_path_input base_path) in
   let path = absolute path in
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let name = "inspect-file" in
   let error failure_class message =
     Tool_result.error ~failure_class ~tool_name:name ~start_time message

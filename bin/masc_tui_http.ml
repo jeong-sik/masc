@@ -495,17 +495,21 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
    A changed DOS answer is about 1.2 MB of JSON around 921 KB of pixels.
    Parsing it and decoding the base64 are pure work, so they run on a system
    thread and the UI domain keeps drawing and reading keys meanwhile; the
-   request itself stays on the fiber, where the Eio client runs. *)
+   request itself stays on the fiber, where the Eio client runs.
+
+   The same decode validates the spectator's activity feed: a malformed
+   feed is a failed read, not a successful empty activity list. *)
 let fetch_machine_live ~(host : string) ~(port : int)
     (source : Masc_tui_machine_live.source) ~(since : Masc_tui_machine_live.mark option) :
-    (Masc_tui_machine_live.answer, string) result =
+    (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result =
   let result =
     match http_get ~host ~port ~path:(Masc_tui_machine_live.path source ~since) with
     | Error _ as error -> error
     | Ok (status_code, body) ->
         Eio_guard.run_in_systhread ~label:"tui-machine-live-decode" (fun () ->
-          Result.bind (decode_json ~allow_empty:false ~status_code ~body)
-            (Masc_tui_machine_live.decode source))
+          match decode_json ~allow_empty:false ~status_code ~body with
+          | Error _ as error -> error
+          | Ok json -> Masc_tui_machine_live.decode source json)
   in
   Result.map_error Masc.Tui_decode.sanitize_terminal_text result
 
@@ -1740,7 +1744,7 @@ let post_runtime_lane_action ~host ~port fields =
 ;;
 
 (** POST /api/v1/runtime/config/routing for [\[runtime\].media_failover]: the
-    vision read fleet, in order. The endpoint takes the whole list for this
+    vision runtimes, in order. The endpoint takes the whole list for this
     route -- it has no per-entry action -- so a caller must know it is sending
     everything the file should hold. *)
 let set_media_failover ~(host : string) ~(port : int) ~(runtime_ids : string list)

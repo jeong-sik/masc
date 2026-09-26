@@ -23,6 +23,11 @@ type t =
         dispatch never used (PR #28219 review). *)
   }
 
+val exact_slot_list_key_of_api_format : api_format -> string
+(** The declaration key used when an exact-output lane appends a binding with
+    this provider format: [slots] or [cli_slots]. The runtime writer and the
+    resolved picker projection use the same decision. *)
+
 type dispatch_credential_error =
   | Required_env_credential_missing of
       { provider_id : string
@@ -444,7 +449,7 @@ val load_list :
     [\[runtime\].media_failover] entry does not resolve, or if any
     [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
     validation — no silent fallback for a typo'd id). [keeper_assignments] is the
-    keeper→lane-name-or-runtime-id list; [media_failover] is the vision read fleet;
+    keeper→lane-name-or-runtime-id list; [media_failover] names the vision runtimes;
     [lanes] is the ordered failover candidate lists. *)
 
 
@@ -580,6 +585,11 @@ end
 
 val get_default_runtime : unit -> t option
 val get_runtimes : unit -> t list
+
+val get_default_and_runtimes : unit -> t option * t list
+(** The default runtime and the runtime list from one read of the loaded
+    state, so a reload between two separate reads cannot pair a default with
+    a list it is not in. *)
 val get_runtime_ids : unit -> string list
 val startup_degradation : unit -> startup_degradation option
 val startup_degraded : unit -> bool
@@ -641,11 +651,17 @@ type exact_lane = Standalone_lane.t =
   | Board_attention
   | Workspace_curator
   | Verifier
+  | Browser_stagehand
+      (** Answers the Stagehand extension's [llm.generate] for the browser
+          lane (RFC-browser-lane-stagehand §3.7). *)
 
 val exact_lane_supports_cli_tail : exact_lane -> bool
 (** Whether this exact lane can walk official-client [cli_slots] when HTTP
     provider slots are absent or exhausted. Verifier uses the managed tool-call
-    runner and its typed verdict callback. *)
+    runner and its typed verdict callback. [Browser_stagehand] walks its
+    [cli_slots] as official-client one-shots after its HTTP slots; see
+    {!Browser_stagehand_model} for the one request shape a one-shot cannot
+    carry. *)
 
 val verifier_runtime_admission : t -> (unit, string) result
 (** The one answer to "can this runtime judge a completion review?", used by
@@ -734,10 +750,10 @@ val verifier_exact_slot_admission : runtime_id:string -> (unit, string) result
     execution-kind constraint; a replacing registry cannot grant admission. *)
 
 val media_failover : unit -> string list
-(** [\[runtime\].media_failover] — the vision read fleet: ordered runtime ids the
+(** [\[runtime\].media_failover] — the vision runtimes: ordered runtime ids the
     vision tool calls, including the image readings made for a runtime that
     cannot take the image. A keeper turn never dispatches to them; its image
-    reroute stays inside its lane. [[]] = no vision fleet. Every entry is
+    reroute stays inside its lane. [[]] = no vision runtimes. Every entry is
     validated at load so each resolves to a configured runtime. *)
 
 val declared_media_failover : unit -> string list

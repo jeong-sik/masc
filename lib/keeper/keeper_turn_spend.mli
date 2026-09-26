@@ -89,3 +89,22 @@ val resolve
   -> observed_at:float
   -> attempt list
   -> resolved list * Keeper_usage_resolution.cursor option
+
+(** A successful turn's readings, resolved in order: the one its result
+    reports, every other, and the cursor they leave. *)
+type turn_resolution =
+  { turn_reading : resolved option
+        (** The last attempt's last reading: the thread, client turn or
+            response the result ended on. [None] when that attempt read
+            nothing. *)
+  ; other_readings : resolved list
+        (** Every earlier conversation or response of that attempt, and
+            every attempt that lost to it: spend beside the turn's. *)
+  ; cursor : Keeper_usage_resolution.cursor option
+  }
+
+val resolve_turn
+  :  cursor:Keeper_usage_resolution.cursor option
+  -> observed_at:float
+  -> attempt list
+  -> turn_resolution

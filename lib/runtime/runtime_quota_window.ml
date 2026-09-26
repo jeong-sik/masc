@@ -12,6 +12,7 @@ type scope =
   | Provider_row of string
   | Credential_env of string
   | Credential_file of string
+  | Official_client_home of string * string
 
 (* Two facts, not one duration. [Until] is the provider's own reset time.
    [Observed] is a hard-quota rejection that stated no reset. It claims no end
@@ -91,13 +92,45 @@ let scope_to_string = function
   | Provider_row row -> "provider:" ^ row
   | Credential_env name -> "env:" ^ name
   | Credential_file path -> "file:" ^ path
+  | Official_client_home (client, home) -> "official:" ^ client ^ ":home:" ^ home
 
 let scope_equal left right =
   match left, right with
   | Provider_row a, Provider_row b
   | Credential_env a, Credential_env b
   | Credential_file a, Credential_file b -> String.equal a b
-  | (Provider_row _ | Credential_env _ | Credential_file _), _ -> false
+  | Official_client_home (a_client, a_home), Official_client_home (b_client, b_home) ->
+    String.equal a_client b_client && String.equal a_home b_home
+  | (Provider_row _ | Credential_env _ | Credential_file _
+    | Official_client_home _), _ -> false
+;;
+
+let official_client_scope ~client ~env_name ~default_subdir account_home =
+  let selected =
+    match account_home with
+    | Some path -> Runtime_account_home.of_string path
+    | None ->
+      (match Env_config_core.raw_value_opt env_name with
+       | Some path when path <> "" -> Runtime_account_home.of_inherited path
+       | Some _ | None ->
+         (match Env_config_core.raw_value_opt "HOME" with
+          | Some path -> Runtime_account_home.of_string (Filename.concat path default_subdir)
+          | None -> Error "HOME is absent"))
+  in
+  match selected with
+  | Ok path -> Official_client_home (client, path)
+  | Error _ ->
+    invalid_arg ("official client " ^ client ^ " has no absolute account home")
+;;
+
+let scope_of_claude_code_home =
+  official_client_scope ~client:"claude-code" ~env_name:"CLAUDE_CONFIG_DIR"
+    ~default_subdir:".claude"
+;;
+
+let scope_of_codex_home =
+  official_client_scope ~client:"codex-app-server" ~env_name:"CODEX_HOME"
+    ~default_subdir:".codex"
 ;;
 
 let scope_of_credential ~provider_id (credential : Runtime_schema.credential option) =

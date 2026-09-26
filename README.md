@@ -93,6 +93,8 @@ bash /tmp/masc-install.sh --version "$TAG"
 
 Optional inspection: run `less /tmp/masc-install.sh` before installation. Press `q` to exit, then run the `bash` installation command above.
 
+If a model check fails, the wizard names the cause. For a yellow **Rate limit (temporary)** or **Provider busy**, wait and *Retry*. For **No answer in time**, retry once; if it keeps timing out, check the endpoint or choose a smaller model. A red cause (credential refused, quota used up, not signed in) needs the fix it names. You can exclude that connection and continue, or choose *Configure later* and run `masc setup` afterwards. A running check shows its elapsed seconds, so a slow provider is not a frozen installer. `NO_COLOR=1` gives plain output.
+
 For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command.
 
 The installer installs into `~/.local/bin` by default and offers to add it to your
@@ -369,7 +371,7 @@ until a model and a sandbox exist and you start it with `masc setup` or set
 [keeper]
 activation_mode = "autonomous"
 sandbox_profile = "docker"
-sandbox_image = "node:22-bookworm"
+sandbox_image = "base"
 network_mode = "none"
 mention_targets = ["operator"]
 board_interests = [] # no targetless semantic Board discovery
@@ -396,14 +398,18 @@ What a Keeper needs before its first turn runs:
   There is no host profile; a Keeper without an accepted profile is refused.
   A `remote_ssh` Keeper names a `remote_endpoint` declared under
   `[exec.ssh.endpoints]` in `runtime.toml`.
-- **An image.** `docker` and `microvm` turns run inside an image, and until
-  it exists image preflight refuses the turn. `masc sandbox-image`
-  builds `masc-sandbox:general` (bash, ripgrep, git on Debian) from a recipe
-  embedded in the binary. Every `docker` or `microvm` Keeper names its image
-  in `sandbox_image`, and one that names none is refused rather than given a
-  default: a Keeper that only needs the general image writes
-  `sandbox_image = "masc-sandbox:general"`, and one that has to build a
-  project names that project's toolchain image. The container runs with a
+- **An image.** `docker` and `microvm` turns run inside an image. A Keeper
+  names one in `sandbox_image` by its name in the host's image catalog,
+  `<base-path>/.masc/config/sandbox-images.toml`, and one that names none is
+  refused rather than given a default: `sandbox_image = "base"` for a Keeper
+  that only needs the general image, `"ocaml"` for one that builds MASC. The
+  catalog records which build each name is, per image store. `masc setup`
+  builds `base` from the recipe embedded in the binary
+  (`sandbox-images/base/Dockerfile`) and promotes it when the catalog has no
+  `base` build; by hand, `masc sandbox-image` builds a new, never-reused tag
+  and `masc sandbox-image promote <name> <tag>` records it. A Keeper whose
+  name has no promoted build starts no container and is told those commands.
+  The container runs with a
   read-only rootfs, `--cap-drop=ALL`, and your uid, so an image has to carry
   `bash` and the toolchain already; nothing can be installed during a turn.
 - **A network mode.** Sandboxes start on `network_mode = "none"`: no web

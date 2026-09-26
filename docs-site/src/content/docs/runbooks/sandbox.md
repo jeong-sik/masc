@@ -34,23 +34,42 @@ start.
 
 ## The sandbox image
 
-MASC ships no image. Build the general one once:
+MASC ships no image. A Keeper names one in `sandbox_image` by a name the
+binary ships in `config/sandbox-images.toml`: `base` for a Keeper that builds
+nothing, `ocaml` for one that builds MASC. This host's builds for those names
+are in `<base-path>/.masc/config/sandbox-image-builds.toml`, which records, per
+image store (Docker's, or a microVM runtime's own), which build
+each name is on this host. `masc setup` builds `base` and promotes it when the
+catalog has no `base` build for the store it sets up.
+
+By hand:
 
 ```bash
-masc sandbox-image
+masc sandbox-image                          # builds base, prints masc-sandbox-base:<UTC minute>-<input hash>
+masc sandbox-image promote base <that tag>  # the next turn of a base Keeper starts from it
 ```
 
-`masc-sandbox:general` is Debian slim carrying `bash` (a turn is run as
-`bash -l -s`), `ripgrep` (the Grep tool refuses without `rg`), `git`, `curl`,
-`ca-certificates`, `less`, `procps` and `findutils`. Nothing beyond that is
-assumed: a project's own toolchain belongs in that project's image, named per
-Keeper with `sandbox_image`.
+Other recipes are read from a checkout:
+`masc sandbox-image --recipe ocaml --source <checkout>`. Each command takes
+`--runtime <backend>` for a microVM runtime's store. A tag already in the store
+is refused, so a build never changes under a tag.
 
-The recipe lives inside the binary and is piped to `docker build -` with no
-build context, so it builds the same on a host that never had a checkout.
-`masc sandbox-image --print` writes the Dockerfile to stdout instead of
-building. `MASC_KEEPER_SANDBOX_DOCKER_IMAGE` overrides the default tag for both
-the `docker` and `microvm` guest paths.
+Promote records a tag only when the store `--runtime` names holds it, and the
+catalog keeps one tag per name and store. To go back, promote an earlier tag
+the store still has. On Docker, `apple_container` and `nerdctl_kata`,
+`masc sandbox-image` builds the tag to promote. `msb` has no build command:
+build the image elsewhere, `msb load` its OCI archive, then promote that tag
+with `--runtime microsandbox`.
+
+A Keeper whose name the catalog lacks, or that has nothing promoted for its
+store, starts no container; the refusal names the commands above. A turn looks
+its Keeper's name up once, when it first needs a container, so a promote
+reaches the next turn and never splits one.
+
+What `base` carries is `sandbox-images/base/Dockerfile`. The binary embeds it
+and pipes it to `docker build -` with no build context, so it builds the same
+on a host that never had a checkout. `masc sandbox-image --print` writes the
+Dockerfile to stdout instead of building.
 
 ## Configuration
 

@@ -108,14 +108,14 @@ let reader base_path =
        | Tool_result.Completed () ->
          Tool_result.make_ok
            ~tool_name:s.name
-           ~start_time:(Time_compat.now ())
+           ~start_time:(Tool_timing.start ())
            ?data:execution.data
            ()
        | Tool_result.Failed class_ ->
          Tool_result.make_err
            ~tool_name:s.name
            ~class_
-           ~start_time:(Time_compat.now ())
+           ~start_time:(Tool_timing.start ())
            execution.raw_output
        | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred")
 ;;

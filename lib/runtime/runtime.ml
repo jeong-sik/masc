@@ -297,12 +297,27 @@ let quota_scope_of_materialized
         provider.credentials
     | Runtime_execution.Antigravity_cli _ -> provider.credentials
     | Runtime_execution.Codex_app_server _
-    | Runtime_execution.Claude_code _ ->
-      (* Official clients own subscription login. A registry API-key default
-         with the same provider label is a different account authority. *)
-      None
+    | Runtime_execution.Claude_code _ -> None
   in
-  Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential
+  let official_home client selected scope =
+    match selected with
+    | None -> Error (client ^ " needs account-home or an absolute CLI home")
+    | Some home ->
+      (match Runtime_account_home.of_string home with
+       | Ok home -> Ok (scope (Some home))
+       | Error reason -> Error (client ^ ": " ^ reason))
+  in
+  match execution with
+  | Runtime_execution.Claude_code client ->
+    official_home "Claude Code"
+      (Runtime_claude_code.effective_account_home client.account_home)
+      Runtime_quota_window.scope_of_claude_code_home
+  | Runtime_execution.Codex_app_server client ->
+    official_home "Codex"
+      (Runtime_codex_app_server.effective_account_home client.account_home)
+      Runtime_quota_window.scope_of_codex_home
+  | Runtime_execution.Agent_core _ | Runtime_execution.Antigravity_cli _ ->
+    Ok (Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential)
 ;;
 
 (* Why a binding did not become a runtime, as a closed vocabulary rather than a
@@ -342,7 +357,7 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
     else
       (match Runtime_adapter.binding_to_execution cfg b with
        | Ok execution ->
-         Ok
+         Result.map (fun quota_scope ->
            { id = id_of_binding b
            ; provider
            ; model
@@ -360,8 +375,10 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
                  | Runtime_execution.Antigravity_cli _ -> Runtime_candidate_backpressure.Official_client_binding
                in
                Runtime_candidate_backpressure.create_candidate ~binding)
-           ; quota_scope = quota_scope_of_materialized ~provider ~execution
-           }
+           ; quota_scope
+           })
+           (quota_scope_of_materialized ~provider ~execution)
+         |> Result.map_error (fun reason -> Execution_unbuildable reason)
        | Error reason -> Error (Execution_unbuildable reason))
   | None, _ -> Error (Provider_not_declared b.provider_id)
   | Some _, None -> Error (Model_not_declared b.model_id)
@@ -1164,13 +1181,14 @@ type exact_lane = Standalone_lane.t =
   | Board_attention
   | Workspace_curator
   | Verifier
+  | Browser_stagehand
 
 (* [Server_workspace_memory_curator.execute] refuses a run whose lane declares
    any CLI slot, so [false] here is that refusal read in advance. The two are
    tied by these comments alone; making a CLI slot on such a lane unloadable
    would leave one rule and let that refusal go. *)
 let exact_lane_supports_cli_tail = function
-  | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true
+  | Librarian | Hitl_auto_judge | Board_attention | Verifier | Browser_stagehand -> true
   | Workspace_curator -> false
 ;;
 
@@ -2151,6 +2169,10 @@ let runtime_state () = Atomic.get loaded_state_ref
 
 let get_default_runtime () = (runtime_state ()).default_runtime
 let get_runtimes () = (runtime_state ()).runtimes
+
+let get_default_and_runtimes () =
+  let state = runtime_state () in
+  state.default_runtime, state.runtimes
 let get_runtime_ids () = runtime_ids (runtime_state ()).runtimes
 let startup_degradation () = (runtime_state ()).startup_degradation
 let startup_degraded () = Option.is_some (startup_degradation ())
@@ -2464,7 +2486,7 @@ let verifier_exact_lane_readiness () =
     | _ :: _, _ | _, _ :: _ -> Ok lane.slot_rejections)
 ;;
 
-(* [runtime].media_failover: the vision read fleet. Reads the Atomic ref set
+(* [runtime].media_failover: the vision runtimes. Reads the Atomic ref set
    by [init_default]. *)
 let media_failover () = (runtime_state ()).media_failover
 let declared_media_failover () = (runtime_state ()).declared_media_failover
@@ -3262,10 +3284,7 @@ let parse_and_validate_config_text ~config_path content =
     match Skill_source_config.validate_text content with
     | Ok () -> Ok ()
     | Error diagnostics ->
-      Error
-        (String.concat
-           "; "
-           (List.map Skill_source_config.diagnostic_to_string diagnostics))
+      Error (Skill_source_config.rejection_message ~config_path diagnostics)
   in
   let* parsed = materialize_runtime_config_text ~config_path content in
   prepare_degraded_loaded ~config_path parsed
@@ -3705,7 +3724,8 @@ let report_exact_output_registry registry =
   warn_rejected_exact_output_slots registry;
   report_verifier_exact_lane_admission ();
   warn_optional_exact_output_lane registry ~lane:Librarian ~feature:"librarian";
-  warn_optional_exact_output_lane registry ~lane:Verifier ~feature:"completion authority"
+  warn_optional_exact_output_lane registry ~lane:Verifier ~feature:"completion authority";
+  warn_optional_exact_output_lane registry ~lane:Browser_stagehand ~feature:"the Stagehand browser lane"
 ;;
 
 (* How a config commit meets the exact-output registry. *)
@@ -4555,7 +4575,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           | Verifier, Ok () -> slots, cli_slots
           | Verifier, Error _ ->
             judgeable_declared_verifier_slots, judgeable_declared_verifier_cli_slots
-          | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator), _ ->
+          | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator | Browser_stagehand), _ ->
             slots, (if exact_lane_supports_cli_tail lane then cli_slots else [])
         in
         let next =
@@ -4572,11 +4592,12 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
                 in
                 Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:lane_cli_slots)
             next
-            (* Shared-memory curation is explicitly configured, not enabled by
-               provisioning a general-purpose runtime. *)
+            (* Shared-memory curation and the browser-specific Stagehand model
+               are explicitly configured, not enabled by provisioning a
+               general-purpose runtime. *)
             (List.filter
                (function
-                 | Workspace_curator -> false
+                 | Workspace_curator | Browser_stagehand -> false
                  | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true)
                Standalone_lane.all)
         in
@@ -4920,6 +4941,21 @@ let exact_slot_list_key = function
   | Cli_slots -> "cli_slots"
 ;;
 
+let exact_slot_list_of_api_format = function
+  | Runtime_schema.Codex_app_server_runtime
+  | Runtime_schema.Antigravity_cli_runtime
+  | Runtime_schema.Claude_code_runtime -> Cli_slots
+  | Runtime_schema.Messages_api
+  | Runtime_schema.Chat_completions_api
+  | Runtime_schema.Ollama_api
+  | Runtime_schema.Gemini_api
+  | Runtime_schema.Vertex_gemini_api -> Catalog_slots
+;;
+
+let exact_slot_list_key_of_api_format api_format =
+  exact_slot_list_key (exact_slot_list_of_api_format api_format)
+;;
+
 let exact_slot_list_of_new_slot (config : Runtime_schema.config) slot =
   match
     List.find_opt (fun (binding : binding) -> String.equal (id_of_binding binding) slot)
@@ -4929,16 +4965,7 @@ let exact_slot_list_of_new_slot (config : Runtime_schema.config) slot =
   | Some binding ->
     (match Runtime_schema.provider_of_id config binding.provider_id with
      | None -> Catalog_slots
-     | Some provider ->
-       (match provider.api_format with
-        | Runtime_schema.Codex_app_server_runtime
-        | Runtime_schema.Antigravity_cli_runtime
-        | Runtime_schema.Claude_code_runtime -> Cli_slots
-        | Runtime_schema.Messages_api
-        | Runtime_schema.Chat_completions_api
-        | Runtime_schema.Ollama_api
-        | Runtime_schema.Gemini_api
-        | Runtime_schema.Vertex_gemini_api -> Catalog_slots))
+     | Some provider -> exact_slot_list_of_api_format provider.api_format)
 ;;
 
 let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =

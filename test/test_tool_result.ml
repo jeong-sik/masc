@@ -7,7 +7,7 @@ module Keeper_tool_execution = Masc.Keeper_tool_execution
 module Keeper_tools_agent_core = Masc.Keeper_tools_agent_core
 
 let tool_ok ?(tool_name = "") message =
-  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+  Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data:(`String message) ()
 ;;
 
 let test_schema tool =
@@ -25,7 +25,7 @@ let register_test_tool ~tool_name ~handler =
 ;;
 
 let test_ok_json_looking_text_is_opaque () =
-  let start = 1000.0 in
+  let start = Tool_timing.start () in
   let r =
     Tool_result.ok
       ~tool_name:"masc_status"
@@ -45,7 +45,7 @@ let test_ok_json_looking_text_is_opaque () =
 ;;
 
 let test_error_plain_string () =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   let r =
     Tool_result.error
       ~failure_class:Tool_result.Runtime_failure
@@ -66,7 +66,7 @@ let test_plain_dispatch_failure_does_not_infer_from_message () =
     Tool_result.error
       ~failure_class:Tool_result.Runtime_failure
       ~tool_name:"masc_transition"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       "[SystemError] IO error: Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)"
   in
   Alcotest.(check bool) "failure" false (Tool_result.is_success r);
@@ -83,7 +83,7 @@ let test_plain_dispatch_failure_honors_explicit_failure_class () =
     Tool_result.error
       ~failure_class:Tool_result.Dependency_unavailable
       ~tool_name:"masc_transition"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       "[SystemError] IO error: Failed to acquire distributed lock for key: tasks:.backlog"
   in
   Alcotest.(check bool) "failure" false (Tool_result.is_success r);
@@ -156,7 +156,7 @@ let test_exception_message_does_not_infer_failure_class () =
   let r =
     Tool_result.of_exn
       ~tool_name:"masc_transition"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       (Invalid_argument
          "Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)")
   in
@@ -174,7 +174,7 @@ let test_exception_boundary_honors_explicit_failure_class () =
     Tool_result.of_exn
       ~failure_class:Tool_result.Dependency_unavailable
       ~tool_name:"masc_transition"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       (Invalid_argument
          "Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)")
   in
@@ -195,7 +195,7 @@ let test_error_message_cannot_override_failure_class () =
     Tool_result.error
       ~failure_class:Tool_result.Runtime_failure
       ~tool_name:"keeper_task_done"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       message
   in
   Alcotest.(check bool) "failure" false (Tool_result.is_success r);
@@ -211,7 +211,7 @@ let test_error_message_cannot_override_failure_class () =
 ;;
 
 let test_ok_newline_json_suffix_is_opaque () =
-  let start = 1000.0 in
+  let start = Tool_timing.start () in
   let message =
     "✅ Post created:\n{\"id\":\"post-1\",\"content\":\"hello\",\"ok\":true}"
   in
@@ -229,7 +229,7 @@ let test_ok_newline_json_suffix_is_opaque () =
 let test_keeper_execution_json_looking_string_is_opaque () =
   let raw = {|{"ok":true,"result":{"secret":"not typed"}}|} in
   let execution =
-    Tool_result.ok ~tool_name:"probe" ~start_time:0.0 raw
+    Tool_result.ok ~tool_name:"probe" ~start_time:(Tool_timing.start ()) raw
     |> Keeper_tool_execution.of_tool_result
   in
   Alcotest.(check string) "raw text preserved" raw execution.raw_output;
@@ -244,7 +244,7 @@ let test_keeper_execution_json_looking_string_is_opaque () =
 let test_keeper_execution_preserves_explicit_typed_data () =
   let data = `Assoc [ "result", `Assoc [ "typed", `Bool true ] ] in
   let execution =
-    Tool_result.make_ok ~tool_name:"probe" ~start_time:0.0 ~data ()
+    Tool_result.make_ok ~tool_name:"probe" ~start_time:(Tool_timing.start ()) ~data ()
     |> Keeper_tool_execution.of_tool_result
   in
   Alcotest.(check bool)
@@ -273,7 +273,7 @@ let test_keeper_execution_defer_kind_is_producer_typed () =
 ;;
 
 let test_to_json () =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   let r = Tool_result.ok ~tool_name:"masc_transition" ~start_time:start "done" in
   let json = Tool_result.to_json r in
   match json with
@@ -288,7 +288,7 @@ let test_to_json () =
 ;;
 
 let test_message_roundtrip () =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   let r = Tool_result.ok ~tool_name:"test" ~start_time:start "hello world" in
   let success = (Tool_result.is_success r) in
   let message = (Tool_result.message r) in
@@ -297,7 +297,7 @@ let test_message_roundtrip () =
 ;;
 
 let test_message_json_roundtrip () =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   let json_str = {|{"key":"value"}|} in
   let r = Tool_result.ok ~tool_name:"test" ~start_time:start json_str in
   let message = (Tool_result.message r) in
@@ -336,7 +336,7 @@ let test_make_ok_roundtrip () =
   let r =
     Tool_result.make_ok
       ~tool_name:"masc_test"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ~data:(`Assoc [ "k", `String "v" ])
       ()
   in
@@ -360,7 +360,7 @@ let test_make_err_required_class () =
     Tool_result.make_err
       ~tool_name:"masc_test"
       ~class_:Tool_result.Policy_rejection
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       "rejected"
   in
   match r with
@@ -379,7 +379,7 @@ let test_make_err_of_exn_classifies_constructor () =
   let r =
     Tool_result.make_err_of_exn
       ~tool_name:"test_tool"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       Eio.Time.Timeout
   in
   match r with
@@ -403,7 +403,7 @@ let test_cancelled_timeout_classifies_as_dependency_unavailable () =
 
 let test_disposition_preserves_typed_payload () =
   let r =
-    Tool_result.make_ok ~tool_name:"x" ~start_time:0.0 ~data:(`Int 1) ()
+    Tool_result.make_ok ~tool_name:"x" ~start_time:(Tool_timing.start ()) ~data:(`Int 1) ()
   in
   let mapped =
     match r with
@@ -425,7 +425,7 @@ let test_deferred_is_distinct_and_projects_one_way () =
   let result =
     Tool_result.make_deferred
       ~tool_name:"keeper_file_write"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ~data
       ~metadata
       ()
@@ -565,7 +565,7 @@ let test_gate_causal_context_preserves_deferred () =
   let result =
     Tool_result.make_deferred
       ~tool_name:"keeper_file_write"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ~data:(`Assoc [ "approval_id", `String "approval-1" ])
       ()
   in

@@ -979,7 +979,7 @@ let test_keeper_up_accepts_live_traffic_fields () =
     `Assoc
       [ "name", `String "alpha"
       ; "instructions", `String "do the thing"
-      ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
+      ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "base"
       ; "mention_targets", `List [ `String "alpha" ]
       ; "activation_mode", `String "autonomous"
       ; "runtime_id", `String "rt"
@@ -2710,4 +2710,7 @@ let () =
       Alcotest.test_case "null const: non-null branch matches" `Quick
         test_oneof_null_const_matches_non_null_branch;
     ]);
+    ( "defined but never registered until task-1768",
+        [ Alcotest.test_case "tool execute empty program not promoted" `Quick test_tool_execute_empty_program_not_promoted
+        ] );
   ]

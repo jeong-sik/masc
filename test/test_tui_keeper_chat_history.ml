@@ -2353,4 +2353,7 @@ let () =
         ; test_case "unreadable row keeps server identity" `Quick
             test_unreadable_memory_identity_is_server_supplied
         ] )
+      ; ( "defined but never registered until task-1768",
+          [ Alcotest.test_case "stored attachment history decodes preview reference" `Quick test_stored_attachment_history_decodes_preview_reference
+          ] )
     ]

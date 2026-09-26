@@ -401,6 +401,19 @@ masc sandbox-image --runtime apple_container
 masc sandbox-image --runtime nerdctl_kata
 ```
 
+빌드마다 태그가 따로 붙습니다. 형식은 `masc-sandbox-base:<UTC 분>-<입력 해시>`이고
+명령이 태그를 출력합니다. 이미 저장소에 있는 태그는 다시 빌드하지 않고 거절하므로,
+한 태그 아래에서 빌드가 바뀌지 않습니다. Keeper 는 태그를 적지 않습니다.
+`sandbox_image` 에는 바이너리에 든 이미지 이름(`config/sandbox-images.toml` 의
+`base`, `ocaml`)을 적고, 이 호스트가 그 이름에 올린 빌드는
+`<base-path>/.masc/config/sandbox-image-builds.toml` 에 있습니다. `masc sandbox-image promote <이름> <태그>` 를 같은 `--runtime` 으로
+실행하면 다음 턴부터 그 이름이 이 빌드로 뜹니다. promote 는 그 저장소에 있는 태그만
+받고, 목록에는 이름과 저장소마다 태그 하나만 남습니다. 되돌리려면 저장소에 남아 있는
+예전 태그를 다시 promote 하면 됩니다. `masc setup` 은 설정하는 저장소에 `base` 빌드가
+목록에 없으면 빌드해서 목록에 올립니다. `base` 가 아닌 레시피는
+checkout 의 `sandbox-images/` 아래에 있고 `masc sandbox-image --recipe ocaml --source .`
+처럼 빌드합니다.
+
 Linux에서 실행 중인 서버와 같은 base path를 지정하여 Keeper를 생성합니다.
 먼저 위 Kata runtime·이미지와 서버의 모델 설정을 준비하고 admin credential로
 로그인해야 합니다. CLI가 선택한 backend를 서버에 전달하고 Keeper TOML에 저장합니다.
@@ -439,10 +452,11 @@ macOS 26을 지원하며, [Kata](https://github.com/kata-containers/kata-contain
 호스트 가상화 조건을 확인해야 합니다. Microsandbox의 현재 MASC 연결은 필수 격리
 조건에 제약이 있어 검증된 대안으로 안내하지 않습니다.
 
-`masc-sandbox:general`에는 bash, CA certificates, curl, findutils, gh, git,
+`base`에는 bash, CA certificates, curl, findutils, gh, git,
 less, procps, Python 3, ripgrep이 들어갑니다. **Node, pnpm, OCaml, 컴파일러,
 SSH client, 모델 CLI는 포함하지 않습니다.** 프로젝트 빌드·테스트가 목적이면
-필요한 toolchain이 있는 이미지를 준비하고 Keeper의 `sandbox_image`로 지정합니다.
+필요한 toolchain이 있는 이미지를 빌드해 목록의 이름으로 promote 하고, 그 이름을
+Keeper의 `sandbox_image`로 지정합니다.
 저장소의 `sandbox-images/ocaml/Dockerfile`은 MASC 개발용 별도 이미지이며 일반 설치물이 아닙니다.
 
 ## 초기 프롬프트·skills·Keeper

@@ -9,6 +9,12 @@ type unavailable =
 
 type failure =
   | Unavailable of unavailable
+  | Rate_limited of string
+  | Quota_exhausted of string
+  | Provider_overloaded of string
+  | Provider_auth_refused of string
+  | Provider_unreachable of string
+  | Model_not_found of string
   | Provider_rejected of string
   | Timed_out
   | Tool_not_called
@@ -39,6 +45,12 @@ let failure_code = function
   | Unavailable (Invalid_configuration _) -> "invalid_configuration"
   | Unavailable (Client_not_authenticated _) -> "client_not_authenticated"
   | Unavailable (Client_not_started _) -> "client_not_started"
+  | Rate_limited _ -> "rate_limited"
+  | Quota_exhausted _ -> "quota_exhausted"
+  | Provider_overloaded _ -> "provider_overloaded"
+  | Provider_auth_refused _ -> "provider_auth_refused"
+  | Provider_unreachable _ -> "provider_unreachable"
+  | Model_not_found _ -> "model_not_found"
   | Provider_rejected _ -> "provider_rejected"
   | Timed_out -> "timed_out"
   | Tool_not_called -> "tool_not_called"
@@ -61,6 +73,24 @@ let failure_message = function
     "The configured client reports no sign-in. Sign in with the client itself, or \
      export its credential variables."
   | Unavailable (Client_not_started _) -> "The configured client could not be started."
+  | Rate_limited _ ->
+    "The provider is rate limiting this account (a request limit or usage window). \
+     The configuration is fine; wait and retry, or continue with another connection."
+  | Quota_exhausted _ ->
+    "The account's quota, balance or plan usage window is used up. A usage window can \
+     take hours or days to reopen and a balance needs a billing change; choose another \
+     connection or configure later."
+  | Provider_overloaded _ ->
+    "The provider is overloaded or returned a server error. The problem is on the \
+     provider's side; retry shortly or choose another connection."
+  | Provider_auth_refused _ ->
+    "The provider refused the credential or account access. Check the API key or \
+     sign-in, and whether the account can use this model."
+  | Provider_unreachable _ ->
+    "The provider could not be reached. Check the endpoint URL, proxy and network."
+  | Model_not_found _ ->
+    "The endpoint does not serve this model. Check the model name against the \
+     endpoint's model list, or choose the model again."
   | Provider_rejected _ ->
     "The selected model request failed; check model access, endpoint and authentication."
   | Timed_out -> "The selected runtime did not finish verification before its deadline."
@@ -79,6 +109,12 @@ let failure_detail = function
   | Unavailable (Invalid_configuration detail)
   | Unavailable (Client_not_authenticated detail)
   | Unavailable (Client_not_started detail)
+  | Rate_limited detail
+  | Quota_exhausted detail
+  | Provider_overloaded detail
+  | Provider_auth_refused detail
+  | Provider_unreachable detail
+  | Model_not_found detail
   | Provider_rejected detail -> Some detail
   | Unavailable (Unsupported_runtime | Tools_not_declared)
   | Timed_out
@@ -124,7 +160,8 @@ let status_of_failure = function
   | None -> "verified"
   | Some (Unavailable _) -> unavailable_status
   | Some
-      ( Provider_rejected _ | Timed_out | Tool_not_called | Tool_result_not_consumed
+      ( Rate_limited _ | Quota_exhausted _ | Provider_overloaded _ | Provider_auth_refused _
+      | Provider_unreachable _ | Model_not_found _ | Provider_rejected _ | Timed_out | Tool_not_called | Tool_result_not_consumed
       | Empty_response | Model_unreported ) -> "failed"
 ;;
 
@@ -215,6 +252,12 @@ let failure_of_code ~code ~detail =
   | "client_not_authenticated", Some detail ->
     Ok (Unavailable (Client_not_authenticated detail))
   | "client_not_started", Some detail -> Ok (Unavailable (Client_not_started detail))
+  | "rate_limited", Some detail -> Ok (Rate_limited detail)
+  | "quota_exhausted", Some detail -> Ok (Quota_exhausted detail)
+  | "provider_overloaded", Some detail -> Ok (Provider_overloaded detail)
+  | "provider_auth_refused", Some detail -> Ok (Provider_auth_refused detail)
+  | "provider_unreachable", Some detail -> Ok (Provider_unreachable detail)
+  | "model_not_found", Some detail -> Ok (Model_not_found detail)
   | "provider_rejected", Some detail -> Ok (Provider_rejected detail)
   | "timed_out", None -> Ok Timed_out
   | "tool_not_called", None -> Ok Tool_not_called
@@ -222,7 +265,9 @@ let failure_of_code ~code ~detail =
   | "empty_response", None -> Ok Empty_response
   | "model_unreported", None -> Ok Model_unreported
   | ( ( "missing_credential" | "invalid_credential" | "invalid_configuration"
-      | "client_not_authenticated" | "client_not_started" | "provider_rejected" )
+      | "client_not_authenticated" | "client_not_started" | "rate_limited"
+      | "quota_exhausted" | "provider_overloaded" | "provider_auth_refused"
+      | "provider_unreachable" | "model_not_found" | "provider_rejected" )
     , None ) -> Error (Printf.sprintf "failure code %S arrived without its detail" code)
   | ( ( "unsupported_runtime" | "tools_not_declared" | "timed_out" | "tool_not_called"
       | "tool_result_not_consumed" | "empty_response" | "model_unreported" )
@@ -377,6 +422,7 @@ let measure ~runtime_id ~selected_model ~challenge ~run =
     ; description =
         "Return a fresh readiness challenge. This tool has no external effects."
     ; input_schema
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ input ->
           match input with
@@ -445,6 +491,90 @@ let initial_runtime_id ~default_runtime_id ~assignments ~lanes ~keeper_name =
     (match Runtime_lane.ordered_candidates lane with
      | [] -> None
      | candidate :: _ -> Some candidate)
+;;
+
+(* A refused verification used to arrive as one [Provider_rejected] whatever
+   the cause, so an operator could not tell a 429 they only had to wait out
+   from a key the provider refused, and stopped the install to find out. The
+   cause is read from the typed error each transport already produces, never
+   from its wording. *)
+let with_retry_after retry_after detail =
+  match Keeper_runtime_failure_route.usable_retry_after retry_after with
+  | None -> detail
+  | Some seconds ->
+    Printf.sprintf "%s (provider asks to retry after %.0fs)" detail (Float.ceil seconds)
+;;
+
+(* Claude Code reports which usage window refused and when it reopens; the
+   operator is told the time instead of "hours or days". *)
+let with_usage_window (rate_limit : Runtime_claude_code.rate_limit option) detail =
+  match rate_limit with
+  | None -> detail
+  | Some { Runtime_claude_code.rate_limit_type; resets_at; _ } ->
+    let window = Option.map (Printf.sprintf "window %s") rate_limit_type in
+    let reopens =
+      Option.bind resets_at (fun seconds ->
+        Option.map
+          (fun time -> "reopens " ^ Ptime.to_rfc3339 ~tz_offset_s:0 time)
+          (Ptime.of_float_s (float_of_int seconds)))
+    in
+    (match List.filter_map Fun.id [ window; reopens ] with
+     | [] -> detail
+     | parts -> Printf.sprintf "%s (%s)" detail (String.concat ", " parts))
+;;
+
+let failure_of_agent_core_error error =
+  let module Route = Keeper_runtime_failure_route in
+  let detail = Agent_core.Error.to_string error in
+  match Route.route_of_error ~boundary:Route.Agent_core_execution error with
+  | Route.Retry_after_observed { retry_class = Route.Rate_limited; retry_after } ->
+    Rate_limited (with_retry_after retry_after detail)
+  | Route.Retry_after_observed { retry_class = Route.Hard_quota; retry_after } ->
+    Quota_exhausted (with_retry_after retry_after detail)
+  | Route.Retry_after_observed
+      { retry_class = Route.Provider_capacity | Route.Server_error; retry_after } ->
+    Provider_overloaded (with_retry_after retry_after detail)
+  | Route.Retry_after_observed { retry_class = Route.Network_transient; _ } ->
+    Provider_unreachable detail
+  | Route.Retry_after_observed { retry_class = Route.Provider_timeout; _ } -> Timed_out
+  | Route.Retry_after_observed { retry_class = Route.Empty_completion _; _ } ->
+    Provider_rejected detail
+  | Route.Rotate_now { rotate = Route.Auth_failed | Route.Authorization_refused } ->
+    Provider_auth_refused detail
+  | Route.Rotate_now { rotate = Route.Model_unavailable } -> Model_not_found detail
+  (* Listed, not wildcarded: a new rotate class must be placed here on
+     purpose rather than fall silently into the undifferentiated refusal. *)
+  | Route.Rotate_now
+      { rotate =
+          ( Route.Resumable_cli_session | Route.Candidates_filtered
+          | Route.Runtime_exhausted | Route.No_progress_empty
+          | Route.No_progress_thinking_only | Route.No_progress_truncated
+          | Route.Refusal_body_not_received | Route.Generation_repeated
+          | Route.Admission | Route.Provider_reported_failure
+          | Route.Request_refused | Route.Provider_wire_defect
+          | Route.Server_error_not_transient | Route.Context_window_exceeded )
+      }
+  | Route.Exhausted_visible_alive _ -> Provider_rejected detail
+;;
+
+let failure_of_codex_turn detail (info : Runtime_codex_app_server.Codex_error_info.t option) =
+  match info with
+  | Some Rate_limit_exceeded -> Rate_limited detail
+  (* The plan's usage window: five hours or a week, not a short wait. *)
+  | Some Usage_limit_exceeded -> Quota_exhausted detail
+  | Some (Server_overloaded | Internal_server_error) -> Provider_overloaded detail
+  | Some Unauthorized -> Provider_auth_refused detail
+  | Some (Http_connection_failed _ | Response_stream_connection_failed _) ->
+    Provider_unreachable detail
+  (* A stream that disconnected had connected: the endpoint is reachable,
+     so pointing the operator at the URL or proxy would send them to fix
+     what works. *)
+  | Some (Response_stream_disconnected _) -> Provider_overloaded detail
+  | Some
+      ( Session_budget_exceeded | Cyber_policy | Misalignment_policy_violation | Bad_request
+      | Thread_rollback_failed | Sandbox_error | Other | Response_too_many_failed_attempts _
+      | Active_turn_not_steerable _ | Unrecognized _ )
+  | None -> Provider_rejected detail
 ;;
 
 let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) =
@@ -548,8 +678,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                     this arm is the mapping's completeness, not a producer
                     seen here. *)
                  Error Timed_out
-               | Error error ->
-                 Error (Provider_rejected (Agent_core.Error.to_string error))
+               | Error error -> Error (failure_of_agent_core_error error)
                | Ok result ->
                  (match result.stop_reason with
                   | Runtime_agent.Completed ->
@@ -562,6 +691,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
       | Runtime_execution.Claude_code execution ->
         let config =
           { (Runtime_claude_code.default_config ~cwd:cwd_path) with
+            account_home = execution.account_home;
             cli_path = execution.cli_path
           ; model = execution.model
           ; admission_timeout_s = Float.min timeout_s execution.timeout_s
@@ -592,10 +722,19 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
              (Unavailable
                 (Invalid_configuration (Runtime_claude_code.error_to_string error)))
          | Error (Runtime_claude_code.Timeout _) -> Error Timed_out
+         | Error (Runtime_claude_code.Quota_blocked { rate_limit; _ } as error) ->
+           (* The subscription's usage window refused the turn. It reopens on
+              its own, but the window can be hours or days, so it reads as a
+              used-up quota rather than a short rate limit. *)
+           Error
+             (Quota_exhausted
+                (with_usage_window
+                   rate_limit
+                   (Runtime_claude_code.error_to_string error)))
          | Error error ->
            Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
       | Runtime_execution.Codex_app_server execution ->
-        (match Runtime_verification_codex_home.prepare ~directory:cwd_path with
+        (match Runtime_verification_codex_home.prepare ?source_home:execution.account_home ~directory:cwd_path () with
         | Error detail -> Error (Unavailable (Invalid_configuration detail))
         | Ok isolated_home ->
         (* Codex rejects Native_none. Native_read is its least supported
@@ -637,6 +776,11 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                 (Invalid_configuration
                    (Runtime_codex_app_server.error_to_string error)))
          | Error (Runtime_codex_app_server.Timeout _) -> Error Timed_out
+         | Error (Runtime_codex_app_server.Turn_failed { codex_error_info; _ } as error) ->
+           Error
+             (failure_of_codex_turn
+                (Runtime_codex_app_server.error_to_string error)
+                codex_error_info)
          | Error error ->
            Error
              (Provider_rejected (Runtime_codex_app_server.error_to_string error)))))

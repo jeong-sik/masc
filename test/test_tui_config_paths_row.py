@@ -30,7 +30,7 @@ def run(executable: str) -> None:
 
     def interact(process, fd, _slave, output, base_path):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
-        h.palette_go(process, fd, output, b"go config", b"MASC Config")
+        h.palette_go(process, fd, output, b"go System", b"MASC System")
         for columns in (120, 100):
             drawn = h.resize_and_wait(process, fd, output, rows=30,
                                       columns=columns, needle=BASE_LABEL,

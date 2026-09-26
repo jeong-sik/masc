@@ -861,7 +861,7 @@ let test_a_label_holding_a_colon_still_reads_its_key () =
   let hints =
     "j/k:select / scroll  p:runtime.toml / models / params  s:resources  \
      t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  \
-     Esc:overview  r:reload  Tab:next"
+     Esc:dashboard  r:reload  Tab:next"
   in
   let line =
     Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:70 ~port:8935 ~hints ()
@@ -869,7 +869,7 @@ let test_a_label_holding_a_colon_still_reads_its_key () =
   Alcotest.(check bool) "the row was cut" true
     (contains ~needle:"\xe2\x80\xa6" line);
   Alcotest.(check bool) "the way out survives" true
-    (contains ~needle:"Esc:overview" line)
+    (contains ~needle:"Esc:dashboard" line)
 
 let test_cut_hints_name_the_key_that_shows_them () =
   let hints =

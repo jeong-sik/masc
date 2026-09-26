@@ -49,7 +49,7 @@ def run_case(executable: str, fixture: dict[str, Any]) -> None:
         _base: str,
     ) -> None:
         h.resize_and_wait(
-            process, fd, output, rows=42, columns=180, needle=b"MASC Overview"
+            process, fd, output, rows=42, columns=180, needle=b"MASC Dashboard"
         )
         h.palette_go(process, fd, output, b"go lanes", b"Librarian")
         h.send_and_wait(

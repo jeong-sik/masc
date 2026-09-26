@@ -89,65 +89,39 @@ status: reference
 : 같은 MASC 상태에 접근하고 관찰하는 사용자 표면. TUI, MCP, Dashboard처럼 서로 다른
   입구를 가리키며, 각 표면은 독립 상태를 소유하지 않는다.
 
-**Goals 블록 (Overview Goals)**
-: TUI Overview 최상단에서 fleet의 활성 작업이 목표를 실제로 진전시키고 있는지를
-  보여주는 자리(`Masc_tui_overview_goals`). 요약 줄 바로 아래, Attention 패널 앞에
-  그려진다. 순서는 Goals, Attention, Team이다(그 사이에 Providers 구획이 있다). 헤드라인은 전체 활성 태스크(진행 중이거나 검증 대기 중인 Task) 중 그려진
-  목표에 연결된 태스크 수 비율을 표시하고, 아직 일이 진행 중인 단계(`Executing`·
-  `Verifying`·`Awaiting_confirmation`)의 Goal마다 우선순위(낮은 숫자 우선) 및 마감일
-  순으로 한 줄씩 그린다(#38386).
-  - 각 행: 목표 제목, 연결 태스크 대비 완료 태스크 바(`done/linked task bar`), 정체
-    시간(`stagnation_seconds` 기준 idle 기간), 운영자의 로컬 캘린더 날짜 기준 마감
-    카운트다운(`D-N due countdown`).
-  - 관측 권위: 목표가 자체 지표(`metric`·`target`)를 가지고 있어도 측정값이 보고되지
-    않으면 지어내지 않고, 진행 바는 순수하게 연결된 태스크의 완료 수만 측정한다.
-    보고된 측정값은 **Goal Measurement**다.
-  - 빈 상태: 활성 목표가 없거나 읽기 실패 시 헤드라인이 그 상태를 명시적으로 표시하며,
-    표시 예산(`rows`)을 초과하면 하단부터 생략하고 헤드라인에 그려진 목표 수를 남긴다.
-  → [Masc_tui_overview_goals](../../bin/masc_tui_overview_goals.mli)
+**Dashboard Goals**
+: TUI 첫 화면에서 Goal의 기록된 측정값과 연결된 Task 완료 수를 별도로 요약한다.
+  Goal의 실제 값은 동일한 Goal ID·기준 개정·지표·목표를 가진 관측 기록에서만 읽는다.
+  Task 개수나 제목을 Goal의 실제 값으로 환산하지 않는다. 각 Goal의 자세한 근거는
+  Work에서 연다.
+  → [측정 중심 TUI 구성](../rfc/RFC-tui-measured-operator-home.md),
+  [Masc_tui_overview_goals](../../bin/masc_tui_overview_goals.mli)
 
 **Fleet (Keeper fleet)**
-: 한 워크스페이스에 등록된 Keeper 묶음. 화면과 코드에서 "fleet" 은 이 뜻 하나로만 쓴다 —
-  `fleet ok` 상태 줄과 fleet scan, Keeper Fleet Blocker, "held outside the fleet" 가 모두
-  이 묶음을 말한다. 상태 줄의 `running N/M` 에서 M 은 부팅할 Keeper 수라서 일시정지된
-  Keeper 는 들어가지 않는다. Overview 의 Team 블록은 이 묶음을 Keeper 한 명당 한 줄로
-  보여 준다. Activity 패널의 `Recent` 탭(`Tab_fleet`, 명령 `/activity fleet`)은 이 중
-  오프라인이 아닌 Keeper 를 최근에 움직인 순서로 한 줄씩 싣고, 커서가 놓인 Keeper 의 최근
-  도구 호출을 그 아래에 붙인다. 이미지를 대신 읽는 런타임 목록(`[runtime].media_failover`)은
-  Keeper 가 아니므로 fleet 이라 부르지 않고 vision runtimes 라고 부른다.
+: 한 워크스페이스에 등록된 Keeper 묶음. `fleet ok` 상태 줄과 fleet scan은 이 묶음을
+  가리킨다. 상태 줄의 `running N/M`에서 M은 부팅할 Keeper 수여서 일시정지된 Keeper는
+  들어가지 않는다. Keeper 목록은 Keepers에서, 각 Keeper의 최근 활동과 도구 호출은
+  System 아래 Activity의 `Recent` 탭(`/activity fleet`)에서 확인한다. 이미지를 대신
+  읽는 런타임 목록(`[runtime].media_failover`)은 Keeper가 아니므로 vision runtimes라고 부른다.
 
-**Team 블록 (Overview Team)**
-: TUI Overview 에서 fleet 을 Keeper 한 명당 한 줄로 보여 주며 "누가 무엇을 하고 누가 막혔나" 에 답하는
-  자리. briefing 의 `keeper_briefs` 와 backlog 를 합쳐 그린다. 줄은 네 무리로 나뉜다 —
-  막힘(Failing·Crashed, 또는 phase 없이 info 가 아닌 Attention 이 가리키는 Keeper),
-  일하는 중(Running·Draining·Restarting 이고 Claimed·InProgress Task 를 잡음), 쉬는 중,
-  멈춤(brief 의 `paused` 가 true 이거나 Paused·Stopped·Offline, 한 줄로 모음). 순서는
-  점수가 아니라 이 무리와 이름이다. 막힌 줄의 설명은 그 Keeper 를 `Attention_keeper` 로
-  가리키는 info 가 아닌 첫 Attention 문장을 그대로 싣는다. Keeper 가 아닌
-  담당자(MCP client 등)가 잡은 Task 는 "held outside the fleet" 한 줄로 센다.
-  `/cost` 로 켜면 Keeper 줄마다 최근 24시간 비용·토큰을, 제목에 합계를 싣는다
-  (`/api/v1/dashboard/keeper-costs`). 모르는 비용은 `$0.00` 으로 그리지 않는다. 기본은
-  꺼져 있고, 꺼져 있으면 읽지도 않는다.
-  → [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli),
-  [Masc_tui_keeper_spend](../../bin/masc_tui_keeper_spend.ml), RFC-0464
+**Usage**
+: provider quota 창·보고 이력은 scope별로, Keeper 토큰·비용은 기록 여부와 함께
+  보여주는 TUI 화면. `/cost`는 이 화면으로 이동한다. 값이 보고되지 않은 날이나
+  Keeper의 비용을 0으로 추정하지 않는다. Keeper 상태와 작업 목록은 각각 Keepers와
+  Work에서 본다.
+  → [측정 중심 TUI 구성](../rfc/RFC-tui-measured-operator-home.md)
 
-**Attention (Overview Attention 패널)**
-: briefing 의 `incidents` 와 `attention_queue` 를 합친 목록. 운영자가 봐야 할 조건 하나가
-  한 줄이다. 화면에 그려진 Team 줄이 문장으로 싣는 항목(막힌 Keeper 줄 하나에 항목 하나)은
-  Team 줄에만 두고, 나머지는 모두 Attention 패널에 남긴다. 살아 있는 Keeper 에 관한 항목,
-  같은 Keeper 의 둘째 항목, 화면이 짧아 잘린 Team 줄의 항목, parked 줄의 Keeper 항목이
-  여기에 든다. 패널 제목은 Team 줄로 옮긴 수를 `+N on Team` 으로 적는다. Task 소유권
-  문제만 모은 Operator Attention 과는 다른 목록이다.
+**Attention (Dashboard)**
+: 운영자가 처리해야 하는 사건을 요약한다. 자세한 Keeper 상태는 Keepers에서,
+  Task·승인·질문은 Work에서 확인한다. Dashboard는 같은 행을 다시 나열하지 않는다.
 
 **닫힌 quota 창 (Shut Quota Window)**
 : provider 계정이나 자격 증명 하나가 사용 한도에 걸려 요청을 받지 않는 상태. 런타임
   카탈로그(`/api/v1/runtime/resolved`)는 런타임마다 `quota_exhausted`·`quota_resets_at`·
-  `quota_scope` 를 싣는데, 같은 계정을 쓰는 런타임은 같은 `quota_scope`(예:
-  `provider:claude_code`)를 공유한다. Team 블록은 창을 scope 마다 한 번만, 그 뒤에 선
-  런타임 수와 다시 열리는 시각으로 적는다. 남은 사용량은 provider 가 알려주지 않으므로
-  퍼센트로 말하지 않는다.
+  `quota_scope` 를 싣는다. Usage는 서로 다른 scope를 합치지 않고, provider가 보고한
+  사용률·관측 시각·재개 시각을 그대로 표시한다. 보고가 없으면 사용률을 추정하지 않는다.
   → [Runtime_quota_window](../../lib/runtime/runtime_quota_window.ml),
-  [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli)
+  [Masc_tui_overview_providers](../../bin/masc_tui_overview_providers.ml)
 
 **Server Push (서버가 밀어 보내는 사건)**
 : 서버가 클라이언트로 밀어 보내는 사건으로, Keeper가 한 일이 아니라 서버가 보고하는

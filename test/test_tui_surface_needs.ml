@@ -14,7 +14,7 @@ module Types = Masc_tui_types
    cases ask what the surface itself fetches, so they ask with the pane
    down. [test_the_keeper_pane_asks_for_the_roster_wherever_it_is_drawn]
    asks the other way. *)
-let needs surface = Types.surface_needs ~keeper_pane_drawn:false ~cost_shown:false surface
+let needs surface = Types.surface_needs ~keeper_pane_drawn:false surface
 
 let test_only_the_chat_pane_asks_for_chat_history () =
   check bool "the chat pane asks for it" true
@@ -58,12 +58,12 @@ let test_the_keeper_pane_asks_for_the_roster_wherever_it_is_drawn () =
       check bool
         (label ^ " does not fetch the roster for itself")
         false
-        (Types.surface_needs ~keeper_pane_drawn:false ~cost_shown:false surface)
+        (Types.surface_needs ~keeper_pane_drawn:false surface)
           .Types.needs_keeper_roster;
       check bool
         (label ^ " fetches it while the pane draws it")
         true
-        (Types.surface_needs ~keeper_pane_drawn:true ~cost_shown:false surface)
+        (Types.surface_needs ~keeper_pane_drawn:true surface)
           .Types.needs_keeper_roster)
     [ ("approvals", Types.Approvals)
     ; ("board", Types.Board)
@@ -72,8 +72,8 @@ let test_the_keeper_pane_asks_for_the_roster_wherever_it_is_drawn () =
     ; ("memory", Types.Memory)
     ];
   (* And the pane changes nothing else: a surface asks for what it draws. *)
-  let board_without = Types.surface_needs ~keeper_pane_drawn:false ~cost_shown:false Types.Board in
-  let board_with = Types.surface_needs ~keeper_pane_drawn:true ~cost_shown:false Types.Board in
+  let board_without = Types.surface_needs ~keeper_pane_drawn:false Types.Board in
+  let board_with = Types.surface_needs ~keeper_pane_drawn:true Types.Board in
   check bool "the board still asks for the board" true
     board_with.Types.needs_board;
   check bool "and for nothing else the pane does not draw" true
@@ -103,8 +103,8 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
       ; delta.needs_operator_approvals
       ; delta.needs_asks
       ; delta.needs_runtime_quota
-      ; delta.needs_repository_pulls
-      ; delta.needs_keeper_spend
+      ; delta.needs_keeper_usage
+      ; delta.needs_provider_history
       ; delta.needs_overview_goals
       ]
       |> List.fold_left (fun total wanted -> if wanted then total + 1 else total) 0
@@ -114,7 +114,7 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
   let _, dataset_count =
     List.fold_left add_delta (needs Types.Overview, 0) destinations
   in
-  check int "only newly visible scoped requests are planned" 6 dataset_count
+  check int "only newly visible scoped requests are planned" 8 dataset_count
 ;;
 
 let test_equal_needs_have_no_delta () =
@@ -128,11 +128,11 @@ let test_equal_needs_have_no_delta () =
 let test_full_refresh_omits_scoped_datasets_while_their_owner_is_running () =
   let concurrent =
     Types.full_refresh_needs ~scoped_refresh_inflight:true
-      ~keeper_pane_drawn:true ~cost_shown:false Types.Board
+      ~keeper_pane_drawn:true Types.Board
   in
   let alone =
     Types.full_refresh_needs ~scoped_refresh_inflight:false
-      ~keeper_pane_drawn:true ~cost_shown:false Types.Board
+      ~keeper_pane_drawn:true Types.Board
   in
   check bool "concurrent full refresh is global-only" false
     (Types.surface_needs_any concurrent);
@@ -169,74 +169,30 @@ let test_authoritative_refresh_waits_for_both_owners_then_runs_once () =
     (cadence = Types.No_scoped_followup)
 ;;
 
-(* The goal tree is read for the Overview's GOALS section and nowhere else;
-   Planning reads its own planning payload. *)
+(* Dashboard and Work both show the exact Goal measurement. Work joins it to
+   the selected Goal only after the criterion revisions agree. *)
 let test_only_the_overview_asks_for_the_goal_tree () =
-  check bool "the overview asks for it" true
+  check bool "Dashboard asks for it" true
     (needs Types.Overview).Types.needs_overview_goals;
+  check bool "Work asks for it" true
+    (needs Types.Planning).Types.needs_overview_goals;
   List.iter
     (fun (label, surface) ->
       check bool (label ^ " does not") false
         (needs surface).Types.needs_overview_goals)
-    [ ("planning", Types.Planning)
-    ; ("board", Types.Board)
+    [ ("board", Types.Board)
     ; ("metrics", Types.Metrics)
     ; ("the keeper list", Types.Keepers Types.Keeper_list)
     ]
 ;;
 
-(* keeper-costs rereads every day file of every Keeper's metrics when its
-   server cache expires, so the Overview asks for it only while [/cost]
-   shows the spend, and no other surface asks at all. *)
-let test_only_a_shown_cost_is_fetched () =
-  let shown surface =
-    Types.surface_needs ~keeper_pane_drawn:false ~cost_shown:true surface
-  in
-  check bool "the overview asks while /cost shows it" true
-    (shown Types.Overview).Types.needs_keeper_spend;
-  check bool "the overview does not while it is hidden" false
-    (needs Types.Overview).Types.needs_keeper_spend;
-  check bool "a full refresh on the overview asks while it is shown" true
-    (Types.full_refresh_needs ~scoped_refresh_inflight:false
-       ~keeper_pane_drawn:false ~cost_shown:true Types.Overview)
-      .Types.needs_keeper_spend;
-  check bool "and does not while it is hidden" false
-    (Types.full_refresh_needs ~scoped_refresh_inflight:false
-       ~keeper_pane_drawn:false ~cost_shown:false Types.Overview)
-      .Types.needs_keeper_spend;
-  List.iter
-    (fun (label, surface) ->
-      check bool (label ^ " does not, shown or not") false
-        (shown surface).Types.needs_keeper_spend)
-    [ ("planning", Types.Planning)
-    ; ("metrics", Types.Metrics)
-    ; ("the keeper list", Types.Keepers Types.Keeper_list)
-    ]
-;;
-
-let test_old_cost_reply_after_off_on_needs_a_new_read () =
-  let shown, first_generation =
-    Types.toggle_cost_visibility ~visible:false ~generation:0
-  in
-  let hidden, hidden_generation =
-    Types.toggle_cost_visibility ~visible:shown ~generation:first_generation
-  in
-  let shown_again, current_generation =
-    Types.toggle_cost_visibility ~visible:hidden ~generation:hidden_generation
-  in
-  check bool "first request is valid before toggling" true
-    (Types.cost_reply_is_current ~visible:shown
-       ~current_generation:first_generation ~reply_generation:first_generation);
-  check bool "old request is invalid after off then on" false
-    (Types.cost_reply_is_current ~visible:shown_again
-       ~current_generation ~reply_generation:first_generation);
-  check bool "discarding it leaves the new reading pending" true
-    (Types.cost_refresh_needed ~visible:shown_again Types.Overview_spend_unread);
-  check bool "new request is valid" true
-    (Types.cost_reply_is_current ~visible:shown_again
-       ~current_generation ~reply_generation:current_generation);
-  check bool "a settled reading needs no immediate retry" false
-    (Types.cost_refresh_needed ~visible:shown_again Types.Overview_spend_warming)
+let test_usage_asks_for_keeper_usage () =
+  check bool "Usage fetches Keeper metrics" true
+    (needs Types.Metrics).Types.needs_keeper_usage;
+  check bool "Usage fetches provider history" true
+    (needs Types.Metrics).Types.needs_provider_history;
+  check bool "Dashboard does not fetch Keeper detail" false
+    (needs Types.Overview).Types.needs_keeper_usage
 ;;
 
 let () =
@@ -246,10 +202,8 @@ let () =
             test_only_the_chat_pane_asks_for_chat_history
         ; test_case "only the overview asks for the goal tree" `Quick
             test_only_the_overview_asks_for_the_goal_tree
-        ; test_case "only a shown cost is fetched" `Quick
-            test_only_a_shown_cost_is_fetched
-        ; test_case "old cost reply after off on needs a new read" `Quick
-            test_old_cost_reply_after_off_on_needs_a_new_read
+        ; test_case "Usage owns Keeper usage" `Quick
+            test_usage_asks_for_keeper_usage
         ; test_case "every keeper sub-mode asks for the roster" `Quick
             test_every_keeper_sub_mode_still_asks_for_the_roster
         ; test_case "the keeper pane asks for the roster wherever it is drawn"

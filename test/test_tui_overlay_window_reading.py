@@ -46,10 +46,10 @@ def window_of(drawn: bytes, where: str) -> tuple[int, int, int]:
 
 def run(executable: str) -> None:
     def interact(process, fd, _slave, output, _base_path):
-        h.wait_for_output(process, fd, output, b"MASC Overview", start=0,
+        h.wait_for_output(process, fd, output, b"MASC Dashboard", start=0,
                           timeout=15)
         drawn = h.resize_and_wait(process, fd, output, rows=24, columns=80,
-                                  needle=b"MASC Overview",
+                                  needle=b"MASC Dashboard",
                                   controls=(h.FULL_REDRAW,))
         drawn = h.send_and_wait(process, fd, output, b"?", SHEET)
         first, last, total = window_of(drawn, "at the top of the sheet")
@@ -79,7 +79,7 @@ def run(executable: str) -> None:
                 f"the viewport was {height} rows at the top and "
                 f"{g_last - g_first + 1} after G")
 
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
 
         # The Agenda panel holds seven lines here and its viewport is taller
         # than that at every size this scenario uses, so it has nothing to
@@ -91,7 +91,7 @@ def run(executable: str) -> None:
             raise AssertionError(
                 "the Agenda fits its viewport, so the reading says nothing "
                 f"the rows do not: {found.group(0)!r}")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
 
         # The deletion record overlay draws the same reading. Here the record
         # is one row -- this workspace has no deletion inventory to read --

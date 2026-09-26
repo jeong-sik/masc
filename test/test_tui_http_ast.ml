@@ -469,15 +469,15 @@ let test_http_get_uses_auth_headers () =
    names all three -- and the Clients title walked from one to the next twice,
    spelling the first step "/" and the second the middle dot: "MASC Config /
    Runtime \xc2\xb7 Clients". Two spellings of one kind of step, in one
-   string. Every other title that walks surfaces uses "/" (Config / Runtime,
-   Config / Resources, Workspace / Code). *)
+   string. Every other title that walks surfaces uses "/" (System / Runtime,
+   System / Resources, Workspace / Code). *)
 let test_the_clients_path_spells_its_steps_alike () =
   let module_path = "bin/masc_tui_render.ml" in
   check int "no step spelled with the middle dot" 0
     (Ast_grep.count_string_literals ~module_path ~needle:"Runtime \xc2\xb7 Clients");
   check bool "the path reads with one separator" true
     (Ast_grep.count_string_literals ~module_path
-       ~needle:"Config / Runtime / Clients"
+       ~needle:"System / Runtime / Clients"
      > 0)
 ;;
 
@@ -1838,29 +1838,18 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
        ~callee:"render_surface");
   let render_path = "bin/masc_tui_render.ml" in
-  check int "overview layout owns one shared row allocation" 1
+  (* The Dashboard is a fixed set of summary sections over one body height;
+     it holds no Team block, task panel or attention window whose rows a
+     shared allocation would split (RFC-tui-measured-operator-home). *)
+  check int "Dashboard reads one body height" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"overview_layout"
-       ~callee:"Render_schedule.allocate_overview");
-  check int "overview renderer consumes one shared layout" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
-       ~binding_name:"render_overview" ~callee:"overview_layout");
-  (* The Attention panel tells an empty answer from an unread one the way
+       ~binding_name:"render_overview"
+       ~callee:"Masc_tui_types.surface_body_rows");
+  (* The attention section tells an empty answer from an unread one the way
      every listing does, instead of leaving its rows blank. *)
-  check int "overview's attention panel reads the shared empty page" 1
+  check int "Dashboard's attention section reads the shared empty page" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview" ~callee:"empty_page_of");
-  (* The overview reads its bounds off [row_budget], the one value the layout
-     above returns. How many times it reads them is how much the surface
-     draws, not whether the allocation is shared: #29684 moved the number
-     from five to six by adding a task-panel window that reads the same
-     [task_rows]. A second source is what breaks the sharing, so that is what
-     is asked for, and none is allowed. *)
-  check int "overview bounds every variable section from that one allocation" 0
-    (Ast_grep.count_field_accesses_off_other_records_in_value_binding
-       ~module_path:render_path ~binding_name:"render_overview"
-       ~record:"row_budget"
-       ~fields:[ "attention_rows"; "task_error_rows"; "task_rows" ]);
   check int "board read consumes one shared row allocation" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"board_read_pane"
@@ -2534,27 +2523,11 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "overview_error"
     ; "ai_summary"
     ];
-  check_fields "overview_layout" [ "tasks_error" ];
+  check_fields "render_work_tasks" [ "tasks_error" ];
   (* The TUI session block prints event text this process wrote from
      server answers and editor output. *)
   check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
     "render_section_fleet" [ "content" ];
-  (* The Team block prints Keeper names and task text that producers wrote. *)
-  (* pr_tag_of_keeper and spend_tag_of_keeper look the name up, and
-     spend_tags and spend_total take the names as lookup keys; none of them
-     draws it. *)
-  check_fields
-    ~non_rendering_calls:
-      [ "pr_tag_of_keeper"; "spend_tag_of_keeper"; "spend_tags"; "spend_total" ]
-    "overview_team_lines"
-    [ "okp_name"; "id"; "title" ];
-  (* The spend line prints the transport or decode failure it was given. *)
-  check_identifiers ~module_path:"bin/masc_tui_keeper_spend.ml" ~binding:"lines"
-    ~callees:sanitizer_calls [ "err" ];
-  (* The pull request lines print repository ids and failure text the server
-     relayed from GitHub. *)
-  check_fields ~module_path:"bin/masc_tui_repository_pulls.ml" "lines"
-    [ "rp_repository" ];
   (* [ap_summary] is not in this list: the press-again line and the row
      summary both moved into [approval_detail_line], and the guard follows
      the field rather than the surface's name. *)

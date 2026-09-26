@@ -15,6 +15,14 @@ SOURCE_MODULES = (
 )
 
 
+# Enter opens the post under the cursor, so it has to wait for the list to
+# hold one. "Health: " no longer says the first read landed: the Dashboard
+# draws "Health: not observed" before any read (RFC-tui-measured-operator-home
+# keeps unknown values unknown), and a Board opened then reads "(not loaded)"
+# and Enter finds no row. The header count is drawn only from a list read.
+ONE_POST_LISTED = h.screen_header(b"MASC Board", b" (1)")
+
+
 def run(executable: str) -> None:
     fixtures = h.overview_event_http_fixtures()
     post = h.board_selection_post("scroll", "Long thread", "Short body")
@@ -30,6 +38,7 @@ def run(executable: str) -> None:
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.wait_for_output(process, fd, output, ONE_POST_LISTED, start=0, timeout=10)
         h.send_and_wait(process, fd, output, b"\r", b"Comment 000")
         h.read_available(fd, output)
         start = len(output)
@@ -105,6 +114,7 @@ def run_side_by_side(executable: str) -> None:
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.wait_for_output(process, fd, output, ONE_POST_LISTED, start=0, timeout=10)
         h.send_and_wait(process, fd, output, b"\r", b"Comment 000")
         h.read_available(fd, output)
         _, stacked = comment_row(output)
@@ -161,6 +171,7 @@ def run_window_names_what_it_counts(executable: str) -> None:
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.wait_for_output(process, fd, output, ONE_POST_LISTED, start=0, timeout=10)
         h.send_and_wait(process, fd, output, b"\r", b"Comment 000")
         h.wait_for_output(process, fd, output, b"comment rows ", start=0, timeout=5)
         h.read_available(fd, output)

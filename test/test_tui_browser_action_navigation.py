@@ -167,7 +167,7 @@ def run(binary):
             h.send_and_wait(process, fd, output, b"v", b"Article body")
             h.send_and_wait(process, fd, output, b"b", b"Choose a connected browser")
             requests_before_picker_tab = (len(scenes), len(actions))
-            h.send_and_wait(process, fd, output, b"\t", b"MASC Overview")
+            h.send_and_wait(process, fd, output, b"\t", b"MASC Dashboard")
             assert (len(scenes), len(actions)) == requests_before_picker_tab
             os.write(fd, b"q")
         finally:

@@ -350,8 +350,9 @@ let test_the_fleet_row_reads_the_control_planes_own_word () =
        ~binding_name:"keeper_liveness_of_briefs"
        ~literals:
          [ "active"; "offline"; "idle"; "paused" ]);
+  (* The Dashboard's health row names its Keepers through one helper. *)
   Alcotest.(check bool) "and the summary row reads the counts" true
-    (reads ~binding_name:"render_overview" ~fields:[ "ov_keeper_liveness" ] > 0)
+    (reads ~binding_name:"dashboard_keeper_line" ~fields:[ "ov_keeper_liveness" ] > 0)
 
 (* [operation=] is the right-hand side of the line directly above whenever the
    two agree, which is every operation but an identity call. The detail line

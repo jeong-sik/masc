@@ -92,7 +92,7 @@ let test_sections_share_one_heading_style () =
   let starts prefix line = String.starts_with ~prefix line in
   let filled = List.filter (starts "\xe2\x97\x86 ") drawn in
   Alcotest.(check (list string)) "one filled heading, the surface being read"
-    [ "\xe2\x97\x86 Overview" ] filled;
+    [ "\xe2\x97\x86 Dashboard" ] filled;
   Alcotest.(check bool) "Global keeps its own name" true
     (List.mem "\xe2\x97\x87 Global" drawn);
   Alcotest.(check bool) "the slash commands are a section like the rest" true

@@ -2008,113 +2008,15 @@ type overview_providers_reading =
   | Providers_read of Tui_decode.provider_usage_windows
   | Providers_failed of string
 
-(** One open pull request as [GET /api/v1/repositories/pulls] reports it
-    (RFC-0465). The check and review words are parsed at decode; a word this
-    build cannot name makes the row undecodable rather than a default. *)
-type pull_checks = Pull_checks_passing | Pull_checks_failing | Pull_checks_running | Pull_checks_none
-type pull_review = Pull_review_approved | Pull_review_changes_requested | Pull_review_waiting | Pull_review_none
-type pull_mergeable = Pull_mergeable | Pull_conflicting | Pull_mergeable_unknown
+type keeper_usage_reading =
+  | Keeper_usage_unread
+  | Keeper_usage_read of Tui_decode.keeper_usage_window
+  | Keeper_usage_error of string
 
-type open_pull = {
-  op_number: int;
-  op_draft: bool;
-  op_checks: pull_checks;
-  op_review: pull_review;
-  op_mergeable: pull_mergeable;
-  op_keeper: string option;
-      (** The Keeper whose name is this PR's last commit author (RFC-0465
-          §2.1). Only meaningful while the snapshot's Keeper list was read;
-          see {!pulls_keepers}. *)
-}
-
-type repository_pulls_reading =
-  | Repo_pulls_read of { pulls: open_pull list; undecodable: int }
-  | Repo_pulls_failed of string
-      (** The server's failure kind, with its detail when it carried one. *)
-  | Repo_pulls_not_read
-  | Repo_not_github
-
-type repository_pulls_row = { rp_repository: string; rp_state: repository_pulls_reading }
-
-type pulls_reader =
-  | Pulls_reader_ready of string
-  | Pulls_reader_not_ready of string
-      (** Why the server is not reading: not declared, the Keeper is missing,
-          or its token cannot be read. *)
-
-(** Whether the server read the Keeper list it joined authors against. A PR
-    with no Keeper means "no Keeper wrote it" only under [Pulls_keepers_listed]. *)
-type pulls_keepers =
-  | Pulls_keepers_not_listed
-  | Pulls_keepers_listed
-  | Pulls_keepers_failed of string
-
-type overview_pulls_reading =
-  | Overview_pulls_unread
-  | Overview_pulls_read of {
-      reader: pulls_reader;
-      keepers: pulls_keepers;
-      repositories_error: string option;
-          (** The server could not list the registered repositories; the rows
-              are the last list it could, so they may be out of date. *)
-      repositories: repository_pulls_row list;
-    }
-  | Overview_pulls_failed of string
-
-(** A sum over a Keeper's turns of a value its runtime may not report
-    (GET /api/v1/dashboard/keeper-costs). [Spend_sum] adds the turns that
-    reported one; [floor] is whether something may be left out of it --
-    turns that gave no value or an unreadable one, rows that were not JSON,
-    or, in a team total, a Keeper whose sum is unknown -- so the sum is then
-    at least this much. [Spend_unknown] is turns that all left the value
-    out: never a zero. *)
-type 'a spend_sum =
-  | Spend_sum of { sum : 'a; floor : bool }
-  | Spend_unknown
-
-type keeper_spend =
-  | Spend_no_turns
-  | Spend_turns of { cost_usd : float spend_sum; tokens : int spend_sum }
-  | Spend_unread of string
-      (** The server could not read this Keeper's metrics store. *)
-  | Spend_rows_unread of { rows : int }
-      (** No turn read, but [rows] rows that may have been turns did not:
-          rows that were not JSON, or turn rows whose time, latency or kind
-          the server could not read. What it spent is unknown. *)
-
-(** How old the server's cached answer is. [Spend_stale] is an answer past
-    its refresh time; [last_error] is why the last refresh failed, if it
-    did. *)
-type spend_freshness =
-  | Spend_fresh
-  | Spend_stale of { age_s : float; last_error : string option }
-
-type overview_spend_reading =
-  | Overview_spend_unread
-  | Overview_spend_warming
-      (** The server answered its placeholder: nothing computed yet. *)
-  | Overview_spend_read of {
-      window_minutes : int;
-      keepers : (string * keeper_spend) list;
-      undecodable : int;
-          (** Rows this build could not read; their Keepers draw unknown. *)
-      freshness : spend_freshness;
-    }
-  | Overview_spend_load_failed of string
-      (** The TUI could not read or decode the keeper-costs response. *)
-  | Overview_spend_compute_failed of string
-      (** The server answered, but could not compute its first spend reading. *)
-
-let cost_reply_is_current ~visible ~current_generation ~reply_generation =
-  visible && current_generation = reply_generation
-
-let toggle_cost_visibility ~visible ~generation =
-  (not visible, generation + 1)
-
-let cost_refresh_needed ~visible = function
-  | Overview_spend_unread -> visible
-  | Overview_spend_warming | Overview_spend_read _
-  | Overview_spend_load_failed _ | Overview_spend_compute_failed _ -> false
+type provider_history_reading =
+  | Provider_history_unread
+  | Provider_history_read of Masc_tui_usage_trend.t
+  | Provider_history_error of string
 
 (** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
     briefing writes [null] for a Keeper with no registry entry (an offline
@@ -2125,7 +2027,7 @@ type overview_keeper_phase =
   | Keeper_phase_absent
   | Keeper_phase_unreadable of string
 
-(** One [keeper_briefs] row, as the Overview Team block reads it. *)
+(** One [keeper_briefs] row from the operator snapshot. *)
 type overview_keeper = {
   okp_name: string;
   okp_phase: overview_keeper_phase;
@@ -2162,6 +2064,7 @@ type system_log_entry = Tui_decode.system_log_entry
 type planning_goal = Tui_decode.planning_goal
   = {
   pg_id: string;
+  pg_criterion_revision: string option;
   pg_title: string;
   pg_phase: Goal_phase.t;
   pg_priority: int;
@@ -2880,12 +2783,11 @@ let shows_selected_keeper = function
   | System_logs ->
       false
 
-(** The Activity screen is two surfaces under one tab strip: the event
-    feed and the system logs, reached from each other with 1 and 2. A
+(** The Activity screen is two related surfaces: the event
+    feed and the system logs, reached from System with A and L. A
     rule about "the Activity screen" reads this rather than [Acting]
     alone -- the pane that stays off that screen was keyed to the one
-    constructor, so pressing 2 opened it and narrowed the table by 56
-    cells, and 1 closed it again. *)
+    constructor, so opening logs narrowed the table by 56 cells. *)
 let on_activity_screen = function
   | Acting | System_logs -> true
   | Overview | Metrics | Keepers _ | Memory | Lanes | Clients | Board
@@ -2902,30 +2804,17 @@ type browser_lane_visibility =
       return_composer_focused : bool;
     }
 
-(* The Tab cycle and the strip drawn above every surface share this order,
-   so the strip cannot disagree with where Tab actually goes. Labels are the
-   strip's spelling. Keepers stands for every keeper sub-mode; Planning owns
-   its Goal view, the Task Review queue, and the Verdicts the judge recorded.
-   Those two remain distinct internal surfaces because each has a different
-   API and permission boundary, but neither is a second top-level
-   destination. Verdicts is the far half of Task Review -- one lists what is
-   waiting for a ruling and the other what was ruled -- and a top-level tab
-   called "Harness" said neither. Fusion is a ring stop because a
-   deliberation is a destination of its own: the run list is where fusion
-   results are read, and before this stop it was reachable only through the
-   palette or a deep link, so the surface existed but could not be found. *)
+(* The Tab cycle and strip share seven destinations. Detail surfaces map to
+   their parent below; Activity and logs live under System, and Goals, Tasks,
+   approvals, review, and verdicts live under Work. *)
 let surface_ring : (surface * string) list =
-  [ (Overview, "Overview");
-    (Acting, "Activity");
+  [ (Overview, "Dashboard");
+    (Planning, "Work");
     (Keepers Keeper_list, "Keepers");
-    (Lanes, "Lanes");
-    (Memory, "Memory");
-    (Approvals, "Approvals");
+    (Metrics, "Usage");
     (Board, "Board");
-    (Planning, "Planning");
-    (Fusion, "Fusion");
     (Repositories, "Workspace");
-    (Config, "Config");
+    (Config, "System");
   ]
 
 (** What a surface needs loaded to draw itself.
@@ -2946,8 +2835,8 @@ type surface_needs = {
   needs_operator_approvals : bool;
   needs_asks : bool;
   needs_runtime_quota : bool;
-  needs_repository_pulls : bool;
-  needs_keeper_spend : bool;
+  needs_keeper_usage : bool;
+  needs_provider_history : bool;
   needs_overview_goals : bool;
 }
 
@@ -2962,8 +2851,8 @@ let nothing =
     needs_operator_approvals = false;
     needs_asks = false;
     needs_runtime_quota = false;
-    needs_repository_pulls = false;
-    needs_keeper_spend = false;
+    needs_keeper_usage = false;
+    needs_provider_history = false;
     needs_overview_goals = false;
   }
 
@@ -2979,27 +2868,22 @@ let nothing =
    screen but Keepers and Metrics, under a count taken from the event feed
    instead of the roster. The roster is 8.4 KB and answers in about a
    millisecond, which is what makes this affordable where planning is not.
-
-   [cost_shown] is the other one: the Team block draws spend only after
-   [/cost], so the Overview asks for keeper-costs only while it is shown. *)
-let rec surface_needs ~keeper_pane_drawn ~cost_shown surface =
+ *)
+let rec surface_needs ~keeper_pane_drawn surface =
   let needs = surface_needs_of_surface surface in
   let needs =
     if keeper_pane_drawn then { needs with needs_keeper_roster = true }
     else needs
   in
-  { needs with needs_keeper_spend = needs.needs_keeper_spend && cost_shown }
+  needs
 
 and surface_needs_of_surface : surface -> surface_needs = function
-  (* The Providers section draws each account's usage windows from the
-     runtime catalogue. Only this surface draws them. The goal tree is read
-     only here too: the GOALS section is its reader. *)
+  (* Dashboard summarizes quota coverage and reads the Goal tree. Usage reads
+     the same quota response for per-scope detail and recorded history. *)
   | Overview ->
       { nothing with
         needs_transport = true
       ; needs_runtime_quota = true
-      ; needs_repository_pulls = true
-      ; needs_keeper_spend = true
       ; needs_overview_goals = true
       }
   (* Its rows come from the acting store and the keeper list, neither of which
@@ -3022,7 +2906,8 @@ and surface_needs_of_surface : surface -> surface_needs = function
       ; needs_keeper_chat = true
       }
   | Board -> { nothing with needs_board = true }
-  | Planning -> { nothing with needs_planning = true }
+  | Planning ->
+      { nothing with needs_planning = true; needs_overview_goals = true }
   | System_logs -> { nothing with needs_system_logs = true }
   (* Approvals is where a human answers things, so the questions Keepers put
      to one belong on the same surface: an operator should not have to know
@@ -3035,8 +2920,11 @@ and surface_needs_of_surface : surface -> surface_needs = function
   | Metrics ->
       { nothing with
         needs_keeper_roster = true
-      ; needs_fleet_safety = true
-      ; needs_transport = true
+        ; needs_fleet_safety = true
+        ; needs_transport = true
+        ; needs_runtime_quota = true
+        ; needs_keeper_usage = true
+        ; needs_provider_history = true
       }
   | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
   | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
@@ -3061,20 +2949,19 @@ let surface_needs_delta ~previous ~next =
   ; needs_asks = next.needs_asks && not previous.needs_asks
   ; needs_runtime_quota =
       next.needs_runtime_quota && not previous.needs_runtime_quota
-  ; needs_repository_pulls =
-      next.needs_repository_pulls && not previous.needs_repository_pulls
-  ; needs_keeper_spend =
-      next.needs_keeper_spend && not previous.needs_keeper_spend
+  ; needs_keeper_usage =
+      next.needs_keeper_usage && not previous.needs_keeper_usage
+  ; needs_provider_history =
+      next.needs_provider_history && not previous.needs_provider_history
   ; needs_overview_goals =
       next.needs_overview_goals && not previous.needs_overview_goals
   }
 
 let surface_needs_any needs = needs <> nothing
 
-let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn ~cost_shown
-    surface =
+let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn surface =
   if scoped_refresh_inflight then nothing
-  else surface_needs ~keeper_pane_drawn ~cost_shown surface
+  else surface_needs ~keeper_pane_drawn surface
 
 type full_refresh_intent = Cadence | Revalidate
 
@@ -5276,6 +5163,7 @@ let lane_name_entry_with_draft entry draft =
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
+  mutable usage_telemetry_open: bool;
   mutable agents: agent list;
   mutable tasks: task list;
   (* The full domain rows the Overview list is projected from, kept so the
@@ -5288,7 +5176,7 @@ type state = {
      the first load answers: an empty list is a fact about the workspace and
      "not looked yet" is not. *)
   mutable operator_stalled: Masc_tui_agenda.stalled list option;
-  (* Whether the Overview task list owns j/k and which task it has chosen,
+  (* Whether Work's task list owns j/k and which task it has chosen,
      by id. An index into the rows would name another task after a poll
      drops a finished one. *)
   mutable task_focus: Masc_tui_overview_tasks.focus;
@@ -5777,8 +5665,9 @@ type state = {
      the rows under an open picker's cursor. *)
   mutable overview_quota: overview_quota_reading;
   mutable overview_providers: overview_providers_reading;
-  mutable overview_pulls: overview_pulls_reading;
-  mutable overview_spend: overview_spend_reading;
+  mutable keeper_usage: keeper_usage_reading;
+  mutable provider_history: provider_history_reading;
+  mutable provider_history_days: int;
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
@@ -6202,12 +6091,6 @@ type state = {
   mutable link_modal_links: string list;
   mutable link_modal_cursor: int;
   mutable link_previews_mode: [ `Rich | `Compact | `Off ];
-  (* [/cost]: whether the Team block draws each Keeper's spend and the
-     fleet total. Off until the operator asks, and process-only: keeper-costs
-     rereads every day file of every Keeper's metrics whenever its server
-     cache expires, so a hidden spend is not fetched at all. *)
-  mutable cost_visible: bool;
-  mutable cost_generation: int;
   (* Code surface: one directory level at a time through the lazy /children
      route; the file arrives whole and is lexed once at load. *)
   mutable code_dir: string;
@@ -7758,6 +7641,7 @@ let create_state
   {
   metrics_scroll = 0;
   metrics_section = Section_fleet;
+  usage_telemetry_open = false;
   agents = [];
   tasks = [];
   tasks_domain = [];
@@ -7958,8 +7842,9 @@ let create_state
   runtime_catalog = [];
   overview_quota = Quota_unread;
   overview_providers = Providers_unread;
-  overview_pulls = Overview_pulls_unread;
-  overview_spend = Overview_spend_unread;
+  keeper_usage = Keeper_usage_unread;
+  provider_history = Provider_history_unread;
+  provider_history_days = 14;
   overview_goals = Goals_unread;
   runtime_lanes = [];
   runtime_assignments = [];
@@ -8205,8 +8090,6 @@ let create_state
   link_modal_links = [];
   link_modal_cursor = 0;
   link_previews_mode = `Rich;
-  cost_visible = false;
-  cost_generation = 0;
   code_dir = "";
   code_listing = Masc_tui_fetched.initial;
   code_cursor = 0;
@@ -10653,7 +10536,7 @@ let approvals_open_question_count (state : state) =
      [approval_queue: null] with [approval_queue_state] in this case.
 
    Every place that has to know whether a list was read -- the strip entry,
-   the Overview "Approvals:" row, the Approvals title and the empty queue --
+   the Dashboard approvals count, the Approvals title and the empty queue --
    reads it from here, so none of them keeps its own list of fields. *)
 type approval_not_read =
   | Approval_unread
@@ -10732,8 +10615,8 @@ let approvals_surface_pending (state : state) =
 (* Whether every list the count is taken over was read. The count is a
    reading of what is waiting only when all four came back.
 
-   The strip entry and the Overview "Approvals:" row both call this, so the
-   entry leaves the strip exactly when the row draws its count without "?".
+   The strip entry and the Dashboard approvals count both call this, so the
+   entry leaves the strip exactly when the count is drawn without "?".
    An unreadable Gate store with every other list empty keeps the entry:
    an entry that is gone reads as "nothing is waiting". *)
 let approvals_reading_current (state : state) =
@@ -10741,7 +10624,7 @@ let approvals_reading_current (state : state) =
   List.for_all list_is_read
     (reading.questions :: List.map snd (approval_row_lists reading))
 
-(* The Overview "Approvals:" count. The "?" tail marks a count no source will
+(* The Dashboard approvals count. The "?" tail marks a count no source will
    stand behind; it does not say which way the number is wrong, because a
    dropped confirm queue leaves it short and a stale held-call or Gate list
    can leave it long. The Approvals title says which list it was. *)
@@ -10789,7 +10672,6 @@ let approvals_empty_queue (reading : approvals_reading) =
 
 let is_surface_active (state : state) (s : surface) =
   match s with
-  | Metrics -> false
   | Approvals ->
       (* An entry that disappears says "nothing is waiting", which is the one
          thing the strip cannot say when it could not look. With the server
@@ -10807,45 +10689,21 @@ let visible_surface_ring (state : state) : (surface * string) list =
   List.filter (fun (s, _) -> is_surface_active state s) surface_ring
 ;;
 
-(* The ring stop a view belongs to. Keeper sub-modes collapse onto Keepers,
-   Task Review and Verdicts collapse onto Planning, Changes collapses onto
-   Keepers -- its rows are one keeper's file writes, chosen by the roster
-   cursor, so it was never a destination of its own. Channels, Automation, and
-   Runs are selected-Keeper detail tabs; standalone Lanes is a top-level
-   observation workspace, and Code remains a Workspace child. Resources and Tools
-   collapse onto Config: an MCP resource catalog and the tool catalog with its
-   receipts and usage are both answers to "what is registered here", read
-   rarely and never raced against. System logs collapse onto Activity (the
-   Acting surface): tool calls settling and the server's own log lines are two
-   readings of the same fleet timeline, and the ring stop that answers "what
-   happened" is one. Metrics is a deep-dive telemetry surface that collapses
-   onto Overview, off the Tab ring. Connectors is under Config while the
-   Browser Lane reader is on screen, and under Keepers otherwise. Lanes is a
-   top-level observation workspace; Runtime remains the substrate/config view.
-
-   One mapping. There were two, one per ring index, and only the tests read
-   the one without the Browser Lane arm, so they checked a mapping the strip
-   never drew with. Every surface is named, so a new one has to be given a
-   stop here rather than falling through to itself. *)
+(* One mapping for the strip highlight and Tab family. Every surface is named
+   so a new surface must choose its destination explicitly. *)
 let surface_ring_family (state : state) (view : surface) =
   match view with
   | Keepers _ -> Keepers Keeper_list
-  | Verification | Harness -> Planning
+  | Verification | Harness | Approvals -> Planning
   | Connectors when Option.is_some (browser_lane_on_screen state) -> Config
-  | Changes | Connectors | Schedules -> Keepers Keeper_list
-  | Runtime | Clients -> Config
-  | Lanes -> Lanes
+  | Changes | Connectors | Schedules | Fusion | Memory -> Keepers Keeper_list
+  | Runtime | Clients | Lanes | Acting | System_logs -> Config
   | Code -> Repositories
   | Resources | Tools -> Config
-  | System_logs -> Acting
-  | Metrics -> Overview
+  | Metrics -> Metrics
   | Overview -> Overview
-  | Acting -> Acting
-  | Memory -> Memory
-  | Approvals -> Approvals
   | Board -> Board
   | Planning -> Planning
-  | Fusion -> Fusion
   | Repositories -> Repositories
   | Config -> Config
 
@@ -11085,6 +10943,15 @@ let surface_row_texts (state : state) : surface -> string list option =
   | Planning ->
       (match state.planning_mode with
        | Planning_detail _ -> None
+       | Planning_list
+         when Masc_tui_overview_tasks.is_focused state.task_focus ->
+           (match Masc_tui_overview_tasks.work_rows state.tasks with
+            | [] -> None
+            | rows ->
+                Some
+                  (List.map
+                     (fun (task : Tui_decode.task) -> task.id ^ " " ^ task.title)
+                     rows))
        | Planning_list ->
            Option.bind state.planning (fun snapshot ->
                match
@@ -11703,15 +11570,18 @@ let palette_entries (state : state) =
   @ [ "go MSX", Palette_msx ]
   @ [ "go Lane Add-ons", Palette_lane_addons ]
   @ [ "go Logs", Palette_goto System_logs ]
-  @ [ "go Metrics", Palette_goto Metrics ]
+  @ [ "go Activity", Palette_goto Acting ]
+  @ [ "go Approvals", Palette_goto Approvals ]
+  @ [ "go Memory", Palette_goto Memory ]
+  @ [ "go Fusion", Palette_goto Fusion ]
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring
-  (* After the ring, so "go config" still leads with the Config surface: the
+  (* After the ring, so "go system" still leads with the System surface: the
      ranks tie on a label that starts with the query, and a tie keeps entry
      order. *)
   @ List.map
-      (fun (pane, label) -> ("go Config / " ^ label, Palette_config pane))
+      (fun (pane, label) -> ("go System / " ^ label, Palette_config pane))
       config_panes
   @ List.map
       (fun (keeper : keeper) ->

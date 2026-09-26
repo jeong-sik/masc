@@ -47,7 +47,7 @@ def run(executable: str) -> None:
     def interact(process, fd, _slave, output, _base_path):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.resize_and_wait(
-            process, fd, output, rows=30, columns=160, needle=b"MASC Overview"
+            process, fd, output, rows=30, columns=160, needle=b"MASC Dashboard"
         )
         before_board = len(output)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")

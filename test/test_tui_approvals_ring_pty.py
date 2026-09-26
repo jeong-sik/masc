@@ -1,4 +1,4 @@
-"""With zero approvals and one open ask, Approvals stays in the strip."""
+"""An open Keeper question remains accessible under Work / Approvals."""
 
 import json
 import os
@@ -6,19 +6,14 @@ import sys
 
 import test_tui_keyboard_input as h
 
-# The regression this scenario stands over: the strip drops its Approvals
-# entry when the only pending thing is a keeper's question. is_surface_active
-# and the strip badge count approval_items alone (masc_tui_types.ml,
-# masc_tui_render_prim.ml); neither saw the asks snapshot the surface already
-# fetches (needs_asks). See PR #37060.
+# The queue and questions are separate readings. With Approvals off the main
+# ring, the palette reaches their shared surface and the title still counts
+# the open question. See PR #37060 for the original badge regression.
 SOURCE_MODULES = (
     "bin/masc_tui_types.ml",
     "bin/masc_tui_render_prim.ml",
     "bin/masc_tui_render.ml",
 )
-
-CURRENT = b"\xe2\x96\xb8"
-
 
 def open_ask_snapshot() -> dict[str, object]:
     """One open question, no approvals anywhere.
@@ -89,46 +84,18 @@ def run(executable: str) -> None:
     fixtures["/api/v1/dashboard/gate"] = h.empty_gate_snapshot()
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
-        # 150 columns: the eleven-entry strip fits whole, so this asserts the
-        # entry's presence, never the windowing arithmetic's mercy.
+        # Approvals is a Work child and has a direct palette destination.
         h.resize_and_wait(process, master_fd, output, rows=38, columns=150,
-                          needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
-        h.drain_until_quiet(process, master_fd, output)
-        # The first paint predates the first periodic refresh, and asks ride
-        # the refresh, not the boot. Wait for a frame that carries the entry
-        # rather than parsing the boot frame: a strip that keeps its previous
-        # scene writes nothing at all, so a needle wait is the only honest
-        # wait here (test_tui_keyboard_input.wait_for_fixture_state).
-        appeared = h.wait_for_fixture_state(
-            process, master_fd, output,
-            lambda: b"Approvals\xc2\xb71" in bytes(output),
-            timeout=45.0)
-        h.drain_until_quiet(process, master_fd, output)
-        rows = h.screen_rows(
-            bytes(output[: output.rfind(h.FRAME_END) + len(h.FRAME_END)]))
-        # The strip is the row carrying the current-entry marker; the title
-        # row also says "MASC Overview" but carries no marker.
-        strip_row = rows[h.screen_row_of(rows, CURRENT + b"Overview")]
-        if not appeared:
-            raise AssertionError(
-                "zero approvals and one open ask, but no Approvals entry was "
-                "drawn within 45s of refreshes; strip reads: "
-                + repr(strip_row))
-        if b"Approvals" not in strip_row:
-            raise AssertionError(
-                "zero approvals and one open ask, but the strip has no "
-                f"Approvals entry: {strip_row!r}")
-        if b"Approvals\xc2\xb71" not in strip_row:
-            raise AssertionError(
-                "open ask not counted in the Approvals badge, expected "
-                "Approvals<middle-dot>1 in: " + repr(strip_row))
-        print("strip captured:", strip_row.decode("utf-8", "replace"))
+                          needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
+        h.palette_go(process, master_fd, output, b"go Approvals", b"MASC Approvals")
+        h.wait_for_output(process, master_fd, output,
+                          b"Questions waiting on you (1)", start=0, timeout=10)
         # Arm the exit; the harness supplies the confirming q itself.
         os.write(master_fd, b"q")
 
     h.run_terminal_scenario(
         executable,
-        description="An open ask keeps Approvals in the strip",
+        description="An open ask is visible in Work / Approvals",
         interact=interact,
         http_fixtures=fixtures,
         refresh=2.0,
@@ -143,13 +110,9 @@ def run(executable: str) -> None:
     # screen with no question at all said so.
     def empty_queue_says_so(process, master_fd, _slave_fd, output, _base_path):
         h.resize_and_wait(process, master_fd, output, rows=38, columns=150,
-                          needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
+                          needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
         h.drain_until_quiet(process, master_fd, output)
-        h.wait_for_fixture_state(
-            process, master_fd, output,
-            lambda: b"Approvals\xc2\xb71" in bytes(output),
-            timeout=45.0)
-        h.tab_until(process, master_fd, output, b"MASC Approvals")
+        h.palette_go(process, master_fd, output, b"go Approvals", b"MASC Approvals")
         h.wait_for_output(process, master_fd, output,
                           b"(no pending approvals)", start=0, timeout=10)
         # And the question it sits above is still drawn, so the note is about
@@ -177,13 +140,16 @@ def run(executable: str) -> None:
     def the_footer_is_the_last_body_row(process, master_fd, _slave_fd, output,
                                         _base_path):
         h.resize_and_wait(process, master_fd, output, rows=24, columns=80,
-                          needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
+                          needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
         h.drain_until_quiet(process, master_fd, output)
+        # Approvals is a Work child off the ring, so no strip entry carries
+        # the question's badge; the surface's own row says the question was
+        # read, which is the state this layout is measured in.
+        h.palette_go(process, master_fd, output, b"go Approvals", b"MASC Approvals")
         h.wait_for_fixture_state(
             process, master_fd, output,
-            lambda: b"Approvals\xc2\xb71" in bytes(output),
+            lambda: b"Questions waiting on you (1)" in bytes(output),
             timeout=45.0)
-        h.tab_until(process, master_fd, output, b"MASC Approvals")
         h.wait_for_output(process, master_fd, output,
                           b"(no pending approvals)", start=0, timeout=10)
         h.drain_until_quiet(process, master_fd, output)
@@ -240,13 +206,9 @@ def run(executable: str) -> None:
 
     def unread_questions_say_so(process, master_fd, _slave_fd, output, _base_path):
         h.resize_and_wait(process, master_fd, output, rows=38, columns=150,
-                          needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
+                          needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
         h.drain_until_quiet(process, master_fd, output)
-        h.wait_for_fixture_state(
-            process, master_fd, output,
-            lambda: b"Approvals\xc2\xb71" in bytes(output),
-            timeout=45.0)
-        h.tab_until(process, master_fd, output, b"MASC Approvals")
+        h.palette_go(process, master_fd, output, b"go Approvals", b"MASC Approvals")
         h.wait_for_output(process, master_fd, output,
                           b"questions unread", start=0, timeout=10)
         os.write(master_fd, b"q")

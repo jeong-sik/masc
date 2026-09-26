@@ -10,7 +10,7 @@ SOURCE_MODULES = ("bin/masc_tui.ml", "lib/core/eio_guard.ml")
 
 
 def open_chat(process, fd, output):
-    h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+    h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
     h.select_keeper_row(process, fd, output, b"alpha")
     title = b"Keepers \xe2\x96\xb8 \x1b[1malpha"
     h.send_and_wait(process, fd, output, b"\r", title)

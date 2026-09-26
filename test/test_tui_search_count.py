@@ -24,6 +24,14 @@ SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
 )
 
+# "/" opens a query only over rows the surface holds; on a Board that has not
+# read its list yet it does nothing, and the query typed after it goes
+# nowhere. "Health: " no longer says the first read landed: the Dashboard
+# draws "Health: not observed" before any read, so the palette can open a
+# Board that still reads "(not loaded)". The header count is drawn only from
+# a list read.
+THREE_POSTS_LISTED = h.screen_header(b"MASC Board", b" (3)")
+
 
 def run(executable: str) -> None:
     fixtures = h.overview_event_http_fixtures()
@@ -43,6 +51,8 @@ def run(executable: str) -> None:
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=15)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.wait_for_output(process, fd, output, THREE_POSTS_LISTED, start=0,
+                          timeout=10)
 
         # Two of the three titles carry it, and the footer says so while the
         # query is still being typed.
@@ -99,7 +109,7 @@ def run(executable: str) -> None:
         http_fixtures=fixtures)
 
     def memory_interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC Memory")
+        h.palette_go(process, fd, output, b"go Memory", b"MASC Memory")
         h.wait_for_output(process, fd, output, b"Total 3 facts", start=0, timeout=5)
         h.send_and_wait(process, fd, output, b"\r", b"\xe2\x96\xb8 alpha")
         h.wait_for_output(
@@ -133,7 +143,7 @@ def run(executable: str) -> None:
                     origin=f"authored-{prefix}")
 
     def memory_phrase_interact(process, fd, _slave, output, _base):
-        h.tab_until(process, fd, output, b"MASC Memory")
+        h.palette_go(process, fd, output, b"go Memory", b"MASC Memory")
         h.wait_for_output(process, fd, output, b"Total 3 facts", start=0, timeout=5)
         h.send_and_wait(process, fd, output, b"\r", b"\xe2\x96\xb8 alpha")
         h.wait_for_output(process, fd, output, b"first deploy", start=0, timeout=5)
@@ -182,7 +192,7 @@ def run_git_changes_overlay(executable: str) -> None:
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=15)
-        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.wait_for_output(process, fd, output, b"alpha", start=0, timeout=5)
         h.send_and_wait(process, fd, output, b"d", b"MASC Git Changes")
         h.wait_for_output(process, fd, output, b"lib/zebra.ml", start=0, timeout=5)

@@ -63,7 +63,7 @@ def run(executable: str) -> None:
                             "complete_frame_ms": elapsed})
 
         h.wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
-        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         for label, down, up in (
             ("arrow", b"\x1b[B", b"\x1b[A"),

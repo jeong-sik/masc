@@ -22,7 +22,9 @@ SOURCE_MODULES = (
 )
 
 VOICE = b"MASC Voice"
-FOOTER = b"Esc:overview"
+# System's panes spell Esc "back" (Masc_tui_keys.config_bindings); the help
+# row names the Dashboard it returns to.
+FOOTER = b"Esc:back"
 
 
 def rows_under_the_footer(drawn: bytes, where: str) -> list[bytes]:
@@ -36,7 +38,7 @@ def rows_under_the_footer(drawn: bytes, where: str) -> list[bytes]:
 def open_voice(process, fd, output) -> bytes:
     """Walked with [p] rather than named: the pane order is the Config
     strip's, and a walk that does not reach Voice says so."""
-    drawn = h.palette_go(process, fd, output, b"go config", b"MASC Config")
+    drawn = h.palette_go(process, fd, output, b"go system", b"MASC System")
     for _ in range(10):
         drawn = h.send_and_wait(process, fd, output, b"p", b"MASC ")
         if VOICE in b"\n".join(h.screen_rows(drawn).values()):
@@ -46,12 +48,12 @@ def open_voice(process, fd, output) -> bytes:
 
 def run(executable: str) -> None:
     def interact(process, fd, _slave, output, _base_path):
-        h.wait_for_output(process, fd, output, b"MASC Overview", start=0,
+        h.wait_for_output(process, fd, output, b"MASC Dashboard", start=0,
                           timeout=15)
         # Opened at a height neither measurement uses: resizing to the size
         # the terminal already has sends no SIGWINCH and redraws nothing.
         h.resize_and_wait(process, fd, output, rows=32, columns=110,
-                          needle=b"MASC Overview", controls=(h.FULL_REDRAW,))
+                          needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,))
         open_voice(process, fd, output)
 
         tails = {}
@@ -72,7 +74,7 @@ def run(executable: str) -> None:
                 "the footer sits a different distance from the bottom at the "
                 f"two heights: {tails}")
 
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable,

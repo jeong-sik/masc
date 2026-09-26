@@ -35,14 +35,17 @@ let every_surface =
    Named together the way the [ / ] table below is, so the next surface that
    arrives with a cursor and nothing to open has to be a decision. *)
 let enter_atom_count_exceptions =
-  [ (* Charts, not a list: [j/k] scrolls. *)
-    "Metrics", 0
+  [ (* A summary with no row cursor: Work owns the task list and Keepers the
+       roster (RFC-tui-measured-operator-home), so nothing on it is opened. *)
+    "Dashboard", 0
+  ; (* Charts, not a list: [j/k] scrolls. *)
+    "Usage", 0
   ; (* A detail screen. Its tabs carry their own keys. *)
     "Keeper detail", 0
   ; (* A roster with a cursor and nothing the cursor opens. *)
-    "Config / Runtime / Clients", 0
+    "System / Runtime / Clients", 0
   ; (* A scrolling reading, not a row list. *)
-    "Config / Tools", 0
+    "System / Tools", 0
   ; (* Two readings a Keeper detail drills into: [j/k] scrolls the text and
        there is no row under a cursor for Enter to open. *)
     "Keepers / Logs", 0
@@ -62,7 +65,7 @@ let enter_atom_count_exceptions =
        union the help sheet shows, not of any footer. The per-pane form of
        this check is [test_every_config_pane_answers_once] below, which is
        stricter than the one here -- it asks seven screens, not one union. *)
-    "Config", 2
+    "System", 2
   ]
 
 let test_every_surface_names_one_key_that_acts_on_the_cursor () =
@@ -390,7 +393,7 @@ let test_plain_listing_footer_shape () =
 
 let test_system_logs_footer_names_browser_controls () =
   check str "logs names filters and detail"
-    ("1 / 2:Events / Logs  j/k:move / scroll  PgUp/PgDn:detail page"
+    ("e:Events  j/k:move / scroll  PgUp/PgDn:detail page"
      ^ "  [ / ]:previous / next  Home/End:top/bottom  l:level floor  v:verbose"
      ^ "  c:category  Right / Enter:detail  Left / Esc:back  /:find"
      ^ "  n / N:next / previous match  r:refresh  Tab:next  q:quit")
@@ -404,7 +407,7 @@ let test_lanes_footer_opens_standalone_runs () =
        One item for Lane Add-ons, not two. The row carried "o:Lane Add-ons"
        and "A:add-ons" as separate items reading as separate destinations,
        and the dispatch had always been one arm. *)
-    "j/k:move  o / A:Lane Add-ons  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  s:providers  Esc:overview  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  o / A:Lane Add-ons  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  s:providers  Esc:dashboard  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =
@@ -445,7 +448,7 @@ let test_harness_footer_links_to_overview_task () =
    which asserts each state drops the other's key, and for Harness by the PTY
    walk, which reads the drawn row. *)
   check str "Harness names its task link"
-    "j/k:move  v:next Planning tab  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:verdict  Left / Esc:back  y / x:agree / overrule  Y:copy task  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Work tab  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:verdict  Left / Esc:back  y / x:agree / overrule  Y:copy task  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints ~detail_open:false Harness)
 
 let test_schedules_footer_names_write_and_read_controls () =
@@ -630,7 +633,7 @@ let test_schedule_update_form_preserves_exact_editable_definition () =
    can drift to any footer at all without a test noticing. *)
 let test_tools_footer_carries_the_keeper_axis () =
   check str "tools names the effective Keeper switch"
-    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [ / ]:Keeper  c / C:new Skill  e:edit Skill  Esc:config  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [ / ]:Keeper  c / C:new Skill  e:edit Skill  Esc:system  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Tools)
 
 let test_resources_footer_steps_through_detail () =
@@ -809,7 +812,7 @@ let test_verification_footer_carries_the_verdict_keys () =
      the other list -- the store keeps every submission, so the history holds
      rows whose task finished weeks ago -- and [< / >] pages that history. *)
   check str "verification names detail, approve, and reject"
-    "j/k:move  v:next Planning tab  h:queue / history  < / >:newer / older  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  a / x:approve / reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Work tab  h:queue / history  < / >:newer / older  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  a / x:approve / reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints ~detail_open:false Verification)
 
 let test_fusion_footer_pins_the_shared_list_projection () =
@@ -992,23 +995,25 @@ let test_lanes_run_detail_footer_names_its_keys_alone () =
     "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_lanes_run_detail
 
-let test_overview_footer_projects_by_focus () =
-  (* The retired literal said "j/k:events  t:tasks  q:quit  r:refresh
-     Tab:next  2:keepers" (and "j/k:tasks  Enter:detail  esc:events …").
-     The projection keeps every pair and drops the keys that are dead in the
-     other mode: t only selects the task list, and j/k, Home/End, Right/Enter
-     and Left/Esc only act on it once it is selected. *)
-  check str "unselected keeps t and drops the task keys"
-    ("m:telemetry  t:tasks  2:keepers  r:refresh  Tab:next  q:quit")
-    (Masc_tui_keys.footer_hints_overview ~task_focus:false);
-  (* The task column and an open task's detail both answer Home and End: the
-     detail as a reading the frame clamps, the task column as a row list
-     whose window follows its cursor. *)
-  check str "tasks mode keeps arrow/Enter/Esc and drops t"
-    ("j/k:move  m:telemetry  Home/End:top/bottom"
-     ^ "  Right / Enter:open  Left / Esc:back  2:keepers  r:refresh"
-     ^ "  Tab:next  q:quit")
-    (Masc_tui_keys.footer_hints_overview ~task_focus:true)
+(* Dashboard is a summary: Work owns the task list, so the footer offers no
+   task focus, no row movement and nothing to open, only the way to Usage and
+   the keys every listing shares. Work's task list draws its own row from the
+   table rather than from a string in the renderer. *)
+let test_dashboard_and_work_task_footers () =
+  let items hints =
+    String.split_on_char ' ' hints |> List.filter (fun item -> item <> "")
+  in
+  let dashboard = Masc_tui_keys.footer_hints Overview in
+  check str "Dashboard names Usage and the shared keys"
+    "m:Usage  r:refresh  Tab:next  q:quit" dashboard;
+  List.iter
+    (fun item ->
+      Alcotest.(check bool) ("Dashboard offers no task key " ^ item) false
+        (List.mem item (items dashboard)))
+    [ "t:tasks"; "Enter:detail" ];
+  check str "Work's task list reads its bindings"
+    "j/k:select  t / Esc:Goals  Enter:detail  r:refresh  Tab:next  q:quit"
+    Masc_tui_keys.footer_hints_work_tasks
 
 (* Reading a queue meant Esc, move, Enter for every row -- three keys to do
    what one does on Changes and the Keeper detail tabs, both of which already
@@ -1045,7 +1050,7 @@ let test_every_detail_surface_steps_through_its_list () =
 
 let test_planning_footer_carries_filter_and_sort () =
   check str "planning names filter and sort"
-    "j/k:move  v:next Planning tab  f:filter  s:sort  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  a:confirm proof  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  t:Goals / Tasks  p:Approvals  v:next Work tab  f:filter  s:sort  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  a:confirm proof  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints ~detail_open:false Planning)
 
 let test_board_footer_names_reversible_hearth_navigation () =
@@ -1111,7 +1116,7 @@ let test_verdicts_is_a_planning_child () =
     (ring_stop Harness);
   Alcotest.(check bool) "and the help sheet files it under Planning" true
     (List.exists
-       (fun (label, _) -> String.equal label "Planning / Task Verdicts")
+       (fun (label, _) -> String.equal label "Work / Task Verdicts")
        (Masc_tui_keys.help_sections ()))
 
 (* Changes reads one keeper's file writes and binds to the roster cursor on
@@ -1349,7 +1354,7 @@ let test_the_config_marks_are_in_the_sheet () =
    of four panes that do not answer it. [test_every_config_pane_answers_once]
    is where this is checked at the size a reader actually sees. *)
 let shared_label_exceptions =
-  [ ("Board", "pane"); ("Workspace / Code", "back"); ("Config", "edit") ]
+  [ ("Board", "pane"); ("Workspace / Code", "back"); ("System", "edit") ]
 
 let test_no_surface_gives_one_answer_two_rows () =
   let found = ref [] in
@@ -1456,10 +1461,10 @@ let test_every_config_pane_answers_once () =
     config_panes
 
 let test_lanes_is_a_main_destination () =
-  Alcotest.(check bool) "Lanes is a top-level ring entry" true
+  Alcotest.(check bool) "Lanes is reached through System" false
     (List.exists (fun (surface, _) -> surface = Lanes) surface_ring);
-  Alcotest.(check bool) "Lanes has its own ring stop" true
-    (ring_stop Lanes <> ring_stop Config);
+  Alcotest.(check int) "Lanes highlights System"
+    (ring_stop Config) (ring_stop Lanes);
   Alcotest.(check bool) "help sheet names Lanes directly" true
     (List.exists
        (fun (label, _) -> String.equal label "Lanes")
@@ -1503,7 +1508,7 @@ let test_resources_is_a_config_child () =
     (ring_stop Resources);
   Alcotest.(check bool) "and the help sheet files it under Config" true
     (List.exists
-       (fun (label, _) -> String.equal label "Config / Resources")
+       (fun (label, _) -> String.equal label "System / Resources")
        (Masc_tui_keys.help_sections ()));
   let config_keys =
     List.map
@@ -1521,7 +1526,7 @@ let test_tools_is_a_config_child () =
     (ring_stop Tools);
   Alcotest.(check bool) "and the help sheet files it under Config" true
     (List.exists
-       (fun (label, _) -> String.equal label "Config / Tools")
+       (fun (label, _) -> String.equal label "System / Tools")
        (Masc_tui_keys.help_sections ()));
   let config_keys =
     List.map
@@ -1543,17 +1548,17 @@ let test_logs_is_an_activity_child () =
     [Runtime; Clients];
   Alcotest.(check bool) "Logs is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = System_logs) surface_ring);
-  Alcotest.(check int) "Logs highlights Activity"
-    (ring_stop Acting)
+  Alcotest.(check int) "Logs highlights System"
+    (ring_stop Config)
     (ring_stop System_logs);
-  Alcotest.(check bool) "and the help sheet files it under Activity" true
+  Alcotest.(check bool) "the help sheet still exposes logs" true
     (List.exists
-       (fun (label, _) -> String.equal label "Activity / Logs")
+       (fun (label, _) -> String.equal label "System / Logs")
        (Masc_tui_keys.help_sections ()));
-  Alcotest.(check bool) "and the ring stop is spelled Activity" true
+  Alcotest.(check bool) "the ring stop is spelled System" true
     (List.exists
        (fun ((surface : surface), label) ->
-         surface = Acting && String.equal label "Activity")
+         surface = Config && String.equal label "System")
        surface_ring);
   let acting_keys =
     List.map
@@ -1561,30 +1566,36 @@ let test_logs_is_an_activity_child () =
       (Masc_tui_keys.for_surface Acting)
   in
   Alcotest.(check bool) "Activity documents the way to Logs" true
-    (List.mem "1 / 2" acting_keys)
+    (List.mem "e / l" acting_keys)
 
 (* Telemetry and multicore engine metrics hang off Overview under [m]
    instead of holding a top-level Tab stop of their own. *)
 let test_metrics_is_an_overview_child () =
-  Alcotest.(check bool) "Metrics is not a top-level ring entry" false
+  Alcotest.(check bool) "Usage is a top-level ring entry" true
     (List.exists (fun (surface, _) -> surface = Metrics) surface_ring);
-  Alcotest.(check int) "Metrics highlights Overview"
-    (ring_stop Overview)
+  Alcotest.(check int) "Usage highlights itself"
+    (ring_stop Metrics)
     (ring_stop Metrics);
   let overview_keys =
     List.map
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
       (Masc_tui_keys.for_surface Overview)
   in
-  Alcotest.(check bool) "Overview documents the [m] hop" true
+  Alcotest.(check bool) "Dashboard documents the [m] hop" true
     (List.mem "m" overview_keys)
 
-(* The strip drops the Approvals entry when nothing is waiting. "Nothing is
-   waiting" is a reading, and with the server unreachable nobody took it: the
-   confirm queue, the held calls and the questions all failed, every other
+(* The strip dropped the Approvals entry when nothing was waiting. "Nothing
+   is waiting" is a reading, and with the server unreachable nobody took it:
+   the confirm queue, the held calls and the questions all failed, every other
    surface drew "(load failed)", and this entry simply left the ring -- so the
    screen that holds the operator's decisions was the only one that read as
-   settled. The entry now stands until a reading says the lists are empty. *)
+   settled.
+
+   Approvals is now a Work child (RFC-tui-measured-operator-home), so the stop
+   that leads to it is Work and it stands whatever was read. What must still
+   not read as settled is the reading itself: it is current only once every
+   list came back, and the Dashboard's approvals count marks it with "?"
+   until then. *)
 let approvals_reading_is_current state =
   state.approval_snapshot <-
     Some
@@ -1604,50 +1615,73 @@ let approvals_reading_is_current state =
     Some { Masc.Tui_decode.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
   state.asks_error <- None
 
-let approvals_in_ring state =
-  List.exists (fun (surface, _) -> surface = Approvals) (visible_surface_ring state)
+let approvals_home_in_ring state =
+  let home = surface_ring_family state Approvals in
+  List.exists (fun (surface, _) -> surface = home) (visible_surface_ring state)
 
-let test_the_ring_keeps_approvals_until_a_reading_empties_it () =
+let test_approvals_stay_reachable_and_unread_until_a_reading_empties_it () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Overview;
-  Alcotest.(check bool) "before any reading the entry stands" true
-    (approvals_in_ring state);
+  Alcotest.(check bool) "Approvals is reached through Work" true
+    (surface_ring_family state Approvals = Planning);
+  Alcotest.(check bool) "before any reading Work stands" true
+    (approvals_home_in_ring state);
+  Alcotest.(check bool) "before any reading nothing reads as settled" false
+    (approvals_reading_current state);
   approvals_reading_is_current state;
-  Alcotest.(check bool) "a reading with nothing in it drops the entry" false
-    (approvals_in_ring state);
+  Alcotest.(check bool) "a reading with nothing in it is current" true
+    (approvals_reading_current state);
+  Alcotest.(check bool) "and Work still stands" true
+    (approvals_home_in_ring state);
   state.keeper_tool_approvals_error <- Some "held calls poll failed";
-  Alcotest.(check bool) "a failed held-calls poll keeps it" true
-    (approvals_in_ring state);
+  Alcotest.(check bool) "a failed held-calls poll is not current" false
+    (approvals_reading_current state);
+  Alcotest.(check bool) "a failed held-calls poll keeps Work" true
+    (approvals_home_in_ring state);
   state.keeper_tool_approvals_error <- None;
   state.asks_error <- Some "questions poll failed";
-  Alcotest.(check bool) "a failed questions poll keeps it" true
-    (approvals_in_ring state);
+  Alcotest.(check bool) "a failed questions poll is not current" false
+    (approvals_reading_current state);
+  Alcotest.(check bool) "a failed questions poll keeps Work" true
+    (approvals_home_in_ring state);
   state.asks_error <- None;
   state.approval_snapshot <- None;
-  Alcotest.(check bool) "an unread confirm queue keeps it" true
-    (approvals_in_ring state);
+  Alcotest.(check bool) "an unread confirm queue is not current" false
+    (approvals_reading_current state);
+  Alcotest.(check bool) "an unread confirm queue keeps Work" true
+    (approvals_home_in_ring state);
   (* The durable Gate queue is the fourth list the count walks. Its rows are
      the ones that keep while nobody watches, so an unreadable Gate store is
-     the case where a missing entry misleads the most. *)
+     the case where a count without "?" misleads the most. *)
   approvals_reading_is_current state;
   state.gate_error <- Some "gate poll failed";
-  Alcotest.(check bool) "a failed Gate poll keeps it" true
-    (approvals_in_ring state);
+  Alcotest.(check bool) "a failed Gate poll is not current" false
+    (approvals_reading_current state);
+  Alcotest.(check bool) "a failed Gate poll keeps Work" true
+    (approvals_home_in_ring state);
   state.gate_error <- None;
   state.gate_queue_unavailable <- Some "approval queue store unreadable";
-  Alcotest.(check bool) "a Gate queue the server could not read keeps it" true
-    (approvals_in_ring state);
+  Alcotest.(check bool) "a Gate queue the server could not read is not current"
+    false (approvals_reading_current state);
+  Alcotest.(check bool) "a Gate queue the server could not read keeps Work"
+    true (approvals_home_in_ring state);
   state.gate_queue_unavailable <- None;
   state.gate_snapshot_observed <- false;
-  Alcotest.(check bool) "a Gate queue not read yet keeps it" true
-    (approvals_in_ring state);
+  Alcotest.(check bool) "a Gate queue not read yet is not current" false
+    (approvals_reading_current state);
+  Alcotest.(check bool) "a Gate queue not read yet keeps Work" true
+    (approvals_home_in_ring state);
   state.gate_snapshot_observed <- true;
   state.keeper_tool_approvals_observed <- false;
-  Alcotest.(check bool) "held calls not read yet keep it" true
-    (approvals_in_ring state);
+  Alcotest.(check bool) "held calls not read yet are not current" false
+    (approvals_reading_current state);
+  Alcotest.(check bool) "held calls not read yet keep Work" true
+    (approvals_home_in_ring state);
   state.keeper_tool_approvals_observed <- true;
-  Alcotest.(check bool) "every list read and empty drops it again" false
-    (approvals_in_ring state)
+  Alcotest.(check bool) "every list read and empty is current again" true
+    (approvals_reading_current state);
+  Alcotest.(check bool) "and Work still stands" true
+    (approvals_home_in_ring state)
 
 (* The Gate poll answered once, with an empty queue, and every poll since
    has failed. The rows it keeps are that first answer's, so the queue is
@@ -1661,7 +1695,7 @@ let test_a_gate_poll_that_fails_after_one_answered_is_not_an_empty_queue () =
   approvals_reading_is_current state;
   Alcotest.(check bool) "every list read and empty: nothing pending" true
     (approvals_empty_queue (approvals_reading state) = Nothing_pending);
-  Alcotest.(check string) "and the Overview count stands" "0"
+  Alcotest.(check string) "and the Dashboard count stands" "0"
     (approvals_count_label state);
   let cause = "gate load failed: HTTP 503" in
   state.gate_error <- Some cause;
@@ -1671,10 +1705,12 @@ let test_a_gate_poll_that_fails_after_one_answered_is_not_an_empty_queue () =
      = Lists_not_read [ ("Gate queue", Approval_stale cause) ]);
   Alcotest.(check string) "the title says the Gate queue is stale"
     ", Gate queue stale" (approvals_title_notes reading);
-  Alcotest.(check string) "the Overview count carries the ?" "0?"
+  Alcotest.(check string) "the Dashboard count carries the ?" "0?"
     (approvals_count_label state);
-  Alcotest.(check bool) "and the strip keeps the entry" true
-    (approvals_in_ring state);
+  Alcotest.(check bool) "and the reading is not current" false
+    (approvals_reading_current state);
+  Alcotest.(check bool) "while Work still leads to it" true
+    (approvals_home_in_ring state);
   state.gate_error <- None;
   state.gate_queue_unavailable <- Some "approval queue store is unreadable";
   let reading = approvals_reading state in
@@ -1721,7 +1757,7 @@ let test_visible_surface_ring_declutter () =
     (List.exists (fun (s, _) -> s = Approvals) ring_empty);
   state.view <- Approvals;
   let ring_active = visible_surface_ring state in
-  Alcotest.(check bool) "Approvals shown when active surface" true
+  Alcotest.(check bool) "Approvals stay inside Work when active" false
     (List.exists (fun (s, _) -> s = Approvals) ring_active);
   state.view <- Overview;
   state.keeper_tool_approvals <-
@@ -1736,7 +1772,7 @@ let test_visible_surface_ring_declutter () =
       }
     ];
   let ring_with_pending = visible_surface_ring state in
-  Alcotest.(check bool) "Approvals shown when pending items exist" true
+  Alcotest.(check bool) "Approvals stay inside Work when pending" false
     (List.exists (fun (s, _) -> s = Approvals) ring_with_pending)
 
 (* One ask can carry several questions, and the surface counts them under the
@@ -1855,8 +1891,8 @@ let test_visible_surface_ring_open_ask () =
           ]
       };
   let ring = visible_surface_ring state in
-  Alcotest.(check bool) "Approvals stays visible with zero approvals and one open ask"
-    true (List.exists (fun (s, _) -> s = Approvals) ring)
+  Alcotest.(check bool) "Ask keeps the top-level ring compact"
+    false (List.exists (fun (s, _) -> s = Approvals) ring)
 
 (* The sheet is the only place the keeper marks are named where a reader
    can read all of them at once: the Keepers rows pair each glyph with its word
@@ -1928,7 +1964,7 @@ let test_the_sheet_says_the_listing_tail_once () =
             (List.exists (fun (k, _) -> String.equal k key) rows))
         [ "Tab / Shift-Tab"; "r"; "q" ];
       Alcotest.(check bool) "a surface's own r stays" true
-        (match List.assoc_opt "Config" sections with
+        (match List.assoc_opt "System" sections with
          | None -> false
          | Some config -> List.mem ("r", "reload") config)
 
@@ -1950,7 +1986,7 @@ let test_config_footer_names_child_hops () =
      meets, and [test_every_config_pane_answers_once] is what holds them to
      one answer each. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / keeper voice  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / keeper voice  o:assets  Esc:back  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -2266,8 +2302,8 @@ let test_help_documents_what_was_missing () =
   let global = List.map fst (section "Global") in
   Alcotest.(check bool) "the palette has a row" true (List.mem ":" global);
   Alcotest.(check bool) "the cross-surface Keepers jump has a row" true
-    (List.mem "2" global);
-  let logs = List.map fst (section "Activity / Logs") in
+    (List.mem "3" global);
+  let logs = List.map fst (section "System / Logs") in
   Alcotest.(check bool) "Logs documents only what is bound" false
     (List.mem "g / G" logs)
 
@@ -2310,21 +2346,21 @@ let test_the_sheet_carries_the_fact_detail_keys () =
     Masc_tui_keys.memory_fact_detail_hints
 
 let test_keepers_jump_uses_one_binding_for_dispatch_and_help () =
-  let global_twos =
+  let global_threes =
     List.filter
-      (fun (binding : Masc_tui_keys.binding) -> String.equal binding.key "2")
+      (fun (binding : Masc_tui_keys.binding) -> String.equal binding.key "3")
       Masc_tui_keys.global
   in
-  Alcotest.(check int) "Global declares 2 once" 1 (List.length global_twos);
-  Alcotest.(check bool) "2 opens Keepers after local input declines it" true
-    (Masc_tui_keys.opens_keepers ~message_mode:false "2");
-  Alcotest.(check bool) "message input keeps printable 2" false
-    (Masc_tui_keys.opens_keepers ~message_mode:true "2");
+  Alcotest.(check int) "Global declares 3 once" 1 (List.length global_threes);
+  Alcotest.(check bool) "3 opens Keepers after local input declines it" true
+    (Masc_tui_keys.opens_keepers ~message_mode:false "3");
+  Alcotest.(check bool) "message input keeps printable 3" false
+    (Masc_tui_keys.opens_keepers ~message_mode:true "3");
   Alcotest.(check bool) "another key does not open Keepers" false
     (Masc_tui_keys.opens_keepers ~message_mode:false "x");
   Alcotest.(check string) "Help states the local-owner boundary"
-    "jump to Keepers when the active field or panel does not use 2"
-    (List.assoc "2" (section "Global"));
+    "jump to Keepers when the active field or panel does not use 3"
+    (List.assoc "3" (section "Global"));
   let overview_keys =
     List.map
       (fun (binding : Masc_tui_keys.binding) -> binding.key)
@@ -2357,10 +2393,10 @@ let test_the_sheet_opens_on_the_current_surface () =
                 (Masc_tui_keys.sheet_bindings surface))
              keys
        | [] -> Alcotest.fail (name ^ ": no sections at all"))
-    [ ("Overview", Overview, "Overview")
+    [ ("Dashboard", Overview, "Dashboard")
     ; ("Keepers", Keepers Keeper_list, "Keepers")
     ; ("Chat", Keepers Keeper_message, "Chat")
-    ; ("Config", Config, "Config")
+    ; ("System", Config, "System")
     ]
 
 (* The Keepers sub-modes are one entry on the strip and three sections here.
@@ -2382,7 +2418,7 @@ let test_without_a_surface_the_order_is_the_strips () =
   match Masc_tui_keys.help_sections () with
   | (title, _) :: (second, _) :: _ ->
       Alcotest.(check string) "Global first" "Global" title;
-      Alcotest.(check string) "then the strip's first surface" "Overview" second
+      Alcotest.(check string) "then the strip's first surface" "Dashboard" second
   | _ -> Alcotest.fail "expected at least two sections"
 
 (* --- Lanes drill-down: the lane notice, the combined "/" search list, and
@@ -2582,6 +2618,7 @@ let test_board_without_posts_offers_nothing_to_search () =
 
 let planning_goal_row id title =
   { pg_id = id
+  ; pg_criterion_revision = None
   ; pg_title = title
   ; pg_phase = Goal_phase.Executing
   ; pg_priority = 1
@@ -3236,8 +3273,9 @@ let () =
         ; Alcotest.test_case "chat help names the Memory cycle" `Quick
             test_chat_help_names_memory_cycle
         ; Alcotest.test_case
-            "the ring keeps Approvals until a reading empties it" `Quick
-            test_the_ring_keeps_approvals_until_a_reading_empties_it
+            "Approvals stay reachable and unread until a reading empties them"
+            `Quick
+            test_approvals_stay_reachable_and_unread_until_a_reading_empties_it
         ; Alcotest.test_case
             "a Gate poll failing after one answered is not an empty queue"
             `Quick
@@ -3340,8 +3378,8 @@ let () =
             test_lanes_run_list_footer_names_the_drill_down
         ; Alcotest.test_case "Lanes run detail names its keys alone" `Quick
             test_lanes_run_detail_footer_names_its_keys_alone
-        ; Alcotest.test_case "Overview footer projects by focus" `Quick
-            test_overview_footer_projects_by_focus
+        ; Alcotest.test_case "Dashboard and Work task footers" `Quick
+            test_dashboard_and_work_task_footers
         ; Alcotest.test_case "System logs owns only real filter keys" `Quick
             test_system_logs_owns_only_its_real_filter_keys
         ; Alcotest.test_case "every detail surface steps through its list"
@@ -3402,7 +3440,7 @@ let () =
             test_activity_footer_keeps_filter_before_evidence
         ; Alcotest.test_case "Logs is an Activity child" `Quick
             test_logs_is_an_activity_child
-        ; Alcotest.test_case "Metrics is an Overview child" `Quick
+        ; Alcotest.test_case "Usage is a main destination" `Quick
             test_metrics_is_an_overview_child
         ; Alcotest.test_case "Browser reader belongs to Config" `Quick
             test_browser_lanes_highlight_config

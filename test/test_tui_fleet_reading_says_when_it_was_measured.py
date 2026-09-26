@@ -69,7 +69,7 @@ def run(executable: str) -> None:
         raise AssertionError(f"the Work section never showed {needle!r}")
 
     def interact(process, fd, _slave, output, _base):
-        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.wait_for_output(process, fd, output, FLEET_LINE, start=0, timeout=10)
         h.read_available(fd, output)
         if b"fleet reading:" in screen_text(output):
@@ -90,7 +90,8 @@ def run(executable: str) -> None:
         if FLEET_LINE not in keepers:
             raise AssertionError("the stale tag pushed the fleet counts off the header")
 
-        h.palette_go(process, fd, output, b"go metrics", b"MASC Metrics")
+        h.palette_go(process, fd, output, b"go Usage", b"MASC Usage")
+        h.send_and_wait(process, fd, output, b"p", b"MASC Usage / Telemetry")
         h.send_and_wait(process, fd, output, b"2", b"Retained task outcomes")
         scroll_until(process, fd, output, b"stale \xc2\xb7 measured 4m")
 

@@ -124,7 +124,8 @@ def run(executable: str) -> None:
                 "pty": base64.b64encode(zlib.compress(captured[start:end])).decode(),
             }), flush=True)
 
-        h.palette_go(process, master, output, b"go metrics", b"MASC Metrics")
+        h.palette_go(process, master, output, b"go Usage", b"MASC Usage")
+        h.send_and_wait(process, master, output, b"p", b"MASC Usage / Telemetry")
         h.send_and_wait(process, master, output, b"3", b"Gate Governance")
         await_requests("initial")
         # Two rows, two jobs. The pulse row has one cell where a number goes,

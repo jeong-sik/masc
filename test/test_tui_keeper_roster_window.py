@@ -50,7 +50,7 @@ def drawn_names(screen: bytes) -> list[str]:
 
 def run(executable: str) -> None:
     def interact(process, fd, _slave, output, _base_path):
-        h.wait_for_output(process, fd, output, b"MASC Overview", start=0,
+        h.wait_for_output(process, fd, output, b"MASC Dashboard", start=0,
                           timeout=15)
         h.palette_go(process, fd, output, b"go keepers", TITLE)
         # The roster is read off .masc/keepers on a refresh tick, so the
@@ -101,7 +101,7 @@ def run(executable: str) -> None:
                 f"the window says it holds {total} and shows up to {last}, "
                 "so it is not a window")
 
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable,

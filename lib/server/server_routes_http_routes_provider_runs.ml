@@ -24,6 +24,7 @@ let dashboard_metrics_cache_mu = Stdlib.Mutex.create ()
 let dashboard_model_metrics_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_cost_latency_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_keeper_costs_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
+let dashboard_provider_history_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_keeper_decisions_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_keeper_decisions_log_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 
@@ -52,6 +53,23 @@ let json_with_cache_metadata json metadata =
   match json with
   | `Assoc fields -> `Assoc (fields @ [ "cache", metadata ])
   | other -> `Assoc [ "payload", other; "cache", metadata ]
+
+let redact_provider_history_cache_error = function
+  | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "cache", `Assoc metadata ->
+                 "cache", `Assoc
+                   (List.map
+                      (function
+                        | "last_error", _ ->
+                            "last_error", `String "history refresh failed"
+                        | field -> field)
+                      metadata)
+             | field -> field)
+           fields)
+  | json -> json
 
 let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
   let now = Unix.gettimeofday () in
@@ -227,9 +245,8 @@ let add_routes ~sw router =
            cached_dashboard_json ~sw ~sync_first:false
              ~cache:dashboard_keeper_costs_cache ~key
              ~placeholder:
-               (* NDT-OK: request-time clock for a cost window; a dashboard read endpoint, not durable output. *)
-               (Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-                  ~keepers:[] ~window_minutes:window ~now_ts:(Unix.gettimeofday ()))
+               (`Assoc [ "state", `String "loading"
+                       ; "window_minutes", `Int window ])
              ~compute:(fun () ->
                let keeper_names =
                  (match Keeper_meta_store.keeper_names_result config with
@@ -258,6 +275,54 @@ let add_routes ~sw router =
                  ~keepers ~window_minutes:window ~now_ts:(Unix.gettimeofday ()))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/provider-usage-history" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         (* The window is parsed here, once; [read] takes the variant and has
+            no count of its own to check. *)
+         let window =
+           match query_param req "days" with
+           | None -> Some Server_provider_usage_history.Fourteen_days
+           | Some raw ->
+               Option.bind (int_of_string_opt raw)
+                 Server_provider_usage_history.window_of_days
+         in
+         let status, json =
+           match window with
+           | Some window ->
+               let config = Mcp_server.workspace_config state in
+               let days = Server_provider_usage_history.days_of_window window in
+               let key = cache_key [ config.base_path; string_of_int days ] in
+               let json =
+                 cached_dashboard_json ~sw ~sync_first:false
+                   ~cache:dashboard_provider_history_cache ~key
+                   ~placeholder:(`Assoc [ "state", `String "loading" ])
+                   ~compute:(fun () ->
+                     let result =
+                       (* NDT-OK: compute time bounds this read-only history
+                          after an asynchronous cache refresh starts. *)
+                       let compute_now = Unix.gettimeofday () in
+                       try Server_provider_usage_history.read config
+                             ~now:compute_now ~window
+                       with Eio.Cancel.Cancelled _ as exn -> raise exn
+                          | exn ->
+                              Log.Server.warn "provider usage history crashed: %s"
+                                (Printexc.to_string exn);
+                              Error "provider usage history store unavailable"
+                     in
+                     match result with
+                     | Ok json -> json
+                     | Error detail ->
+                         `Assoc [ "state", `String "unavailable"
+                                ; "reason", `String detail ])
+               in
+               `OK, redact_provider_history_cache_error json
+           | None ->
+               `Bad_request,
+               `Assoc [ "ok", `Bool false
+                      ; "error", `String "days must be 1, 7, or 14" ]
+         in
+         Http.Response.json_value ~status ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/cost-latency" (fun request reqd ->
        with_public_read (fun state req reqd ->

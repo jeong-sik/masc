@@ -83,7 +83,7 @@ def run(executable):
                 'encoding': 'zlib+base64', 'pty': base64.b64encode(zlib.compress(frame)).decode(),
             }), flush=True)
 
-        h.palette_go(process, master, output, b'go Planning', cause.encode())
+        h.palette_go(process, master, output, b'go Work', cause.encode())
         capture('source-unavailable', cause.encode(), 140)
         current[:] = h.planning_snapshot([])
         h.send_and_wait(process, master, output, b'r', b'(no goals)')

@@ -311,7 +311,7 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         )
 
     def interact_body(process, master, _slave, output, _base):
-        h.send_and_wait(process, master, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master, output, b"alpha")
 
         def check_receive_limit() -> None:
@@ -377,9 +377,9 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
         if scenario == "overlay-palette":
             # Returning to the same surface need not repaint its title.
             h.palette_go(process, master, output, b"go lanes", b"j/k:move")
-            h.send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
+            h.send_and_wait(process, master, output, b"\x1b", b"MASC Dashboard")
         if scenario == "theme-preview":
-            h.palette_go(process, master, output, b"go Config / themes", b"MASC Themes")
+            h.palette_go(process, master, output, b"go System / themes", b"MASC Themes")
             h.wait_for_output(
                 process, master, output, b"terminal colours", start=0, timeout=3.0
             )
@@ -562,7 +562,7 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
                 h.escape_to_keeper_detail(process, master, output, name=b"alpha")
         elif scenario == "theme-preview":
             h.palette_go(
-                process, master, output, b"go Config / themes", b"terminal colours"
+                process, master, output, b"go System / themes", b"terminal colours"
             )
         elif scenario == "probabilities-preview":
             for needle in (

@@ -802,11 +802,33 @@ let table : (Runtime_quota_window.scope, (string option * window_kind, recorded)
 
 let mu = Stdlib.Mutex.create ()
 
+let record_observer =
+  Atomic.make (fun ~scope:_ ~observed_at:_ (_ : report) -> ())
+
+let record_observer_failure = Atomic.make None
+
+let set_record_observer observer =
+  Atomic.set record_observer observer;
+  Atomic.set record_observer_failure None
+
+let record_observer_failure_at () = Atomic.get record_observer_failure
+
+let rec mark_record_observer_failure at =
+  let held = Atomic.get record_observer_failure in
+  let later =
+    match held with
+    | Some previous when previous >= at -> held
+    | Some _ | None -> Some at
+  in
+  if later != held
+     && not (Atomic.compare_and_set record_observer_failure held later)
+  then mark_record_observer_failure at
+
 let record ~scope ~observed_at (report : report) =
   match report.windows with
   | [] -> ()
   | windows ->
-    Stdlib.Mutex.protect mu (fun () ->
+    let accepted = Stdlib.Mutex.protect mu (fun () ->
       let by_window =
         match Hashtbl.find_opt table scope with
         | Some by_window -> by_window
@@ -815,14 +837,24 @@ let record ~scope ~observed_at (report : report) =
           Hashtbl.replace table scope by_window;
           by_window
       in
-      List.iter
+      List.filter
         (fun (window : window) ->
            let key = window.limit_id, window.kind in
            match Hashtbl.find_opt by_window key with
-           | Some held when Float.compare held.observed_at observed_at > 0 -> ()
+           | Some held when Float.compare held.observed_at observed_at >= 0 -> false
            | Some _ | None ->
-             Hashtbl.replace by_window key { window; source = report.source; observed_at })
+             Hashtbl.replace by_window key { window; source = report.source; observed_at };
+             true)
         windows)
+    in
+    if accepted <> [] then
+      (try (Atomic.get record_observer) ~scope ~observed_at
+             { report with windows = accepted }
+       with Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+              mark_record_observer_failure observed_at;
+              Log.Runtime.warn "provider usage history sink failed: %s"
+                (Printexc.to_string exn))
 ;;
 
 let kind_rank = function

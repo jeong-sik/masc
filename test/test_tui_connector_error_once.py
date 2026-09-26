@@ -36,9 +36,9 @@ def run(executable: str) -> None:
 
         def interact(process, fd, _slave, output, _base_path):
             h.resize_and_wait(
-                process, fd, output, rows=30, columns=160, needle=b"MASC Overview"
+                process, fd, output, rows=30, columns=160, needle=b"MASC Dashboard"
             )
-            h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+            h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
             h.select_keeper_row(process, fd, output, b"alpha")
             h.send_and_wait(process, fd, output, b"\r", b"\xe2\x96\xb8Info")
             h.send_and_wait(process, fd, output, b"[", b"\xe2\x96\xb8Runs")
@@ -80,7 +80,7 @@ def run(executable: str) -> None:
 
     def list_interaction(process, fd, _slave, output, _base_path):
         h.resize_and_wait(
-            process, fd, output, rows=30, columns=160, needle=b"MASC Overview"
+            process, fd, output, rows=30, columns=160, needle=b"MASC Dashboard"
         )
         h.palette_go(process, fd, output, b"go Connectors", b"MASC Connectors")
         h.wait_for_output(
@@ -99,7 +99,7 @@ def run(executable: str) -> None:
         # next sends the view back to the Keeper list. The composer row reads
         # "› to <keeper>" only once the roster is read and its cursor names a
         # Keeper; until then it reads "› no keeper selected".
-        h.wait_for_output(process, fd, output, b"\xe2\x80\xba to ", start=0, timeout=5)
+        h.wait_for_output(process, fd, output, b"\xe2\x80\xba to alpha", start=0, timeout=5)
         h.send_and_wait(process, fd, output, b"\x1b", b"Current Work")
         os.write(fd, b"q")
 

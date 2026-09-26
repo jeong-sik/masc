@@ -112,9 +112,7 @@ let test_a_larger_budget_never_shrinks_a_section () =
         ~before:(rows ~budget sections)
         ~after:(rows ~budget:(budget + 1) sections))
 
-(* A section asking for less never costs another section a row. The Overview
-   leans on this: the Attention panel loses the items the Team rows carry, and
-   the Team block must not lose rows for it ([Overview_team.settle]). *)
+(* A section asking for less never costs another section a row. *)
 let test_asking_for_less_never_costs_another_section () =
   for_every_case (fun ~budget sections ->
       let before = rows ~budget sections in

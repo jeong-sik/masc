@@ -221,6 +221,15 @@ let test_a_finished_selection_selects_nothing () =
   check (option string) "Enter and Ctrl-] name nothing" None
     (selected_id polled ~selected)
 
+let test_work_includes_todo_backlog () =
+  let rows = Tasks.work_rows tasks in
+  check int "all open tasks have a Work row" 7 (List.length rows);
+  check (option int) "todo is selectable" (Some 4)
+    (Tasks.work_selected_index tasks ~selected:(Some "task-1501"));
+  check (option string) "Enter can open todo" (Some "task-1501")
+    (Option.map (fun (task : Tui_decode.task) -> task.id)
+       (Tasks.work_selected_task tasks ~selected:(Some "task-1501")))
+
 (* The keys over one focus value. What is drawn highlighted, what Enter
    opens and what Ctrl-] follows all read [Tasks.selection]; these check that
    it names a task only while the list is focused on a row that exists. *)
@@ -241,9 +250,11 @@ let test_esc_after_a_landing_follows_nothing () =
   check bool "and Enter is not the list's" true
     (Option.is_none (Tasks.opening tasks after_esc))
 
-let test_a_landing_on_a_todo_task_does_not_focus () =
-  check focus_pair "no focus, no id that can never be highlighted"
-    (false, None)
+(* Work lists the Todo backlog after the held rows, so a landing on a Todo
+   task has a row to highlight and Enter opens it. *)
+let test_a_landing_on_a_todo_task_focuses_its_work_row () =
+  check focus_pair "Work highlights the Todo row"
+    (true, Some "task-1501")
     (focus_state (Tasks.land_on tasks ~task_id:"task-1501"))
 
 let test_t_chooses_the_first_row () =
@@ -335,10 +346,12 @@ let () =
             test_a_poll_does_not_move_the_selection
         ; test_case "a finished selection selects nothing" `Quick
             test_a_finished_selection_selects_nothing
+        ; test_case "Work includes todo backlog" `Quick
+            test_work_includes_todo_backlog
         ; test_case "Esc after a landing follows nothing" `Quick
             test_esc_after_a_landing_follows_nothing
-        ; test_case "a landing on a todo task does not focus" `Quick
-            test_a_landing_on_a_todo_task_does_not_focus
+        ; test_case "a landing on a todo task focuses its Work row" `Quick
+            test_a_landing_on_a_todo_task_focuses_its_work_row
         ; test_case "t chooses the first row" `Quick test_t_chooses_the_first_row
         ; test_case "Enter says why nothing opens" `Quick
             test_enter_says_why_nothing_opens

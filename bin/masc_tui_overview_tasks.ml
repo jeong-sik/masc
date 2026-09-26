@@ -159,6 +159,43 @@ let step tasks ~selected direction =
       in
       id_at tasks target
 
+let work_rows tasks =
+  rows tasks
+  @ List.filter
+      (fun (task : Tui_decode.task) ->
+        match task.status with
+        | Masc_domain.Todo -> true
+        | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+        | Masc_domain.Claimed _ | Masc_domain.Done _
+        | Masc_domain.Cancelled _ -> false)
+      tasks
+
+let work_selected_index tasks ~selected =
+  let rec find index = function
+    | [] -> None
+    | (task : Tui_decode.task) :: rest ->
+        if Some task.id = selected then Some index
+        else find (index + 1) rest
+  in
+  find 0 (work_rows tasks)
+
+let work_selected_task tasks ~selected =
+  Option.bind (work_selected_index tasks ~selected)
+    (List.nth_opt (work_rows tasks))
+
+let work_step tasks ~selected direction =
+  let rows = work_rows tasks in
+  let last = List.length rows - 1 in
+  match work_selected_index tasks ~selected with
+  | None -> Option.map (fun (task : Tui_decode.task) -> task.id) (List.nth_opt rows 0)
+  | Some index ->
+      let next = match direction with
+        | Next -> min last (index + 1)
+        | Previous -> max 0 (index - 1)
+      in
+      Option.map (fun (task : Tui_decode.task) -> task.id)
+        (List.nth_opt rows next)
+
 type focus = No_task_focus | Task_focus of { selected : string option }
 
 let selection = function
@@ -167,28 +204,32 @@ let selection = function
 
 let is_focused = function No_task_focus -> false | Task_focus _ -> true
 
-let focus_list tasks = Task_focus { selected = id_at tasks 0 }
+let focus_list tasks =
+  Task_focus
+    { selected =
+        Option.map (fun (task : Tui_decode.task) -> task.id)
+          (List.nth_opt (work_rows tasks) 0) }
 
 let toggle tasks = function
   | No_task_focus -> focus_list tasks
   | Task_focus _ -> No_task_focus
 
 let land_on tasks ~task_id =
-  match row_of tasks ~task_id with
+  match work_selected_index tasks ~selected:(Some task_id) with
   | Some _ -> Task_focus { selected = Some task_id }
-  | None -> No_task_focus
+  | None -> Task_focus { selected = None }
 
 let move tasks focus direction =
   match focus with
   | No_task_focus -> No_task_focus
   | Task_focus { selected } ->
-      Task_focus { selected = step tasks ~selected direction }
+      Task_focus { selected = work_step tasks ~selected direction }
 
 let reconcile tasks focus =
   match focus with
   | No_task_focus | Task_focus { selected = None } -> (focus, None)
   | Task_focus { selected = Some task_id } -> (
-      match row_of tasks ~task_id with
+      match work_selected_index tasks ~selected:(Some task_id) with
       | Some _ -> (focus, None)
       | None -> (Task_focus { selected = None }, Some task_id))
 
@@ -208,7 +249,7 @@ let opening tasks focus =
   match focus with
   | No_task_focus -> None
   | Task_focus { selected } -> (
-      match selected_task tasks ~selected, rows tasks with
+      match work_selected_task tasks ~selected, work_rows tasks with
       | Some task, _ -> Some (Open task)
       | None, [] -> Some No_held_task
       | None, _ :: _ -> Some No_selection)

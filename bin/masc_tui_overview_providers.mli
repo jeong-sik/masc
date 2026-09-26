@@ -20,6 +20,14 @@ type section = {
           bottom. *)
 }
 
+val scope_id : Masc.Tui_decode.provider_usage_account -> string
+(** The server's id for the scope, as its usage history names it. *)
+
+val scope_id_cells : int
+(** How much of a scope id a row draws to tell scopes apart. *)
+
+val scope_name : Masc.Tui_decode.provider_usage_account -> string
+
 val section :
   providers:Masc_tui_types.overview_providers_reading ->
   runtimes:Masc_tui_types.overview_quota_reading ->
@@ -35,6 +43,8 @@ val utilization_text : Masc.Tui_decode.provider_usage_utilization -> string
 (** The value as a whole percent, so accounts read in one unit. A percent is
     shown as reported; a fraction is multiplied by 100 and floored, so
     [0.9999] reads [99%] and never [100%]. *)
+
+val share_of_full : Masc.Tui_decode.provider_usage_utilization -> float
 
 val meter : cells:int -> float -> string
 (** A meter [cells] cells wide filled to the given share of full, drawn with

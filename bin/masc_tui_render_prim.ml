@@ -2143,7 +2143,7 @@ let planning_rollup_row ~cols (rollup : planning_rollup) =
               if value = 0 then None else Some (counter phase glyph name value))
        |> String.concat "  ")
 
-(* The transport's own readings are on Metrics. The Overview keeps one item
+(* The transport's own readings are on Usage. The Dashboard keeps one item
    while the outbound queue is under pressure, since that delays what every
    other row there reports; a steady queue, or no reading, says nothing. *)
 let transport_attention_item (transport : Tui_decode.transport_health option) =
@@ -2151,7 +2151,7 @@ let transport_attention_item (transport : Tui_decode.transport_health option) =
     { ai_kind = "transport_queue_pressure"
     ; ai_severity = severity
     ; ai_summary =
-        Printf.sprintf "transport queue pressure %s (m: Metrics)" word
+        Printf.sprintf "transport queue pressure %s (m: Usage)" word
     ; ai_target =
         Masc_tui_types.Attention_other
           { target_type = "transport"; target_id = None }
@@ -2250,11 +2250,11 @@ let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(windo
       ~window
   in
   let stops = [ Planning_goals; Planning_task_review; Planning_verdicts ] in
-  screen_title " MASC Planning" ^ "  "
+  screen_title " MASC Work" ^ "  "
   ^ tab_strip
       ~width:
         (tab_strip_width ~cols
-           ~before:(screen_title " MASC Planning" ^ "  ") ~after)
+           ~before:(screen_title " MASC Work" ^ "  ") ~after)
       (List.map2 (fun stop label -> (label, stop = tab)) stops labels)
 
 

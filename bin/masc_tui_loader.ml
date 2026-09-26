@@ -8,7 +8,6 @@ module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Keeper_runtime_root_entry = Masc.Keeper_runtime_root_entry
 module Keeper_selection = Masc_tui_keeper_selection
-module Repository_pulls = Masc_tui_repository_pulls
 module Context_state = Masc_tui_context_state
 module Metrics_tail = Masc_tui_metrics_tail
 
@@ -209,10 +208,10 @@ let load_active_tasks (base_path : string) :
           (Tui_decode.active_tasks_of_domain ~goals_for_task
              observation.observed_backlog.tasks)
       , observation.observed_backlog.tasks
-      , (match recovery_error, goal_link_error, archive_error with
-         | Some recovery, _, _ -> Some recovery
-         | None, Some goal_links, _ -> Some goal_links
-         | None, None, archive -> archive)
+      , (match List.filter_map Fun.id
+                 [ recovery_error; goal_link_error; archive_error ] with
+         | [] -> None
+         | errors -> Some (String.concat " · " errors))
       , Some (Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ()) ~archived
                 observation.observed_backlog.tasks)
       (* Projected here rather than on a render frame: resolving whether an
@@ -1161,6 +1160,35 @@ let load_overview_runtime_resolved ~(host : string) ~(port : int) :
           (Tui_decode.decode_runtime_resolved_full json)
       , Tui_decode.decode_provider_usage_windows json )
 
+let load_keeper_usage ~(host : string) ~(port : int) =
+  match fetch_keeper_usage ~host ~port with
+  | Error reason -> Error ("keeper usage load failed: " ^ reason)
+  | Ok json -> Tui_decode.decode_keeper_usage_window json
+
+let load_provider_usage_history ~(host : string) ~(port : int) ~(days : int) =
+  match fetch_provider_usage_history ~host ~port ~days with
+  | Error reason -> Error ("provider usage history load failed: " ^ reason)
+  | Ok json ->
+      let cache_error =
+        match Json_util.assoc_member_opt "cache" json with
+        | Some cache ->
+            (match Json_util.assoc_member_opt "last_error" cache with
+             | Some (`String reason) -> Some reason
+             | _ -> None)
+        | None -> None
+      in
+      (match cache_error with
+       | Some reason -> Error ("history read failed: " ^ reason)
+       | None ->
+      match Json_util.assoc_member_opt "state" json with
+       | Some (`String "loading") ->
+           Error "history is loading"
+       | Some (`String "unavailable") ->
+           (match Json_util.assoc_member_opt "reason" json with
+            | Some (`String reason) -> Error reason
+            | _ -> Error "history unavailable without a reason")
+       | Some _ | None -> Tui_decode.decode_provider_usage_history json)
+
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;
   rsl_probe : (Tui_decode.runtime_probe_snapshot, string) result;
@@ -1317,24 +1345,6 @@ let overview_keeper_rows_of_briefs briefs =
           Some { okp_name = name; okp_phase; okp_last_turn_ago_s; okp_paused }
       | _ -> None)
     briefs
-
-(* RFC-0465 pull request snapshot. A row whose check or review word, number,
-   title, branch or draft flag cannot be read is counted with the server's
-   own undecodable rows instead of being drawn with a guessed state. *)
-let load_repository_pulls ~(host : string) ~(port : int) :
-    (overview_pulls_reading, string) result =
-  match Masc_tui_http.fetch_repository_pulls ~host ~port with
-  | Error err -> Error ("pull requests load failed: " ^ err)
-  | Ok json -> Repository_pulls.decode_reading json
-
-(* Each Keeper's spend over the server's default window; the title draws the
-   window the answer names. A Keeper row the decoder cannot read is counted,
-   and that Keeper is drawn unknown. *)
-let load_keeper_spend ~(host : string) ~(port : int) :
-    (overview_spend_reading, string) result =
-  match Masc_tui_http.fetch_keeper_costs ~host ~port with
-  | Error err -> Error err
-  | Ok json -> Masc_tui_keeper_spend.decode_reading json
 
 (* The Overview's GOALS section. A phase this build does not know refuses the
    whole reading: a goal dropped from the list, or drawn under a phase it is

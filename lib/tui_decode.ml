@@ -506,6 +506,7 @@ type verifier_unreconciled = {
 
 type planning_goal = {
   pg_id : string;
+  pg_criterion_revision : string option;
   pg_title : string;
   pg_phase : Goal_phase.t;
   pg_priority : int;
@@ -2186,6 +2187,7 @@ let decode_verifier_unreconciled json =
 
 let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
+  let* pg_criterion_revision = optional_string_field json "criterion_revision" in
   let* pg_title = required_string_field json "title" in
   let* raw_phase = required_string_field json "phase" in
   let* pg_phase =
@@ -2206,6 +2208,7 @@ let decode_planning_goal json =
   Ok
     {
       pg_id;
+      pg_criterion_revision;
       pg_title;
       pg_phase;
       pg_priority;
@@ -5187,6 +5190,7 @@ type provider_usage_state =
 
 type provider_usage_account = {
   pua_scope : string;
+  pua_scope_id : string;
   pua_providers : string list;
   pua_state : provider_usage_state;
 }
@@ -5252,6 +5256,7 @@ let decode_provider_usage_window json =
 
 let decode_provider_usage_account json =
   let* pua_scope = required_string_field json "scope" in
+  let* pua_scope_id = required_string_field json "scope_id" in
   let* provider_items = required_list_field json "providers" in
   let* pua_providers =
     decode_list "providers"
@@ -5275,7 +5280,7 @@ let decode_provider_usage_account json =
              pua_scope)
     | other, _ -> Error (Printf.sprintf "unknown usage state %S" other)
   in
-  Ok { pua_scope; pua_providers; pua_state }
+  Ok { pua_scope; pua_scope_id; pua_providers; pua_state }
 
 let decode_provider_usage_windows json =
   let* puws_since = required_number_field json "provider_usage_windows_since" in
@@ -5284,6 +5289,154 @@ let decode_provider_usage_windows json =
     decode_list "provider_usage_windows" decode_provider_usage_account items
   in
   Ok { puws_since; puws_accounts }
+
+type provider_usage_history_point = {
+  puhp_scope_id : string;
+  puhp_kind : string;
+  puhp_limit_id : string option;
+  puhp_unit : provider_usage_utilization;
+  puhp_observed_at : float;
+}
+
+type provider_usage_history = {
+  puh_days : int;
+  puh_generated_at : float;
+  puh_unreadable_reports : int;
+  puh_points : provider_usage_history_point list;
+}
+
+let decode_provider_usage_history_point json =
+  let* puhp_scope_id = required_string_field json "scope_id" in
+  let* puhp_kind = required_string_field json "kind" in
+  let* puhp_limit_id = required_nullable_string_field json "limit_id" in
+  let* puhp_observed_at = required_number_field json "observed_at" in
+  let* unit = required_string_field json "unit" in
+  let* puhp_unit =
+    match unit with
+    | "fraction" ->
+        let* value = required_number_field json "value" in
+        if Float.is_finite value then Ok (Utilization_fraction value)
+        else Error "provider usage history: non-finite fraction"
+    | "percent" ->
+        let* value = required_int_field json "value" in
+        Ok (Utilization_percent value)
+    | _ -> Error ("provider usage history: unknown unit " ^ unit)
+  in
+  Ok { puhp_scope_id; puhp_kind; puhp_limit_id; puhp_unit; puhp_observed_at }
+
+let decode_provider_usage_history json =
+  let* puh_days = required_int_field json "days" in
+  if not (List.mem puh_days [ 1; 7; 14 ]) then
+    Error "provider usage history: unsupported day window"
+  else
+    let* puh_generated_at = required_number_field json "generated_at" in
+    let* sampling = required_string_field json "sampling" in
+    if sampling <> "latest_provider_report_per_utc_day" then
+      Error "provider usage history: unknown sampling contract"
+    else
+      let* puh_unreadable_reports =
+        required_int_field json "unreadable_reports"
+      in
+      let* points = required_list_field json "points" in
+      let* puh_points =
+        decode_list "points" decode_provider_usage_history_point points
+      in
+      Ok { puh_days; puh_generated_at; puh_unreadable_reports; puh_points }
+
+type keeper_usage_coverage =
+  | Keeper_usage_complete
+  | Keeper_usage_partial of int
+  | Keeper_usage_failed of string
+
+type keeper_usage_row = {
+  kur_name : string;
+  kur_turn_samples : int;
+  kur_tokens : int option;
+  kur_cost_usd : float option;
+  kur_tokens_reported : int;
+  kur_tokens_missing : int;
+  kur_cost_reported : int;
+  kur_cost_missing : int;
+  kur_coverage : keeper_usage_coverage;
+}
+
+type keeper_usage_freshness =
+  | Keeper_usage_fresh
+  | Keeper_usage_stale of { age_s : float; last_error : string option }
+
+type keeper_usage_window =
+  | Keeper_usage_loading
+  | Keeper_usage_window of {
+      kuw_generated_at : float;
+      kuw_window_minutes : int;
+      kuw_rows : keeper_usage_row list;
+      kuw_freshness : keeper_usage_freshness;
+    }
+
+let decode_keeper_usage_row json =
+  let* kur_name = required_string_field json "keeper_name" in
+  let* kur_turn_samples = required_int_field json "sample_count" in
+  let* kur_tokens = required_nullable_int_field json "total_tokens" in
+  let* kur_cost_usd = required_nullable_float_field json "total_cost_usd" in
+  let* kur_tokens_reported = required_int_field json "tokens_reported_samples" in
+  let* tokens_unreported = required_int_field json "tokens_unreported_samples" in
+  let* tokens_unread = required_int_field json "tokens_unread_samples" in
+  let* kur_cost_reported = required_int_field json "cost_reported_samples" in
+  let* cost_unreported = required_int_field json "cost_unreported_samples" in
+  let* cost_unread = required_int_field json "cost_unread_samples" in
+  let* metrics_read = required_object_field json "metrics_read" in
+  let* read_state = required_string_field metrics_read "state" in
+  let* kur_coverage =
+    match read_state with
+    | "read" ->
+        let* malformed = required_int_field metrics_read "malformed_rows" in
+        Ok (if malformed = 0 then Keeper_usage_complete
+            else Keeper_usage_partial malformed)
+    | "failed" ->
+        let* reason = required_string_field metrics_read "reason" in
+        Ok (Keeper_usage_failed reason)
+    | state -> Error ("unknown keeper usage read state: " ^ state)
+  in
+  Ok
+    { kur_name; kur_turn_samples; kur_tokens; kur_cost_usd;
+      kur_tokens_reported;
+      kur_tokens_missing = tokens_unreported + tokens_unread;
+      kur_cost_reported;
+      kur_cost_missing = cost_unreported + cost_unread;
+      kur_coverage }
+
+let decode_keeper_usage_window json =
+  let* cache = required_object_field json "cache" in
+  let* cache_word = required_string_field cache "state" in
+  let* cache_state =
+    match Dashboard_cache_wire.of_string cache_word with
+    | Some state -> Ok state
+    | None -> Error ("unknown keeper usage cache state: " ^ cache_word)
+  in
+  let* last_error = optional_string_field cache "last_error" in
+  match Json_util.assoc_member_opt "state" json, cache_state with
+  | Some (`String "loading"), Dashboard_cache_wire.Cache_warming ->
+      (match last_error with
+       | None -> Ok Keeper_usage_loading
+       | Some detail -> Error ("Keeper usage computation failed: " ^ detail))
+  | None, (Dashboard_cache_wire.Cache_fresh | Dashboard_cache_wire.Cache_stale_refreshing) ->
+      let* kuw_freshness =
+        match cache_state with
+        | Dashboard_cache_wire.Cache_fresh -> Ok Keeper_usage_fresh
+        | Dashboard_cache_wire.Cache_stale_refreshing ->
+            let* age_s = required_number_field cache "age_s" in
+            Ok (Keeper_usage_stale { age_s; last_error })
+        | Dashboard_cache_wire.Cache_warming -> Error "keeper usage still warming"
+      in
+      let* kuw_generated_at = required_number_field json "generated_at" in
+      let* kuw_window_minutes = required_int_field json "window_minutes" in
+      let* rows = required_list_field json "keepers" in
+      let* kuw_rows = decode_list "keepers" decode_keeper_usage_row rows in
+      Ok (Keeper_usage_window
+        { kuw_generated_at; kuw_window_minutes; kuw_rows; kuw_freshness })
+  | Some (`String state), _ -> Error ("unknown keeper usage state or cache: " ^ state ^ "/" ^ cache_word)
+  | Some _, _ -> Error "keeper usage state must be a string"
+  | None, Dashboard_cache_wire.Cache_warming -> Error "keeper usage warming cache has no loading placeholder"
 
 let join_runtime_surface ~probe ~probe_error ~resolved =
   let probe_rows =
@@ -6901,11 +7054,26 @@ let decode_planning_snapshot json =
   let* pl_generated_at = required_string_field json "generated_at" in
   Ok { pl_goals; pl_rollup; pl_backlog; pl_goal_history; pl_generated_at }
 
+type overview_goal_measurement =
+  | Goal_measurement_unread
+  | Goal_measurement_not_recorded
+  | Goal_measurement_reported of {
+      value : string;
+      evidence : string;
+      actor : string;
+      recorded_at : string;
+    }
+  | Goal_measurement_unavailable of string
+
 type overview_goal = {
   og_id : string;
   og_title : string;
   og_phase : Goal_phase.t;
   og_priority : int;
+  og_criterion_revision : string option;
+  og_metric : string option;
+  og_target_value : string option;
+  og_measurement : overview_goal_measurement;
   og_due_date : string option;
   og_task_count : int;
   og_task_done_count : int;
@@ -6935,6 +7103,34 @@ let decode_overview_goal_items decode items =
   in
   loop [] items
 
+let decode_overview_goal_measurement ~goal_id ~criterion_revision json =
+  match Json_util.assoc_member_opt "measurement" json with
+  | None -> Ok Goal_measurement_unread
+  | Some measurement ->
+      let* state = required_string_field measurement "state" in
+      match state with
+      | "not_recorded" -> Ok Goal_measurement_not_recorded
+      | "unavailable" ->
+          let* reason = required_string_field measurement "reason" in
+          Ok (Goal_measurement_unavailable reason)
+      | "reported" ->
+          let* record = required_object_field measurement "record" in
+          let* recorded_goal_id = required_string_field record "goal_id" in
+          let* recorded_revision = required_string_field record "criterion_revision" in
+          let* () =
+            match criterion_revision with
+            | Some current
+              when String.equal current recorded_revision
+                   && String.equal goal_id recorded_goal_id -> Ok ()
+            | Some _ | None -> Error "goal measurement does not match current criterion"
+          in
+          let* value = required_string_field record "observed_value" in
+          let* evidence = required_string_field record "evidence" in
+          let* actor = required_string_field record "actor" in
+          let* recorded_at = required_string_field record "recorded_at" in
+          Ok (Goal_measurement_reported { value; evidence; actor; recorded_at })
+      | _ -> Error ("unknown goal measurement state: " ^ state)
+
 (* One tree node and every goal under it, parent first. A child goal is a goal
    in its own right, so the Overview reads the forest flat. *)
 let rec decode_overview_goal_node json =
@@ -6951,6 +7147,13 @@ let rec decode_overview_goal_node json =
         Error (Overview_goal_phase_unknown { goal_id = og_id; phase = raw_phase })
   in
   let* og_priority = malformed (required_int_field json "priority") in
+  let* og_criterion_revision = malformed (optional_string_field json "criterion_revision") in
+  let* og_metric = malformed (optional_string_field json "metric") in
+  let* og_target_value = malformed (optional_string_field json "target_value") in
+  let* og_measurement =
+    malformed (decode_overview_goal_measurement ~goal_id:og_id
+                 ~criterion_revision:og_criterion_revision json)
+  in
   let* og_due_date = malformed (optional_string_field json "due_date") in
   let* og_task_count = malformed (required_int_field json "task_count") in
   let* og_task_done_count =
@@ -6974,6 +7177,10 @@ let rec decode_overview_goal_node json =
      ; og_title
      ; og_phase
      ; og_priority
+     ; og_criterion_revision
+     ; og_metric
+     ; og_target_value
+     ; og_measurement
      ; og_due_date
      ; og_task_count
      ; og_task_done_count

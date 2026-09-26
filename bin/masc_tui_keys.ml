@@ -40,6 +40,10 @@ let config_bindings =
       ; Config_presets; Config_themes; Config_voice ]
   ; b Navigate "p" "next pane"
       ~help:"runtime.toml / models / params / prompts / presets / themes / voice", None
+  ; b Navigate "A" "activity"
+      ~help:"event history under System", None
+  ; b Navigate "L" "logs"
+      ~help:"server logs under System", None
   ; b Navigate "PgUp/PgDn" "page"
       ~help:"pages runtime.toml, the voice reading and the detail of prompts \
              and presets, and moves the selection a page on models and themes",
@@ -51,9 +55,9 @@ let config_bindings =
   ; b Navigate "9" "Runtime"
       ~help:"runtime status, lane routing, probes and connected clients", None
   ; b Navigate "s" "resources"
-      ~help:"the MCP resource catalog, off the ring under Config", None
+      ~help:"the MCP resource catalog, off the ring under System", None
   ; b Navigate "t" "tools"
-      ~help:"the tool catalog, receipts, and usage, off the ring under Config", None
+      ~help:"the tool catalog, receipts, and usage, off the ring under System", None
   ; b Act "e" "edit"
       ~help:"runtime.toml previews; models open source; prompts save an override; voice opens the setup wizard",
       Some [ Config_runtime; Config_models; Config_prompts; Config_voice ]
@@ -102,7 +106,11 @@ let config_bindings =
       ~help:"on prompts, switch between the read-only runtime assets and \
              the registry you can override",
       Some [ Config_prompts ]
-  ; b Act "Esc" "overview", None
+  (* "back", not the destination's name: [Esc] is pinned on every row, so
+     each cell of its label comes out of the pane's own keys. Spelled
+     "dashboard", params at 80 columns gave up [E], its only way to the JSON
+     value. The help names where it goes. *)
+  ; b Act "Esc" "back" ~help:"back to Dashboard", None
   ; b Meta "r" "reload", None
   ; b Meta "Tab" "next", None
   ; b Meta "q" "quit", None
@@ -218,8 +226,8 @@ let context_inspector_label = "Ctrl-X"
 
 
 let keepers_jump =
-  b Meta "2" "keepers"
-    ~help:"jump to Keepers when the active field or panel does not use 2"
+  b Meta "3" "keepers"
+    ~help:"jump to Keepers when the active field or panel does not use 3"
 
 let global =
   [ b Meta "Tab / Shift-Tab" "next / previous surface"
@@ -315,19 +323,12 @@ let fusion_board_key = b Navigate "B" "Board evidence"
 
 let for_surface = function
   | Overview ->
-      [ b Navigate "j/k" "move" ~help:"move through the selected task list"
-      ; b Navigate "m" "telemetry"
-          ~help:"system metrics, engine telemetry and this TUI's session log"
-      ; b Act "t" "tasks" ~help:"select the task list for j/k"
-      ; b Act "Right / Enter" "open" ~help:"open the selected task"
-      ; b Act "Left / Esc" "back" ~help:"close detail / leave the task list"
-      ; b Navigate "Home/End" "top/bottom"
-          ~help:"the ends of the task list, or of an open task's detail"
+      [ b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
       ]
       @ listing_meta
   | Acting ->
-      [ b Navigate "1 / 2" "Events / Logs"
-          ~help:"Events, or the server's own log lines; l opens Logs as well"
+      [ b Navigate "e / l" "Events / Logs"
+          ~help:"Events, or the server's own log lines"
       ; b Navigate "j/k" "move" ~help:"select an event / scroll its evidence"
       (* [Navigate], not [Act]: the group is documented as "doing something to
          the thing under the cursor", and this key does nothing to the event
@@ -345,7 +346,7 @@ let for_surface = function
          (masc_tui.ml guards the close on acting_detail) and otherwise
          leaves the surface, so two rows read as two bindings. *)
       ; b Act "Esc" "back"
-          ~help:"close event evidence; from the list, back to Overview"
+          ~help:"close event evidence; from the list, back to Dashboard"
       (* One row per action. g and G reach the ends Home and End reach, and
          l the tab 2 opens; a row for each spent two of the footer's places
          on actions it already showed, and at 120 columns the fitter dropped
@@ -359,10 +360,13 @@ let for_surface = function
       ]
   | Metrics ->
       [ b Navigate "j/k" "scroll"
-      ; b Navigate "1-3" "section"
-          ~help:"1: Engine & Scheduler · 2: Work & Outcomes · 3: Memory & Gate Safety"
-      ; b Navigate "s" "cycle" ~help:"cycle telemetry section"
-      ; b Act "Esc" "overview"
+      ; b Navigate "p" "Usage / Telemetry"
+          ~help:"switch between quota and Keeper usage, and engine telemetry"
+      ; b Navigate "w" "1d / 7d / 14d"
+          ~help:"on Usage: cycle the exact UTC day window for provider report history"
+      ; b Navigate "1 / 2 / 3" "telemetry section"
+          ~help:"on Telemetry: Engine, Work, or Tools"
+      ; b Act "Esc" "Dashboard"
       ; b Meta "r" "refresh"
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
@@ -373,7 +377,7 @@ let for_surface = function
       :: keeper_actions
       @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"
         ; b Search "n / N" "next / previous match"
-        ; b Act "Esc" "overview"
+        ; b Act "Esc" "dashboard"
         ]
       @ row_list_jumps @ listing_meta
   | Keepers Keeper_detail ->
@@ -525,7 +529,7 @@ let for_surface = function
              left out, and the lane needs one slot across the two"
       ; b Navigate "p" "runtime"
           ~help:"open the Runtime surface"
-      ; b Act "Esc" "overview" ~help:"back to Overview"
+      ; b Act "Esc" "dashboard" ~help:"back to Dashboard"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching standalone lane; the run list \
                  and a run's detail carry no searchable rows"
@@ -628,7 +632,11 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Planning ->
       [ b Navigate "j/k" "move"
-      ; b Navigate "v" "next Planning tab"
+      ; b Navigate "t" "Goals / Tasks"
+          ~help:"switch between Goals and the active task list"
+      ; b Navigate "p" "Approvals"
+          ~help:"open operator approvals and Keeper questions; Esc returns to Work"
+      ; b Navigate "v" "next Work tab"
           ~help:"Goals, then the two task surfaces: Task Review and \
                  Task Verdicts. Not stages of one flow"
       ; b Act "Right / Enter" "detail" ~detail:List_only
@@ -667,7 +675,7 @@ let for_surface = function
       @ row_list_edges @ listing_meta
   | Verification ->
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the evidence"
-      ; b Navigate "v" "next Planning tab"
+      ; b Navigate "v" "next Work tab"
           ~help:"on to Task Verdicts, then back to Goals"
       ; b Navigate "h" "queue / history"
           ~help:"the queue is what a task is still waiting on; the history is \
@@ -697,7 +705,7 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Harness ->
       [ b Navigate "j/k" "move" ~help:"move; in a verdict, scroll"
-      ; b Navigate "v" "next Planning tab" ~help:"back round to Goals"
+      ; b Navigate "v" "next Work tab" ~help:"back round to Goals"
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Right / Enter" "verdict" ~detail:List_only
           ~help:"open the full evaluator verdict"
@@ -716,7 +724,7 @@ let for_surface = function
       ; b Act "y / x" "agree / overrule"
           ~help:"y records the machine's verdict as yours; x records the \
                  opposite, with $EDITOR taking the reason"
-      ; b Act "Y" "copy task" ~help:"copy a link to the task on Overview"
+      ; b Act "Y" "copy task" ~help:"copy a link to the task in Work"
       ; b Search "/" "find" ~help:"jump the cursor to a matching task id or title"
       ; b Search "n / N" "next / previous match"
       ]
@@ -744,7 +752,7 @@ let for_surface = function
           ~help:"jump the cursor to a matching run id, Keeper or preset; an \
                  open run's detail carries no searchable rows"
       ; b Search "n / N" "next / previous match"
-      ; b Act "Esc" "back" ~help:"leave detail, or return to Overview"
+      ; b Act "Esc" "back" ~help:"leave detail, or return to Dashboard"
       ]
       @ row_list_edges @ listing_meta
   | Memory ->
@@ -756,7 +764,7 @@ let for_surface = function
       ; b Act "s" "sort"
           ~help:"cycle sort keepers (facts, size, delta, state, name)"
       ; b Act "Esc" "clear / back"
-          ~help:"clear the filter, or return to Overview"
+          ~help:"clear the filter, or return to Dashboard"
       ; b Search "/" "filter"
           ~help:"show only keepers whose id or state matches"
       ; b Search "n / N" "next / previous match"
@@ -771,7 +779,7 @@ let for_surface = function
           ~help:"show the selected repository's current working-tree changes"
       ; b Act "a" "add" ~help:"register a repository; opens $EDITOR"
       ; b Act "Left / Esc" "back"
-          ~help:"leave Git changes, or return to Overview"
+          ~help:"leave Git changes, or return to Dashboard"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching repository, or to a changed \
                  path while Git changes is open"
@@ -831,7 +839,7 @@ let for_surface = function
           ~help:"the first or last resource, or the ends of the text when it                  is focused"
       ; b Act "Enter" "read" ~help:"read the selected resource"
       ; b Act "Esc" "back"
-          ~help:"the text hands back to the list; the list leaves for Config"
+          ~help:"the text hands back to the list; the list leaves for System"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching resource name; the list has to                  be focused for there to be a cursor to land"
       ; b Search "n / N" "next / previous match"
@@ -906,11 +914,11 @@ let for_surface = function
                  instruction Skill, C starts a composition Skill"
       ; b Act "e" "edit Skill"
           ~help:"open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish"
-      ; b Act "Esc" "config" ~help:"back to the Config surface it hangs off"
+      ; b Act "Esc" "system" ~help:"back to the System surface it hangs off"
       ]
       @ listing_meta
   | System_logs ->
-      [ b Navigate "1 / 2" "Events / Logs"
+      [ b Navigate "e" "Events"
       ; b Navigate "j/k" "move / scroll"
       ; b Navigate "PgUp/PgDn" "detail page"
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
@@ -976,6 +984,13 @@ let has_detail_scoped_keys surface =
       | Either -> false
       | List_only | Detail_only -> true)
     (for_surface surface)
+
+let footer_hints_metrics ~telemetry =
+  for_surface Metrics
+  |> List.filter (fun binding ->
+         if telemetry then not (String.equal binding.key "w")
+         else not (String.equal binding.key "1 / 2 / 3"))
+  |> hints_of_bindings
 
 (* The keys an open approval answers to. Its footer was written out in the
    renderer, which is how it came to spell the decision keys apart from the
@@ -1078,19 +1093,17 @@ let footer_hints_prompt_assets =
   in
   config_row ~own ~shared
 
-(* The Overview footer is the same table plus one runtime fact the renderer
-   owns: whether the task list is selected (task_focus). The table stays the
-   SSOT — this projection only drops the keys that are dead in the current
-   mode: t selects the task list, and j/k, Home/End, Enter and Esc act on
-   it only once it is selected. *)
-let footer_hints_overview ~task_focus =
-  let dead =
-    if task_focus then [ "t" ]
-    else [ "j/k"; "Home/End"; "Right / Enter"; "Left / Esc" ]
-  in
-  keepers_jump :: for_surface Overview
-  |> List.filter (fun b -> not (List.mem b.key dead))
-  |> hints_of_bindings
+(* Work's task list, while it owns j/k. The Goals pane under the same
+   surface reads [footer_hints Planning]; this is the other half of that one
+   screen, so its keys come from a table too rather than from the renderer. *)
+let work_tasks_bindings =
+  [ b Navigate "j/k" "select" ~help:"move through Work's open tasks"
+  ; b Navigate "t / Esc" "Goals" ~help:"hand j/k back to the Goals list"
+  ; b Act "Enter" "detail" ~help:"open the selected task"
+  ]
+  @ listing_meta
+
+let footer_hints_work_tasks = hints_of_bindings work_tasks_bindings
 
 (* The Code surface's footer, which the renderer used to spell by hand. It
    named d, H, m and w and nothing else, so the three language-server keys
@@ -1332,10 +1345,14 @@ let memory_fact_detail_hints = hints_of_bindings bindings_memory_fact_detail
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)
 let help_surfaces : (string * surface) list =
-  [ "Overview", Overview
-  ; "Activity", Acting
-  ; "Metrics", Metrics
+  [ "Dashboard", Overview
+  ; "Work", Planning
   ; "Keepers", Keepers Keeper_list
+  ; "Usage", Metrics
+  ; "Board", Board
+  ; "Workspace", Repositories
+  ; "System", Config
+  ; "Activity", Acting
   ; "Keeper detail", Keepers Keeper_detail
   ; "Chat", Keepers Keeper_message
   (* Three screens a Keeper detail drills into, each with keys of its own and
@@ -1348,12 +1365,10 @@ let help_surfaces : (string * surface) list =
   ; "Keepers / Calls", Keepers Keeper_calls
   ; "Keepers / Runtime", Keepers Keeper_runtime_pick
   ; "Lanes", Lanes
-  ; "Config / Runtime / Clients", Clients
-  ; "Board", Board
+  ; "System / Runtime / Clients", Clients
   ; "Approvals", Approvals
-  ; "Planning / Goals", Planning
-  ; "Planning / Task Review", Verification
-  ; "Planning / Task Verdicts", Harness
+  ; "Work / Task Review", Verification
+  ; "Work / Task Verdicts", Harness
   ; "Fusion", Fusion
   (* "Schedules", the name the title bar and the palette both use. It read
      "Keeper detail / Automation" -- a Keeper detail tab that has no keys of
@@ -1363,14 +1378,12 @@ let help_surfaces : (string * surface) list =
      puts the highlight while this surface is open. *)
   ; "Keepers / Schedules", Schedules
   ; "Memory", Memory
-  ; "Workspace", Repositories
   ; "Workspace / Code", Code
   ; "Changes", Changes
-  ; "Config / Runtime", Runtime
-  ; "Config", Config
-  ; "Config / Resources", Resources
-  ; "Config / Tools", Tools
-  ; "Activity / Logs", System_logs
+  ; "System / Runtime", Runtime
+  ; "System / Resources", Resources
+  ; "System / Tools", Tools
+  ; "System / Logs", System_logs
   (* Its keys are the least guessable on the product -- [B] opens the Browser
      Lane, [Ctrl-O] previews a tab, [b / u] bind and unbind a channel -- and
      the sheet built no section for them at all. *)

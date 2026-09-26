@@ -397,6 +397,27 @@ let test_an_unknown_phase_is_refused () =
         (Tui_decode.overview_goals_error_to_string other)
   | Ok _ -> fail "an unknown phase decoded"
 
+let test_explicit_measurement_requires_the_current_criterion () =
+  let document revision =
+    Yojson.Safe.from_string
+      (Printf.sprintf
+         {|{"tree":[{"id":"goal-x","title":"x","phase":"executing","priority":1,
+            "criterion_revision":"r2","metric":"passing checks","target_value":"5",
+            "measurement":{"state":"reported","record":{"goal_id":"goal-x",
+              "criterion_revision":"%s","observed_value":"3","evidence":"artifact:checks",
+              "actor":"planner","recorded_at":"2026-09-24T00:00:00Z"}},
+            "due_date":null,"task_count":0,"task_done_count":0,
+            "stagnation_seconds":null,"tasks":[],"children":[]}]}|}
+         revision)
+  in
+  (match Tui_decode.decode_overview_goals (document "r2") with
+   | Ok [ { og_measurement = Tui_decode.Goal_measurement_reported { value; _ }; _ } ] ->
+       check string "value is reported, not inferred" "3" value
+   | Ok _ | Error _ -> fail "current explicit observation was not decoded");
+  (match Tui_decode.decode_overview_goals (document "r1") with
+   | Error (Tui_decode.Overview_goals_malformed _) -> ()
+   | Ok _ | Error _ -> fail "stale criterion was accepted")
+
 let () =
   run "tui_overview_goals"
     [ ( "overview goals"
@@ -420,5 +441,7 @@ let () =
             test_an_empty_tree_is_one_headline
         ; test_case "an unknown phase is refused" `Quick
             test_an_unknown_phase_is_refused
+        ; test_case "measurement is bound to the current criterion" `Quick
+            test_explicit_measurement_requires_the_current_criterion
         ] )
     ]

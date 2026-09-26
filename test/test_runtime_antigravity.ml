@@ -305,7 +305,12 @@ let test_stream_events_preserve_available_wire_data () =
                { conversation_id = "conversation-1"
                ; model = "gemini-fixture"
                }
-           ; Text_delta "MASC_ANTIGRAVITY_OK\n"
+           ; Text_delta { step_index = None; text = "MASC_ANTIGRAVITY_OK\n" }
+           ; Usage_reported
+               { model = "gemini-fixture"
+               ; usage = { input_tokens = 100; output_tokens = 7; _ }
+               ; _
+               }
            ; Turn_finished { text = "MASC_ANTIGRAVITY_OK\n" }
            ] -> ()
          | _ -> fail "Antigravity stream did not preserve available wire data")
@@ -336,8 +341,13 @@ let test_answer_pieces_reach_the_reader_and_the_result_adds_nothing () =
          match List.rev !events with
          | [ Runtime_antigravity.Turn_started
                { conversation_id = "conversation-1"; model = "gemini-fixture" }
-           ; Text_delta "PO"
-           ; Text_delta "NG\n"
+           ; Text_delta { step_index = Some 1; text = "PO" }
+           ; Text_delta { step_index = Some 1; text = "NG\n" }
+           ; Usage_reported
+               { model = "gemini-fixture"
+               ; usage = { input_tokens = 100; output_tokens = 7; _ }
+               ; _
+               }
            ; Turn_finished { text = "PONG\n" }
            ] -> ()
          | _ ->
@@ -363,10 +373,77 @@ let test_an_empty_piece_is_not_forwarded () =
        | Ok _ ->
          match List.rev !events with
          | [ Runtime_antigravity.Turn_started _
-           ; Text_delta "PONG\n"
+           ; Text_delta { step_index = None; text = "PONG\n" }
+           ; Usage_reported
+               { model = "gemini-fixture"
+               ; usage = { input_tokens = 100; output_tokens = 7; _ }
+               ; _
+               }
            ; Turn_finished { text = "PONG\n" }
            ] -> ()
          | _ -> fail "An empty piece changed what the reader was shown")
+;;
+
+(* Two response steps around a tool step, as agy 1.2.11 wrote them
+   (measured 2026-09-25): each response step ends its text with "\n", and the
+   result repeats both steps' text. *)
+let two_response_steps =
+  [ init ()
+  ; step ~index:0 ~step_type:"user_input" ()
+  ; step ~index:1 ~state:"ACTIVE" ~step_type:"agent_response" ~text_delta:"CHECKING" ()
+  ; step ~index:1 ~state:"DONE" ~step_type:"agent_response" ~text_delta:"\n" ()
+  ; step ~index:2 ~state:"ACTIVE" ~step_type:"tool" ~tool_name:"run_command" ()
+  ; step ~index:2 ~state:"DONE" ~step_type:"tool" ~tool_name:"run_command" ()
+  ; step ~index:3 ~state:"ACTIVE" ~step_type:"agent_response" ~text_delta:"DONE" ()
+  ; step ~index:3 ~state:"DONE" ~step_type:"agent_response" ~text_delta:"\n" ()
+  ; result ~response:"CHECKING\nDONE\n" ()
+  ]
+;;
+
+(* Each piece names the step that carried it: that is what tells the two
+   assistant messages apart. *)
+let test_answer_pieces_name_their_step () =
+  let events = ref [] in
+  with_fixture two_response_steps (fun path ->
+    match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+    | Error error -> fail (Runtime_antigravity.error_to_string error)
+    | Ok turn ->
+      check string "recorded text" "CHECKING\nDONE\n" turn.text;
+      let pieces =
+        List.filter_map
+          (function
+            | Runtime_antigravity.Text_delta { step_index; text } -> Some (step_index, text)
+            | Turn_started _ | Native_tool_started _ | Native_tool_finished _
+            | Usage_reported _ | Turn_finished _ -> None)
+          (List.rev !events)
+      in
+      check
+        (list (pair (option int) string))
+        "pieces and their steps"
+        [ Some 1, "CHECKING"; Some 1, "\n"; Some 3, "DONE"; Some 3, "\n" ]
+        pieces)
+;;
+
+(* The Keeper live stream appends the pieces, and a native tool step draws no
+   row between them, so the two steps read as one paragraph on a Markdown
+   surface. The projection completes a paragraph break in front of the second
+   step: agy already ended the first with "\n", so one more. Nothing repeats,
+   and the result adds nothing because the steps carried the text. *)
+let test_keeper_streams_two_response_steps_apart () =
+  let events = ref [] in
+  with_fixture two_response_steps (fun path ->
+    match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+    | Error error -> fail (Runtime_antigravity.error_to_string error)
+    | Ok _ ->
+      let texts =
+        Keeper_antigravity_runtime.For_testing.project_stream (List.rev !events)
+        |> List.filter_map (function
+          | Agent_core.Types.ContentBlockDelta
+              { index = 0; delta = Agent_core.Types.TextDelta text } -> Some text
+          | _ -> None)
+      in
+      check (list string) "pieces with the break" [ "CHECKING"; "\n"; "\nDONE"; "\n" ] texts;
+      check string "each step once, apart" "CHECKING\n\nDONE\n" (String.concat "" texts))
 ;;
 
 let test_stream_events_preserve_exact_native_tool_steps () =
@@ -404,7 +481,12 @@ let test_stream_events_preserve_exact_native_tool_steps () =
                ; tool_name = Some "run_command"
                ; origin = Runtime_native_tools.Built_in
                }
-           ; Text_delta "MASC_ANTIGRAVITY_OK\n"
+           ; Text_delta { step_index = None; text = "MASC_ANTIGRAVITY_OK\n" }
+           ; Usage_reported
+               { model = "gemini-fixture"
+               ; usage = { input_tokens = 100; output_tokens = 7; _ }
+               ; _
+               }
            ; Turn_finished { text = "MASC_ANTIGRAVITY_OK\n" }
            ] -> ()
          | _ -> fail "Antigravity tool step lost its exact provider identity")
@@ -512,6 +594,29 @@ let test_transmitted_prompt_survives_provider_rejection () =
        | Error error -> fail (Runtime_antigravity.error_to_string error)
        | Ok _ -> fail "provider rejection became a completed response");
       check int "transmission is retained despite provider rejection" 1 !sent)
+;;
+
+(* The result event of a refused turn still carries the conversation's
+   usage, and it is reported before the refusal fails the turn. *)
+let test_refused_result_still_reports_usage () =
+  let reported = ref [] in
+  let on_stream_event = function
+    | Runtime_antigravity.Usage_reported { model; usage; _ } ->
+      reported := (model, usage.input_tokens, usage.cache_read_tokens) :: !reported
+    | Turn_started _ | Text_delta _ | Native_tool_started _ | Native_tool_finished _
+    | Turn_finished _ -> ()
+  in
+  with_fixture [ init (); result ~status:"ERROR" ~response:"" ~error:"fixture rejected" () ]
+    (fun path ->
+      (match run_fixture ~on_stream_event path with
+       | Error (Runtime_antigravity.Turn_failed "fixture rejected") -> ()
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "provider rejection became a completed response");
+      match !reported with
+      | [ ("gemini-fixture", 100, 50) ] -> ()
+      | reports ->
+        failf "expected the refused result's usage reported once, got %d"
+          (List.length reports))
 ;;
 
 let test_child_environment_is_allowlisted () =
@@ -1238,6 +1343,14 @@ let () =
             `Quick
             test_an_empty_piece_is_not_forwarded
         ; test_case
+            "answer pieces name their step"
+            `Quick
+            test_answer_pieces_name_their_step
+        ; test_case
+            "Keeper streams two response steps apart"
+            `Quick
+            test_keeper_streams_two_response_steps_apart
+        ; test_case
             "stream preserves exact native tool steps"
             `Quick
             test_stream_events_preserve_exact_native_tool_steps
@@ -1255,6 +1368,8 @@ let () =
             `Quick test_a_cli_that_answers_without_reading_the_prompt_does_not_hold_the_turn
         ; test_case "transmission survives provider rejection" `Quick
             test_transmitted_prompt_survives_provider_rejection
+        ; test_case "refused result still reports usage" `Quick
+            test_refused_result_still_reports_usage
         ; test_case
             "resume mismatch"
             `Quick

@@ -8,6 +8,7 @@ open Server_auth
 open Server_dashboard_http
 open Server_routes_http_common
 open Server_routes_http_keeper_stream
+module Runtime_request = Server_dashboard_runtime_request
 
 include Server_routes_http_routes_dashboard_setup
 
@@ -191,7 +192,7 @@ let handle_execute_output_stream ~sw ~clock request reqd =
            let wrote_initial =
              write_string
                (Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms)
-             && write_json (Dashboard_execute_output.event_json ~keeper_name)
+             && write_json (Dashboard_execute_output.initial_event_json subscriber)
            in
            if not wrote_initial
            then Dashboard_execute_output.unsubscribe subscriber
@@ -353,8 +354,42 @@ let runtime_config_commit_json (receipt : Runtime.config_commit_receipt) =
     ]
 ;;
 
+(* The exact-output registry is its own row, not part of [routing]: the
+   runtime cache and the registry are published by different code, and a
+   commit made while no registry is published leaves exact lanes unavailable
+   although routing applied (#38779). *)
+let exact_output_registry_application_json
+      (application : Runtime.exact_output_registry_application)
+  =
+  match application with
+  | Runtime.Exact_output_registry_replaced { origin } ->
+    `Assoc
+      [ "status", `String "applied"
+      ; "requires_restart", `Bool false
+      ; ( "targets"
+        , `String
+            (match origin with
+             | Runtime.Runtime_binding_targets -> "runtime_bindings"
+             | Runtime.Replacement_catalog_targets _ -> "replacement_catalog") )
+      ]
+  | Runtime.Exact_output_registry_unpublished ->
+    `Assoc [ "status", `String "unpublished"; "requires_restart", `Bool true ]
+  | Runtime.Exact_output_registry_kept { reason } ->
+    (* A restart would not help: boot rebuilds from the same file, which
+       publishes no registry, so exact output would be unavailable until the
+       file is fixed. [next_boot_publishes] says so. *)
+    `Assoc
+      [ "status", `String "kept"
+      ; "requires_restart", `Bool false
+      ; "next_boot_publishes", `Bool false
+      ; ( "reason"
+        , `String (Runtime_exact_output_registry.publication_error_to_string reason) )
+      ]
+;;
+
 let runtime_config_application_json
       ?skill_application
+      ?exact_output_registry
       ~operation
       ~routing_applied_at
       overlay
@@ -372,9 +407,13 @@ let runtime_config_application_json
           ] )
     ; "keeper_overlay", overlay
     ]
-     @ match skill_application with
+     @ (match skill_application with
+        | None -> []
+        | Some application -> [ "skills", skill_application_json application ])
+     @ match exact_output_registry with
        | None -> []
-       | Some application -> [ "skills", skill_application_json application ])
+       | Some outcome ->
+         [ "exact_output_registry", exact_output_registry_application_json outcome ])
 ;;
 
 let runtime_config_raw_json
@@ -398,6 +437,11 @@ let runtime_config_raw_json
     ; ( "application"
       , runtime_config_application_json
           ?skill_application
+          ?exact_output_registry:
+            (Option.map
+               (fun (receipt : Runtime.config_commit_receipt) ->
+                  receipt.exact_output_registry)
+               commit)
           ~operation
           ~routing_applied_at
           overlay )
@@ -547,303 +591,6 @@ let respond_skill_editor_error ~request reqd error =
     reqd
 ;;
 
-type runtime_route_lane =
-  | Runtime_default
-  | Runtime_media_failover
-  | Runtime_named_lane of string
-      (** A name {!Runtime.resolve_assignment} knows: a declared
-          [\[runtime.lanes."<id>"\]] lane, whose name is the operator's own
-          (RFC-0457), or a configured runtime id, whose order a [set] writes as
-          a lane of that id. *)
-  | Runtime_exact_lane of Runtime.exact_lane
-      (** A [\[runtime.exact_output_lanes.<id>\]] walk order, one of the
-          closed set {!Runtime.exact_lane} (verifier_exact, librarian_exact,
-          ...). The "exact/" prefix keeps the name space disjoint from
-          conversation-lane names. *)
-
-let exact_route_prefix = "exact/"
-
-let runtime_route_lane_to_string = function
-  | Runtime_default -> "default"
-  | Runtime_media_failover -> "media_failover"
-  | Runtime_named_lane lane_id -> lane_id
-  | Runtime_exact_lane lane -> exact_route_prefix ^ Standalone_lane.to_id lane
-
-(* Which name space a route string belongs to, before anything is resolved.
-   Creating or renaming a lane asks only this: the name must land in the
-   conversation-lane space, whether or not a lane of that name exists yet. *)
-type route_name_space =
-  | Default_route
-  | Media_failover_route
-  | Exact_route of string
-  | Lane_route
-
-let route_name_space = function
-  | "default" -> Default_route
-  | "media_failover" -> Media_failover_route
-  | lane when String.starts_with ~prefix:exact_route_prefix lane ->
-    let prefix_length = String.length exact_route_prefix in
-    Exact_route (String.sub lane prefix_length (String.length lane - prefix_length))
-  | _ -> Lane_route
-
-(* A name is admitted when the runtime resolver knows it: a declared lane,
-   whatever its name, or a configured runtime id. [resolve_assignment] answers
-   [`Missing] for anything else, so a typo is refused with the name it could
-   not find. An exact-output lane name never reaches that resolver: the prefix
-   names which name space the rest of the string belongs to, and the name must
-   be one of the exact lanes the server runs ({!Standalone_lane.of_id}), so
-   a typo is refused here instead of becoming a table nothing reads. *)
-let parse_runtime_route_lane lane =
-  match route_name_space lane with
-  | Default_route -> Ok Runtime_default
-  | Media_failover_route -> Ok Runtime_media_failover
-  | Exact_route name ->
-    (match Standalone_lane.of_id name with
-     | Some exact -> Ok (Runtime_exact_lane exact)
-     | None ->
-       Error
-         (Printf.sprintf
-            "unknown exact-output lane: %s (expected one of %s)"
-            name
-            (String.concat ", " (List.map Standalone_lane.to_id Standalone_lane.all))))
-  | Lane_route ->
-    (match Runtime.resolve_assignment lane with
-     | `Lane _ -> Ok (Runtime_named_lane lane)
-     | `Unavailable missing ->
-       Error ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing)
-     | `Missing ->
-       Error
-         (Printf.sprintf
-            "unknown runtime routing lane: %s (not a declared lane or a \
-             configured runtime)"
-            lane))
-
-type runtime_route_body =
-  | Runtime_route_runtime_id of runtime_route_lane * string option
-  | Runtime_route_runtime_ids of runtime_route_lane * string list
-  | Runtime_route_named_lane_set_if_revision of string * string list * string
-  | Runtime_route_lane_created of string * string list
-  | Runtime_route_lane_removed of string
-  | Runtime_route_lane_renamed of string * string
-  | Runtime_route_exact_slot_appended of Runtime.exact_lane * string
-  | Runtime_route_exact_slot_dropped of Runtime.exact_lane * string
-  | Runtime_route_exact_slot_moved of
-      Runtime.exact_lane * string * Runtime.exact_slot_move
-
-(* What a routing body asks of a lane. [set], the action a body without one
-   names, replaces the order of a lane or route the resolver already knows.
-   [create] declares a lane under a name nothing resolves yet, which [set]
-   refuses so that a typo cannot become a lane. [remove] deletes a declared
-   lane. [append] adds one slot to the end of an exact-output lane as the file
-   declares it, read under the write lock: a caller that sent the whole order
-   could only send the slots the registry admitted, and a [set] of those
-   would delete every declared slot the registry dropped. *)
-type runtime_lane_action =
-  | Lane_set
-  | Lane_create
-  | Lane_remove
-  | Lane_rename
-  | Lane_append
-  | Lane_drop
-  | Lane_move
-
-let parse_runtime_lane_action json =
-  match Json_util.assoc_member_opt "action" json with
-  | None | Some `Null -> Ok Lane_set
-  | Some (`String "set") -> Ok Lane_set
-  | Some (`String "create") -> Ok Lane_create
-  | Some (`String "remove") -> Ok Lane_remove
-  | Some (`String "rename") -> Ok Lane_rename
-  | Some (`String "append") -> Ok Lane_append
-  | Some (`String "drop") -> Ok Lane_drop
-  | Some (`String "move") -> Ok Lane_move
-  | Some (`String other) ->
-    Error
-      (Printf.sprintf
-         "unknown lane action: %s (expected set, create, remove, rename, append, drop \
-          or move)"
-         other)
-  | Some _ -> Error "action must be a string"
-
-let required_string_field json name =
-  match Json_util.assoc_member_opt name json with
-  | Some (`String value) when not (String.equal (String.trim value) "") ->
-    Ok (String.trim value)
-  | Some (`String _) -> Error (name ^ " must not be empty")
-  | Some _ -> Error (name ^ " must be a string")
-  | None -> Error (name ^ " required")
-
-let optional_string_field json name =
-  match Json_util.assoc_member_opt name json with
-  | None | Some `Null -> Ok None
-  | Some (`String value) ->
-    let trimmed = String.trim value in
-    if String.equal trimmed "" then Ok None else Ok (Some trimmed)
-  | Some _ -> Error (name ^ " must be a string or null")
-
-let required_string_array_field json name =
-  match Json_util.assoc_member_opt name json with
-  | Some (`List values) ->
-    let rec loop acc = function
-      | [] -> Ok (List.rev acc)
-      | `String value :: rest ->
-        let trimmed = String.trim value in
-        if String.equal trimmed ""
-        then Error (name ^ " must not contain empty entries")
-        else loop (trimmed :: acc) rest
-      | _ :: _ -> Error (name ^ " must be an array of strings")
-    in
-    loop [] values
-  | Some _ -> Error (name ^ " must be an array of strings")
-  | None -> Error (name ^ " required")
-;;
-
-let parse_set_route_body json lane =
-  match parse_runtime_route_lane lane with
-  | Error _ as err -> err
-  | Ok parsed_lane ->
-    (match parsed_lane with
-     | Runtime_named_lane lane_id ->
-       (match required_string_array_field json "runtime_ids" with
-        | Error _ as err -> err
-        | Ok runtime_ids ->
-          (match Json_util.assoc_member_opt "expected_source_revision" json with
-           | None -> Ok (Runtime_route_runtime_ids (parsed_lane, runtime_ids))
-           | Some (`String revision) when String_util.is_lowercase_sha256_hex revision ->
-             Ok (Runtime_route_named_lane_set_if_revision (lane_id, runtime_ids, revision))
-           | Some _ -> Error "expected_source_revision must be lowercase SHA-256 hex"))
-     | Runtime_media_failover | Runtime_exact_lane _ ->
-       (match required_string_array_field json "runtime_ids" with
-        | Error _ as err -> err
-        | Ok runtime_ids -> Ok (Runtime_route_runtime_ids (parsed_lane, runtime_ids)))
-     | Runtime_default ->
-       (match optional_string_field json "runtime_id" with
-        | Error _ as err -> err
-        | Ok runtime_id -> Ok (Runtime_route_runtime_id (parsed_lane, runtime_id))))
-
-(* A new lane's name must not read as one of the other routes this endpoint
-   edits, an exact/ name included: a lane created under it could never be
-   addressed again. Whether the file already declares the lane is decided
-   under the write lock ({!Runtime.create_runtime_lane}). *)
-let lane_name_of_new_name name =
-  match route_name_space name with
-  | Lane_route -> Ok name
-  | Default_route | Media_failover_route | Exact_route _ ->
-    Error (Printf.sprintf "%S names another route, not a lane" name)
-
-let parse_create_route_body json lane =
-  match lane_name_of_new_name lane with
-  | Error _ as err -> err
-  | Ok lane ->
-    (match required_string_array_field json "runtime_ids" with
-     | Error _ as err -> err
-     | Ok runtime_ids -> Ok (Runtime_route_lane_created (lane, runtime_ids)))
-
-(* A rename names the lane it renames and the name it takes. Both are read as
-   routing labels: a new name that reads as one of the other routes this
-   endpoint edits would be a lane nothing can address. *)
-let parse_rename_route_body json lane =
-  match parse_runtime_route_lane lane with
-  | Ok (Runtime_named_lane lane_id) ->
-    (match required_string_field json "to" with
-     | Error _ as err -> err
-     | Ok new_lane_id ->
-       (match lane_name_of_new_name new_lane_id with
-        | Error _ as err -> err
-        | Ok new_lane_id -> Ok (Runtime_route_lane_renamed (lane_id, new_lane_id))))
-  | Ok (Runtime_default | Runtime_media_failover | Runtime_exact_lane _) ->
-    Error (Printf.sprintf "%S names another route, not a lane" lane)
-  | Error _ as err -> err
-
-let parse_remove_route_body lane =
-  match parse_runtime_route_lane lane with
-  | Ok (Runtime_named_lane lane_id) -> Ok (Runtime_route_lane_removed lane_id)
-  | Ok (Runtime_default | Runtime_media_failover | Runtime_exact_lane _) ->
-    Error (Printf.sprintf "%S names another route, not a lane" lane)
-  | Error _ as err -> err
-
-(* [drop] and [move] name one slot and let the writer read the declared order
-   under the lock, for the reason [append] does: a caller can only see the
-   slots the registry admitted, and an order rebuilt from that view deletes
-   every declared slot the catalog rejected. *)
-let parse_exact_slot_route_body json lane ~build ~verb =
-  match parse_runtime_route_lane lane with
-  | Ok (Runtime_exact_lane exact) ->
-    (match required_string_field json "runtime_id" with
-     | Error _ as err -> err
-     | Ok runtime_id -> build exact runtime_id)
-  | Ok (Runtime_default | Runtime_media_failover | Runtime_named_lane _) ->
-    Error
-      (Printf.sprintf
-         "%S is not an exact-output lane; %s acts on a slot of exact/<name>"
-         lane
-         verb)
-  | Error _ as err -> err
-
-let parse_move_direction json =
-  match Json_util.assoc_member_opt "direction" json with
-  | Some (`String "up") -> Ok Runtime.Move_slot_up
-  | Some (`String "down") -> Ok Runtime.Move_slot_down
-  | Some (`String other) ->
-    Error (Printf.sprintf "unknown direction: %s (expected up or down)" other)
-  | Some _ -> Error "direction must be a string"
-  | None -> Error "direction required"
-
-let parse_append_route_body json lane =
-  match parse_runtime_route_lane lane with
-  | Ok (Runtime_exact_lane exact) ->
-    (match required_string_field json "runtime_id" with
-     | Error _ as err -> err
-     | Ok runtime_id -> Ok (Runtime_route_exact_slot_appended (exact, runtime_id)))
-  | Ok (Runtime_default | Runtime_media_failover | Runtime_named_lane _) ->
-    Error (Printf.sprintf "%S is not an exact-output lane; append adds a slot to exact/<name>" lane)
-  | Error _ as err -> err
-
-let parse_runtime_route_body body_str =
-  try
-    match Yojson.Safe.from_string body_str with
-    | `Assoc _ as json ->
-      (match required_string_field json "lane", parse_runtime_lane_action json with
-       | (Error _ as err), _ -> err
-       | Ok _, (Error _ as err) -> err
-       | Ok lane, Ok Lane_set -> parse_set_route_body json lane
-       | Ok lane, Ok Lane_create -> parse_create_route_body json lane
-       | Ok lane, Ok Lane_remove -> parse_remove_route_body lane
-       | Ok lane, Ok Lane_rename -> parse_rename_route_body json lane
-       | Ok lane, Ok Lane_append -> parse_append_route_body json lane
-       | Ok lane, Ok Lane_drop ->
-         parse_exact_slot_route_body json lane ~verb:"drop" ~build:(fun exact runtime_id ->
-           Ok (Runtime_route_exact_slot_dropped (exact, runtime_id)))
-       | Ok lane, Ok Lane_move ->
-         parse_exact_slot_route_body json lane ~verb:"move" ~build:(fun exact runtime_id ->
-           match parse_move_direction json with
-           | Error _ as err -> err
-           | Ok move -> Ok (Runtime_route_exact_slot_moved (exact, runtime_id, move))))
-    | _ -> Error "JSON object body required"
-  with
-  | Yojson.Json_error err -> Error ("invalid json: " ^ err)
-
-let parse_runtime_assignment_body body_str =
-  try
-    match Yojson.Safe.from_string body_str with
-    | `Assoc _ as json ->
-      (match required_string_field json "keeper_name" with
-       | Error _ as err -> err
-       | Ok keeper_name ->
-         if not (Keeper_config.validate_name keeper_name)
-         then Error (Printf.sprintf "invalid keeper name: %S" keeper_name)
-         else (match optional_string_field json "runtime_id" with
-          | Error _ as err -> err
-          | Ok runtime_id ->
-            (match Json_util.assoc_member_opt "expected_assignment_revision" json with
-             | None -> Error "expected_assignment_revision required"
-             | Some value ->
-               Runtime.keeper_assignment_revision_of_yojson value
-               |> Result.map (fun expected -> keeper_name, runtime_id, expected))))
-    | _ -> Error "JSON object body required"
-  with
-  | Yojson.Json_error err -> Error ("invalid json: " ^ err)
-
 let runtime_config_path_error_status message =
   if String.equal message Runtime.runtime_config_path_missing_message
   then `Not_found
@@ -851,8 +598,8 @@ let runtime_config_path_error_status message =
 
 type runtime_config_write_operation =
   | Runtime_config_raw_save
-  | Runtime_config_routing of runtime_route_lane * string option
-  | Runtime_config_routing_list of runtime_route_lane * string list
+  | Runtime_config_routing of Runtime_request.runtime_route_lane * string option
+  | Runtime_config_routing_list of Runtime_request.runtime_route_lane * string list
   | Runtime_config_lane_created of string * string list
   | Runtime_config_lane_removed of string
   | Runtime_config_lane_renamed of string * string
@@ -863,7 +610,9 @@ type runtime_config_write_operation =
   | Runtime_config_assignment of string * string option
   | Runtime_config_fusion of string
 
-let runtime_config_write_operation_details = function
+let runtime_config_write_operation_details =
+  let open Runtime_request in
+  function
   | Runtime_config_raw_save -> [ ("operation", `String "raw_save") ]
   | Runtime_config_routing (lane, runtime_id) ->
     [ ("operation", `String "routing")
@@ -1002,7 +751,11 @@ let audit_runtime_config_write
               ]
             @ (match receipt with
                | None -> []
-               | Some commit -> [ "commit", runtime_config_commit_json commit ])
+               | Some (commit : Runtime.config_commit_receipt) ->
+                 [ "commit", runtime_config_commit_json commit
+                 ; ( "exact_output_registry"
+                   , exact_output_registry_application_json commit.exact_output_registry )
+                 ])
             @ (match skill_application with
                | None -> []
                | Some application ->
@@ -1131,7 +884,7 @@ let respond_runtime_config_commit
 
 let handle_runtime_assignment_post_with ~set_assignment state agent_name req reqd
     body_str =
-  match parse_runtime_assignment_body body_str with
+  match Runtime_request.parse_runtime_assignment_body body_str with
   | Error msg ->
     respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
   | Ok (keeper_name, runtime_id, expected) ->
@@ -1198,6 +951,7 @@ let handle_runtime_assignment_post state agent_name req reqd body_str =
 (* POST /api/v1/runtime/config/routing, after authentication: one routing
    body, parsed to a variant, answered by the Runtime writer it names. *)
 let handle_runtime_routing_post state agent_name req reqd body_str =
+  let open Runtime_request in
   match parse_runtime_route_body body_str with
   | Error msg ->
     respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
@@ -1354,16 +1108,53 @@ type gate_mode_recovery =
   | Recovery_not_requested
 
 let gate_mode_change_json change recovery =
-  let recovery_status, recovery_error, started, queued, recovery_failures =
+  let ( recovery_status
+      , recovery_error
+      , started
+      , queued
+      , recovery_failures
+      , recovery_blockers )
+    =
     match recovery with
     | Recovery_completed report ->
       ( (if report.failures = [] then "completed" else "partial")
       , `Null
       , List.length report.started_ids
       , report.queued
-      , report.failures )
-    | Recovery_failed detail -> "failed", `String detail, 0, 0, []
-    | Recovery_not_requested -> "not_requested", `Null, 0, 0, []
+      , report.failures
+      , report.blockers )
+    | Recovery_failed detail -> "failed", `String detail, 0, 0, [], []
+    | Recovery_not_requested -> "not_requested", `Null, 0, 0, [], []
+  in
+  (* The typed drain blocker is rendered only here, at the wire boundary:
+     a closed [kind], the approval ids it names, and the start-failure
+     reason when there is one. *)
+  let recovery_blockers_json =
+    `List
+      (List.map
+         (fun (owner_blocker : Keeper_gate.auto_judge_owner_blocker) ->
+            let kind, approval_ids, reason =
+              match owner_blocker.blocker with
+              | Keeper_gate.Drain_owner_at_capacity active_ids ->
+                "owner_at_capacity", active_ids, `Null
+              | Keeper_gate.Drain_entry_changed approval_id ->
+                "entry_changed", [ approval_id ], `Null
+              | Keeper_gate.Drain_entry_missing approval_id ->
+                "entry_missing", [ approval_id ], `Null
+              | Keeper_gate.Drain_start_failed (approval_id, detail) ->
+                "start_failed", [ approval_id ], `String detail
+              | Keeper_gate.Drain_mode_manual -> "mode_manual", [], `Null
+              | Keeper_gate.Drain_mode_always_allow ->
+                "mode_always_allow", [], `Null
+            in
+            `Assoc
+              [ "keeper_name", `String owner_blocker.keeper_name
+              ; "kind", `String kind
+              ; ( "approval_ids"
+                , `List (List.map (fun id -> `String id) approval_ids) )
+              ; "reason", reason
+              ])
+         recovery_blockers)
   in
   let recovery_failures_json =
     `List
@@ -1387,21 +1178,19 @@ let gate_mode_change_json change recovery =
      :: ("queued", `Int queued)
      :: ("recovery_failure_count", `Int (List.length recovery_failures))
      :: ("recovery_failures", recovery_failures_json)
+     :: ("recovery_blockers", recovery_blockers_json)
      :: fields)
 ;;
 
 module For_testing = struct
-  (* The routing body parser is private to the route; the named-lane array
-     shape it accepts is a wire contract, so the parser test asserts it
-     directly instead of through an HTTP round trip. *)
-  let lane_string = function
-    | Runtime_default -> "default"
-    | Runtime_media_failover -> "media_failover"
-    | Runtime_exact_lane exact -> exact_route_prefix ^ Standalone_lane.to_id exact
-    | Runtime_named_lane id -> id
+  (* The request decoder is private to the server library; the named-lane
+     array shape is a wire contract, so the parser test asserts it directly
+     instead of through an HTTP round trip. *)
+  let lane_string = Runtime_request.runtime_route_lane_to_string
 
   let parse_runtime_route_body body =
-    match parse_runtime_route_body body with
+    let open Runtime_request in
+    match Runtime_request.parse_runtime_route_body body with
     | Error detail -> Error detail
     | Ok (Runtime_route_runtime_id (lane, runtime_id)) ->
         Ok
@@ -1418,12 +1207,12 @@ module For_testing = struct
     | Ok (Runtime_route_lane_renamed (lane_id, new_lane_id)) ->
         Ok (lane_id, "rename", [ new_lane_id ])
     | Ok (Runtime_route_exact_slot_appended (exact, runtime_id)) ->
-        Ok (exact_route_prefix ^ Standalone_lane.to_id exact, "append", [ runtime_id ])
+        Ok (runtime_route_lane_to_string (Runtime_exact_lane exact), "append", [ runtime_id ])
     | Ok (Runtime_route_exact_slot_dropped (exact, runtime_id)) ->
-        Ok (exact_route_prefix ^ Standalone_lane.to_id exact, "drop", [ runtime_id ])
+        Ok (runtime_route_lane_to_string (Runtime_exact_lane exact), "drop", [ runtime_id ])
     | Ok (Runtime_route_exact_slot_moved (exact, runtime_id, move)) ->
         Ok
-          ( exact_route_prefix ^ Standalone_lane.to_id exact
+          ( runtime_route_lane_to_string (Runtime_exact_lane exact)
           , "move"
           , [ runtime_id
             ; (match move with
@@ -3075,14 +2864,7 @@ let add_routes ~sw ~clock router =
            match Keeper_exact_lane_preference.all ~base_path with
            | Ok rows ->
              ( `List
-                 (List.map
-                    (fun (row : Keeper_exact_lane_preference.t) ->
-                      `Assoc
-                        [ "keeper_name", `String row.keeper_name
-                        ; "lane_id", `String row.lane_id
-                        ; "slot_id", `String row.slot_id
-                        ])
-                    rows)
+                 (List.map Keeper_exact_lane_preference.to_projection_json rows)
              , `Assoc [ "state", `String "ready" ] )
            | Error detail ->
              ( `List []

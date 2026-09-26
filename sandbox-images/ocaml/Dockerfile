@@ -1,0 +1,300 @@
+# MASC Keeper Sandbox
+# Runtime environment for keeper agents executing Bash/Read/Edit tools.
+#
+# Base: masc.opam pins `"ocaml" {= "5.5.1"}`. The previous
+# `ubuntu:24.04` + `opam switch create ocaml-system` combination resolved to
+# the distribution compiler (4.x), so `opam install --deps-only` for this repo
+# could never succeed there. The upstream opam image ships the pinned compiler
+# already built, which also removes a 20-40 minute compiler build from every
+# image rebuild.
+#
+# Dependencies are baked into the image rather than installed at run time:
+# keeper tool dispatch runs each turn in a fresh `docker run --rm` container
+# with `--read-only` rootfs and `--cap-drop=ALL` (see
+# keeper_sandbox_docker.ml `docker_run_argv`), so a keeper cannot install
+# anything at run time. Whatever a keeper needs to build must already be here.
+#
+# Hardening notes:
+# - When docker_hardened is enabled, override at runtime:
+#     MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS=false
+#     REQUIRE_USERNS=false
+# - The host docker socket is typically mounted for DinD operations.
+# - Keeper GitHub/SSH credential bundles are projected at /tmp/keeper-creds.
+
+FROM ocaml/opam:ubuntu-24.04-ocaml-5.5
+
+USER root
+ENV DEBIAN_FRONTEND=noninteractive
+
+# GitHub CLI ships from its own apt repository. The Ubuntu archive package
+# trails upstream by months, and keepers authenticate and drive PRs through
+# `gh`, so the client is pinned to the vendor channel instead.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+ && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+ && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+ && printf 'deb [arch=%s signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\n' \
+      "$(dpkg --print-architecture)" > /etc/apt/sources.list.d/github-cli.list \
+ && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+      -o /usr/share/keyrings/nodesource.gpg.armor \
+ && gpg --dearmor -o /usr/share/keyrings/nodesource.gpg \
+      < /usr/share/keyrings/nodesource.gpg.armor \
+ && chmod go+r /usr/share/keyrings/nodesource.gpg \
+ && printf 'deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main\n' \
+      > /etc/apt/sources.list.d/nodesource.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      bash \
+      coreutils \
+      findutils \
+      g++ \
+      gcc \
+      gh \
+      git \
+      jq \
+      less \
+      make \
+      openssh-client \
+      patch \
+      pkg-config \
+      python3 \
+      python3-venv \
+      ripgrep \
+      rsync \
+      tree \
+      unzip \
+      zip \
+      m4 \
+      nodejs \
+      procps \
+      lsof \
+      fd-find \
+      zsh \
+      perl \
+      trash-cli \
+      file \
+      xxd \
+      time \
+      iproute2 \
+      bind9-dnsutils \
+      python3-pip \
+      python3-yaml \
+      libev-dev \
+      libgmp-dev \
+      libprotobuf-dev \
+      libsqlite3-dev \
+      libssl-dev \
+      libzstd-dev \
+      libncurses-dev \
+      protobuf-compiler \
+      zlib1g-dev \
+ && rm -rf /var/lib/apt/lists/*
+# The -dev packages above are the depexts opam reports for this dependency set
+# (`opam install --deps-only --depext-only --dry-run`): libgmp-dev,
+# libprotobuf-dev, libsqlite3-dev, libssl-dev, pkg-config, protobuf-compiler.
+#
+# libncurses-dev is here because the build stopped without it, not because the
+# list said so. Measured 2026-08-26: the opam solve fails with
+#
+#     Missing dependency: conf-ncurses
+#     depends on the unavailable system package 'ncurses-dev'
+#
+# conf-ncurses names the depext `ncurses-dev`, which is not a package on
+# Ubuntu 24.04 -- the name there is `libncurses-dev`. The image on disk was
+# built 2026-08-12 and predates whatever pulled conf-ncurses into the solve,
+# so the failure only appears on a rebuild. Anyone rebuilding before this line
+# existed got exit 20 out of the opam stage with no other clue.
+# They are installed here rather than by opam because the image build runs as a
+# non-root user at that point and the container has no package manager access
+# at run time.
+
+# What keepers actually invoke, measured over 35,919 filesystem tool calls
+# (2026-08-20..26). The apt list above closed procps (ps/pgrep/pkill, 35 uses),
+# lsof (7), fd (2), zsh (3) and trash (39). These three are not apt packages.
+#
+# A second count, over 93,111 Execute records (2026-09-10..24), found commands
+# that neither this image nor the general one had: file (20 calls from 12
+# keepers), ip, ss, nslookup and dig (37), python3's yaml module (15), time
+# (8) and xxd (7). They are apt packages and sit in the list above. pip is
+# there so a turn can make a venv inside its workspace; the rootfs itself stays
+# read-only, so nothing lands in the image at run time.
+#
+# Node is resolved from the nodesource apt repository added above, the same
+# keyring-and-signed-source shape this file already uses for `gh`, and for the
+# same reason: Ubuntu 24.04 ships nodejs 18.19 while dashboard/package.json
+# declares `"engines": {"node": ">=22"}` and `"packageManager": "pnpm@10.31.0"`.
+#
+# Measured 2026-08-26: pnpm installed on top of apt's node 18 is present on
+# PATH and unusable -- `pnpm --version` answers "requires at least Node.js
+# v22.13". Existing is not working, and the contract test below now asks the
+# second question. The host runs v22.22; the image was four majors behind the
+# project it builds.
+#
+# pnpm is pinned to the version the repository declares, so the image tracks
+# the project rather than drifting with the registry's "latest".
+RUN npm install --global --no-fund --no-audit pnpm@10.31.0 \
+ && ln -s "$(command -v timeout)" /usr/local/bin/gtimeout \
+ && ln -s "$(command -v fdfind)" /usr/local/bin/fd
+
+# Deliberately absent, with the reason, so the next reader does not "fix" them:
+#
+#   docker      A keeper invoked it 11 times. The client is useless without the
+#               socket, and mounting the socket hands the container the daemon
+#               -- every mount boundary in this file becomes advisory at that
+#               point (OpenClaw shipped exactly that escape, arXiv 2603.27517).
+#               If a keeper needs containers, that is a separate design.
+#   playwright  15 uses, and the browsers are the cost, not the CLI. Adding it
+#               means several hundred MB of image for one keeper's workflow.
+#   ttyd        8 uses, not packaged for this base. TUI PTY work needs its own
+#               answer.
+#   actionlint  One exec failure in the container logs and 9 mentions. It lints
+#               .github/workflows, which CI already does on every push, so a
+#               keeper running it locally duplicates a gate rather than
+#               unblocking work. Host-only (homebrew). Left out on purpose: if a
+#               keeper needs workflow validation before pushing, the answer is
+#               to say so, not to grow the image by one binary per habit.
+#   md5         macOS spelling. `md5sum` is present but prints a different
+#               format, so a symlink would produce output that parses wrong --
+#               worse than the command being absent.
+#   masc, sb    Host operator wrappers under /Users/dancer/me/scripts. They are
+#               not a toolchain; a keeper reaching for them is reaching outside
+#               its sandbox, which is the thing being closed.
+
+# MASC_KEEPER_DOCKER_PLAYGROUND_ROOT defaults to /home/keeper/playground and is
+# supplied as a bind mount. The container runs as the host uid/gid
+# (`--user <uid>:<gid>`), which matches no image account, so the mount point is
+# created up front and left group/other writable.
+RUN mkdir -p /home/keeper/playground && chmod 0777 /home/keeper /home/keeper/playground
+
+USER opam
+
+# masc.opam requires `ocaml = 5.5.1` (pinned in #34143 for the 5.5.1 security
+# and runtime-leak fixes). The `ocaml-5.5` base tag ships 5.5.0 and pins
+# `ocaml-base-compiler` to it, so `--deps-only` below cannot solve: with the
+# pin in place the only route to 5.5.1 is `ocaml-variants`, which wants
+# libunwind-dev and autoconf that are not installed, and the build stops with
+# "No solution found". Dropping the pin and moving the switch invariant keeps
+# the compiler on `ocaml-base-compiler`, so no depext is needed and the switch
+# keeps the name "5.5" that the OPAM_SWITCH_PREFIX paths below spell out.
+#
+# scripts/check-sandbox-ocaml-version.sh reads the version out of the line
+# below and fails CI when masc.opam asks for a different one.
+RUN opam update --yes \
+ && opam pin remove ocaml-base-compiler --yes \
+ && opam switch set-invariant ocaml-base-compiler.5.5.1 --yes \
+ && opam install ocaml-base-compiler.5.5.1 --yes \
+ && opam clean -a -c -s --logs
+
+# Only the package metadata is copied: the dependency set is what belongs in
+# the image, and copying sources would pin the image to one commit of the repo
+# a keeper is about to clone itself.
+#
+# The pins are replayed explicitly. Seven dependencies (mcp_protocol,
+# grpc-direct, grpc-direct-core, ws-direct-core/-eio/-gluten and
+# a bisect_ppx fork) are absent from opam-repository, so `--deps-only` alone
+# fails to solve. opam does not apply the lock file's `pin-depends:` on its own
+# here — see opam-pin-from-lock.sh for what was tried and how each option
+# failed.
+# --chown: COPY writes as root, but this stage runs as `opam`, so the cleanup
+# at the end of the RUN below cannot remove root-owned files.
+COPY --chown=opam:opam masc.opam masc.opam.locked /tmp/masc/
+COPY --chown=opam:opam scripts/opam-pin-from-lock.sh /tmp/opam-pin-from-lock.sh
+# --with-test pulls alcotest / qcheck-* / bisect_ppx, which masc.opam declares
+# under {with-test}. Without it `dune build @check` fails on 258 test stanzas:
+# a keeper that cannot run the suite cannot verify its own change.
+RUN sh /tmp/opam-pin-from-lock.sh /tmp/masc/masc.opam.locked \
+ && opam install --deps-only --with-test --yes /tmp/masc/masc.opam \
+ && opam clean -a -c -s --logs \
+ && rm -rf /tmp/masc /tmp/opam-pin-from-lock.sh
+
+USER root
+
+# Tool dispatch invokes `bash -c`, which reads neither a login profile nor an
+# opam environment, so `eval $(opam env)` never runs. Exporting the switch
+# variables here is what makes the installed packages visible: with only the
+# binaries on PATH, dune runs but every `(libraries yojson ...)` stanza fails
+# with "Library not found" because dune resolves libraries through
+# OPAM_SWITCH_PREFIX.
+#
+# The switch name is fixed by the base image tag above (ocaml-5.5 yields switch
+# "5.5"). The check below fails the build if that stops holding, instead of
+# shipping an image whose dune silently cannot see any library.
+# OPAMROOT is stated here rather than discovered. The entrypoint inherited from
+# the base image is `opam exec --`, and opam looks for its root at $HOME/.opam
+# when nothing says otherwise. masc deliberately overrides HOME to /tmp for
+# every container it starts (keeper_sandbox_runtime_setup.ml, added in #12036 to
+# fix a sandbox UID mismatch), so that lookup goes to /tmp/.opam and finds
+# nothing. The entrypoint then exits 50 with "Opam has not been initialised"
+# before the requested command runs at all, and because masc starts turn
+# containers with --rm the container is gone by the time anything inspects it --
+# the keeper sees "no such object", which names the symptom and not the cause.
+#
+# Where opam lives is a fact about this image, not about whoever runs it. Saying
+# so makes the entrypoint independent of HOME.
+ENV OPAMROOT=/home/opam/.opam \
+    OPAM_SWITCH_PREFIX=/home/opam/.opam/5.5 \
+    OCAML_TOPLEVEL_PATH=/home/opam/.opam/5.5/lib/toplevel \
+    OCAMLTOP_INCLUDE_PATH=/home/opam/.opam/5.5/lib/toplevel \
+    CAML_LD_LIBRARY_PATH=/home/opam/.opam/5.5/lib/stublibs:/home/opam/.opam/5.5/lib/ocaml/stublibs:/home/opam/.opam/5.5/lib/ocaml \
+    PATH=/home/opam/.opam/5.5/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+RUN test -d "${OPAM_SWITCH_PREFIX}/lib/yojson" \
+ || { echo "opam switch prefix drift: ${OPAM_SWITCH_PREFIX} has no lib/yojson" >&2; exit 1; }
+
+# Prove the entrypoint survives the HOME masc actually passes. Running `opam
+# exec` with HOME pointed somewhere empty is the exact shape of a keeper turn,
+# so if OPAMROOT ever stops covering it this fails here rather than in a
+# container that vanishes before anyone can look at it. The version it prints
+# lands in the build log, which is the cheapest place to read what shipped.
+
+# The container runs as the host uid (`--user <uid>:<gid>`), which matches no
+# account in the image, so every path it reads has to be world-readable.
+# /home/opam ships 0750 and the switch below it 0755 -- the parent is what
+# denies, and PATH pointing at ${OPAM_SWITCH_PREFIX}/bin does not help when the
+# directory above it cannot be traversed.
+#
+# Measured 2026-08-26: `docker exec` as the host uid answers
+# "Permission denied" for ${OPAM_SWITCH_PREFIX}/bin/dune, so `dune` is absent
+# from PATH in practice. The live fleet already shows this as
+# "OCI runtime exec failed, exit 127, dune build" -- five occurrences in a
+# 24-hour window on the keepers that do run containers.
+#
+# Traverse and read only: no write bit is added, and the switch stays owned by
+# opam. The build itself still runs as opam and is unaffected.
+RUN chmod o+rx /home/opam \
+ && find /home/opam/.opam -type d -exec chmod o+rx {} + \
+ && test -x "${OPAM_SWITCH_PREFIX}/bin/dune" \
+ || { echo "chmod failed, or ${OPAM_SWITCH_PREFIX}/bin has no dune" >&2; exit 1; }
+
+# The line above says nothing about whether a keeper can reach that dune. It
+# runs as root, and root traverses a directory whether or not o+rx is set -- so
+# it stays green with the chmod deleted, which was measured. What it does catch
+# is the switch moving out from under ${OPAM_SWITCH_PREFIX}, and that is worth
+# catching early. Reachability is asked at the end of this file, as a uid with
+# no account.
+
+VOLUME ["/tmp/keeper-creds"]
+
+# Keeper sandbox: bash + tools (Read/Edit/Bash). SIGTERM lets bash and
+# any in-flight tool process exit gracefully before docker stop escalates.
+STOPSIGNAL SIGTERM
+
+CMD ["/bin/bash"]
+
+# Asked as a uid that matches no account in the image, because that is what a
+# keeper is: masc passes --user <host uid>:<gid> and mounts an /etc/passwd that
+# names it "keeper". Running this check as root would prove nothing -- root
+# ignores the permission bits this is meant to catch, so the chmod above could
+# be deleted and a root-only build would still pass. Deleting it was tried and
+# a root check did stay green.
+#
+# HOME=/tmp is the value masc actually passes (added in #12036 for a sandbox UID
+# mismatch), and the entrypoint inherited from the base image is `opam exec --`,
+# so this line is the whole keeper turn in miniature: the wrong answer here is
+# exit 50 before the keeper's command runs at all. The version it prints lands
+# in the build log, which is the cheapest place to read what shipped.
+USER 60123:60123
+RUN HOME=/tmp opam exec -- dune --version \
+ || { echo "opam exec fails as a uid with no account -- OPAMROOT or the chmod above is not covering it" >&2; exit 1; }
+USER root

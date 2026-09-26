@@ -58,6 +58,7 @@ type diagnostic =
   | Missing_resource_read_max_bytes
   | Invalid_resource_read_max_bytes_type of value_kind
   | Non_positive_resource_read_max_bytes of int
+  | Resource_read_max_bytes_over_inline_boundary of int
   | Unexpected_skill_field of string
   | Invalid_sources_type of value_kind
   | Invalid_source_entry_type of
@@ -192,6 +193,12 @@ let diagnostic_to_string = function
   | Non_positive_resource_read_max_bytes value ->
     Printf.sprintf
       "skills.resource-read-max-bytes must be positive, got %d"
+      value
+  | Resource_read_max_bytes_over_inline_boundary value ->
+    Printf.sprintf
+      "skills.resource-read-max-bytes must be at most %d, the inline tool-result \
+       boundary a resource is returned through, got %d"
+      Common.max_tool_result_wire_bytes
       value
   | Unexpected_skill_field field ->
     Printf.sprintf "skills has unexpected field %S" field
@@ -365,8 +372,13 @@ let resource_read_max_bytes ~required doc =
   match List.assoc_opt resource_read_max_bytes_key doc with
   | None ->
     if required then None, [ Missing_resource_read_max_bytes ] else None, []
-  | Some (Keeper_toml_loader.Toml_int value) when value > 0 -> Some value, []
-  | Some (Toml_int value) -> None, [ Non_positive_resource_read_max_bytes value ]
+  | Some (Keeper_toml_loader.Toml_int value) when value <= 0 ->
+    None, [ Non_positive_resource_read_max_bytes value ]
+  | Some (Toml_int value) when value > Common.max_tool_result_wire_bytes ->
+    (* A resource is returned as one inline tool result. A bound above that
+       boundary only lets a file be read and then refused. *)
+    None, [ Resource_read_max_bytes_over_inline_boundary value ]
+  | Some (Toml_int value) -> Some value, []
   | Some value ->
     None, [ Invalid_resource_read_max_bytes_type (value_kind value) ]
 ;;

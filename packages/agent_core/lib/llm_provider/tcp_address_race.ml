@@ -76,13 +76,17 @@ let connect ~sw ~net addresses =
       match connect_owned ~sw ~net address with
       | socket -> connected := socket :: !connected; socket
       | exception ((Eio.Io _ | Unix.Unix_error _) as exn) ->
-        failures.(index) <- Some (exn, Printexc.get_raw_backtrace ());
+        let bt = Printexc.get_raw_backtrace () in
+        failures.(index) <- Some (exn, bt);
         decr remaining;
         if !remaining = 0
         then (
-          match failures.(Array.length failures - 1) with
-          | Some (last, bt) -> Printexc.raise_with_backtrace last bt
-          | None -> assert false)
+          (* Every attempt has failed, so the last address has a failure;
+             this attempt's own failure stands in only for the type. *)
+          let last, last_bt =
+            Option.value failures.(Array.length failures - 1) ~default:(exn, bt)
+          in
+          Printexc.raise_with_backtrace last last_bt)
         else Eio.Fiber.await_cancel ()
     in
     match

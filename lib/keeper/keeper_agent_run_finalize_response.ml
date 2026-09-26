@@ -105,6 +105,33 @@ let record_turn_boundary
      | exception exn -> not_recorded ~site:"append" (Printexc.to_string exn))
 ;;
 
+(* An official-client turn that failed never reaches [finalize], yet its input
+   is already a fragment of its [turn_ref] and the tools it called may already
+   have acted. Its end line names the turn so a Librarian round reads what it
+   left (RFC librarian-lifecycle §10-3). It saved no checkpoint and kept no
+   assistant text, so the line is [No_atom_history] and the round reads the
+   input and the tool observations. *)
+let record_errored_official_turn_boundary
+      ~config
+      ~meta
+      ~turn_ref
+      ~session
+      ~tool_observations
+      ~history_at_start
+      ~restart_notice_pending
+  =
+  record_turn_boundary
+    ~config
+    ~meta
+    ~turn_ref
+    ~session
+    ~checkpoint_owner:Runtime_execution.Official_client
+    ~tool_observations
+    ~history_at_start
+    ~restart_notice_pending
+    None
+;;
+
 let finalize
     ~config
     ~meta
@@ -398,12 +425,16 @@ let finalize
              Keeper_usage_resolution.Turn_total
            | ( Some _
              , Some
-                 { usage_scope = Runtime_usage_scope.Conversation_cumulative
-                 ; _ } ) ->
+                 ({ usage_scope = Runtime_usage_scope.Conversation_cumulative
+                  ; _ } as observation) ) ->
+             (* The counter is keyed by the runtime that ran the attempt, the
+                key each attempt's spend readings use, so a failed turn and
+                the next successful one resolve against one cursor. The
+                turn's own runtime id can name a lane instead. *)
              (match result.session_resumed with
               | Some resumed ->
                 Keeper_usage_resolution.Conversation_counter
-                  { runtime_id = runtime_id_string
+                  { runtime_id = observation.runtime_id
                   ; conversation_id = result.session_id
                   ; position =
                       (if resumed
@@ -422,6 +453,7 @@ let finalize
       ; run_validation = result.run_validation
       ; stop_reason = result.stop_reason
       ; inference_telemetry = result.response.telemetry
+      ; wire_prompt_tokens = acc.wire_prompt_tokens
       ; tool_surface = acc.tool_surface
       }
 ;;

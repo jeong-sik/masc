@@ -234,7 +234,7 @@ max-concurrent = 1
     { transmitted_atoms = total_atoms - 8
     ; total_atoms
     ; measurement = Turn_record.Wire_shape
-    ; front_atom_digest = (seed ~messages:persisted 8).front_digest
+    ; front_atom_digest = Some ((seed ~messages:persisted 8).front_digest)
     }
   in
   let write_record ~turn response_observed_model_input =
@@ -449,7 +449,7 @@ let test_the_librarian_gap_is_read_from_small_files () =
       { transmitted_atoms = total_atoms - first_atom
       ; total_atoms
       ; measurement = Turn_record.Wire_shape
-      ; front_atom_digest = (seed ~messages:persisted first_atom).front_digest
+      ; front_atom_digest = Some ((seed ~messages:persisted first_atom).front_digest)
       }
     in
     Keeper_turn_record_writer.write

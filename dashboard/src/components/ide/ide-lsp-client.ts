@@ -22,6 +22,7 @@ import {
   TRANSPORT_RETRY_MAX_MS,
 } from '../../config/constants'
 import { DEFAULT_LANGUAGE_ID } from './ide-language'
+import { dashboardBearerToken } from '../../api/core'
 import { ownLspDocument, ownsLspDocument, publishLspDocument, type LspDocumentConnection, type LspDocumentDiagnostics } from './ide-lsp-document-status'
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -31,8 +32,9 @@ import { ownLspDocument, ownsLspDocument, publishLspDocument, type LspDocumentCo
  *
  * `codebase` declares the IDE scope, which fixes the tree the connection's
  * document paths are relative to. `repoId`/`keeper` select that tree
- * independently. Without a codebase the server takes the tree from the
- * client's `rootUri` instead.
+ * independently. Only when none of them is declared may a non-empty client
+ * `rootUri` choose the tree; this client sends none, so the server keeps the
+ * project root.
  */
 export interface LspScope {
   readonly repoId: string | null
@@ -71,7 +73,12 @@ export function lspScopeSnapshot(): LspScope {
   return currentLspScope
 }
 
-function lspScopeQuery(scope: LspScope): string {
+/**
+ * Query string for the LSP socket. The server token-gates the socket because
+ * each connection spawns language servers, and a browser WebSocket cannot set
+ * an Authorization header, so the dashboard bearer rides as `token`.
+ */
+function lspConnectionQuery(scope: LspScope, token: string | null): string {
   const params = new URLSearchParams()
   if (scope.repoId) {
     params.set('repo_id', scope.repoId)
@@ -79,6 +86,7 @@ function lspScopeQuery(scope: LspScope): string {
     params.set('keeper', scope.keeper)
   }
   if (scope.codebase) params.set('codebase', scope.codebase)
+  if (token) params.set('token', token)
   const query = params.toString()
   return query === '' ? '' : `?${query}`
 }
@@ -289,6 +297,10 @@ const hoverTooltipTheme = EditorView.theme({
   },
   '.cm-hover-tooltip strong': {
     color: 'var(--color-fg-primary)',
+  },
+  '.cm-hover-tooltip pre': {
+    margin: '0 0 4px',
+    whiteSpace: 'pre-wrap',
   },
   '.cm-hover-tooltip code': {
     background: 'var(--color-bg-muted)',
@@ -529,7 +541,7 @@ export class LspConnection {
     this.workspaceRoot = null
     this.clearAnalysis(this.document && languageIdFromPath(this.document.filePath) === null ? { kind: 'unsupported' } : { kind: 'connecting' })
     const wsUrl =
-      origin.replace(/^http/, 'ws') + '/api/v1/ide/lsp' + lspScopeQuery(scope)
+      origin.replace(/^http/, 'ws') + '/api/v1/ide/lsp' + lspConnectionQuery(scope, dashboardBearerToken())
     const ws = new WebSocket(wsUrl)
     this.ws = ws
 
@@ -1099,6 +1111,78 @@ const lspConfigField = StateField.define<LspConfig>({
   update(state) { return state },
 })
 
+// ── Hover rendering ──────────────────────────────────────────────
+
+type HoverSection = { readonly kind: 'markdown' | 'plaintext' | 'code'; readonly value: string }
+
+/**
+ * The sections of an LSP Hover's `contents`, in every shape the protocol
+ * allows: MarkupContent, a MarkedString (plain string or
+ * `{ language, value }`), or an array of MarkedStrings. `null` for no
+ * hover, an empty one, or a shape the protocol does not define.
+ */
+export function hoverSections(result: unknown): ReadonlyArray<HoverSection> | null {
+  if (typeof result !== 'object' || result === null) return null
+  const contents = (result as { contents?: unknown }).contents
+  const items = Array.isArray(contents) ? contents : [contents]
+  const sections: HoverSection[] = []
+  for (const item of items) {
+    const section = hoverSection(item)
+    if (section === undefined) return null
+    if (section !== null) sections.push(section)
+  }
+  return sections.length > 0 ? sections : null
+}
+
+/** `undefined` for a shape outside the protocol, `null` for an empty one. */
+function hoverSection(item: unknown): HoverSection | null | undefined {
+  if (typeof item === 'string') return item.trim() === '' ? null : { kind: 'markdown', value: item }
+  if (typeof item !== 'object' || item === null) return undefined
+  const record = item as { kind?: unknown; language?: unknown; value?: unknown }
+  if (typeof record.value !== 'string') return undefined
+  if (record.value.trim() === '') return null
+  if (typeof record.language === 'string') return { kind: 'code', value: record.value }
+  if (record.kind === 'markdown' || record.kind === 'plaintext') return { kind: record.kind, value: record.value }
+  return undefined
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function codeBlockHtml(code: string): string {
+  return `<pre><code>${escapeHtml(code.replace(/\n$/, ''))}</code></pre>`
+}
+
+/**
+ * The small markdown subset language servers put in hovers. Fenced code
+ * blocks come first and keep their line breaks; ocaml-lsp and
+ * typescript-language-server answer with a fenced signature and prose.
+ */
+export function renderHoverMarkdown(markdown: string): string {
+  const parts = markdown.split(/^```[^\n]*\n([\s\S]*?)^```[ \t]*$/m)
+  return parts.map((part, index) => {
+    if (index % 2 === 1) return codeBlockHtml(part)
+    return escapeHtml(part.replace(/^\n+|\n+$/g, ''))
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+      .replace(/^---$/gm, '<hr>')
+      .replace(/^- (.+)$/gm, '• $1')
+      .replace(/\n/g, '<br>')
+      .replace(/<hr><br>/g, '<hr>')
+  }).filter(html => html !== '').join('')
+}
+
+export function hoverContentsHtml(result: unknown): string | null {
+  const sections = hoverSections(result)
+  if (sections === null) return null
+  return sections.map(section => {
+    if (section.kind === 'code') return codeBlockHtml(section.value)
+    if (section.kind === 'plaintext') return escapeHtml(section.value).replace(/\n/g, '<br>')
+    return renderHoverMarkdown(section.value)
+  }).join('<hr>')
+}
+
 // ── View Plugin ──────────────────────────────────────────────────
 
 const lspViewPlugin = ViewPlugin.fromClass(
@@ -1111,6 +1195,9 @@ const lspViewPlugin = ViewPlugin.fromClass(
     private tooltip: HTMLDivElement | null = null
     private hoverClientX = 0
     private hoverClientY = 0
+    /** Bumped by every pointer move and leave, so an answer to an older
+        position is dropped instead of showing where the pointer no longer is. */
+    private hoverSeq = 0
     private boundHoverMove: ((e: MouseEvent) => void) | null = null
     private boundHoverLeave: (() => void) | null = null
 
@@ -1188,11 +1275,13 @@ const lspViewPlugin = ViewPlugin.fromClass(
     private onHoverMove(e: MouseEvent): void {
       this.hoverClientX = e.clientX
       this.hoverClientY = e.clientY
+      this.hoverSeq += 1
       if (this.hoverTimer) clearTimeout(this.hoverTimer)
       this.hoverTimer = setTimeout(() => void this.triggerHover(), LSP_DEBOUNCE_MS)
     }
 
     private onHoverLeave(): void {
+      this.hoverSeq += 1
       if (this.hoverTimer) {
         clearTimeout(this.hoverTimer)
         this.hoverTimer = null
@@ -1212,31 +1301,25 @@ const lspViewPlugin = ViewPlugin.fromClass(
       const filePath = view.state.field(lspConfigField).filePath
       if (!filePath) return
 
+      const seq = this.hoverSeq
       const result = await this.conn.requestHover(filePath, line.number - 1, character)
-      if (!view.dom.isConnected) return
+      if (!view.dom.isConnected || seq !== this.hoverSeq) return
 
-      const hover = result as { contents?: { kind?: string; value?: string } } | null
-      if (!hover?.contents?.value) return
+      const html = hoverContentsHtml(result)
+      if (html === null) { this.hideTooltip(); return }
 
-      this.showTooltip(hover.contents.value, this.hoverClientX, this.hoverClientY)
+      this.showTooltip(html, this.hoverClientX, this.hoverClientY)
     }
 
-    private showTooltip(markdown: string, clientX: number, clientY: number): void {
+    private showTooltip(html: string, clientX: number, clientY: number): void {
       this.hideTooltip()
       const div = document.createElement('div')
       div.className = 'cm-hover-tooltip'
       div.style.visibility = 'hidden'
-      const html = markdown
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/`([^`]+)`/g, '<code>$1</code>')
-        .replace(/^---$/gm, '<hr>')
-        .replace(/^- (.+)$/gm, '• $1')
-        .replace(/\n/g, '<br>')
       div.innerHTML = html
-      document.body.appendChild(div)
+      // Inside the editor, where EditorView.theme scopes its rules. Under
+      // document.body the tooltip had none of them, position included.
+      this.view.dom.appendChild(div)
 
       const PAD = 10
       requestAnimationFrame(() => {

@@ -1,0 +1,87 @@
+# MASC general Keeper sandbox.
+#
+# Built by `masc sandbox-image`, which hands this file to the container
+# runtime's build command -- on stdin where the runtime reads a Dockerfile
+# there, in a directory of its own where it does not. Either way this file is
+# the whole context and there is no COPY, so it builds the same way from an
+# installed binary as from a checkout.
+#
+# General work includes documents, diagrams, slides, audio and video as well
+# as repository edits. These tools are installed before the read-only runtime
+# starts. Project-specific build toolchains still belong in sandbox_image.
+FROM debian:bookworm-slim
+
+# bash: the turn is run as `bash -l -s`, so a shell that is not bash cannot
+#       take one.
+# ripgrep: the Grep tool refuses without `rg` on PATH.
+# git: history and diffs are how a Keeper reports what it changed.
+# ca-certificates, curl: anything that reaches the network at all.
+# less, procps, findutils: what a shell turn reaches for without thinking.
+# gh: MASC mounts a GitHub CLI config into the guest, points GH_CONFIG_DIR at
+#     it, and runs `gh auth status` there as a preflight. Shipping the
+#     credentials and not the program that reads them left a Keeper able to
+#     commit and unable to open a pull request.
+# python3: MASC's own repository-checkout probe runs `python3 -c` in the guest
+#     (keeper_sandbox_remote_checkouts.ml). Without it the probe exits 127 and
+#     the Keeper reports its workspace as unreadable.
+#
+# jq, file, xxd, time, make, iproute2, bind9-dnsutils, python3-yaml, python3-pip,
+# python3-venv: the commands Keepers reached for and did not find, counted over
+# 93,111 Execute records (2026-09-10..24). file alone was called by 12 keepers.
+#
+# PDF/SVG: ReportLab, CairoSVG and Poppler create and inspect real documents.
+# Nanum fonts retain Korean glyphs in rendered output. Pillow handles raster
+# images; Pandoc and Impress produce and render slides; FFmpeg handles media.
+#
+# The shell and checkout prerequisites are not a toolchain choice. They are what MASC itself asks the
+# guest for, and an image that ships without them breaks a contract MASC
+# already made. Which language toolchain a Keeper needs stays the operator's
+# call, named per Keeper with sandbox_image.
+RUN apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+       bash \
+       ca-certificates \
+       curl \
+       file \
+       findutils \
+       ffmpeg \
+       fontconfig \
+       fonts-nanum \
+       libreoffice-impress \
+       pandoc \
+       poppler-utils \
+       gh \
+       iproute2 \
+       jq \
+       git \
+       less \
+       make \
+       procps \
+       python3 \
+       python3-cairosvg \
+       python3-pip \
+       python3-pil \
+       python3-reportlab \
+       python3-venv \
+       python3-yaml \
+       ripgrep \
+       time \
+       xxd \
+       bind9-dnsutils \
+  && rm -rf /var/lib/apt/lists/*
+
+# The container runs as the host operator's uid, which has no entry here. Give
+# that arbitrary uid a readable, writable HOME so a login shell and git both
+# have somewhere to land; the rootfs is read-only at run time apart from this
+# and the mounted workspace.
+RUN mkdir -p /home/keeper && chmod 0777 /home/keeper
+ENV HOME=/home/keeper
+
+# No VOLUME on purpose. MASC's own image declares VOLUME ["/tmp/keeper-creds"],
+# so every container started from it mints an anonymous volume that the removal
+# path has to carry -v to reap; leaving it out here means there is nothing to
+# orphan. Credential bundles are bind-mounted at run time either way.
+#
+# Declared for a reader, not enforced: the run command supplies its own user,
+# workdir and entrypoint.
+CMD ["bash", "-l"]

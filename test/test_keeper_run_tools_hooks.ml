@@ -789,6 +789,73 @@ let test_the_turn_observation_names_its_keeper_turn () =
   | observations -> failf "expected one observation, got %d" (List.length observations)
 ;;
 
+(* What the completion hook writes to the cost ledger for each kind of
+   attempt. An official client that already reported on its stream is
+   repeated by a response with usage, so no row; a response without usage
+   (a host stop) still records the missing usage, under no scope. An
+   AGENT_CORE response is one request; without usage its row has no scope
+   either. *)
+let test_the_completion_hook_rows_by_attempt () =
+  let rows_for ~attempt ~usage =
+    with_temp_base_path @@ fun base_path ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    let config = Masc.Workspace.default_config base_path in
+    let masc_root = Masc.Workspace.masc_root_dir config in
+    let hooks = Masc.Keeper_hooks_agent_core.make_hooks
+        ~config
+        ~meta_ref:(ref (make_meta "ledger-keeper"))
+        ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
+        ~trace_id:"ledger-trace" ~keeper_turn_id:7
+        ~on_after_turn_ordinal:ignore
+        ~current_attempt_usage:(fun () -> attempt)
+        ~trajectory_acc:
+          (Trajectory.create_accumulator
+             ~masc_root ~keeper_name:"ledger-keeper" ~trace_id:"ledger-trace" ())
+        () in
+    let after_turn = match hooks.Agent_core.Hooks.after_turn with
+      | Some hook -> hook | None -> fail "after_turn hook missing" in
+    let response : Agent_core.Types.api_response =
+      { id = "resp-ledger"; model = "model"; stop_reason = Agent_core.Types.EndTurn
+      ; content = [ Agent_core.Types.Text "done" ]; usage; telemetry = None } in
+    ignore (after_turn (Agent_core.Hooks.AfterTurn { turn = 0; response; tool_source_map = None }));
+    Dated_jsonl.read_recent (Cost_ledger.store_of_masc_root masc_root) 10
+    |> List.map (fun json ->
+      match Cost_ledger.of_json json with
+      | Ok { Cost_ledger.usage_projection = Cost_ledger.Raw_observation scope; usage; _ } ->
+        ( Runtime_usage_scope.to_string scope
+        , match usage with
+          | Cost_ledger.Usage_missing -> "missing"
+          | Cost_ledger.Usage_reported _ -> "reported" )
+      | Ok
+          { Cost_ledger.usage_projection =
+              Cost_ledger.Resolved_delta | Cost_ledger.Resolved_attempt_delta _
+          ; _
+          } -> fail "the completion hook wrote a resolved row"
+      | Error error -> failf "cost row: %s" (Cost_ledger.decode_error_to_string error))
+  in
+  let usage : Agent_core.Types.api_usage =
+    { input_tokens = 900; output_tokens = 7; cache_creation_input_tokens = 0
+    ; cache_read_input_tokens = 800; cost_usd = None } in
+  let client ~reported =
+    Some (Masc.Keeper_hooks_agent_core.Client_stream_attempt { reported }) in
+  check (list (pair string string)) "a reported client response is not written again" []
+    (rows_for ~attempt:(client ~reported:true) ~usage:(Some usage));
+  check (list (pair string string)) "a client response without usage after reports"
+    [ "unavailable", "missing" ]
+    (rows_for ~attempt:(client ~reported:true) ~usage:None);
+  check (list (pair string string)) "a client response no report preceded"
+    [ "unavailable", "missing" ]
+    (rows_for ~attempt:(client ~reported:false) ~usage:None);
+  check (list (pair string string)) "an AGENT_CORE response is one request"
+    [ "per_request", "reported" ]
+    (rows_for ~attempt:(Some Masc.Keeper_hooks_agent_core.Agent_core_attempt) ~usage:(Some usage));
+  check (list (pair string string)) "an AGENT_CORE response without usage has no scope"
+    [ "unavailable", "missing" ]
+    (rows_for ~attempt:(Some Masc.Keeper_hooks_agent_core.Agent_core_attempt) ~usage:None)
+;;
+
 let test_plain_tool_commits_before_hook_returns ~success () =
   with_temp_base_path @@ fun base_path ->
   let module Log = Masc.Keeper_tool_call_log in
@@ -1119,8 +1186,8 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
            ~on_after_turn_ordinal:ignore
            ~on_tool_executed:
              (fun
-               ~tool_name:_ ~input:_ ~output_text:_ ~success:_ ~duration_ms:_
-               ~provider:_ ~typed_outcome:_ ->
+               ~tool_name:_ ~input:_ ~output_text:_ ~execution_evidence:_ ~success:_
+               ~duration_ms:_ ~provider:_ ~typed_outcome:_ ->
                serialize (fun () ->
                  incr observation_count;
                  if !observation_count = 1
@@ -1606,6 +1673,54 @@ let test_no_trailing_tool_message_yields_no_receipt () =
     0 (List.length receipts)
 ;;
 
+let navigate = "keeper_compose_browser-navigate-read"
+let follow = "keeper_compose_browser-live-follow-read"
+let github = "keeper_compose_github-pr-read"
+
+let test_skills_block_names_a_deferred_composition_for_search () =
+  check
+    (option string)
+    "a deferred composition not yet loaded is named for keeper_tool_search"
+    (Some
+       ("[Skills] 1 composition tools on this turn — each is one call whose reads \
+         run in parallel: " ^ github
+        ^ "\n[Skills] 2 more composition tools load by name through \
+           keeper_tool_search: " ^ navigate ^ ", " ^ follow))
+    (Masc.Keeper_run_tools_hooks.skill_compositions_block
+       ~compositions:[ navigate; follow; github ]
+       ~deferred:[ navigate; follow ]
+       ~on_the_wire:[ github ])
+;;
+
+(* [keeper_tool_search] extends the running agent's tool set, and the deferred
+   list is fixed for the run. Splitting on the deferred list alone kept the
+   loaded composition on the "load by name" line every round after the load. *)
+let test_skills_block_counts_a_loaded_composition_on_this_turn () =
+  check
+    (option string)
+    "a deferred composition already on the wire is on this turn"
+    (Some
+       ("[Skills] 2 composition tools on this turn — each is one call whose reads \
+         run in parallel: " ^ navigate ^ ", " ^ github
+        ^ "\n[Skills] 1 more composition tools load by name through \
+           keeper_tool_search: " ^ follow))
+    (Masc.Keeper_run_tools_hooks.skill_compositions_block
+       ~compositions:[ navigate; follow; github ]
+       ~deferred:[ navigate; follow ]
+       ~on_the_wire:[ navigate; github ])
+;;
+
+let test_skills_block_is_absent_without_compositions () =
+  check
+    (option string)
+    "no composition tools, no block"
+    None
+    (Masc.Keeper_run_tools_hooks.skill_compositions_block
+       ~compositions:[]
+       ~deferred:[ navigate ]
+       ~on_the_wire:[])
+;;
+
 let () =
   run
     "keeper_run_tools_hooks"
@@ -1721,7 +1836,9 @@ let () =
             test_retained_observation_commits_through_production_hook ] )
     ; ( "turn observation"
       , [ test_case "the turn observation names its keeper turn" `Quick
-            test_the_turn_observation_names_its_keeper_turn ] )
+            test_the_turn_observation_names_its_keeper_turn
+        ; test_case "the completion hook rows by attempt" `Quick
+            test_the_completion_hook_rows_by_attempt ] )
     ; ( "rejected_tool_calls"
       , [ test_case "autonomous plain success commits before completion" `Quick
             (test_plain_tool_commits_before_hook_returns ~success:true)
@@ -1793,6 +1910,14 @@ let () =
             `Quick test_receipts_survive_a_trailing_non_tool_message
         ; test_case "no trailing tool message yields no receipt" `Quick
             test_no_trailing_tool_message_yields_no_receipt
+        ] )
+    ; ( "Skills block"
+      , [ test_case "a deferred composition is named for search" `Quick
+            test_skills_block_names_a_deferred_composition_for_search
+        ; test_case "a loaded composition is on this turn" `Quick
+            test_skills_block_counts_a_loaded_composition_on_this_turn
+        ; test_case "no compositions, no block" `Quick
+            test_skills_block_is_absent_without_compositions
         ] )
     ]
 ;;

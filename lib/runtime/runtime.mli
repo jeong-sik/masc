@@ -64,11 +64,50 @@ type config_durability =
   | Durable
   | Durability_unconfirmed of { detail : string }
 
+(** Where the exact-output registry's targets come from. *)
+type exact_output_target_source =
+  | Runtime_binding_targets
+      (** The exact-output registry builds its targets from this file's HTTP
+          bindings, so a slot's deadline is its provider's
+          [exact-body-timeout-s]. *)
+  | Replacement_catalog_targets of { path : string }
+      (** [AGENT_CORE_MODEL_CATALOG] names a full replacement catalog; its
+          [[targets]] rows are the whole target set and carry their own
+          [body_timeout_s]. Binding fields in runtime.toml,
+          [exact-body-timeout-s] among them, do not reach those targets. *)
+
+(** What a config commit did to the exact-output registry. *)
+type exact_output_registry_application =
+  | Exact_output_registry_replaced of { origin : exact_output_target_source }
+      (** A registry rebuilt from the committed text was published with the
+          write. *)
+  | Exact_output_registry_unpublished
+      (** No registry was published, and a commit does not publish the first
+          one: exact lanes stay unavailable until a restart publishes one. *)
+  | Exact_output_registry_kept of
+      { reason : Runtime_exact_output_registry.publication_error }
+      (** The committed text does not rebuild the registry and neither did
+          the file it replaced, so the fault predates the commit. The
+          published registry stays as it was and no longer describes the
+          file, and the file on disk publishes no registry at the next boot.
+          {!exact_output_registry_stale} records it for health until a
+          commit replaces the registry. *)
+
+(** The registry a config commit kept because neither the committed text nor
+    the file it replaced rebuilds one. It keeps serving, but the file on disk
+    publishes no registry at the next boot. *)
+type exact_output_registry_stale =
+  { stale_reason : Runtime_exact_output_registry.publication_error
+  ; stale_since_commit : config_commit_order
+        (** The first commit that kept it; later kept commits do not move it. *)
+  }
+
 type config_commit_receipt = private
   { observation : config_observation
   ; durability : config_durability
   ; order : config_commit_order
   ; lock_warnings : config_lock_warning list
+  ; exact_output_registry : exact_output_registry_application
   }
 
 and config_lock_warning =
@@ -232,6 +271,37 @@ type resolution_failure =
     reason when one was declared under that id, [None] when nothing declared
     it. *)
 
+type exact_slot_body_deadline_gap =
+  { lane_id : string
+  ; slot_id : string
+  ; provider_id : string
+  }
+(** One [\[runtime.exact_output_lanes.<lane>\]] [slots] entry that names an
+    HTTP runtime whose provider declares no [exact-body-timeout-s] (rule 3,
+    #38779). Not collected under {!Replacement_catalog_targets}. *)
+
+type exact_slot_degradation =
+  { gaps : exact_slot_body_deadline_gap list
+  ; emptied_lane_ids : string list
+        (** Lanes whose every slot is a gap and that declare no cli_slots.
+            Each is unavailable on its own; the other lanes still publish. *)
+  }
+
+val exact_slot_body_deadline_gap_to_string : exact_slot_body_deadline_gap -> string
+(** One line naming the lane table, the slot, the provider and the key to add. *)
+
+type exact_lane_cli_slot_not_official_client =
+  { lane_id : string
+  ; slot_id : string
+  ; provider_id : string
+  }
+(** One [\[runtime.exact_output_lanes.<lane>\]] [cli_slots] entry that names a
+    configured runtime dispatched over HTTP ([Agent_core]) rather than an
+    official client. Every lane's [cli_slots] dispatches through
+    {!Keeper_lane_cli_oneshot.run} alone, which requires
+    {!Runtime_execution.Official_client}; an id that resolves to nothing
+    instead is {!Reference_unresolved}, not this. *)
+
 type load_failure =
   | Toml_unparsable of Runtime_toml.parse_error list
   | Undeclared_bindings of (string * drop_reason) list
@@ -251,16 +321,32 @@ type load_failure =
       ; execution_model : string
       ; declared_model : string
       }
+  | Exact_slot_body_deadlines_absent of exact_slot_body_deadline_gap list
+      (** The exact-output slots a save would add on an HTTP provider that
+          declares no [exact-body-timeout-s], compared with the file on disk.
+          A gap the file already has does not refuse the save; a load keeps
+          every gap as degraded state ({!exact_slot_degradation}) and the
+          exact-output registry leaves those slots out. *)
   | Context_marks_exceed_max_context of
       { runtime_id : string
       ; high_water_tokens : int
       ; max_context : int
       }
+  | Exact_lane_cli_slot_not_official_client of exact_lane_cli_slot_not_official_client
       (** Why {!load_list} refused a configuration. Closed, so a consumer
           decides per case instead of matching rendered text — the contract
           {!drop_reason} keeps one level down. [Toml_unparsable] is the one case
           whose text comes from the parser and can quote operator input; the
           rest name ids and config keys this repository authored. *)
+
+val agent_core_model_catalog_env_var_name : string
+
+val exact_output_target_source :
+  ?env:(string -> string option) -> unit -> exact_output_target_source
+(** One answer for both readers: configuration load decides whether rule 3
+    (exact slot body deadline) applies, and {!exact_output_resolver_catalog}
+    decides which catalog the exact-output registry reads, at boot and on
+    every config commit. A blank value names no file. *)
 
 val to_diagnostic_text : config_path:string -> load_failure -> string
 (** The operator-facing account of a refused configuration, and the wording the
@@ -330,7 +416,16 @@ type strict_init_error =
 
 val strict_init_error_to_string : strict_init_error -> string
 val startup_degradation_to_string : startup_degradation -> string
-val startup_degradation_to_yojson : startup_degradation option -> Yojson.Safe.t
+val startup_degradation_to_yojson :
+  exact_slots:exact_slot_degradation ->
+  exact_registry_stale:exact_output_registry_stale option ->
+  startup_degradation option ->
+  Yojson.Safe.t
+(** The one startup report health, the runtime inventory and the dashboard
+    read. Catalog-missing bindings and exact slots without a body deadline
+    both make it [degraded]; the gaps and the lanes they empty are listed in
+    every shape, and [status_reasons]/[operator_action_reasons] name every
+    cause present. *)
 
 val load_list :
   config_path:string
@@ -366,14 +461,76 @@ val init_default : config_path:string -> (unit, string) result
     callers or {!init_default_degraded_report} for server boot). Safe for tests
     with arbitrary-model runtime fixtures. *)
 
+val exact_output_targets : t list -> Agent_core.Exact_output.declared_target list
+(** The exact-output slots of [runtimes]: every HTTP binding, carried whole with
+    its resolved credential and its [exact-body-timeout-s]. Official-client
+    runtimes do no exact output and are left out. *)
+
+type exact_output_catalog =
+  { catalog_input : Agent_core.Exact_output.resolver_catalog_input
+  ; catalog_origin : exact_output_target_source
+  ; catalog_description : string  (** A phrase naming it for the publication log. *)
+  ; catalog_exact_slots : exact_slot_degradation
+        (** What rule 3 leaves out of this build: the gap slots, which are not
+            targets, and the lanes they empty, which the registry does not
+            require. The same function [set_loaded] records for the startup
+            report. *)
+  }
+
+val exact_output_resolver_catalog :
+  exact_output_lane_decls:Runtime_schema.exact_output_lane_decl list ->
+  t list ->
+  exact_output_catalog
+(** The catalog an exact-output resolver snapshot for [runtimes] is built from.
+    {!exact_output_target_source} decides: the full replacement
+    [AGENT_CORE_MODEL_CATALOG] names, or the embedded catalog with
+    {!exact_output_targets} as its targets, less every slot rule 3 leaves out
+    for [exact_output_lane_decls]. Boot, every config commit, the save preview
+    and the on-disk rebuild check read this one derivation, and pass
+    [catalog_exact_slots.emptied_lane_ids] as the lanes excused from the
+    required set. *)
+
+val report_exact_output_registry : Runtime_exact_output_registry.t -> unit
+(** Log what [registry] left out: targets whose binding has no catalog row,
+    rejected lane slots (a slot rule 3 left out is counted, not diagnosed
+    again), [verifier_exact] slots that cannot judge, and the optional lanes
+    with nothing admitted. Boot runs it after publishing and every config
+    commit that replaces the registry runs it when what it reports changed
+    (a kept registry's rejected slots are listed, not diagnosed, because it
+    was built from an earlier text). The rule-3 slots and lanes themselves
+    are named by {!warn_exact_slot_degradation}. *)
+
+val warn_exact_slot_degradation : exact_slot_degradation -> unit
+(** One WARN per exact slot rule 3 leaves out and one per lane it empties.
+    Boot logs it before publishing, so it is said even when the registry
+    cannot be published. A config commit logs it after the write: a save
+    refuses only the gaps it adds, so the text it commits can keep gaps the
+    file already had. *)
+
+val load_exact_output_resolver_snapshot :
+  Agent_core.Exact_output.resolver_catalog_input ->
+  ( Agent_core.Exact_output.resolver_snapshot
+  , Agent_core.Exact_output.resolver_snapshot_error )
+  result
+(** Build a resolver snapshot from [catalog], excluding targets whose provider
+    or model has no catalog row. *)
+
 val publish_exact_output_registry :
   ?required_lane_ids:string list ->
+  ?excused_lane_ids:string list ->
   lanes:Runtime_schema.exact_output_lane_decl list ->
   Agent_core.Exact_output.resolver_snapshot ->
   (Runtime_exact_output_registry.t, string) result
 (** Publish one immutable AGENT_CORE resolver-and-lane snapshot and return that exact
-    publication. [required_lane_ids] must each retain an admitted slot; that
-    validation happens before the global publication changes. *)
+    publication. [required_lane_ids] must each retain an admitted slot, less
+    [excused_lane_ids] (the lanes rule 3 emptied); that validation happens
+    before the global publication changes. *)
+
+val unpublish_exact_output_registry :
+  unit -> (unit, Runtime_exact_output_registry.publication_error) result
+(** Withdraw the published exact-output registry and clear
+    {!exact_output_registry_stale}, since no kept registry serves any more.
+    Refuses, changing nothing, while a replacement reservation is active. *)
 
 val init_default_strict : config_path:string -> (unit, string) result
 (** Fail-closed startup entry point: {!init_default} plus the capability check
@@ -427,6 +584,20 @@ val get_runtimes : unit -> t list
 val get_runtime_ids : unit -> string list
 val startup_degradation : unit -> startup_degradation option
 val startup_degraded : unit -> bool
+
+val exact_output_registry_stale : unit -> exact_output_registry_stale option
+(** [Some] from a config commit that kept the exact-output registry until a
+    commit replaces it, leaves none published, or boot publishes one. The
+    startup report lists it as [exact_output_registry_stale] and names
+    [exact_output_registry_stale] in its reasons. *)
+
+val exact_slot_degradation : unit -> exact_slot_degradation
+(** The gaps of the loaded file and the lanes they empty. *)
+
+val exact_slot_body_deadline_gaps : unit -> exact_slot_body_deadline_gap list
+(** The exact slots the loaded file declares on a provider without
+    [exact-body-timeout-s], computed when the file was loaded. Boot does not
+    refuse the file for them; the exact-output registry leaves them out. *)
 val runtimes_and_media_failover : unit -> t list * string list
 (** Atomically consistent snapshot of configured runtimes plus
     [\[runtime\].media_failover]. Use when both values drive one routing
@@ -826,8 +997,17 @@ val remove_egress_allow_text : string -> keeper_name:string -> string
 val save_config_text :
   ?runtime_config_path:string -> string -> (config_commit_receipt, string) result
 (** Validate raw runtime.toml and prepare its exact-output replacement without
-    changing or credential-resolving the active frozen registry. The writer
-    then reserves that exact base and atomically replaces the file. A failure
+    changing the active registry: a resolver snapshot built from the catalog
+    {!exact_output_resolver_catalog} names for the runtimes this text loads,
+    with every lane admitted against it. When the targets are the runtime
+    bindings, a changed binding field such as [exact-body-timeout-s] is what
+    the replacement carries; under a full replacement catalog it is not, and
+    the receipt says so ([Replacement_catalog_targets]). A text the
+    registry cannot be rebuilt from is refused before the write when the file
+    it replaces rebuilds; when that file does not either, the write goes
+    through, the published registry is kept, and the receipt carries
+    [Exact_output_registry_kept]. The writer then reserves that exact base and
+    atomically replaces the file. A failure
     before rename leaves the published registry and runtime cache unchanged.
     Once rename is visible, the prepared immutable registry and runtime cache
     are synchronously converged even when parent-directory fsync fails; that
@@ -861,7 +1041,8 @@ val validate_config_text :
   ?runtime_config_path:string -> string -> (unit, string) result
 (** Run the raw runtime.toml save precondition — TOML parse, ordered Skill
     source validation, config materialization, dispatch-cap validation, the
-    [\[fusion\]] section, and the Fusion seats {!save_config_text} judges —
+    [\[fusion\]] section, the Fusion seats {!save_config_text} judges, and
+    the exact-output registry replacement it prepares —
     without writing or mutating the active
     registry. Preview endpoints call
     this so [can_save] reflects the same rejection {!save_config_text}

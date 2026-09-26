@@ -154,6 +154,7 @@ type success =
   ; output : Yojson.Safe.t
   ; provenance : plan_provenance
   ; raw_response : raw_response
+  ; usage : Types.api_usage option
   }
 
 type flow_candidate_identity =
@@ -653,7 +654,7 @@ let wire_admission_error_disposition = function
   | Global_admission_not_allowed
   | Invalid_connect_timeout
   | Invalid_body_timeout
-  | Missing_deadline
+  | Missing_deadline _
   | Context_limit_unavailable
   | Invalid_context_limit
   | Unsupported_target_model _ -> Runtime_contract_rejected
@@ -856,6 +857,30 @@ let refusal_reason = function
   | Http_client.ProviderFailure { kind; message } ->
     Http_client.provider_failure_to_string ~kind ~message
 
+(* The provider a deadline refusal names, rendered for a line a person
+   reads. [None] is said as such rather than left blank: a config with no
+   provider id is a fact about that config, not a missing word. The whole
+   detail is quoted where it lands in a reason line, so the id is not. *)
+let missing_deadline_provider_label = function
+  | Some provider_id -> provider_id
+  | None -> "(config names no provider)"
+;;
+
+(* What a deadline refusal tells an operator to do. The target's body
+   deadline has two spellings, one per surface that declares targets: a
+   runtime.toml provider's [exact-body-timeout-s], and a replacement
+   catalog's [[targets]] row [body_timeout_s]. Which one built this target
+   is not known here, so both are named. The connect deadline is named
+   because it is what an operator who set one expects to have been enough. *)
+let missing_deadline_detail provider_id =
+  Printf.sprintf
+    "provider %s declares no whole-request deadline: set exact-body-timeout-s \
+     on that provider in runtime.toml, or body_timeout_s on its \
+     AGENT_CORE_MODEL_CATALOG [[targets]] row. connect-timeout-s ends when the \
+     response headers arrive and does not bound the response body"
+    (missing_deadline_provider_label provider_id)
+;;
+
 let wire_admission_error_evidence_json = function
   | Capability_snapshot_missing ->
     `Assoc [ "kind", `String "capability_snapshot_missing" ]
@@ -866,7 +891,13 @@ let wire_admission_error_evidence_json = function
     `Assoc [ "kind", `String "global_admission_not_allowed" ]
   | Invalid_connect_timeout -> `Assoc [ "kind", `String "invalid_connect_timeout" ]
   | Invalid_body_timeout -> `Assoc [ "kind", `String "invalid_body_timeout" ]
-  | Missing_deadline -> `Assoc [ "kind", `String "missing_deadline" ]
+  | Missing_deadline { provider_id } ->
+    `Assoc
+      [ "kind", `String "missing_deadline"
+      ; ( "provider_id"
+        , Option.fold ~none:`Null ~some:(fun value -> `String value) provider_id )
+      ; "detail", `String (missing_deadline_detail provider_id)
+      ]
   | Caller_supplied_header_not_allowed ->
     `Assoc [ "kind", `String "caller_supplied_header_not_allowed" ]
   | Unsupported_image_input -> `Assoc [ "kind", `String "unsupported_image_input" ]
@@ -946,7 +977,10 @@ let wire_admission_error_reason = function
   | Global_admission_not_allowed -> "global_admission_not_allowed"
   | Invalid_connect_timeout -> "invalid_connect_timeout"
   | Invalid_body_timeout -> "invalid_body_timeout"
-  | Missing_deadline -> "missing_deadline"
+  | Missing_deadline { provider_id } ->
+    Printf.sprintf
+      "missing_deadline(%s)"
+      (quoted_dynamic (missing_deadline_detail provider_id))
   | Caller_supplied_header_not_allowed ->
     "caller_supplied_header_not_allowed"
   | Unsupported_image_input -> "unsupported_image_input"
@@ -1686,6 +1720,29 @@ let provider_refusal_of_api_error : Retry.api_error -> provider_refusal = functi
   | Retry.Timeout _ -> Timeout
 ;;
 
+(* The candidate-fault judgment projects onto the flow's collapsed refusal
+   vocabulary. [provider_refusal] folds [Retry.InvalidRequest]'s five reasons
+   to one [Invalid_request]; that collapsed refusal is the un-attributed one,
+   and [Refusal_body_not_received] is the unread one. A new [provider_refusal]
+   constructor stops compilation here, so the two walks stay on one judgment
+   (RFC-one-slot-fault-judgment-for-every-walk.md, #38472). *)
+let candidate_fault_of_provider_refusal : provider_refusal -> Candidate_fault.t = function
+  | Request_body_refused -> Binding Body_limit
+  | Refusal_body_not_received -> Binding Refusal_unread
+  | Rate_limited -> Binding Rate_limit
+  | Overloaded -> Binding Capacity
+  | Server_error -> Binding Server
+  | Auth_failed -> Binding Credential
+  | Authorization_refused -> Binding Credential
+  | Payment_required -> Binding Account
+  | Invalid_request -> Unattributed
+  | Not_found -> Binding Model_absent
+  | Context_overflow -> Binding Window
+  | Input_capacity -> Binding Admission
+  | Network_error -> Unknown_after_dispatch
+  | Timeout -> Binding Deadline
+;;
+
 let execution_error_cause ~http_status ~dispatch = function
   | Exec.Clock_required_for_timeout -> Clock_required_for_timeout
   | Exec.Frozen_request_mismatch -> Frozen_request_mismatch
@@ -1783,6 +1840,10 @@ let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
       in
       record_provider_trace receipt provider_trace;
       publish ();
+      (* The wire's response parser already read the usage report when it
+         built [outcome.response], from the same parse that produced the
+         output; the body is not read a second time for it. *)
+      let usage = Types.usage_of_response outcome.response in
       (match outcome.output with
        | Exec.Json_output { value; _ } ->
          Ok
@@ -1791,6 +1852,7 @@ let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
            ; output = value
            ; provenance = ready.provenance
            ; raw_response = raw_response evidence
+           ; usage
            }
        | Exec.Text_output text ->
          (match ready.provenance.actual_assurance, Plan.response_format ready.plan with
@@ -1803,6 +1865,7 @@ let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
                  ; output = value
                  ; provenance = ready.provenance
                  ; raw_response = raw_response evidence
+                 ; usage
                  }
              with
              | Yojson.Json_error _ ->
@@ -1915,11 +1978,21 @@ let execution_failure_may_advance (error : execution_error) =
      the reasoning field (2026-08-16/08-27). *)
   | Missing_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
-  (* The remaining refusals do not advance, as before this classification
-     existed ([Payment_required] and [Context_overflow] were promoted above:
-     the successor bills a different account, or carries its own window).
-     Promoting any other one needs its own argument about whether the
-     successor can serve the same input. *)
+  (* One closed judgment decides whose affair a refusal is (Candidate_fault,
+     RFC-one-slot-fault-judgment-for-every-walk.md, #38472). §3.3: 401·403·404
+     are this binding's affair — the key, permission, or model is missing
+     here, not in the request — so the successor carries its own and may serve
+     the same input. §3.4: an un-attributed refusal (the collapsed
+     Invalid_request) is advanced too, since no response yet proves the input
+     itself is what failed. §2.1: Refusal_body_not_received is the unread
+     refusal. Exact requests have no tools, so advancing cannot double an
+     effect. *)
+  | Provider_response_refused { refusal; _ }, Response_received
+    when (match candidate_fault_of_provider_refusal refusal with
+          | Candidate_fault.Binding _ | Candidate_fault.Unattributed -> true
+          | Candidate_fault.Unknown_after_dispatch -> false) ->
+    receipt_dispatch_count error.receipt = 1
+  (* The remaining transport and non-advance refusals do not advance. *)
   | ( Provider_response_refused
         { refusal =
             ( Auth_failed
@@ -1932,7 +2005,7 @@ let execution_failure_may_advance (error : execution_error) =
             | Timeout )
         ; _
         }
-    , (Not_started | Before_dispatch | Dispatch_started | Response_received | Terminal) )
+    , (Not_started | Before_dispatch | Dispatch_started | Terminal) )
   | Completion_failed _, (Not_started | Dispatch_started | Response_received | Terminal)
   | Response_body_deadline_exceeded,
       (Not_started | Before_dispatch | Dispatch_started | Terminal)
@@ -1956,7 +2029,8 @@ let execution_failure_may_advance (error : execution_error) =
       | Ambiguous_output _
       | Unexpected_output_content
       | Internal_non_json_output )
-    , _ ) -> false
+    , _ )
+  | ( Provider_response_refused _, _ ) -> false
 ;;
 
 let candidate_rejection_may_advance (receipt : candidate_rejection_receipt) =
@@ -2175,4 +2249,277 @@ let execute_flow_once
         Flow_exact_execution_failed { candidate; cause; evidence }
     in
     terminal prior_rejections cause
+;;
+
+(* Text renderers for the exact-output error family (#27861). They exist so a
+   consumer never reimplements this classification or drops a payload behind
+   [_]: every match below is exhaustive with no catch-all, so a new
+   constructor is a compile error here. Numeric fields are printed because
+   they are what tells a local capacity refusal from a provider outage. The
+   strings are for logs and operator lines only; nothing may branch on them.
+   A transport error is rendered by its typed kind, never by its message,
+   because a message can echo request material. A raw provider body is
+   rendered by the caller's [raw_response_to_string]: AGENT_CORE offers only
+   the sha256 ([raw_response_sha256_to_string]), and a consumer that owns a
+   redactor may pass a redacted excerpt instead. *)
+
+let optional_token_count_to_string = function
+  | None -> "unknown"
+  | Some tokens -> string_of_int tokens
+;;
+
+let token_capacity_rejection_to_string : token_capacity_rejection -> string = function
+  | Capacity_evidence_not_yet_valid { now_unix_s; checked_at_unix_s } ->
+    Printf.sprintf
+      "capacity evidence not yet valid (now=%d checked_at=%d)"
+      now_unix_s
+      checked_at_unix_s
+  | Capacity_evidence_expired { now_unix_s; expires_at_unix_s } ->
+    Printf.sprintf
+      "capacity evidence expired (now=%d expires_at=%d)"
+      now_unix_s
+      expires_at_unix_s
+  | Capacity_boundary_unknown { input_tokens; accepted_through_tokens; rejected_from_tokens }
+    ->
+    Printf.sprintf
+      "capacity boundary unknown (input=%d accepted_through=%d rejected_from=%s)"
+      input_tokens
+      accepted_through_tokens
+      (optional_token_count_to_string rejected_from_tokens)
+  | Capacity_input_rejected { input_tokens; accepted_through_tokens; rejected_from_tokens }
+    ->
+    Printf.sprintf
+      "capacity input rejected (input=%d accepted_through=%d rejected_from=%d)"
+      input_tokens
+      accepted_through_tokens
+      rejected_from_tokens
+;;
+
+let input_capacity_disposition_to_string : input_capacity_disposition -> string =
+  function
+  | Token_measurement_required { accepted_through_tokens; rejected_from_tokens } ->
+    Printf.sprintf
+      "token measurement required (accepted_through=%d rejected_from=%s)"
+      accepted_through_tokens
+      (optional_token_count_to_string rejected_from_tokens)
+  | Context_window_exceeded { input_tokens; reserved_output_tokens; max_context_tokens } ->
+    Printf.sprintf
+      "context window exceeded (input=%d reserved_output=%d max_context=%d)"
+      input_tokens
+      reserved_output_tokens
+      max_context_tokens
+  | Token_capacity_rejected rejection -> token_capacity_rejection_to_string rejection
+;;
+
+let candidate_rejection_disposition_to_string
+  : candidate_rejection_disposition -> string
+  = function
+  | Runtime_slot_unavailable -> "runtime slot unavailable"
+  | Runtime_contract_rejected -> "runtime contract rejected"
+  | Input_contract_rejected -> "input contract rejected"
+  | Output_requirement_rejected -> "output requirement rejected"
+  | Input_capacity disposition -> input_capacity_disposition_to_string disposition
+  | Request_preparation_failed -> "request preparation failed"
+;;
+
+let http_error_kind_to_string : Http_client.http_error -> string = function
+  | Http_client.HttpError { code; body = _; retry_after_header = _ } ->
+    Printf.sprintf "http_status=%d" code
+  | Http_client.NetworkError { kind; message = _ } ->
+    "network_error:" ^ Http_client.network_error_kind_to_string kind
+  | Http_client.TimeoutError { phase; message = _ } ->
+    "timeout:" ^ Http_client.timeout_phase_to_label phase
+  | Http_client.AcceptRejected { reason = _ } -> "accept_rejected"
+  | Http_client.ProviderTerminal { kind = Http_client.Session_conflict; message = _ } ->
+    "provider_terminal:session_conflict"
+  | Http_client.ProviderTerminal { kind = Http_client.Other subtype; message = _ } ->
+    "provider_terminal:" ^ subtype
+  | Http_client.ProviderFailure { kind; message = _ } ->
+    Http_client.provider_failure_kind_to_string kind
+;;
+
+let generation_dispatch_fact_to_string : generation_dispatch_fact -> string = function
+  | No_generation_dispatch -> "not sent"
+  | Generation_dispatch_started -> "sent"
+;;
+
+let execution_error_cause_to_string : execution_error_cause -> string = function
+  | Attempt_already_started -> "attempt already started"
+  | Clock_required_for_timeout -> "clock required for timeout"
+  | Frozen_request_mismatch -> "frozen request mismatch"
+  | Completion_failed { error; dispatch } ->
+    Printf.sprintf
+      "completion failed (%s, %s)"
+      (http_error_kind_to_string error)
+      (generation_dispatch_fact_to_string dispatch)
+  | Response_body_deadline_exceeded ->
+    "total request deadline exceeded while reading response body"
+  | Provider_response_refused { http_status; refusal } ->
+    Printf.sprintf
+      "provider refused (http_status=%d refusal=%s)"
+      http_status
+      (provider_refusal_to_string refusal)
+  | Incomplete_output -> "incomplete output"
+  | Missing_output -> "missing output"
+  | Ambiguous_output count -> Printf.sprintf "ambiguous output (candidates=%d)" count
+  | Unexpected_output_content -> "unexpected output content"
+  | Invalid_json_output -> "invalid json output"
+  | Internal_non_json_output -> "internal non-json output"
+;;
+
+let start_attempt_error_to_string : start_attempt_error -> string = function
+  | Call_id_generation_failed detail ->
+    Printf.sprintf "call_id_generation_failed detail=%S" detail
+;;
+
+let measurement_start_error_to_string : measurement_start_error -> string = function
+  | Measurement_operation_id_generation_failed detail ->
+    Printf.sprintf "operation_id_generation_failed detail=%S" detail
+  | Measurement_clock_required_for_timeout -> "measurement_clock_required_for_timeout"
+;;
+
+let candidate_rejection_to_string (rejection : candidate_rejection_receipt) =
+  Printf.sprintf
+    "slot=%s %s cause=%s"
+    rejection.visit.identity.candidate_id
+    (candidate_rejection_disposition_to_string
+       (candidate_rejection_disposition rejection))
+    (candidate_rejection_reason rejection)
+;;
+
+let flow_advance_failure_to_string
+  : flow_advance_failure_snapshot -> string * string
+  = function
+  | Flow_advance_candidate_rejected rejection ->
+    ( rejection.visit.identity.candidate_id
+    , "candidate_rejected cause=" ^ candidate_rejection_reason rejection )
+  | Flow_advance_execution_failed { candidate; cause; raw_response_sha256 } ->
+    let sha =
+      match raw_response_sha256 with
+      | None -> ""
+      | Some sha -> Printf.sprintf " raw_response_sha256=%s" sha
+    in
+    ( candidate.visit.identity.candidate_id
+    , Printf.sprintf
+        "execution_failed cause=%s%s"
+        (execution_error_cause_to_string cause)
+        sha )
+;;
+
+let flow_evidence_to_string (evidence : flow_evidence) =
+  let attempts =
+    List.map
+      (fun (attempt : flow_attempt_snapshot) ->
+         Printf.sprintf
+           "slot=%s call_id=%s"
+           attempt.visit.identity.candidate_id
+           (call_id_to_string (generation_receipt_snapshot_call_id attempt.receipt)))
+      evidence.attempts
+  in
+  let advances =
+    List.map
+      (fun (advance : flow_advance_receipt) ->
+         let failed_slot, failure_kind = flow_advance_failure_to_string advance.failed in
+         Printf.sprintf
+           "advance=%s->%s kind=%s"
+           failed_slot
+           advance.next.identity.candidate_id
+           failure_kind)
+      evidence.advances
+  in
+  match attempts @ advances with
+  | [] -> "no candidate attempt or advance was recorded"
+  | details -> String.concat "; " details
+;;
+
+let raw_response_sha256_to_string : raw_response option -> string = function
+  | None -> "raw_response_sha256=none"
+  | Some raw -> "raw_response_sha256=" ^ raw.body_sha256
+;;
+
+let execution_error_to_string
+      ~(raw_response_to_string : raw_response option -> string)
+      (error : execution_error)
+  =
+  Printf.sprintf
+    "call_id=%s cause=%s %s"
+    (call_id_to_string error.call_id)
+    (execution_error_cause_to_string error.cause)
+    (raw_response_to_string error.raw_response)
+;;
+
+let flow_candidate_failure_to_string ~raw_response_to_string
+  : flow_candidate_failure -> string
+  = function
+  | Flow_candidate_rejected rejection ->
+    "candidate_rejected " ^ candidate_rejection_to_string rejection
+  | Flow_candidate_execution_failed { candidate; cause } ->
+    Printf.sprintf
+      "execution_failed slot=%s %s"
+      candidate.visit.identity.candidate_id
+      (execution_error_to_string ~raw_response_to_string cause)
+;;
+
+let flow_execution_error_to_string
+      ~(callback_error_to_string : 'callback_error -> string)
+      ~(raw_response_to_string : raw_response option -> string)
+      (error : 'callback_error flow_execution_error)
+  =
+  let with_flow evidence detail =
+    Printf.sprintf "%s; flow=[%s]" detail (flow_evidence_to_string evidence)
+  in
+  match error with
+  | Flow_attempt_already_started evidence -> with_flow evidence "attempt_already_started"
+  | Flow_attempt_start_failed { candidate; cause; evidence } ->
+    with_flow
+      evidence
+      (Printf.sprintf
+         "attempt_start_failed: slot=%s cause=%s"
+         candidate.identity.candidate_id
+         (start_attempt_error_to_string cause))
+  | Flow_measurement_start_failed { candidate; cause; evidence } ->
+    with_flow
+      evidence
+      (Printf.sprintf
+         "measurement_start_failed: slot=%s cause=%s"
+         candidate.identity.candidate_id
+         (measurement_start_error_to_string cause))
+  | Flow_before_measurement_dispatch_callback_failed { measurement; cause; evidence } ->
+    with_flow
+      evidence
+      (Printf.sprintf
+         "before_measurement_dispatch_callback_failed: slot=%s cause=%s"
+         measurement.visit.identity.candidate_id
+         (callback_error_to_string cause))
+  | Flow_measurement_terminal_callback_failed { measurement; cause; evidence } ->
+    with_flow
+      evidence
+      (Printf.sprintf
+         "measurement_terminal_callback_failed: slot=%s cause=%s"
+         measurement.visit.identity.candidate_id
+         (callback_error_to_string cause))
+  | Flow_before_dispatch_callback_failed { candidate; cause; evidence } ->
+    with_flow
+      evidence
+      (Printf.sprintf
+         "before_dispatch_callback_failed: slot=%s cause=%s"
+         candidate.visit.identity.candidate_id
+         (callback_error_to_string cause))
+  | Flow_before_advance_callback_failed { failed; next; cause; evidence } ->
+    with_flow
+      evidence
+      (Printf.sprintf
+         "before_advance_callback_failed: failed=[%s] next=%s cause=%s"
+         (flow_candidate_failure_to_string ~raw_response_to_string failed)
+         next.identity.candidate_id
+         (callback_error_to_string cause))
+  | Flow_candidates_exhausted { rejection; evidence } ->
+    with_flow evidence ("candidates_exhausted: " ^ candidate_rejection_to_string rejection)
+  | Flow_exact_execution_failed { candidate; cause; evidence } ->
+    with_flow
+      evidence
+      (Printf.sprintf
+         "execution_failed: slot=%s %s"
+         candidate.visit.identity.candidate_id
+         (execution_error_to_string ~raw_response_to_string cause))
 ;;

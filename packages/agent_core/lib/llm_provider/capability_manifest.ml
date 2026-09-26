@@ -44,6 +44,11 @@ type entry =
   ; supports_audio_input : bool option
   ; supports_video_input : bool option
   ; supports_document_input : bool option
+  ; modality_priority : string option
+    (** Canonical multimodal block ordering policy (preserve_input_order /
+        visual_first, plus the catalog's hyphenated aliases), validated
+        against {!Capability_vocab.modality_priority_values}. Parsed + applied
+        in {!Capabilities.apply_manifest_entry}. *)
   ; supports_native_streaming : bool option
   ; supports_system_prompt : bool option
   ; supports_prompt_caching : bool option
@@ -82,6 +87,13 @@ type entry =
     (** Optional multi-turn reasoning replay policy override (default / no_replay
         / drop_without_tool / preserve_always); applied in
         {!Capabilities.apply_manifest_entry}. *)
+  ; emits_usage_tokens : bool option
+    (** Whether the standard response carries usage tokens. [None] inherits
+        the base preset's declaration. *)
+  ; supported_models : string list option
+    (** Exact client-side model allow-list. When present it must be a
+        non-empty list of distinct, non-blank, unpadded model ids. [None]
+        inherits the base preset's declaration. *)
   }
 
 (** A parsed capability manifest. *)
@@ -179,6 +191,36 @@ let member_string_list key json =
          "entry field %S expected string array, got %s"
          key
          (json_kind actual))
+;;
+
+(* Mirrors [Model_catalog.exact_non_empty_string_list_opt]: a declared
+   allow-list is an exact set of ids, so an empty list, a blank or padded id,
+   or a repeated id is a malformed declaration rather than something to trim
+   or deduplicate silently. *)
+let exact_non_empty_string_list key json =
+  let open Result_syntax in
+  let* values = member_string_list key json in
+  match values with
+  | None -> Ok None
+  | Some [] -> Error (Printf.sprintf "entry field %S must contain at least one value" key)
+  | Some values ->
+    let rec validate seen = function
+      | [] -> Ok (Some values)
+      | raw :: rest ->
+        let trimmed = String.trim raw in
+        if trimmed = ""
+        then Error (Printf.sprintf "entry field %S values must not be empty" key)
+        else if raw <> trimmed
+        then
+          Error
+            (Printf.sprintf
+               "entry field %S values must not have leading or trailing whitespace"
+               key)
+        else if List.mem raw seen
+        then Error (Printf.sprintf "entry field %S contains duplicate value %S" key raw)
+        else validate (raw :: seen) rest
+    in
+    validate [] values
 ;;
 
 let canonical_choice key ~allowed json =
@@ -309,6 +351,7 @@ let known_entry_keys =
   ; "supports_audio_input"
   ; "supports_video_input"
   ; "supports_document_input"
+  ; "modality_priority"
   ; "supports_native_streaming"
   ; "supports_system_prompt"
   ; "supports_prompt_caching"
@@ -324,6 +367,8 @@ let known_entry_keys =
   ; "reasoning_output_format"
   ; "reasoning_streaming_format"
   ; "reasoning_replay"
+  ; "emits_usage_tokens"
+  ; "supported_models"
   ]
 ;;
 
@@ -487,6 +532,14 @@ let parse_entry json =
   let* supports_top_k = member_bool "supports_top_k" json in
   let* supports_min_p = member_bool "supports_min_p" json in
   let* supports_seed = member_bool "supports_seed" json in
+  let* modality_priority =
+    canonical_choice
+      "modality_priority"
+      ~allowed:Capability_vocab.modality_priority_values
+      json
+  in
+  let* emits_usage_tokens = member_bool "emits_usage_tokens" json in
+  let* supported_models = exact_non_empty_string_list "supported_models" json in
   Ok
     { id_prefix
     ; base_label
@@ -509,6 +562,7 @@ let parse_entry json =
     ; supports_audio_input
     ; supports_video_input
     ; supports_document_input
+    ; modality_priority
     ; supports_native_streaming
     ; supports_system_prompt
     ; supports_prompt_caching
@@ -523,6 +577,8 @@ let parse_entry json =
     ; reasoning_output_format
     ; reasoning_streaming_format
     ; reasoning_replay
+    ; emits_usage_tokens
+    ; supported_models
     }
 ;;
 

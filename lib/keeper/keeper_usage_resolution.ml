@@ -59,6 +59,12 @@ let api_usage_of_sample sample : Agent_core.Types.api_usage =
   }
 ;;
 
+let reported_cost_usd (sample : sample) =
+  (* DET-OK: a sum of reported costs gains nothing from a sample that reported
+     none, and the ledger row says so in cost_usd_source. *)
+  Option.value ~default:0.0 sample.cost_usd
+;;
+
 let status_to_string = function
   | Exact -> "exact"
   | Usage_missing -> "usage_missing"

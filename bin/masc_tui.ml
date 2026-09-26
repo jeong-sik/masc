@@ -2020,6 +2020,8 @@ type async_msg =
       * string
       * (Keeper_chat_history.decoded, string) result
       * (Keeper_chat_history.decoded, string) result
+  | Keeper_chat_copy_loaded of
+      string * (Keeper_chat_history.decoded, string) result
   | Keeper_chat_journal_loaded of
       { keeper_name : string
       ; operation_id : string
@@ -6583,6 +6585,18 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
       launch_keeper_chat_tool_details_load state ~mailbox ~keeper_name
   end
 
+(* Copy reads the stored reply again, before the display layer scrubs control
+   bytes or wraps lines. A separate read leaves the visible history cache and
+   its pagination untouched. *)
+let launch_keeper_chat_copy state ~mailbox ~keeper_name =
+  let host = server_peer_host in
+  let port = state.port in
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox (Keeper_chat_copy_loaded (keeper_name, result)))
+    (fun () -> Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name)
+;;
+
 (* One fiber per load, reading the journals one after another in the order
    the targets came -- newest turn first -- each from where the session's
    record of it ends, and handing each turn's lines to the mailbox as they
@@ -9687,6 +9701,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         notice ~kind:Notice_failure
           "/find needs text the first time; /find on its own repeats it"
       else seek_in_chat state ~target ~restart:false
+  | Masc_tui_command.Copy_latest_reply ->
+      Buffer.clear state.msg_input;
+      (match target with
+       | Some keeper_name -> launch_keeper_chat_copy state ~mailbox ~keeper_name
+       | None -> notice ~kind:Notice_failure "/copy needs a Keeper selected")
   | Masc_tui_command.Inspect_context ->
       (match target with
        | Some keeper_name ->
@@ -12362,6 +12381,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        (* [/find] moves the pane on purpose, so unlike every other command it
           must not be followed by the reset to the newest row above. *)
        | Masc_tui_command.Find_in_chat _ | Masc_tui_command.Find_next
+       | Masc_tui_command.Copy_latest_reply
        | Masc_tui_command.Open_measurement _ | Masc_tui_command.Measurement_missing_sha
        | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
@@ -14677,6 +14697,49 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         state.context_inspector_reading <- Some (keeper_name, reading);
         state.context_inspector_read_at <- Some (Unix.gettimeofday ())
       end
+  | Keeper_chat_copy_loaded (keeper_name, result) ->
+      let notice = chat_notice state ~keeper_name:(Some keeper_name) in
+      (match result with
+       | Error detail ->
+           notice ~kind:Notice_failure ("/copy could not read chat history: " ^ detail)
+       | Ok { Keeper_chat_history.rows; _ } ->
+           (* The store appends in order. Timestamps can tie or be absent, so
+              the last reply row is newer than an earlier one regardless of
+              its display clock. *)
+           let newest =
+             List.fold_left
+               (fun selected (row : Keeper_chat_history.row) ->
+                 match row.kind with
+                 | Keeper_chat_history.Said_by_keeper
+                 | Keeper_chat_history.Autonomous_reply
+                   when row.text <> "" -> Some row
+                 | Keeper_chat_history.Addressed_to_keeper _
+                 | Keeper_chat_history.Delivery_failed _
+                 | Keeper_chat_history.Tool_calls _
+                 | Keeper_chat_history.Skill_activity _
+                 | Keeper_chat_history.Reasoning _
+                 | Keeper_chat_history.Gate_activity _
+                 | Keeper_chat_history.Memory_activity _
+                 | Keeper_chat_history.Fusion_conclusion _
+                 | Keeper_chat_history.Said_by_keeper
+                 | Keeper_chat_history.Autonomous_reply -> selected)
+               None rows
+           in
+           (match newest with
+            | None -> notice ~kind:Notice_failure "/copy found no completed reply"
+            | Some row ->
+                let characters =
+                  String.fold_left
+                    (fun count byte ->
+                      if Char.code byte land 0xc0 = 0x80 then count else count + 1)
+                    0 row.text
+                in
+                Terminal_write_repair.note ();
+                write_to_terminal (Link.osc52_copy row.text);
+                notice ~kind:Notice_reply
+                  (Printf.sprintf
+                     "Sent %s's latest reply (%d characters, %d bytes) via OSC 52 (terminal support unconfirmed)"
+                     keeper_name characters (String.length row.text))))
   | Keeper_chat_history_loaded
       (generation, keeper_name, history_result, memory_result) ->
       (match state.msg_history_inflight with

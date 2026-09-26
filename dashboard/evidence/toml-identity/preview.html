@@ -1,0 +1,25 @@
+<!doctype html><html lang="ko" data-theme="dark"><meta charset="utf-8"><title>TOML provider edit fixture</title><div id="app"></div><script type="module">
+import { render } from 'preact';
+import { useState } from 'preact/hooks';
+import { html } from 'htm/preact';
+import { RuntimeExactLaneEditor } from '/src/components/runtime-exact-lane-editor.ts';
+import { setRuntimeTomlProviderField } from '/src/lib/runtime-toml-config.ts';
+import '/src/styles/global.css';
+import '/src/styles/tokens.css';
+import '/src/styles/keeper-v2/runtime.css';
+const initial = '[providers . "p"]\nprotocol = "openai-compatible-http"\nendpoint = "https://example.invalid/v1"\nexact-body-timeout-s = 10 # operator note\n';
+function Preview() {
+ const [source, setSource] = useState(initial);
+ window.fixtureSource = source;
+ return html`<main style="max-width:1000px;margin:36px auto;padding:24px;background:#151820;color:#e5e7eb;">
+ <h1 style="font-size:22px;margin-bottom:14px">설정 편집 회귀 확인</h1>
+ <p style="margin-bottom:18px">Synthetic fixture · 실제 Lane 편집 컴포넌트</p>
+ <${RuntimeExactLaneEditor} sourceText=${source}
+ lanes=${[{laneId:'librarian_exact',label:'Librarian',declaredSlots:['p.m'],declaredCliSlots:[],droppedSlots:[],admissionError:null}]}
+ runtimes=${[{id:'p.m'}]} slotsDisabled=${true} deadlineDisabled=${false} onSlotAction=${()=>{}}
+ onDeadlineChange=${(id,value)=>setSource(current=>setRuntimeTomlProviderField(current,id,'exact-body-timeout-s',value))}/>
+ <h2 style="margin-top:28px;font-size:16px">편집된 원문</h2><pre id="source" style="margin-top:10px;padding:18px;border:1px solid #555;white-space:pre-wrap">${source}</pre>
+ </main>`;
+}
+render(html`<${Preview}/>`,document.getElementById('app'));
+</script></html>

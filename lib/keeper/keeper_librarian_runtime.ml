@@ -402,6 +402,7 @@ let resolve_librarian_slots ~base_path ~keeper_id =
     |> Result.map_error (fun detail ->
       Exact_setup_failed
         (Exact_lane_preference_unavailable detail))
+    |> Result.map Runtime_exact_lane_backpressure.order
   in
   Ok
     ( resolved.Runtime_exact_output_registry.selected_slots
@@ -634,15 +635,14 @@ let extraction_cli_input_limit = function
   | Domain_output_invalid _ | Memory_snapshot_write_failed _ -> None
 ;;
 
-let fit_continuity ~capacity ~base_path ~keeper_id ~input prepared =
+let fit_continuity ~capacity ~base_path ~keeper_id ~input_for prepared =
   let open Result.Syntax in
   let* _, cli_slots = resolve_librarian_slots ~base_path ~keeper_id
     |> Result.map_error extraction_error_to_string in
   if not (List.mem capacity.Keeper_lane_cli_oneshot.runtime_id cli_slots)
   then Ok (Some prepared)
   else Keeper_librarian_continuity.fit prepared ~fits:(fun continuity ->
-    let input = {input with Keeper_librarian.messages =
-      Keeper_librarian_continuity.messages continuity} in
+    let* input = input_for continuity in
     (* Whether this range's Memory is already committed is read after the
        fit, so either pass may run on the fitted range. The range fits only
        when both requests fit: an operator override can make either prompt
@@ -869,7 +869,7 @@ let execute_answer
     | Ok answer -> Exact_output.Accept (answer, output.output)
     | Error error -> Exact_output.Reject_and_advance error
   in
-  match
+  let flow =
     Exact_output.execute_flow_once
       ~net
       ~clock
@@ -879,7 +879,9 @@ let execute_answer
       ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
       ~validate:validate_flow
       attempt
-  with
+  in
+  Runtime_exact_lane_backpressure.observe flow;
+  match flow with
   | Ok success ->
     let selected_slot =
       success.transport_success

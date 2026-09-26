@@ -48,7 +48,7 @@ let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id
       ~lanes:[{Runtime_schema.id = "librarian_exact";
         slot_ids = List.map (fun (target : Fixture.target_fixture) -> target.id) targets;
         cli_slot_ids = List.map fst cli_errors;
-        max_output_tokens = Some 4_096}] resolver with
+        max_output_tokens = Some 4_096; thinking = None}] resolver with
    | Ok _ -> ()
    | Error error -> Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
   let input : Keeper_librarian.input =
@@ -313,7 +313,7 @@ let test_prefit_real_continuity ~base_path () =
     Alcotest.(check string) "continuity leaves pending context bytes unchanged"
       context_before (Fs_compat.load_file_opt context_path |> some) in
   let fit prepared = Runtime.fit_continuity ~capacity ~base_path ~keeper_id
-      ~input:(input prepared) prepared |> get |> some in
+      ~input_for:(fun candidate -> Ok (input candidate)) prepared |> get |> some in
   let first = fit full in
   Alcotest.(check int) "measured bound selects first two whole atoms" 2 (P.end_atom first);
   execute first ("Saved state " ^ String.make 200 's');
@@ -373,7 +373,7 @@ let test_size_verdict_table () =
   let module E = Agent_core.Exact_output in
   (* The verdict reads the refusal and never the status it arrived with. *)
   let any_status = 400 in
-  let refused refusal = E.Provider_response_refused { http_status = any_status; refusal } in
+  let refused refusal = E.Provider_response_refused { http_status = any_status; refusal; retry_after_s = None } in
   let module Http = Agent_core.Llm_provider.Http_client in
   let module Types = Agent_core.Llm_provider.Types in
   let sent error = E.Completion_failed { error; dispatch = E.Generation_dispatch_started } in

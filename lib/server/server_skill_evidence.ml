@@ -24,7 +24,6 @@ let composition_evidence ~config reference =
 
 let owner_source_to_string = function
   | Keeper_skill_activation_owner.Current_meta -> "current_meta"
-  | Trace_history -> "trace_history"
   | Runtime_manifest -> "runtime_manifest"
 ;;
 

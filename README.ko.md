@@ -76,13 +76,13 @@ masc setup --base-path "$HOME/masc-workspace"
 
 ### 공개 바이너리
 
-[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.40.0)에
+[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.41.0)에
 첨부된 설치 스크립트를 받습니다. 선택한 릴리스의 자산을 검증하고 설치합니다.
 
-> Installation target: v0.40.0 (check tag availability on GitHub Releases).
+> Installation target: v0.41.0 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.40.0
+TAG=v0.41.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
@@ -373,9 +373,9 @@ reviewer = "<provider>.<model>"
   Keeper는 거부됩니다. `remote_ssh` Keeper는 `runtime.toml`의
   `[exec.ssh.endpoints]`에 선언한 `remote_endpoint`를 이름으로 댑니다.
 - **이미지.** `docker`와 `microvm` 턴은 이미지 안에서 돌고, 이미지가 없으면
-  턴마다 `docker_preflight_failed`에서 멈춥니다. `masc sandbox-image`가
-  바이너리에 든 레시피로 `masc-sandbox:general`(Debian 위 bash, ripgrep, git)을
-  만듭니다. `docker`와 `microvm` Keeper는 모두 `sandbox_image`에 이미지를
+  턴마다 `docker_preflight_failed`에서 멈춥니다. 저장소에 없으면 `masc setup`이
+  바이너리에 든 레시피(`sandbox-images/base/Dockerfile`)로 `masc-sandbox:general`을
+  만듭니다. `masc sandbox-image`는 다시 쓰지 않는 새 태그로 손수 빌드합니다. `docker`와 `microvm` Keeper는 모두 `sandbox_image`에 이미지를
   적어야 하고, 적지 않으면 기본값을 받는 대신 거부됩니다. 범용 이미지로
   충분한 Keeper는 `sandbox_image = "masc-sandbox:general"`을, 프로젝트를
   빌드해야 하는 Keeper는 그 프로젝트 툴체인 이미지를 적습니다. 컨테이너는 읽기 전용 rootfs, `--cap-drop=ALL`,

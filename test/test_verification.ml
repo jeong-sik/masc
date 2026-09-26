@@ -1735,7 +1735,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                  ~input:(`Assoc [ "path", `String "evidence.md" ])
                  (Tool_result.ok
                     ~tool_name:"verification_read_file"
-                    ~start_time:0.0
+                    ~start_time:(Tool_timing.start ())
                     "verified evidence");
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok {Masc.Task.Anti_rationalization.selected_runtime_id="test-system-evaluator";verdict=Some (Masc.Task.Anti_rationalization.Approve "")});
@@ -3899,6 +3899,51 @@ let test_submit_snapshot_reads_microvm_artifacts_where_the_producer_keeps_them
           reference
       | _ -> Alcotest.fail "expected completion-authority evidence projection")
 
+(* #38583: a producer whose keeper TOML is refused has no known tree
+   location, so the host bundle is not its artifact. The artifact submit is
+   refused and records nothing; a note-only submit reads no artifact and
+   still lands. *)
+let test_submit_with_unreadable_producer_meta_refuses_artifacts () =
+  with_eio_temp_dir (fun base_path ->
+      let config = W.default_config base_path in
+      ignore (W.init config ~agent_name:None);
+      ensure_keeper_meta config "omega";
+      let bundle_artifact =
+        Filename.concat base_path ".masc/playground/omega/evidence.txt"
+      in
+      Fs_compat.mkdir_p (Filename.dirname bundle_artifact);
+      Fs_compat.save_file bundle_artifact "bundle decoy\n";
+      let toml_path =
+        Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"omega"
+      in
+      Fs_compat.mkdir_p (Filename.dirname toml_path);
+      Fs_compat.save_file toml_path "[keeper\nsandbox_profile = \"microvm\"\n";
+      ignore
+        (W.add_task config ~title:"Produce evidence" ~priority:1 ~description:"");
+      let task =
+        match (W.read_backlog config).tasks with
+        | [ task ] -> task
+        | tasks -> Alcotest.failf "expected one task, got %d" (List.length tasks)
+      in
+      let submit ~request_id evidence_refs =
+        VP.create_submit_request ~config ~task ~assignee:"omega"
+          ~verification_id:request_id
+          ~claim:(Masc_domain.Completion_evidence { evidence_refs })
+      in
+      (match submit ~request_id:"vrf-meta-unreadable"
+               [ "artifact:evidence.txt"; "note:producer summary" ] with
+       | Ok () ->
+         Alcotest.fail "an artifact submit passed with the producer meta unreadable"
+       | Error _ -> ());
+      (match inspect_evidence ~base_path ~request_id:"vrf-meta-unreadable" () with
+       | VS.Evidence_unavailable { reason = VS.Request_not_found; _ } -> ()
+       | VS.Evidence_available { items = VS.Evidence_artifact { content; _ } :: _; _ } ->
+         Alcotest.failf "the refused submit still recorded host bytes: %s" content
+       | _ -> Alcotest.fail "the refused submit left a request record");
+      match submit ~request_id:"vrf-meta-unreadable-note" [ "note:producer summary" ] with
+      | Ok () -> ()
+      | Error detail -> Alcotest.failf "a note-only submit was refused: %s" detail)
+
 (* RFC-0436 §4.1-4.2: a binary payload is adopted, not refused -- the
    snapshot keeps the hash, size and format, and files the bytes as the
    evidence body when the caller names the request. *)
@@ -4605,6 +4650,10 @@ let () =
         "the submit snapshot reads microvm artifacts where the producer keeps them"
         `Quick
         test_submit_snapshot_reads_microvm_artifacts_where_the_producer_keeps_them;
+      Alcotest.test_case
+        "an artifact submit is refused when the producer meta is unreadable"
+        `Quick
+        test_submit_with_unreadable_producer_meta_refuses_artifacts;
       Alcotest.test_case "an injected reader answers under the text line" `Quick
         test_an_injected_reader_answers_under_the_text_line;
       Alcotest.test_case "large binary snapshots retain complete immutable bytes" `Quick test_complete_large_binary_snapshots;

@@ -121,7 +121,9 @@ readonly WS_DIRECT_SHA="d812d6fec4153efc11235661e0d4b4d0d789c45b"
 # C-BIOS boot that found it leaked game code into the 720-frame warm-up and
 # the replay landed on that polluted state (Sangokushi II cold-boot stall
 # pc=e1dc); boot_disk now mounts the ROM at replay time (ocaml-msx #37).
-readonly OCAML_MSX_SHA="870e61063e08ca4a0b15b939cb72a1c11aade1d3"
+# 50ba535 moves the pin to ocaml-msx #42: versioned checkpoints retain v1
+# restore support and write v2, so checkpoints saved before masc v0.41.0 can load.
+readonly OCAML_MSX_SHA="50ba5354b35cdeb1c8350f6a359ae819df256b8a"
 # DOS emulator core (8086 + BIOS/DOS interrupt surface + CGA/EGA/VGA video).
 # Path-pinned locally for core development; SHA-pinned here for CI.
 # d887e45 = ocaml-dos #11: keys have names, so lib/dos_lane can take "up" and
@@ -156,6 +158,15 @@ readonly OCAML_DOS_SHA="d9e2cba992292a8aa405d0f1034d5d027946236a"
 # file constraint still holds. Verified by test_cohttp_eio_body_flow. Remove
 # the pin when a cohttp-eio release carries the fix (upstream PR from this fork).
 readonly COHTTP_EIO_SHA="45ecbe94b2a6e9a49e5ce11a9f69127833814d46"
+# ocaml-protoc-plugin 6.2.0 + one commit: protoc-gen-ocaml reads its request
+# until end of input. 6.2.0 stops at the first read shorter than its 1024-byte
+# buffer, and a macOS pipe hands over 512 bytes first, so every local build of
+# proto/masc_workspace.proto on macOS failed with Premature_end_of_input. A
+# Linux pipe filled the first read, which is why CI never saw it. Pinned as
+# version 6.2.0 so the generated code and the lock constraint stay 6.2.0's.
+# Remove the pin when a release carries the fix
+# (andersfugmann/ocaml-protoc-plugin#60).
+readonly OCAML_PROTOC_PLUGIN_SHA="4ffa25b5174e811951e7b5192195214afe776ce9"
 
 include_bisect=false
 include_compact_protocol=false
@@ -215,8 +226,12 @@ load_live_pins() {
       print name "\t" target }')"
 }
 
+# awk reads the whole table: an awk that exits at the match can close the pipe
+# while printf is still writing, and under pipefail that SIGPIPE (exit 141)
+# ended the --check dune-local.sh runs before every build.
 live_pin_target() {
-  printf '%s\n' "${live_pin_table}" | awk -F'\t' -v want="$1" '$1 == want { print $2; exit }'
+  printf '%s\n' "${live_pin_table}" \
+    | awk -F'\t' -v want="$1" '$1 == want && !found { print $2; found = 1 }'
 }
 
 # A target naming a place on this machine rather than a repository to fetch.
@@ -325,6 +340,8 @@ opam_pin_add ocaml-dos "https://github.com/jeong-sik/ocaml-dos.git#${OCAML_DOS_S
 pinned_pkgs+=("ocaml-dos")
 opam_pin_add cohttp-eio.6.2.1 "https://github.com/jeong-sik/ocaml-cohttp.git#${COHTTP_EIO_SHA}" -n -y
 pinned_pkgs+=("cohttp-eio")
+opam_pin_add ocaml-protoc-plugin.6.2.0 "https://github.com/jeong-sik/ocaml-protoc-plugin.git#${OCAML_PROTOC_PLUGIN_SHA}" -n -y
+pinned_pkgs+=("ocaml-protoc-plugin")
 
 if $include_bisect; then
   # bisect_ppx opam constraints lag newer compilers; keep CI solvable under OCaml 5.5 by pinning.

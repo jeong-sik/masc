@@ -611,7 +611,7 @@ let build_recipe_image_for backend ~image ~timeout_sec =
         let argv =
           command_argv_for backend
           @ Keeper_sandbox_image.context_directory_build_argv ~tag:image
-              ~dockerfile ~context
+              ~dockerfile ~context ()
         in
         match Process_eio.run_argv_with_status_split ~timeout_sec argv with
         | Unix.WEXITED 0, _, _ -> Ok ()
@@ -645,10 +645,11 @@ let image_present_for backend ~image ~timeout_sec =
         (Printf.sprintf
            "microvm_image_build_failed: %s was missing from %s's image store, \
             and building it from the recipe in this binary failed. Next: run \
-            `masc sandbox-image --runtime %s` and read what it says. %s"
+            `masc sandbox-image --runtime %s --tag %s` and read what it says. %s"
            image
            (Backend.cli_name backend)
            (Backend.to_string backend)
+           image
            (String.trim stderr)))
   | probe -> image_present_result_for backend ~image probe
 ;;

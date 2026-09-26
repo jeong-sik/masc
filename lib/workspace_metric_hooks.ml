@@ -304,8 +304,7 @@ let install () =
   Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
   Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path:_ ?sw ~evaluator_runtime ~prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
-    let verdict_ref = ref None in
-    let protocol_error_ref = ref None in
+    let verdict_call = ref Task.Anti_rationalization.empty_verdict_call in
     let { Task.Anti_rationalization.schemas = lookup_schemas
         ; dispatch = dispatch_lookup
         }
@@ -317,46 +316,30 @@ let install () =
        reaches the lookup dispatch, which returns an error the evaluator can
        read and correct, not a silently dropped call. *)
     let dispatch_verdict ~name ~args =
-      let start_time = Time_compat.now () in
-      let result = match !verdict_ref with
-      | Some verdict ->
-        let detail =
-          Printf.sprintf
-            "Task completion verdict already recorded (%s); report_review_verdict must be called exactly once"
-            (Task.Anti_rationalization.verdict_constructor_name verdict)
-        in
-        protocol_error_ref := Some detail;
+      let start_time = Tool_timing.start () in
+      let call, answer = Task.Anti_rationalization.step_verdict_call !verdict_call args in
+      verdict_call := call;
+      match answer with
+      | Task.Anti_rationalization.Verdict_recorded verdict ->
+        Tool_result.ok
+          ~tool_name:name
+          ~start_time
+          (match verdict with
+           | Approve reason -> "Completion verdict recorded: APPROVE: " ^ reason
+           | Reject reason -> "Completion verdict recorded: REJECT: " ^ reason)
+      | Task.Anti_rationalization.Verdict_already_recorded { detail } ->
         Tool_result.error
           ~failure_class:Tool_result.Workflow_rejection
           ~tool_name:name
           ~start_time
           detail
-      | None ->
-        (match Task.Anti_rationalization.parse_review_verdict_from_json args with
-         | Ok verdict ->
-           (* A verdict the evaluator corrected after a parse refusal is the
-              verdict: the refusal told it the format and it answered again.
-              Only a second call after a recorded verdict is a violation. *)
-           protocol_error_ref := None;
-           verdict_ref := Some verdict;
-           Tool_result.ok
-             ~tool_name:name
-             ~start_time
-             (match verdict with
-              | Approve reason -> "Completion verdict recorded: APPROVE: " ^ reason
-              | Reject reason -> "Completion verdict recorded: REJECT: " ^ reason)
-         | Error msg ->
-           protocol_error_ref := Some msg;
-           Log.Task.warn
-             "[anti-rationalization] structured verdict parse failed: %s"
-             msg;
-           Tool_result.error
-             ~failure_class:Tool_result.Workflow_rejection
-             ~tool_name:name
-             ~start_time
-             (Printf.sprintf "Invalid verdict format: %s" msg))
-      in
-      result
+      | Task.Anti_rationalization.Verdict_refused { detail } ->
+        Log.Task.warn "[anti-rationalization] structured verdict parse failed: %s" detail;
+        Tool_result.error
+          ~failure_class:Tool_result.Workflow_rejection
+          ~tool_name:name
+          ~start_time
+          (Printf.sprintf "Invalid verdict format: %s" detail)
     in
     let dispatch ~name ~args =
       let result =
@@ -425,14 +408,14 @@ let install () =
             ()))
     with
     | Ok _ ->
-      (match !protocol_error_ref with
+      (match !verdict_call.Task.Anti_rationalization.violation with
        | Some detail ->
          Error
            (Agent_core.Error.Internal
               ("task completion verdict protocol violation: " ^ detail))
        | None ->
          (match !selected_runtime_id with
-          | Some selected_runtime_id -> Ok {Task.Anti_rationalization.selected_runtime_id;verdict= !verdict_ref}
+          | Some selected_runtime_id -> Ok {Task.Anti_rationalization.selected_runtime_id;verdict= !verdict_call.recorded}
           | None -> Error (Agent_core.Error.Internal "verifier dispatch omitted its selected runtime")))
     | Error err ->
       Error err);

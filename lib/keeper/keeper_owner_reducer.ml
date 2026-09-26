@@ -27,8 +27,6 @@ type turn_runtime_delta =
   ; counters : turn_counter_deltas
   ; next_keeper_id : Keeper_id.Uid.t option
   ; next_trace_id : Keeper_id.Trace_id.t
-  ; next_trace_history : string list
-  ; next_last_handoff_ts : float
   ; proactive_observation : Keeper_meta_contract.proactive_runtime observed_change
   ; usage_cursor : Keeper_usage_resolution.cursor option observed_change
   ; last_usage_resolution : Keeper_usage_resolution.t option observed_change
@@ -278,8 +276,6 @@ let turn_runtime_delta_of_snapshots
           }
       ; next_keeper_id = after.keeper_id
       ; next_trace_id = after_rt.trace_id
-      ; next_trace_history = after_rt.trace_history
-      ; next_last_handoff_ts = after_rt.last_handoff_ts
       ; proactive_observation =
           observed_change before_rt.proactive_rt after_rt.proactive_rt
       ; usage_cursor = observed_change before_rt.usage_cursor after_rt.usage_cursor
@@ -373,8 +369,6 @@ let apply_turn_runtime_delta
     let runtime =
       { runtime with
         trace_id = delta.next_trace_id
-      ; trace_history = delta.next_trace_history
-      ; last_handoff_ts = delta.next_last_handoff_ts
       ; proactive_rt
       ; usage_cursor = apply_observed_change runtime.usage_cursor delta.usage_cursor
       ; last_usage_resolution =

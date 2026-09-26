@@ -3818,7 +3818,7 @@ let test_glm_rate_limit_code_stays_a_rate_limit () =
       ( Cohttp.Code.status_of_code 429
       , {|{"error":{"code":"1302","message":"Rate limit reached for requests"}}|} )
     ~assert_cause:(function
-      | EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited } ->
+      | EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited; _ } ->
         ()
       | _ -> fail "a GLM rate-limit code lost its typed rate-limit cause")
 ;;

@@ -86,7 +86,7 @@ type reply =
 
 type event =
   | Key of string
-  | Paste of Masc_tui_paste.t                  (* 200~ … 201~ 전체 *)
+  | Paste of paste                             (* 200~ … 201~ 전체. text, dropped *)
   | Mouse of mouse
   | Reply of reply
 
@@ -128,12 +128,28 @@ probe는 시작할 때 질의를 쓰고, 정해진 시간 동안 `Reply` 이벤�
 그 뒤에 오는 `Reply`(늦은 팔레트, 테마 알림)는 메인 루프가 같은 경로로 받는다.
 그러면 "probe가 끝났는가"라는 상태가 필요 없다.
 
+### 2.5 바이트 해석은 이 모듈에만 있다 (SSOT)
+
+터미널 바이트를 읽어 의미를 정하는 일은 `Masc_tui_input_decoder` 한 곳에서만 한다.
+
+- `Masc_tui_paste`는 이 모듈 안으로 흡수한다. 끝 표시 찾기, 본문 누적,
+  `max_bytes`/`dropped` 계산이 모두 해석기 상태 `Pasting` 안에 들어간다.
+  모듈 파일은 지운다.
+- X10 마우스(`ESC [M` + 3바이트)도 해석기 상태 하나로 둔다. CSI 끝 바이트
+  규칙을 따르지 않는 유일한 형식이므로, `Csi` 상태에서 인자 없이 `M`이 오면(SGR의 `<…M`과 구별)
+  `X10_mouse of int`(남은 바이트 수)로 넘어간다. 지원은 끊지 않는다.
+- `Masc_tui_csi.name`과 `Masc.Tui_decode`의 SGR 좌표 함수는 상태가 없는
+  표·순수 함수다. 해석기만 이 함수들을 부르고, 다른 모듈은 부르지 않는다.
+  2단계에서 `bin/masc_tui.ml`이 이들을 직접 부르는 곳을 모두 없앤다.
+- 1·2·3단계가 끝나면 `rg 'Masc_tui_csi\.|Tui_decode\.(sgr|x10)' bin lib`의
+  결과가 해석기 파일 하나만 나와야 한다. 이 검사를 3단계 PR의 완료 조건으로 둔다.
+
 ## 3. 옮기는 순서
 
 | 단계 | PR 내용 | 연결 여부 | 검증 |
 |---|---|---|---|
 | 1 | `Masc_tui_input_decoder`와 단위 테스트. 지금 `test_tui_terminal_probe.ml`과 붙여넣기 테스트의 입력 사례를 모두 옮겨 같은 결과인지 비교한다. | 연결 안 함 | 단위 테스트 |
-| 2 | `read_input`이 새 해석기를 쓴다. `csi_parameters`, `partial_scalar`, `paste_phase`, 안쪽 `timeout:0.05` 읽기를 지운다. probe는 그대로 앞에 둔다. | 입력 경로 | PTY 키보드·붙여넣기 시나리오 |
+| 2 | `read_input`이 새 해석기를 쓴다. `csi_parameters`, `partial_scalar`, `paste_phase`, 안쪽 `timeout:0.05` 읽기, `bin/masc_tui_paste.ml`을 지운다. probe는 그대로 앞에 둔다. | 입력 경로 | PTY 키보드·붙여넣기 시나리오 |
 | 3 | probe를 `Reply` 소비자로 바꾼다. `replay`, `return_replay`, `last_source`, `holds_incomplete_sequence`, `Masc_tui_terminal_probe.next`를 지운다. | 시작 경로 | PTY 시작·팔레트·그래픽 시나리오 |
 
 단계마다 main이 동작하는 상태를 유지한다. 옛 경로와 새 경로를 나란히 두는
@@ -158,15 +174,15 @@ probe는 시작할 때 질의를 쓰고, 정해진 시간 동안 `Reply` 이벤�
 
 ## 5. 하지 않는 것
 
-- 키 이름 표(`Masc_tui_csi.name`)와 마우스 좌표 해석(`Masc.Tui_decode`)은
-  바꾸지 않는다. 해석기가 그대로 부른다.
+- 키 이름 표(`Masc_tui_csi.name`)와 마우스 좌표 해석(`Masc.Tui_decode`)의
+  내용은 바꾸지 않는다. 부르는 곳만 해석기 하나로 모은다(§2.5).
 - 붙여넣기 크기 제한과 복구 정책(`paste_quiet_seconds`)의 값은 바꾸지 않는다.
   위치만 `idle`로 옮긴다.
 - 터미널에 보내는 질의 문자열은 바꾸지 않는다.
 
-## 6. 열린 질문
+## 6. 결정
 
-1. `Masc_tui_paste`를 해석기 안으로 흡수할지, 본문 누적기로만 남길지.
-   누적기로 남기면 `max_bytes`/`dropped` 계산을 다시 쓰지 않아도 된다.
-2. X10 마우스(`ESC [M` + 3바이트)는 CSI 끝 바이트 규칙을 따르지 않는다.
-   해석기에 별도 상태를 둘지, 지원을 끊고 SGR 마우스만 받을지.
+1. `Masc_tui_paste`는 해석기 안으로 흡수한다. 붙여넣기 상태를 두 모듈이 나눠
+   들면 이 RFC가 없애려는 구조가 그대로 남는다. (2026-09-26 운영자)
+2. X10 마우스는 해석기 상태로 두고 지원을 유지한다. 같은 원칙(바이트 해석은
+   한 곳)을 따른다.

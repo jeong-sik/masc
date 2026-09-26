@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { useStoreSubscription } from './use-signal-value'
 import type { FunctionComponent } from 'preact'
 import { dispatchKeeperInterjectAction } from '../../keeper-actions'
@@ -18,6 +18,7 @@ import { globalPresenceSnapshot, presenceEntries, type KeeperPresenceStatus } fr
 import { activeIdeFocus } from './ide-state'
 import { ideEditorSelection } from './ide-editor-selection'
 import { buildIdeInterjectSurfaceContext } from './ide-interject-surface-context'
+import { isImeComposing } from './ide-keyboard'
 
 // The input and button states flow through the same store/dispatch boundary
 // that live active-keeper wiring uses. Send remains disabled until a concrete
@@ -65,12 +66,6 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({
     return () => unsub()
   }, [interjectStore, keeperName])
   useEffect(() => {
-    const unsub = activeKeeperName.subscribe(name => {
-      interjectStore.setActiveKeeper(keeperName?.trim() || name)
-    })
-    return () => unsub()
-  }, [interjectStore, keeperName])
-  useEffect(() => {
     interjectStore.setActiveKeeper(resolveActiveKeeper(keeperName))
   }, [interjectStore, keeperName])
 
@@ -92,12 +87,38 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({
     : null
   const contextLinks = interjectContextRouteLinks(keeperId)
 
+  // Opening moves focus into the chat; closing hands it back to the button
+  // that opened it rather than dropping it on the page body.
+  const inputRef = useRef<HTMLInputElement>(null)
+  const fabRef = useRef<HTMLButtonElement>(null)
+  const wasExpanded = useRef(expanded)
+  useEffect(() => {
+    if (compact && expanded) inputRef.current?.focus()
+    if (compact && !expanded && wasExpanded.current) fabRef.current?.focus()
+    wasExpanded.current = expanded
+  }, [compact, expanded])
+
+  const sendAction = actions.find(action => action.kind === 'send')
+  // Enter sends, as in every chat box. A Korean or Japanese IME confirms its
+  // composition with Enter too; that keystroke belongs to the IME.
+  const handleInputKeyDown = (event: KeyboardEvent): void => {
+    if (isImeComposing(event)) return
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      if (sendAction?.enabled) void interjectStore.submit('send')
+    } else if (event.key === 'Escape' && compact) {
+      event.preventDefault()
+      setExpanded(false)
+    }
+  }
+
   if (compact && !expanded) {
     return html`
       <button
         type="button"
         class="ide-interject-fab"
         data-testid="ide-interject-fab"
+        ref=${fabRef}
         aria-label="Open keeper chat"
         onClick=${() => setExpanded(true)}
       >✦ Chat</button>
@@ -128,7 +149,19 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({
           padding: '0 var(--sp-2)',
         }}
       >
-        <span>INTERJECT</span>
+        <span style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          INTERJECT
+          ${compact ? html`
+            <button
+              type="button"
+              class="v2-ide-action"
+              data-testid="ide-interject-collapse"
+              aria-label="Close keeper chat"
+              title="Close keeper chat (Esc)"
+              onClick=${() => setExpanded(false)}
+            >✕</button>
+          ` : null}
+        </span>
         <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)' }}>
           <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-secondary)' }}>
             ${keeperId || 'No active keeper'}
@@ -142,7 +175,10 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({
         type="text"
         placeholder="Send message to active keeper..."
         aria-label="Interject input"
+        aria-keyshortcuts=${compact ? 'Enter Escape' : 'Enter'}
+        ref=${inputRef}
         value=${snapshot.message}
+        onKeyDown=${handleInputKeyDown}
         disabled=${snapshot.busy_action !== null}
         onInput=${(event: Event) =>
           interjectStore.setMessage((event.currentTarget as HTMLInputElement).value)}

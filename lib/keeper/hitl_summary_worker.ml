@@ -401,6 +401,7 @@ let prepare_flow
       resolved
     |> Result.map_error (fun detail ->
       "HITL exact-lane preference unavailable: " ^ detail)
+    |> Result.map Runtime_exact_lane_backpressure.order
   in
   let* transport =
     match resolved.selected_slots, resolved.cli_slots with
@@ -686,6 +687,14 @@ let log_exact_error (entry : pending_approval) operation detail =
     operation
     entry.id
     detail
+;;
+
+let log_cli_slot_failure (entry : pending_approval) failure =
+  Log.Keeper.warn
+    ~keeper_name:entry.keeper_name
+    "HITL exact-output approval_id=%s: %s"
+    entry.id
+    (Keeper_lane_cli_oneshot.failure_to_string failure)
 ;;
 
 let exact_attempt_source_resolved (entry : pending_approval) = function
@@ -1290,10 +1299,11 @@ let try_cli_slots
               the entry settles through the ordinary quarantine transition
               under the identity that actually failed. *)
            record_outcome Cli_slots_exhausted;
-           log_exact_error
-             entry
-             "cli lane-slot walk"
-             (Keeper_lane_cli_oneshot.failure_to_string failure);
+           Log.Keeper.warn
+             ~keeper_name:entry.keeper_name
+             "HITL exact-output CLI candidates exhausted approval_id=%s last_slot=%s"
+             entry.id
+             identity.slot_id;
            quarantine_identity
              ~queue_ops
              entry
@@ -1385,10 +1395,7 @@ let try_cli_slots
                    ()
                with
                | Error failure ->
-                 log_exact_error
-                   entry
-                   "cli slot execution"
-                   (Keeper_lane_cli_oneshot.failure_to_string failure);
+                 log_cli_slot_failure entry failure;
                  walk
                    ~bound:(Some identity)
                    ~released_entry_binding
@@ -1402,14 +1409,15 @@ let try_cli_slots
                       output
                   with
                   | Error detail ->
-                    log_exact_error entry "cli domain validation" detail;
+                    let failure =
+                      Keeper_lane_cli_oneshot.Invalid_domain_output
+                        { runtime_id; detail }
+                    in
+                    log_cli_slot_failure entry failure;
                     walk
                       ~bound:(Some identity)
                       ~released_entry_binding
-                      ~last_cli_failure:
-                        (Some
-                           (Keeper_lane_cli_oneshot.Invalid_json_output
-                              { runtime_id; detail }))
+                      ~last_cli_failure:(Some failure)
                       rest
                   | Ok summary ->
                     (match complete_exact_attempt queue_ops entry identity summary with
@@ -1495,7 +1503,7 @@ let execute_prepared_flow_with_queue_ops_current
            ~cause:Exact_flow_execution_failed);
       Executed
     | Http_attempt attempt ->
-    match
+    let flow =
       Exact_output.execute_flow_once
         ~net
         ?clock
@@ -1505,7 +1513,9 @@ let execute_prepared_flow_with_queue_ops_current
         ~before_advance:guarded_before_advance
         ~validate:(validate_success prepared)
         attempt
-    with
+    in
+    Runtime_exact_lane_backpressure.observe flow;
+    match flow with
     | Ok success ->
       handle_validated_success
         ~queue_ops

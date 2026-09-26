@@ -3,7 +3,14 @@
     The state is stored in one owned Checkpoint Context entry, independently
     of tool-result prose and transcript compaction. It contains only exact
     names actually installed by the loader, scoped to the current work and
-    the deferred tools offered by that work. *)
+    the deferred tools offered by that work.
+
+    A load lives for the Keeper turn that made it and the one turn after it.
+    That is the boundary it exists to cross: the loading turn may end before
+    calling the tool, and the next turn, restarted or not, is placed with it
+    rather than asking again. A load still uncalled when a further turn is
+    bound is retired there; a tool that was called is carried by history
+    instead. *)
 
 type source =
   | Builtin
@@ -36,8 +43,12 @@ val restore
 
 type t
 
-(** Bind the restored receipts to this exact trace, Task (or no Task), and
-    ordered deferred surface. A changed scope retires its outstanding loads.
+(** Bind the restored receipts to this exact trace, Task (or no Task),
+    absolute Keeper turn, and ordered deferred surface. A changed scope
+    retires its outstanding loads. Of an unchanged scope, only loads made in
+    [keeper_turn] or the turn immediately before it remain; loads made here
+    record [keeper_turn]. A turn resumed under the same [keeper_turn] keeps
+    its own loads.
     The surface digest includes each source identity and complete schema,
     including attached tools absent from [Keeper_capability_surface].
     [current_task_id] reads the authoritative work identity at each load,
@@ -46,6 +57,7 @@ val create
   :  restored:restored
   -> trace_id:Keeper_id.Trace_id.t
   -> task_id:Keeper_id.Task_id.t option
+  -> keeper_turn:int
   -> current_task_id:(unit -> (Keeper_id.Task_id.t option, string) result)
   -> surface:surface_entry list
   -> t
@@ -67,5 +79,6 @@ val loaded
   -> (unit, error) result
 
 (** Consume only this name's outstanding load when its handler is reached.
-    Ordinary history-based carry remains responsible for tools already used. *)
+    Ordinary history-based carry remains responsible for tools already used.
+    A load never dispatched is retired by {!create} instead. *)
 val dispatched : t -> name:string -> unit

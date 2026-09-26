@@ -308,6 +308,7 @@ let with_server
       ?response_delay_s
       ?(status = `OK)
       ?first_response
+      ?(first_response_headers = [])
       ?first_stalled_response
       ?(abort_completion = false)
       ~response
@@ -334,12 +335,17 @@ let with_server
           ~body:(stalling_response_body first_bytes)
           ()
       | Some _, _ | None, _ ->
-        let response_status, response_body =
+        let response_status, response_body, response_headers =
           match first_response, post_index with
-          | Some first, 0 -> first
-          | Some _, _ | None, _ -> status, response
+          | Some (first_status, first_body), 0 ->
+            first_status, first_body, first_response_headers
+          | Some _, _ | None, _ -> status, response, []
         in
-        Cohttp_eio.Server.respond_string ~status:response_status ~body:response_body ()
+        Cohttp_eio.Server.respond_string
+          ~headers:(Cohttp.Header.of_list response_headers)
+          ~status:response_status
+          ~body:response_body
+          ()
     in
     let socket =
       Eio.Net.listen
@@ -3556,17 +3562,22 @@ let test_callback_failures_are_terminal () =
 ;;
 
 let assert_typed_capacity_refusal_advances_once
+      ?first_response_headers
       ~refused_kind
       ~label
       ~first_response
       ~assert_cause
+      ()
   =
   let refused_id = label ^ "-refused" in
   let successor_id = label ^ "-successor" in
   let ( (result, replay, advances, evidence, observed_advance, dispatches_before_replay)
       , posts )
     =
-    with_server ~first_response ~response:(openai_response {|{"name":"accepted"}|})
+    with_server
+      ?first_response_headers
+      ~first_response
+      ~response:(openai_response {|{"name":"accepted"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry ~kind:refused_kind ~id:refused_id ~base_url ~native:true ~json:true ()
@@ -3699,7 +3710,7 @@ let test_context_window_400_prose_advances_to_successor () =
       true
       (failure.cause.cause
        = EO.Provider_response_refused
-           { http_status = 400; refusal = EO.Invalid_request });
+           { http_status = 400; refusal = EO.Invalid_request; retry_after_s = None });
     check
       bool
       "HTTP 400 prose is an advanceable terminal"
@@ -3717,8 +3728,9 @@ let test_serialized_request_413_refusal_advances_once_to_successor () =
       (Cohttp.Code.status_of_code 413, {|{"error":"request body too large"}|})
     ~assert_cause:(function
       | EO.Provider_response_refused
-          { http_status = 413; refusal = EO.Request_body_refused } -> ()
+          { http_status = 413; refusal = EO.Request_body_refused; _ } -> ()
       | _ -> fail "HTTP 413 lost its typed serialized-request cause")
+    ()
 ;;
 
 (* A 429 says the binding's quota is spent, not that the request is bad. Before
@@ -3733,9 +3745,28 @@ let test_rate_limited_429_refusal_advances_once_to_successor () =
       ( Cohttp.Code.status_of_code 429
       , {|{"error":{"code":"1302","message":"Rate limit reached for requests"}}|} )
     ~assert_cause:(function
-      | EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited } ->
+      | EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited; _ } ->
         ()
       | _ -> fail "HTTP 429 lost its typed rate-limit cause")
+    ()
+;;
+
+(* The provider's own wait survives the collapsed refusal, so a caller that
+   keeps per-binding rate-limit evidence rests the binding for as long as the
+   provider asked instead of inventing a time. *)
+let test_rate_limited_429_keeps_retry_after () =
+  assert_typed_capacity_refusal_advances_once
+    ~first_response_headers:[ "retry-after", "30" ]
+    ~refused_kind:"openai_compat"
+    ~label:"rate-limited-retry-after"
+    ~first_response:
+      ( Cohttp.Code.status_of_code 429
+      , {|{"error":{"code":"1302","message":"Rate limit reached for requests"}}|} )
+    ~assert_cause:(function
+      | EO.Provider_response_refused
+          { http_status = 429; refusal = EO.Rate_limited; retry_after_s = Some 30.0 } -> ()
+      | _ -> fail "HTTP 429 lost the provider's Retry-After")
+    ()
 ;;
 
 (* A 402 says the binding's account cannot pay, not that the request is bad.
@@ -3752,8 +3783,9 @@ let test_payment_required_402_refusal_advances_once_to_successor () =
       , {|{"error":{"message":"Insufficient Balance"}}|} )
     ~assert_cause:(function
       | EO.Provider_response_refused
-          { http_status = 402; refusal = EO.Payment_required } -> ()
+          { http_status = 402; refusal = EO.Payment_required; _ } -> ()
       | _ -> fail "HTTP 402 lost its typed payment-required cause")
+    ()
 ;;
 
 let test_server_refusal_advances_once_to_successor status =
@@ -3762,10 +3794,11 @@ let test_server_refusal_advances_once_to_successor status =
     ~label:(Printf.sprintf "server-refusal-%d" status)
     ~first_response:(Cohttp.Code.status_of_code status, {|{"error":"unavailable"}|})
     ~assert_cause:(function
-      | EO.Provider_response_refused { http_status; refusal }
+      | EO.Provider_response_refused { http_status; refusal; _ }
         when http_status = status
              && refusal = (if status = 529 then EO.Overloaded else EO.Server_error) -> ()
       | _ -> fail "HTTP server refusal lost its typed cause")
+    ()
 ;;
 
 (* A provider that refuses the input as larger than its window refused it
@@ -3781,8 +3814,9 @@ let test_context_overflow_refusal_advances_once_to_successor () =
       , {|{"error":{"code":"1261","message":"Prompt exceeds max length"}}|} )
     ~assert_cause:(function
       | EO.Provider_response_refused
-          { http_status = 400; refusal = EO.Context_overflow } -> ()
+          { http_status = 400; refusal = EO.Context_overflow; _ } -> ()
       | _ -> fail "a GLM window refusal lost its typed context-overflow cause")
+    ()
 ;;
 
 (* The same window refusal as an empty answer the provider stopped at its
@@ -3798,8 +3832,9 @@ let test_window_stopped_empty_answer_advances_once_to_successor () =
       )
     ~assert_cause:(function
       | EO.Provider_response_refused
-          { http_status = 200; refusal = EO.Context_overflow } -> ()
+          { http_status = 200; refusal = EO.Context_overflow; _ } -> ()
       | _ -> fail "an empty answer stopped at the window lost its overflow cause")
+    ()
 ;;
 
 (* Which of its own deadlines the first candidate misses: the header deadline
@@ -4093,7 +4128,7 @@ let test_stalled_server_refusal_body_advances_to_successor () =
       true
       (failure.cause.cause
        = EO.Provider_response_refused
-           { http_status = 503; refusal = EO.Refusal_body_not_received })
+           { http_status = 503; refusal = EO.Refusal_body_not_received; retry_after_s = None })
   | Ok _ -> ()
   | Error _ -> fail "stalled refusal did not advance"
 ;;
@@ -4134,7 +4169,7 @@ let test_generic_400_advances_to_successor () =
           ; cause =
               { cause =
                   EO.Provider_response_refused
-                    { http_status = 400; refusal = EO.Invalid_request }
+                    { http_status = 400; refusal = EO.Invalid_request; _ }
               ; _
               }
           ; _
@@ -4882,6 +4917,10 @@ let () =
             "HTTP 429 rate limit advances with one dispatch per candidate"
             `Quick
             test_rate_limited_429_refusal_advances_once_to_successor
+        ; test_case
+            "HTTP 429 keeps the provider's Retry-After"
+            `Quick
+            test_rate_limited_429_keeps_retry_after
         ; test_case
             "HTTP 402 payment required advances with one dispatch per candidate"
             `Quick

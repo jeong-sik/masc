@@ -5831,17 +5831,17 @@ let render_lanes_overview (state : state) =
         | None -> ()
         | Some detail ->
             box_line buf cols
-              ((Theme.warn ()) ^ "  STALE · refresh failed: "
+              ((Theme.warn ()) ^ "  STALE · "
                ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset))
    | None ->
        box_line buf cols
          (match state.standalone_lanes_error with
           | None -> Ansi.dim ^ "  loading standalone lane observations…" ^ Ansi.reset
           | Some detail ->
-              (* The loader already names the subject and the verdict --
+              (* The lane-read boundary already names the subject and verdict --
                  "standalone lanes load failed: <reason>" -- so the sentence
                  that stood here said "standalone lane" a second time and
-                 put an unavailable verdict beside the loader's own, and
+                 put an unavailable verdict beside the read error's own, and
                  pushed the reason
                  twenty-two cells right, past the pane edge. Fourteen other
                  surfaces draw the loader's message and nothing in front of
@@ -6468,7 +6468,7 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
     | Some failure ->
       [ ( Theme.bad ()
         , Printf.sprintf
-            "  FAILURE  %s  ·  %s"
+            "  CODE  %s  ·  %s"
             (Terminal_text.single_line failure.lrf_code)
             (Terminal_text.single_line failure.lrf_detail) ) ]
   in
@@ -7701,9 +7701,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let channel_lines =
       match state.connectors_error, state.connectors with
       | Some detail, None ->
-          [ (Theme.bad ()) ^ "  channel transports unavailable: "
-            ^ Terminal_text.single_line detail ^ Ansi.reset
-          ]
+          [ (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
+            ^ Ansi.reset ]
       | _, None -> [ Ansi.dim ^ "  (loading channel transports…)" ^ Ansi.reset ]
       | error, Some snapshot ->
           let connectors = snapshot.cs_connectors in
@@ -7966,7 +7965,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           @ (match error with
              | None -> []
              | Some detail ->
-                 [ (Theme.bad ()) ^ "  refresh failed: "
+                 [ (Theme.bad ()) ^ "  STALE · "
                    ^ Terminal_text.single_line detail ^ Ansi.reset
                  ])
           @ transport_rows @ refused_rows @ selected_lines
@@ -11853,8 +11852,8 @@ let render_connectors (state : state) =
   let title =
     match state.connectors with
     | None ->
-        Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Connectors") (title_missing_reading ~error:state.connectors_error) timestamp
+        Printf.sprintf "%s  %s  %s"
+          (screen_title " MASC Connectors") timestamp
           (connection_badge state)
     | Some snapshot ->
         Printf.sprintf "%s (%d of %d available)  %s  %s"

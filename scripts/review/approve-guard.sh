@@ -9,7 +9,10 @@
 #      (a queued workflow has no check-runs yet; this catches it)
 #   4. the check-run of every name from the newest check suite on that SHA is
 #      completed+success, ignoring suites of runs that lost in 3 (none -> refuse)
-#   5. the body file is non-empty (no evidence-free approvals)
+#   5. the body file is non-empty (no evidence-free approvals), and its first
+#      line is a literal R1 verdict line for this head:
+#        verdict: PASS head: <--head> run: <workflow run id on --head> by: <keeper>
+#      where <keeper> is not this account's login (#38975, 2026-09-26)
 #   6. no account has an open CHANGES_REQUESTED on the PR -- except this
 #      account's own one when --replace-own-cr names exactly that review id
 # Skips (exit 0, no write) if this account already APPROVED that exact SHA.
@@ -64,8 +67,25 @@ gh_json() { # gh_json <endpoint> <jq> ; stdout=result, returns 1 on transport er
 if [ -n "$replace_cr" ] && ! [[ "$replace_cr" =~ ^[1-9][0-9]*$ ]]; then
   refuse "--replace-own-cr must be a review id (digits), got '${replace_cr}'"
 fi
+# The body's first line is the R1 verdict line the merge relies on, so it must
+# be literal text naming this head. On #38975 (2026-09-26, review 5325206074)
+# the body carried `head: $(gh api ...)` from a quoted heredoc: the substitution
+# never ran, the APPROVE landed on the right commit_id, and the PR merged on a
+# PASS line that names no head. The run and by: fields are checked in section 5.
+v_run=""; v_by=""
 if [ "$check_only" -eq 0 ]; then
-  [ -n "$body" ] && [ -s "$body" ] || refuse "--body file missing or empty"
+  if [ -n "$body" ] && [ -s "$body" ]; then
+    vline="$(head -n 1 "$body" | tr -d '\r')"
+    vre='^verdict: PASS head: ([0-9a-f]{40}) run: ([1-9][0-9]*) by: ([A-Za-z0-9._-]+)$'
+    if [[ "$vline" =~ $vre ]]; then
+      [ "${BASH_REMATCH[1]}" = "$head" ] || refuse "verdict line head ${BASH_REMATCH[1]} is not --head ${head}"
+      v_run="${BASH_REMATCH[2]}"; v_by="${BASH_REMATCH[3]}"
+    else
+      refuse "body first line is not a literal verdict line 'verdict: PASS head: <40hex> run: <run id> by: <keeper>' (got: '${vline:0:120}')"
+    fi
+  else
+    refuse "--body file missing or empty"
+  fi
 fi
 [ ${#reasons[@]} -eq 0 ] || finish_refused
 
@@ -188,6 +208,16 @@ while IFS=$'\t' read -r who rid rstate; do
 done <<<"$revs"
 if [ -n "$replace_cr" ] && [ "$replaced" != "$replace_cr" ]; then
   refuse "--replace-own-cr ${replace_cr} does not name an open CHANGES_REQUESTED from ${me}"
+fi
+# The verdict's run must be a workflow run on this head (a PASS carried from an
+# older head names that head's run), and by: must name the Keeper that judged,
+# not the shared account: '${me}' says nothing about which lane read the diff.
+if [ "$check_only" -eq 0 ]; then
+  case " ${wf_ids[*]} " in
+    *" ${v_run} "*) ;;
+    *) refuse "verdict line run ${v_run} is not a workflow run on ${head} (runs: ${wf_ids[*]})" ;;
+  esac
+  [ "$v_by" != "$me" ] || refuse "verdict line by: is the account login '${me}'; name the Keeper that judged"
 fi
 [ ${#reasons[@]} -eq 0 ] || finish_refused
 

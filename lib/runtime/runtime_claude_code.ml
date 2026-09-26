@@ -190,6 +190,7 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
@@ -225,6 +226,7 @@ let emit_stream_event on_stream_event event =
   | None -> ()
   | Some emit ->
     (try emit event with
+     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
        Log.Runtime_agent.warn
@@ -514,6 +516,7 @@ let read_subscription ~mgr ~cwd config =
     |> parse_json ~stage:"auth status"
     |> fun result -> Result.bind result parse_subscription
   with
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Eio.Exn.Io
       (Eio.Process.E (Eio.Process.Executable_not_found executable), _) ->
@@ -579,6 +582,7 @@ let send_control_response
     response ();
     Ok ()
   with
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Idle_timeout _ as exn -> raise exn
   | Eio.Time.Timeout as exn -> raise exn
@@ -635,6 +639,7 @@ let handle_control_request
             (Dynamic_tool_started { call_id; tool_name = name; arguments });
           let result =
             try tool.call ~call_id arguments with
+            | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn ->
               Log.Runtime_agent.warn
@@ -1536,6 +1541,7 @@ let drain_stderr flow tail =
     done
   with
   | End_of_file -> ()
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Runtime_agent.debug
@@ -1609,6 +1615,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
       turn_admitted := true;
       Ok ()
     with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Idle_timeout _ as exn -> raise exn
     | Eio.Time.Timeout as exn -> raise exn
@@ -1689,6 +1696,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
           ~stderr:stderr_w
           argv
       with
+      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> raise (Runtime_error (Spawn_failed (Printexc.to_string exn)))
     in
@@ -1742,6 +1750,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
              ; turn_admitted = !turn_admitted
              })
       | Idle_timeout seconds -> Error (Timeout seconds)
+      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | Eio.Time.Timeout as exn -> raise exn
       | exn -> protocol_error "stdout read" (Printexc.to_string exn)
@@ -1942,6 +1951,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
         ~on_prompt_sent
         ~on_stream_event
     with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Idle_timeout seconds -> Error (Timeout seconds)
     | Eio.Time.Timeout as exn -> raise exn

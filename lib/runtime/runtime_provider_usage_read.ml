@@ -99,6 +99,7 @@ let read_antigravity ~scope (antigravity : Runtime_execution.antigravity_cli) =
 
 type http_error =
   | Credential_unavailable
+  | Credential_not_refreshed
   | Request_failed of Llm_provider.Http_client.http_error
   | Http_status of int
   | Body_not_json
@@ -119,6 +120,8 @@ let request_error_to_string : Llm_provider.Http_client.http_error -> string = fu
 
 let http_error_to_string = function
   | Credential_unavailable -> "the runtime's credential is empty or could not be refreshed"
+  | Credential_not_refreshed ->
+    "the runtime's credential needs a refresh, which a read after a refusal does not do"
   | Request_failed error -> request_error_to_string error
   | Http_status status -> Printf.sprintf "status %d" status
   | Body_not_json -> "the body is not JSON"
@@ -172,9 +175,9 @@ let api_key_of_credential : Llm_provider.Provider_config.credential_source * _ -
       (refresh ())
 ;;
 
-let usage_report ~fetch { credential; usage_read } =
+let usage_report ?(api_key_of = api_key_of_credential) ~fetch { credential; usage_read } =
   let ( let* ) = Result.bind in
-  let* api_key = api_key_of_credential credential in
+  let* api_key = api_key_of credential in
   let* () =
     if Llm_provider.Secret.is_empty api_key then Error Credential_unavailable else Ok ()
   in
@@ -375,4 +378,169 @@ let read_codex_in_background ~clock ~cwd ~scope codex =
                   (Runtime_quota_window.scope_to_string scope)
                   (Printexc.to_string exn)));
         Started))
+;;
+
+
+(* After a 403: the one read whose answer the walk reads.
+
+   An HTTP 403 does not say why the account was refused. Kimi For Coding
+   sends the same body type for a spent 5-hour window and for a client the
+   plan does not admit. The provider's usage endpoint answers the question
+   with counts: a window that gates model calls and whose used count reached
+   its limit is spent until its stated reset. Only that answer rests the
+   scope; the status alone rests nothing. *)
+
+type account_refusal_read =
+  | Spent_until of float
+  | Spent_without_reset
+  | No_window_spent
+
+(* [used] reached [limit]. Count windows are decoded as [used / limit]
+   ([fraction_of_counts]), which is exactly 1.0 when the two are equal. *)
+let window_spent (window : Runtime_provider_usage_window.window) =
+  match window.utilization with
+  | Runtime_provider_usage_window.Fraction used -> Float.compare used 1.0 >= 0
+  | Runtime_provider_usage_window.Percent used -> used >= 100
+;;
+
+(* Only a window that gates model calls can explain a refused model call. *)
+let gates_model_calls (window : Runtime_provider_usage_window.window) =
+  match window.role with
+  | Runtime_provider_usage_window.Gates_model_calls -> true
+  | Runtime_provider_usage_window.Counts_other_use
+  | Runtime_provider_usage_window.Unclassified_limit -> false
+;;
+
+(* The latest stated reset among the spent gating windows: every one of them
+   refuses calls until it resets. A spent gating window that states no reset
+   keeps the scope resting until its next success, whatever the others say. *)
+let account_refusal_read_of_report (report : Runtime_provider_usage_window.report) =
+  List.fold_left
+    (fun acc (window : Runtime_provider_usage_window.window) ->
+      if not (gates_model_calls window && window_spent window)
+      then acc
+      else (
+        match acc, window.resets_at with
+        | Spent_without_reset, (Some _ | None) | (No_window_spent | Spent_until _), None ->
+          Spent_without_reset
+        | No_window_spent, Some resets_at -> Spent_until (Float.of_int resets_at)
+        | Spent_until held, Some resets_at -> Spent_until (Float.max held (Float.of_int resets_at))))
+    No_window_spent
+    report.windows
+;;
+
+let account_refusal_read_to_string = function
+  | Spent_until resets_at -> Printf.sprintf "a gating window is spent until %.0f" resets_at
+  | Spent_without_reset -> "a gating window is spent and states no reset"
+  | No_window_spent -> "no gating window is spent"
+;;
+
+(* The refused call just used this credential. A token that needs a refresh
+   is not refreshed on the failing path for a diagnostic read; the read is
+   skipped instead. *)
+let materialized_api_key : Llm_provider.Provider_config.credential_source * _ -> _ =
+  function
+  | Static_credential, api_key -> Ok api_key
+  | Refreshable_credential _, _ -> Error Credential_not_refreshed
+;;
+
+let read_after_account_refusal ~fetch ~scope http =
+  let ( let* ) = Result.bind in
+  let* (report : Runtime_provider_usage_window.report) =
+    usage_report ~api_key_of:materialized_api_key ~fetch http
+  in
+  Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
+  let read = account_refusal_read_of_report report in
+  (match read with
+   | Spent_until resets_at -> Runtime_quota_window.note_exhausted ~scope ~resets_at
+   | Spent_without_reset -> Runtime_quota_window.note_observed_exhausted ~scope
+   | No_window_spent -> ());
+  Ok read
+;;
+
+let http_read_of_runtime (rt : Runtime.t) =
+  match how_of_runtime rt with
+  | Some (Http http) -> Some http
+  | Some (Codex _ | Antigravity _) | None -> None
+;;
+
+type account_refusal_skip =
+  | No_usage_read
+  | Scope_already_resting
+  | Already_reading
+  | No_net_or_clock
+
+type account_refusal_outcome =
+  | Read of account_refusal_read
+  | Read_failed of http_error
+  | Read_raised of string
+  | Skipped of account_refusal_skip
+
+let account_refusal_skip_to_string = function
+  | No_usage_read -> "the provider declares no usage-read"
+  | Scope_already_resting -> "the scope already rests"
+  | Already_reading -> "a read for the scope is already running"
+  | No_net_or_clock -> "no Eio net or clock"
+;;
+
+let fetch_of_context () =
+  match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
+  | Some net, Some clock -> Some (fun ~api_key url -> get_usage ~net ~clock ~api_key url)
+  | None, _ | _, None -> None
+;;
+
+let read_runtime_after_account_refusal ?fetch (rt : Runtime.t) =
+  let scope = Runtime.quota_scope_of_runtime rt in
+  let outcome =
+    match http_read_of_runtime rt with
+    | None -> Skipped No_usage_read
+    | Some http ->
+      (* A sibling on the same account refused a moment ago and its read
+         already rests the scope; the walk has nothing more to learn. *)
+      if Runtime_quota_window.is_exhausted ~scope ~now:(Time_compat.now ())
+      then Skipped Scope_already_resting
+      else (
+        let fetch =
+          match fetch with
+          | Some fetch -> Some fetch
+          | None -> fetch_of_context ()
+        in
+        match fetch with
+        | None -> Skipped No_net_or_clock
+        | Some fetch ->
+          if not (claim scope)
+          then Skipped Already_reading
+          else
+            Fun.protect
+              ~finally:(fun () -> release scope)
+              (fun () ->
+                match read_after_account_refusal ~fetch ~scope http with
+                | Ok read -> Read read
+                | Error error -> Read_failed error
+                | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+                (* The request carried the key and nothing bounds what an
+                   HTTP client's exception message quotes: keep the
+                   constructor only. *)
+                | exception exn -> Read_raised (Printexc.exn_slot_name exn)))
+  in
+  let scope_label = Runtime_quota_window.scope_to_string scope in
+  (match outcome with
+   | Read read ->
+     Log.Runtime_agent.info
+       "provider usage read after a 403 for %s: %s"
+       scope_label
+       (account_refusal_read_to_string read)
+   | Read_failed error ->
+     Log.Runtime_agent.warn
+       "provider usage read after a 403 failed for %s: %s"
+       scope_label
+       (http_error_to_string error)
+   | Read_raised name ->
+     Log.Runtime_agent.warn "provider usage read after a 403 raised for %s: %s" scope_label name
+   | Skipped skip ->
+     Log.Runtime_agent.info
+       "provider usage not read after a 403 for %s: %s"
+       scope_label
+       (account_refusal_skip_to_string skip));
+  outcome
 ;;

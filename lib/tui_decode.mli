@@ -96,6 +96,15 @@ val short_timestamp_for_terminal :
     split UTF-8 scalar cannot recreate a raw C1 byte. Empty timestamps render as
     [(never)]. *)
 
+val clock_timestamp_of_unix_for_terminal :
+  localtime:(float -> Unix.tm) -> float -> string
+(** [HH:MM:SS] of a Unix time in the zone [localtime] converts to. The same
+    shape {!clock_timestamp_for_terminal} draws, for a time the wire carries
+    as a number rather than an RFC 3339 string -- the pairing
+    {!short_timestamp_of_unix_for_terminal} already is for
+    {!short_timestamp_for_terminal}. Always digits and colons, so unlike its
+    string-input sibling this need not sanitize its own output. *)
+
 val clock_timestamp_for_terminal :
   localtime:(float -> Unix.tm) -> string -> string
 (** The [HH:MM:SS] clock of an RFC 3339 timestamp in the zone [localtime]
@@ -2528,9 +2537,7 @@ type preset_manifest = {
   pm_description : string;
   pm_created_at : string;
   pm_override_count : int;
-  pm_override_keys : string list option;
-      (** Which prompts the preset overrides. [None] on a manifest written
-          before the server named them -- unknown, not none. *)
+  pm_override_keys : string list;  (** Which prompts the preset overrides. *)
   pm_keepers : string list;
   pm_assignment_count : int;
   pm_lane_count : int;

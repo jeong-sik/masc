@@ -16,7 +16,9 @@ val create_submit_request :
     cancellation the record keeps no copy of the producer's reason: the
     operator reads it from the Board post
     {!notify_submit_for_verification} makes. Returns [Error _] when
-    persistence fails. *)
+    persistence fails, and when an [artifact:] reference is submitted but the
+    producer's keeper meta cannot be read: the snapshot cannot know where the
+    producer's sandbox keeps the artifact, and the host copy is not it. *)
 
 val delete_verification_request :
   config:Workspace.config ->

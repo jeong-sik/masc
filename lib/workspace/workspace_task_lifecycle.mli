@@ -15,6 +15,10 @@ type invalid =
           carry only an operator's signature. A system-lane approval of a
           cancel claim is refused at the commit funnel, where every verdict
           caller converges. *)
+  | Cancel_reason_required
+      (** The holder cancels its own Task without a stated reason. The
+          cancellation ends the Task at once, and the reason is the only thing
+          its author is told. *)
   | Verification_id_mismatch of { expected : string; actual : string }
   | Invalid_transition
 
@@ -49,7 +53,9 @@ val decide
   -> action:Masc_domain.task_action
   -> now:string
   -> notes:string
-  -> reason:string
+  -> reason:string option
+      (** The stated reason, [None] when the caller stated none. A holder's
+          cancel is refused without one. *)
   -> (decision, invalid) result
 
 (** A verdict decision plus the typed authority provenance the caller records.

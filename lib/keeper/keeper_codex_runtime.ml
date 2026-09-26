@@ -1340,6 +1340,27 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           (internal_error
              "Codex host stop arrived without an acknowledged provider turn")
     in
+    let settle_cancellation exn =
+      let backtrace = Printexc.get_raw_backtrace () in
+      recovery_failure
+        := (if Keeper_owner_signals.is_owner_cancel_reason exn then
+              Keeper_official_client_session_store.Owner_stopped_turn
+            else Keeper_official_client_session_store.Transport_interrupted);
+      let detail = "Codex turn cancelled: " ^ Printexc.to_string exn in
+      (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
+       | Ok () -> ()
+       | Error recovery_detail ->
+         Log.Keeper.error
+           ~keeper_name
+           "Codex cancellation recovery persistence failed: %s"
+           recovery_detail);
+      (match
+         Eio.Cancel.protect (fun () ->
+           finish_raw_error ~keeper_name raw_trace_run (internal_error detail))
+       with
+       | () -> ());
+      Printexc.raise_with_backtrace exn backtrace
+    in
     let turn_result =
       try
         let observe_stream =
@@ -1566,27 +1587,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       (* A stop the owner raised is not an ambiguity: it knows the turn did
          not finish and why. Only an unexplained cancellation needs an
          operator to adjudicate what the transport left behind (#28012). *)
-      | Eio.Cancel.Cancelled _ as exn ->
-        let backtrace = Printexc.get_raw_backtrace () in
-        recovery_failure
-          := (match exn with
-              | Eio.Cancel.Cancelled Keeper_owner_signals.Stop_active_child ->
-                Keeper_official_client_session_store.Owner_stopped_turn
-              | _ -> Keeper_official_client_session_store.Transport_interrupted);
-        let detail = "Codex turn cancelled: " ^ Printexc.to_string exn in
-        (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
-         | Ok () -> ()
-         | Error recovery_detail ->
-           Log.Keeper.error
-             ~keeper_name
-             "Codex cancellation recovery persistence failed: %s"
-             recovery_detail);
-        (match
-           Eio.Cancel.protect (fun () ->
-             finish_raw_error ~keeper_name raw_trace_run (internal_error detail))
-         with
-         | () -> ());
-        Printexc.raise_with_backtrace exn backtrace
+      | Eio.Cancel.Cancelled _ as exn -> settle_cancellation exn
+      | exn when Keeper_owner_signals.is_owner_cancel_reason exn ->
+        settle_cancellation exn
     in
     let turn_result =
       match turn_result with

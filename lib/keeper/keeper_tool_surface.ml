@@ -27,7 +27,12 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
           |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
         in
         let all_names =
-          registry_names @ keeper_names config
+          registry_names
+          @ (match keeper_names_result config with
+             | Ok names -> names
+             | Error detail ->
+               Log.Keeper.warn "keeper_list: keeper names unread: %s" detail;
+               [])
           |> List.map String.trim
           |> List.filter (fun name -> not (String.equal name ""))
           |> List.sort_uniq String.compare

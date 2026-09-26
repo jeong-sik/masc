@@ -1107,6 +1107,24 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
           (internal_error
              "Claude Code host stop arrived without an acknowledged provider turn")
     in
+    let settle_cancellation exn =
+      let backtrace = Printexc.get_raw_backtrace () in
+      recovery_failure
+        := (if Keeper_owner_signals.is_owner_cancel_reason exn then
+              Session_store.Owner_stopped_turn
+            else Session_store.Transport_interrupted);
+      let detail = "Claude Code turn cancelled: " ^ Printexc.to_string exn in
+      (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
+       | Ok () -> ()
+       | Error recovery_detail ->
+         Log.Keeper.error
+           ~keeper_name
+           "Claude Code cancellation recovery persistence failed: %s"
+           recovery_detail);
+      Eio.Cancel.protect (fun () ->
+        Host.finish_raw_error ~keeper_name raw_trace_run (internal_error detail));
+      Printexc.raise_with_backtrace exn backtrace
+    in
     let turn_result =
       let on_stream_event =
         claude_stream_callback
@@ -1332,24 +1350,9 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       (* A stop the owner raised is not an ambiguity: it knows the turn did
          not finish and why. Only an unexplained cancellation needs an
          operator to adjudicate what the transport left behind (#28012). *)
-      | Eio.Cancel.Cancelled _ as exn ->
-        let backtrace = Printexc.get_raw_backtrace () in
-        recovery_failure
-          := (match exn with
-              | Eio.Cancel.Cancelled Keeper_owner_signals.Stop_active_child ->
-                Session_store.Owner_stopped_turn
-              | _ -> Session_store.Transport_interrupted);
-        let detail = "Claude Code turn cancelled: " ^ Printexc.to_string exn in
-        (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
-         | Ok () -> ()
-         | Error recovery_detail ->
-           Log.Keeper.error
-             ~keeper_name
-             "Claude Code cancellation recovery persistence failed: %s"
-             recovery_detail);
-        Eio.Cancel.protect (fun () ->
-          Host.finish_raw_error ~keeper_name raw_trace_run (internal_error detail));
-        Printexc.raise_with_backtrace exn backtrace
+      | Eio.Cancel.Cancelled _ as exn -> settle_cancellation exn
+      | exn when Keeper_owner_signals.is_owner_cancel_reason exn ->
+        settle_cancellation exn
     in
     let turn_result =
       match turn_result with

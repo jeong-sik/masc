@@ -53,6 +53,7 @@
   masc.skill_config
   masc.provider_tool_support
   masc.keeper_runtime
+  masc.keeper_registry
   masc.auth
   masc.fs_compat
   masc.fd_accountant

@@ -63,7 +63,7 @@ value = {}
    the model as its own error code, never as a storage failure. *)
 let model_sees_verdict ~base_path (result : Keeper_tool_execution.t) data =
   let tool_name = "keeper_skill_validate" in
-  let start_time = Unix.gettimeofday () in
+  let start_time = Tool_timing.start () in
   let typed =
     match result.Keeper_tool_execution.disposition with
     | Tool_result.Completed () -> Tool_result.make_ok ~tool_name ~start_time ~data ()

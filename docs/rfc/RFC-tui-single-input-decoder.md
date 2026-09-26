@@ -95,12 +95,12 @@ type event =
   | Mouse_wheel of … | Mouse_left_press of … | Mouse_left_release of …
   | Reply of reply
 
-type pending = Sequence | Character | Pasting | Draining
+type pending = Prefix | Sequence | Character | Pasting | Draining
 
 val feed : t -> char -> event list
 val idle : t -> event list                   (* 읽기가 빈손으로 돌아왔다 *)
 val pending : t -> pending option
-val cancel_pending : t -> unit               (* Sequence만 버린다. 아무것도 내보내지 않는다 *)
+val cancel_pending : t -> unit               (* Prefix·Sequence만 버린다. 아무것도 내보내지 않는다 *)
 val recover_paste : t -> Masc_tui_paste.t option
 ```
 
@@ -121,7 +121,9 @@ val recover_paste : t -> Masc_tui_paste.t option
 | `ESC O`, `ESC _` | 0.05초 뒤 `esc` | `idle` → `esc` |
 | X10 마우스 3바이트 중 일부 | 바이트마다 0.05초, 버튼 없으면 `unknown-esc` | `idle` → 같은 결과 |
 | CSI 인자 | 끝 바이트까지 기다림, 16바이트 넘으면 `esc` | 같음 |
-| OSC / APC 본문 | probe는 기다림, `read_apc_body`는 0.05초 뒤 잘린 본문 | 기다림. 4096바이트 넘으면 본문을 통째로 버림 |
+| OSC / APC 본문 | probe는 기다림, `read_apc_body`는 0.05초 뒤 잘린 본문 | `idle`에서 버림(본문이 비었으면 `esc`). 답은 한 번에 오므로, 끊긴 본문은 우리 답이 아니다. 계속 기다리면 Alt+] 뒤의 입력을 전부 삼킨다. 4096바이트 넘는 본문도 버림 |
+
+`ESC`로 시작해 `idle`에서 끝나는 상태(위 표의 앞 세 줄과 이 줄)는 `pending = Prefix`다. 호출하는 쪽은 `timeout`과 상관없이 이 상태의 다음 바이트를 0.05초 기다린다. 화면을 그려야 할 때 메인 루프가 `timeout`을 0으로 넘기면, 이 대기가 없어 화살표 키가 세 키로 쪼개진다.
 | UTF-8 앞부분 | 시간 제한 없이 기다림 | 같음. 거절된 바이트는 다음 입력으로 다시 읽음 |
 | 붙여넣기 | 기다림. Ctrl-C가 0.5초 조용함과 남은 입력 없음을 확인한 뒤 복구 | 기다림. 복구는 호출 쪽이 같은 조건으로 `recover_paste` |
 

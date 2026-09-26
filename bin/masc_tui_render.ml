@@ -630,35 +630,10 @@ let render_overview (state : state) =
         let health_label = workspace_health_label o.ov_workspace_health in
         (* The tab strip's badge counts held keeper tool calls, pending gate
            rows, and confirm-queue entries together, and so does the Approvals
-           screen's own header. This row counted only the third of those, off
-           the confirm queue's own visible count, so a runtime holding one
-           keeper tool call drew "Approvals: 0" beside a tab reading
-           "Approvals·1" -- one name over two populations. All three now walk
-           [approval_items].
-
-           The "?" tail marks a count no source will stand behind, and it does
-           not say which way the number is wrong, because the failures do not
-           agree on that. A dropped confirm queue empties its list, leaving the
-           count short. A failed held-calls or gate poll replaces nothing --
-           the previous rows stay on screen, which the Approvals header calls
-           "held calls stale" -- so that count can just as easily be long,
-           describing rows the server no longer holds. Which list failed is a
-           question that header answers; at this width the row says only that
-           one did. *)
-        let approval_count =
-          let on_screen = Masc_tui_types.approvals_surface_pending state in
-          let source_unread =
-            Option.is_none state.approval_snapshot
-            || Option.is_some state.approvals_error
-            || Option.is_some state.keeper_tool_approvals_error
-            || Option.is_none state.asks_snapshot
-            || Option.is_some state.asks_error
-            || Option.is_some state.gate_error
-            || Option.is_some state.gate_queue_unavailable
-          in
-          if source_unread then Printf.sprintf "%d?" on_screen
-          else string_of_int on_screen
-        in
+           screen's own header. This row counts the same population through
+           [approvals_count_label], which also decides the "?" tail from the
+           same per-list readings the strip and the Approvals title use. *)
+        let approval_count = Masc_tui_types.approvals_count_label state in
         (* Keepers and MCP clients are counted apart: a row reading
            "Agents: 2" over a runtime with ten keepers named the wrong
            population.
@@ -1867,34 +1842,19 @@ let render_approvals (state : state) =
      entries, and [visible_entries]/[hidden_entries] partition the same list,
      so the hidden count is the whole of what the old total said. It now
      reads as a note about that queue rather than as the screen's count. *)
-  let queue_note =
+  let hidden_note =
     match state.approval_snapshot with
-    | None -> ", confirm queue unread"
-    | Some snapshot ->
-      if snapshot.aps_hidden_count = 0 then ""
-      else
+    | Some snapshot when snapshot.aps_hidden_count > 0 ->
         Printf.sprintf ", %d hidden from %s" snapshot.aps_hidden_count
           (Terminal_text.single_line_or ~default:"?" snapshot.aps_actor_filter)
+    | Some _ | None -> ""
   in
-  (* A failed held-calls poll keeps the previous rows on screen: the handler
-     in [masc_tui.ml] replaces [keeper_tool_approvals] only on [Ok], so the
-     count beside the title can describe a list the server no longer holds.
-     The empty branch below already refuses to let an unreadable queue wear
-     the face of an empty one; a stale list is the same lie with rows on it,
-     and it is the one an operator decides against. *)
-  let held_note =
-    match state.keeper_tool_approvals_error with
-    | Some _ -> ", held calls stale"
-    | None -> ""
-  in
-  (* The questions have the same two ways to be wrong. A failed questions
-     poll reached the event log once and nothing on this screen. *)
-  let question_note =
-    match Masc_tui_types.approvals_questions_reading state with
-    | Masc_tui_types.Questions_unread -> ", questions unread"
-    | Masc_tui_types.Questions_stale -> ", questions stale"
-    | Masc_tui_types.Questions_current -> ""
-  in
+  (* Which list the count cannot stand behind, one clause per list, from the
+     same readings that keep the strip entry and put "?" on the Overview
+     count. A stale list still draws its earlier rows, and those are the rows
+     an operator decides against. *)
+  let reading = Masc_tui_types.approvals_reading state in
+  let reading_notes = Masc_tui_types.approvals_title_notes reading in
   let action_badge = if action_inflight then "  [submitting]" else "" in
   (* The count and where it came from, naming only the lists that have a row
      on the screen. It read "3 [0 held · 0 gate · 3 op]": two zeros for lists
@@ -1934,9 +1894,9 @@ let render_approvals (state : state) =
   in
   let header =
     Printf.sprintf
-      "%s (%s%s%s%s)  %s  %s%s"
+      "%s (%s%s%s)  %s  %s%s"
       (screen_title " MASC Approvals")
-      count_text queue_note held_note question_note timestamp
+      count_text hidden_note reading_notes timestamp
       (connection_badge state) action_badge
   in
 
@@ -2033,48 +1993,45 @@ let render_approvals (state : state) =
   let ask_rows = count_frame_lines ask_buf in
   let approval_body_rows = max 1 (rows - around_rows - ask_rows) in
 
-  let approvals_error =
-    Terminal_text.optional_single_line state.approvals_error
-  in
   (* The queue's own population, not the surface's. [count] above is the
      approval rows plus the open questions -- the right reading for the title
-     and the badge, which name the screen -- and this block is about one of
-     the three lists the screen draws. With the queue empty and a question
+     and the badge, which name the screen -- and this block is about the three
+     lists that hold approval rows. With the queue empty and a question
      waiting, [count] was three, so the list drew its empty self: a cursor
      mark on a blank row and nothing to say the queue was empty, where the
-     same screen with no question at all said "(no pending approvals)". *)
+     same screen with no question at all said "(no pending approvals)".
+
+     "(no pending approvals)" is itself a reading of all three lists. A Gate
+     poll that failed after one that answered keeps its empty rows, so the
+     queue is empty on screen while the server may hold Gate approvals; each
+     list that was not read says so here instead. *)
   if approvals = [] then begin
-    (match state.approval_snapshot, approvals_error with
-     | _, Some err ->
-         box_line buf cols (data_unreliable_row ~cols err);
-         for _ = 1 to max 0 (approval_body_rows - 1) do
-           box_empty buf cols
-         done
-     | None, None ->
-         box_line buf cols
-           (Ansi.dim ^ "  (no approval data — press 'r' to refresh)"
-           ^ Ansi.reset);
-         for _ = 1 to max 0 (approval_body_rows - 1) do
-           box_empty buf cols
-         done
-     | Some _, None ->
-         (* An unreadable approval-queue store and an empty queue must not
-            share a face: the server says which one it was, and "no pending
-            approvals" over a store nobody could read is the lie an operator
-            acts on. *)
-         (match state.gate_queue_unavailable with
-          | Some detail ->
-              box_line buf cols
-                (data_unreliable_row ~cols ("approval queue unavailable: " ^ detail));
-              for _ = 1 to max 0 (approval_body_rows - 1) do
-                box_empty buf cols
-              done
-          | None ->
-              box_line buf cols
-                (Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset);
-              for _ = 1 to max 0 (approval_body_rows - 1) do
-                box_empty buf cols
-              done));
+    let lines =
+      match Masc_tui_types.approvals_empty_queue reading with
+      | Masc_tui_types.Nothing_pending ->
+          [ Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset ]
+      | Masc_tui_types.Lists_not_read not_read ->
+          List.map
+            (fun (name, (not_read : Masc_tui_types.approval_not_read)) ->
+              match not_read with
+              | Masc_tui_types.Approval_unread ->
+                  Printf.sprintf "%s  (%s not read yet \xe2\x80\x94 press 'r' to refresh)%s"
+                    Ansi.dim name Ansi.reset
+              (* The loader's message already names what failed ("... load
+                 failed: ..."), so the row carries it as it came. *)
+              | Masc_tui_types.Approval_failed cause
+              | Masc_tui_types.Approval_stale cause ->
+                  data_unreliable_row ~cols (Terminal_text.single_line cause)
+              | Masc_tui_types.Approval_unavailable detail ->
+                  data_unreliable_row ~cols
+                    (Printf.sprintf "%s unavailable: %s" name
+                       (Terminal_text.single_line detail)))
+            not_read
+    in
+    List.iter (fun line -> box_line buf cols line) lines;
+    for _ = 1 to max 0 (approval_body_rows - List.length lines) do
+      box_empty buf cols
+    done
   end else begin
     let content_height = approval_body_rows in
     let scroll_offset =
@@ -2576,7 +2533,7 @@ let render_board_list (state : state) =
      counted them by hand and counted two rows it no longer draws, so the
      footer stood two rows above the composer. *)
   surface_chrome state ~terminal_rows ~cols ~surface_key:"board-list"
-    ~title:header ~hints:(Masc_tui_keys.footer_hints state.view)
+    ~title:header ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view)
     ~body:(fun ~budget c ->
       (* The header is laid out by the same arithmetic as the rows below it,
          because a header laid out by its own is a header that stops
@@ -3561,13 +3518,34 @@ let render_planning_list (state : state) =
          let content_height =
            rows - count_frame_lines buf - selection_rows - tail_rows
          in
+         (* Where the list stands, when it does not hold every goal. At
+            sixty columns and twenty-four rows the active filter held eight
+            and the frame drew seven, and nothing on the screen said an
+            eighth existed -- the rollup above counts every goal in the
+            store, not the ones this filter and this frame leave off. The
+            reading costs one of the rows it describes, which is the rule
+            [Masc_tui_scroll.content_height ~overflow_takes_row:true] already
+            holds for the roster and the reading panes. The chrome is zero
+            here because [content_height] above has already taken it. *)
+         let list_rows =
+           (* A short frame may leave no list row at all. When it leaves
+              one, that row is the selected goal: the cursor row is what
+              [j/k] and Enter act on, and the count needs a second row. *)
+           if content_height <= 0 then 0
+           else if content_height = 1 then 1
+           else
+             Masc_tui_scroll.content_height ~rows:content_height ~chrome:0
+               ~count ~preview_keep:None ~overflow_takes_row:true
+         in
+         let overflowing = content_height > 1 && count > list_rows in
          let scroll_offset =
-           if state.planning_cursor >= content_height then
-             state.planning_cursor - content_height + 1
+           if list_rows = 0 then 0
+           else if state.planning_cursor >= list_rows then
+             state.planning_cursor - list_rows + 1
            else 0
          in
-         let goals_window = Rows.of_list ~first:scroll_offset ~height:content_height goals in
-         for i = 0 to content_height - 1 do
+         let goals_window = Rows.of_list ~first:scroll_offset ~height:list_rows goals in
+         for i = 0 to list_rows - 1 do
            let idx = i + scroll_offset in
            match Rows.at goals_window idx with
            | None -> box_empty buf cols
@@ -3660,6 +3638,11 @@ let render_planning_list (state : state) =
                box_line buf cols line
            end
          done;
+         if overflowing then
+           box_line_styled buf cols ~style:(Theme.recede ())
+             (Printf.sprintf "  [goals %s]"
+                (Masc_tui_scroll.window_text ~scroll:scroll_offset
+                   ~height:list_rows count));
          match List.nth_opt goals state.planning_cursor with
          | None -> box_empty buf cols
          | Some selected ->
@@ -5805,17 +5788,17 @@ let render_lanes_overview (state : state) =
         | None -> ()
         | Some detail ->
             box_line buf cols
-              ((Theme.warn ()) ^ "  STALE · refresh failed: "
+              ((Theme.warn ()) ^ "  STALE · "
                ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset))
    | None ->
        box_line buf cols
          (match state.standalone_lanes_error with
           | None -> Ansi.dim ^ "  loading standalone lane observations…" ^ Ansi.reset
           | Some detail ->
-              (* The loader already names the subject and the verdict --
+              (* The lane-read boundary already names the subject and verdict --
                  "standalone lanes load failed: <reason>" -- so the sentence
                  that stood here said "standalone lane" a second time and
-                 put an unavailable verdict beside the loader's own, and
+                 put an unavailable verdict beside the read error's own, and
                  pushed the reason
                  twenty-two cells right, past the pane edge. Fourteen other
                  surfaces draw the loader's message and nothing in front of
@@ -6442,7 +6425,7 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
     | Some failure ->
       [ ( Theme.bad ()
         , Printf.sprintf
-            "  FAILURE  %s  ·  %s"
+            "  CODE  %s  ·  %s"
             (Terminal_text.single_line failure.lrf_code)
             (Terminal_text.single_line failure.lrf_detail) ) ]
   in
@@ -6602,8 +6585,10 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
     | R.Provided text -> [ "QUESTION PROVIDED"; text ]
     | R.Generated value -> generation "QUESTION GENERATED" value
   in
+  (* The sample header names the failed stage. Retain the stage when the
+     header scrolls away, without repeating the FAILED status. *)
   let failed_generation label (value : R.failed_generation) =
-    [ label ^ " FAILED  " ^ value.error
+    [ label ^ " CAUSE  " ^ value.error
     ; "REQUESTED  " ^ value.request.requested_model ^ "  ·  runtime " ^ value.request.runtime_id
     ] @ prepared value.request
     @ (match value.incomplete_response with
@@ -6637,7 +6622,7 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
         | R.Judge_failed { question; answer; failure } -> Theme.bad (), "JUDGE FAILED",
             question_lines question @ generation "ANSWER" answer
             @ [ "JUDGE REQUESTED  " ^ failure.request.model ^ "  ·  " ^ failure.request.endpoint
-              ; "JUDGE FAILED  " ^ failure.error ]
+              ; "JUDGE CAUSE  " ^ failure.error ]
         | R.Scored { question; answer; judgment } -> Ansi.reset, "SCORED",
             question_lines question @ generation "ANSWER" answer
             @ [ "JUDGE  " ^ judgment.response_model ^ "  ·  " ^ judgment.request.endpoint
@@ -7395,7 +7380,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                (String.concat ", "
                   (List.map
                      (fun (first : Tui_decode.keeper_exact_lane_first) ->
-                       first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
+                       (* The marker leads: a narrow pane cuts the row's
+                          tail, and the slot id is the part it can lose. *)
+                       (if first.kel_offered then ""
+                        else "not offered, lane order \xc2\xb7 ")
+                       ^ first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
                        ^ first.kel_slot_id)
                      firsts))
            ^ Ansi.reset);
@@ -7669,9 +7658,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let channel_lines =
       match state.connectors_error, state.connectors with
       | Some detail, None ->
-          [ (Theme.bad ()) ^ "  channel transports unavailable: "
-            ^ Terminal_text.single_line detail ^ Ansi.reset
-          ]
+          [ (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
+            ^ Ansi.reset ]
       | _, None -> [ Ansi.dim ^ "  (loading channel transports…)" ^ Ansi.reset ]
       | error, Some snapshot ->
           let connectors = snapshot.cs_connectors in
@@ -7934,7 +7922,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           @ (match error with
              | None -> []
              | Some detail ->
-                 [ (Theme.bad ()) ^ "  refresh failed: "
+                 [ (Theme.bad ()) ^ "  STALE · "
                    ^ Terminal_text.single_line detail ^ Ansi.reset
                  ])
           @ transport_rows @ refused_rows @ selected_lines
@@ -8533,7 +8521,7 @@ let render_system_log_detail (state : state) seq =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints System_logs));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:true System_logs));
   finish_surface state ~clamped:(System_log_detail_scroll scroll)
     ~surface_key:"system-log-detail" ~rows:terminal_rows ~cols buf
 
@@ -8745,7 +8733,8 @@ let render_system_logs (state : state) =
       (Printf.sprintf "[entries %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height total_entries));
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view));
   finish_surface state ~surface_key:"system-logs" ~rows:terminal_rows
       ~cols buf
 
@@ -9990,7 +9979,7 @@ let render_fusion_list (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints Fusion));
+         (Masc_tui_keys.footer_hints ~detail_open:false Fusion));
   finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
 
 (* The panel as marks, one per model, filled where the model answered.
@@ -11488,7 +11477,9 @@ let render_changes_list (state : state) =
       (Printf.sprintf "[changes %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:move  Right/Enter:diff  [/]:keeper  d:tree diff  v:code  o:editor  r:refresh  q:quit");
+    (* The footer is the key table's (for_surface Changes); never a literal here. *)
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints Changes));
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 
@@ -11818,8 +11809,8 @@ let render_connectors (state : state) =
   let title =
     match state.connectors with
     | None ->
-        Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Connectors") (title_missing_reading ~error:state.connectors_error) timestamp
+        Printf.sprintf "%s  %s  %s"
+          (screen_title " MASC Connectors") timestamp
           (connection_badge state)
     | Some snapshot ->
         Printf.sprintf "%s (%d of %d available)  %s  %s"
@@ -13150,8 +13141,12 @@ let render_acting (state : state) =
     | Observer_live { events; _ } -> Printf.sprintf "feed: live %d" events
     (* The count sits straight after the state word, so it reads as the count
        its "live N" sibling above uses. *)
-    | Observer_closed { events; reason; _ } ->
+    | Observer_closed_after_live { events; reason; _ } ->
         Printf.sprintf "feed: closed %d (%s)" events
+          (Terminal_text.single_line reason)
+    (* No count: the stream never answered, so there is nothing it carried. *)
+    | Observer_closed_before_answer { reason; _ } ->
+        Printf.sprintf "feed: failed to open (%s)"
           (Terminal_text.single_line reason)
   in
   (* Rows and events, each with its noun. This read "(3 of 120 held, turns)",
@@ -13238,8 +13233,11 @@ let render_acting (state : state) =
       | Observer_live _ ->
           if held = 0 then "  (no events yet)"
           else "  (nothing under this filter; f shows everything)"
-      | Observer_closed _ ->
+      | Observer_closed_after_live _ ->
           if held = 0 then "  (the feed closed before any event arrived)"
+          else "  (nothing under this filter; f shows everything)"
+      | Observer_closed_before_answer _ ->
+          if held = 0 then "  (no events yet: the feed failed to open)"
           else "  (nothing under this filter; f shows everything)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;

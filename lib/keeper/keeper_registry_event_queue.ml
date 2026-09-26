@@ -551,13 +551,20 @@ let enqueue_hitl_resolution_durable_result
      durable row is written. Generic stimuli take no such check — the queue
      stays an open mailbox. A Keeper mid-shutdown is fenced by the intake
      reservation below, which keeps the delivery replayable until the
-     removal either completes or unwinds. *)
+     removal either completes or unwinds. Only a missing meta file is an
+     absent recipient: a file this binary does not decode as the current
+     schema still names a Keeper, so it is a delivery failure the caller
+     keeps for replay, not a disposition that retires the delivery. *)
   match
-    Keeper_meta_store.read_meta (Workspace.default_config base_path) keeper_name
+    Keeper_meta_store.read_meta_presence
+      (Workspace.default_config base_path)
+      keeper_name
   with
   | Error detail -> Error (Hitl_enqueue_failed detail)
-  | Ok None -> Error Hitl_recipient_absent
-  | Ok (Some _) ->
+  | Ok (Keeper_meta_store.Meta_not_current detail) ->
+    Error (Hitl_enqueue_failed ("keeper meta not current: " ^ detail))
+  | Ok Keeper_meta_store.Meta_absent -> Error Hitl_recipient_absent
+  | Ok (Keeper_meta_store.Meta_present _) ->
     (match
        with_durable_intake
          ~base_path
@@ -761,7 +768,7 @@ let commit_and_project_accepted_cancellation ~base_path name ~applied_at cancell
       ~expected_transition_id:receipt.transition_id
 ;;
 
-let cancel_scheduled_wakes_result ~base_path name ~applied_at ~schedule_ids ~reason =
+let cancel_scheduled_wakes_keeping ~keep ~base_path name ~applied_at ~schedule_ids ~reason =
   (* Cancel propagation (task-370): a cancelled schedule's already-enqueued
      utterances must leave the durable queue at the cancel boundary, not ride
      the wake path of an owner who will never be woken for them again. Each
@@ -787,6 +794,23 @@ let cancel_scheduled_wakes_result ~base_path name ~applied_at ~schedule_ids ~rea
   with
   | Error _ as error -> error
   | Ok selections ->
+    let kept_or_error =
+      List.fold_left
+        (fun acc (selection : Keeper_event_queue_state.pending_selection) ->
+           match acc with
+           | Error _ as error -> error
+           | Ok withdrawn when not (matching selection.source) -> Ok withdrawn
+           | Ok withdrawn ->
+             (match keep selection with
+              | Error _ as error -> error
+              | Ok true -> Ok withdrawn
+              | Ok false -> Ok (selection :: withdrawn)))
+        (Ok [])
+        selections
+    in
+    match kept_or_error with
+    | Error _ as error -> error
+    | Ok withdrawn ->
     let cancelled =
       List.filter_map
         (fun (selection : Keeper_event_queue_state.pending_selection) ->
@@ -813,7 +837,7 @@ let cancel_scheduled_wakes_result ~base_path name ~applied_at ~schedule_ids ~rea
                ; reason
                }
            else None)
-        selections
+        (List.rev withdrawn)
     in
     List.fold_left
       (fun acc cancellation ->
@@ -831,6 +855,30 @@ let cancel_scheduled_wakes_result ~base_path name ~applied_at ~schedule_ids ~rea
             | Error detail -> Error detail))
       (Ok 0)
       cancelled
+;;
+
+let cancel_scheduled_wakes_result =
+  cancel_scheduled_wakes_keeping ~keep:(fun _selection -> Ok false)
+;;
+
+(* A running turn records its start on the reaction ledger before it takes
+   its batch and leaves each entry pending until the turn-end ACK
+   ([record_replay_owned_turn_started_reactions] in the heartbeat loop). Such
+   an entry belongs to that turn: cancelling it underneath makes the turn's
+   own ACK fail with "event queue pending selection is no longer present".
+   An unreadable ledger cannot say whether a turn took the entry, so the
+   whole call fails and nothing is withdrawn. *)
+let cancel_untaken_scheduled_wakes_result ~base_path name =
+  let keep (selection : Keeper_event_queue_state.pending_selection) =
+    Keeper_reaction_ledger.event_queue_turn_started_seen_for_source_result
+      ~base_path
+      ~keeper_name:name
+      ~post_id:selection.source.post_id
+      ~stimulus_kind:Keeper_reaction_ledger.Schedule_due
+    |> Result.map_error
+         Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+  in
+  cancel_scheduled_wakes_keeping ~keep ~base_path name
 ;;
 
 let drain_owner_absent_pending_result ~base_path name ~applied_at ~reason =

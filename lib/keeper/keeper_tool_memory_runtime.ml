@@ -398,7 +398,7 @@ let absorbed_match_to_json { row; into; into_current } : Yojson.Safe.t =
     ]
 ;;
 
-(* --- History search (checkpoint + trace history) --- *)
+(* --- History search (checkpoint + current trace) --- *)
 
 type history_search =
   { matches : string list
@@ -509,7 +509,7 @@ let search_history ~config ~(meta : keeper_meta) ~ctx_work ~query ~limit =
     let exact_matches = !checkpoint_exact in
     read_traces (limit - List.length exact_matches) !exact_seen !fragment_seen
       exact_matches !checkpoint_fragments 0 []
-      (Keeper_id.Trace_id.to_string meta.runtime.trace_id :: meta.runtime.trace_history)
+      [ Keeper_id.Trace_id.to_string meta.runtime.trace_id ]
 ;;
 
 type all_search_match =
@@ -562,11 +562,42 @@ let record_memory_events ~keepers_dir ~(meta : keeper_meta) ~now ~kind memory_id
 
 (* --- Unified keeper_memory_search dispatch --- *)
 
+(* How one search ended, counted per source so the share of searches that
+   found nothing is visible without reading the decision logs. A search that
+   found nothing while a store or history file could not be read is its own
+   case: better ranking cannot answer it, so it stays out of the misses a
+   ranking change is measured against. *)
+type memory_search_outcome =
+  | Matched
+  | No_match
+  | No_match_partial_read
+  | Store_unavailable
+
+let memory_search_outcome_to_string = function
+  | Matched -> "matched"
+  | No_match -> "no_match"
+  | No_match_partial_read -> "no_match_partial_read"
+  | Store_unavailable -> "store_unavailable"
+;;
+
+(* What one search answered, before it is recorded. [durable_candidates]
+   counts the durable facts and absorbed rows searched; history has no such
+   count, so a source=all search can match more than it counts. *)
+type search_answer =
+  { output : Yojson.Safe.t
+  ; match_count : int
+  ; durable_candidates : int option
+  ; read_errors : bool
+  ; matched_memory_ids : string list
+  }
+
 let keeper_memory_search_with_outcome
+      ?turn_ref
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
       ~(args : Yojson.Safe.t)
+      ()
   =
   let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
   let limit = max 1 (min 10 (Safe_ops.json_int ~default:5 "limit" args)) in
@@ -689,20 +720,25 @@ let keeper_memory_search_with_outcome
          | Error _ as error -> error
          | Ok (fact_matches, fact_total) ->
            Ok
-             ( durable_json
-                 ~fact_jsons:(List.map fact_match_to_json fact_matches)
-                 ~fact_total
-                 ~total_matches:(List.length fact_matches)
-                 ~extra_matches:[]
-                 ~read_errors:false
-                 ~read_error_fields:[]
-             , List.length fact_matches
-             , List.filter_map
-                 (fun (matched : fact_match) ->
-                    match matched.identity with
-                    | Ordinary_memory_id memory_id -> Some memory_id
-                    | Source_sha256 _ -> None)
-                 fact_matches ))
+             { output =
+                 durable_json
+                   ~fact_jsons:(List.map fact_match_to_json fact_matches)
+                   ~fact_total
+                   ~total_matches:(List.length fact_matches)
+                   ~extra_matches:[]
+                   ~read_errors:false
+                   ~read_error_fields:[]
+             ; match_count = List.length fact_matches
+             ; durable_candidates = Some fact_total
+             ; read_errors = false
+             ; matched_memory_ids =
+                 List.filter_map
+                   (fun (matched : fact_match) ->
+                      match matched.identity with
+                      | Ordinary_memory_id memory_id -> Some memory_id
+                      | Source_sha256 _ -> None)
+                   fact_matches
+             })
     in
     (* Source=all combines current facts, absorbed rows, and history. The match
        tier before the store order ({!answering}): a weaker current fact does
@@ -756,22 +792,28 @@ let keeper_memory_search_with_outcome
              answering ~claim_of:all_search_match_text ~query candidates
            in
            let selected = take limit (whole_query @ fragments) in
+           let read_errors =
+             history_has_read_errors history
+             || absorbed.unreadable <> []
+             || absorbed.unreadable_events <> []
+             || unavailable <> None
+           in
            Ok
-             ( durable_json
-                 ~fact_jsons:(List.map all_search_match_to_json selected)
-                 ~fact_total:(fact_total + absorbed.candidates)
-                 ~total_matches:(List.length selected)
-                 ~extra_matches:[]
-                 ~read_errors:
-                   (history_has_read_errors history
-                    || absorbed.unreadable <> []
-                    || absorbed.unreadable_events <> []
-                    || unavailable <> None)
-                 ~read_error_fields:
-                   (absorbed_fields ~absorbed ~unavailable
-                    @ history_read_error_fields history)
-             , List.length selected
-             , List.filter_map ordinary_memory_id_of_all_match selected ))
+             { output =
+                 durable_json
+                   ~fact_jsons:(List.map all_search_match_to_json selected)
+                   ~fact_total:(fact_total + absorbed.candidates)
+                   ~total_matches:(List.length selected)
+                   ~extra_matches:[]
+                   ~read_errors
+                   ~read_error_fields:
+                     (absorbed_fields ~absorbed ~unavailable
+                      @ history_read_error_fields history)
+             ; match_count = List.length selected
+             ; durable_candidates = Some (fact_total + absorbed.candidates)
+             ; read_errors
+             ; matched_memory_ids = List.filter_map ordinary_memory_id_of_all_match selected
+             })
     in
     let result =
       match source with
@@ -781,16 +823,20 @@ let keeper_memory_search_with_outcome
         let no_match = matches = [] && not (history_has_read_errors history) in
         let match_jsons = List.map (fun msg -> `String msg) matches in
         Ok
-          ( `Assoc
-              ([ "query", `String query
-               ; "source", `String source_label
-               ; "match_count", `Int (List.length matches)
-               ; "matches", `List match_jsons
-               ]
-               @ (if no_match then [ "no_match", `Bool true ] else [])
-               @ history_read_error_fields history)
-          , List.length matches
-          , [] )
+          { output =
+              `Assoc
+                ([ "query", `String query
+                 ; "source", `String source_label
+                 ; "match_count", `Int (List.length matches)
+                 ; "matches", `List match_jsons
+                 ]
+                 @ (if no_match then [ "no_match", `Bool true ] else [])
+                 @ history_read_error_fields history)
+          ; match_count = List.length matches
+          ; durable_candidates = None
+          ; read_errors = history_has_read_errors history
+          ; matched_memory_ids = []
+          }
       | All -> all_stores ()
       | Absorbed ->
         (* No Retrieved event: an absorbed fact is not a current memory, and
@@ -809,20 +855,35 @@ let keeper_memory_search_with_outcome
             with
             | Error _ as error -> error
             | Ok absorbed ->
+              let read_errors =
+                absorbed.unreadable <> [] || absorbed.unreadable_events <> []
+              in
               Ok
-                ( durable_json
-                    ~fact_jsons:(List.map absorbed_match_to_json absorbed.matches)
-                    ~fact_total:absorbed.candidates
-                    ~total_matches:(List.length absorbed.matches)
-                    ~extra_matches:[]
-                    ~read_errors:(absorbed.unreadable <> [] || absorbed.unreadable_events <> [])
-                    ~read_error_fields:(absorbed_fields ~absorbed ~unavailable:None)
-                , List.length absorbed.matches
-                , [] )))
+                { output =
+                    durable_json
+                      ~fact_jsons:(List.map absorbed_match_to_json absorbed.matches)
+                      ~fact_total:absorbed.candidates
+                      ~total_matches:(List.length absorbed.matches)
+                      ~extra_matches:[]
+                      ~read_errors
+                      ~read_error_fields:(absorbed_fields ~absorbed ~unavailable:None)
+                ; match_count = List.length absorbed.matches
+                ; durable_candidates = Some absorbed.candidates
+                ; read_errors
+                ; matched_memory_ids = []
+                }))
       | Current -> current_stores ()
+    in
+    let record_search_outcome outcome =
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string MemorySearch)
+        ~labels:
+          [ "source", source_label; "outcome", memory_search_outcome_to_string outcome ]
+        ()
     in
     match result with
     | Error error ->
+      record_search_outcome Store_unavailable;
       Keeper_tool_execution.failure
         ~class_:Tool_result.Dependency_unavailable
         ~effect_disposition:Tool_result.Proven_pre_effect
@@ -833,7 +894,12 @@ let keeper_memory_search_with_outcome
              ; "detail", `String (durable_search_error_detail error)
              ]
            "keeper_memory_search could not read the durable memory store")
-    | Ok (result, match_count, matched_memory_ids) ->
+    | Ok { output = result; match_count; durable_candidates; read_errors; matched_memory_ids } ->
+    record_search_outcome
+      (match match_count > 0, read_errors with
+       | true, (true | false) -> Matched
+       | false, false -> No_match
+       | false, true -> No_match_partial_read);
     (* Each ordinary fact the model was shown is a retrieval (RFC-0418): the
        event is what later says this memory was used. A sidecar that cannot be
        written does not take the results away from the model; it is said in
@@ -848,14 +914,25 @@ let keeper_memory_search_with_outcome
     (try
        let log_entry =
          `Assoc
-           [ "ts_unix", `Float (Time_compat.now ())
-           ; "event", `String "memory_search"
-           ; "query", `String query
-           ; "source", `String source_label
-           ; "match_count", `Int match_count
-           ; ( "matched_memory_ids"
-             , `List (List.map (fun id -> `String id) matched_memory_ids) )
-           ]
+           ([ "ts_unix", `Float (Time_compat.now ())
+            ; "event", `String "memory_search"
+            ; "query", `String query
+            ; "source", `String source_label
+            ; "match_count", `Int match_count
+            ; ( "matched_memory_ids"
+              , `List (List.map (fun id -> `String id) matched_memory_ids) )
+            ; "read_errors", `Bool read_errors
+            ]
+            @ (* History reads messages, not a store with a candidate count. *)
+            (match durable_candidates with
+             | Some total -> [ "durable_candidates", `Int total ]
+             | None -> [])
+            @
+            (* The turn that searched, so searches per turn can be counted. A
+               direct call outside a Keeper turn has none. *)
+            match turn_ref with
+            | Some turn_ref -> [ "turn_ref", `String (Ids.Turn_ref.to_string turn_ref) ]
+            | None -> [])
        in
        Keeper_types_support.append_jsonl_line
          (Keeper_types_support.keeper_decision_log_path config meta.name)
@@ -874,7 +951,7 @@ let keeper_memory_search_with_outcome
 ;;
 
 let keeper_memory_search_json ~config ~meta ~ctx_work ~args =
-  (keeper_memory_search_with_outcome ~config ~meta ~ctx_work ~args).raw_output
+  (keeper_memory_search_with_outcome ~config ~meta ~ctx_work ~args ()).raw_output
 ;;
 
 let keeper_context_status_json

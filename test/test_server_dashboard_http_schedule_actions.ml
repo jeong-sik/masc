@@ -70,7 +70,15 @@ let test_prune_removes_terminal_schedule () =
   with_workspace
   @@ fun config ->
   let request = create_schedule config "dashboard-prune" in
-  (match Schedule_service.cancel config ~schedule_id:request.schedule_id with
+  (* A consumer.note payload queues nothing, so there is no wake to withdraw. *)
+  (match
+     Schedule_service.cancel
+       config
+       ~schedule_id:request.schedule_id
+       ~cancelled_by:(actor "canceller")
+       ~reason:"prune fixture"
+       ~withdraw_queued_wakes:(fun _request _cancellation -> Ok ())
+   with
    | Ok _ -> ()
    | Error error -> fail (Schedule_service.service_error_to_string error));
   match

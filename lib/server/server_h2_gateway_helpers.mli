@@ -1,5 +1,11 @@
 (** H2 gateway response helpers. *)
 
+val dispatch_request :
+  sw:Eio.Switch.t -> H2.Reqd.t -> (unit -> unit) -> unit
+(** Schedule deferred request work on [sw], the request stream's switch. The callback
+    yields before running, keeps transport access on this domain, and reports
+    handler exceptions to its own stream. Cancellation propagates. *)
+
 (** [h2_close_after_flush writer] closes [writer] once every byte written to it
     so far has been handed to the connection, not right away. Close an H2
     response body with this, never with [H2.Body.Writer.close]: h2 0.13.0 cuts
@@ -52,9 +58,10 @@ val h2_respond_empty :
   ?extra_headers:(string * string) list ->
   H2.Reqd.t -> unit
 
-val h2_read_body : H2.Reqd.t -> (string -> unit) -> unit
+val h2_read_body : sw:Eio.Switch.t -> H2.Reqd.t -> (string -> unit) -> unit
 (** Reads the request body and hands the bytes read to the callback when the
-    body reader reports end of input. h2 also reports end of input when it
+    body reader reports end of input. The completion callback and 413 response
+    run through [dispatch_request], outside the connection reader. h2 also reports end of input when it
     closes the reader because the stream failed, so a failed stream can hand
     the callback a partial body. A body over
     [Http_server_eio.Request.max_body_bytes], the HTTP/1 ceiling, is answered

@@ -291,7 +291,7 @@ let test_source_ack_identity_survives_checkpoint_reload () =
       | State.Transition_already_applied _ -> Alcotest.fail "first source ACK was a replay"
     in
     let projected =
-      State.mark_transition_projected ~transition_id:first_receipt.transition_id first
+      State.mark_transition_projected ~retain_previous:(fun _ -> true) ~transition_id:first_receipt.transition_id first
       |> require_ok "project first source ACK"
     in
     let reloaded = State.to_yojson projected |> State.of_yojson |> require_ok "reload projected ACK" in

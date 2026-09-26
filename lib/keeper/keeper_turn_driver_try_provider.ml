@@ -1071,7 +1071,8 @@ let within_turn_boundary ~history_digest_at ~turn_boundary (seed : Keeper_carrie
   match turn_boundary with
   | Keeper_carried_front.Turn_boundary { end_atom } when seed.first_atom > end_atom ->
     Option.map
-      (fun front_digest -> { seed with first_atom = end_atom; front_digest })
+      (fun front_digest ->
+         { seed with first_atom = end_atom; front_digest = Some front_digest })
       (history_digest_at end_atom)
   | Keeper_carried_front.Turn_boundary _ | Keeper_carried_front.Turn_boundary_unknown _ ->
     Some seed
@@ -1886,7 +1887,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                                      request.atom_count - request.first_atom
                                  ; total_atoms = request.atom_count
                                  ; measurement = Turn_record.Wire_shape
-                                 ; front_atom_digest = front_digest
+                                 ; front_atom_digest = Some front_digest
                                  }
                              })
                         ctx.on_response_observed_model_input
@@ -2705,7 +2706,7 @@ let carried_range_eviction_sequence
              then (
                hold_front
                  { Keeper_carried_front.first_atom
-                 ; front_digest
+                 ; front_digest = Some front_digest
                  ; source = Keeper_carried_front.Evicted_after_refusal { retry }
                  };
                on_retry ~retry (Evicted_blocks step);
@@ -2734,7 +2735,7 @@ let halve_front ~digest_at ~move_ledger ~hold ~first_atom ~retry =
     let (_ : bool) = move_ledger ~first_atom ~front_digest in
     hold
       { Keeper_carried_front.first_atom
-      ; front_digest
+      ; front_digest = Some front_digest
       ; source = Keeper_carried_front.Halved_after_refusal { retry }
       };
     true
@@ -2848,7 +2849,10 @@ let run_try_provider_with_carried_range_eviction
           in
           Option.map
             (fun front_digest ->
-               { Keeper_carried_front.first_atom; front_digest; source })
+               { Keeper_carried_front.first_atom
+               ; front_digest = Some front_digest
+               ; source
+               })
             (sent.digest_at first_atom)))
       ~held_front:ctx.carried_front_after_refusal
       ~restore_front:ctx.restore_carried_front

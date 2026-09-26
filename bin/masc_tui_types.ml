@@ -1912,7 +1912,13 @@ type observer_status =
       since : float;
       events : int;  (** frames received on this stream *)
     }
-  | Observer_closed of {
+  | Observer_closed_before_answer of {
+      reason : string;
+          (** why it failed while opening: the server never answered this
+              stream, so there is no count of what it delivered *)
+      at : float;
+    }
+  | Observer_closed_after_live of {
       reason : string;
       at : float;
       events : int;  (** frames the stream delivered before it closed *)
@@ -1929,7 +1935,11 @@ let observer_replay_description = function
   | Observer_replay_scoped { replay = Sse_wire.Fresh; _ } ->
       "Replay: live from connection; earlier history not loaded"
   | Observer_replay_scoped { replay = Sse_wire.Resumed; _ } ->
-      "Replay: retained window resumed; history completeness unknown"
+      "Replay: resumed; no event expired while disconnected"
+  | Observer_replay_scoped { replay = Sse_wire.Resumed_after_gap { missed_through }; _ } ->
+      Printf.sprintf
+        "Replay resumed after a gap: events up to #%d expired while disconnected"
+        missed_through
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Instance_changed; _ } ->
       "Replay reset: server instance changed; disconnected history not recovered"
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Unscoped_cursor; _ } ->
@@ -7310,8 +7320,13 @@ let promoted_inflight_for_keeper state keeper_name =
 
 let working_chat_for_keeper state keeper_name =
   List.find_opt (fun entry ->
+    let streaming =
+      match entry.phase with
+      | Turn_streaming -> true
+      | Turn_reconciling -> false
+    in
     String.equal entry.sent_request.keeper_name keeper_name
-    && entry.phase = Turn_streaming
+    && streaming
     && Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript = Working)
     state.msg_inflight
 
@@ -8351,10 +8366,9 @@ let visible_system_log_entries (state : state) =
    reader on the others learned there was nothing to learn. *)
 let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
 
-(* The note says what the blank body is, not what happened: every surface that
-   draws it draws the server's reason one row above it and carries "(load
-   failed)" in its own title, so the words it used to lead with -- "load
-   failed;" -- were the third copy of one verdict inside four rows. What the
+(* The note says what the blank body is, not what happened: the surface draws
+   the failure reason above it, so the words it used to lead with -- "load
+   failed;" -- repeated that verdict. Some titles carry it as well. What the
    reason cannot say is that this emptiness is not a count of zero. That is
    the sentence, and it is all of it now. *)
 let page_failed_note = "  (nothing here is a reading)"
@@ -8415,14 +8429,22 @@ let field_missing_reading ~error =
    surface's title in that frame, and the Logs tab of this very surface, reads
    "(load failed)" or "(not loaded)".
 
+   A feed that closed while opening never answered either, and its reason is
+   the failure: with nothing held it reads "(load failed)", the way a refused
+   read does on every other surface, and not "(0 rows \xc2\xb7 0 events held)"
+   above a row saying the feed closed before any event arrived.
+
    Held frames outlive the stream that delivered them, so a closed feed, or one
    switched back off, with frames in hand still has a reading to report. Only
    the state before any answer, with nothing held, has none. *)
 let activity_title_reading ~observer ~shown ~held =
   match observer, held with
   | (Observer_off | Observer_opening), 0 -> title_missing_reading ~error:None
-  | (Observer_off | Observer_opening | Observer_live _ | Observer_closed _), _
-    ->
+  | Observer_closed_before_answer { reason; _ }, 0 ->
+    title_missing_reading ~error:(Some reason)
+  | ( ( Observer_off | Observer_opening | Observer_live _
+      | Observer_closed_before_answer _ | Observer_closed_after_live _ ),
+      _ ) ->
     Printf.sprintf "(%s \xc2\xb7 %s held)"
       (Masc_tui_message_layout.count_noun shown "row")
       (Masc_tui_message_layout.count_noun held "event")
@@ -10537,36 +10559,155 @@ let approvals_open_question_count (state : state) =
         0 rows
   | None -> 0
 
-(* Whether the rows behind [approvals_open_question_count] are the server's
-   current answer. Before the first poll answers there are no rows, so the
-   count holds no question because none was read; a failed poll keeps the
-   previous rows, as [apply_asks_load] replaces them only on [Ok]. *)
-type questions_reading =
-  | Questions_current
-  | Questions_unread
-  | Questions_stale
+(* One list the Approvals surface draws, as its last poll left it.
 
+   - [List_read]: the last poll answered, and the rows on screen are its rows.
+   - [List_not_read Approval_unread]: no poll has answered yet.
+   - [List_not_read (Approval_failed cause)]: the last poll failed and nothing
+     from an earlier one is on screen. A failed confirm-queue read clears its snapshot
+     ([apply_approvals_load]), and a first poll that fails has nothing to keep.
+   - [List_not_read (Approval_stale cause)]: the last poll failed and the
+     rows on screen are an
+     earlier poll's. The held-call, Gate and question polls replace their rows
+     only on [Ok], so those rows can name calls the server no longer holds.
+   - [List_not_read (Approval_unavailable detail)]: the server answered and
+     said the store behind the list could not be read. The Gate snapshot sends
+     [approval_queue: null] with [approval_queue_state] in this case.
+
+   Every place that has to know whether a list was read -- the strip entry,
+   the Overview "Approvals:" row, the Approvals title and the empty queue --
+   reads it from here, so none of them keeps its own list of fields. *)
+type approval_not_read =
+  | Approval_unread
+  | Approval_failed of string
+  | Approval_stale of string
+  | Approval_unavailable of string
+
+type approval_list_reading =
+  | List_read
+  | List_not_read of approval_not_read
+
+type approvals_reading =
+  { confirm_queue : approval_list_reading
+  ; held_calls : approval_list_reading
+  ; gate_queue : approval_list_reading
+  ; questions : approval_list_reading
+  }
+
+(* A failed confirm-queue read sets [approval_snapshot] to [None] in the same
+   step as it sets [approvals_error], so a snapshot on screen is always the
+   last answer. *)
+let confirm_queue_reading (state : state) =
+  match (state.approval_snapshot, state.approvals_error) with
+  | Some _, _ -> List_read
+  | None, Some cause -> List_not_read (Approval_failed cause)
+  | None, None -> List_not_read Approval_unread
+
+let kept_rows_reading ~observed ~error =
+  match (observed, error) with
+  | false, None -> List_not_read Approval_unread
+  | false, Some cause -> List_not_read (Approval_failed cause)
+  | true, Some cause -> List_not_read (Approval_stale cause)
+  | true, None -> List_read
+
+let gate_queue_reading (state : state) =
+  match
+    kept_rows_reading ~observed:state.gate_snapshot_observed ~error:state.gate_error
+  with
+  | List_read ->
+      (match state.gate_queue_unavailable with
+       | Some detail -> List_not_read (Approval_unavailable detail)
+       | None -> List_read)
+  | List_not_read _ as reading -> reading
+
+(* The questions' snapshot doubles as their "observed" mark: [apply_asks_load]
+   sets it on the first [Ok] and never clears it. *)
 let approvals_questions_reading (state : state) =
-  match (state.asks_snapshot, state.asks_error) with
-  | None, _ -> Questions_unread
-  | Some _, Some _ -> Questions_stale
-  | Some _, None -> Questions_current
+  kept_rows_reading ~observed:(Option.is_some state.asks_snapshot)
+    ~error:state.asks_error
+
+let approvals_reading (state : state) =
+  { confirm_queue = confirm_queue_reading state
+  ; held_calls =
+      kept_rows_reading ~observed:state.keeper_tool_approvals_observed
+        ~error:state.keeper_tool_approvals_error
+  ; gate_queue = gate_queue_reading state
+  ; questions = approvals_questions_reading state
+  }
+
+let list_is_read = function
+  | List_read -> true
+  | List_not_read _ -> false
+
+(* The three lists that hold approval rows, by the name the title and the
+   empty queue give each. The questions are drawn in their own block, which
+   says for itself when they were not read. *)
+let approval_row_lists (reading : approvals_reading) =
+  [ ("confirm queue", reading.confirm_queue)
+  ; ("held calls", reading.held_calls)
+  ; ("Gate queue", reading.gate_queue)
+  ]
 
 let approvals_surface_pending (state : state) =
   List.length (approval_items state) + approvals_open_question_count state
 
 (* Whether every list the count is taken over was read. The count is a
-   reading of what is waiting only when all three came back: the confirm
-   queue, the held calls, and the questions. The surface's own title already
-   parts the two -- it says "confirm queue unread", "held calls stale",
-   "questions unread" beside the number -- and the strip asked the number
-   alone. *)
+   reading of what is waiting only when all four came back.
+
+   The strip entry and the Overview "Approvals:" row both call this, so the
+   entry leaves the strip exactly when the row draws its count without "?".
+   An unreadable Gate store with every other list empty keeps the entry:
+   an entry that is gone reads as "nothing is waiting". *)
 let approvals_reading_current (state : state) =
-  Option.is_some state.approval_snapshot
-  && Option.is_none state.keeper_tool_approvals_error
-  && (match approvals_questions_reading state with
-      | Questions_current -> true
-      | Questions_unread | Questions_stale -> false)
+  let reading = approvals_reading state in
+  List.for_all list_is_read
+    (reading.questions :: List.map snd (approval_row_lists reading))
+
+(* The Overview "Approvals:" count. The "?" tail marks a count no source will
+   stand behind; it does not say which way the number is wrong, because a
+   dropped confirm queue leaves it short and a stale held-call or Gate list
+   can leave it long. The Approvals title says which list it was. *)
+let approvals_count_label (state : state) =
+  let on_screen = approvals_surface_pending state in
+  if approvals_reading_current state then string_of_int on_screen
+  else Printf.sprintf "%d?" on_screen
+
+(* One title clause per list that was not read, in the order the lists are
+   drawn. A list with nothing read and nothing kept is "unread" whether or not
+   a poll failed; the rows of a list read before and not since are "stale". *)
+let approval_list_note ~name = function
+  | List_read -> ""
+  | List_not_read (Approval_unread | Approval_failed _) ->
+      Printf.sprintf ", %s unread" name
+  | List_not_read (Approval_stale _) -> Printf.sprintf ", %s stale" name
+  | List_not_read (Approval_unavailable _) ->
+      Printf.sprintf ", %s unavailable" name
+
+let approvals_title_notes (reading : approvals_reading) =
+  String.concat ""
+    (List.map
+       (fun (name, list_reading) -> approval_list_note ~name list_reading)
+       (approval_row_lists reading @ [ ("questions", reading.questions) ]))
+
+(* What the queue says when it has no approval row to draw. "No pending
+   approvals" is a reading of all three row lists, so it is said only when
+   each of them was read; otherwise each list that was not read is named with
+   its reading. *)
+type approvals_empty_queue =
+  | Nothing_pending
+  | Lists_not_read of (string * approval_not_read) list
+
+let approvals_empty_queue (reading : approvals_reading) =
+  match
+    List.filter_map
+      (fun (name, list_reading) ->
+        match list_reading with
+        | List_read -> None
+        | List_not_read not_read -> Some (name, not_read))
+      (approval_row_lists reading)
+  with
+  | [] -> Nothing_pending
+  | not_read -> Lists_not_read not_read
 
 let is_surface_active (state : state) (s : surface) =
   match s with
@@ -10697,7 +10838,8 @@ let surface_row_texts (state : state) : surface -> string list option =
         match state.context_inspector_reading with
         | Some
             ( _
-            , { Masc_tui_context_inspector.provider_input = Ok input; _ } ) ->
+            , Masc_tui_context_inspector.Turn_read
+                { provider_input = Ok input; _ } ) ->
             let labels =
               List.map
                 (fun (item : Masc_tui_context_inspector.exact_input_item) ->
@@ -11216,20 +11358,57 @@ let keeper_message_activity_rows (state : state) =
    row the pane never drew, and the status area gained a blank line while the
    footer sat one row off (#37741).
 
-   Both read this now. The filter is keyed on the execution id rather than the
-   keeper, so a second message to the same keeper still gets its row, and a
-   request to some other keeper cannot be swallowed by it: an execution id
-   belongs to one turn. *)
+   Both read this now. Requests sharing one server execution occupy one row
+   with a member count; a distinct queued execution keeps its own row. The
+   filter and grouping use execution id rather than keeper, so a request to
+   another keeper cannot be swallowed by the current turn. *)
+type inflight_group =
+  { representative : inflight
+  ; count : int
+  ; reconciling_count : int
+  }
+
 let keeper_message_inflight_drawn (state : state) =
-  match state.msg_live with
-  | Some live
-    when state.msg_target_keeper_name = Some (turn_log_keeper_name live) ->
-    let drawn_by_transcript = turn_log_execution_id live in
-    List.filter
-      (fun entry ->
-        not (String.equal drawn_by_transcript (turn_log_execution_id entry.log)))
-      state.msg_inflight
-  | Some _ | None -> state.msg_inflight
+  let uncovered =
+    match state.msg_live with
+    | Some live
+      when state.msg_target_keeper_name = Some (turn_log_keeper_name live) ->
+      let drawn_by_transcript = turn_log_execution_id live in
+      List.filter
+        (fun entry ->
+          not (String.equal drawn_by_transcript (turn_log_execution_id entry.log)))
+        state.msg_inflight
+    | Some _ | None -> state.msg_inflight
+  in
+  List.fold_left
+    (fun groups entry ->
+      let execution_id = turn_log_execution_id entry.log in
+      let same_execution group =
+        String.equal
+          (turn_log_execution_id group.representative.log)
+          execution_id
+      in
+      let reconciling =
+        match entry.phase with
+        | Turn_reconciling -> 1
+        | Turn_streaming -> 0
+      in
+      if List.exists same_execution groups then
+        List.map
+          (fun group ->
+            if same_execution group then
+              { representative =
+                  (if entry.sent_at < group.representative.sent_at then entry
+                   else group.representative)
+              ; count = group.count + 1
+              ; reconciling_count = group.reconciling_count + reconciling
+              }
+            else group)
+          groups
+      else
+        groups
+        @ [ { representative = entry; count = 1; reconciling_count = reconciling } ])
+    [] uncovered
 
 let keeper_message_status_rows (state : state) =
   let unavailable_target =

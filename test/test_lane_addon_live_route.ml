@@ -242,7 +242,8 @@ let dos_eject_if_loaded () =
 
 let dos_load ~dir program_bytes =
   Dos_lane.load ~who ~ledger_dir:(Filename.concat dir "ledger")
-    ~saves_dir:(Filename.concat dir "saves") ~program_name:"game.com" ~program_bytes
+    ~saves_dir:(Filename.concat dir "saves") ~checkpoint_dir:(Filename.concat dir "checkpoints")
+    ~program_name:"game.com" ~program_bytes
     ~files:[] ~announce:ignore
 
 let with_dos f =

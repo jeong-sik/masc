@@ -195,17 +195,17 @@ let test_selected_binary () =
 let test_browser_configuration () =
   let parse text = match Otoml.Parser.from_string_result text with
     | Error detail -> fail detail | Ok toml -> Masc.Browser_configuration.parse toml in
-  (match parse "" with Ok Masc.Browser_configuration.Disabled -> () | _ -> fail "missing browser config");
+  (match parse "" with Ok { Masc.Browser_configuration.automation = None; stagehand = None } -> () | _ -> fail "missing browser config");
   (match parse {|[browser]
 geckodriver = "/test/geckodriver"
 binary = "/test/Zen.app"
 |} with
-   | Ok (Masc.Browser_configuration.Geckodriver {driver="/test/geckodriver";binary=Some "/test/Zen.app"}) -> ()
+   | Ok { Masc.Browser_configuration.automation = Some {driver="/test/geckodriver";binary=Some "/test/Zen.app"}; stagehand = None } -> ()
    | _ -> fail "explicit browser configuration lost");
   (match parse {|[browser]
 geckodriver = "/test/geckodriver"
 |} with
-   | Ok (Masc.Browser_configuration.Geckodriver {driver="/test/geckodriver";binary=None}) -> ()
+   | Ok { Masc.Browser_configuration.automation = Some {driver="/test/geckodriver";binary=None}; stagehand = None } -> ()
    | _ -> fail "a driver without a binary lets geckodriver discover the browser");
   List.iter (fun (why, text) -> check bool why true (Result.is_error (parse text)))
     [ "a binary needs the driver that launches it", {|[browser]
@@ -217,7 +217,28 @@ geckodriver = "/test/geckodriver"
 binary = "Zen.app"|};
       "a non-string binary is refused", {|[browser]
 geckodriver = "/test/geckodriver"
-binary = false|} ]
+binary = false|};
+      "a Stagehand table needs its extension", {|[browser.stagehand]
+chrome = "/test/chrome"|};
+      "a Stagehand table needs its browser", {|[browser.stagehand]
+extension = "/test/extension"|};
+      "an empty Stagehand table needs its browser", {|[browser.stagehand]|};
+      "a misspelled Stagehand field does not disable the backend", {|[browser.stagehand]
+extention = "/test/extension"|};
+      "a relative Stagehand profile is refused", {|[browser.stagehand]
+chrome = "/test/chrome"
+extension = "/test/extension"
+profile = "profile"|} ];
+  (match parse {|[browser]
+geckodriver = "/test/geckodriver"
+
+[browser.stagehand]
+chrome = "/test/chrome"
+extension = "/test/extension"
+|} with
+   | Ok { Masc.Browser_configuration.automation = Some _;
+          stagehand = Some { chrome = "/test/chrome"; extension = "/test/extension"; profile = None } } -> ()
+   | _ -> fail "both backends can be configured together")
 
 (* The server owns the driver it starts. On 2026-09-15 a driver started by hand
    on 2026-09-08 still held the session a dead server opened, and every later

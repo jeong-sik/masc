@@ -215,7 +215,7 @@ let opening tasks focus =
 
 let age_text ~age_text ~now since =
   match since with
-  | None -> "?"
+  | None -> Masc_tui_theme.Glyph.no_value
   | Some at -> age_text (int_of_float (Float.max 0. (now -. at)))
 
 let summary_text ~age_text:format ~now line =

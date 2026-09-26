@@ -87,6 +87,14 @@ let drawn ~height ~selected =
 (* 2026-09-11T12:00Z to the fixture clock. *)
 let oldest_todo_seconds = string_of_int (12 * 24 * 3600) ^ "s"
 
+(* A backlog whose oldest task carries no creation time has no age to give.
+   It drew "oldest ?", a mark no other pane uses for a missing value. *)
+let test_a_backlog_with_no_creation_time_draws_no_value () =
+  check (option string) "the shared no-value mark"
+    (Some ("3 todo · oldest " ^ Masc_tui_theme.Glyph.no_value))
+    (Tasks.summary_text ~age_text:seconds_text ~now
+       (Tasks.Todo_backlog { todo_count = 3; oldest_created_at = None }))
+
 let test_held_work_first () =
   check (list string)
     "in progress longest first, then awaiting, then claimed, then the backlog line"
@@ -327,6 +335,8 @@ let () =
         ; test_case "rows are the drawn order" `Quick
             test_rows_are_the_drawn_order
         ; test_case "nothing held is said" `Quick test_nothing_held_is_said
+        ; test_case "a backlog with no creation time draws no value" `Quick
+            test_a_backlog_with_no_creation_time_draws_no_value
         ; test_case "an open todo task highlights no row" `Quick
             test_open_todo_highlights_nothing
         ; test_case "an open held task highlights its row" `Quick

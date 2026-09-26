@@ -2938,7 +2938,7 @@ let voice_wizard_probe_lines json =
                        them. An endpoint that answers with control bytes would
                        otherwise redraw the screen from inside this row. *)
                     | Some (`String value) -> Terminal_text.single_line value
-                    | Some _ | None -> "?"
+                    | Some _ | None -> Masc_tui_theme.Glyph.no_value
                   in
                   (* The state is the answer the wizard was opened to get. Left
                      out, an endpoint that refused drew in the same shape as one
@@ -2949,7 +2949,10 @@ let voice_wizard_probe_lines json =
                     | Some (`String "answered") -> "answered"
                     | Some (`String "refused") -> "refused"
                     | Some (`String "skipped") -> "not asked"
-                    | Some _ | None -> "?"
+                    (* A state this build does not know is shown as the probe
+                       wrote it, not folded into a mark that hides it. *)
+                    | Some (`String other) -> Terminal_text.single_line other
+                    | Some _ | None -> Masc_tui_theme.Glyph.no_value
                   in
                   Some
                     (Printf.sprintf "%-20s %-10s %s" (text "endpoint_id") state

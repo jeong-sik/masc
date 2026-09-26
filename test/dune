@@ -3672,7 +3672,7 @@
 (test
  (name test_tui_overview_tasks)
  (modules test_tui_overview_tasks)
- (libraries alcotest masc masc.masc_types masc_tui_overview_tasks))
+ (libraries alcotest masc masc.masc_types masc_tui_overview_tasks masc_tui_theme))
 
 (test
  (name test_tui_keeper_chat_transcript)

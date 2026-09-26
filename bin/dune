@@ -376,7 +376,7 @@
  (name masc_tui_overview_tasks)
  (wrapped false)
  (modules masc_tui_overview_tasks)
- (libraries masc masc.masc_types))
+ (libraries masc masc.masc_types masc_tui_theme))
 
 (library
  (name masc_tui_keeper_chat_projection)

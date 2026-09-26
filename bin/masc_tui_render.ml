@@ -2111,7 +2111,7 @@ let render_approvals (state : state) =
                 match pending.Tui_decode.gp_waiting_s with
                 | Some seconds ->
                   Masc_tui_answering.duration_text seconds
-                | None -> "?"
+                | None -> Masc_tui_theme.Glyph.no_value
               in
               let phase, tone =
                 match pending.Tui_decode.gp_phase with
@@ -12834,7 +12834,7 @@ let render_keeper_calls (state : state) =
   let keeper_name =
     match List.nth_opt state.keepers state.keeper_cursor with
     | Some keeper -> keeper.k_name
-    | None -> "?"
+    | None -> Masc_tui_theme.Glyph.no_value
   in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
@@ -15617,7 +15617,7 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
     in
     match index 1 steps with
     | Some n -> Printf.sprintf "%d/%d" n (List.length steps)
-    | None -> "?"
+    | None -> Masc_tui_theme.Glyph.no_value
   in
   box_top head cols;
   box_line head cols

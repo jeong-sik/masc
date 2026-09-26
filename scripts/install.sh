@@ -642,15 +642,14 @@ ping_provider() {
   # metadata so the installer does not guess protocol-specific probe URLs.
   local ping_url="${endpoint%/}${ping_path}"
 
+  local http_status
   if [ -z "$key_var" ]; then
-    if curl -fsS \
+    # A transfer cut off by --max-time after a 2xx header did not answer.
+    http_status=$(curl -sS -o /dev/null -w '%{http_code}' \
       --max-time "$MASC_INSTALL_PUBLIC_PING_TIMEOUT_S" \
-      "$ping_url" >/dev/null 2>&1; then
-      return 0
-    else
-      warn "could not reach $ping_url ($(provider_name "$idx") may not be running)"
-      return 1
-    fi
+      "$ping_url" 2>/dev/null) || http_status=000
+    report_ping_status "$idx" "$ping_url" "${http_status:-000}" ""
+    return
   fi
 
   # Callers decide whether a ping is possible ([provider_ping_possible]); an
@@ -661,13 +660,29 @@ ping_provider() {
 
   # Feed the bearer header through an anonymous fd so the key is not written to
   # disk and does not appear in curl's process arguments.
-  if ! curl -fsS --max-time "$MASC_INSTALL_AUTH_PING_TIMEOUT_S" \
+  http_status=$(curl -sS -o /dev/null -w '%{http_code}' \
+    --max-time "$MASC_INSTALL_AUTH_PING_TIMEOUT_S" \
     -H @<(printf 'Authorization: Bearer %s\n' "$key") \
-    "$ping_url" >/dev/null 2>&1; then
-    warn "provider ping failed for $(provider_name "$idx")"
-    return 1
-  fi
-  return 0
+    "$ping_url" 2>/dev/null) || http_status=000
+  report_ping_status "$idx" "$ping_url" "${http_status:-000}" "$key_var"
+}
+
+# Name the cause of a failed ping from its HTTP status, so a rate limit (wait
+# and retry) is never mistaken for a refused key or a server that is down.
+# Report-only: a failed ping never stops the install.
+report_ping_status() {
+  local idx="$1" url="$2" status="$3" key_var="$4" name
+  name=$(provider_name "$idx")
+  case "$status" in
+    2??|3??) return 0 ;;
+    429) warn "$name: rate limit or quota (HTTP 429) -- if a retry in a minute still fails, check credits and spend limits" ;;
+    401|403) warn "$name: credential refused (HTTP $status) -- not a rate limit; check ${key_var:-access to the endpoint}" ;;
+    402) warn "$name: quota or balance used up (HTTP 402) -- not a rate limit; check the plan or billing" ;;
+    5??) warn "$name: provider-side error (HTTP $status) -- usually temporary; retry shortly" ;;
+    000) warn "$name: could not reach $url -- check the endpoint, proxy and network (or start the local server)" ;;
+    *) warn "$name: ping returned HTTP $status from $url" ;;
+  esac
+  return 1
 }
 
 finish_setup_journey() {
@@ -873,9 +888,13 @@ choose_install_base_path() {
   fi
 }
 
-c_red=$(printf '\033[31m'); c_yel=$(printf '\033[33m'); c_grn=$(printf '\033[32m')
+# Bold labels as well as hue, so warn and error stay apart on a monochrome or
+# low-contrast theme. NO_COLOR (https://no-color.org) turns color off.
+c_red=$(printf '\033[1;31m'); c_yel=$(printf '\033[1;33m'); c_grn=$(printf '\033[1;32m')
 c_dim=$(printf '\033[2m'); c_off=$(printf '\033[0m')
-[ -t 1 ] || { c_red=""; c_yel=""; c_grn=""; c_dim=""; c_off=""; }
+if [ ! -t 1 ] || [ ! -t 2 ] || [ -n "${NO_COLOR:-}" ] || [ "${TERM:-}" = dumb ]; then
+  c_red=""; c_yel=""; c_grn=""; c_dim=""; c_off=""
+fi
 
 log()  { printf '%s==>%s %s\n' "$c_grn" "$c_off" "$*"; }
 warn() { printf '%swarn:%s %s\n' "$c_yel" "$c_off" "$*" >&2; }
@@ -1909,8 +1928,8 @@ Next: start your first conversation with imp:
   ${c_dim}# or create one non-interactively once the server is up:${c_off}
   ${c_dim}# $DEST keeper-create --help${c_off}
 
-  ${c_dim}# for Docker Keepers, build the general file/Git tools image:${c_off}
-  "$DEST" sandbox-image --tag masc-sandbox:general
+  ${c_dim}# setup above builds and promotes catalog name base for Docker Keepers.${c_off}
+  ${c_dim}# To replace it later, build a fresh tag with sandbox-image, then promote base; see docs/INSTALL.md.${c_off}
   ${c_dim}# microVM uses a separate runtime/image store; see the platform guide:${c_off}
   # https://github.com/$REPO/blob/$VERSION/docs/INSTALL.md
 

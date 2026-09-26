@@ -5648,9 +5648,8 @@ type state = {
   mutable github_identity_view: (string * string list) option;
   mutable github_identity_view_error: string option;
   (* The Info tab's Board-attention rows, keyed by the Keeper they were read
-     for. [requeue_board_quarantine_inflight] holds the partition a requeue
-     press is waiting on, so a second press before the answer is not a second
-     request against the same quarantine. *)
+     for. [board_quarantine_requeue_inflight] names the partition or batch
+     whose answer is pending, so a second press cannot race that recovery. *)
   mutable keeper_board_quarantines:
     (string, Masc_tui_board_quarantine.t) Masc_tui_fetched.t;
   mutable board_quarantine_requeue_inflight: string option;

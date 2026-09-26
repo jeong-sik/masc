@@ -106,6 +106,13 @@ type blocked_reason =
           returns a cut run to [Ready], so no new row takes this reason. Rows
           the ledger already holds keep it until the operator requeue moves
           them [Blocked -> Ready]. *)
+  | Restored_candidate_quarantine of
+      { failure_category : Candidate.quarantine_failure_category
+      ; attempt_provenance : Candidate.attempt_provenance option
+      }
+      (** The candidate ledger proves that a Blocked partition was durably
+          projected, but the partition row is now absent. Retain the exact
+          category and call identity without inventing the missing detail. *)
 
 type running_state =
   { worker_epoch : Worker_epoch.t
@@ -176,7 +183,11 @@ val ensure_roots :
   Candidate.candidate list ->
   (int, string) result
 (** Persist one deterministic singleton root for each unassigned [Pending] or
-    [Judged] candidate. Existing live membership must remain one-to-one. *)
+    [Judged] candidate. Also restore a missing [Blocked] root from a candidate's
+    durable quarantine at its recorded generation. The candidate is the proof
+    of that prior Blocked commit; its category and call identity are retained,
+    while unavailable detail is not fabricated. Existing live membership must
+    remain one-to-one. *)
 
 val recover_for_process_start :
   now:float -> base_path:string -> keeper_name:string -> (int, string) result

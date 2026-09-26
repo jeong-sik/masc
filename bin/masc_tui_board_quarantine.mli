@@ -6,7 +6,8 @@
     causes in {!category_words}. The worker never retries these on its own.
     Only an operator's requeue takes one out. This module says how many of a
     Keeper's partitions are waiting for that, grouped by what stopped them,
-    and which one the requeue key acts on. *)
+    and which one Q acts on. B sends one separately fenced recovery for each
+    waiting row in that same oldest-first order. *)
 
 (** One row of a Keeper's Board-attention quarantine inventory
     ([GET /api/v1/keepers/<name>/board-attention/quarantines]). A row this
@@ -49,7 +50,7 @@ val waiting :
 val oldest_waiting :
   t ->
   Masc.Keeper_board_attention_quarantine_command.inventory_item option
-(** The row the requeue key acts on: the head of {!waiting}. *)
+(** The row the Q key acts on: the head of {!waiting}. *)
 
 val requeue_request :
   Masc.Keeper_board_attention_quarantine_command.inventory_item ->
@@ -57,6 +58,31 @@ val requeue_request :
 (** The recovery request for one row, fenced by the quarantine id the row was
     read with, so a newer quarantine of the same partition is not requeued by
     a press made against the old one. *)
+
+type outcome_kind =
+  | Accepted
+  | Refused
+  | Uncertain
+
+type batch_counts =
+  { attempted : int
+  ; total : int
+  ; accepted : int
+  ; refused : int
+  ; uncertain : int
+  }
+
+val requeue_all :
+  send:(partition_id:string ->
+        request:Masc.Keeper_board_attention_quarantine_command.request -> 'a) ->
+  classify:('a -> outcome_kind) ->
+  progress:(batch_counts -> unit) ->
+  Masc.Keeper_board_attention_quarantine_command.inventory_item list ->
+  (string * 'a) list
+(** Sends one fenced request per snapshot row in order, reporting cumulative
+    progress after each answer. Refused and uncertain outcomes do not prevent
+    later rows from being attempted. The caller supplies the authenticated
+    transport and the outcome classification. *)
 
 val lines :
   now:float ->

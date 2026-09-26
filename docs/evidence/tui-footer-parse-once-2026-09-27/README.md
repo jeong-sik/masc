@@ -48,7 +48,10 @@ widths, compound pinned keys, ANSI/Korean text, conflict ordering, position,
 action results, literal search status and the Identity tab's controls.
 
 Source and both edited test files pass OCaml syntax parsing and diff checks.
-Compiled CI and a candidate native PTY comparison are pending. No local OCaml
+Compiled CI is pending. The [native PTY comparison](comparison/README.md)
+completed 600 acknowledged inputs: overall median/p95/max and all Info
+aggregates worsened. The PR is draft while a separate balanced six-pair run
+checks whether the regression reproduces. No local OCaml
 build, speedup, allocation-volume measurement, deployment or 0.1ms result is
 claimed.
 

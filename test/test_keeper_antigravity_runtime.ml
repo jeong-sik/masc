@@ -35,6 +35,16 @@ set -eu
 test "$HOME" = %s
 test -f "$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
 test -f "$HOME/.gemini/config/mcp_config.json"
+python3 - <<'POLICY'
+import json, os
+with open(os.path.join(os.environ["HOME"], ".gemini/antigravity-cli/settings.json")) as f:
+    permissions = json.load(f)["permissions"]
+cwd = os.getcwd()
+assert permissions["allow"] == ["mcp(masc/*)", "read_file(" + cwd + ")"]
+assert "write_file(*)" in permissions["deny"]
+assert "command(*)" in permissions["deny"]
+assert "unsandboxed(*)" not in permissions["deny"]
+POLICY
 conversation=conversation-antigravity-fixture
 turns=1
 mode=
@@ -107,13 +117,16 @@ printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_inde
 printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"MASC_ANTIGRAVITY_KEEPER_OK","error":null,"num_turns":%%d,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":40,"total_tokens":16}}}\n' "$conversation" "$turns"
 |}
       (shell_quote
-         (Filename.concat
-            (Filename.concat
-               (Filename.concat base_path ".masc")
-               "official-clients")
-            "antigravity/antigravity-fixture"))
+         (Runtime_antigravity_home.home_path
+            ~runtime_root:(Filename.concat base_path ".masc")
+            ~owner_leaf:(Runtime_antigravity_home.keeper_owner_leaf
+              ~keeper_name:"antigravity-fixture"
+              ~oauth_source:(Filename.concat base_path "operator-oauth-token"))))
       (shell_quote prompt_path)
-      (Yojson.Safe.to_string (`String base_path))
+      (Yojson.Safe.to_string (`String (Env_config_core.strip_trailing_slashes
+         (Filename.concat base_path
+           (Keeper_sandbox.host_root_rel_of_profile Keeper_types_profile_sandbox.Docker
+             "antigravity-fixture")))))
   in
   write_file ~mode:0o700 path script;
   path
@@ -142,14 +155,17 @@ printf '{"event":"init","conversation_id":"%%s","init":{"model":"gemini-fixture"
 printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"%%s","error":null,"num_turns":1,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":40,"total_tokens":16}}}\n' "$conversation" "$response"
 |}
       (shell_quote
-         (Filename.concat
-            (Filename.concat
-               (Filename.concat base_path ".masc")
-               "official-clients")
-            "antigravity/antigravity-fixture"))
+         (Runtime_antigravity_home.home_path
+            ~runtime_root:(Filename.concat base_path ".masc")
+            ~owner_leaf:(Runtime_antigravity_home.keeper_owner_leaf
+              ~keeper_name:"antigravity-fixture"
+              ~oauth_source:(Filename.concat base_path "operator-oauth-token"))))
       (shell_quote invocation_path)
       (shell_quote invocation_path)
-      (Yojson.Safe.to_string (`String base_path))
+      (Yojson.Safe.to_string (`String (Env_config_core.strip_trailing_slashes
+         (Filename.concat base_path
+           (Keeper_sandbox.host_root_rel_of_profile Keeper_types_profile_sandbox.Docker
+             "antigravity-fixture")))))
   in
   write_file ~mode:0o700 path script;
   path
@@ -193,6 +209,11 @@ let seed_ambiguous_resumed_session ~base_path ~tool =
   let runtime_id = "antigravity.gemini" in
   let tool_surface_sha256 =
     Store.tool_surface_sha256
+      ~account_home:(Runtime_antigravity_home.home_path
+        ~runtime_root:(Filename.concat base_path ".masc")
+        ~owner_leaf:(Runtime_antigravity_home.keeper_owner_leaf
+          ~keeper_name:"antigravity-fixture"
+          ~oauth_source:(Filename.concat base_path "operator-oauth-token")))
       ~native_posture:Runtime_native_tools.antigravity_default
       [ tool ]
   in
@@ -280,7 +301,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
       (* #36066: the runtime resolves the keeper's native posture from its
          declaration before any turn, so the fixture keeper is declared. *)
       Masc_test_deps.declare_fixture_keeper
-        ~base_path ~sandbox_profile:None "antigravity-fixture";
+        ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-fixture";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
       write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
       let raw_trace_path = Filename.concat base_path "antigravity-raw-trace.jsonl" in
@@ -749,8 +770,10 @@ let test_keeper_projects_mcp_tool_and_settles () =
       check int "next durable turn count" 74 next_plan.turn_count;
       let mcp_path =
         Filename.concat
-          mascot_root
-          "official-clients/antigravity/antigravity-fixture/.gemini/config/mcp_config.json"
+          (Runtime_antigravity_home.home_path ~runtime_root:mascot_root
+            ~owner_leaf:(Runtime_antigravity_home.keeper_owner_leaf
+              ~keeper_name:"antigravity-fixture" ~oauth_source))
+          ".gemini/config/mcp_config.json"
       in
       check bool "turn capability cleared" false (Sys.file_exists mcp_path))
 ;;
@@ -762,7 +785,7 @@ let test_blank_success_requires_fresh_conversation () =
     (fun () ->
       Unix.mkdir (Filename.concat base_path ".masc") 0o700;
       Masc_test_deps.declare_fixture_keeper
-        ~base_path ~sandbox_profile:None "antigravity-fixture";
+        ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-fixture";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
       write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
       let cli_path = blank_then_success_fixture_script ~base_path in
@@ -861,9 +884,9 @@ let test_spawn_failure_is_pre_dispatch () =
     (fun () ->
       Unix.mkdir (Filename.concat base_path ".masc") 0o700;
       Masc_test_deps.declare_fixture_keeper
-        ~base_path ~sandbox_profile:None "antigravity-pre-dispatch";
+        ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-pre-dispatch";
       Masc_test_deps.declare_fixture_keeper
-        ~base_path ~sandbox_profile:None "antigravity-capacity-override";
+        ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-capacity-override";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
       write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
       let missing_cli = Filename.concat base_path "missing-antigravity" in
@@ -1021,7 +1044,7 @@ let test_blank_system_prompt_is_refused_not_defaulted () =
     (fun () ->
       Unix.mkdir (Filename.concat base_path ".masc") 0o700;
       Masc_test_deps.declare_fixture_keeper
-        ~base_path ~sandbox_profile:None "antigravity-blank-prompt";
+        ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-blank-prompt";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
       write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
       let cli_path = fixture_script ~base_path in

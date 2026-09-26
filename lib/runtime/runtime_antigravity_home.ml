@@ -205,40 +205,28 @@ let ensure_private_child parent leaf =
   | Ok () -> Result.map (fun () -> path) (verify_private_directory path)
 ;;
 
-(* Only the whole-tool pattern [tool(*)] matches in agy 1.1.12: a path-scoped
-   argument such as [read_file(<dir>/*)] matched neither a direct child nor a
-   nested file in either list (measured 2026-08-14), so "deny everything
-   except the client's own artifact files" is not expressible. [read_file]
-   therefore stays denied wholesale even though that also denies the client's
-   own large-MCP-output artifacts (results over ~10KB are materialized to a
-   brain file the model is told to view): the workspace masc passes as
-   [--add-dir] is the operator checkout, whose [.masc/auth] tokens a
-   workspace-wide read grant would expose. A rule denial comes back to the
-   model as a typed tool error and the turn continues; an unlisted tool would
-   instead take the review path, which auto-denies in print mode and ends the
-   turn with an empty SUCCESS response.
+(* Permissions are the security boundary. Plan mode merely adds an instruction.
+   Directory arguments (without glob suffixes) are recursive CLI grants:
+   https://antigravity.google/docs/permissions?tab=cli . *)
+(* Do not emit a wildcard command grant: agy 1.2.11 uses it for both sandboxed and
+   unsandboxed execution, and rejects the former [unsandboxed] action. With
+   --sandbox, the vendor's implicit grant covers sandboxed commands; an escape
+   remains Ask, which print mode cannot approve. Read posture denies both. *)
+let native_settings_json ~posture ~workspaces =
+  let read = List.map (fun path -> "read_file(" ^ path ^ ")") workspaces in
+  let write = List.map (fun path -> "write_file(" ^ path ^ ")") workspaces in
+  let allow, deny = match (posture : Runtime_native_tools.posture) with
+    | Native_none -> [], ["read_file(*)"; "write_file(*)"; "command(*)"]
+    | Native_read -> read, ["write_file(*)"; "command(*)"]
+    | Native_full -> read @ write, [] in
+  let strings values = `List (List.map (fun value -> `String value) values) in
+  `Assoc ["permissions", `Assoc
+    ["allow", strings ("mcp(masc/*)" :: allow);
+     "deny", strings (deny @ ["read_url(*)"; "execute_url(*)"])]]
+;;
 
-   No [toolPermission] key: agy 1.1.12 does not read it (the client rewrites
-   this file without it and initializes toolPermission=request-review from
-   its own default). *)
 let settings_json () =
-  `Assoc
-    [ ( "permissions"
-      , `Assoc
-          [ "allow", `List [ `String "mcp(masc/*)" ]
-          ; ( "deny"
-            , `List
-                (List.map
-                   (fun permission -> `String permission)
-                   [ "read_file(*)"
-                   ; "write_file(*)"
-                   ; "read_url(*)"
-                   ; "execute_url(*)"
-                   ; "command(*)"
-                   ; "unsandboxed(*)"
-                   ]) )
-          ] )
-    ]
+  native_settings_json ~posture:Runtime_native_tools.Native_none ~workspaces:[]
 ;;
 
 let write_private_file ~make_error path contents =
@@ -539,6 +527,17 @@ let ensure_login_keychain home_dir =
       else Present)
 ;;
 
+let keeper_owner_leaf ~keeper_name ~oauth_source =
+  let identity = Yojson.Safe.to_string
+      (`List [`String keeper_name; `String oauth_source]) in
+  "keeper-" ^ (Digestif.SHA256.digest_string identity |> Digestif.SHA256.to_hex)
+;;
+
+let home_path ~runtime_root ~owner_leaf =
+  Filename.concat (Filename.concat (Filename.concat runtime_root "official-clients")
+    "antigravity") owner_leaf
+;;
+
 let prepare_with_seed ~runtime_root ~owner_leaf ~oauth_seed =
   if not (Fs_compat.is_capability_leaf owner_leaf)
   then Error (Invalid_owner_leaf owner_leaf)
@@ -581,12 +580,48 @@ let prepare_for_login ~runtime_root ~owner_leaf =
 
 let oauth_path t = t.oauth_path
 let home_dir t = t.home_dir
+type native_workspace = Shared_workspace of string | Private_workspace
+
+let canonical_workspace path =
+  try
+    if Filename.is_relative path || (Unix.lstat path).Unix.st_kind <> Unix.S_DIR
+    then Error (Unsafe_directory {path; detail="native workspace must be an absolute real directory"})
+    else
+      let canonical = Unix.realpath path in
+      if not (String.equal path canonical || String.equal path (canonical ^ "/"))
+      then Error (Unsafe_directory {path; detail="native workspace must not traverse symbolic links"})
+      else if String.exists (function '*' | '?' | '[' | ']' | '(' | ')' -> true | _ -> false) canonical
+      then Error (Unsafe_directory {path; detail="native workspace contains permission-pattern syntax"})
+      else Ok canonical
+  with Unix.Unix_error (error, fn, arg) ->
+    Error (Unsafe_directory {path; detail=unix_error_detail error fn arg})
+;;
+
+let prepare_native_tools t ~posture ~workspace ~additional_workspaces =
+  let* cwd = match workspace with
+    | Private_workspace -> ensure_private_child t.home_dir "native-workspace"
+    | Shared_workspace path -> canonical_workspace path in
+  let rec validate = function
+    | [] -> Ok []
+    | path :: rest ->
+      let* path = canonical_workspace path in
+      let* rest = validate rest in
+      Ok (path :: rest) in
+  let* additional_workspaces = validate additional_workspaces in
+  let* () = write_private_file
+    ~make_error:(fun path detail -> Settings_write_failed {path; detail})
+    t.settings_path
+    (native_settings_json ~posture ~workspaces:(cwd :: additional_workspaces)
+     |> Yojson.Safe.pretty_to_string) in
+  Ok cwd
+;;
+
 let write_context_observation_settings t ~command =
   let settings = `Assoc [
     "statusLine", `Assoc ["type", `String "command"; "command", `String command; "enabled", `Bool true];
     "altScreenMode", `String "never";
     "permissions", `Assoc ["allow", `List []; "deny", `List (List.map (fun name -> `String name)
-      ["read_file(*)"; "write_file(*)"; "read_url(*)"; "execute_url(*)"; "command(*)"; "unsandboxed(*)"])]] in
+      ["read_file(*)"; "write_file(*)"; "read_url(*)"; "execute_url(*)"; "command(*)"])]] in
   write_private_file ~make_error:(fun path detail -> Settings_write_failed {path;detail})
     t.settings_path (Yojson.Safe.to_string settings)
 
@@ -641,6 +676,7 @@ module For_testing = struct
   ;;
 
   let settings_json = settings_json
+  let native_settings_json = native_settings_json
   let security_environment = security_environment
   let replace_keychain = replace_keychain
 end

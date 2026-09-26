@@ -43,6 +43,13 @@ type t
 
 val error_to_string : error -> string
 
+val keeper_owner_leaf : keeper_name:string -> oauth_source:string -> string
+(** Stable account boundary for a Keeper. Identity uses the configured source
+    path, never token bytes, so refresh preserves the account's managed state. *)
+
+val home_path : runtime_root:string -> owner_leaf:string -> string
+(** Pure managed HOME spelling, also used to bind session identity before IO. *)
+
 val prepare
   :  runtime_root:string
   -> owner_leaf:string
@@ -63,6 +70,22 @@ val oauth_path : t -> string
 (** Private native reference for setup import; never include in HTTP receipts. *)
 
 val home_dir : t -> string
+
+type native_workspace = Shared_workspace of string | Private_workspace
+
+val canonical_workspace : string -> (string, error) result
+(** Absolute directory without symbolic links or permission-pattern syntax. *)
+
+val prepare_native_tools
+  : t -> posture:Runtime_native_tools.posture -> workspace:native_workspace
+  -> additional_workspaces:string list -> (string, error) result
+(** Apply native permissions to the selected workspace and return its cwd.
+    Endpoint-owned trees use [Private_workspace], an isolated host directory;
+    this does not claim native access to the endpoint's actual files.
+    Read posture denies commands and writes; full permits sandboxed effects.
+    Both deny native network tools. The caller must enable the CLI sandbox;
+    no command allow rule is emitted because it would grant sandbox escapes
+    too. Unsandboxed requests retain the vendor's interactive approval gate. *)
 
 val write_context_observation_settings : t -> command:string -> (unit, error) result
 (** Metadata-only setup for a fresh disposable HOME: no MCP allowance and no
@@ -94,6 +117,7 @@ module For_testing : sig
 
   val paths : t -> paths
   val settings_json : unit -> Yojson.Safe.t
+  val native_settings_json : posture:Runtime_native_tools.posture -> workspaces:string list -> Yojson.Safe.t
 
   val replace_keychain : home_dir:string -> string -> keychain_state
   (** Discard the keychain at the given path and build a fresh one. This is

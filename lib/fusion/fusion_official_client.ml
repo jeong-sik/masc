@@ -166,9 +166,9 @@ let muse_config ~runtime_id ~override_s (execution : Runtime_execution.muse_serv
   =
   { cli_path = execution.cli_path
   ; model = Some execution.model
-  ; (* [denyUnmatched]: the host's own rules decide which built-in tool runs
-       and everything else is denied, the posture a keeper turn gets by
-       default. A panelist answers a question; nothing downstream expects
+  ; (* The posture a keeper turn gets by default: write and shell off, and
+       every approval the host raises rejected, since a panelist has no MASC
+       tools. A panelist answers a question; nothing downstream expects
        files to have changed. *)
     native = Runtime_native_tools.muse_default
   ; admission_timeout_s = execution.timeout_s

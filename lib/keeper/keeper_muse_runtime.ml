@@ -22,6 +22,22 @@ let provider_name = "muse_serve"
    MASC's tools under it. *)
 let mcp_server_name = "masc"
 
+(* The session's posture as the model meets it. Muse Code still lists
+   built-in tools MASC will not approve, and a model that learns that only
+   from each rejection spends calls on them. This projects the configuration
+   MASC already chose ({!Runtime_muse_serve.config}), as the Codex lane's
+   note does; it is not an instruction. *)
+let native_posture_note = function
+  | Runtime_native_tools.Native_none | Runtime_native_tools.Native_read ->
+    [ Printf.sprintf
+        "In this session MASC approves only the tools its %s server lists. \
+         Built-in file writes and shell commands are switched off, and any \
+         other call that asks for approval is rejected."
+        mcp_server_name
+    ]
+  | Runtime_native_tools.Native_full -> []
+;;
+
 let undeclared_capacity_detail =
   "Muse Code requires max-prompt-bytes because MSP has no typed oversized-input refusal"
 ;;
@@ -499,10 +515,16 @@ let find_tool tools name =
 
 (* A session takes MASC's tools as one required streamable-HTTP server:
    a bridge the host cannot reach fails the session instead of running the
-   turn without the Keeper's tools. *)
-let mcp_servers_of_bridge bridge =
+   turn without the Keeper's tools. [served] is the list the bridge answers
+   [tools/list] from, so the tools a MASC-tools-only session allows are
+   exactly the ones the model can see. *)
+let mcp_servers_of_bridge bridge ~(served : Host.dynamic_tool list) =
   let { Mcp_http.url; headers } = Mcp_http.endpoint bridge in
-  [ mcp_server_name, Msp.Streamable_http { url; headers; required = true } ]
+  [ { Serve.name = mcp_server_name
+    ; server = Msp.Streamable_http { url; headers; required = true }
+    ; tool_names = List.map (fun (tool : Host.dynamic_tool) -> tool.name) served
+    }
+  ]
 ;;
 
 type observed_turn =
@@ -696,17 +718,82 @@ let phase_name : Session_store.phase -> string = function
   | Session_store.Settled _ -> "Settled"
 ;;
 
+(* Where an endpoint-backed Keeper's session works, under the runtime root
+   beside the other official clients' private homes:
+   [<base>/.masc/official-clients/muse/workspaces/<keeper>]. *)
+let endpoint_workspace_dirs = [ "official-clients"; "muse"; "workspaces" ]
+
+(* Owner read, write and search; nothing for group or others. *)
+let private_dir_perm = 0o700
+let permission_bits = 0o777
+
+(* One level of that path: created 0700 when absent, and accepted only as a
+   real directory the effective user owns with mode 0700, so no symbolic
+   link or shared directory can stand in for it. *)
+let ensure_private_dir path =
+  let* () =
+    match Unix.mkdir path private_dir_perm with
+    | () -> Ok ()
+    | exception Unix.Unix_error (Unix.EEXIST, _, _) -> Ok ()
+    | exception Unix.Unix_error (error, _, _) ->
+      Error (Printf.sprintf "%s cannot be created: %s" path (Unix.error_message error))
+  in
+  match Unix.lstat path with
+  | exception Unix.Unix_error (error, _, _) ->
+    Error (Printf.sprintf "%s is unreadable: %s" path (Unix.error_message error))
+  | { Unix.st_kind = Unix.S_DIR; st_uid; st_perm; _ } ->
+    if st_uid <> Unix.geteuid ()
+    then Error (Printf.sprintf "%s is owned by uid %d" path st_uid)
+    else if st_perm land permission_bits <> private_dir_perm
+    then
+      Error
+        (Printf.sprintf
+           "%s has mode %03o, not %03o"
+           path
+           (st_perm land permission_bits)
+           private_dir_perm)
+    else Ok path
+  | { Unix.st_kind =
+        ( Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+        | Unix.S_SOCK )
+    ; _
+    } -> Error (Printf.sprintf "%s is not a real directory" path)
+;;
+
+let endpoint_workspace_root ~base_path ~keeper_name =
+  let refused detail = Error (config_error ~field:"muse_workspace_root" detail) in
+  if String.equal keeper_name ""
+     || String.equal keeper_name Filename.current_dir_name
+     || String.equal keeper_name Filename.parent_dir_name
+     || not (String.equal (Filename.basename keeper_name) keeper_name)
+  then refused (Printf.sprintf "Keeper name %S is not one path segment" keeper_name)
+  else
+    List.fold_left
+      (fun parent leaf ->
+         let* parent = parent in
+         ensure_private_dir (Filename.concat parent leaf))
+      (Ok (Common.masc_dir_from_base_path ~base_path))
+      (endpoint_workspace_dirs @ [ keeper_name ])
+    |> Result.fold ~ok:Result.ok ~error:refused
+;;
+
 (* MSP's one path setting is the session's [workspaceRoot], and the host's
    file tools stay inside it even with its sandbox off (Muse Code SDK
    CHANGELOG). The base path holds [.masc], auth tokens included, so the
-   session works in the Keeper's playground instead: the host root MASC's own
-   file tools confine the Keeper to. For a Micro_vm or Remote_ssh Keeper that
-   root is the host bookkeeping bundle, because its working tree lives on the
-   endpoint; MASC's file tools read the endpoint and do not see what this
-   host writes in the bundle. The Keeper's turn creates the root before the
-   runtime runs ([Keeper_alerting_path.ensure_sandbox_bundle]), so a missing
-   one is refused, not made here. *)
-let playground_root ~base_path ~keeper_name =
+   session never works there.
+
+   A Docker Keeper's session works in its playground, the host root MASC's
+   own file tools confine the Keeper to. The Keeper's turn creates it before
+   the runtime runs ([Keeper_alerting_path.ensure_sandbox_bundle]), so a
+   missing one is refused, not made here.
+
+   A Micro_vm or Remote_ssh Keeper's working tree lives on its endpoint,
+   which MASC's own tools reach and this host process does not, and its host
+   root is the bookkeeping bundle. Its session works in a private directory
+   of its own instead, created empty. The path depends only on the base path
+   and the Keeper's name, so every turn names the same root: the root enters
+   the session digest, and a changed one would start a fresh session. *)
+let session_workspace_root ~base_path ~keeper_name =
   let config = Workspace.default_config base_path in
   let refused detail = Error (config_error ~field:"playground_root" detail) in
   match Keeper_meta_store.read_effective_meta_presence config keeper_name with
@@ -716,15 +803,19 @@ let playground_root ~base_path ~keeper_name =
   | Ok (Keeper_meta_store.Meta_not_current detail) ->
     refused ("the Keeper meta is not current: " ^ detail)
   | Ok (Keeper_meta_store.Meta_present meta) ->
-    let root =
-      Env_config_core.strip_path_trailing_slashes
-        (Keeper_sandbox.host_root_abs_of_meta ~config meta)
-    in
-    (match Sys.is_directory root with
-     | true -> Ok root
-     | false -> refused (Printf.sprintf "playground %s is not a directory" root)
-     | exception Sys_error detail ->
-       refused (Printf.sprintf "playground %s is unreadable: %s" root detail))
+    (match meta.Keeper_meta_contract.sandbox_profile with
+     | Keeper_types_profile_sandbox.Docker ->
+       let root =
+         Env_config_core.strip_path_trailing_slashes
+           (Keeper_sandbox.host_root_abs_of_meta ~config meta)
+       in
+       (match Sys.is_directory root with
+        | true -> Ok root
+        | false -> refused (Printf.sprintf "playground %s is not a directory" root)
+        | exception Sys_error detail ->
+          refused (Printf.sprintf "playground %s is unreadable: %s" root detail))
+     | Keeper_types_profile_sandbox.Micro_vm | Keeper_types_profile_sandbox.Remote_ssh ->
+       endpoint_workspace_root ~base_path ~keeper_name)
 ;;
 
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled
@@ -797,7 +888,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         |> Result.map_error (config_error ~field:"official_client_session.gate_continuation")
     in
     let claim_plan = Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256 in
-    let* workspace_root = playground_root ~base_path ~keeper_name in
+    let* workspace_root = session_workspace_root ~base_path ~keeper_name in
     (* MSP offers no replaceable configuration channel, and this client
        names the model and the workspace root only when it starts a session.
        A host session that settled against another canonical history, system
@@ -902,7 +993,10 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~runtime_label
         ~keeper_name
         ~turn_count
-        ~system_prompt
+        ~system_prompt:
+          (system_prompt :: native_posture_note native_posture
+           |> List.filter (fun text -> String.trim text <> "")
+           |> String.concat "\n\n")
         ~tools
         ~initial_messages
         ~model_input_projection:(if is_resume then model_input_projection else None)
@@ -1165,8 +1259,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~on_usage_report
         ~on_turn_started:(fun turn ->
           (* From here the host runs the turn, and MASC cannot prove what it
-             did. Its built-in tools run under the host's own rules, which
-             may allow a write ({!Runtime_native_tools.muse_default}); a
+             did. A call the host's own rules allow runs without asking
+             MASC ({!Runtime_native_tools.muse_default}); a
              subagent or workflow runs its tools in a child session this
              client does not read. A failure after this point must not rotate
              into a second run of the same goal. *)
@@ -1316,7 +1410,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                `Runtime
                  (Serve.run_turn
                     ~session_mode
-                    ~mcp_servers:(mcp_servers_of_bridge bridge)
+                    ~mcp_servers:(mcp_servers_of_bridge bridge ~served:dynamic_tools)
                     ?reasoning_effort
                     ~on_session_ready:(fun ~session_id ->
                       let* () =
@@ -1679,4 +1773,5 @@ module For_testing = struct
 
   let reserved_prompt_bytes = reserved_prompt_bytes
   let measure_model_input_message_bytes = measure_model_input_message_bytes
+  let native_posture_note = native_posture_note
 end

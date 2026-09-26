@@ -81,15 +81,22 @@ val run :
     refuses.
 
     The session's [workspaceRoot] and the host process's working directory
-    are the Keeper's playground on this host
-    ({!Keeper_sandbox.host_root_abs_of_meta}), not [base_path], which holds
-    [.masc] and its auth tokens. Muse Code keeps its file tools inside the
-    workspace root; its shell reaches what the host's own sandbox profile
-    allows. For a Micro_vm or Remote_ssh Keeper the root is the host
-    bookkeeping bundle, not the endpoint tree MASC's file tools read. The
-    root enters the digest too, so a session started under another root is
-    not resumed. A Keeper with no readable meta, or whose playground is not a
-    directory, fails as config before any process starts.
+    are never [base_path], which holds [.masc] and its auth tokens. A Docker
+    Keeper works in its playground on this host
+    ({!Keeper_sandbox.host_root_abs_of_meta}). A Micro_vm or Remote_ssh
+    Keeper, whose tree lives on its endpoint, works in a private 0700
+    directory of its own,
+    [<base_path>/.masc/official-clients/muse/workspaces/<keeper_name>],
+    created empty and the same on every turn. Muse Code keeps its file tools
+    inside the workspace root. The root enters the digest too, so a session
+    started under another root is not resumed. A Keeper with no readable
+    meta, a Docker Keeper whose playground is not a directory, and an
+    endpoint Keeper whose directory cannot be made private fail as config
+    before any process starts.
+
+    The session's MASC server lists the Keeper's dynamic tools, and under
+    [native = "none"] or ["read"] those are the only calls MASC approves
+    ({!Runtime_muse_serve.config}).
 
     MSP has no system-prompt channel and no typed oversized-input refusal. A
     start therefore renders the system prompt, the history and the goal into
@@ -158,4 +165,8 @@ module For_testing : sig
 
   val measure_model_input_message_bytes : Agent_core.Types.message -> int
   (** What the window charges one history message, framing included. *)
+
+  val native_posture_note : Runtime_native_tools.posture -> string list
+  (** What a start prompt's system section adds after the system prompt to
+      tell the model the session's posture. *)
 end

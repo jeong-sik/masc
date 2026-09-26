@@ -343,9 +343,11 @@ let temp_workspace () =
    fixture's [muse] launcher runs this MSP host from the base path, where it
    records what it saw. It speaks one session per process: a start or a
    resume and one turn. fixture.json's
-   [scenario] says what the turn does; [complete], the default, calls one
-   MASC tool through the session's MCP server and runs one built-in tool.
-   The others each end the turn one way a real host can. *)
+   [scenario] says what the turn does; [complete], the default, asks MASC to
+   approve one MASC tool and one built-in read, calls the MASC tool through
+   the session's MCP server and runs the built-in tool, recording each
+   answer in decisions.log. The others each end the turn one way a real host
+   can. *)
 let muse_host_script =
   {|import json, os, sys, urllib.request
 
@@ -393,7 +395,7 @@ assert read()["method"] == "initialized"
 
 opened = read()
 if opened["method"] == "session/start":
-    assert opened["params"]["approvalMode"] == "denyUnmatched", opened
+    assert opened["params"]["approvalMode"] == "promptUnmatched", opened
     with open(os.path.join(HERE, "start-root.txt"), "w") as handle:
         handle.write(opened["params"]["workspaceRoot"])
     assert opened["params"]["workspaceRoot"] == FIXTURE["workspace_root"], opened
@@ -416,7 +418,7 @@ send({"jsonrpc": "2.0", "id": opened["id"], "result": {"session": {
 if mode == "resume":
     approval = read()
     assert approval["method"] == "session/setApprovalMode", approval
-    assert approval["params"]["mode"] == "denyUnmatched", approval
+    assert approval["params"]["mode"] == "promptUnmatched", approval
     send({"jsonrpc": "2.0", "id": approval["id"], "result": {}})
 
 headers = dict(server["headers"])
@@ -474,6 +476,37 @@ def built_in_tool(item_id, tool, call_id):
     item("item/started", tool_item(item_id, tool, call_id, "inProgress", 1))
     item("item/completed", tool_item(item_id, tool, call_id, "completed", 2))
 
+# The choices muse 1.4.0 offered for an MCP tool (2026-09-26).
+CHOICES = [
+    {"choiceId": "allow_once", "label": "Allow once", "decision": "approved", "scope": "once"},
+    {"choiceId": "allow_session", "label": "Allow for this session",
+     "decision": "approvedForSession", "scope": "session"},
+    {"choiceId": "allow_local_mcp_tool", "label": "Always allow this MCP tool",
+     "decision": "approvedPolicyAmendment", "scope": "localPersistent"},
+    {"choiceId": "abort", "label": "Reject", "decision": "abort", "scope": "once",
+     "acceptsFeedback": True}]
+ASKED = [0]
+
+def ask(tool, subject):
+    ASKED[0] += 1
+    approval_id = "approval-%d" % ASKED[0]
+    send({"jsonrpc": "2.0", "id": ASKED[0], "method": "approval/request", "params": {
+        "sessionId": SESSION, "approvalId": approval_id, "turnId": turn_id,
+        "taskId": approval_id, "itemId": approval_id, "toolCallId": "call-" + approval_id,
+        "toolName": tool, "rawArgs": "{}", "viewCursor": cursor(), "subject": subject,
+        "currentRequirementId": {"approvalId": approval_id, "sourceIndex": 0},
+        "availableChoices": CHOICES, "protectedWrite": False, "judgeEscalated": False}})
+    ack = read()
+    assert ack.get("id") == ASKED[0] and ack.get("result") == {}, ack
+    decide = read()
+    assert decide["method"] == "approval/decide", decide
+    send({"jsonrpc": "2.0", "id": decide["id"], "result": {
+        "commandId": decide["params"]["commandId"], "status": "accepted",
+        "approvalId": approval_id, "terminal": True}})
+    with open(os.path.join(HERE, "decisions.log"), "a") as handle:
+        handle.write("%s %s %s\n" % (tool, decide["params"]["choiceId"],
+                                     "feedback" if decide["params"].get("feedback") else "-"))
+
 if SCENARIO == "refuse_turn":
     send({"jsonrpc": "2.0", "id": turn["id"],
           "error": {"code": -32602, "message": "fixture refusal"}})
@@ -510,9 +543,12 @@ notify("item/delta", {"sessionId": SESSION, "itemId": "m-1", "field": "text",
 probe_args = json.dumps({"marker": "from-muse"})
 item("item/started", tool_item("tc-mcp", "mcp__masc__masc_probe", "call-mcp-1",
                                "inProgress", 1, probe_args))
+ask("mcp__masc__masc_probe", {"kind": "tool", "toolName": "mcp__masc__masc_probe"})
 call_probe()
 item("item/completed", tool_item("tc-mcp", "mcp__masc__masc_probe", "call-mcp-1",
                                  "completed", 2, probe_args))
+ask("read_file", {"kind": "fileAccess", "toolName": "read_file", "path": "/etc/hosts",
+                  "access": "read"})
 built_in_tool("tc-1", "read_file", "call-native-1")
 notify("item/delta", {"sessionId": SESSION, "itemId": "m-1", "field": "text",
                       "delta": "MUSE_KEEPER_OK"})
@@ -1231,9 +1267,26 @@ let test_a_missing_playground_is_refused_before_spawn () =
     check_effect "effect-free" Keeper_provider_attempt_effect.No_effect_observed run.outcome)
 ;;
 
+(* Where an endpoint-backed Keeper's session works. *)
+let endpoint_workspace ~base_path =
+  List.fold_left
+    Filename.concat
+    (Common.masc_dir_from_base_path ~base_path)
+    [ "official-clients"; "muse"; "workspaces"; keeper_name ]
+;;
+
+let perm_of path = (Unix.stat path).Unix.st_perm land 0o777
+
+let sessions_opened ~base_path =
+  read_text (Filename.concat base_path "sessions.log")
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> line <> "")
+;;
+
 (* MSP names the root only at [session/start], so a session is resumed only
-   under the root it started in. A Remote_ssh Keeper's host root is its
-   bookkeeping bundle, because its working tree lives on the endpoint. *)
+   under the root it started in. A Remote_ssh Keeper's tree lives on its
+   endpoint, so its session works in a private directory of its own, and
+   that directory is the same on the next turn, which therefore resumes. *)
 let test_a_changed_root_starts_a_fresh_session () =
   with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
@@ -1243,20 +1296,79 @@ let test_a_changed_root_starts_a_fresh_session () =
       | Error error -> failf "%s: %s" label (Agent_core.Error.to_string error)
     in
     turn "turn in the Docker playground";
-    let bundle = host_root ~base_path Keeper_types_profile_sandbox.Remote_ssh in
-    Fs_compat.mkdir_p bundle;
+    let root = endpoint_workspace ~base_path in
     declare_keeper ~base_path
       "sandbox_profile = \"remote_ssh\"\nremote_endpoint = \"fixture-endpoint\"\n";
-    write_fixture ~root:bundle ~base_path [];
-    turn "turn in the Remote_ssh bundle";
-    check bool "the bundle is another root" false
-      (String.equal bundle (playground ~base_path));
-    check string "session/start names the bundle" bundle
+    write_fixture ~root ~base_path [];
+    turn "turn in the Remote_ssh Keeper's directory";
+    check bool "not the bookkeeping bundle" false
+      (String.equal root (host_root ~base_path Keeper_types_profile_sandbox.Remote_ssh));
+    check string "session/start names the directory" root
       (read_text (Filename.concat base_path "start-root.txt"));
-    check (list string) "sessions the host opened" [ "start"; "start" ]
-      (read_text (Filename.concat base_path "sessions.log")
+    check string "the host runs in it" (Unix.realpath root)
+      (read_text (Filename.concat base_path "cwd.txt"));
+    check int "owner-only" 0o700 (perm_of root);
+    check int "empty" 0 (Array.length (Sys.readdir root));
+    turn "the next turn of the Remote_ssh Keeper";
+    check (list string) "sessions the host opened" [ "start"; "start"; "resume" ]
+      (sessions_opened ~base_path))
+;;
+
+(* A Micro_vm Keeper's session works in its own private directory too, never
+   in the bookkeeping bundle or under the base path's auth tokens. *)
+let test_a_micro_vm_keeper_works_in_its_own_directory () =
+  with_scripted_host (fun ~base_path ->
+    let root = endpoint_workspace ~base_path in
+    declare_keeper ~base_path "sandbox_profile = \"microvm\"\n";
+    write_fixture ~root ~base_path [];
+    (match (run_turn ~base_path ~tool:(masc_probe_tool (ref `Null))).outcome.result with
+     | Ok _ -> ()
+     | Error error -> fail (Agent_core.Error.to_string error));
+    check string "session/start names the directory" root
+      (read_text (Filename.concat base_path "start-root.txt"));
+    check bool "not the bookkeeping bundle" false
+      (String.equal root (host_root ~base_path Keeper_types_profile_sandbox.Micro_vm));
+    check int "owner-only" 0o700 (perm_of root))
+;;
+
+(* A directory someone else can read is not the Keeper's private one: the
+   turn is refused as config before any process starts. *)
+let test_a_shared_endpoint_directory_is_refused_before_spawn () =
+  with_scripted_host (fun ~base_path ->
+    let root = endpoint_workspace ~base_path in
+    Fs_compat.mkdir_p root;
+    Unix.chmod root 0o755;
+    declare_keeper ~base_path "sandbox_profile = \"microvm\"\n";
+    let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+    (match run.outcome.result with
+     | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ })) ->
+       check string "refused field" "muse_workspace_root" field
+     | Error error -> failf "refused otherwise: %s" (Agent_core.Error.to_string error)
+     | Ok _ -> fail "a shared directory ran a turn");
+    check bool "no host process ran" false
+      (Sys.file_exists (Filename.concat base_path "cwd.txt"));
+    check_effect "effect-free" Keeper_provider_attempt_effect.No_effect_observed run.outcome)
+;;
+
+(* Under the default [read] posture MASC approves exactly the tools the
+   session's MASC server lists and rejects a built-in, and the start prompt
+   says so. *)
+let test_masc_tools_only_follows_the_bridge () =
+  with_scripted_host (fun ~base_path ->
+    (match (run_turn ~base_path ~tool:(masc_probe_tool (ref `Null))).outcome.result with
+     | Ok _ -> ()
+     | Error error -> fail (Agent_core.Error.to_string error));
+    check (list string) "answers"
+      [ "mcp__masc__masc_probe allow_once -"; "read_file abort feedback" ]
+      (read_text (Filename.concat base_path "decisions.log")
        |> String.split_on_char '\n'
-       |> List.filter (fun line -> line <> "")))
+       |> List.filter (fun line -> line <> ""));
+    let start_prompt = read_text (Filename.concat base_path "start-prompt.txt") in
+    List.iter
+      (fun note ->
+         check bool "the start prompt states the posture" true
+           (String_util.contains_substring start_prompt note))
+      (Adapter.native_posture_note Runtime_native_tools.Native_read))
 ;;
 
 let () =
@@ -1322,6 +1434,12 @@ let () =
             test_the_session_works_in_the_keepers_playground
         ; test_case "a missing playground is refused before spawn" `Quick
             test_a_missing_playground_is_refused_before_spawn
+        ; test_case "a micro_vm keeper works in its own directory" `Quick
+            test_a_micro_vm_keeper_works_in_its_own_directory
+        ; test_case "a shared endpoint directory is refused before spawn" `Quick
+            test_a_shared_endpoint_directory_is_refused_before_spawn
+        ; test_case "MASC tools only follows the bridge" `Quick
+            test_masc_tools_only_follows_the_bridge
         ; test_case "a changed root starts a fresh session" `Quick
             test_a_changed_root_starts_a_fresh_session
         ] )

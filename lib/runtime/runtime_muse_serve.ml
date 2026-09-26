@@ -34,6 +34,12 @@ let default_config () =
   }
 ;;
 
+type session_mcp_server =
+  { name : string
+  ; server : Msp.mcp_server
+  ; tool_names : string list
+  }
+
 type session_mode =
   | Start
   | Resume of { session_id : string }
@@ -222,33 +228,91 @@ let exit_status_of = function
   | `Signaled signal -> Exit_signal signal
 ;;
 
+(* Under [promptUnmatched] every call the host's own rules do not settle
+   waits for MASC's answer, which the approval policy below gives. *)
 let approval_mode_of_posture = function
-  | Runtime_native_tools.Native_full -> Ok Msp.Allow_all
-  | Runtime_native_tools.Native_read -> Ok Msp.Deny_unmatched
-  | Runtime_native_tools.Native_none ->
-    Error
-      (Invalid_config
-         "native posture \"none\" is unrepresentable on Muse Code: MSP has no switch \
-          that removes the built-in tools")
-;;
-
-(* The choice an [approval/request] is answered with, in order of
-   preference. A mode the session declared should already have settled most
-   requests; one that still arrives is answered from the same posture rather
-   than left waiting on a person MASC does not have. *)
-let approval_preferences = function
-  | Runtime_native_tools.Native_full -> [ Msp.Approved; Msp.Approved_for_session ]
+  | Runtime_native_tools.Native_full -> Msp.Allow_all
   | Runtime_native_tools.Native_read | Runtime_native_tools.Native_none ->
-    [ Msp.Denied; Msp.Abort ]
+    Msp.Prompt_unmatched
 ;;
 
-let approval_choice posture (approval : Msp.approval_request) =
+(* The host's sandbox posture is fixed for the process and set only by
+   flags; MSP selects an approval mode per session but cannot remove a
+   built-in tool. Names from [muse serve --help] (muse 1.4.0). *)
+let serve_flags = function
+  | Runtime_native_tools.Native_full -> []
+  | Runtime_native_tools.Native_read | Runtime_native_tools.Native_none ->
+    [ "--disable-write"; "--disable-shell" ]
+;;
+
+(* Sent with a rejection on a choice that takes feedback, so the model
+   learns why the call did not run. *)
+let masc_tools_only_feedback =
+  "This session allows MASC tools only, so this call was rejected."
+;;
+
+module Tool_names = Set.Make (String)
+
+(* The name the host gives a session MCP server's tool: the model calls it
+   by this name and an [approval/request] carries it as [toolName]. Seen on
+   muse 1.4.0 (2026-09-26): server [masc], tool [ping], [mcp__masc__ping]. *)
+let host_tool_name ~server ~tool = "mcp__" ^ server ^ "__" ^ tool
+
+(* How a session answers the approvals its host raises. A person MASC does
+   not have is never left to answer. *)
+type approval_policy =
+  | Approve_every_call
+  | Masc_tools_only of Tool_names.t
+      (** The exact host names of the session's MASC tools. *)
+
+let approval_policy posture mcp_servers =
+  match posture with
+  | Runtime_native_tools.Native_full -> Approve_every_call
+  | Runtime_native_tools.Native_read | Runtime_native_tools.Native_none ->
+    Masc_tools_only
+      (List.fold_left
+         (fun names { name; tool_names; server = _ } ->
+            List.fold_left
+              (fun names tool -> Tool_names.add (host_tool_name ~server:name ~tool) names)
+              names
+              tool_names)
+         Tool_names.empty
+         mcp_servers)
+;;
+
+type approval_answer =
+  | Allow_once of Msp.approval_choice
+  | Reject of Msp.approval_choice
+
+let offered (approval : Msp.approval_request) decisions =
   List.find_map
     (fun wanted ->
        List.find_opt
          (fun (choice : Msp.approval_choice) -> choice.Msp.decision = wanted)
          approval.Msp.choices)
-    (approval_preferences posture)
+    decisions
+;;
+
+(* A one-time approval only: [approvedForSession] and
+   [approvedPolicyAmendment] save a rule in the operator's own Muse Code
+   files. [None] when the host offered no such choice. *)
+let answer_approval policy (approval : Msp.approval_request) =
+  let allow_once () =
+    offered approval [ Msp.Approved ] |> Option.map (fun choice -> Allow_once choice)
+  in
+  match policy with
+  | Approve_every_call -> allow_once ()
+  | Masc_tools_only allowed ->
+    (match approval.Msp.subject_kind with
+     | Msp.Subject_tool when Tool_names.mem approval.Msp.tool_name allowed -> allow_once ()
+     | Msp.Subject_tool
+     | Msp.Subject_shell
+     | Msp.Subject_file_access
+     | Msp.Subject_network
+     | Msp.Subject_unix_socket
+     | Msp.Subject_process
+     | Msp.Unrecognized_subject _ ->
+       offered approval [ Msp.Denied; Msp.Abort ] |> Option.map (fun choice -> Reject choice))
 ;;
 
 (* MSP asks for UUIDv7 command ids and never mints one itself. A fresh
@@ -308,7 +372,6 @@ let validate_process_config config =
    request that never gets an answer. *)
 let validate_turn ?(session_mode = Start) config ~workspace_root ~prompt ~images =
   let* () = validate_process_config config in
-  let* _ = approval_mode_of_posture config.native in
   let* () = valid_utf8 "workspace_root" workspace_root in
   let* () = valid_utf8 "prompt" prompt in
   let* () =
@@ -333,7 +396,9 @@ let validate_turn ?(session_mode = Start) config ~workspace_root ~prompt ~images
 
 let validate_mcp_servers servers =
   List.fold_left
-    (fun checked (name, Msp.Streamable_http { url; headers; required = _ }) ->
+    (fun checked
+      { name; server = Msp.Streamable_http { url; headers; required = _ }; tool_names = _ }
+       ->
        let* () = checked in
        let* () = valid_utf8 "MCP server name" name in
        let* () = valid_utf8 "MCP server url" url in
@@ -388,10 +453,16 @@ let child_environment_key_allowed = function
   | _ -> false
 ;;
 
+(* The [muse] launcher replaces its binary in the background once an hour
+   unless this is exactly 1, so a turn could start on a build nobody chose.
+   Set here, not inherited: the allowlist above drops it. *)
+let no_auto_update_entry = "MUSE_NO_AUTO_UPDATE=1"
+
 let client_environment () =
   Unix.environment ()
   |> Array.to_list
   |> List.filter (fun entry -> child_environment_key_allowed (env_key entry))
+  |> List.cons no_auto_update_entry
   |> Array.of_list
 ;;
 
@@ -486,7 +557,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         ~stdin:stdin_r
         ~stdout:stdout_w
         ~stderr:stderr_w
-        [ config.cli_path; "serve" ]
+        (config.cli_path :: "serve" :: serve_flags config.native)
     with
     | exception exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -687,9 +758,9 @@ let item_in_turn ~turn_id (item : Msp.item) =
   | None -> false
 ;;
 
-let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_event state =
+let rec await_terminal io ~approval_policy ~session_id ~turn_id ~on_stream_event state =
   let continue state =
-    await_terminal io config ~session_id ~turn_id ~on_stream_event state
+    await_terminal io ~approval_policy ~session_id ~turn_id ~on_stream_event state
   in
   let emit = emit_stream_event on_stream_event in
   let ours sid = String.equal sid session_id in
@@ -710,14 +781,19 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
     let* request = lift (Msp.parse_server_request ~method_ params) in
     (match request with
      | Msp.Approval_request approval ->
-       (match approval_choice config.native approval with
+       (match answer_approval approval_policy approval with
         | None ->
           protocol_error
             "approval/request"
             (Printf.sprintf
                "no offered choice for %s matches the session's posture"
                approval.Msp.tool_name)
-        | Some choice ->
+        | Some answer ->
+          let choice, feedback =
+            match answer with
+            | Allow_once choice -> choice, None
+            | Reject choice -> choice, Some masc_tools_only_feedback
+          in
           send_best_effort io ~what:"approval ack" (Msp.server_request_ack request_id);
           let decide_id = io.next_id () in
           send_best_effort
@@ -726,6 +802,7 @@ let rec await_terminal io (config : config) ~session_id ~turn_id ~on_stream_even
             (Msp.approval_decide_request
                ~id:decide_id
                ~command_id:(new_command_id ())
+               ?feedback
                approval
                choice);
           emit
@@ -919,6 +996,7 @@ let run_protocol
       (config : config)
       ~admission
       ~approval_mode
+      ~approval_policy
       ~session_mode
       ~mcp_servers
       ~reasoning_effort
@@ -942,7 +1020,12 @@ let run_protocol
       ~approval_mode
       ~session_mode
       ~workspace_root
-      ~session_config:{ Msp.mcp_servers }
+      ~session_config:
+        { Msp.mcp_servers =
+            List.map
+              (fun { name; server; tool_names = _ } -> name, server)
+              mcp_servers
+        }
   in
   let session_id = session.Msp.session_id in
   let* () =
@@ -1004,7 +1087,7 @@ let run_protocol
     after_dispatch (fun () ->
       await_terminal
         io
-        config
+        ~approval_policy
         ~session_id
         ~turn_id
         ~on_stream_event
@@ -1054,7 +1137,8 @@ let run_turn
   =
   let* () = validate_turn ~session_mode config ~workspace_root ~prompt ~images in
   let* () = validate_mcp_servers mcp_servers in
-  let* approval_mode = approval_mode_of_posture config.native in
+  let approval_mode = approval_mode_of_posture config.native in
+  let approval_policy = approval_policy config.native mcp_servers in
   guard_idle_timeout (fun () ->
     with_spawned_client ~mgr ~clock ~cwd config (fun io ->
       run_protocol
@@ -1062,6 +1146,7 @@ let run_turn
         config
         ~admission:(fun f -> with_idle_timeout clock config.admission_timeout_s f)
         ~approval_mode
+        ~approval_policy
         ~session_mode
         ~mcp_servers
         ~reasoning_effort

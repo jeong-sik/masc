@@ -233,6 +233,22 @@ let test_approval_round_trip () =
     "choices"
     [ "allow_once"; "allow_session"; "abort" ]
     (List.map (fun (c : Msp.approval_choice) -> c.choice_id) approval.choices);
+  check
+    (list bool)
+    "only the reject choice takes feedback"
+    [ false; false; true ]
+    (List.map (fun (c : Msp.approval_choice) -> c.accepts_feedback) approval.choices);
+  let feedback_of choice_id =
+    let choice =
+      List.find (fun (c : Msp.approval_choice) -> c.choice_id = choice_id) approval.choices
+    in
+    Yojson.Safe.Util.(
+      Msp.approval_decide_request ~id:9 ~command_id:"c" ~feedback:"why" approval choice
+      |> member "params"
+      |> member "feedback")
+  in
+  check bool "feedback on the choice that takes it" true (feedback_of "abort" = `String "why");
+  check bool "no feedback on another choice" true (feedback_of "allow_once" = `Null);
   let decide = client_frame_with_method name "approval/decide" in
   let params = function
     | `Assoc fields -> List.assoc "params" fields

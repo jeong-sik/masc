@@ -81,7 +81,8 @@ let codex_default = Native_read
 let antigravity_default = Native_read
 let muse_default = Native_read
 
-(* MSP has no switch that removes Muse Code's built-in tools. *)
+(* No switch removes every Muse Code built-in, and a call the host's own
+   rules allow never reaches MASC. *)
 let muse_none_supported = false
 
 (* WebFetch/WebSearch observe no local state but do reach the network, so

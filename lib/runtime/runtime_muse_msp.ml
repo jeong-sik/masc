@@ -836,6 +836,7 @@ let approval_subject_kind_of_string = function
 type approval_choice =
   { choice_id : string
   ; decision : approval_decision
+  ; accepts_feedback : bool
   }
 
 type approval_requirement =
@@ -866,7 +867,17 @@ let parse_approval_choice stage json =
   let* fields = assoc_at stage json in
   let* choice_id = required_string stage "choiceId" fields in
   let* decision = required_string stage "decision" fields in
-  Ok ({ choice_id; decision = approval_decision_of_string decision } : approval_choice)
+  (* The schema marks a choice that takes feedback by sending the member;
+     one that omits it takes none. *)
+  let* accepts_feedback =
+    match List.assoc_opt "acceptsFeedback" fields with
+    | None -> Ok false
+    | Some (`Bool value) -> Ok value
+    | Some _ -> fail stage "field \"acceptsFeedback\" must be a boolean"
+  in
+  Ok
+    ({ choice_id; decision = approval_decision_of_string decision; accepts_feedback }
+      : approval_choice)
 ;;
 
 let parse_approval_request stage fields =
@@ -917,22 +928,27 @@ let parse_server_request ~method_ params =
 let approval_decide_request
       ~id
       ~command_id
+      ?feedback
       (approval : approval_request)
       (choice : approval_choice)
   =
   request
     ~id
     ~method_:"approval/decide"
-    [ "sessionId", `String approval.session_id
-    ; "commandId", `String command_id
-    ; "approvalId", `String approval.approval_id
-    ; ( "requirementId"
-      , `Assoc
-          [ "approvalId", `String approval.requirement.requirement_approval_id
-          ; "sourceIndex", `Int approval.requirement.source_index
-          ] )
-    ; "choiceId", `String choice.choice_id
-    ]
+    ([ "sessionId", `String approval.session_id
+     ; "commandId", `String command_id
+     ; "approvalId", `String approval.approval_id
+     ; ( "requirementId"
+       , `Assoc
+           [ "approvalId", `String approval.requirement.requirement_approval_id
+           ; "sourceIndex", `Int approval.requirement.source_index
+           ] )
+     ; "choiceId", `String choice.choice_id
+     ]
+     @
+     match feedback, choice.accepts_feedback with
+     | Some text, true -> [ "feedback", `String text ]
+     | Some _, false | None, (true | false) -> [])
 ;;
 
 let parse_usage_read_result json =

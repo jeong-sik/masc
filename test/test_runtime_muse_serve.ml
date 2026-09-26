@@ -86,13 +86,26 @@ let handshake_and_session ~granted =
   ]
 ;;
 
-let script_text ~capture steps =
+(* Where the script records its arguments after [serve] and the auto-update
+   switch it inherited. *)
+let argv_file = "argv.txt"
+let auto_update_file = "auto-update.txt"
+
+let script_text ~dir ~capture steps =
   let buffer = Buffer.create 1024 in
   let line text =
     Buffer.add_string buffer text;
     Buffer.add_char buffer '\n'
   in
   line "#!/bin/sh";
+  line
+    (Printf.sprintf
+       "printf '%%s\\n' \"$@\" > %s"
+       (shell_quote (Filename.concat dir argv_file)));
+  line
+    (Printf.sprintf
+       "env | grep '^MUSE_NO_AUTO_UPDATE=' > %s"
+       (shell_quote (Filename.concat dir auto_update_file)));
   List.iter
     (function
       | Read ->
@@ -116,7 +129,7 @@ let with_script steps f =
   let dir = Filename.temp_dir "masc-muse-serve-" "" in
   let capture = Filename.concat dir "requests.jsonl" in
   Out_channel.with_open_bin (Filename.concat dir "serve") (fun output ->
-    output_string output (script_text ~capture steps));
+    output_string output (script_text ~dir ~capture steps));
   let requests () =
     if Sys.file_exists capture
     then
@@ -146,6 +159,7 @@ let config ?(native = Runtime_native_tools.Native_read) ?model ?(admission_timeo
 
 let run_scripted
       ?session_mode
+      ?(check_dir = fun (_ : string) -> ())
       ?mcp_servers
       ?on_session_ready
       ?on_stream_event
@@ -171,7 +185,8 @@ let run_scripted
           ~prompt:"say MASC_MUSE_OK"
           ~images:[]
       in
-      check_result result (requests ())))
+      check_result result (requests ());
+      check_dir dir))
 ;;
 
 let request_with_method method_ requests =
@@ -245,9 +260,9 @@ let test_turn_with_tool_and_approval () =
          let start = request_with_method "session/start" requests in
          check
            bool
-           "read posture selects denyUnmatched"
+           "read posture selects promptUnmatched"
            true
-           (params_member "approvalMode" start = `String "denyUnmatched");
+           (params_member "approvalMode" start = `String "promptUnmatched");
          check bool "no bridge, no config" true (params_member "config" start = `Null);
          check
            bool
@@ -255,7 +270,12 @@ let test_turn_with_tool_and_approval () =
            true
            (params_member "workspaceRoot" start <> `Null);
          let decide = request_with_method "approval/decide" requests in
-         check bool "deny choice" true (params_member "choiceId" decide = `String "deny"))
+         check bool "deny choice" true (params_member "choiceId" decide = `String "deny");
+         check
+           bool
+           "no feedback on a choice that takes none"
+           true
+           (params_member "feedback" decide = `Null))
 ;;
 
 let test_auth_required () =
@@ -287,9 +307,12 @@ let test_exit_code_is_typed () =
 let test_bridge_needs_session_mcp () =
   run_scripted
     ~mcp_servers:
-      [ ( "masc_keeper"
-        , Msp.Streamable_http
-            { url = "http://127.0.0.1:1/mcp"; headers = []; required = true } )
+      [ { Serve.name = "masc_keeper"
+        ; server =
+            Msp.Streamable_http
+              { url = "http://127.0.0.1:1/mcp"; headers = []; required = true }
+        ; tool_names = []
+        }
       ]
     [ Read; Write (init_frame ~granted:[]) ]
     (fun result requests ->
@@ -427,17 +450,284 @@ let test_a_started_session_on_another_model_is_refused () =
             requests))
 ;;
 
-let test_native_none_is_config_error () =
-  match
-    Serve.validate_turn
-      (config ~native:Runtime_native_tools.Native_none ())
-      ~workspace_root:"/tmp"
-      ~prompt:"x"
-      ~images:[]
-  with
-  | Error (Serve.Invalid_config _) -> ()
-  | Error error -> fail (Serve.error_to_string error)
-  | Ok () -> fail "native posture none must be refused"
+(* ── MASC tools only ───────────────────────────────────────────────── *)
+
+(* The session's MASC server, serving [masc_status] and [ping]. *)
+let masc_server =
+  { Serve.name = "masc"
+  ; server =
+      Msp.Streamable_http { url = "http://127.0.0.1:1/mcp"; headers = []; required = true }
+  ; tool_names = [ "masc_status"; "ping" ]
+  }
+;;
+
+(* The choices muse 1.4.0 offered for [mcp__masc__ping] on 2026-09-26. *)
+let real_choices =
+  {|[{"choiceId":"allow_once","label":"Allow once","decision":"approved","scope":"once"},{"choiceId":"allow_session","label":"Allow for this session","decision":"approvedForSession","scope":"session","rulePreview":"tool `x`"},{"choiceId":"allow_local_mcp_tool","label":"Always allow this MCP tool","decision":"approvedPolicyAmendment","scope":"localPersistent","rulePreview":"tool `x`"},{"choiceId":"abort","label":"Reject","decision":"abort","scope":"once","acceptsFeedback":true}]|}
+;;
+
+let approval_with ~id ~approval_id ~tool_name ~subject ~choices =
+  Printf.sprintf
+    {|{"jsonrpc":"2.0","id":%d,"method":"approval/request","params":{"sessionId":"s-1","approvalId":%S,"turnId":"t-1","taskId":%S,"itemId":%S,"toolCallId":"call_%s","toolName":%S,"rawArgs":"{}","viewCursor":"v:6","sourceRange":{"stream":{"kind":"session","id":"s-1"},"first":{"id":"r-1","sequence":65},"last":{"id":"r-1","sequence":65}},"subject":%s,"currentRequirementId":{"approvalId":%S,"sourceIndex":0},"availableChoices":%s,"protectedWrite":false,"judgeEscalated":false}}|}
+    id
+    approval_id
+    approval_id
+    approval_id
+    approval_id
+    tool_name
+    subject
+    approval_id
+    choices
+;;
+
+let tool_subject name = Printf.sprintf {|{"kind":"tool","toolName":%S}|} name
+
+let decide_result_with ~id ~approval_id =
+  Printf.sprintf
+    {|{"jsonrpc":"2.0","id":%d,"result":{"commandId":"c","status":"accepted","approvalId":%S,"terminal":true}}|}
+    id
+    approval_id
+;;
+
+(* One turn whose host raises [approval] under [native]; [check] sees the
+   result and every frame MASC wrote. *)
+let answer_one ?(native = Runtime_native_tools.Native_read) approval check =
+  run_scripted
+    ~native
+    ~mcp_servers:[ masc_server ]
+    (handshake_and_session ~granted:[ "sessionMcp" ]
+     @ [ Write approval
+       ; Read (* approval ack *)
+       ; Read (* approval/decide *)
+       ; Write (decide_result_with ~id:4 ~approval_id:"a-1")
+       ; Write turn_completed
+       ])
+    check
+;;
+
+let decided_choice ?native ~label approval ~expected ~feedback =
+  answer_one ?native approval (fun result requests ->
+    (match result with
+     | Ok _ -> ()
+     | Error error -> failf "%s: %s" label (Serve.error_to_string error));
+    let decide = request_with_method "approval/decide" requests in
+    check bool (label ^ ": choice") true (params_member "choiceId" decide = `String expected);
+    match params_member "feedback" decide, feedback with
+    | `String text, true -> check bool (label ^ ": feedback") true (String.trim text <> "")
+    | `Null, false -> ()
+    | other, true -> failf "%s: expected feedback, got %s" label (Yojson.Safe.to_string other)
+    | other, false -> failf "%s: expected no feedback, got %s" label (Yojson.Safe.to_string other))
+;;
+
+(* Only a call whose subject is a tool named exactly like one of the
+   session's MASC tools is allowed, and only once; every other call is
+   rejected with the reason. *)
+let test_masc_tools_only_approval_policy () =
+  let request ~tool_name ~subject =
+    approval_with ~id:1 ~approval_id:"a-1" ~tool_name ~subject ~choices:real_choices
+  in
+  decided_choice
+    ~label:"a mounted MASC tool"
+    (request ~tool_name:"mcp__masc__ping" ~subject:(tool_subject "mcp__masc__ping"))
+    ~expected:"allow_once"
+    ~feedback:false;
+  decided_choice
+    ~label:"a built-in tool"
+    (request
+       ~tool_name:"read_file"
+       ~subject:{|{"kind":"fileAccess","toolName":"read_file","path":"/etc/hosts","access":"read"}|})
+    ~expected:"abort"
+    ~feedback:true;
+  decided_choice
+    ~label:"a MASC tool the session does not serve"
+    (request
+       ~tool_name:"mcp__masc__not_mounted"
+       ~subject:(tool_subject "mcp__masc__not_mounted"))
+    ~expected:"abort"
+    ~feedback:true;
+  decided_choice
+    ~label:"another server's tool"
+    (request ~tool_name:"mcp__other__x" ~subject:(tool_subject "mcp__other__x"))
+    ~expected:"abort"
+    ~feedback:true;
+  decided_choice
+    ~label:"a MASC tool's name on a non-tool subject"
+    (request
+       ~tool_name:"mcp__masc__ping"
+       ~subject:{|{"kind":"network","toolName":"mcp__masc__ping","host":"example.com","port":443}|})
+    ~expected:"abort"
+    ~feedback:true;
+  decided_choice
+    ~native:Runtime_native_tools.Native_none
+    ~label:"none runs the same session"
+    (request ~tool_name:"web_fetch" ~subject:(tool_subject "web_fetch"))
+    ~expected:"abort"
+    ~feedback:true;
+  decided_choice
+    ~native:Runtime_native_tools.Native_full
+    ~label:"full approves a built-in once"
+    (request ~tool_name:"web_fetch" ~subject:(tool_subject "web_fetch"))
+    ~expected:"allow_once"
+    ~feedback:false
+;;
+
+(* A host that offers no way to reject a call it asks about leaves MASC no
+   answer to give: the turn fails as a protocol error and nothing is
+   decided. *)
+let test_no_reject_choice_is_a_protocol_error () =
+  answer_one
+    (approval_with
+       ~id:1
+       ~approval_id:"a-1"
+       ~tool_name:"read_file"
+       ~subject:(tool_subject "read_file")
+       ~choices:
+         {|[{"choiceId":"allow_once","label":"Allow once","decision":"approved","scope":"once"},{"choiceId":"allow_session","label":"Allow for this session","decision":"approvedForSession","scope":"session"}]|})
+    (fun result requests ->
+       (match result with
+        | Error (Serve.Protocol_error { stage = "approval/request"; _ }) -> ()
+        | Error error -> fail (Serve.error_to_string error)
+        | Ok _ -> fail "a call with no reject choice was answered");
+       check
+         bool
+         "nothing decided"
+         false
+         (List.exists
+            (fun json -> Yojson.Safe.Util.member "method" json = `String "approval/decide")
+            requests))
+;;
+
+let approval_resolved ~approval_id ~decision =
+  Printf.sprintf
+    {|{"jsonrpc":"2.0","method":"approval/resolved","params":{"sessionId":"s-1","viewCursor":"v:8","approvalId":%S,"itemId":%S,"turnId":"t-1","decision":%S,"resolvedBy":"client","stageEvidence":[]}}|}
+    approval_id
+    approval_id
+    decision
+;;
+
+let mcp_tool_item ~status ~revision =
+  Printf.sprintf
+    {|{"jsonrpc":"2.0","method":"%s","params":{"sessionId":"s-1","viewCursor":"v:7","item":{"itemId":"a-1","kind":"toolCall","turnId":"t-1","revision":%d,"status":%S,"tool":"mcp__masc__ping","callId":"call_a-1","args":"{}"}}}|}
+    (if revision = 1 then "item/started" else "item/completed")
+    revision
+    status
+;;
+
+(* A promptUnmatched turn shaped like the host's frames: the model calls one
+   MASC tool, which MASC allows once, then a built-in, which MASC rejects,
+   and the turn still completes with the model's reply. *)
+let test_a_masc_tools_only_turn_completes () =
+  let decisions = ref [] in
+  run_scripted
+    ~mcp_servers:[ masc_server ]
+    ~on_stream_event:(function
+      | Serve.Approval_decided { tool_name; decision; _ } ->
+        decisions := (tool_name, decision) :: !decisions
+      | _ -> ())
+    (handshake_and_session ~granted:[ "sessionMcp" ]
+     @ [ Write agent_started
+       ; Write
+           (approval_with
+              ~id:1
+              ~approval_id:"a-1"
+              ~tool_name:"mcp__masc__ping"
+              ~subject:(tool_subject "mcp__masc__ping")
+              ~choices:real_choices)
+       ; Read (* approval ack *)
+       ; Read (* approval/decide *)
+       ; Write (decide_result_with ~id:4 ~approval_id:"a-1")
+       ; Write (approval_resolved ~approval_id:"a-1" ~decision:"approved")
+       ; Write (mcp_tool_item ~status:"inProgress" ~revision:1)
+       ; Write (mcp_tool_item ~status:"completed" ~revision:2)
+       ; Write
+           (approval_with
+              ~id:2
+              ~approval_id:"a-2"
+              ~tool_name:"web_fetch"
+              ~subject:{|{"kind":"network","toolName":"web_fetch","host":"example.com","port":443}|}
+              ~choices:real_choices)
+       ; Read (* approval ack *)
+       ; Read (* approval/decide *)
+       ; Write (decide_result_with ~id:5 ~approval_id:"a-2")
+       ; Write (approval_resolved ~approval_id:"a-2" ~decision:"abort")
+       ; Write agent_completed
+       ; Write turn_completed
+       ])
+    (fun result requests ->
+       (match result with
+        | Ok turn ->
+          check string "reply" "MASC_MUSE_OK" turn.text;
+          check int "approvals" 2 turn.approvals_decided;
+          check int "tool calls" 1 turn.tool_calls
+        | Error error -> fail (Serve.error_to_string error));
+       check
+         bool
+         "allowed the MASC tool once, rejected the built-in"
+         true
+         (List.rev !decisions
+          = [ "mcp__masc__ping", Msp.Approved; "web_fetch", Msp.Abort ]);
+       let start = request_with_method "session/start" requests in
+       check
+         bool
+         "promptUnmatched"
+         true
+         (params_member "approvalMode" start = `String "promptUnmatched");
+       check
+         bool
+         "the session's MASC server"
+         true
+         (Yojson.Safe.Util.(
+            params_member "config" start |> member "mcpServers" |> member "masc" |> member "url")
+          = `String "http://127.0.0.1:1/mcp");
+       let decides =
+         List.filter
+           (fun json -> Yojson.Safe.Util.member "method" json = `String "approval/decide")
+           requests
+       in
+       check
+         (list string)
+         "decided choices"
+         [ "allow_once"; "abort" ]
+         (List.map
+            (fun json -> Yojson.Safe.Util.to_string (params_member "choiceId" json))
+            decides))
+;;
+
+let lines_of path =
+  In_channel.with_open_bin path In_channel.input_all
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> line <> "")
+;;
+
+(* [muse serve] starts with write and shell off for [none] and [read], and
+   with its whole surface for [full]. Every spawn turns the launcher's
+   background self-update off. *)
+let test_serve_flags_and_environment () =
+  List.iter
+    (fun (native, expected) ->
+       let label = Runtime_native_tools.to_string native in
+       run_scripted
+         ~native
+         ~check_dir:(fun dir ->
+           check
+             (list string)
+             (label ^ ": serve flags")
+             expected
+             (lines_of (Filename.concat dir argv_file));
+           check
+             (list string)
+             (label ^ ": auto update off")
+             [ "MUSE_NO_AUTO_UPDATE=1" ]
+             (lines_of (Filename.concat dir auto_update_file)))
+         (handshake_and_session ~granted:[] @ [ Write turn_completed ])
+         (fun result _ ->
+            match result with
+            | Ok _ -> ()
+            | Error error -> failf "%s: %s" label (Serve.error_to_string error)))
+    [ Runtime_native_tools.Native_none, [ "--disable-write"; "--disable-shell" ]
+    ; Runtime_native_tools.Native_read, [ "--disable-write"; "--disable-shell" ]
+    ; Runtime_native_tools.Native_full, []
+    ]
 ;;
 
 (* An operator interrupt a stream callback raises is the owner's stop, not a
@@ -463,7 +753,13 @@ let () =
         ; test_case "auth required" `Quick test_auth_required
         ; test_case "exit code is typed" `Quick test_exit_code_is_typed
         ; test_case "bridge needs sessionMcp" `Quick test_bridge_needs_session_mcp
-        ; test_case "native none is config error" `Quick test_native_none_is_config_error
+        ; test_case "MASC tools only approval policy" `Quick
+            test_masc_tools_only_approval_policy
+        ; test_case "no reject choice is a protocol error" `Quick
+            test_no_reject_choice_is_a_protocol_error
+        ; test_case "a MASC tools only turn completes" `Quick
+            test_a_masc_tools_only_turn_completes
+        ; test_case "serve flags and environment" `Quick test_serve_flags_and_environment
         ; test_case "a blocked approval answer leaves the turn accepted" `Quick
             test_a_blocked_approval_answer_leaves_the_turn_accepted
         ; test_case "resume reads a null model as unnamed" `Quick

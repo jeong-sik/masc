@@ -16,16 +16,25 @@ type config =
   ; model : string option
     (** [session/start]'s [modelId]. [None] takes the host's default. *)
   ; native : Runtime_native_tools.posture
-    (** Built-in tool posture (RFC-0390), sent as the session's approval
-        mode. [Native_full] selects [allowAll]. [Native_read] selects
-        [denyUnmatched]: the host's own configured rules decide what runs,
-        and anything they do not allow is denied instead of waiting for an
-        answer. MSP lets a client select a mode but never state a rule
-        ([ApprovalMode] is closed, "select, never create"), so a rule the
-        host already holds, such as a saved "always allow" for a write,
-        still runs under [denyUnmatched]. [read] is therefore not a
-        read-only guarantee on this client. MSP has no switch that removes
-        the built-in tools, so [Native_none] fails as config. *)
+    (** Built-in tool posture (RFC-0390). [Native_full] selects [allowAll]
+        and starts the host with its whole built-in surface.
+
+        [Native_none] and [Native_read] run the same MASC-tools-only
+        session. The host starts with [--disable-write --disable-shell], the
+        session selects [promptUnmatched], and MASC answers each approval
+        the host raises itself: a call whose subject is a tool named exactly
+        like one of the session's MASC tools ({!session_mcp_server}) is
+        allowed once, and every other call is rejected. Muse Code offers no
+        read-only built-in set MASC could grant, so [Native_read] is
+        stricter here than on the other clients, not looser.
+
+        MSP lets a client select a mode but never state a rule
+        ([ApprovalMode] is closed, "select, never create"). A call the
+        host's own rules already allow therefore runs without an approval
+        reaching MASC; under an operator profile that asks nothing, such as
+        [:unrestricted], that can include a built-in read. MASC never
+        answers with a choice that saves a rule in the operator's files
+        ([approvedForSession], [approvedPolicyAmendment]). *)
   ; admission_timeout_s : float
     (** Finite bound on the handshake, the session start or resume, the
         session callback and the complete [turn/start] write. *)
@@ -43,6 +52,18 @@ type config =
 
 val default_timeout_s : float
 val default_config : unit -> config
+
+type session_mcp_server =
+  { name : string
+    (** The session's [mcpServers] key. The host shows the model each of
+        this server's tools as [mcp__<name>__<tool>]. *)
+  ; server : Runtime_muse_msp.mcp_server
+  ; tool_names : string list
+    (** The tools this server lists for the session, named by the same
+        source that answers its [tools/list]. Under [Native_none] and
+        [Native_read] they are the only calls an approval is granted
+        for. *)
+  }
 
 type session_mode =
   | Start
@@ -147,9 +168,10 @@ type stream_event =
       ; subject : Runtime_muse_msp.approval_subject_kind
       ; decision : Runtime_muse_msp.approval_decision
       }
-      (** An [approval/request] the host sent despite the session's mode,
-          answered from the posture: [Native_full] approves once,
-          [Native_read] denies. *)
+      (** An [approval/request] the host raised, answered from the posture:
+          [Native_full] approves once; [Native_none] and [Native_read]
+          approve once a call to one of the session's MASC tools and reject
+          any other. *)
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
       (** A [usage/changed] notification, for the operator view only. *)
   | Usage_reported of
@@ -173,7 +195,7 @@ val validate_turn
 
 val run_turn
   :  ?session_mode:session_mode
-  -> ?mcp_servers:(string * Runtime_muse_msp.mcp_server) list
+  -> ?mcp_servers:session_mcp_server list
   -> ?reasoning_effort:Runtime_muse_msp.reasoning_effort
   -> ?on_session_ready:(session_id:string -> (unit, string) result)
   -> ?on_prompt_sent:(unit -> unit)
@@ -187,9 +209,10 @@ val run_turn
   -> images:image_input list
   -> (turn_result, error) result
 (** [workspace_root] is the absolute directory the session works in.
-    [mcp_servers] are added to this session only. A non-empty list requests
-    [sessionMcp] at the handshake and fails with {!Capability_not_granted}
-    when the host withholds it.
+    [mcp_servers] are added to this session only, and their [tool_names]
+    are the MASC tools a MASC-tools-only session allows. A non-empty list
+    requests [sessionMcp] at the handshake and fails with
+    {!Capability_not_granted} when the host withholds it.
 
     [on_session_ready] runs once the host has returned the session id, before
     the turn is written, so the caller can persist the id first. Its failure

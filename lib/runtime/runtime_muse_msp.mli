@@ -410,6 +410,9 @@ type approval_subject_kind =
 type approval_choice =
   { choice_id : string
   ; decision : approval_decision
+  ; accepts_feedback : bool
+    (** [acceptsFeedback]: the choice carries free text to the model with
+        the decision. A choice that omits the member takes none. *)
   }
 
 type approval_requirement =
@@ -441,6 +444,7 @@ val parse_server_request : method_:string -> Yojson.Safe.t -> (server_request, e
 val approval_decide_request
   :  id:int
   -> command_id:string
+  -> ?feedback:string
   -> approval_request
   -> approval_choice
   -> Yojson.Safe.t
@@ -448,7 +452,9 @@ val approval_decide_request
     choice rather than its id keeps a choice the host never offered out of
     reach. The request's
     [requirement] is sent back unchanged: MSP uses it to guard against a
-    decision landing on a later stage of the approval. *)
+    decision landing on a later stage of the approval. [feedback] goes to
+    the model with the decision and is written only when [choice] accepts
+    it, since the host refuses feedback on any other choice. *)
 
 val parse_usage_read_result : Yojson.Safe.t -> (subscription_usage option, error) result
 (** [None] when the host has observed no usage yet. The schema omits the

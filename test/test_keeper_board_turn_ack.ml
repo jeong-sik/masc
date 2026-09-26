@@ -232,13 +232,11 @@ data: [DONE]
   let operation_id = Keeper_chat_operation.Operation_id.of_string
     "kmsg-person-waiting-for-board-turn" |> get Fun.id in
   let source =
-    `Assoc ["kind", `String "keeper"; "asked_by", `String "operator"]
-    |> Keeper_chat_operation.canonical_json |> get Fun.id in
+    `Assoc ["kind", `String "keeper"; "asked_by", `String "operator"] in
   let input =
     Keeper_chat_operation_payload.input_to_json
       ~message:"Answer after the current Board turn"
-      ~user_blocks:[] ~turn_instructions:None ~surface_context:None ~attachments:[]
-    |> Keeper_chat_operation.canonical_json |> get Fun.id in
+      ~user_blocks:[] ~turn_instructions:None ~surface_context:None ~attachments:[] in
   let accepted = Keeper_owner_registry.submit_operation
     ~base_path ~keeper_name ~operation_id ~source ~input
     |> get Keeper_owner_registry.command_error_to_string in

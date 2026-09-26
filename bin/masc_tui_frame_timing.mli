@@ -24,6 +24,22 @@ val time_tagged : phase -> tag:('a -> string) -> (unit -> 'a) -> 'a
 (** Like {!time}, but the sample carries [tag result]. The tag is read from
     the result because a frame's surface is only known once it is built. *)
 
+val time_present :
+  tag:string ->
+  write:(string -> unit) ->
+  flush:(unit -> unit) ->
+  (write:(string -> unit) -> flush:(unit -> unit) -> 'a) -> 'a
+(** Time one Present, keeping the write/flush wall times and byte/call counts
+    on that same sample. When disabled, pass the original callbacks through.
+    Callbacks, results and exceptions keep their original order and meaning.
+    As with {!time}, a raising presentation does not produce a sample.
+
+    The worst Present lines include this breakdown. [other] is total minus
+    write and flush; it includes diff preparation, state updates, observation
+    overhead and any scheduling/GC delays outside those calls. Buffered
+    [output_string] can itself write to the terminal, so either call can
+    block. These are elapsed times, not CPU time or physical display latency. *)
+
 val report : unit -> unit
 (** Append the summary to the configured file. Silent when timing is off, and
     on a file that cannot be opened -- a diagnostic must not take the process
@@ -34,10 +50,22 @@ val report : unit -> unit
 module Samples : sig
   type t
 
+  type output = {
+    write_ms : float;
+    flush_ms : float;
+    bytes : int;
+    writes : int;
+    flushes : int;
+  }
+
   val empty : t
 
   val add : t -> phase -> tag:string option -> ms:float -> t
   (** Record one frame. Ordinals count per phase, in the order of {!add}. *)
+
+  val add_present : t -> tag:string -> ms:float -> output:output -> t
+  (** Record a Present with its own output measurements. An unchanged frame
+      has zero calls and bytes; it still occupies a Present ordinal. *)
 
   val summary_lines : t -> string list
   (** One line per phase with frames, mean, p50, p95, p99 and max; then one

@@ -2421,6 +2421,9 @@ def acting_pane_ctrl_l_cycle_interaction(
         columns=ACTING_PANE_CYCLE_COLUMNS,
         needle=b"MASC Dashboard",
     )
+    # Dashboard keeps the Activity pane closed. Keepers is a surface that
+    # owns this pane, so exercise its width cycle there.
+    send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
     drain_until_quiet(process, master_fd, output, cap=4.0)
 
     def header_for(pane_columns: int) -> int:
@@ -4323,10 +4326,16 @@ def approval_selection_identity_interaction(
             timeout=3.0,
         )
         tab_until(process, master_fd, output, b"MASC Keepers")
-        landed = palette_go(process, master_fd, output, b"go Approvals", approvals_header(3))
+        # The operator queue can answer before the held-call/Question/Gate
+        # polls. Wait for the complete reading before checking its breakdown.
+        ready_header = re.compile(
+            rb"MASC Approvals(?:\x1b\[[0-9;]*m)* \("
+            rb"(?:\x1b\[[0-9;]*m)*3 op(?:\x1b\[[0-9;]*m)*\)"
+        )
+        landed = palette_go(process, master_fd, output, b"go Approvals", ready_header)
         # Three operator entries, no held call, no Gate row: the title names
         # the one kind that has rows and says no zero for the two that do not.
-        landed_plain = CSI_RE.sub(b"", frame_containing(landed, approvals_header(3)))
+        landed_plain = CSI_RE.sub(b"", frame_containing(landed, ready_header))
         if b"MASC Approvals (3 op)" not in landed_plain or b"0 held" in landed_plain:
             raise AssertionError(
                 f"Approvals title did not read its count by kind: {landed_plain!r}"

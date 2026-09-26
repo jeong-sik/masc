@@ -125,6 +125,8 @@ let clamped_scroll_now (state : state) = function
   | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
   | Voice_scroll _ -> Voice_scroll state.config_scroll
   | Keeper_list_scroll _ -> Keeper_list_scroll state.keeper_list_scroll
+  | Context_inspector_scroll _ ->
+      Context_inspector_scroll state.context_inspector_scroll
 
 (* Where one wheel notch leaves a reader: as far as [j] or [k] moves it, one
    row. The wheel used to arrive as a key that only list arms knew, so over an
@@ -177,6 +179,9 @@ let reader_after_wheel (reader : clamped_scroll)
   | Acting _ | Acting_selection _ | Keeper_list_scroll _ -> None
   (* Resources has panes of its own that [h] and [l] move between. *)
   | Resource_scroll _ -> None
+  (* The inspector chooses a cursor or a focused pane; its modal input path
+     owns that choice, rather than a generic reader scroll. *)
+  | Context_inspector_scroll _ -> None
 
 
 let navigation_rows = 1

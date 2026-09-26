@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "source_commit": "c54123bba424c016a12ed0e023434586704d1b89",
+  "platform": "macos-arm64",
+  "provider_execution": "not_run_in_ci",
+  "offline_controls_file": "offline-controls.json",
+  "offline_controls": [
+    {
+      "name": "fixture_validators",
+      "status": "passed",
+      "exit_code": 0,
+      "category": "passed"
+    },
+    {
+      "name": "configuration_publication",
+      "status": "passed",
+      "exit_code": 0,
+      "category": "passed"
+    }
+  ],
+  "sha256": {
+    "stagehand_model_probe.exe": "fd37c32272c3fca4b88697cc81949d770330db967748a0214477cd348a109cd1",
+    "llm-generate-params.json": "73a93555ceeca35a679fa79875b4292a3d1c63adc2208f505651ce15e1b427d6",
+    "README.md": "5145d496c56d5d80559c3e619ae9872b1e45dc6af41632e2509075b5bf12fc65",
+    "native-dependencies.txt": "40e9072217a4ae1d8eeb519a77e01bdf5e5741e7c427739473a3729bd82a4bd6",
+    "offline-controls.json": "88d8a8bff9f8746c51a9cea6ac15a4bd3d9c033fdebb2da443735a6ff4b543a7",
+    "runtime-publication.toml": "ce256bb5b240b72613527eeacecacebad8925f27b89a2fcbe2cc2c8722309129"
+  }
+}

@@ -1,5 +1,9 @@
 (** Authenticated dashboard projection and operator resolution for the durable
-    per-Keeper official-client session owner. *)
+    per-Keeper official-client session owner.
+
+    The session wire field [session_binding_sha256] identifies the durable
+    account, client tool posture, and descriptor binding. It is separate from
+    the pure effective-tool-surface projection [tool_surface_sha256]. *)
 
 type error_kind =
   | Bad_request

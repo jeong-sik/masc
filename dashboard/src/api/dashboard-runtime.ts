@@ -1365,7 +1365,7 @@ export interface DashboardOfficialClientSession {
   runtime_id: string
   phase: DashboardOfficialClientSessionPhase
   turn_count: number
-  tool_surface_sha256: string
+  session_binding_sha256: string
   last_recovery_resolution: DashboardOfficialClientRecoveryResolutionRecord | null
   last_transient_release: DashboardOfficialClientTransientReleaseRecord | null
   updated_at: number
@@ -1642,7 +1642,7 @@ function decodeOfficialClientSessionResponse(raw: unknown): DashboardOfficialCli
       'runtime_id',
       'phase',
       'turn_count',
-      'tool_surface_sha256',
+      'session_binding_sha256',
       'last_recovery_resolution',
       'last_transient_release',
       'updated_at',
@@ -1654,8 +1654,8 @@ function decodeOfficialClientSessionResponse(raw: unknown): DashboardOfficialCli
   const runtime_id = decodeOfficialClientNonEmptyString(raw.session.runtime_id)
   const phase = decodeOfficialClientPhase(raw.session.phase)
   const turn_count = asNumber(raw.session.turn_count)
-  const tool_surface_sha256 = typeof raw.session.tool_surface_sha256 === 'string'
-    ? raw.session.tool_surface_sha256
+  const session_binding_sha256 = typeof raw.session.session_binding_sha256 === 'string'
+    ? raw.session.session_binding_sha256
     : null
   const updated_at = asNumber(raw.session.updated_at)
   const last_recovery_resolution = raw.session.last_recovery_resolution === null
@@ -1673,8 +1673,8 @@ function decodeOfficialClientSessionResponse(raw: unknown): DashboardOfficialCli
     || !Number.isInteger(turn_count)
     || turn_count < 0
     || (turn_count === 0 && phase.kind !== 'ready')
-    || !tool_surface_sha256
-    || !OFFICIAL_CLIENT_SHA256.test(tool_surface_sha256)
+    || !session_binding_sha256
+    || !OFFICIAL_CLIENT_SHA256.test(session_binding_sha256)
     || updated_at == null
   ) return null
   if (raw.session.last_recovery_resolution !== null && !last_recovery_resolution) return null
@@ -1688,7 +1688,7 @@ function decodeOfficialClientSessionResponse(raw: unknown): DashboardOfficialCli
       runtime_id,
       phase,
       turn_count,
-      tool_surface_sha256,
+      session_binding_sha256,
       last_recovery_resolution,
       last_transient_release,
       updated_at,

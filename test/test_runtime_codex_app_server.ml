@@ -4632,6 +4632,11 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
          "dashboard schema"
          "masc.dashboard.official-client-session.v1"
          (snapshot |> member "schema" |> to_string);
+       check string "dashboard exposes the durable account/session binding"
+         recovery.tool_surface_sha256
+         (snapshot |> member "session" |> member "session_binding_sha256" |> to_string);
+       check bool "session binding is not labeled as the pure tool surface" false
+         (snapshot |> member "session" |> to_assoc |> List.mem_assoc "tool_surface_sha256");
        check string
          "dashboard client kind"
          "codex"

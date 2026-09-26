@@ -70,7 +70,7 @@ SKILL.md catalog -> composition tools -> Effective_keeper_tool_surface
                                       |
                                       +--> provider request digest
                                       +--> Tools API/TUI
-                                      +--> session tool_surface_sha256
+                                      +--> session session_binding_sha256
 
 Official CLI stream
   +-- text ---------------------------------> assistant stream
@@ -144,7 +144,12 @@ Effective projection은 아래를 함께 반환한다.
 - instruction skills named by the current task
 - composition skills materialized as tools
 - direct/public/keeper/native origin
-- digest equal to the session store's `tool_surface_sha256`
+- `tool_surface_sha256`: pure current descriptor/posture projection digest
+
+The session endpoint exposes `session_binding_sha256` separately. Its durable
+binding also includes the selected account home (and generation where supported),
+so equality with the computed surface digest is neither expected nor a health
+condition. Reading the pure projection does not provision or rotate credentials.
 
 Actor query를 지원할 수 없으면 actor parameter를 제거한다. actor별 cache key만 남기는
 형태는 금지한다.

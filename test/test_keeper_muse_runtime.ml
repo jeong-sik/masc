@@ -201,7 +201,12 @@ let exited ?(turn_accepted = false) status =
 let test_refusals_of_the_session_start_fresh_next () =
   let lease_held = exited (Some Serve.Exit_session_lease_held) in
   let refused_resume =
-    Serve.Rpc_error { method_ = "session/resume"; code = -32004; message = "unknown session" }
+    Serve.Rpc_error
+      { method_ = "session/resume"
+      ; code = -32004
+      ; message = "unknown session"
+      ; data = Serve.No_error_data
+      }
   in
   let model_mismatch =
     Serve.Session_model_mismatch { requested = "muse-a"; reported = "muse-b" }

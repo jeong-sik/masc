@@ -505,17 +505,27 @@ type rpc_error_kind =
   | Rpc_user_input_answer_invalid
   | Unrecognized_rpc_error_kind of string
 
+(** The winning resolution an [approvalAlreadyResolved] answer carries. The
+    schema keeps it optional. *)
+type resolution_reading =
+  | Resolution of approval_resolution
+  | Resolution_absent
+  | Resolution_unreadable of error
+      (** Present but not an [ApprovalResolutionSummary]. The kind still
+          says the approval is closed. *)
+
 type rpc_error_data =
-  | Approval_already_resolved of approval_resolution option
+  | Approval_already_resolved of resolution_reading
       (** [approvalAlreadyResolved] (-32051): something else closed the
           approval before this client's [approval/decide] landed, such as
-          the host's own policy under [denyUnmatched]. The schema keeps the
-          winning resolution optional. *)
+          the host's own policy under [denyUnmatched]. *)
   | Rpc_error_kind of rpc_error_kind
 
 val parse_rpc_error_data : Yojson.Safe.t -> (rpc_error_data, error) result
 (** Reads a JSON-RPC error's [data]. [kind] is required whenever [data] is
-    present (SS1.6); the message text is never read. *)
+    present (SS1.6); the message text is never read. A malformed
+    [resolution] under [approvalAlreadyResolved] is {!Resolution_unreadable},
+    not an [Error]. *)
 
 val parse_usage_read_result : Yojson.Safe.t -> (subscription_usage option, error) result
 (** [None] when the host has observed no usage yet. The schema omits the

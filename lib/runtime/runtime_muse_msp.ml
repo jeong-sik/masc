@@ -993,8 +993,13 @@ type rpc_error_kind =
   | Rpc_user_input_answer_invalid
   | Unrecognized_rpc_error_kind of string
 
+type resolution_reading =
+  | Resolution of approval_resolution
+  | Resolution_absent
+  | Resolution_unreadable of error
+
 type rpc_error_data =
-  | Approval_already_resolved of approval_resolution option
+  | Approval_already_resolved of resolution_reading
   | Rpc_error_kind of rpc_error_kind
 
 (* [approvalAlreadyResolved] is not here: [parse_rpc_error_data] reads it
@@ -1056,14 +1061,17 @@ let parse_rpc_error_data json =
   let* kind = required_string stage "kind" fields in
   match kind with
   | "approvalAlreadyResolved" ->
-    let* resolution =
-      match List.assoc_opt "resolution" fields with
-      | None | Some `Null -> Ok None
-      | Some resolution ->
-        let* resolution = parse_approval_resolution stage resolution in
-        Ok (Some resolution)
-    in
-    Ok (Approval_already_resolved resolution)
+    (* The kind alone says the approval is closed; the resolution is
+       optional in the schema, so a malformed one is reported beside the
+       kind rather than hiding it. *)
+    Ok
+      (Approval_already_resolved
+         (match List.assoc_opt "resolution" fields with
+          | None | Some `Null -> Resolution_absent
+          | Some resolution ->
+            (match parse_approval_resolution "error.data.resolution" resolution with
+             | Ok resolution -> Resolution resolution
+             | Error error -> Resolution_unreadable error)))
   | other -> Ok (Rpc_error_kind (rpc_error_kind_of_string other))
 ;;
 

@@ -462,7 +462,7 @@ let test_approval_resolved_by_policy () =
     check int "code" (-32051) code;
     (match ok_or_fail (Msp.parse_rpc_error_data data) with
      | Msp.Approval_already_resolved
-         (Some { Msp.decision = Msp.Denied; resolved_by = Msp.Resolved_by_policy }) -> ()
+         (Msp.Resolution { Msp.decision = Msp.Denied; resolved_by = Msp.Resolved_by_policy }) -> ()
      | Msp.Approval_already_resolved _ | Msp.Rpc_error_kind _ ->
        fail "the answer was not read as denied by the host's policy")
   | Some (_, None) -> fail "the -32051 answer carried no data"
@@ -477,9 +477,19 @@ let test_rpc_error_data () =
    | Ok (Msp.Rpc_error_kind _ | Msp.Approval_already_resolved _) | Error _ ->
      fail "approvalChoiceInvalid was not read as its kind");
   (match parse {|{"kind":"approvalAlreadyResolved","approvalId":"a-1"}|} with
-   | Ok (Msp.Approval_already_resolved None) -> ()
-   | Ok (Msp.Approval_already_resolved (Some _) | Msp.Rpc_error_kind _) | Error _ ->
-     fail "an already-resolved answer without its resolution was not kept as one");
+   | Ok (Msp.Approval_already_resolved Msp.Resolution_absent) -> ()
+   | Ok
+       (Msp.Approval_already_resolved (Msp.Resolution _ | Msp.Resolution_unreadable _)
+       | Msp.Rpc_error_kind _)
+   | Error _ -> fail "an already-resolved answer without its resolution was not kept as one");
+  (* The kind alone says the approval is closed; a malformed resolution is
+     kept beside it. *)
+  (match parse {|{"kind":"approvalAlreadyResolved","resolution":{"decision":"denied"}}|} with
+   | Ok (Msp.Approval_already_resolved (Msp.Resolution_unreadable _)) -> ()
+   | Ok
+       (Msp.Approval_already_resolved (Msp.Resolution _ | Msp.Resolution_absent)
+       | Msp.Rpc_error_kind _)
+   | Error _ -> fail "a malformed resolution was not kept beside its kind");
   (match parse {|{"kind":"aLaterKind"}|} with
    | Ok (Msp.Rpc_error_kind (Msp.Unrecognized_rpc_error_kind "aLaterKind")) -> ()
    | Ok (Msp.Rpc_error_kind _ | Msp.Approval_already_resolved _) | Error _ ->

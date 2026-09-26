@@ -66,12 +66,28 @@ type exit_status =
   | Exit_code of int  (** Any other code, which MSP calls a crash. *)
   | Exit_signal of int
 
+(** A JSON-RPC error's [data], as read. *)
+type rpc_error_detail =
+  | No_error_data
+  | Error_data of Runtime_muse_msp.rpc_error_data
+  | Unreadable_error_data of Runtime_muse_msp.error
+      (** [data] was present but did not decode; the error's code and
+          message still stand. *)
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string
   | Turn_input_write_failed of string
       (** The session is ready but the [turn/start] write did not complete,
           so whether the host received the turn is unknown. *)
+  | Approval_answer_write_failed of
+      { tool_name : string
+      ; detail : string
+      }
+      (** The acknowledgement or [approval/decide] for an approval request
+          could not be written. The turn was running, so what it did is
+          unknown, and a host holding the tool for the answer would wait
+          for it. *)
   | Protocol_error of
       { stage : string
       ; detail : string
@@ -80,6 +96,7 @@ type error =
       { method_ : string
       ; code : int
       ; message : string
+      ; data : rpc_error_detail
       }
   | Capability_not_granted of Runtime_muse_msp.capability
       (** The session needed a capability the host did not grant, such as
@@ -127,8 +144,9 @@ type turn_result =
   ; tool_calls : int
   ; approvals_decided : int
     (** Decisions this client made that the host accepted. One the host had
-        already resolved, or one still unanswered when the turn ended, is
-        not counted. *)
+        already resolved ({!Approval_resolved_by_host}), or one still
+        unanswered when the turn ended ({!Approval_unanswered}), is not
+        counted. *)
   ; resumed : bool
   ; server_version : string
   }
@@ -157,12 +175,24 @@ type stream_event =
   | Approval_resolved_by_host of
       { tool_name : string
       ; subject : Runtime_muse_msp.approval_subject_kind
+      ; masc_decision : Runtime_muse_msp.approval_decision
+        (** What this client sent, which did not land. *)
       ; resolution : Runtime_muse_msp.approval_resolution option
+        (** [None] when the answer carried none, or one that did not read
+            (logged). *)
       }
       (** The host closed the approval before this client's decision landed
-          and answered [approvalAlreadyResolved] with the winning resolution,
-          such as its own policy denying a tool no rule allows under
-          [denyUnmatched]. The turn goes on. *)
+          and answered [approvalAlreadyResolved], such as its own policy
+          denying a tool no rule allows under [denyUnmatched]. The turn goes
+          on. Every other refusal of [approval/decide] fails the turn as
+          {!Rpc_error}. *)
+  | Approval_unanswered of
+      { tool_name : string
+      ; subject : Runtime_muse_msp.approval_subject_kind
+      ; decision : Runtime_muse_msp.approval_decision
+      }
+      (** An [approval/decide] the host had not answered when the turn
+          completed; whether it took is unknown. *)
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
       (** A [usage/changed] notification, for the operator view only. *)
   | Usage_reported of

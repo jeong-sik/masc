@@ -107,6 +107,7 @@ let muse_error_is_binding_rest : Runtime_muse_serve.error -> bool = function
   | Runtime_muse_serve.Invalid_config _
   | Runtime_muse_serve.Spawn_failed _
   | Runtime_muse_serve.Turn_input_write_failed _
+  | Runtime_muse_serve.Approval_answer_write_failed _
   | Runtime_muse_serve.Protocol_error _
   | Runtime_muse_serve.Rpc_error _
   | Runtime_muse_serve.Capability_not_granted _

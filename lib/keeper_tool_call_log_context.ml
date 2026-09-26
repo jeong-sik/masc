@@ -125,7 +125,6 @@ let action_radius_json_for_call
       ~cell
       ~tool_name
       ~input
-      ~success
       ~duration_ms
       ?error
       ()
@@ -134,7 +133,6 @@ let action_radius_json_for_call
   Keeper_runtime_contract.action_radius_json
     ~tool_name
     ~input
-    ~success
     ~duration_ms
     ?error
     ?sandbox_target:ctx.sandbox_profile

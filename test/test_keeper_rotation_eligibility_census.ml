@@ -171,7 +171,8 @@ let provider_not_found =
        { provider = "ollama_cloud"; detail = "model not found" })
 
 (* A credential the binding was given and its provider refuses. The failure
-   route names both a same-turn rotation ([Auth_failed]), like the 404 above. *)
+   route names a same-turn rotation ([Auth_failed] for a 401,
+   [Authorization_refused] for a 403), like the 404 above. *)
 let api_auth_error =
   Agent_core.Error.Api (Agent_core.Retry.AuthError { message = "invalid api key" })
 
@@ -437,6 +438,7 @@ let route_claim = function
   | Keeper_runtime_failure_route.Rotate_now
       { rotate =
           ( Keeper_runtime_failure_route.Auth_failed
+          | Keeper_runtime_failure_route.Authorization_refused
           | Keeper_runtime_failure_route.Model_unavailable
           | Keeper_runtime_failure_route.Refusal_body_not_received
           | Keeper_runtime_failure_route.Generation_repeated
@@ -444,7 +446,8 @@ let route_claim = function
           | Keeper_runtime_failure_route.Provider_reported_failure
           | Keeper_runtime_failure_route.Request_refused
           | Keeper_runtime_failure_route.Provider_wire_defect
-          | Keeper_runtime_failure_route.Server_error_not_transient )
+          | Keeper_runtime_failure_route.Server_error_not_transient
+          | Keeper_runtime_failure_route.Context_window_exceeded )
       } -> Walk_rotates
   | Keeper_runtime_failure_route.Rotate_now
       { rotate =
@@ -463,13 +466,13 @@ let route_of error =
     error
 
 (* Rows where the walk and the route answer differently on purpose, with the
-   reason. A context overflow ends this candidate's attempt, and the route
-   reports it as a terminal fact about the turn's size; the walk still asks
-   a later candidate whose window may be larger ([lane_should_retry]). *)
-let walk_and_route_differ_on_purpose =
-  [ "api:context_overflow", "overflow: the walk tries a larger window"
-  ; "projection:capacity_refusal", "overflow: the walk tries a larger window"
-  ]
+   reason. Empty since #38984: a context overflow used to be routed as a
+   terminal fact about the turn's size while the walk still asked a later
+   candidate whose window may be larger ([lane_should_retry]). The route now
+   rotates on it too ([Context_window_exceeded]), so both overflow rows
+   (api:context_overflow, projection:capacity_refusal) agree with the walk.
+   A new entry needs a reason the two sides must disagree. *)
+let walk_and_route_differ_on_purpose : (string * string) list = []
 
 let test_walk_rotates_where_the_route_says_it_does () =
   (* Rows the check must cover on each side. Without them the loop below

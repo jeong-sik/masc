@@ -1647,6 +1647,136 @@ max-context = 400000
 |}
 ;;
 
+let test_multiple_official_client_accounts_are_distinct_runtimes () =
+  let source = {|[providers.claude_one]
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+account-home = "/tmp/claude-one"
+
+[providers.claude_two]
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+account-home = "/tmp/claude-two"
+
+[providers.codex_one]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/tmp/codex-one"
+
+[providers.codex_two]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/tmp/codex-two"
+
+[models.shared]
+api-name = "shared-model"
+max-context = 100000
+tools-support = true
+
+[claude_one.shared]
+[claude_two.shared]
+[codex_one.shared]
+[codex_two.shared]
+|} in
+  let config = match Runtime_toml.parse_string source with
+    | Ok config -> config
+    | Error errors -> Alcotest.failf "multi-account TOML refused: %s"
+        (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors)) in
+  let homes = List.map (fun binding ->
+    match Runtime_adapter.binding_to_execution config binding with
+    | Ok (Runtime_execution.Claude_code execution) -> execution.account_home
+    | Ok (Runtime_execution.Codex_app_server execution) -> execution.account_home
+    | Ok _ -> Alcotest.fail "expected an official client"
+    | Error detail -> Alcotest.fail detail) config.Runtime_schema.bindings in
+  Alcotest.(check (list (option string))) "each binding keeps its login home"
+    [Some "/tmp/claude-one"; Some "/tmp/claude-two";
+     Some "/tmp/codex-one"; Some "/tmp/codex-two"]
+    (List.sort compare homes);
+  (match Runtime_toml.parse_string
+      {|[providers.bad]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "relative/codex-two"
+[models.shared]
+api-name = "shared-model"
+max-context = 100000
+tools-support = true
+[bad.shared]
+|} with
+     | Error errors ->
+       Alcotest.(check bool) "the account path is refused" true
+         (List.exists (fun e -> e.Runtime_toml.path = "providers.bad.account-home") errors)
+     | Ok _ -> Alcotest.fail "relative account home was accepted");
+  Masc_test_deps.with_process_env "CLAUDE_CONFIG_DIR" (Some "relative-claude-account") (fun () ->
+    let source = {|[providers.claude]
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+[models.shared]
+api-name = "shared-model"
+max-context = 100000
+tools-support = true
+[claude.shared]
+|} in
+    match Runtime_toml.parse_string source with
+    | Error errors -> Alcotest.failf "inherited CLI home config refused: %s"
+        (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors))
+    | Ok config ->
+      let binding = List.hd config.Runtime_schema.bindings in
+      (match Runtime.of_binding config binding with
+       | Error reason -> Alcotest.failf "relative inherited home dropped runtime: %s"
+           (Runtime.string_of_drop_reason reason)
+       | Ok runtime ->
+         let expected = Filename.concat (Sys.getcwd ()) "relative-claude-account" in
+         Alcotest.(check string) "runtime quota uses the selected child home"
+           ("official:claude-code:home:" ^ expected)
+           (Runtime_quota_window.scope_to_string (Runtime.quota_scope_of_runtime runtime))));
+  Masc_test_deps.with_process_env "HOME" (Some "") (fun () ->
+    Masc_test_deps.with_process_env "CODEX_HOME" (Some "") (fun () ->
+      match Runtime_toml.parse_string
+        {|[providers.codex]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+[providers.http]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.shared]
+api-name = "shared-model"
+max-context = 100000
+tools-support = true
+[codex.shared]
+[http.shared]
+|} with
+      | Error errors ->
+        Alcotest.failf "an unselected provider should still parse: %s"
+          (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors))
+      | Ok config ->
+        let binding id =
+          match List.find_opt
+                  (fun b -> String.equal b.Runtime_schema.provider_id id)
+                  config.Runtime_schema.bindings with
+          | Some b -> b
+          | None -> Alcotest.fail ("missing binding " ^ id)
+        in
+        (match Runtime.of_binding config (binding "codex") with
+            | Error (Runtime.Execution_unbuildable reason) ->
+              Alcotest.(check bool) "selected account needs a real home" true
+                (String_util.contains_substring reason "account-home")
+            | Error _ | Ok _ ->
+              Alcotest.fail "selected official client without HOME gained a shared scope");
+        (match Runtime.of_binding config (binding "http") with
+         | Ok _ -> ()
+         | Error reason ->
+           Alcotest.failf "unrelated HTTP binding was rejected: %s"
+             (Runtime.string_of_drop_reason reason))))
+;;
+
 (* The base file, loaded, with the official clients and [lane] written after
    it, as [test_first_run_fallback_order_and_preservation] extends it: the lane
    writers read the file and validate the whole text they commit. *)
@@ -3401,6 +3531,106 @@ let test_a_verifier_cli_slot_naming_a_lane_is_refused () =
     then Alcotest.failf "the refusal %S does not name %S" msg needle
 ;;
 
+(* Regression for the 2026-09-24 defect: only [verifier_exact]'s [cli_slots]
+   were reference-checked at load, so a typo'd id on any sibling lane
+   ([librarian_exact], [hitl_auto_judge], [board_attention_exact]) loaded
+   fine and then failed every [Keeper_lane_cli_oneshot] attempt at run time
+   with a misleading "is not an official-client runtime" message (192 times
+   in one server log, on [librarian_exact]). [exact_lane_cli_slot_references]
+   is one function over every declared lane, so the same refusal must reach
+   every sibling lane, not just the one this incident happened to hit. *)
+let test_a_sibling_lane_cli_slot_naming_an_unknown_id_is_refused () =
+  List.iter
+    (fun lane_id ->
+       let config =
+         String.trim runtime_config
+         ^ Printf.sprintf
+             "\n\n[runtime.exact_output_lanes.%s]\n\
+              slots = [\"openai.gpt\"]\ncli_slots = [\"codex_subscription.gpt-6-luna-xhigh\"]\n"
+             lane_id
+       in
+       match load_lane_config config with
+       | Ok _ -> Alcotest.failf "%s: an unknown cli_slots id loaded" lane_id
+       | Error msg ->
+         let needle =
+           Printf.sprintf
+             {|[runtime.exact_output_lanes.%s].cli_slots entry "codex_subscription.gpt-6-luna-xhigh"|}
+             lane_id
+         in
+         Alcotest.(check bool)
+           (lane_id ^ ": the refusal names the lane, the key and the id")
+           true
+           (string_contains msg needle);
+         Alcotest.(check bool)
+           (lane_id ^ ": the refusal keeps the not-found-among-runtimes wording")
+           true
+           (string_contains msg "not found among"))
+    [ "librarian_exact"; "hitl_auto_judge"; "board_attention_exact" ]
+;;
+
+(* [cli_slots] dispatches through [Keeper_lane_cli_oneshot.run] on every lane
+   alike, which requires an official-client runtime
+   ([Runtime_execution.Official_client]); a [cli_slots] entry that resolves to
+   a provider-dispatched (HTTP) runtime is a load error distinct from an
+   unresolved id, because the id is not missing. *)
+let test_a_sibling_lane_cli_slot_naming_an_http_runtime_is_refused () =
+  let config =
+    String.trim runtime_config
+    ^ "\n\n[runtime.exact_output_lanes.librarian_exact]\n\
+       slots = [\"runpod_mtp.qwen\"]\ncli_slots = [\"openai.gpt\"]\n"
+  in
+  match load_lane_config config with
+  | Ok _ -> Alcotest.fail "an HTTP runtime named in cli_slots loaded"
+  | Error msg ->
+    Alcotest.(check bool)
+      "the refusal names the lane and the offending cli_slots entry"
+      true
+      (string_contains msg {|[runtime.exact_output_lanes.librarian_exact].cli_slots entry "openai.gpt"|});
+    Alcotest.(check bool)
+      "the refusal says why, not just that the id is unknown"
+      true
+      (string_contains msg "dispatched over HTTP rather than an official-client CLI");
+    Alcotest.(check bool)
+      "the refusal does NOT fall back to the not-found wording (the id did resolve)"
+      false
+      (string_contains msg "not found among")
+;;
+
+let test_a_sibling_lane_cli_slot_naming_an_official_client_is_accepted () =
+  let config =
+    String.concat
+      "\n\n"
+      [ String.trim runtime_config
+      ; String.trim official_client_bindings
+      ; "[runtime.exact_output_lanes.librarian_exact]\n\
+         slots = [\"openai.gpt\"]\ncli_slots = [\"codex.codex\"]"
+      ]
+  in
+  match load_lane_config config with
+  | Error msg -> Alcotest.failf "a librarian_exact cli_slots naming an official client must load: %s" msg
+  | Ok _ -> ()
+;;
+
+(* The design boundary [verifier_exact_slot_references]'s comment documents:
+   a sibling lane's [slots] (unlike its [cli_slots]) is consumed exclusively
+   through [Runtime_exact_output_registry], which admits an id against the
+   AGENT_CORE catalog rather than [runtime.toml]'s runtime list -- a
+   catalog-only id such as ["catalog.only"] (used the same way by other lane
+   writer tests in this file) is not a runtime.toml typo, and refusing it at
+   load would break a configuration dispatch already handles. This pins that
+   boundary so a future change to [exact_lane_cli_slot_references] cannot
+   silently widen to cover [slots] too. *)
+let test_a_sibling_lane_slots_entry_may_be_catalog_only () =
+  let config =
+    String.trim runtime_config
+    ^ "\n\n[runtime.exact_output_lanes.librarian_exact]\n\
+       slots = [\"catalog.only\"]\n"
+  in
+  match load_lane_config config with
+  | Error msg -> Alcotest.failf "a catalog-only slots id on a sibling lane must load: %s" msg
+  | Ok _ -> ()
+;;
+
 let test_an_assignment_names_a_lane_of_its_own_name () =
   match load_lane_config runtime_config_lane_named_freely with
   | Error msg -> Alcotest.failf "a freely named lane must load: %s" msg
@@ -3732,6 +3962,10 @@ let () =
             `Quick
             test_an_exact_append_places_an_official_client_in_cli_slots
         ; Alcotest.test_case
+            "multiple official client accounts stay distinct"
+            `Quick
+            test_multiple_official_client_accounts_are_distinct_runtimes
+        ; Alcotest.test_case
             "a CLI append to an undeclared lane writes only cli_slots"
             `Quick
             test_a_cli_append_to_an_undeclared_lane_writes_only_cli_slots
@@ -3751,6 +3985,22 @@ let () =
             "a verifier CLI slot naming a lane is refused"
             `Quick
             test_a_verifier_cli_slot_naming_a_lane_is_refused
+        ; Alcotest.test_case
+            "a sibling lane's CLI slot naming an unknown id is refused"
+            `Quick
+            test_a_sibling_lane_cli_slot_naming_an_unknown_id_is_refused
+        ; Alcotest.test_case
+            "a sibling lane's CLI slot naming an HTTP runtime is refused"
+            `Quick
+            test_a_sibling_lane_cli_slot_naming_an_http_runtime_is_refused
+        ; Alcotest.test_case
+            "a sibling lane's CLI slot naming an official client is accepted"
+            `Quick
+            test_a_sibling_lane_cli_slot_naming_an_official_client_is_accepted
+        ; Alcotest.test_case
+            "a sibling lane's slots entry may be catalog-only"
+            `Quick
+            test_a_sibling_lane_slots_entry_may_be_catalog_only
         ; Alcotest.test_case
             "a second write replaces the ladder"
             `Quick

@@ -26,21 +26,12 @@ let output_schema =
     ; "excluded", array_schema (object_schema
         [ "source_id", text_schema; "reason", text_schema ]) ]
 
-let flow_failure = function
-  | Exact.Flow_candidates_exhausted { rejection; evidence } ->
-    Keeper_exact_flow_detail.candidates_exhausted_detail ~rejection ~evidence
-  | Exact.Flow_exact_execution_failed { candidate; cause; evidence } ->
-    Keeper_exact_flow_detail.execution_failure_detail ~candidate ~cause ~evidence
-  | Exact.Flow_attempt_already_started evidence ->
-    "attempt already started: " ^ Keeper_exact_flow_detail.flow_evidence_detail evidence
-  | Exact.Flow_attempt_start_failed { cause = Call_id_generation_failed detail; _ }
-  | Exact.Flow_measurement_start_failed { cause = Measurement_operation_id_generation_failed detail; _ } -> detail
-  | Exact.Flow_measurement_start_failed { cause = Measurement_clock_required_for_timeout; _ } ->
-    "measurement clock required for provider timeout"
-  | Exact.Flow_before_measurement_dispatch_callback_failed { cause; _ }
-  | Exact.Flow_measurement_terminal_callback_failed { cause; _ }
-  | Exact.Flow_before_dispatch_callback_failed { cause; _ }
-  | Exact.Flow_before_advance_callback_failed { cause; _ } -> cause
+(* The curator's flow callbacks never fail ([Ok ()]); their error type is
+   string, which the renderer prints unchanged. *)
+let flow_failure =
+  Exact.flow_execution_error_to_string
+    ~callback_error_to_string:Fun.id
+    ~raw_response_to_string:Keeper_exact_flow_detail.raw_response_excerpt
 
 let execute ~(resolved : Runtime_exact_output_registry.resolved_lane) ~rendered_prompt context =
   (* This workspace owner has no Keeper identity or Keeper CLI sandbox. Refuse
@@ -57,7 +48,10 @@ let execute ~(resolved : Runtime_exact_output_registry.resolved_lane) ~rendered_
       let* rest = candidates rest in
       Ok (candidate :: rest)
   in
-  let* candidates = candidates resolved.selected_slots in
+  (* Ordered here, not in [prepare_execution]: the declared order is part of
+     the published configuration, and a rest must not change its identity. *)
+  let* candidates =
+    candidates (Runtime_exact_lane_backpressure.order resolved).selected_slots in
   let* first, rest = match candidates with
     | [] -> Error "workspace curator has no admitted exact-output slot"
     | first :: rest -> Ok (first, rest) in
@@ -77,11 +71,13 @@ let execute ~(resolved : Runtime_exact_output_registry.resolved_lane) ~rendered_
       match Proposals.decode (Context.proposal_json context raw) with
       | Ok _ -> Exact.Accept raw
       | Error detail -> Exact.Reject_and_advance detail in
-    (match Exact.execute_flow_once ~net ~clock
+    let flow = Exact.execute_flow_once ~net ~clock
        ~before_measurement_dispatch:(fun _ -> Ok ())
        ~on_measurement_terminal:(fun _ -> Ok ())
        ~before_dispatch:(fun _ -> Ok ())
-       ~before_advance:(fun ~failed:_ ~next:_ -> Ok ()) ~validate attempt with
+       ~before_advance:(fun ~failed:_ ~next:_ -> Ok ()) ~validate attempt in
+    Runtime_exact_lane_backpressure.observe flow;
+    (match flow with
      | Ok success ->
        let candidate = Exact.flow_success_candidate success.transport_success in
        Ok (success.accepted, candidate.visit.identity.candidate_id)

@@ -2810,7 +2810,7 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
 let test_transport_failure_is_error_not_empty () =
   let outcome =
     Masc_exec.Sandbox_target.Transport_failed
-      { output_files = None; reason = "remote_ssh_version_error: trailer carries v=2"
+      { failure = Masc_exec.Sandbox_target.Lane_unavailable; output_files = None; reason = "remote_ssh_version_error: trailer carries v=2"
       ; stdout = ""
       ; stderr = "remote_ssh_version_error"
       }
@@ -3139,6 +3139,9 @@ let run_tests ~clock () =
           Alcotest.test_case "read lane still rejects exit 1" `Quick
             test_read_lane_still_rejects_exit_1;
         ] );
+      ( "defined but never registered until task-1768",
+          [ Alcotest.test_case "run command scrubs sensitive env" `Quick test_run_command_scrubs_sensitive_env
+          ] );
     ]
 
 let () =

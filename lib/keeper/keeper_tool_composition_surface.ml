@@ -124,18 +124,23 @@ let schema_tool_rows ?(skill_compositions = []) () =
          Declared_composition evidence, schema_tool_of_entry entry)
       skill_compositions
   in
-  composition_tools
-  @ [ ( Async_status
-      , schema_tool
-          ~name:Catalog.status_tool_name
-          ~description:Tool_schemas_composition_control.status_schema.description
-          ~input_schema:Tool_schemas_composition_control.status_schema.input_schema )
-    ; ( Async_cancel
-      , schema_tool
-          ~name:Catalog.cancel_tool_name
-          ~description:Tool_schemas_composition_control.cancel_schema.description
-          ~input_schema:Tool_schemas_composition_control.cancel_schema.input_schema )
-    ]
+  let controls =
+    if Catalog.requires_async_controls (List.map fst skill_compositions)
+    then
+      [ ( Async_status
+        , schema_tool
+            ~name:Catalog.status_tool_name
+            ~description:Tool_schemas_composition_control.status_schema.description
+            ~input_schema:Tool_schemas_composition_control.status_schema.input_schema )
+      ; ( Async_cancel
+        , schema_tool
+            ~name:Catalog.cancel_tool_name
+            ~description:Tool_schemas_composition_control.cancel_schema.description
+            ~input_schema:Tool_schemas_composition_control.cancel_schema.input_schema )
+      ]
+    else []
+  in
+  composition_tools @ controls
 ;;
 
 let schedule_to_json (schedule : Agent_core.Tool_contract.schedule) =
@@ -344,6 +349,9 @@ let observe_node_result
       ~tool_name:result.tool_name
       ~input:result.input
       ~output_text:(Tool_result.message observed_result)
+      ?execution_evidence:
+        (Keeper_tool_call_log.execution_evidence_of_metadata
+           (Tool_result.metadata observed_result))
       ~wire_outcome:(wire_outcome_of_result observed_result)
       ~duration_ms:(Tool_result.duration_ms observed_result)
       ~model:(Keeper_hooks_agent_core_types.current_keeper_model meta)
@@ -889,7 +897,7 @@ let async_worker_result
   let sandbox_factory = Keeper_sandbox_factory.create ~config ~meta () in
   Eio.Switch.on_release request_sw (fun () ->
     Keeper_sandbox_factory.cleanup sandbox_factory);
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let run_id = Keeper_tool_plan.Run_id.fresh () in
   let execution =
     execute_keeper_plan
@@ -973,7 +981,7 @@ let async_submission_result
       ?clock
       ()
   =
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
   let request_context_fields =
     [ ( "composition_run_id"
@@ -1123,7 +1131,7 @@ let status_result
       ~request_id
   =
   let tool_name = Catalog.status_tool_name in
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let with_kind = with_tool_kind_field Catalog.status_tool_kind in
   match
     Keeper_msg_async.poll
@@ -1191,7 +1199,7 @@ let cancel_result
       ~request_id
   =
   let tool_name = Catalog.cancel_tool_name in
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let result =
     Keeper_msg_async.cancel
       ~base_path:config.base_path
@@ -1254,7 +1262,7 @@ let make_request_control_tool
     ~description
     ~input_schema
     (fun _execution_env input ->
-      let start_time = Time_compat.now () in
+      let start_time = Tool_timing.start () in
       match
         Tool_input_validation.validate_args
           ~schema:input_schema
@@ -1425,7 +1433,7 @@ let make_instruction_skill_tool
     ~description
     ~input_schema:skill_reference_input_schema
     (observe (fun execution_env input ->
-      let start_time = Time_compat.now () in
+      let start_time = Tool_timing.start () in
       match
         Tool_input_validation.validate_args ~schema:skill_reference_input_schema ~name
           ~args:input ()
@@ -1801,11 +1809,27 @@ let make_tools_with_authority
                (Keeper_tool_plan.nodes entry.plan)))
       composition_plan_index;
     let completion = Executor.outer_completion entry.plan in
+    (* A template is not the input a node will execute. Only static read-only
+       contracts for every node prove the whole inline composition read-only.
+       Async admission writes a durable request even when its nodes only read. *)
+    let call_effect _ =
+      match entry.execution with
+      | Catalog.Async -> Agent_core.Tool.Effect_possible
+      | Catalog.Inline ->
+        if List.for_all (fun (node : Keeper_tool_plan.node) ->
+          match Keeper_tool_plan.descriptor entry.plan node.id with
+          | None -> false
+          | Some descriptor ->
+            Keeper_tool_descriptor.readonly_static_hint descriptor = Some true)
+          (Keeper_tool_plan.nodes entry.plan)
+        then Agent_core.Tool.Read_only
+        else Agent_core.Tool.Effect_possible
+    in
     let descriptor =
       match entry.execution, completion with
       | Catalog.Async, Agent_core.Tool_contract.Continue_after_success
       | Catalog.Inline, Agent_core.Tool_contract.Continue_after_success ->
-        Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial
+        Agent_core.Tool.ordinary_descriptor ~call_effect Agent_core.Tool_contract.Serial
       | Catalog.Inline, Agent_core.Tool_contract.Terminal_after_success disposition ->
         Agent_core.Tool.terminal_descriptor disposition
       | Catalog.Async, Agent_core.Tool_contract.Terminal_after_success _ ->
@@ -1827,7 +1851,7 @@ let make_tools_with_authority
       ~description:(entry_description entry)
       ~input_schema:(Catalog.input_schema_of_params entry.params)
       (fun execution_env input ->
-        let start_time = Time_compat.now () in
+        let start_time = Tool_timing.start () in
         match
           Tool_input_validation.validate_args
             ~schema:(Catalog.input_schema_of_params entry.params)
@@ -2181,6 +2205,12 @@ let make_tools_with_authority
           , Tool_loading_declarations.loading_of_tool Catalog.skill_tool_name )
         ]
   in
+  (* Built only where they can address something: an async entry on this
+     surface is the one thing that mints the request id they take. *)
+  let async_controls =
+    Catalog.requires_async_controls
+      (List.map (fun (skill : composition_skill) -> skill.entry) skill_compositions)
+  in
   let status_tool =
       make_request_control_tool
         ~config
@@ -2202,10 +2232,13 @@ let make_tools_with_authority
   in
   (* The Skill reader and the two request controls are not Skill
      compositions; each is declared in its own [config/tools/<name>.toml]. *)
-  composition_tools
-  @ [ status_tool, Tool_loading_declarations.loading_of_tool Catalog.status_tool_name
-    ; cancel_tool, Tool_loading_declarations.loading_of_tool Catalog.cancel_tool_name
-    ]
+  if async_controls
+  then
+    composition_tools
+    @ [ status_tool, Tool_loading_declarations.loading_of_tool Catalog.status_tool_name
+      ; cancel_tool, Tool_loading_declarations.loading_of_tool Catalog.cancel_tool_name
+      ]
+  else composition_tools
 ;;
 
 let make_tools ~capability_surface =

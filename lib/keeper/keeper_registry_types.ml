@@ -12,7 +12,7 @@ module StringMap = Set_util.StringMap
    [Keeper_registry_types_failure] (godfile decomp). *)
 include Keeper_registry_types_failure
 
-exception Operator_interrupt
+exception Operator_interrupt = Keeper_operator_interrupt.Operator_interrupt
 
 (* One string for every [Operator_interrupt] terminal (ledger rows, queued
    outcomes, tool responses) so the incident class stays greppable as one
@@ -32,14 +32,7 @@ let operator_interrupt_detail =
    reduces to the interrupt — a real co-occurring error must keep its crash
    classification. Mirrors [Shutdown.is_benign_termination] (#28868 review:
    constructor-only arms missed the combined shapes). *)
-let rec is_operator_interrupt = function
-  | Operator_interrupt -> true
-  | Eio.Cancel.Cancelled inner -> is_operator_interrupt inner
-  | Stdlib.Fun.Finally_raised inner -> is_operator_interrupt inner
-  | Eio.Exn.Multiple [] -> false
-  | Eio.Exn.Multiple members ->
-    List.for_all (fun (member, _bt) -> is_operator_interrupt member) members
-  | _ -> false
+let is_operator_interrupt = Keeper_operator_interrupt.is_operator_interrupt
 ;;
 
 (* Turn_phase FSM types, witnesses, transitions, and resolver extracted to
@@ -122,7 +115,6 @@ type registry_entry =
     (** Ephemeral flag: true when keeper is blocked in admission queue.
           Set/cleared around the AGENT_CORE inference boundary.
           Does not affect state machine phase derivation. *)
-  ; last_context_actions : (float * Keeper_state_machine.context_actions) option
   ; last_event_bus_correlation : string option
   ; pending_turn_measurement : turn_measurement option
   ; current_turn_observation : turn_observation option
@@ -250,4 +242,3 @@ let pending_measurement_after_event now entry event =
     Some { tm_captured_at = now; tm_context_actions = context_actions }
   | _ -> entry.pending_turn_measurement
 ;;
-

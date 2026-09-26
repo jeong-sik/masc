@@ -659,255 +659,102 @@ let accept_with_recorded_stimulus
     retryable_dispatch_failure detail
 ;;
 
-type durable_occurrence_state =
-  | Pending
-  | Transfer_projecting_to of string
-  | Transferred_to of string
-  | Terminally_completed of terminal_evidence_status
-  | Terminally_failed of string * terminal_evidence_status
-  | Cancelled of string * terminal_evidence_status
-
-and terminal_evidence_status =
-  | Terminal_evidence_pending of string
-  | Terminal_evidence_recorded
-
-type durable_occurrence_source =
-  | Full_source of Keeper_event_queue.stimulus
-  | Compact_schedule_source of
-      { post_id : string
-      ; urgency : Keeper_event_queue.urgency
-      ; arrived_at : float
-      ; source_ref : string
-      }
-
-type durable_occurrence_disposition =
-  { source : durable_occurrence_source
-  ; source_incarnation : int64
-  ; state : durable_occurrence_state
-  }
-
 type resolved_occurrence_disposition =
-  | Pending_at of string * durable_occurrence_source
+  | Pending_at of string * Keeper_event_queue_state.schedule_occurrence_source
   | Transfer_projecting_at of string * string
   | Terminal_completed_at of
-      string * durable_occurrence_source * terminal_evidence_status
+      string
+      * Keeper_event_queue_state.schedule_occurrence_source
+      * Keeper_event_queue_state.occurrence_terminal_evidence
   | Terminal_failed_at of
-      string * durable_occurrence_source * string * terminal_evidence_status
+      string
+      * Keeper_event_queue_state.schedule_occurrence_source
+      * string
+      * Keeper_event_queue_state.occurrence_terminal_evidence
   | Terminal_cancelled_at of
-      string * durable_occurrence_source * string * terminal_evidence_status
+      string
+      * Keeper_event_queue_state.schedule_occurrence_source
+      * string
+      * Keeper_event_queue_state.occurrence_terminal_evidence
   | Absent_at of string
 
-let terminal_evidence_status_equal left right =
+let terminal_evidence_equal left right =
   match left, right with
-  | Terminal_evidence_recorded, Terminal_evidence_recorded -> true
-  | Terminal_evidence_pending left, Terminal_evidence_pending right ->
+  | Keeper_event_queue_state.Terminal_evidence_recorded,
+    Keeper_event_queue_state.Terminal_evidence_recorded -> true
+  | Keeper_event_queue_state.Terminal_evidence_pending left,
+    Keeper_event_queue_state.Terminal_evidence_pending right ->
     String.equal left right
-  | Terminal_evidence_recorded, Terminal_evidence_pending _
-  | Terminal_evidence_pending _, Terminal_evidence_recorded -> false
+  | Keeper_event_queue_state.Terminal_evidence_recorded,
+    Keeper_event_queue_state.Terminal_evidence_pending _
+  | Keeper_event_queue_state.Terminal_evidence_pending _,
+    Keeper_event_queue_state.Terminal_evidence_recorded -> false
 ;;
 
 let occurrence_state_equal left right =
   match left, right with
-  | Pending, Pending -> true
-  | Terminally_completed left, Terminally_completed right ->
-    terminal_evidence_status_equal left right
-  | Terminally_failed (left_reason, left_evidence),
-    Terminally_failed (right_reason, right_evidence)
-  | Cancelled (left_reason, left_evidence),
-    Cancelled (right_reason, right_evidence) ->
+  | Keeper_event_queue_state.Occurrence_pending,
+    Keeper_event_queue_state.Occurrence_pending -> true
+  | Keeper_event_queue_state.Occurrence_completed left,
+    Keeper_event_queue_state.Occurrence_completed right ->
+    terminal_evidence_equal left right
+  | Keeper_event_queue_state.Occurrence_failed (left_reason, left_evidence),
+    Keeper_event_queue_state.Occurrence_failed (right_reason, right_evidence)
+  | Keeper_event_queue_state.Occurrence_cancelled (left_reason, left_evidence),
+    Keeper_event_queue_state.Occurrence_cancelled (right_reason, right_evidence) ->
     String.equal left_reason right_reason
-    && terminal_evidence_status_equal left_evidence right_evidence
-  | Transfer_projecting_to left, Transfer_projecting_to right
-  | Transferred_to left, Transferred_to right -> String.equal left right
-  | ( Pending
-    | Transfer_projecting_to _
-    | Transferred_to _
-    | Terminally_completed _
-    | Terminally_failed _
-    | Cancelled _ )
+    && terminal_evidence_equal left_evidence right_evidence
+  | Keeper_event_queue_state.Occurrence_transfer_projecting_to left,
+    Keeper_event_queue_state.Occurrence_transfer_projecting_to right
+  | Keeper_event_queue_state.Occurrence_transferred_to left,
+    Keeper_event_queue_state.Occurrence_transferred_to right -> String.equal left right
+  | ( Keeper_event_queue_state.Occurrence_pending
+    | Keeper_event_queue_state.Occurrence_transfer_projecting_to _
+    | Keeper_event_queue_state.Occurrence_transferred_to _
+    | Keeper_event_queue_state.Occurrence_completed _
+    | Keeper_event_queue_state.Occurrence_failed _
+    | Keeper_event_queue_state.Occurrence_cancelled _ )
     , _ -> false
-;;
-
-let occurrence_source_and_disposition
-      ~projecting
-      (receipt : Keeper_event_queue_state.transition_receipt)
-  =
-  let terminal_evidence =
-    if projecting
-    then Terminal_evidence_pending receipt.transition_id
-    else Terminal_evidence_recorded
-  in
-  match receipt.transition with
-  | Keeper_event_queue_state.Cancel_accepted cancellation ->
-    ( cancellation.source.post_id
-    , { source = Full_source cancellation.source
-      ; source_incarnation = cancellation.source_incarnation
-      ; state = Cancelled (cancellation.reason, terminal_evidence)
-      } )
-  | Keeper_event_queue_state.Transfer_accepted transfer ->
-    ( transfer.source.post_id
-    , { source = Full_source transfer.source
-      ; source_incarnation = transfer.source_incarnation
-      ; state =
-          (if projecting
-           then Transfer_projecting_to transfer.to_keeper
-           else Transferred_to transfer.to_keeper)
-      } )
-  | Keeper_event_queue_state.Ack_source_terminal terminal ->
-    let state =
-      match terminal.source_receipt with
-      | Keeper_event_queue_state.Turn_attempt_terminal { detail } ->
-        Terminally_failed (detail, terminal_evidence)
-      | Keeper_event_queue_state.Fusion_terminal _
-      | Keeper_event_queue_state.Hitl_terminal _
-      | Keeper_event_queue_state.Turn_completed ->
-        Terminally_completed terminal_evidence
-    in
-    ( terminal.source.post_id
-    , { source = Full_source terminal.source
-      ; source_incarnation = terminal.source_incarnation
-      ; state
-      } )
 ;;
 
 let durable_occurrence_index state =
   let index = Hashtbl.create 16 in
-  let add occurrence_id disposition =
-    match Hashtbl.find_opt index occurrence_id with
+  let add (occurrence : Keeper_event_queue_state.schedule_occurrence) =
+    match Hashtbl.find_opt index occurrence.occurrence_id with
     | None ->
-      Hashtbl.add index occurrence_id disposition;
+      Hashtbl.add index occurrence.occurrence_id occurrence;
       Ok ()
-    | Some existing ->
+    | Some (existing : Keeper_event_queue_state.schedule_occurrence) ->
       let incarnation_order =
-        Int64.compare disposition.source_incarnation existing.source_incarnation
+        Int64.compare
+          occurrence.occurrence_incarnation
+          existing.occurrence_incarnation
       in
       if incarnation_order > 0
       then (
-        Hashtbl.replace index occurrence_id disposition;
+        Hashtbl.replace index occurrence.occurrence_id occurrence;
         Ok ())
       else if incarnation_order < 0
       then Ok ()
-      else if existing.source = disposition.source
-              && occurrence_state_equal existing.state disposition.state
+      else if existing.occurrence_source = occurrence.occurrence_source
+              && occurrence_state_equal
+                   existing.occurrence_state
+                   occurrence.occurrence_state
       then Ok ()
       else
       Error
         (Printf.sprintf
            "conflicting durable queue dispositions for occurrence %s incarnation %Ld"
-           occurrence_id
-           disposition.source_incarnation)
+           occurrence.occurrence_id
+           occurrence.occurrence_incarnation)
   in
-  let rec add_pending = function
+  let rec add_all = function
     | [] -> Ok ()
-    | (selection : Keeper_event_queue_state.pending_selection) :: rest ->
-      let* () =
-        add
-          selection.source.post_id
-          { source = Full_source selection.source
-          ; source_incarnation = selection.admitted_revision
-          ; state = Pending
-          }
-      in
-      add_pending rest
+    | occurrence :: rest ->
+      let* () = add occurrence in
+      add_all rest
   in
-  let rec add_receipts ~projecting = function
-    | [] -> Ok ()
-    | receipt :: rest ->
-      let occurrence_id, disposition =
-        occurrence_source_and_disposition ~projecting receipt
-      in
-      let* () = add occurrence_id disposition in
-      add_receipts ~projecting rest
-  in
-  let rec add_projected = function
-    | [] -> Ok ()
-    | Keeper_event_queue_state.Current_receipt receipt :: rest ->
-      (match
-         (Keeper_event_queue_state.transition_source receipt.transition).payload
-       with
-       | Keeper_event_queue.Schedule_due _ ->
-         let occurrence_id, disposition =
-           occurrence_source_and_disposition ~projecting:false receipt
-         in
-         let* () = add occurrence_id disposition in
-         add_projected rest
-       | Keeper_event_queue.Board_signal _
-       | Keeper_event_queue.Board_attention _
-       | Keeper_event_queue.Bootstrap
-       | Keeper_event_queue.Fusion_completed _
-       | Keeper_event_queue.Connector_attention _
-       | Keeper_event_queue.Hitl_resolved _
-       | Keeper_event_queue.Ask_answered _
-       | Keeper_event_queue.Completion_authority_rejected _
-       | Keeper_event_queue.Task_outcome _
-       | Keeper_event_queue.Task_cancelled _
-       | Keeper_event_queue.Workspace_message _
-       | Keeper_event_queue.Delegate_completed _
-       | Keeper_event_queue.Composition_completed _ ->
-         add_projected rest)
-    | Keeper_event_queue_state.Projected_witness witness :: rest ->
-      (match witness.source_kind with
-       | Keeper_event_queue_state.Source_schedule_due ->
-         let source =
-           Compact_schedule_source
-             { post_id = witness.post_id
-             ; urgency = witness.urgency
-             ; arrived_at = witness.source_arrived_at
-             ; source_ref = witness.source_ref
-             }
-         in
-         let state =
-           match witness.kind with
-           | Keeper_event_queue_state.Projected_cancel _ ->
-             Cancelled ("projected cancellation", Terminal_evidence_recorded)
-           | Keeper_event_queue_state.Projected_transfer { to_keeper; _ } ->
-             Transferred_to to_keeper
-           | Keeper_event_queue_state.Projected_turn_attempt_terminal ->
-             Terminally_failed
-               ("projected turn attempt terminal", Terminal_evidence_recorded)
-           | Keeper_event_queue_state.Projected_turn_completed ->
-             Terminally_completed Terminal_evidence_recorded
-           | Keeper_event_queue_state.Projected_fusion_terminal
-           | Keeper_event_queue_state.Projected_hitl_terminal ->
-             Terminally_completed Terminal_evidence_recorded
-         in
-         let* () =
-           add
-             witness.post_id
-             { source
-             ; source_incarnation = witness.source_incarnation
-             ; state
-             }
-         in
-         add_projected rest
-       | Keeper_event_queue_state.Source_board_signal
-       | Keeper_event_queue_state.Source_board_attention
-       | Keeper_event_queue_state.Source_bootstrap
-       | Keeper_event_queue_state.Source_fusion_completed
-       | Keeper_event_queue_state.Source_connector_attention
-       | Keeper_event_queue_state.Source_hitl_resolved
-       | Keeper_event_queue_state.Source_ask_answered
-       | Keeper_event_queue_state.Source_completion_authority_rejected
-       | Keeper_event_queue_state.Source_task_outcome
-       | Keeper_event_queue_state.Source_task_cancelled
-       | Keeper_event_queue_state.Source_workspace_message
-       | Keeper_event_queue_state.Source_delegate_completed
-       | Keeper_event_queue_state.Source_composition_completed ->
-         add_projected rest)
-  in
-  let* () =
-    Keeper_event_queue_state.pending_selections state
-    |> add_pending
-  in
-  let* () =
-    Keeper_event_queue_state.transition_outbox state
-    |> List.map (fun (entry : Keeper_event_queue_state.outbox_entry) -> entry.receipt)
-    |> add_receipts ~projecting:true
-  in
-  let* () =
-    Keeper_event_queue_state.projected_dispositions state
-    |> add_projected
-  in
+  let* () = add_all (Keeper_event_queue_state.schedule_occurrences state) in
   Ok index
 ;;
 
@@ -942,21 +789,7 @@ let rec resolve_durable_occurrence
   then Error ("durable queue transfer cycle at keeper " ^ keeper_name)
   else
     let* index = owner_index_result cache ~read_state ~base_path keeper_name in
-    match Hashtbl.find_opt index occurrence_id with
-    | None -> Ok (Absent_at keeper_name)
-    | Some { source; state = Pending; _ } -> Ok (Pending_at (keeper_name, source))
-    | Some { source; state = Terminally_completed evidence; _ } ->
-      Ok (Terminal_completed_at (keeper_name, source, evidence))
-    | Some { source; state = Terminally_failed (reason, evidence); _ } ->
-      Ok (Terminal_failed_at (keeper_name, source, reason, evidence))
-    | Some { source; state = Cancelled (reason, evidence); _ } ->
-      Ok (Terminal_cancelled_at (keeper_name, source, reason, evidence))
-    | Some { state = Transfer_projecting_to target; _ } ->
-      (* The source outbox is the sole durable authority until projection
-         retires it. Reading or activating the target here would turn a valid
-         pre-commit absence into either false loss or a speculative wake. *)
-      Ok (Transfer_projecting_at (keeper_name, target))
-    | Some { state = Transferred_to target; _ } ->
+    let resolve_transfer target =
       let target_was_cached = Hashtbl.mem cache target in
       let resolve_target () =
         resolve_durable_occurrence
@@ -968,15 +801,53 @@ let rec resolve_durable_occurrence
           target
       in
       let* target_disposition = resolve_target () in
-      (match target_disposition with
-       | Absent_at _ when target_was_cached ->
-         (* A transfer is marked projected only after the target commit. A
-            cached target snapshot may predate that commit when the same batch
-            resolved another occurrence first, so absence must be revalidated
-            against a fresh target snapshot before it can become loss proof. *)
-         Hashtbl.remove cache target;
-         resolve_target ()
-       | disposition -> Ok disposition)
+      match target_disposition with
+      | Absent_at _ when target_was_cached ->
+        (* A cached target snapshot may predate the transfer commit. *)
+        Hashtbl.remove cache target;
+        resolve_target ()
+      | disposition -> Ok disposition
+    in
+    let disposition_of_occurrence
+          (occurrence : Keeper_event_queue_state.schedule_occurrence)
+      =
+      let source = occurrence.occurrence_source in
+      match occurrence.occurrence_state with
+      | Keeper_event_queue_state.Occurrence_pending ->
+        Ok (Pending_at (keeper_name, source))
+      | Keeper_event_queue_state.Occurrence_completed evidence ->
+        Ok (Terminal_completed_at (keeper_name, source, evidence))
+      | Keeper_event_queue_state.Occurrence_failed (reason, evidence) ->
+        Ok (Terminal_failed_at (keeper_name, source, reason, evidence))
+      | Keeper_event_queue_state.Occurrence_cancelled (reason, evidence) ->
+        Ok (Terminal_cancelled_at (keeper_name, source, reason, evidence))
+      | Keeper_event_queue_state.Occurrence_transfer_projecting_to target ->
+        (* The source outbox is the sole durable authority until projection
+           retires it. Reading or activating the target here would turn a valid
+           pre-commit absence into either false loss or a speculative wake. *)
+        Ok (Transfer_projecting_at (keeper_name, target))
+      | Keeper_event_queue_state.Occurrence_transferred_to target ->
+        resolve_transfer target
+    in
+    match Hashtbl.find_opt index occurrence_id with
+    | Some occurrence -> disposition_of_occurrence occurrence
+    | None ->
+      (* A retired queue witness is read by exact occurrence id. A new
+         occurrence does one small file lookup, and a damaged receipt cannot
+         be mistaken for absence and re-executed. *)
+      (match
+        Keeper_reaction_ledger.schedule_occurrence_receipt_result
+          ~base_path ~keeper_name ~occurrence_id
+      with
+      | Error detail -> Error detail
+      | Ok None -> Ok (Absent_at keeper_name)
+      | Ok (Some witness) ->
+        (match Keeper_event_queue_state.schedule_occurrence_of_witness witness with
+         | Some occurrence -> disposition_of_occurrence occurrence
+         | None ->
+           Error
+             ("schedule occurrence receipt is not a scheduled source: "
+              ^ occurrence_id)))
 ;;
 
 let resolved_occurrence_owner = function
@@ -1009,13 +880,14 @@ let accept_keeper_wake_occurrence
       stimulus
   =
   let exact_stimulus_for_source = function
-    | Full_source durable_stimulus -> Ok durable_stimulus
-    | Compact_schedule_source { post_id; urgency; arrived_at; source_ref } ->
+    | Keeper_event_queue_state.Full_source durable_stimulus -> Ok durable_stimulus
+    | Keeper_event_queue_state.Compact_source
+        { post_id; urgency; arrived_at; source_ref } ->
       let durable_stimulus =
         { stimulus with Keeper_event_queue.arrived_at }
       in
-      (match stimulus.Keeper_event_queue.payload with
-       | Keeper_event_queue.Schedule_due _
+      (match Keeper_event_queue.scheduled_wake stimulus with
+       | Some _
          when String.equal stimulus.post_id post_id
               && stimulus.urgency = urgency
               && String.equal
@@ -1023,20 +895,7 @@ let accept_keeper_wake_occurrence
                       durable_stimulus)
                    source_ref ->
          Ok durable_stimulus
-       | Keeper_event_queue.Schedule_due _
-       | Keeper_event_queue.Board_signal _
-       | Keeper_event_queue.Board_attention _
-       | Keeper_event_queue.Bootstrap
-       | Keeper_event_queue.Fusion_completed _
-       | Keeper_event_queue.Connector_attention _
-       | Keeper_event_queue.Hitl_resolved _
-       | Keeper_event_queue.Ask_answered _
-       | Keeper_event_queue.Completion_authority_rejected _
-       | Keeper_event_queue.Task_outcome _
-       | Keeper_event_queue.Task_cancelled _
-       | Keeper_event_queue.Workspace_message _
-       | Keeper_event_queue.Delegate_completed _
-       | Keeper_event_queue.Composition_completed _ ->
+       | Some _ | None ->
          retryable_dispatch_failure
            (Printf.sprintf
               "scheduled keeper wake compact source conflicts occurrence=%s source_ref=%s"
@@ -1052,8 +911,8 @@ let accept_keeper_wake_occurrence
     let* durable_stimulus = exact_stimulus_for_source durable_stimulus in
     let* () =
       match evidence with
-      | Terminal_evidence_recorded -> Ok ()
-      | Terminal_evidence_pending transition_id ->
+      | Keeper_event_queue_state.Terminal_evidence_recorded -> Ok ()
+      | Keeper_event_queue_state.Terminal_evidence_pending transition_id ->
         Keeper_reaction_ledger.project_event_queue_transition_outbox_result
           ~base_path
           ~keeper_name:owner
@@ -1451,9 +1310,9 @@ let self_clock_holds config ~occurrence_id (request : Schedule_domain.schedule_r
            | Error _ -> false
            | Ok queue ->
              List.exists
-               (fun (stimulus : Keeper_event_queue.stimulus) ->
-                  match stimulus.Keeper_event_queue.payload with
-                  | Keeper_event_queue.Schedule_due wake ->
+               (fun stimulus ->
+                  match Keeper_event_queue.scheduled_wake stimulus with
+                  | Some wake ->
                     String.equal
                       wake.Keeper_event_queue.schedule_instance_id
                       request.Schedule_domain.schedule_instance_id
@@ -1463,19 +1322,7 @@ let self_clock_holds config ~occurrence_id (request : Schedule_domain.schedule_r
                        new wake back. *)
                     && not (String.equal wake.occurrence_id
                               (Schedule_occurrence_id.to_string occurrence_id))
-                  | Keeper_event_queue.Board_signal _
-                  | Keeper_event_queue.Board_attention _
-                  | Keeper_event_queue.Bootstrap
-                  | Keeper_event_queue.Fusion_completed _
-                  | Keeper_event_queue.Connector_attention _
-                  | Keeper_event_queue.Hitl_resolved _
-                  | Keeper_event_queue.Ask_answered _
-                  | Keeper_event_queue.Completion_authority_rejected _
-                  | Keeper_event_queue.Task_outcome _
-                  | Keeper_event_queue.Task_cancelled _
-                  | Keeper_event_queue.Workspace_message _
-                  | Keeper_event_queue.Delegate_completed _
-                  | Keeper_event_queue.Composition_completed _ -> false)
+                  | None -> false)
                (Keeper_event_queue.to_list queue)))
      | Ok (Some _) | Error _ -> false)
   | Schedule_domain.One_shot | Schedule_domain.Daily _ | Schedule_domain.Cron _ -> false

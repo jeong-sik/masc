@@ -262,14 +262,16 @@ async def merge_keeper_usage(
         # accounted figure as resolved_delta
         # (keeper_unified_turn_success.ml). Summing both counts a
         # single-request turn twice, which is why the inference-metrics reader
-        # drops the raw rows too (model_inference_metrics_reader.ml). The field
-        # is required of a valid row, so a row without one is not a projection
+        # drops the raw rows too (model_inference_metrics_reader.ml). What an
+        # attempt of a failed turn spent is accounted as
+        # resolved_attempt_delta, a spend beside resolved_delta. The field is
+        # required of a valid row, so a row without one is not a projection
         # this can classify and is counted rather than assumed.
         projection = row.get("usage_projection")
         if projection == "raw_observation":
             raw_observations += 1
             continue
-        if projection != "resolved_delta":
+        if projection not in ("resolved_delta", "resolved_attempt_delta"):
             without_projection += 1
             continue
         rows += 1

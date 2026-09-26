@@ -52,6 +52,26 @@ val mcp_tool_to_agent_core_tool_result
 
 val mcp_tool_of_json : Yojson.Safe.t -> mcp_tool option
 
+(** {1 Per-tool schema conversion} *)
+
+(** An MCP tool left out because its input schema could not be converted
+    into a {!Tool.t}. [detail] is the converter's diagnostic. *)
+type skipped_tool =
+  { tool_name : string
+  ; detail : string
+  }
+
+(** [convert_tools ~server_name ~call_fn_for tools] converts each tool
+    independently. Tools that convert are returned first; tools whose schema
+    fails conversion are returned as {!skipped_tool} values and logged under
+    [server_name], so one malformed schema disables only that tool instead of
+    failing the whole list. Both lists keep the input order. *)
+val convert_tools
+  :  server_name:string
+  -> call_fn_for:(mcp_tool -> Yojson.Safe.t -> Types.tool_result)
+  -> mcp_tool list
+  -> Tool.t list * skipped_tool list
+
 (** {1 Client handle} *)
 
 type t
@@ -130,8 +150,11 @@ type transport =
       ; headers : (string * string) list
       }
 
+(** [skipped_tools] lists the server's tools that were not loaded because
+    their input schema failed conversion; [tools] holds the rest. *)
 type managed =
   { tools : Tool.t list
+  ; skipped_tools : skipped_tool list
   ; name : string
   ; transport : transport
   }

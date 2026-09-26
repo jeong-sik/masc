@@ -297,12 +297,27 @@ let quota_scope_of_materialized
         provider.credentials
     | Runtime_execution.Antigravity_cli _ -> provider.credentials
     | Runtime_execution.Codex_app_server _
-    | Runtime_execution.Claude_code _ ->
-      (* Official clients own subscription login. A registry API-key default
-         with the same provider label is a different account authority. *)
-      None
+    | Runtime_execution.Claude_code _ -> None
   in
-  Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential
+  let official_home client selected scope =
+    match selected with
+    | None -> Error (client ^ " needs account-home or an absolute CLI home")
+    | Some home ->
+      (match Runtime_account_home.of_string home with
+       | Ok home -> Ok (scope (Some home))
+       | Error reason -> Error (client ^ ": " ^ reason))
+  in
+  match execution with
+  | Runtime_execution.Claude_code client ->
+    official_home "Claude Code"
+      (Runtime_claude_code.effective_account_home client.account_home)
+      Runtime_quota_window.scope_of_claude_code_home
+  | Runtime_execution.Codex_app_server client ->
+    official_home "Codex"
+      (Runtime_codex_app_server.effective_account_home client.account_home)
+      Runtime_quota_window.scope_of_codex_home
+  | Runtime_execution.Agent_core _ | Runtime_execution.Antigravity_cli _ ->
+    Ok (Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential)
 ;;
 
 (* Why a binding did not become a runtime, as a closed vocabulary rather than a
@@ -342,7 +357,7 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
     else
       (match Runtime_adapter.binding_to_execution cfg b with
        | Ok execution ->
-         Ok
+         Result.map (fun quota_scope ->
            { id = id_of_binding b
            ; provider
            ; model
@@ -360,8 +375,10 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
                  | Runtime_execution.Antigravity_cli _ -> Runtime_candidate_backpressure.Official_client_binding
                in
                Runtime_candidate_backpressure.create_candidate ~binding)
-           ; quota_scope = quota_scope_of_materialized ~provider ~execution
-           }
+           ; quota_scope
+           })
+           (quota_scope_of_materialized ~provider ~execution)
+         |> Result.map_error (fun reason -> Execution_unbuildable reason)
        | Error reason -> Error (Execution_unbuildable reason))
   | None, _ -> Error (Provider_not_declared b.provider_id)
   | Some _, None -> Error (Model_not_declared b.model_id)
@@ -477,6 +494,19 @@ type exact_slot_degradation =
   ; emptied_lane_ids : string list
   }
 
+(* One declared [cli_slots] entry that resolves to a configured runtime, but a
+   provider-dispatched (HTTP / [Agent_core]) one rather than an official
+   client. [Keeper_lane_cli_oneshot.run] (the sole consumer of every lane's
+   [cli_slots]) requires an official client, so this is a load-time gap of
+   the same shape as [exact_slot_body_deadline_gap] but a different rule:
+   that one is about a missing timeout key, this one is about the runtime
+   kind. See [exact_lane_cli_slot_official_client_gaps]. *)
+type exact_lane_cli_slot_not_official_client =
+  { lane_id : string
+  ; slot_id : string
+  ; provider_id : string
+  }
+
 (* The ways loading runtime.toml fails, closed so a consumer decides per case
    instead of matching rendered text — the contract [drop_reason] already keeps
    one level down. [Toml_unparsable] is the single case whose text comes from
@@ -507,6 +537,7 @@ type load_failure =
       ; high_water_tokens : int
       ; max_context : int
       }
+  | Exact_lane_cli_slot_not_official_client of exact_lane_cli_slot_not_official_client
 
 (* A dangling reference is an operator typo, and unlike every other drop reason
    it is not survivable by ignoring the binding: the runtime the operator
@@ -654,6 +685,18 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       (gaps
        |> List.map (fun gap -> "  " ^ exact_slot_body_deadline_gap_to_string gap)
        |> String.concat "\n")
+  | Exact_lane_cli_slot_not_official_client { lane_id; slot_id; provider_id } ->
+    Printf.sprintf
+      "%s: [runtime.exact_output_lanes.%s].cli_slots entry %S is provider %S, \
+       dispatched over HTTP rather than an official-client CLI; cli_slots \
+       dispatches through the official-client CLI alone \
+       (Keeper_lane_cli_oneshot), so move this id to slots or replace it with \
+       an official-client runtime (protocol = \"claude-code\" / \
+       \"codex-app-server\" / \"antigravity-cli\")"
+      config_path
+      lane_id
+      slot_id
+      provider_id
 ;;
 
 (* The same account, minus the one part this repository did not write. A parse
@@ -677,7 +720,8 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Lane_candidate_unresolved _
   | Max_context_absent _
   | Context_marks_exceed_max_context _
-  | Exact_slot_body_deadlines_absent _ -> to_diagnostic_text ~config_path failure
+  | Exact_slot_body_deadlines_absent _
+  | Exact_lane_cli_slot_not_official_client _ -> to_diagnostic_text ~config_path failure
 ;;
 
 (* The list is carried out whole rather than counted here: the caller decides
@@ -1147,7 +1191,17 @@ let exact_lane_supports_cli_tail = function
   | Workspace_curator -> false
 ;;
 
-(* [verifier_exact] is the one exact-output lane whose slot ids are read
+(* One [runtime.exact_output_lanes.<lane>].<key> reference, named the way
+   every reference-list builder in this file names one. *)
+let exact_lane_reference ~lane_id ~key id =
+  { site = Printf.sprintf "[runtime.exact_output_lanes.%s].%s" lane_id key
+  ; shape = List_entry
+  ; id
+  ; domain = Runtime_only
+  }
+;;
+
+(* [verifier_exact] is the one exact-output lane whose [slots] ids are read
    twice. The exact registry admits them against the AGENT_CORE catalog, and
    completion-authority judgement admits each one through
    [verifier_exact_slot_admission], which takes a configured direct runtime
@@ -1157,33 +1211,37 @@ let exact_lane_supports_cli_tail = function
    sent judgements to such an id 113 times, one failure each, and the trace
    was a Board post per attempt rather than a config that refused to load.
 
-   [cli_slots] are read the same way, through [verifier_cli_slot_admission].
-   An id that cannot judge is dropped from the lane and reported rather than
-   failing the lane, because first-run setup in v0.35.15-20 wrote exactly such
-   an id and refusing it at load would stop those configs from loading
-   (#37179).
+   The sibling lanes' [slots] are deliberately not checked here, and this is
+   the one part of the old validation that stays verifier-only: their [slots]
+   are consumed exclusively through [Runtime_exact_output_registry] (e.g.
+   [Keeper_librarian_runtime.resolve_librarian_slots] never resolves a slot
+   id as a runtime directly), which admits each id against the AGENT_CORE
+   catalog and keeps a rejected id as a soft, reported drop rather than a load
+   failure -- [hitl_auto_judge] holds a catalog-only [slots] id today, and the
+   registry's own top-of-file comment is explicit that "a runtime.toml
+   runtime id is invisible to it even when both name the same model". Forcing
+   [slots] to resolve in [runtimes] here would refuse a configuration that
+   dispatch already handles correctly.
 
-   The sibling lanes are deliberately not checked here. They dispatch through
-   the registry alone, so a catalog-only target id is right for their slots,
-   and [hitl_auto_judge] holds one today; their CLI slots answer an
-   unresolved id with a typed error at execution and walk on. *)
+   [cli_slots] used to be read the same way -- verifier-only, through
+   [verifier_cli_slot_admission] -- because an id that cannot judge was
+   dropped from the lane and reported rather than failing the lane load
+   (first-run setup in v0.35.15-20 wrote exactly such an id, #37179). But
+   [cli_slots] dispatch is [Keeper_lane_cli_oneshot.run] on every lane alike
+   ([Librarian], [Hitl_auto_judge], [Board_attention] and [Verifier] all reach
+   it, via [Runtime.get_runtime_by_id] + [Fusion_official_client]), so an
+   unresolved sibling-lane cli_slots id is not "checked at execution and
+   walked on" the way the old comment here described: [Keeper_lane_cli_oneshot]
+   has no lane concept, so a stray id fails identically on every attempt
+   instead of failing over. On 2026-09-24 a single mistyped
+   [librarian_exact].cli_slots entry answered every CLI fallback attempt
+   "cli lane slot ... is not an official-client runtime" 192 times in one
+   server log before this file refused to load it (RFC:
+   [exact_lane_cli_slot_references] below covers every lane; only the
+   catalog-namespaced [slots] rule above stays verifier-specific). *)
 let verifier_exact_slot_references
       (decls : Runtime_schema.exact_output_lane_decl list)
   =
-  let references key ids =
-    List.map
-      (fun id ->
-         { site =
-             Printf.sprintf
-               "[runtime.exact_output_lanes.%s].%s"
-               (Standalone_lane.to_id Verifier)
-               key
-         ; shape = List_entry
-         ; id
-         ; domain = Runtime_only
-         })
-      ids
-  in
   match
     List.find_opt
       (fun (lane : Runtime_schema.exact_output_lane_decl) ->
@@ -1191,8 +1249,66 @@ let verifier_exact_slot_references
       decls
   with
   | None -> []
-  | Some lane ->
-    references "slots" lane.slot_ids @ references "cli_slots" lane.cli_slot_ids
+  | Some lane -> List.map (exact_lane_reference ~lane_id:lane.id ~key:"slots") lane.slot_ids
+;;
+
+(* Every declared exact-output lane's [cli_slots], over every lane
+   (including [verifier_exact]) rather than a per-lane copy: dispatch is the
+   same [Keeper_lane_cli_oneshot.run] regardless of which lane declared the
+   id, so the reference check has to be too. See the comment above for the
+   2026-09-24 defect this closes. *)
+let exact_lane_cli_slot_references
+      (decls : Runtime_schema.exact_output_lane_decl list)
+  =
+  List.concat_map
+    (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+       List.map (exact_lane_reference ~lane_id:lane.id ~key:"cli_slots") lane.cli_slot_ids)
+    decls
+;;
+
+(* One declared [cli_slots] entry that resolves to a configured runtime, but a
+   provider-dispatched (HTTP / [Agent_core]) one rather than an official
+   client ([exact_lane_cli_slot_not_official_client], declared with
+   [load_failure] above since the failure type needs it).
+   [exact_lane_cli_slot_references] above already refuses an id that resolves
+   to nothing; this is the other half of what [Keeper_lane_cli_oneshot.run]
+   requires before it will dispatch a cli_slots id
+   ([Fusion_official_client.is_official_client] /
+   [Runtime_execution.checkpoint_owner]), reported as its own case rather
+   than folded into [Reference_unresolved]: the id is not missing, so "not
+   found among N runtimes" would misdescribe it the same way the run-time
+   message this closes ("is not an official-client runtime", conflating
+   unknown and wrong-kind) misdescribed an unknown id. *)
+let exact_lane_cli_slot_official_client_gaps
+      ~(runtimes : t list)
+      (decls : Runtime_schema.exact_output_lane_decl list)
+  : exact_lane_cli_slot_not_official_client list
+  =
+  List.concat_map
+    (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+       List.filter_map
+         (fun slot_id ->
+            match List.find_opt (fun (r : t) -> String.equal r.id slot_id) runtimes with
+            | None -> None (* named by [exact_lane_cli_slot_references] instead *)
+            | Some r ->
+              (match Runtime_execution.checkpoint_owner r.execution with
+               | Runtime_execution.Official_client -> None
+               | Runtime_execution.Masc_agent_core ->
+                 Some
+                   { lane_id = lane.id
+                   ; slot_id
+                   ; provider_id = r.provider.Runtime_schema.id
+                   }))
+         lane.cli_slot_ids)
+    decls
+;;
+
+let validate_exact_lane_cli_slot_official_clients ~runtimes decls
+  : (unit, load_failure) result
+  =
+  match exact_lane_cli_slot_official_client_gaps ~runtimes decls with
+  | [] -> Ok ()
+  | gap :: _ -> Error (Exact_lane_cli_slot_not_official_client gap)
 ;;
 
 let agent_core_model_catalog_env_var_name = "AGENT_CORE_MODEL_CATALOG"
@@ -1633,6 +1749,13 @@ let materialize_config
       (verifier_exact_slot_references cfg.exact_output_lane_decls)
   in
   let* () =
+    validate_runtime_references ~dropped_bindings runtimes lanes
+      (exact_lane_cli_slot_references cfg.exact_output_lane_decls)
+  in
+  let* () =
+    validate_exact_lane_cli_slot_official_clients ~runtimes cfg.exact_output_lane_decls
+  in
+  let* () =
     if validate_max_context then validate_runtime_max_context runtimes else Ok ()
   in
   let* () = validate_runtime_context_marks runtimes in
@@ -2045,6 +2168,10 @@ let runtime_state () = Atomic.get loaded_state_ref
 
 let get_default_runtime () = (runtime_state ()).default_runtime
 let get_runtimes () = (runtime_state ()).runtimes
+
+let get_default_and_runtimes () =
+  let state = runtime_state () in
+  state.default_runtime, state.runtimes
 let get_runtime_ids () = runtime_ids (runtime_state ()).runtimes
 let startup_degradation () = (runtime_state ()).startup_degradation
 let startup_degraded () = Option.is_some (startup_degradation ())
@@ -3156,10 +3283,7 @@ let parse_and_validate_config_text ~config_path content =
     match Skill_source_config.validate_text content with
     | Ok () -> Ok ()
     | Error diagnostics ->
-      Error
-        (String.concat
-           "; "
-           (List.map Skill_source_config.diagnostic_to_string diagnostics))
+      Error (Skill_source_config.rejection_message ~config_path diagnostics)
   in
   let* parsed = materialize_runtime_config_text ~config_path content in
   prepare_degraded_loaded ~config_path parsed
@@ -4814,6 +4938,21 @@ let exact_slot_list_key = function
   | Cli_slots -> "cli_slots"
 ;;
 
+let exact_slot_list_of_api_format = function
+  | Runtime_schema.Codex_app_server_runtime
+  | Runtime_schema.Antigravity_cli_runtime
+  | Runtime_schema.Claude_code_runtime -> Cli_slots
+  | Runtime_schema.Messages_api
+  | Runtime_schema.Chat_completions_api
+  | Runtime_schema.Ollama_api
+  | Runtime_schema.Gemini_api
+  | Runtime_schema.Vertex_gemini_api -> Catalog_slots
+;;
+
+let exact_slot_list_key_of_api_format api_format =
+  exact_slot_list_key (exact_slot_list_of_api_format api_format)
+;;
+
 let exact_slot_list_of_new_slot (config : Runtime_schema.config) slot =
   match
     List.find_opt (fun (binding : binding) -> String.equal (id_of_binding binding) slot)
@@ -4823,16 +4962,7 @@ let exact_slot_list_of_new_slot (config : Runtime_schema.config) slot =
   | Some binding ->
     (match Runtime_schema.provider_of_id config binding.provider_id with
      | None -> Catalog_slots
-     | Some provider ->
-       (match provider.api_format with
-        | Runtime_schema.Codex_app_server_runtime
-        | Runtime_schema.Antigravity_cli_runtime
-        | Runtime_schema.Claude_code_runtime -> Cli_slots
-        | Runtime_schema.Messages_api
-        | Runtime_schema.Chat_completions_api
-        | Runtime_schema.Ollama_api
-        | Runtime_schema.Gemini_api
-        | Runtime_schema.Vertex_gemini_api -> Catalog_slots))
+     | Some provider -> exact_slot_list_of_api_format provider.api_format)
 ;;
 
 let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =

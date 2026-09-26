@@ -457,6 +457,84 @@ let create_goal ctx title =
   json_state created [ "goal_id" ]
 ;;
 
+let test_measurement_requires_current_criterion_and_evidence () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Measure actual work" in
+  let goal =
+    match Goal_store.find_goal config ~goal_id with
+    | Goal_store.Goal_found goal -> goal
+    | Goal_store.Goal_absent | Goal_store.Store_unavailable _ ->
+        fail "created Goal is not readable"
+  in
+  let args revision evidence =
+    [ "goal_id", `String goal_id
+    ; "criterion_revision", `String revision
+    ; "observed_value", `String "0"
+    ; "evidence", `String evidence
+    ]
+  in
+  ignore (must_fail "missing evidence"
+            (dispatch ctx ~name:"masc_goal_measure"
+               (args goal.criterion_revision "")));
+  let measured =
+    must_succeed "record explicit measurement"
+      (dispatch ctx ~name:"masc_goal_measure"
+         (args goal.criterion_revision "artifact:measured-count"))
+  in
+  check string "the tool calls it reported" "reported_only"
+    (json_state measured [ "verification" ]);
+  let first_measurement = Goal_measurement.projection (Goal_measurement.load config) goal in
+  check string "actual is stored exactly" "0"
+    (json_state first_measurement [ "record"; "observed_value" ]);
+  check string "evidence survives" "artifact:measured-count"
+    (json_state first_measurement [ "record"; "evidence" ]);
+  let listed = must_succeed "goal list after measurement"
+      (dispatch ctx ~name:"masc_goal_list" []) in
+  (match Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list with
+   | [ goal_json ] ->
+       check string "list reports actual state" "reported"
+         (json_state goal_json [ "measurement"; "state" ]);
+       check string "list preserves reported zero" "0"
+         (json_state goal_json [ "measurement"; "record"; "observed_value" ])
+   | _ -> fail "expected one listed Goal");
+  let cache_before = Goal_projection_generation.current () in
+  (match Goal_measurement.record config ~goal_id
+           ~criterion_revision:goal.criterion_revision ~observed_value:"1"
+           ~evidence:"artifact:updated-count" ~actor:"test" with
+   | Ok _ -> ()
+   | Error error -> fail (Goal_measurement.error_to_string error));
+  check int "successful write changes dashboard cache key" (cache_before + 1)
+    (Goal_projection_generation.current ());
+  (match Goal_measurement.load config with
+   | Ok [ row ] ->
+       check string "latest replaces prior value" "1" row.observed_value;
+       check string "latest replaces prior evidence" "artifact:updated-count" row.evidence
+   | Ok _ | Error _ -> fail "measurement snapshot kept more than one row for a Goal");
+  let before_revision = Goal_projection_generation.current () in
+  let changed =
+    match Goal_store.upsert_goal config ~id:goal_id ~target_value:"2" () with
+    | Ok (goal, _) -> goal
+    | Error error -> fail (Goal_store.write_error_to_string error)
+  in
+  check bool "criterion change refreshes dashboard cache" true
+    (Goal_projection_generation.current () > before_revision);
+  check string "old criterion is not current" "not_recorded"
+    (json_state (Goal_measurement.projection (Goal_measurement.load config) changed)
+       [ "state" ]);
+  let listed = must_succeed "goal list after criterion revision"
+      (dispatch ctx ~name:"masc_goal_list" []) in
+  (match Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list with
+   | [ goal_json ] ->
+       check string "revised criterion has no actual" "not_recorded"
+         (json_state goal_json [ "measurement"; "state" ])
+   | _ -> fail "expected one listed Goal");
+  ignore (must_fail "stale criterion"
+            (dispatch ctx ~name:"masc_goal_measure"
+               (args goal.criterion_revision "artifact:stale")))
+;;
+
 let transition ctx goal_id ?note ?evidence action =
   let args =
     [ "goal_id", `String goal_id; "action", `String action ]
@@ -470,11 +548,152 @@ let transition ctx goal_id ?note ?evidence action =
   dispatch ctx ~name:"masc_goal_transition" args
 ;;
 
+let measurable_goal config ctx title =
+  let goal_id = create_goal ctx title in
+  match Goal_store.find_goal config ~goal_id with
+  | Goal_store.Goal_found goal -> goal
+  | Goal_store.Goal_absent | Goal_store.Store_unavailable _ ->
+      fail "created Goal is not readable"
+;;
+
+let record_evidence config (goal : Goal_store.goal) evidence =
+  Goal_measurement.record config ~goal_id:goal.id
+    ~criterion_revision:goal.criterion_revision ~observed_value:"7" ~evidence
+    ~actor:"test"
+;;
+
+(* "Evidence-backed" means the product's Evidence Reference grammar, the one
+   Task completion accepts, not any non-blank text: a Keeper sending
+   evidence "done" must not put a reported value on the Goal tree. *)
+let test_measurement_evidence_is_an_evidence_reference () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal = measurable_goal config ctx "Evidence must resolve" in
+  List.iter
+    (fun evidence ->
+       match record_evidence config goal evidence with
+       | Error (Goal_measurement.Invalid_request _) -> ()
+       | Error ((Goal_measurement.Conflict _ | Goal_measurement.Store_error _) as error) ->
+           fail
+             (Printf.sprintf "evidence %S: expected Invalid_request, got %s" evidence
+                (Goal_measurement.error_to_string error))
+       | Ok _ -> fail (Printf.sprintf "evidence %S is not a reference but was recorded" evidence))
+    [ "done"; "100%"; "https://example.com/proof"; "note:   "; "board:";
+      "artifact:"; "artifact:/abs"; "artifact:../x" ];
+  (match Goal_measurement.load config with
+   | Ok [] -> ()
+   | Ok _ -> fail "rejected evidence left a measurement row"
+   | Error detail -> fail detail);
+  let refused =
+    must_fail "tool rejects evidence that is not a reference"
+      (dispatch ctx ~name:"masc_goal_measure"
+         [ "goal_id", `String goal.id
+         ; "criterion_revision", `String goal.criterion_revision
+         ; "observed_value", `String "100%"
+         ; "evidence", `String "done"
+         ])
+  in
+  check string "the tool refuses it as a validation error"
+    (Tool_args.error_code_to_string Tool_args.Validation_error)
+    (json_state refused [ "error_code" ]);
+  List.iter
+    (fun evidence ->
+       match record_evidence config goal evidence with
+       | Ok row -> check string "reference is stored as given" evidence row.evidence
+       | Error error ->
+           fail
+             (Printf.sprintf "evidence %S was refused: %s" evidence
+                (Goal_measurement.error_to_string error)))
+    [ "artifact:reports/cases.json"; "note:seven cases passed in CI"; "board:p-123";
+      "fusion:run-9" ]
+;;
+
+(* The store is read with the same evidence check: a row whose evidence is
+   not a reference makes the snapshot unreadable instead of being shown as a
+   reported value. The first write is the control that the hand-written row
+   shape is one [load] accepts. *)
+let test_stored_non_reference_evidence_is_unreadable () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal = measurable_goal config ctx "Stored evidence is checked" in
+  let store evidence =
+    Fs_compat.save_file (Goal_measurement.path config)
+      (Yojson.Safe.to_string
+         (`Assoc
+           [ "version", `Int 1
+           ; "measurements",
+             `List
+               [ `Assoc
+                   [ "id", `String "measurement-1"
+                   ; "goal_id", `String goal.id
+                   ; "criterion_revision", `String goal.criterion_revision
+                   ; "observed_value", `String "7"
+                   ; "evidence", `String evidence
+                   ; "actor", `String "test"
+                   ; "recorded_at", `String "2026-09-25T00:00:00Z"
+                   ]
+               ]
+           ]))
+  in
+  store "artifact:reports/cases.json";
+  (match Goal_measurement.load config with
+   | Ok [ row ] -> check string "control row loads" "artifact:reports/cases.json" row.evidence
+   | Ok rows -> fail (Printf.sprintf "control: expected 1 row, found %d" (List.length rows))
+   | Error detail -> fail ("control row was refused: " ^ detail));
+  store "done";
+  (match Goal_measurement.load config with
+   | Error _ -> ()
+   | Ok _ -> fail "a stored row with evidence \"done\" was loaded");
+  check string "the Goal shows the store as unavailable" "unavailable"
+    (json_state (Goal_measurement.projection (Goal_measurement.load config) goal) [ "state" ])
+;;
+
+(* Deleting a Goal takes its observation row with it, so the snapshot is
+   bounded by the Goals that exist. A closed Goal still takes an
+   observation: recording never moves the phase. *)
+let test_measurement_rows_follow_goal_existence_not_phase () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let kept = measurable_goal config ctx "Kept" in
+  let deleted = measurable_goal config ctx "Deleted" in
+  List.iter
+    (fun (goal, evidence) ->
+       match record_evidence config goal evidence with
+       | Ok _ -> ()
+       | Error error -> fail (Goal_measurement.error_to_string error))
+    [ kept, "artifact:kept"; deleted, "artifact:deleted" ];
+  (match Goal_store.delete_goal config ~goal_id:deleted.id with
+   | Ok _ -> ()
+   | Error error -> fail (Goal_store.delete_goal_error_to_string error));
+  (match Goal_measurement.remove_goal config ~goal_id:deleted.id with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  (match Goal_measurement.load config with
+   | Ok [ row ] -> check string "only the live Goal keeps a row" kept.id row.goal_id
+   | Ok rows -> fail (Printf.sprintf "expected 1 row, found %d" (List.length rows))
+   | Error detail -> fail detail);
+  ignore (must_succeed "drop" (transition ctx kept.id "drop"));
+  (match record_evidence config kept "note:metric seen again after the drop" with
+   | Ok row ->
+       check string "a dropped Goal records the new observation"
+         "note:metric seen again after the drop" row.evidence
+   | Error error -> fail (Goal_measurement.error_to_string error));
+  (match Goal_store.find_goal config ~goal_id:kept.id with
+   | Goal_store.Goal_found goal ->
+       check string "the observation did not move the phase" "dropped"
+         (Goal_phase.to_string goal.phase)
+   | Goal_store.Goal_absent | Goal_store.Store_unavailable _ ->
+       fail "dropped Goal is not readable")
+;;
+
 let verifier_transition config goal_id decision evidence =
   let request_id, criterion = proof_identity config goal_id in
   Workspace_goals.commit_verifier_decision
     ~tool_name:"goal_verifier_commit"
-    ~start_time:0.
+    ~start_time:(Tool_timing.start ())
     config
     ~goal_id
     ~verification_run_id:"goal-verifier-test-run"
@@ -597,7 +816,7 @@ let test_reopened_goal_enters_a_new_verification_cycle () =
   check int "the pending request is archived once" 1 (List.length archived_pending);
   ignore (must_fail "stale answer after reopen"
     (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
-       ~start_time:0. config ~goal_id ~request_id:stale_request ~criterion:stale_criterion
+       ~start_time:(Tool_timing.start ()) config ~goal_id ~request_id:stale_request ~criterion:stale_criterion
        ~verification_run_id:"stale-verifier-run"
        ~decision:Workspace_goals.Proof_proven ~evidence:"stale proof"));
   check string "stale answer leaves the goal executing" "executing" (stored_phase config goal_id);
@@ -605,7 +824,7 @@ let test_reopened_goal_enters_a_new_verification_cycle () =
   let request_id, criterion = proof_identity config goal_id in
   ignore (must_succeed "second proof"
     (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
-       ~start_time:0. config ~goal_id ~request_id ~criterion ~verification_run_id:"second-verifier-run"
+       ~start_time:(Tool_timing.start ()) config ~goal_id ~request_id ~criterion ~verification_run_id:"second-verifier-run"
        ~decision:Workspace_goals.Proof_proven ~evidence:"new execution proof"));
   check string "new execution can complete" "awaiting_confirmation" (stored_phase config goal_id);
   match (ledger_record config goal_id).completion with
@@ -683,7 +902,7 @@ let test_dropped_pending_proof_gets_a_new_request_after_reopen () =
     (String.equal old_request new_request);
   ignore (must_fail "old answer after reopen"
     (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
-       ~start_time:0. config ~goal_id ~verification_run_id:"old-run"
+       ~start_time:(Tool_timing.start ()) config ~goal_id ~verification_run_id:"old-run"
        ~request_id:old_request ~criterion:old_criterion
        ~decision:Workspace_goals.Proof_proven ~evidence:"old execution proof"));
   check string "new execution remains verifying" "verifying" (stored_phase config goal_id);
@@ -706,7 +925,7 @@ let test_verdict_after_drop_from_verifying_is_refused () =
     (json_state dropped [ "goal"; "phase" ]);
   ignore (must_fail "late verdict after drop"
     (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
-       ~start_time:0. config ~goal_id ~verification_run_id:"late-run"
+       ~start_time:(Tool_timing.start ()) config ~goal_id ~verification_run_id:"late-run"
        ~request_id ~criterion
        ~decision:Workspace_goals.Proof_proven ~evidence:"late proof"));
   check string "late verdict does not resurrect the goal" "dropped"
@@ -731,7 +950,7 @@ let test_reopen_from_verifying_clears_the_pending_request () =
    | _ -> fail "reopen from verifying retained the pending request");
   ignore (must_fail "late refutation after reopen"
     (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
-       ~start_time:0. config ~goal_id ~verification_run_id:"late-run"
+       ~start_time:(Tool_timing.start ()) config ~goal_id ~verification_run_id:"late-run"
        ~request_id ~criterion
        ~decision:(Workspace_goals.Proof_refuted { reason = "late" })
        ~evidence:"late refutation"));
@@ -895,7 +1114,7 @@ let test_proof_proven_completes_with_authority_and_evidence () =
     must_fail "typed proof verdict with blank run ID"
       (Workspace_goals.commit_verifier_decision
          ~tool_name:"goal_verifier_commit"
-         ~start_time:0.
+         ~start_time:(Tool_timing.start ())
          config
          ~goal_id
          ~verification_run_id:"   "
@@ -1357,6 +1576,14 @@ let () =
             test_goal_list_joins_the_ledger
         ; test_case "goal list renders a ledger-error state" `Quick
             test_goal_list_renders_a_ledger_error_state
+        ; test_case "measurements require current criterion and evidence" `Quick
+            test_measurement_requires_current_criterion_and_evidence
+        ; test_case "measurement evidence is an Evidence Reference" `Quick
+            test_measurement_evidence_is_an_evidence_reference
+        ; test_case "measurement rows follow Goal existence, not phase" `Quick
+            test_measurement_rows_follow_goal_existence_not_phase
+        ; test_case "stored non-reference evidence is unreadable" `Quick
+            test_stored_non_reference_evidence_is_unreadable
         ] )
     ; ( "stage 2 gate"
       , [ test_case "reopen works before any completion request" `Quick

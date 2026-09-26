@@ -936,7 +936,10 @@
  (name masc_tui_render_schedule)
  (wrapped false)
  (modules masc_tui_render_schedule)
- (libraries masc_tui_message_layout masc_tui_table masc_tui_theme))
+ ; masc_tui_scroll so the keeper detail's clamp is the shared one rather than
+ ; a second copy of the same arithmetic.
+ (libraries masc_tui_layout masc_tui_message_layout masc_tui_scroll
+  masc_tui_table masc_tui_theme))
 
 (library
  (name masc_tui_frame_timing)
@@ -1129,6 +1132,14 @@
  (modules masc_tui_fork_guard)
  (libraries eio))
 
+;; The one launch every TUI read goes through: the switch, the read's
+;; exceptions, a refused launch and the failure label, handled once.
+(library
+ (name masc_tui_async_read)
+ (wrapped false)
+ (modules masc_tui_async_read)
+ (libraries eio masc_eio_context masc_tui_fork_guard))
+
 (library
  (name masc_tui_board_detail)
  (wrapped false)
@@ -1250,6 +1261,9 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries digestif mtime.clock.os masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+  ;; [threshold_cols] is the width two panes need: the Board read layout is
+  ;; decided here so the footer and the frame cannot disagree about it.
+  masc_tui_roster_pane
   masc_tui_overview_tasks
   masc_tui_machine_live
   masc_tui_connector_unbind
@@ -1611,6 +1625,21 @@
  (wrapped false)
  (modules masc_tui_repository_pulls)
  (libraries unix masc masc_tui_types masc_tui_ansi yojson))
+;; The Overview's spend reading (GET /api/v1/dashboard/keeper-costs),
+;; decoder and Team row tags. A library so a test can decode the server's
+;; own encoder output.
+(library
+ (name masc_tui_keeper_spend)
+ (wrapped false)
+ (modules masc_tui_keeper_spend)
+ (libraries
+  masc
+  masc.dashboard_utils
+  masc_tui_types
+  masc_tui_ansi
+  masc_tui_message_layout
+  yojson))
+
 
 (executable
  (name masc_tui)
@@ -1624,6 +1653,7 @@
  (libraries
   masc_tui_pick_list
   masc_tui_repository_pulls
+  masc_tui_keeper_spend
   digestif
   masc.string_util
   masc.keeper_runtime
@@ -1637,6 +1667,7 @@
   masc_tui_lane_installer
   masc_tui_queue_inspection
   masc_tui_fork_guard
+  masc_tui_async_read
   masc_tui_lane_subscriptions
   masc_tui_lane_declaration
   masc_tui_lane_table
@@ -1672,6 +1703,7 @@
   masc_tui_theme_choice
   masc_tui_terminal_palette
   masc_tui_terminal_probe
+  masc_tui_input_decoder
   masc_tui_code_lexer
   masc_tui_memo
   masc_tui_span
@@ -1697,6 +1729,9 @@
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
   masc_tui_runtime_config_view
+  ;; The Lanes provider jump reads runtime.toml table headers by the TOML
+  ;; grammar's key path rather than by spelling.
+  masc.toml_line_editor
   masc_tui_interrupt_signal
   masc_tui_esc_interrupt
   masc_tui_exit_signals
@@ -1995,3 +2030,15 @@
  (libraries masc masc.runtime masc.server masc.config masc.config_dir_resolver
   masc.masc_eio_context masc.http_client masc.masc_tool_blob_store
   masc.agent_core masc.agent_core.llm_provider masc.masc_log masc.fs_compat digestif eio eio_main yojson))
+
+(library
+ (name masc_tui_input_decoder)
+ (wrapped false)
+ (modules masc_tui_input_decoder)
+ (libraries
+  masc
+  masc_tui_csi
+  masc_tui_message_layout
+  masc_tui_paste
+  masc_tui_terminal_palette
+  masc_tui_utf8_input))

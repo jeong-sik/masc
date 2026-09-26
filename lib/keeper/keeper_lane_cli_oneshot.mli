@@ -17,10 +17,22 @@
     path. *)
 
 type failure =
+  | Unknown_runtime of { runtime_id : string }
+      (** No configured runtime holds this id
+          ([Runtime.get_runtime_by_id] answered [None]). Every declared
+          exact-output lane's [cli_slots] is reference-checked against
+          [runtime.toml]'s runtime list at load
+          ([Runtime.exact_lane_cli_slot_references]), so this should be
+          unreachable through a lane a config file declared; it stays a
+          distinct case from {!Not_an_official_client} for a caller that
+          dispatches a [runtime_id] the loader never validated. *)
   | Not_an_official_client of { runtime_id : string }
-      (** The id resolved to nothing this module may run. Declaration-time
-          admission does not check this ([cli_slots] are carried verbatim);
-          the walk reports it per slot and advances. *)
+      (** The id resolves to a configured runtime this module may not run: a
+          provider-dispatched (HTTP / [Agent_core]) runtime rather than an
+          official client. Every declared lane's [cli_slots] is checked for
+          this at load too
+          ([Runtime.validate_exact_lane_cli_slot_official_clients]), so this
+          should likewise be unreachable through a loaded config. *)
   | Execution_failed of
       { runtime_id : string
       ; cause : Fusion_official_client.failure
@@ -39,6 +51,14 @@ type failure =
       (** JSON parsed, but the consumer rejected its domain value. *)
 
 val failure_to_string : failure -> string
+
+val refused_for_binding_rest : failure -> bool
+(** [true] only when the client refused for its account's standing, read from
+    its typed failure: Claude [Quota_blocked], or a Codex turn tagged
+    [Usage_limit_exceeded], [Rate_limit_exceeded] or [Server_overloaded]. Such
+    a refusal says nothing about the prompt, so the same prompt can be served
+    once the account frees. Every other failure, including an Antigravity
+    refusal (its quota arrives only as turn text), is [false]. *)
 
 type runner =
   runtime_id:string
@@ -93,7 +113,12 @@ val walk
     erase their preceding failure evidence. [Error failures] carries every
     slot's failure in walk order when all of them failed; an empty
     [cli_slots] is [Error []] — the caller distinguishes "nothing declared"
-    from "declared and exhausted" by the list it passed in. *)
+    from "declared and exhausted" by the list it passed in.
+
+    An accepted CLI answer carries no token usage: [runner] returns the
+    answer text alone. Usage of an exact call is the [usage] field of
+    {!Agent_core.Exact_output.success}, which only an API slot's exact
+    execution produces. *)
 
 val prompt_with_schema :
   requirement:Agent_core.Exact_output.output_requirement -> prompt:string -> string

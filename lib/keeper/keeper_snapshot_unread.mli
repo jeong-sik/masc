@@ -43,3 +43,29 @@ val list_of_json : Yojson.Safe.t -> (t list, string) result
     unread and the result is [Ok []]. A [keepers] section without the list
     is an [Error]. *)
 val of_snapshot : Yojson.Safe.t -> (t list, string) result
+
+(** Whether the Keeper name list itself read. {!t} reports a Keeper whose
+    name was listed; when the list does not read there is no name to report,
+    so the [unread] list is empty for that reason and not because every row
+    built (#38120). *)
+type listing =
+  | Not_listed  (** The view did not ask for Keepers. *)
+  | Listed
+  | Unreadable of string
+      (** The Keeper directory did not list; the payload is the store's error. *)
+
+(** The key the [keepers] section carries {!listing} under. *)
+val listing_field : string
+
+(** [{"state"}], [state] one of [not_listed], [listed], [unreadable];
+    [unreadable] also carries [detail]. *)
+val listing_to_json : listing -> Yojson.Safe.t
+
+(** Strict inverse of {!listing_to_json}: a missing or non-string field, or a
+    [state] word outside the three, is an [Error]. *)
+val listing_of_json : Yojson.Safe.t -> (listing, string) result
+
+(** Reads {!listing_field} off a whole operator snapshot. No [keepers]
+    section is [Ok Not_listed], as in {!of_snapshot}; a [keepers] section
+    without the field is an [Error]. *)
+val listing_of_snapshot : Yojson.Safe.t -> (listing, string) result

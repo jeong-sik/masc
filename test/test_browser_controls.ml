@@ -136,7 +136,7 @@ let test_pre_effect_tool_outcome () = with_upload_context (fun config meta -> fi
     check bool "outside upload is pre-effect" true (denied.failure_effect_disposition = Tool_result.Proven_pre_effect);
     check int "denied upload sends no browser commands, including clear" 0 (List.length !calls);
     let _,phase = Masc.Tool_misc_browser_lane.handle_act_with_phase ~base_path:config.base_path
-        ~tool_name:"masc_browser_act" ~start_time:0.0 (`Assoc upload) in
+        ~tool_name:"masc_browser_act" ~start_time:(Tool_timing.start ()) (`Assoc upload) in
     check bool "generic upload requires owner" true (phase = Tool_result.Proven_pre_effect);
     check int "generic upload sends no browser commands" 0 (List.length !calls))))
 let test_owned_upload_staging () = with_upload_context (fun config meta -> fixture (fun driver _ _ _ ->
@@ -251,7 +251,7 @@ let test_download_result_reaches_provider () =
       let execution = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
           ~config ~meta ~args:(`Assoc ["lane",`String "automation";"mode",`String "downloads";"tabId",`Int 1]) in
       check bool "browser read completes" true (execution.disposition = Tool_result.Completed ());
-      let result = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:0.0
+      let result = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:(Tool_timing.start ())
           ?data:execution.data ?metadata:execution.metadata () in
       let output = match Masc.Tool_bridge.to_agent_core_typed_result ~base_path:config.base_path result with
         | Ok output -> output | Error error -> fail error.message in

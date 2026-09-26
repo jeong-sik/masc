@@ -197,6 +197,8 @@ type standalone_lane = {
   sl_cli_slots : string list;
   sl_dropped_slots : string list;
   sl_declared_slots : string list;
+  sl_declared_cli_slots : string list;
+  sl_supports_cli_tail : bool;
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;
@@ -1225,6 +1227,15 @@ let short_timestamp_of_unix_for_terminal ~localtime unix_seconds =
   Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_year + 1900)
     (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
     tm.Unix.tm_sec
+;;
+
+(* {!clock_timestamp_for_terminal}'s [HH:MM:SS] shape, for a time the wire
+   carries as a number rather than an RFC 3339 string -- the same pairing
+   {!short_timestamp_of_unix_for_terminal} already is for
+   {!short_timestamp_for_terminal}. *)
+let clock_timestamp_of_unix_for_terminal ~localtime unix_seconds =
+  let tm = localtime unix_seconds in
+  Printf.sprintf "%02d:%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 ;;
 
 (* The date and time beside a record, in the zone the operator's terminal is
@@ -2751,10 +2762,14 @@ type runtime_context_source =
   | Runtime_context_capability
   | Runtime_context_clamped
 
+type exact_slot_group = Exact_http_slots | Exact_cli_slots
+
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
+  ro_provider_id : string;
   ro_model : string;
+  ro_exact_slot_group : exact_slot_group;
   ro_effective_max_context : int;
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
@@ -4899,7 +4914,15 @@ let runtime_probe_for_id snapshot ~runtime_id =
 let decode_runtime_option ~default_id json =
   let* ro_id = required_string_field json "id" in
   let* ro_provider = required_string_field json "provider" in
+  let* ro_provider_id = required_string_field json "provider_id" in
   let* ro_model = required_string_field json "model" in
+  let* ro_exact_slot_group =
+    let* group = required_string_field json "exact_slot_group" in
+    match group with
+    | "slots" -> Ok Exact_http_slots
+    | "cli_slots" -> Ok Exact_cli_slots
+    | _ -> Error (Printf.sprintf "unknown exact_slot_group %S" group)
+  in
   let* ro_effective_max_context = required_int_field json "effective_max_context" in
   let* context_source = required_string_field json "max_context_source" in
   let* ro_max_context_source = decode_runtime_context_source context_source in
@@ -4938,7 +4961,9 @@ let decode_runtime_option ~default_id json =
   Ok
     { ro_id
     ; ro_provider
+    ; ro_provider_id
     ; ro_model
+    ; ro_exact_slot_group
     ; ro_effective_max_context
     ; ro_max_context_source
     ; ro_max_output_tokens
@@ -5055,7 +5080,9 @@ let decode_runtime_resolved_snapshot json =
          | None -> Error "default_runtime is absent from the resolved runtime list"
          | Some listed
            when String.equal default.ro_provider listed.ro_provider
+                && String.equal default.ro_provider_id listed.ro_provider_id
                 && String.equal default.ro_model listed.ro_model
+                && default.ro_exact_slot_group = listed.ro_exact_slot_group
                 && Int.equal default.ro_effective_max_context listed.ro_effective_max_context
                 && default.ro_max_context_source = listed.ro_max_context_source
                 && Option.equal Int.equal default.ro_max_output_tokens listed.ro_max_output_tokens
@@ -6351,6 +6378,91 @@ let decode_harness_overview json =
       Some { hov_evaluator_status = status }
   | _ -> None
 
+
+let merge_keeper_memory_facts ~now loads =
+  let tagged keeper_name ~sep text =
+    if String.starts_with ~prefix:(keeper_name ^ sep) text then text
+    else keeper_name ^ sep ^ text
+  in
+  let step (ord, src, invals, event_errors, unread) (keeper_name, load) =
+    match load with
+    | Error detail -> ord, src, invals, event_errors, (keeper_name, detail) :: unread
+    | Ok snap ->
+      let event_errors =
+        match snap.mfs_events_read_error with
+        | None -> event_errors
+        | Some detail -> Printf.sprintf "%s: %s" keeper_name detail :: event_errors
+      in
+      let ord, unread =
+        match snap.mfs_ordinary with
+        | Memory_store_present store ->
+          ( List.rev_append
+              (List.map
+                 (fun (f : memory_fact) ->
+                   { f with mf_origin = tagged keeper_name ~sep:" \xc2\xb7 " f.mf_origin })
+                 store.mos_facts)
+              ord
+          , unread )
+        | Memory_store_read_error detail ->
+          ord, (keeper_name, "ordinary store: " ^ detail) :: unread
+        | Memory_store_absent -> ord, unread
+      in
+      let src, invals, unread =
+        match snap.mfs_source with
+        | Memory_store_present store ->
+          ( List.rev_append
+              (List.map
+                 (fun (f : memory_source_fact) ->
+                   { f with msf_path = tagged keeper_name ~sep:":" f.msf_path })
+                 store.mss_facts)
+              src
+          , List.rev_append
+              (List.map
+                 (fun (inv : memory_invalidation) ->
+                   { inv with mi_source_path = tagged keeper_name ~sep:":" inv.mi_source_path })
+                 store.mss_invalidations)
+              invals
+          , unread )
+        | Memory_store_read_error detail ->
+          src, invals, (keeper_name, "source-bound store: " ^ detail) :: unread
+        | Memory_store_absent -> src, invals, unread
+      in
+      ord, src, invals, event_errors, unread
+  in
+  let ord, src, invals, event_errors, unread =
+    List.fold_left step ([], [], [], [], []) loads
+  in
+  let snapshot =
+    { mfs_keeper = "*"
+    ; mfs_ordinary =
+        Memory_store_present
+          { mos_revision = 1; mos_updated_at = now; mos_facts = List.rev ord }
+    ; mfs_source =
+        Memory_store_present
+          { mss_revision = 1
+          ; mss_updated_at = now
+          ; mss_facts = List.rev src
+          ; mss_invalidations = List.rev invals
+          }
+    ; mfs_events_read_error =
+        (match List.rev event_errors with
+         | [] -> None
+         | errors -> Some (String.concat "; " errors))
+    }
+  in
+  let unread_summary =
+    match List.rev unread with
+    | [] -> None
+    | failures ->
+      Some
+        (Printf.sprintf "%d of %d keepers not read: %s"
+           (List.length (List.sort_uniq String.compare (List.map fst failures)))
+           (List.length loads)
+           (String.concat "; "
+              (List.map (fun (keeper_name, detail) -> keeper_name ^ ": " ^ detail) failures)))
+  in
+  snapshot, unread_summary
+
 let decode_harness_snapshot json =
   let* verdicts_json = required_list_field json "recent_verdicts" in
   let* hs_verdicts =
@@ -7281,6 +7393,16 @@ let decode_standalone_lane json =
         | _ -> Error "declared_slots: expected a string")
       declared_slots
   in
+  let* declared_cli_slots = required_list_field json "declared_cli_slots" in
+  let* sl_declared_cli_slots =
+    decode_list
+      "declared_cli_slots"
+      (function
+        | `String runtime_id -> Ok runtime_id
+        | _ -> Error "declared_cli_slots: expected a string")
+      declared_cli_slots
+  in
+  let* sl_supports_cli_tail = required_bool_field json "supports_cli_tail" in
   let* sl_admission_error = required_nullable_string_field json "admission_error" in
   let* status = required_string_field json "status" in
   let* sl_status = standalone_lane_status_of_string status in
@@ -7313,6 +7435,8 @@ let decode_standalone_lane json =
     ; sl_cli_slots
     ; sl_dropped_slots
     ; sl_declared_slots
+    ; sl_declared_cli_slots
+    ; sl_supports_cli_tail
     ; sl_admission_error
     ; sl_retained_run_count
     ; sl_running_count
@@ -7332,7 +7456,7 @@ let decode_standalone_lanes_snapshot json =
   let* schema = required_string_field json "schema" in
   let* () =
     if String.equal schema "masc.standalone_llm_lanes.v2" then Ok ()
-    else Error ("standalone lanes: unsupported schema " ^ schema)
+    else Error ("unsupported schema " ^ schema)
   in
   let* _generated_at = required_string_field json "generated_at" in
   let* sls_observed_at_unix = require_float_field json "observed_at_unix" in
@@ -7350,12 +7474,12 @@ let decode_standalone_lanes_snapshot json =
            sls_exact_run_projection_truncated
            (sls_exact_run_projection_count < sls_exact_run_source_total)
     then Ok ()
-    else Error "standalone lanes: exact run projection metadata is inconsistent"
+    else Error "exact run projection metadata is inconsistent"
   in
   let* observation_only = required_bool_field json "observation_only" in
   let* () =
     if observation_only then Ok ()
-    else Error "standalone lanes snapshot is not observation-only"
+    else Error "snapshot is not observation-only"
   in
   let* items = required_list_field json "lanes" in
   let* sls_lanes = decode_list "lanes" decode_standalone_lane items in
@@ -7379,7 +7503,7 @@ let decode_standalone_lanes_snapshot json =
       ; sls_exact_run_projection_truncated
       ; sls_lanes
       }
-  else Error "standalone lanes: expected each known lane exactly once"
+  else Error "expected each known lane exactly once"
 
 let keeper_secret_status_of_string = function
   | "ready" -> Secret_ready
@@ -8601,21 +8725,59 @@ let decode_gate_snapshot json =
    effect under, and it survives a restart. Both lists carry only Keepers
    somebody singled out, so an empty one means everybody follows the
    workspace. *)
+type keeper_exact_lane_first = {
+  kel_keeper : string;
+  kel_lane_id : string;
+  kel_slot_id : string;
+  kel_offered : bool;
+      (** [false]: the published lane no longer offers [kel_slot_id], so the
+          lane walks its declared order and this row has no effect. *)
+}
+
 let decode_keeper_gate_settings json =
-  let pairs field value_key =
+  (* An unreadable store answers with an empty list beside
+     [state = "unavailable"]. Read as a list alone, that is "nobody singled
+     out", the looser reading, so it is an error here and the caller keeps
+     what it last knew. *)
+  let readable field =
+    match member (field ^ "_state") json with
+    | `Assoc _ as state ->
+      (match member "state" state with
+       | `String "ready" -> Ok ()
+       | `String "unavailable" ->
+         Error
+           (match member "error" state with
+            | `String detail -> Printf.sprintf "%s unavailable: %s" field detail
+            | _ -> field ^ " unavailable")
+       | _ -> Error (field ^ "_state.state must be ready or unavailable"))
+    | _ -> Error (field ^ "_state must be an object")
+  in
+  let rows field decode_row =
+    let* () = readable field in
     let* items = required_list_field json field in
     let rec loop acc = function
       | [] -> Ok (List.rev acc)
       | item :: rest ->
-        let* keeper = required_string_field item "keeper_name" in
-        let* value = required_string_field item value_key in
-        loop ((keeper, value) :: acc) rest
+        let* row = decode_row item in
+        loop (row :: acc) rest
     in
     loop [] items
   in
-  let* modes = pairs "modes" "mode" in
-  let* judges = pairs "judges" "slot_id" in
-  Ok (modes, judges)
+  let* modes =
+    rows "modes" (fun item ->
+      let* keeper = required_string_field item "keeper_name" in
+      let* mode = required_string_field item "mode" in
+      Ok (keeper, mode))
+  in
+  let* exact_lanes =
+    rows "exact_lanes" (fun item ->
+      let* kel_keeper = required_string_field item "keeper_name" in
+      let* kel_lane_id = required_string_field item "lane_id" in
+      let* kel_slot_id = required_string_field item "slot_id" in
+      let* kel_offered = required_bool_field item "offered" in
+      Ok { kel_keeper; kel_lane_id; kel_slot_id; kel_offered })
+  in
+  Ok (modes, exact_lanes)
 
 (* Keep the JSON spelling, including quotes around strings.  The Config pane
    now hands this exact spelling to its inline editor and sends the parsed
@@ -8868,7 +9030,7 @@ let decode_keeper_turns json =
   let* schema = required_string_field json "schema" in
   let* () =
     if String.equal schema "masc.keeper_turns.v1" then Ok ()
-    else Error (Printf.sprintf "unknown keeper turns schema %S" schema)
+    else Error (Printf.sprintf "unknown schema %S" schema)
   in
   let* items = required_list_field json "keepers" in
   let rec loop acc = function
@@ -11621,7 +11783,7 @@ let decode_skill_evidence_activation_item reference = function
                  | `Assoc _ as claim ->
                    (match member "keeper" claim, member "source" claim with
                     | ( `String keeper
-                      , `String ("current_meta" | "trace_history" | "runtime_manifest" as source) )
+                      , `String ("current_meta" | "runtime_manifest" as source) )
                       when String.trim keeper <> "" ->
                       Ok ({ seo_keeper = keeper; seo_source = source } :: reversed)
                     | _ -> Error "Skill activation owner claim is invalid")

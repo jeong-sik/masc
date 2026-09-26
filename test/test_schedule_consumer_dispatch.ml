@@ -12,6 +12,11 @@ module Keeper_registry_event_queue = struct
   ;;
 end
 
+(* Fixture tick for create and modify: the runner's floor tick, below every
+   interval these fixtures declare, so the runner-tick check never refuses one
+   of them. *)
+let runner_tick_sec = 1.0
+
 let () = Mirage_crypto_rng_unix.use_default ()
 
 let temp_dir () =
@@ -374,7 +379,7 @@ let test_keeper_wake_receipt_decoder_rejects_noncanonical_shapes () =
 
 let create_board_schedule config =
   match
-    Schedule_service.create config ~now:100.0 ~schedule_id:"board-sched-1"
+    Schedule_service.create config ~runner_tick_sec ~now:100.0 ~schedule_id:"board-sched-1"
       ~requested_at:100.0 ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
       ~payload:board_post_payload ~source:Schedule_domain.Operator_request ()
@@ -386,7 +391,7 @@ let create_board_schedule config =
 
 let create_keeper_wake_schedule ?recurrence config =
   match
-    Schedule_service.create config ~now:100.0 ~schedule_id:"keeper-wake-sched-1"
+    Schedule_service.create config ~runner_tick_sec ~now:100.0 ~schedule_id:"keeper-wake-sched-1"
       ~requested_at:100.0 ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
       ~payload:keeper_wake_payload ~source:Schedule_domain.Operator_request
@@ -401,6 +406,7 @@ let create_routed_keeper_wake_schedule ?recurrence config channel =
   match
     Schedule_service.create
       config
+      ~runner_tick_sec
       ~now:100.0
       ~schedule_id:"keeper-wake-routed-sched-1"
       ~requested_at:100.0
@@ -421,6 +427,7 @@ let create_named_keeper_wake_schedule ?recurrence config ~schedule_id ~keeper_na
   match
     Schedule_service.create
       config
+      ~runner_tick_sec
       ~now:100.0
       ~schedule_id
       ~requested_at:100.0
@@ -439,7 +446,7 @@ let create_named_keeper_wake_schedule ?recurrence config ~schedule_id ~keeper_na
 
 let create_unsupported_schedule config =
   match
-    Schedule_service.create config ~now:100.0 ~schedule_id:"unsupported-live-sched"
+    Schedule_service.create config ~runner_tick_sec ~now:100.0 ~schedule_id:"unsupported-live-sched"
       ~requested_at:100.0 ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
       ~payload:unsupported_payload ~source:Schedule_domain.Operator_request ()
@@ -461,7 +468,7 @@ let create_invalid_keeper_wake_schedule config =
       ]
   in
   match
-    Schedule_service.create config ~now:100.0 ~schedule_id:"invalid-keeper-wake-sched"
+    Schedule_service.create config ~runner_tick_sec ~now:100.0 ~schedule_id:"invalid-keeper-wake-sched"
       ~requested_at:100.0 ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
       ~payload ~source:Schedule_domain.Operator_request ()
@@ -1048,23 +1055,31 @@ let test_one_call_cancels_every_pending_occurrence_of_a_schedule () =
    | [] -> ()
    | _ :: _ ->
      fail "a cancellation receipt stayed in the outbox; the keeper's next ack would be refused");
-  let cancelled =
-    List.filter_map
-      (function
-        | Keeper_event_queue_state.Current_receipt
-            { transition = Keeper_event_queue_state.Cancel_accepted cancellation; _ } ->
-          Some cancellation.source.post_id
-        | Keeper_event_queue_state.Projected_witness
-            { post_id; kind = Keeper_event_queue_state.Projected_cancel _; _ } ->
-          Some post_id
-        | Keeper_event_queue_state.Current_receipt _
-        | Keeper_event_queue_state.Projected_witness _ -> None)
-      (Keeper_event_queue_state.projected_dispositions state)
-    |> List.sort String.compare
-  in
-  check (list string) "each occurrence left its own durable cancellation"
-    [ "piled-occurrence-1"; "piled-occurrence-2" ]
-    cancelled;
+  (* #38527: un-re-askable cancellation receipts no longer stay in the
+     projected-dispositions list -- the reaction ledger each projection
+     wrote is where a cancelled occurrence stays answerable, so each
+     occurrence's own cancellation is asserted there. *)
+  List.iter
+    (fun occurrence_id ->
+       match
+         Keeper_reaction_ledger.event_queue_reaction_evidence_result
+           ~base_path
+           ~keeper_name
+           ~stimulus_id:occurrence_id
+       with
+       | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+         check bool
+           (Printf.sprintf "occurrence %s left its own durable cancellation"
+              occurrence_id)
+           true
+           evidence.event_queue_cancelled_seen
+       | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
+         fail "cancellation evidence was quarantined"
+       | Error error ->
+         fail
+           (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+              error))
+    [ "piled-occurrence-1"; "piled-occurrence-2" ];
   (* Nothing of the schedule is pending any more, so a second call has
      nothing to cancel and refuses nothing. *)
   match
@@ -1233,6 +1248,167 @@ let test_cancelled_schedule_enqueued_wake_is_removed_at_cancel_boundary () =
        (match w.status with
         | Wake_running -> false
         | Wake_succeeded | Wake_failed -> true))
+;;
+
+(* masc_schedule_cancel, the one path the HTTP route and the TUI both call,
+   used to settle only the ledger rows. The wake an earlier occurrence had
+   already queued stayed, so a paused Keeper would still run the cancelled
+   occurrence when resumed and could answer its origin; the reason and the
+   canceller the call carried were echoed back and never stored. *)
+let test_schedule_cancel_tool_withdraws_the_queued_wake_and_stores_the_cancellation () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let meta = persist_keeper_meta config keeper_name in
+  (match Keeper_meta_store.replace_snapshot config { meta with paused = true } with
+   | Ok () -> ()
+   | Error detail -> fail ("paused keeper meta write failed: " ^ detail));
+  let request =
+    create_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+      config
+  in
+  let _ = tick_ok config ~now:201.0 in
+  check int "the fired occurrence waits in the paused keeper's queue" 1
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  let ctx : Tool_schedule.context =
+    { config
+    ; caller = Tool_schedule.Operator_caller "dashboard-operator"
+    ; stamp_keeper_wake_result_delivery = (fun ~payload -> Ok payload)
+    ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+    ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
+    }
+  in
+  let reason = "the operator stopped this wake" in
+  let result =
+    Tool_schedule.handle_cancel
+      ~tool_name:"masc_schedule_cancel"
+      ~start_time:(Tool_timing.start ())
+      ctx
+      (`Assoc
+        [ "schedule_id", `String request.schedule_id; "reason", `String reason ])
+  in
+  check bool "cancel succeeds" true (Tool_result.is_success result);
+  check int "the queued wake is withdrawn" 0
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+  | None -> fail "cancelled schedule missing"
+  | Some stored ->
+    check string "schedule is cancelled" "cancelled"
+      (Schedule_domain.schedule_status_to_string stored.status);
+    (match stored.cancellation with
+     | None -> fail "the ledger row does not carry the cancellation"
+     | Some cancellation ->
+       check string "the stored canceller is the caller" "dashboard-operator"
+         cancellation.cancelled_by.id;
+       check string "the stored canceller kind" "human_operator"
+         (Schedule_domain.actor_kind_to_string cancellation.cancelled_by.kind);
+       check string "the stored reason" reason cancellation.reason)
+;;
+
+(* The cancel may run inside the turn the schedule woke: a Keeper cancelling
+   its own interval schedule, or the operator cancelling from the TUI while
+   that turn runs. The turn took its entry and leaves it pending until its
+   ACK, so withdrawing that entry made the turn's own ACK fail with "event
+   queue pending selection is no longer present". The taken entry stays for
+   the turn; an occurrence no turn has taken is withdrawn. *)
+let test_schedule_cancel_mid_turn_leaves_the_taken_wake_to_its_turn () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
+  let request =
+    create_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+      config
+  in
+  let taken_id = tick_ok config ~now:201.0 |> single_occurrence_id in
+  let selection =
+    match
+      Keeper_event_queue_persistence.select_when_result
+        ~base_path
+        ~keeper_name
+        ~now:202.0
+        ~ready:(fun _ -> true)
+    with
+    | Ok (Some selection) -> selection
+    | Ok None -> fail "the fired occurrence was not queued"
+    | Error detail -> fail detail
+  in
+  check string "the turn takes the fired occurrence" taken_id selection.source.post_id;
+  Keeper_reaction_ledger.record_event_queue_turn_started
+    ~base_path
+    ~keeper_name
+    selection.source;
+  let untaken : Keeper_event_queue.scheduled_wake =
+    { occurrence_id = "untaken-occurrence"
+    ; schedule_instance_id = request.schedule_instance_id
+    ; schedule_id = request.schedule_id
+    ; due_at = 261.0
+    ; payload_digest = "untaken-digest"
+    ; title = None
+    ; message = "untaken wake"
+    ; result_delivery = None
+    }
+  in
+  (match
+     Keeper_registry_event_queue.enqueue_stimulus_durable_result
+       ~base_path
+       keeper_name
+       { post_id = untaken.occurrence_id
+       ; urgency = Keeper_event_queue.Normal
+       ; arrived_at = untaken.due_at
+       ; payload = Keeper_event_queue.Schedule_due untaken
+       }
+   with
+   | Keeper_registry_event_queue.Stimulus_enqueued -> ()
+   | Keeper_registry_event_queue.Stimulus_already_present ->
+     fail "untaken occurrence already present in a fresh workspace"
+   | Keeper_registry_event_queue.Stimulus_storage_error detail -> fail detail);
+  let ctx : Tool_schedule.context =
+    { config
+    ; caller = Tool_schedule.Named_caller keeper_name
+    ; stamp_keeper_wake_result_delivery = (fun ~payload -> Ok payload)
+    ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+    ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
+    }
+  in
+  let result =
+    Tool_schedule.handle_cancel
+      ~tool_name:"masc_schedule_cancel"
+      ~start_time:(Tool_timing.start ())
+      ctx
+      (`Assoc
+        [ "schedule_id", `String request.schedule_id
+        ; "reason", `String "the keeper stops its own schedule"
+        ])
+  in
+  check bool "cancel from inside the turn succeeds" true (Tool_result.is_success result);
+  check (list string) "only the taken occurrence stays pending" [ taken_id ]
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.to_list
+     |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id));
+  (match
+     Keeper_event_queue_persistence.ack_pending_result
+       ~base_path
+       ~keeper_name
+       ~selection
+       ()
+   with
+   | Ok () -> ()
+   | Error detail -> fail ("the turn could not ACK its own entry: " ^ detail));
+  check int "the turn's ACK empties the queue" 0
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+  | None -> fail "cancelled schedule missing"
+  | Some stored ->
+    check string "schedule is cancelled" "cancelled"
+      (Schedule_domain.schedule_status_to_string stored.status)
 ;;
 
 let test_keeper_purge_cancels_future_schedule_intent () =  with_workspace
@@ -1997,6 +2173,126 @@ let test_keeper_wake_durable_state_failure_retries_same_occurrence () =
     (List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id) queued)
 ;;
 
+(* #38527: projected dispositions no longer remember a consumed occurrence,
+   so a retried dispatch must not run it twice. The enqueue committed, the
+   keeper consumed and ACKed the occurrence, the ACK projection dropped its
+   receipt, and a later receipt displaced it from last_transition -- the
+   index answers Absent, and the reaction ledger the ACK projection wrote
+   must answer "already delivered" so the retry accepts without enqueueing. *)
+let test_consumed_occurrence_retry_does_not_enqueue_again () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let keeper_dir =
+    Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
+      keeper_name
+  in
+  mkdir_p keeper_dir;
+  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
+  mkdir_p (Filename.dirname ledger_dir);
+  write_empty_file ledger_dir;
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
+  let request = create_keeper_wake_schedule config in
+  let failed = tick_ok config ~now:201.0 in
+  let occurrence_id = single_occurrence_id failed in
+  check string "ledger damage makes the first dispatch retryable" "failed"
+    (Schedule_runner.dispatch_status_to_string (List.hd failed.dispatches).status);
+  Sys.remove ledger_dir;
+  mkdir_p ledger_dir;
+  let ack_of_selection selection operation_id =
+    match
+      Keeper_registry_event_queue.ack_pending_source_terminal_result
+        ~base_path
+        keeper_name
+        ~acked_at:201.5
+        ~source_terminal:
+          Keeper_registry_event_queue.
+            { source = selection.Keeper_event_queue_state.source
+            ; source_incarnation = selection.Keeper_event_queue_state.admitted_revision
+            ; operator_operation_id = operation_id
+            ; source_receipt = Keeper_event_queue_state.Turn_completed
+            }
+    with
+    | Ok (Keeper_registry_event_queue.Acked _) -> ()
+    | Ok (Keeper_registry_event_queue.Already_acked _) -> ()
+    | Ok (Keeper_registry_event_queue.Ack_committed_followup_failed { detail; _ })
+      -> failf "ack follow-up failed: %s" detail
+    | Error detail -> failf "ack failed: %s" detail
+  in
+  ack_of_selection (pending_selection_exn ~base_path ~keeper_name) "consumed-ack";
+  let displacing : Keeper_event_queue.stimulus =
+    { post_id = "displacing-source"
+    ; urgency = Keeper_event_queue.Normal
+    ; arrived_at = 202.0
+    ; payload = Keeper_event_queue.Bootstrap
+    }
+  in
+  Keeper_event_queue_persistence.persist
+    ~base_path
+    ~keeper_name
+    (Keeper_event_queue.enqueue Keeper_event_queue.empty displacing);
+  ack_of_selection
+    (pending_selection_exn ~base_path ~keeper_name)
+    "displacing-ack";
+  let receipt_path =
+    Keeper_reaction_ledger.For_testing.schedule_occurrence_receipt_path
+      ~base_path ~keeper_name ~occurrence_id
+  in
+  (match
+     Keeper_reaction_ledger.schedule_occurrence_receipt_result
+       ~base_path ~keeper_name ~occurrence_id
+   with
+   | Ok (Some receipt) ->
+     check string "the retired receipt names the consumed occurrence"
+       occurrence_id receipt.post_id
+   | Ok None -> fail "the retired occurrence has no exact-id receipt"
+   | Error detail -> fail detail);
+  let retried = tick_ok config ~now:203.0 in
+  (match List.hd retried.dispatches with
+   | { status = Schedule_runner.Dispatch_succeeded; _ } -> ()
+   | dispatch ->
+     failf "the retry after consumption must accept, got %s"
+       (Schedule_runner.dispatch_status_to_string dispatch.status));
+  check int "a consumed occurrence is not enqueued again" 0
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  (match
+     Keeper_reaction_ledger.event_queue_delivery_seen_for_source_result
+       ~base_path
+       ~keeper_name
+       ~post_id:occurrence_id
+       ~stimulus_kind:Keeper_reaction_ledger.Schedule_due
+   with
+   | Ok true -> ()
+   | Ok false -> fail "the ledger must answer delivered for the consumed occurrence"
+   | Error error ->
+     fail
+       (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+          error));
+  (* A new occurrence must not rescan the ledger. The exact-id receipt still
+     answers after the ledger path becomes unreadable; a damaged receipt then
+     fails closed rather than reporting an unconsumed occurrence. *)
+  Sys.rename ledger_dir (ledger_dir ^ "-held");
+  write_empty_file ledger_dir;
+  (match
+     Server_schedule_consumers.resolve_keeper_wake_occurrence
+       ~base_path ~keeper_name ~stimulus_id:occurrence_id
+   with
+   | Ok (Server_schedule_consumers.Terminal_completed_at _) -> ()
+   | Ok _ -> fail "the exact-id receipt did not preserve the completed turn"
+   | Error detail -> fail detail);
+  write_file receipt_path "{";
+  (match
+     Server_schedule_consumers.resolve_keeper_wake_occurrence
+       ~base_path ~keeper_name ~stimulus_id:occurrence_id
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "a malformed exact-id receipt must not become absence");
+  ignore request
+;;
+
 let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
   with_workspace
   @@ fun config ->
@@ -2252,21 +2548,15 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
           { detail; _ }) ->
      fail detail
    | Error detail -> fail detail);
-  let compact_state =
-    match Keeper_registry_event_queue.durable_state_result ~base_path keeper_name with
-    | Ok state -> state
-    | Error detail -> fail detail
-  in
+  (* The older terminal left the queue list, but its exact-id compact witness
+     still answers without scanning every row of the reaction ledger. *)
   (match
-     Keeper_event_queue_state.projected_dispositions compact_state
-     |> List.find_opt (function
-       | Keeper_event_queue_state.Projected_witness witness ->
-         String.equal witness.post_id stimulus_id
-       | Keeper_event_queue_state.Current_receipt _ -> false)
+     Keeper_reaction_ledger.schedule_occurrence_receipt_result
+       ~base_path ~keeper_name ~occurrence_id:stimulus_id
    with
-   | Some (Keeper_event_queue_state.Projected_witness _) -> ()
-   | Some (Keeper_event_queue_state.Current_receipt _) | None ->
-     fail "older schedule terminal did not become a compact witness");
+   | Ok (Some { kind = Keeper_event_queue_state.Projected_turn_attempt_terminal; _ }) -> ()
+   | Ok (Some _) | Ok None -> fail "older terminal did not leave an exact-id witness"
+   | Error detail -> fail detail);
   let conflicting_wake, conflicting_stimulus =
     match original_stimulus.payload with
     | Keeper_event_queue.Schedule_due wake ->
@@ -2310,7 +2600,10 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
        Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string);
      check string "terminal retry needs no activation" "not_required"
        Yojson.Safe.Util.(detail |> member "activation_status" |> to_string)
-   | _ -> fail "terminal retry did not preserve the failed disposition");
+   | dispatch ->
+     failf "terminal retry did not preserve the failed disposition: %s / %s"
+       (Schedule_runner.dispatch_status_to_string dispatch.status)
+       (match dispatch.error with Some e -> e | None -> "-"));
   check int "terminal retry enqueues no second occurrence" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.length);
@@ -3603,6 +3896,14 @@ let () =
         ; test_case "cancelled schedule enqueued wake leaves queue at cancel boundary"
             `Quick
             test_cancelled_schedule_enqueued_wake_is_removed_at_cancel_boundary
+        ; test_case
+            "schedule cancel tool withdraws the queued wake and stores the cancellation"
+            `Quick
+            test_schedule_cancel_tool_withdraws_the_queued_wake_and_stores_the_cancellation
+        ; test_case
+            "schedule cancel mid-turn leaves the taken wake to its turn"
+            `Quick
+            test_schedule_cancel_mid_turn_leaves_the_taken_wake_to_its_turn
         ; test_case "owner absent pending demand is drained not retained" `Quick
             test_owner_absent_pending_demand_is_drained_not_retained
         ; test_case "shutdown fence rejects schedule intake before enqueue" `Quick
@@ -3679,6 +3980,8 @@ let () =
             test_projection_failure_keeps_spent_replay_queued
         ; test_case "rejection projection precedes turn intake" `Quick
             test_rejected_resolution_projection_precedes_turn_intake
+        ; test_case "consumed occurrence retry does not enqueue again" `Quick
+            test_consumed_occurrence_retry_does_not_enqueue_again
         ; test_case "unconsumed grant replay stays actionable" `Quick
             test_unconsumed_grant_replay_stays_actionable
         ] )

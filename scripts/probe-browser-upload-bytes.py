@@ -17,7 +17,8 @@ repo = pathlib.Path(__file__).resolve().parents[1]
 out = args.out.resolve()
 out.mkdir(parents=True, exist_ok=True)
 sources = ['lib/keeper/keeper_browser_upload.ml', 'lib/browser_lane/browser_upload_lease.ml',
-           'lib/core/exec_buffer.ml', 'lib/core/common.ml', 'lib/process/process_eio.ml']
+           'lib/string_util/string_util.ml', 'lib/core/exec_buffer.ml', 'lib/core/common.ml',
+           'lib/process/process_eio.ml']
 (out / 'sources.json').write_text(json.dumps({name: hashlib.sha256((repo / name).read_bytes()).hexdigest()
                                              for name in sources}, indent=2) + '\n')
 common = (repo / 'lib/core/common.ml').read_text()
@@ -25,7 +26,10 @@ caps = '\n'.join(line for line in common.splitlines()
                  if line.startswith(('let max_process_capture_head_bytes =',
                                      'let max_process_capture_tail_bytes =')))
 source = '#use "topfind";;\n#require "eio_main";;\nmodule Common = struct\n' + caps + '\nend;;\n'
-for module, path in [('Exec_buffer', 'lib/core/exec_buffer.ml'),
+# Exec_buffer cuts its render with String_util, a dependency-free library, so
+# it comes in first, the way the real build links it.
+for module, path in [('String_util', 'lib/string_util/string_util.ml'),
+                     ('Exec_buffer', 'lib/core/exec_buffer.ml'),
                      ('Browser_upload_lease', 'lib/browser_lane/browser_upload_lease.ml')]:
     source += f'module {module} = struct\n' + (repo / path).read_text() + '\nend;;\n'
 source += r'''

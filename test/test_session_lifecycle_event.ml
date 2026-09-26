@@ -29,13 +29,6 @@ let samples : E.t list =
     Open { transport = WS ; session_id = "s2" ; origin = "*" };
     Upgrade
       { transport_from = SSE ; transport_to = WS ; session_id = "s3" };
-    Resume
-      {
-        transport = SSE ;
-        session_id = "s4" ;
-        last_event_id = Some "evt-1234" ;
-        replayed = 7 ;
-      };
     Evict { transport = SSE ; session_id = "s6" ; reason = Cap_exceeded };
     Evict { transport = WS ; session_id = "s7" ; reason = Idle_timeout };
     Evict

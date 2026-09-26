@@ -90,7 +90,7 @@ val runtime_mcp_keeper_log_context_of_entry :
 
 val retain_runtime_mcp_observation :
   keeper_entry:Keeper_registry.registry_entry option -> tool_name:string ->
-  arguments:Yojson.Safe.t -> start_time:float -> Tool_result.result -> Tool_result.result
+  arguments:Yojson.Safe.t -> start_time:Tool_timing.started -> Tool_result.result -> Tool_result.result
 (** Retains only canonical browser reads owned by a resolved Keeper. *)
 
 val record_runtime_mcp_keeper_tool_trace :

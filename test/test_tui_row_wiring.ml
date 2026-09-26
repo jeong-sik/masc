@@ -213,29 +213,66 @@ let test_the_overview_row_counts_every_approval_list () =
     "no confirm-queue count of its own in the Overview summary" 0
     (reads ~binding_name:"render_overview"
        ~fields:[ "aps_visible_count"; "aps_total_count" ]);
-  (* The row and the ring must use the same population. The helper owns
-     the approval rows plus open questions, so the overview must call it
-     rather than rebuilding only one source. *)
-  Alcotest.(check int) "the row walks the shared pending helper" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"render_overview"
-       ~callee:"approvals_surface_pending"
-     + Ast_grep.count_calls_in_value_binding ~module_path:render
-         ~binding_name:"render_overview"
-         ~callee:"Masc_tui_types.approvals_surface_pending");
-  (* Every list the walk can come up short or long on has to be able to mark
-     the count unreliable. The gate poll was the one left out: a failed fetch
-     fills gate_error and leaves the previous rows standing, so the row drew a
-     bare number over a list the server no longer holds. *)
-  Alcotest.(check int) "every approval source can mark the count unreliable" 6
+  (* The row, the ring and the Approvals title count one population and judge
+     one reading. [approvals_count_label] takes the count from
+     [approvals_surface_pending] and the "?" from [approvals_reading_current],
+     and test_tui_keys checks that the label follows the reading. Here: the
+     row draws that label and keeps no copy of either half. Two copies of the
+     judgement drift: at fe6315aa69 (2026-09-26) the strip's copy left the Gate
+     queue out while this row's copy counted it. *)
+  let calls callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render
+      ~binding_name:"render_overview" ~callee
+    + Ast_grep.count_calls_in_value_binding ~module_path:render
+        ~binding_name:"render_overview" ~callee:("Masc_tui_types." ^ callee)
+  in
+  Alcotest.(check int) "the row draws the shared count label" 1
+    (calls "approvals_count_label");
+  Alcotest.(check int) "and counts no population of its own" 0
+    (calls "approvals_surface_pending");
+  Alcotest.(check int) "and makes no reading judgement of its own" 0
+    (calls "approvals_reading_current" + calls "approvals_reading");
+  Alcotest.(check int) "and reads no approval list's state itself" 0
     (reads ~binding_name:"render_overview"
        ~fields:
-         [ "approvals_error"
+         [ "approval_snapshot"
+         ; "approvals_error"
+         ; "keeper_tool_approvals_observed"
          ; "keeper_tool_approvals_error"
-         ; "asks_snapshot"
-         ; "asks_error"
+         ; "gate_snapshot_observed"
          ; "gate_error"
          ; "gate_queue_unavailable"
+         ; "asks_snapshot"
+         ; "asks_error"
+         ])
+
+(* The Approvals title and the empty queue say which list was not read, from
+   the same readings the strip and the Overview row use. The screen kept its
+   own field list for each: the title named a failed held-calls or questions
+   poll and never the Gate queue, and the empty queue said "(no pending
+   approvals)" over a failed Gate poll (#39172 review, 2026-09-26). *)
+let test_the_approvals_screen_reads_the_shared_readings () =
+  let calls callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render
+      ~binding_name:"render_approvals" ~callee
+    + Ast_grep.count_calls_in_value_binding ~module_path:render
+        ~binding_name:"render_approvals" ~callee:("Masc_tui_types." ^ callee)
+  in
+  Alcotest.(check int) "one reading for the whole screen" 1
+    (calls "approvals_reading");
+  Alcotest.(check int) "the title notes come from it" 1
+    (calls "approvals_title_notes");
+  Alcotest.(check int) "the empty queue comes from it" 1
+    (calls "approvals_empty_queue");
+  Alcotest.(check int) "no list's failure state is read beside it" 0
+    (reads ~binding_name:"render_approvals"
+       ~fields:
+         [ "approvals_error"
+         ; "keeper_tool_approvals_observed"
+         ; "keeper_tool_approvals_error"
+         ; "gate_snapshot_observed"
+         ; "gate_queue_unavailable"
+         ; "asks_error"
          ])
 
 (* The briefing answers with two lists that carry the same incidents, and the
@@ -1084,7 +1121,7 @@ let test_the_tasks_list_pane_says_which_task_each_row_is () =
   Alcotest.(check int) "the pane builds its labels through the shared one" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"render_task_detail"
-       ~callee:"Render_schedule.task_list_sidebar_label");
+       ~callee:"Render_schedule.sidebar_row_label");
   (* Off [task], which is the one the detail beside this pane is open on: a
      label built from that id would give every row the same one. The pane
      also reads [task.id] to find which row to highlight, and that read is
@@ -1105,6 +1142,24 @@ let test_the_board_age_column_reads_the_sort_once () =
   Alcotest.(check int) "and names that time over the column once" 1
     (asks ~callee:"board_age_header")
 
+
+(* The Approvals index drew the tool alone. A queue holds one row per held
+   call, and different Keepers can wait on the same tool. The label itself is
+   tested in test_tui_render_schedule; this says the pane reaches it, and
+   that each of the three row kinds hands over its own asker. *)
+let test_an_approval_row_says_who_asked () =
+  Alcotest.(check int) "the label is built through the shared one" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"approval_sidebar_label"
+       ~callee:"Render_schedule.sidebar_row_label");
+  List.iter
+    (fun field_name ->
+      Alcotest.(check int)
+        (field_name ^ " reaches the label") 1
+        (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+           ~binding_name:"approval_sidebar_label" ~field_name))
+    [ "kta_keeper"; "gp_keeper"; "ap_actor" ]
+;;
 
 (* Six values the loader read and no screen drew.
 
@@ -1286,10 +1341,14 @@ let () =
             test_the_title_does_not_count_another_queue
         ; Alcotest.test_case "the Overview row counts every approval list"
             `Quick test_the_overview_row_counts_every_approval_list
+        ; Alcotest.test_case "the Approvals screen reads the shared readings"
+            `Quick test_the_approvals_screen_reads_the_shared_readings
         ; Alcotest.test_case "the summary row does not count the panel below"
             `Quick test_the_summary_row_does_not_count_the_panel_below_it
         ; Alcotest.test_case "the load stops reading a field no screen draws"
             `Quick test_the_overview_load_stops_reading_a_field_no_screen_draws
+        ; Alcotest.test_case "an approval row says who asked" `Quick
+            test_an_approval_row_says_who_asked
         ; Alcotest.test_case
             "the keeper detail reads its token figures at a glance" `Quick
             test_the_keeper_detail_reads_its_token_figures_at_a_glance

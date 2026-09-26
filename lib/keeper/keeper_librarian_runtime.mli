@@ -21,13 +21,18 @@ type extraction_error
 
 val extraction_error_to_string : extraction_error -> string
 
-(** Slot ids and refusal reasons on one line, for the exclusion WARN and the
-    all-slots-refused error. *)
-val slot_reason_pairs : ?sep:string -> (string * string) list -> string
+type slot_refusal =
+  { slot_id : string
+  ; cause : Agent_core.Exact_output.admission_error
+  }
+
+(** Render each rejected slot and its typed admission cause once, for the
+    exclusion WARN and the all-slots-refused error. *)
+val slot_reason_pairs : ?sep:string -> slot_refusal list -> string
 
 type preflight_selection =
   { selected_slots : Runtime_exact_output_registry.selected_slot list
-  ; unusable : (string * string) list
+  ; unusable : slot_refusal list
   }
 
 val preflight_slots
@@ -36,7 +41,7 @@ val preflight_slots
   -> messages:Agent_core.Types.message list
   -> (preflight_selection, extraction_error) result
 (** The pre-flight over the ladder: the selected slots whose request projected
-    and the slots this run is without (id and refusal reason). The execution
+    and the slots this run is without (id and typed admission cause). The execution
     flow receives only [selected_slots]; a ladder with no projectable slot at
     all is [Exact_request_projection_failed], naming each refusal. An empty
     ladder reports two empty lists -- the caller routes it to the cli lane.
@@ -98,11 +103,14 @@ type not_committed =
 
 val fit_continuity :
   capacity:Keeper_lane_cli_oneshot.input_capacity -> base_path:string -> keeper_id:string ->
-  input:Keeper_librarian.input -> Keeper_librarian_continuity.prepared ->
+  input_for:(Keeper_librarian_continuity.prepared -> (Keeper_librarian.input, string) result) ->
+  Keeper_librarian_continuity.prepared ->
   (Keeper_librarian_continuity.prepared option, string) result
 (** Fit the complete rendered CLI prompt to a reported character limit while its
-    runtime remains declared in the lane. Returns [None] if no safe source fits.
-    Does not dispatch a provider or change Memory receipts. *)
+    runtime remains declared in the lane. Each candidate is measured with the
+    input [input_for] gives it, so what a Memory pass over that candidate
+    carries counts. Returns [None] if no safe source fits. Does not dispatch a
+    provider or change Memory receipts. *)
 
 val run_best_effort
   :  ?write_scope:write_scope
@@ -116,6 +124,9 @@ val run_best_effort
   -> ?on_not_committed:(not_committed -> unit)
   -> ?on_continuity_committed:(served_by:served_slot -> Librarian_continuity_snapshot.t -> unit)
        (** [served_by] is the slot whose answer committed. *)
+  -> ?on_context_committed:(Keeper_librarian_context.version -> unit)
+       (** The working-context version this pass wrote, observed right after
+           that write succeeds. Same constraints as [on_memory_committed]. *)
   -> ?durable_range_id:Keeper_memory_os_current.durable_range_id
   -> ?official_range_id:Keeper_memory_os_current.official_range_id
   -> ?cli_runner:Keeper_lane_cli_oneshot.runner

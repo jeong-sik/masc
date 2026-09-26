@@ -67,6 +67,11 @@ type 'callback_error execution_error =
           (** Why the HTTP walk gave up: the provider error's label and
               payload. The CLI tail, when the lane walks one, reports through
               {!Cli_slots_exhausted} rather than being folded in here. *)
+      ; binding_standing : Agent_core.Exact_output.flow_binding_standing
+          (** [Every_binding_resting] only when every HTTP slot the walk
+              visited refused for its binding's standing (quota or rate limit
+              spent, capacity full, payment refused) and no slot's answer was
+              rejected by the domain decoder. *)
       }
   | Cli_slots_exhausted of
       { prior_error : 'callback_error execution_error option
@@ -92,11 +97,16 @@ type prepared
 val lane_id : string
 
 val terminal_of_flow_error
-  :  'callback_error Agent_core.Exact_output.flow_execution_error
+  :  callback_error_to_string:('callback_error -> string)
+  -> 'callback_error Agent_core.Exact_output.flow_execution_error
   -> 'callback_error execution_error
 (** Classify every AGENT_CORE flow terminal before deciding whether a second
     transport may run. The closed input and output variants make a new flow
-    terminal a compile-time classification request. *)
+    terminal a compile-time classification request. The [detail] of
+    [Providers_exhausted] and [Flow_bookkeeping_failed] is
+    [Agent_core.Exact_output.flow_execution_error_to_string] with
+    [callback_error_to_string], so a failed measurement callback keeps its
+    cause in the durable sentence. *)
 
 val error_detail : 'callback_error execution_error -> string
 (** The durable-record sentence for a lane terminal: the run record's
@@ -117,6 +127,7 @@ val prepare :
 val execute :
   ?cli_runner:Keeper_lane_cli_oneshot.runner ->
   clock:_ Eio.Time.clock ->
+  callback_error_to_string:('callback_error -> string) ->
   before_dispatch:
     (attempt_provenance -> (unit, 'callback_error) result) ->
   before_advance:
@@ -137,5 +148,5 @@ val execute :
     progress is the sole terminalization authority and must be quarantined
     under cancellation protection; no AGENT_CORE receipt state is inspected. *)
 (** Cancellation is propagated promptly without protected partition I/O.
-    Durable [Bound] or [Advancing] progress is quarantined only by the subsequent
-    process-start recovery path. *)
+    Durable [Bound] or [Advancing] progress returns to [Ready] only through the
+    subsequent process-start recovery path. *)

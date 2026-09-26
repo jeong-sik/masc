@@ -34,9 +34,12 @@ val cost_event_payload
   -> input_tokens:int
   -> output_tokens:int
   -> cost_usd:float
-  -> ?usage_projection:Cost_ledger.usage_projection
+  -> usage_projection:Cost_ledger.usage_projection
   -> ?response_id:string
   -> ?runtime_attempt:(string * string * int)
+  -> ?conversation:(string * Keeper_usage_resolution.cumulative_position)
+  -> ?vendor_total_tokens:int
+  -> ?resolution_status:Keeper_usage_resolution.status
   -> ?cache_creation_input_tokens:int
   -> ?cache_read_input_tokens:int
   -> ?usage_missing:bool
@@ -56,9 +59,12 @@ val emit_cost_event
   -> input_tokens:int
   -> output_tokens:int
   -> cost_usd:float
-  -> ?usage_projection:Cost_ledger.usage_projection
+  -> usage_projection:Cost_ledger.usage_projection
   -> ?response_id:string
   -> ?runtime_attempt:(string * string * int)
+  -> ?conversation:(string * Keeper_usage_resolution.cumulative_position)
+  -> ?vendor_total_tokens:int
+  -> ?resolution_status:Keeper_usage_resolution.status
   -> ?cache_creation_input_tokens:int
   -> ?cache_read_input_tokens:int
   -> ?usage_missing:bool

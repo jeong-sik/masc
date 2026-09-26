@@ -2986,9 +2986,10 @@ let attempt_failure : Runtime_candidate_backpressure.attempt_failure option Alco
     ( = )
 ;;
 
-let walk_once ?provider_answered outcomes ids =
+let walk_once ?provider_answered ?read_usage_after_account_refusal outcomes ids =
   Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
     ?provider_answered
+    ?read_usage_after_account_refusal
     ~runtime_id:"quota_lane" ~runtime_id_of:Fun.id
     ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
     ~run_attempt:(fun ~idx:_ ~runtime_id _ -> attempt_without_effect (outcomes runtime_id) None)
@@ -3131,16 +3132,17 @@ let test_an_empty_completion_clears_stale_unavailability_evidence () =
       Alcotest.(check bool) "the undated quota observation is cleared" false
         (Runtime_quota_window.is_exhausted ~scope ~now:(Unix.gettimeofday ()))))
 ;;
-(* RFC-0458 §3.4, §6: an access denial rotates to the next candidate within
-   the turn and leaves no evidence. The next turn tries the head first, so a
-   head whose credential works again answers without waiting for a restart. *)
+(* RFC-0458 §3.4, §6: a credential denial (401) rotates to the next candidate
+   within the turn and leaves no evidence. The next turn tries the head first,
+   so a head whose credential works again answers without waiting for a
+   restart. A 403 refuses the account instead; the test after this one covers
+   it. *)
 let test_access_refusal_rotates_this_turn_and_the_next_turn_tries_the_head () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
     Fun.protect ~finally:reset_quota_lane_rests (fun () ->
       let refused = "shared_a.test_model" and fallback = "shared_b.test_model" in
       let ids = [ refused; fallback ] in
-      (* 401 is AuthError and 403 is AuthorizationError; both route to
-         [Auth_failed]. *)
+      (* 401 is AuthError, which routes to [Auth_failed]. *)
       List.iter
         (fun code ->
            reset_quota_lane_rests ();
@@ -3183,7 +3185,243 @@ let test_access_refusal_rotates_this_turn_and_the_next_turn_tries_the_head () =
               Alcotest.failf "%s" (label ("restored head failed: " ^ Agent_core.Error.to_string error)));
            Alcotest.(check (list string)) (label "the next turn tries the head first and it answers")
              [ refused ] (List.rev !attempts))
-        [ 401; 403 ]))
+        [ 401 ]))
+;;
+
+(* Kimi For Coding answers a spent 5-hour window with this 403, captured from
+   api.kimi.com/coding/v1 on 2026-09-25. [type] is the only machine-readable
+   field and the same value also answers a client the plan does not admit, so
+   nothing here reads it; the status is the fact. *)
+let kimi_usage_limit_403_body =
+  {|{"error":{"message":"You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota","type":"access_terminated_error"}}|}
+;;
+
+(* The [other] account of [runtime_toml_quota_lane] with a Kimi usage
+   endpoint declared. The fetch is injected, so no request leaves the test. *)
+let runtime_toml_quota_lane_with_usage_read =
+  runtime_toml_quota_lane
+  ^ {|
+[providers.other.usage-read]
+shape = "kimi-coding-usages"
+url = "https://127.0.0.1/coding/v1/usages"
+|}
+;;
+
+let rfc3339_of_epoch seconds =
+  let tm = Unix.gmtime seconds in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ" (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+;;
+
+(* The shape GET /coding/v1/usages answered on 2026-09-25 while the 5-hour
+   window was spent (the plan-period counts and the reset are the test's).
+   [usages.limit_5h.used_ratio] is 0 there as well, as it was live
+   (MoonshotAI/kimi-code#3951); nothing reads it. *)
+let kimi_usages_body ~five_hour_used ~five_hour_reset =
+  Printf.sprintf
+    {|{"usage":{"limit":"100","used":"66","remaining":"34","resetTime":"2099-09-30T10:10:16.485718Z"},"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"%d","remaining":"%d","resetTime":"%s"}}],"usages":{"limit_5h":{"used_ratio":0,"reset_time":"%s"},"limit_7d":{"used_ratio":0,"reset_time":"2099-09-30T10:10:15Z"}}}|}
+    five_hour_used (100 - five_hour_used) five_hour_reset five_hour_reset
+;;
+
+let kimi_account_refusal () =
+  Agent_core.Provider_failure_attribution.core_error_of_http_error
+    ~provider:"kimi_coding"
+    (Llm_provider.Http_client.HttpError
+       { code = 403
+       ; body = Llm_provider.Http_client.Received kimi_usage_limit_403_body
+       ; retry_after_header = None
+       })
+;;
+
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+let with_env key value f =
+  let original = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match original with
+      | Some previous -> Unix.putenv key previous
+      | None -> unsetenv key)
+    f
+;;
+
+module Usage_read = Runtime_provider_usage_read
+
+(* The production read ([read_runtime_after_account_refusal]) with only the
+   GET replaced. *)
+let read_usage_with ~fetch runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | None -> Alcotest.failf "no runtime %s" runtime_id
+  | Some runtime ->
+    let (_ : Usage_read.account_refusal_outcome) =
+      Usage_read.read_runtime_after_account_refusal ~fetch runtime
+    in
+    ()
+;;
+
+let outcome_label : Usage_read.account_refusal_outcome -> string = function
+  | Read (Spent_until _) -> "read: spent until"
+  | Read Spent_without_reset -> "read: spent without reset"
+  | Read No_window_spent -> "read: no window spent"
+  | Read_failed _ -> "read failed"
+  | Read_raised name -> "raised " ^ name
+  | Skipped No_usage_read -> "skipped: no usage-read"
+  | Skipped Scope_already_resting -> "skipped: scope already resting"
+  | Skipped Already_reading -> "skipped: already reading"
+  | Skipped No_net_or_clock -> "skipped: no net or clock"
+;;
+
+(* 2026-09-25: after a restart the lane heads rested on their quota and Kimi,
+   declared last, was the one candidate with no mark, so every walk led with
+   it and failed 17 of 17 times. The 403 alone rests nothing; the usage read
+   it triggers decides. *)
+let with_refusal_lane ~toml f =
+  with_env "OTHER_QUOTA_TEST_KEY" "fixture-kimi-key" (fun () ->
+    with_runtime_config toml (fun () ->
+      Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+        reset_quota_lane_rests ();
+        f ())))
+;;
+
+let account_refusal_case ~toml ~usages_body check =
+  with_refusal_lane ~toml (fun () ->
+    let head = "shared_a.test_model"
+    and sibling = "shared_b.test_model"
+    and refused = "other.test_model" in
+    let lane = [ head; sibling; refused ] in
+    Runtime_quota_window.note_observed_exhausted
+      ~scope:(Option.get (Runtime.quota_scope_of_runtime_id head));
+    Alcotest.(check (list string)) "the unmarked last candidate leads while the heads rest"
+      [ refused; head; sibling ] (backpressure_order lane);
+    let account_refusal = kimi_account_refusal () in
+    (match account_refusal with
+     | Agent_core.Error.Api (Llm_provider.Retry.AuthorizationError _) -> ()
+     | other ->
+       Alcotest.failf "the 403 is not an authorization error: %s"
+         (Agent_core.Error.to_string other));
+    let fetched = ref [] in
+    let fetch ~api_key:_ url =
+      fetched := url :: !fetched;
+      Ok usages_body
+    in
+    (match
+       walk_once
+         ~read_usage_after_account_refusal:(read_usage_with ~fetch)
+         (fun _ -> Error account_refusal)
+         [ refused ]
+     with
+     | Error _ -> ()
+     | Ok () -> Alcotest.fail "the refused candidate unexpectedly answered");
+    Alcotest.check attempt_failure "a 403 is never a failed attempt" None
+      (failed_attempt_of refused);
+    check
+      ~fetched:(List.rev !fetched)
+      ~refused_scope:(Option.get (Runtime.quota_scope_of_runtime_id refused))
+      ~order:(backpressure_order lane)
+      ~lane)
+;;
+
+let test_a_403_with_a_spent_window_rests_until_its_reset () =
+  let resets_at = Float.round (Unix.gettimeofday () +. 3600.0) in
+  account_refusal_case
+    ~toml:runtime_toml_quota_lane_with_usage_read
+    ~usages_body:
+      (kimi_usages_body ~five_hour_used:100 ~five_hour_reset:(rfc3339_of_epoch resets_at))
+    (fun ~fetched ~refused_scope ~order ~lane ->
+      Alcotest.(check (list string)) "the declared usage endpoint is read once"
+        [ "https://127.0.0.1/coding/v1/usages" ] fetched;
+      Alcotest.(check (option (float 0.0))) "the scope rests until the spent window resets"
+        (Some resets_at)
+        (Runtime_quota_window.active_until ~scope:refused_scope ~now:(Unix.gettimeofday ()));
+      Alcotest.(check (list string)) "the refused account rests with the heads in declared order"
+        lane order)
+;;
+
+let test_a_403_with_headroom_rests_nothing () =
+  account_refusal_case
+    ~toml:runtime_toml_quota_lane_with_usage_read
+    ~usages_body:
+      (kimi_usages_body ~five_hour_used:20 ~five_hour_reset:"2099-09-24T15:10:16Z")
+    (fun ~fetched ~refused_scope ~order ~lane ->
+      Alcotest.(check int) "the usage endpoint is read" 1 (List.length fetched);
+      Alcotest.(check bool) "a refusal with headroom is not a spent quota" false
+        (Runtime_quota_window.is_exhausted ~scope:refused_scope ~now:(Unix.gettimeofday ()));
+      Alcotest.(check (list string)) "the order is what it was before the 403"
+        (match lane with
+         | [ head; sibling; refused ] -> [ refused; head; sibling ]
+         | _ -> lane)
+        order)
+;;
+
+let test_a_403_without_usage_read_rests_nothing () =
+  account_refusal_case
+    ~toml:runtime_toml_quota_lane
+    ~usages_body:(kimi_usages_body ~five_hour_used:100 ~five_hour_reset:"2099-09-24T15:10:16Z")
+    (fun ~fetched ~refused_scope ~order:_ ~lane:_ ->
+      Alcotest.(check (list string)) "nothing is read without usage-read" [] fetched;
+      Alcotest.(check bool) "the status alone rests nothing" false
+        (Runtime_quota_window.is_exhausted ~scope:refused_scope ~now:(Unix.gettimeofday ())))
+;;
+
+(* The seams of the production read: no Eio context, a raising GET, one read
+   per scope at a time, and no second read once the scope rests. *)
+let test_the_read_after_a_403_skips_and_contains_its_failures () =
+  with_refusal_lane ~toml:runtime_toml_quota_lane_with_usage_read (fun () ->
+    let refused = Option.get (Runtime.get_runtime_by_id "other.test_model") in
+    let scope = Runtime.quota_scope_of_runtime refused in
+    let read ?fetch () = outcome_label (Usage_read.read_runtime_after_account_refusal ?fetch refused) in
+    Alcotest.(check string) "outside a server there is no net or clock to read with"
+      "skipped: no net or clock" (read ());
+    Alcotest.(check string) "a raising GET is contained and named by its constructor"
+      "raised Failure"
+      (read ~fetch:(fun ~api_key:_ _ -> failwith "boom with a secret") ());
+    Alcotest.(check bool) "a raising GET rests nothing" false
+      (Runtime_quota_window.is_exhausted ~scope ~now:(Unix.gettimeofday ()));
+    let inner = ref "" in
+    let resets_at = Float.round (Unix.gettimeofday () +. 3600.0) in
+    let fetch ~api_key:_ _ =
+      inner :=
+        read ~fetch:(fun ~api_key:_ _ -> Alcotest.fail "a second read ran while one held the scope") ();
+      Ok (kimi_usages_body ~five_hour_used:100 ~five_hour_reset:(rfc3339_of_epoch resets_at))
+    in
+    Alcotest.(check string) "the first read rests the scope" "read: spent until" (read ~fetch ());
+    Alcotest.(check string) "a read for the same scope while one runs is skipped"
+      "skipped: already reading" !inner;
+    Alcotest.(check string) "a scope that already rests is not read again"
+      "skipped: scope already resting"
+      (read ~fetch:(fun ~api_key:_ _ -> Alcotest.fail "a resting scope was read again") ()))
+;;
+
+(* A refreshable credential is not refreshed for the diagnostic read after a
+   refusal: the read fails without a request. *)
+let test_the_read_after_a_403_does_not_refresh_a_credential () =
+  Runtime_quota_window.reset_for_testing ();
+  let refreshed = ref false in
+  let http : Usage_read.http_read =
+    { credential =
+        ( Llm_provider.Provider_config.Refreshable_credential
+            (fun () ->
+              refreshed := true;
+              Ok (Llm_provider.Secret.of_string "fresh"))
+        , Llm_provider.Secret.of_string "materialized" )
+    ; usage_read =
+        { Runtime_schema.shape = Runtime_schema.Kimi_coding_usages
+        ; url = "https://127.0.0.1/coding/v1/usages"
+        ; refresh_s = None
+        }
+    }
+  in
+  let scope = Runtime_quota_window.scope_of_credential ~provider_id:"refresh-fixture" None in
+  (match
+     Usage_read.read_after_account_refusal
+       ~fetch:(fun ~api_key:_ _ -> Alcotest.fail "a refreshable credential was sent")
+       ~scope
+       http
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "the read ran with a refreshable credential");
+  Alcotest.(check bool) "the credential is not refreshed" false !refreshed
 ;;
 (* The evidence follows the failure route. A closed runtime connection is
    routed as a server error, so it is evidence; MASC's own capacity, a
@@ -5234,52 +5472,6 @@ let test_a_same_path_suffix_waits_only_for_a_recorded_rest () =
         (next ~route:rate_limited_route bad_gateway)))
 ;;
 
-let test_deferred_hint_refs_are_not_shared () =
-  let failure = retryable_network_error "checkpoint failure" in
-  let hint =
-    Driver.For_testing.make_deferred_runtime_lane
-      ~assignment_id:"lane.one"
-      ~failed_runtime_id:"runtime.a"
-      ~next_runtime_id:"runtime.b"
-      ~later_runtime_ids:[ "runtime.c" ]
-      ~failure
-  in
-  let first = ref (Some hint) in
-  let second = ref (Some hint) in
-  Alcotest.(check bool)
-    "first owner consumes its hint"
-    true
-    (Masc.Keeper_heartbeat_loop.For_testing.consume_deferred_runtime_lane_hint
-       first
-       hint);
-  Alcotest.(check bool) "first hint cleared" true (Option.is_none !first);
-  Alcotest.(check bool)
-    "second owner remains independent"
-    true
-    (Option.is_some !second)
-
-let test_deferred_hint_is_dropped_when_assignment_changes () =
-  let failure = retryable_network_error "checkpoint failure" in
-  let hint =
-    Driver.For_testing.make_deferred_runtime_lane
-      ~assignment_id:"lane.one"
-      ~failed_runtime_id:"runtime.a"
-      ~next_runtime_id:"runtime.b"
-      ~later_runtime_ids:[]
-      ~failure
-  in
-  let hint_ref = ref (Some hint) in
-  let for_assignment =
-    Masc.Keeper_heartbeat_loop.For_testing.deferred_runtime_lane_for_assignment
-  in
-  Alcotest.(check bool) "same assignment keeps its hint" true
-    (Option.is_some (for_assignment hint_ref ~assignment_id:"lane.one"));
-  Alcotest.(check bool) "hint survives a matching read" true
-    (Option.is_some !hint_ref);
-  Alcotest.(check bool) "changed assignment gets no hint" true
-    (Option.is_none (for_assignment hint_ref ~assignment_id:"lane.two"));
-  Alcotest.(check bool) "stale hint is cleared" true (Option.is_none !hint_ref)
-
 let rec remove_tree path =
   match Unix.lstat path with
   | { st_kind = Unix.S_DIR; _ } ->
@@ -5295,9 +5487,25 @@ let with_deferred_store f =
   Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> f base_path)
 ;;
 
-let test_deferred_hint_survives_store_restart_and_clears_after_settlement () =
+(* Named clusters keep their keeper runtime state under separate directories
+   of one base path ([Workspace.keepers_runtime_dir]). *)
+let cluster_keepers_dir base_path cluster =
+  Filename.concat (Filename.concat base_path cluster) "keepers"
+;;
+
+(* The configured lane each restore sees, unchanged across the restart. *)
+let unchanged_lane _assignment_id =
+  Masc.Keeper_heartbeat_loop.For_testing.Lane_candidates
+    [ "runtime.a"; "runtime.b"; "runtime.c" ]
+;;
+
+(* The heartbeat loop's own restart path: one loop records the suffix a failed
+   cycle left, a fresh loop on the same base path starts from it, and the
+   settlement or an assignment change removes the file. *)
+let test_heartbeat_restart_resumes_deferred_suffix () =
   with_deferred_store (fun base_path ->
-    let original =
+    let module Loop = Masc.Keeper_heartbeat_loop.For_testing in
+    let hint =
       Driver.For_testing.make_deferred_runtime_lane
         ~assignment_id:"lane.restart"
         ~failed_runtime_id:"runtime.a"
@@ -5305,46 +5513,155 @@ let test_deferred_hint_survives_store_restart_and_clears_after_settlement () =
         ~later_runtime_ids:[ "runtime.c" ]
         ~failure:(accept_empty_no_progress_error "runtime.a")
     in
-    (match Deferred_store.save ~base_path ~keeper_name:"backend" original with
-     | Ok () -> ()
-     | Error error ->
-       Alcotest.failf "save failed: %s" (Deferred_store.error_to_string error));
-    let restored =
-      match Deferred_store.load ~base_path ~keeper_name:"backend" with
-      | Ok (Some hint) -> hint
-      | Ok None -> Alcotest.fail "restart lost the durable deferred suffix"
-      | Error error ->
-        Alcotest.failf "load failed: %s" (Deferred_store.error_to_string error)
-    in
-    Alcotest.(check (list string))
-      "restart starts from frozen successor"
-      [ "runtime.b"; "runtime.c" ]
-      (Driver.deferred_runtime_ids restored);
+    let before = Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
+    Loop.record_deferred_lane before hint;
+    let after = Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
+    (match Loop.deferred_lane_for_assignment after ~assignment_id:"lane.restart" with
+     | Some restored ->
+       Alcotest.(check (list string))
+         "restarted loop starts from the frozen successor"
+         [ "runtime.b"; "runtime.c" ]
+         (Driver.deferred_runtime_ids restored);
+       Alcotest.(check bool)
+         "typed accept rejection survives the restart"
+         true
+         (match Driver.classify_masc_internal_error restored.failure with
+          | Some (Driver.Accept_rejected { reason_kind; _ }) ->
+            reason_kind = Some Driver.Accept_no_usable_progress
+          | _ -> false);
+       Loop.consume_deferred_lane after restored
+     | None -> Alcotest.fail "restarted heartbeat lost the deferred suffix");
+    (* Dispatch consumed the suffix and runtime.b is running; a restart now,
+       before the cycle settles, must still start from runtime.b. *)
+    (match
+       Loop.deferred_lane_for_assignment ~assignment_id:"lane.restart"
+         (Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend")
+     with
+     | Some mid_run ->
+       Alcotest.(check (list string))
+         "restart while the successor runs resumes on it"
+         [ "runtime.b"; "runtime.c" ]
+         (Driver.deferred_runtime_ids mid_run)
+     | None -> Alcotest.fail "restart during the successor's run walked back to runtime.a");
+    Loop.settle_deferred_lane after None;
     Alcotest.(check bool)
-      "typed accept rejection survives durable codec"
+      "settled suffix is not restored again"
       true
-      (match Driver.classify_masc_internal_error restored.failure with
-       | Some (Driver.Accept_rejected { reason_kind; _ }) ->
-         reason_kind = Some Driver.Accept_no_usable_progress
-       | _ -> false);
-    (match Deferred_store.clear ~base_path ~keeper_name:"backend" with
-     | Ok () -> ()
-     | Error error ->
-       Alcotest.failf "clear failed: %s" (Deferred_store.error_to_string error));
-    match Deferred_store.load ~base_path ~keeper_name:"backend" with
-    | Ok None -> ()
-    | Ok (Some _) -> Alcotest.fail "settled suffix remained replayable"
-    | Error error ->
-      Alcotest.failf "post-clear load failed: %s" (Deferred_store.error_to_string error))
+      (Option.is_none
+         (Loop.deferred_lane_for_assignment ~assignment_id:"lane.restart"
+            (Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend")));
+    Loop.record_deferred_lane after hint;
+    let reassigned = Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
+    Alcotest.(check bool)
+      "changed assignment gets no suffix"
+      true
+      (Option.is_none
+         (Loop.deferred_lane_for_assignment reassigned ~assignment_id:"lane.other"));
+    Alcotest.(check bool)
+      "dropped suffix is not restored again"
+      true
+      (Option.is_none
+         (Loop.deferred_lane_for_assignment ~assignment_id:"lane.restart"
+            (Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend"))))
+;;
+
+(* Two named clusters with the same keeper name and assignment: recording or
+   clearing a suffix in one leaves the other's untouched. *)
+let test_deferred_suffix_is_isolated_between_clusters () =
+  with_deferred_store (fun base_path ->
+    let module Loop = Masc.Keeper_heartbeat_loop.For_testing in
+    let hint next =
+      Driver.For_testing.make_deferred_runtime_lane
+        ~assignment_id:"lane.shared"
+        ~failed_runtime_id:"runtime.a"
+        ~next_runtime_id:next
+        ~later_runtime_ids:[]
+        ~failure:(accept_empty_no_progress_error "runtime.a")
+    in
+    let slot cluster =
+      Loop.restore_deferred_lane_slot
+        ~lane_now:unchanged_lane
+        ~base_path
+        ~keepers_dir:(cluster_keepers_dir base_path cluster)
+        ~keeper_name:"backend"
+    in
+    let next_of cluster =
+      Option.map
+        (fun (h : Driver.deferred_runtime_lane) -> h.next_runtime_id)
+        (Loop.deferred_lane_for_assignment ~assignment_id:"lane.shared" (slot cluster))
+    in
+    let alpha = slot "alpha" in
+    Loop.record_deferred_lane alpha (hint "runtime.b");
+    Alcotest.(check (option string))
+      "recording in alpha leaves beta without a suffix"
+      None
+      (next_of "beta");
+    let beta = slot "beta" in
+    Loop.record_deferred_lane beta (hint "runtime.c");
+    Alcotest.(check (option string))
+      "alpha keeps its own successor"
+      (Some "runtime.b")
+      (next_of "alpha");
+    Alcotest.(check bool)
+      "beta drops its suffix for a changed assignment"
+      true
+      (Option.is_none (Loop.deferred_lane_for_assignment beta ~assignment_id:"lane.other"));
+    Alcotest.(check (option string))
+      "clearing beta leaves alpha's suffix"
+      (Some "runtime.b")
+      (next_of "alpha"))
+;;
+
+(* An operator edits the lane to [A; D] and restarts. The frozen suffix names
+   B and C, which the lane no longer has, so the restart walks the edited lane
+   and the file is gone; a removed assignment is dropped the same way. *)
+let test_restored_suffix_yields_to_edited_lane () =
+  with_deferred_store (fun base_path ->
+    let module Loop = Masc.Keeper_heartbeat_loop.For_testing in
+    let keepers_dir = cluster_keepers_dir base_path "alpha" in
+    let restore lane_now =
+      Loop.restore_deferred_lane_slot ~lane_now ~base_path ~keepers_dir ~keeper_name:"backend"
+    in
+    let hint =
+      Driver.For_testing.make_deferred_runtime_lane
+        ~assignment_id:"lane.edited"
+        ~failed_runtime_id:"runtime.a"
+        ~next_runtime_id:"runtime.b"
+        ~later_runtime_ids:[ "runtime.c" ]
+        ~failure:(accept_empty_no_progress_error "runtime.a")
+    in
+    Loop.record_deferred_lane (restore unchanged_lane) hint;
+    let edited _ = Loop.Lane_candidates [ "runtime.a"; "runtime.d" ] in
+    Alcotest.(check bool)
+      "edited lane drops the frozen suffix"
+      true
+      (Option.is_none (Loop.deferred_lane_for_assignment ~assignment_id:"lane.edited" (restore edited)));
+    Alcotest.(check bool)
+      "dropped suffix does not come back under the old lane"
+      true
+      (Option.is_none (Loop.deferred_lane_for_assignment ~assignment_id:"lane.edited" (restore unchanged_lane)));
+    Loop.record_deferred_lane (restore unchanged_lane) hint;
+    Alcotest.(check bool)
+      "unavailable catalog entry keeps the suffix"
+      true
+      (Option.is_some (Loop.deferred_lane_for_assignment ~assignment_id:"lane.edited" (restore (fun _ -> Loop.Lane_unavailable))));
+    Alcotest.(check bool)
+      "removed assignment drops the suffix"
+      true
+      (Option.is_none (Loop.deferred_lane_for_assignment ~assignment_id:"lane.edited" (restore (fun _ -> Loop.Lane_missing))));
+    Alcotest.(check bool)
+      "removed assignment's suffix is not restored again"
+      true
+      (Option.is_none (Loop.deferred_lane_for_assignment ~assignment_id:"lane.edited" (restore unchanged_lane))))
 ;;
 
 let test_deferred_store_rejects_unknown_schema_without_fallback () =
   with_deferred_store (fun base_path ->
-    let path = Deferred_store.path_for ~base_path ~keeper_name:"backend" in
+    let path = Deferred_store.path_for ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
     let dir = Filename.dirname path in
     Fs_compat.mkdir_p dir;
     write_file path {|{"schema":"keeper.deferred_runtime_lane.v0"}|};
-    match Deferred_store.load ~base_path ~keeper_name:"backend" with
+    match Deferred_store.load ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" with
     | Error (Deferred_store.Malformed _) -> ()
     | Error error ->
       Alcotest.failf
@@ -5793,6 +6110,16 @@ let () =
             "access refusal rotates this turn and the next turn tries the head"
             `Quick
             test_access_refusal_rotates_this_turn_and_the_next_turn_tries_the_head;
+          Alcotest.test_case "a 403 with a spent window rests until its reset" `Quick
+            test_a_403_with_a_spent_window_rests_until_its_reset;
+          Alcotest.test_case "a 403 with headroom rests nothing" `Quick
+            test_a_403_with_headroom_rests_nothing;
+          Alcotest.test_case "a 403 without usage-read rests nothing" `Quick
+            test_a_403_without_usage_read_rests_nothing;
+          Alcotest.test_case "the read after a 403 skips and contains its failures" `Quick
+            test_the_read_after_a_403_skips_and_contains_its_failures;
+          Alcotest.test_case "the read after a 403 does not refresh a credential" `Quick
+            test_the_read_after_a_403_does_not_refresh_a_credential;
           Alcotest.test_case "only the candidate's own failures are evidence" `Quick
             test_only_the_candidates_own_failures_are_evidence;
           Alcotest.test_case "a yield before the first token clears no evidence" `Quick
@@ -5964,17 +6291,17 @@ let () =
             `Quick
             test_the_heartbeat_lane_restarts_its_cycle;
           Alcotest.test_case
-            "deferred hint refs are not shared"
+            "heartbeat restart resumes the deferred suffix"
             `Quick
-            test_deferred_hint_refs_are_not_shared;
+            test_heartbeat_restart_resumes_deferred_suffix;
           Alcotest.test_case
-            "deferred hint is dropped when the assignment changes"
+            "deferred suffix is isolated between clusters"
             `Quick
-            test_deferred_hint_is_dropped_when_assignment_changes;
+            test_deferred_suffix_is_isolated_between_clusters;
           Alcotest.test_case
-            "deferred hint survives restart and settles durably"
+            "restored suffix yields to an edited lane"
             `Quick
-            test_deferred_hint_survives_store_restart_and_clears_after_settlement;
+            test_restored_suffix_yields_to_edited_lane;
           Alcotest.test_case
             "deferred store rejects unknown schema"
             `Quick

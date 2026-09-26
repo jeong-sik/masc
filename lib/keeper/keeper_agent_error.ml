@@ -168,7 +168,7 @@ let provider_error_terminal_reason_code = function
   | Llm_provider.Error.HardQuota _ -> "provider_error_hard_quota"
   | Llm_provider.Error.CapacityExhausted { scope; _ } ->
     Printf.sprintf
-      "provider_error_capacity_backpressure:%s"
+      "provider_error_provider_capacity:%s"
       (Llm_provider.Error.capacity_scope_to_string scope)
   | Llm_provider.Error.AuthError _ -> Keeper_terminal_reason.wire_provider_error_auth
   | Llm_provider.Error.AuthorizationError _ ->

@@ -126,8 +126,12 @@ let mandatory_exact_output_lane_ids =
   [ Hitl_summary_worker.lane_id; Keeper_board_attention_exact_flow.lane_id ]
 ;;
 
-let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
-  List.iter
+type mandatory_exact_output_lane_violation =
+  | Mandatory_lane_missing of { lane_id : string }
+  | Mandatory_lane_without_slots of { lane_id : string }
+
+let mandatory_exact_output_lane_violations lanes =
+  List.filter_map
     (fun lane_id ->
        match
          List.find_opt
@@ -135,31 +139,53 @@ let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
               String.equal lane.id lane_id)
            lanes
        with
-       | None ->
-         raise
-           (Env_config_core.Config_error
-              (Printf.sprintf
-                 "exact-output registry: mandatory lane %S is missing in %s; add \
-                  [runtime.exact_output_lanes.%s] with non-empty slots (AGENT_CORE \
-                  target refs) or cli_slots (runtime ids), or reset the preserved runtime.toml and \
-                  restart so MASC can reseed it; existing runtime configs are \
-                  never migrated automatically"
-                 lane_id
-                 config_path
-                 lane_id))
+       | None -> Some (Mandatory_lane_missing { lane_id })
        | Some { slot_ids = []; cli_slot_ids = []; _ } ->
-         raise
-           (Env_config_core.Config_error
-              (Printf.sprintf
-                 "exact-output registry: mandatory lane %S has no slots in %s; \
-                  configure at least one AGENT_CORE target ref in slots or CLI runtime \
-                  id in cli_slots, or reset the preserved runtime.toml and restart so MASC can reseed it; existing \
-                  runtime configs are never migrated automatically"
-                 lane_id
-                 config_path))
+         Some (Mandatory_lane_without_slots { lane_id })
        | Some { slot_ids = _ :: _; _ }
-       | Some { cli_slot_ids = _ :: _; _ } -> ())
+       | Some { cli_slot_ids = _ :: _; _ } -> None)
     mandatory_exact_output_lane_ids
+;;
+
+(* Names the key to set and the type it expects, never a value: the seed
+   config/runtime.toml describes a different deployment, so a target ref
+   copied from it can be unknown here and fail publication on the next
+   boot (#25685). *)
+let mandatory_exact_output_lane_violation_to_string = function
+  | Mandatory_lane_missing { lane_id } ->
+    Printf.sprintf
+      "lane %S is missing: add [runtime.exact_output_lanes.%s] with a \
+       non-empty slots array (AGENT_CORE target refs) or cli_slots array \
+       (runtime ids)"
+      lane_id
+      lane_id
+  | Mandatory_lane_without_slots { lane_id } ->
+    Printf.sprintf
+      "lane %S has no slots: set runtime.exact_output_lanes.%s.slots \
+       (AGENT_CORE target refs) or runtime.exact_output_lanes.%s.cli_slots \
+       (runtime ids) to a non-empty array"
+      lane_id
+      lane_id
+      lane_id
+;;
+
+(* Every violation goes into one error, so the first failed boot names every
+   key the operator has to set. *)
+let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
+  match mandatory_exact_output_lane_violations lanes with
+  | [] -> ()
+  | violations ->
+    raise
+      (Env_config_core.Config_error
+         (Printf.sprintf
+            "exact-output registry: %d mandatory lane(s) unusable in %s: %s; \
+             choose target refs or runtime ids this deployment defines; \
+             existing runtime configs are never migrated automatically"
+            (List.length violations)
+            config_path
+            (violations
+             |> List.map mandatory_exact_output_lane_violation_to_string
+             |> String.concat "; ")))
 ;;
 
 (* Retracted (2026-08-28, hours after #31445): the classifier reuses
@@ -224,6 +250,10 @@ let install_domain_pool_references domain_pool =
 
 module For_testing = struct
   let configure_exact_output_registry = configure_exact_output_registry
+  let mandatory_exact_output_lane_violations = mandatory_exact_output_lane_violations
+
+  let require_explicit_mandatory_exact_output_lanes =
+    require_explicit_mandatory_exact_output_lanes
   let install_domain_pool_references = install_domain_pool_references
 end
 
@@ -875,27 +905,14 @@ let initialize_owner_state_blocking
    | Ok Workspace_retired ->
      Log.Server.warn "Skill snapshot workspace retired during boot publication"
    | Ok (Published skill_snapshot | Unchanged skill_snapshot) ->
-     (match Skill_catalog_snapshot.config_state skill_snapshot with
-      | Configured _ ->
-        Log.Server.info
-          "Skill snapshot ready at boot: snapshot_revision=%s catalog_revision=%s skills=%d rejections=%d"
-          (Skill_catalog_snapshot.snapshot_revision skill_snapshot
-           |> Skill_catalog_snapshot.snapshot_revision_to_string)
-          (Skill_catalog_snapshot.catalog_revision skill_snapshot
-           |> Skill_catalog_snapshot.catalog_revision_to_string)
-          (List.length (Skill_catalog_snapshot.entries skill_snapshot))
-          (List.length (Skill_catalog_snapshot.rejections skill_snapshot))
-      | Config_rejected { diagnostics; _ } ->
-        Log.Server.warn
-          "Skill snapshot config rejected at boot: snapshot_revision=%s diagnostics=%d"
-          (Skill_catalog_snapshot.snapshot_revision skill_snapshot
-           |> Skill_catalog_snapshot.snapshot_revision_to_string)
-          (List.length diagnostics)
-      | Config_unreadable _ ->
-        Log.Server.error
-          "Skill snapshot config unreadable at boot: snapshot_revision=%s"
-          (Skill_catalog_snapshot.snapshot_revision skill_snapshot
-           |> Skill_catalog_snapshot.snapshot_revision_to_string))));
+     (match
+        Server_skill_snapshot_runtime.boot_report
+          ~runtime_config_path:runtime_config_observation.Runtime.path
+          skill_snapshot
+      with
+      | Server_skill_snapshot_runtime.Boot_info, line -> Log.Server.info "%s" line
+      | Server_skill_snapshot_runtime.Boot_warn, line -> Log.Server.warn "%s" line
+      | Server_skill_snapshot_runtime.Boot_error, line -> Log.Server.error "%s" line)));
   (match runtime_initialization, runtime_config_path with
    | Ok _, Some path ->
      (try configure_exact_output_registry ~config_root:(Filename.dirname path) () with

@@ -52,7 +52,7 @@ let dispatch
       ~(args : Yojson.Safe.t)
   : Tool_result.result option
   =
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let err msg =
     Tool_result.error
       ~failure_class:Tool_result.Runtime_failure
@@ -124,6 +124,7 @@ let dispatch
                  ~payload
                  ~channel:None)
         ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+        ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
         }
         ~name
         ~args

@@ -5530,6 +5530,78 @@ let test_decode_memory_fact_refuses_an_unknown_category () =
       | Ok _ | Error _ -> Alcotest.failf "%s did not decode" word)
     Masc.Keeper_memory_os_types.all_categories
 
+(* The "all keepers" Memory view merges per-keeper listings. A keeper that
+   could not be read is named beside the facts that were read; a keeper with
+   no memory yet is not a failure. *)
+let merge_fixture_fact claim : Tui_decode.memory_fact =
+  { Tui_decode.mf_claim = claim
+  ; mf_category = Masc.Keeper_memory_os_types.Fact
+  ; mf_origin = "authored"
+  ; mf_first_seen = 1.
+  ; mf_last_seen = 1.
+  ; mf_memory_id = "mem-" ^ claim
+  ; mf_events = Tui_decode.no_memory_fact_events
+  }
+
+let merge_fixture_snapshot ?(ordinary = Tui_decode.Memory_store_absent) keeper =
+  { Tui_decode.mfs_keeper = keeper
+  ; mfs_ordinary = ordinary
+  ; mfs_source = Tui_decode.Memory_store_absent
+  ; mfs_events_read_error = None
+  }
+
+let merged_claims (snapshot : Tui_decode.memory_fact_snapshot) =
+  match snapshot.Tui_decode.mfs_ordinary with
+  | Tui_decode.Memory_store_present store ->
+    List.map (fun (f : Tui_decode.memory_fact) -> f.Tui_decode.mf_origin, f.mf_claim)
+      store.Tui_decode.mos_facts
+  | Tui_decode.Memory_store_absent | Tui_decode.Memory_store_read_error _ ->
+    Alcotest.fail "the merge is always a present store"
+
+let test_merge_keeper_memory_facts_names_unread_keepers () =
+  let present claims =
+    Tui_decode.Memory_store_present
+      { Tui_decode.mos_revision = 3
+      ; mos_updated_at = 1.
+      ; mos_facts = List.map merge_fixture_fact claims
+      }
+  in
+  let snapshot, unread =
+    Tui_decode.merge_keeper_memory_facts ~now:10.
+      [ "alpha", Ok (merge_fixture_snapshot ~ordinary:(present [ "a1" ]) "alpha")
+      ; "beta", Error "connection refused"
+      ; ( "gamma"
+        , Ok
+            { (merge_fixture_snapshot "gamma") with
+              Tui_decode.mfs_ordinary = Tui_decode.Memory_store_read_error "unreadable"
+            ; mfs_source = Tui_decode.Memory_store_read_error "unreadable"
+            } )
+      ; "delta", Ok (merge_fixture_snapshot "delta")
+      ]
+  in
+  Alcotest.(check (list (pair string string)))
+    "facts read stay, tagged with their keeper"
+    [ "alpha \xc2\xb7 authored", "a1" ]
+    (merged_claims snapshot);
+  match unread with
+  | None -> Alcotest.fail "unread keepers were not reported"
+  | Some summary ->
+    Alcotest.(check bool) "each unread keeper counted once, absent is not unread" true
+      (String.starts_with ~prefix:"2 of 4 keepers not read: " summary);
+    List.iter
+      (fun needle ->
+        Alcotest.(check bool) ("names " ^ needle) true
+          (String_util.contains_substring summary needle))
+      [ "beta: connection refused"; "gamma: ordinary store: unreadable";
+        "gamma: source-bound store: unreadable" ]
+
+let test_merge_keeper_memory_facts_all_read () =
+  let _, unread =
+    Tui_decode.merge_keeper_memory_facts ~now:10.
+      [ "alpha", Ok (merge_fixture_snapshot "alpha") ]
+  in
+  Alcotest.(check (option string)) "nothing unread" None unread
+
 let test_decode_memory_facts_keeps_both_stores () =
   let ordinary =
     `Assoc
@@ -5918,6 +5990,8 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "cli_slots", `List []
     ; "dropped_slots", `List []
     ; "declared_slots", `List [ `String "qwen-primary" ]
+    ; "declared_cli_slots", `List []
+    ; "supports_cli_tail", `Bool true
     ; "admission_error", `Null
     ; "status", `String status
     ; "retained_run_count", `Int retained
@@ -6476,12 +6550,12 @@ let test_decode_standalone_lanes_rejects_duplicate_ids () =
   match Tui_decode.decode_standalone_lanes_snapshot json with
   | Ok _ -> Alcotest.fail "duplicate lane ids decoded as a complete matrix"
   | Error detail ->
-      Alcotest.(check bool)
-        "error names completeness"
-        true
-        (String.starts_with
-           ~prefix:"standalone lanes: expected each known lane"
-           detail)
+      (* The async read boundary names the source once; the decoder gives
+         only the cause. *)
+      Alcotest.(check string)
+        "error names completeness without the source"
+        "expected each known lane exactly once"
+        detail
 
 let fusion_run_json ?(status = "completed") ?(topology = "simple")
     ?(failure_fields = []) ?(outcome_fields = []) ?stage ?progress run_id =
@@ -8210,14 +8284,19 @@ let test_decode_keeper_turns_rejects_unknown_schema () =
   in
   match Tui_decode.decode_keeper_turns unknown_schema with
   | Ok _ -> Alcotest.fail "an unknown schema decoded instead of erroring"
-  | Error _ -> ()
+  | Error detail ->
+      (* The async read boundary adds "keeper turns load failed: ". *)
+      Alcotest.(check string) "cause without the source"
+        "unknown schema \"masc.keeper_turns.v2\"" detail
 
 (* GET /api/v1/runtime/resolved, the picker's comprehensive shared document. *)
 let picker_default_runtime =
   `Assoc
     [ ("id", `String "ollama_cloud.deepseek")
     ; ("provider", `String "Ollama Cloud")
+    ; ("provider_id", `String "ollama_cloud")
     ; ("model", `String "deepseek-v4-flash:0731")
+    ; ("exact_slot_group", `String "slots")
     ; ("effective_max_context", `Int 200000)
     ; ("max_context_source", `String "override_clamped_by_capability")
     ; ("max_output_tokens", `Int 8192)
@@ -8240,7 +8319,9 @@ let runtime_resolved_json =
           ; `Assoc
               [ ("id", `String "exact.embed")
               ; ("provider", `String "Local")
+              ; ("provider_id", `String "exact")
               ; ("model", `String "embed")
+              ; ("exact_slot_group", `String "slots")
               ; ("effective_max_context", `Int 8192)
               ; ("max_context_source", `String "capability")
               ; ("max_output_tokens", `Null)
@@ -8326,6 +8407,41 @@ let test_decode_runtime_resolved_full () =
            Alcotest.(check bool) "a table declares this lane" true lane.rrl_declared
        | _ -> Alcotest.fail "expected exactly one lane");
       Alcotest.(check int) "assignments decode" 1 (List.length assignments)
+
+let test_exact_slot_group_is_typed () =
+  let change_group group = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              if String.equal key "exact_slot_group" then key, `String group
+              else key, value)
+           fields)
+    | value -> value
+  in
+  let change_second_runtime group = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              match key, value with
+              | "runtimes", `List [ first; second ] ->
+                key, `List [ first; change_group group second ]
+              | _ -> key, value)
+           fields)
+    | value -> value
+  in
+  (match Tui_decode.decode_runtime_resolved
+           (change_second_runtime "cli_slots" runtime_resolved_json) with
+   | Ok ([ _; cli ], _) ->
+     Alcotest.(check bool) "official client appends to CLI tail" true
+       (cli.ro_exact_slot_group = Tui_decode.Exact_cli_slots)
+   | Ok _ -> Alcotest.fail "expected two runtimes"
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check bool) "unknown destination refuses the catalog" true
+    (Result.is_error
+       (Tui_decode.decode_runtime_resolved
+          (change_second_runtime "other" runtime_resolved_json)))
 
 (* [declared] tells a lane a table declares from the single candidate an
    assignment naming a runtime rests on. The two are the same shape otherwise,
@@ -8484,7 +8600,9 @@ let resolved_runtime id provider model =
   `Assoc
     [ "id", `String id
     ; "provider", `String provider
+    ; "provider_id", `String provider
     ; "model", `String model
+    ; "exact_slot_group", `String "slots"
     ; "effective_max_context", `Int 200000
     ; "max_context_source", `String "capability"
     ; "max_output_tokens", `Int 8192
@@ -8777,6 +8895,8 @@ let test_runtime_default_limits_must_match_listed_row () =
         "default_runtime disagrees with its resolved runtime row" detail
     | Ok _ -> Alcotest.fail ("contradictory default accepted: " ^ key))
     ["effective_max_context", `Int 100000;
+     "provider_id", `String "another_provider";
+     "exact_slot_group", `String "cli_slots";
      "max_context_source", `String "capability";
      "max_output_tokens", `Null;
      "declared_reasoning_effort", `String "low";
@@ -10743,23 +10863,50 @@ let keeper_gate_settings_json =
       , `List
           [ `Assoc [ ("keeper_name", `String "echo"); ("mode", `String "manual") ] ] )
     ; ("modes_state", `Assoc [ ("state", `String "ready") ])
-    ; ( "judges"
+    ; ( "exact_lanes"
       , `List
           [ `Assoc
               [ ("keeper_name", `String "echo")
+              ; ("lane_id", `String "hitl_auto_judge")
               ; ("slot_id", `String "glm-coding.glm-5-turbo")
+              ; ("updated_by", `String "vincent")
+              ; ("updated_at", `String "2026-08-27T05:00:00Z")
+              ; ("offered", `Bool false)
               ] ] )
-    ; ("judges_state", `Assoc [ ("state", `String "ready") ])
+    ; ("exact_lanes_state", `Assoc [ ("state", `String "ready") ])
     ]
 
 let test_decode_keeper_gate_settings_reads_both_lists () =
   match Tui_decode.decode_keeper_gate_settings keeper_gate_settings_json with
   | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
-  | Ok (modes, judges) ->
+  | Ok (modes, exact_lanes) ->
     Alcotest.(check (list (pair string string)))
       "modes" [ ("echo", "manual") ] modes;
-    Alcotest.(check (list (pair string string)))
-      "judges" [ ("echo", "glm-coding.glm-5-turbo") ] judges
+    Alcotest.(check (list (pair string (pair string string))))
+      "exact lanes" [ ("echo", ("hitl_auto_judge", "glm-coding.glm-5-turbo")) ]
+      (List.map
+         (fun (first : Tui_decode.keeper_exact_lane_first) ->
+           first.Tui_decode.kel_keeper, (first.kel_lane_id, first.kel_slot_id))
+         exact_lanes);
+    Alcotest.(check (list bool)) "offered is carried, not defaulted" [ false ]
+      (List.map (fun (first : Tui_decode.keeper_exact_lane_first) -> first.Tui_decode.kel_offered)
+         exact_lanes)
+
+(* An unreadable store answers an empty list beside state=unavailable. Read
+   as the list alone, that is "nobody singled out". *)
+let test_decode_keeper_gate_settings_refuses_an_unavailable_store () =
+  let json =
+    `Assoc
+      [ ("modes", `List [])
+      ; ("modes_state", `Assoc [ ("state", `String "ready") ])
+      ; ("exact_lanes", `List [])
+      ; ( "exact_lanes_state"
+        , `Assoc [ ("state", `String "unavailable"); ("error", `String "unreadable") ] )
+      ]
+  in
+  match Tui_decode.decode_keeper_gate_settings json with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "an unreadable store read as nobody singled out"
 
 let test_decode_keeper_gate_settings_takes_an_empty_workspace () =
   (* Nobody singled out is a working configuration, not a missing answer. *)
@@ -10767,8 +10914,8 @@ let test_decode_keeper_gate_settings_takes_an_empty_workspace () =
     `Assoc
       [ ("modes", `List [])
       ; ("modes_state", `Assoc [ ("state", `String "ready") ])
-      ; ("judges", `List [])
-      ; ("judges_state", `Assoc [ ("state", `String "ready") ])
+      ; ("exact_lanes", `List [])
+      ; ("exact_lanes_state", `Assoc [ ("state", `String "ready") ])
       ]
   in
   match Tui_decode.decode_keeper_gate_settings json with
@@ -10782,7 +10929,9 @@ let test_decode_keeper_gate_settings_rejects_a_row_without_a_keeper () =
   let json =
     `Assoc
       [ ("modes", `List [ `Assoc [ ("mode", `String "manual") ] ])
-      ; ("judges", `List [])
+      ; ("modes_state", `Assoc [ ("state", `String "ready") ])
+      ; ("exact_lanes", `List [])
+      ; ("exact_lanes_state", `Assoc [ ("state", `String "ready") ])
       ]
   in
   match Tui_decode.decode_keeper_gate_settings json with
@@ -11843,6 +11992,8 @@ let () =
           test_decode_runtime_resolved;
         Alcotest.test_case "carries runtimes, lanes, and assignments" `Quick
           test_decode_runtime_resolved_full;
+        Alcotest.test_case "exact slot destination is typed" `Quick
+          test_exact_slot_group_is_typed;
         Alcotest.test_case "runtime catalog keeps unavailable assignment evidence" `Quick
           test_decode_unavailable_runtime_assignment;
         Alcotest.test_case "a lane says whether a table declares it" `Quick
@@ -11964,6 +12115,10 @@ let () =
           test_every_lane_draws_its_own_answer;
         Alcotest.test_case "standalone lanes refuse an unknown lane id" `Quick
           test_decode_standalone_lanes_refuses_an_unknown_lane_id;
+        Alcotest.test_case "merge names unread keepers" `Quick
+          test_merge_keeper_memory_facts_names_unread_keepers;
+        Alcotest.test_case "merge with every keeper read" `Quick
+          test_merge_keeper_memory_facts_all_read;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
         Alcotest.test_case "memory fact refuses an unknown category" `Quick
@@ -12448,6 +12603,8 @@ let () =
           test_decode_keeper_gate_settings_takes_an_empty_workspace;
         Alcotest.test_case "rejects a row without a keeper" `Quick
           test_decode_keeper_gate_settings_rejects_a_row_without_a_keeper;
+        Alcotest.test_case "refuses an unavailable store" `Quick
+          test_decode_keeper_gate_settings_refuses_an_unavailable_store;
       ] );
     ( "keeper_secret_projection",
       [

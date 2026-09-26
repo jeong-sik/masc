@@ -1096,9 +1096,9 @@ let load_schedule_wake_history ~(host : string) ~(port : int)
     decoder reads it and the pane keeps its truncation reading. *)
 let load_schedules_for_target ~(host : string) ~(port : int)
     ~(payload_target : string) : (schedule_snapshot, string) result =
-  match fetch_schedules_for_target ~host ~port ~payload_target with
-  | Error err -> Error ("keeper schedule load failed: " ^ err)
-  | Ok json -> decode_schedule_snapshot json
+  Result.bind
+    (fetch_schedules_for_target ~host ~port ~payload_target)
+    decode_schedule_snapshot
 
 (** Load board post list from /api/v1/board *)
 let load_board_list ~(host : string) ~(port : int)
@@ -1210,9 +1210,7 @@ let load_keeper_tool_approvals ~(host : string) ~(port : int) :
 (** Load which keepers are mid-turn right now (the "answering now" badge). *)
 let load_keeper_turns ~(host : string) ~(port : int) :
     (Tui_decode.keeper_turn_row list, string) result =
-  match fetch_keeper_turns ~host ~port with
-  | Error err -> Error ("keeper turns load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_keeper_turns json
+  Result.bind (fetch_keeper_turns ~host ~port) Tui_decode.decode_keeper_turns
 
 (** Load the durable Gate: pending approvals and both lane modes. *)
 let load_dashboard_gate ~(host : string) ~(port : int) :
@@ -1227,7 +1225,7 @@ let load_dashboard_gate ~(host : string) ~(port : int) :
 
 (** Load the durable per-keeper Gate settings. *)
 let load_keeper_gate_settings ~(host : string) ~(port : int) :
-    ((string * string) list * (string * string) list, string) result =
+    ((string * string) list * Tui_decode.keeper_exact_lane_first list, string) result =
   match fetch_keeper_gate_settings ~host ~port with
   | Error err -> Error ("keeper Gate settings load failed: " ^ err)
   | Ok json -> Tui_decode.decode_keeper_gate_settings json
@@ -1329,6 +1327,15 @@ let load_repository_pulls ~(host : string) ~(port : int) :
   | Error err -> Error ("pull requests load failed: " ^ err)
   | Ok json -> Repository_pulls.decode_reading json
 
+(* Each Keeper's spend over the server's default window; the title draws the
+   window the answer names. A Keeper row the decoder cannot read is counted,
+   and that Keeper is drawn unknown. *)
+let load_keeper_spend ~(host : string) ~(port : int) :
+    (overview_spend_reading, string) result =
+  match Masc_tui_http.fetch_keeper_costs ~host ~port with
+  | Error err -> Error ("keeper spend load failed: " ^ err)
+  | Ok json -> Masc_tui_keeper_spend.decode_reading json
+
 (* The Overview's GOALS section. A phase this build does not know refuses the
    whole reading: a goal dropped from the list, or drawn under a phase it is
    not in, would answer "is work moving a goal" about a different fleet. *)
@@ -1363,6 +1370,10 @@ let load_overview ~(host : string) ~(port : int) :
       let* keepers_unread =
         let* items = required_list_field json "keepers_unread" in
         Keeper_snapshot_unread.list_of_json (`List items)
+      in
+      let* ov_keeper_listing =
+        let* listing = required_object_field json "keepers_listing" in
+        Keeper_snapshot_unread.listing_of_json listing
       in
       let* ov_workspace_health =
         let* workspace_health = required_string_field summary "workspace_health" in
@@ -1407,6 +1418,7 @@ let load_overview ~(host : string) ~(port : int) :
         {
           ov_workspace_health;
           ov_keepers;
+          ov_keeper_listing;
           ov_keeper_liveness;
           ov_keeper_rows;
           ov_mcp_agents;
@@ -1454,7 +1466,7 @@ let load_skills_catalog ~(host : string) ~(port : int) :
 let load_connectors ~(host : string) ~(port : int) :
     (Tui_decode.connector_snapshot, string) result =
   match fetch_connectors ~host ~port with
-  | Error err -> Error ("connector load failed: " ^ err)
+  | Error err -> Error err
   | Ok json ->
       (match Tui_decode.decode_connector_snapshot json with
        | Error _ as error -> error
@@ -1555,7 +1567,7 @@ let load_keeper_lanes ~(host : string) ~(port : int) :
 let load_standalone_lanes ~(host : string) ~(port : int) :
     (Tui_decode.standalone_lanes_snapshot, string) result =
   match fetch_standalone_lanes ~host ~port with
-  | Error err -> Error ("standalone lanes load failed: " ^ err)
+  | Error err -> Error err
   | Ok json -> Tui_decode.decode_standalone_lanes_snapshot json
 
 (** Load the clients roster from /api/v1/dashboard/clients *)

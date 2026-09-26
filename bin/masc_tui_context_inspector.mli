@@ -51,6 +51,10 @@ type recent_turn =
             the provider reported a conversation-cumulative figure instead,
             which is a number about the whole conversation and not a fact
             about this turn. *)
+  ; provider_context_window : int option
+        (** The model window an official client reported
+            ({!Turn_record.t.provider_context_window}); the context it holds is
+            {!client_context_tokens}. *)
   ; cache_read : int option
   ; output_tokens : int option
   ; turn_output_tokens : int option
@@ -235,11 +239,22 @@ type forecast =
   }
 
 type reading =
-  { turn : (selection, string) result
-  ; provider_input : (provider_input, string) result
-  ; response : (response_turn, string) result
-  ; forecast : (forecast, string) result
-  }
+  | Request_failed of string
+      (** The whole inspector request could not start. Keep its cause once. *)
+  | Turn_read_failed of
+      { detail : string
+      ; forecast : (forecast, string) result
+      }
+      (** The turn-dependent reads cannot start. The independently fetched
+          next-request forecast remains visible. *)
+  | Turn_read of
+      { selection : selection
+      ; provider_input : (provider_input, string) result
+      ; response : (response_turn, string) result
+      ; forecast : (forecast, string) result
+      }
+      (** Once the turn is known, its provider input and response may each
+          fail independently. *)
 
 type tab =
   | Composition
@@ -323,3 +338,10 @@ val input_map_rows :
 val exact_input_items : provider_input -> exact_input_item list
 val format_bytes : int -> string
 val format_tokens : int -> string
+
+val client_context_tokens :
+  scope:Runtime_usage_scope.t -> input_tokens:int option -> output_tokens:int option -> int option
+(** The context one request occupied, as an official client counts it against
+    its model window: that request's input plus its output (an estimate after
+    a compaction has no output). Only a per-request figure is one request's;
+    a conversation-cumulative or turn total is [None], never a context size. *)

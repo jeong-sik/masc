@@ -82,7 +82,12 @@ let parse_source = function
              | Some Browser_lane.Lane_name.Live, None -> Error "live browser observation requires an explicit client_id"
              | Some Browser_lane.Lane_name.Automation, None -> Ok Automation
              | Some Browser_lane.Lane_name.Automation, Some _ -> Error "automation does not use a live client_id"
-             | None, _ -> Error ("browser source requires " ^ Browser_lane.Lane_name.expected ^ " lane") in
+             | Some Browser_lane.Lane_name.Stagehand, _ ->
+               Error "a lane addon cannot observe the stagehand lane: it has no idle document observer"
+             | None, _ ->
+               Error ("browser source requires "
+                      ^ String.concat " or " (List.map Browser_lane.Lane_name.to_wire Browser_lane.Lane_name.[ Live; Automation ])
+                      ^ " lane") in
            let* tab_id = match List.assoc_opt "tab_id" fields with
              | Some (`Int value) when value >= 0 -> Ok value
              | _ -> Error "tab_id requires a nonnegative integer" in
@@ -135,12 +140,14 @@ let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = 
   | Misc_dos_click | Misc_dos_type
   (* Handing the controller on changes no pixel, but the capture carries the
      holder, so a watcher would keep showing the old one. *)
-  | Misc_dos_pass -> Dos_changed
+  | Misc_dos_pass
+  (* A restore replaces the machine a watcher shows. *)
+  | Misc_dos_restore -> Dos_changed
   | Misc_browser_session | Misc_browser_goto | Misc_browser_act
   | Misc_browser_interact -> Browser_changed
   | Misc_msx_save | Misc_msx_screen | Misc_msx_peek | Misc_msx_ram_diff
   | Misc_browser_tabs | Misc_browser_read
-  | Misc_dos_screen | Misc_dos_peek
+  | Misc_dos_screen | Misc_dos_peek | Misc_dos_save
   | Misc_lane_declaration_read | Misc_lane_declaration_save | Misc_lane_attach
   | Misc_lane_inspect | Misc_lane_observe | Misc_lane_slice | Misc_lane_detach
   | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status | Misc_lane_updates

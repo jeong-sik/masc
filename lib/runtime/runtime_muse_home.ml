@@ -30,10 +30,13 @@ let sync_directory path =
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
 
 let ensure_directory_with_sync ~sync ~private_ path =
-  let created = try Unix.mkdir path 0o700; true
-    with Unix.Unix_error (Unix.EEXIST, _, _) -> false in
+  (try Unix.mkdir path 0o700
+   with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   let* () = check_directory ~private_ path in
-  if created then sync (Filename.dirname path);
+  (* EEXIST proves visibility, not durability: a prior attempt may have been
+     interrupted after mkdir or failed its parent fsync. Reconfirm publication
+     before using either a newly created or an existing directory. *)
+  sync (Filename.dirname path);
   Ok ()
 
 let ensure_directory = ensure_directory_with_sync ~sync:sync_directory

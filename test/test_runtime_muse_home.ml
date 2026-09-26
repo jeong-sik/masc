@@ -172,14 +172,30 @@ let test_directory_creation_syncs_each_parent () = with_fixture (fun root ->
     check (list string) "each new directory publishes its parent" [parent] !synced;
     synced := [];
     ok (Home.For_testing.ensure_directory_with_sync ~sync ~private_:true path);
-    check (list string) "existing directory needs no new publication" [] !synced;
+    check (list string) "existing directory publication is reconfirmed" [parent] !synced;
+    synced := [];
     path) root [".local"; "state"; "masc"; "muse-config"; "generation"; "muse"] in
   ())
+
+let test_parent_sync_failure_is_retried_on_existing_directory () = with_fixture (fun root ->
+  let path = Filename.concat root "interrupted-publication" in
+  let attempts = ref [] in
+  let sync parent =
+    attempts := parent :: !attempts;
+    if List.length !attempts = 1 then raise (Unix.Unix_error (Unix.EIO, "fsync", parent)) in
+  (match Home.For_testing.ensure_directory_with_sync ~sync ~private_:true path with
+   | exception Unix.Unix_error (Unix.EIO, "fsync", _) -> ()
+   | Ok () -> fail "failed parent sync was reported as successful publication"
+   | Error error -> fail (Home.error_to_string error));
+  check bool "interrupted attempt leaves a visible directory" true (Sys.is_directory path);
+  ok (Home.For_testing.ensure_directory_with_sync ~sync ~private_:true path);
+  check (list string) "retry confirms the parent despite EEXIST" [root; root] (List.rev !attempts))
 
 let () = run "Muse managed account home"
   [ "selected account", [
       test_case "foreign file and parent ownership refuse" `Quick test_foreign_ownership_is_refused;
-      test_case "every new directory syncs its parent" `Quick test_directory_creation_syncs_each_parent;
+      test_case "interrupted parent publication is retried" `Quick test_parent_sync_failure_is_retried_on_existing_directory;
+      test_case "every accepted directory syncs its parent" `Quick test_directory_creation_syncs_each_parent;
       test_case "vendor refresh and external re-login" `Quick test_refresh_survives_and_source_relogin_gets_a_new_identity;
       test_case "accounts, settings and workspaces" `Quick test_accounts_settings_and_native_workspaces_are_separate;
       test_case "missing auth and changed policy refuse" `Quick test_missing_signin_and_changed_managed_policy_refuse;

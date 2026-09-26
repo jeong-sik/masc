@@ -718,6 +718,23 @@ class SelectedNativeAccounts(unittest.TestCase):
         self.assertIsNone(rows[0]['context'])
         self.assertIsNone(rows[0]['existing'])
 
+    def test_muse_selection_only_offers_admissible_catalog_models(self):
+        source = dict(choice='muse', command='muse', account_home='/selected', label='Muse', rows=[])
+        model = dict(id='reported', label='Reported', context=8192)
+        with patch.object(SETUP, 'connection_sources', return_value=[source]), \
+             patch.object(SETUP, 'pick_connection_sources', return_value=([source], [0])), \
+             patch.object(SETUP, 'prepare_connection', return_value=source), \
+             patch.object(SETUP, 'source_models', return_value=([model], 'providerCatalog')), \
+             patch.object(SETUP, 'pick', return_value=[0]) as pick, \
+             patch.object(SETUP, 'resolve_model_spec', return_value=('muse.reported', dict(model='reported'))) as resolve:
+            selected, specs, _ = SETUP.select_connections('/masc', {}, 10)
+        labels = pick.call_args.args[1]
+        self.assertNotIn('Advanced: enter an exact model ID', labels)
+        self.assertEqual(labels[-2:], ['Refresh model list', 'Back to connection selection'])
+        self.assertEqual(selected, ['muse.reported'])
+        self.assertEqual(specs, [dict(model='reported')])
+        self.assertEqual(resolve.call_args.args[1]['context'], 8192)
+
     def test_muse_discovery_offers_selected_signin_before_catalog(self):
         source = dict(choice='muse', command='/selected/muse', account_home='/selected/account')
         catalog = dict(schema='masc.muse_models.v1', source='providerCatalog',

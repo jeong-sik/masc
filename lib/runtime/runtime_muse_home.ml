@@ -56,17 +56,8 @@ let check_file_snapshot (snapshot : Fs_compat.owned_regular_file_snapshot) =
   else Ok ()
 
 let read_optional ~ownership_root path =
-  let* parents = Fs_compat.owned_directory_paths ~ownership_root (Filename.dirname path)
-    |> Result.map_error (fun _ -> State_unavailable "credential path leaves its ownership root") in
-  let rec check_parents = function
-    | [] -> Ok true
-    | parent :: rest ->
-      (match Unix.lstat parent with
-       | stat -> let* () = check_directory_stat ~private_:false stat in check_parents rest
-       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false) in
-  let* parents_exist = check_parents (ownership_root :: parents) in
-  if not parents_exist then Ok None else
-  match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root path with
+  match Fs_compat.load_owned_regular_file_with_snapshot
+      ~owner_uid:(Unix.geteuid ()) ~ownership_root path with
   | Error _ -> unavailable "credential or generation record failed owned-file validation"
   | Ok None -> Ok None
   | Ok (Some file) ->

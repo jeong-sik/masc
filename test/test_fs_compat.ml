@@ -629,6 +629,70 @@ let test_read_dir_and_path_kind_use_typed_inventory ~fs () =
   check_inventory "Eio"
 ;;
 
+let test_owned_read_checks_uid_in_each_parent_snapshot () =
+  with_tmp_dir @@ fun raw_base ->
+  let base = Unix.realpath raw_base in
+  let directory = Filename.concat base "credentials" in
+  Unix.mkdir directory 0o700;
+  let path = Filename.concat directory "auth" in
+  Fs_compat.save_file path "synthetic-private-content";
+  let uid = Unix.geteuid () in
+  let foreign_uid = if uid = 0 then 1 else 0 in
+  List.iter (fun fail_at ->
+    let inspections = ref 0 in
+    let parent_lstat parent =
+      let stat = Unix.lstat parent in
+      if String.equal parent directory then (
+        incr inspections;
+        if !inspections >= fail_at then {stat with Unix.st_uid=foreign_uid} else stat)
+      else stat in
+    match Fs_compat.Owned_read_for_testing.load_with_snapshot
+      ~parent_lstat ~owner_uid:uid ~ownership_root:base path with
+    | Error {failure=Fs_compat.Owned_path_owner_mismatch {path=failed_path; expected_uid; actual_uid}; _} ->
+      check string "same read rejects the replaced parent" directory failed_path;
+      check int "requested owner" uid expected_uid;
+      check int "observed foreign owner" foreign_uid actual_uid;
+      check int "rejection at requested read boundary" fail_at !inspections
+    | Error error -> fail (Fs_compat.owned_regular_file_read_error_to_string error)
+    | Ok _ -> fail "foreign parent passed an owned read") [1;2;3];
+  (* Make parents appear to have the requested foreign UID: the actual file
+     descriptor must still reject it, independent of the parent validator. *)
+  (match Fs_compat.Owned_read_for_testing.load_with_snapshot
+      ~parent_lstat:(fun parent -> {(Unix.lstat parent) with Unix.st_uid=foreign_uid})
+      ~owner_uid:foreign_uid ~ownership_root:base path with
+   | Error {failure=Fs_compat.Owned_path_owner_mismatch {path=failed_path; _}; _} ->
+     check string "descriptor UID is checked" path failed_path
+   | _ -> fail "descriptor owner was not enforced");
+  match Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:uid ~ownership_root:base path with
+  | Ok (Some contents) -> check string "stable owned source admitted" "synthetic-private-content" contents.content
+  | Ok None -> fail "owned fixture missing"
+  | Error error -> fail (Fs_compat.owned_regular_file_read_error_to_string error)
+;;
+
+let test_owned_read_retains_ancestor_identity () =
+  with_tmp_dir @@ fun raw_base ->
+  let base = Unix.realpath raw_base in
+  let ancestor = Filename.concat base "ancestor" in
+  let leaf = Filename.concat ancestor "leaf" in
+  Unix.mkdir ancestor 0o700; Unix.mkdir leaf 0o700;
+  let path = Filename.concat leaf "auth" in
+  Fs_compat.save_file path "synthetic-content";
+  let inspections = ref 0 in
+  let parent_lstat directory =
+    if String.equal directory base then (
+      incr inspections;
+      if !inspections = 2 then (
+        Unix.rename ancestor (ancestor ^ ".old");
+        Unix.mkdir ancestor 0o700;
+        Unix.rename (Filename.concat (ancestor ^ ".old") "leaf") leaf));
+    Unix.lstat directory in
+  match Fs_compat.Owned_read_for_testing.load_with_snapshot ~parent_lstat
+    ~owner_uid:(Unix.geteuid ()) ~ownership_root:base path with
+  | Error {failure=Fs_compat.Filesystem_identity_changed _; _} -> ()
+  | Error error -> fail (Fs_compat.owned_regular_file_read_error_to_string error)
+  | Ok _ -> fail "changed ancestor admitted because immediate parent stayed the same"
+;;
+
 let test_owned_regular_file_read_uses_eio_systhread ~fs () =
   Fs_compat.set_fs fs;
   with_tmp_dir
@@ -945,7 +1009,10 @@ let () =
             (test_primitives_agree_inside_and_outside_eio ~fs:(Eio.Stdenv.fs env))
         ] )
     ; ( "owned regular file"
-      , [ test_case
+      , [ test_case "requested UID checked before and after open/read" `Quick
+            test_owned_read_checks_uid_in_each_parent_snapshot
+        ; test_case "all ancestor identities retained" `Quick test_owned_read_retains_ancestor_identity
+        ; test_case
             "Eio systhread and cancellation"
             `Quick
             (test_owned_regular_file_read_uses_eio_systhread

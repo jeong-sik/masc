@@ -226,6 +226,8 @@ let test_refusals_of_the_session_start_fresh_next () =
     [ "session lease held", lease_held
     ; "resume refused", refused_resume
     ; "resumed on another model", model_mismatch
+    ; "returned another workspace", Serve.Session_workspace_mismatch
+        {requested="/requested"; reported=Some "/other"}
     ; "terminal nonretryable failure", Serve.Turn_failed
         {Msp.kind=Msp.Step_limit; message="fixture refusal"; retryable=false}
     ];

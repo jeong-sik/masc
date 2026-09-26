@@ -82,6 +82,10 @@ type error =
       { requested : string
       ; resumed : string option
       }
+  | Session_workspace_mismatch of
+      { requested : string
+      ; reported : string option
+      }
   | Auth_required of string
   | Turn_failed of Runtime_muse_msp.turn_error
   | Turn_cancelled
@@ -165,10 +169,14 @@ let error_to_string = function
     "Muse Code host uses ephemeral sessions; durable session storage is required"
   | Session_model_mismatch { requested; resumed } ->
     Printf.sprintf
-      "Muse Code resumed a session on %s, but the turn asks for %s"
+      "Muse Code returned a session on %s, but the turn asks for %s"
       (* DET-OK: display text for an absent model id; nothing branches on it. *)
       (Option.value resumed ~default:"the host default model")
       requested
+  | Session_workspace_mismatch { requested; reported } ->
+    Printf.sprintf "Muse Code returned session workspace %s, but the turn asks for %s"
+      (* DET-OK: display text for an absent workspace; admission uses typed equality. *)
+      (Option.value reported ~default:"<absent>") requested
   | Auth_required detail -> "Muse Code has no usable login: " ^ detail
   | Turn_failed { message; retryable; _ } ->
     Printf.sprintf
@@ -899,6 +907,15 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
      | Msp.Unhandled_notification _ -> continue state)
 ;;
 
+let validate_session_identity (config : config) ~workspace_root (session : Msp.session) =
+  let* () = match config.model with
+    | Some requested when session.model_id <> Some requested ->
+      Error (Session_model_mismatch {requested; resumed=session.model_id})
+    | Some _ | None -> Ok () in
+  if session.workspace_root = Some workspace_root then Ok ()
+  else Error (Session_workspace_mismatch {requested=workspace_root; reported=session.workspace_root})
+;;
+
 let open_session io (config : config) ~approval_mode ~session_mode ~workspace_root ~session_config =
   match session_mode with
   | Start ->
@@ -913,6 +930,7 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
           ~config:session_config)
     in
     let* session = lift (Msp.parse_session_result ~stage:"session/start" result) in
+    let* () = validate_session_identity config ~workspace_root session in
     Ok (session, false)
   | Resume { session_id } ->
     let* result =
@@ -935,12 +953,7 @@ let open_session io (config : config) ~approval_mode ~session_mode ~workspace_ro
              session_id
              session.Msp.session_id)
     in
-    let* () =
-      match config.model with
-      | Some requested when session.Msp.model_id <> Some requested ->
-        Error (Session_model_mismatch { requested; resumed = session.Msp.model_id })
-      | Some _ | None -> Ok ()
-    in
+    let* () = validate_session_identity config ~workspace_root session in
     let* (_ : Yojson.Safe.t) =
       request io ~method_:"session/setApprovalMode" (fun ~id ->
         Msp.session_set_approval_mode_request

@@ -101,6 +101,13 @@ let runtime_error_to_core_error (error : Serve.error) =
          ; error_type = Some "session_model_mismatch"
          ; detail = Serve.error_to_string error
          })
+  | Serve.Session_workspace_mismatch _ ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = provider_name
+         ; error_type = Some "session_workspace_mismatch"
+         ; detail = Serve.error_to_string error
+         })
   | Serve.Auth_required detail
   | Serve.Turn_failed { Msp.kind = Msp.Auth_required; message = detail; retryable = _ } ->
     Agent_core.Error.Provider
@@ -234,6 +241,7 @@ let recovery_failure_of_runtime_error ?current (error : Serve.error) =
   | Serve.Process_exited { status = Some Serve.Exit_usage; _ } -> Session_store.Protocol_failed
   | Serve.Turn_failed {retryable=true; _} -> Session_store.Retryable_turn_failed
   | Serve.Session_model_mismatch _
+  | Serve.Session_workspace_mismatch _
   | Serve.Auth_required _
   | Serve.Turn_failed _
   | Serve.Process_exited
@@ -275,6 +283,7 @@ let failure_leaves_effects_unknown ~admission (error : Serve.error) =
      | Serve.Protocol_error _
      | Serve.Capability_not_granted _
      | Serve.Session_model_mismatch _
+     | Serve.Session_workspace_mismatch _
      | Serve.Auth_required _
      | Serve.Turn_failed _
      | Serve.Turn_cancelled
@@ -292,6 +301,7 @@ let failure_leaves_effects_unknown ~admission (error : Serve.error) =
      | Serve.Rpc_error _
      | Serve.Capability_not_granted _
      | Serve.Session_model_mismatch _
+     | Serve.Session_workspace_mismatch _
      | Serve.Auth_required _
      | Serve.Turn_failed _
      | Serve.Turn_cancelled

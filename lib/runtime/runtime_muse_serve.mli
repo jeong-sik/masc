@@ -106,9 +106,14 @@ type error =
       { requested : string
       ; resumed : string option
       }
-      (** [session/resume] cannot select a model, so a resumed session
-          running another model is refused. The caller starts a new session
-          or keeps the model. *)
+      (** A start or resume response must report the explicitly requested model.
+          Missing or different model identity is refused before session persistence
+          or turn dispatch. [resumed] carries the returned model for either mode. *)
+  | Session_workspace_mismatch of
+      { requested : string
+      ; reported : string option
+      }
+      (** Start and resume must report the exact requested workspace before admission. *)
   | Auth_required of string
       (** The host has no usable login ([authRequired]). *)
   | Turn_failed of Runtime_muse_msp.turn_error
@@ -203,6 +208,8 @@ val run_turn
     [sessionMcp] at the handshake and fails with {!Capability_not_granted}
     when the host withholds it.
 
+    The returned model (when explicitly selected) and workspace must match the
+    request on both start and resume. Mismatches refuse admission before callbacks.
     [on_session_ready] runs once the host has returned the session id, before
     the turn is written, so the caller can persist the id first. Its failure
     fails the turn. [on_prompt_sent] runs after the complete [turn/start]

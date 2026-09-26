@@ -30,6 +30,11 @@ ERRORS = (
 
 def run_case(executable: str, kind: str, prefix: bytes, expected: bytes) -> None:
     fixtures = h.resources_mcp_fixture()
+    # The observer GET has no JSON-RPC body. Keep it out of the POST callback;
+    # this fixture exercises resource reads and has no observer events to send.
+    fixtures["/mcp?sse_kind=observer"] = h.RawHttpResponse(
+        200, b"", content_type="text/event-stream"
+    )
     original = fixtures["/mcp"]
     assert isinstance(original, h.RequestHttpResponse)
 

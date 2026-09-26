@@ -312,7 +312,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
       Masc_test_deps.declare_fixture_keeper
         ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-fixture";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
-      write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
+      write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
       let raw_trace_path = Filename.concat base_path "antigravity-raw-trace.jsonl" in
       let raw_trace =
         Agent_core.Raw_trace.create ~path:raw_trace_path ()
@@ -629,22 +629,29 @@ let test_keeper_projects_mcp_tool_and_settles () =
                          large_history @ [Agent_core.Types.user_msg "new native correction"]) in
                       let old_home = prepared_account_home ~base_path in
                       write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path old_home)
-                        "vendor-refreshed-account";
+                        (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "operator-oauth-fixture");
                       check int "native refresh keeps the existing session" 73
                         (run_context ~goal:"Unchanged source, native-refreshed token" unchanged_context);
-                      check string "native refresh is not overwritten" "vendor-refreshed-account"
+                      check string "native refresh is not overwritten" (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "operator-oauth-fixture")
                         (Fs_compat.load_file (Runtime_antigravity_home.oauth_path old_home));
-                      write_file ~mode:0o600 oauth_source "external-relogin-account";
+                      write_file ~mode:0o600 oauth_source
+                        (Masc_test_deps.antigravity_oauth_fixture ~revision:"source-refresh" "operator-oauth-fixture");
+                      check int "ordinary source OAuth refresh resumes the existing session" 73
+                        (run_context ~goal:"Keep this account after OAuth refresh" unchanged_context);
+                      check string "source refresh retains native credential rotation"
+                        (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "operator-oauth-fixture")
+                        (Fs_compat.load_file (Runtime_antigravity_home.oauth_path old_home));
+                      write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "external-relogin-account");
                       check int "same-path external login starts a fresh session" 1
                         (run_context ~goal:"Use externally re-logged account" unchanged_context);
                       let selected_home = String.trim (Fs_compat.load_file
                         (Filename.concat base_path "antigravity-selected-home")) in
                       check bool "actual spawned HOME is a new generation" true
                         (selected_home <> Runtime_antigravity_home.home_dir old_home);
-                      check string "actual child used externally selected account" "external-relogin-account"
+                      check string "actual child used externally selected account" (Masc_test_deps.antigravity_oauth_fixture "external-relogin-account")
                         (Fs_compat.load_file (Filename.concat selected_home
                            ".gemini/antigravity-cli/antigravity-oauth-token"));
-                      check string "old in-flight generation is preserved" "vendor-refreshed-account"
+                      check string "old in-flight generation is preserved" (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "operator-oauth-fixture")
                         (Fs_compat.load_file (Runtime_antigravity_home.oauth_path old_home));
                       let unchanged = ("pre-dispatch fixture system prompt",
                         large_history @ [Agent_core.Types.user_msg "new native correction"]) in
@@ -869,7 +876,7 @@ let test_blank_success_requires_fresh_conversation () =
       Masc_test_deps.declare_fixture_keeper
         ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-fixture";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
-      write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
+      write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
       let cli_path = blank_then_success_fixture_script ~base_path in
       let runtime_path = Filename.concat base_path "runtime.toml" in
       write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
@@ -970,7 +977,7 @@ let test_spawn_failure_is_pre_dispatch () =
       Masc_test_deps.declare_fixture_keeper
         ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-capacity-override";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
-      write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
+      write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
       let missing_cli = Filename.concat base_path "missing-antigravity" in
       let runtime_path = Filename.concat base_path "runtime.toml" in
       write_file
@@ -1128,7 +1135,7 @@ let test_blank_system_prompt_is_refused_not_defaulted () =
       Masc_test_deps.declare_fixture_keeper
         ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-blank-prompt";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
-      write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
+      write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
       let cli_path = fixture_script ~base_path in
       let runtime_path = Filename.concat base_path "runtime.toml" in
       write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
@@ -1998,7 +2005,7 @@ let test_losing_claim_cannot_publish_native_policy () =
     Masc_test_deps.declare_fixture_keeper ~base_path
       ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) keeper_name;
     let oauth_source = Filename.concat base_path "operator-oauth-token" in
-    write_file ~mode:0o600 oauth_source "synthetic-policy-account";
+    write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "synthetic-policy-account");
     let marker = Filename.concat base_path "unexpected-spawn" in
     let cli_path = Filename.concat base_path "agy-never-spawn" in
     write_file ~mode:0o700 cli_path ("#!/bin/sh\ntouch " ^ shell_quote marker ^ "\nexit 0\n");

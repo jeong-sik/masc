@@ -462,7 +462,7 @@ let with_quota_fixture f =
     (fun () ->
       Runtime_quota_window.reset_for_testing ();
       write_file ~path:marker ~perm:0o600 "";
-      write_file ~path:oauth_source ~perm:0o600 "{}";
+      write_file ~path:oauth_source ~perm:0o600 (Masc_test_deps.antigravity_oauth_fixture "quota-fixture");
       write_file ~path:claude_cli ~perm:0o700 (claude_script ~marker ~body:(rejection ()));
       write_file ~path:agy_cli ~perm:0o700
         (Printf.sprintf {|#!/bin/sh

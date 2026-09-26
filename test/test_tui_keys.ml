@@ -41,6 +41,8 @@ let enter_atom_count_exceptions =
     "Keeper detail", 0
   ; (* A roster with a cursor and nothing the cursor opens. *)
     "Config / Runtime / Clients", 0
+  ; (* A scrolling reading, not a row list. *)
+    "Config / Tools", 0
   ; (* Two readings a Keeper detail drills into: [j/k] scrolls the text and
        there is no row under a cursor for Enter to open. *)
     "Keepers / Logs", 0
@@ -101,6 +103,27 @@ let test_every_surface_answers () =
         "a surface with no bindings has no footer and no help row" true
         (Masc_tui_keys.for_surface surface <> []))
     every_surface
+
+(* Keeper logs reads a tail window and has arms of its own for the keys that
+   move it: [home] and [end] set [log_scroll] and the page dispatcher walks
+   the window. The table named only [j/k], so three keys that answer on this
+   screen were on no footer and in no sheet section. The labels say what the
+   keys do here rather than what they do on a row list: rows are newest
+   first, so Home is now and End the oldest row held. *)
+let test_keeper_logs_names_the_keys_that_move_its_reading () =
+  let hints = Masc_tui_keys.footer_hints (Keepers Keeper_logs) in
+  List.iter
+    (fun needle ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the Keeper logs footer names %S" needle)
+        true
+        (let n = String.length needle and h = String.length hints in
+         let rec scan i =
+           i + n <= h
+           && (String.equal (String.sub hints i n) needle || scan (i + 1))
+         in
+         scan 0))
+    [ "j/k:scroll"; "PgUp/PgDn:page"; "Home/End:now / oldest"; "Left / Esc:back" ]
 
 (* The runtime picker claims its own keys through [Masc_tui_pick_list], and
    the page and edge pairs were carried inside [j/k]'s help rather than
@@ -516,23 +539,25 @@ let test_schedule_update_form_preserves_exact_editable_definition () =
    can drift to any footer at all without a test noticing. *)
 let test_tools_footer_carries_the_keeper_axis () =
   check str "tools names the effective Keeper switch"
-    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [ / ]:Keeper  Enter:evidence  c / C:new Skill  e:edit Skill  Esc:config  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [ / ]:Keeper  c / C:new Skill  e:edit Skill  Esc:config  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Tools)
 
 let test_resources_footer_steps_through_detail () =
-  let tail =
-    "  h/l:pane  Ctrl-W:focus  J/K:scroll text  [ / ]:previous / next"
-    ^ "  PgUp/PgDn:page  Home/End:top/bottom  Enter:read  Esc:back"
-  in
+  let panes = "  h/l:pane  Ctrl-W:focus  J/K:scroll text" in
+  (* [[ / ]] reads the resource before or after the open one, and the
+     dispatcher answers it only with the text focused, so the list footer
+     does not offer it. *)
+  let step = "  [ / ]:previous / next" in
+  let tail = "  PgUp/PgDn:page  Home/End:top/bottom  Enter:read  Esc:back" in
   let meta = "  r:reload  Tab:next  q:quit" in
-  check str "list names its search and adjacent detail navigation"
-    ("j/k:move" ^ tail ^ "  /:find  n / N:next / previous match" ^ meta)
+  check str "list names its search and not the adjacent-detail step"
+    ("j/k:move" ^ panes ^ tail ^ "  /:find  n / N:next / previous match" ^ meta)
     (Masc_tui_keys.footer_hints_resources ~detail_focus:false);
   (* The text has no cursor for a match to land on, so it says no [/] --
      the same answer [surface_row_texts] gives for that focus. Both ends
      still answer Home and End, which move the reading. *)
-  check str "the text names scrolling without a row search"
-    ("j/k:scroll text" ^ tail ^ meta)
+  check str "the text names scrolling and the step it answers"
+    ("j/k:scroll text" ^ panes ^ step ^ tail ^ meta)
     (Masc_tui_keys.footer_hints_resources ~detail_focus:true)
 
 (* Changes drew a literal in the renderer, and a literal names a fixed set at
@@ -1479,7 +1504,11 @@ let approvals_reading_is_current state =
       ; aps_total_count = 0
       ; aps_hidden_count = 0
       };
+  state.keeper_tool_approvals_observed <- true;
   state.keeper_tool_approvals_error <- None;
+  state.gate_snapshot_observed <- true;
+  state.gate_error <- None;
+  state.gate_queue_unavailable <- None;
   state.asks_snapshot <-
     Some { Masc.Tui_decode.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
   state.asks_error <- None
@@ -1505,7 +1534,69 @@ let test_the_ring_keeps_approvals_until_a_reading_empties_it () =
   state.asks_error <- None;
   state.approval_snapshot <- None;
   Alcotest.(check bool) "an unread confirm queue keeps it" true
+    (approvals_in_ring state);
+  (* The durable Gate queue is the fourth list the count walks. Its rows are
+     the ones that keep while nobody watches, so an unreadable Gate store is
+     the case where a missing entry misleads the most. *)
+  approvals_reading_is_current state;
+  state.gate_error <- Some "gate poll failed";
+  Alcotest.(check bool) "a failed Gate poll keeps it" true
+    (approvals_in_ring state);
+  state.gate_error <- None;
+  state.gate_queue_unavailable <- Some "approval queue store unreadable";
+  Alcotest.(check bool) "a Gate queue the server could not read keeps it" true
+    (approvals_in_ring state);
+  state.gate_queue_unavailable <- None;
+  state.gate_snapshot_observed <- false;
+  Alcotest.(check bool) "a Gate queue not read yet keeps it" true
+    (approvals_in_ring state);
+  state.gate_snapshot_observed <- true;
+  state.keeper_tool_approvals_observed <- false;
+  Alcotest.(check bool) "held calls not read yet keep it" true
+    (approvals_in_ring state);
+  state.keeper_tool_approvals_observed <- true;
+  Alcotest.(check bool) "every list read and empty drops it again" false
     (approvals_in_ring state)
+
+(* The Gate poll answered once, with an empty queue, and every poll since
+   has failed. The rows it keeps are that first answer's, so the queue is
+   empty on screen while the server may be holding Gate approvals. The strip
+   kept its entry, but the screen it opened said "(no pending approvals)"
+   under "MASC Approvals (0)" (#39172 review, 2026-09-26). Every place that
+   says whether the lists were read now reads the same per-list readings. *)
+let test_a_gate_poll_that_fails_after_one_answered_is_not_an_empty_queue () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Overview;
+  approvals_reading_is_current state;
+  Alcotest.(check bool) "every list read and empty: nothing pending" true
+    (approvals_empty_queue (approvals_reading state) = Nothing_pending);
+  Alcotest.(check string) "and the Overview count stands" "0"
+    (approvals_count_label state);
+  let cause = "gate load failed: HTTP 503" in
+  state.gate_error <- Some cause;
+  let reading = approvals_reading state in
+  Alcotest.(check bool) "the empty queue names the Gate queue as stale" true
+    (approvals_empty_queue reading
+     = Lists_not_read [ ("Gate queue", Approval_stale cause) ]);
+  Alcotest.(check string) "the title says the Gate queue is stale"
+    ", Gate queue stale" (approvals_title_notes reading);
+  Alcotest.(check string) "the Overview count carries the ?" "0?"
+    (approvals_count_label state);
+  Alcotest.(check bool) "and the strip keeps the entry" true
+    (approvals_in_ring state);
+  state.gate_error <- None;
+  state.gate_queue_unavailable <- Some "approval queue store is unreadable";
+  let reading = approvals_reading state in
+  Alcotest.(check bool) "an unreadable Gate store is named, not emptied" true
+    (approvals_empty_queue reading
+     = Lists_not_read
+         [ ("Gate queue", Approval_unavailable "approval queue store is unreadable") ]);
+  Alcotest.(check string) "and the title says so"
+    ", Gate queue unavailable" (approvals_title_notes reading);
+  state.gate_queue_unavailable <- None;
+  Alcotest.(check bool) "the next answered poll empties it again" true
+    (approvals_empty_queue (approvals_reading state) = Nothing_pending);
+  Alcotest.(check string) "with no note" "" (approvals_title_notes (approvals_reading state))
 
 let test_browser_lanes_highlight_config () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
@@ -1616,13 +1707,18 @@ let test_the_questions_reading_tells_unread_from_none_open () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   let reading () =
     match approvals_questions_reading state with
-    | Questions_current -> "current"
-    | Questions_unread -> "unread"
-    | Questions_stale -> "stale"
+    | List_read -> "current"
+    | List_not_read Approval_unread -> "unread"
+    | List_not_read (Approval_failed _) -> "failed"
+    | List_not_read (Approval_stale _) -> "stale"
+    | List_not_read (Approval_unavailable _) -> "unavailable"
   in
   Alcotest.(check string) "before the first poll answers" "unread" (reading ());
   state.asks_error <- Some "connection refused";
-  Alcotest.(check string) "a first poll that failed" "unread" (reading ());
+  Alcotest.(check string) "a first poll that failed" "failed" (reading ());
+  Alcotest.(check string) "which the title calls unread: nothing was read"
+    ", questions unread"
+    (approval_list_note ~name:"questions" (approvals_questions_reading state));
   state.asks_snapshot <-
     Some { Tui_decode.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
   Alcotest.(check string) "rows kept from before a failed poll" "stale"
@@ -3028,6 +3124,8 @@ let () =
             `Quick test_every_enter_atom_exception_names_a_sheet_surface
         ; Alcotest.test_case "every surface answers" `Quick
             test_every_surface_answers
+        ; Alcotest.test_case "Keeper logs names the keys that move it" `Quick
+            test_keeper_logs_names_the_keys_that_move_its_reading
         ; Alcotest.test_case "the runtime picker names its paging" `Quick
             test_the_runtime_picker_names_its_paging
         ; Alcotest.test_case "every surface with keys has a sheet section"
@@ -3045,6 +3143,10 @@ let () =
         ; Alcotest.test_case
             "the ring keeps Approvals until a reading empties it" `Quick
             test_the_ring_keeps_approvals_until_a_reading_empties_it
+        ; Alcotest.test_case
+            "a Gate poll failing after one answered is not an empty queue"
+            `Quick
+            test_a_gate_poll_that_fails_after_one_answered_is_not_an_empty_queue
         ; Alcotest.test_case "chat help names the voice keys" `Quick
             test_chat_help_names_the_voice_keys
         ; Alcotest.test_case "a searchable surface does not also bind n" `Quick

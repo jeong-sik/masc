@@ -144,6 +144,12 @@ type turn_result =
   ; usage : turn_usage option
     (* The turn's thread/tokenUsage/updated frames, folded; [None] when none
        arrived before turn/completed. *)
+  ; model_context_window : int option
+    (* The model window the newest of those frames named
+       ([tokenUsage.modelContextWindow]), apart from MASC's own shaping
+       ceiling; [None] when none named one. The context that window holds is
+       the newest [last]: its [input_tokens + output_tokens], or the
+       estimate after a compaction. Never the thread's cumulative total. *)
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
@@ -189,7 +195,14 @@ type stream_event =
       { turn_id : string
       ; model : string
       }
-  | Text_delta of string
+  | Text_delta of
+      { item_id : string option
+      ; delta : string
+      }
+      (** One [item/agentMessage/delta]. [item_id] is its [itemId], the
+          agentMessage item the piece belongs to, so a reader can tell two
+          assistant messages of one turn apart. [None] when the frame omits
+          it or sends it blank; the delta still streams (#28010). *)
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -342,6 +355,12 @@ val input_capacity_refusal : error -> input_capacity option
     remain ordinary RPC errors. Counts come from the server, never a local cap. *)
 
 val error_to_string : error -> string
+
+val refused_for_spent_usage : error -> bool
+(** [true] when the account refused the turn because its usage is spent: the
+    provider's own [usageLimitExceeded] or [sessionBudgetExceeded]. The
+    refusal states its reset time only in message text, never in a typed
+    field, so a caller that records it records an exhaustion with no end. *)
 
 val validate_turn :
   ?dynamic_tools:dynamic_tool list ->

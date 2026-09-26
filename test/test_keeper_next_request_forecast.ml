@@ -28,7 +28,8 @@ let atom_bytes messages =
 (* A front measured on [messages]: its index and the message that opens it. *)
 let seed ~messages first_atom : Keeper_carried_front.seed =
   match Runtime_model_input_tail_window.atom_opening_digest messages first_atom with
-  | Some front_digest -> { first_atom; front_digest; source = Keeper_carried_front.Ledger }
+  | Some front_digest ->
+    { first_atom; front_digest = Some front_digest; source = Keeper_carried_front.Ledger }
   | None -> Alcotest.fail "the seed's own history has the atom"
 
 let carry ?front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ?counted_tokens messages =

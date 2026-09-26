@@ -311,7 +311,7 @@ let test_stream_events_preserve_available_wire_data () =
                { conversation_id = "conversation-1"
                ; model = "gemini-fixture"
                }
-           ; Text_delta "MASC_ANTIGRAVITY_OK\n"
+           ; Text_delta { step_index = None; text = "MASC_ANTIGRAVITY_OK\n" }
            ; Usage_reported
                { model = "gemini-fixture"
                ; usage = { input_tokens = 100; output_tokens = 7; _ }
@@ -347,8 +347,8 @@ let test_answer_pieces_reach_the_reader_and_the_result_adds_nothing () =
          match List.rev !events with
          | [ Runtime_antigravity.Turn_started
                { conversation_id = "conversation-1"; model = "gemini-fixture" }
-           ; Text_delta "PO"
-           ; Text_delta "NG\n"
+           ; Text_delta { step_index = Some 1; text = "PO" }
+           ; Text_delta { step_index = Some 1; text = "NG\n" }
            ; Usage_reported
                { model = "gemini-fixture"
                ; usage = { input_tokens = 100; output_tokens = 7; _ }
@@ -379,7 +379,7 @@ let test_an_empty_piece_is_not_forwarded () =
        | Ok _ ->
          match List.rev !events with
          | [ Runtime_antigravity.Turn_started _
-           ; Text_delta "PONG\n"
+           ; Text_delta { step_index = None; text = "PONG\n" }
            ; Usage_reported
                { model = "gemini-fixture"
                ; usage = { input_tokens = 100; output_tokens = 7; _ }
@@ -388,6 +388,171 @@ let test_an_empty_piece_is_not_forwarded () =
            ; Turn_finished { text = "PONG\n" }
            ] -> ()
          | _ -> fail "An empty piece changed what the reader was shown")
+;;
+
+(* Two response steps around a tool step, as agy 1.2.11 wrote them
+   (measured 2026-09-25): each response step ends its text with "\n", and the
+   result repeats both steps' text. *)
+let two_response_steps =
+  [ init ()
+  ; step ~index:0 ~step_type:"user_input" ()
+  ; step ~index:1 ~state:"ACTIVE" ~step_type:"agent_response" ~text_delta:"CHECKING" ()
+  ; step ~index:1 ~state:"DONE" ~step_type:"agent_response" ~text_delta:"\n" ()
+  ; step ~index:2 ~state:"ACTIVE" ~step_type:"tool" ~tool_name:"run_command" ()
+  ; step ~index:2 ~state:"DONE" ~step_type:"tool" ~tool_name:"run_command" ()
+  ; step ~index:3 ~state:"ACTIVE" ~step_type:"agent_response" ~text_delta:"DONE" ()
+  ; step ~index:3 ~state:"DONE" ~step_type:"agent_response" ~text_delta:"\n" ()
+  ; result ~response:"CHECKING\nDONE\n" ()
+  ]
+;;
+
+(* Each piece names the step that carried it: that is what tells the two
+   assistant messages apart. *)
+let test_answer_pieces_name_their_step () =
+  let events = ref [] in
+  with_fixture two_response_steps (fun path ->
+    match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+    | Error error -> fail (Runtime_antigravity.error_to_string error)
+    | Ok turn ->
+      check string "recorded text" "CHECKING\nDONE\n" turn.text;
+      let pieces =
+        List.filter_map
+          (function
+            | Runtime_antigravity.Text_delta { step_index; text } -> Some (step_index, text)
+            | Turn_started _ | Native_tool_started _ | Native_tool_finished _
+            | Usage_reported _ | Turn_finished _ -> None)
+          (List.rev !events)
+      in
+      check
+        (list (pair (option int) string))
+        "pieces and their steps"
+        [ Some 1, "CHECKING"; Some 1, "\n"; Some 3, "DONE"; Some 3, "\n" ]
+        pieces)
+;;
+
+(* The Keeper live stream appends the pieces, and a native tool step draws no
+   row between them, so the two steps read as one paragraph on a Markdown
+   surface. The projection completes a paragraph break in front of the second
+   step: agy already ended the first with "\n", so one more. Nothing repeats,
+   and the result adds nothing because the steps carried the text. *)
+let test_keeper_streams_two_response_steps_apart () =
+  let events = ref [] in
+  with_fixture two_response_steps (fun path ->
+    match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+    | Error error -> fail (Runtime_antigravity.error_to_string error)
+    | Ok _ ->
+      let texts =
+        Keeper_antigravity_runtime.For_testing.project_stream (List.rev !events)
+        |> List.filter_map (function
+          | Agent_core.Types.ContentBlockDelta
+              { index = 0; delta = Agent_core.Types.TextDelta text } -> Some text
+          | _ -> None)
+      in
+      check (list string) "pieces with the break" [ "CHECKING"; "\n"; "\nDONE"; "\n" ] texts;
+      check string "each step once, apart" "CHECKING\n\nDONE\n" (String.concat "" texts))
+;;
+
+let describe_keeper_event = function
+  | Agent_core.Types.MessageStart { id; model; usage = None } ->
+    Printf.sprintf "start %s %s" id model
+  | Agent_core.Types.MessageStart { usage = Some _; _ } -> "start with usage"
+  | Agent_core.Types.ContentBlockStart { index; content_type; tool_id; tool_name } ->
+    Printf.sprintf
+      "block %d %s %s %s"
+      index
+      content_type
+      (Option.value tool_id ~default:"-")
+      (Option.value tool_name ~default:"-")
+  | Agent_core.Types.ContentBlockDelta
+      { index; delta = Agent_core.Types.InputJsonSnapshot arguments } ->
+    Printf.sprintf "arguments %d %s" index arguments
+  | Agent_core.Types.ContentBlockDelta { index; delta = Agent_core.Types.TextDelta text } ->
+    Printf.sprintf "text %d %S" index text
+  | Agent_core.Types.ContentBlockDelta { index; _ } -> Printf.sprintf "other delta %d" index
+  | Agent_core.Types.ContentBlockStop { index } -> Printf.sprintf "stop %d" index
+  | Agent_core.Types.MessageDelta
+      { stop_reason = Some Agent_core.Types.EndTurn; usage = None } -> "end turn"
+  | Agent_core.Types.MessageDelta _ -> "other message delta"
+  | Agent_core.Types.MessageStop -> "message stop"
+  | _ -> "other"
+;;
+
+let mcp_probe_call call_id =
+  Keeper_antigravity_runtime.For_testing.Mcp_tool_started
+    { call_id; tool_name = "masc_probe"; arguments = `Assoc [ "marker", `String call_id ] }
+;;
+
+let antigravity_turn_started =
+  Keeper_antigravity_runtime.For_testing.Cli_event
+    (Runtime_antigravity.Turn_started
+       { conversation_id = "conversation-1"; model = "gemini-fixture" })
+;;
+
+let antigravity_turn_finished =
+  Keeper_antigravity_runtime.For_testing.Cli_event
+    (Runtime_antigravity.Turn_finished { text = "" })
+;;
+
+(* #37118: agy prints init before it calls a MASC tool, but the MCP server
+   can answer the call while init is still writing the session. The call's
+   blocks come after MessageStart, in the order they were answered. *)
+let test_keeper_mcp_blocks_follow_message_start () =
+  let events =
+    Keeper_antigravity_runtime.For_testing.project_stream_inputs
+      ~during:(fun _ -> [])
+      [ mcp_probe_call "call-1"
+      ; Keeper_antigravity_runtime.For_testing.Mcp_tool_finished { call_id = "call-1" }
+      ; antigravity_turn_started
+      ; mcp_probe_call "call-2"
+      ; Keeper_antigravity_runtime.For_testing.Mcp_tool_finished { call_id = "call-2" }
+      ; antigravity_turn_finished
+      ]
+  in
+  check
+    (list string)
+    "message first, then each call in order"
+    [ "start conversation-1:ordinal:1 gemini-fixture"
+    ; "block 1 tool_use call-1 masc_probe"
+    ; {|arguments 1 {"marker":"call-1"}|}
+    ; "stop 1"
+    ; "block 2 tool_use call-2 masc_probe"
+    ; {|arguments 2 {"marker":"call-2"}|}
+    ; "stop 2"
+    ; "end turn"
+    ; "message stop"
+    ]
+    (List.map describe_keeper_event events)
+;;
+
+(* Emitting can yield to the MCP server's fiber. A call answered while the
+   held blocks go out waits behind them, so no block is emitted before its
+   own start. *)
+let test_keeper_mcp_blocks_answered_while_releasing_wait_their_turn () =
+  let events =
+    Keeper_antigravity_runtime.For_testing.project_stream_inputs
+      ~during:(function
+        | Agent_core.Types.MessageStart _ -> [ mcp_probe_call "call-2" ]
+        | Agent_core.Types.ContentBlockStart { tool_id = Some "call-2"; _ } ->
+          [ Keeper_antigravity_runtime.For_testing.Mcp_tool_finished { call_id = "call-2" } ]
+        | Agent_core.Types.ContentBlockStart { tool_id = Some "call-1"; _ } ->
+          [ Keeper_antigravity_runtime.For_testing.Mcp_tool_finished { call_id = "call-1" } ]
+        | _ -> [])
+      [ mcp_probe_call "call-1"; antigravity_turn_started; antigravity_turn_finished ]
+  in
+  check
+    (list string)
+    "each block after its own start"
+    [ "start conversation-1:ordinal:1 gemini-fixture"
+    ; "block 1 tool_use call-1 masc_probe"
+    ; {|arguments 1 {"marker":"call-1"}|}
+    ; "block 2 tool_use call-2 masc_probe"
+    ; {|arguments 2 {"marker":"call-2"}|}
+    ; "stop 1"
+    ; "stop 2"
+    ; "end turn"
+    ; "message stop"
+    ]
+    (List.map describe_keeper_event events)
 ;;
 
 let test_stream_events_preserve_exact_native_tool_steps () =
@@ -425,7 +590,7 @@ let test_stream_events_preserve_exact_native_tool_steps () =
                ; tool_name = Some "run_command"
                ; origin = Runtime_native_tools.Built_in
                }
-           ; Text_delta "MASC_ANTIGRAVITY_OK\n"
+           ; Text_delta { step_index = None; text = "MASC_ANTIGRAVITY_OK\n" }
            ; Usage_reported
                { model = "gemini-fixture"
                ; usage = { input_tokens = 100; output_tokens = 7; _ }
@@ -1364,6 +1529,22 @@ let () =
             "an empty piece is not forwarded"
             `Quick
             test_an_empty_piece_is_not_forwarded
+        ; test_case
+            "answer pieces name their step"
+            `Quick
+            test_answer_pieces_name_their_step
+        ; test_case
+            "Keeper streams two response steps apart"
+            `Quick
+            test_keeper_streams_two_response_steps_apart
+        ; test_case
+            "Keeper MCP blocks follow MessageStart"
+            `Quick
+            test_keeper_mcp_blocks_follow_message_start
+        ; test_case
+            "Keeper MCP blocks answered while releasing wait their turn"
+            `Quick
+            test_keeper_mcp_blocks_answered_while_releasing_wait_their_turn
         ; test_case
             "stream preserves exact native tool steps"
             `Quick

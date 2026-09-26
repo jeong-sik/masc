@@ -57,6 +57,11 @@ type runtime_observation = {
   request_context : request_context option;
       (** [None] when the runtime reports no occupancy apart from its
           response usage. *)
+  reported_context_window : int option;
+      (** The model window the official client reported beside
+          [request_context], separate from MASC's effective context ceiling.
+          The occupancy it bounds is [request_context]'s input plus output;
+          it has no count of its own. *)
 }
 (** Per-turn runtime execution snapshot.  [attempts] is
     in chronological order (the internal capture stores
@@ -116,6 +121,7 @@ val runtime_observation_with_metrics :
   ?agent_core_internal_runtime_allowed:bool ->
   ?usage_scope:Runtime_usage_scope.t ->
   ?request_context:request_context ->
+  ?reported_context_window:int ->
   unit ->
   runtime_observation
 (** Materialises a {!runtime_observation} from a finished

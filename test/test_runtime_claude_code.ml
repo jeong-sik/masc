@@ -332,6 +332,9 @@ let test_routed_credentials_reach_probe_and_turn () =
         output_string out "#!/bin/sh\nset -eu\n";
         output_string out "[ \"$ANTHROPIC_AUTH_TOKEN\" = fixture-token ] || exit 71\n";
         output_string out "[ \"$ANTHROPIC_BASE_URL\" = https://gateway.example.test/anthropic ] || exit 72\n";
+        (* A routed base URL would otherwise turn the client's tool search
+           off and send every masc schema inline. *)
+        output_string out "[ \"$ENABLE_TOOL_SEARCH\" = true ] || exit 74\n";
         output_string out "if [ \"${2-}\" = auth ]; then [ \"$1\" = --setting-sources= ] || exit 73; fi\n";
         output_string out ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
         close_out out; Unix.chmod wrapper 0o700;
@@ -837,7 +840,8 @@ let test_usage_windows_are_reported_without_changing_the_turn () =
   let on_stream_event = function
     | Runtime_claude_code.Usage_windows_reported report -> reports := report :: !reports
     | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-    | Native_tool_started _ | Native_tool_finished _ | Usage_reported _ | Turn_finished _ -> ()
+    | Native_tool_started _ | Native_tool_finished _ | Conversation_compacted
+    | Usage_reported _ | Turn_finished _ -> ()
   in
   with_fixture
     [ Emit rate_limit_with_windows
@@ -911,7 +915,7 @@ let test_quota_refusal_still_reports_the_turns_spend () =
         :: !reported
     | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
-    | Turn_finished _ -> ()
+    | Conversation_compacted | Turn_finished _ -> ()
   in
   with_fixture
     [ Emit native_tool_assistant
@@ -939,7 +943,7 @@ let test_quota_refusal_before_any_response_reports_no_spend () =
     | Runtime_claude_code.Usage_reported _ -> incr reported
     | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
-    | Turn_finished _ -> ()
+    | Conversation_compacted | Turn_finished _ -> ()
   in
   with_fixture [ Emit rate_limit_rejected; Emit quota_result_with_usage ] (fun path ->
     (match run_fixture ~on_stream_event path with
@@ -957,7 +961,7 @@ let test_result_of_another_session_reports_no_spend () =
     | Runtime_claude_code.Usage_reported _ -> incr reported
     | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Usage_windows_reported _
-    | Turn_finished _ -> ()
+    | Conversation_compacted | Turn_finished _ -> ()
   in
   with_fixture
     [ Emit native_tool_assistant
@@ -1068,7 +1072,9 @@ let test_api_diagnostic_preserves_prior_text () =
        run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
        |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:true;
        match List.rev !events with
-       | [ Turn_started { model = "claude-fixture"; _ }; Text_delta "MASC_CLAUDE_OK" ] ->
+       | [ Turn_started { model = "claude-fixture"; _ }
+         ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK" }
+         ] ->
          ()
        | _ -> fail "diagnostic changed the real response stream")
 ;;
@@ -1099,7 +1105,8 @@ let test_api_diagnostic_preserves_native_effects () =
                 (function
                   | Runtime_claude_code.Native_tool_started _ | Native_tool_finished _ ->
                     true
-                  | Turn_started _ | Usage_windows_reported _ | Usage_reported _ -> false
+                  | Turn_started _ | Usage_windows_reported _ | Conversation_compacted
+                  | Usage_reported _ -> false
                   | Text_delta _
                   | Dynamic_tool_started _
                   | Dynamic_tool_finished _
@@ -1207,7 +1214,9 @@ let test_real_identical_prose_is_still_response () =
             run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
             |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:true;
             match List.rev !events with
-            | [ Turn_started _; Text_delta "You've hit your limit" ] -> ()
+            | [ Turn_started _
+              ; Text_delta { message_id = None; text = "You've hit your limit" }
+              ] -> ()
             | _ -> fail "ordinary assistant prose was hidden"))
     [ None; Some (`Bool false) ]
 ;;
@@ -1245,7 +1254,7 @@ let test_valid_response_after_api_diagnostic () =
       check string "real response" "MASC_CLAUDE_OK" turn.text;
       (match List.rev !events with
        | [ Turn_started { turn_id = "assistant-fixture-1"; model = "claude-fixture" }
-         ; Text_delta "MASC_CLAUDE_OK"
+         ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK" }
          ; Turn_finished { text = "MASC_CLAUDE_OK" }
          ] -> ()
        | _ -> fail "diagnostic started or polluted response stream")
@@ -1503,7 +1512,7 @@ let test_stream_events_preserve_text_and_tool_identity () =
       | Ok _ ->
         match List.rev !events with
         | [ Turn_started { turn_id = "assistant-fixture-1"; model = "claude-fixture" }
-          ; Text_delta "MASC_CLAUDE_OK"
+          ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK" }
           ; Dynamic_tool_started
               { call_id = "call-1"
               ; tool_name = "masc_probe"
@@ -1545,7 +1554,7 @@ let test_stream_events_preserve_native_tool_origin () =
               ; tool_name = Some "Read"
               ; origin = Runtime_native_tools.Built_in
               }
-          ; Text_delta "MASC_CLAUDE_OK"
+          ; Text_delta { message_id = None; text = "MASC_CLAUDE_OK" }
           ; Turn_finished { text = "MASC_CLAUDE_OK" }
           ] -> ()
         | _ -> fail "Claude native tool activity was not kept distinct from MASC tools")
@@ -2081,6 +2090,38 @@ let test_setting_sources_render_in_argv () =
           (argv [ Runtime_native_tools.Settings_local ])))
 ;;
 
+(* A Resume leaves out carried context the session already holds, which
+   holds only while the session keeps the system prompt it recorded at its
+   first launch; the argv pins that instead of relying on the client default. *)
+let test_system_prompt_snapshot_is_pinned_on () =
+  let argv session_mode =
+    match
+      Runtime_claude_code.command ~system_prompt_file:None
+        (Runtime_claude_code.default_config ~cwd:"/tmp")
+        ~dynamic_tools:[]
+        ~reasoning_effort:None
+        ~session_mode
+        ~session_id:"11111111-1111-4111-8111-111111111111"
+    with
+    | Ok argv -> argv
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+  in
+  let rec pinned = function
+    | "--system-prompt-snapshot" :: value :: _ -> Some value
+    | _ :: rest -> pinned rest
+    | [] -> None
+  in
+  List.iter
+    (fun (label, session_mode) ->
+       check (option string) (label ^ " pins the snapshot on") (Some "on")
+         (pinned (argv session_mode)))
+    [ "a start", Runtime_claude_code.Start
+    ; ( "a resume"
+      , Runtime_claude_code.Resume
+          { session_id = "11111111-1111-4111-8111-111111111111" } )
+    ]
+;;
+
 let test_system_prompt_flag_is_omitted_when_unset () =
   let argv system_prompt =
     let config = {(Runtime_claude_code.default_config ~cwd:"/tmp") with system_prompt} in
@@ -2167,6 +2208,8 @@ let () =
             "setting sources render in argv"
             `Quick
             test_setting_sources_render_in_argv
+        ; test_case "system prompt snapshot is pinned on" `Quick
+            test_system_prompt_snapshot_is_pinned_on
         ; test_case "large system context uses file argv" `Quick test_system_file_keeps_large_context_off_argv
         ; test_case
             "an unset system prompt omits the flag"

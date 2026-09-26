@@ -71,7 +71,6 @@ type transport = SSE | WS | GRPC | WebRTC
 type t =
   | Open      of { transport : transport ; session_id : string ; origin : string }
   | Upgrade   of { transport_from : transport ; transport_to : transport ; session_id : string }
-  | Resume    of { transport : transport ; session_id : string ; last_event_id : string option ; replayed : int }
   | Evict     of { transport : transport ; session_id : string ; reason : evict_reason }
   | Close     of { transport : transport ; session_id : string ; reason : close_reason }
 
@@ -130,11 +129,11 @@ Drop count: explicitly **zero** by construction. A consumer that can't keep up g
 
 ### 3.4 Last-Event-ID resume (SSE only; gRPC/WS use native reconnect)
 
-SSE session-scoped ring-buffer (capacity 256 frames, TTL 300 s) — already part of [[RFC-0098]]'s IMPROVE-02 plan. This RFC pins its acceptance criteria:
+The replay buffer in `lib/sse.ml` keeps the last `MASC_SSE_REPLAY_BUFFER_SIZE` events (default and maximum 1000) for `MASC_SSE_BUFFER_TTL_SEC` seconds (default 300).
 
 - Reconnect with `Last-Event-ID: <id>` header replays frames *after* the named id.
-- Each replayed frame increments the new session's `replayed` counter in `Resume { replayed ; _ }`.
-- If `<id>` is beyond TTL, server sends `event: resume_failed` and forces a fresh `Open`.
+- The buffer records the highest id it dropped. When that is past `<id>`, a TUI observer's handshake answers `x-masc-sse-replay: resumed-after-gap` with `x-masc-sse-replay-missed-through`, and the retained frames are still replayed (#39145). Agent-stream and AG-UI clients read no such header.
+- No lifecycle event is published for a resume: nothing subscribes to this topic.
 
 ### 3.5 Transport keep-alive SSOT
 
@@ -183,7 +182,6 @@ PR-2 is **wire-inert** (Event_bus only). PR-3 introduces the first client-visibl
 
 ## 7. Open questions
 
-- **Q1**: Should `Resume.replayed` include a checksum / hash to let clients detect ring-buffer corruption? **Decision (default)**: no — adds complexity for a fault class that is itself silent (ring corruption is server-side). Revisit if a real incident appears.
 - **Q2**: Should `Idle_timeout` reason carry the last activity timestamp? **Open** — PR-2 leaves the variant payload narrow; PR-3 considers based on dashboard need.
 - **Q3**: WS close code 4001..4099 conflicts with any existing application semantics? **Audit**: `git grep '40[0-9][0-9]' lib/server/server_websocket_transport.ml` — verify in PR-4.
 

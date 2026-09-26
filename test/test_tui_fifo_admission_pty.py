@@ -21,11 +21,26 @@ def run(executable: str) -> None:
                 raise AssertionError("first POST never reached the HTTP fixture")
             h.send_and_wait(process, master_fd, output, b"second", h.composer_showing(b"second"))
             h.send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
-            # /queue completes another TUI/server round trip while the first
-            # receipt is withheld. This gives the event loop and HTTP fixture
-            # a causal progress point before inspecting same-Keeper POSTs.
+            # The /queue command first renders the local queue before its
+            # server read. A parallel second POST removes this line locally,
+            # even if its HTTP fiber has not yet reached the fixture.
             h.send_and_wait(process, master_fd, output, b"/queue", h.composer_showing(b"/queue"))
-            h.send_and_wait(process, master_fd, output, b"\r", b"Queue snapshot")
+            h.read_available(master_fd, output)
+            queue_start = len(output)
+            local_frame = h.send_and_wait(
+                process, master_fd, output, b"\r", b"Local unsent messages: 1"
+            )
+            local_snapshot = h.frame_containing(
+                local_frame, b"Local unsent messages: 1"
+            )
+            if b"Reading server queue" not in h.screen_text(local_snapshot):
+                raise AssertionError("local queue count was not from this /queue request")
+            # The later snapshot proves the read-only server round trip also
+            # completed while the first acceptance remains withheld.
+            h.wait_for_output(
+                process, master_fd, output, b"Queue snapshot", start=queue_start,
+                timeout=3.0,
+            )
             with fixture.lock:
                 before_receipt = [item["message"] for item in fixture.received]
             if before_receipt != ["first"]:

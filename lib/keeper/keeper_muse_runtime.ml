@@ -739,7 +739,7 @@ let phase_name : Session_store.phase -> string = function
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
-    ~turn_start ~pre_tool_rejects ~base_path ~workspace_root ~goal ~goal_blocks ~system_prompt ~tools
+    ~turn_start ~pre_tool_rejects ~base_path ~workspace_root ~native_workspace_context ~goal ~goal_blocks ~system_prompt ~tools
     ~initial_messages ~model_input_projection ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_transport_uncertain ~on_official_client_tool_boundary
@@ -835,7 +835,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     in
     let prepared = { prepared with
       system_prompt = String.concat "\n\n"
-        (prepared.system_prompt :: native_posture_note native_posture) } in
+        (prepared.system_prompt :: native_posture_note native_posture
+         @ Option.to_list native_workspace_context) } in
     (* MSP offers no replaceable configuration channel, and this client
        names the model and the workspace root only when it starts a session.
        A host session that settled against another canonical history, system
@@ -1550,7 +1551,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
 ;;
 
 let run ?official_task_reference ~accepts_image_input ?required_native_posture
-    ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~workspace_root ~goal
+    ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~workspace_root ?native_workspace_context ~goal
     ~goal_blocks ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
@@ -1593,6 +1594,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture
         ~pre_tool_rejects
         ~base_path
         ~workspace_root
+        ~native_workspace_context
         ~goal
         ~goal_blocks
         ~system_prompt

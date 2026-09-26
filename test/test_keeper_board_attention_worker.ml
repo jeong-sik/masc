@@ -384,17 +384,24 @@ let test_a_cli_answer_after_every_http_slot_was_rejected_completes () =
    with
    | W.Judgment_completed { candidate_id; _ }
      when String.equal candidate_id persisted.candidate_id -> ()
-   | W.Judgment_completed _
-   | W.Idle
-   | W.Contended _
-   | W.Rescan_later _
-   | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
-     Alcotest.fail "the CLI answer did not complete the partition");
+     Alcotest.failf
+       "the CLI answer blocked the partition: %s"
+       (Yojson.Safe.to_string (P.to_yojson (load_one_partition ~base_path)))
+   | W.Judgment_completed { candidate_id; _ } ->
+     Alcotest.failf "the CLI answer completed another candidate: %s" candidate_id
+   | W.Idle -> Alcotest.fail "the CLI answer step returned Idle"
+   | W.Contended _ -> Alcotest.fail "the CLI answer step returned Contended"
+   | W.Rescan_later _ -> Alcotest.fail "the CLI answer step returned Rescan_later"
+   | W.Candidate_already_consumed _ ->
+     Alcotest.fail "the CLI answer step returned Candidate_already_consumed");
   match (load_one_partition ~base_path).state with
   | P.Completed { item; _ } ->
     Alcotest.(check string) "the answering client is recorded" cli_slot item.judgment.slot_id
-  | _ -> Alcotest.fail "the partition is not Completed"
+  | _ ->
+    Alcotest.failf
+      "the partition is not Completed: %s"
+      (Yojson.Safe.to_string (P.to_yojson (load_one_partition ~base_path)))
 ;;
 
 (* task-1666: a [Not_relevant] verdict carries nothing across the owner lane

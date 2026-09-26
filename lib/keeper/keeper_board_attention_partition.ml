@@ -818,6 +818,12 @@ let legal_transition previous next =
     true
   | Running { progress = Advancing _; _ }, Running { progress = Bound _; _ } -> true
   | Running { progress = Bound _; _ }, Completed _ -> true
+  (* Only a CLI tail answer completes from [Advancing]: the tail runs after
+     AGENT_CORE ended the HTTP walk, so the named next slot is never bound.
+     [complete] makes the same check before it appends the row. *)
+  | ( Running { progress = Advancing _; _ }
+    , Completed { item = { judgment = { source = Candidate.Cli_lane_slot; _ }; _ }; _ } )
+    -> true
   | Running _, Blocked _ -> true
   | Blocked _, Ready -> true
   | (Completed _ | Blocked _), Settled _ -> true

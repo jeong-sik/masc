@@ -115,6 +115,18 @@ let test_full_restores_every_original_row () =
   let projected = Types.project_gate_history ~visibility:Types.Tools_full entries in
   check bool "Full returns raw timeline, including identity and clocks" true (projected == entries)
 
+let test_results_keeps_gate_rows_folded () =
+  let entries = rows [step Approval_requested; step Approval_resolved_approved;
+    step Approval_replay_applied] in
+  check (list string) "short results keep the compact Gate history"
+    (describe (Types.project_gate_history ~visibility:Types.Tools_compact entries))
+    (describe (Types.project_gate_history ~visibility:Types.Tools_results entries));
+  let opened = Types.toggle_tool_visibility Types.Tools_results in
+  check string "Ctrl-D opens Gate detail from results" "full"
+    (Types.tool_visibility_to_string opened);
+  check bool "the opened Gate history restores its rows" true
+    (Types.project_gate_history ~visibility:opened entries == entries)
+
 let test_identity_is_not_a_tool_name () =
   let entries = [step ~approval:"a" Approval_requested;
     step ~approval:"b" Approval_replay_applied] in
@@ -236,6 +248,8 @@ let () =
         ; test_case "unresolved approvals remain complete" `Quick test_unresolved_approval_remains_complete
         ; test_case "settled steps fold across prose" `Quick test_settled_steps_fold_across_prose
         ; test_case "Full restores every original row" `Quick test_full_restores_every_original_row
+        ; test_case "results keeps Gate history folded" `Quick
+            test_results_keeps_gate_rows_folded
         ; test_case "identity is not a tool name" `Quick test_identity_is_not_a_tool_name
         ; test_case "wait after success is unresolved" `Quick test_wait_after_success_is_not_settled
         ; test_case "two approvals stay two rows" `Quick

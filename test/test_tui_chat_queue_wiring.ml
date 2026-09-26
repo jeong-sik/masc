@@ -1799,8 +1799,10 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
   in
   Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
     set_size (60, 120);
-    let draw ?(tool_visibility = Tui_types.Tools_full)
-        ?(outcome = Masc_tui_keeper_chat_transcript.Returned) result =
+    let draw ?(columns = 120) ?(tool_visibility = Tui_types.Tools_full)
+        ?(outcome = Masc_tui_keeper_chat_transcript.Returned)
+        ?(execution_id = Some "exec-1") result =
+      set_size (60, columns);
       let state =
         Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
       in
@@ -1828,7 +1830,7 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
            state.keeper_calls <- Some snapshot
        | Error detail -> fail ("the calls fixture did not decode: " ^ detail));
       let activity =
-        Masc_tui_keeper_chat_transcript.make_tool_activity ~execution_id:"exec-1"
+        Masc_tui_keeper_chat_transcript.make_tool_activity ?execution_id
           ~call_id:(Some "call-1") ~tool_name:"Execute"
           ~args:{|{"argv":["git","log"]}|} ~outcome
           ~duration:None ()
@@ -1890,7 +1892,7 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
     in
     let has affix = List.exists (Astring.String.is_infix ~affix) plain in
     check bool "results mode shows the call and its short output" true
-      (has "Execute" && has "RESULT_PREVIEW_123");
+      (has "↩ Execute" && has "RESULT_PREVIEW_123");
     List.iter
       (fun field ->
         check bool ("results mode omits " ^ field) false (has field))
@@ -1902,7 +1904,29 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
     in
     let has affix = List.exists (Astring.String.is_infix ~affix) plain in
     check bool "a call-log result is named despite a missing turn result" true
-      (has "result in call log" && has "LATE_RESULT_456"))
+      (has "in call log" && has "LATE_RESULT_456");
+    let plain =
+      draw ~tool_visibility:Tui_types.Tools_results ~execution_id:None
+        {|{"ok":true,"status":{"kind":"exit","code":0},"output":"UNJOINED_RESULT","typed":true}|}
+    in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    check bool "unjoined result explains why no preview appears" true
+      (has "no execution id" && not (has "UNJOINED_RESULT"));
+    let plain =
+      draw ~tool_visibility:Tui_types.Tools_results
+        {|{"ok":false,"status":{"kind":"exit","code":1},"output":"command failed","typed":true}|}
+    in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    check bool "a received failing Execute result has a neutral mark" true
+      (has "↩ Execute" && has "exit 1" && not (has "✓ Execute"));
+    let plain =
+      draw ~columns:50 ~tool_visibility:Tui_types.Tools_results
+        ~execution_id:None
+        {|{"ok":true,"status":{"kind":"exit","code":0},"output":"UNJOINED_RESULT","typed":true}|}
+    in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    check bool "narrow results view preserves status and missing-result reason" true
+      (has "received" && has "no execution id"))
 ;;
 
 (* A Librarian that keeps failing is named once on the header while it

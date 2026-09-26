@@ -331,7 +331,7 @@ let contains_sub s sub =
 ;;
 
 let extract_tool_marker s =
-  let markers = [ "✓"; "✗"; "×"; "√"; "▶"; "◌"; "○"; "!"; "?" ] in
+  let markers = [ "✓"; "✗"; "×"; "√"; "↩"; "▶"; "◌"; "○"; "!"; "?" ] in
   List.find_opt (fun m -> String.starts_with ~prefix:m s) markers
 
 ;;
@@ -353,7 +353,7 @@ let tool_marker_color = function
   | "✓" | "√" -> Theme.ok ()
   | "✗" | "×" | "!" -> Ansi.reset ^ Ansi.bold ^ Theme.bad ()
   | "▶" | "○" | "?" -> Theme.warn ()
-  | "◌" -> Theme.info ()
+  | "↩" | "◌" -> Theme.info ()
   | _ -> tool_reopen
 
 ;;
@@ -1202,32 +1202,68 @@ let tool_result_preview activity value =
 
 let tool_result_rows state ~keeper_name ~max_cells projection =
   let rows =
-    List.map
+    List.concat_map
       (fun (activity : Keeper_chat_transcript.tool_activity) ->
-        let marker = Keeper_chat_transcript.marker_of_outcome activity.outcome in
-        let name = clip_tool_result ~max_cells:48 activity.tool_name in
         let association = keeper_call_association state ~keeper_name activity in
+        (* The turn stream only says that a result arrived. A received result
+           may itself report a failed command, so a check mark would claim
+           more than this concise row knows. *)
+        let marker =
+          match activity.outcome, association with
+          | Keeper_chat_transcript.Returned, _
+          | Keeper_chat_transcript.Never_returned, Call_execution_exact
+              { kc_output = Some _; _ } -> "↩"
+          | _ -> Keeper_chat_transcript.marker_of_outcome activity.outcome
+        in
         let status =
           match activity.outcome, association with
           | Keeper_chat_transcript.Never_returned, Call_execution_exact call
-            when Option.is_some call.kc_output -> "result in call log"
-          | _ -> Keeper_chat_transcript.outcome_label activity.outcome
+            when Option.is_some call.kc_output -> "in call log"
+          | Keeper_chat_transcript.Started, _ -> "starting"
+          | Keeper_chat_transcript.Awaiting_result, _ -> "waiting"
+          | Keeper_chat_transcript.Returned, _ -> "received"
+          | Keeper_chat_transcript.Failed, _ -> "failed"
+          | Keeper_chat_transcript.Never_returned, _ -> "not seen"
+          | Keeper_chat_transcript.Outcome_unrecorded, _ -> "unknown"
         in
+        let fixed_cells = Message_layout.display_width (marker ^ "  · " ^ status) in
+        let name_cells = max 4 (min 48 (max_cells - fixed_cells - 8)) in
+        let name = clip_tool_result ~max_cells:name_cells activity.tool_name in
         let prefix = Printf.sprintf "%s %s · %s" marker name status in
-        let preview =
+        let preview, unavailable =
           match association with
           | Call_execution_exact call ->
-              Option.map (tool_result_preview activity) call.kc_output
-          | Call_log_not_loaded | Call_log_loading | Call_log_unavailable _
-          | Call_execution_unrecorded | Call_execution_missing
-          | Call_execution_ambiguous _ -> None
+              Option.map (tool_result_preview activity) call.kc_output,
+              "result text not recorded"
+          | Call_log_not_loaded -> None, "result preview not loaded"
+          | Call_log_loading -> None, "loading result preview"
+          | Call_log_unavailable _ -> None, "result preview unavailable"
+          | Call_execution_unrecorded -> None, "no execution id"
+          | Call_execution_missing -> None, "no call-log row"
+          | Call_execution_ambiguous _ -> None, "duplicate execution id"
         in
-        let row =
+        let detail =
           match preview with
-          | Some value when String.trim value <> "" -> prefix ^ " · " ^ value
-          | Some _ | None -> prefix
+          | Some value when String.trim value <> "" -> Some value
+          | Some _ -> Some "(empty result)"
+          | None ->
+              (match activity.outcome with
+               | Keeper_chat_transcript.Started
+               | Keeper_chat_transcript.Awaiting_result -> None
+               | Keeper_chat_transcript.Returned
+               | Keeper_chat_transcript.Failed
+               | Keeper_chat_transcript.Never_returned
+               | Keeper_chat_transcript.Outcome_unrecorded ->
+                   Some unavailable)
         in
-        clip_tool_result ~max_cells row)
+        match detail with
+        | None -> [clip_tool_result ~max_cells prefix]
+        | Some detail when max_cells < 60 ->
+            [ clip_tool_result ~max_cells prefix
+            ; "  " ^ clip_tool_result ~max_cells:(max_cells - 2) detail
+            ]
+        | Some detail ->
+            [clip_tool_result ~max_cells (prefix ^ " · " ^ detail)])
       projection.Keeper_chat_transcript.activities
   in
   if projection.omitted_steps = 0 then rows
@@ -1637,9 +1673,9 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
              call asked for, while a status row without one is a sentence the
              server composed and has nothing to fold away. *)
           | Message_status when message.me_gate <> None -> (
-              match tool_projection_mode state with
-              | Keeper_chat_transcript.Full -> message.me_text
-              | Keeper_chat_transcript.Compact ->
+              match state.msg_tool_visibility with
+              | Tools_full -> message.me_text
+              | Tools_compact | Tools_results ->
                   (gate_fold ~chat_cols ~role_label_column message)
                     .Masc_tui_gate_text.fa_text)
           | Message_thinking | Message_user _ | Message_keeper
@@ -1685,8 +1721,8 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                 would take a press and do nothing visible, which reads as the
                 pane ignoring the click. *)
              action =
-               (match message.me_role, tool_projection_mode state with
-                | Masc_tui_types.Message_status, Keeper_chat_transcript.Compact
+               (match message.me_role, state.msg_tool_visibility with
+                | Masc_tui_types.Message_status, (Tools_compact | Tools_results)
                   when message.me_gate <> None
                        && (gate_fold ~chat_cols ~role_label_column message)
                             .Masc_tui_gate_text.fa_held_cells

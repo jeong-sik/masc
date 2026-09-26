@@ -363,7 +363,8 @@ let next_origin_display = function
 
 let toggle_tool_visibility = function
   | Tools_compact -> Tools_full
-  | Tools_results | Tools_full -> Tools_compact
+  | Tools_results -> Tools_full
+  | Tools_full -> Tools_compact
 ;;
 
 (* The three Gate stances in the words the [w] chooser's help already uses

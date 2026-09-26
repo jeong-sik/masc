@@ -1952,8 +1952,8 @@ let test_losing_claim_cannot_publish_native_policy () =
     let runtime_path = Filename.concat base_path "runtime.toml" in
     write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
     Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
-      Eio_context.set_env env;
       Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw (fun () ->
+        Eio_context.set_env env;
         Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
         let config = match Runtime.get_runtime_by_id "antigravity.gemini" with
           | Some {Runtime.execution=Runtime_execution.Antigravity_cli config; _} -> config
@@ -1987,7 +1987,12 @@ let test_losing_claim_cannot_publish_native_policy () =
           ~context_injector:None ~context:None ~event_bus:None ~raw_trace:None ~on_event:None
           ~config () in
         check bool "competing owner claimed after the candidate snapshot" true !won;
-        check bool "stale candidate loses its claim" true (Result.is_error attempt.result);
+        (match attempt.result with
+         | Error (Agent_core.Error.Internal detail) ->
+           check bool "stale candidate specifically loses the session claim" true
+             (String.starts_with ~prefix:"Antigravity session claim failed:" detail)
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> fail "stale candidate unexpectedly won its session claim");
         check bool "loser never launches its CLI" false (Sys.file_exists marker);
         check string "loser cannot replace the winner's Full policy with Read"
           winner_policy (Fs_compat.load_file settings)))))

@@ -5,7 +5,11 @@ type error = Invalid_workspace of Config_dir_resolver.canonical_base_path_error
 type lookup =
   | Not_registered
   | Uninitialized
-  | Ready of Skill_catalog_snapshot.t
+  | Ready of
+      { snapshot : Skill_catalog_snapshot.t
+      ; config_path : string
+            (** The runtime.toml [snapshot] was built from. *)
+      }
 
 type commit_application =
   | Applied of
@@ -21,11 +25,10 @@ val refresh_from_observation :
   base_path:string ->
   Runtime.config_observation ->
   (Skill_catalog_snapshot_service.publication, error) result
-(** Publish the Skill snapshot for runtime.toml as [observation] read it. When
-    this replaces an earlier snapshot and the config state changes (configured,
-    rejected, unreadable), the change is logged once with the reason and the
-    file. The first publication logs nothing here: that one is boot's, and
-    [boot_report] names it. *)
+(** Publish the Skill snapshot for runtime.toml as [observation] read it, with
+    [observation]'s path. Boot, the Skill refresh route, the Skill editor and
+    Keeper Skill publication all come here; the publication logs itself
+    ({!Skill_catalog_snapshot_service.refresh}). *)
 
 val apply_commit :
   base_path:string ->
@@ -40,14 +43,3 @@ val publish_lane_skills :
     diagnostics; runtime.toml and Keeper prompts are not modified. *)
 
 val error_to_string : error -> string
-
-type boot_level =
-  | Boot_info
-  | Boot_warn
-  | Boot_error
-
-val boot_report :
-  runtime_config_path:string -> Skill_catalog_snapshot.t -> boot_level * string
-(** The boot log line for a published Skill snapshot. Pure so the line is
-    tested; the bootstrap only chooses the logger for the level. A rejected
-    [skills] table is a WARN carrying every diagnostic and the file path. *)

@@ -22,19 +22,31 @@ let rejected_snapshot () =
         ~diagnostics )
 ;;
 
+(* Every configured source is observed missing, which is what a fresh
+   workspace without the source directories publishes. *)
 let configured_snapshot config_text =
   match Skill_source_config.parse_text config_text with
   | Error _ -> failf "fixture config %S was rejected" config_text
   | Ok config ->
-    (match Skill_catalog_snapshot.configured ~config [] with
+    let scans =
+      List.map
+        (fun source ->
+           let resolved = Skill_source_config.resolve ~base_path:"/fixture" ~user_home:None source in
+           { Skill_catalog_snapshot.source = resolved
+           ; observation = Source_missing { resolved_path = "/fixture/missing" }
+           ; candidates = []
+           })
+        config.Skill_source_config.sources
+    in
+    (match Skill_catalog_snapshot.configured ~config scans with
      | Ok snapshot -> snapshot
      | Error _ -> failf "fixture config %S did not build a snapshot" config_text)
 ;;
 
-let runtime_config_path = "/tmp/live/runtime.toml"
+let config_path = "/tmp/live/runtime.toml"
 
-let ready ?(runtime_config_path = Some runtime_config_path) snapshot =
-  Health.to_yojson ~runtime_config_path (Ok (Server_skill_snapshot_runtime.Ready snapshot))
+let ready snapshot =
+  Health.to_yojson (Ok (Server_skill_snapshot_runtime.Ready { snapshot; config_path }))
 ;;
 
 let member = Yojson.Safe.Util.member
@@ -68,7 +80,7 @@ let test_rejected_config_degrades_with_each_diagnostic () =
   List.iter2
     (fun diagnostic reason ->
        (* The boot WARN and the save-path 400 print this same line. *)
-       let line = Skill_source_config.rejection_message ~config_path:runtime_config_path [ diagnostic ] in
+       let line = Skill_source_config.rejection_message ~config_path [ diagnostic ] in
        check bool ("the reason carries " ^ line) true
          (String_util.contains_substring reason line))
     diagnostics
@@ -86,7 +98,9 @@ let test_unreadable_config_degrades_with_its_detail () =
   match strings "operator_action_reasons" json with
   | [ reason ] ->
     check bool "the reason carries the detail" true
-      (String_util.contains_substring reason detail)
+      (String_util.contains_substring reason detail);
+    check bool "the reason names the file" true
+      (String_util.contains_substring reason config_path)
   | reasons -> failf "expected one reason, got %d" (List.length reasons)
 ;;
 
@@ -109,26 +123,47 @@ let test_absent_skills_table_is_ok () =
   check bool "no [skills] table needs nobody" false (action_required json)
 ;;
 
-(* Without a runtime.toml path the diagnostic still reaches the operator. *)
-let test_rejected_reason_without_a_path_keeps_the_diagnostic () =
-  let diagnostics, snapshot = rejected_snapshot () in
-  let json = ready ~runtime_config_path:None snapshot in
-  check bool "still needs an operator" true (action_required json);
-  List.iter2
-    (fun diagnostic reason ->
-       check bool "the reason carries the diagnostic" true
-         (String_util.contains_substring reason
-            (Skill_source_config.diagnostic_to_string diagnostic)))
-    diagnostics
-    (strings "operator_action_reasons" json)
+let int_member name json = member name json |> Yojson.Safe.Util.to_int
+
+(* The counts say what the published snapshot holds and leave the grade to the
+   config state: a configured catalog whose only source is missing is ok. *)
+let test_counts_describe_the_snapshot_without_moving_the_grade () =
+  let json =
+    ready
+      (configured_snapshot
+         "[skills]\nresource-read-max-bytes = 16384\n\n[[skills.sources]]\nid = \"project\"\n\
+          anchor = \"base-path\"\npath = \".agents/skills\"\naccess = \"read-only\"\n")
+  in
+  check string "a missing source leaves the grade ok" "ok" (status json);
+  check string "the path the snapshot was built from" config_path
+    (member "config_path" json |> Yojson.Safe.Util.to_string);
+  check int "no Skills" 0 (int_member "skills" json);
+  check int "no rejections" 0 (int_member "rejections" json);
+  let sources = member "sources" json in
+  check (list int) "one source, observed missing" [ 0; 1; 0; 0; 0 ]
+    (List.map
+       (fun name -> int_member name sources)
+       [ "ready"; "missing"; "not_directory"; "unavailable"; "unresolved" ])
+;;
+
+let test_rejected_catalog_counts_nothing () =
+  let _, snapshot = rejected_snapshot () in
+  let json = ready snapshot in
+  check int "a rejected catalog holds no Skills" 0 (int_member "skills" json);
+  check int "and no sources" 0 (int_member "ready" (member "sources" json))
+;;
+
+(* The timed-out fallback and the no-server-state case keep the schema, so a
+   reader can tell the section from a missing one. *)
+let test_placeholder_keeps_the_schema () =
+  let json = Health.placeholder ~component_timed_out:true ~status:"unavailable" () in
+  check string "the placeholder keeps the schema" "masc.skill_catalog.v1"
+    (member "schema" json |> Yojson.Safe.Util.to_string);
+  check bool "the placeholder asks nothing of the operator" false (action_required json)
 ;;
 
 let test_unpublished_catalog_needs_no_answer_here () =
-  let json =
-    Health.to_yojson
-      ~runtime_config_path:(Some runtime_config_path)
-      (Ok Server_skill_snapshot_runtime.Uninitialized)
-  in
+  let json = Health.to_yojson (Ok Server_skill_snapshot_runtime.Uninitialized) in
   check string "unpublished catalog is not ready" "snapshot_not_ready" (status json);
   check bool "unpublished catalog asks nothing of the operator" false
     (action_required json)
@@ -167,8 +202,11 @@ let () =
     [ ( "section"
       , [ test_case "rejected config degrades with each diagnostic" `Quick
             test_rejected_config_degrades_with_each_diagnostic
-        ; test_case "rejected reason without a path keeps the diagnostic" `Quick
-            test_rejected_reason_without_a_path_keeps_the_diagnostic
+        ; test_case "counts describe the snapshot without moving the grade" `Quick
+            test_counts_describe_the_snapshot_without_moving_the_grade
+        ; test_case "rejected catalog counts nothing" `Quick
+            test_rejected_catalog_counts_nothing
+        ; test_case "placeholder keeps the schema" `Quick test_placeholder_keeps_the_schema
         ; test_case "unreadable config degrades with its detail" `Quick
             test_unreadable_config_degrades_with_its_detail
         ; test_case "configured catalog is ok" `Quick test_configured_catalog_is_ok

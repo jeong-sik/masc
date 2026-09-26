@@ -399,7 +399,7 @@ let current_snapshot ~base_path =
   | Error _ -> Error Invalid_workspace
   | Ok Not_registered -> Error Snapshot_not_registered
   | Ok Uninitialized -> Error Snapshot_uninitialized
-  | Ok (Ready snapshot) -> Ok snapshot
+  | Ok (Ready { snapshot; config_path = _ }) -> Ok snapshot
 ;;
 
 let resolve_target ~base_path reference =

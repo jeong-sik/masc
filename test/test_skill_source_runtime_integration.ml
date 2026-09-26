@@ -132,78 +132,102 @@ let test_over_bound_save_names_key_and_file () =
       (String_util.contains_substring detail "(file: /tmp/live/runtime.toml)")
 ;;
 
-(* #39269 (a): a [skills] table the boot cannot accept is a WARN with the
-   reason and the file, not a bare diagnostic count. *)
-let test_boot_warns_with_reason_and_file () =
-  let diagnostics =
-    match Skill_source_config.parse_text over_bound_text with
-    | Ok _ -> fail "over-bound Skill config parsed"
-    | Error diagnostics -> diagnostics
-  in
-  let snapshot =
-    Skill_catalog_snapshot.config_rejected ~source_text:over_bound_text ~diagnostics
-  in
-  match
-    Server_skill_snapshot_runtime.boot_report
-      ~runtime_config_path:"/tmp/live/runtime.toml"
-      snapshot
-  with
-  | Server_skill_snapshot_runtime.Boot_warn, line ->
-    check bool "reason in WARN" true
-      (String_util.contains_substring line "[skills] resource-read-max-bytes = 65536");
-    check bool "file in WARN" true
-      (String_util.contains_substring line "/tmp/live/runtime.toml")
-  | (Boot_info | Boot_error), line -> fail ("rejected Skill config was not a WARN: " ^ line)
-;;
-
-(* #39269: after boot the Skill refresh route, the Skill editor and Keeper
-   Skill publication reread runtime.toml from disk, so a hand edit the runtime
-   config API never saw can empty the catalog with no save and no boot. Such a
-   change is logged once with the reason and the file; the first publication
-   is boot's and logs nothing here, and a publication that keeps the state
-   logs nothing. *)
-let test_reread_logs_each_config_state_change_once () =
-  let base_path = Filename.temp_file "skill-reread-" "" in
+let with_workspace_dir prefix f =
+  let base_path = Filename.temp_file prefix "" in
   Sys.remove base_path;
   Unix.mkdir base_path 0o700;
-  Fun.protect ~finally:(fun () -> Unix.rmdir base_path) @@ fun () ->
+  Fun.protect ~finally:(fun () -> Unix.rmdir base_path) (fun () -> f base_path)
+;;
+
+(* The Server lines one publication wrote that name [path], oldest first, read
+   from the in-memory ring the dashboard log API serves. *)
+let logged_by ~path publish =
+  let since_seq =
+    match Log.Ring.recent ~limit:1 () with
+    | [] -> -1
+    | entry :: _ -> entry.Log.Ring.seq
+  in
+  (match publish () with
+   | Skill_catalog_snapshot_service.Published _ -> ()
+   | Unchanged _ | Workspace_retired -> fail "fixture config was not published");
+  Log.Ring.recent ~since_seq ~order:`Oldest_first ~module_filter:"Server" ()
+  |> List.filter (fun (entry : Log.Ring.entry) ->
+    String_util.contains_substring entry.message ("(file: " ^ path ^ ")"))
+;;
+
+let refresh ~base_path ~path text () =
+  match
+    Server_skill_snapshot_runtime.refresh_from_observation
+      ~base_path
+      (Runtime.config_observation ~path text)
+  with
+  | Ok publication -> publication
+  | Error error -> fail (Server_skill_snapshot_runtime.error_to_string error)
+;;
+
+let levels entries =
+  List.map (fun (entry : Log.Ring.entry) -> Log.level_to_string entry.level) entries
+;;
+
+(* #39269 (a): a [skills] table the boot cannot accept is a WARN with the
+   reason and the file, not a bare diagnostic count. Boot's is the first
+   publication, and the publication logs it. *)
+let test_boot_warns_with_reason_and_file () =
+  with_workspace_dir "skill-boot-" @@ fun base_path ->
   let path = Filename.concat base_path "runtime.toml" in
-  let file = "(file: " ^ path ^ ")" in
-  let publish text =
-    let since_seq =
-      match Log.Ring.recent ~limit:1 () with
-      | [] -> -1
-      | entry :: _ -> entry.Log.Ring.seq
-    in
-    match
-      Server_skill_snapshot_runtime.refresh_from_observation
-        ~base_path
-        (Runtime.config_observation ~path text)
-    with
-    | Ok (Skill_catalog_snapshot_service.Published _) ->
-      Log.Ring.recent ~since_seq ~order:`Oldest_first ~module_filter:"Server" ()
-      |> List.filter (fun (entry : Log.Ring.entry) ->
-        String_util.contains_substring entry.message file)
-    | Ok (Unchanged _ | Workspace_retired) -> fail "fixture config was not published"
-    | Error error -> fail (Server_skill_snapshot_runtime.error_to_string error)
-  in
-  let levels entries =
-    List.map (fun (entry : Log.Ring.entry) -> Log.level_to_string entry.level) entries
-  in
-  check (list string) "the first publication is boot's" [] (levels (publish runtime_with_skills));
-  (match publish over_bound_text with
-   | [ entry ] ->
-     check string "a reread rejection warns" "WARN" (Log.level_to_string entry.level);
-     check bool "the warning names the key and value" true
-       (String_util.contains_substring
-          entry.message
-          "[skills] resource-read-max-bytes = 65536")
-   | entries -> fail (Printf.sprintf "a reread rejection wrote %d lines" (List.length entries)));
+  match logged_by ~path (refresh ~base_path ~path over_bound_text) with
+  | [ entry ] ->
+    check string "a rejected first publication warns" "WARN" (Log.level_to_string entry.level);
+    check bool "reason in WARN" true
+      (String_util.contains_substring entry.message "[skills] resource-read-max-bytes = 65536")
+  | entries -> fail (Printf.sprintf "a rejected boot wrote %d lines" (List.length entries))
+;;
+
+(* #39269: every publisher reaches the one publish point -- boot, a runtime
+   config save, and the Skill refresh route, the Skill editor and Keeper Skill
+   publication, which reread runtime.toml from disk. A hand edit the runtime
+   config API never saw can empty the catalog after boot, and the line that
+   says it ended is what an outage is measured by. Each change of config state
+   is logged once; a publication that keeps the state logs nothing. *)
+let test_publication_logs_each_config_state_change_once () =
+  with_workspace_dir "skill-reread-" @@ fun base_path ->
+  let path = Filename.concat base_path "runtime.toml" in
+  let publish text = levels (logged_by ~path (refresh ~base_path ~path text)) in
+  check (list string) "the first publication says the catalog is ready" [ "INFO" ]
+    (publish runtime_with_skills);
+  check (list string) "a reread rejection warns once" [ "WARN" ] (publish over_bound_text);
   check (list string) "a rejected reread that stays rejected writes nothing" []
-    (levels (publish ("# edited\n" ^ over_bound_text)));
-  check (list string) "a reread that configures the catalog again is logged once"
-    [ "INFO" ]
-    (levels (publish runtime_with_skills))
+    (publish ("# edited\n" ^ over_bound_text));
+  check (list string) "configuring the catalog again is logged once" [ "INFO" ]
+    (publish runtime_with_skills)
+;;
+
+(* The unreadable arm: nothing Skills can use was read, so every Keeper's
+   catalog is empty, and the line names the detail and the file. *)
+let test_unreadable_publication_is_an_error () =
+  with_workspace_dir "skill-unreadable-" @@ fun base_path ->
+  let path = Filename.concat base_path "runtime.toml" in
+  let detail = "fixture read failed" in
+  let workspace =
+    match Skill_catalog_snapshot_service.workspace_of_base_path ~base_path with
+    | Ok workspace -> workspace
+    | Error _ -> fail "fixture workspace was rejected"
+  in
+  let unreadable () =
+    Skill_catalog_snapshot_service.refresh
+      ~workspace
+      ~user_home:None
+      ~read_config:(fun () -> Skill_catalog_snapshot_service.Config_unreadable { path; detail })
+  in
+  (match logged_by ~path unreadable with
+   | [ entry ] ->
+     check string "an unreadable configuration is an error" "ERROR"
+       (Log.level_to_string entry.level);
+     check bool "the error names the detail" true
+       (String_util.contains_substring entry.message detail)
+   | entries -> fail (Printf.sprintf "an unreadable publication wrote %d lines" (List.length entries)));
+  check (list string) "a readable configuration after it is logged once" [ "INFO" ]
+    (levels (logged_by ~path (refresh ~base_path ~path runtime_with_skills)))
 ;;
 
 let () =
@@ -220,8 +244,10 @@ let () =
             test_over_bound_save_names_key_and_file
         ; test_case "boot warns with reason and file" `Quick
             test_boot_warns_with_reason_and_file
-        ; test_case "reread logs each config state change once" `Quick
-            test_reread_logs_each_config_state_change_once
+        ; test_case "publication logs each config state change once" `Quick
+            test_publication_logs_each_config_state_change_once
+        ; test_case "unreadable publication is an error" `Quick
+            test_unreadable_publication_is_an_error
         ] )
     ]
 ;;

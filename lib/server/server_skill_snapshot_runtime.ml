@@ -3,7 +3,10 @@ type error = Invalid_workspace of Config_dir_resolver.canonical_base_path_error
 type lookup =
   | Not_registered
   | Uninitialized
-  | Ready of Skill_catalog_snapshot.t
+  | Ready of
+      { snapshot : Skill_catalog_snapshot.t
+      ; config_path : string
+      }
 
 type commit_application =
   | Applied of
@@ -41,80 +44,18 @@ let application_slot workspace =
       slot)
 ;;
 
-let snapshot_revision_string snapshot =
-  Skill_catalog_snapshot.snapshot_revision snapshot
-  |> Skill_catalog_snapshot.snapshot_revision_to_string
-;;
-
-(* #39269: the reason and the file are the whole point of the line. The boot
-   report and a rejection found after boot print the same one. *)
-let rejected_line ~runtime_config_path ~snapshot_revision diagnostics =
-  Printf.sprintf
-    "Skill catalog is empty for every Keeper until this is fixed. %s \
-     snapshot_revision=%s"
-    (Skill_source_config.rejection_message ~config_path:runtime_config_path diagnostics)
-    snapshot_revision
-;;
-
-(* Boot publishes the first snapshot and [boot_report] logs it. After boot the
-   Skill refresh route, the Skill editor and Keeper Skill publication reread
-   runtime.toml from disk through [refresh_from_observation]. The runtime
-   config API refuses an invalid [skills] table, but a hand edit on disk is
-   read by any of these, so the catalog can empty or refill with no save and
-   no boot. Each such change of config state is logged once, and a
-   publication that keeps the state logs nothing. *)
-let log_reread_transition ~runtime_config_path ~previous snapshot =
-  let snapshot_revision = snapshot_revision_string snapshot in
-  match
-    Skill_catalog_snapshot.config_state previous,
-    Skill_catalog_snapshot.config_state snapshot
-  with
-  | Configured _, Configured _
-  | Config_rejected _, Config_rejected _
-  | Config_unreadable _, Config_unreadable _ -> ()
-  | (Configured _ | Config_unreadable _), Config_rejected { diagnostics; _ } ->
-    Log.Server.warn
-      "%s"
-      (rejected_line ~runtime_config_path ~snapshot_revision diagnostics)
-  | (Configured _ | Config_rejected _), Config_unreadable { detail } ->
-    Log.Server.error
-      "Skill snapshot config unreadable after rereading runtime.toml: %s (file: %s) \
-       snapshot_revision=%s"
-      detail
-      runtime_config_path
-      snapshot_revision
-  | (Config_rejected _ | Config_unreadable _), Configured _ ->
-    Log.Server.info
-      "Skill catalog configured again after rereading runtime.toml: skills=%d \
-       (file: %s) snapshot_revision=%s"
-      (List.length (Skill_catalog_snapshot.entries snapshot))
-      runtime_config_path
-      snapshot_revision
+let observation_input (observation : Runtime.config_observation) =
+  Skill_catalog_snapshot_service.Config_text
+    { path = observation.path; source_text = observation.source_text }
 ;;
 
 let refresh_from_observation ~base_path observation =
   Result.map
     (fun workspace ->
-       (* [read_config] runs under the workspace refresh lock, so the snapshot
-          read there is the one this publication replaces. *)
-       let previous = ref None in
-       let publication =
-         Skill_catalog_snapshot_service.refresh
-           ~workspace
-           ~user_home:Config_dir_resolver.initial_env_home
-           ~read_config:(fun () ->
-             previous := Skill_catalog_snapshot_service.current ~workspace;
-             Config_text observation.Runtime.source_text)
-       in
-       (match !previous, publication with
-        | Some previous, Published snapshot ->
-          log_reread_transition
-            ~runtime_config_path:observation.Runtime.path
-            ~previous
-            snapshot
-        | None, (Published _ | Unchanged _ | Workspace_retired)
-        | Some _, (Unchanged _ | Workspace_retired) -> ());
-       publication)
+       Skill_catalog_snapshot_service.refresh
+         ~workspace
+         ~user_home:Config_dir_resolver.initial_env_home
+         ~read_config:(fun () -> observation_input observation))
     (workspace base_path)
 ;;
 
@@ -132,7 +73,7 @@ let apply_commit ~base_path (receipt : Runtime.config_commit_receipt) =
              Skill_catalog_snapshot_service.refresh
                ~workspace
                ~user_home:Config_dir_resolver.initial_env_home
-               ~read_config:(fun () -> Config_text receipt.observation.source_text)
+               ~read_config:(fun () -> observation_input receipt.observation)
            in
            (match publication with
             | Workspace_retired -> ()
@@ -151,9 +92,9 @@ let lookup ~base_path =
   |> Result.map (function
     | None -> Not_registered
     | Some workspace ->
-      (match Skill_catalog_snapshot_service.current ~workspace with
+      (match Skill_catalog_snapshot_service.current_published ~workspace with
        | None -> Uninitialized
-       | Some snapshot -> Ready snapshot))
+       | Some { snapshot; config_path } -> Ready { snapshot; config_path }))
 ;;
 
 let error_to_string = function
@@ -193,35 +134,4 @@ let publish_lane_skills ~config exports =
   | Workspace_retired, _ -> Error "package Skill workspace publication was retired"
   | (Published _ | Unchanged _), [] -> Ok ()
   | (Published _ | Unchanged _), _ -> Error (String.concat "; " errors)
-;;
-
-type boot_level =
-  | Boot_info
-  | Boot_warn
-  | Boot_error
-
-let boot_report ~runtime_config_path snapshot =
-  let snapshot_revision = snapshot_revision_string snapshot in
-  match Skill_catalog_snapshot.config_state snapshot with
-  | Configured _ ->
-    ( Boot_info
-    , Printf.sprintf
-        "Skill snapshot ready at boot: snapshot_revision=%s catalog_revision=%s skills=%d rejections=%d"
-        snapshot_revision
-        (Skill_catalog_snapshot.catalog_revision snapshot
-         |> Skill_catalog_snapshot.catalog_revision_to_string)
-        (List.length (Skill_catalog_snapshot.entries snapshot))
-        (List.length (Skill_catalog_snapshot.rejections snapshot)) )
-  | Config_rejected { diagnostics; _ } ->
-    (* #39269: this used to print only a diagnostic count, so a rejected
-       [skills] table emptied every Keeper's catalog with no reason in the
-       log. *)
-    Boot_warn, rejected_line ~runtime_config_path ~snapshot_revision diagnostics
-  | Config_unreadable { detail } ->
-    ( Boot_error
-    , Printf.sprintf
-        "Skill snapshot config unreadable at boot: %s (file: %s) snapshot_revision=%s"
-        detail
-        runtime_config_path
-        snapshot_revision )
 ;;

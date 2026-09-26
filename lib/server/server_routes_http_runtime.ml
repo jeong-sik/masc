@@ -522,11 +522,10 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
       match base_path with
       | Some base_path ->
         Server_skill_catalog_health.to_yojson
-          ~runtime_config_path:(Runtime.config_path ())
           (Server_skill_snapshot_runtime.lookup ~base_path)
       | None ->
-        full_health_component_placeholder ~status:"snapshot_not_ready"
-          "skill_catalog")
+        Server_skill_catalog_health.placeholder ~component_timed_out:false
+          ~status:"snapshot_not_ready" ())
   in
   let lazy_task_boot_guard_fires_total =
     int_of_float
@@ -863,8 +862,8 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ( "keeper_observability_artifacts"
     , Keeper_observability_artifact_registry.to_yojson () );
     ( "skill_catalog",
-      full_health_component_placeholder ?error ~component_timed_out ~status
-        "skill_catalog" );
+      Server_skill_catalog_health.placeholder ?error ~component_timed_out
+        ~status () );
     ( "paused_keepers",
       `Assoc
         [

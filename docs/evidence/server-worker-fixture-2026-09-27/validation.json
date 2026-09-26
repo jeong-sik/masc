@@ -1,0 +1,33 @@
+{
+  "timed_requests": 10,
+  "total_receipts": 54,
+  "worker_fixture_records": 25,
+  "worker_projection_snapshots": 3,
+  "each_snapshot_workers": [
+    25,
+    25,
+    25
+  ],
+  "persisted_tasks": 820,
+  "success": {
+    "initial_revision": 1,
+    "final_revision": 46,
+    "final_tasks": 820
+  },
+  "cleanup": {
+    "server_returncode": 0,
+    "reaped": true,
+    "model_requests": [
+      {
+        "method": "GET",
+        "path": "/v1/models"
+      }
+    ],
+    "stub_stopped": true
+  },
+  "source": "97ed4b9f508727944bdec361dd4d3e271d1a510a",
+  "server_sha256": "732abb40ac65f8df793481bcf92260dd48fb1e0ebad1f1edef155946110df5fb",
+  "artifact": null,
+  "run_id": null,
+  "scope": "Installed macOS snapshot plumbing smoke only; not Linux, index candidate, comparative latency or deployed runtime proof"
+}

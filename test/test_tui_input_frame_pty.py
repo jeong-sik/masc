@@ -13,6 +13,7 @@ import resource
 import select
 import sys
 import time
+from urllib.parse import parse_qs, urlsplit
 
 import test_tui_keyboard_input as h
 
@@ -29,6 +30,59 @@ def positive_int(value: str) -> int:
     return parsed
 
 
+def nonnegative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("retained channels must be nonnegative")
+    return parsed
+
+
+def input_fixtures(retained_channels: int):
+    fixtures = h.keeper_runtime_http_fixtures()
+    if retained_channels == 0:
+        return fixtures, None
+    bindings = [{"channel_id": str(100000 + i), "keeper_name": "alpha"}
+                for i in range(retained_channels)]
+    # A binding for another Keeper makes the displayed here/total counts
+    # distinguish ownership filtering from the whole retained snapshot.
+    bindings.append({"channel_id": "99999", "keeper_name": "beta"})
+    connectors = {
+        "connectors": [{"connector_id": "discord", "display_name": "Discord",
+                        "status": "connected", "available": True, "connected": True,
+                        "configured_bindings": bindings}],
+        "total": 1, "active_count": 1,
+    }
+    names = {"server": [], "person": [], "channel": sorted(
+        [{"id": row["channel_id"], "name": f"fixture-channel-{i:04d}"}
+         for i, row in enumerate(bindings[:-1])], key=lambda row: row["id"])}
+
+    def directory(path):
+        query = parse_qs(urlsplit(path).query, strict_parsing=True)
+        scope = query.get("scope", [])
+        if query.get("name") != ["discord"] or len(scope) != 1 or scope[0] not in names:
+            return 400, {"error": "unexpected fixture directory query"}
+        kind = scope[0]
+        after = query.get("after_id", [None])[0]
+        limit = int(query["limit"][0])
+        if limit <= 0 or query.get("offset") != ["0"]:
+            return 400, {"error": "unexpected fixture directory window"}
+        remaining = [row for row in names[kind] if after is None or row["id"] > after]
+        page = remaining[:limit]
+        has_more = len(remaining) > len(page)
+        return 200, {
+            "connector_id": "discord", "kind": kind, "mapping_scope": "workspace",
+            "path": f"connector_names/discord/{kind}", "total": len(names[kind]),
+            "has_more": has_more, "after_id": after,
+            "next_after_id": page[-1]["id"] if has_more else None, "mappings": page,
+        }
+
+    fixtures[h.CONNECTORS_PATH] = (200, connectors)
+    fixtures[h.CONNECTOR_NAMES_PATH] = h.PathHttpResponse(directory)
+    fixture_hash = hashlib.sha256(
+        json.dumps([connectors, names], sort_keys=True).encode()).hexdigest()
+    return fixtures, fixture_hash
+
+
 def workspace_metadata(path: Path | None) -> dict:
     metadata = ({name: h.keeper_metadata(name) for name in ("alpha", "beta")}
                 if path is None else json.loads(path.read_text()))
@@ -39,15 +93,20 @@ def workspace_metadata(path: Path | None) -> dict:
     return metadata
 
 
-def run(executable: str, *, cycles: int = 1, metadata_path: Path | None = None) -> None:
+def run(executable: str, *, cycles: int = 1, metadata_path: Path | None = None,
+        retained_channels: int = 0) -> None:
     if cycles <= 0:
         raise ValueError("cycles must be positive")
+    if retained_channels < 0:
+        raise ValueError("retained channels must be nonnegative")
     samples = []
     stage = "startup"
     metadata = workspace_metadata(metadata_path)
     metadata_sha256 = hashlib.sha256(
         json.dumps(metadata, sort_keys=True).encode()).hexdigest()
-    preflight = {"metadata_sha256": metadata_sha256, "visible_keepers": []}
+    fixtures, channels_hash = input_fixtures(retained_channels)
+    preflight = {"metadata_sha256": metadata_sha256, "visible_keepers": [],
+                 "retained_channels": None}
 
     def prepare_workspace(base_path):
         for name, value in metadata.items():
@@ -142,6 +201,29 @@ def run(executable: str, *, cycles: int = 1, metadata_path: Path | None = None) 
         # destination. A quiet PTY does not prove which view owns the input.
         stage = "prepare detail"
         h.send_and_wait(process, master_fd, output, b"\x15\x1b", title)
+        if retained_channels:
+            stage = "load retained Channels snapshot"
+            for tab in (b"Runs", b"Automation", b"Channels"):
+                h.send_and_wait(process, master_fd, output, b"[", b"\xe2\x96\xb8" + tab)
+            count_text = f"{retained_channels} here / {retained_channels + 1} total"
+
+            def channels_loaded():
+                end = output.rfind(h.FRAME_END)
+                if end < 0:
+                    return False
+                screen = h.screen_text(bytes(output[:end + len(h.FRAME_END)]))
+                return (count_text.encode() in screen
+                        and b"fixture-channel-0000" in screen)
+
+            if not h.wait_for_fixture_state(process, master_fd, output,
+                                           channels_loaded, timeout=5.0):
+                raise AssertionError("Channels bindings and name directory were not rendered")
+            h.send_and_wait(process, master_fd, output, b"]]]", b"\xe2\x96\xb8Info")
+            preflight["retained_channels"] = {
+                "count": retained_channels, "fixture_sha256": channels_hash,
+                "loaded_header": count_text, "returned_tab": "Info",
+            }
+        stage = "prepare detail scroll window"
         frame = h.resize_and_wait(process, master_fd, output, rows=16, columns=100,
                                   needle=title, controls=(h.FULL_REDRAW,),
                                   final_cursor=b"\x1b[?25l")
@@ -174,7 +256,7 @@ def run(executable: str, *, cycles: int = 1, metadata_path: Path | None = None) 
     try:
         h.run_terminal_scenario(executable,
             description="Input bursts and scroll keys present their resulting frame",
-            interact=interact, http_fixtures=h.keeper_runtime_http_fixtures(),
+            interact=interact, http_fixtures=fixtures,
             prepare_workspace=prepare_workspace)
     except BaseException:
         # Print only after the helper unwinds: per-input I/O would perturb the
@@ -207,5 +289,8 @@ if __name__ == "__main__":
     parser.add_argument("--cycles", type=positive_int, default=1)
     parser.add_argument("--keeper-metadata", type=Path,
                         help="Explicit alpha/beta JSON fixture for a source-pinned comparison")
+    parser.add_argument("--retained-channels", type=nonnegative_int, default=0,
+                        help="Load this many synthetic alpha bindings before timed Info scrolling")
     args = parser.parse_args()
-    run(os.path.abspath(args.executable), cycles=args.cycles, metadata_path=args.keeper_metadata)
+    run(os.path.abspath(args.executable), cycles=args.cycles, metadata_path=args.keeper_metadata,
+        retained_channels=args.retained_channels)

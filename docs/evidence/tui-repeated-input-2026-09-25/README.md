@@ -21,9 +21,11 @@ See [Python resource usage documentation](https://docs.python.org/3/library/reso
 
 ## Verification
 
-- Six Python receipt tests pass. They reject missing/duplicate/changed cycle
+- Eight Python receipt/fixture tests pass. They reject missing/duplicate/changed cycle
   samples, invalid latency or resource values, inconsistent CPU totals, missing
   gaps, nonfinite/negative gaps, and incorrect phase boundaries.
+- An optional retained-Channels workload must report its matching loaded
+  binding count, name-directory hash, rendered count and return to Info.
 - Python syntax and `git diff --check` pass; no local OCaml build.
 - A local existing binary, copied without a neighboring server executable,
   completed two cycles (20 transitions), draft verification, exit and termios
@@ -105,3 +107,42 @@ timed scrolling. This fixes the fixture's navigation assumption; no production
 input routing is changed. The updated local two-cycle smoke passes and its
 receipt is in `pinned-fixture-smoke.stdout.txt`. This additional setup belongs
 to whole-session CPU and is not pooled with the earlier experiment.
+
+## Retained hidden Channels workload
+
+`--retained-channels N` and the corresponding workflow input load N synthetic
+alpha bindings, one beta binding and N synthetic channel names. Server and
+person name scopes return empty pages of their own kind; channel names follow
+the requested page limit and cursor. The default is
+zero and skips this setup. The profile visits Channels after the draft check,
+requires the completed current screen to contain both `N here / N+1 total` and
+the first resolved channel name, then acknowledges a return to Info. Detail
+scroll timings start after this setup and resize; roster timings precede it.
+
+Receipts retain the requested count, rendered count, returned tab and the
+SHA-256 of the normalized connector/name payloads. The comparator requires the
+requested profile and identical preflight receipts for every binary/repetition.
+It still measures the same ten transitions per cycle. Whole-session CPU now
+also includes the optional channel loading/rendering setup; it is not Info-only
+CPU. Frame timing histograms likewise include setup frames and are not directly
+matched to individual inputs. The fixture density is a controlled stress
+parameter, not a claim about the live runtime's channel population.
+
+An existing local binary with SHA-256
+`7c9579ccdfb04b42a20d8df783bf5984ebd43d918c460a88dc942349d336d1ec`
+passed N=250, two cycles, all 20 transitions and the draft check. Its source was
+not attributed for this smoke run, so it proves fixture operation only. The
+normalized channel fixture hash was
+`a57996f8ba3a01b5357180200dbd61d7ec7433dbd799b07ec2609efe4e2b73a8`.
+`retained-channels-smoke.stdout.txt` contains the complete receipt.
+
+The controlled builds for #39279 share base
+`5bb84d077c4adeb3e3c06df5511019c6b1184f40` and the same drained-input scheduler
+from #39270. Baseline `d40a5b18e6c5db66340c34f8946c08724a4cb98a` is built by
+[Release 36237833472](https://github.com/jeong-sik/masc/actions/runs/36237833472).
+Candidate `9c244cd88c147811a8534ee7df4c0ffb160f5000` is built by
+[Release 36237885748](https://github.com/jeong-sik/masc/actions/runs/36237885748).
+Their bin/lib diff contains only the four deferred Keeper detail builders in
+`bin/masc_tui_render.ml`; the additional diff is a changelog fragment. These
+integration builds are not installed runtime binaries. Comparison results are
+pending; the older 600-transition scheduler comparison is a separate experiment.

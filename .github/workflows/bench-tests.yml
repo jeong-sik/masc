@@ -55,6 +55,10 @@ on:
       keeper_metadata:
         type: string
         description: Optional checked-in alpha/beta JSON fixture path for both binaries
+      retained_channels:
+        type: string
+        description: Synthetic alpha bindings loaded before Info scroll; zero skips this setup
+        default: '0'
 permissions:
   contents: read
 concurrency:
@@ -146,6 +150,7 @@ jobs:
           REPETITIONS: ${{ inputs.repetitions }}
           INPUT_CYCLES: ${{ inputs.input_cycles }}
           KEEPER_METADATA: ${{ inputs.keeper_metadata }}
+          RETAINED_CHANNELS: ${{ inputs.retained_channels }}
         run: |
           fixture_args=()
           if [[ -n "$KEEPER_METADATA" ]]; then
@@ -157,6 +162,7 @@ jobs:
             --candidate runtime-candidate --candidate-run "$CANDIDATE_RUN" \
             --candidate-artifact "$CANDIDATE_ARTIFACT" --candidate-commit "$CANDIDATE_COMMIT" \
             --repetitions "$REPETITIONS" --input-cycles "$INPUT_CYCLES" \
+            --retained-channels "$RETAINED_CHANNELS" \
             "${fixture_args[@]}" \
             --output-dir comparison-results
       - name: Retain raw observations and identity receipts

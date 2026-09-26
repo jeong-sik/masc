@@ -36,6 +36,13 @@ def positive_int(value):
     return parsed
 
 
+def nonnegative_int(value):
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError('must be nonnegative')
+    return parsed
+
+
 def commit(value):
     if len(value) != 40 or any(c not in '0123456789abcdef' for c in value):
         raise argparse.ArgumentTypeError('expected a full lowercase commit SHA')
@@ -73,13 +80,14 @@ def cancel(signum, _frame):
     raise SystemExit(128 + signum)
 
 
-def run_scenario(scenario, binary, *, cycles, metadata_path, root, environment, out, name):
+def run_scenario(scenario, binary, *, cycles, retained_channels, metadata_path, root, environment, out, name):
     stdout_path = out / (name + '.stdout.txt')
     stderr_path = out / (name + '.stderr.txt')
     # Open before spawning: a cancelled run still has its output files. -u
     # prevents Python's redirected stdout from retaining observations in RAM.
     with stdout_path.open('wb', buffering=0) as stdout, stderr_path.open('wb', buffering=0) as stderr:
-        command = [sys.executable, '-u', str(scenario), str(binary), '--cycles', str(cycles)]
+        command = [sys.executable, '-u', str(scenario), str(binary), '--cycles', str(cycles),
+                   '--retained-channels', str(retained_channels)]
         if metadata_path is not None:
             command.extend(['--keeper-metadata', str(metadata_path)])
         process = subprocess.Popen(
@@ -115,12 +123,26 @@ def run_scenario(scenario, binary, *, cycles, metadata_path, root, environment, 
     return returncode, stdout_path.read_text(encoding='utf-8')
 
 
-def validate_observation(observation, *, cycles):
+def validate_observation(observation, *, cycles, retained_channels=0):
     preflight = observation['preflight']
     digest_value = preflight['metadata_sha256']
     if (len(digest_value) != 64 or any(c not in '0123456789abcdef' for c in digest_value)
             or preflight['visible_keepers'] != ['alpha', 'beta']):
         raise ValueError('workspace fixture was not fully acknowledged before measurement')
+    channels = preflight['retained_channels']
+    if retained_channels == 0:
+        if channels is not None:
+            raise ValueError('unexpected retained Channels workload')
+    else:
+        if (not isinstance(channels, dict) or type(channels.get('count')) is not int
+                or channels['count'] != retained_channels
+                or channels.get('returned_tab') != 'Info'
+                or channels.get('loaded_header') != f'{retained_channels} here / {retained_channels + 1} total'):
+            raise ValueError('retained Channels workload was not fully acknowledged')
+        fixture_hash = channels.get('fixture_sha256')
+        if (not isinstance(fixture_hash, str) or len(fixture_hash) != 64
+                or any(c not in '0123456789abcdef' for c in fixture_hash)):
+            raise ValueError('retained Channels fixture identity is invalid')
     if observation['cycles'] != cycles:
         raise ValueError('scenario cycle count differs')
     samples = observation['samples']
@@ -162,6 +184,7 @@ def main():
         parser.add_argument('--' + role + '-commit', type=commit, required=True)
     parser.add_argument('--repetitions', type=positive_int, default=3)
     parser.add_argument('--input-cycles', type=positive_int, default=1)
+    parser.add_argument('--retained-channels', type=nonnegative_int, default=0)
     parser.add_argument('--keeper-metadata', type=Path)
     parser.add_argument('--output-dir', type=Path, required=True)
     args = parser.parse_args()
@@ -205,7 +228,8 @@ def main():
             name = f'{repeat + 1:02d}-{role}'
             frame_timing = out / (name + '.frame-timing.txt')
             returncode, stdout = run_scenario(
-                scenario, binary, cycles=args.input_cycles, metadata_path=metadata_path, root=root,
+                scenario, binary, cycles=args.input_cycles, retained_channels=args.retained_channels,
+                metadata_path=metadata_path, root=root,
                 environment={**environment, 'MASC_TUI_FRAME_TIMING': str(frame_timing)},
                 out=out, name=name)
             if returncode != 0 or 'input and scroll frames: PASS' not in stdout.splitlines():
@@ -222,7 +246,8 @@ def main():
                     or digest(binary) != binary_hash
                     or digest(scenario) != scenario_hash or digest(helper) != helper_hash):
                 raise ValueError(f'{name}: observed identity changed')
-            inputs, action_inputs = validate_observation(observation, cycles=args.input_cycles)
+            inputs, action_inputs = validate_observation(
+                observation, cycles=args.input_cycles, retained_channels=args.retained_channels)
             if expected_preflight is None:
                 expected_preflight = observation['preflight']
             elif observation['preflight'] != expected_preflight:
@@ -256,6 +281,7 @@ def main():
         'perf_counter': vars(time.get_clock_info('perf_counter')),
         'scenario_sha256': scenario_hash, 'helper_sha256': helper_hash,
         'input_cycles': args.input_cycles,
+        'retained_channels': args.retained_channels,
         'preflight': expected_preflight,
         'session_resources': [{'role': r['role'], 'repetition': r['repetition'],
                                **r['session_resources']} for r in receipts],

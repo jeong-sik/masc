@@ -3,6 +3,7 @@ import copy
 import importlib.util
 from pathlib import Path
 import unittest
+import test_tui_input_frame_pty as scenario
 
 SOURCE_MODULES = (
     "scripts/harness/perf/compare_tui_artifacts.py",
@@ -17,7 +18,8 @@ spec.loader.exec_module(comparison)
 
 def receipt():
     return {"preflight": {"metadata_sha256": "a" * 64,
-                          "visible_keepers": ["alpha", "beta"]},
+                          "visible_keepers": ["alpha", "beta"],
+                          "retained_channels": None},
             "cycles": 2, "samples": [
         {"cycle": cycle, "action": f"action {action}", "input_hex": f"{action:02x}",
          "preceding_ack_to_input_ms": None if cycle == 1 and action in (0, 6) else 0.2,
@@ -30,6 +32,48 @@ def receipt():
 
 
 class ReceiptTests(unittest.TestCase):
+    def test_retained_fixture_respects_directory_scope_and_cursor(self):
+        fixtures, _ = scenario.input_fixtures(501)
+        directory = fixtures[scenario.h.CONNECTOR_NAMES_PATH].resolve
+        def read(kind, suffix=""):
+            status, page = directory(f"/api/v1/gate/connector/names?name=discord&scope={kind}&offset=0&limit=500{suffix}")
+            self.assertEqual(status, 200)
+            self.assertEqual(page["kind"], kind)
+            return page
+        for kind in ("server", "person"):
+            page = read(kind)
+            self.assertEqual(page["mappings"], [])
+            self.assertEqual(page["total"], 0)
+            self.assertFalse(page["has_more"])
+        first = read("channel")
+        self.assertEqual(len(first["mappings"]), 500)
+        self.assertTrue(first["has_more"])
+        second = read("channel", "&after_id=" + first["next_after_id"])
+        self.assertEqual(second["after_id"], first["next_after_id"])
+        self.assertEqual(len(second["mappings"]), 1)
+        self.assertFalse(second["has_more"])
+        self.assertEqual(len({row["id"] for row in first["mappings"] + second["mappings"]}), 501)
+
+    def test_retained_channels_require_loaded_matching_fixture(self):
+        observation = receipt()
+        observation["preflight"]["retained_channels"] = {
+            "count": 250, "fixture_sha256": "b" * 64,
+            "loaded_header": "250 here / 251 total", "returned_tab": "Info",
+        }
+        inputs, _ = comparison.validate_observation(observation, cycles=2, retained_channels=250)
+        self.assertEqual(len(inputs), 20)
+        with self.assertRaises(ValueError):
+            comparison.validate_observation(observation, cycles=2)
+        with self.assertRaises(ValueError):
+            comparison.validate_observation(receipt(), cycles=2, retained_channels=250)
+        for key, value in (("count", 249), ("count", True),
+                           ("loaded_header", "249 here / 250 total"),
+                           ("returned_tab", "Channels"), ("fixture_sha256", "g" * 64)):
+            malformed = copy.deepcopy(observation)
+            malformed["preflight"]["retained_channels"][key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                comparison.validate_observation(malformed, cycles=2, retained_channels=250)
+
     def test_reject_unacknowledged_workspace(self):
         for key, value in (("visible_keepers", []), ("visible_keepers", ["alpha"]),
                            ("metadata_sha256", "a" * 63), ("metadata_sha256", "g" * 64)):

@@ -85,6 +85,8 @@
             (Held_by_other → AlreadyClaimed 거부, 상태 변경 없음)</rule>
       <rule>완료는 자기 선언이 아니라 검증 제출(AwaitingVerification)을 거친다.
             verification_id 가 증거 레코드와 조인된다.</rule>
+      <rule>맡은 쪽은 자기 Task 를 사유와 함께 바로 취소한다. 판정 제출 중인 Task 도 같다.
+            취소는 판정이나 승인을 거치지 않는다. (RFC-0417 §4.1, workspace_task_lifecycle.ml)</rule>
 
       <lifecycle src="lib/types/types_core.mli">
         <state>Todo</state>

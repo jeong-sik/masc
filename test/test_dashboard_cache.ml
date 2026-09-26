@@ -1695,7 +1695,7 @@ let () =
           test_case "JSON materialization cannot deadlock an occupied worker" `Quick
             (test_json_cache_nested_materialization ~clock
                ~dm:(Eio.Stdenv.domain_mgr env));
-          test_case "JSON materialization restarts after timeout and cancellation" `Quick
+          test_case "JSON materialization survives timeout and cancellation" `Quick
             (test_json_materialization_timeout_and_cancel ~clock ~sw
                ~dm:(Eio.Stdenv.domain_mgr env));
           test_case "JSON materialization supports native domain callers" `Quick

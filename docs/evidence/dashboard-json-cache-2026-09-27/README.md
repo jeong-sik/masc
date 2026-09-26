@@ -32,8 +32,9 @@ reader adopting the same atomic winner. The existing per-key preparation policy
 is unchanged: JSON-first producers use identity-only preparation.
 
 Preparation claims the lazy inside the worker, avoiding a single-worker queue
-cycle. Timeout wraps that worker call so cancellation restarts the lazy.
-Only a successful caller publishes prepared bytes, and detached old values
+cycle. Timeout wraps that worker call; the lazy restarts when its forcing
+fiber is cancelled. A caller timeout does not prove that an admitted worker
+stopped immediately. Only a successful caller publishes prepared bytes, and detached old values
 cannot republish a globally invalidated entry. Existing table tokens, expiry,
 SWR scheduling, prepared HTTP fills, seeds and timeout envelopes remain.
 

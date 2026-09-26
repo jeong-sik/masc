@@ -80,14 +80,17 @@ type model_input_window =
   { transmitted_atoms : int
   ; total_atoms : int
   ; measurement : model_input_measurement
-  ; front_atom_digest : string
-        (** SHA-256 hex of the message that opens the front atom, index
+  ; front_atom_digest : string option
+        (** [Some] SHA-256 hex of the message that opens the front atom, index
             [total_atoms - transmitted_atoms]
             ([Runtime_model_input_tail_window.atom_opening_digest]). The
             index and this digest together are the position a later turn
             resumes from: the position holds only while that index still
             opens with the same message, whatever the history's atom count
-            is now. *)
+            is now. [None] names no front — a floor window, the request
+            transmitted none of its history (#39013) — and decodes only
+            beside [transmitted_atoms = 0]; the index in that case is the
+            history's atom count, not a position. *)
   }
 (** How much of the keeper's own history the dispatched request carried, in
     atoms — one organic user message, or one assistant message together with
@@ -115,8 +118,9 @@ type model_input_window =
 
     The four fields are written as the keys [transmitted_atoms],
     [total_atoms], [model_input_measurement] and [front_atom_digest], all
-    present or all null. A record without the [front_atom_digest] key does not
-    decode. *)
+    present or all null. A record without the [front_atom_digest] key does
+    not decode, and neither does a null digest beside a positive transmitted
+    count: a request that carried atoms names what it carried from (#39013). *)
 
 type response_observed_model_input =
   { runtime_profile : string
@@ -197,6 +201,14 @@ type t =
        than the fabricated 200K. This is the keeper conversation ceiling
        ([max_context]), not the provider's per-request num-ctx cap (an
        Ollama-only transport detail). *)
+  ; provider_context_window : int option
+    (** The model window the official client reported, positive when
+        present (decode rejects zero). This never replaces
+        [context_window], the MASC shaping ceiling used for ctx-fill. The
+        occupancy it bounds is the per-request [usage]: input plus output,
+        which is what the client itself counts against that window. There is
+        no separate occupancy field, and never a conversation-cumulative
+        one. *)
   ; price_input_per_million : float option
     (* RFC-0233 §8 — USD per 1M input tokens declared on the runtime
        binding in runtime.toml. [None] when the operator left it unset;

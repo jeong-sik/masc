@@ -181,7 +181,10 @@ type stream_event =
       { turn_id : string
       ; model : string
       }
-  | Text_delta of string
+  | Text_delta of
+      { message_id : string option
+      ; text : string
+      }
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -408,7 +411,17 @@ let client_environment () =
   |> List.filter_map (fun name ->
     Option.map (fun value -> name ^ "=" ^ value) (Sys.getenv_opt name))
   |> fun inherited ->
-  ("CLAUDE_CODE_ENTRYPOINT=masc" :: "CLAUDE_AGENT_SDK_VERSION=masc-ocaml" :: inherited)
+  (* Claude Code loads the auto-memory index kept for its working directory
+     (~/.claude/projects/<cwd>/memory/MEMORY.md) into every session. A Keeper
+     runs with the operator's base path as its working directory, so without
+     this it read the operator's own memory index -- notes from unrelated
+     work and personal details -- on every session. --setting-sources ""
+     does not cover this; the environment switch does (measured with Claude
+     Code 2.1.282: the `instructions` attachment carrying MEMORY.md is gone). *)
+  ("CLAUDE_CODE_ENTRYPOINT=masc"
+   :: "CLAUDE_AGENT_SDK_VERSION=masc-ocaml"
+   :: "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
+   :: inherited)
   |> Array.of_list
 ;;
 
@@ -1187,7 +1200,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
            | Api_error_diagnostic -> ()
            | Model_response ->
              texts_rev := text :: !texts_rev;
-             emit_stream_event on_stream_event (Text_delta text))
+             emit_stream_event on_stream_event (Text_delta { message_id; text }))
         | Assistant_native_tool observation ->
           native_tool_attempted := true;
           Option.iter

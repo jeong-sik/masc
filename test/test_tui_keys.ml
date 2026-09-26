@@ -41,6 +41,8 @@ let enter_atom_count_exceptions =
     "Keeper detail", 0
   ; (* A roster with a cursor and nothing the cursor opens. *)
     "Config / Runtime / Clients", 0
+  ; (* A scrolling reading, not a row list. *)
+    "Config / Tools", 0
   ; (* Two readings a Keeper detail drills into: [j/k] scrolls the text and
        there is no row under a cursor for Enter to open. *)
     "Keepers / Logs", 0
@@ -101,6 +103,27 @@ let test_every_surface_answers () =
         "a surface with no bindings has no footer and no help row" true
         (Masc_tui_keys.for_surface surface <> []))
     every_surface
+
+(* Keeper logs reads a tail window and has arms of its own for the keys that
+   move it: [home] and [end] set [log_scroll] and the page dispatcher walks
+   the window. The table named only [j/k], so three keys that answer on this
+   screen were on no footer and in no sheet section. The labels say what the
+   keys do here rather than what they do on a row list: rows are newest
+   first, so Home is now and End the oldest row held. *)
+let test_keeper_logs_names_the_keys_that_move_its_reading () =
+  let hints = Masc_tui_keys.footer_hints (Keepers Keeper_logs) in
+  List.iter
+    (fun needle ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the Keeper logs footer names %S" needle)
+        true
+        (let n = String.length needle and h = String.length hints in
+         let rec scan i =
+           i + n <= h
+           && (String.equal (String.sub hints i n) needle || scan (i + 1))
+         in
+         scan 0))
+    [ "j/k:scroll"; "PgUp/PgDn:page"; "Home/End:now / oldest"; "Left / Esc:back" ]
 
 (* The runtime picker claims its own keys through [Masc_tui_pick_list], and
    the page and edge pairs were carried inside [j/k]'s help rather than
@@ -516,24 +539,38 @@ let test_schedule_update_form_preserves_exact_editable_definition () =
    can drift to any footer at all without a test noticing. *)
 let test_tools_footer_carries_the_keeper_axis () =
   check str "tools names the effective Keeper switch"
-    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [ / ]:Keeper  Enter:evidence  c / C:new Skill  e:edit Skill  Esc:config  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [ / ]:Keeper  c / C:new Skill  e:edit Skill  Esc:config  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Tools)
 
 let test_resources_footer_steps_through_detail () =
-  let tail =
-    "  h/l:pane  Ctrl-W:focus  J/K:scroll text  [ / ]:previous / next"
-    ^ "  PgUp/PgDn:page  Home/End:top/bottom  Enter:read  Esc:back"
-  in
+  let panes = "  h/l:pane  Ctrl-W:focus  J/K:scroll text" in
+  (* [[ / ]] reads the resource before or after the open one, and the
+     dispatcher answers it only with the text focused, so the list footer
+     does not offer it. *)
+  let step = "  [ / ]:previous / next" in
+  let tail = "  PgUp/PgDn:page  Home/End:top/bottom  Enter:read  Esc:back" in
   let meta = "  r:reload  Tab:next  q:quit" in
-  check str "list names its search and adjacent detail navigation"
-    ("j/k:move" ^ tail ^ "  /:find  n / N:next / previous match" ^ meta)
+  check str "list names its search and not the adjacent-detail step"
+    ("j/k:move" ^ panes ^ tail ^ "  /:find  n / N:next / previous match" ^ meta)
     (Masc_tui_keys.footer_hints_resources ~detail_focus:false);
   (* The text has no cursor for a match to land on, so it says no [/] --
      the same answer [surface_row_texts] gives for that focus. Both ends
      still answer Home and End, which move the reading. *)
-  check str "the text names scrolling without a row search"
-    ("j/k:scroll text" ^ tail ^ meta)
+  check str "the text names scrolling and the step it answers"
+    ("j/k:scroll text" ^ panes ^ step ^ tail ^ meta)
     (Masc_tui_keys.footer_hints_resources ~detail_focus:true)
+
+(* Changes drew a literal in the renderer, and a literal names a fixed set at
+   every width. It named eight of the fourteen keys this surface answers and
+   left out [Left / Esc] -- the way back to the keeper the surface was opened
+   from -- so the only exit an operator could read was [q], which leaves the
+   terminal. The row search went with it, on a surface that has rows for it. *)
+let test_changes_footer_names_the_way_back_and_the_search () =
+  check str "the Changes footer is the table's"
+    "j/k:move  [ / ]:keeper  PgUp/PgDn:page  Home/End:top/bottom  \
+     Right / Enter:written diff  Left / Esc:back  d:tree diff  v:view code  \
+     o:editor  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Changes)
 
 let test_repositories_footer_offers_code_and_git_changes () =
   check str "repositories names the Code and Git changes paths"
@@ -3016,6 +3053,8 @@ let () =
             `Quick test_every_enter_atom_exception_names_a_sheet_surface
         ; Alcotest.test_case "every surface answers" `Quick
             test_every_surface_answers
+        ; Alcotest.test_case "Keeper logs names the keys that move it" `Quick
+            test_keeper_logs_names_the_keys_that_move_its_reading
         ; Alcotest.test_case "the runtime picker names its paging" `Quick
             test_the_runtime_picker_names_its_paging
         ; Alcotest.test_case "every surface with keys has a sheet section"
@@ -3073,6 +3112,8 @@ let () =
             test_system_logs_footer_names_browser_controls
         ; Alcotest.test_case "Tools carries the Keeper axis" `Quick
             test_tools_footer_carries_the_keeper_axis
+        ; Alcotest.test_case "Changes names the way back and the search" `Quick
+            test_changes_footer_names_the_way_back_and_the_search
         ; Alcotest.test_case "Resources steps through detail" `Quick
             test_resources_footer_steps_through_detail
         ; Alcotest.test_case "Lanes opens standalone runs" `Quick

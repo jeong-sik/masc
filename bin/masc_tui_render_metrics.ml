@@ -343,8 +343,10 @@ let render_section_fleet ?session_rows ~cols (state : state) =
     | Observer_off -> "off"
     | Observer_opening -> "opening"
     | Observer_live { events; _ } -> Printf.sprintf "live %d" events
-    | Observer_closed { events; reason; _ } ->
+    | Observer_closed_after_live { events; reason; _ } ->
         Printf.sprintf "closed %d (%s)" events (Terminal_text.single_line reason)
+    | Observer_closed_before_answer { reason; _ } ->
+        Printf.sprintf "failed to open (%s)" (Terminal_text.single_line reason)
   in
   (* This TUI's own log: what it did and what it was told, oldest first so the
      newest line is last. The log holds eleven lines ([add_event]); a run of

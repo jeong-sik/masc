@@ -613,9 +613,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
          | Error (Client_error (Runtime_muse_serve.Invalid_config detail)) ->
            Error (Unavailable (Invalid_configuration detail))
          | Error (Client_error (Runtime_muse_serve.Auth_required _
-             | Runtime_muse_serve.Turn_failed {kind=Runtime_muse_msp.Auth_required; _}
-             | Runtime_muse_serve.Process_exited
-                 {status=Some Runtime_muse_serve.Exit_config_or_credential; _})) ->
+             | Runtime_muse_serve.Turn_failed {kind=Runtime_muse_msp.Auth_required; _})) ->
            Error (Unavailable (Client_not_authenticated "The selected Muse account requires sign-in"))
          | Error (Client_error (Runtime_muse_serve.Timeout _)) -> Error Timed_out
          | Error (Client_error (Runtime_muse_serve.Turn_failed {retryable=true; _} as error)) ->

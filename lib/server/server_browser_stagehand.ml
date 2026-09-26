@@ -326,6 +326,8 @@ let log_event = function
   | Session.Unexpected_response { id } -> Log.Server.warn "browser-lane stagehand: response to %d, which no call waits for" id
   | Session.Abandoned_call_ended { method_; rejected } ->
     Log.Server.info "browser-lane stagehand: abandoned %s ended (%s)" method_ (if rejected then "rejected" else "answered")
+  | Session.Abandoned_call_unanswered { method_; waited_s } ->
+    Log.Server.warn "browser-lane stagehand: abandoned %s did not answer within %.0fs, so the session ended" method_ waited_s
   | Session.Reply_not_delivered detail ->
     Log.Server.warn "browser-lane stagehand: an answer to the extension was not delivered, so the session ended: %s" detail
   | Session.Malformed_cdp_event { method_; detail } ->

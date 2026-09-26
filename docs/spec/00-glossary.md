@@ -551,12 +551,15 @@ status: reference
   판정·Board attention)과 Keeper 걸음이 같은 오류에 같은 답을 하도록 둘 다 이 판정 하나를
   읽는다(#38913). 값은 셋이다.
   - `Binding of binding_fact`: 이 바인딩의 사정이라, 다음 후보가 같은 입력을 받아도 된다.
-    사정은 열둘이다 — `Credential`(401·403), `Account`(402), `Model_absent`(404), `Rate_limit`(429), `Capacity`(529),
+    사정은 열셋이다 — `Credential`(401, 죽은 키), `Account_access`(403, 계정이 거절됨: 다 쓴
+    구독 창·없는 권한·플랜이 받지 않는 클라이언트·정지된 계정), `Account`(402), `Model_absent`(404), `Rate_limit`(429), `Capacity`(529),
     `Server`(5xx), `Window`(창 초과, 또는 창에서 멈춘 빈 답), `Body_limit`(413),
     `Admission`(보내기 전에 이 바인딩이 준비된 요청을 받지 않음: 선언된 입력 용량 초과,
     입력을 잴 수 없음, 준비된 요청 거절), `Deadline`(보낸 뒤 헤더·전체 기한 초과),
     `Output_dialect`(답이 content 밖 필드에 옴), `Refusal_unread`(거절 상태는 왔지만 거절
     본문이 기한 안에 오지 않음).
+    401과 403을 두 사정으로 나눈 것은 Keeper 걸음이 403 뒤에만 provider 사용량을 읽기 때문이다.
+    한 사정으로 두면 route 가 원래 오류에서 둘을 다시 가르는 두 번째 표가 생긴다(#38975, #39254).
   - `Unattributed`: 거절은 왔지만, 누구의 사정인지 응답이 기계가 읽는 꼴로 말하지 않는다.
     기록에도 모른다고 남긴다.
   - `Unknown_after_dispatch`: 결과를 모르거나 이 바인딩의 사정으로 가를 수 없다. 이름과 달리
@@ -2303,8 +2306,13 @@ status: reference
     독립적으로 읽어 atom 위치를 전진시킨다. atom 쪽에 더 읽을 것이 없을 때 비로소 회차가
     `Official_range_stopped`로 종료된다(#38475).
   - 연속성 회차(`Keeper_librarian_continuity`): 스냅숏이 덮은 앞부분을 다시 쓰는 회차.
-    완료된 대화 구간을 요약해 Continuity Snapshot을 만든다. 커밋은 durable 회차의
-    위치를 바꾸지 않는다.
+    완료된 대화 구간을 요약해 Continuity Snapshot을 만든다. 그 구간의 기억을 durable
+    회차가 아직 저장하지 않았으면 이 회차가 기억을 먼저 저장하고, 저장이 끝난 뒤에만
+    스냅숏을 쓴다. 이렇게 기억을 저장할 때는 durable 회차가 같은 구간에 싣는 것을 그대로
+    싣는다. 그 메시지의 도구 호출과, 그 턴 동안 들어온 상대방 발화다. durable 회차의
+    위치 파일은 고치지 않는다. 대신 durable 회차가 다음에
+    돌 때 연속성 회차가 저장한 구간(그 영수증과 게시된 스냅숏)을 보고, 그 구간은 모델에
+    다시 보내지 않고 위치만 그 끝으로 옮긴다.
   두 회차는 따로 밀리고(Continuity Lag), 실패 뒤 범위를 좁히는 방식도 다르다(RFC
   librarian-lifecycle §4.3). durable 회차는 실패 종류를 보지 않고, 실패 표식(wide-range
   failure marker)을 루프 메모리에 두고 가장 오래된 한 턴으로 좁힌다. 단, 공식 정지

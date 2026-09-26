@@ -1282,6 +1282,7 @@ for target in "$@"; do
       # used to pass without the walk ever costing a second.
       case "${name}" in
         *slow*) sleep "${FAKE_DUNE_SUITE_SECONDS:-60}" ;;
+        *failing*) status=1 ;;
       esac
       continue
       ;;
@@ -1386,6 +1387,9 @@ FAKE
       "test/test_slow_one (stopped at the step budget);test/test_slow_two (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
       0 2 test_slow_one test_slow_two test_zz_after
 
+  runner_check "a failing Python alias rejects the parallel batch" \
+    "test/test_python_failing (dune-rule batch);test/test_python_ok (dune-rule batch);" \
+    0 30 test/test_python_failing.py test/test_python_ok.py
   runner_calls_check "the keyboard alias joins the default-bound Python batch" \
     "@test/runtest-test_tui_keyboard_input @test/runtest-test_python_one" \
     0 30 test/test_tui_keyboard_input.py test/test_python_one.py

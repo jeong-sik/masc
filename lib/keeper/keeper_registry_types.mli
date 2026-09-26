@@ -61,7 +61,7 @@ type failure_reason =
       (** The current turn was cancelled by an explicit operator request,
           typically from the dashboard "stop current turn" action. *)
 
-exception Operator_interrupt
+exception Operator_interrupt = Keeper_operator_interrupt.Operator_interrupt
 (** Raised by [interrupt_current_turn] to cancel the live turn switch.
     Fibers inside the turn switch observe it as
     [Eio.Cancel.Cancelled Operator_interrupt]; the [Eio.Switch.run] boundary

@@ -1513,6 +1513,54 @@ let test_post_effect_transport_enters_recovery () =
        | _ -> fail "post-effect transport failure released the durable claim")
 ;;
 
+let test_operator_interrupt_preserves_previous_native_settlement () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture
+      [ Emit (assistant ~turn_id:"original-turn" "ORIGINAL_OK")
+      ; Emit (result ~turn_id:"original-turn" "ORIGINAL_OK") ]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"ORIGINAL" () with
+        | Ok _ -> ()
+        | Error error -> fail (Agent_core.Error.to_string error));
+    let original = load_state base_path in
+    let observed : Keeper_semantic_execution.official_client_checkpoint =
+      match original.phase with
+      | Settled { session_id; turn_id } ->
+        { client_kind = original.client_kind; runtime_id = original.runtime_id;
+          session_id; turn_id; tool_surface_sha256 = original.tool_surface_sha256;
+          frame = Keeper_repetition_snapshot.empty }
+      | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+        fail "original native turn did not settle" in
+    let observed_message = ref false in
+    with_fixture
+      [ Emit (assistant ~turn_id:"interrupted-turn" "INTERRUPTED")
+      ; Emit (result ~turn_id:"interrupted-turn" "INTERRUPTED") ]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"NEWER"
+          ~on_event:(function
+            | Agent_core.Types.MessageStart _ ->
+              observed_message := true;
+              raise Keeper_registry_types.Operator_interrupt
+            | _ -> ()) () with
+        | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ()
+        | exception exn -> fail (Printexc.to_string exn)
+        | Ok _ | Error _ -> fail "operator interrupt was converted to a provider result");
+    check bool "native response callback was reached" true !observed_message;
+    let restored = load_state base_path in
+    check bool "operator interruption restores prior settlement" true
+      (restored.phase = original.phase);
+    (match restored.last_transient_release with
+     | Some release ->
+       check bool "typed owner stop was recorded" true
+         (release.failure = Owner_stopped_turn)
+     | None -> fail "owner stop release evidence was not persisted");
+    let resumed =
+      Keeper_direct_checkpoint_continuation.For_testing.prepare_official_resume
+        ~observed ~expected:(Some restored) |> Result.get_ok in
+    check string "previous checkpoint remains resumable" observed.turn_id resumed.turn_id)
+;;
+
 let test_keeper_does_not_retry_context_error_after_tool_effect () =
   let base_path = temp_workspace () in
   let call_count = ref 0 in
@@ -3254,6 +3302,8 @@ let () =
             "post-effect transport enters recovery"
             `Quick
             test_post_effect_transport_enters_recovery
+        ; test_case "operator interruption preserves previous native settlement" `Quick
+            test_operator_interrupt_preserves_previous_native_settlement
         ; test_case
             "does not retry context error after tool effect"
             `Quick

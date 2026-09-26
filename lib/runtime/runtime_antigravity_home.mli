@@ -134,6 +134,13 @@ val clear_mcp_config : t -> (unit, error) result
 (** Remove the turn capability after the listener has stopped. *)
 
 module For_testing : sig
+  val ensure_private_child_with_sync
+    : sync_parent:(string -> unit) -> string -> string -> (string, error) result
+
+  val prepare_account_with_store_sync
+    : sync_store:(string -> unit) -> runtime_root:string -> owner_leaf:string
+    -> oauth_source:string -> (t, error) result
+
   type paths =
     { settings_path : string
     ; mcp_config_path : string

@@ -163,6 +163,83 @@ let test_account_identity_preparation_does_not_reset_active_policy () =
     (Fs_compat.load_file (Runtime_antigravity_home.oauth_path planned))
 ;;
 
+let test_every_managed_hierarchy_link_reconfirms_parent_sync () =
+  with_temp_root @@ fun runtime_root ->
+  let synced = ref [] in
+  let sync_parent parent = synced := parent :: !synced in
+  let _ = List.fold_left (fun parent leaf ->
+    synced := [];
+    let path = Runtime_antigravity_home.For_testing.ensure_private_child_with_sync
+      ~sync_parent parent leaf |> require_ok in
+    check (list string) "created child confirms its parent" [parent] !synced;
+    synced := [];
+    let existing = Runtime_antigravity_home.For_testing.ensure_private_child_with_sync
+      ~sync_parent parent leaf |> require_ok in
+    check string "existing child is stable" path existing;
+    check (list string) "visible child reconfirms its parent" [parent] !synced;
+    path) runtime_root ["official-clients"; "antigravity"; "owner"; "generation"; ".gemini"; "antigravity-cli"] in
+  ()
+;;
+
+let test_failed_parent_sync_retries_visible_child () =
+  with_temp_root @@ fun runtime_root ->
+  let attempts = ref [] in
+  let sync_parent parent =
+    attempts := parent :: !attempts;
+    if List.length !attempts = 1 then raise (Unix.Unix_error (Unix.EIO, "fsync", parent)) in
+  let prepare () = Runtime_antigravity_home.For_testing.ensure_private_child_with_sync
+    ~sync_parent runtime_root "interrupted-publication" in
+  (match prepare () with
+   | Error (Runtime_antigravity_home.Unsafe_directory _) -> ()
+   | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+   | Ok _ -> fail "directory admitted after failed parent sync");
+  check bool "failed publication can leave its directory visible" true
+    (Sys.is_directory (Filename.concat runtime_root "interrupted-publication"));
+  ignore (prepare () |> require_ok);
+  check (list string) "EEXIST retry synchronizes the parent again"
+    [runtime_root; runtime_root] (List.rev !attempts)
+;;
+
+let test_visible_generation_pointer_requires_successful_store_sync () =
+  with_temp_root @@ fun runtime_root ->
+  let oauth_source = Filename.concat runtime_root "source" in
+  let owner_leaf = "pointer-retry" in
+  let prepare () = Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf ~oauth_source in
+  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "account-a");
+  let first = prepare () |> require_ok in
+  let store = Filename.dirname (Runtime_antigravity_home.home_dir first) in
+  let record_path = Filename.concat store "current.json" in
+  let old_record = Fs_compat.load_file record_path in
+  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "account-b");
+  let second = prepare () |> require_ok in
+  let new_record = Fs_compat.load_file record_path in
+  let refreshed = Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "account-b" in
+  write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path second) refreshed;
+  (match Fs_compat.save_file_atomic_strict record_path old_record with
+   | Ok () -> () | Error detail -> fail detail);
+  (match Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ~sync_parent:(fun parent -> raise (Unix.Unix_error (Unix.EIO, "fsync", parent)))
+      record_path new_record with
+   | Error {stage=Fs_compat.After_rename; _} -> ()
+   | Error failure -> fail (Fs_compat.atomic_replace_failure_to_string failure)
+   | Ok () -> fail "injected pointer publication failure was ignored");
+  check string "failed pointer publication remains visible" new_record (Fs_compat.load_file record_path);
+  let attempts = ref [] in
+  (match Runtime_antigravity_home.For_testing.prepare_account_with_store_sync
+      ~runtime_root ~owner_leaf ~oauth_source
+      ~sync_store:(fun parent -> attempts := parent :: !attempts;
+        raise (Unix.Unix_error (Unix.EIO, "fsync", parent))) with
+   | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
+   | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+   | Ok _ -> fail "visible pointer admitted without successful store sync");
+  check (list string) "retry syncs the exact pointer directory" [store] !attempts;
+  let recovered = prepare () |> require_ok in
+  check string "successful retry preserves the exact account generation"
+    (Runtime_antigravity_home.home_dir second) (Runtime_antigravity_home.home_dir recovered);
+  check string "retry retains the native-refreshed credential" refreshed
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path recovered))
+;;
+
 let test_corrupt_generation_never_reseeds_managed_state () =
   List.iter (fun corruption ->
     with_temp_root @@ fun runtime_root ->
@@ -767,6 +844,12 @@ let () =
             test_keeper_account_switch_preserves_each_refreshed_home
         ; test_case "corrupt generation refuses without reseed" `Quick
             test_corrupt_generation_never_reseeds_managed_state
+        ; test_case "visible pointer retries store sync before admission" `Quick
+            test_visible_generation_pointer_requires_successful_store_sync
+        ; test_case "every hierarchy link reconfirms parent sync" `Quick
+            test_every_managed_hierarchy_link_reconfirms_parent_sync
+        ; test_case "failed parent sync retries visible child" `Quick
+            test_failed_parent_sync_retries_visible_child
         ; test_case "preclaim identity preserves active permissions" `Quick
             test_account_identity_preparation_does_not_reset_active_policy
         ; test_case

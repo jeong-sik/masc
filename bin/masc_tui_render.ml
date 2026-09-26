@@ -16863,6 +16863,7 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
 let render (state : state) =
   (* Marks number the targets of this frame alone. *)
   Masc_tui_hit.reset press_marks;
+  Masc_tui_hit.reset wheel_marks;
   let frame, clamped, approval =
   (* Decide the pane before any surface measures the terminal. Modals draw
      over the whole terminal and the Activity screen, both its tabs,
@@ -16925,4 +16926,6 @@ let render (state : state) =
   let lines, presses =
     Masc_tui_hit.extract press_marks frame.Frame_presenter.lines
   in
-  ({ frame with Frame_presenter.lines }, clamped, approval, presses)
+  let lines, wheel_regions = Masc_tui_hit.extract wheel_marks lines in
+  ({ frame with Frame_presenter.lines }, clamped, approval,
+   { presses; wheel_regions })

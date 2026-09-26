@@ -104,6 +104,74 @@ let press_marks : press_target Masc_tui_hit.registry = Masc_tui_hit.registry ()
 
 let pressable target text = Masc_tui_hit.mark press_marks target text
 
+(* Where a wheel notch is not the reader's. A frame that draws one reader
+   reports it through [clamped_scroll], and a notch anywhere on that frame
+   scrolls it -- except over a list drawn beside the reader, which keeps the
+   wheel it had. *)
+type wheel_region = List_sidebar
+
+let wheel_marks : wheel_region Masc_tui_hit.registry = Masc_tui_hit.registry ()
+
+(* Where one wheel notch leaves the reader a presented frame drew. A notch
+   moves it as far as [j] or [k] does, one row. The wheel used to arrive as a
+   key that only list arms knew, so over an open fact or event reading it
+   moved the list hidden behind it instead.
+
+   [None] for the scrolls the wheel reaches another way. Listed one by one so
+   a new reader is a compile error here, not a notch that quietly moves a
+   list. *)
+let reader_after_wheel (reader : clamped_scroll)
+    (direction : Tui_decode.wheel_direction) : clamped_scroll option =
+  let step value =
+    match direction with
+    | Tui_decode.Wheel_down -> Masc_tui_types.scroll_down_from value ~by:1
+    | Tui_decode.Wheel_up -> max 0 (value - 1)
+  in
+  match reader with
+  | Task_detail value -> Some (Task_detail (step value))
+  | Schedule_detail_scroll value -> Some (Schedule_detail_scroll (step value))
+  | Acting_detail_scroll value -> Some (Acting_detail_scroll (step value))
+  | Memory_fact_detail_scroll value -> Some (Memory_fact_detail_scroll (step value))
+  | Verification_detail_scroll value ->
+      Some (Verification_detail_scroll (step value))
+  | Harness_detail_scroll value -> Some (Harness_detail_scroll (step value))
+  | Fusion_detail_scroll value -> Some (Fusion_detail_scroll (step value))
+  | Runtime_detail_scroll value -> Some (Runtime_detail_scroll (step value))
+  | System_log_detail_scroll value -> Some (System_log_detail_scroll (step value))
+  | Planning_detail_scroll value -> Some (Planning_detail_scroll (step value))
+  | Lane_run_detail_scroll { scroll; content_height } ->
+      Some (Lane_run_detail_scroll { scroll = step scroll; content_height })
+  | Changes_diff_scroll value -> Some (Changes_diff_scroll (step value))
+  | Repository_changes_diff_scroll value ->
+      Some (Repository_changes_diff_scroll (step value))
+  | Metrics_scroll value -> Some (Metrics_scroll (step value))
+  | Approval_detail_scroll value -> Some (Approval_detail_scroll (step value))
+  | Patch_modal_scroll value -> Some (Patch_modal_scroll (step value))
+  | Link_modal_scroll value -> Some (Link_modal_scroll (step value))
+  | Voice_scroll value -> Some (Voice_scroll (step value))
+  (* The chat reads its own wheel, three rows a notch, and its scroll counts
+     rows up from the newest message rather than down from the top. *)
+  | Message_scroll _ -> None
+  (* The Board read draws its comments beside the post with a scroll of their
+     own, which no mark separates from the post yet. *)
+  | Board_read _ -> None
+  (* Some Keeper detail tabs and the calls view move a row cursor on [j]; the
+     notch keeps reaching them as that key. *)
+  | Keeper_detail _ | Keeper_calls _ -> None
+  (* List scrolls: the notch moves the list's cursor as the arrow does. *)
+  | Acting _ | Acting_selection _ -> None
+  (* Resources has panes of its own that [h] and [l] move between. *)
+  | Resource_scroll _ -> None
+
+(* What [render] reads back from a finished frame. *)
+type frame_marks = {
+  presses : press_target Masc_tui_hit.zones;
+  wheel_regions : wheel_region Masc_tui_hit.zones;
+}
+
+let no_frame_marks =
+  { presses = Masc_tui_hit.no_zones; wheel_regions = Masc_tui_hit.no_zones }
+
 
 let navigation_rows = 1
 
@@ -1445,8 +1513,11 @@ let list_count_text ~loaded ~holding =
    Asked of every caller rather than defaulted: a list that is filtered
    rather than paged has nothing more to hold, and passing [None] says so
    where leaving it out could not be told from forgetting. *)
-let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
-    ~labels ~selection =
+let write_list_sidebar_selection destination ~rows ~cols ~title ~focused
+    ~holding ~labels ~selection =
+  (* Drawn into its own buffer so each row can be marked as the list's: a
+     wheel notch over these rows moves the list, not the reader beside it. *)
+  let buf = Buffer.create 1024 in
   framed_top buf cols;
   (* Focus wears a caret, not a key list: which keys work is the footer's
      sentence; which pane hears them is this one glyph. *)
@@ -1500,7 +1571,12 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
          else " " ^ drawn)
     | None -> framed_empty buf cols
   done;
-  framed_bottom buf cols
+  framed_bottom buf cols;
+  frame_lines buf
+  |> List.iter (fun line ->
+         Buffer.add_string destination
+           (Masc_tui_hit.mark wheel_marks List_sidebar line);
+         Buffer.add_char destination '\n')
 
 (* The same index for a list whose open row is always in it. *)
 let write_list_sidebar buf ~rows ~cols ~title ~focused ~holding ~labels

@@ -102,6 +102,27 @@ val pressable : press_target -> string -> string
 (** [pressable target text] is [text] marked so that a press on it resolves
     to [target] in the frame it is drawn in. *)
 
+(** Where a wheel notch is not the reader's: a list drawn beside the reader
+    the frame reports through [clamped_scroll]. *)
+type wheel_region = List_sidebar
+
+val wheel_marks : wheel_region Masc_tui_hit.registry
+
+val reader_after_wheel :
+  Masc_tui_types.clamped_scroll ->
+  Masc.Tui_decode.wheel_direction ->
+  Masc_tui_types.clamped_scroll option
+(** Where one wheel notch leaves the reader a presented frame drew: one row,
+    as [j] / [k] move it. [None] for the scrolls the wheel reaches as a key. *)
+
+(** What {!Masc_tui_render.render} reads back from a finished frame. *)
+type frame_marks = {
+  presses : press_target Masc_tui_hit.zones;
+  wheel_regions : wheel_region Masc_tui_hit.zones;
+}
+
+val no_frame_marks : frame_marks
+
 val navigation_rows : int
 
 val get_terminal_size : unit -> int * int

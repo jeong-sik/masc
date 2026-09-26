@@ -643,7 +643,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         (Fs_compat.load_file (Runtime_antigravity_home.oauth_path old_home));
                       write_file ~mode:0o600 oauth_source
                         (Masc_test_deps.antigravity_oauth_fixture ~revision:"source-refresh" "operator-oauth-fixture");
-                      check int "ordinary source OAuth refresh resumes the existing session" 73
+                      check int "ordinary source OAuth refresh resumes the existing session" 74
                         (run_context ~goal:"Keep this account after OAuth refresh" unchanged_context);
                       check string "source refresh retains native credential rotation"
                         (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "operator-oauth-fixture")

@@ -1088,7 +1088,9 @@ let guard_idle_timeout f =
 
 let prepare_account_config config =
   match config.prepared_home, config.account_home with
-  | Some _, Some _ | None, None -> Ok config
+  | Some home, Some selected when String.equal selected (Runtime_muse_home.account_home home) -> Ok config
+  | Some _, Some _ -> Error (Invalid_config "prepared_home does not match the selected account_home")
+  | None, None -> Ok config
   | Some _, None -> Error (Invalid_config "prepared_home requires a selected account_home")
   | None, Some account_home ->
     (match Runtime_muse_home.prepare ~account_home with

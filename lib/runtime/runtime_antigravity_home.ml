@@ -649,7 +649,7 @@ let existing_generation ~store ~revision =
       Filename.concat config_dir "mcp_config.json", oauth_path)
 ;;
 
-let select_generation ~runtime_root ~owner_leaf ~oauth_source =
+let select_generation ~sync_store ~runtime_root ~owner_leaf ~oauth_source =
   (* Validate the source under the preparation lock before creating any
      managed account directories. Unknown identity cannot seed a generation. *)
   let* source_bytes = read_oauth_seed oauth_source in
@@ -662,7 +662,11 @@ let select_generation ~runtime_root ~owner_leaf ~oauth_source =
     | Some file -> parse_generation_record ~path:record_path file.content |> Result.map Option.some in
   match previous with
   | Some (previous_sha256, revision) when String.equal account_sha256 previous_sha256 ->
-    existing_generation ~store ~revision
+    let* paths = existing_generation ~store ~revision in
+    (* A prior pointer rename can be visible after its parent fsync failed.
+       Confirm current.json publication before admitting the existing account. *)
+    sync_store store;
+    Ok paths
   | None | Some _ ->
     let revision = Random_id.uuid_v7 () in
     let home_dir = Filename.concat store revision in
@@ -679,7 +683,7 @@ let select_generation ~runtime_root ~owner_leaf ~oauth_source =
     Ok paths
 ;;
 
-let with_prepared_account ~runtime_root ~owner_leaf ~oauth_source publish_policy =
+let with_prepared_account_using_sync ~sync_store ~runtime_root ~owner_leaf ~oauth_source publish_policy =
   let* () = Eio_guard.run_in_systhread ~label:"antigravity-account-root" (fun () ->
     if not (Fs_compat.is_capability_leaf owner_leaf)
     then Error (Invalid_owner_leaf owner_leaf)
@@ -687,7 +691,7 @@ let with_prepared_account ~runtime_root ~owner_leaf ~oauth_source publish_policy
   let lock_path = Filename.concat runtime_root ("antigravity-" ^ owner_leaf ^ ".prepare.lock") in
   match File_lock_eio.with_durable_lock ~lock_path (fun () ->
     let* paths = Eio_guard.run_in_systhread ~label:"antigravity-account-generation" (fun () ->
-      try select_generation ~runtime_root ~owner_leaf ~oauth_source with
+      try select_generation ~sync_store ~runtime_root ~owner_leaf ~oauth_source with
       | Sys_error detail -> Error (generation_error runtime_root detail)
       | Unix.Unix_error (error, fn, arg) ->
         Error (generation_error runtime_root (unix_error_detail error fn arg))) in
@@ -695,6 +699,11 @@ let with_prepared_account ~runtime_root ~owner_leaf ~oauth_source publish_policy
     publish_policy home) with
   | Ok result -> result
   | Error error -> Error (Invalid_runtime_root (File_lock_eio.durable_lock_error_to_string error))
+;;
+
+let with_prepared_account ~runtime_root ~owner_leaf ~oauth_source publish_policy =
+  with_prepared_account_using_sync ~sync_store:sync_directory
+    ~runtime_root ~owner_leaf ~oauth_source publish_policy
 ;;
 
 let prepare_account ~runtime_root ~owner_leaf ~oauth_source =
@@ -816,6 +825,10 @@ let clear_mcp_config t =
 ;;
 
 module For_testing = struct
+  let prepare_account_with_store_sync ~sync_store ~runtime_root ~owner_leaf ~oauth_source =
+    with_prepared_account_using_sync ~sync_store ~runtime_root ~owner_leaf ~oauth_source Result.ok
+  ;;
+
   type paths =
     { settings_path : string
     ; mcp_config_path : string

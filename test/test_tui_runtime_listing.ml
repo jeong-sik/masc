@@ -669,7 +669,7 @@ let test_the_slot_editor_edits_cli_slots_after_http () =
   Alcotest.(check string) "HTTP/CLI boundary explains execution order"
     "refuse: HTTP slots run first; CLI slots are the fallback after HTTP exhaustion. Reorder within a group"
     (slot_plan_text (plan_slot_edit state (Move_slot Move_up)));
-  state.slot_editor <- Some { se_target = Exact_lane_slots "librarian_exact"; se_cursor = 2 };
+  state.slot_editor <- Some { se_target = Exact_lane_slots Standalone_lane.Librarian; se_cursor = 2 };
   Alcotest.(check string) "rejected CLI can be dropped"
     "librarian_exact drop cli-rejected, cursor stays"
     (slot_plan_text (plan_slot_edit state Drop_slot))

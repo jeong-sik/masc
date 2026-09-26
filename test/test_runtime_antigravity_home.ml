@@ -108,7 +108,7 @@ let test_keeper_account_switch_preserves_each_refreshed_home () =
        (Runtime_antigravity_home.home_dir second));
   check string "new source seeds its own account" "synthetic-b"
     (Fs_compat.load_file (Runtime_antigravity_home.oauth_path second));
-  let surface home = Keeper_official_client_session_store.tool_surface_sha256
+  let surface home = Masc.Keeper_official_client_session_store.tool_surface_sha256
       ~account_home:(Runtime_antigravity_home.home_dir home)
       ~native_posture:Runtime_native_tools.Native_read [] in
   check bool "old vendor session cannot retain its account surface" false

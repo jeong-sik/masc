@@ -3,9 +3,11 @@
 
     A lane is one connected browser backend: "live" is the user's real
     Firefox/Zen through the extension's native-messaging host. "automation"
-    is the in-process OCaml WebDriver executor. Only the live host long-polls
-    this process and posts results through the HTTP transport; automation
-    owns its session directly inside the server.
+    is the in-process OCaml WebDriver executor. "stagehand" is a Chromium the
+    server launches with the Stagehand runtime, reached over CDP
+    (RFC-browser-lane-stagehand). Only the live host long-polls this process
+    and posts results through the HTTP transport; automation and stagehand
+    own their sessions directly inside the server.
 
     Verbs are a closed variant: an unknown verb is refused by name on every
     boundary (tool input, lane issue, backend), the same rule the observe
@@ -46,6 +48,12 @@ type verb =
   | Page_elements of { tab_id : int option }
   | Page_act of Browser_action.t
   | Page_context of { tab_id : int; frame_path : string list; mode : [ `Text of int | `Elements | `Frames | `Dialog ] }
+  (* Sentences for the Stagehand runtime (RFC-browser-lane-stagehand §3.2):
+     act on, locate, or extract from the page, with element choice left to
+     the model the runtime asks. *)
+  | Page_instruct of { tab_id : int; instruction : string }
+  | Page_locate of { tab_id : int; instruction : string option }
+  | Page_extract of { tab_id : int; instruction : string; schema : Yojson.Safe.t option }
 
 let verb_to_string = function
   | Tabs_list -> "tabs.list"
@@ -62,6 +70,9 @@ let verb_to_string = function
   | Page_elements _ -> "page.elements"
   | Page_act _ -> "page.act"
   | Page_context _ -> "page.context"
+  | Page_instruct _ -> "page.instruct"
+  | Page_locate _ -> "page.locate"
+  | Page_extract _ -> "page.extract"
 ;;
 
 (* The wire carries a verb name plus args; the closed variant is the only
@@ -138,6 +149,14 @@ let verb_json = function
       (["tabId",`Int tab_id;"framePath",`List (List.map (fun s -> `String s) frame_path);"mode",`String name] @ extra)]
   | Page_act action ->
     `Assoc ["verb", `String "page.act"; "args", Browser_action.to_json action]
+  | Page_instruct { tab_id; instruction } ->
+    `Assoc ["verb", `String "page.instruct"; "args", `Assoc ["tabId", `Int tab_id; "instruction", `String instruction]]
+  | Page_locate { tab_id; instruction } ->
+    `Assoc ["verb", `String "page.locate"; "args", `Assoc
+      (["tabId", `Int tab_id] @ Option.to_list (Option.map (fun text -> "instruction", `String text) instruction))]
+  | Page_extract { tab_id; instruction; schema } ->
+    `Assoc ["verb", `String "page.extract"; "args", `Assoc
+      (["tabId", `Int tab_id; "instruction", `String instruction] @ Option.to_list (Option.map (fun s -> "schema", s) schema))]
 ;;
 
 (* Two different questions, two different classifications, both exhaustive
@@ -150,8 +169,8 @@ let verb_json = function
      and direct navigation remain with the automation backend. *)
 let verb_is_read = function
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _ | Page_downloads _
-  | Session_status -> true
-  | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ -> false
+  | Session_status | Page_locate _ | Page_extract _ -> true
+  | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ | Page_instruct _ -> false
 ;;
 
 let verb_allowed_on_live = function
@@ -160,7 +179,36 @@ let verb_allowed_on_live = function
   (* The operator's browser owns itself, so it has no session to report on.
      Answering here would describe something the automation backend holds. *)
   | Session_open _ | Session_close | Session_status | Page_goto _ | Page_act _ -> false
+  | Page_instruct _ | Page_locate _ | Page_extract _ -> false
 ;;
+
+(* The WebDriver backend has no model to hand a sentence to. *)
+let verb_allowed_on_automation = function
+  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _
+  | Page_downloads _ | Page_interact _ | Session_open _ | Session_close | Session_status | Page_goto _ | Page_act _ -> true
+  | Page_instruct _ | Page_locate _ | Page_extract _ -> false
+;;
+
+(* What the Stagehand backend serves once its executor is installed
+   (RFC-browser-lane-stagehand §7 step 7): its session, tabs, navigation,
+   screenshots and the three sentence verbs. Reads through the scene scripts,
+   interaction and actions are not served. *)
+let verb_allowed_on_stagehand = function
+  | Session_open _ | Session_close | Session_status | Tabs_list | Page_goto _ | Page_capture _
+  | Page_instruct _ | Page_locate _ | Page_extract _ -> true
+  | Page_read _ | Page_document _ | Page_elements _ | Page_scene _ | Page_context _ | Page_downloads _
+  | Page_interact _ | Page_act _ -> false
+;;
+
+let verb_allowed (lane : Lane_name.t) verb =
+  match lane with
+  | Live -> verb_allowed_on_live verb
+  | Automation -> verb_allowed_on_automation verb
+  | Stagehand -> verb_allowed_on_stagehand verb
+;;
+
+(* The refusal the other lanes give a sentence verb. *)
+let sentence_verbs_refused = "sentence verbs belong to the stagehand lane"
 
 type issued = { id : string; verb_json : Yojson.Safe.t }
 
@@ -186,7 +234,7 @@ type client = { info : client_info; commands : issued Eio.Stream.t;
   mutex : Eio.Mutex.t;
   waiters : (string, Yojson.Safe.t Eio.Promise.u) Hashtbl.t;
   mutable connected_until : Monotonic_deadline.t; mutable closed : bool }
-type target = Automation | Live_client of client
+type target = Automation | Live_client of client | Stagehand
 let clients : (string, client) Hashtbl.t = Hashtbl.create 4
 let clients_mutex = Eio.Mutex.create ()
 (* Retain only IDs after disconnect; queues and page payloads must be reclaimed. *)
@@ -217,15 +265,21 @@ let active_clients () =
 let client_json info = `Assoc ["clientId", `String (client_id_to_string info.client_id);
   "browser", `String (browser_name info.browser); "version", `String info.version;
   "engineVersion", `String info.engine_version]
-let target_client_id = function Automation -> None | Live_client client -> Some client.info.client_id
+let target_client_id = function Automation | Stagehand -> None | Live_client client -> Some client.info.client_id
+let target_lane = function
+  | Automation -> Lane_name.Automation
+  | Live_client _ -> Lane_name.Live
+  | Stagehand -> Lane_name.Stagehand
+;;
 
 (* Which backend a request names. A browser client id belongs to the live
    source, so a request for the automation backend has nowhere to carry one. *)
-type route = Automation_route | Live_route of client_id option
+type route = Automation_route | Live_route of client_id option | Stagehand_route
 
 let route_lane_name = function
   | Automation_route -> Lane_name.Automation
   | Live_route _ -> Lane_name.Live
+  | Stagehand_route -> Lane_name.Stagehand
 ;;
 
 (* Why a live request names no browser to send its command to. Each case has
@@ -243,6 +297,7 @@ let selection_error_code = function
 
 let resolve_target = function
   | Automation_route -> Ok Automation
+  | Stagehand_route -> Ok Stagehand
   | Live_route selected ->
     Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
       prune_unlocked ();
@@ -316,7 +371,7 @@ let issue_live ?(only_if_idle = false) client ~verb ~timeout_sec =
   if not (connected client) then
     Error (Selected_client_disconnected client.info.client_id)
   else if not (verb_allowed_on_live verb) then
-    Ok (Rejected_before_effect "session ownership and direct navigation belong to the automation lane")
+    Ok (Rejected_before_effect "session ownership, direct navigation and sentence verbs belong to the server's lanes")
   else
     Ok (Eio.Switch.run (fun sw ->
       let id = Uuidm.to_string (command_uuid ()) in
@@ -347,14 +402,68 @@ let install_automation_executor executor = Atomic.set automation_executor execut
 let automation_document_observer : (tab_id:int -> answer) option Atomic.t = Atomic.make None
 let install_automation_document_observer observer = Atomic.set automation_document_observer observer
 let issue_automation ~verb ~timeout_sec =
+  if not (verb_allowed_on_automation verb) then
+    Rejected_before_effect sentence_verbs_refused
+  else
   match Atomic.get automation_executor with
   | None -> Lane_absent
   | Some execute -> Watched_work.run (fun () -> execute verb)
       ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)
+let stagehand_executor : (verb -> answer) option Atomic.t = Atomic.make None
+let install_stagehand_executor executor = Atomic.set stagehand_executor executor
+let issue_stagehand ~verb ~timeout_sec =
+  if not (verb_allowed_on_stagehand verb) then
+    Rejected_before_effect
+      ("the stagehand lane serves session, tabs, goto, capture and sentence verbs, not "
+       ^ verb_to_string verb)
+  else
+  match Atomic.get stagehand_executor with
+  | None -> Lane_absent
+  | Some execute -> Watched_work.run (fun () -> execute verb)
+      ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)
+(* The lanes whose browser the server owns; sessions and navigation belong
+   to them, and the live browser belongs to the operator. *)
+type server_lane = Server_automation | Server_stagehand
+
+let server_lane_of_name : Lane_name.t -> server_lane option = function
+  | Lane_name.Automation -> Some Server_automation
+  | Lane_name.Stagehand -> Some Server_stagehand
+  | Lane_name.Live -> None
+;;
+
+let server_lane_name = function
+  | Server_automation -> Lane_name.Automation
+  | Server_stagehand -> Lane_name.Stagehand
+;;
+
+let server_lanes_expected =
+  String.concat " or " (List.map (fun lane -> Lane_name.to_wire (server_lane_name lane)) [ Server_automation; Server_stagehand ])
+;;
+
+let server_lane_refused = "lane must be " ^ server_lanes_expected
+
+(* A wire lane name as a server lane, or why not. Models often reach for live
+   here, since the read tools default to it, so that refusal says whose
+   browser it is. *)
+let parse_server_lane raw =
+  match Lane_name.of_wire raw with
+  | Some Lane_name.Live -> Error ("the live browser belongs to the operator; " ^ server_lane_refused)
+  | Some ((Lane_name.Automation | Lane_name.Stagehand) as name) ->
+    Option.to_result ~none:server_lane_refused (server_lane_of_name name)
+  | None -> Error server_lane_refused
+;;
+
+let issue_server_lane lane ~verb ~timeout_sec =
+  match lane with
+  | Server_automation -> issue_automation ~verb ~timeout_sec
+  | Server_stagehand -> issue_stagehand ~verb ~timeout_sec
+;;
+
 let issue_for ~target ~verb ~timeout_sec =
   match target with
   | Live_client client -> issue_live client ~verb ~timeout_sec
   | Automation -> Ok (issue_automation ~verb ~timeout_sec)
+  | Stagehand -> Ok (issue_stagehand ~verb ~timeout_sec)
 
 (** Additional observations never queue behind an existing browser command.
     Busy or missing browsers leave this optional source unavailable. The caller
@@ -371,6 +480,9 @@ let issue_document_if_idle ~target ~tab_id ~timeout_sec =
           Ok (Answered (`Assoc (("data", data) :: List.remove_assoc "data" fields)))
         | Some _ | None -> Ok (Answered (`Assoc fields)))
      | answer -> answer)
+  (* The Stagehand backend has no idle document observer; the optional
+     source is unavailable there, as it is for a busy browser. *)
+  | Stagehand -> Ok Lane_absent
   | Automation ->
     match Atomic.get automation_document_observer with
     | None -> Ok Lane_absent

@@ -832,10 +832,14 @@ type runtime_context_source =
   | Runtime_context_capability
   | Runtime_context_clamped
 
+type exact_slot_group = Exact_http_slots | Exact_cli_slots
+
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
   ro_model : string;
+  ro_exact_slot_group : exact_slot_group;
+      (** The declared list an exact-lane append writes. *)
   ro_effective_max_context : int;
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
@@ -1603,6 +1607,11 @@ type standalone_lane = {
           admitted or not. The two lists above are an admission reading and
           lose file order once a sibling was rejected; the slot editor moves
           and drops by position, so it reads this one. *)
+  sl_declared_cli_slots : string list;
+      (** [cli_slots] in source order, including any client rejected at admission. *)
+  sl_supports_cli_tail : bool;
+      (** Whether this lane walks a [cli_slots] tail; an official-client append
+          to a lane that does not is refused by the runtime writer. *)
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;

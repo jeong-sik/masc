@@ -117,9 +117,16 @@ let examine_official_client_session (config : Workspace.config) examination =
 let examine_event_queue (config : Workspace.config) examination =
   let base_path = config.Workspace.base_path in
   let discovery = Keeper_event_queue_persistence.discover_keeper_names_with_durable_state ~base_path in
-  (match discovery.read_error with
-   | None -> ()
-   | Some error -> Log.Keeper.warn "boot reconcile: event queue directory unreadable: %s" error);
+  let examination =
+    match discovery.read_error with
+    | None -> examination
+    | Some rejection ->
+      { examination with discovery_failures =
+          { store = D.Refusing.Event_queue
+          ; path = Common.keepers_runtime_dir_of_base ~base_path
+          ; rejection
+          } :: examination.discovery_failures }
+  in
   List.fold_left
     (fun examination keeper ->
        match

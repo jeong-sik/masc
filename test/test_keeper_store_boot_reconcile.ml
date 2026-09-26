@@ -773,6 +773,26 @@ let test_unreadable_session_inventory_refuses_even_with_quarantine () =
          (fun () -> really_input_string channel (in_channel_length channel))))
 ;;
 
+let test_event_queue_discovery_failure_refuses_quarantine () =
+  with_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let directory = Filename.concat
+        (Common.keepers_runtime_dir_of_base ~base_path) "invalid keeper name" in
+    let path = Filename.concat directory Keeper_event_queue_persistence.snapshot_filename in
+    write_bytes path "unread queue";
+    let examination = R.examine config in
+    List.iter (fun accept_quarantine ->
+      match R.admit ~accept_quarantine examination with
+      | Ok _ -> fail "partial event queue discovery admitted boot"
+      | Error failures ->
+        check bool "queue discovery failure remains explicit" true
+          (List.exists (function
+            | R.Discovery_failed { store = D.Refusing.Event_queue; _ } -> true
+            | R.Discovery_failed _ | R.Undecodable _ -> false) failures))
+      [ false; true ];
+    check bool "discovery never moved the queue" true (Sys.file_exists path))
+;;
+
 let () =
   run
     "keeper store boot reconcile"
@@ -783,7 +803,9 @@ let () =
             test_examine_is_silent_on_a_goal_store_that_is_absent_or_reads
         ] )
     ; ( "admit"
-      , [ test_case "unreadable inventory refuses even with quarantine" `Quick
+      , [ test_case "partial queue discovery refuses quarantine" `Quick
+            test_event_queue_discovery_failure_refuses_quarantine
+        ; test_case "unreadable inventory refuses even with quarantine" `Quick
             test_unreadable_session_inventory_refuses_even_with_quarantine
         ; test_case "refuses only undecodable stores without the flag" `Quick
             test_admit_refuses_only_undecodable_without_the_flag

@@ -13,7 +13,7 @@ let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime
    turn cost no longer needs a usage-trust classification. *)
 let turn_cost (resolution : Keeper_usage_resolution.t) =
   match resolution.delta with
-  | Some delta -> Option.value ~default:0.0 delta.cost_usd
+  | Some delta -> Keeper_usage_resolution.reported_cost_usd delta
   | None -> 0.0
 ;;
 
@@ -416,7 +416,7 @@ let emit_resolved_cost_event
     ~model:result.model_used
     ~input_tokens:usage.input_tokens
     ~output_tokens:usage.output_tokens
-    ~cost_usd:(Option.value ~default:0.0 usage.cost_usd)
+    ~cost_usd:(Keeper_usage_resolution.reported_cost_usd usage)
     ~cache_creation_input_tokens:usage.cache_creation_input_tokens
     ~cache_read_input_tokens:usage.cache_read_input_tokens
     ~usage_missing
@@ -753,7 +753,12 @@ let handle
       ~turn:keeper_turn_id
       ~tool_calls_made:(Keeper_agent_result.tool_call_count result)
       ~total_turns:updated_meta.runtime.usage.total_turns
-      ~usage_resolution);
+      ~usage_resolution
+      ~wire_prompt_tokens:
+        (Option.map
+           (fun (tokens : Keeper_agent_result.wire_prompt_tokens) ->
+             tokens.cache_n, tokens.prompt_n)
+           result.wire_prompt_tokens));
   (* Every terminal outcome has consumed a keeper turn id. *)
   let updated_meta =
     persist_terminal_turn_meta

@@ -6,6 +6,14 @@ type t = {
 let end_marker = "\x1b[201~"
 let max_bytes = 1_048_576
 
+type decoder = {
+  text : Buffer.t;
+  mutable dropped : int;
+  mutable matched : int;
+}
+
+let create () = { text = Buffer.create 4096; dropped = 0; matched = 0 }
+
 (* A line break in pasted text is whatever the sender's terminal writes for
    one, and terminals disagree: CR, LF, or CRLF, depending on the emulator and
    on what was on the clipboard. The draft holds LF -- that is what Ctrl-J
@@ -39,43 +47,34 @@ let newlines_normalized text =
    the byte that broke it against the first byte covers every restart. A
    marker whose bytes repeat (say "aab") would need the real fallback table;
    this one does not have that shape. *)
-let read ~next_byte =
-  let text = Buffer.create 4096 in
-  let dropped = ref 0 in
-  let matched = ref 0 in
+let keep decoder string =
+  let room = max 0 (max_bytes - Buffer.length decoder.text) in
+  let length = String.length string in
+  if length <= room then Buffer.add_string decoder.text string
+  else begin
+    if room > 0 then Buffer.add_string decoder.text (String.sub string 0 room);
+    decoder.dropped <- decoder.dropped + (length - room)
+  end
+
+let contents decoder =
+  { text = newlines_normalized (Buffer.contents decoder.text);
+    dropped = decoder.dropped }
+
+let snapshot_payload decoder = contents decoder
+
+let feed decoder byte =
   let marker_length = String.length end_marker in
-  (* Counting before the append keeps a large paste linear; appending and then
-     trimming would recopy the whole buffer once per byte. *)
-  let keep string =
-    let room = max 0 (max_bytes - Buffer.length text) in
-    let length = String.length string in
-    if length <= room then Buffer.add_string text string
-    else begin
-      if room > 0 then Buffer.add_string text (String.sub string 0 room);
-      dropped := !dropped + (length - room)
-    end
-  in
-  let finished = ref false in
-  let ended = ref false in
-  while not (!finished || !ended) do
-    match next_byte () with
-    | None -> ended := true
-    | Some byte ->
-        if byte = end_marker.[!matched] then begin
-          incr matched;
-          if !matched = marker_length then finished := true
-        end
-        else begin
-          keep (String.sub end_marker 0 !matched);
-          matched := 0;
-          if byte = end_marker.[0] then matched := 1
-          else keep (String.make 1 byte)
-        end
-  done;
-  (* A partial match the stream ended on is payload the operator typed, not a
-     marker that never came. *)
-  if !ended && !matched > 0 then keep (String.sub end_marker 0 !matched);
-  { text = newlines_normalized (Buffer.contents text); dropped = !dropped }
+  if byte = end_marker.[decoder.matched] then begin
+    decoder.matched <- decoder.matched + 1;
+    if decoder.matched = marker_length then Some (contents decoder) else None
+  end
+  else begin
+    keep decoder (String.sub end_marker 0 decoder.matched);
+    decoder.matched <- 0;
+    if byte = end_marker.[0] then decoder.matched <- 1
+    else keep decoder (String.make 1 byte);
+    None
+  end
 
 (* Dragging a file onto a terminal, or copying it in Finder, pastes the path
    the way a shell would need it: every space backslash-escaped. The draft is

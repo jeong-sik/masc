@@ -128,12 +128,12 @@ type durable_stimulus_summary =
   ; kinds : Keeper_event_queue.stimulus_payload list
   }
 
-type autonomous_yield_reason =
+type yield_reason =
   | Operation_queued
   | Durable_stimulus_waiting of durable_stimulus_summary
 
-type autonomous_yield_request =
-  { reason : autonomous_yield_reason }
+type yield_request =
+  { reason : yield_reason }
 
 let durable_stimulus_summary ~now (pending : Keeper_event_queue.t) =
   let stimuli = Keeper_event_queue.to_list pending in
@@ -177,6 +177,20 @@ let runtime_yield_reason request =
   | Operation_queued -> Runtime_agent.Operation_queued
   | Durable_stimulus_waiting _ ->
     Runtime_agent.Durable_stimulus_waiting
+;;
+
+let person_queued_probe ~turn_kind ~yield_requested =
+  match turn_kind with
+  | Turn_record.Direct -> None
+  | Turn_record.Autonomous ->
+    Option.map
+      (fun requested () ->
+         match requested () with
+         | Ok (Some { reason = Operation_queued }) -> true
+         | Ok (Some { reason = Durable_stimulus_waiting _ })
+         | Ok None
+         | Error _ -> false)
+      yield_requested
 ;;
 
 (* Constitution exception (named bound + rationale): loop detection is
@@ -338,21 +352,35 @@ let repeated_tool_call_input ~threshold tool_calls =
    same reading [native_tool_boundary] makes for AGENT_CORE. An admitted
    scope contributes only its latched observation failure; it is not what
    makes the boundary exist (#34083). *)
-let official_client_tool_boundary ~repetition_execution ~tool_calls =
+let official_client_tool_boundary
+      ~repetition_execution ?yield_requested ~tool_calls () =
   match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
   | Some error ->
     Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
   | None ->
-    let repeated =
-      match repeated_exact_tool_call
-              ~threshold:repeated_tool_call_yield_threshold tool_calls with
-      | Some _ as repeated -> repeated
-      | None ->
-        repeated_tool_call_input
-          ~threshold:repeated_tool_call_input_yield_threshold tool_calls
+    let repetition_stop () =
+      let repeated =
+        match repeated_exact_tool_call
+                ~threshold:repeated_tool_call_yield_threshold tool_calls with
+        | Some _ as repeated -> repeated
+        | None ->
+          repeated_tool_call_input
+            ~threshold:repeated_tool_call_input_yield_threshold tool_calls
+      in
+      Ok (Option.map (fun (tool_name, repeated_count) ->
+        Keeper_official_client_host.Repeated_tool_call { tool_name; repeated_count }) repeated)
     in
-    Ok (Option.map (fun (tool_name, repeated_count) ->
-      Keeper_official_client_host.Repeated_tool_call { tool_name; repeated_count }) repeated)
+    (match yield_requested with
+     | None -> repetition_stop ()
+     | Some requested ->
+       (match requested () with
+        | Ok (Some { reason = Operation_queued }) ->
+          Ok (Some Keeper_official_client_host.Queued_chat_operation)
+        | Ok (Some { reason = Durable_stimulus_waiting _ }) | Ok None ->
+          repetition_stop ()
+        | Error detail ->
+          Error (Agent_core.Error.Internal
+            ("keeper cooperative-yield snapshot failed: " ^ detail))))
 ;;
 
 let assistant_text_is_blank text =
@@ -628,7 +656,7 @@ let native_tool_boundary
       ~terminal_effect_state
       ~tool_calls
       ~assistant_turn_texts
-      ~autonomous_yield_requested
+      ~yield_requested
   =
   (match
      tool_boundary_before_repetition ~repetition_execution
@@ -695,7 +723,7 @@ let native_tool_boundary
                       (Runtime_agent.Repeated_assistant_text
                          { repeated_count })))))
      in
-     (match autonomous_yield_requested with
+     (match yield_requested with
       | None -> repeated_loop_decision ()
       | Some requested ->
         (match requested () with
@@ -710,6 +738,7 @@ let native_tool_boundary
 ;;
 
 module For_testing = struct
+  let person_queued_probe = person_queued_probe
   let native_tool_boundary = native_tool_boundary
   let tool_boundary_before_repetition = tool_boundary_before_repetition
   let official_client_tool_boundary = official_client_tool_boundary
@@ -816,7 +845,7 @@ let run_turn
       ?continuation_channel
       ?hitl_resolution
       ?on_gate_deferred
-      ?autonomous_yield_requested
+      ?yield_requested
       ?on_checkpoint_stage
       ()
   : Keeper_agent_result.turn_settlement
@@ -1502,7 +1531,9 @@ let run_turn
          let on_official_client_tool_boundary () =
            match
              official_client_tool_boundary ~repetition_execution
+               ?yield_requested
                ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
+               ()
            with
            | Ok (Some (Keeper_official_client_host.Repeated_tool_call _)) as stop ->
              record_repetition_judged ();
@@ -1524,7 +1555,7 @@ let run_turn
                        ~terminal_effect_state:(s.terminal_effect_state ())
                        ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
                        ~assistant_turn_texts:s.acc.assistant_turn_texts
-                       ~autonomous_yield_requested
+                       ~yield_requested
                    with
                    | Ok (Runtime_agent.Yield (Runtime_agent.Repeated_tool_call _)) as decision ->
                      record_repetition_judged ();
@@ -1540,21 +1571,13 @@ let run_turn
                           "keeper cooperative-yield probe failed: %s"
                           (Printexc.to_string exn))))
          in
-         (* The same queue snapshot the tool-boundary probe reads, narrowed to a
-            person's own chat operation ([Operation_queued]). The turn driver
-            races this against the pre-first-token wait so a queued person is
-            not stuck behind a provider that has produced nothing (RFC-0441
-            pre-first-token gap). Autonomous-only: [autonomous_yield_requested]
-            is [None] off the autonomous lane, so the probe is too. *)
+         (* The autonomous lane can abandon a call before its first event: its
+            stimulus stays pending for a later cycle. A direct operation has
+            already claimed its user's input, so it hands over only after a
+            settled tool result whose continuation can be retained. Applying the
+            pre-first-token abort to it would fail that operation instead. *)
          let person_queued_probe =
-           Option.map
-             (fun requested () ->
-                match requested () with
-                | Ok (Some { reason = Operation_queued }) -> true
-                | Ok (Some { reason = Durable_stimulus_waiting _ })
-                | Ok None
-                | Error _ -> false)
-             autonomous_yield_requested
+           person_queued_probe ~turn_kind ~yield_requested
          in
          let checkpoint_sidecar =
                 ctx_work.checkpoint.Agent_core.Checkpoint.working_context
@@ -1856,6 +1879,8 @@ let run_turn
                         s.Keeper_run_tools.observe_official_client_result_handoff
                       ~on_official_client_native_action:
                         s.Keeper_run_tools.observe_official_client_native_action
+                      ~on_official_client_usage_report:
+                        s.Keeper_run_tools.observe_official_client_usage_report
                       ())
          in
          (* Trace-store failure isolation: [raw_trace_for_dispatch]
@@ -2150,6 +2175,7 @@ let run_turn
            ~receipt_runtime_observation_ref
            ~receipt_lane_attempt_index_ref
            ~receipt_response_text_present_ref
+           ~spend:(s.Keeper_run_tools.spend_attempts ())
            ()
        in
        (* RFC-0233 PR-3: TurnRecord — same per-keeper-turn cadence as the
@@ -2179,15 +2205,25 @@ let run_turn
                   Some { request_context = Some (context : Runtime_observation.request_context); _ }
               ; _
               } ->
-            (* A runtime that reports the newest request's occupancy apart from
-               the turn's spend (Claude Code) records that request here: this
-               record's readers ask what one request carried. The request's
-               own output count is not known; the turn's output goes to
-               [turn_output_tokens] below, under its own scope. *)
+            (* A runtime that reports its newest request apart from the
+               turn's spend records that request here: this record's readers
+               ask what one request carried. Its output is there when the
+               runtime reports that request's final count; the turn's output
+               goes to [turn_output_tokens] below, under its own scope. Its
+               cache split is absent when the runtime reports only an
+               estimate of the whole context, as it does after a compaction. *)
             { input_tokens = Some context.input_tokens
-            ; output_tokens = None
-            ; cache_creation_input_tokens = Some context.cache_creation_input_tokens
-            ; cache_read_input_tokens = Some context.cache_read_input_tokens
+            ; output_tokens = context.output_tokens
+            ; cache_creation_input_tokens =
+                Option.map
+                  (fun (cache : Runtime_observation.request_cache) ->
+                     cache.cache_creation_input_tokens)
+                  context.cache
+            ; cache_read_input_tokens =
+                Option.map
+                  (fun (cache : Runtime_observation.request_cache) ->
+                     cache.cache_read_input_tokens)
+                  context.cache
             ; scope = Runtime_usage_scope.Per_request
             }
           | Ok result when result.usage_reported ->
@@ -2379,6 +2415,11 @@ let run_turn
                  run_ref.worker_run_id detail;
                None)
         in
+        let provider_context =
+          match turn_result with
+          | Ok result -> result.runtime_observation
+          | Error _ -> None
+        in
         (match !request_wire_evidence_ref with
          | Some
              { serialized_observation = Some wire
@@ -2414,6 +2455,9 @@ let run_turn
                Keeper_execution_receipt.stop_reason_to_string
                !receipt_stop_reason_ref)
           ~context_window:settled_context_window
+          ?provider_context_window:
+            (Option.bind provider_context
+               (fun observation -> observation.reported_context_window))
           ~price_input_per_million
           ~price_output_per_million
           ~request_latency_ms

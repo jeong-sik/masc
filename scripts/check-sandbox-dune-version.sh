@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check-sandbox-dune-version.sh
 #
-# CI gate: verify that the dune version installed in Dockerfile.keeper-sandbox
+# CI gate: verify that the dune version installed in sandbox-images/ocaml/Dockerfile
 # meets or exceeds the (lang dune X.Y) requirement in dune-project.
 #
 # Rationale: Ubuntu 24.04's ocaml-dune apt package provides dune 3.14 while
@@ -33,13 +33,13 @@ fi
 # no-match grep exits 1, which would kill the script before it could print
 # the diagnostic below.
 sandbox_ver="$(grep -oE 'dune\.[0-9]+\.[0-9]+(\.[0-9]+)?' \
-               "$repo_root/Dockerfile.keeper-sandbox" 2>/dev/null \
+               "$repo_root/sandbox-images/ocaml/Dockerfile" 2>/dev/null \
                | head -1 | sed 's/^dune\.//' || true)"
-sandbox_source="Dockerfile.keeper-sandbox (explicit install)"
+sandbox_source="sandbox-images/ocaml/Dockerfile (explicit install)"
 
 if [[ -z "$sandbox_ver" ]] \
    && grep -qE '^[[:space:]]*(RUN|&&)?[^#]*--deps-only' \
-        "$repo_root/Dockerfile.keeper-sandbox"; then
+        "$repo_root/sandbox-images/ocaml/Dockerfile"; then
   sandbox_ver="$(grep -oE '"dune" \{= "[0-9]+\.[0-9]+(\.[0-9]+)?"\}' \
                  "$repo_root/masc.opam.locked" 2>/dev/null \
                  | head -1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)"
@@ -48,7 +48,7 @@ fi
 
 if [[ -z "$sandbox_ver" ]]; then
   printf 'ERROR: could not determine the dune version the sandbox image installs\n' >&2
-  printf '  Looked for: an `opam install dune.X.Y.Z` line in Dockerfile.keeper-sandbox,\n' >&2
+  printf '  Looked for: an `opam install dune.X.Y.Z` line in sandbox-images/ocaml/Dockerfile,\n' >&2
   printf '  then, if it installs with --deps-only, `"dune" {= "X.Y.Z"}` in masc.opam.locked\n' >&2
   exit 1
 fi
@@ -64,7 +64,7 @@ if printf '%s\n%s\n' "$req_ver" "$sandbox_ver" | sort -V -C; then
 else
   printf 'FAIL: sandbox dune %s < dune-project required %s\n' \
          "$sandbox_ver" "$req_ver" >&2
-  printf '  Fix: update Dockerfile.keeper-sandbox to install dune >= %s\n' \
+  printf '  Fix: update sandbox-images/ocaml/Dockerfile to install dune >= %s\n' \
          "$req_ver" >&2
   exit 1
 fi

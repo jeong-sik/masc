@@ -2798,6 +2798,47 @@ let test_drain_outcome_carries_the_work_it_did () =
     (after_contention.judgments, after_contention.steps)
 ;;
 
+let meta_fixture ~paused =
+  let meta =
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "alpha"; "trace_id", `String "trace-alpha" ])
+    |> Result.get_ok
+  in
+  { meta with Masc.Keeper_meta_contract.paused }
+;;
+
+(* Issue #25452: the heartbeat Board path refuses to act for a paused Keeper,
+   so the worker must skip the whole wake for the same meta. A meta the worker
+   cannot see is skipped too, never read as "not paused". *)
+let test_wake_admission_follows_keeper_pause () =
+  let admission = W.For_testing.wake_admission_of_meta_read in
+  let is_admitted = function
+    | W.Wake_admitted -> true
+    | W.Wake_skipped
+        (W.Keeper_paused | W.Keeper_meta_absent | W.Keeper_meta_read_failed _) ->
+      false
+  in
+  Alcotest.(check bool)
+    "active keeper drains"
+    true
+    (is_admitted (admission (Ok (Some (meta_fixture ~paused:false)))));
+  (match admission (Ok (Some (meta_fixture ~paused:true))) with
+   | W.Wake_skipped W.Keeper_paused -> ()
+   | W.Wake_admitted
+   | W.Wake_skipped (W.Keeper_meta_absent | W.Keeper_meta_read_failed _) ->
+     Alcotest.fail "paused keeper must skip the wake as Keeper_paused");
+  (match admission (Ok None) with
+   | W.Wake_skipped W.Keeper_meta_absent -> ()
+   | W.Wake_admitted
+   | W.Wake_skipped (W.Keeper_paused | W.Keeper_meta_read_failed _) ->
+     Alcotest.fail "absent meta must skip the wake as Keeper_meta_absent");
+  match admission (Error "unreadable") with
+  | W.Wake_skipped (W.Keeper_meta_read_failed detail) ->
+    Alcotest.(check string) "read failure keeps its detail" "unreadable" detail
+  | W.Wake_admitted | W.Wake_skipped (W.Keeper_paused | W.Keeper_meta_absent) ->
+    Alcotest.fail "meta read failure must skip the wake with its detail"
+;;
+
 let test_drain_outcome_labels_stay_distinct () =
   let contention =
     { W.keeper_name = "k"
@@ -3171,6 +3212,10 @@ let () =
             "a not-relevant judgment settles without an owner turn (task-1666)"
             `Quick
             test_a_not_relevant_judgment_settles_without_an_owner_turn
+        ; Alcotest.test_case
+            "wake admission follows keeper pause"
+            `Quick
+            test_wake_admission_follows_keeper_pause
         ; Alcotest.test_case
             "drain outcome labels stay distinct"
             `Quick

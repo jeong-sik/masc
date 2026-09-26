@@ -267,21 +267,110 @@ let memo_line_refusal_to_string = function
       (lang_id_of_language language)
 ;;
 
-(* The comment line a memo becomes in the file at [path]. One function, so
-   the tool that writes the line and the projection that records the call
-   spell it the same way. *)
-let memo_markers_of_path path =
+(* The language and comment markers of the file at [path]: what the writer
+   spells a memo with and the reader looks for. *)
+let memo_language_of_path path =
   let extension = String.lowercase_ascii (Filename.extension path) in
   match language_of_extension extension with
   | None -> Error (Extension_unknown extension)
   | Some language ->
     (match memo_markers_of_language language with
      | None -> Error (No_comment_syntax language)
-     | Some markers -> Ok markers)
+     | Some markers -> Ok (language, markers))
+;;
+
+let memo_markers_of_path path = Result.map snd (memo_language_of_path path)
+
+type memo_line_error =
+  | Unwritable of memo_line_refusal
+  | Breaks_comment of string
+
+let memo_line_error_to_string = function
+  | Unwritable refusal -> memo_line_refusal_to_string refusal
+  | Breaks_comment why -> "the memo would not stay inside its comment: " ^ why
+;;
+
+(* OCaml lexes string literals inside comments, so a double quote, or a
+   quoted-string opener (a left brace, an optional lower-case id or a
+   percent-sign extension, then a bar), in the text starts a string the
+   comment's closer cannot end, and the rest of the file is read as that
+   string. The same rule is why this comment names those characters instead
+   of writing them. *)
+let ocaml_string_opener_in text =
+  let n = String.length text in
+  let rec quoted_id_then_bar i =
+    i < n
+    &&
+    match text.[i] with
+    | '|' -> true
+    | 'a' .. 'z' | '_' -> quoted_id_then_bar (i + 1)
+    | _ -> false
+  in
+  let rec from i =
+    i < n
+    &&
+    match text.[i] with
+    | '"' -> true
+    | '{' -> (i + 1 < n && Char.equal text.[i + 1] '%') || quoted_id_then_bar (i + 1) || from (i + 1)
+    | _ -> from (i + 1)
+  in
+  from 0
+;;
+
+(* Java turns a [\uXXXX] escape into its character before it lexes, so
+   [\u000a] (any number of [u]s, either case of hex) in a [//] comment is a
+   real line break and the rest of the memo is code. *)
+let java_line_break_escape_in text =
+  let n = String.length text in
+  let lower = String.lowercase_ascii text in
+  let rec after_us i = if i < n && Char.equal lower.[i] 'u' then after_us (i + 1) else i in
+  let rec from i =
+    i < n
+    &&
+    ((Char.equal text.[i] '\\'
+      && i + 1 < n
+      && Char.equal lower.[i + 1] 'u'
+      &&
+      let hex = after_us (i + 1) in
+      hex + 4 <= n
+      && (String.equal (String.sub lower hex 4) "000a" || String.equal (String.sub lower hex 4) "000d"))
+     || from (i + 1))
+  in
+  from 0
+;;
+
+let language_breaks_comment language (memo : Ide_memo.t) =
+  match language with
+  | Ocaml ->
+    if ocaml_string_opener_in memo.text
+    then Some "the text has \" or {|, which OCaml reads as a string inside the comment"
+    else None
+  | C | Cpp ->
+    (* A backslash at the end of a line splices the next source line into
+       the [//] comment, and the memo sits above a line of code. *)
+    if String.ends_with ~suffix:"\\" memo.text
+    then Some "the text ends in \\, which joins the next line into the comment"
+    else None
+  | Java ->
+    if java_line_break_escape_in memo.text
+    then Some "the text has \\u000a or \\u000d, which Java reads as a line break"
+    else None
+  | Php ->
+    if Ide_memo.contains ~sub:"?>" memo.text
+    then Some "the text has ?>, which ends the PHP block and the comment with it"
+    else None
+  | Typescript | Javascript | Rust | Go | Swift | Kotlin | Zig | Dart | Scala | Csharp | Python
+  | Ruby | Bash | Yaml | Elixir | Lua | Haskell | Markdown | Json ->
+    None
 ;;
 
 let memo_line ~path (memo : Ide_memo.t) =
-  Result.map (fun markers -> Ide_memo.to_line markers memo) (memo_markers_of_path path)
+  match memo_language_of_path path with
+  | Error refusal -> Error (Unwritable refusal)
+  | Ok (language, markers) ->
+    (match Ide_memo.breaks_comment markers memo, language_breaks_comment language memo with
+     | Some why, _ | None, Some why -> Error (Breaks_comment why)
+     | None, None -> Ok (Ide_memo.to_line markers memo))
 ;;
 
 let covered_extensions () = List.concat_map extensions_of_language all_languages

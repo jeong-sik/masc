@@ -98,6 +98,10 @@ val register :
 (** [register ~auth session_id ~last_event_id] validates the supplied
     bearer token and MCP session pair before admitting the client.
 
+    [last_event_id] is the client's delivery floor. One above {!current_id}
+    was handed out by an earlier process, since ids only grow within one, and
+    is registered as 0: every new event reaches the client.
+
     [?on_disconnect] is installed atomically with registration via
     {!set_disconnect_hook} before the client becomes broadcast-visible,
     so a concurrent queue-overflow [unregister] always finds the hook.

@@ -23,6 +23,22 @@
    no runner closure.  [Exec_dispatch] routes [Host] directly to
    [Process_eio], and guest / SSH targets via the carried [runner]. *)
 
+(* What kind of transport failure: the payload ran past its time budget and
+   the endpoint stopped it, or the lane never delivered the command's own
+   result (including a host budget that ran out before the endpoint answered). *)
+type transport_failure =
+  | Payload_timed_out
+  | Lane_unavailable
+
+(* The status a caller that needs one gives a transport failure. A timeout
+   takes the timeout status a host run takes ([Process_eio.timed_out_status],
+   124), so a remote timeout reads as a timeout everywhere a host one does.
+   A lane that delivered nothing still reads as [WEXITED 1] (#38890 types
+   that case in the Execute result). *)
+let status_of_transport_failure = function
+  | Payload_timed_out -> Process_eio.timed_out_status
+  | Lane_unavailable -> Unix.WEXITED 1
+
 (* Whether a runner delivered the command's own result, or the transport
    failed before/instead of producing one. Keeping the two apart at the type
    level is what stops a lane failure -- which the remote runner used to
@@ -40,6 +56,7 @@ type run_outcome =
       output_files : Process_output_capture.files option;
     }
   | Transport_failed of {
+      failure : transport_failure;
       reason : string;
       stdout : string;
       stderr : string;
@@ -56,8 +73,8 @@ type run_outcome =
 let status_tuple : run_outcome -> Unix.process_status * string * string =
   function
   | Ran { status; stdout; stderr; output_files = _ } -> status, stdout, stderr
-  | Transport_failed { reason = _; stdout; stderr; output_files = _ } ->
-    Unix.WEXITED 1, stdout, stderr
+  | Transport_failed { failure; reason = _; stdout; stderr; output_files = _ } ->
+    status_of_transport_failure failure, stdout, stderr
 
 type runner =
   on_stdout_chunk:(string -> unit) option ->

@@ -54,8 +54,16 @@ for line in sys.stdin:
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(reject_context = false) ?(overflow_resume = false) ?max_prompt_bytes test =
+let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?max_prompt_bytes test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let previous_pool = Domain_pool_ref.get () in
+  Eio.Switch.on_release sw (fun () ->
+    match previous_pool with
+    | None -> Domain_pool_ref.clear_for_tests ()
+    | Some pool -> Domain_pool_ref.set pool);
+  if worker_pool then
+    Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 env#domain_mgr)
+  else Domain_pool_ref.clear_for_tests ();
   Eio_context.set_env env;
   Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -119,12 +127,12 @@ let turn_text rows =
   List.find (fun row -> member "method" row = `String "turn/start") rows
   |> member "params" |> member "input" |> items |> List.hd |> member "text" |> text
 
-let test_resume_carries_per_turn_context_in_front_of_the_goal () =
+let test_resume_carries_per_turn_context_in_front_of_the_goal ?(worker_pool = false) () =
   (* The thread holds the conversation, so a Resume sends none of it. The
      per-turn context goes in front of the goal, as the Claude Code lane sends
      it, and stays out of [developerInstructions], which Codex applies only
      when it compacts the thread. *)
-  with_fixture @@ fun ~run ~capture ~reports ->
+  with_fixture ~worker_pool @@ fun ~run ~capture ~reports ->
   successful (run ~instructions:"Keeper revision 1: publish the first artifact."
     ~world:"World State: task-001 done; goal awaiting confirmation." ());
   let first_requests = read_requests capture in
@@ -403,5 +411,6 @@ let () = run "Keeper current Codex context" ["native requests",[
   test_case "a prompt limit above the history changes nothing" `Quick test_declared_limit_above_history_changes_nothing;
   test_case "a continuation's resume overflow ends on a full thread" `Quick test_continuation_resume_overflow_ends_on_a_full_thread;
   test_case "cooperative native resume does not replay original input" `Quick test_cooperative_resume_sends_only_remaining_work_instruction;
-  test_case "a resume carries per-turn context in front of the goal" `Quick test_resume_carries_per_turn_context_in_front_of_the_goal;
+  test_case "a resume carries per-turn context in front of the goal" `Quick (test_resume_carries_per_turn_context_in_front_of_the_goal ~worker_pool:false);
+  test_case "pooled context projection preserves fresh and resumed requests" `Quick (test_resume_carries_per_turn_context_in_front_of_the_goal ~worker_pool:true);
   test_case "context injection must be acknowledged before model turn" `Quick test_rejected_context_never_submits_turn]]

@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import select
+import shutil
 import signal
 import socket
 import struct
@@ -3610,17 +3611,16 @@ def assert_row_budgeted_surfaces(
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    # At 16 rows the Attention panel holds three of the six items. The
-    # smallest surface the TUI draws is 15 rows, where it drops the composer
-    # and keeps the same three, so three is the tightest this panel gets. The
-    # budget checked here is that the panel stops where its rows stop: the
-    # third item is the last one drawn and the fourth is not. GOALS is served
-    # after the panel and the one held task row, so at this height it gets no
-    # row (4 spare rows: 3 attention + 1 task) and the count is unchanged.
-    for expected in (b"attention-1", b"attention-3", b"5 todo", b"q:quit"):
+    # At 16 rows the Overview has four rows to share, and each block is paid
+    # the rows it cannot give up before any block grows: the Attention
+    # panel's first item, the GOALS headline and its divider, and the one
+    # Tasks row left, which draws the backlog line. The budget checked here
+    # is that the panel stops where its rows stop: the first item is the
+    # last one drawn and the second is not.
+    for expected in (b"attention-1", b"GOALS", b"5 todo", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
-    if b"attention-4" in overview:
+    if b"attention-2" in overview:
         raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
 
     resize_and_wait(
@@ -4846,7 +4846,9 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         if reference not in detail:
             raise AssertionError(f"Board detail omitted its stable link: {detail!r}")
         copy_reference(process, master_fd, output, reference)
-        wide = send_and_wait(process, master_fd, output, b"z", b"z:wide")
+        # The label is where the key goes, so the wide detail offers the list
+        # back rather than the width it already has.
+        wide = send_and_wait(process, master_fd, output, b"z", b"z:list")
         wide_frame = frame_containing(wide, reference)
         if b"Board (3)" in wide_frame:
             raise AssertionError(
@@ -6035,7 +6037,7 @@ def keeper_chat_error_detail_interaction() -> Interaction:
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         send_and_wait(process, master_fd, output, b"trigger-error", b"trigger-error")
-        failed = send_and_wait(
+        send_and_wait(
             process, master_fd, output, b"\r", ERROR_DETAIL_TAIL_WRAPPED
         )
         plain = unwrapped(screen_text(bytes(output)))
@@ -8454,7 +8456,12 @@ def chat_clarity_http_fixtures() -> HttpFixtures:
     )
     fixtures["/api/v1/dashboard/gate/keeper-settings"] = (
         200,
-        {"modes": [], "judges": []},
+        {
+            "modes": [],
+            "modes_state": {"state": "ready"},
+            "exact_lanes": [],
+            "exact_lanes_state": {"state": "ready"},
+        },
     )
     fixtures["/api/v1/keepers/tool-approval-mode"] = (200, {"overrides": []})
     fixtures["/api/v1/keepers/alpha/tool-calls?limit=100"] = (
@@ -9813,6 +9820,27 @@ def planning_review_hierarchy_interaction() -> Interaction:
                     f"Task Verdicts did not explain itself ({needle!r}): "
                     f"{verdicts_plain!r}"
                 )
+        # And it keeps its footer. The surface declared its chrome as a
+        # constant that said seven where the head draws nine, so it ran three
+        # rows past its budget; a surface that overruns loses its last rows,
+        # and the last row here is the footer. The screen drew no key hints at
+        # all, at every terminal height. "y / x" is this surface's own pair, so
+        # a row left over from another screen cannot stand in for it.
+        #
+        # The ledger block is what makes the head nine rows, and it rides the
+        # refresh rather than the first paint: without this wait the screen
+        # under assertion is the six-row head, where the old constant was
+        # right and the footer was never lost.
+        wait_for_output(process, master_fd, output, b"12 ruled", start=0,
+                        timeout=20.0)
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(
+            bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        if screen_row_of(rows, b"y / x:agree / overrule") < 0:
+            raise AssertionError(
+                "Task Verdicts drew no key hints: its footer was cut. Screen: "
+                + repr(screen_text(bytes(output)))
+            )
         # Planning's [v] strip has exactly three stops — Goals, Task Review,
         # Task Verdicts — and wraps back round to Goals. The walk used to
         # keep two extra children, Schedules and Fusion, but Schedules was
@@ -10236,6 +10264,41 @@ def verification_request_row(task_id: str) -> dict[str, object]:
     }
 
 
+HARNESS_HEALTH_PATH = "/api/v1/dashboard/harness-health"
+
+
+def harness_health_snapshot() -> dict[str, object]:
+    """A ruled ledger, which is what makes Task Verdicts draw its full head.
+
+    With no calibration the ledger block is empty and the head is six rows;
+    with one it is nine, and the surface's row arithmetic has to hold for
+    both. The block is where that arithmetic went wrong (masc_tui_render.ml,
+    render_harness_list).
+    """
+    return {
+        "recent_verdicts": [
+            {
+                "task_id": "task-901",
+                "task_title": "a ruled task",
+                "agent_name": "alpha",
+                "gate": "structured_tool",
+                "verdict": "approve",
+                "evaluator_runtime": "claude_code.claude-sonnet-5",
+                "timestamp": 1787766400.0,
+                "notes_hash": "d0d0",
+            }
+        ],
+        "calibration": {
+            "total_verdicts": 12,
+            "approve_count": 8,
+            "reject_count": 4,
+            "labeled_count": 0,
+            "gate_distribution": {"fallback": 7, "structured_tool": 5},
+        },
+        "overview": {"evaluator_status": "healthy"},
+    }
+
+
 def verification_verdict_fixtures() -> HttpFixtures:
     rows = [
         verification_request_row("task-901"),
@@ -10243,6 +10306,7 @@ def verification_verdict_fixtures() -> HttpFixtures:
     ]
     return {
         VERIFICATION_QUEUE_PATH: (200, verification_snapshot(rows)),
+        HARNESS_HEALTH_PATH: (200, harness_health_snapshot()),
         VERIFICATION_VERDICT_PATH: (
             200,
             {"ok": True, "message": "verdict recorded for task-901", "noop": False},
@@ -11603,6 +11667,122 @@ def run_pause_offers_channel_unbind_regression(executable: str) -> None:
         interact=decline_offer,
         http_fixtures=fixtures(),
         http_requests=declined,
+    )
+
+
+def run_keeper_runtime_picker_filter_regression(executable: str) -> None:
+    """The Keeper runtime picker is walked without holding an arrow key.
+
+    Keepers, U lists the declared lanes and then the whole catalogue. End and
+    Home jump, [/] narrows the list to the typed text across both groups, and
+    Esc drops the filter before it closes the picker. While the filter is
+    open [q] and [d] are letters: neither quits nor resets the Keeper to the
+    default. Enter assigns the row the filter left under the cursor.
+    """
+    filter_cursor = "\u258f".encode()
+
+    def selected_row(output: bytearray) -> bytes:
+        for row in screen_text(bytes(output)).split(b"\n"):
+            is_picker_row = b"[LANE]" in row or b"[MODEL]" in row
+            if is_picker_row and row.lstrip(b"\xe2\x94\x82 ").startswith(b"> "):
+                return row
+        raise AssertionError(f"no picker row is selected: {bytes(output)!r}")
+
+    def expect_selected(process: subprocess.Popen[bytes], master_fd: int,
+                        output: bytearray, target: bytes) -> None:
+        drain_until_quiet(process, master_fd, output)
+        row = selected_row(output)
+        if target not in row:
+            raise AssertionError(f"expected {target!r} under the cursor, got {row!r}")
+
+    def fixtures() -> HttpFixtures:
+        served = keeper_runtime_http_fixtures()
+        served[RUNTIME_RESOLVED_PATH] = runtime_resolved_response()
+        served["/api/v1/keepers/alpha/config"] = (200, {
+            "config_revision": {
+                "manifest": {"state": "missing"},
+                "runtime_assignment": {"state": "runtime_config_missing"},
+            },
+        })
+        return served
+
+    requests: HttpRequests = []
+
+    # Every assignment written, as (keeper, runtime id); [d]'s reset to the
+    # default is one with no runtime id.
+    def assignments() -> list[tuple[str | None, str | None]]:
+        return [
+            (body.get("keeper_name"), body.get("runtime_id"))
+            for body in (
+                json.loads(raw) for path, raw in requests
+                if path == "/api/v1/runtime/config/assignment"
+            )
+        ]
+
+    def interact(process: subprocess.Popen[bytes], master_fd: int,
+                 _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        # Three declared lanes, then five runtimes.
+        send_and_wait(process, master_fd, output, b"U",
+                      "8 of 8 \u00b7 / filter".encode())
+        expect_selected(process, master_fd, output, b"primary")
+        os.write(master_fd, b"\x1b[F")
+        expect_selected(process, master_fd, output, b"runtime-e")
+        os.write(master_fd, b"\x1b[H")
+        expect_selected(process, master_fd, output, b"primary")
+        # One wheel notch is one row: the shared list steps on the wheel, and
+        # nothing else here moves the picker a second time.
+        os.write(master_fd, b"\x1b[<65;5;5M")
+        expect_selected(process, master_fd, output, b"degraded")
+        os.write(master_fd, b"\x1b[<64;5;5M")
+        expect_selected(process, master_fd, output, b"primary")
+
+        send_and_wait(process, master_fd, output, b"/",
+                      b"filter: " + filter_cursor + b" 8 of 8")
+        # "-d" is in the unobserved lane's route and in runtime-d: one list.
+        send_and_wait(process, master_fd, output, b"-d",
+                      b"filter: -d" + filter_cursor + b" 2 of 8")
+        expect_selected(process, master_fd, output, b"unobserved")
+        send_and_wait(process, master_fd, output, b"q",
+                      b"(no lane or runtime among 8 matches the filter)")
+        send_and_wait(process, master_fd, output, b"d",
+                      b"filter: -dqd" + filter_cursor + b" 0 of 8")
+        send_and_wait(process, master_fd, output, b"\x7f\x7f",
+                      b"filter: -d" + filter_cursor + b" 2 of 8")
+        os.write(master_fd, b"\x1b[B")
+        expect_selected(process, master_fd, output, b"runtime-d")
+        # Esc drops the filter and keeps runtime-d under the cursor.
+        send_and_wait(process, master_fd, output, b"\x1b",
+                      "8 of 8 \u00b7 / filter".encode())
+        expect_selected(process, master_fd, output, b"runtime-d")
+        if assignments():
+            raise AssertionError(
+                f"typing into the filter sent an assignment: {assignments()!r}"
+            )
+
+        # The filter again, then Enter: runtime-e is assigned to alpha.
+        send_and_wait(process, master_fd, output, b"/model-e",
+                      b"filter: model-e" + filter_cursor + b" 1 of 8")
+        send_and_wait(process, master_fd, output, b"\r", b"MASC Keepers")
+        deadline = time.monotonic() + 3.0
+        while not assignments() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if assignments() != [("alpha", "runtime-e")]:
+            raise AssertionError(f"assignment posts: {assignments()!r}")
+
+        # A second picker opens with no filter, and Esc closes it.
+        send_and_wait(process, master_fd, output, b"U",
+                      "8 of 8 \u00b7 / filter".encode())
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="Keeper runtime picker filters across lanes and runtimes",
+        interact=interact,
+        http_fixtures=fixtures(),
+        http_requests=requests,
     )
 
 
@@ -13466,15 +13646,25 @@ def fusion_list_detail_interaction(
         # terminal gives this footer 144 cells. Status yields before hints,
         # then copy/search yield before pinned exits. A wider frame must still
         # show those controls; check both states on the actual footer row.
+        # [ / ] steps the open run and the dispatcher answers it only with a
+        # detail open, so the run list does not offer it -- the open run's own
+        # footer does.
         footer_head = (
-            b"j/k:move  PgUp/PgDn:page  [ / ]:previous / next  "
+            b"j/k:move  PgUp/PgDn:page  "
             b"K:calling Keeper  B:Board evidence  Home/End:top/bottom  "
             b"Enter:open"
         )
         exits = (b"Esc:back", b"q:quit")
         secondary = (b"Y:copy", b"/:find", b"n / N:next / previous match")
+        # 144 cells fit all but the longest of the three once [ / ] left this
+        # row: the key answers only with a run open, and the cell it was
+        # holding is a cell a usable key can have. The order is what this
+        # pins -- the search pair yields before copy, and both before the
+        # exits -- not how many survive at one width.
+        at_200 = (b"Y:copy", b"/:find")
         for columns, required, omitted in (
-                (200, exits, secondary), (280, exits + secondary, ())):
+                (200, exits + at_200, (b"n / N:next / previous match",)),
+                (280, exits + secondary, ())):
             resize_and_wait(
                 process, master_fd, output, rows=30, columns=columns,
                 needle=b"MASC Fusion", controls=(FULL_REDRAW,),
@@ -14288,7 +14478,113 @@ def repository_pulls_fixture() -> HttpResponse:
     )
 
 
-def pull_requests_on_overview_interaction() -> Interaction:
+def keeper_costs_fixture() -> HttpResponse:
+    # GET /api/v1/dashboard/keeper-costs: k-author's runtime reported usage
+    # but no cost, so its Team row draws its tokens and no dollar figure.
+    return (
+        200,
+        {
+            "keepers": [
+                {
+                    "keeper_name": "k-author",
+                    "total_cost_usd": None,
+                    "cost_reported_samples": 0,
+                    "cost_unreported_samples": 3,
+                    "cost_unread_samples": 0,
+                    "total_input_tokens": 1_000_000,
+                    "total_output_tokens": 200_000,
+                    "total_tokens": 1_200_000,
+                    "tokens_reported_samples": 3,
+                    "tokens_unreported_samples": 0,
+                    "tokens_unread_samples": 0,
+                    "p50_latency_ms": 100.0,
+                    "p95_latency_ms": 100.0,
+                    "sample_count": 3,
+                    "metrics_read": {"state": "read", "malformed_rows": 0, "unread_turn_rows": 0},
+                }
+            ],
+            "window_minutes": 1440,
+            "generated_at": 1_790_000_000.0,
+            "cache": {"state": "fresh", "generated_at": 1_790_000_000.0},
+        },
+    )
+
+
+STUCK_KEEPER_CAUSE = b"token expired for the github connector"
+
+
+def stuck_keeper_briefing() -> HttpResponse:
+    item = {
+        "kind": "keeper_attention",
+        "severity": "warning",
+        "summary": "k-stuck " + STUCK_KEEPER_CAUSE.decode(),
+        "target_type": "keeper",
+        "target_id": "k-stuck",
+    }
+    status, body = pull_requests_briefing()
+    assert isinstance(body, dict)
+    body = dict(body)
+    body["attention_queue"] = [item]
+    body["keeper_briefs"] = [
+        {"name": "k-stuck", "phase": "crashed", "last_turn_ago_s": 180},
+    ]
+    return (status, body)
+
+
+def stuck_keeper_costs_fixture() -> HttpResponse:
+    status, body = keeper_costs_fixture()
+    assert isinstance(body, dict)
+    body = dict(body)
+    row = dict(body["keepers"][0])
+    row["keeper_name"] = "k-stuck"
+    body["keepers"] = [row]
+    return (status, body)
+
+
+def counted(fixture: HttpResponse, reads: list[str]) -> Callable[[], HttpResponse]:
+    """[fixture], noting each request in [reads]."""
+    def respond() -> HttpResponse:
+        reads.append("read")
+        return fixture
+
+    return respond
+
+
+def show_cost(
+    process: subprocess.Popen[bytes], master_fd: int, output: bytearray, reads: list[str]
+) -> None:
+    """Turn spend on with /cost, typed in a Keeper's chat, and come back to the
+    Overview. Spend is off until asked for, and a hidden spend is not fetched:
+    by the time the Team block is drawn, the refresh that drew it has asked
+    for everything the Overview needs, and keeper-costs is not among it."""
+    wait_for_output(process, master_fd, output, b"MASC Overview", start=0, timeout=10.0)
+    wait_for_output(process, master_fd, output, b"Team", start=0, timeout=10.0)
+    if reads:
+        raise AssertionError(f"keeper-costs was read {len(reads)} time(s) before /cost")
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+    if reads:
+        raise AssertionError(f"keeper-costs was read {len(reads)} time(s) before /cost")
+    send_and_wait(process, master_fd, output, b"/cost", composer_showing(b"/cost"))
+    send_and_wait(process, master_fd, output, b"\r", b"Team block: shown")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+
+
+def priced_cost_reply(usd: float) -> HttpResponse:
+    status, body = keeper_costs_fixture()
+    assert isinstance(body, dict)
+    row = dict(body["keepers"][0])
+    row.update(total_cost_usd=usd, cost_reported_samples=3, cost_unreported_samples=0)
+    result = dict(body)
+    result["keepers"] = [row]
+    return status, result
+
+
+def cost_off_on_discards_old_reply_interaction(
+    gate: GatedHttpResponse, reads: list[str]
+) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
         master_fd: int,
@@ -14296,8 +14592,195 @@ def pull_requests_on_overview_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        for needle in (b"1 conflicting", b"1 not by a Keeper", b"#11"):
+        try:
+            show_cost(process, master_fd, output, reads)
+            if not wait_for_fixture_event(process, master_fd, output, gate.requested, timeout=10.0):
+                raise AssertionError("the first keeper-costs request did not start")
+
+            def toggle(expected: bytes) -> None:
+                send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+                select_keeper_row(process, master_fd, output, b"alpha")
+                send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+                send_and_wait(process, master_fd, output, b"/cost", composer_showing(b"/cost"))
+                send_and_wait(process, master_fd, output, b"\r", expected)
+                send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+                send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+
+            toggle(b"Team block: hidden")
+            toggle(b"Team block: shown")
+            read_available(master_fd, output)
+            start = len(output)
+            gate.release.set()
+            if not wait_for_fixture_event(process, master_fd, output, gate.completed, timeout=10.0):
+                raise AssertionError("the held old cost reply did not complete")
+            wait_for_output(process, master_fd, output, b"$2.00", start=start, timeout=10.0)
+            if gate.calls < 2:
+                raise AssertionError("the new /cost generation made no replacement request")
+            if b"$1.00" in CSI_RE.sub(b"", bytes(output[start:])):
+                raise AssertionError("a pre-toggle cost was displayed after /cost was reenabled")
+            os.write(master_fd, b"q")
+        finally:
+            gate.release.set()
+
+    return interact
+
+
+def narrow_stuck_row_keeps_its_cause_interaction(reads: list[str]) -> Interaction:
+    # The spend tag sits at the right of a Team row and only where the row
+    # fits whole: at 56 columns a stuck Keeper's row keeps its cause, which
+    # the attention panel no longer draws, and drops the spend.
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        show_cost(process, master_fd, output, reads)
+        wait_for_output(process, master_fd, output, b"1.2M tok", start=0, timeout=10.0)
+        frame = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=40,
+            columns=56,
+            needle=b"k-stuck",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        plain = CSI_RE.sub(b"", frame)
+        if b"token expired" not in plain:
+            raise AssertionError(f"the stuck row lost its cause at 56 columns: {frame!r}")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def spend_title_briefing() -> HttpResponse:
+    status, body = stuck_keeper_briefing()
+    assert isinstance(body, dict)
+    body = dict(body)
+    body["keeper_briefs"] = [
+        {"name": "k-stuck", "phase": "crashed", "last_turn_ago_s": 180},
+        {"name": "k-idle", "phase": "running", "last_turn_ago_s": 30},
+        {"name": "k-stopped", "phase": "stopped", "last_turn_ago_s": 600},
+    ]
+    return (status, body)
+
+
+def spend_title_costs_fixture() -> HttpResponse:
+    status, body = keeper_costs_fixture()
+    assert isinstance(body, dict)
+    base = dict(body["keepers"][0])
+
+    def priced(name: str, cost: float) -> dict[str, object]:
+        row = dict(base)
+        row.update(
+            keeper_name=name,
+            total_cost_usd=cost,
+            cost_reported_samples=3,
+            cost_unreported_samples=0,
+        )
+        return row
+
+    quiet = dict(base)
+    quiet.update(
+        keeper_name="k-stuck",
+        total_cost_usd=None,
+        cost_reported_samples=0,
+        cost_unreported_samples=0,
+        total_input_tokens=None,
+        total_output_tokens=None,
+        total_tokens=None,
+        tokens_reported_samples=0,
+        sample_count=0,
+    )
+    body = dict(body)
+    body["keepers"] = [priced("k-idle", 1.0), priced("k-stopped", 2.0), quiet]
+    # Past its refresh time, with the refresh failing: the title says how old.
+    body["cache"] = {
+        "state": "stale_refreshing",
+        "generated_at": 1_790_000_000.0,
+        "age_s": 720.0,
+        "last_error": "EIO",
+    }
+    return (status, body)
+
+
+def team_title_line(frame: bytes) -> bytes:
+    parts = POSITION_RE.split(frame)
+    for index in range(3, len(parts), 3):
+        text = CSI_RE.sub(b"", parts[index])
+        if text.lstrip().startswith(b"Team "):
+            return text
+    raise AssertionError(f"no Team title in the frame: {frame!r}")
+
+
+def spend_title_interaction(reads: list[str]) -> Interaction:
+    # The title's total covers the stopped Keeper too ($1.00 + $2.00), and a
+    # title too narrow for the total sheds it whole but keeps its age.
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        show_cost(process, master_fd, output, reads)
+        wait_for_output(process, master_fd, output, b"12m old", start=0, timeout=10.0)
+        wide = team_title_line(
+            resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=40,
+                columns=80,
+                needle=b"12m old",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+        )
+        if b"$3.00 2.4M tok" not in wide or b"1 stopped" not in wide:
+            raise AssertionError(f"the 80-column title left the stopped Keeper out: {wide!r}")
+        narrow = team_title_line(
+            resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=40,
+                columns=56,
+                needle=b"12m old",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+        )
+        if b"$" in narrow or b"12m old" not in narrow:
+            raise AssertionError(f"the 56-column title cut the total or lost its age: {narrow!r}")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def pull_requests_on_overview_interaction(reads: list[str]) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        show_cost(process, master_fd, output, reads)
+        for needle in (
+            b"1 conflicting",
+            b"1 not by a Keeper",
+            b"#11",
+            # The row's cost is unknown: its tokens are drawn, no dollar figure.
+            b"1.2M tok",
+            b"24h",
+        ):
             wait_for_output(process, master_fd, output, needle, start=0, timeout=10.0)
+        if b"$" in CSI_RE.sub(b"", bytes(output)).split(b"Team", 1)[-1].split(b"Tasks", 1)[0]:
+            raise AssertionError(f"an unpriced Team block drew a dollar figure: {bytes(output)!r}")
         # The harness confirms the exit that this first press arms.
         os.write(master_fd, b"q")
 
@@ -14821,6 +15304,7 @@ def run_keyboard_regression(executable: str) -> None:
     run_tab_strip_keeps_current_entry_regression(executable)
     run_keeper_unbind_all_channels_regression(executable)
     run_pause_offers_channel_unbind_regression(executable)
+    run_keeper_runtime_picker_filter_regression(executable)
     run_activity_logs_tab_pane_regression(executable)
     changes_navigation_fixtures = keeper_runtime_http_fixtures()
     changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
@@ -14963,13 +15447,55 @@ def run_keyboard_regression(executable: str) -> None:
             "/api/v1/dashboard/briefing": duplicated_attention_briefing(),
         },
     )
+    cost_reads: list[str] = []
     run_terminal_scenario(
         executable,
         description="Pull requests on Overview",
-        interact=pull_requests_on_overview_interaction(),
+        interact=pull_requests_on_overview_interaction(cost_reads),
         http_fixtures={
             "/api/v1/dashboard/briefing": pull_requests_briefing(),
             "/api/v1/repositories/pulls": repository_pulls_fixture(),
+            "/api/v1/dashboard/keeper-costs": counted(keeper_costs_fixture(), cost_reads),
+        },
+    )
+    cost_reads: list[str] = []
+    run_terminal_scenario(
+        executable,
+        description="Team spend title",
+        interact=spend_title_interaction(cost_reads),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": spend_title_briefing(),
+            "/api/v1/dashboard/keeper-costs": counted(spend_title_costs_fixture(), cost_reads),
+        },
+    )
+    old_cost_reads: list[str] = []
+    old_cost_gate = GatedHttpResponse(
+        priced_cost_reply(1.0),
+        subsequent_response=priced_cost_reply(2.0),
+        hold_seconds=30.0,
+    )
+
+    def gated_cost() -> HttpResponse:
+        old_cost_reads.append("read")
+        return old_cost_gate()
+
+    run_terminal_scenario(
+        executable,
+        description="Cost off on discards old reply",
+        interact=cost_off_on_discards_old_reply_interaction(old_cost_gate, old_cost_reads),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": pull_requests_briefing(),
+            "/api/v1/dashboard/keeper-costs": gated_cost,
+        },
+    )
+    cost_reads: list[str] = []
+    run_terminal_scenario(
+        executable,
+        description="Narrow stuck row keeps its cause",
+        interact=narrow_stuck_row_keeps_its_cause_interaction(cost_reads),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": stuck_keeper_briefing(),
+            "/api/v1/dashboard/keeper-costs": counted(stuck_keeper_costs_fixture(), cost_reads),
         },
     )
     run_terminal_scenario(
@@ -17425,6 +17951,188 @@ def lanes_press_selects_the_lane_under_the_pointer(
     os.write(master_fd, b"q")
 
 
+KEEPER_SETTINGS_PATH = "/api/v1/keepers/alpha/config"
+KEEPER_SETTINGS_REVISION = {
+    "manifest": {"state": "sha256", "value": "a" * 64},
+    "runtime_assignment": {
+        "state": "runtime_config_present",
+        "source_revision": "b" * 64,
+        "assignment": {"state": "assigned", "runtime_id": "anthropic.claude-opus-5"},
+    },
+}
+ACTIVATION_VALUES = b"manual | on_demand | autonomous"
+
+
+def keeper_settings_fixture() -> RequestHttpResponse:
+    """GET answers the settings snapshot; POST answers as the server does.
+
+    The same path serves both, so the fixture tells them apart by the body.
+    A POST carrying a value outside the closed activation set gets the
+    server's own 400 (keeper_turn_up_args.ml), so main's behaviour -- send,
+    then show the refusal -- is what the red run records.
+    """
+
+    def resolve(body: bytes) -> HttpResponse:
+        if not body:
+            return 200, {
+                "config_revision": KEEPER_SETTINGS_REVISION,
+                "activation_mode": "manual",
+                "input_policy": "small",
+                "max_context_override": None,
+                "sandbox_profile": "docker",
+                "network_mode": "none",
+                "prompt": {"instructions": "be exact"},
+                "execution": {"selected_runtime_id": "anthropic.claude-opus-5"},
+                "skills": {"names": None},
+                "workspace": {"mention_targets": ["@alpha"], "board_interests": []},
+            }
+        mode = json.loads(body).get("activation_mode")
+        if mode not in (None, "manual", "on_demand", "autonomous"):
+            # Keeper_turn_up_args.parse refuses before any write, and the
+            # route answers with error_json: {"error": <sentence>}.
+            return 400, {
+                "error": "activation_mode must be manual, on_demand, or autonomous"
+            }
+        return 200, {
+            "runtime_sync": "lane_restarted",
+            "config_write": {
+                "revision": KEEPER_SETTINGS_REVISION,
+                "applied": True,
+                "warnings": [],
+            },
+        }
+
+    return RequestHttpResponse(resolve)
+
+
+@contextmanager
+def activation_editor_script(value: str) -> Iterator[tuple[str, str]]:
+    """An $EDITOR that sets activation_mode to [value] and saves (exit 0).
+
+    It is the operator's `e`, one edit, `:w`: every buffer it is handed is
+    copied to seen.<n> first, so the scenario can count how many times the
+    editor opened and read what each opening showed. A second opening gets
+    the same edit applied again -- an operator who saves without fixing.
+    """
+    workdir = tempfile.mkdtemp(prefix="masc-tui-activation-editor-")
+    path = os.path.join(workdir, "editor.sh")
+    with open(path, "w", encoding="utf-8") as script:
+        script.write(
+            "#!/bin/sh\n"
+            f'n=$(ls "{workdir}" | grep -c "^seen\\.")\n'
+            f'cp "$1" "{workdir}/seen.$n"\n'
+            f"sed 's/\"activation_mode\": \"[a-z_]*\"/\"activation_mode\": \"{value}\"/' "
+            '"$1" > "$1.new" && mv "$1.new" "$1"\n'
+        )
+    os.chmod(path, 0o755)
+    try:
+        yield path, workdir
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def editor_buffers(workdir: str) -> list[bytes]:
+    names = sorted(
+        (name for name in os.listdir(workdir) if name.startswith("seen.")),
+        key=lambda name: int(name.split(".", 1)[1]),
+    )
+    buffers = []
+    for name in names:
+        with open(os.path.join(workdir, name), "rb") as handle:
+            buffers.append(handle.read())
+    return buffers
+
+
+def activation_settings_interaction(
+    requests: HttpRequests, workdir: str, *, value: str
+) -> Interaction:
+    """`e` on the Keepers list, activation_mode set to [value], `:w`.
+
+    A value outside the closed set must never reach the wire: the editor
+    opens again with the operator's text and the allowed values above it,
+    and saving that same text again closes it with the reason on the status
+    line -- not a loop the operator can only escape with :cq. A valid value
+    is sent once, as the only changed field.
+    """
+
+    def settings_posts() -> list[bytes]:
+        return [body for path, body in requests if path == KEEPER_SETTINGS_PATH]
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Keepers")
+        wait_for_output(process, master_fd, output, b"alpha", start=0, timeout=5.0)
+        drain_until_quiet(process, master_fd, output)
+        start = len(output)
+        os.write(master_fd, b"e")
+        if value == "autonomous":
+            body = wait_for_http_request(
+                process, master_fd, output, requests, path=KEEPER_SETTINGS_PATH
+            )
+            patch = json.loads(body)
+            if patch.get("activation_mode") != "autonomous":
+                raise AssertionError(f"valid activation was not sent: {patch!r}")
+            if set(patch) != {"expected_config_revision", "activation_mode"}:
+                raise AssertionError(f"patch carried more than the edit: {patch!r}")
+            wait_for_output(
+                process,
+                master_fd,
+                output,
+                b"alpha: changed settings applied",
+                start=start,
+                timeout=5.0,
+            )
+            if len(editor_buffers(workdir)) != 1:
+                raise AssertionError("a valid edit reopened the editor")
+        else:
+            wait_for_output(
+                process, master_fd, output, ACTIVATION_VALUES, start=start, timeout=10.0
+            )
+            drain_until_quiet(process, master_fd, output)
+            buffers = editor_buffers(workdir)
+            posts = settings_posts()
+            if posts:
+                raise AssertionError(
+                    f"an activation outside the closed set reached the wire: {posts!r}"
+                )
+            if len(buffers) != 2:
+                raise AssertionError(
+                    f"the editor should open twice (edit, then the refusal), "
+                    f"opened {len(buffers)} time(s): {buffers!r}"
+                )
+            first, second = buffers
+            if b"//" in first:
+                raise AssertionError(f"the first opening carried a refusal: {first!r}")
+            if ACTIVATION_VALUES not in second or f'"{value}"'.encode() not in second:
+                raise AssertionError(
+                    f"the reopened editor did not name the value and the allowed set: {second!r}"
+                )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def run_keeper_settings_activation_regression(executable: str) -> None:
+    for value in ("auto", "autonomous"):
+        requests: HttpRequests = []
+        fixtures = keeper_runtime_http_fixtures()
+        fixtures[KEEPER_SETTINGS_PATH] = keeper_settings_fixture()
+        with activation_editor_script(value) as (editor, workdir):
+            run_terminal_scenario(
+                executable,
+                description=f"Keeper settings activation_mode {value!r} then :w",
+                interact=activation_settings_interaction(requests, workdir, value=value),
+                http_fixtures=fixtures,
+                http_requests=requests,
+                extra_env={"EDITOR": editor},
+            )
+
+
 def run_keeper_lanes_regression(executable: str) -> None:
     fixtures = keeper_runtime_http_fixtures()
     gate = GatedHttpResponse(
@@ -18226,8 +18934,17 @@ def run_dos_live_regression(executable: str) -> None:
         finally:
             held["release"].set()
         wait_for_output(process, master, output, b"change 200", start=changed_from, timeout=5.0)
+        # The held read asked at 100. Once its answer is drawn the next poll
+        # asks at 200, and that poll can already be under way by the time
+        # "change 200" is on screen, so a read at 200 says nothing about the
+        # key. A disowned read is re-asked at the counter still drawn -- 100
+        # -- so the reads at 100 are what tell the two apart: exactly one,
+        # and it is the first.
         after_change = dos_reads[reads_before_change:]
-        if len(after_change) != 1:
+        at_old = [since for since in after_change if since == (100, LIVE_INCARNATION)]
+        rest = [since for since in after_change if since != (100, LIVE_INCARNATION)]
+        if (len(at_old) != 1 or after_change[0] != (100, LIVE_INCARNATION)
+                or any(since != (200, LIVE_INCARNATION) for since in rest)):
             raise AssertionError(
                 f"a key on the DOS screen disowned the read in flight: {after_change!r}")
         wait_for_output(process, master, output, b"Esc: back", start=changed_from, timeout=5.0)
@@ -18631,6 +19348,11 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     ScenarioFamily("runtime", "Runtime regression", (run_runtime_regression,)),
     ScenarioFamily("resources", "Resources regression", (run_resources_regression,)),
     ScenarioFamily("keepers-lanes", "Keepers/Lanes regression", (run_keeper_lanes_regression,)),
+    ScenarioFamily(
+        "keeper-settings-activation",
+        "Keeper settings activation regression",
+        (run_keeper_settings_activation_regression,),
+    ),
     ScenarioFamily("board-json", "Board JSON regression", (run_board_json_regression,)),
     ScenarioFamily("code-memo", "Code memo regression", (run_code_memo_regression,)),
     ScenarioFamily("memory-journal", "Memory journal regression", (run_memory_journal_regression,)),

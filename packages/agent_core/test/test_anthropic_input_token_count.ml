@@ -1421,7 +1421,11 @@ let test_invalid_count_response_is_provider_parse_failure () =
           Agent_core.Error.Api
             (Retry.InvalidRequest { reason = Retry.Json_parse_error; _ })
       ; provider_failure =
-          Some { Agent_core.Provider_failure_attribution.evidence = Response_parse; _ }
+          Some
+            { Agent_core.Provider_failure_attribution.evidence = Response_parse
+            ; ownership = Agent_core.Provider_failure_attribution.Unclassified
+            ; binding = Some _
+            }
       } -> ()
   | Error detailed -> fail (Agent_core.Error.to_string detailed.error)
   | Ok _ -> fail "malformed provider count response must fail"

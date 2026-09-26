@@ -1371,6 +1371,10 @@ let load_overview ~(host : string) ~(port : int) :
         let* items = required_list_field json "keepers_unread" in
         Keeper_snapshot_unread.list_of_json (`List items)
       in
+      let* ov_keeper_listing =
+        let* listing = required_object_field json "keepers_listing" in
+        Keeper_snapshot_unread.listing_of_json listing
+      in
       let* ov_workspace_health =
         let* workspace_health = required_string_field summary "workspace_health" in
         decode_workspace_health workspace_health
@@ -1414,6 +1418,7 @@ let load_overview ~(host : string) ~(port : int) :
         {
           ov_workspace_health;
           ov_keepers;
+          ov_keeper_listing;
           ov_keeper_liveness;
           ov_keeper_rows;
           ov_mcp_agents;

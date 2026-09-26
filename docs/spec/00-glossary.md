@@ -1854,21 +1854,29 @@ status: reference
   항목)가 LLM 없이 재작성한다.
 
 **Store Boot Policy (영속 store 부팅 정책)**
-: durable per-keeper store가 이번 빌드로 디코딩되지 않을 때 부팅이 어떻게
-  행동할지를 store 타입이 짊어지는 닫힌 분류
-  (`Keeper_store_boot_reconcile`의 `refuse_boot`·`degrade_typed`,
-  RFC-0420·RFC-0444 §2.4). `Refuse_boot`(keeper meta·current Memory OS snapshot):
-  없으면 Keeper가 다른 Keeper로, 또는 빈 기억으로 뜨고 잃은 것을 덮어쓰므로
-  부팅을 거절한다. `Degrade_typed`(goal store): 모든 쓰는 쪽이 못 읽는 store를
-  거절하고 어떤 읽는 쪽도 빈 목록으로 바꾸지 않으므로, Keeper는 task·board·
-  schedule로 돌고 파일은 아무것도 덮어쓰지 않는다 — `examine`이 읽고 못 읽으면
-  INFO 한 줄만 남긴다. 절차는 `examine`(읽기만, 파일 생성·이름변경 없음) →
+: 이번 빌드로 디코딩되지 않는 영속 store 를 만났을 때 부팅과 배포 preflight 가
+  어떻게 행동할지를 정하는 닫힌 분류
+  (`Keeper_durable_store.reader`의 `Refuse_boot`·`Degrade_typed`·`Preflight_only`,
+  RFC every-durable-store-has-one-boot-policy, RFC-0420, RFC-0444 §2.4).
+  store 목록은 `Keeper_durable_store.Id.all` 하나이고, 배포 preflight
+  (`deployment_preflight_helper validate-stores`)와 부팅 reconcile 이 같은 목록을
+  읽는다. `Refuse_boot`(keeper meta·current Memory OS snapshot): 없으면 Keeper가
+  다른 Keeper로, 또는 빈 기억으로 뜨고 잃은 것을 덮어쓰므로 부팅을 거절한다.
+  preflight 도 읽고 거절한다. `Degrade_typed`(goal store): 모든 쓰는 쪽이 못 읽는
+  store를 거절하고 어떤 읽는 쪽도 빈 목록으로 바꾸지 않으므로, Keeper는
+  task·board·schedule로 돌고 파일은 아무것도 덮어쓰지 않는다 — `examine`이 읽고
+  못 읽으면 INFO 한 줄만 남긴다. preflight 는 읽지 않는다. `Preflight_only`(나머지):
+  부팅은 읽지 않고 preflight 만 미리 읽는다. 실행 중에는 그 store 를 읽는 쪽이
+  처음 만난다. 부팅 절차는 `examine`(읽기만, 파일 생성·이름변경 없음) →
   `admit`(부팅 진행 여부) → `quarantine`(운영자가
-  `--accept-store-quarantine`로 받아들인 뒤에만 옆으로 옮김) 순서다.
-  새 store 생성자는 컴파일러가 정책을 묻게 한다. **경계**: Board 판정의
-  `Quarantined`(Board Attention Quarantine)와 이름이 겹치지만 다른 층위다 —
-  여기서 격리는 부팅 단계에서 store 파일을 옆으로 옮기는 운영자 결정이다.
-  → [Keeper_store_boot_reconcile](../../lib/keeper/keeper_store_boot_reconcile.mli)
+  `--accept-store-quarantine`로 받아들인 뒤에만 옆으로 옮김) 순서다. store 를
+  `Refuse_boot` 로 보내려면 `Keeper_durable_store.Refusing.t` 에 생성자를 더해야
+  하고, 부팅의 이름·검사·옮기는 법이 그 타입을 exhaustive 로 match 하므로 셋을 다
+  채워야 컴파일된다. **경계**: Board 판정의 `Quarantined`(Board Attention
+  Quarantine)와 이름이 겹치지만 다른 층위다 — 여기서 격리는 부팅 단계에서 store
+  파일을 옆으로 옮기는 운영자 결정이다.
+  → [Keeper_durable_store](../../lib/keeper/keeper_durable_store.mli),
+  [Keeper_store_boot_reconcile](../../lib/keeper/keeper_store_boot_reconcile.mli)
 
 **Checkpoint Purge (체크포인트 청소)**
 : 멈춘 Keeper의 canonical AGENT_CORE checkpoint를 LLM 없이 두 닫힌 규칙으로 줄이는

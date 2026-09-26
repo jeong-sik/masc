@@ -15,6 +15,10 @@ type source =
   ; trace_id : string
   }
 
+(* schema-compat: [removal] moved here verbatim from below
+   [read_journal_tail] (#39289); this revision otherwise rewrites match arms
+   and adds error constructors. No persisted field, wire label, or decoder
+   changed, so no store version bump or migration. *)
 type removal =
   { removed_in_revision : int
   ; removed_at : float

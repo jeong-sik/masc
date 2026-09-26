@@ -202,6 +202,19 @@ let () =
          (Tools.handle_read ~base_path:out ~tool_name:"masc_browser_read" ~start_time:0.0
             (args [ lane; "tabId", `Int tab_id; "mode", `String mode ]))
      in
+     let observed_viewport () =
+       let* capture =
+         match Masc.Browser_surface.capture
+                 { Masc.Browser_surface.route = Browser_lane.Stagehand_route
+                 ; tab_id = Some tab_id }
+         with
+         | Ok data -> Ok data
+         | Error failure -> Error (Masc.Browser_surface.failure_message failure)
+       in
+       let viewport = Yojson.Safe.Util.member "viewport" capture in
+       let* geometry = Browser_lane.Pointer.viewport_of_json viewport in
+       Ok (viewport, geometry)
+     in
      record "BrowserRead text reads the page"
        (let* data = read "text" in
         match string_at [ "text" ] data, Yojson.Safe.Util.member "tabId" data with
@@ -250,13 +263,7 @@ let () =
         title_at tab_id "filled");
      record "reset after BrowserInteract fill" (goto_fixture ());
      record "BrowserInteract click_at sends native Stagehand input"
-       (let* capture =
-          match Masc.Browser_surface.capture { Masc.Browser_surface.route = Browser_lane.Stagehand_route; tab_id = Some tab_id } with
-          | Ok data -> Ok data
-          | Error failure -> Error (Masc.Browser_surface.failure_message failure)
-        in
-        let viewport = Yojson.Safe.Util.member "viewport" capture in
-        let* geometry = Browser_lane.Pointer.viewport_of_json viewport in
+       (let* viewport, geometry = observed_viewport () in
         (* The fixture's fixed button starts at 20vw/20vh and is 100×40 CSS
            pixels; this point is its centre in the observed viewport. *)
         let x = 0.2 +. (50. /. geometry.width)
@@ -272,6 +279,45 @@ let () =
           in
           title_at tab_id "clicked");
      record "reset after BrowserInteract click_at" (goto_fixture ());
+     record "BrowserInteract scroll_at sends native Stagehand wheel input"
+       (let* viewport, _ = observed_viewport () in
+        let* _ = interact
+          [ "action", `String "scroll_at"; "tabId", `Int tab_id
+          ; "expectedUrl", `String fixture_url; "viewport", viewport
+          ; "point", `Assoc [ "x", `Float 0.5; "y", `Float 0.45 ]
+          ; "x", `Int 0; "y", `Int 240
+          ]
+        in
+        let* _ = title_at tab_id "scrolled" in
+        let* data = read "text" in
+        match string_at [ "text" ] data with
+        | Some text when contains ~sub:"Scroll confirmed" text -> Ok data
+        | _ -> Error ("the scroll was absent from BrowserRead: " ^ Yojson.Safe.to_string data));
+     record "reset after BrowserInteract scroll_at" (goto_fixture ());
+     record "BrowserInteract drag sends native Stagehand pointer input"
+       (let* viewport, geometry = observed_viewport () in
+        (* Source and target are fixed boxes with distinct centres. The page
+           changes title only after a drop or a pointer release on target. *)
+        let from_x = 0.2 +. (35. /. geometry.width)
+        and from_y = 0.55 +. (20. /. geometry.height)
+        and to_x = 0.45 +. (50. /. geometry.width)
+        and to_y = 0.55 +. (30. /. geometry.height) in
+        if from_x >= 1. || from_y >= 1. || to_x >= 1. || to_y >= 1.
+        then Error "the viewport is too small for the drag fixture"
+        else
+          let* _ = interact
+            [ "action", `String "drag"; "tabId", `Int tab_id
+            ; "expectedUrl", `String fixture_url; "viewport", viewport
+            ; "from", `Assoc [ "x", `Float from_x; "y", `Float from_y ]
+            ; "to", `Assoc [ "x", `Float to_x; "y", `Float to_y ]
+            ]
+          in
+          let* _ = title_at tab_id "dragged" in
+          let* data = read "text" in
+          match string_at [ "text" ] data with
+          | Some text when contains ~sub:"Drag completed" text -> Ok data
+          | _ -> Error ("the drag was absent from BrowserRead: " ^ Yojson.Safe.to_string data));
+     record "reset after BrowserInteract drag" (goto_fixture ());
      record "observe locates the button the model chose"
        (let* data =
           instruct [ "action", `String "observe"; "instruction", `String "the Submit order button"; "tabId", `Int tab_id ]

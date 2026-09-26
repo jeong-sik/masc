@@ -1791,6 +1791,25 @@ let test_volume_create_argv_carries_a_size () =
   Alcotest.(check bool) "size is passed" true (adjacent ~flag:"-s" ~value:"64g" argv)
 ;;
 
+let test_work_volume_trim_argv_grants_one_capability () =
+  let argv =
+    M.apple_work_volume_trim_argv ~volume_name:"masc-keeper-work-x" ~image:"masc-sandbox:general"
+  in
+  Alcotest.(check bool) "goes through container" true (contains "container" argv);
+  Alcotest.(check bool) "a one-shot container" true (contains "--rm" argv);
+  Alcotest.(check bool) "runs as root" true (adjacent ~flag:"--user" ~value:"0" argv);
+  (* FITRIM needs this one capability; nothing broader is granted. *)
+  Alcotest.(check bool) "only CAP_SYS_ADMIN is added" true
+    (adjacent ~flag:"--cap-add" ~value:"CAP_SYS_ADMIN" argv
+     && List.length (List.filter (String.equal "--cap-add") argv) = 1);
+  Alcotest.(check bool) "mounts the work volume at the trim root" true
+    (adjacent ~flag:"--volume" ~value:("masc-keeper-work-x:" ^ M.trim_guest_root) argv);
+  Alcotest.(check (list string)) "the image runs fstrim on that root"
+    [ "masc-sandbox:general"; "fstrim"; "-v"; M.trim_guest_root ]
+    (let n = List.length argv in
+     List.filteri (fun i _ -> i >= n - 4) argv)
+;;
+
 let test_nerdctl_volume_ensure_confirms_persistent_identity () =
   with_eio_fs @@ fun () ->
   let context = Eio_context.snapshot_state () in
@@ -2715,6 +2734,8 @@ let () =
             test_work_volume_is_named_and_mounted_at_its_root
         ; Alcotest.test_case "create argv carries a size" `Quick
             test_volume_create_argv_carries_a_size
+        ; Alcotest.test_case "work volume trim grants one capability" `Quick
+            test_work_volume_trim_argv_grants_one_capability
         ; Alcotest.test_case "shim travels read-only with its config" `Quick
             test_shim_travels_read_only_with_its_config
         ; Alcotest.test_case "the shim sidecar decides the boot" `Quick

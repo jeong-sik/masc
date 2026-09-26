@@ -1534,6 +1534,7 @@ let muse_native_workspace ~base_path ~keeper_name ~required_native_posture ~acco
       "Muse native tools use a separate private host workspace. They cannot access the Keeper's endpoint-owned tree. Use MASC tools for that tree; native commands run in the official client's host sandbox.") in
   let shared_workspace profile =
     try
+      (* See the SSOT root resolution below; only directory creation is needed here. *)
       ignore (Keeper_alerting_path.ensure_sandbox_bundle_for_profile
         ~config:(Workspace.default_config base_path) ~name:keeper_name
         ~sandbox_profile:profile : string list);

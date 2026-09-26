@@ -15,8 +15,16 @@ include Keeper_tool_surface_ops
    masc_keeper_list with [Keeper_dispatch_ref] at module load. *)
 let keeper_list_body ~(config : Workspace.config) args : tool_result =
   (* Read before consulting the projection cache: a previously readable
-     roster cannot certify a directory that has since become unreadable. *)
-  match keeper_names_result config with
+     roster cannot certify a directory that has since become unreadable.
+     The census also raises when the roster path cannot even be ensured
+     (e.g. occupied by a file); that failure is typed here, like the
+     fleet-health projections do, instead of escaping the tool. *)
+  let persisted_names_result =
+    try keeper_names_result config with
+    | EioCancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+  in
+  match persisted_names_result with
   | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail
   | Ok persisted_names ->
   let limit = max 0 (get_int args "limit" 50) in

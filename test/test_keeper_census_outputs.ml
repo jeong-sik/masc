@@ -64,8 +64,15 @@ let replace_census_directory config =
   let retained = path ^ ".fixture-retained" in
   Unix.rename path retained;
   Out_channel.with_open_bin path (fun out -> output_string out "not a directory");
+  (* A cold ensure-dir cache raises instead of returning [Error]; read the
+     census the way the surfaces do so the expected detail always matches. *)
+  let census =
+    try Keeper_meta_store.keeper_names_result config with
+    | EioCancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+  in
   let detail =
-    match Keeper_meta_store.keeper_names_result config with
+    match census with
     | Error detail -> detail
     | Ok _ -> fail "the file fixture did not refuse the real Keeper census"
   in

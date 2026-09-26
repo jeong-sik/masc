@@ -40,7 +40,6 @@ from __future__ import annotations
 import os
 import pathlib
 import re
-import shlex
 import sys
 import tempfile
 
@@ -48,23 +47,139 @@ import tempfile
 MIN_MODULES = 1000
 
 MODULE_TOKEN = re.compile(r"[A-Za-z0-9_]+")
-INCLUDE = re.compile(r"\(include\s+([^)\s]+)\)")
-SCRIPT_ATOM = re.compile(
-    r"(%\{workspace_root\}/)?((?:\.\.?/)?[\w./-]*\w\.(?:py|sh|cjs|mjs))"
-)
+SCRIPT_SUFFIXES = (".py", ".sh", ".cjs", ".mjs")
+DUNE_WHITESPACE = " \t\r\n\f"
+
+
+def dune_forms(text: str) -> list:
+    """Read Dune lists and literal atoms, without shell quoting rules.
+
+    https://dune.readthedocs.io/en/stable/reference/lexical-conventions.html
+    Apostrophes and unquoted backslashes are ordinary atom characters.
+    """
+    pos = 0
+
+    def escaped() -> bytes:
+        nonlocal pos
+        if pos >= len(text):
+            raise ValueError("unfinished escape in Dune string")
+        char = text[pos]
+        pos += 1
+        simple = {"n": "\n", "r": "\r", "t": "\t", "b": "\b",
+                  "\\": "\\", '"': '"'}
+        if char in simple:
+            return simple[char].encode("utf-8")
+        if char in "0123456789":
+            digits = char + text[pos:pos + 2]
+            if len(digits) != 3 or any(c not in "0123456789" for c in digits):
+                raise ValueError("invalid decimal escape in Dune string")
+            pos += 2
+            value = int(digits)
+            if value > 255:
+                raise ValueError("Dune decimal escape exceeds one byte")
+            return bytes([value])
+        if char == "x":
+            digits = text[pos:pos + 2]
+            if len(digits) != 2 or any(c not in "0123456789abcdefABCDEF" for c in digits):
+                raise ValueError("invalid hexadecimal escape in Dune string")
+            pos += 2
+            return bytes([int(digits, 16)])
+        if char == "%" and text[pos:pos + 1] == "{":
+            return b"%"
+        if char in "\r\n":
+            if char == "\r" and text[pos:pos + 1] == "\n":
+                pos += 1
+            while pos < len(text) and text[pos] in " \t":
+                pos += 1
+            return b""
+        raise ValueError(f"unsupported Dune string escape: {char!r}")
+
+    def quoted() -> str:
+        nonlocal pos
+        pos += 1
+        chars = []
+        # Dune's end-of-line strings may continue on adjacent marked lines.
+        if text[pos:pos + 2] in ("\\|", "\\>"):
+            while True:
+                interpret = text[pos + 1] == "|"
+                pos += 2
+                if text[pos:pos + 1] == " ":
+                    pos += 1
+                while pos < len(text) and text[pos] not in "\r\n":
+                    char = text[pos]
+                    pos += 1
+                    chars.append(escaped() if interpret and char == "\\" else char.encode("utf-8"))
+                following = pos
+                if text[following:following + 2] == "\r\n":
+                    following += 2
+                elif following < len(text):
+                    following += 1
+                while following < len(text) and text[following] in " \t":
+                    following += 1
+                if text[following:following + 3] not in ('"\\|', '"\\>'):
+                    return b"".join(chars).decode("utf-8", errors="surrogateescape")
+                chars.append(b"\n")
+                pos = following + 1
+        while pos < len(text):
+            char = text[pos]
+            pos += 1
+            if char == '"':
+                return b"".join(chars).decode("utf-8", errors="surrogateescape")
+            chars.append(escaped() if char == "\\" else char.encode("utf-8"))
+        raise ValueError("unterminated Dune string")
+
+    def sequence(nested=False) -> list:
+        nonlocal pos
+        result = []
+        while pos < len(text):
+            char = text[pos]
+            if char in DUNE_WHITESPACE:
+                pos += 1
+            elif char == ";":
+                while pos < len(text) and text[pos] != "\n":
+                    pos += 1
+            elif char == "(":
+                pos += 1
+                result.append(sequence(nested=True))
+            elif char == ")":
+                if not nested:
+                    raise ValueError("unmatched closing Dune parenthesis")
+                pos += 1
+                return result
+            elif char == '"':
+                result.append(quoted())
+            else:
+                start = pos
+                while pos < len(text) and text[pos] not in DUNE_WHITESPACE and text[pos] not in '();"':
+                    pos += 1
+                result.append(text[start:pos])
+        if nested:
+            raise ValueError("unclosed Dune list")
+        return result
+
+    return sequence()
 
 
 def script_atoms(text: str):
-    """Literal script references only; never a suffix inside a glob atom."""
-    atoms = shlex.shlex(text, posix=True, punctuation_chars="()")
-    atoms.whitespace_split = True
-    atoms.commenters = ";"
-    for atom in atoms:
-        if atom.startswith("%{dep:") and atom.endswith("}"):
-            atom = atom[len("%{dep:"):-1]
-        match = SCRIPT_ATOM.fullmatch(atom)
-        if match is not None:
-            yield match.groups()
+    """Find literal script atoms; skip complete glob dependency expressions."""
+    def literals(form):
+        if isinstance(form, str):
+            yield form
+        elif form and form[0] not in ("glob_files", "glob_files_rec"):
+            for child in form:
+                yield from literals(child)
+
+    for form in dune_forms(text):
+        for atom in literals(form):
+            if atom.startswith("%{dep:") and atom.endswith("}"):
+                atom = atom[len("%{dep:"):-1]
+            root_prefix = "%{workspace_root}/"
+            if atom.startswith(root_prefix):
+                prefix, name = root_prefix, atom[len(root_prefix):]
+            else:
+                prefix, name = None, atom
+            if "%{" not in name and name.endswith(SCRIPT_SUFFIXES):
+                yield prefix, name
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -83,8 +198,10 @@ def wiring_text(dune: pathlib.Path) -> str:
         seen.add(path)
         text = read_text(path)
         parts.append(text)
-        for target in INCLUDE.findall(text):
-            walk(path.parent / target)
+        for form in dune_forms(text):
+            if (isinstance(form, list) and len(form) == 2
+                    and form[0] == "include" and isinstance(form[1], str)):
+                walk(path.parent / form[1])
 
     walk(dune)
     return "\n".join(parts)
@@ -135,6 +252,56 @@ def scan(repo_root: pathlib.Path) -> tuple[int, list[str], list[str]]:
 
 def self_test() -> int:
     rc = 0
+    literal_cases = [
+        (
+            "apostrophes remain ordinary Dune atom characters",
+            """(rule (deps can't foo's.py "present's.py"))""",
+            ["test/foo's.py"],
+        ),
+        (
+            "quoted path spaces and escapes name complete literal files",
+            r'''(rule (deps "missing script.py" "%{dep:missing dep.sh}"
+                 "%{workspace_root}/tools/missing tool.mjs"
+                 "present\032script.py" "caf\xc3\xa9.py" "quote\"name.py"))''',
+            ["test/missing dep.sh", "test/missing script.py",
+             'test/quote"name.py', "tools/missing tool.mjs"],
+        ),
+        (
+            "glob dependency forms remain optional without wildcard characters",
+            """(rule (deps (:optional (glob_files optional.py)
+                 (glob_files_rec "optional script.py")
+                 (glob_files_rec %{workspace_root}/optional.sh))
+                 (file mandatory.py) "literal*name.py" mandatory.sh))""",
+            ["test/literal*name.py", "test/mandatory.py", "test/mandatory.sh"],
+        ),
+        (
+            "quoted parentheses and semicolons cannot change list structure",
+            r'''(rule (deps (glob_files "optional(name).py")
+                 "missing;name.py" "missing(name).py" "back\092slash.py"))
+                 ; not-a-file.py
+                 (rule (deps present\name.py))''',
+            ["test/back\\slash.py", "test/missing(name).py", "test/missing;name.py"],
+        ),
+        (
+            "end-of-line strings preserve literal spaces and Dune escapes",
+            '(rule (deps\n "\\| missing\\032line.py\n))\n',
+            ["test/missing line.py"],
+        ),
+    ]
+    for title, text, expected in literal_cases:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            dune = root / "dune"
+            dune.write_text(text)
+            for name in ["present's.py", "present script.py", "café.py", r"present\name.py"]:
+                (root / name).write_text("")
+            missing = missing_scripts(root, root, dune, "test")
+            if missing == expected:
+                print(f"[PASS] {title}")
+            else:
+                print(f"[FAIL] {title}: {missing}", file=sys.stderr)
+                rc = 1
+
     # This is valid Dune dependency syntax. The old substring scan invented
     # [_pty.py] from the wildcard, blocking #39263 although Dune built it.
     with tempfile.TemporaryDirectory() as tmp:

@@ -1938,6 +1938,13 @@ let execution_failure_may_advance (error : execution_error) =
      | Http_client.Provider_step
      | Http_client.Cli_stdout_idle
      | Http_client.Unknown_timeout -> false)
+  (* The provider answered that this binding's account is out of quota: a
+     quota code the glm codec reads as [Hard_quota], the fact a 402 states.
+     The successor bills its own account, so the lane walks it as it walks a
+     402 or a 429. *)
+  | ( Completion_failed
+        { error = Http_client.ProviderFailure { kind = Http_client.Hard_quota _; _ }; _ }
+    , Response_received ) -> receipt_dispatch_count error.receipt = 1
   | Response_body_deadline_exceeded, Response_received ->
     (* No domain validator ran for this incomplete response. Advance through
        the caller's existing settlement callback, retaining the dispatched

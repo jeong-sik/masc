@@ -144,6 +144,7 @@ type provider =
   ; transport : transport
   ; is_non_interactive : bool
   ; credentials : credential option
+  ; account_home : string option
   ; capabilities : capabilities option
   ; healthcheck_path : string option
   ; headers : (string * string) list option

@@ -7209,6 +7209,8 @@
 
 (include stanzas/test_deployment_store_directories.inc)
 
+(include stanzas/test_deployment_runtime_config.inc)
+
 (test
  (name test_tui_fusion_summary_rows)
  (modules test_tui_fusion_summary_rows)

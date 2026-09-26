@@ -744,6 +744,110 @@ let validate_stores_cmd =
     Term.(ret (const (fun base_path -> cmdliner_result (validate_stores base_path)) $ base_path))
 ;;
 
+(* The runtime.toml this BasePath's server reads, judged by what the raw save
+   ([POST /api/v1/runtime/config/raw]) checks before it writes: the Keeper
+   setting schema, then [Runtime.validate_config_text]. #39040 narrowed
+   [\[skills\] resource-read-max-bytes] while the live file kept the old value,
+   and the restarted server refused the whole Skill table: every Keeper ran
+   without Skills for about five hours (#39311). Text this build would refuse
+   to save is refused here, before the build is installed.
+
+   The path is the one boot locks for this BasePath, read by
+   [Runtime.config_path]'s rules. An invalid [MASC_CONFIG_DIR] is refused. A
+   config root or file that does not exist is absent, and the server boots
+   that as setup-required with no model, so absence passes only for an
+   intentional new workspace.
+
+   Two parts of the save check do not bite here. Some sections are compared
+   with the file the save replaces; that file is this same text, so nothing
+   reads as added, as for a save that changed nothing. The exact-output
+   registry the save would replace is not published in this process, so its
+   plan never refuses; boot builds that registry from the file. *)
+let keeper_setting_errors (report : Keeper_runtime_config.validation_report) =
+  List.filter_map
+    (fun (issue : Keeper_runtime_config.validation_issue) ->
+       match issue.severity with
+       | Keeper_runtime_config.Error ->
+         Some (Printf.sprintf "%s: %s" issue.key issue.detail)
+       | Keeper_runtime_config.Warning -> None)
+    report.issues
+;;
+
+let validate_runtime_config base_path allow_empty_workspace =
+  let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
+  let root = resolution.config_root in
+  let path = Filename.concat root.path Config_dir_resolver.runtime_toml_filename in
+  let absent () =
+    if allow_empty_workspace
+    then (
+      Printf.printf "runtime.toml absent path=%s empty_workspace=allowed\n%!" path;
+      Ok ())
+    else
+      errorf
+        "runtime.toml is absent path=%s (the server would start with no model; \
+         wrong --base-path or MASC_CONFIG_DIR? pass --allow-empty-workspace \
+         only for an intentional new workspace)"
+        path
+  in
+  let refused detail =
+    Printf.printf "runtime.toml refused path=%s: %s\n%!" path detail;
+    Printf.printf
+      "  on refusal: change the named value in this file (through the runtime \
+       config editor while a server runs on this workspace), then deploy again\n%!";
+    errorf "runtime.toml is one this build would refuse to save path=%s" path
+  in
+  match root.source with
+  | Config_dir_resolver.Invalid_env ->
+    errorf
+      "runtime config root is invalid base_path=%s: %s"
+      base_path
+      (String.concat "; " resolution.warnings)
+  | Config_dir_resolver.Missing -> absent ()
+  | Config_dir_resolver.Env | Config_dir_resolver.Local_masc ->
+    if not (Sys.file_exists path)
+    then absent ()
+    else (
+      match Runtime.load_config_observation ~runtime_config_path:path () with
+      | Error detail -> refused detail
+      | Ok observation ->
+        let source_text = observation.Runtime.source_text in
+        (match Keeper_runtime_config.validate_source_text source_text with
+         | Error detail -> refused ("runtime config parse failed: " ^ detail)
+         | Ok report when not (Keeper_runtime_config.validation_report_is_valid report) ->
+           refused
+             ("Keeper setting refused: "
+              ^ String.concat "; " (keeper_setting_errors report))
+         | Ok (_ : Keeper_runtime_config.validation_report) ->
+           (match Runtime.validate_config_text ~runtime_config_path:path source_text with
+            | Error detail -> refused detail
+            | Ok () ->
+              Printf.printf "runtime.toml accepted path=%s\n%!" path;
+              Ok ())))
+;;
+
+let allow_empty_workspace =
+  let doc =
+    "The workspace is intentionally new, so an absent runtime.toml passes \
+     instead of being refused."
+  in
+  Arg.(value & flag & info [ "allow-empty-workspace" ] ~doc)
+;;
+
+let validate_runtime_config_cmd =
+  let doc =
+    "judge the runtime.toml this BasePath's server reads with the check a raw \
+     runtime config save runs"
+  in
+  Cmd.v
+    (Cmd.info "validate-runtime-config" ~doc)
+    Term.(
+      ret
+        (const (fun base_path allow_empty_workspace ->
+           cmdliner_result (validate_runtime_config base_path allow_empty_workspace))
+         $ base_path
+         $ allow_empty_workspace))
+;;
+
 (* A hard-cut field leaves rows no current decoder can read. [replay] refuses
    to compact while such a row is on disk and the row only leaves through
    compaction, so the store keeps it and its retention bound stops applying —
@@ -952,5 +1056,6 @@ let () =
           ; validate_signals_cmd
           ; cut_run_registries_cmd
           ; validate_stores_cmd
+          ; validate_runtime_config_cmd
           ]))
 ;;

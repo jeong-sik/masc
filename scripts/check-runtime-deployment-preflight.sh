@@ -20,6 +20,8 @@ PREFLIGHT_HELPER_COMMIT=""
 # The gate's own keeper-meta verdict prefix. The self-test asserts this exact
 # literal, so the gate and its test cannot drift apart.
 KEEPER_META_REJECTED='current keeper meta is invalid'
+# Same contract for the runtime.toml verdict.
+RUNTIME_CONFIG_REJECTED='runtime.toml is not one this build accepts'
 # Keep aligned with Keeper_board_attention_candidate.schema_version.
 BOARD_ATTENTION_SCHEMA_VERSION=7
 
@@ -239,6 +241,18 @@ run_gate() {
     fail "durable store validation rejected current runtime state"
   fi
 
+  # A build that narrows a runtime.toml key refuses the live file on boot, and
+  # the part that key belongs to goes empty: #39040 left every Keeper without
+  # Skills (#39311). The helper runs the raw save check on the file this
+  # workspace's server reads; its verdict above names the key and the file.
+  local runtime_config_args=(validate-runtime-config --base-path "$BASE_PATH")
+  if [[ "$ALLOW_EMPTY_WORKSPACE" -eq 1 ]]; then
+    runtime_config_args+=(--allow-empty-workspace)
+  fi
+  if ! "$PREFLIGHT_HELPER" "${runtime_config_args[@]}"; then
+    fail "$RUNTIME_CONFIG_REJECTED (the helper verdict above names the key and the file)"
+  fi
+
   # The runtime reader rejects a whole ledger on an unsupported schema or torn
   # row. Check the current version before restart without changing runtime data.
   local candidates_root="$runtime_root/board_attention_candidates"
@@ -293,6 +307,15 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     || fail "Board attention preflight schema differs from the OCaml writer: gate=$BOARD_ATTENTION_SCHEMA_VERSION source=$candidate_source_version"
   fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/runtime-deployment-preflight.XXXXXX")"
   trap 'if [[ -n "${handoff_pid:-}" ]]; then kill "$handoff_pid" 2>/dev/null || true; fi; if [[ -n "${cancel_handoff_pid:-}" ]]; then kill "$cancel_handoff_pid" 2>/dev/null || true; fi; rm -rf "$fixture_root"' EXIT
+
+  # Every fixture reads the shipped seed as its runtime.toml through
+  # MASC_CONFIG_DIR, the override scripts/deploy.sh sets too, so a case fails
+  # for the state it plants and not for a missing runtime.toml. The
+  # runtime.toml cases unset it and read the file under their own BasePath.
+  shared_config_root="$fixture_root/shared-config"
+  mkdir -p "$shared_config_root"
+  cp "$REPO_ROOT/config/runtime.toml" "$shared_config_root/runtime.toml"
+  export MASC_CONFIG_DIR="$shared_config_root"
 
   write_schedules() {
     local target_root="$1"
@@ -732,6 +755,50 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   signal_row="$(cat "$signal_fixture")"
   printf '%s %s\n' "$signal_row" "$signal_row" >"$signal_fixture"
   expect_failure multiple_values_on_one_signal_line "$multi_value_signal_root"
+
+  # The runtime.toml under the BasePath, read the way the server resolves it.
+  seed_config_root="$fixture_root/runtime-config-seed"
+  write_schedules "$seed_config_root" succeeded
+  mkdir -p "$seed_config_root/.masc/config"
+  cp "$REPO_ROOT/config/runtime.toml" "$seed_config_root/.masc/config/runtime.toml"
+  env -u MASC_CONFIG_DIR "$0" --base-path "$seed_config_root" >/dev/null \
+    || fail "self-test expected success: runtime_config_seed"
+
+  # The #39311 shape: the seed with the bound it had before #39040.
+  over_bound_config_root="$fixture_root/runtime-config-over-bound"
+  write_schedules "$over_bound_config_root" succeeded
+  mkdir -p "$over_bound_config_root/.masc/config"
+  sed -E 's/^resource-read-max-bytes = [0-9]+$/resource-read-max-bytes = 65536/' \
+    "$REPO_ROOT/config/runtime.toml" \
+    >"$over_bound_config_root/.masc/config/runtime.toml"
+  grep -qx 'resource-read-max-bytes = 65536' \
+    "$over_bound_config_root/.masc/config/runtime.toml" \
+    || fail "self-test fixture has no over-bound resource-read-max-bytes line"
+  (
+    unset MASC_CONFIG_DIR
+    expect_failure_contains \
+      runtime_config_over_bound \
+      "$over_bound_config_root" \
+      "$RUNTIME_CONFIG_REJECTED" \
+      "[skills] resource-read-max-bytes = 65536" \
+      ".masc/config/runtime.toml"
+  )
+
+  absent_config_root="$fixture_root/runtime-config-absent"
+  write_schedules "$absent_config_root" succeeded
+  (
+    unset MASC_CONFIG_DIR
+    expect_failure_contains \
+      runtime_config_absent \
+      "$absent_config_root" \
+      "$RUNTIME_CONFIG_REJECTED" \
+      "--allow-empty-workspace"
+  )
+  env -u MASC_CONFIG_DIR "$0" \
+    --base-path "$absent_config_root" \
+    --allow-empty-workspace \
+    >/dev/null \
+    || fail "self-test expected success: runtime_config_absent_empty_workspace"
 
   missing_runtime_root="$fixture_root/missing-runtime"
   mkdir -p "$missing_runtime_root"

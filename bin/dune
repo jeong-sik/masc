@@ -289,6 +289,7 @@
   masc.server
   masc.host_config
   masc.keeper_runtime
+  masc.runtime
   masc.masc_schedule
   masc.masc_tool_blob_store
   masc.fusion_core

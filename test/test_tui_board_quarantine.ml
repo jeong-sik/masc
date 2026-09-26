@@ -149,6 +149,51 @@ let test_the_requeue_key_takes_the_oldest_waiting_row () =
        (Quarantine.oldest_waiting quarantines))
 ;;
 
+let test_bulk_requeue_attempts_every_waiting_row_in_order () =
+  let quarantines =
+    decode_ok
+      (inventory_json
+         [ item ~partition_id:"new" ~quarantined_at:300.0 ()
+         ; item ~partition_id:"old" ~quarantined_at:100.0 ()
+         ; item ~phase:Command.Inventory_requeued ~partition_id:"done"
+             ~quarantined_at:50.0 ()
+         ; item ~partition_id:"middle" ~quarantined_at:200.0 ()
+         ]
+         [])
+  in
+  let sent = ref [] in
+  let progress = ref [] in
+  let outcomes =
+    Quarantine.requeue_all
+      ~send:(fun ~partition_id ~request ->
+        sent := (partition_id, request.Command.expected_quarantine_id) :: !sent;
+        match partition_id with
+        | "old" -> Quarantine.Refused
+        | "middle" -> Quarantine.Uncertain
+        | "new" -> Quarantine.Accepted
+        | _ -> fail "a completed row must not be sent")
+      ~classify:Fun.id
+      ~progress:(fun counts -> progress := counts :: !progress)
+      (Quarantine.waiting quarantines)
+  in
+  check (list (pair string string)) "each request uses its own fence, oldest first"
+    [ "old", "q-old"; "middle", "q-middle"; "new", "q-new" ]
+    (List.rev !sent);
+  check (list string) "later rows are attempted after refusal and uncertainty"
+    [ "old"; "middle"; "new" ]
+    (List.map fst outcomes);
+  check (list (pair int (pair int (pair int int)))) "cumulative progress"
+    [ 1, (0, (1, 0)); 2, (0, (1, 1)); 3, (1, (1, 1)) ]
+    (List.rev_map
+       (fun (counts : Quarantine.batch_counts) ->
+         counts.attempted,
+         (counts.accepted, (counts.refused, counts.uncertain)))
+       !progress);
+  check (list int) "all progress updates keep the snapshot total"
+    [ 3; 3; 3 ]
+    (List.rev_map (fun (counts : Quarantine.batch_counts) -> counts.total) !progress)
+;;
+
 let ready_fetched ~keeper_name value =
   match Masc_tui_fetched.start ~equal:String.equal Masc_tui_fetched.initial ~key:keeper_name with
   | Masc_tui_fetched.Already_loading -> fail "a fresh read cannot already be loading"
@@ -293,6 +338,8 @@ let () =
     ; ( "lines"
       , [ test_case "requeue takes the oldest waiting row" `Quick
             test_the_requeue_key_takes_the_oldest_waiting_row
+        ; test_case "bulk attempts all fenced rows in order" `Quick
+            test_bulk_requeue_attempts_every_waiting_row_in_order
         ; test_case "count and reason" `Quick test_lines_say_how_many_are_blocked_and_why
         ; test_case "one line per cause" `Quick test_lines_group_rows_by_cause
         ; test_case "every read state" `Quick test_lines_for_every_read_state

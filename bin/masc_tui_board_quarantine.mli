@@ -59,6 +59,31 @@ val requeue_request :
     read with, so a newer quarantine of the same partition is not requeued by
     a press made against the old one. *)
 
+type outcome_kind =
+  | Accepted
+  | Refused
+  | Uncertain
+
+type batch_counts =
+  { attempted : int
+  ; total : int
+  ; accepted : int
+  ; refused : int
+  ; uncertain : int
+  }
+
+val requeue_all :
+  send:(partition_id:string ->
+        request:Masc.Keeper_board_attention_quarantine_command.request -> 'a) ->
+  classify:('a -> outcome_kind) ->
+  progress:(batch_counts -> unit) ->
+  Masc.Keeper_board_attention_quarantine_command.inventory_item list ->
+  (string * 'a) list
+(** Sends one fenced request per snapshot row in order, reporting cumulative
+    progress after each answer. Refused and uncertain outcomes do not prevent
+    later rows from being attempted. The caller supplies the authenticated
+    transport and the outcome classification. *)
+
 val lines :
   now:float ->
   (string, t) Masc_tui_fetched.t ->

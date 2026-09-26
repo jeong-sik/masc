@@ -22,6 +22,7 @@ let recorded_params =
 
 let lane_id = Standalone_lane.to_id Standalone_lane.Browser_stagehand
 let slot_id = "stagehand-fixture.model"
+let second_slot_id = "stagehand-fixture.model-second"
 let answer = `Assoc [ "action", `Null; "twoStep", `Bool false ]
 
 (* One catalog target on the fixture server. [system_prompt] is the model's
@@ -48,10 +49,19 @@ let resolver_snapshot ~base_url ~system_prompt =
        provider_ref = \"stagehand-fixture\"\n\
        model_id = \"model\"\n\
        connect_timeout_s = %g\n\
+       body_timeout_s = %g\n\n\
+       [[targets]]\n\
+       id = %S\n\
+       provider_ref = \"stagehand-fixture\"\n\
+       model_id = \"model\"\n\
+       connect_timeout_s = %g\n\
        body_timeout_s = %g\n"
       base_url
       system_prompt
       slot_id
+      F.fixture_post_connect_timeout_seconds
+      F.fixture_wait_seconds
+      second_slot_id
       F.fixture_post_connect_timeout_seconds
       F.fixture_wait_seconds
   in
@@ -66,12 +76,12 @@ let resolver_snapshot ~base_url ~system_prompt =
   | Error _ -> Alcotest.fail "the stagehand catalog fixture did not load"
 ;;
 
-let resolved_lane ?(cli_slot_ids = []) ~base_url ~system_prompt () =
+let resolved_lane ?(cli_slot_ids = []) ?(slot_ids = [ slot_id ]) ~base_url ~system_prompt () =
   let registry =
     F.publish_registry
       ~cli_slot_ids
       ~lane_id
-      ~slot_ids:[ slot_id ]
+      ~slot_ids
       (resolver_snapshot ~base_url ~system_prompt)
   in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
@@ -82,12 +92,14 @@ let resolved_lane ?(cli_slot_ids = []) ~base_url ~system_prompt () =
       (Runtime_exact_output_registry.lane_resolution_error_to_string error)
 ;;
 
-let openai_body ~usage =
+let openai_body_for ~output ~usage =
   Printf.sprintf
     {|{"id":"stagehand-fixture","model":"model","choices":[{"index":0,"message":{"role":"assistant","content":%s},"finish_reason":"stop"}]%s}|}
-    (Yojson.Safe.to_string (`String (Yojson.Safe.to_string answer)))
+    (Yojson.Safe.to_string (`String (Yojson.Safe.to_string output)))
     usage
 ;;
+
+let openai_body ~usage = openai_body_for ~output:answer ~usage
 
 let with_provider behavior f =
   Eio_main.run
@@ -419,6 +431,33 @@ let test_provider_failure_is_a_refusal () =
     Alcotest.(check bool) "the reason names the slot" true (contains ~affix:slot_id message)
 ;;
 
+let test_missing_nested_required_key_advances_to_second_http_slot () =
+  let _, _, act = Lazy.force recorded_params in
+  let incomplete =
+    `Assoc
+      [ "action", `Assoc [ "method", `String "click" ]
+      ; "twoStep", `Bool false
+      ]
+  in
+  with_provider
+    (F.Replies
+       [ openai_body_for ~output:incomplete ~usage:""
+       ; openai_body_for ~output:answer ~usage:""
+       ])
+  @@ fun ~net ~clock server ->
+  let resolved =
+    resolved_lane ~slot_ids:[ slot_id; second_slot_id ]
+      ~base_url:server.base_url ~system_prompt:true ()
+  in
+  match generate ~net ~clock resolved act with
+  | Error { Browser_stagehand_wire.message; _ } ->
+    Alcotest.failf "the second HTTP slot did not answer: %s" message
+  | Ok result ->
+    Alcotest.(check int) "the incomplete first answer advanced" 2 (F.post_count server);
+    Alcotest.(check bool) "the accepted answer is the second slot's value" true
+      (Yojson.Safe.equal answer (U.member "structured_content" result))
+;;
+
 let () =
   Alcotest.run
     "browser_stagehand_model"
@@ -444,6 +483,10 @@ let () =
             "a provider failure is a refusal"
             `Quick
             test_provider_failure_is_a_refusal
+        ; Alcotest.test_case
+            "missing nested required key advances to second HTTP slot"
+            `Quick
+            test_missing_nested_required_key_advances_to_second_http_slot
         ; Alcotest.test_case "a cli slot answers" `Quick test_cli_slot_answers
         ; Alcotest.test_case
             "a cli slot follows a failed HTTP slot"

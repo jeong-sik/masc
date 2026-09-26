@@ -548,9 +548,9 @@ let failure_of_agent_core_error error =
           | Route.Runtime_exhausted | Route.No_progress_empty
           | Route.No_progress_thinking_only | Route.No_progress_truncated
           | Route.Refusal_body_not_received | Route.Generation_repeated
-          | Route.Attempt_rejected | Route.Admission | Route.Provider_reported_failure
+          | Route.Admission | Route.Provider_reported_failure
           | Route.Request_refused | Route.Provider_wire_defect
-          | Route.Server_error_not_transient )
+          | Route.Server_error_not_transient | Route.Context_window_exceeded )
       }
   | Route.Exhausted_visible_alive _ -> Provider_rejected detail
 ;;

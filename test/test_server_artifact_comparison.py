@@ -207,6 +207,27 @@ class ReceiptTest(unittest.TestCase):
         _, _, semantics = self.check()
         self.assertEqual(semantics["worker_fixture"], [])
 
+    def test_agent_row_order_survives_semantic_comparison(self):
+        self.options["workers"] = 2
+        identity = json.loads((self.root / "identity.json").read_text())
+        identity["workers"] = 2
+        put(self.root / "identity.json", identity)
+        self.workers.append({**self.workers[0], "name": "fixture-worker-0001"})
+        for name in ("worker-fixture.json", "workers-after.json"):
+            put(self.root / name, self.workers)
+        for row in self.rows:
+            if row["phase"] in ("prime", "cold", "warm"):
+                body = json.loads(row["body_utf8"])
+                body["agents"] = list(reversed(self.workers))
+                body["worker_support_briefs"].append(
+                    {**body["worker_support_briefs"][0], "name": "fixture-worker-0001"})
+                raw = json.dumps(body)
+                row.update(body_utf8=raw, body_sha256=hashlib.sha256(raw.encode()).hexdigest(),
+                           json_bytes=len(raw.encode()))
+        _, _, semantics = self.check()
+        self.assertEqual([row["name"] for row in semantics["worker_snapshots"][0]["agents"]],
+                         ["fixture-worker-0001", "fixture-worker-0000"])
+
     def test_missing_receipt_never_yields_a_full_summary(self):
         self.rows.pop()
         with self.assertRaisesRegex(ValueError, "incomplete request"):

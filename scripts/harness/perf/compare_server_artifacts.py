@@ -67,7 +67,7 @@ def validate_session(directory, entry, expected, *, tasks, cycles, workers, runn
                     for row in briefs), "worker support state/count differs")
         # This age is intentionally derived from the render's current clock.
         # Keep every other field and row order for cross-build comparison.
-        worker_snapshots.append({"agents": agents, "briefs": [
+        worker_snapshots.append({"agents": body["agents"], "briefs": [
             {key: value for key, value in row.items() if key != "last_signal_age_sec"}
             for row in briefs]})
     cleanup = json.loads((directory / "cleanup.json").read_text())

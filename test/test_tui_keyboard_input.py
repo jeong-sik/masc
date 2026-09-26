@@ -72,6 +72,10 @@ class StreamingHttpResponse:
         self.headers = headers
 
 
+class DroppedHttpResponse:
+    """Close before writing a status line to exercise the client's transport error."""
+
+
 class HeadersHttpResponse:
     """A streaming protocol fixture whose response depends on request headers."""
 
@@ -102,6 +106,7 @@ HttpFixture = (
     HttpResponse
     | RawHttpResponse
     | StreamingHttpResponse
+    | DroppedHttpResponse
     | RequestHttpResponse
     | HeadersHttpResponse
     | PathHttpResponse
@@ -267,6 +272,10 @@ def test_http_endpoint(
                 resolved = fixture.resolve({key.lower(): value for key, value in self.headers.items()})
             else:
                 resolved = fixture() if callable(fixture) else fixture
+            if isinstance(resolved, DroppedHttpResponse):
+                self.close_connection = True
+                self.connection.close()
+                return
             if isinstance(resolved, StreamingHttpResponse):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -7967,6 +7976,36 @@ def context_inspector_fixtures() -> HttpFixtures:
     return fixtures
 
 
+def run_context_inspector_transport_error_regression(executable: str) -> None:
+    fixtures = context_inspector_fixtures()
+    fixtures["/api/v1/keepers/alpha/turn-records?limit=50"] = DroppedHttpResponse()
+
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        resize_and_wait(process, master_fd, output, rows=50, columns=160, needle=b"MASC Overview")
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        send_and_wait(process, master_fd, output, b"/context", composer_showing(b"/context"))
+        frame = send_and_wait(
+            process, master_fd, output, b"\r",
+            b"Composition unavailable: turn-records: GET failed:",
+        )
+        plain = CSI_RE.sub(b"", frame)
+        if b"request failed: GET failed" in plain:
+            raise AssertionError(f"Transport failure received two verdicts: {frame!r}")
+        if b"NEXT REQUEST" not in plain:
+            raise AssertionError(f"Independent forecast was lost after turn read failure: {frame!r}")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="Context Inspector shows transport cause once",
+        interact=interact,
+        http_fixtures=fixtures,
+    )
+
+
 def context_inspector_interaction() -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -15440,6 +15479,7 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
             interact=context_inspector_interaction(),
             http_fixtures=context_inspector_fixtures(),
         )
+        run_context_inspector_transport_error_regression(executable)
         run_terminal_scenario(
             executable,
             description="Ctrl-V is not swallowed by the terminal",

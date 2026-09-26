@@ -2,7 +2,7 @@
 
     A Keeper names an image by a short name ([base], [ocaml]). The catalog
     repository's [config/sandbox-images.toml] supplies the names. The host's
-    [sandbox-images.toml] stores only promoted builds: for each name and image
+    [sandbox-image-builds.toml] stores only promoted builds: for each name and image
     store, the one tag that name starts from. A registry is not involved.
 
     {v
@@ -38,6 +38,11 @@ type pinned = private
             starting with ['-']. *)
   }
 (** Only {!parse} and {!promote} make one, so a [pinned] is always valid. *)
+
+val name_error : field:string -> string -> string option
+(** [None] for a catalog name; otherwise why [value], read from [field], is
+    not one. A Keeper names its image by catalog name, so a tag here (it has a
+    [':']) is refused where it is read rather than looked up and missed. *)
 
 val is_reference : string -> bool
 (** Whether a string is a [repository:tag] {!pinned} accepts. A caller that
@@ -85,8 +90,15 @@ type missing =
 
 val resolve : t -> name:string -> store:store -> (pinned, missing) result
 
+val shipped_file_name : string
+(** ["sandbox-images.toml"]: the image names, embedded from [config/] and read
+    from the binary. *)
+
 val file_name : string
-(** ["sandbox-images.toml"], directly under the config root. *)
+(** ["sandbox-image-builds.toml"], directly under the config root: this
+    host's promoted builds. A different name from {!shipped_file_name}, so the
+    config root's copy of the shipped names never stands where the builds
+    file is read. *)
 
 type load_error =
   | Unreadable of { path : string; detail : string }

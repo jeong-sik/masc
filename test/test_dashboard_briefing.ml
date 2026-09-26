@@ -679,7 +679,7 @@ let declare_unbooted_keeper (config : Workspace_utils.config) name =
     (Filename.concat declarations (name ^ ".toml"))
     (fun out ->
       output_string out
-        "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n\
+        "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n\
          instructions = \"Help the operator.\"\n")
 
 let row_named name rows =

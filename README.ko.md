@@ -346,7 +346,7 @@ Keeper `imp` 하나가 들어 있습니다. 설치 스크립트도 `masc init`�
 [keeper]
 activation_mode = "autonomous"
 sandbox_profile = "docker"
-sandbox_image = "node:22-bookworm"
+sandbox_image = "base"
 network_mode = "none"
 mention_targets = ["operator"]
 
@@ -372,13 +372,17 @@ reviewer = "<provider>.<model>"
   하나입니다. 호스트에서 그냥 도는 프로파일은 없고, 받아들일 프로파일이 없는
   Keeper는 거부됩니다. `remote_ssh` Keeper는 `runtime.toml`의
   `[exec.ssh.endpoints]`에 선언한 `remote_endpoint`를 이름으로 댑니다.
-- **이미지.** `docker`와 `microvm` 턴은 이미지 안에서 돌고, 이미지가 없으면
-  턴마다 `docker_preflight_failed`에서 멈춥니다. 저장소에 없으면 `masc setup`이
-  바이너리에 든 레시피(`sandbox-images/base/Dockerfile`)로 `masc-sandbox:general`을
-  만듭니다. `masc sandbox-image`는 다시 쓰지 않는 새 태그로 손수 빌드합니다. `docker`와 `microvm` Keeper는 모두 `sandbox_image`에 이미지를
-  적어야 하고, 적지 않으면 기본값을 받는 대신 거부됩니다. 범용 이미지로
-  충분한 Keeper는 `sandbox_image = "masc-sandbox:general"`을, 프로젝트를
-  빌드해야 하는 Keeper는 그 프로젝트 툴체인 이미지를 적습니다. 컨테이너는 읽기 전용 rootfs, `--cap-drop=ALL`,
+- **이미지.** `docker`와 `microvm` 턴은 이미지 안에서 돕니다. Keeper는
+  `sandbox_image`에 이 호스트의 이미지 목록
+  (`<base-path>/.masc/config/sandbox-images.toml`)에 있는 이름을 적고, 적지
+  않으면 기본값을 받는 대신 거부됩니다. 범용 이미지로 충분한 Keeper는
+  `sandbox_image = "base"`를, MASC를 빌드하는 Keeper는 `"ocaml"`을 적습니다.
+  목록은 저장소별로 각 이름이 어떤 빌드인지 적어 둡니다. `masc setup`은 목록에
+  `base` 빌드가 없으면 바이너리에 든 레시피(`sandbox-images/base/Dockerfile`)로
+  빌드해 목록에 올립니다. 손으로는 `masc sandbox-image`로 다시 쓰지 않는 새
+  태그를 빌드하고 `masc sandbox-image promote <이름> <태그>`로 올립니다. 이름에
+  올린 빌드가 없으면 Keeper는 컨테이너를 띄우지 않고 이 명령을 알려 줍니다.
+  컨테이너는 읽기 전용 rootfs, `--cap-drop=ALL`,
   내 uid로 돌기 때문에 `bash`와 툴체인이 이미지에 미리 있어야 합니다. 턴 도중에
   뭘 설치할 수는 없습니다.
 - **네트워크 모드.** 샌드박스는 `network_mode = "none"`으로 시작합니다. 웹

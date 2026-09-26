@@ -174,7 +174,7 @@ let with_surface ?(sandbox_profile = "remote_ssh") ?ssh_script f =
       channel
       "[keeper]\ninstructions = \"verification test producer\"\nsandbox_profile = %S\n%s"
       sandbox_profile
-      (if String.equal sandbox_profile "remote_ssh" then "" else "sandbox_image = \"masc-sandbox:general\"\n");
+      (if String.equal sandbox_profile "remote_ssh" then "" else "sandbox_image = \"base\"\n");
     if remote
     then Printf.fprintf channel "remote_endpoint = %S\n" ssh_fixture_endpoint);
   if remote then write_runtime_toml ~base_path:config.base_path;

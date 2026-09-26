@@ -79,6 +79,16 @@ let ( let* ) = Result.bind
    rule is the recipe loader's own: a buildable name is always promotable. *)
 let valid_name = Keeper_sandbox_image_version.valid_name
 
+let name_error ~field value =
+  if valid_name value then None
+  else
+    Some
+      (Printf.sprintf
+         "%s %S is not an image catalog name (lowercase letters and digits, words \
+          joined by single '-', such as base or ocaml). A Keeper names an image \
+          from sandbox-images.toml; the catalog says which build that name is."
+         field value)
+
 (* [repository:tag], checked only as far as the value's two uses need: it is
    written between TOML quotes and passed as one argv word to an image
    store's CLI. So: no leading '-' (it would read as a flag), only characters
@@ -187,7 +197,8 @@ let resolve t ~name ~store =
      | Some pin -> Ok pin
      | None -> Error (Not_built_on_host { name; store }))
 
-let file_name = "sandbox-images.toml"
+let shipped_file_name = "sandbox-images.toml"
+let file_name = "sandbox-image-builds.toml"
 
 type load_error =
   | Unreadable of { path : string; detail : string }

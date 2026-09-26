@@ -83,6 +83,10 @@ type native_workspace = Shared_workspace of string | Private_workspace
 val canonical_workspace : string -> (string, error) result
 (** Absolute directory without symbolic links or permission-pattern syntax. *)
 
+val prepare_native_workspace : t -> workspace:native_workspace -> (string, error) result
+(** Validate the shared cwd or prepare its private directory without publishing
+    any permission rules. Safe for a candidate that has not claimed its turn. *)
+
 val prepare_native_tools
   : t -> posture:Runtime_native_tools.posture -> workspace:native_workspace
   -> additional_workspaces:string list -> (string, error) result

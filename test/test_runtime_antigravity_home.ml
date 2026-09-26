@@ -145,7 +145,10 @@ let test_account_identity_preparation_does_not_reset_active_policy () =
       ~owner_leaf:"active-policy" ~oauth_source |> require_ok in
   check string "planning retains the account generation" (Runtime_antigravity_home.home_dir home)
     (Runtime_antigravity_home.home_dir planned);
-  check string "planning cannot reset the active permission policy" policy_before (Fs_compat.load_file settings);
+  ignore (Runtime_antigravity_home.prepare_native_workspace planned
+    ~workspace:Runtime_antigravity_home.Private_workspace |> require_ok);
+  check string "identity and workspace planning cannot reset the active permission policy"
+    policy_before (Fs_compat.load_file settings);
   check string "planning cannot replace native refresh" "native-refresh"
     (Fs_compat.load_file (Runtime_antigravity_home.oauth_path planned))
 ;;

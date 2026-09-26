@@ -1935,6 +1935,64 @@ let test_stream_usage_is_keyed_by_the_clis_turn () =
     failf "expected one report keyed by the CLI turn, got %d" (List.length reports)
 ;;
 
+let test_losing_claim_cannot_publish_native_policy () =
+  let base_path = temp_workspace () |> Unix.realpath in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot; cleanup_tree base_path) (fun () ->
+    let runtime_root = Common.masc_dir_from_base_path ~base_path in
+    Unix.mkdir runtime_root 0o700;
+    let keeper_name = "antigravity-policy-race" in
+    Masc_test_deps.declare_fixture_keeper ~base_path
+      ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) keeper_name;
+    let oauth_source = Filename.concat base_path "operator-oauth-token" in
+    write_file ~mode:0o600 oauth_source "synthetic-policy-account";
+    let marker = Filename.concat base_path "unexpected-spawn" in
+    let cli_path = Filename.concat base_path "agy-never-spawn" in
+    write_file ~mode:0o700 cli_path ("#!/bin/sh\ntouch " ^ shell_quote marker ^ "\nexit 0\n");
+    let runtime_path = Filename.concat base_path "runtime.toml" in
+    write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      Eio_context.set_env env;
+      Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw (fun () ->
+        Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+        let config = match Runtime.get_runtime_by_id "antigravity.gemini" with
+          | Some {Runtime.execution=Runtime_execution.Antigravity_cli config; _} -> config
+          | _ -> fail "Antigravity binding missing" in
+        let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf ~keeper_name ~oauth_source in
+        let home, _ = Runtime_antigravity_home.prepare_native ~runtime_root ~owner_leaf ~oauth_source
+            ~posture:Runtime_native_tools.Native_full
+            ~workspace:Runtime_antigravity_home.Private_workspace ~additional_workspaces:[]
+          |> Result.get_ok in
+        let settings = (Runtime_antigravity_home.For_testing.paths home).settings_path in
+        let winner_policy = Fs_compat.load_file settings in
+        let won = ref false in
+        let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (fun _ ->
+          let module Store = Keeper_official_client_session_store in
+          let surface = Store.tool_surface_sha256
+              ~account_home:(Runtime_antigravity_home.home_dir home)
+              ~native_posture:Runtime_native_tools.Native_full [] in
+          (match Store.claim ~base_path ~keeper_name ~expected:None ~client_kind:Store.Antigravity
+              ~owner_epoch:(Store.process_epoch ()) ~runtime_id:"antigravity.gemini"
+              ~tool_surface_sha256:surface ~updated_at:0. with
+           | Ok _ -> won := true
+           | Error detail -> fail detail);
+          Agent_core.Hooks.Continue)} in
+        let attempt = Keeper_antigravity_runtime.run
+          ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0})
+          ~accepts_image_input:false ~required_native_posture:Runtime_native_tools.Native_read
+          ~runtime_id:"antigravity.gemini" ~keeper_name ~pre_tool_rejects:(ref []) ~base_path
+          ~goal:"Losing candidate" ~goal_blocks:None ~system_prompt:"Policy race fixture."
+          ~tools:[] ~initial_messages:[] ~model_input_projection:None
+          ~on_transmitted_model_input:(fun _ -> ()) ~hooks:(Some hooks)
+          ~context_injector:None ~context:None ~event_bus:None ~raw_trace:None ~on_event:None
+          ~config () in
+        check bool "competing owner claimed after the candidate snapshot" true !won;
+        check bool "stale candidate loses its claim" true (Result.is_error attempt.result);
+        check bool "loser never launches its CLI" false (Sys.file_exists marker);
+        check string "loser cannot replace the winner's Full policy with Read"
+          winner_policy (Fs_compat.load_file settings)))))
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
@@ -1955,6 +2013,8 @@ let () =
               "blank system prompt is refused not defaulted"
               `Quick
               test_blank_system_prompt_is_refused_not_defaulted
+        ; test_case "losing claim cannot publish native policy" `Quick
+            test_losing_claim_cannot_publish_native_policy
         ] )
     ; ( "model input window"
         , [ test_case

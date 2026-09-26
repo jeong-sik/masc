@@ -6647,7 +6647,7 @@ def chat_reconcile_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
 def chat_reconcile_interaction(
     gate: GatedHttpResponse, requests: HttpRequests
 ) -> Interaction:
-    """New Enter is admitted while the original identity reconnects separately."""
+    """New Enter waits for the original identity's admission receipt."""
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -6687,51 +6687,42 @@ def chat_reconcile_interaction(
             timeout=5.0,
         ):
             raise AssertionError("exact Keeper chat re-subscribe did not start")
-        send_and_wait(
-            process, master_fd, output, b"held-next", composer_showing(b"held-next")
-        )
-        send_and_wait(process, master_fd, output, b"\r", b"reply-held-next")
-        if gate.release.is_set():
-            raise AssertionError("independent input waited for original reconciliation")
-        if not any(json.loads(body).get("message") == "held-next"
-                   for path, body in requests if path == "/api/v1/keepers/chat/stream"):
-            raise AssertionError("new Enter did not reach the server during reconciliation")
-
-        gate.release.set()
-        deadline = time.monotonic() + 10.0
-        while True:
-            read_available(master_fd, output)
+        try:
+            send_and_wait(
+                process, master_fd, output, b"held-next", composer_showing(b"held-next")
+            )
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            before_release = [
+                json.loads(body).get("message")
+                for path, body in requests
+                if path == "/api/v1/keepers/chat/stream"
+            ]
+            if "held-next" in before_release:
+                raise AssertionError(
+                    f"later Enter overtook unverified admission: {before_release!r}"
+                )
+            gate.release.set()
+            wait_for_output(
+                process, master_fd, output, b"reply-held-next", start=0, timeout=10.0
+            )
             bodies = [
                 body
                 for path, body in requests
                 if path == "/api/v1/keepers/chat/stream"
             ]
             messages = [json.loads(body).get("message") for body in bodies]
-            if messages.count("uncertain") >= 2 and "held-next" in messages:
-                break
-            if time.monotonic() >= deadline:
-                raise AssertionError(
-                    f"terminal reconciliation did not release NEXT: {messages!r}"
-                )
-            time.sleep(0.02)
-        originals = [json.loads(body) for body in bodies if json.loads(body).get("message") == "uncertain"]
-        if len({item["request_id"] for item in originals}) != 1:
-            raise AssertionError(f"reconnect invented a new original request identity: {originals!r}")
-        if messages.count("held-next") != 1:
-            raise AssertionError(f"independent Enter was replayed as a new submission: {messages!r}")
-        wait_for_output(
-            process,
-            master_fd,
-            output,
-            b"Enter:send",
-            start=0,
-            timeout=10.0,
-        )
-        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
-        send_and_wait(
-            process, master_fd, output, b"\x1b", b"MASC Keepers"
-        )
-        os.write(master_fd, b"q")
+            originals = [json.loads(body) for body in bodies if json.loads(body).get("message") == "uncertain"]
+            if len(originals) < 2 or len({item["request_id"] for item in originals}) != 1:
+                raise AssertionError(f"reconnect changed original request identity: {originals!r}")
+            if messages.count("held-next") != 1:
+                raise AssertionError(f"later Enter was lost or replayed: {messages!r}")
+            escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+            send_and_wait(
+                process, master_fd, output, b"\x1b", b"MASC Keepers"
+            )
+            os.write(master_fd, b"q")
+        finally:
+            gate.release.set()
 
     return interact
 
@@ -15383,7 +15374,7 @@ def run_chat_input_regression(executable: str) -> None:
     reconcile_fixtures, reconcile_gate = chat_reconcile_http_fixtures()
     run_terminal_scenario(
         executable,
-        description="Unknown outcome reconnects by identity while new Enter is admitted",
+        description="Unknown admission reconnects by identity before later Enter",
         interact=chat_reconcile_interaction(reconcile_gate, reconcile_requests),
         http_fixtures=reconcile_fixtures,
         http_requests=reconcile_requests,

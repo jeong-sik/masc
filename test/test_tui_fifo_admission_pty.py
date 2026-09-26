@@ -161,6 +161,13 @@ def run(executable: str) -> None:
                 second["request_id"], third["request_id"], fourth["request_id"]
             ]:
                 raise AssertionError(f"priority targeted another message: {completed_promotions!r}")
+            if [item.get("priority_predecessors") for item in completed_promotions] != [
+                [], [second["request_id"]],
+                [second["request_id"], third["request_id"]],
+            ]:
+                raise AssertionError(
+                    f"automatic priority lost the accepted FIFO predecessors: {completed_promotions!r}"
+                )
             if any(item.get("interrupt_token", "missing") is not None for item in completed_promotions):
                 raise AssertionError(f"automatic priority tried to interrupt a turn: {completed_promotions!r}")
             if priority_fixture.release.is_set():

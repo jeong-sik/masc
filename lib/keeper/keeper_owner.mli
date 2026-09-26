@@ -382,10 +382,13 @@ val submit_interactive_operation : t -> operation_id:Chat_operation.Operation_id
     intent within the same mailbox command. Interactive admission itself does
     not reorder queued work; explicit queue-priority operations can do so.
     Replayed admissions and stale control tokens perform no control effects. *)
-val run_next_operation : t -> operation_id:Chat_operation.Operation_id.t ->
+val run_next_operation : ?priority_predecessors:Chat_operation.Operation_id.t list ->
+  t -> operation_id:Chat_operation.Operation_id.t ->
   observed:interrupt_target option -> (run_next_result, error) result
-(** Prioritize a queued operation. An operator pause can refuse the request;
-    invalid or unavailable queued operations return an error. *)
+(** Prioritize a queued operation. [priority_predecessors] keeps automatic
+    priority after the latest still-queued earlier request. Omission retains
+    explicit run-next's absolute-front behavior. An operator pause can refuse
+    the request; invalid or unavailable queued operations return an error. *)
 
 val interrupt_running_operation
   :  t

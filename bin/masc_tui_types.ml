@@ -5338,6 +5338,11 @@ type state = {
      ordered run-next call. No priority intent is inferred from queue text. *)
   mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request list;
   mutable keeper_run_next_ready : Masc_tui_keeper_chat_projection.request list;
+  mutable keeper_auto_priority_pending : (string * string) list;
+  (* Accepted automatic priority requests still owned by this session, in
+     Enter order per Keeper. The server uses these exact IDs as predecessors
+     when it moves the next accepted request within the priority cohort. *)
+  mutable keeper_auto_priority_requests : (string * string list) list;
   (* Whether ^Y ending a voice capture also sends what was heard
      ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
      in the draft either way, and that draft is also where a spoken
@@ -7386,6 +7391,9 @@ let begin_keeper_chat_control state keeper_name =
     (fun (request : Masc_tui_keeper_chat_projection.request) ->
        not (String.equal request.keeper_name keeper_name))
     state.keeper_run_next_ready;
+  state.keeper_auto_priority_pending <- List.filter
+    (fun (name, _) -> not (String.equal name keeper_name))
+    state.keeper_auto_priority_pending;
   state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
     name, id, (if name = keeper_name then Retained_after_stop else intervention))
     state.keeper_interactive_waiting;
@@ -7793,6 +7801,8 @@ let create_state
   keeper_queue_inflight = [];
   keeper_run_next_pending = [];
   keeper_run_next_ready = [];
+  keeper_auto_priority_pending = [];
+  keeper_auto_priority_requests = [];
   voice_send_on_stop = false;
   answering_open = false;
   answering_scroll = 0;

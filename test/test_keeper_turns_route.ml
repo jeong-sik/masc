@@ -237,8 +237,14 @@ let test_run_next_ownership_and_started_boundary () =
     let order () = match Keeper_owner.list_queued_operations owner ~after_sequence:None ~limit:10 with
       | Ok rows -> List.map (fun (row:Keeper_chat_operation.t) -> Keeper_chat_operation.Operation_id.to_string row.operation_id) rows
       | Error e -> Alcotest.fail (Keeper_owner.error_to_string e) in
-    let request id = Yojson.Safe.to_string (`Assoc ["name",`String name;"request_id",`String id;"interrupt_token",`Null]) in
-    let post id = post_response ~handle:(Server_routes_http_keeper_stream.handle_keeper_run_next state ~actor:"masc-tui") (request id) in
+    let request ?predecessors id = Yojson.Safe.to_string (`Assoc
+      (["name",`String name;"request_id",`String id;"interrupt_token",`Null]
+       @ match predecessors with
+         | None -> []
+         | Some ids -> ["priority_predecessors",`List (List.map (fun id -> `String id) ids)])) in
+    let post ?predecessors id = post_response
+      ~handle:(Server_routes_http_keeper_stream.handle_keeper_run_next state ~actor:"masc-tui")
+      (request ?predecessors id) in
     Alcotest.(check bool) "other producer is forbidden" true (String_util.contains_substring (post "other-first") "403 Forbidden");
     Alcotest.(check (list string)) "forbidden action changes nothing" ["other-first";"mine"] (order ());
     Alcotest.(check bool) "own queued input is prioritized" true (String_util.contains_substring (post "mine") "200 OK");
@@ -247,7 +253,24 @@ let test_run_next_ownership_and_started_boundary () =
     Alcotest.(check (list string)) "replayed command has no duplicate" ["mine";"other-first"] (order ());
     (match Keeper_owner.claim_next_operation owner with Ok (Some _) -> () | _ -> Alcotest.fail "claim failed");
     Alcotest.(check bool) "running input is not replayed or interrupted" true
-      (String_util.contains_substring (post "mine") "409 Conflict"))
+      (String_util.contains_substring (post "mine") "409 Conflict");
+    submit "other-keeper" "outsider";
+    List.iter (submit "masc-tui") ["mine-a"; "mine-b"; "mine-c"];
+    Alcotest.(check bool) "foreign predecessor is rejected" true
+      (String_util.contains_substring
+         (post ~predecessors:["outsider"] "mine-b") "409 Conflict");
+    Alcotest.(check (list string)) "foreign predecessor changes no order"
+      ["outsider";"mine-a";"mine-b";"mine-c"] (order ());
+    Alcotest.(check bool) "first automatic priority accepted" true
+      (String_util.contains_substring (post ~predecessors:[] "mine-a") "200 OK");
+    Alcotest.(check bool) "second automatic priority accepted" true
+      (String_util.contains_substring
+         (post ~predecessors:["mine-a"] "mine-b") "200 OK");
+    Alcotest.(check bool) "third automatic priority accepted" true
+      (String_util.contains_substring
+         (post ~predecessors:["mine-a";"mine-b"] "mine-c") "200 OK");
+    Alcotest.(check (list string)) "HTTP automatic priority persists accepted FIFO"
+      ["mine-a";"mine-b";"mine-c";"outsider"] (order ()))
 ;;
 
 let () =

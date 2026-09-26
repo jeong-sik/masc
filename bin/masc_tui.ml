@@ -7154,13 +7154,30 @@ let run_next_busy_for state keeper_name =
   || List.exists same_keeper state.keeper_run_next_inflight
 ;;
 
-let queue_run_next_on_admission state request =
+let queue_run_next_on_admission ?(automatic = false) state request =
   if not (List.exists (Keeper_chat.same_request_identity request)
             state.keeper_run_next_pending) then
-    state.keeper_run_next_pending <- state.keeper_run_next_pending @ [request]
+    state.keeper_run_next_pending <- state.keeper_run_next_pending @ [request];
+  if automatic then
+    state.keeper_auto_priority_pending <-
+      (request.keeper_name, request.request_id) ::
+      List.filter (fun (name, id) ->
+        not (String.equal name request.keeper_name
+             && String.equal id request.request_id))
+        state.keeper_auto_priority_pending
 ;;
 
-let launch_keeper_run_next state ~mailbox request =
+let add_auto_priority_request state (request : Keeper_chat.request) =
+  let keeper_name = request.keeper_name in
+  let previous = Option.value ~default:[]
+    (List.assoc_opt keeper_name state.keeper_auto_priority_requests) in
+  if not (List.mem request.request_id previous) then
+    state.keeper_auto_priority_requests <-
+      (keeper_name, previous @ [request.request_id]) ::
+      List.remove_assoc keeper_name state.keeper_auto_priority_requests
+;;
+
+let launch_keeper_run_next ?(automatic = false) state ~mailbox request =
   if List.exists (fun (inflight : Keeper_chat.request) ->
        String.equal inflight.keeper_name request.Keeper_chat.keeper_name)
        state.keeper_run_next_inflight then ()
@@ -7168,9 +7185,19 @@ let launch_keeper_run_next state ~mailbox request =
     let keeper_name = request.Keeper_chat.keeper_name in
     let request_id = request.Keeper_chat.request_id in
     state.keeper_run_next_inflight <- request :: state.keeper_run_next_inflight;
-    append_chat_history state request Message_status "Requesting first place for this message; waiting for server confirmation";
+    append_chat_history state request Message_status
+      "Requesting priority for this message; waiting for server confirmation";
+    let priority_predecessors =
+      if automatic then
+        let rec earlier reversed = function
+          | [] -> List.rev reversed
+          | id :: _ when String.equal id request_id -> List.rev reversed
+          | id :: rest -> earlier (id :: reversed) rest in
+        Some (earlier [] (Option.value ~default:[]
+          (List.assoc_opt keeper_name state.keeper_auto_priority_requests)))
+      else None in
     let run () =
-      let result = try Masc_tui_http.post_keeper_run_next ~host:server_peer_host
+      let result = try Masc_tui_http.post_keeper_run_next ?priority_predecessors ~host:server_peer_host
         ~port:state.port ~keeper_name ~request_id
         with Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn) in
@@ -7197,7 +7224,11 @@ let rec dispatch_ready_run_next state ~mailbox keeper_name =
       (* Later ordinary Interactive sends advance the admission generation.
          Explicit Esc/pause/resume already removed superseded ready requests. *)
       if not (List.mem_assoc keeper_name state.keeper_chat_control_pending)
-      then launch_keeper_run_next state ~mailbox request
+      then
+        let automatic = List.mem request.request_id
+          (Option.value ~default:[]
+             (List.assoc_opt keeper_name state.keeper_auto_priority_requests)) in
+        launch_keeper_run_next ~automatic state ~mailbox request
       else dispatch_ready_run_next state ~mailbox keeper_name
 ;;
 
@@ -7462,6 +7493,17 @@ let drop_inflight state request =
   state.keeper_run_next_ready <- List.filter
     (fun ready -> not (Keeper_chat.same_request_identity ready request))
     state.keeper_run_next_ready;
+  state.keeper_auto_priority_pending <- List.filter (fun (keeper_name, id) ->
+    not (String.equal keeper_name request.Keeper_chat.keeper_name
+         && String.equal id request.request_id))
+    state.keeper_auto_priority_pending;
+  state.keeper_auto_priority_requests <-
+    List.filter_map (fun (keeper_name, request_ids) ->
+      let request_ids = List.filter (fun id ->
+        not (String.equal keeper_name request.Keeper_chat.keeper_name
+             && String.equal id request.request_id)) request_ids in
+      if request_ids = [] then None else Some (keeper_name, request_ids))
+      state.keeper_auto_priority_requests;
   state.msg_inflight <-
     List.filter
       (fun entry ->
@@ -7682,7 +7724,7 @@ let launch_waiting_keeper_input state ~mailbox ~keeper_name =
               priority is a separate request, sent only if admission reports
               Queued; a message that started or settled needs no reordering. *)
            if state.user_input_priority_next then
-             queue_run_next_on_admission state item.request;
+             queue_run_next_on_admission ~automatic:true state item.request;
            launch_keeper_request ~promoted:item ~admission_intent
              state ~mailbox item.request;
            let next_generation = keeper_chat_control_generation state keeper_name in
@@ -14249,6 +14291,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  state.keeper_run_next_pending <- List.filter
                    (fun pending -> not (Keeper_chat.same_request_identity pending request))
                    state.keeper_run_next_pending;
+                 let automatic = List.mem
+                   (request.Keeper_chat.keeper_name, request.request_id)
+                   state.keeper_auto_priority_pending in
+                 state.keeper_auto_priority_pending <- List.filter
+                   (fun (name, id) ->
+                     not (String.equal name request.keeper_name
+                          && String.equal id request.request_id))
+                   state.keeper_auto_priority_pending;
                  let keeper_name = request.Keeper_chat.keeper_name in
                  let control_current =
                    entry.control_generation = keeper_chat_control_generation state keeper_name
@@ -14263,6 +14313,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                       | Keeper_chat.Replayed -> false)
                  in
                  if control_current && admission_applied then begin
+                   if automatic then add_auto_priority_request state request;
                    state.keeper_run_next_ready <- state.keeper_run_next_ready @ [request];
                    dispatch_ready_run_next state ~mailbox keeper_name
                  end
@@ -14271,6 +14322,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  state.keeper_run_next_pending <- List.filter
                    (fun pending -> not (Keeper_chat.same_request_identity pending request))
                    state.keeper_run_next_pending;
+                 state.keeper_auto_priority_pending <- List.filter
+                   (fun (name, id) ->
+                     not (String.equal name request.keeper_name
+                          && String.equal id request.request_id))
+                   state.keeper_auto_priority_pending;
                  append_chat_history state request Message_status "Submitted message already started or settled; no other turn was interrupted"
                | None -> ())
            end;

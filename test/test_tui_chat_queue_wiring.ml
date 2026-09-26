@@ -3434,6 +3434,7 @@ let test_composing_holds_only_while_the_composer_is_live () =
   let state =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
+  state.coalesce_queued_input <- true;
   state.msg_target_keeper_name <- Some "alpha";
   state.view <- Tui_types.Keepers Tui_types.Keeper_message;
   Buffer.add_string state.msg_input "half a";

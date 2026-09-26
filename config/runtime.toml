@@ -2735,3 +2735,26 @@ streaming = true
 reasoning-effort = "high"
 
 [openrouter.openrouter-glm-5-3-flashx]
+
+# ── OpenRouter free models ───────────────────────────────────────────────────
+# Two selected ids passed basic and tool-call probes. See
+# evidence/task-openrouter-free-models/probe-results.json and gen_rows.py.
+# These are available bindings; lane placement remains operator configuration.
+
+[models.openrouter-free-north-mini-code]
+api-name = "cohere/north-mini-code:free"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-free-north-mini-code]
+
+[models.openrouter-free-lfm-2-5-2-6b]
+api-name = "liquid/lfm-2.5-2.6b:free"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-free-lfm-2-5-2-6b]

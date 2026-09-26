@@ -756,6 +756,8 @@ let openrouter_effort_ladders =
     ; "google/gemini-3.1-pro-preview"
     ; "x-ai/grok-4.7"
     ; "z-ai/glm-5.3-flashx"
+    (* Free-model admission probe: this endpoint refuses disabled reasoning. *)
+    ; "liquid/lfm-2.5-2.6b:free"
     ]
   @ List.map
       (fun model_id -> model_id, with_disable)
@@ -771,6 +773,9 @@ let openrouter_effort_ladders =
       ; "openai/gpt-5.6-terra"
       ; "openai/gpt-5.6-luna"
       ; "qwen/qwen3.8-flash"
+      (* Free-model admission probes explicitly reported zero reasoning
+         tokens for an accepted [none] request. *)
+      ; "cohere/north-mini-code:free"
       ]
 ;;
 

@@ -1795,9 +1795,14 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
       boot_stage "slack_poll.begin";
       Server_slack_poll_lane.start ~sw ~env ~state;
       boot_stage "slack_poll.end";
+      (* The browser lanes keep their owner records and profiles under the
+         server's own base path, not one resolved again from env or cwd. *)
       boot_stage "browser_webdriver.begin";
-      Server_browser_webdriver.start ~sw ~env;
+      Server_browser_webdriver.start ~sw ~env ~base_path;
       boot_stage "browser_webdriver.end";
+      boot_stage "browser_stagehand.begin";
+      Server_browser_stagehand.start ~sw ~env ~base_path;
+      boot_stage "browser_stagehand.end";
       (* In-process iMessage connector, replacing the deleted
          sidecars/imessage-bot/ Python connector. Off unless Messages.app's
          chat.db is readable — on Linux it never is, and the start function

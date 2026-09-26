@@ -68,6 +68,52 @@ def run(binary: str) -> None:
         print("CHAT_COPY_PTY bytes=%d newlines=%d sha256=%s" %
               (len(copied), copied.count(b"\n"), hashlib.sha256(copied).hexdigest()),
               flush=True)
+        # Keep A's second GET pending while B's later /copy completes. The
+        # terminal clipboard must keep B even when A finally responds.
+        old_reply = "alpha reply that must not replace beta"
+        slow_alpha = h.GatedHttpResponse(
+            (200, [{"id": "slow-alpha", "role": "assistant",
+                    "content": old_reply, "ts": 1787348493.0}]),
+            hold_seconds=30.0,
+        )
+        fixtures["/api/v1/keepers/alpha/chat/history"] = slow_alpha
+        beta_reply = "beta reply requested last"
+        fixtures["/api/v1/keepers/beta/chat/history"] = (
+            200, [{"id": "beta-answer", "role": "assistant",
+                   "content": beta_reply, "ts": 1787348494.0}],
+        )
+        try:
+            os.write(fd, b"/copy\r")
+            assert h.wait_for_fixture_state(
+                process, fd, output, slow_alpha.requested.is_set, timeout=5.0
+            ), "alpha /copy did not start"
+            h.escape_to_keeper_detail(process, fd, output, name=b"alpha")
+            h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+            h.select_keeper_row(process, fd, output, b"beta")
+            h.send_and_wait(
+                process, fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1mbeta"
+            )
+            h.send_and_wait(
+                process, fd, output, b"m", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat"
+            )
+            h.wait_for_output(process, fd, output, beta_reply.encode(),
+                              start=0, timeout=10)
+            frame = h.send_and_wait(process, fd, output, b"/copy\r", OSC52)
+            match = OSC52.search(frame)
+            assert match is not None
+            assert base64.b64decode(match.group(1), validate=True) == beta_reply.encode()
+            after_beta = len(output)
+            slow_alpha.release.set()
+            assert h.wait_for_fixture_state(
+                process, fd, output, slow_alpha.completed.is_set, timeout=5.0
+            ), "alpha response did not leave the fixture"
+            assert not h.poll_for_output(
+                process, fd, output, OSC52, start=after_beta, timeout=1.0
+            ), "late alpha /copy replaced beta on the terminal clipboard"
+            print("CHAT_COPY_ORDER_PTY beta remains latest after alpha settles", flush=True)
+        finally:
+            slow_alpha.release.set()
+
         h.send_and_wait(process, fd, output, b"\x03",
                         b"Ctrl-C: press again to quit")
 

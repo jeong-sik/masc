@@ -2030,7 +2030,7 @@ type async_msg =
       * (Keeper_chat_history.decoded, string) result
       * (Keeper_chat_history.decoded, string) result
   | Keeper_chat_copy_loaded of
-      string * (Keeper_chat_history.decoded, string) result
+      int * string * (Keeper_chat_history.decoded, string) result
   | Keeper_chat_journal_loaded of
       { keeper_name : string
       ; operation_id : string
@@ -6598,11 +6598,13 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
    bytes or wraps lines. A separate read leaves the visible history cache and
    its pagination untouched. *)
 let launch_keeper_chat_copy state ~mailbox ~keeper_name =
+  state.msg_copy_generation <- state.msg_copy_generation + 1;
+  let generation = state.msg_copy_generation in
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Keeper_chat_copy_loaded (keeper_name, result)))
+      enqueue_async mailbox (Keeper_chat_copy_loaded (generation, keeper_name, result)))
     (fun () -> Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name)
 ;;
 
@@ -14706,7 +14708,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         state.context_inspector_reading <- Some (keeper_name, reading);
         state.context_inspector_read_at <- Some (Unix.gettimeofday ())
       end
-  | Keeper_chat_copy_loaded (keeper_name, result) ->
+  | Keeper_chat_copy_loaded (generation, _, _) when generation <> state.msg_copy_generation -> ()
+  | Keeper_chat_copy_loaded (_, keeper_name, result) ->
       let notice = chat_notice state ~keeper_name:(Some keeper_name) in
       (match result with
        | Error detail ->

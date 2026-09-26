@@ -98,6 +98,9 @@ let test_a_refusal_without_a_suffix_waits_for_the_failed_path () =
   check_decision "a rate limit stating nothing"
     (wait ~after:floor_sec)
     (decide (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = None }));
+  check_decision "a stated reset beyond the fallback cap"
+    (wait ~after:4470.0)
+    (decide (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = Some 4470.0 }));
   check_decision "a hard quota stating nothing"
     (wait ~after:cap_sec)
     (decide (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = None }))

@@ -16,8 +16,8 @@ let candidate_of_slot slot_id =
 
    A rate limit rests the slot for the Keeper walk's own path rest
    ([Keeper_runtime_failure_route.path_rest_sec]): the provider's Retry-After
-   when it sent one, the configured floor when it did not, never past the
-   configured cap. The Keeper walk keeps an unhinted rate limit demoted until
+   when it sent one, the configured fallback when it did not. The Keeper
+   walk keeps an unhinted rate limit demoted until
    the path answers, because a later rotation still reaches it; an Exact lane
    whose siblings keep answering never would, so here the rest ends and the
    slot is tried in its declared place again. *)

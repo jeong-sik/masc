@@ -3671,6 +3671,31 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
         true waits_for_the_path))
 ;;
 
+let test_provider_resets_outlive_the_fallback_cap () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let now = Unix.gettimeofday () in
+      let cap = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
+      let head = "shared_a.test_model" and next = "other.test_model" in
+      Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:(quota_lane_candidate head) ~retry_after:(Some (cap +. 7200.));
+      Runtime_quota_window.note_exhausted
+        ~scope:(Option.get (Runtime.quota_scope_of_runtime_id next))
+        ~resets_at:(now +. cap +. 3600.);
+      let suffix = quota_lane_suffix [head; next] in
+      (match Driver.deferred_lane_rest ~now suffix with
+       | Driver.Walk_waits_until { release_at; resting_runtime_id } ->
+         Alcotest.(check (float 0.01)) "wait until the earliest stated reset"
+           (now +. cap +. 3600.) release_at;
+         Alcotest.(check string) "the quota path releases first" next resting_runtime_id
+       | Driver.Walk_head_serving _ -> Alcotest.fail "both paths are resting");
+      (match Driver.deferred_lane_rest ~now:(now +. cap +. 3601.) suffix with
+       | Driver.Walk_head_serving { runtime_id } ->
+         Alcotest.(check string) "the released path takes the continuation" next runtime_id
+       | Driver.Walk_waits_until _ -> Alcotest.fail "the quota path is released")))
+;;
+
 (* A failure without a suffix used every path the input may take. Its wait
    covers the failed path's own rest and never ends before a fresh walk of the
    assignment can start on a serving head: with A resting 600 s and B failing
@@ -6134,6 +6159,8 @@ let () =
             test_a_quota_hint_that_names_no_time_is_recorded_as_observed;
           Alcotest.test_case "a deferred suffix waits only while its walk head rests" `Quick
             test_a_deferred_suffix_waits_only_while_its_walk_head_rests;
+          Alcotest.test_case "provider resets outlive the fallback cap" `Quick
+            test_provider_resets_outlive_the_fallback_cap;
           Alcotest.test_case "a failure without a suffix waits until a fresh walk head serves"
             `Quick test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves;
           Alcotest.test_case "a chat retry follows the shared next dispatch" `Quick

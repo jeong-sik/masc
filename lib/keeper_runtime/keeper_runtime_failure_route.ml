@@ -426,8 +426,9 @@ let usable_retry_after = function
    Without a usable hint (absent, zero, negative, infinite, NaN) the class decides: a
    throttle rests the named floor, and an account exhaustion rests the cap,
    because a quota that said nothing about its end is not known to come back
-   within a minute. Every result is clamped to [cap_sec] so a misread header
-   cannot park a path longer than the operator allows. *)
+   within a minute. Only the unstated fallback is clamped to [cap_sec].
+   A validated provider hint is evidence of when the path can serve again;
+   cutting it short repeatedly calls a path that is still exhausted (#39190). *)
 let path_rest_sec ~cap_sec ~retry_class ~retry_after_hint =
   let cap_sec = Float.max 0.0 cap_sec in
   let unstated () =
@@ -441,12 +442,9 @@ let path_rest_sec ~cap_sec ~retry_class ~retry_after_hint =
     | Provider_timeout ->
       Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec
   in
-  let base =
-    match usable_retry_after retry_after_hint with
-    | None -> unstated ()
-    | Some hint -> Float.max hint 1.0
-  in
-  Float.min cap_sec base
+  match usable_retry_after retry_after_hint with
+  | None -> Float.min cap_sec (unstated ())
+  | Some hint -> Float.max hint 1.0
 ;;
 
 let route_kind_label = function

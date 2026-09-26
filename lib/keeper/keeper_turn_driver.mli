@@ -92,7 +92,7 @@ val quota_ordered_deferred_runtime_lane :
     the quota window; a failed attempt is no rest (RFC-0458 §3.4).
     [walk_promotes_at_release] is [true] when the walk order moves the path
     ahead of the paths still told to rest at [release_at]: every rest on it was
-    stated by the provider and not cut by the cap. A failed attempt the path
+    stated by the provider. A failed attempt the path
     also holds keeps it behind the paths with no evidence. An id the runtime
     table cannot resolve is serving. *)
 type path_rest =

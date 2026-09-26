@@ -1240,8 +1240,7 @@ let test_comment_routes_bystander_lane_to_attention_judgment () =
 (* RFC-provider-path-rest §3.3: a path's rest comes from the provider's answer
    alone. A usable hint rests that long (at least 1 s, #35246) whatever the
    keeper cadence is; without one a throttle rests the named floor and a hard
-   quota rests the cap; every result is clamped to the cap so a misread header
-   cannot rest a path longer than the operator allows. *)
+   quota rests the fallback cap. A usable provider hint outlives that cap. *)
 let test_path_rest_follows_the_answer_not_the_cadence () =
   let rest = Keeper_runtime_failure_route.path_rest_sec ~cap_sec:900.0 in
   let floor_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec in
@@ -1266,8 +1265,12 @@ let test_path_rest_follows_the_answer_not_the_cadence () =
     (rest ~retry_class:rate_limited ~retry_after_hint:(Some (-5.0)));
   check (float 0.5) "a NaN hint is unstated" floor_sec
     (rest ~retry_class:rate_limited ~retry_after_hint:(Some nan));
-  check (float 0.001) "the cap clamps an absurd hint" 900.0
+  check (float 0.001) "a stated reset outlives the fallback cap" 120000.0
     (rest ~retry_class:rate_limited ~retry_after_hint:(Some 120000.0));
+  check (float 0.001) "a hard quota reset outlives the fallback cap" 4470.0
+    (rest ~retry_class:hard_quota ~retry_after_hint:(Some 4470.0));
+  check (float 0.001) "an infinite hint is unstated" floor_sec
+    (rest ~retry_class:rate_limited ~retry_after_hint:(Some infinity));
   check bool "default cap is not below the named floor" true
     (Float.compare Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec floor_sec
      >= 0)

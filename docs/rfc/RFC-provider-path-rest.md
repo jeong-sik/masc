@@ -3,7 +3,7 @@ rfc: "provider-path-rest"
 title: "사용량 제한은 그 경로만 쉬게 하고, Keeper 는 다음에 보낼 경로의 쉼만 기다린다"
 status: Draft
 created: 2026-09-15
-updated: 2026-09-15
+updated: 2026-09-26
 author: claude
 supersedes: []
 superseded_by: null
@@ -154,7 +154,10 @@ type next_dispatch =
 | 402·HardQuota, 리셋 시각을 말함 (`Until t`) | `t` |
 | 402·HardQuota, 말하지 않음 (`Observed`) | 판단한 시각 + `rate_limit_backoff_cap_sec` (900초) |
 
-모든 값은 `rate_limit_backoff_cap_sec` 로 자른다. cadence 는 어디에도 들어가지 않는다.
+제공자가 말한 유효한 Retry-After와 quota reset은 그대로 보존한다(#39190).
+`rate_limit_backoff_cap_sec`는 시각을 말하지 않은 경우의 fallback에만 적용한다.
+cadence는 어디에도 들어가지 않는다. Retry-After가 후속 요청 전 대기를 나타낸다는
+[RFC 9110 §10.2.3](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.3)을 따른다.
 
 429 와 402 를 다르게 두는 근거는 이미 타입에 있다. `retry_class` 문서가 `Rate_limited` 를
 "soft 429 throttle", `Hard_quota` 를 "account-level quota/balance exhaustion" 으로
@@ -169,14 +172,14 @@ type next_dispatch =
 풀리는 시각과 걷는 순서는 같이 움직이지 않을 수 있다. 다음 턴은
 `quota_ordered_deferred_runtime_lane` 순서로 걷고, 그 순서는 쉬는 증거가 있는 경로를
 뒤로 민다. provider 가 말한 시각은 그 시각에 증거가 지워져 순서도 같이 풀린다. 말하지 않은
-증거는 성공이 올 때까지 뒤로 밀린 채다. cap 에 잘린 시각도 cap 이 먼저 와서 순서보다 먼저
-풀린다.
+증거는 성공이 올 때까지 뒤로 밀린 채다. 제공자가 말한 시각은 fallback cap으로 자르지
+않으므로 대기와 순서가 같은 시각에 풀린다.
 
 그래서 suffix 가 쉬면 대기 시각은 **걷는 순서의 첫 경로**가 정한다.
 
 - 첫 경로가 쉬지 않으면 곧바로 잇는다.
 - 첫 경로가 쉬면 그 경로가 풀리는 시각까지 기다린다. 뒤의 경로가 더 일찍 풀리고 그 시각에
-  순서도 풀린다면(말한 시각, cap 안) 그 시각까지만 기다린다. 그때 그 경로가 앞으로 온다.
+  순서도 풀린다면(제공자가 말한 시각) 그 시각까지만 기다린다. 그때 그 경로가 앞으로 온다.
 - 뒤의 경로가 일찍 풀려도 순서가 안 풀리면 대기를 줄이지 않는다. 줄이면 다음 턴이 아직
   쉬는 첫 경로를 부른다.
 

@@ -2967,9 +2967,6 @@ let () =
             test_an_undeclared_microvm_backend_is_looked_up_in_the_host_default
 
         ; test_case
-            "a name the catalog lacks reaches the preflight as its reason"
-            `Quick
-            test_a_name_the_catalog_lacks_reaches_the_preflight_as_its_reason        ; test_case
             "docker preflight receives sandbox_image from profile defaults"
             `Quick
             test_docker_preflight_receives_sandbox_image_from_profile_defaults

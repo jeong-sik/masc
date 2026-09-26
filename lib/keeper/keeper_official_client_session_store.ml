@@ -24,6 +24,7 @@ type vendor_session_activity = Keeper_internal_error.vendor_session_activity =
   | Activity_observed
 
 type recovery_failure =
+  | Pre_dispatch_failed
   | Transient_spawn_failed
   | Owner_stopped_turn
   | Retryable_turn_failed
@@ -436,6 +437,7 @@ let settlement_opt_of_yojson = function
 ;;
 
 let recovery_failure_to_string = function
+  | Pre_dispatch_failed -> "pre_dispatch_failed"
   | Transient_spawn_failed -> "transient_spawn_failed"
   | Owner_stopped_turn -> "owner_stopped_turn"
   | Retryable_turn_failed -> "retryable_turn_failed"
@@ -453,6 +455,7 @@ let recovery_failure_to_string = function
 ;;
 
 let recovery_failure_of_string = function
+  | "pre_dispatch_failed" -> Ok Pre_dispatch_failed
   | "transient_spawn_failed" -> Ok Transient_spawn_failed
   | "owner_stopped_turn" -> Ok Owner_stopped_turn
   | "retryable_turn_failed" -> Ok Retryable_turn_failed

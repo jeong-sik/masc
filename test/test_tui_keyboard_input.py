@@ -72,6 +72,10 @@ class StreamingHttpResponse:
         self.headers = headers
 
 
+class DroppedHttpResponse:
+    """Close before writing a status line to exercise the client's transport error."""
+
+
 class HeadersHttpResponse:
     """A streaming protocol fixture whose response depends on request headers."""
 
@@ -102,6 +106,7 @@ HttpFixture = (
     HttpResponse
     | RawHttpResponse
     | StreamingHttpResponse
+    | DroppedHttpResponse
     | RequestHttpResponse
     | HeadersHttpResponse
     | PathHttpResponse
@@ -267,6 +272,10 @@ def test_http_endpoint(
                 resolved = fixture.resolve({key.lower(): value for key, value in self.headers.items()})
             else:
                 resolved = fixture() if callable(fixture) else fixture
+            if isinstance(resolved, DroppedHttpResponse):
+                self.close_connection = True
+                self.connection.close()
+                return
             if isinstance(resolved, StreamingHttpResponse):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -7433,16 +7442,13 @@ def memory_journal_timeline_interaction(
         ):
             if find_needle(plain, pattern) < 0:
                 raise AssertionError(f"Missing {label} label: {plain!r}")
-        # Speaker labels are dim-styled, not reverse-video, in the current
-        # renderer (observed: b"\\x1b[2mYOU"). The colored bold arrow/circle
-        # glyph checked above is what actually marks the causal role; this
-        # only confirms the label itself still renders.
-        for label in (b"YOU",):
-            if b"\x1b[2m" + label not in drawn:
-                raise AssertionError(
-                    f"Direct causal label lost its dim-styled badge {label!r}: "
-                    f"{drawn!r}"
-                )
+        # The conversation badge reverses only the speaker name. The mark's
+        # color and weight end before it, and the badge resets before the rule.
+        badge = b"\x1b[7mYOU\x1b[0m"
+        if badge not in drawn:
+            raise AssertionError(f"Direct causal label lost its bounded reverse badge: {drawn!r}")
+        if "▶".encode() + b"\x1b[0m " + badge not in drawn:
+            raise AssertionError(f"Direct causal mark style leaked into the speaker badge: {drawn!r}")
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -7965,6 +7971,42 @@ def context_inspector_fixtures() -> HttpFixtures:
         },
     )
     return fixtures
+
+
+def run_context_inspector_transport_error_regression(executable: str) -> None:
+    fixtures = context_inspector_fixtures()
+    fixtures["/api/v1/keepers/alpha/turn-records?limit=50"] = DroppedHttpResponse()
+
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        resize_and_wait(process, master_fd, output, rows=50, columns=160, needle=b"MASC Overview")
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        send_and_wait(process, master_fd, output, b"/context", composer_showing(b"/context"))
+        frame = send_and_wait(
+            process, master_fd, output, b"\r",
+            b"Composition unavailable: turn-records: GET failed:",
+        )
+        plain = CSI_RE.sub(b"", frame)
+        if b"request failed: GET failed" in plain:
+            raise AssertionError(f"Transport failure received two verdicts: {frame!r}")
+        if b"NEXT REQUEST" not in plain:
+            raise AssertionError(f"Independent forecast was lost after turn read failure: {frame!r}")
+        # The chat view is message mode, where q is a composer key rather
+        # than the quit key, so leaving runs through the keeper detail like
+        # the sibling inspector scenario. Esc closes the inspector itself:
+        # the error view opens no exact item, so one press reaches chat.
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="Context Inspector shows transport cause once",
+        interact=interact,
+        http_fixtures=fixtures,
+    )
 
 
 def context_inspector_interaction() -> Interaction:
@@ -15467,6 +15509,7 @@ def run_keyboard_regression(executable: str, *, group: int | None = None) -> Non
             interact=context_inspector_interaction(),
             http_fixtures=context_inspector_fixtures(),
         )
+        run_context_inspector_transport_error_regression(executable)
         run_terminal_scenario(
             executable,
             description="Ctrl-V is not swallowed by the terminal",
@@ -18653,6 +18696,17 @@ def machine_live_query(path: str) -> tuple[str, LiveMark | None]:
     return query["source_kind"][0], mark
 
 
+def with_live_activity(kind: str, answer: dict[str, object]) -> dict[str, object]:
+    """The live route adds the DOS activity feed to every DOS answer, the
+    no_machine one included (lib/server/server_routes_http_routes_lane_addons.ml
+    [with_activity]); MSX answers carry none. Since #39286 the TUI refuses a
+    DOS answer without the array, so a fixture that leaves it out never draws
+    the DOS row."""
+    if kind == "dos_capture":
+        return dict(answer, activity=[])
+    return answer
+
+
 def machine_live_answer(
     kind: str, body: dict[str, object] | None, since: LiveMark | None, *,
     count: int, frame_number: int | None,
@@ -18661,17 +18715,17 @@ def machine_live_answer(
     picture ([None]: no machine). [count] is the machine's change count, so a
     machine that did not move answers "unchanged"."""
     if body is None:
-        return 200, {"source_kind": kind, "state": "no_machine"}
+        return 200, with_live_activity(kind, {"source_kind": kind, "state": "no_machine"})
     marked = {"source_kind": kind, "change_count": count, "incarnation": LIVE_INCARNATION}
     if since == (count, LIVE_INCARNATION):
-        return 200, dict(marked, state="unchanged")
+        return 200, with_live_activity(kind, dict(marked, state="unchanged"))
     answer: dict[str, object] = dict(marked, state="changed", screen={
         "format": "rgb8", "width": body["width"], "height": body["height"],
         "rgb_base64": body["rgb_base64"],
     })
     if frame_number is not None:
         answer["frame_number"] = frame_number
-    return 200, answer
+    return 200, with_live_activity(kind, answer)
 
 
 def msx_live_fixture(frame: Callable[[], HttpResponse]) -> PathHttpResponse:
@@ -18680,7 +18734,7 @@ def msx_live_fixture(frame: Callable[[], HttpResponse]) -> PathHttpResponse:
     def resolve(path: str) -> HttpResponse:
         kind, since = machine_live_query(path)
         if kind == "dos_capture":
-            return 200, {"source_kind": kind, "state": "no_machine"}
+            return 200, with_live_activity(kind, {"source_kind": kind, "state": "no_machine"})
         if kind != "msx_capture":
             raise AssertionError(f"unexpected source kind: {kind}")
         status, body = frame()

@@ -82,6 +82,11 @@ def run(executable: str) -> None:
         h.resize_and_wait(
             process, fd, output, rows=30, columns=160, needle=b"MASC Overview"
         )
+        # Esc below goes to the selected Keeper's detail, so the roster has to
+        # have read first. Pressed before it did, Esc drew "No keeper
+        # selected." and the view moved on without ever drawing the detail.
+        # The composer names its target once a Keeper is selected.
+        h.wait_for_output(process, fd, output, b"to alpha", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go Connectors", b"MASC Connectors")
         h.wait_for_output(
             process, fd, output, b"connector load failed:", start=0, timeout=5

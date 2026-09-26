@@ -12,7 +12,7 @@ related: ["event-spine-and-source-contract", "machine-spectating-goes-through-la
 
 - 관련 문서: `docs/design/lane-addon-v0.md`, `docs/design/tui-lane-experience.md`, glossary 의 Lane 항목들, TUI 작업대 RFC(#39231), RFC-tui-measured-operator-home(#38801). 뒤의 둘은 아직 main 에 없다.
 - 범위: Lane 을 가리키는 id, 설정으로 켜고 끄는 규칙, 상태를 말하는 타입, 목록을 읽는 endpoint 하나, TUI `Lanes` 목록, 배포 순서. Lane 이 하는 일(판정, 브라우저 조작, 기계 실행, 패키지 관측)은 바꾸지 않는다.
-- 근거 기준: `origin/main` = `7a8a5e109d` (2026-09-27). 줄 번호는 모두 이 커밋 기준이다. 라이브 설정(`~/me/.masc/config`)은 2026-09-27 에 읽었다.
+- 근거 기준: `origin/main` = `7a8a5e109d` (2026-09-27). 줄 번호는 모두 이 커밋 기준이다. 라이브 설정(`<base-path>/.masc/config`, `MASC_BASE_PATH=~/me`)은 2026-09-27 에 읽었다.
 - 표시: **[사실]** 은 코드·파일에서 확인한 것이다. **[제안]** 은 이 RFC 가 정하려는 것이다.
 
 ## 무슨 일이 있었나 (사람이 읽는 서두)
@@ -86,7 +86,7 @@ glossary 는 이 중 일부를 이미 나눴다. `[runtime.lanes.<이름>]` 은 
 
 - 서버의 DOS 는 `ocaml-dos` 코어다. 서버 프로세스 안에 하나 있고, 모든 Keeper 가 `masc_dos_*` 로 같은 기계를 쓴다 (`lib/dos_lane/dos_lane.mli:1-7`, `dune-project:69`).
 - `dos-world` 패키지는 container 안에서 js-dos/WASM DOS 를 따로 띄운다 (`addons/dos-world/README.md:3-7`, `addons/dos-world/lane.toml:5`, `:18`). Keeper 는 이 기계를 `masc_lane_act` 로 부린다. 원천을 받지 않는다 (`lane.toml:27-33`, `"maxItems": 0`).
-- 라이브에 `dos-counter`(package id `dos-world`)와 `dos-output-statistics` 두 선언이 있다 (`~/me/.masc/config/lane-addons/`, 2026-09-27).
+- 라이브에 `dos-counter`(package id `dos-world`)와 `dos-output-statistics` 두 선언이 있다 (`<base-path>/.masc/config/lane-addons/`, `MASC_BASE_PATH=~/me`, 2026-09-27).
 - 기록된 설계는 이렇다. lane-addon-v0 는 Add-on 을 "기존 실행 환경 위에 붙는 선택적 관측·관계 레이어" 로, 머신과 세션을 "재사용한다" 고 적었다 (`docs/design/lane-addon-v0.md:5-8`). 사건 척추 RFC 는 "기계는 서버 프로세스 안(L1)에 공유 1대 … 애드온 샌드박스로 내리지 않는다" 고 적었다 (`docs/rfc/RFC-event-spine-and-source-contract.md:89-91`).
 - `dos-world` 는 공유 기계를 옮기지 않는다. 대신 에뮬레이터·도구·상태가 모두 다른 DOS 를 하나 더 띄운다. 운영자와 Keeper 는 "DOS" 를 두 개 보게 된다.
 - artifact 바이트를 내는 패키지는 `dos-world` 하나다 (`rg -l artifacts addons --glob '*.{py,mjs,js}'`).
@@ -145,6 +145,8 @@ type t = Msx | Dos [@@deriving enumerate]
 type t = private string
 (* lane-addons 디렉터리의 바로 아래 .toml 파일 하나. 값은 확장자를 뺀 파일 이름이다. *)
 val of_file_name : string -> t option   (* "<이름>.toml", '/' 없음, 이름이 비지 않음 *)
+val of_basename : string -> t option    (* 확장자를 뺀 이름. wire 복원에 쓴다 *)
+val to_basename : t -> string           (* wire 에 적는 이름. 확장자 없음 *)
 
 (* lib/lane_registry/lane_id.mli *)
 type builtin =
@@ -159,7 +161,7 @@ type t =
 
 val to_wire : t -> string
 (* exact/<Standalone_lane.to_id>, browser/<Lane_name.to_wire>,
-   machine/msx|dos, package/<Declaration_file> *)
+   machine/msx|dos, package/<to_basename> *)
 val of_wire : string -> t option
 ```
 
@@ -170,7 +172,7 @@ val of_wire : string -> t option
 - Package Lane 은 선언 파일 하나로 가리킨다. 선언의 `id` 로 가리키지 않는 이유는 둘이다.
   - 못 읽는 파일에도 행이 있어야 하는데, 그런 파일에는 id 가 없을 수 있다 (`lane_addon_config.mli:14`, issue 의 `id : string option`).
   - 같은 id 를 적은 파일이 둘이면 loader 가 둘 다 뺀다 (`lane_addon_config.mli:36-37`). 그 두 파일도 각각 행이어야 한다.
-- `of_wire` 는 첫 `/` 에서 한 번 나눈다. 앞은 닫힌 family 태그 넷 중 하나여야 한다. 내장 Lane 은 `all_of_builtin` 을 `to_wire` 로 되읽어 찾는다. 이름을 두 번 적지 않는다(`Standalone_lane.of_id`, `standalone_lane.ml:26` 과 같은 방식). package 는 `Declaration_file.of_file_name` 을 거친다. 경계에서 한 번 parse 하고, 안쪽 코드는 문자열을 비교하지 않는다.
+- `of_wire` 는 첫 `/` 에서 한 번 나눈다. 앞은 닫힌 family 태그 넷 중 하나여야 한다. 내장 Lane 은 `all_of_builtin` 을 `to_wire` 로 되읽어 찾는다. 이름을 두 번 적지 않는다(`Standalone_lane.of_id`, `standalone_lane.ml:26` 과 같은 방식). package 는 `Declaration_file.of_basename` 을 거친다. `to_wire` 가 적는 것도 확장자 없는 이름이라 round-trip 한다. 경계에서 한 번 parse 하고, 안쪽 코드는 문자열을 비교하지 않는다.
 
 ### 2.2 내장 Lane 의 manifest 는 id 에서 값을 내는 exhaustive 함수들이다
 
@@ -263,13 +265,15 @@ val offers : Lane_id.builtin -> Lane_addon_sources.kind list      (* Lane_addon_
 | Exact | registry 가 slot 을 받지 않는다. 호출자는 typed 거절 `Exact_lane_off` 를 받는다. Curator 의 시작 판단도 이 값을 읽는다 | config commit 때. commit 이 registry 를 바꾸는 지금 경로 그대로다 |
 | Browser `live` | host 가 가져가는 요청과 도구 호출이 typed 거절 `Lane_off` 를 받는다. `Lane_absent` 와 다른 답이다 | 켜기와 끄기 모두 다음 요청부터. `live` 는 부팅 때 설치하는 것이 없다 |
 | Browser `automation`, `stagehand` | 요청이 `Lane_off` 를 받는다 | 끄기는 다음 요청부터. 켜기는 다음 부팅부터다. executor 설치가 부팅 때 한 번이기 때문이다 (`server_browser_webdriver.ml:229-245`). 그 사이 행은 `Waiting_for_restart` 다 |
-| 기계 | 도구 목록에는 남는다. 호출은 설정 키를 적은 typed 거절을 받는다. live 라우트는 `off` 를 답한다. 기계 메모리의 상태는 지우지 않는다 | 다음 호출부터 |
+| 기계 | 도구 목록에는 남는다. 호출은 설정 키를 적은 typed 거절을 받는다. live 라우트는 `off` 를 답하고 TUI `answer` 에 `Off` 를 더한다. 원천 획득(`acquire` 의 machine capture)도 같은 게시 값으로 막고, 막힌 원천은 명시적 unavailable coverage 로 돌려준다. 기계 메모리의 상태는 지우지 않는다 | 다음 호출부터 |
 | Package | 지금 선언을 지울 때 하는 detach 를 한다. 선언 파일과 보존한 증거는 남는다. 행도 남는다 | 다음 reconcile 부터 |
+
+꺼진 Lane 에 이미 도는 일이 있으면 그 일은 끝까지 둔다. 그 사이 행은 `Off` 다. 도는 일은 행 상세가 보인다(exact 행의 run 필드). 끄는 것이 일을 끊지 않는다.
 
 "다음 요청부터" 에 필요한 장치가 둘 있다. 둘 다 영속 저장이 아니다. 정본은 설정 파일이다.
 
-- **게시된 enabled 값.** 부팅과 모든 config commit 이 확정된 설정에서 Lane 별 `enabled` 를 뽑아 `Atomic` 하나에 게시한다. exact registry 를 바꾸는 같은 commit 경로에서 한다. 기계 도구 dispatch, Browser 요청, live 라우트가 이 값을 읽는다. live 라우트의 빠른 길은 `Atomic.get` 하나가 늘 뿐이라 잠금을 잡지 않는다.
-- **Browser 부팅 설치 결과.** 부팅의 설치가 backend 마다 `Installed | Install_failed of install_failure | Not_started_off` 를 `Atomic` 에 남긴다. `install_failure` 는 지금 로그만 남기는 세 exit 에서 온다: `Config_invalid`(`server_browser_webdriver.ml:230`), `Launch_failed`(`:235`), `Driver_unready`(`:239`). stagehand 설치(#38739)도 같은 타입을 쓴다.
+- **게시된 enabled 값.** 부팅과 모든 config commit 이 확정된 설정에서 Lane 별 `enabled` 를 뽑아 `Atomic` 하나에 게시한다. exact registry 를 바꾸는 같은 commit 경로에서 한다. 기계 도구 dispatch, Browser 요청, live 라우트가 이 값을 읽는다. live 라우트의 빠른 길은 `Atomic.get` 하나가 늘 뿐이라 잠금을 잡지 않는다. enabled 맵과 registry 후보는 같은 원자 단계에 함께 게시한다. 따로 두면 목록이 새 enabled 와 옛 registry 를 섞어 읽는다.
+- **Browser 부팅 설치 결과.** 부팅의 설치가 backend 마다 `Installed | Install_failed of install_failure | Not_started_off` 를 `Atomic` 에 남긴다. `install_failure` 는 지금 로그만 남기는 세 exit 에서 온다: `Config_invalid`(`server_browser_webdriver.ml:230`), `Launch_failed`(`:235`), `Driver_unready`(`:239`). stagehand 설치(#38739)도 같은 타입을 쓴다. 설치 때 쓴 설정 revision 도 함께 남긴다. 켜진 채로 설정이 바뀌면 설치된 executor 는 옛 설정으로 돌고 있으므로 행은 `Waiting_for_restart` 다. 부팅 뒤 자식 프로세스가 죽으면 감시가 같은 `Atomic` 에 `Exited` 를 남긴다.
 
 ### 2.4 배포는 두 단계다
 
@@ -340,9 +344,10 @@ type live_browser_state =
 type spawned_backend = Automation_backend | Stagehand_backend
 type spawned_browser_state =
   | Off
-  | Waiting_for_restart                       (* 켰지만 부팅 때 꺼져 있어서 설치하지 않았다 *)
+  | Waiting_for_restart                       (* 켰지만 설치된 executor 가 없다. 부팅 때 꺼져 있었거나, 켜진 채로 설정이 바뀌었다 *)
   | Install_failed of install_failure
-  | Ready
+  | Exited                                    (* 부팅 뒤 자식 프로세스가 죽었다 *)
+  | Ready                                     (* 설치됐고 자식이 살아 있다 *)
 
 type machine_state =
   | Off
@@ -374,10 +379,10 @@ type row =
 |---|---|
 | exact `Off` | registry admission. `enabled = false` |
 | exact `Not_admitted` | registry admission. 지금 문자열로 합쳐지는 원인들(`server_standalone_lane_projection.ml:964-992`)을 PR-1b 가 `exact_admission_problem` 의 생성자로 하나씩 옮긴다 |
-| exact `Idle`·`Running` | exact run registry 의 실행 중 run 수 (`server_standalone_lane_projection.ml:764`) |
+| exact `Idle`·`Running` | exact run registry 의 실행 중 run 수 (`server_standalone_lane_projection.ml:764`). Browser Stagehand 는 run 기록이 없으므로(`standalone_lane.mli`) PR-1b 가 transient activity counter 를 더한다 |
 | `live` `Disconnected`·`Connected` | 새 `Browser_lane.connected_client_count ()`. 지금의 `active_clients ()` 는 쓰지 않는다. 그 함수는 연결이 끊긴 client 를 정리하고 기다리던 요청을 `client_disconnected` 로 끝낸다 (`browser_lane.ml:247-262`). 새 함수는 같은 잠금 아래에서 `connected` (`:244`)만 세고 아무것도 바꾸지 않는다 |
-| spawned `Install_failed`·`Ready`·`Waiting_for_restart` | 2.3 의 Browser 부팅 설치 결과와 게시된 enabled 값 |
-| 기계 `Idle`·`Running` | `Msx_lane`·`Dos_lane` 의 게시된 표식 (`Machine_live_publication`, `lib/server/server_routes_http_routes_lane_addons.ml:196-210`) |
+| spawned `Install_failed`·`Ready`·`Waiting_for_restart`·`Exited` | 2.3 의 Browser 부팅 설치 결과(설치 revision, 자식 종료 감시)와 게시된 enabled 값 |
+| 기계 `Idle`·`Running` | `Msx_lane`·`Dos_lane` 의 게시된 표식 (`Machine_live_publication`, `lib/server/server_routes_http_routes_lane_addons.ml:196-210`). 행이 약속하는 program·조종권은 게시에 가볍게 넣어 확장한다. 목록 새로고침마다 capture(잠금+화면 복사)로 읽지 않는다 |
 | 모든 `Off` | 게시된 enabled 값 |
 | package `Rejected` | `Lane_addon_config.load` 의 issue. 지금은 `message : string` 이다 (`lane_addon_config.mli:14`). PR-5a 가 원인을 `problem = Unreadable | Invalid of string | Duplicate_id` 로 나눈다. `Invalid` 의 문자열은 화면에 보이는 설명이고, 코드는 이 문자열로 분기하지 않는다 |
 | package worker | `Lane_addon_runtime` 의 phase 와 적용 revision. phase `Failed of string` 은 지금 타입 그대로다 (`lane_addon_types.mli:54`). 그 문자열도 설명일 뿐이다 |
@@ -398,8 +403,8 @@ type row =
 | 생성자 | 더하는 PR | 지우는 PR | 이유 |
 |---|---|---|---|
 | exact `Undeclared`, spawned `Undeclared` | PR-1b | PR-4b | PR-4b 전에는 표가 없을 수 있다(라이브 Curator) |
-| spawned `Not_installed` | PR-1b | PR-4a | 부팅 설치 결과를 기록하기 전에는 "설정했는데 slot 이 빔" 의 원인을 모른다. PR-4a 가 `Install_failed`·`Waiting_for_restart` 로 나눈다 |
-| 모든 `Off`, spawned `Install_failed`·`Waiting_for_restart` | PR-4a | — | `enabled` 와 설치 결과가 PR-4a 에서 생긴다 |
+| spawned `Not_installed` | PR-1b | PR-4a | 부팅 설치 결과를 기록하기 전에는 "설정했는데 slot 이 빔" 의 원인을 모른다. PR-4a 가 `Install_failed`·`Waiting_for_restart`·`Exited` 로 나눈다 |
+| 모든 `Off`, spawned `Install_failed`·`Waiting_for_restart`·`Exited` | PR-4a | — | `enabled` 와 설치 결과(설치 revision, 자식 종료 감시)가 PR-4a 에서 생긴다 |
 | package `Rejected` 의 `problem` | PR-5a | — | |
 
 ### 2.6 목록을 읽는 곳은 하나다: `GET /api/v1/lanes`
@@ -530,12 +535,12 @@ PR 하나의 출력은 20k 토큰 이하로 나눈다 (constitution `work_unit`)
 | # | 범위 | 확인 |
 |---|---|---|
 | PR-1a | `Machine_lane.t`, `Declaration_file.t`, `Lane_id`(`[@@deriving enumerate]`, `to_wire`·`of_wire`). `masc.runtime` 에 `ppx_enumerate` 를 더하고 `Standalone_lane.all` 손 목록과 그 테스트를 지운다. `Standalone_lane.obligation` 과 거기서 만드는 `required_lane_ids`. 문자열 목록 `mandatory_exact_output_lane_ids` 를 지운다(사전 검사는 이 값을 읽도록 바꾼다). `lanes_of_misc_operation`, `Lane_addon_sources.offers` 와 `parse` 가 그것을 쓰게. `live_reader`·`Masc_tui_machine_live.source`·`activity` 의 기계 생성자를 `Machine_lane.t` 로. label·purpose 함수 | 단위: 모든 내장 id 의 wire round-trip, id 가 겹치지 않음, 모르는 wire(`exact/nope`, `machine/`, `package/a/b`)는 `None`. `required_lane_ids` 가 Board Attention·HITL 둘. `offers (Browser Stagehand) = []` 이고 stagehand 원천 binding 은 지금처럼 거절. `rg 'mandatory_exact_output_lane_ids' lib bin` 0 |
-| PR-1b | `lib/server` 에 행 만들기와 `GET /api/v1/lanes`. `Server_standalone_lane_projection` 의 행 만들기를 옮기고 모듈을 지운다. 옛 route 는 새 exact 행을 옛 모양으로 적는다. `last_published`, `connected_client_count`. 상태 생성자는 이 PR 이 만드는 것만(2.5 표) | route fixture: Curator 표가 없으면 행이 `undeclared`. commit 진행 중에 읽어도 행이 이전 registry 를 보임(`unavailable` 아님). 선언 파일 둘 중 하나가 틀리면 그 행만 `rejected`. 같은 id 를 적은 파일 둘이 각각 행. 첫 reconcile 전에도 package 행이 보임. `live` client 가 끊긴 채 읽어도 client 가 정리되지 않고 기다리던 요청이 끝나지 않음. 요청 한 번에 store 에 쓴 바이트 0 |
+| PR-1b | `lib/server` 에 행 만들기와 `GET /api/v1/lanes`. `Server_standalone_lane_projection` 의 행 만들기를 옮기고 모듈을 지운다. 옛 route 는 새 exact 행을 옛 모양으로 적는다. `last_published`, `connected_client_count`. 상태 생성자는 이 PR 이 만드는 것만(2.5 표) | route fixture: Curator 표가 없으면 행이 `undeclared`. commit 진행 중에 읽어도 행이 이전 registry 를 보임(`unavailable` 아님). 선언 파일 둘 중 하나가 틀리면 그 행만 `rejected`. 같은 id 를 적은 파일 둘이 각각 행. 첫 reconcile 전에도 package 행이 보임. `live` client 가 끊긴 채 읽어도 client 가 정리되지 않고 기다리던 요청이 끝나지 않음. stagehand 실행 중 목록이 `running`. 요청 한 번에 store 에 쓴 바이트 0 |
 | PR-2a | TUI 가 `/api/v1/lanes` 를 `Lanes` 화면의 load 에서 읽는다. family 묶음 목록, 머리글 숫자, 탭 글자 "Candidate orders". "Lane Add-ons:" 줄과 `installed_reading` 을 지운다 | PTY: TUI 를 처음 열고 add-on 화면을 열지 않은 채 목록에 package 행과 수가 보인다("not loaded" 회귀). 서버 503 이면 "load failed". 60열·80열 캡처 |
 | PR-2b | 행 Enter 의 목적지. 기계를 받아 관전 화면을 여는 새 입구. Browser Lane 을 Connectors 에서 빼고 Browser 행에서 연다. 팔레트 "go Machines" | PTY: DOS 행 Enter → DOS 관전 화면, Browser 행 Enter → Browser Lane 화면, package 행 Enter → 그 설치를 고른 add-on 화면. `&` 는 기계 메뉴, `B`·`A` 는 지금 목적지 |
 | PR-2c | live 라우트를 `/api/v1/lanes/live` 로 옮긴다. 이 라우트가 읽는 것은 package 가 아니라 기계 Lane 이다. RFC-machine-spectating §2.1(l.52-55)이 적은 "왜 Lane 경로 아래인가" 의 답이 목록으로 바뀐다 | `rg 'lane-addons/live' lib bin` 0. 라우트 테스트를 새 경로로 옮김 |
 | PR-3 | Dashboard 가 `/api/v1/lanes` 를 읽는다. `dashboard-standalone-lanes.ts`, `LANE_IDS`, `standalone-lanes-parity.test.ts` 를 지운다. label 은 목록에서 온다. PR-2a 보다 늦으면 옛 route 를 지운다 | vitest. `rg 'standalone-lanes' lib bin dashboard/src` 0(옛 route 를 지우는 PR 에서). 브라우저 화면 캡처 |
-| PR-4a | (Stagehand 스택과 #39345 뒤, 3.2 (d5) 결정 뒤) **받아들이는 단계.** parser 가 새 표와 `enabled` 를 안다. 적혀 있으면 따르고, 없으면 지금처럼. exact slot 규칙을 `enabled = true` 에만. `Exact_lane_off`, `Lane_off`, 기계 거절, `Required_lane_disabled`. 게시된 enabled 값과 Browser 부팅 설치 결과. 크기에 따라 exact / Browser / 기계 셋으로 나눈다. 변경 조각에 "Upgrade notes" 로 운영자 단계를 적는다 | 음성: `Required` lane 이 `enabled = false` 인 파일은 부팅 거절, 같은 내용의 commit 도 거절되고 이전 registry 유지. Curator `enabled = false` 면 시작하지 않고 행이 `off`. 끈 DOS 에 `masc_dos_screen` → 설정 키를 적은 거절, 다시 켜면 기계 상태 그대로. 끈 automation → `Lane_off` 이고 `Lane_absent` 가 아님. `[browser]` 와 `[browser.automation]` 에 모두 geckodriver 가 있으면 load 오류. live 라우트 빠른 길이 잠금을 잡지 않음 |
+| PR-4a | (Stagehand 스택과 #39345 뒤, 3.2 (d5) 결정 뒤) **받아들이는 단계.** parser 가 새 표와 `enabled` 를 안다. 적혀 있으면 따르고, 없으면 지금처럼. exact slot 규칙을 `enabled = true` 에만. `Exact_lane_off`, `Lane_off`, 기계 거절, `Required_lane_disabled`. 게시된 enabled 값과 Browser 부팅 설치 결과. 크기에 따라 exact / Browser / 기계 셋으로 나눈다. 변경 조각에 "Upgrade notes" 로 운영자 단계를 적는다 | 음성: `Required` lane 이 `enabled = false` 인 파일은 부팅 거절, 같은 내용의 commit 도 거절되고 이전 registry 유지. Curator `enabled = false` 면 시작하지 않고 행이 `off`. 끈 DOS 에 `masc_dos_screen` → 설정 키를 적은 거절, 다시 켜면 기계 상태 그대로. 끈 automation → `Lane_off` 이고 `Lane_absent` 가 아님. `[browser]` 와 `[browser.automation]` 에 모두 geckodriver 가 있으면 load 오류. live 라우트 빠른 길이 잠금을 잡지 않음. 끄고 `&` 로 열면 disabled 표시(protocol error 없음). 켜진 채로 automation 설정을 바꾸면 행이 `Waiting_for_restart`. geckodriver 가 죽으면 행이 `Exited` |
 | 운영자 | admin raw endpoint 로 2.4 의 라이브 추가분을 넣는다 | 저장 뒤 `GET /api/v1/lanes` 에서 11개 행이 모두 `undeclared` 가 아님 |
 | PR-4b | **요구하는 단계.** 표나 `enabled` 가 없으면 load 오류. `Undeclared`, `Exact_lane_unconfigured`, 부팅 사전 검사 `mandatory_exact_output_lane_violations`, 손 경고 세 줄, `[browser] geckodriver/binary` 자리를 지운다. seed 가 11개 표를 모두 적는다 | 음성: 표 하나를 뺀 파일 → 그 표 이름을 적은 load 오류. `enabled` 를 뺀 표 → 그 키를 적은 load 오류. #39345 preflight 가 운영자 단계를 빠뜨린 라이브 파일에서 이전 서버를 멈추기 전에 배포를 거절(`test/test_deploy_preflight.sh` 에 경우 추가) |
 | PR-5a | 선언 파일의 `enabled` 를 받아들인다. `false` 면 reconcile 이 worker 를 떼고 선언은 남긴다. `Lane_addon_config.problem` | 음성: `false` → container 제거 확인(지금 detach 증명), 행은 남음. 다시 `true` → 붙음. 새 선언이 거절돼도 이전 worker 가 돌면 행이 `rejected` 이면서 `observing` |
@@ -553,7 +558,7 @@ PR 하나의 출력은 20k 토큰 이하로 나눈다 (constitution `work_unit`)
 - **새 거절은 "꺼진 Lane" 한 종류다.** 운영자 결정이 근거다(2.3). 필수 Lane 검사는 지금 registry 의 검사 하나가 계속 맡는다.
 - **목록은 켜고 끄지 않는다.** 각 주인이 지금 결정하는 자리에서 설정을 읽는다. 새 scheduler 는 없다.
 - **꺼도 기계 메모리를 비우지 않는다.** 올린 프로그램을 내리지 않는다.
-- **spawned Browser backend 켜기는 다음 부팅부터다.** executor 설치가 부팅 때 한 번이기 때문이다. 그 사이 행은 `Waiting_for_restart` 다.
+- **spawned Browser backend 켜기는 다음 부팅부터다.** executor 설치가 부팅 때 한 번이기 때문이다. 켜진 채로 설정을 바꾸는 것도 같다. 설치된 executor 는 옛 설정으로 돈다. 그 사이 행은 `Waiting_for_restart` 다.
 - **Keeper 가 목록을 읽는 도구는 더하지 않는다.** Keeper 는 꺼진 Lane 을 typed 거절로 안다.
 - 트레이드오프: 표와 `enabled` 를 필수로 두면 모든 선언을 한 번씩 고쳐야 하고, 배포가 두 단계가 된다(2.4). 기본값을 두면 이 일이 없지만, 파일만 보고 켜짐인지 알 수 없고 Curator 같은 조용한 꺼짐이 다시 생긴다.
 - 트레이드오프: PR-4a 동안에는 "없으면 지금처럼" 가지와 `geckodriver` 두 자리 읽기가 있다. 떠 있는 서버로 라이브 파일을 고칠 길을 남기기 위해서다. PR-4b 가 지운다.

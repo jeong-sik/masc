@@ -14140,6 +14140,15 @@ def run_http_badge_refresh_regression(executable: str) -> None:
         return briefing
 
     fixtures["/api/v1/dashboard/briefing"] = answer_briefing
+    # The badge reports a full failure only when every requested surface fails.
+    # A failed briefing beside successful Board/Planning reads is "partial".
+    for path, response in tuple(fixtures.items()):
+        if path in ("/health?full=1", "/api/v1/dashboard/briefing"):
+            continue
+        if isinstance(response, tuple):
+            fixtures[path] = lambda response=response: (
+                (503, {"error": "refresh refused"}) if fail_next.is_set() else response
+            )
 
     def interact(
         process: subprocess.Popen[bytes],

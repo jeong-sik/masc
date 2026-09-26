@@ -155,7 +155,7 @@
 (test
  (name test_sse_observer_epoch)
  (modules test_sse_observer_epoch)
- (libraries alcotest masc masc.sse_wire masc_test_deps eio))
+ (libraries alcotest masc masc.sse_wire masc.time_compat masc_test_deps eio))
 
 (test
  (name test_server_standalone_lane_projection)
@@ -6247,6 +6247,8 @@
 (include stanzas/test_browser_webdriver.inc)
 (include stanzas/test_browser_cdp.inc)
 (include stanzas/test_browser_stagehand_session.inc)
+(include stanzas/test_browser_chromium_process.inc)
+(include stanzas/test_server_browser_stagehand.inc)
 (include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)
@@ -6699,6 +6701,8 @@
  (libraries alcotest masc.dashboard masc.masc_types yojson digestif))
 
 (include stanzas/test_h2_json_worker.inc)
+(include stanzas/test_h2_request_fibers.inc)
+(include stanzas/test_h2_oauth_request_fibers.inc)
 
 (include stanzas/test_h2_response_window.inc)
 
@@ -7122,6 +7126,7 @@
 (include stanzas/test_tui_keeper_current_failure_pty.inc)
 
 (include stanzas/test_exact_output_runtime_reasoning.inc)
+(include stanzas/test_runtime_exact_lane_backpressure.inc)
 
 (include stanzas/test_exact_output_admission_refusal_reason.inc)
 (include stanzas/test_exact_output_binding_wire.inc)

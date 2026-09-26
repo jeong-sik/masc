@@ -2182,6 +2182,7 @@ let handle_masc_schedule_with_outcome
              ~payload
              ~channel:continuation_channel)
     ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+    ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
     }
   in
   Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name

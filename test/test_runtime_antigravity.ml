@@ -446,6 +446,109 @@ let test_keeper_streams_two_response_steps_apart () =
       check string "each step once, apart" "CHECKING\n\nDONE\n" (String.concat "" texts))
 ;;
 
+let describe_keeper_event = function
+  | Agent_core.Types.MessageStart { id; model; usage = None } ->
+    Printf.sprintf "start %s %s" id model
+  | Agent_core.Types.MessageStart { usage = Some _; _ } -> "start with usage"
+  | Agent_core.Types.ContentBlockStart { index; content_type; tool_id; tool_name } ->
+    Printf.sprintf
+      "block %d %s %s %s"
+      index
+      content_type
+      (Option.value tool_id ~default:"-")
+      (Option.value tool_name ~default:"-")
+  | Agent_core.Types.ContentBlockDelta
+      { index; delta = Agent_core.Types.InputJsonSnapshot arguments } ->
+    Printf.sprintf "arguments %d %s" index arguments
+  | Agent_core.Types.ContentBlockDelta { index; delta = Agent_core.Types.TextDelta text } ->
+    Printf.sprintf "text %d %S" index text
+  | Agent_core.Types.ContentBlockDelta { index; _ } -> Printf.sprintf "other delta %d" index
+  | Agent_core.Types.ContentBlockStop { index } -> Printf.sprintf "stop %d" index
+  | Agent_core.Types.MessageDelta
+      { stop_reason = Some Agent_core.Types.EndTurn; usage = None } -> "end turn"
+  | Agent_core.Types.MessageDelta _ -> "other message delta"
+  | Agent_core.Types.MessageStop -> "message stop"
+  | _ -> "other"
+;;
+
+let mcp_probe_call call_id =
+  Keeper_antigravity_runtime.For_testing.Mcp_tool_started
+    { call_id; tool_name = "masc_probe"; arguments = `Assoc [ "marker", `String call_id ] }
+;;
+
+let antigravity_turn_started =
+  Keeper_antigravity_runtime.For_testing.Cli_event
+    (Runtime_antigravity.Turn_started
+       { conversation_id = "conversation-1"; model = "gemini-fixture" })
+;;
+
+let antigravity_turn_finished =
+  Keeper_antigravity_runtime.For_testing.Cli_event
+    (Runtime_antigravity.Turn_finished { text = "" })
+;;
+
+(* #37118: agy prints init before it calls a MASC tool, but the MCP server
+   can answer the call while init is still writing the session. The call's
+   blocks come after MessageStart, in the order they were answered. *)
+let test_keeper_mcp_blocks_follow_message_start () =
+  let events =
+    Keeper_antigravity_runtime.For_testing.project_stream_inputs
+      ~during:(fun _ -> [])
+      [ mcp_probe_call "call-1"
+      ; Keeper_antigravity_runtime.For_testing.Mcp_tool_finished { call_id = "call-1" }
+      ; antigravity_turn_started
+      ; mcp_probe_call "call-2"
+      ; Keeper_antigravity_runtime.For_testing.Mcp_tool_finished { call_id = "call-2" }
+      ; antigravity_turn_finished
+      ]
+  in
+  check
+    (list string)
+    "message first, then each call in order"
+    [ "start conversation-1:ordinal:1 gemini-fixture"
+    ; "block 1 tool_use call-1 masc_probe"
+    ; {|arguments 1 {"marker":"call-1"}|}
+    ; "stop 1"
+    ; "block 2 tool_use call-2 masc_probe"
+    ; {|arguments 2 {"marker":"call-2"}|}
+    ; "stop 2"
+    ; "end turn"
+    ; "message stop"
+    ]
+    (List.map describe_keeper_event events)
+;;
+
+(* Emitting can yield to the MCP server's fiber. A call answered while the
+   held blocks go out waits behind them, so no block is emitted before its
+   own start. *)
+let test_keeper_mcp_blocks_answered_while_releasing_wait_their_turn () =
+  let events =
+    Keeper_antigravity_runtime.For_testing.project_stream_inputs
+      ~during:(function
+        | Agent_core.Types.MessageStart _ -> [ mcp_probe_call "call-2" ]
+        | Agent_core.Types.ContentBlockStart { tool_id = Some "call-2"; _ } ->
+          [ Keeper_antigravity_runtime.For_testing.Mcp_tool_finished { call_id = "call-2" } ]
+        | Agent_core.Types.ContentBlockStart { tool_id = Some "call-1"; _ } ->
+          [ Keeper_antigravity_runtime.For_testing.Mcp_tool_finished { call_id = "call-1" } ]
+        | _ -> [])
+      [ mcp_probe_call "call-1"; antigravity_turn_started; antigravity_turn_finished ]
+  in
+  check
+    (list string)
+    "each block after its own start"
+    [ "start conversation-1:ordinal:1 gemini-fixture"
+    ; "block 1 tool_use call-1 masc_probe"
+    ; {|arguments 1 {"marker":"call-1"}|}
+    ; "block 2 tool_use call-2 masc_probe"
+    ; {|arguments 2 {"marker":"call-2"}|}
+    ; "stop 1"
+    ; "stop 2"
+    ; "end turn"
+    ; "message stop"
+    ]
+    (List.map describe_keeper_event events)
+;;
+
 let test_stream_events_preserve_exact_native_tool_steps () =
   let events = ref [] in
   with_fixture
@@ -1350,6 +1453,14 @@ let () =
             "Keeper streams two response steps apart"
             `Quick
             test_keeper_streams_two_response_steps_apart
+        ; test_case
+            "Keeper MCP blocks follow MessageStart"
+            `Quick
+            test_keeper_mcp_blocks_follow_message_start
+        ; test_case
+            "Keeper MCP blocks answered while releasing wait their turn"
+            `Quick
+            test_keeper_mcp_blocks_answered_while_releasing_wait_their_turn
         ; test_case
             "stream preserves exact native tool steps"
             `Quick

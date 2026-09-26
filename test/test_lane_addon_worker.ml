@@ -338,7 +338,13 @@ let test_recovery_control_command_times_out () = with_fixture (fun env _sw dir d
   check bool "control timeout returns promptly" true
     (Eio.Time.now clock -. started_at < 1.);
   Sys.remove marker;
-  unwrap (Worker.recover_stop ~clock ~control_timeout_sec:0.05
+  (* The post-cleanup recover_stop spawns a fresh fixture python under
+     runner load. Cold spawns measured 0-1 ms on an idle 5-core box, but the
+     two observed CI failures (run 35991632408, run 36211317914) both landed
+     in busy windows, so the second call keeps the suite's own
+     control_timeout_sec ceiling instead of inheriting the deliberately
+     starved 0.05 one. The hung-command assertions above stay unchanged. *)
+  unwrap (Worker.recover_stop ~clock ~control_timeout_sec:1.
     ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"not-created"
     ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker ()))
 

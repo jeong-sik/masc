@@ -1,0 +1,8 @@
+{
+  "baseline_commit": "1c717324a5e505b5088e0f8b8cf671ebf430d17f",
+  "candidate_commit": "d510002c509073952c3c9b7267a0594da1863de3",
+  "baseline_runner_sha256": "7cd7a76f8b9f2dec9c208747927f78cb3d3003f6468122d828ff6e79e18ff4c5",
+  "candidate_runner_sha256": "35bbce1bb5c3a14c5476f27095993855c02ff680180ba29e1b4a589c62610b4d",
+  "test_sha256": "c4e26be7c8e18f83f44589b44b1fca854b466f59ce792fd3a8d9956df579eed6",
+  "scope": "Same real Python-child environment scenario with original or changed runner. Staging/OCaml compile commands mocked; no OCaml build or timing test executed locally."
+}

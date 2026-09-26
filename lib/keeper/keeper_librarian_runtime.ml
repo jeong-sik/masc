@@ -635,15 +635,14 @@ let extraction_cli_input_limit = function
   | Domain_output_invalid _ | Memory_snapshot_write_failed _ -> None
 ;;
 
-let fit_continuity ~capacity ~base_path ~keeper_id ~input prepared =
+let fit_continuity ~capacity ~base_path ~keeper_id ~input_for prepared =
   let open Result.Syntax in
   let* _, cli_slots = resolve_librarian_slots ~base_path ~keeper_id
     |> Result.map_error extraction_error_to_string in
   if not (List.mem capacity.Keeper_lane_cli_oneshot.runtime_id cli_slots)
   then Ok (Some prepared)
   else Keeper_librarian_continuity.fit prepared ~fits:(fun continuity ->
-    let input = {input with Keeper_librarian.messages =
-      Keeper_librarian_continuity.messages continuity} in
+    let* input = input_for continuity in
     (* Whether this range's Memory is already committed is read after the
        fit, so either pass may run on the fitted range. The range fits only
        when both requests fit: an operator override can make either prompt

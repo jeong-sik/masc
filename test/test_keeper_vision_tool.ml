@@ -2243,7 +2243,7 @@ let test_browser_screenshot_reaches_vision_reader () =
 
 let test_browser_screenshot_requires_keeper_owner () =
   let result = Masc.Tool_misc_browser_lane.handle_read
-      ~base_path:(Filename.get_temp_dir_name ()) ~tool_name:"masc_browser_read" ~start_time:0.
+      ~base_path:(Filename.get_temp_dir_name ()) ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ())
       (`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
   match result with
   | Tool_result.Failed failure -> assert (failure.message = "screenshot requires an owning Keeper")
@@ -2309,9 +2309,10 @@ let test_artifact_failures_are_classified () =
 let test_generated_sandbox_image_reaches_vision () =
   with_temp_runtime_toml image_capable_vision_runtime_toml (fun () ->
     with_temp_base (fun base ->
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ "base", "alpine:test" ];
       let meta = { (make_meta "generated-image") with
         sandbox_profile = Keeper_types_profile_sandbox.Docker;
-        sandbox_image = Some "alpine:test" } in
+        sandbox_image = Some "base" } in
       let config = Masc.Workspace.default_config base in
       let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
       let rec mkdir path =
@@ -2349,7 +2350,8 @@ let test_generated_sandbox_image_reaches_vision () =
             ~complete ~config ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
             ~meta ~args () in
         let result = invoke (`Assoc ["path", `String "generated.png"; "query", `String "read generated image"]) in
-        assert (result.disposition = Tool_result.Completed ());
+        if result.disposition <> Tool_result.Completed ()
+        then failwith ("analyze_image did not complete: " ^ result.raw_output);
         let output = json_of_output result.raw_output in
         let handle = assoc_string "artifact" output in
         assert (assoc_string "text" output = "generated image read");

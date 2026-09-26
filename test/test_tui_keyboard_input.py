@@ -72,6 +72,10 @@ class StreamingHttpResponse:
         self.headers = headers
 
 
+class DroppedHttpResponse:
+    """Close before writing a status line to exercise the client's transport error."""
+
+
 class HeadersHttpResponse:
     """A streaming protocol fixture whose response depends on request headers."""
 
@@ -102,6 +106,7 @@ HttpFixture = (
     HttpResponse
     | RawHttpResponse
     | StreamingHttpResponse
+    | DroppedHttpResponse
     | RequestHttpResponse
     | HeadersHttpResponse
     | PathHttpResponse
@@ -267,6 +272,10 @@ def test_http_endpoint(
                 resolved = fixture.resolve({key.lower(): value for key, value in self.headers.items()})
             else:
                 resolved = fixture() if callable(fixture) else fixture
+            if isinstance(resolved, DroppedHttpResponse):
+                self.close_connection = True
+                self.connection.close()
+                return
             if isinstance(resolved, StreamingHttpResponse):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -502,73 +511,78 @@ def _needle_before_start(
     )
 
 
-@dataclass
-class _StallWatch:
-    started_at: float
-    started_len: int
-    cpu_before: tuple[int, int] | None
-    last_byte_at: float | None = None
-    cpu_at_last_byte: tuple[int, int] | None = None
-
-
 def _child_cpu_ticks(pid: int) -> tuple[int, int] | None:
-    """Read Linux utime/stime for a child, or None when /proc is unavailable."""
+    """(utime, stime) of a still-running child, in clock ticks, from /proc.
+
+    None where /proc does not exist (macOS) or the child is already reaped:
+    both make the delta unmeasurable, and the diagnostic line says so instead
+    of guessing a zero.
+    """
     try:
-        with open(f"/proc/{pid}/stat", "rb") as stat_file:
-            fields = stat_file.read().rsplit(b")", 1)[1].split()
+        with open(f"/proc/{pid}/stat", "rb") as stat:
+            fields = stat.read().rsplit(b")", 1)[-1].split()
+    except OSError:
+        return None
+    try:
+        # fields[0] is state (field 3); utime and stime are fields 14 and 15.
         return int(fields[11]), int(fields[12])
-    except (OSError, IndexError, ValueError):
+    except (IndexError, ValueError):
         return None
 
 
 def _stall_line(
-    process: subprocess.Popen[bytes], output: bytearray, watch: _StallWatch
+    process: subprocess.Popen[bytes],
+    output: bytearray,
+    *,
+    started_at: float,
+    started_len: int,
+    last_byte_at: float,
+    last_byte_ticks: tuple[int, int] | None,
 ) -> str:
+    """One bracketed line for a wait that timed out, task-1776.
+
+    The three readings separate the ways a PTY wait dies: silence counts from
+    the last byte the PTY delivered, so a screen that froze mid-draw reads
+    differently from one that never drew; loadavg is sampled at the timeout;
+    the child CPU delta is measured from the last byte, so CPU spent before a
+    later freeze is excluded. Reads /proc and getloadavg only --
+    no timeout, needle or wait behaviour changes because of it.
+    """
     now = time.monotonic()
-    if watch.last_byte_at is None:
-        silence = f"no new PTY bytes for at least {now - watch.started_at:.2f}s"
-        sample_label = "wait start baseline (no new byte in this wait)"
-        cpu_at_last_byte = watch.cpu_before
-    else:
-        silence = f"last PTY byte {now - watch.last_byte_at:.2f}s ago"
-        sample_label = "last byte"
-        cpu_at_last_byte = watch.cpu_at_last_byte
-
     try:
-        with open("/proc/loadavg", "r", encoding="ascii") as load_file:
-            loadavg = load_file.read().strip()
-    except OSError:
-        loadavg = "unavailable"
-
-    cpu_at_timeout = _child_cpu_ticks(process.pid)
-    if cpu_at_last_byte is None or cpu_at_timeout is None:
-        cpu = "child utime/stime unavailable"
+        with open("/proc/loadavg", "rt", encoding="ascii") as loadavg:
+            load = tuple(float(value) for value in loadavg.read().split()[:3])
+    except (OSError, ValueError):
+        try:
+            load = os.getloadavg()
+        except (AttributeError, OSError):
+            load = None
+    parts = [
+        f"silence {now - last_byte_at:.2f}s"
+        f" (wait ran {now - started_at:.2f}s,"
+        f" bytes {started_len} -> {len(output)})",
+        (
+            f"loadavg(at timeout) {load[0]:.2f}/{load[1]:.2f}/{load[2]:.2f}"
+            if load is not None and len(load) == 3
+            else "loadavg(at timeout) n/a"
+        ),
+    ]
+    ended = (
+        _child_cpu_ticks(process.pid) if process.pid is not None else None
+    )
+    if last_byte_ticks is None or ended is None:
+        parts.append("child utime/stime since last byte n/a")
     else:
         try:
-            ticks_per_second = os.sysconf("SC_CLK_TCK")
-            last_utime = cpu_at_last_byte[0] / ticks_per_second
-            last_stime = cpu_at_last_byte[1] / ticks_per_second
-            timeout_utime = cpu_at_timeout[0] / ticks_per_second
-            timeout_stime = cpu_at_timeout[1] / ticks_per_second
-            delta_utime = (
-                cpu_at_timeout[0] - cpu_at_last_byte[0]
-            ) / ticks_per_second
-            delta_stime = (
-                cpu_at_timeout[1] - cpu_at_last_byte[1]
-            ) / ticks_per_second
-            cpu = (
-                f"child utime/stime at {sample_label} "
-                f"{last_utime:.2f}/{last_stime:.2f}s, at timeout "
-                f"{timeout_utime:.2f}/{timeout_stime:.2f}s, delta "
-                f"+{delta_utime:.2f}/+{delta_stime:.2f}s"
+            hz = os.sysconf("SC_CLK_TCK")
+            user = (ended[0] - last_byte_ticks[0]) / hz
+            system = (ended[1] - last_byte_ticks[1]) / hz
+            parts.append(
+                f"child utime/stime since last byte +{user:.2f}s/+{system:.2f}s"
             )
         except (OSError, ValueError):
-            cpu = "child utime/stime unavailable"
-
-    return (
-        f" [stall: {silence}; {cpu}; loadavg {loadavg};"
-        f" bytes {watch.started_len}->{len(output)}]"
-    )
+            parts.append("child utime/stime since last byte n/a")
+    return " [stall: " + "; ".join(parts) + "]"
 
 
 def poll_for_output(
@@ -579,23 +593,27 @@ def poll_for_output(
     *,
     start: int,
     timeout: float,
-    stall_watch: _StallWatch | None = None,
+    on_byte: Callable[[float, tuple[int, int] | None], None] | None = None,
 ) -> bool:
     """True once ``needle`` lands at or after ``start``, False once ``timeout`` passes.
 
     A caller that has something to do when it does not arrive -- press the key
     again, say -- needs the answer rather than the exception. An exited TUI
-    still raises: no amount of waiting brings it back. ``stall_watch``, when
-    supplied, records the time of each newly read byte for timeout diagnostics.
+    still raises: no amount of waiting brings it back. ``on_byte``, when
+    given, is called once per loop iteration in which new bytes landed, with
+    the time and child CPU ticks sampled at that point; wait_for_output uses
+    both to date the last byte it ever saw.
     """
     deadline = time.monotonic() + timeout
     seen_len = len(output)
     while find_needle(output, needle, start) < 0:
         read_available(master_fd, output)
-        if stall_watch is not None and len(output) > seen_len:
+        if on_byte is not None and len(output) != seen_len:
             seen_len = len(output)
-            stall_watch.last_byte_at = time.monotonic()
-            stall_watch.cpu_at_last_byte = _child_cpu_ticks(process.pid)
+            on_byte(
+                time.monotonic(),
+                _child_cpu_ticks(process.pid) if process.pid is not None else None,
+            )
         if process.poll() is not None:
             raise AssertionError(f"TUI exited before {needle!r}: {bytes(output)!r}")
         remaining = deadline - time.monotonic()
@@ -614,11 +632,18 @@ def wait_for_output(
     start: int,
     timeout: float,
 ) -> None:
-    watch = _StallWatch(
-        started_at=time.monotonic(),
-        started_len=len(output),
-        cpu_before=_child_cpu_ticks(process.pid),
+    started_at = time.monotonic()
+    started_len = len(output)
+    started_ticks = (
+        _child_cpu_ticks(process.pid) if process.pid is not None else None
     )
+    last_byte_at = [started_at]
+    last_byte_ticks = [started_ticks]
+
+    def note_byte(at: float, ticks: tuple[int, int] | None) -> None:
+        last_byte_at[0] = at
+        last_byte_ticks[0] = ticks
+
     if poll_for_output(
         process,
         master_fd,
@@ -626,13 +651,21 @@ def wait_for_output(
         needle,
         start=start,
         timeout=timeout,
-        stall_watch=watch,
+        on_byte=note_byte,
     ):
         return
+    stall = _stall_line(
+        process,
+        output,
+        started_at=started_at,
+        started_len=started_len,
+        last_byte_at=last_byte_at[0],
+        last_byte_ticks=last_byte_ticks[0],
+    )
     raise AssertionError(
         f"timed out waiting for {needle!r}"
         f"{_needle_before_start(output, needle, start)}"
-        f"{_stall_line(process, output, watch)}: {bytes(output)!r}"
+        f"{stall}: {bytes(output)!r}"
     )
 
 
@@ -660,7 +693,7 @@ def wait_for_fixture_state(
             return False
         if time.monotonic() >= deadline:
             return False
-        time.sleep(0.02)
+        select.select([master_fd], [], [], 0.02)
     return True
 
 
@@ -5874,7 +5907,7 @@ def seed_playground_workspace(base_path: str) -> None:
     all."""
     Path(base_path, ".masc", "config", "keepers").mkdir(parents=True, exist_ok=True)
     Path(base_path, ".masc", "config", "keepers", "alpha.toml").write_text(
-        '[keeper]\nsandbox_profile = "docker"\nsandbox_image = "masc-sandbox:general"\n',
+        '[keeper]\nsandbox_profile = "docker"\nsandbox_image = "base"\n',
         encoding="utf-8"
     )
     Path(base_path, ".masc", "playground", "docker", "alpha").mkdir(
@@ -7409,16 +7442,13 @@ def memory_journal_timeline_interaction(
         ):
             if find_needle(plain, pattern) < 0:
                 raise AssertionError(f"Missing {label} label: {plain!r}")
-        # Speaker labels are dim-styled, not reverse-video, in the current
-        # renderer (observed: b"\\x1b[2mYOU"). The colored bold arrow/circle
-        # glyph checked above is what actually marks the causal role; this
-        # only confirms the label itself still renders.
-        for label in (b"YOU",):
-            if b"\x1b[2m" + label not in drawn:
-                raise AssertionError(
-                    f"Direct causal label lost its dim-styled badge {label!r}: "
-                    f"{drawn!r}"
-                )
+        # The conversation badge reverses only the speaker name. The mark's
+        # color and weight end before it, and the badge resets before the rule.
+        badge = b"\x1b[7mYOU\x1b[0m"
+        if badge not in drawn:
+            raise AssertionError(f"Direct causal label lost its bounded reverse badge: {drawn!r}")
+        if "▶".encode() + b"\x1b[0m " + badge not in drawn:
+            raise AssertionError(f"Direct causal mark style leaked into the speaker badge: {drawn!r}")
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -7848,7 +7878,7 @@ def context_inspector_fixtures() -> HttpFixtures:
                         "transmitted_atoms": 7,
                         "total_atoms": 9,
                         "model_input_measurement": "wire_shape",
-                        "front_atom_digest": hashlib.sha256(b"front atom").hexdigest(),
+                        "model_input_front": {"kind": "at_atom", "digest": hashlib.sha256(b"front atom").hexdigest()},
                         # These two keys are a pair. Turn_record.of_json
                         # defaults a missing usage_scope to
                         # Usage_scope_unavailable, and /context then omits
@@ -7941,6 +7971,42 @@ def context_inspector_fixtures() -> HttpFixtures:
         },
     )
     return fixtures
+
+
+def run_context_inspector_transport_error_regression(executable: str) -> None:
+    fixtures = context_inspector_fixtures()
+    fixtures["/api/v1/keepers/alpha/turn-records?limit=50"] = DroppedHttpResponse()
+
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        resize_and_wait(process, master_fd, output, rows=50, columns=160, needle=b"MASC Overview")
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        send_and_wait(process, master_fd, output, b"/context", composer_showing(b"/context"))
+        frame = send_and_wait(
+            process, master_fd, output, b"\r",
+            b"Composition unavailable: turn-records: GET failed:",
+        )
+        plain = CSI_RE.sub(b"", frame)
+        if b"request failed: GET failed" in plain:
+            raise AssertionError(f"Transport failure received two verdicts: {frame!r}")
+        if b"NEXT REQUEST" not in plain:
+            raise AssertionError(f"Independent forecast was lost after turn read failure: {frame!r}")
+        # The chat view is message mode, where q is a composer key rather
+        # than the quit key, so leaving runs through the keeper detail like
+        # the sibling inspector scenario. Esc closes the inspector itself:
+        # the error view opens no exact item, so one press reaches chat.
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="Context Inspector shows transport cause once",
+        interact=interact,
+        http_fixtures=fixtures,
+    )
 
 
 def context_inspector_interaction() -> Interaction:
@@ -8751,7 +8817,7 @@ def run_skill_usage_coverage_regression(executable: str) -> None:
         )
 
 
-def run_skill_usage_coverage_error_regression(executable: str) -> None:
+def run_skill_catalog_error_regression(executable: str) -> None:
     for initial_error in (True, False):
         fixtures = skills_usage_clarity_http_fixtures()
         good = fixtures["/api/v1/skills"]
@@ -8762,7 +8828,11 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
         fail_reads = threading.Event()
         if initial_error:
             fail_reads.set()
-        fixtures["/api/v1/skills"] = lambda: (200, bad_payload) if fail_reads.is_set() else good
+        failure = (
+            (503, {"error": "fixture catalog unavailable"})
+            if initial_error else (200, bad_payload)
+        )
+        fixtures["/api/v1/skills"] = lambda: failure if fail_reads.is_set() else good
 
         def interact(process, master_fd, _slave_fd, output, _base_path):
             resize_and_wait(process, master_fd, output, rows=30, columns=160, needle=b"MASC Overview")
@@ -8770,14 +8840,29 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
             send_and_wait(process, master_fd, output, b"t", b"MASC Config / Tools")
             frame = send_and_wait(
                 process, master_fd, output, b"p" * 3,
-                b"Skill catalog read failed:" if initial_error else b"1 of 2 catalog Skills observed",
+                b"skills catalog load failed:" if initial_error else b"1 of 2 catalog Skills observed",
             )
             if not initial_error:
                 fail_reads.set()
-                frame = send_and_wait(process, master_fd, output, b"r", b"Previous catalog reading; refresh failed")
-            rendered = CSI_RE.sub(b"", frame)
-            if b"Skill catalog read failed:" not in rendered or b"usage_coverage" not in rendered:
-                raise AssertionError(f"Coverage decode failure was hidden: {frame!r}")
+                frame = send_and_wait(process, master_fd, output, b"r", b"Previous catalog reading retained")
+            drain_until_quiet(process, master_fd, output)
+            completed = bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)])
+            rendered = screen_text(completed)
+            causes = (
+                (b"HTTP 503", b"fixture catalog unavailable")
+                if initial_error else (b"usage_coverage",)
+            )
+            if rendered.count(b"skills catalog load failed:") != 1 or not all(
+                cause in rendered for cause in causes
+            ):
+                raise AssertionError(f"Catalog failure was hidden or duplicated: {frame!r}")
+            if b"Skill catalog read failed:" in rendered or b"refresh failed" in rendered:
+                raise AssertionError(f"Catalog failure was described more than once: {frame!r}")
+            # The source is named once on the whole screen, not only once in
+            # front of "load failed:": a cause that still carries its own
+            # "skills catalog" prefix names the source twice.
+            if rendered.lower().count(b"skills catalog") != 1:
+                raise AssertionError(f"Catalog failure named its source twice: {frame!r}")
             if initial_error:
                 if b"unavailable (no catalog reading)" not in rendered:
                     raise AssertionError(f"First failed reading still looked like loading: {frame!r}")
@@ -8787,7 +8872,7 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
 
         run_terminal_scenario(
             executable,
-            description=f"Skill usage coverage error: {'initial' if initial_error else 'refresh'}",
+            description=f"Skill catalog error: {'initial' if initial_error else 'refresh'}",
             interact=interact, http_fixtures=fixtures,
         )
 
@@ -10588,7 +10673,7 @@ STANDALONE_LANES_PATH = "/api/v1/dashboard/standalone-lanes"
 
 
 def standalone_lane_fixture(
-    lane_id: str, label: str, *, status: str = "idle"
+    lane_id: str, label: str, *, status: str = "idle", retained: int = 12
 ) -> dict[str, object]:
     """One row of the observation matrix, in the wire shape the strict
     decoder accepts: every known lane exactly once, observation_only set."""
@@ -10612,6 +10697,11 @@ def standalone_lane_fixture(
         ),
         "verifier_exact": (
             "Reviews Task completion and Goal proof evidence.",
+            False,
+        ),
+        "browser_stagehand_exact": (
+            "Answers structured model requests from the Stagehand browser lane; "
+            "run records are not retained yet.",
             False,
         ),
     }
@@ -10638,16 +10728,20 @@ def standalone_lane_fixture(
         "dropped_slots": [],
         "admission_error": None,
         "status": status,
-        "retained_run_count": 12,
+        "retained_run_count": retained,
         "running_count": 0,
-        "succeeded_count": 12,
+        "succeeded_count": retained,
         "failed_count": 0,
         "cancelled_count": 0,
-        "last_started_at": 1787557600.0,
-        "last_terminal_at": 1787557660.0,
-        "last_outcome": "succeeded",
-        "p50_elapsed_s": 8.0,
-        "selected_slots": [{"slot_id": "glm-coding.glm-5-turbo", "count": 12}],
+        "last_started_at": 1787557600.0 if retained else None,
+        "last_terminal_at": 1787557660.0 if retained else None,
+        "last_outcome": "succeeded" if retained else None,
+        "p50_elapsed_s": 8.0 if retained else None,
+        "selected_slots": (
+            [{"slot_id": "glm-coding.glm-5-turbo", "count": retained}]
+            if retained
+            else []
+        ),
         "runs_without_slot": {"vendor_system_one": 0, "server_restarted": 0, "no_slot": 0},
     }
     if lane_id == "board_attention_exact":
@@ -10679,6 +10773,10 @@ def standalone_lanes_response() -> HttpResponse:
                     "workspace_curator_exact", "Workspace Curator"
                 ),
                 standalone_lane_fixture("verifier_exact", "Verifier"),
+                standalone_lane_fixture(
+                    "browser_stagehand_exact", "Browser Stagehand",
+                    status="no_retained_observation", retained=0,
+                ),
             ],
         },
     )
@@ -12269,6 +12367,19 @@ def code_lane_interaction(
         )
     if re.search(rb"\x1b\[[0-9;]*m" + re.escape(b"(* hi *)") + rb"\x1b\[0m", opened) is None:
         raise AssertionError(f"the comment did not colour: {opened!r}")
+    # This scenario runs at 100 columns, under the split threshold, so the
+    # frame draws one pane and the focus chooses which. h and l move that
+    # focus, and with a file open they are the only way back to the tree:
+    # Esc closes the file. The keys were refused under the threshold until
+    # #39017, on a screen already drawing their answer.
+    tree_focus = send_and_wait(
+        process, master_fd, output, b"h", b"j/k:move  h/l:pane"
+    )
+    if "\u25c6 a.ml" not in CSI_RE.sub(b"", tree_focus).decode("utf-8"):
+        raise AssertionError(
+            f"h did not put the tree back under the focus: {tree_focus!r}"
+        )
+    send_and_wait(process, master_fd, output, b"l", b"j/k:scroll  h/l:pane")
     # Shift-Right pans the open file sideways by one cell: lowercase h/l now
     # choose the split pane. The keyword span is cut mid-word but its colour
     # still opens the remainder, and the title says the view is shifted.
@@ -12694,7 +12805,7 @@ def runtime_resolved_response(*, runtime_a_in_two_lanes: bool = False) -> HttpRe
             "config_path": "/workspace/config/runtime.toml",
             "default_runtime": runtime_a,
             # The two routes that are not lanes. Both lists are required by
-            # the decoder; empty is a configuration (no vision fleet), and
+            # the decoder; empty is a configuration (no vision runtimes), and
             # the declared list is what the editor writes back.
             "media_failover": [],
             "media_failover_declared": [],
@@ -13221,8 +13332,16 @@ def schedule_detail_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        # Wait for a loaded row, not for the title. The title is drawn the
+        # moment the screen opens, while the list still reads
+        # "HTTP [loading...]" and "(not loaded yet - press r)". Waiting on the
+        # title let the checks below read that frame, and they failed on a
+        # list that had not arrived yet (PR check runs 36250155607,
+        # 36250173553, 36251291941). The reaction fact is contiguous in raw
+        # terminal output. The row's "succeeded consumed_ack" crosses an ANSI
+        # style boundary; require that full row text after stripping below.
         listing = palette_go(
-            process, master_fd, output, b"go schedules", b"MASC Keepers / Schedules"
+            process, master_fd, output, b"go schedules", b"reaction:matched_consumed_ack"
         )
         listing_plain = CSI_RE.sub(b"", listing)
         for needle in (
@@ -15202,83 +15321,8 @@ def flow_control_is_off_interaction() -> Interaction:
     return interact
 
 
-def run_keyboard_regression(executable: str) -> None:
+def run_chat_input_regression(executable: str) -> None:
     utf8_requests: HttpRequests = []
-    missing_target_requests: HttpRequests = []
-    unreliable_roster_requests: HttpRequests = []
-    keeper_scroll_fixtures = overview_event_http_fixtures()
-    # The gate holds a refresh open so the scenario can resize while one is in
-    # flight, so it has to sit on a request every refresh makes. The board list
-    # is fetched only while the board is on screen, which the scenario is not,
-    # so the briefing -- which every surface asks for -- carries the gate.
-    keeper_scroll_gate = GatedHttpResponse((200, overview_event_briefing()))
-    approval_fixtures, approval_items, approval_new = approval_selection_http_fixtures()
-    planning_reorder_fixtures = planning_selection_http_fixtures()
-    planning_missing_fixtures = planning_selection_http_fixtures()
-    board_selection_fixtures = board_selection_http_fixtures()
-    board_authority_fixtures, late_list = board_detail_authority_http_fixtures()
-    board_detail_fixtures, b_failure = board_detail_isolation_http_fixtures()
-    missing_target_fixtures, late_b = board_paginated_detail_http_fixtures()
-    message_switch_fixtures, alpha_history = keeper_message_switch_http_fixtures()
-    chat_visibility_fixtures = chat_clarity_http_fixtures()
-    lanes_fixtures = keeper_runtime_http_fixtures()
-    lanes_gate = GatedHttpResponse(
-        keeper_lanes_response(
-            [
-                keeper_lane_row(
-                    "alpha",
-                    phase="running",
-                    turn_phase="idle",
-                    idle_seconds=75,
-                    runtime_state="done",
-                    selected_model="claude-opus-5",
-                ),
-                keeper_lane_row(
-                    "beta",
-                    phase="failing",
-                    turn_phase="executing",
-                    idle_seconds=3599,
-                    runtime_state="done",
-                    selected_model=None,
-                    turn_healthy=False,
-                ),
-            ]
-        )
-    )
-    lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
-    lanes_fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
-    lanes_fixtures[RUNTIME_CONFIG_RAW_PATH] = standalone_lane_runtime_config_response()
-    lanes_fixtures[lane_runs_path("verifier_exact")] = verifier_lane_runs_response()
-    lanes_fixtures[
-        "/api/v1/dashboard/exact-lane-runs/vrf-fixture"
-    ] = verifier_lane_run_detail_response()
-    lanes_fixtures[lane_runs_path("hitl_auto_judge")] = hitl_lane_runs_response()
-    lanes_fixtures[
-        "/api/v1/dashboard/exact-lane-runs/hitl-fixture"
-    ] = hitl_lane_run_detail_response()
-    runtime_fixtures, runtime_initial_probe, runtime_force_probe = (
-        runtime_http_fixtures()
-    )
-    schedule_fixtures = schedule_detail_http_fixtures()
-    fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
-    run_terminal_scenario(
-        executable,
-        description="flow control leaves Ctrl-S to the key layer",
-        interact=flow_control_is_off_interaction(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="Image view over the frame",
-        interact=image_view_interaction(),
-        prepare_workspace=seed_image_workspace,
-        preload_input=GRAPHICS_SUPPORTED_REPLY,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Memory fact browser lists both stores and filters",
-        interact=memory_facts_interaction(),
-        http_fixtures=memory_facts_http_fixtures(),
-    )
     to_file_requests: HttpRequests = []
     run_terminal_scenario(
         executable,
@@ -15382,572 +15426,668 @@ def run_keyboard_regression(executable: str) -> None:
         },
         http_requests=utf8_requests,
     )
-    run_terminal_scenario(
-        executable,
-        description="Autonomous turn history",
-        interact=autonomous_turn_history_interaction(),
-        http_fixtures={
-            "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
-        },
-        extra_args=("--reasoning", "full", "--tool-view", "full"),
+
+
+def run_keyboard_regression(executable: str, *, group: int | None = None) -> None:
+    missing_target_requests: HttpRequests = []
+    unreliable_roster_requests: HttpRequests = []
+    keeper_scroll_fixtures = overview_event_http_fixtures()
+    # The gate holds a refresh open so the scenario can resize while one is in
+    # flight, so it has to sit on a request every refresh makes. The board list
+    # is fetched only while the board is on screen, which the scenario is not,
+    # so the briefing -- which every surface asks for -- carries the gate.
+    keeper_scroll_gate = GatedHttpResponse((200, overview_event_briefing()))
+    approval_fixtures, approval_items, approval_new = approval_selection_http_fixtures()
+    planning_reorder_fixtures = planning_selection_http_fixtures()
+    planning_missing_fixtures = planning_selection_http_fixtures()
+    board_selection_fixtures = board_selection_http_fixtures()
+    board_authority_fixtures, late_list = board_detail_authority_http_fixtures()
+    board_detail_fixtures, b_failure = board_detail_isolation_http_fixtures()
+    missing_target_fixtures, late_b = board_paginated_detail_http_fixtures()
+    message_switch_fixtures, alpha_history = keeper_message_switch_http_fixtures()
+    chat_visibility_fixtures = chat_clarity_http_fixtures()
+    lanes_fixtures = keeper_runtime_http_fixtures()
+    lanes_gate = GatedHttpResponse(
+        keeper_lanes_response(
+            [
+                keeper_lane_row(
+                    "alpha",
+                    phase="running",
+                    turn_phase="idle",
+                    idle_seconds=75,
+                    runtime_state="done",
+                    selected_model="claude-opus-5",
+                ),
+                keeper_lane_row(
+                    "beta",
+                    phase="failing",
+                    turn_phase="executing",
+                    idle_seconds=3599,
+                    runtime_state="done",
+                    selected_model=None,
+                    turn_healthy=False,
+                ),
+            ]
+        )
     )
-    run_memory_journal_regression(executable)
-    run_terminal_scenario(
-        executable,
-        description="Keeper provider-input Context Inspector",
-        interact=context_inspector_interaction(),
-        http_fixtures=context_inspector_fixtures(),
+    lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
+    lanes_fixtures[STANDALONE_LANES_PATH] = standalone_lanes_response()
+    lanes_fixtures[RUNTIME_CONFIG_RAW_PATH] = standalone_lane_runtime_config_response()
+    lanes_fixtures[lane_runs_path("verifier_exact")] = verifier_lane_runs_response()
+    lanes_fixtures[
+        "/api/v1/dashboard/exact-lane-runs/vrf-fixture"
+    ] = verifier_lane_run_detail_response()
+    lanes_fixtures[lane_runs_path("hitl_auto_judge")] = hitl_lane_runs_response()
+    lanes_fixtures[
+        "/api/v1/dashboard/exact-lane-runs/hitl-fixture"
+    ] = hitl_lane_run_detail_response()
+    runtime_fixtures, runtime_initial_probe, runtime_force_probe = (
+        runtime_http_fixtures()
     )
-    run_terminal_scenario(
-        executable,
-        description="Ctrl-V is not swallowed by the terminal",
-        interact=clipboard_paste_key_interaction(),
-        http_fixtures={
-            "/api/v1/keepers/alpha/chat/history": (200, []),
-        },
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper chat visibility modes",
-        interact=chat_visibility_modes_interaction(),
-        http_fixtures=chat_visibility_fixtures,
-    )
-    error_detail_fixtures = keeper_runtime_http_fixtures()
-    error_detail_fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
-    error_detail_fixtures["/api/v1/keepers/alpha/memory-journal?limit=20"] = (
-        200,
-        {"keeper": "alpha", "entries": []},
-    )
-    error_detail_fixtures["/api/v1/keepers/chat/stream"] = RequestHttpResponse(
-        keeper_chat_failed_response
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper chat errors preserve their complete detail",
-        interact=keeper_chat_error_detail_interaction(),
-        http_fixtures=error_detail_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper message origin badges",
-        interact=message_origin_badge_interaction,
-        http_fixtures={
-            "/api/v1/keepers/alpha/chat/history": message_origin_history_fixture(),
-        },
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper oversized viewport gap under NO_COLOR",
-        interact=viewport_gap_interaction,
-        http_fixtures={
-            "/api/v1/keepers/alpha/chat/history": viewport_gap_history_fixture(),
-            "/api/v1/keepers/alpha/chat/history/page": (
-                viewport_gap_history_page_fixture()
-            ),
-        },
-        extra_env={"NO_COLOR": "1"},
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper live Markdown code frame",
-        interact=live_markdown_interaction,
-        http_fixtures={
-            "/api/v1/keepers/alpha/chat/history": live_markdown_history_fixture(),
-        },
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper message Ctrl-G switch",
-        interact=keeper_message_switch_interaction(alpha_history),
-        http_fixtures=message_switch_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keepers operations and Standalone-only Lanes",
-        interact=keeper_lanes_ia_interaction(lanes_gate, lanes_fixtures),
-        http_fixtures=lanes_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Code lane lists, drills, and lexes",
-        interact=code_lane_interaction,
-        http_fixtures=code_lane_fixtures(),
-    )
-    run_code_memo_regression(executable)
-    enter_split_fixtures = keeper_runtime_http_fixtures()
-    enter_split_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
-    run_terminal_scenario(
-        executable,
-        description="Enter off the Changes surface does not arm its diff",
-        interact=enter_outside_changes_interaction,
-        http_fixtures=enter_split_fixtures,
-    )
-    run_tab_strip_keeps_current_entry_regression(executable)
-    run_keeper_unbind_all_channels_regression(executable)
-    run_pause_offers_channel_unbind_regression(executable)
-    run_keeper_runtime_picker_filter_regression(executable)
-    run_activity_logs_tab_pane_regression(executable)
-    changes_navigation_fixtures = keeper_runtime_http_fixtures()
-    changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
-    changes_navigation_fixtures[FILE_CHANGES_BETA_PATH] = file_changes_beta_response()
-    # The v jump reads the row's file through the keeper axis; both query
-    # encodings of the slash are served, as the workspace fixtures do.
-    code_children = (
-        200,
-        [
-            {"path": "repos/masc/lib/example.ml", "label": "example.ml",
-             "depth": 0, "parent": "repos/masc/lib", "hasChildren": False,
-             "diff": None, "keeperId": None, "hueIndex": None},
-        ],
-    )
-    code_file = (200, {"ok": True, "content": "let a = 2\n"})
-    for children_path in (
-        "/api/v1/workspace/children?path=repos/masc/lib&limit=2000&keeper=alpha",
-        "/api/v1/workspace/children?path=repos%2Fmasc%2Flib&limit=2000&keeper=alpha",
-    ):
-        changes_navigation_fixtures[children_path] = code_children
-    for file_path in (
-        "/api/v1/workspace/file?path=repos/masc/lib/example.ml&keeper=alpha",
-        "/api/v1/workspace/file?path=repos%2Fmasc%2Flib%2Fexample.ml&keeper=alpha",
-    ):
-        changes_navigation_fixtures[file_path] = code_file
-    run_terminal_scenario(
-        executable,
-        description="Changes keeper switch and arrow detail navigation",
-        interact=changes_keeper_and_arrow_detail_interaction,
-        http_fixtures=changes_navigation_fixtures,
-    )
-    gate_mode_fixtures = keeper_runtime_http_fixtures()
-    gate_mode_gate = GatedHttpResponse(
-        (200, {"overrides": [{"keeper": "alpha", "mode": "yolo"}]}),
-        subsequent_response=(
-            200,
-            {"overrides": [{"keeper": "alpha", "mode": "yolo"}]},
-        ),
-        hold_seconds=15.0,
-    )
-    gate_mode_fixtures["/api/v1/keepers/tool-approval-mode"] = gate_mode_gate
-    run_terminal_scenario(
-        executable,
-        description="Keeper gate footer offers Auto from YOLO",
-        interact=keeper_gate_mode_footer_interaction(gate_mode_gate),
-        http_fixtures=gate_mode_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Runtime lane candidates from joined projections",
-        interact=runtime_surface_interaction(
-            runtime_fixtures,
-            runtime_initial_probe,
-            runtime_force_probe,
-        ),
-        refresh=0.05,
-        http_fixtures=runtime_fixtures,
-        # The probe's checked-at is drawn in the terminal's zone; UTC keeps the
-        # expected "2026-08-24 10:20:00" the same on every machine.
-        extra_env={"TZ": "UTC"},
-    )
-    run_terminal_scenario(
-        executable,
-        description="Schedule operational detail and page navigation",
-        interact=schedule_detail_interaction(),
-        http_fixtures=schedule_fixtures,
-        # The recorded times are drawn in the terminal's zone; UTC keeps the
-        # expected "2026-08-25 09:30:20" the same on every machine.
-        extra_env={"TZ": "UTC"},
-    )
-    run_terminal_scenario(
-        executable,
-        description="Fusion list identity and panel-to-judge detail",
-        interact=fusion_list_detail_interaction(
-            fusion_fixtures,
-            fusion_initial_runs,
-        ),
-        refresh=0.05,
-        http_fixtures=fusion_fixtures,
-        # The harness verdict in these fixtures judges task-linked-501. Seeding
-        # that task and the goal it serves is what lets the detail say what the
-        # verdict was aiming at, rather than naming a task and stopping.
-        prepare_workspace=seed_goal_linked_task,
-    )
-    fusion_live_fixtures, fusion_mcp_gate, fusion_run_list = fusion_live_reload_http_fixtures()
-    run_terminal_scenario(
-        executable,
-        description="Fusion live reload on an observer status push",
-        interact=fusion_live_reload_interaction(fusion_run_list, fusion_mcp_gate),
-        http_fixtures=fusion_live_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper tool-call log",
-        interact=keeper_calls_interaction(),
-        http_fixtures={
-            "/api/v1/keepers/alpha/tool-calls?limit=100": keeper_calls_fixture(),
-        },
-    )
-    verification_gate = GatedHttpResponse((200, verification_snapshot([])))
-    run_terminal_scenario(
-        executable,
-        description="Verification unread before read",
-        interact=verification_unread_interaction(verification_gate),
-        http_fixtures={
-            VERIFICATION_QUEUE_PATH: verification_gate,
-        },
-    )
-    verdict_requests: HttpRequests = []
-    with reject_editor_script() as reject_editor:
+    schedule_fixtures = schedule_detail_http_fixtures()
+    fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
+
+    def run_general() -> None:
         run_terminal_scenario(
             executable,
-            description="Verification verdict keys",
-            interact=verification_verdict_interaction(verdict_requests),
-            http_fixtures=verification_verdict_fixtures(),
-            http_requests=verdict_requests,
-            extra_env={"EDITOR": reject_editor},
+            description="flow control leaves Ctrl-S to the key layer",
+            interact=flow_control_is_off_interaction(),
         )
-    observer_requests: HttpRequests = []
-    run_terminal_scenario(
-        executable,
-        description="Observer feed subscription",
-        interact=observer_feed_interaction(observer_requests),
-        http_fixtures=observer_http_fixtures(),
-        http_requests=observer_requests,
-    )
-    dispatch_requests: HttpRequests = []
-    run_terminal_scenario(
-        executable,
-        description="Composer task dispatch",
-        interact=task_dispatch_interaction(dispatch_requests),
-        http_fixtures=task_dispatch_http_fixtures(),
-        http_requests=dispatch_requests,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Attention drawn once",
-        interact=attention_drawn_once_interaction(),
-        http_fixtures={
-            "/api/v1/dashboard/briefing": duplicated_attention_briefing(),
-        },
-    )
-    cost_reads: list[str] = []
-    run_terminal_scenario(
-        executable,
-        description="Pull requests on Overview",
-        interact=pull_requests_on_overview_interaction(cost_reads),
-        http_fixtures={
-            "/api/v1/dashboard/briefing": pull_requests_briefing(),
-            "/api/v1/repositories/pulls": repository_pulls_fixture(),
-            "/api/v1/dashboard/keeper-costs": counted(keeper_costs_fixture(), cost_reads),
-        },
-    )
-    cost_reads: list[str] = []
-    run_terminal_scenario(
-        executable,
-        description="Team spend title",
-        interact=spend_title_interaction(cost_reads),
-        http_fixtures={
-            "/api/v1/dashboard/briefing": spend_title_briefing(),
-            "/api/v1/dashboard/keeper-costs": counted(spend_title_costs_fixture(), cost_reads),
-        },
-    )
-    old_cost_reads: list[str] = []
-    old_cost_gate = GatedHttpResponse(
-        priced_cost_reply(1.0),
-        subsequent_response=priced_cost_reply(2.0),
-        hold_seconds=30.0,
-    )
+        run_terminal_scenario(
+            executable,
+            description="Image view over the frame",
+            interact=image_view_interaction(),
+            prepare_workspace=seed_image_workspace,
+            preload_input=GRAPHICS_SUPPORTED_REPLY,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Memory fact browser lists both stores and filters",
+            interact=memory_facts_interaction(),
+            http_fixtures=memory_facts_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="Autonomous turn history",
+            interact=autonomous_turn_history_interaction(),
+            http_fixtures={
+                "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
+            },
+            extra_args=("--reasoning", "full", "--tool-view", "full"),
+        )
+        run_memory_journal_regression(executable)
+        run_terminal_scenario(
+            executable,
+            description="Keeper provider-input Context Inspector",
+            interact=context_inspector_interaction(),
+            http_fixtures=context_inspector_fixtures(),
+        )
+        run_context_inspector_transport_error_regression(executable)
+        run_terminal_scenario(
+            executable,
+            description="Ctrl-V is not swallowed by the terminal",
+            interact=clipboard_paste_key_interaction(),
+            http_fixtures={
+                "/api/v1/keepers/alpha/chat/history": (200, []),
+            },
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper chat visibility modes",
+            interact=chat_visibility_modes_interaction(),
+            http_fixtures=chat_visibility_fixtures,
+        )
+        error_detail_fixtures = keeper_runtime_http_fixtures()
+        error_detail_fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
+        error_detail_fixtures["/api/v1/keepers/alpha/memory-journal?limit=20"] = (
+            200,
+            {"keeper": "alpha", "entries": []},
+        )
+        error_detail_fixtures["/api/v1/keepers/chat/stream"] = RequestHttpResponse(
+            keeper_chat_failed_response
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper chat errors preserve their complete detail",
+            interact=keeper_chat_error_detail_interaction(),
+            http_fixtures=error_detail_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper message origin badges",
+            interact=message_origin_badge_interaction,
+            http_fixtures={
+                "/api/v1/keepers/alpha/chat/history": message_origin_history_fixture(),
+            },
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper oversized viewport gap under NO_COLOR",
+            interact=viewport_gap_interaction,
+            http_fixtures={
+                "/api/v1/keepers/alpha/chat/history": viewport_gap_history_fixture(),
+                "/api/v1/keepers/alpha/chat/history/page": (
+                    viewport_gap_history_page_fixture()
+                ),
+            },
+            extra_env={"NO_COLOR": "1"},
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper live Markdown code frame",
+            interact=live_markdown_interaction,
+            http_fixtures={
+                "/api/v1/keepers/alpha/chat/history": live_markdown_history_fixture(),
+            },
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper message Ctrl-G switch",
+            interact=keeper_message_switch_interaction(alpha_history),
+            http_fixtures=message_switch_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keepers operations and Standalone-only Lanes",
+            interact=keeper_lanes_ia_interaction(lanes_gate, lanes_fixtures),
+            http_fixtures=lanes_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Code lane lists, drills, and lexes",
+            interact=code_lane_interaction,
+            http_fixtures=code_lane_fixtures(),
+        )
+        run_code_memo_regression(executable)
 
-    def gated_cost() -> HttpResponse:
-        old_cost_reads.append("read")
-        return old_cost_gate()
-
-    run_terminal_scenario(
-        executable,
-        description="Cost off on discards old reply",
-        interact=cost_off_on_discards_old_reply_interaction(old_cost_gate, old_cost_reads),
-        http_fixtures={
-            "/api/v1/dashboard/briefing": pull_requests_briefing(),
-            "/api/v1/dashboard/keeper-costs": gated_cost,
-        },
-    )
-    cost_reads: list[str] = []
-    run_terminal_scenario(
-        executable,
-        description="Narrow stuck row keeps its cause",
-        interact=narrow_stuck_row_keeps_its_cause_interaction(cost_reads),
-        http_fixtures={
-            "/api/v1/dashboard/briefing": stuck_keeper_briefing(),
-            "/api/v1/dashboard/keeper-costs": counted(stuck_keeper_costs_fixture(), cost_reads),
-        },
-    )
-    run_terminal_scenario(
-        executable,
-        description="Unread keeper counted",
-        interact=unread_keeper_counted_interaction(),
-        http_fixtures={
-            "/api/v1/dashboard/briefing": unread_keeper_briefing(),
-        },
-    )
-    run_terminal_scenario(
-        executable,
-        description="Unlisted keepers named",
-        interact=unlisted_keepers_named_interaction(),
-        http_fixtures={
-            "/api/v1/dashboard/briefing": unlisted_keepers_briefing(),
-        },
-    )
-    run_terminal_scenario(
-        executable,
-        description="Paused apart from stopped",
-        interact=paused_apart_from_stopped_interaction(),
-        http_fixtures={
-            "/api/v1/dashboard/briefing": paused_and_stopped_briefing(),
-        },
-    )
-    composer_requests: HttpRequests = []
-    run_terminal_scenario(
-        executable,
-        description="Composer newline and send",
-        interact=composer_newline_interaction(composer_requests),
-        http_fixtures={
-            "/health?full=1": fleet_safety_fixture(),
-            "/api/v1/keepers/chat/stream": (
-                503,
-                {"error": "stop after composer request capture"},
+    def run_surfaces() -> None:
+        enter_split_fixtures = keeper_runtime_http_fixtures()
+        enter_split_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
+        run_terminal_scenario(
+            executable,
+            description="Enter off the Changes surface does not arm its diff",
+            interact=enter_outside_changes_interaction,
+            http_fixtures=enter_split_fixtures,
+        )
+        run_tab_strip_keeps_current_entry_regression(executable)
+        run_keeper_unbind_all_channels_regression(executable)
+        run_pause_offers_channel_unbind_regression(executable)
+        run_keeper_runtime_picker_filter_regression(executable)
+        run_activity_logs_tab_pane_regression(executable)
+        changes_navigation_fixtures = keeper_runtime_http_fixtures()
+        changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
+        changes_navigation_fixtures[FILE_CHANGES_BETA_PATH] = file_changes_beta_response()
+        # The v jump reads the row's file through the keeper axis; both query
+        # encodings of the slash are served, as the workspace fixtures do.
+        code_children = (
+            200,
+            [
+                {"path": "repos/masc/lib/example.ml", "label": "example.ml",
+                 "depth": 0, "parent": "repos/masc/lib", "hasChildren": False,
+                 "diff": None, "keeperId": None, "hueIndex": None},
+            ],
+        )
+        code_file = (200, {"ok": True, "content": "let a = 2\n"})
+        for children_path in (
+            "/api/v1/workspace/children?path=repos/masc/lib&limit=2000&keeper=alpha",
+            "/api/v1/workspace/children?path=repos%2Fmasc%2Flib&limit=2000&keeper=alpha",
+        ):
+            changes_navigation_fixtures[children_path] = code_children
+        for file_path in (
+            "/api/v1/workspace/file?path=repos/masc/lib/example.ml&keeper=alpha",
+            "/api/v1/workspace/file?path=repos%2Fmasc%2Flib%2Fexample.ml&keeper=alpha",
+        ):
+            changes_navigation_fixtures[file_path] = code_file
+        run_terminal_scenario(
+            executable,
+            description="Changes keeper switch and arrow detail navigation",
+            interact=changes_keeper_and_arrow_detail_interaction,
+            http_fixtures=changes_navigation_fixtures,
+        )
+        gate_mode_fixtures = keeper_runtime_http_fixtures()
+        gate_mode_gate = GatedHttpResponse(
+            (200, {"overrides": [{"keeper": "alpha", "mode": "yolo"}]}),
+            subsequent_response=(
+                200,
+                {"overrides": [{"keeper": "alpha", "mode": "yolo"}]},
             ),
-        },
-        http_requests=composer_requests,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper detail overscroll normalization",
-        interact=keeper_detail_overscroll_interaction(
-            keeper_scroll_fixtures,
-            keeper_scroll_gate,
-        ),
-        http_fixtures=keeper_scroll_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper selection identity",
-        interact=keeper_selection_identity_interaction,
-        http_fixtures=overview_event_http_fixtures(),
-        prepare_workspace=block_stderr_redirect,
-    )
-    run_terminal_scenario(
-        executable,
-        description="CLI base path overrides inherited environment",
-        interact=cli_base_path_overrides_environment_interaction,
-        http_fixtures=overview_event_http_fixtures(),
-        conflicting_env_base_path=True,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper message unreliable roster",
-        interact=keeper_message_unreliable_roster_interaction(
-            unreliable_roster_requests
-        ),
-        refresh=0.05,
-        http_fixtures=overview_event_http_fixtures(),
-        http_requests=unreliable_roster_requests,
-        prepare_workspace=block_stderr_redirect,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper message missing target",
-        interact=keeper_message_missing_target_interaction(missing_target_requests),
-        refresh=0.05,
-        http_fixtures=overview_event_http_fixtures(),
-        http_requests=missing_target_requests,
-    )
-    run_terminal_scenario(
-        executable,
-        description="approval selection identity",
-        interact=approval_selection_identity_interaction(
-            approval_fixtures,
-            approval_items,
-            approval_new,
-        ),
-        http_fixtures=approval_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Planning preserves selected goals and footer across resize",
-        interact=planning_resize_budget_interaction,
-        http_fixtures=planning_selection_http_fixtures(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="Planning selection identity",
-        interact=planning_reorder_identity_interaction(planning_reorder_fixtures),
-        http_fixtures=planning_reorder_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Planning missing detail recovery",
-        interact=planning_missing_detail_interaction(planning_missing_fixtures),
-        http_fixtures=planning_missing_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Clients draws its footer and an armed search",
-        interact=clients_footer_interaction,
-        http_fixtures=clients_http_fixtures(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="Clients keeps its footer while a crowded roster resizes",
-        interact=clients_footer_interaction,
-        http_fixtures=clients_http_fixtures(extra_clients=40),
-    )
-    board_reference_fixtures = board_reference_http_fixtures()
-    keeper_ask_fixtures, _ask_initial, _ask_new = approval_selection_http_fixtures()
-    keeper_ask_fixtures[KEEPER_ASKS_PATH] = keeper_asks_response()
-    keeper_ask_fixtures[KEEPER_ASK_ANSWER_PATH] = (200, {"ok": True})
-    ask_requests: HttpRequests = []
-    run_terminal_scenario(
-        executable,
-        description="Blocked Gate reason remains whole in approval detail",
-        interact=blocked_gate_detail_interaction(),
-        http_fixtures=blocked_gate_detail_http_fixtures(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="A concealing escape in the input draws as text in approval detail",
-        interact=concealed_input_detail_interaction(),
-        http_fixtures=concealed_input_http_fixtures(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="A cursor escape in a held call's question draws as text in approval detail",
-        interact=escaped_question_detail_interaction(),
-        http_fixtures=escaped_question_http_fixtures(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="Answering a Keeper's question from an approval detail",
-        interact=keeper_ask_answer_interaction(keeper_ask_fixtures, ask_requests),
-        http_fixtures=keeper_ask_fixtures,
-        http_requests=ask_requests,
-    )
-    reader_fixtures, _, _ = approval_selection_http_fixtures()
-    reader_fixtures[KEEPER_ASKS_PATH] = keeper_asks_response(long_question=True)
-    reader_fixtures[KEEPER_ASK_ANSWER_PATH] = (200, {"ok": True})
-    reader_requests: HttpRequests = []
-    run_terminal_scenario(
-        executable,
-        description="Question arrows, overflow and visible free-text editing",
-        interact=question_reader_interaction(reader_requests),
-        http_fixtures=reader_fixtures,
-        http_requests=reader_requests,
-    )
-    mode_fixtures = blocked_gate_detail_http_fixtures()
-    mode_fixtures["/api/v1/dashboard/gate/mode"] = (200, {"ok": True})
-    mode_fixtures["/api/v1/dashboard/gate/external-mode"] = (200, {"ok": True})
-    mode_requests: HttpRequests = []
-    run_terminal_scenario(
-        executable,
-        description="Gate mode chooser applies only after Enter",
-        interact=gate_mode_picker_interaction(mode_requests),
-        http_fixtures=mode_fixtures,
-        http_requests=mode_requests,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Board references and related posts",
-        interact=board_reference_interaction(board_reference_fixtures),
-        http_fixtures=board_reference_fixtures,
-    )
-    run_board_json_regression(executable)
-    run_terminal_scenario(
-        executable,
-        description="Board selection identity",
-        interact=board_selection_identity_interaction(board_selection_fixtures),
-        http_fixtures=board_selection_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Board detail post authority",
-        interact=board_detail_authority_interaction(
-            board_authority_fixtures,
-            late_list,
-        ),
-        http_fixtures=board_authority_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Board detail isolation",
-        interact=board_detail_isolation_interaction(b_failure),
-        http_fixtures=board_detail_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Board exact detail survives page omission",
-        interact=board_paginated_detail_interaction(missing_target_fixtures, late_b),
-        http_fixtures=missing_target_fixtures,
-    )
-    run_terminal_scenario(
-        executable,
-        description="row-budgeted Overview and Board",
-        interact=assert_row_budgeted_surfaces,
-        http_fixtures=row_budget_http_fixtures(),
-        prepare_workspace=seed_row_budget_workspace,
-    )
-    run_terminal_scenario(
-        executable,
-        description="console diagnostic repair",
-        interact=repair_after_console_diagnostic,
-        prepare_workspace=block_stderr_redirect,
-        refresh=0.05,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper phase and runtime identity",
-        interact=keeper_runtime_phase_and_identity_interaction,
-        http_fixtures=keeper_runtime_http_fixtures(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="Ctrl-L walks the Activity pane narrow, wide, hidden",
-        interact=acting_pane_ctrl_l_cycle_interaction,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Keeper long runtime identities remain distinguishable",
-        interact=keeper_long_runtime_identity_interaction,
-        http_fixtures=keeper_runtime_http_fixtures(
-            alpha_runtime_id="antigravity_subscription.gemini-3-7-flash-thinking-preview",
-            beta_runtime_id="antigravity_subscription.gemini-3-7-flash-thinking-lite",
-        ),
-    )
-    run_terminal_scenario(
-        executable,
-        description="q",
-        interact=navigate_with_arrows_and_quit,
-    )
-    run_terminal_scenario(
-        executable,
-        description="wheel scrolls, clicks do not",
-        interact=wheel_scrolls_and_clicks_do_not,
-        http_fixtures=compact_input_gate_http_fixtures(),
-    )
-    run_terminal_scenario(
-        executable,
-        description="compact q",
-        interact=quit_from_compact_message,
-    )
-    run_terminal_scenario(
-        executable,
-        description="Ctrl-C",
-        interact=interrupt_with_ctrl_c,
-        confirm_exit=b"\x03",
-    )
-    # No confirming key: the signal is the whole exit.
-    run_terminal_scenario(
-        executable,
-        description="SIGTERM",
-        interact=terminate_with_sigterm,
-        confirm_exit=b"",
-    )
+            hold_seconds=15.0,
+        )
+        gate_mode_fixtures["/api/v1/keepers/tool-approval-mode"] = gate_mode_gate
+        run_terminal_scenario(
+            executable,
+            description="Keeper gate footer offers Auto from YOLO",
+            interact=keeper_gate_mode_footer_interaction(gate_mode_gate),
+            http_fixtures=gate_mode_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Runtime lane candidates from joined projections",
+            interact=runtime_surface_interaction(
+                runtime_fixtures,
+                runtime_initial_probe,
+                runtime_force_probe,
+            ),
+            refresh=0.05,
+            http_fixtures=runtime_fixtures,
+            # The probe's checked-at is drawn in the terminal's zone; UTC keeps the
+            # expected "2026-08-24 10:20:00" the same on every machine.
+            extra_env={"TZ": "UTC"},
+        )
+        run_terminal_scenario(
+            executable,
+            description="Schedule operational detail and page navigation",
+            interact=schedule_detail_interaction(),
+            http_fixtures=schedule_fixtures,
+            # The recorded times are drawn in the terminal's zone; UTC keeps the
+            # expected "2026-08-25 09:30:20" the same on every machine.
+            extra_env={"TZ": "UTC"},
+        )
+        run_terminal_scenario(
+            executable,
+            description="Fusion list identity and panel-to-judge detail",
+            interact=fusion_list_detail_interaction(
+                fusion_fixtures,
+                fusion_initial_runs,
+            ),
+            refresh=0.05,
+            http_fixtures=fusion_fixtures,
+            # The harness verdict in these fixtures judges task-linked-501. Seeding
+            # that task and the goal it serves is what lets the detail say what the
+            # verdict was aiming at, rather than naming a task and stopping.
+            prepare_workspace=seed_goal_linked_task,
+        )
+        fusion_live_fixtures, fusion_mcp_gate, fusion_run_list = fusion_live_reload_http_fixtures()
+        run_terminal_scenario(
+            executable,
+            description="Fusion live reload on an observer status push",
+            interact=fusion_live_reload_interaction(fusion_run_list, fusion_mcp_gate),
+            http_fixtures=fusion_live_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper tool-call log",
+            interact=keeper_calls_interaction(),
+            http_fixtures={
+                "/api/v1/keepers/alpha/tool-calls?limit=100": keeper_calls_fixture(),
+            },
+        )
+        verification_gate = GatedHttpResponse((200, verification_snapshot([])))
+        run_terminal_scenario(
+            executable,
+            description="Verification unread before read",
+            interact=verification_unread_interaction(verification_gate),
+            http_fixtures={
+                VERIFICATION_QUEUE_PATH: verification_gate,
+            },
+        )
+
+    def run_overview() -> None:
+        verdict_requests: HttpRequests = []
+        with reject_editor_script() as reject_editor:
+            run_terminal_scenario(
+                executable,
+                description="Verification verdict keys",
+                interact=verification_verdict_interaction(verdict_requests),
+                http_fixtures=verification_verdict_fixtures(),
+                http_requests=verdict_requests,
+                extra_env={"EDITOR": reject_editor},
+            )
+        observer_requests: HttpRequests = []
+        run_terminal_scenario(
+            executable,
+            description="Observer feed subscription",
+            interact=observer_feed_interaction(observer_requests),
+            http_fixtures=observer_http_fixtures(),
+            http_requests=observer_requests,
+        )
+        dispatch_requests: HttpRequests = []
+        run_terminal_scenario(
+            executable,
+            description="Composer task dispatch",
+            interact=task_dispatch_interaction(dispatch_requests),
+            http_fixtures=task_dispatch_http_fixtures(),
+            http_requests=dispatch_requests,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Attention drawn once",
+            interact=attention_drawn_once_interaction(),
+            http_fixtures={
+                "/api/v1/dashboard/briefing": duplicated_attention_briefing(),
+            },
+        )
+        cost_reads: list[str] = []
+        run_terminal_scenario(
+            executable,
+            description="Pull requests on Overview",
+            interact=pull_requests_on_overview_interaction(cost_reads),
+            http_fixtures={
+                "/api/v1/dashboard/briefing": pull_requests_briefing(),
+                "/api/v1/repositories/pulls": repository_pulls_fixture(),
+                "/api/v1/dashboard/keeper-costs": counted(keeper_costs_fixture(), cost_reads),
+            },
+        )
+        cost_reads: list[str] = []
+        run_terminal_scenario(
+            executable,
+            description="Team spend title",
+            interact=spend_title_interaction(cost_reads),
+            http_fixtures={
+                "/api/v1/dashboard/briefing": spend_title_briefing(),
+                "/api/v1/dashboard/keeper-costs": counted(spend_title_costs_fixture(), cost_reads),
+            },
+        )
+        old_cost_reads: list[str] = []
+        old_cost_gate = GatedHttpResponse(
+            priced_cost_reply(1.0),
+            subsequent_response=priced_cost_reply(2.0),
+            hold_seconds=30.0,
+        )
+
+        def gated_cost() -> HttpResponse:
+            old_cost_reads.append("read")
+            return old_cost_gate()
+
+        run_terminal_scenario(
+            executable,
+            description="Cost off on discards old reply",
+            interact=cost_off_on_discards_old_reply_interaction(old_cost_gate, old_cost_reads),
+            http_fixtures={
+                "/api/v1/dashboard/briefing": pull_requests_briefing(),
+                "/api/v1/dashboard/keeper-costs": gated_cost,
+            },
+        )
+        cost_reads: list[str] = []
+        run_terminal_scenario(
+            executable,
+            description="Narrow stuck row keeps its cause",
+            interact=narrow_stuck_row_keeps_its_cause_interaction(cost_reads),
+            http_fixtures={
+                "/api/v1/dashboard/briefing": stuck_keeper_briefing(),
+                "/api/v1/dashboard/keeper-costs": counted(stuck_keeper_costs_fixture(), cost_reads),
+            },
+        )
+        run_terminal_scenario(
+            executable,
+            description="Unread keeper counted",
+            interact=unread_keeper_counted_interaction(),
+            http_fixtures={
+                "/api/v1/dashboard/briefing": unread_keeper_briefing(),
+            },
+        )
+        run_terminal_scenario(
+            executable,
+            description="Unlisted keepers named",
+            interact=unlisted_keepers_named_interaction(),
+            http_fixtures={
+                "/api/v1/dashboard/briefing": unlisted_keepers_briefing(),
+            },
+        )
+        run_terminal_scenario(
+            executable,
+            description="Paused apart from stopped",
+            interact=paused_apart_from_stopped_interaction(),
+            http_fixtures={
+                "/api/v1/dashboard/briefing": paused_and_stopped_briefing(),
+            },
+        )
+        composer_requests: HttpRequests = []
+        run_terminal_scenario(
+            executable,
+            description="Composer newline and send",
+            interact=composer_newline_interaction(composer_requests),
+            http_fixtures={
+                "/health?full=1": fleet_safety_fixture(),
+                "/api/v1/keepers/chat/stream": (
+                    503,
+                    {"error": "stop after composer request capture"},
+                ),
+            },
+            http_requests=composer_requests,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper detail overscroll normalization",
+            interact=keeper_detail_overscroll_interaction(
+                keeper_scroll_fixtures,
+                keeper_scroll_gate,
+            ),
+            http_fixtures=keeper_scroll_fixtures,
+        )
+
+    def run_rosters() -> None:
+        run_terminal_scenario(
+            executable,
+            description="Keeper selection identity",
+            interact=keeper_selection_identity_interaction,
+            http_fixtures=overview_event_http_fixtures(),
+            prepare_workspace=block_stderr_redirect,
+        )
+        run_terminal_scenario(
+            executable,
+            description="CLI base path overrides inherited environment",
+            interact=cli_base_path_overrides_environment_interaction,
+            http_fixtures=overview_event_http_fixtures(),
+            conflicting_env_base_path=True,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper message unreliable roster",
+            interact=keeper_message_unreliable_roster_interaction(
+                unreliable_roster_requests
+            ),
+            refresh=0.05,
+            http_fixtures=overview_event_http_fixtures(),
+            http_requests=unreliable_roster_requests,
+            prepare_workspace=block_stderr_redirect,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper message missing target",
+            interact=keeper_message_missing_target_interaction(missing_target_requests),
+            refresh=0.05,
+            http_fixtures=overview_event_http_fixtures(),
+            http_requests=missing_target_requests,
+        )
+        run_terminal_scenario(
+            executable,
+            description="approval selection identity",
+            interact=approval_selection_identity_interaction(
+                approval_fixtures,
+                approval_items,
+                approval_new,
+            ),
+            http_fixtures=approval_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Planning preserves selected goals and footer across resize",
+            interact=planning_resize_budget_interaction,
+            http_fixtures=planning_selection_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="Planning selection identity",
+            interact=planning_reorder_identity_interaction(planning_reorder_fixtures),
+            http_fixtures=planning_reorder_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Planning missing detail recovery",
+            interact=planning_missing_detail_interaction(planning_missing_fixtures),
+            http_fixtures=planning_missing_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Clients draws its footer and an armed search",
+            interact=clients_footer_interaction,
+            http_fixtures=clients_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="Clients keeps its footer while a crowded roster resizes",
+            interact=clients_footer_interaction,
+            http_fixtures=clients_http_fixtures(extra_clients=40),
+        )
+
+    def run_board_terminal() -> None:
+        board_reference_fixtures = board_reference_http_fixtures()
+        keeper_ask_fixtures, _ask_initial, _ask_new = approval_selection_http_fixtures()
+        keeper_ask_fixtures[KEEPER_ASKS_PATH] = keeper_asks_response()
+        keeper_ask_fixtures[KEEPER_ASK_ANSWER_PATH] = (200, {"ok": True})
+        ask_requests: HttpRequests = []
+        run_terminal_scenario(
+            executable,
+            description="Blocked Gate reason remains whole in approval detail",
+            interact=blocked_gate_detail_interaction(),
+            http_fixtures=blocked_gate_detail_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="A concealing escape in the input draws as text in approval detail",
+            interact=concealed_input_detail_interaction(),
+            http_fixtures=concealed_input_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="A cursor escape in a held call's question draws as text in approval detail",
+            interact=escaped_question_detail_interaction(),
+            http_fixtures=escaped_question_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="Answering a Keeper's question from an approval detail",
+            interact=keeper_ask_answer_interaction(keeper_ask_fixtures, ask_requests),
+            http_fixtures=keeper_ask_fixtures,
+            http_requests=ask_requests,
+        )
+        reader_fixtures, _, _ = approval_selection_http_fixtures()
+        reader_fixtures[KEEPER_ASKS_PATH] = keeper_asks_response(long_question=True)
+        reader_fixtures[KEEPER_ASK_ANSWER_PATH] = (200, {"ok": True})
+        reader_requests: HttpRequests = []
+        run_terminal_scenario(
+            executable,
+            description="Question arrows, overflow and visible free-text editing",
+            interact=question_reader_interaction(reader_requests),
+            http_fixtures=reader_fixtures,
+            http_requests=reader_requests,
+        )
+        mode_fixtures = blocked_gate_detail_http_fixtures()
+        mode_fixtures["/api/v1/dashboard/gate/mode"] = (200, {"ok": True})
+        mode_fixtures["/api/v1/dashboard/gate/external-mode"] = (200, {"ok": True})
+        mode_requests: HttpRequests = []
+        run_terminal_scenario(
+            executable,
+            description="Gate mode chooser applies only after Enter",
+            interact=gate_mode_picker_interaction(mode_requests),
+            http_fixtures=mode_fixtures,
+            http_requests=mode_requests,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Board references and related posts",
+            interact=board_reference_interaction(board_reference_fixtures),
+            http_fixtures=board_reference_fixtures,
+        )
+        run_board_json_regression(executable)
+        run_terminal_scenario(
+            executable,
+            description="Board selection identity",
+            interact=board_selection_identity_interaction(board_selection_fixtures),
+            http_fixtures=board_selection_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Board detail post authority",
+            interact=board_detail_authority_interaction(
+                board_authority_fixtures,
+                late_list,
+            ),
+            http_fixtures=board_authority_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Board detail isolation",
+            interact=board_detail_isolation_interaction(b_failure),
+            http_fixtures=board_detail_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Board exact detail survives page omission",
+            interact=board_paginated_detail_interaction(missing_target_fixtures, late_b),
+            http_fixtures=missing_target_fixtures,
+        )
+        run_terminal_scenario(
+            executable,
+            description="row-budgeted Overview and Board",
+            interact=assert_row_budgeted_surfaces,
+            http_fixtures=row_budget_http_fixtures(),
+            prepare_workspace=seed_row_budget_workspace,
+        )
+        run_terminal_scenario(
+            executable,
+            description="console diagnostic repair",
+            interact=repair_after_console_diagnostic,
+            prepare_workspace=block_stderr_redirect,
+            refresh=0.05,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper phase and runtime identity",
+            interact=keeper_runtime_phase_and_identity_interaction,
+            http_fixtures=keeper_runtime_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="Ctrl-L walks the Activity pane narrow, wide, hidden",
+            interact=acting_pane_ctrl_l_cycle_interaction,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Keeper long runtime identities remain distinguishable",
+            interact=keeper_long_runtime_identity_interaction,
+            http_fixtures=keeper_runtime_http_fixtures(
+                alpha_runtime_id="antigravity_subscription.gemini-3-7-flash-thinking-preview",
+                beta_runtime_id="antigravity_subscription.gemini-3-7-flash-thinking-lite",
+            ),
+        )
+        run_terminal_scenario(
+            executable,
+            description="q",
+            interact=navigate_with_arrows_and_quit,
+        )
+        run_terminal_scenario(
+            executable,
+            description="wheel scrolls, clicks do not",
+            interact=wheel_scrolls_and_clicks_do_not,
+            http_fixtures=compact_input_gate_http_fixtures(),
+        )
+        run_terminal_scenario(
+            executable,
+            description="compact q",
+            interact=quit_from_compact_message,
+        )
+        run_terminal_scenario(
+            executable,
+            description="Ctrl-C",
+            interact=interrupt_with_ctrl_c,
+            confirm_exit=b"\x03",
+        )
+        # No confirming key: the signal is the whole exit.
+        run_terminal_scenario(
+            executable,
+            description="SIGTERM",
+            interact=terminate_with_sigterm,
+            confirm_exit=b"",
+        )
+
+    groups = (run_general, run_surfaces, run_overview, run_rosters, run_board_terminal)
+    if group is None:
+        for run in groups:
+            run()
+    else:
+        groups[group]()
 
 
 def run_cli_base_path_regression(executable: str) -> None:
@@ -17519,8 +17659,16 @@ def run_schedule_delivery_regression(executable: str) -> None:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        # Wait for a loaded row, not for the title. The title is drawn the
+        # moment the screen opens, while the list still reads
+        # "HTTP [loading...]" and "(not loaded yet - press r)". Waiting on the
+        # title let the checks below read that frame, and they failed on a
+        # list that had not arrived yet (PR check runs 36250155607,
+        # 36250173553, 36251291941). The reaction fact is contiguous in raw
+        # terminal output. The row's "succeeded consumed_ack" crosses an ANSI
+        # style boundary; require that full row text after stripping below.
         listing = palette_go(
-            process, master_fd, output, b"go schedules", b"MASC Keepers / Schedules"
+            process, master_fd, output, b"go schedules", b"reaction:matched_consumed_ack"
         )
         plain = CSI_RE.sub(b"", listing)
         for needle in (
@@ -17941,6 +18089,22 @@ def resources_detail_interaction() -> Interaction:
                 raise AssertionError(
                     f"80-column Resources detail omitted {needle!r}: {narrow_plain!r}"
                 )
+
+        # Eighty columns is under the split threshold, so the frame draws one
+        # pane and the focus chooses which. h goes back to the listing with
+        # the detail still read, l opens it again. Both keys were refused
+        # under the threshold until #39017, on a screen already drawing their
+        # answer.
+        listing = send_and_wait(
+            process, master_fd, output, b"h", b"Event Log (JSON)"
+        )
+        if b"read-only data exposed by this server" in CSI_RE.sub(b"", listing):
+            raise AssertionError(
+                f"h left the detail drawn instead of the listing: {listing!r}"
+            )
+        send_and_wait(
+            process, master_fd, output, b"l", b"read-only data exposed by this server"
+        )
 
         wide = resize_and_wait(
             process,
@@ -18561,6 +18725,17 @@ def machine_live_query(path: str) -> tuple[str, LiveMark | None]:
     return query["source_kind"][0], mark
 
 
+def with_live_activity(kind: str, answer: dict[str, object]) -> dict[str, object]:
+    """The live route adds the DOS activity feed to every DOS answer, the
+    no_machine one included (lib/server/server_routes_http_routes_lane_addons.ml
+    [with_activity]); MSX answers carry none. Since #39286 the TUI refuses a
+    DOS answer without the array, so a fixture that leaves it out never draws
+    the DOS row."""
+    if kind == "dos_capture":
+        return dict(answer, activity=[])
+    return answer
+
+
 def machine_live_answer(
     kind: str, body: dict[str, object] | None, since: LiveMark | None, *,
     count: int, frame_number: int | None,
@@ -18569,17 +18744,17 @@ def machine_live_answer(
     picture ([None]: no machine). [count] is the machine's change count, so a
     machine that did not move answers "unchanged"."""
     if body is None:
-        return 200, {"source_kind": kind, "state": "no_machine"}
+        return 200, with_live_activity(kind, {"source_kind": kind, "state": "no_machine"})
     marked = {"source_kind": kind, "change_count": count, "incarnation": LIVE_INCARNATION}
     if since == (count, LIVE_INCARNATION):
-        return 200, dict(marked, state="unchanged")
+        return 200, with_live_activity(kind, dict(marked, state="unchanged"))
     answer: dict[str, object] = dict(marked, state="changed", screen={
         "format": "rgb8", "width": body["width"], "height": body["height"],
         "rgb_base64": body["rgb_base64"],
     })
     if frame_number is not None:
         answer["frame_number"] = frame_number
-    return 200, answer
+    return 200, with_live_activity(kind, answer)
 
 
 def msx_live_fixture(frame: Callable[[], HttpResponse]) -> PathHttpResponse:
@@ -18588,7 +18763,7 @@ def msx_live_fixture(frame: Callable[[], HttpResponse]) -> PathHttpResponse:
     def resolve(path: str) -> HttpResponse:
         kind, since = machine_live_query(path)
         if kind == "dos_capture":
-            return 200, {"source_kind": kind, "state": "no_machine"}
+            return 200, with_live_activity(kind, {"source_kind": kind, "state": "no_machine"})
         if kind != "msx_capture":
             raise AssertionError(f"unexpected source kind: {kind}")
         status, body = frame()
@@ -19479,11 +19654,9 @@ KEYBOARD_FAMILY = ScenarioFamily(
     "keyboard", "keyboard PTY regression", (run_keyboard_regression,)
 )
 
-# Each family has one dune rule that names it after the binary, except the
-# keyboard walk, whose rule names none, and each rule is on the runtest alias.
-# test_tui_keyboard_scenario_selection.py reads those rules from test/dune and
-# test/stanzas/*.inc and fails on a family with no rule, a rule naming no
-# family, or a rule off runtest that its exception list does not name.
+# Named families each have a Dune rule, while the keyboard aggregate runs six
+# separate PTY rules. test_tui_keyboard_scenario_selection.py reads those rules
+# from test/dune and test/stanzas/*.inc and checks both forms of wiring.
 SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     KEYBOARD_FAMILY,
     ScenarioFamily("fusion-history", "historical Fusion inspection", (run_fusion_history_regression,)),
@@ -19565,7 +19738,7 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     ScenarioFamily(
         "skill-usage-coverage",
         "Skill usage coverage regression",
-        (run_skill_usage_coverage_regression, run_skill_usage_coverage_error_regression),
+        (run_skill_usage_coverage_regression, run_skill_catalog_error_regression),
     ),
     ScenarioFamily(
         "tools-request-identity",

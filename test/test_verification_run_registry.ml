@@ -518,7 +518,7 @@ let test_tool_result_keeps_typed_disposition_and_input () =
   let result =
     Tool_result.ok
       ~tool_name:"report_review_verdict"
-      ~start_time:(Time_compat.now ())
+      ~start_time:(Tool_timing.start ())
       "Completion verdict recorded: APPROVE"
   in
   let tool =

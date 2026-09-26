@@ -195,8 +195,8 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
      |> Yojson.Safe.Util.member "observation_only"
      |> Yojson.Safe.Util.to_bool);
   check int
-    "five fixed lanes"
-    5
+    "six fixed lanes"
+    6
     (json |> Yojson.Safe.Util.member "lanes" |> Yojson.Safe.Util.to_list |> List.length);
   let status lane_id =
     lane_by_id json lane_id
@@ -213,6 +213,8 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
   check string "hitl idle" "idle" (status "hitl_auto_judge");
   check string "librarian degraded" "degraded" (status "librarian_exact");
   check string "verifier idle" "idle" (status verifier_lane_id);
+  check string "Stagehand has no retained run" "no_retained_observation"
+    (status "browser_stagehand_exact");
   let hitl_slots =
     lane_by_id json "hitl_auto_judge"
     |> Yojson.Safe.Util.member "selected_slots"

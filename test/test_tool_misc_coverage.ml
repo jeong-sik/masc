@@ -536,6 +536,13 @@ let () = test "dispatch_web_search_grounded_envelope" (fun () ->
       | None -> failwith "dispatch returned None")
 )
 
+(* #27392: masc_web_search stamps its own start, so a result reports this
+   call's span. A caller-supplied 0.0 used to report the distance from the
+   Unix epoch (56 years) on both the success and the failure path. *)
+let assert_call_span result =
+  let duration_ms = Tool_result.duration_ms result in
+  assert (duration_ms >= 0.0 && duration_ms < 60_000.0)
+
 let () = test "web_search_simulate_for_test_falls_back_after_error" (fun () ->
   let result =
     Tool_misc.web_search_simulate_for_test ~query:"ocaml eio" ~limit:3
@@ -548,7 +555,8 @@ let () = test "web_search_simulate_for_test_falls_back_after_error" (fun () ->
   let json = parse_json ((Tool_result.message result)) in
   let result_json = Yojson.Safe.Util.member "result" json in
   assert (Yojson.Safe.Util.member "engine" result_json = `String "searxng");
-  assert (Yojson.Safe.Util.member "result_count" result_json = `Int 1)
+  assert (Yojson.Safe.Util.member "result_count" result_json = `Int 1);
+  assert_call_span result
 )
 
 (* Ollama sends page text in the field read as a snippet. A snippet past
@@ -601,7 +609,8 @@ let () = test "web_search_simulate_for_test_reports_all_failures" (fun () ->
   assert (not (Tool_result.is_success result));
   assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
   assert
-    (str_contains (Tool_result.message result) "exa: provider unavailable")
+    (str_contains (Tool_result.message result) "exa: provider unavailable");
+  assert_call_span result
 )
 
 let () = test "web_search_provider_error_to_string_renders_typed_variants" (fun () ->

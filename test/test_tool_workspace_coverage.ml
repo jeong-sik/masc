@@ -660,14 +660,14 @@ let () =
     let _ =
       Task.Tool.handle_add_task
         ~tool_name:"test_tool"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         task_ctx
         (`Assoc [ "title", `String "Check transition claim" ])
     in
     let _ =
       Task.Tool.handle_transition
         ~tool_name:"test_tool"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         task_ctx
         (`Assoc [ "task_id", `String "task-001"; "action", `String "claim" ])
     in
@@ -703,14 +703,14 @@ let () =
     let _ =
       Task.Tool.handle_add_task
         ~tool_name:"test_tool"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         task_ctx
         (`Assoc [ "title", `String "Check claim next" ])
     in
     let _ =
       Task.Tool.handle_claim_next
         ~tool_name:"test_tool"
-        ~start_time:0.0
+        ~start_time:(Tool_timing.start ())
         task_ctx
         (`Assoc [])
     in

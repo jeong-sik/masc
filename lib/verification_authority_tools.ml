@@ -429,7 +429,7 @@ let run t tool ~args =
   | (Keeper_producer _ | Workspace_producer), Web_fetch ->
     Tool_misc_web_fetch.handle
       ~tool_name:(tool_name Web_fetch)
-      ~start_time:(Time_compat.now ())
+      ~start_time:(Tool_timing.start ())
       args
     |> Keeper_tool_execution.of_tool_result
     |> execution_result
@@ -546,7 +546,7 @@ let media_result t tool ~name ~args ~start_time =
 ;;
 
 let dispatch t ~name ~args =
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let text_result = function
     | Ok text -> Tool_result.ok ~tool_name:name ~start_time text
     | Error (Runtime_error detail) -> Tool_result.error ~failure_class:Tool_result.Runtime_failure

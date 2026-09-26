@@ -11,16 +11,16 @@ let standalone_lane = function
   | Workspace_curator -> Standalone_lane.Workspace_curator
 ;;
 
-(* The one place this registry decides which lanes it records. A Verifier
-   review is recorded by Verification_run_registry or
-   Goal_verification_run_registry, each keyed by the Task or Goal it reviews,
-   so a Verifier row here would be a second record of one review. *)
+(* The one place this registry decides which lanes it records. Verifier reviews
+   have their own Task and Goal registries. Browser Stagehand requests do not
+   yet create retained lane runs, so neither is admitted here on replay. *)
 let lane_of_standalone = function
   | Standalone_lane.Librarian -> Some Librarian
   | Standalone_lane.Hitl_auto_judge -> Some Hitl_auto_judge
   | Standalone_lane.Board_attention -> Some Board_attention
   | Standalone_lane.Workspace_curator -> Some Workspace_curator
   | Standalone_lane.Verifier -> None
+  | Standalone_lane.Browser_stagehand -> None
 ;;
 
 let lane_id lane = Standalone_lane.to_id (standalone_lane lane)
@@ -153,7 +153,7 @@ let lane_of_key key =
      | Some lane -> Ok lane
      | None ->
        Error
-         (Printf.sprintf "exact lane %S is recorded by the verification run registries" key))
+         (Printf.sprintf "exact lane %S has no run records in this registry" key))
 ;;
 
 let outcome_label = function

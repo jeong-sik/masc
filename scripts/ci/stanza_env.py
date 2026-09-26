@@ -223,7 +223,7 @@ def collect_literal_deps(form, suite_dir: str) -> list[str]:
     return [dep for item in form for dep in collect_literal_deps(item, suite_dir)]
 
 
-def resolve(key: str, value: str) -> tuple[str, str | None]:
+def resolve(key: str, value: str, *, allow_dependency_values: bool = True) -> tuple[str, str | None]:
     """(value for env, dune target to build first).
 
     A value naming a dune variable other than %{dep:...} cannot be resolved
@@ -232,6 +232,11 @@ def resolve(key: str, value: str) -> tuple[str, str | None]:
     """
     match = DEP_RE.match(value)
     if match:
+        if not allow_dependency_values:
+            raise StanzaError(
+                f"{key} needs a Dune action dependency: {value!r}; "
+                "this runner has no Dune action directory"
+            )
         return match.group(1), match.group(1)
     if VAR_RE.search(value):
         raise StanzaError(
@@ -357,7 +362,8 @@ def stanza_text(suite: str, suite_dir: str = DEFAULT_SUITE_DIR) -> tuple[str, bo
 
 
 def suite_env(
-    suite: str, text: str, own_file: bool = True, *, suite_dir: str
+    suite: str, text: str, own_file: bool = True, *, suite_dir: str,
+    allow_dependency_values: bool = True,
 ) -> tuple[list[tuple[str, str]], list[str]]:
     forms = parse(tokenize(text))
     if own_file:
@@ -409,7 +415,7 @@ def suite_env(
     env: list[tuple[str, str]] = []
     deps = list(dict.fromkeys(deps))
     for key, value in pairs:
-        resolved, dep = resolve(key, value)
+        resolved, dep = resolve(key, value, allow_dependency_values=allow_dependency_values)
         env.append((key, resolved))
         if dep is not None and dep not in deps:
             deps.append(dep)

@@ -139,8 +139,9 @@ type docker_shell_result =
    observe this: the sandbox backend owns its hang protection rather than a
    caller-side product-specific timeout. *)
 
-let resolve_sandbox_image (meta : keeper_meta) =
-  (Env_config_sandbox.Runtime.resolve_image meta.sandbox_image).tag
+let resolve_sandbox_image ~(config : Workspace.config) (meta : keeper_meta) =
+  Keeper_sandbox_image_resolver.for_keeper ~base_path:config.Workspace.base_path meta
+  |> Result.map (fun pinned -> pinned.Keeper_sandbox_image_catalog.reference)
 ;;
 
 let docker_cleanup_rm_timeout_sec () =
@@ -434,7 +435,7 @@ let run_docker_shell_command_with_status_internal
       ~(cmd : string)
       ~(network_mode : network_mode)
   =
-  let image = resolve_sandbox_image meta in
+  let image = resolve_sandbox_image ~config meta in
   let sandbox_error = sandbox_error ~config ~meta in
   (* The docker entrypoints execute only the Docker profile. A [Micro_vm]
      keeper reaching here would be run under docker — the substitution the
@@ -445,9 +446,10 @@ let run_docker_shell_command_with_status_internal
     sandbox_error
       (Keeper_types_profile_sandbox.backend_unimplemented_message
          Keeper_types_profile_sandbox.Micro_vm)
-  else if String.trim image = ""
-  then sandbox_error "keeper sandbox docker image is not configured"
-  else (
+  else match image with
+  | Error error ->
+    sandbox_error (Keeper_turn_sandbox_runtime.image_unresolved_message error)
+  | Ok image -> (
     let cmd = rewrite_docker_command_paths ~config ~meta cmd in
     match
         validate_docker_dispatch_context
@@ -659,16 +661,6 @@ let run_trusted_docker_shell_command_with_status =
   run_docker_shell_command_with_status_internal ~validate_command_paths:false
 ;;
 
-(** Preflight shared by [run_docker_bash]. Command meaning is deliberately
-    opaque here; socket, mount, network, and path containment are enforced by
-    the sandbox itself. *)
-let docker_bash_preflight ~config ~meta ~cmd:_ =
-  let image = resolve_sandbox_image meta in
-  let sandbox_error_json = sandbox_error_json ~config ~meta in
-  if String.trim image = ""
-  then Some (sandbox_error_json "keeper sandbox docker image is not configured")
-  else None
-;;
 
 let docker_bash_response ~ok ~network_label ~status ~output ~cwd_response
   =
@@ -730,7 +722,13 @@ let run_docker_bash
       ~(cmd : string)
       ~(network_mode : network_mode)
   =
-  let image = resolve_sandbox_image meta in
+  (* The turn's runtime already holds the image its turn resolved; asking the
+     catalog again could name a build the runtime is not running. *)
+  let image =
+    match turn_sandbox_runtime with
+    | Some runtime -> Keeper_turn_sandbox_runtime.image runtime
+    | None -> resolve_sandbox_image ~config meta
+  in
   let sandbox_error_json = sandbox_error_json ~config ~meta in
   if meta.sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
   then
@@ -738,9 +736,10 @@ let run_docker_bash
       (Keeper_types_profile_sandbox.backend_unimplemented_message
          Keeper_types_profile_sandbox.Micro_vm)
   else (
-  match docker_bash_preflight ~config ~meta ~cmd with
-  | Some err -> err
-  | None -> (
+  match image with
+  | Error error ->
+    sandbox_error_json (Keeper_turn_sandbox_runtime.image_unresolved_message error)
+  | Ok image -> (
     match turn_sandbox_runtime, network_mode with
     | Some runtime, Network_none ->
       (match validate_docker_dispatch_context ~config ~meta ~cwd ~cmd () with

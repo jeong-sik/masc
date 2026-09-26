@@ -56,11 +56,11 @@ let expect_no_args ~tool_name ~start_time args =
            (Printf.sprintf "%s arguments must be an object" tool_name))
 
 let dashboard_handler =
-  ref (fun ~tool_name ~start_time:_ _ctx _args ->
+  ref (fun ~tool_name ~start_time _ctx _args ->
     Tool_result.make_err
       ~tool_name
       ~class_:Tool_result.Workflow_rejection
-      ~start_time:0.0
+      ~start_time
       "Dashboard handler not registered"
   )
 
@@ -147,7 +147,7 @@ let ask_context (ctx : context) arguments : Mcp_tool_runtime_ask.context =
    added to [Tool_schemas_misc.misc_operation] is a compile error here. [None]
    means the name is not this facade's -- the tag dispatcher owns that case. *)
 let dispatch ctx ~name ~args : Tool_result.result option =
-  let start = Time_compat.now () in
+  let start = Tool_timing.start () in
   let lane_error error =
     let class_ = match error with
       | Lane_addon_runtime.Request_rejected _ -> Tool_result.Workflow_rejection
@@ -241,6 +241,8 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some (Tool_misc_browser_lane.handle_goto ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_browser_act ->
       Some (Tool_misc_browser_lane.handle_act ~base_path:ctx.config.base_path ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_browser_instruct ->
+      Some (Tool_misc_browser_lane.handle_instruct ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_msx_load ->
       Some
         (Tool_misc_msx_lane.handle_load ~tool_name:name ~start_time:start
@@ -383,6 +385,7 @@ let is_read_only = function
     Tool_schemas_misc.Misc_browser_goto
   | Tool_schemas_misc.Misc_browser_act
   | Tool_schemas_misc.Misc_browser_interact
+  | Tool_schemas_misc.Misc_browser_instruct
   | Tool_schemas_misc.Misc_web_fetch
   | Tool_schemas_misc.Misc_web_search -> false
 

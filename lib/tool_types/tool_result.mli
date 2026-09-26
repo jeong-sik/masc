@@ -196,14 +196,14 @@ val is_failed : result -> bool
 
 (** Completed result with an opaque string body.  Producers with typed JSON
     must use {!make_ok} and pass [~data] directly. *)
-val ok : tool_name:string -> start_time:float -> string -> result
+val ok : tool_name:string -> start_time:Tool_timing.started -> string -> result
 
 (** Failure result with an opaque string body.  The producer must supply the
     failure class explicitly; message contents never affect the class. *)
 val error
   :  failure_class:tool_failure_class
   -> tool_name:string
-  -> start_time:float
+  -> start_time:Tool_timing.started
   -> string
   -> result
 
@@ -214,7 +214,7 @@ val error
 val of_exn
   :  ?failure_class:tool_failure_class
   -> tool_name:string
-  -> start_time:float
+  -> start_time:Tool_timing.started
   -> exn
   -> result
 
@@ -223,7 +223,7 @@ val of_exn
 (** Typed success constructor.  [data] defaults to [`Null]. *)
 val make_ok
   :  tool_name:string
-  -> start_time:float
+  -> start_time:Tool_timing.started
   -> ?data:Yojson.Safe.t
   -> ?metadata:Yojson.Safe.t
   -> ?content_blocks:Llm_provider.Types.content_block list
@@ -234,7 +234,7 @@ val make_ok
     boundary; the constructor itself is the only semantic authority. *)
 val make_deferred
   :  tool_name:string
-  -> start_time:float
+  -> start_time:Tool_timing.started
   -> ?data:Yojson.Safe.t
   -> ?metadata:Yojson.Safe.t
   -> unit
@@ -244,7 +244,7 @@ val make_deferred
 val make_err
   :  tool_name:string
   -> class_:tool_failure_class
-  -> start_time:float
+  -> start_time:Tool_timing.started
   -> ?data:Yojson.Safe.t
   -> ?metadata:Yojson.Safe.t
   -> ?effect_disposition:failure_effect_disposition
@@ -257,7 +257,7 @@ val make_err
 val make_err_of_exn
   :  ?class_:tool_failure_class
   -> tool_name:string
-  -> start_time:float
+  -> start_time:Tool_timing.started
   -> exn
   -> result
 
@@ -265,8 +265,8 @@ val make_err_of_exn
 
 (** {!make_err} with [~class_:Workflow_rejection] and the default [`Null]
     data payload. *)
-val workflow_err : tool_name:string -> start_time:float -> string -> result
+val workflow_err : tool_name:string -> start_time:Tool_timing.started -> string -> result
 
 (** {!make_err} with [~class_:Runtime_failure] and the default [`Null]
     data payload. *)
-val runtime_err : tool_name:string -> start_time:float -> string -> result
+val runtime_err : tool_name:string -> start_time:Tool_timing.started -> string -> result

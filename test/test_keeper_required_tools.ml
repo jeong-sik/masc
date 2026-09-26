@@ -149,7 +149,7 @@ candidates = ["native.no_tools", "binding.sample"]
            ; input_schema = `Assoc [ "type", `String "object" ]
            } ]
        ~dispatch:(fun ~name ~args:_ ->
-         Tool_result.ok ~tool_name:name ~start_time:(Time_compat.now ()) "wrapper fixture")
+         Tool_result.ok ~tool_name:name ~start_time:(Tool_timing.start ()) "wrapper fixture")
        ~tool_requirement:Required.Required
        ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ ~dispatch error ->
          wrapper_attempts := (runtime_id, dispatch, error) :: !wrapper_attempts)

@@ -245,7 +245,7 @@ pin-depends: [
   ]
   [
     "ocaml-msx.dev"
-    "git+https://github.com/jeong-sik/ocaml-msx.git#cab7f9f36828b005f5885793ddf5cf541fde9149"
+    "git+https://github.com/jeong-sik/ocaml-msx.git#50ba5354b35cdeb1c8350f6a359ae819df256b8a"
   ]
   [
     "ocaml-protoc-plugin.6.2.0"

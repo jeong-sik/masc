@@ -482,6 +482,12 @@ let test_batch_claim_freezes_inputs_and_settles_members () =
     ~now:(float_of_int index) ~operation_id ~source:(source "same-person")
     ~input:(input (Id.to_string operation_id))))) [first; second; third];
   ignore (store_ok (Store.edit_queued store ~operation_id:second ~input:(input "edited before dispatch")));
+  let skip_middle _ _ =
+    Ok (Some { Store.members = [first; third]; input = input "invalid batch" }) in
+  (match Store.claim_next ~batch:skip_middle store ~now:3. with
+   | Error (Store.Invalid_input _) -> ()
+   | Error error -> fail (Store.error_to_string error)
+   | Ok _ -> fail "batch skipped an earlier queued message");
   let batch head candidates =
     check string "head" (Id.to_string first) (Id.to_string head.Operation.operation_id);
     check int "all ready inputs available" 3 (List.length candidates);

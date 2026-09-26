@@ -16,7 +16,7 @@ let register_test_metadata name =
 ;;
 
 let tool_ok ?(tool_name = "") message =
-  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+  Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data:(`String message) ()
 ;;
 
 let () =

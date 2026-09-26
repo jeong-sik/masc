@@ -1659,7 +1659,7 @@ let test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate () =
     let result =
       Tool_result.make_deferred
         ~tool_name:"keeper_wait"
-        ~start_time:(Time_compat.now ())
+        ~start_time:(Tool_timing.start ())
         ~data:(`Assoc [ "reason", `String "external_effect_pending" ])
         ()
     in

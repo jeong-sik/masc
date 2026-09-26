@@ -18,6 +18,8 @@ type picture = {
 }
 
 type answer = No_machine | Unchanged of mark | Picture of picture
+type activity_entry = { at : float; who : string; action : string }
+type activity = No_activity_feed | Activity of activity_entry list
 
 let live_path = "/api/v1/lane-addons/live"
 
@@ -90,6 +92,41 @@ let screen_of = function
       Ok (width, height, rgb)
   | Some _ | None -> Error "live: a changed answer carries no screen object"
 
+let activity_entry_of index = function
+  | `Assoc fields when has_duplicates fields ->
+      Error (Printf.sprintf "live: duplicate activity[%d] fields" index)
+  | `Assoc fields ->
+      let* at = match List.assoc_opt "at" fields with
+        | Some (`Int at) -> Ok (Float.of_int at)
+        | Some (`Float at) when Float.is_finite at -> Ok at
+        | Some _ | None ->
+            Error (Printf.sprintf "live: activity[%d].at is not a finite number" index) in
+      let string_field name =
+        match List.assoc_opt name fields with
+        | Some (`String value) -> Ok value
+        | Some _ | None ->
+            Error (Printf.sprintf "live: activity[%d].%s is not a string" index name)
+      in
+      let* who = string_field "who" in
+      let* action = string_field "action" in
+      Ok { at; who; action }
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error (Printf.sprintf "live: activity[%d] is not an object" index)
+
+let activity_of source fields =
+  match source, List.assoc_opt "activity" fields with
+  | Msx, None -> Ok No_activity_feed
+  | Msx, Some _ -> Error "live: an MSX answer carries no activity field"
+  | Dos, Some (`List items) ->
+      let rec entries index acc = function
+        | [] -> Ok (Activity (List.rev acc))
+        | item :: rest ->
+            let* entry = activity_entry_of index item in
+            entries (index + 1) (entry :: acc) rest
+      in
+      entries 0 [] items
+  | Dos, (Some _ | None) -> Error "live: a DOS answer carries an activity array"
+
 let decode source json =
   match json with
   | `Assoc fields when has_duplicates fields -> Error "live: duplicate fields"
@@ -97,7 +134,7 @@ let decode source json =
       let* () = match List.assoc_opt "source_kind" fields with
         | Some (`String kind) when String.equal kind (source_kind source) -> Ok ()
         | Some _ | None -> Error ("live: the answer is not for " ^ source_kind source) in
-      match List.assoc_opt "state" fields with
+      let* answer = match List.assoc_opt "state" fields with
       | Some (`String "no_machine") -> Ok No_machine
       | Some (`String "unchanged") ->
           let* mark = mark_of fields in
@@ -107,29 +144,11 @@ let decode source json =
           let* time = time_of source fields in
           let* width, height, rgb = screen_of (List.assoc_opt "screen" fields) in
           Ok (Picture { width; height; rgb; mark; time })
-      | Some _ | None -> Error "live: state is not no_machine, unchanged or changed")
+      | Some _ | None -> Error "live: state is not no_machine, unchanged or changed" in
+      let* activity = activity_of source fields in
+      Ok (answer, activity))
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
       Error "live: expected an object"
-
-type activity_entry = { at : float; who : string; action : string }
-
-let activity_entry_of = function
-  | `Assoc fields -> (
-      match
-        List.assoc_opt "at" fields, List.assoc_opt "who" fields,
-        List.assoc_opt "action" fields
-      with
-      | Some (`Float at), Some (`String who), Some (`String action) ->
-          Some { at; who; action }
-      | _, _, _ -> None)
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
-
-let activity_of = function
-  | `Assoc fields -> (
-      match List.assoc_opt "activity" fields with
-      | Some (`List items) -> List.filter_map activity_entry_of items
-      | Some _ | None -> [])
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
 
 type view = Unread | Not_loaded | Showing of picture | Failed of string
 

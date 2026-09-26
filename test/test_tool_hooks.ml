@@ -11,7 +11,7 @@ let log_call s = call_log := !call_log @ [s]
 let reset_log () = call_log := []
 
 let tool_ok ?(tool_name = "") message =
-  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+  Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data:(`String message) ()
 ;;
 
 let test_schema tool_name : Masc_domain.tool_schema =

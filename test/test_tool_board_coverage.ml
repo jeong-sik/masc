@@ -724,14 +724,14 @@ let test_activity_projection_failure_preserves_primary_effect () =
   let primary_result =
     Tool_result.make_ok
       ~tool_name:"masc_board_post"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ~data:(`Assoc [ ("id", `String "post-1") ])
       ()
   in
   let result =
     Mcp_tool_runtime_board.For_testing.result_after_activity_projection
       ~tool_name:"masc_board_post"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       ~primary_result
       ~operation:"posted"
       (fun () -> Error "activity graph unavailable")
@@ -1259,7 +1259,7 @@ let mcp_runtime_board_dispatch name args =
   let state = Mcp_server.For_testing.create_state ~base_path:_test_base_path in
   Mcp_tool_runtime_board.dispatch ~config:(Mcp_server.workspace_config state)
     ~agent_name:"mcp-runtime-curator" ~arguments:args ~state ~name
-    ~start_time:(Unix.gettimeofday ())
+    ~start_time:(Tool_timing.start ())
 
 let require_mcp_runtime_result name args =
   match mcp_runtime_board_dispatch name args with

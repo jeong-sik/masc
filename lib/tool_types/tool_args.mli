@@ -118,21 +118,22 @@ val ok_assoc : (string * Yojson.Safe.t) list -> Yojson.Safe.t
 (** {1 Tool_result.result Helpers}
 
     These return structured {!Tool_result.result} directly, eliminating the
-    need for [wrap_result] at the dispatch boundary.  Optional
-    [~tool_name] and [~start_time] are forwarded to [Tool_result]
-    constructors; absent metadata defaults to an empty tool name and the
-    current timestamp. *)
+    need for [wrap_result] at the dispatch boundary.  [~tool_name] and
+    [~start_time] are forwarded to [Tool_result] constructors; an absent
+    [~tool_name] becomes the empty string.  [~start_time] is required so
+    duration is measured from when execution began, not from when the
+    result is assembled. *)
 
 val error_result_typed :
   ?tool_name:string ->
-  ?start_time:float ->
+  start_time:Tool_timing.started ->
   code:error_code ->
   string ->
   Tool_result.result
 (** Class: {!failure_class_of_error_code}[ code]. *)
 
 val ok_result :
-  ?tool_name:string -> ?start_time:float -> (string * Yojson.Safe.t) list -> Tool_result.result
+  ?tool_name:string -> start_time:Tool_timing.started -> (string * Yojson.Safe.t) list -> Tool_result.result
 
 (** {1 Required field extractors (Parse, Don't Validate)}
 
@@ -180,7 +181,7 @@ val validation_error_assoc : field_error list -> Yojson.Safe.t
 val validation_error_response : field_error list -> string
 
 val validation_error_result :
-  ?tool_name:string -> ?start_time:float -> field_error list -> Tool_result.result
+  ?tool_name:string -> start_time:Tool_timing.started -> field_error list -> Tool_result.result
 (** {!validation_error_assoc} as a failed result. Class:
     {!failure_class_of_error_code}[ Validation_error]. *)
 

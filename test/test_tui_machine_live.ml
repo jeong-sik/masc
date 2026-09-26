@@ -18,8 +18,9 @@ let marked ?(kind = "dos_capture") ?(count = 7) ?(incarnation = "inc-1") state =
   [ "source_kind", `String kind; "state", `String state;
     "change_count", `Int count; "incarnation", `String incarnation ]
 
-let dos_changed ?count ?incarnation ?(screen = screen ()) ?(extra = []) () =
-  `Assoc (marked ?count ?incarnation "changed" @ extra @ [ screen ])
+let dos_changed ?count ?incarnation ?(screen = screen ())
+    ?(activity = `List []) ?(extra = []) () =
+  `Assoc (marked ?count ?incarnation "changed" @ extra @ [ screen; "activity", activity ])
 
 let msx_changed ?(frame = [ "frame_number", `Int 88 ]) () =
   `Assoc (marked ~kind:"msx_capture" "changed" @ frame @ [ screen () ])
@@ -36,7 +37,7 @@ let answer =
 
 let decoded source json =
   match Live.decode source json with
-  | Ok answer -> answer
+  | Ok (answer, _) -> answer
   | Error detail -> failf "expected an answer, got %s" detail
 
 let refused source json =
@@ -47,12 +48,12 @@ let refused source json =
 let test_no_machine () =
   check answer "state no_machine" Live.No_machine
     (decoded Live.Dos (`Assoc [ "source_kind", `String "dos_capture";
-                                "state", `String "no_machine" ]))
+                                "state", `String "no_machine"; "activity", `List [] ]))
 
 let test_unchanged () =
   check answer "unchanged carries its mark"
     (Live.Unchanged { count = 41; incarnation = "inc-1" })
-    (decoded Live.Dos (`Assoc (marked ~count:41 "unchanged")))
+    (decoded Live.Dos (`Assoc (marked ~count:41 "unchanged" @ [ "activity", `List [] ])))
 
 let test_dos_picture () =
   match decoded Live.Dos (dos_changed ()) with
@@ -162,57 +163,82 @@ let activity_entry =
       Format.fprintf fmt "%f/%s/%s" e.at e.who e.action)
     ( = )
 
+let decoded_activity source json =
+  match Live.decode source json with
+  | Ok (_, activity) -> activity
+  | Error detail -> failf "expected activity, got %s" detail
+
+let activity_entries json =
+  match decoded_activity Live.Dos json with
+  | Live.Activity entries -> entries
+  | Live.No_activity_feed -> fail "a DOS answer must carry its feed"
+
 let test_activity_parses_entries () =
   let json =
     dos_changed
-      ~extra:[ "activity",
-               `List [ entry_json ~at:2.0 ~who:"liu-bei" ~action:"step 1,000";
-                       entry_json ~at:1.0 ~who:"cao-cao" ~action:"press a" ] ]
+      ~activity:(`List [ entry_json ~at:2.5 ~who:"liu-bei" ~action:"step 1,000";
+                        `Assoc [ "at", `Int 1; "who", `String "cao-cao";
+                                 "action", `String "press a" ] ])
       ()
   in
-  check (list activity_entry) "both entries, in the order the JSON gave them"
-    [ { Live.at = 2.0; who = "liu-bei"; action = "step 1,000" };
+  check (list activity_entry) "integer and fractional times retain every entry in order"
+    [ { Live.at = 2.5; who = "liu-bei"; action = "step 1,000" };
       { Live.at = 1.0; who = "cao-cao"; action = "press a" } ]
-    (Live.activity_of json)
+    (activity_entries json)
 
-let test_activity_absent_is_empty () =
-  check (list activity_entry) "no activity field, nothing to show" []
-    (Live.activity_of (dos_changed ()))
+let dos_states =
+  [ marked "no_machine"; marked "unchanged"; marked "changed" @ [ screen () ] ]
 
-(* The field {!Live.decode} never names is exactly the field {!activity_of}
-   reads: this is the direct proof that an unrecognized key does not fail
-   the read it rides beside, not just an assertion about [activity_of] in
-   isolation. *)
-let test_an_unknown_field_does_not_fail_decode () =
-  let json =
-    dos_changed ~extra:[ "activity", `List [ entry_json ~at:1.0 ~who:"a" ~action:"b" ] ] ()
+let test_activity_source_contract () =
+  List.iter
+    (fun fields ->
+      check (list activity_entry) "an explicit empty DOS feed is valid in every state" []
+        (activity_entries (`Assoc (fields @ [ "activity", `List [] ])));
+      refused Live.Dos (`Assoc fields);
+      refused Live.Dos (`Assoc (fields @ [ "activity", `Null ]));
+      refused Live.Dos (`Assoc (fields @ [ "activity", `String "oops" ])))
+    dos_states;
+  List.iter
+    (fun fields ->
+      check bool "MSX has a typed absence, not an empty DOS feed" true
+        (decoded_activity Live.Msx (`Assoc fields) = Live.No_activity_feed);
+      refused Live.Msx (`Assoc (fields @ [ "activity", `List [] ])))
+    [ marked ~kind:"msx_capture" "no_machine";
+      marked ~kind:"msx_capture" "unchanged";
+      marked ~kind:"msx_capture" "changed" @ [ "frame_number", `Int 88; screen () ] ]
+
+let test_activity_refuses_invalid_entries () =
+  let valid = entry_json ~at:1.0 ~who:"a" ~action:"b" in
+  let malformed =
+    [ `Null; `List []; `String "entry";
+      `Assoc [ "who", `String "c"; "action", `String "d" ];
+      `Assoc [ "at", `Int 1; "action", `String "d" ];
+      `Assoc [ "at", `Int 1; "who", `String "c" ];
+      `Assoc [ "at", `String "1"; "who", `String "c"; "action", `String "d" ];
+      `Assoc [ "at", `Int 1; "who", `Int 1; "action", `String "d" ];
+      `Assoc [ "at", `Int 1; "who", `String "c"; "action", `Bool false ];
+      `Assoc [ "at", `Int 1; "at", `Int 2; "who", `String "c"; "action", `String "d" ];
+      entry_json ~at:Float.nan ~who:"c" ~action:"d";
+      entry_json ~at:Float.infinity ~who:"c" ~action:"d";
+      entry_json ~at:Float.neg_infinity ~who:"c" ~action:"d" ]
   in
-  (match Live.decode Live.Dos json with
-   | Ok (Live.Picture _) -> ()
-   | Ok (Live.No_machine | Live.Unchanged _) -> fail "still a picture, just decoded oddly"
-   | Error detail -> failf "an unknown field failed decode: %s" detail);
-  check (list activity_entry) "and activity_of reads the same field"
-    [ { Live.at = 1.0; who = "a"; action = "b" } ] (Live.activity_of json)
+  List.iter
+    (fun bad ->
+      List.iter
+        (fun fields ->
+          refused Live.Dos (`Assoc (fields @ [ "activity", `List [valid; bad; valid] ])))
+        dos_states)
+    malformed;
+  refused Live.Dos (dos_changed ~extra:[ "activity", `List [] ] ())
 
-let test_activity_drops_one_malformed_entry () =
+let test_activity_failure_is_visible () =
+  let drawn = Live.Showing (a_picture 7) in
   let json =
-    dos_changed
-      ~extra:[ "activity",
-               `List [ entry_json ~at:1.0 ~who:"a" ~action:"b";
-                       `Assoc [ "at", `String "not a number"; "who", `String "c";
-                                "action", `String "d" ];
-                       entry_json ~at:2.0 ~who:"e" ~action:"f" ] ]
-      ()
+    dos_changed ~activity:(`List [entry_json ~at:1.0 ~who:"a" ~action:"b"; `Null]) ()
   in
-  check (list activity_entry) "the malformed middle entry is dropped, the rest kept"
-    [ { Live.at = 1.0; who = "a"; action = "b" }; { Live.at = 2.0; who = "e"; action = "f" } ]
-    (Live.activity_of json)
-
-let test_activity_of_the_wrong_shape_is_empty () =
-  check (list activity_entry) "activity is not a list" []
-    (Live.activity_of (dos_changed ~extra:[ "activity", `String "oops" ] ()));
-  check (list activity_entry) "the answer itself is not an object" []
-    (Live.activity_of (`List []))
+  let result = Result.map fst (Live.decode Live.Dos json) in
+  check bool "an invalid feed reaches the existing visible read failure" true
+    (Live.advance drawn result = Some (Live.Failed "live: activity[1] is not an object"))
 
 let () =
   run "tui_machine_live"
@@ -227,11 +253,7 @@ let () =
         [ test_case "since" `Quick test_since;
           test_case "advance" `Quick test_advance ] );
       ( "activity",
-        [ test_case "parses entries" `Quick test_activity_parses_entries;
-          test_case "absent is empty" `Quick test_activity_absent_is_empty;
-          test_case "an unknown field does not fail decode" `Quick
-            test_an_unknown_field_does_not_fail_decode;
-          test_case "drops one malformed entry" `Quick
-            test_activity_drops_one_malformed_entry;
-          test_case "the wrong shape is empty" `Quick
-            test_activity_of_the_wrong_shape_is_empty ] ) ]
+        [ test_case "integer and fractional timestamps" `Quick test_activity_parses_entries;
+          test_case "source contract in every state" `Quick test_activity_source_contract;
+          test_case "invalid entries fail the entire read" `Quick test_activity_refuses_invalid_entries;
+          test_case "activity failure is visible" `Quick test_activity_failure_is_visible ] ) ]

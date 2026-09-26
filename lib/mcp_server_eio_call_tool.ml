@@ -545,7 +545,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     resolved_caller := Some (caller, keeper_entry)
   in
   (* Measure execution time for telemetry *)
-  let start_time = Eio.Time.now clock in
+  let start_time = Tool_timing.start () in
   let execute () =
     try
       execute_tool_eio
@@ -617,8 +617,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let success = not (Tool_result.is_failed result)
   and message = Tool_result.message result
   in
-  let end_time = Eio.Time.now clock in
-  let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
+  let duration_ms = int_of_float (Tool_timing.elapsed_ms start_time) in
   let request_id_json =
     Mcp_transport_protocol.request_id_to_yojson request_id
   in

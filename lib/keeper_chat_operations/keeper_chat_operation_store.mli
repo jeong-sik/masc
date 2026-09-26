@@ -72,9 +72,11 @@ val submit
 
 val get : t -> Operation.Operation_id.t -> (Operation.t option, error) result
 val inventory : t -> (inventory, error) result
-(** Pure selector receives only fresh, unbound queued operations. Members must
-    include the head, in queue order. The store freezes membership and combined
-    input atomically with claim; resumed executions never acquire new members. *)
+(** Pure selector receives the contiguous fresh, unbound queued operations
+    starting at the claimable head and ending before the next continuation.
+    Members must be a contiguous prefix beginning with the head. The store freezes membership
+    and combined input atomically with claim; resumed executions never acquire
+    new members. *)
 val claim_next : ?batch:batch_selector -> t -> now:float -> (Operation.t option, error) result
 val batch_operations : t -> operation_id:Operation.Operation_id.t -> (Operation.t list, error) result
 (** Ordered original member inputs and digests, including the execution owner.

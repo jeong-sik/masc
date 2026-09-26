@@ -548,7 +548,7 @@ let test_load_activity_precedes_board_relay () =
       try
         ignore
           (Tool_misc_msx_lane.handle_load ~tool_name:"masc_msx_load"
-             ~start_time:0. ~base_path ~agent_name:"msx-test"
+             ~start_time:(Tool_timing.start ()) ~base_path ~agent_name:"msx-test"
              ~after_load:(fun () -> notified := true) ~relay
              (`Assoc [ ("roms_dir", `String ""); ("cart", `String "hero") ]));
         false

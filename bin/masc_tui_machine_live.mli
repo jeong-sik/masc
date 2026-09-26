@@ -42,25 +42,25 @@ val path : source -> since:mark option -> string
     drawn and is sent as [since] and [incarnation] together; without one the
     server always answers with a picture. *)
 
-val decode : source -> Yojson.Safe.t -> (answer, string) result
-(** Parse one answer. It must name the requested source kind. A picture must
-    carry [frame_number] for MSX and none for DOS, a [screen] of format
-    [rgb8] with positive dimensions and exactly [width * height * 3] decoded
-    bytes, and its mark. An [Unchanged] answer is read without touching any
-    pixel field. Anything else is an [Error] naming what was wrong. *)
-
 type activity_entry = { at : float; who : string; action : string }
 (** One line of "what a Keeper did to this machine", the wire shape of
     [Lane_activity.entry] read independently of it -- this module never links
     the server's write-side library, only its own JSON contract. *)
 
-val activity_of : Yojson.Safe.t -> activity_entry list
-(** The answer's [activity] array, read the same JSON {!decode} parses. A
-    missing field, a field that is not a list, or one malformed entry inside
-    it are not reasons to fail: this is a spectator convenience riding along
-    with every answer (present or not, on every [state]), never a fact the
-    picture depends on, so a caller gets what it can parse and drops the
-    rest silently rather than turning a good picture into an [Error]. *)
+type activity =
+  | No_activity_feed  (** MSX has no activity field. *)
+  | Activity of activity_entry list  (** DOS has an activity array, possibly empty. *)
+
+val decode : source -> Yojson.Safe.t -> (answer * activity, string) result
+(** Parse the whole answer. It must name the requested source kind. A picture
+    must carry [frame_number] for MSX and none for DOS, a [screen] of format
+    [rgb8] with positive dimensions and exactly [width * height * 3] decoded
+    bytes, and its mark. An [Unchanged] answer is read without touching any
+    pixel field. Every DOS state requires an [activity] array of entries with
+    finite numeric [at] and string [who] and [action]; MSX requires the field
+    to be absent. Missing or malformed DOS activity, malformed entries and
+    duplicate fields fail the whole read, preserving the caller's previous
+    activity. Anything else is an [Error] naming what was wrong. *)
 
 (** What the spectator holds for one machine between reads. *)
 type view =

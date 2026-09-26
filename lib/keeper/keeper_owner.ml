@@ -1669,7 +1669,7 @@ let start
             reject_if_stopping state (fun () ->
               run_operation_command t ~label:"admit interactive Keeper message" (fun () ->
                 Chat_operation_store.submit
-                  ?priority:(if permitted then Some Keeper_chat_operation_batch.select else None)
+                  ?priority:(if permitted then Some Keeper_chat_operation_batch.select_priority else None)
                   t.operation_store ~now:(t.now ()) ~operation_id ~source ~input))) in
           (match result with
            | Error error -> Eio.Promise.resolve resolve (Error error); loop state shutdown_operation_id

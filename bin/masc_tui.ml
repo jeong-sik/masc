@@ -589,6 +589,15 @@ let terminal_has_bytes ~remaining =
            thread does not stop the domain. *)
         kernel_wait remaining
 
+(* A read buffer can end while the next chunk already waits in the kernel.
+   Include readiness without consuming input, so a long burst is coalesced
+   across buffer boundaries too. EINTR means readiness was not observed;
+   defer at most to the existing frame deadline and let the reader retry. *)
+let input_reader_has_ready_input reader =
+  input_reader_has_pending_bytes reader
+  || try terminal_has_bytes ~remaining:0.0 with
+     | Unix.Unix_error (Unix.EINTR, _, _) -> true
+
 let refill_input_reader reader ~timeout =
   let timeout_ns =
     Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)
@@ -1951,7 +1960,7 @@ type async_msg =
   | Msx_frame_loaded of msx_poll_request
       * (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result
   | Dos_live_loaded of machine_live_request
-      * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity_entry list, string) result
+      * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
      on every one of these rather than read from the state at delivery: the
      roster cursor moves under a refresh, and a transcript that took several
@@ -3556,40 +3565,29 @@ let launch_tools_load ?(force = true) state ~mailbox =
       };
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_tools ~host ~port ?keeper () with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Tools_loaded (generation, keeper, result));
-      let async_observation =
-        try Masc_tui_http.fetch_async_request_observation ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Tools_async_observation_loaded (generation, async_observation))
+    (* The async-request observation is read after the inventory, as it
+       always was; the inventory's answer launches it. Both go through the
+       shared launch, so a missing or finished switch still answers each part
+       and the pending read settles instead of staying "loading". *)
+    let launch_async_observation () =
+      Masc_tui_async_read.launch
+        ~deliver:(fun result ->
+          enqueue_async mailbox (Tools_async_observation_loaded (generation, result)))
+        (fun () -> Masc_tui_http.fetch_async_request_observation ~host ~port)
     in
     (* The skills catalog (usage + flows) is a separate read and must not
        delay the tool list: a slow catalog costs its own section, not the
        screen. *)
-    let run_catalog () =
-      let result =
-        try Masc_tui_loader.load_skills_catalog ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Skills_catalog_loaded (generation, result))
-    in
-    (match Eio_context.get_switch_opt () with
-     | Some sw ->
-         Eio.Fiber.fork_daemon ~sw (fun () -> run_catalog (); `Stop_daemon);
-         Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-     | None ->
-         let error = Error "Eio switch is unavailable" in
-         enqueue_async mailbox (Tools_loaded (generation, keeper, error));
-         enqueue_async mailbox (Skills_catalog_loaded (generation, error));
-         enqueue_async mailbox (Tools_async_observation_loaded (generation, error)))
+    Masc_tui_async_read.launch
+      ~source:Masc_tui_async_read.Skills_catalog
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Skills_catalog_loaded (generation, result)))
+      (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port);
+    Masc_tui_async_read.launch
+      ~deliver:(fun result ->
+        enqueue_async mailbox (Tools_loaded (generation, keeper, result));
+        launch_async_observation ())
+      (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ())
   end
 
 let settle_tools_read state ~generation part =
@@ -6265,7 +6263,7 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
   | Keepers Keeper_message -> None
   (* Metrics was here for want of a report, and that reason had gone stale:
      [render_metrics] already answers [Metrics_scroll] through
-     [surface_chrome]'s [clamped] callback, so the generic End sentinel is
+     [surface_chrome]'s [Self_scrolled] overflow, so the generic End sentinel is
      corrected after drawing exactly as the other reading panes are. *)
   | Metrics -> pane (fun v -> Metrics_scroll v)
   (* The voice pane is lines the frame lays out; its wizard takes its own keys
@@ -8275,10 +8273,8 @@ let msx_frame_of_live ~previous_live ~previous_frame
    frame alone. *)
 let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
   let result =
-    (* MSX has no activity feed yet ([lib/msx_lane/msx_lane.ml] takes no
-       [~who] on several of its calls, so the server never fills one in) --
-       [fst] drops the always-empty second half rather than storing a field
-       nothing draws. *)
+    (* The decoder has checked that MSX has no activity feed. Only its
+       picture answer is needed by the MSX view. *)
     Result.map fst
       (Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
          Masc_tui_machine_live.Msx ~since:(Masc_tui_machine_live.since state.msx_live))
@@ -11773,10 +11769,10 @@ let verification_cursor_row state =
   | None -> List.nth_opt requests state.verification_cursor
 
 (* The approve key on the row under the cursor. Two presses, like the cancel
-   and vote keys: the first names the task, the same press again sends the
-   verdict. The task id is captured at arm time, so moving the cursor between
-   presses re-arms for the new row rather than approving the one the operator
-   left. Reject is not armed -- its $EDITOR reason form is the confirmation. *)
+   and vote keys: the first names the task and request, the same press again
+   sends the verdict. A reload can replace a request for the same task; a
+   press on that new request re-arms instead of approving it. Reject is not
+   armed -- its $EDITOR reason form is the confirmation. *)
 (* Opening a detail is one move -- read the row under the cursor, name it, put
    the pane at the top of it, fetch what the detail needs -- and each surface
    spelled that move inside its own Enter arm, guarded on the detail not being
@@ -11912,16 +11908,19 @@ let handle_verification_approve_key state ~mailbox =
   | None -> ()
   | Some row -> (
       let task_id = row.Masc.Tui_decode.vr_task_id in
+      let request_id = row.Masc.Tui_decode.vr_request_id in
       match state.verification_verdict_armed with
-      | Some armed when String.equal armed task_id ->
+      | Some (armed_task, armed_request)
+        when String.equal armed_task task_id
+             && String.equal armed_request request_id ->
           state.verification_verdict_armed <- None;
           start_verification_verdict state ~mailbox ~task_id
-            ~verification_id:row.Masc.Tui_decode.vr_request_id ~verdict:`Approve
+            ~verification_id:request_id ~verdict:`Approve
       | Some _ | None ->
-          state.verification_verdict_armed <- Some task_id;
+          state.verification_verdict_armed <- Some (task_id, request_id);
           state.verification_verdict_error <- None;
           report_action state "system"
-            (Printf.sprintf "press a again to approve %s" task_id))
+            (Printf.sprintf "press a again to approve %s [%s]" task_id request_id))
 
 let open_board_composer_editor state ~restore ~reenter =
   match Masc_tui_editor.editor_command () with
@@ -14082,8 +14081,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                Printf.sprintf "Verification: %s (already recorded)" message
              else "Verification: " ^ message);
           (* The row shown still says awaiting until this lands; a judged row
-             that stays listed invites a second verdict. *)
-          launch_verification_load state ~mailbox
+             that stays listed invites a second verdict. A GET already in
+             flight began before this POST committed, so its result cannot
+             restore the old queue; it must be followed by a fresh read. *)
+          state.verification <- None;
+          state.verification_error <- None;
+          if state.verification_inflight then
+            state.verification_refresh_after_inflight <- true
+          else launch_verification_load state ~mailbox
       | Error err ->
           state.verification_verdict_armed <- None;
           state.verification_verdict_error <- Some err)
@@ -14355,6 +14360,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            in
            if request.live_view == !msx_poll_view && request.live_port = state.port
               && state.msx_open && (state.msx_menu_open || watching_dos) then begin
+             let result =
+               match result with
+               | Ok (answer, Masc_tui_machine_live.Activity activity) -> Ok (answer, activity)
+               | Ok (_, Masc_tui_machine_live.No_activity_feed) ->
+                   Error "live: a DOS read answered without an activity feed"
+               | Error _ as error -> error
+             in
              (* A failed read leaves [dos_activity] as it was -- the sidebar
                 keeps showing the last activity it had rather than flashing
                 empty on a read that did not answer at all. *)
@@ -15565,7 +15577,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | None -> ())
   | Verification_loaded result ->
       state.verification_inflight <- false;
-      (match result with
+      if state.verification_refresh_after_inflight then begin
+        state.verification_refresh_after_inflight <- false;
+        launch_verification_load state ~mailbox
+      end else (match result with
       | Ok snapshot ->
           state.verification <- Some snapshot;
           state.verification_error <- None;
@@ -15573,6 +15588,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           let count = List.length requests in
           if state.verification_cursor >= count then
             state.verification_cursor <- max 0 (count - 1);
+          (match state.verification_verdict_armed with
+           | Some (task_id, request_id)
+             when not
+                    (List.exists
+                       (fun (row : Masc.Tui_decode.verification_request) ->
+                          String.equal row.vr_task_id task_id
+                          && String.equal row.vr_request_id request_id)
+                       requests) ->
+               state.verification_verdict_armed <- None;
+               state.verification_verdict_error <-
+                 Some (Printf.sprintf
+                   "%s: request %s changed or closed; review the refreshed queue"
+                   task_id request_id)
+           | Some _ | None -> ());
           (match state.verification_detail_request_id with
            | Some request_id
              when not
@@ -20202,8 +20231,8 @@ and is loaded on demand through keeper_skill.
               && state.runtime_mode = Masc_tui_types.Runtime_lanes
               && Option.is_none state.runtime_detail_target
               && Option.is_none state.runtime_lane_pick ->
-           (* [\[runtime\].media_failover]: the vision fleet, in the order it
-              is called. Opened in the same editor an exact lane's slots use --
+           (* [\[runtime\].media_failover]: the vision runtimes, in the order they
+              are called. Opened in the same editor an exact lane's slots use --
               both are an ordered list of runtime ids, and neither is a lane. *)
            (match state.slot_editor with
             | Some { se_target = Masc_tui_types.Media_failover_slots; _ } ->
@@ -21887,9 +21916,17 @@ and is loaded on demand through keeper_skill.
                 | "m" -> "microvm"
                 | _ -> "remote_ssh")
        | Some ("h" | "l")
-         when terminal_columns >= keeper_split_threshold_cols
-              && (match state.view with
-                  | Keepers Keeper_detail | Resources -> true
+         (* The width belongs to the screen that needs two panes, not to the
+            key. Keeper detail below the threshold draws the detail alone and
+            never reads the focus -- its footer drops [h/l] there for that
+            reason -- while Resources and Code draw whichever pane the focus
+            names at every width, so the key was refused on screens already
+            drawing its answer. On Code that also left a file open with no way
+            back to the tree but [Esc], which closes the file. *)
+         when (match state.view with
+                  | Keepers Keeper_detail ->
+                      terminal_columns >= keeper_split_threshold_cols
+                  | Resources -> true
                   | Board ->
                       (match state.board_mode with
                        | Board_read _ -> (
@@ -25388,7 +25425,7 @@ and is loaded on demand through keeper_skill.
 
       (match
          Render_schedule.take
-           ~input_pending:(input_reader_has_pending_bytes input_reader)
+           ~input_pending:(input_reader_has_ready_input input_reader)
            render_schedule
            ~now_ns:(Mtime_clock.elapsed_ns ())
        with

@@ -229,7 +229,7 @@ let execute_one
        wrapper all project the exact same non-optional join key. *)
     let execution_id = Ids.Execution_id.generate () in
     let tool_use_id = tool_use_id_for_node ~execution_id node in
-    let start_time = Time_compat.now () in
+    let start_time = Tool_timing.start () in
     let result =
       Cancel_safe.protect
         ~on_exn:(fun exn ->

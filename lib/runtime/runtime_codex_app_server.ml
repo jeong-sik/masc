@@ -251,6 +251,7 @@ let emit_stream_event on_stream_event event =
   | None -> ()
   | Some callback ->
     (try callback event with
+     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
        Log.Runtime_agent.warn
@@ -735,6 +736,7 @@ let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count ~too
        | Agent_core.Tool.Effect_possible -> tool_effect_attempted := true);
       let result =
         try tool.call ~call_id arguments with
+        | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
           Log.Runtime_agent.warn
@@ -1817,6 +1819,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
                  | Some schema -> [ "outputSchema", schema ])));
       Ok ()
     with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Eio.Time.Timeout as exn -> raise exn
     | exn ->
@@ -1993,6 +1996,7 @@ let drain_stderr flow tail =
     done
   with
   | End_of_file -> ()
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Runtime_agent.debug
@@ -2154,6 +2158,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         Error (Timeout { seconds; turn_accepted = false })
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | Eio.Time.Timeout as exn -> raise exn
+      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
       | exn -> protocol_error "stdout read" (Printexc.to_string exn)
     in
     (* Terminate inside the body: the child can be waiting for more stdin on
@@ -2212,6 +2217,7 @@ let native_cwd cwd =
     then Error (Invalid_config "cwd must be an absolute native path")
     else Ok cwd
   with
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Error
@@ -2302,6 +2308,7 @@ let probe_metadata ~mgr ~clock ~cwd config protocol =
         config
         protocol
     with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Idle_timeout seconds ->
       (* The probe never starts a turn. *)
@@ -2386,6 +2393,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
               ~on_turn_started
               ~on_stream_event
           with
+          | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | Idle_timeout seconds ->
             Error (Timeout { seconds; turn_accepted = !turn_accepted })

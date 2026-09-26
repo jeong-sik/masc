@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import glob
+import importlib.util
 import os
 import re
 import shutil
@@ -39,6 +40,14 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
+
+
+_stanza_spec = importlib.util.spec_from_file_location(
+    "masc_stanza_env", os.path.join(os.path.dirname(__file__), "ci", "stanza_env.py"))
+if _stanza_spec is None or _stanza_spec.loader is None:
+    raise ImportError("cannot load the repository's Dune environment reader")
+stanza_env = importlib.util.module_from_spec(_stanza_spec)
+_stanza_spec.loader.exec_module(stanza_env)
 
 
 @dataclass(frozen=True)
@@ -657,7 +666,36 @@ def compile_commands(staged: StagedPlan, workdir: str) -> list[list[str]]:
     return commands
 
 
+class SuiteEnvironmentError(Exception):
+    """The declared execution environment cannot be reproduced by this runner."""
+
+
+def suite_environment(root: str, suite: str) -> dict[str, str]:
+    """Literal directory and action environment of the compiled suite.
+
+    The separate source_root only controls source-inspection assertions.
+    Environment declarations belong to the checkout that supplies the test.
+    Dependency values require Dune's action directory, which this runner does
+    not stage; refusing them prevents a false verdict from a guessed path.
+    """
+    directory = os.path.abspath(os.path.join(root, "test"))
+    environment = {
+        key: stanza_env.resolve(key, value, allow_dependency_values=False)[0]
+        for key, value in stanza_env.directory_env_vars(directory)
+    }
+    text, own_file = stanza_env.stanza_text(suite, directory)
+    pairs, _deps = stanza_env.suite_env(
+        suite, text, own_file=own_file, suite_dir=directory,
+        allow_dependency_values=False)
+    environment.update(pairs)
+    return environment
+
+
 def build_and_run(plan: Plan, root: str, source_root: str, keep: str | None) -> Outcome:
+    try:
+        environment = suite_environment(root, plan.suite)
+    except (OSError, stanza_env.StanzaError) as error:
+        raise SuiteEnvironmentError(str(error)) from error
     workdir = keep or tempfile.mkdtemp(prefix=f"{plan.suite}-")
     os.makedirs(workdir, exist_ok=True)
     try:
@@ -716,7 +754,7 @@ def build_and_run(plan: Plan, root: str, source_root: str, keep: str | None) -> 
         capture_output=True,
         text=True,
         check=False,
-        env={**os.environ, "DUNE_SOURCEROOT": source_root},
+        env={**os.environ, **environment, "DUNE_SOURCEROOT": source_root},
     )
     output = run.stdout + run.stderr
     if run.returncode == 0:
@@ -863,9 +901,15 @@ def main() -> int:
     started = time.time()
     failed = 0
     unbuilt = 0
+    environment_errors = 0
     for plan in plans:
         keep = os.path.join(args.keep, plan.suite) if args.keep else None
-        outcome = build_and_run(plan, root, source_root, keep)
+        try:
+            outcome = build_and_run(plan, root, source_root, keep)
+        except SuiteEnvironmentError as error:
+            environment_errors += 1
+            print(f"env   {plan.suite}: {error}; suite was not run")
+            continue
         if outcome.built is None:
             unbuilt += 1
             label = "build"
@@ -898,13 +942,13 @@ def main() -> int:
         if rest > 0:
             print(f"skip  ... and {rest} further reasons")
     print(
-        f"\n{len(plans) - failed - unbuilt} passed, {failed} failed,"
-        f" {unbuilt} would not build, {len(blocked)} skipped"
+        f"\n{len(plans) - failed - unbuilt - environment_errors} passed, {failed} failed,"
+        f" {unbuilt} would not build, {environment_errors} environment errors, {len(blocked)} skipped"
         f" in {time.time() - started:.0f}s"
     )
     # A suite that would not build is this harness falling short, not a verdict
     # on the tree, so it does not fail the run.
-    return 1 if failed else 0
+    return 1 if failed or environment_errors else 0
 
 
 if __name__ == "__main__":

@@ -1,0 +1,77 @@
+{
+  "policy": "Only owned workspace, installed snapshot, observer/CI checkout and operator-home prefixes normalized. Health projected to the four consumed groups. Original response hashes, json byte counts, wire sizes and timings remain unchanged; normalized bodies have separate published hashes/byte counts. Original private receipts passed the final strict validator. No CI provenance for this installed-file smoke.",
+  "files": {
+    "backlog.json.gz": {
+      "original_sha256": "b2fc05ce4c05d7f75fe6c3a3bc8d913692c00aed2d39666c4b50d39e7a350cb7",
+      "published_decoded_sha256": "b2fc05ce4c05d7f75fe6c3a3bc8d913692c00aed2d39666c4b50d39e7a350cb7",
+      "health_projected": false,
+      "normalized_response_bodies": 0
+    },
+    "backlog.json.last-good.gz": {
+      "original_sha256": "b2fc05ce4c05d7f75fe6c3a3bc8d913692c00aed2d39666c4b50d39e7a350cb7",
+      "published_decoded_sha256": "b2fc05ce4c05d7f75fe6c3a3bc8d913692c00aed2d39666c4b50d39e7a350cb7",
+      "health_projected": false,
+      "normalized_response_bodies": 0
+    },
+    "cleanup.json": {
+      "original_sha256": "bcbc2ebfa5169f51d7bce62e353f3afef845f76d5ecb954e12b22e0b305125a4",
+      "published_decoded_sha256": "bcbc2ebfa5169f51d7bce62e353f3afef845f76d5ecb954e12b22e0b305125a4",
+      "health_projected": false,
+      "normalized_response_bodies": 0
+    },
+    "health-after.json": {
+      "original_sha256": "e3c97e50b3456c3eba61d57c6d29d1c0c7ae72bedf7a3923276fdd903ee9e6af",
+      "published_decoded_sha256": "fddf877924ce0142fecb8dc4e0cdb9d1ce85b80c63a30d7436daf0363213d8c7",
+      "health_projected": true,
+      "normalized_response_bodies": 0
+    },
+    "health-before.json": {
+      "original_sha256": "98426f864172d0b1025590e5c17741e20d59da56b5adebd066a7b6f4c13ceb7e",
+      "published_decoded_sha256": "4be154bc99765bc1d6734a2273ad44e624a0f065ee20f53a4d472ec5c4ff3e29",
+      "health_projected": true,
+      "normalized_response_bodies": 0
+    },
+    "identity.json": {
+      "original_sha256": "b2b319ae6c53a660113429c40a04c0f9a2d5b68aeebd6e454ab0a2155efba6b3",
+      "published_decoded_sha256": "2a15a5b6ed9543c720606f3082b2f76aac54fc4c36564f0e39982e76b366b54e",
+      "health_projected": false,
+      "normalized_response_bodies": 0
+    },
+    "requests.jsonl.gz": {
+      "original_sha256": "501f8a24078da8b63a07e3f92a9d9ffe43587b8f5a67f18512571a67c78deb42",
+      "published_decoded_sha256": "5c8dba45db37060dd21108e8c51cedbf8a1aec83e666efd48dd7d9f124229a80",
+      "health_projected": false,
+      "normalized_response_bodies": 7
+    },
+    "server.log.gz": {
+      "original_sha256": "46c0de7e9465f87cbd48d9a28e37e513d4867d76ed5a5811e51646e884ad909c",
+      "published_decoded_sha256": "dd3a9ff19bc93b4c1eea0ed9e54573d7df2f2ef17e212ede590a604a9d39d058",
+      "health_projected": false,
+      "normalized_response_bodies": 0
+    },
+    "success.json": {
+      "original_sha256": "bb6608e063ff11f122151db06b46b0d15a0dcbcbf680f262cf04f75f43515638",
+      "published_decoded_sha256": "bb6608e063ff11f122151db06b46b0d15a0dcbcbf680f262cf04f75f43515638",
+      "health_projected": false,
+      "normalized_response_bodies": 0
+    },
+    "validation.json": {
+      "original_sha256": "bec7b877cbf32d3c80052f9b98a9e591eb7f89cb5a7c4380b78ba8233c73d788",
+      "published_decoded_sha256": "bec7b877cbf32d3c80052f9b98a9e591eb7f89cb5a7c4380b78ba8233c73d788",
+      "health_projected": false,
+      "normalized_response_bodies": 0
+    },
+    "worker-fixture.json": {
+      "original_sha256": "74b862792288bd49f8a0fa961108890baf79d86bbcb5e30fdbc2fdb55edf870e",
+      "published_decoded_sha256": "74b862792288bd49f8a0fa961108890baf79d86bbcb5e30fdbc2fdb55edf870e",
+      "health_projected": false,
+      "normalized_response_bodies": 0
+    },
+    "workers-after.json": {
+      "original_sha256": "74b862792288bd49f8a0fa961108890baf79d86bbcb5e30fdbc2fdb55edf870e",
+      "published_decoded_sha256": "74b862792288bd49f8a0fa961108890baf79d86bbcb5e30fdbc2fdb55edf870e",
+      "health_projected": false,
+      "normalized_response_bodies": 0
+    }
+  }
+}

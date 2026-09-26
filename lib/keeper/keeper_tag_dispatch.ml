@@ -52,7 +52,7 @@ let dispatch
       ~(args : Yojson.Safe.t)
   : Tool_result.result option
   =
-  let start_time = Time_compat.now () in
+  let start_time = Tool_timing.start () in
   let err msg =
     Tool_result.error
       ~failure_class:Tool_result.Runtime_failure

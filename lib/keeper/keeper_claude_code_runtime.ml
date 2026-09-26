@@ -88,117 +88,20 @@ let model_input_projection_for_capacity
     ~runtime_id
     source_projection
     messages =
-  (* Atoms, not messages: the window's front is named by the message that
-     opens atom [total_atoms - transmitted_atoms], so both counts have to be
-     the atoms [Runtime_model_input_tail_window.annotate] numbers. *)
-  let _labelled, history_atom_count =
-    Runtime_model_input_tail_window.annotate messages
-  in
-  let observe_window projection =
-    Option.iter
-      (fun observe ->
-         Option.iter
-           observe
-           (Runtime_model_input_tail_window.observe
-              ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
-              ~history_atom_count
-              projection))
-      on_model_input_window_observation
-  in
-  (* The declared ceiling names a front of its own: the atoms it dropped. The
-     seeded front names another, the range the last completed turn carried on
-     this history, and the two are positions in the same vocabulary. *)
-  let capacity_cut =
-    if capacity_bytes = unbounded_model_input_capacity_bytes
-    then Ok None
-    else
-      Domain_pool_ref.submit_cpu_or_inline (fun () ->
-        match
-          Runtime_model_input_tail_window.project_with_drop
-            ~allow_empty_history:true
-            ~measure_message_bytes:measure_model_input_message_bytes
-            ~capacity_bytes
-            ~reserved_bytes:0
-            messages
-        with
-        | Ok projection -> Ok (Some projection)
-        | Error error ->
-          Error
-            (Runtime_model_input_tail_window.budget_error_to_core_error error))
-  in
-  let* capacity_cut = capacity_cut in
   let* windowed =
-    match capacity_cut with
-    | Some projection
-      when projection.Runtime_model_input_tail_window.dropped_atoms
-           >= history_atom_count ->
-      (* The ceiling reached its zero-prior-history floor, which the shrink
-         ladder's last rung composes on purpose. A range always carries the
-         newest atom, so seeding this one would put an atom back into the view
-         the provider just refused. The floor stands. *)
-      observe_window projection;
-      Ok projection.Runtime_model_input_tail_window.messages
-    | Some _ | None ->
-      let own_first_atom =
-        match capacity_cut with
-        | Some projection -> projection.Runtime_model_input_tail_window.dropped_atoms
-        | None -> 0
-      in
-      let* librarian_front = Host.read_librarian_front librarian_front messages in
-      let carried_front_seed = Host.read_seed_once carried_front_seed in
-      (* Every candidate range starts at or past the ceiling's own cut, so
-         the window over it drops nothing -- except in front of a working
-         state, which the cut above never measured.
-         [Host.compose_librarian_range] decides whether that working state
-         goes (RFC-0460): it is carried only where it displaces no atom, and
-         otherwise the Librarian position goes alone. The window is the
-         declared ceiling once more, as a measurement of each candidate, and
-         the one chosen goes out as it left it. *)
-      let compose librarian_front =
-        let carried =
-          Host.carried_start_range
-            ~keeper_name
-            ~runtime_id
-            ~carried_front_seed
-            ~librarian_front
-            ~own_first_atom
-            ~turn_start
-            messages
-        in
-        match capacity_cut with
-        | None ->
-          Ok
-            { Host.carried
-            ; sent = carried.Host.messages
-            ; atoms_kept = Host.carried_atoms carried
-            }
-        | Some _ ->
-          Host.window_carried_range
-            ~measure_message_bytes:measure_model_input_message_bytes
-            ~capacity_bytes
-            ~reserved_bytes:0
-            carried
-      in
-      let* windowed =
-        Host.compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front
-      in
-      (* No cut is still a reading: what was carried, reported with the atom
-         it starts from. Leaving it silent would put the turn record's absent
-         window back for any runtime whose declared cap is unbounded and whose
-         seed named no front. A list with no atom has no front to report, and
-         [Runtime_model_input_tail_window.observe] reports nothing for it. *)
-      observe_window (Host.windowed_projection windowed);
-      Option.iter
-        (fun observe ->
-           observe
-             windowed.Host.carried.Host.front
-             ~transmitted_bytes:
-               (List.fold_left
-                  (fun total message -> total + measure_model_input_message_bytes message)
-                  0
-                  windowed.Host.sent))
-        on_carried_front;
-      Ok windowed.Host.sent
+    Host.start_range_projection
+      ~measure_message_bytes:measure_model_input_message_bytes
+      ~capacity_bytes
+      ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
+      ~reserved_bytes:0
+      ?on_model_input_window_observation
+      ?carried_front_seed
+      ?librarian_front
+      ?on_carried_front
+      ~turn_start
+      ~keeper_name
+      ~runtime_id
+      messages
   in
   let () =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->
@@ -1204,6 +1107,24 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
           (internal_error
              "Claude Code host stop arrived without an acknowledged provider turn")
     in
+    let settle_cancellation exn =
+      let backtrace = Printexc.get_raw_backtrace () in
+      recovery_failure
+        := (if Keeper_owner_signals.is_owner_cancel_reason exn then
+              Session_store.Owner_stopped_turn
+            else Session_store.Transport_interrupted);
+      let detail = "Claude Code turn cancelled: " ^ Printexc.to_string exn in
+      (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
+       | Ok () -> ()
+       | Error recovery_detail ->
+         Log.Keeper.error
+           ~keeper_name
+           "Claude Code cancellation recovery persistence failed: %s"
+           recovery_detail);
+      Eio.Cancel.protect (fun () ->
+        Host.finish_raw_error ~keeper_name raw_trace_run (internal_error detail));
+      Printexc.raise_with_backtrace exn backtrace
+    in
     let turn_result =
       let on_stream_event =
         claude_stream_callback
@@ -1429,24 +1350,9 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       (* A stop the owner raised is not an ambiguity: it knows the turn did
          not finish and why. Only an unexplained cancellation needs an
          operator to adjudicate what the transport left behind (#28012). *)
-      | Eio.Cancel.Cancelled _ as exn ->
-        let backtrace = Printexc.get_raw_backtrace () in
-        recovery_failure
-          := (match exn with
-              | Eio.Cancel.Cancelled Keeper_owner_signals.Stop_active_child ->
-                Session_store.Owner_stopped_turn
-              | _ -> Session_store.Transport_interrupted);
-        let detail = "Claude Code turn cancelled: " ^ Printexc.to_string exn in
-        (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
-         | Ok () -> ()
-         | Error recovery_detail ->
-           Log.Keeper.error
-             ~keeper_name
-             "Claude Code cancellation recovery persistence failed: %s"
-             recovery_detail);
-        Eio.Cancel.protect (fun () ->
-          Host.finish_raw_error ~keeper_name raw_trace_run (internal_error detail));
-        Printexc.raise_with_backtrace exn backtrace
+      | Eio.Cancel.Cancelled _ as exn -> settle_cancellation exn
+      | exn when Keeper_owner_signals.is_owner_cancel_reason exn ->
+        settle_cancellation exn
     in
     let turn_result =
       match turn_result with

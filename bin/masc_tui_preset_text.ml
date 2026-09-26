@@ -145,14 +145,10 @@ let detail_lines ~(selected : D.preset_manifest option)
       ; (if String.equal m.D.pm_description "" then "설명 없음" else m.D.pm_description)
       ; "저장 시각 " ^ m.D.pm_created_at
       ; (* Which prompts, not how many. A count cannot be chosen between,
-           and choosing is what this pane is for. A preset saved before the
-           server named them says so rather than reading as "none". *)
-        (match m.D.pm_override_keys, m.D.pm_override_count with
-         | Some [], _ -> "프롬프트 override 없음"
-         | Some keys, _ -> "프롬프트 override " ^ String.concat ", " keys
-         | None, 0 -> "프롬프트 override 없음"
-         | None, n ->
-           Printf.sprintf "프롬프트 override %d개 — 어느 것인지는 이 프리셋에 적혀 있지 않습니다" n)
+           and choosing is what this pane is for. *)
+        (match m.D.pm_override_keys with
+         | [] -> "프롬프트 override 없음"
+         | keys -> "프롬프트 override " ^ String.concat ", " keys)
       ; (match m.D.pm_keepers with
          | [] -> "지시문을 담은 keeper 없음"
          | keepers -> "지시문 " ^ String.concat ", " keepers)

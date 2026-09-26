@@ -1,0 +1,198 @@
+{
+  "groups": {
+    "all-baseline": {
+      "n": 300,
+      "min": 0.239791,
+      "median": 0.3569795,
+      "p95": 1.145333,
+      "max": 16.7655
+    },
+    "all-candidate": {
+      "n": 300,
+      "min": 0.235584,
+      "median": 0.363167,
+      "p95": 1.14875,
+      "max": 15.993209
+    },
+    "roster-baseline": {
+      "n": 180,
+      "min": 0.239791,
+      "median": 0.331729,
+      "p95": 0.834041,
+      "max": 2.592625
+    },
+    "roster-candidate": {
+      "n": 180,
+      "min": 0.235584,
+      "median": 0.365333,
+      "p95": 1.517083,
+      "max": 15.993209
+    },
+    "info-baseline": {
+      "n": 120,
+      "min": 0.253583,
+      "median": 0.379375,
+      "p95": 1.383209,
+      "max": 16.7655
+    },
+    "info-candidate": {
+      "n": 120,
+      "min": 0.2675,
+      "median": 0.363167,
+      "p95": 0.773833,
+      "max": 3.232042
+    }
+  },
+  "session_resources": [
+    {
+      "role": "baseline",
+      "repetition": 1,
+      "child_user_seconds": 0.11229099999999999,
+      "child_system_seconds": 0.11044999999999999,
+      "child_cpu_seconds": 0.22274099999999997,
+      "wall_seconds": 2.626068959,
+      "scope": "whole reaped launcher/TUI session and waited descendants; includes startup/navigation/draft/shutdown; excludes observer CPU"
+    },
+    {
+      "role": "candidate",
+      "repetition": 1,
+      "child_user_seconds": 0.12342399999999999,
+      "child_system_seconds": 0.075712,
+      "child_cpu_seconds": 0.19913599999999998,
+      "wall_seconds": 2.49044875,
+      "scope": "whole reaped launcher/TUI session and waited descendants; includes startup/navigation/draft/shutdown; excludes observer CPU"
+    },
+    {
+      "role": "candidate",
+      "repetition": 2,
+      "child_user_seconds": 0.125865,
+      "child_system_seconds": 0.057428,
+      "child_cpu_seconds": 0.183293,
+      "wall_seconds": 3.084127166,
+      "scope": "whole reaped launcher/TUI session and waited descendants; includes startup/navigation/draft/shutdown; excludes observer CPU"
+    },
+    {
+      "role": "baseline",
+      "repetition": 2,
+      "child_user_seconds": 0.108414,
+      "child_system_seconds": 0.050843,
+      "child_cpu_seconds": 0.15925699999999998,
+      "wall_seconds": 2.488872958,
+      "scope": "whole reaped launcher/TUI session and waited descendants; includes startup/navigation/draft/shutdown; excludes observer CPU"
+    },
+    {
+      "role": "baseline",
+      "repetition": 3,
+      "child_user_seconds": 0.11846699999999999,
+      "child_system_seconds": 0.059037,
+      "child_cpu_seconds": 0.177504,
+      "wall_seconds": 2.955538458,
+      "scope": "whole reaped launcher/TUI session and waited descendants; includes startup/navigation/draft/shutdown; excludes observer CPU"
+    },
+    {
+      "role": "candidate",
+      "repetition": 3,
+      "child_user_seconds": 0.111541,
+      "child_system_seconds": 0.049562999999999996,
+      "child_cpu_seconds": 0.161104,
+      "wall_seconds": 2.177750709,
+      "scope": "whole reaped launcher/TUI session and waited descendants; includes startup/navigation/draft/shutdown; excludes observer CPU"
+    }
+  ],
+  "source_and_observer": {
+    "identities": {
+      "baseline": {
+        "manifest": {
+          "commit": "9adb139dd3aabcb67d7bdf35184f21915c401e41",
+          "arch": "macos-arm64",
+          "run_attempt": 1,
+          "release_validated": false,
+          "sha256": {
+            "main_eio.exe": "42563b5db005a84d20d81b769b7e800832c850291565158eab68755f909ffc9e",
+            "masc_tui.exe": "815bdbfd53d13c64f8f4f1fe84da5a23155c91764da8d8365b57d9b964326854",
+            "masc_browser_host.exe": "b70aa1e91a07f98ea7e05de7ec5bae84005c3a87382729f7011876cc91f6ddc7"
+          }
+        },
+        "artifact": {
+          "id": 10906509317,
+          "node_id": "MDg6QXJ0aWZhY3QxMDkwNjUwOTMxNw==",
+          "name": "runtime-probe-macos-arm64-9adb139dd3aabcb67d7bdf35184f21915c401e41-attempt-1",
+          "size_in_bytes": 67167325,
+          "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10906509317",
+          "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10906509317/zip",
+          "expired": false,
+          "digest": "sha256:dd6e43929a9a975b8ee9d0500d7a5dfa1020cc1b869aecc11df912e7cfc676ea",
+          "created_at": "2026-09-26T13:05:30Z",
+          "updated_at": "2026-09-26T13:05:30Z",
+          "expires_at": "2026-10-03T13:05:23Z",
+          "workflow_run": {
+            "id": 36243647589,
+            "repository_id": 1136640865,
+            "head_repository_id": 1136640865,
+            "head_branch": "perf/tui-footer-pinned-probe-20260926",
+            "head_sha": "9adb139dd3aabcb67d7bdf35184f21915c401e41"
+          }
+        },
+        "binary": "/Users/runner/work/masc/masc/runtime-baseline/masc_tui.exe"
+      },
+      "candidate": {
+        "manifest": {
+          "commit": "14c9e1f6488557047e4d77e302fa069e2a88b214",
+          "arch": "macos-arm64",
+          "run_attempt": 1,
+          "release_validated": false,
+          "sha256": {
+            "main_eio.exe": "eef83167b2256dc85ea81d213a7aa1e7f261329f3ce18031dbf2b8d3352b512e",
+            "masc_tui.exe": "f36e87bbf2fb17cc9f1fd25d35e665d93bdc8b8401e7a5f984d6bf75b00006b0",
+            "masc_browser_host.exe": "546eafe46585fba0dc9f30e5afcc8c8a5cef2af166aff62aa478482cfc66fd25"
+          }
+        },
+        "artifact": {
+          "id": 10907062871,
+          "node_id": "MDg6QXJ0aWZhY3QxMDkwNzA2Mjg3MQ==",
+          "name": "runtime-probe-macos-arm64-14c9e1f6488557047e4d77e302fa069e2a88b214-attempt-1",
+          "size_in_bytes": 67167684,
+          "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10907062871",
+          "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10907062871/zip",
+          "expired": false,
+          "digest": "sha256:6990ab75fc61f05d7d0c5eb488e481e04dc4faabb9cf5e51f359b9d9bde411b7",
+          "created_at": "2026-09-26T13:25:05Z",
+          "updated_at": "2026-09-26T13:25:05Z",
+          "expires_at": "2026-10-03T13:24:56Z",
+          "workflow_run": {
+            "id": 36244725141,
+            "repository_id": 1136640865,
+            "head_repository_id": 1136640865,
+            "head_branch": "perf/tui-frame-capacity-probe-20260926",
+            "head_sha": "14c9e1f6488557047e4d77e302fa069e2a88b214"
+          }
+        },
+        "binary": "/Users/runner/work/masc/masc/runtime-candidate/masc_tui.exe"
+      }
+    },
+    "helper_sha256": "4841c61f45457db49dac8afb8a6714a8a9f109671a33e5e9b96b7cf8d4bd39d8",
+    "scenario_sha256": "2b12d51f3fb64d0a32924804c601a2f9e489729962da303a6049cada1114af55",
+    "preflight": {
+      "metadata_sha256": "5ee56d0c08a735b95330e4d4b7b1f9d8201925600c61e4c02933702fe5a3a2c1",
+      "visible_keepers": [
+        "alpha",
+        "beta"
+      ],
+      "retained_channels": {
+        "count": 250,
+        "fixture_sha256": "a57996f8ba3a01b5357180200dbd61d7ec7433dbd799b07ec2609efe4e2b73a8",
+        "loaded_header": "250 here / 251 total",
+        "returned_tab": "Info"
+      }
+    },
+    "execution_order": [
+      "baseline",
+      "candidate",
+      "candidate",
+      "baseline",
+      "baseline",
+      "candidate"
+    ]
+  },
+  "p95_definition": "nearest rank sorted[ceil(0.95*n)-1]"
+}

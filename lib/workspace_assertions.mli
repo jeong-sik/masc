@@ -98,7 +98,7 @@ val assertion_kind_of_string_lenient : string -> assertion_kind option
 val handle_check
   :  inspect_state:(Workspace_types.context -> agent_state)
   -> tool_name:string
-  -> start_time:float
+  -> start_time:Tool_timing.started
   -> Workspace_types.context
   -> Yojson.Safe.t
   -> Tool_result.result

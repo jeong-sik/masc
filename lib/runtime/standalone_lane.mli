@@ -1,9 +1,11 @@
 (** The standalone lanes: model-driven exact-output work that runs outside a
-    Keeper turn. A lane is one [\[runtime.exact_output_lanes.<id>\]] table, one
-    row of the standalone-lane projection, and the [lane] a run record names.
+    Keeper turn. A lane is one [\[runtime.exact_output_lanes.<id>\]] table and
+    one row of the standalone-lane projection. Browser Stagehand does not yet
+    retain run records; the other lanes name their records here.
 
     [Runtime.exact_lane] is this type. [Exact_lane_run_registry.lane] is its
-    own type without [Verifier], and [Exact_lane_run_registry.lane_of_standalone]
+    own type without [Verifier] or [Browser_stagehand], and
+    [Exact_lane_run_registry.lane_of_standalone]
     matches on this one, so adding a lane here fails every match that has not
     yet said what the new lane means. *)
 
@@ -13,6 +15,7 @@ type t =
   | Board_attention
   | Workspace_curator
   | Verifier
+  | Browser_stagehand
 
 val all : t list
 (** Every lane once, in declaration order. *)

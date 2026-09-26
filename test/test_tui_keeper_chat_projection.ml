@@ -1172,6 +1172,95 @@ let test_batch_preserves_original_user_history_once () =
       (List.for_all (fun (member : Keeper_chat_operation.t) -> member.input = None) members))
 ;;
 
+let test_batch_respects_interleaved_conversation_order () =
+  let module Store = Keeper_chat_operation_store in
+  let module Batch = Masc.Keeper_chat_operation_batch in
+  let module Payload = Masc.Keeper_chat_operation_payload in
+  let module History = Masc.Keeper_chat_store in
+  let ok = function Ok value -> value | Error detail -> fail detail in
+  let store_ok = function
+    | Ok value -> value
+    | Error error -> fail (Store.error_to_string error)
+  in
+  let source thread_id =
+    let continuation_channel =
+      Keeper_continuation_channel.dashboard ~thread_id |> ok
+    in
+    Payload.source_to_json ~submitted_by:"operator" ~thread_id
+      ~continuation_channel
+      ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+      ~channel:"" ~channel_user_id:"" ~channel_user_name:""
+      ~channel_workspace_id:"" ~conversation_id:None
+      ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
+      ~sender_keeper:None ~user_row_origin:History.Needs_append
+    |> ok
+  in
+  let source_a = source "keeper:batch-order-a" in
+  let source_b = source "keeper:batch-order-b" in
+  let submit ?priority store name source =
+    let operation_id = Keeper_chat_operation.Operation_id.of_string name |> ok in
+    let input =
+      Payload.input_to_json ~message:name ~user_blocks:[]
+        ~turn_instructions:None ~surface_context:None ~attachments:[]
+    in
+    ignore (Store.submit ?priority store ~now:1. ~operation_id ~source ~input
+            |> store_ok)
+  in
+  let claim store =
+    match Store.claim_next ~batch:Batch.select store ~now:2. |> store_ok with
+    | Some operation -> operation
+    | None -> fail "queued conversation was not claimed"
+  in
+  let member_names store operation =
+    Store.batch_operations store ~operation_id:operation.Keeper_chat_operation.operation_id
+    |> store_ok
+    |> List.map (fun member ->
+      Keeper_chat_operation.Operation_id.to_string
+        member.Keeper_chat_operation.operation_id)
+  in
+  let with_store name f =
+    let directory = Filename.temp_dir name "" in
+    let store =
+      Store.open_or_create ~path:(Filename.concat directory "operations.sqlite3")
+      |> store_ok
+    in
+    Fun.protect ~finally:(fun () -> ignore (Store.close store))
+      (fun () -> f store)
+  in
+  with_store "batch-interleaved-fifo" (fun store ->
+    submit store "fifo-a-one" source_a;
+    submit store "fifo-b" source_b;
+    submit store "fifo-a-two" source_a;
+    let first = claim store in
+    check (list string) "normal batch stops before another conversation"
+      ["fifo-a-one"] (member_names store first);
+    ignore (Store.succeed_running store ~now:3.
+              ~operation_id:first.operation_id ~outcome_ref:"first-turn"
+            |> store_ok);
+    let second = claim store in
+    check (list string) "interleaved conversation keeps its queue position"
+      ["fifo-b"] (member_names store second);
+    ignore (Store.succeed_running store ~now:3.
+              ~operation_id:second.operation_id ~outcome_ref:"second-turn"
+            |> store_ok);
+    check (list string) "later matching message runs after interleaved one"
+      ["fifo-a-two"] (member_names store (claim store)));
+  with_store "batch-interactive-priority" (fun store ->
+    submit store "priority-a-one" source_a;
+    submit store "priority-b" source_b;
+    submit ~priority:Batch.select_priority store "priority-a-two" source_a;
+    check (list string) "explicit interactive admission moves its cohort"
+      ["priority-a-one"; "priority-a-two"; "priority-b"]
+      (Store.list_queued store ~after_sequence:None ~limit:10
+       |> store_ok
+       |> List.map (fun operation ->
+         Keeper_chat_operation.Operation_id.to_string
+           operation.Keeper_chat_operation.operation_id));
+    check (list string) "reordered cohort runs once in original member order"
+      ["priority-a-one"; "priority-a-two"]
+      (member_names store (claim store)))
+;;
+
 let test_batch_member_events_pass_request_bound_stream_decode () =
   let module Events = Masc.Keeper_chat_events in
   let module Projection = Server_keeper_chat_agui_projection in
@@ -1581,6 +1670,8 @@ let () =
             test_operation_reconciliation_projection
         ; test_case "batch accepted-user history preserves original identities" `Quick
             test_batch_preserves_original_user_history_once
+        ; test_case "batch respects interleaved conversation order" `Quick
+            test_batch_respects_interleaved_conversation_order
         ; test_case "batch member stream retains strict request identity" `Quick
             test_batch_member_events_pass_request_bound_stream_decode
         ; test_case "batch reconciliation keeps original request binding" `Quick

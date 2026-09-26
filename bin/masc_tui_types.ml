@@ -449,8 +449,8 @@ type msg_identity =
    for. *)
 type gate_step = {
   gs_approval_id: string;
-  gs_phase: Masc.Keeper_chat_store.approval_lifecycle_phase;
-      (** The store's closed sum, parsed once by the history decoder. *)
+  gs_phase: Keeper_approval_lifecycle.approval_lifecycle_phase;
+      (** The HITL contract's closed sum, parsed once by the history decoder. *)
   gs_tool: string option;
   gs_summary: string option;
 }
@@ -626,7 +626,7 @@ let project_gate_history ~visibility entries =
         let phases = List.map (fun (_, gate) -> gate.gs_phase) steps in
         let has_problem, last_outcome =
           List.fold_left (fun (problem, last) phase ->
-            let open Masc.Keeper_chat_store in
+            let open Keeper_approval_lifecycle in
             match phase with
             | Approval_replay_failed | Approval_replay_indeterminate
             | Approval_replay_applied_with_warning | Approval_resolved_rejected ->
@@ -641,7 +641,7 @@ let project_gate_history ~visibility entries =
         in
         match reversed, has_problem, last_outcome with
         | (last_index, newest) :: _ :: _, false,
-          Some Masc.Keeper_chat_store.Approval_replay_applied ->
+          Some Keeper_approval_lifecycle.Approval_replay_applied ->
             let summary = List.find_map (fun (_, gate) -> gate.gs_summary) reversed in
             Option.map (fun text ->
               last_index, Printf.sprintf "%s · %d steps · Ctrl-D" text (List.length steps))
@@ -2100,7 +2100,10 @@ type overview_spend_reading =
           (** Rows this build could not read; their Keepers draw unknown. *)
       freshness : spend_freshness;
     }
-  | Overview_spend_failed of string
+  | Overview_spend_load_failed of string
+      (** The TUI could not read or decode the keeper-costs response. *)
+  | Overview_spend_compute_failed of string
+      (** The server answered, but could not compute its first spend reading. *)
 
 let cost_reply_is_current ~visible ~current_generation ~reply_generation =
   visible && current_generation = reply_generation
@@ -2110,7 +2113,8 @@ let toggle_cost_visibility ~visible ~generation =
 
 let cost_refresh_needed ~visible = function
   | Overview_spend_unread -> visible
-  | Overview_spend_warming | Overview_spend_read _ | Overview_spend_failed _ -> false
+  | Overview_spend_warming | Overview_spend_read _
+  | Overview_spend_load_failed _ | Overview_spend_compute_failed _ -> false
 
 (** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
     briefing writes [null] for a Keeper with no registry entry (an offline
@@ -6381,6 +6385,9 @@ type state = {
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
   mutable verification_inflight: bool;
+  (* A verdict can commit while an older queue read is still in flight. Its
+     answer is stale even if it arrives later; discard it and read again. *)
+  mutable verification_refresh_after_inflight: bool;
   mutable verification_scroll: int;
   mutable verification_cursor: int;
   (* Which list this surface is reading. The store keeps every submission ever
@@ -6398,11 +6405,11 @@ type state = {
      and verdict keys from silently moving to a different task. *)
   mutable verification_detail_request_id: string option;
   mutable verification_detail_scroll: int;
-  (* An approve armed for a second keypress: which task. The cursor can move
-     between the two presses, so the task id is captured at arm time and a
-     press on a different row re-arms for that row. Reject carries no arm --
-     its $EDITOR reason form is the confirmation step. *)
-  mutable verification_verdict_armed: string option;
+  (* An approve armed for a second keypress: the exact task and submission.
+     A queue reload can replace a submission for the same task between presses;
+     that second press must re-arm, not approve the new request. Reject carries
+     no arm -- its $EDITOR reason form is the confirmation step. *)
+  mutable verification_verdict_armed: (string * string) option;
   mutable verification_verdict_error: string option;
   mutable system_logs: system_log_snapshot option;
   mutable system_logs_error: string option;
@@ -8273,6 +8280,7 @@ let create_state
   verification = None;
   verification_error = None;
   verification_inflight = false;
+  verification_refresh_after_inflight = false;
   verification_scroll = 0;
   verification_cursor = 0;
   verification_view = Tui_decode.Awaiting_queue;
@@ -8755,6 +8763,11 @@ type clamped_scroll =
      it -- later endpoints, the probe's last rows, the footer -- could not be
      reached. *)
   | Voice_scroll of int
+  (* The context inspector's plain shapes are lines the frame lays out of the
+     reading it holds, and the frame windows them. The keypress bounds the
+     scroll against the same window, but a reading that lands shorter leaves
+     the stored value past it until the frame says where it drew from. *)
+  | Context_inspector_scroll of int
 
 (* What End names on a surface whose rows the drawing counts: a row past any
    real end, so the frame's own clamp reports the last one back. The keypress
@@ -8812,6 +8825,7 @@ let apply_clamped_scroll (state : state) = function
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
+  | Context_inspector_scroll value -> state.context_inspector_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
    fewer than the chrome alone says. The number of rows the list keeps lives
@@ -8853,10 +8867,10 @@ let agenda (state : state) : Masc_tui_agenda.t =
     | Some snapshot, _ when not (String.equal snapshot.scs_status "ok") ->
       Masc_tui_agenda.Read_failed
         (match snapshot.scs_read_error with
-         | Some reason -> Tui_decode.sanitize_terminal_text reason
+         | Some reason -> reason
          | None -> "schedule store unreadable")
     | None, Some error ->
-      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
+      Masc_tui_agenda.Read_failed error
     | None, None -> Masc_tui_agenda.Not_read
     | Some snapshot, _ ->
       Masc_tui_agenda.Read
@@ -8877,7 +8891,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
   let awaiting =
     match state.keeper_tool_approvals_observed, state.keeper_tool_approvals_error with
     | false, Some error ->
-      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
+      Masc_tui_agenda.Read_failed error
     | false, None -> Masc_tui_agenda.Not_read
     | true, _ ->
       Masc_tui_agenda.Read
@@ -8893,7 +8907,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
   let stalled =
     match state.operator_stalled, state.tasks_error with
     | None, Some error ->
-      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
+      Masc_tui_agenda.Read_failed error
     | None, None -> Masc_tui_agenda.Not_read
     | Some rows, _ -> Masc_tui_agenda.Read rows
   in
@@ -9921,7 +9935,7 @@ let plan_slot_edit (state : state) edit =
              { target; slot; request = Drop_declared_slot; cursor_after = cursor_after_drop }
          | Media_failover_slots, Drop_slot ->
            (* An empty route is a configuration, not a broken one: it means no
-              vision fleet. So the last entry may go. *)
+              vision runtimes. So the last entry may go. *)
            Send_slot_write
              { target
              ; slot

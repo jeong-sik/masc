@@ -1,0 +1,36 @@
+{
+  "baseline": "8c23cd524c28048a0f3a859fb86f4e001428c9a9",
+  "candidate": "c1997e8d770fe7c6c60677563956409b97cb0eb5",
+  "PR_source_head": "f4feb04d600cf4544c2c4b64131a08dce1f7e407",
+  "fixed_test_probe_head": "f9ea43e96349c1da634b7b8586412d187f984851",
+  "product_diff": [
+    "lib/workspace/workspace_backlog.ml",
+    "lib/workspace/workspace_utils_ops.ml",
+    "lib/workspace/workspace_utils_ops.mli"
+  ],
+  "all_candidate_changed_paths": [
+    "changelog.d/39330.md",
+    "lib/workspace/workspace_backlog.ml",
+    "lib/workspace/workspace_utils_ops.ml",
+    "lib/workspace/workspace_utils_ops.mli",
+    "test/test_workspace.ml"
+  ],
+  "file_sha256": {
+    "lib/workspace/workspace_backlog.ml": {
+      "c1997e8d770fe7c6c60677563956409b97cb0eb5": "9742ded3e0ee7d241e668dca3d8f0d4052dd24c0dd4714a69094544b0f3f7bb5",
+      "f4feb04d600cf4544c2c4b64131a08dce1f7e407": "9742ded3e0ee7d241e668dca3d8f0d4052dd24c0dd4714a69094544b0f3f7bb5",
+      "f9ea43e96349c1da634b7b8586412d187f984851": "9742ded3e0ee7d241e668dca3d8f0d4052dd24c0dd4714a69094544b0f3f7bb5"
+    },
+    "lib/workspace/workspace_utils_ops.ml": {
+      "c1997e8d770fe7c6c60677563956409b97cb0eb5": "2a5baf3b670690bb40e8cdac9a7b79a92a461feeb4ad09eb0e9f33b1bc5ac8a2",
+      "f4feb04d600cf4544c2c4b64131a08dce1f7e407": "2a5baf3b670690bb40e8cdac9a7b79a92a461feeb4ad09eb0e9f33b1bc5ac8a2",
+      "f9ea43e96349c1da634b7b8586412d187f984851": "2a5baf3b670690bb40e8cdac9a7b79a92a461feeb4ad09eb0e9f33b1bc5ac8a2"
+    },
+    "lib/workspace/workspace_utils_ops.mli": {
+      "c1997e8d770fe7c6c60677563956409b97cb0eb5": "43278abc4b7e67402c5326e7dab3a435aa8d128e39e47af9efcc9a454cf90dc4",
+      "f4feb04d600cf4544c2c4b64131a08dce1f7e407": "43278abc4b7e67402c5326e7dab3a435aa8d128e39e47af9efcc9a454cf90dc4",
+      "f9ea43e96349c1da634b7b8586412d187f984851": "43278abc4b7e67402c5326e7dab3a435aa8d128e39e47af9efcc9a454cf90dc4"
+    }
+  },
+  "test_correction": "Candidate predates the path-aware test lock fix. Fixed probe differs from candidate only in test/test_workspace.ml. Different PR/probe bases mean whole lib/bin are not identical. Sanitizer inline follow-up is absent."
+}

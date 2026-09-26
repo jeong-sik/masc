@@ -215,6 +215,22 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
   let has_waiting = match has_waiting with
     | Some has_waiting -> has_waiting
     | None -> fun () -> Keeper_memory_lane.has_waiting ~base_path ~keeper_name in
+  (* What a Memory pass over [unit] carries, as the durable pass would for the
+     same atoms: their messages, the tool calls in them, and the counterpart
+     observations of the turn they finish (none for a unit that stops inside
+     its turn; the unit that finishes it carries the turn's). *)
+  let memory_input (base : Keeper_librarian.input) unit =
+    let ( let* ) = Result.bind in
+    let messages = P.messages unit in
+    let* counterpart_observations = match P.turn_window unit with
+      | None -> Ok []
+      | Some { P.after; through } ->
+        Keeper_librarian_input_sources.counterpart_observations_between
+          ~base_dir:base_path ~keeper_name ~after ~before:through
+        |> Result.map_error Keeper_librarian_input_sources.read_error_to_string in
+    Ok { base with messages;
+         tool_observations = Keeper_librarian_durable_consumer.tool_observations messages;
+         counterpart_observations } in
   let rec next () =
     observe O.Checking;
     match Env_config.KeeperMemoryOs.librarian_config_state () with
@@ -290,20 +306,27 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
           working_context = Keeper_librarian_context.empty;
           messages = P.messages prepared;
           tool_observations = []; counterpart_observations = [] } in
-      let* selected = match !capacity with
+      let* fitted = match !capacity with
         | None -> Ok (Some prepared)
         | Some capacity -> Runtime.fit_continuity ~capacity ~base_path
-            ~keeper_id:keeper_name ~input prepared in
-      (* One fallback's limit cannot prohibit other providers. If no indivisible
-         range fits it, keep the source for the normal lane walk; only a real
-         final refusal may stop this attempt. *)
-      let selected = match selected with
-        | Some selected -> selected
-        | None -> prepared in
+            ~keeper_id:keeper_name ~input_for:(memory_input input) prepared in
+      let selected = match fitted with
+        | Some fitted -> fitted
+        | None ->
+          (* One fallback's limit cannot prohibit other providers. If no
+             indivisible range fits it, keep the source for the normal lane
+             walk; only a real final refusal may stop this attempt. *)
+          prepared in
       let* memory_committed = P.memory_committed ~config ~keeper_name selected in
       let* range_id = P.memory_range_id ~config ~keeper_name selected in
-      Ok (current, memory_committed, range_id, selected,
-        {input with messages = P.messages selected})) in
+      (* A pass that saves Memory for these atoms is the only one that will:
+         the durable pass moves past them without reading them again. So it
+         carries what the durable pass would have. A pass whose Memory is
+         already saved needs neither observation. *)
+      let* input =
+        if memory_committed then Ok {input with messages = P.messages selected}
+        else memory_input input selected in
+      Ok (current, memory_committed, range_id, selected, input)) in
     match inputs with
     | Error detail -> report O.Input_unavailable detail
     | Ok (current, memory_committed, range_id, selected, input) ->
@@ -406,9 +429,13 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
            knows that something was too large, steps down once and waits. *)
         let fitted = Domain_pool_ref.submit_io_or_inline (fun () ->
           Runtime.fit_continuity ~capacity:observed ~base_path
-            ~keeper_id:keeper_name ~input selected) in
+            ~keeper_id:keeper_name ~input_for:(memory_input input) selected) in
         (match fitted with
          | Error detail -> report O.Input_unavailable detail
+         | Ok None when not memory_committed ->
+           report O.Not_committed
+             "the unit that finishes this turn does not fit the reported CLI input limit \
+              with its observations; its Memory is left to the durable pass"
          | Ok None -> report O.Capacity_refused "source cannot fit the reported CLI input capacity"
          | Ok (Some smaller) when P.end_atom smaller < P.end_atom selected ->
            Log.Keeper.info ~keeper_name

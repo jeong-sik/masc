@@ -53,8 +53,8 @@ store 마다 세 가지를 묻는다.
 | keeper meta | — | 아니오 | 멈춤 | Refuse_boot (0420) | — |
 | memory current | — | 아니오 | 돈다 (recall 빠짐) | Refuse_boot (0420) | — |
 | official-client session | 예 | 예 | **멈춤** | **Refuse_boot** | — |
-| Keeper event queue | — | — | **멈춤** | Refuse_boot (PR-3) | — |
-| Keeper checkpoint | — | — | **멈춤** (버전을 올리지 않은 변경만) | 정하지 않음 (4장) | — |
+| Keeper event queue | — | — | **멈춤** | Refuse_boot (PR-3, #39239) | — |
+| Keeper checkpoint | — | — | **멈춤** (버전을 올리지 않은 변경만) | 목록 밖 (1장 아래) | — |
 | World constitution | 아니오 | 예 (append) | 돈다 (못 푼 줄은 빠짐) | 목록 밖 | 프롬프트가 `rejected` 줄을 보여 주지 않음 |
 | goal store | 예 | 예 | 돈다 | Degrade_typed (0444) | — |
 | memory-source current | 아니오 | 예 | 돈다 | Preflight_only | `keeper_tool_memory_runtime.ml:830-835`, `keeper_memory_os_recall.ml:72-80` |
@@ -88,7 +88,10 @@ store 마다 세 가지를 묻는다.
 아직 목록에 없는 store 는 4장 PR-3 에서 다룬다.
 
 - event queue: (c) 가 아니오라서 `Refuse_boot` 다. 지금은 preflight 셸이 `validate-current-queue`·`validate-current-wal` 로 따로 읽는다. 목록에 넣으면서 그 두 subcommand 와 셸 반복문을 지운다. 파일은 Keeper 당 두 개, 합쳐 10MB 라서 부팅 비용이 작다.
-- 체크포인트: 현재 trace 의 checkpoint 는 24개 합쳐 642MB(가장 큰 것 89MB)다. 부팅마다 전부 풀면 2.2 의 전제가 깨진다. 버전을 올린 hard cut 은 이미 새 맥락으로 넘어가므로, 남은 위험은 버전을 올리지 않은 codec 변경이다. 부팅에서 읽을지, codec 을 바꾸면 버전을 올리도록 막을지는 운영자가 정한다.
+- 체크포인트: 목록에 넣지 않는다 (2026-09-26 운영자 결정). 기준은 Keeper 맥락을 얼마나 지키느냐다.
+  - 부팅에서 읽으면: 현재 trace 의 checkpoint 는 24개 합쳐 642MB(가장 큰 것 89MB)라, 부팅마다 전부 풀면 2.2 의 전제가 깨진다. 결과도 지금과 같다. 못 읽으면 build 를 되돌리거나, 격리해서 빈 맥락으로 시작한다.
+  - codec 을 바꿀 때 버전을 올리도록 강제하면(#38680 제안): 새 코드가 옛 파일을 읽을 수 있는 변경에도 모든 Keeper 가 `Superseded_version` 으로 새 맥락에서 시작한다(`keeper_context_core.ml:153-164`). 옛 버전을 읽는 코드는 두지 않으니 history 에 남은 옛 바이트도 쓸 수 없다. 맥락을 가장 많이 잃는다.
+  - 지금대로면: 못 읽는 동안 턴이 멈추고 정본은 남는다. build 를 되돌리면 맥락이 이어진다. `masc_keeper_clear` 가 못 읽는 정본을 지워도 저장 때마다 hardlink 한 history(기본 3개, `keeper.checkpoint_history_retained`)에 바이트가 남아서, 새 저장이 밀어내기 전까지는 손으로 되살릴 수 있다. 롤백 뒤 clear 의 남은 위험은 #38680 에 적었다.
 - World constitution: hard cut 으로 턴이 멈추지 않아서 이 RFC 의 부팅 정책 대상이 아니다. 프롬프트가 `rejected` 줄을 보여 주지 않는 것은 (a) 결함이다.
 - board comments, memory-journal: preflight 도 읽지 않는다. 읽는 함수부터 만들어야 한다 (#38595, #38596). (c) 는 조사하지 않았다.
 
@@ -167,8 +170,8 @@ preflight 의 `scan` 과 `on_refusal` 문구는 `Keeper_durable_store` 로 옮�
 
 - **PR-1 목록**: `Keeper_durable_store`(`Id`, `Refusing`, `Reported`, `reader`, `preflight_scan`, `name`, `run`, `on_refusal`). store 별 읽는 법은 preflight 에서 이 모듈로 옮기고 내보내지 않는다. `reader` 가 더는 가리키지 않는 읽는 법은 unused 경고로 빌드가 멈춘다. preflight 와 부팅 reconcile 이 이 목록을 쓴다. 부팅과 preflight 의 동작은 바뀌지 않는다. 판정 1·2·3.
 - **PR-2 세션**: official-client session 을 `Refuse_boot` 로 올리고, 잠금을 잡고 옮기는 방법을 더한다. 판정 4.
-- **PR-3 event queue**: 목록에 넣고 `Refuse_boot` 로 둔다. 격리는 queue 소유자 잠금 아래에서 스냅숏과 WAL 을 함께 옮긴다. 판정 5.
-- **체크포인트**: 운영자 결정을 기다린다 (1장 아래 설명).
+- **PR-3 event queue**: 목록에 넣고 `Refuse_boot` 로 둔다. 격리는 queue 소유자 잠금 아래에서 스냅숏과 WAL 을 함께 옮기고, WAL 을 먼저 옮긴다. WAL 은 혼자서도 첫 줄의 이전 상태부터 다시 읽히기 때문에, 중간에 멈췄을 때 스냅숏만 남게 하려는 순서다. 판정 5.
+- **체크포인트**: 목록 밖 (1장 아래 설명).
 - **PR-4 읽는 함수가 없는 store**: board comments, memory-journal(#38596). (c) 부터 조사한다.
 - **PR-5~ 소비자**: 1장 마지막 열의 소비자를 store 별로 고친다. 판정 6.
 - 별도 결함: #38597(memory events), #38598(preflight 문구), #39224(설치된 preflight helper 가 서버보다 오래됨).

@@ -103,6 +103,7 @@ module Make (E : Error) = struct
       | Ok () -> Ok ()
       | Error detail -> protocol_error stage detail
     with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Idle_timeout _ as exn -> raise exn
     | Eio.Time.Timeout as exn -> raise exn

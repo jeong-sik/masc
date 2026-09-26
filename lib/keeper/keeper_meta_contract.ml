@@ -338,13 +338,14 @@ let missing_required_sandbox_image_error ~keeper_name
        Some
          (Printf.sprintf
             "keeper %s rejected: sandbox_image is required for sandbox_profile \
-             %S%s. Add e.g. `sandbox_image = \"%s\"` to the keeper TOML; that \
+             %S%s. Add e.g. `sandbox_image = \"%s\"` to the keeper TOML, a \
+             name from the host's image catalog (sandbox-images.toml); that \
              image has no language toolchain, so a Keeper that builds code \
              names an image that carries one."
             keeper_name
             (Keeper_types_profile.sandbox_profile_to_string sandbox_profile)
             manifest_hint
-            Keeper_sandbox_image.default_tag))
+            Keeper_sandbox_image_version.(base_embedded.name)))
 ;;
 
 let effective_meta_of_profile_defaults

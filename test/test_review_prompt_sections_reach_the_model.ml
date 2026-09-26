@@ -49,7 +49,7 @@ let schemas =
   [ { Types_core.name = "tool_read_file"; description = "read"; input_schema = `Assoc [] } ]
 ;;
 
-let dispatch ~name ~args:_ = Tool_result.ok ~tool_name:name ~start_time:0.0 ""
+let dispatch ~name ~args:_ = Tool_result.ok ~tool_name:name ~start_time:(Tool_timing.start ()) ""
 
 let lookup = { AR.schemas; dispatch }
 

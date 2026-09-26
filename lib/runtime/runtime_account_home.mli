@@ -1,5 +1,5 @@
 val of_string : string -> (string, string) result
-(** Accept a non-empty absolute path without surrounding whitespace. Preserve
+(** Accept a non-empty UTF-8 absolute path without NUL bytes or surrounding whitespace. Preserve
     its exact spelling: an official client's credential store may use the home
     path text as part of its Keychain identity. *)
 

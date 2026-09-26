@@ -241,7 +241,8 @@ let write_backlog_result ?after_commit config backlog =
   let json = backlog_to_yojson backlog in
   let primary_path = backlog_path config in
   let recovery_path = backlog_recovery_path config in
-  match write_json_commit_result config primary_path json with
+  let encoded = encode_json_pretty json in
+  match write_encoded_json_commit_result config primary_path encoded with
   | Error msg -> Error msg
   | Ok primary_commit ->
     protect_backlog_commit_settlement (fun () ->
@@ -253,7 +254,7 @@ let write_backlog_result ?after_commit config backlog =
            message)
       primary_commit.mirror_error;
     let recovery_error =
-      match write_json_commit_result config recovery_path json with
+      match write_encoded_json_commit_result config recovery_path encoded with
       | Ok { mirror_error = None } -> None
       | Ok { mirror_error = Some message } ->
         Log.TaskState.error
@@ -330,7 +331,8 @@ let repair_backlog_copies_result config backlog =
   let json = backlog_to_yojson backlog in
   let primary_path = backlog_path config in
   let recovery_path = backlog_recovery_path config in
-  let write path = match write_json_commit_result config path json with
+  let encoded = encode_json_pretty json in
+  let write path = match write_encoded_json_commit_result config path encoded with
     | Error message -> Error message
     | Ok {mirror_error=Some message} -> Error message
     | Ok {mirror_error=None} -> Ok () in

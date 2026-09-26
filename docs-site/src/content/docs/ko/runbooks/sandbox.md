@@ -33,23 +33,40 @@ Keeper 가 띄울 microVM 런타임이 없습니다.
 
 ## 샌드박스 이미지
 
-MASC 는 이미지를 같이 배송하지 않습니다. 배포에 든 Keeper 는 `masc-sandbox:general`
-을 적어 두었고, `masc setup` 이 저장소에 그 이미지가 없으면 만듭니다. 손으로 만들 때는
-이렇게 합니다.
+MASC 는 이미지를 같이 배송하지 않습니다. Keeper 는 `sandbox_image` 에 이미지
+이름을 적습니다. 이름은 바이너리에 든 `config/sandbox-images.toml` 에 있는 것이어야
+합니다. 아무것도 빌드하지 않는 Keeper 는 `base`, MASC 를 빌드하는 Keeper 는
+`ocaml` 입니다. 이 호스트의 빌드 목록
+`<base-path>/.masc/config/sandbox-image-builds.toml` 은
+이미지 저장소(Docker, 또는 microVM 런타임마다 따로 있는 저장소)별로 각 이름이 이
+호스트에서 어떤 빌드인지 적어 둡니다. `masc setup` 은 설정하는 저장소에 `base`
+빌드가 목록에 없으면 빌드해서 목록에 올립니다(promote).
+
+손으로 할 때는 이렇게 합니다.
 
 ```bash
-masc sandbox-image --tag masc-sandbox:general
+masc sandbox-image                          # base 를 빌드하고 masc-sandbox-base:<UTC 분>-<입력 해시> 를 출력
+masc sandbox-image promote base <그 태그>    # base Keeper 의 다음 턴부터 이 빌드로 뜸
 ```
 
-무엇이 들었는지는 `sandbox-images/base/Dockerfile` 에 있습니다. 프로젝트의 툴체인은
-그 프로젝트 이미지에 있어야 하고, Keeper 마다 `sandbox_image` 로 가리킵니다.
+다른 레시피는 저장소 체크아웃에서 읽습니다.
+`masc sandbox-image --recipe ocaml --source <checkout>` 입니다. microVM 런타임의
+저장소를 쓰려면 명령마다 `--runtime <backend>` 를 붙입니다. 이미 저장소에 있는 태그는
+거절하므로, 한 태그 아래에서 빌드가 바뀌는 일은 없습니다.
 
-`--tag` 를 주지 않으면 명령이 빌드 이름을 `masc-sandbox-base:<UTC 분>-<입력 해시>`
-로 붙이고 출력합니다. 어느 쪽이든 이미 저장소에 있는 태그는 거절합니다. 그래서
-Keeper 가 쓰는 이름 아래에서 이미지가 바뀌지 않습니다. 새 태그로 빌드하고 Keeper 가
-그 태그를 가리키게 합니다.
+promote 는 `--runtime` 으로 고른 저장소에 그 태그가 있을 때만 목록에 적습니다. 목록에는
+이름과 저장소마다 태그 하나만 남습니다. 되돌리려면 저장소에 남아 있는 예전 태그를 다시
+promote 합니다. Docker, `apple_container`, `nerdctl_kata` 는 `masc sandbox-image` 로
+promote 할 태그를 빌드합니다. `msb` 는 빌드 명령이 없어서, 다른 데서 만든 이미지를
+OCI 아카이브로 `msb load` 한 뒤 그 태그를 `--runtime microsandbox` 로 promote 합니다.
 
-바이너리가 base 레시피를 품고 있고, 빌드 컨텍스트 없이 `docker build -` 로 넘깁니다.
+목록에 없는 이름을 적었거나, 이름은 있는데 그 저장소에 promote 된 빌드가 없는
+Keeper 는 컨테이너를 띄우지 않습니다. 거절 메시지에 위 명령이 함께 나옵니다. 턴은
+처음 컨테이너가 필요할 때 이름을 한 번 찾습니다. 그래서 promote 는 다음 턴부터
+닿고, 한 턴이 두 빌드로 갈리지 않습니다.
+
+`base` 에 무엇이 들었는지는 `sandbox-images/base/Dockerfile` 에 있습니다.
+바이너리가 이 레시피를 품고 있고, 빌드 컨텍스트 없이 `docker build -` 로 넘깁니다.
 그래서 저장소를 받아본 적 없는 기계에서도 똑같이 만들어집니다.
 
 **microVM 키퍼는 Docker 스토어를 보지 않습니다.** 런타임마다 자기 이미지 스토어가
@@ -63,10 +80,9 @@ masc sandbox-image --runtime apple_container
 `apple_container` 는 `container build` 가 `-` 를 안 받고 컨텍스트 디렉터리를 받으므로
 레시피를 임시 디렉터리에 파일로 써서 `-f` 로 지목합니다. `nerdctl` 은 Docker 문법이라
 같은 stdin 경로를 씁니다. `microsandbox`(`msb`)는 `build` 자체가 없어서 — `pull`,
-`load`, `save` 뿐입니다 — 다른 데서 만들어 OCI 아카이브로 `msb load` 해야 하고,
-이 명령이 그렇게 알려줍니다. `masc sandbox-image --print`
-는 빌드 대신 Dockerfile 을 표준출력으로 내보냅니다. `MASC_KEEPER_SANDBOX_DOCKER_IMAGE`
-로 기본 태그를 바꾸면 `docker` 와 `microvm` 양쪽 게스트 경로가 같이 따릅니다.
+`load`, `save` 뿐입니다 — 다른 데서 만들어 OCI 아카이브로 `msb load` 한 뒤 promote
+해야 하고, 이 명령이 그렇게 알려줍니다. `masc sandbox-image --print`
+는 빌드 대신 Dockerfile 을 표준출력으로 내보냅니다.
 
 ## 설정
 

@@ -1333,7 +1333,7 @@ let load_repository_pulls ~(host : string) ~(port : int) :
 let load_keeper_spend ~(host : string) ~(port : int) :
     (overview_spend_reading, string) result =
   match Masc_tui_http.fetch_keeper_costs ~host ~port with
-  | Error err -> Error ("keeper spend load failed: " ^ err)
+  | Error err -> Error err
   | Ok json -> Masc_tui_keeper_spend.decode_reading json
 
 (* The Overview's GOALS section. A phase this build does not know refuses the
@@ -1458,9 +1458,7 @@ let load_tools ~(host : string) ~(port : int) ?keeper () :
 (** Load the workspace skills catalog for the Tools screen tracking views. *)
 let load_skills_catalog ~(host : string) ~(port : int) :
     (Tui_decode.skills_catalog, string) result =
-  match fetch_skills_catalog ~host ~port with
-  | Error err -> Error ("skills catalog load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_skills_catalog json
+  Result.bind (fetch_skills_catalog ~host ~port) Tui_decode.decode_skills_catalog
 
 (** Load connector status from /api/v1/gate/connectors *)
 let load_connectors ~(host : string) ~(port : int) :

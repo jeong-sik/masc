@@ -27,7 +27,7 @@ type tool_result = Tool_result.result
 let tool_result_ok ?(tool_name = "") body : tool_result =
   Tool_result.make_ok
     ~tool_name
-    ~start_time:(Time_compat.now ())
+    ~start_time:(Tool_timing.start ())
     ~data:(`String body)
     ()
 ;;
@@ -35,7 +35,7 @@ let tool_result_ok ?(tool_name = "") body : tool_result =
 let tool_result_ok_data ?(tool_name = "") data : tool_result =
   Tool_result.make_ok
     ~tool_name
-    ~start_time:(Time_compat.now ())
+    ~start_time:(Tool_timing.start ())
     ~data
     ()
 ;;
@@ -55,7 +55,7 @@ let tool_result_error
   Tool_result.make_err
     ~tool_name
     ~class_
-    ~start_time:(Time_compat.now ())
+    ~start_time:(Tool_timing.start ())
     ~data:(`String body)
     body
 ;;
@@ -73,7 +73,7 @@ let tool_result_error_data
   Tool_result.make_err
     ~tool_name
     ~class_
-    ~start_time:(Time_compat.now ())
+    ~start_time:(Tool_timing.start ())
     ~data
     ?effect_disposition
     (Yojson.Safe.to_string data)

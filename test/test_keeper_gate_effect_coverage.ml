@@ -114,7 +114,7 @@ let with_keeper_dispatch_probe f =
       Some
         (Tool_result.make_ok
            ~tool_name:name
-           ~start_time:0.0
+           ~start_time:(Tool_timing.start ())
            ~data:(`Assoc [ "effect", `String "ran" ])
            ())
     in
@@ -146,7 +146,7 @@ let test_second_tool_snapshot_contains_first_tool_result () =
   let first_result =
     Tool_result.ok
       ~tool_name:"tool_read_file"
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       {|{"ok":true,"content":"exact evidence"}|}
   in
   Keeper_gate_causal_context.record_tool_result
@@ -514,7 +514,7 @@ let test_a_lane_that_reads_no_preference_is_refused () =
          "unknown exact-output lane %S; expected one of %s"
          "verifier_made_up"
          "librarian_exact, hitl_auto_judge, board_attention_exact, \
-          workspace_curator_exact, verifier_exact")
+          workspace_curator_exact, verifier_exact, browser_stagehand_exact")
       detail;
     check int "a refusal stores no row" 0 (List.length rows)
   | _ -> fail "an unknown lane did not meet the refusal contract"
@@ -789,7 +789,7 @@ let test_ollama_probe_leaf_requests_exact_authorization () =
     calls := (operation, input) :: !calls;
     Tool_result.ok
       ~tool_name:operation
-      ~start_time:0.0
+      ~start_time:(Tool_timing.start ())
       {|{"ok":true,"effect":"intercepted"}|}
   in
   let result =

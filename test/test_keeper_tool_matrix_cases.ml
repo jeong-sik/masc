@@ -120,7 +120,9 @@ let init_keeper_bridge =
       Masc.Keeper_tool_shared_runtime.tag_dispatch_fn := Masc.Keeper_tag_dispatch.dispatch)
 
 let keeper_matrix_owner = "keeper-tool-matrix"
+(* The tag this suite builds, and the catalog name its Keepers use for it. *)
 let sandbox_image = "masc-test-tool-matrix:fixture"
+let sandbox_image_name = "base"
 
 let make_meta ?(name = keeper_matrix_owner) () =
   match
@@ -139,7 +141,7 @@ let make_meta ?(name = keeper_matrix_owner) () =
        says which backend it wants instead of inheriting one it never chose. *)
     { meta with
       sandbox_profile = Masc_test_deps.fixture_sandbox_profile ();
-      sandbox_image = Some sandbox_image;
+      sandbox_image = Some sandbox_image_name;
     }
   | Error err -> failwith ("make_meta failed: " ^ err)
 
@@ -173,6 +175,8 @@ let make_fixture
   let generic =
     Generic.make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode
   in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path
+    [ sandbox_image_name, sandbox_image ];
   let config = Masc.Workspace.default_config base_path in
   let playground = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
   Generic.mkdir_p (Filename.concat playground "lib");
@@ -706,7 +710,7 @@ let evaluate_expectation ~name expectation = function
             in
             let expected_result =
               Tool_result.error ~failure_class:Tool_result.Runtime_failure
-                ~tool_name:name ~start_time:0.0
+                ~tool_name:name ~start_time:(Tool_timing.start ())
                 (Yojson.Safe.to_string expected)
               |> Masc.Tool_bridge.to_agent_core_typed_result
             in

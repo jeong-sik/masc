@@ -44,6 +44,19 @@ keep-alive = "10m"
 `
 
 describe('runtime TOML dashboard editing helpers', () => {
+  it('edits a quoted provider table in place', () => {
+    for (const quote of ['"', "'"]) {
+      const header = `providers.${quote}runpod_mtp${quote}`
+      const quoted = sourceText.replaceAll('providers.runpod_mtp', header)
+      expect(parseRuntimeTomlEnvironment(quoted).providers[0]?.id).toBe('runpod_mtp')
+      expect(getRuntimeTomlKey(quoted, 'providers.runpod_mtp', 'display-name')).toBe('"RunPod"')
+      const edited = setRuntimeTomlProviderField(quoted, 'runpod_mtp', 'exact-body-timeout-s', 1200)
+      expect(edited).toContain(`[${header}]`)
+      expect(edited).not.toContain('[providers.runpod_mtp]')
+      expect(getRuntimeTomlKey(edited, 'providers.runpod_mtp', 'exact-body-timeout-s')).toBe('1200')
+    }
+  })
+
   it('projects provider, model, and binding fields from runtime.toml source', () => {
     const environment = parseRuntimeTomlEnvironment(sourceText)
 
@@ -380,6 +393,25 @@ sangsu = "runpod_mtp.qwen"
     expect(env.bindings.length).toBe(0)
     expect(next).not.toContain('default = "runpod_mtp.qwen"')
     expect(next).not.toContain('[providers.runpod_mtp.credentials]')
+  })
+
+  it('deletes quoted provider and credential tables with their binding', () => {
+    for (const quote of ['"', "'"]) {
+      const quoted = sourceText
+        .replaceAll('providers.runpod_mtp', `providers.${quote}runpod_mtp${quote}`)
+        .replace('[runpod_mtp.qwen]', `[${quote}runpod_mtp${quote}.${quote}qwen${quote}]`)
+        + '\n[runtime.assignments]\nsangsu = "runpod_mtp.qwen"\n'
+      expect(parseRuntimeTomlEnvironment(quoted).bindings.map(binding => binding.id))
+        .toEqual(['runpod_mtp.qwen'])
+
+      const next = cascadeDeleteProvider(quoted, 'runpod_mtp')
+      expect(parseRuntimeTomlEnvironment(next).providers).toEqual([])
+      expect(next).not.toContain(`[providers.${quote}runpod_mtp${quote}]`)
+      expect(next).not.toContain(`[providers.${quote}runpod_mtp${quote}.credentials]`)
+      expect(next).not.toContain(`[${quote}runpod_mtp${quote}.${quote}qwen${quote}]`)
+      expect(next).not.toContain('default = "runpod_mtp.qwen"')
+      expect(next).not.toContain('sangsu = "runpod_mtp.qwen"')
+    }
   })
 
   it('retargets default and clears the dependent route when deleting a provider with a fallback binding', () => {

@@ -24,9 +24,6 @@ let published =
   [ ( "masc_goal_list"
   , "List shared planning goals, optionally filtered by explicit lifecycle phase."
   , "{\"type\":\"object\",\"properties\":{\"phase\":{\"type\":\"string\",\"enum\":[\"executing\",\"verifying\",\"awaiting_confirmation\",\"completed\",\"dropped\"],\"description\":\"Optional explicit Goal lifecycle phase filter\"}},\"additionalProperties\":false}" )
-  ; ( "masc_goal_measure"
-  , "Record an explicit observation of a Goal's declared metric. Supply the exact\ncurrent criterion_revision from masc_goal_list, the observed value, and\nsupporting evidence. This records a reported value; it does not prove\nthat the target was reached or change the Goal phase."
-  , "{\"type\":\"object\",\"properties\":{\"goal_id\":{\"type\":\"string\"},\"criterion_revision\":{\"type\":\"string\"},\"observed_value\":{\"type\":\"string\"},\"evidence\":{\"type\":\"string\",\"description\":\"An Evidence Reference: artifact:<producer-root-relative-path>, note:<text>, board:<post-id>, or fusion:<run-id>. Any other form is rejected.\"}},\"required\":[\"goal_id\",\"criterion_revision\",\"observed_value\",\"evidence\"],\"additionalProperties\":false}" )
   ; ( "masc_goal_transition"
   , "Apply an explicit Goal lifecycle transition (RFC-0387 stage 2 gate).
 

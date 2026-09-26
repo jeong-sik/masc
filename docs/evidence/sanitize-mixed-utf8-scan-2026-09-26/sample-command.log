@@ -1,0 +1,3 @@
+Sampling process 6424 for 5 seconds with 1 millisecond of run time between samples
+Sampling completed, processing symbols...
+Sample analysis of process 6424 written to file /private/tmp/masc-cold-http-native-profile-20260926/native-sample.txt

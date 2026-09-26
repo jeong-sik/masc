@@ -206,30 +206,25 @@ let is_disallowed_control_char (c : char) : bool =
 
 let sanitize_text_utf8 (s : string) : string =
   let len = String.length s in
-  let rec ascii_clean i =
-    if i >= len then true
+  (* ASCII is one UTF-8 byte even within multilingual text. Decode only the
+     non-ASCII characters, and retain the validated prefix if repair is needed. *)
+  let rec first_repair i =
+    if i >= len then None
+    else if Char.code s.[i] < 128 then
+      if is_disallowed_control_char s.[i] then Some i
+      else first_repair (i + 1)
     else
-      let c = Char.code s.[i] in
-      if c >= 128 then false
-      else if c < 32 && c <> 9 && c <> 10 && c <> 13 then false
-      else if c = 127 then false
-      else ascii_clean (i + 1)
+      let dec = String.get_utf_8_uchar s i in
+      let dlen = Uchar.utf_decode_length dec in
+      if dlen > 0 && Uchar.utf_decode_is_valid dec then
+        first_repair (i + dlen)
+      else Some i
   in
-  if ascii_clean 0 then s
-  else
-    let rec has_invalid_or_control i =
-      if i >= len then false
-      else
-        let dec = String.get_utf_8_uchar s i in
-        let dlen = Uchar.utf_decode_length dec in
-        if dlen > 0 && Uchar.utf_decode_is_valid dec then
-          if dlen = 1 && is_disallowed_control_char s.[i] then true
-          else has_invalid_or_control (i + dlen)
-        else true
-    in
-    if not (has_invalid_or_control 0) then s
-    else
+  match first_repair 0 with
+  | None -> s
+  | Some first ->
     let buf = Buffer.create len in
+    Buffer.add_substring buf s 0 first;
     let rec loop i =
       if i >= len then ()
       else
@@ -245,7 +240,7 @@ let sanitize_text_utf8 (s : string) : string =
           Buffer.add_string buf "\xEF\xBF\xBD";
           loop (i + 1))
     in
-    loop 0;
+    loop first;
     Buffer.contents buf
 
 let rec sanitize_json_utf8 (json : Yojson.Safe.t) : Yojson.Safe.t =

@@ -46,3 +46,10 @@ The changed OCaml files pass syntax parsing and the diff whitespace check.
 Compiled tests and candidate PTY measurements are pending CI. No local OCaml
 build was run. No latency gain, live-runtime deployment, physical-display
 measurement, or 0.1ms completion is claimed.
+
+## First comparison attempt
+
+[Comparison 36256591061](failed-comparison-36256591061/README.md) failed at
+baseline repetition 3 startup, before that session measured any input. Four
+completed sessions are retained without a full aggregate. A single retry
+36257181447 uses the same artifacts and observer; its data remains separate.

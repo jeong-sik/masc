@@ -28,6 +28,7 @@
     [Refuse_boot] too: while it does not decode, every turn of its keeper
     fails (2026-09-26, #38986); moved aside under its store lock, the
     keeper's next claim starts a new vendor session. The goal store ([goals.json]) is
+
     [Degrade_typed]: every goal writer refuses an unreadable store and no
     reader turns it into an empty goal list, so keepers run on tasks, board
     and schedules and nothing overwrites the file. [examine] reads it and

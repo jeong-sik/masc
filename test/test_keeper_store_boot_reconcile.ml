@@ -545,6 +545,7 @@ let test_a_binding_behind_a_linked_keeper_directory_refuses_boot () =
     (List.map (fun (u : R.undecodable) -> u.R.keeper) examination.R.undecodable)
 ;;
 
+
 let () =
   run
     "keeper store boot reconcile"
@@ -580,5 +581,6 @@ let () =
         ; test_case "a binding behind a linked keeper directory refuses boot" `Quick
             test_a_binding_behind_a_linked_keeper_directory_refuses_boot
         ] )
+
     ]
 ;;

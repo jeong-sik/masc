@@ -412,6 +412,7 @@ let official_client_session_store =
                       (match stored.decoded with
                        | Ok (_ : Keeper_official_client_session_store.t) -> Ok ()
                        | Error detail -> Error (stored.keeper_name ^ ": " ^ detail)))
+
                  empty_report))
   }
 ;;
@@ -701,6 +702,7 @@ module Refusing = struct
     | Keeper_meta
     | Memory_current
     | Official_client_session
+
   [@@deriving enumerate]
 end
 
@@ -722,6 +724,7 @@ let reader : Id.t -> reader = function
   | Id.Gate_pending -> Preflight_only gate_pending_store
   | Id.Official_client_session ->
     Refuse_boot (Refusing.Official_client_session, official_client_session_store)
+
   | Id.Librarian_range_receipts -> Preflight_only librarian_range_receipt_store
   | Id.Memory_source_current -> Preflight_only memory_source_current_store
   | Id.Disposition_receipts -> Preflight_only disposition_receipt_store

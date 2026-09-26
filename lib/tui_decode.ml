@@ -11530,9 +11530,17 @@ let decode_verification_evidence json =
              | _ -> Error "evidence artifact is missing reference/content/bytes")
         | `String "artifact_unreadable" ->
             let* ev_u_reason =
+              (* The producer writes the cause in two shapes only: a bare
+                 code string (transport projection) or an object carrying
+                 [code] (store snapshot). Anything else is a corrupt payload,
+                 not a cause to render. *)
               match member "reason" item with
-              | `Null -> Error "unreadable artifact has no reason"
-              | reason -> Ok (Yojson.Safe.to_string reason)
+              | `String code when String.trim code <> "" -> Ok code
+              | `Assoc _ as reason -> (
+                  match member "code" reason with
+                  | `String code when String.trim code <> "" -> Ok code
+                  | _ -> Error "unreadable artifact reason has no code")
+              | _ -> Error "unreadable artifact has an invalid reason"
             in
             Ok (Ev_artifact_unreadable { ev_u_reference = str "reference"; ev_u_reason })
         | `String kind -> Error ("unknown evidence item kind: " ^ kind)

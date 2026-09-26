@@ -11332,8 +11332,8 @@ let test_verification_evidence_decodes_items () =
            Alcotest.(check bool) "not truncated" false ev_truncated;
            Alcotest.(check (option string)) "unreadable ref"
              (Some "artifact:gone.txt") ev_u_reference;
-           Alcotest.(check bool) "reason preserved" true
-             (String.length ev_u_reason > 0)
+           Alcotest.(check string) "reason code without quotes" "missing"
+             ev_u_reason
        | _ -> Alcotest.fail "items decoded out of shape")
 
 let test_verification_evidence_unavailable_and_unknown_kind () =
@@ -11364,6 +11364,41 @@ let test_verification_evidence_unavailable_and_unknown_kind () =
   with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "an unknown evidence kind decoded"
+
+(* The producer writes the unreadable-artifact cause as a bare code string
+   (transport projection) or an object carrying [code] (store snapshot).
+   Anything else must fail the decode: a corrupt payload must never render
+   as a producer cause. *)
+let test_verification_evidence_reason_shapes () =
+  (match
+     Masc.Tui_decode.decode_verification_evidence
+       (Yojson.Safe.from_string
+          {|{"result":{"evidence":{"access":"available",
+             "items":[{"kind":"artifact_unreadable",
+               "reference":"artifact:gone.txt","reason":"missing"}]}}}|})
+   with
+   | Ok (Masc.Tui_decode.Evidence_items
+       [ Masc.Tui_decode.Ev_artifact_unreadable { ev_u_reason; _ } ]) ->
+       Alcotest.(check string) "bare code renders raw" "missing" ev_u_reason
+   | Ok _ | Error _ -> Alcotest.fail "a bare code reason did not decode");
+  List.iter (fun source ->
+    match Masc.Tui_decode.decode_verification_evidence
+      (Yojson.Safe.from_string source) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "a corrupt reason rendered as a producer cause")
+    [ {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":false}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":""}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":{}}]}}}|}
+    ; {|{"result":{"evidence":{"access":"available",
+         "items":[{"kind":"artifact_unreadable",
+           "reference":"artifact:gone.txt","reason":{"code":false}}]}}}|}
+    ]
 
 let skill_evidence_fixture () =
   `Assoc
@@ -11958,6 +11993,8 @@ let () =
           test_verification_evidence_decodes_items
       ; Alcotest.test_case "unavailable carries reason; unknown kind fails" `Quick
           test_verification_evidence_unavailable_and_unknown_kind
+      ; Alcotest.test_case "reason takes a code or code object; else fails" `Quick
+          test_verification_evidence_reason_shapes
       ] );
     ( "decode_goal_timeline",
       [ Alcotest.test_case "carries ready events" `Quick

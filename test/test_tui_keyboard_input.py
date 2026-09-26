@@ -6199,8 +6199,12 @@ class AtomicChatFixture:
     by the OCaml suites, not simulated as a claimed production success here.
     """
 
-    def __init__(self, *, first_working: bool = False) -> None:
+    def __init__(self, *, first_working: bool = False,
+                 no_control_token: bool = False,
+                 hold_first_acceptance: bool = False) -> None:
         self.first_working = first_working
+        self.no_control_token = no_control_token
+        self.hold_first_acceptance = hold_first_acceptance
         self.lock = threading.Lock()
         self.started_at = time.time()
         self.run_next_calls = 0
@@ -6209,6 +6213,8 @@ class AtomicChatFixture:
         self.interrupted = threading.Event()
         self.release_interrupt = threading.Event()
         self.old_poll_seen = threading.Event()
+        self.first_post_received = threading.Event()
+        self.release_first_acceptance = threading.Event()
         self.received: list[dict[str, Any]] = []
         self.submitted: list[dict[str, Any]] = []
         self.admitted = threading.Condition(self.lock)
@@ -6230,7 +6236,8 @@ class AtomicChatFixture:
         if self.interrupted.is_set() and not self.release_interrupt.is_set():
             self.old_poll_seen.set()
         return 200, {"schema": "masc.keeper_turns.v1", "keepers": [{
-            "keeper_name": "alpha", "status": "ok", "chat_control_token": self.token,
+            "keeper_name": "alpha", "status": "ok",
+            "chat_control_token": None if self.no_control_token else self.token,
             "turn": None if self.release.is_set() else {
                 "lane": "autonomous", "started_at_unix": self.started_at,
                 "interrupt_token": self.turn_token,
@@ -6252,17 +6259,29 @@ class AtomicChatFixture:
         request = json.loads(body)
         with self.lock:
             self.received.append(request)
+            first_post = len(self.received) == 1
+        if first_post:
+            self.first_post_received.set()
+            if self.hold_first_acceptance and not self.release_first_acceptance.wait(timeout=10):
+                raise AssertionError("first admission receipt was never released")
         intent = request.get("admission_intent")
-        if not isinstance(intent, dict) or intent.get("kind") != "interactive":
-            raise AssertionError(f"ordinary Enter lost interactive admission: {request!r}")
-        if intent.get("control_token") != self.token:
-            raise AssertionError(f"Enter used stale control authority: {request!r}")
+        if self.no_control_token:
+            if intent is not None:
+                raise AssertionError(f"Enter without a control token must queue only: {request!r}")
+        else:
+            if not isinstance(intent, dict) or intent.get("kind") != "interactive":
+                raise AssertionError(f"ordinary Enter lost interactive admission: {request!r}")
+            if intent.get("control_token") != self.token:
+                raise AssertionError(f"Enter used stale control authority: {request!r}")
         # Enter admits the line in queue order and names nothing to stop. Until
         # 2026-09-14 it bound the working direct execution, else the observed
         # autonomous turn, as the interrupt target, so every line typed while
         # the Keeper worked cancelled that work. Esc still targets the exact
         # turn (see [interrupt] below); Enter must not.
-        if intent.get("interrupt_token") is not None or intent.get("operation_id") is not None:
+        if isinstance(intent, dict) and (
+            intent.get("interrupt_token") is not None
+            or intent.get("operation_id") is not None
+        ):
             raise AssertionError(f"Enter named a turn to stop; it must only admit to the queue: {request!r}")
         with self.admitted:
             self.submitted.append(request)
@@ -6293,10 +6312,13 @@ class AtomicChatFixture:
         working = self.first_working and sequence == 1
         acceptance["value"]["state"] = "Running" if working else "Queued"
         acceptance["value"]["queued_count"] = sequence - 1 if self.first_working else sequence
-        acceptance["value"]["interactive"] = {
-            "outcome": "applied", "chat_control_token": self.token,
-            "signalled": not self.paused, "resumed": self.paused, "interrupt_error": None,
-        }
+        if self.no_control_token:
+            acceptance["value"].pop("interactive", None)
+        else:
+            acceptance["value"]["interactive"] = {
+                "outcome": "applied", "chat_control_token": self.token,
+                "signalled": not self.paused, "resumed": self.paused, "interrupt_error": None,
+            }
         self.paused = False
 
         def chunks() -> Iterator[bytes]:

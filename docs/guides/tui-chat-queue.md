@@ -8,13 +8,15 @@ While a turn is active, `Esc` requests that exact turn to stop and pauses admiss
 of queued messages and autonomous work. A stop request is acknowledged separately
 from the turn actually ending. Repeated keys cannot stop an unseen successor.
 
-Press Enter to send an update during a running conversation. The server accepts
-it in queue order without stopping the running turn. Each Enter keeps its own
+Press Enter to send an update during a running conversation. Ordinary sends
+reach server admission in local queue order without stopping the running turn.
+Each Enter keeps its own
 message identity. Compatible waiting inputs may share one execution in their
 accepted order. `/priority on` opts into automatically moving new messages to
-the front; `/run-next` moves a previously queued message explicitly. A pause
-caused by chat interruption can be resumed by a later message that observed that
-pause; a separate manual pause remains in effect.
+the front; `/run-next` moves a previously queued message explicitly. A stop
+can retain earlier local messages for an explicit operator decision, so those
+held messages do not block newer sends automatically. A separate manual pause
+remains in effect until it is resumed explicitly.
 
 If another stop or resume happened after the input was sent, the message remains
 queued and the newer control takes precedence. The TUI reports this explicitly.

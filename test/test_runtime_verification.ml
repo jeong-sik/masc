@@ -852,7 +852,7 @@ let test_antigravity_private_tool_roundtrip () =
     write script antigravity_readiness_fixture;
     Unix.chmod script 0o700;
     let config = { (Runtime_antigravity.default_config ~cwd:directory ~model:"fixture-selected-model") with
-      cli_path=script; timeout_s=Some 15.; admission_timeout_s=15.; wall_clock_ceiling_s=Some 15. } in
+      cli_path=script; timeout_s=Some 15.; admission_timeout_s=15. } in
     let result = Verify.For_testing.measure ~runtime_id:"antigravity.fixture" ~selected_model:"fixture-selected-model"
       ~challenge:"private-nonce-fixture"
       ~run:(fun tool ~prompt ->

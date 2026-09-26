@@ -1252,7 +1252,7 @@ let run_keeper_cycle
                      (* The FSM's from-state is the event bus's pending-tool
                         count (the authoritative value, per drain): [>0] means
                         the turn was in [Awaiting_tool_result] when the
-                        wall-clock ceiling expired. Hardcoding [Streaming]
+                        provider operation timed out. Hardcoding [Streaming]
                         here recorded a false from-state for exactly the hang
                         this escape exists for (#29230) — the classifier then
                         had no arm for it and the audit trail lost the

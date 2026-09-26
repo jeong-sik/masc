@@ -195,7 +195,6 @@ let run_fixture
     ?(timeout_s = 2.0)
     ?admission_timeout_s
     ?(no_turn_deadline = false)
-    ?wall_clock_ceiling_s
     ?(prompt = "Return the fixture marker")
     path
   =
@@ -205,7 +204,6 @@ let run_fixture
         cli_path = path
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
-      ; wall_clock_ceiling_s
       }
     in
     Runtime_antigravity.run_turn
@@ -1170,119 +1168,6 @@ let test_stream_idle_timeout_is_typed () =
        | Ok _ -> fail "silent Antigravity stream ignored its idle timeout")
 ;;
 
-let test_wall_clock_ceiling_ends_a_dripping_turn () =
-  (* Lines arrive inside every idle window (0.2s apart < 2.0s), so the idle
-     timeout never fires; only the whole-turn ceiling can end this turn. *)
-  with_fixture
-    ~line_delay_s:0.2
-    [ init ()
-    ; step (); step (); step (); step (); step (); step ()
-    ; step (); step (); step (); step (); step (); step ()
-    ]
-    (fun path ->
-       match run_fixture ~timeout_s:2.0 ~wall_clock_ceiling_s:0.7 path with
-       | Error (Runtime_antigravity.Timeout seconds) ->
-         check bool
-           "ceiling bounds the reported timeout"
-           true
-           (seconds > 0.0 && seconds <= 0.7)
-       | Error error -> fail (Runtime_antigravity.error_to_string error)
-       | Ok _ -> fail "a dripping stream outlived the wall-clock ceiling")
-;;
-
-let test_wall_clock_ceiling_bounds_a_turn_without_idle_deadline () =
-  (* [no_turn_deadline] leaves the idle timeout at [None]; the ceiling is
-     still a deadline, so a silently held stdout cannot outlive it. *)
-  with_fixture
-    ~pipe_holder_s:5.0
-    [ init () ]
-    (fun path ->
-       match
-         run_fixture ~no_turn_deadline:true ~wall_clock_ceiling_s:0.3 path
-       with
-       | Error (Runtime_antigravity.Timeout seconds) ->
-         check bool
-           "ceiling bounds the reported timeout"
-           true
-           (seconds > 0.0 && seconds <= 0.3)
-       | Error error -> fail (Runtime_antigravity.error_to_string error)
-       | Ok _ -> fail "an unbounded silent turn outlived the wall-clock ceiling")
-;;
-
-(* #29230: hang-duration distribution. The two ceiling tests above prove
-   single-shot bounds; this one measures the escape repeatedly and reports
-   the observed wall-clock hang-duration distribution, so drift in *when*
-   the ceiling ends a stuck turn (not just whether it does) shows up in CI.
-
-   Measured value: elapsed wall time around run_turn, i.e. how long the
-   turn actually stayed hung before the typed Timeout ended it. The
-   [Timeout seconds] payload alone cannot serve here: it reports the idle
-   window that expired, which for a dripping stream is the ceiling-capped
-   remainder (small), not the hang duration. Two shapes mirror the 8/21
-   field report: a stream that keeps dripping events (idle window never
-   expires) and a silently held stdout with no idle deadline at all. *)
-let test_wall_clock_ceiling_hang_duration_distribution () =
-  let runs = 8 in
-  let percentile p (a : float array) =
-    let sorted = Array.copy a in
-    Array.sort compare sorted;
-    sorted.(int_of_float (float_of_int (Array.length sorted - 1) *. p))
-  in
-  let measure_one ?no_turn_deadline ~timeout_s ~ceiling_s path =
-    let started = Unix.gettimeofday () in
-    let outcome =
-      run_fixture ?no_turn_deadline ~timeout_s ~wall_clock_ceiling_s:ceiling_s path
-    in
-    let elapsed = Unix.gettimeofday () -. started in
-    (match outcome with
-     | Error (Runtime_antigravity.Timeout _) -> ()
-     | Error error -> fail (Runtime_antigravity.error_to_string error)
-     | Ok _ -> fail "the turn completed; the hang escape never fired");
-    elapsed
-  in
-  (* dripping: 0.2s lines inside a 2.0s idle window, ceiling 0.7s. Without
-     the ceiling this shape runs to EOF (~2.4s) without ever tripping the
-     idle deadline, so an elapsed under ~0.9s means the ceiling fired. *)
-  let dripping = Array.init runs (fun _ ->
-      with_fixture
-        ~line_delay_s:0.2
-        [ init ()
-        ; step (); step (); step (); step (); step (); step ()
-        ; step (); step (); step (); step (); step (); step ()
-        ]
-        (fun path -> measure_one ~timeout_s:2.0 ~ceiling_s:0.7 path)) in
-  (* silent, no idle deadline: the ceiling is the only deadline *)
-  let silent = Array.init runs (fun _ ->
-      with_fixture
-        ~pipe_holder_s:5.0
-        [ init () ]
-        (fun path ->
-           measure_one ~no_turn_deadline:true ~timeout_s:2.0 ~ceiling_s:0.3 path)) in
-  Printf.printf
-    "#29230 hang-duration distribution (%d runs per shape)\n\
-     | shape | runs | min | p50 | p90 | max | ceiling |\n\
-     | dripping (idle 2.0s) | %d | %.3f | %.3f | %.3f | %.3f | 0.7 |\n\
-     | silent (no idle deadline) | %d | %.3f | %.3f | %.3f | %.3f | 0.3 |\n%!"
-    runs
-    runs
-    (percentile 0.0 dripping) (percentile 0.5 dripping)
-    (percentile 0.9 dripping) (percentile 1.0 dripping)
-    runs
-    (percentile 0.0 silent) (percentile 0.5 silent)
-    (percentile 0.9 silent) (percentile 1.0 silent);
-  (* every run's hang must be bounded by its ceiling plus process-spawn
-     slack (the ceiling clock starts after spawn; the measurement wraps
-     run_turn, so it includes it) *)
-  check bool
-    "dripping hang duration stays under ceiling + spawn slack (all runs)"
-    true
-    (Array.for_all (fun s -> s > 0.0 && s <= 0.9) dripping);
-  check bool
-    "silent hang duration stays under ceiling + spawn slack (all runs)"
-    true
-    (Array.for_all (fun s -> s > 0.0 && s <= 0.5) silent)
-;;
-
 let test_no_deadline_keeps_init_bounded () =
   with_fixture
     ~sleep_s:0.2
@@ -1360,45 +1245,6 @@ let test_idle_window_rearms_when_the_tool_step_ends () =
                 (final_state
                  ^ ": silence after a finished tool step was not bounded")))
     [ "DONE"; "ERROR" ]
-;;
-
-(* A tool step with no end is bounded by the ceiling alone: the fixture goes
-   silent inside the step and exits long after the ceiling. The ceiling sits
-   above the idle window, so the budget the timeout reports tells which of the
-   two ended the turn: an armed idle window reports exactly
-   [tool_step_idle_window_s], the ceiling reports its larger remainder. *)
-let test_wall_clock_ceiling_bounds_a_tool_step_that_never_ends () =
-  let fixture_exit_delay_s = 10.0 in
-  let ceiling_s = 1.0 in
-  with_fixture
-    ~exit_delay_s:fixture_exit_delay_s
-    [ init (); step ~index:1 ~state:"ACTIVE" ~step_type:"tool" () ]
-    (fun path ->
-       let started = Unix.gettimeofday () in
-       let outcome =
-         run_fixture
-           ~timeout_s:tool_step_idle_window_s
-           ~admission_timeout_s:tool_step_admission_s
-           ~wall_clock_ceiling_s:ceiling_s
-           path
-       in
-       let elapsed = Unix.gettimeofday () -. started in
-       match outcome with
-       | Error (Runtime_antigravity.Timeout seconds) ->
-         check bool
-           "ceiling bounds the reported timeout"
-           true
-           (seconds > 0.0 && seconds <= ceiling_s);
-         check bool
-           "the ceiling, not the idle window, ended the turn"
-           true
-           (seconds > tool_step_idle_window_s);
-         check bool
-           "the turn ended at the ceiling, not when the fixture exited"
-           true
-           (elapsed < fixture_exit_delay_s)
-       | Error error -> fail (Runtime_antigravity.error_to_string error)
-       | Ok _ -> fail "a tool step with no end outlived the wall-clock ceiling")
 ;;
 
 let test_no_deadline_starts_after_init () =
@@ -1668,14 +1514,6 @@ let () =
             `Quick
             test_stream_idle_timeout_is_typed
         ; test_case
-            "wall-clock ceiling ends a dripping turn"
-            `Quick
-            test_wall_clock_ceiling_ends_a_dripping_turn
-        ; test_case
-            "wall-clock ceiling bounds a turn without idle deadline"
-            `Quick
-            test_wall_clock_ceiling_bounds_a_turn_without_idle_deadline
-        ; test_case
             "tool step outlasting the idle window completes"
             `Quick
             test_tool_step_outlasting_the_idle_window_completes
@@ -1683,14 +1521,6 @@ let () =
             "idle window re-arms when the tool step ends"
             `Quick
             test_idle_window_rearms_when_the_tool_step_ends
-        ; test_case
-            "wall-clock ceiling bounds a tool step that never ends"
-            `Quick
-            test_wall_clock_ceiling_bounds_a_tool_step_that_never_ends
-        ; test_case
-            "wall-clock ceiling hang-duration distribution"
-            `Quick
-            test_wall_clock_ceiling_hang_duration_distribution
         ; test_case
             "no deadline keeps init bounded"
             `Quick

@@ -1117,8 +1117,9 @@ status: reference
   → [Runtime_execution.t](../../lib/runtime/runtime_execution.mli)
 
 **Exact-output route**
-: Librarian, Workspace memory curator, HITL auto judge, Board attention 같은 단독
-  모델 작업의 목적별 실행 경로(`Agent_core.Exact_output`). 설정은 API slot과 후속 CLI
+: Keeper의 목적별 단독 모델 작업(Librarian, Workspace memory curator, HITL auto judge,
+  Board attention)과 Browser Stagehand 확장의 구조화 `llm.generate` 요청이 쓰는 실행
+  경로(`Agent_core.Exact_output`). 설정은 API slot과 후속 CLI
   후보 순서를 선언한다(`exact_output_lane_decl`). 대부분의 exact route는 도구를 쓰지
   않고 단일 완결 응답을 받아 도메인 검증기가 유효성을 판정하며, Keeper turn의
   Runtime Candidate Order와는 다른 층이다. 단 **verifier_exact은 예외로 도구를 호출한다** —
@@ -1126,6 +1127,11 @@ status: reference
   (`lib/task/anti_rationalization.ml`: "The verdict channel is the
   report_review_verdict tool call, so every slot needs a tool-calling model"). 이 lane의
   모든 slot은 도구 호출이 가능한 모델이어야 한다.
+  - **Browser Stagehand `llm.generate`**: `browser_stagehand_exact` route는 구조화
+    (`json_schema`) 요청과 text-only message만 제공한다. 스키마는 AGENT_CORE의
+    `Json_syntax` 프롬프트 텍스트로 전달되고, 응답은 JSON 값·선언된 필수 객체 키·방문한
+    primitive 모양만 검사한다. 전체 JSON Schema 검증은 하지 않으며, 그 밖의 요청 모양은
+    provider 호출 전에 거절한다(#38708).
   - **슬롯 전진 조건 (`execution_failure_may_advance`)**: 한 슬롯이 실패했을 때 패스를
     끝내거나 범위를 줄이지 않고 선언된 다음 후보 슬롯으로 넘어가는 경우는 둘이다.
     (1) 보내기 직전 단계(`Before_dispatch`)에서 실패했고 이 슬롯이 아무것도 보내지 않았다
@@ -1186,7 +1192,8 @@ status: reference
   → [Exact_output](../../packages/agent_core/lib/llm_provider/exact_output.mli),
   [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli),
   [Runtime_exact_lane_backpressure](../../lib/runtime/runtime_exact_lane_backpressure.mli),
-  [Keeper_board_attention_exact_flow](../../lib/keeper/keeper_board_attention_exact_flow.mli)
+  [Keeper_board_attention_exact_flow](../../lib/keeper/keeper_board_attention_exact_flow.mli),
+  [Browser_stagehand_model](../../lib/browser_stagehand_model.mli)
 
 **Memory queue**
 : Keeper별 Librarian 작업을 직렬화하는 제출 경로. 현재 실행 하나와 교체 가능한

@@ -407,12 +407,12 @@ for _ in sys.stdin:
 |}
 ;;
 
-(* Muse Code has no runtime.toml protocol before stack step 4/5. This
-   declaration exists so [Runtime_inference] can answer the capacity the
-   adapter requires; its provider is never spawned. *)
+(* The muse-serve runtime [Runtime_inference] answers the adapter's
+   [max-prompt-bytes] from. Its command is never spawned: each turn below
+   hands the adapter its own serve config. *)
 let runtime_toml =
   {|[providers.muse_fixture]
-protocol = "codex-app-server"
+protocol = "muse-serve"
 command = "/bin/sh"
 is-non-interactive = true
 
@@ -536,33 +536,44 @@ let settled_turn ~base_path =
   | Error detail -> fail detail
 ;;
 
+(* A workspace holding the scripted host, its fixture and the runtime.toml,
+   with the fixture keeper declared. Returns the runtime.toml path. *)
+let prepare_scripted_host ~base_path =
+  Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+  Masc_test_deps.declare_fixture_keeper ~base_path ~sandbox_profile:None keeper_name;
+  write_file ~mode:0o600 (Filename.concat base_path "muse_host.py") muse_host_script;
+  write_file ~mode:0o600 (Filename.concat base_path "serve") "exec python3 ./muse_host.py\n";
+  write_file ~mode:0o600 (Filename.concat base_path "fixture.json")
+    (Yojson.Safe.to_string
+       (`Assoc [ "session_id", `String session_id; "workspace_root", `String base_path ]));
+  let runtime_path = Filename.concat base_path "runtime.toml" in
+  write_file ~mode:0o600 runtime_path runtime_toml;
+  runtime_path
+;;
+
+(* The MASC tool the scripted host calls once; [observed_input] receives its
+   arguments. *)
+let masc_probe_tool observed_input =
+  let marker : Agent_core.Types.tool_param =
+    { name = "marker"; description = "Fixture marker"; param_type = String; required = true }
+  in
+  Agent_core.Tool.create
+    ~name:"masc_probe"
+    ~description:"Return a deterministic fixture marker"
+    ~parameters:[ marker ]
+    (fun input ->
+       observed_input := input;
+       Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+;;
+
 let test_turn_through_scripted_host () =
   let base_path = temp_workspace () in
   Fun.protect
     ~finally:(fun () -> try Fs_compat.remove_tree base_path with _ -> ())
     (fun () ->
-      Unix.mkdir (Filename.concat base_path ".masc") 0o700;
-      Masc_test_deps.declare_fixture_keeper ~base_path ~sandbox_profile:None keeper_name;
-      write_file ~mode:0o600 (Filename.concat base_path "muse_host.py") muse_host_script;
-      write_file ~mode:0o600 (Filename.concat base_path "serve") "exec python3 ./muse_host.py\n";
-      write_file ~mode:0o600 (Filename.concat base_path "fixture.json")
-        (Yojson.Safe.to_string
-           (`Assoc [ "session_id", `String session_id; "workspace_root", `String base_path ]));
-      let runtime_path = Filename.concat base_path "runtime.toml" in
-      write_file ~mode:0o600 runtime_path runtime_toml;
+      let runtime_path = prepare_scripted_host ~base_path in
       let observed_input = ref `Null in
-      let marker : Agent_core.Types.tool_param =
-        { name = "marker"; description = "Fixture marker"; param_type = String; required = true }
-      in
-      let tool =
-        Agent_core.Tool.create
-          ~name:"masc_probe"
-          ~description:"Return a deterministic fixture marker"
-          ~parameters:[ marker ]
-          (fun input ->
-             observed_input := input;
-             Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
-      in
+      let tool = masc_probe_tool observed_input in
       let snapshot = Runtime.For_testing.snapshot () in
       Fun.protect
         ~finally:(fun () -> Runtime.For_testing.restore snapshot)
@@ -641,6 +652,65 @@ let test_turn_through_scripted_host () =
                     (String_util.contains_substring resumed_prompt "MUSE_FIXTURE_SYSTEM_PROMPT"))))))
 ;;
 
+(* The turn driver picks the adapter from the runtime's execution: a
+   [muse-serve] binding reaches [muse serve] with the runtime's command and
+   api-name, and its turn settles in the Muse Code session. *)
+let test_a_muse_serve_runtime_dispatches_to_muse_serve () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> try Fs_compat.remove_tree base_path with _ -> ())
+    (fun () ->
+      let runtime_path = prepare_scripted_host ~base_path in
+      let tool = masc_probe_tool (ref `Null) in
+      let snapshot = Runtime.For_testing.snapshot () in
+      Fun.protect
+        ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+        (fun () ->
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Eio_context.set_env env;
+              Eio_context.with_test_env
+                ~net:(Eio.Stdenv.net env)
+                ~clock:(Eio.Stdenv.clock env)
+                ~mono_clock:(Eio.Stdenv.mono_clock env)
+                ~sw
+                (fun () ->
+                  (match Runtime.init_default ~config_path:runtime_path with
+                   | Ok () -> ()
+                   | Error detail -> fail detail);
+                  (match Runtime.get_runtime_by_id runtime_id with
+                   | Some { Runtime.execution = Runtime_execution.Muse_serve execution; _ } ->
+                     check string "the runtime's command" "/bin/sh" execution.cli_path;
+                     check string "the runtime's api-name" "muse-fixture-1" execution.model
+                   | Some _ | None -> fail "the muse-serve fixture did not materialize");
+                  match
+                    Keeper_turn_driver.run_named
+                      ~walk_owner:Keeper_turn_driver.One_shot_walk
+                      ~runtime_id
+                      ~keeper_name
+                      ~base_path
+                      ~goal:"Call masc_probe once"
+                      ~system_prompt:"MUSE_FIXTURE_SYSTEM_PROMPT"
+                      ~tools:[ tool ]
+                      ~agent_core_tools:[ tool ]
+                      ~initial_messages:[ user_message "MUSE_FIXTURE_HISTORY" ]
+                      ~context:(Agent_core.Context.create ())
+                      ~sw
+                      ~net:(Eio.Stdenv.net env)
+                      ()
+                  with
+                  | Error error -> fail (Agent_core.Error.to_string error)
+                  | Ok selected ->
+                    check string "the reply came from muse serve" "MASC_MUSE_KEEPER_OK"
+                      (response_text selected.Keeper_turn_driver.run_result);
+                    let prompt = read_text (Filename.concat base_path "start-prompt.txt") in
+                    check bool "the system prompt was framed into the start" true
+                      (String_util.contains_substring prompt "MUSE_FIXTURE_SYSTEM_PROMPT");
+                    let settled_session, _, turn_count = settled_turn ~base_path in
+                    check string "settled in the Muse Code session" session_id settled_session;
+                    check int "one turn" 1 turn_count)))))
+;;
+
 let () =
   run
     "keeper_muse_runtime"
@@ -668,6 +738,8 @@ let () =
     ; ( "scripted host"
       , [ test_case "start and resume through muse serve with a MASC tool" `Quick
             test_turn_through_scripted_host
+        ; test_case "a muse-serve runtime dispatches to muse serve" `Quick
+            test_a_muse_serve_runtime_dispatches_to_muse_serve
         ] )
     ]
 ;;

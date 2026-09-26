@@ -497,6 +497,199 @@ let test_antigravity_judge_receives_its_system_prompt () =
     (List.sort Int.compare order) order
 ;;
 
+let muse_fixture ~muse_cli =
+  Printf.sprintf
+    {|
+[runtime]
+default = "muse_code.muse-spark"
+
+[providers.muse_code]
+protocol = "muse-serve"
+command = "%s"
+is-non-interactive = true
+
+[models.muse-spark]
+api-name = "muse-spark-1.3"
+max-context = 1007997
+max-prompt-bytes = 1048576
+
+[muse_code.muse-spark]
+|}
+    muse_cli
+;;
+
+let muse_runtime_id = "muse_code.muse-spark"
+
+(* The serve client runs [cli_path serve] in [base_dir]; with
+   [cli_path = "/bin/sh"] the [serve] file there starts this MSP host. It
+   records the session start and the turn's text, then answers. *)
+let muse_panel_host_script =
+  {|import json, os, sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+def send(message):
+    sys.stdout.write(json.dumps(message) + "\n")
+    sys.stdout.flush()
+
+def read():
+    line = sys.stdin.readline()
+    if not line:
+        sys.exit(97)
+    return json.loads(line)
+
+def notify(method, params):
+    send({"jsonrpc": "2.0", "method": method, "params": params})
+
+init = read()
+send({"jsonrpc": "2.0", "id": init["id"], "result": {
+    "serverInfo": {"name": "muse-session-server", "version": "1.3.0"},
+    "userAgent": "muse/1.3.0", "museHome": "/tmp/muse", "platformFamily": "unix",
+    "platformOs": "linux", "schema": {"version": 1, "fingerprint": "sha256:fixture"},
+    "grantedCapabilities": [], "experimentalApi": False,
+    "sessionDurability": "durable"}})
+assert read()["method"] == "initialized"
+opened = read()
+assert opened["method"] == "session/start", opened
+with open(os.path.join(HERE, "start-params.json"), "w") as handle:
+    json.dump(opened["params"], handle)
+send({"jsonrpc": "2.0", "id": opened["id"], "result": {
+    "session": {"sessionId": "panel-session", "status": "idle", "turnCount": 0,
+                "modelId": opened["params"]["modelId"],
+                "workspaceRoot": opened["params"]["workspaceRoot"]},
+    "viewCursor": "v:1"}})
+turn = read()
+assert turn["method"] == "turn/start", turn
+turn_id = turn["params"]["commandId"]
+text = [part["text"] for part in turn["params"]["input"] if part["type"] == "text"][0]
+with open(os.path.join(HERE, "panel-prompt.txt"), "w") as handle:
+    handle.write(text)
+send({"jsonrpc": "2.0", "id": turn["id"], "result": {
+    "commandId": turn_id, "status": "accepted", "turnId": turn_id,
+    "startedNewTurn": True, "disposition": "started"}})
+notify("turn/started", {"sessionId": "panel-session", "turnId": turn_id,
+                        "commandId": turn_id, "viewCursor": "v:2"})
+notify("item/completed", {"sessionId": "panel-session", "viewCursor": "v:3", "item": {
+    "itemId": "m-1", "kind": "agentMessage", "turnId": turn_id, "revision": 1,
+    "status": "completed", "text": "MUSE_PANEL_ANSWER"}})
+notify("turn/completed", {"sessionId": "panel-session", "turnId": turn_id,
+                          "terminal": "completed", "viewCursor": "v:4"})
+for _ in sys.stdin:
+    pass
+|}
+;;
+
+let with_muse_runtime ~muse_cli f =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let base_dir = Filename.temp_dir "fusion-muse" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      remove_tree base_dir)
+  @@ fun () ->
+  let config_path = Filename.concat base_dir "runtime.toml" in
+  write_file ~path:config_path ~perm:0o600 (muse_fixture ~muse_cli:(muse_cli ~base_dir));
+  (match Runtime.init_default ~config_path with
+   | Ok () -> ()
+   | Error detail -> failf "muse-serve fixture must initialize: %s" detail);
+  f ~base_dir
+;;
+
+let in_eio_context f =
+  Eio_main.run (fun env ->
+    Eio_context.set_env env;
+    Eio.Switch.run (fun sw ->
+      Eio_context.with_test_env
+        ~net:(Eio.Stdenv.net env)
+        ~clock:(Eio.Stdenv.clock env)
+        ~mono_clock:(Eio.Stdenv.mono_clock env)
+        ~sw
+        f))
+;;
+
+(* A Muse Code panelist runs one [muse serve] turn: the group prompt is framed
+   ahead of the question in the labels a keeper start uses, the binding's
+   api-name is the session's model, and the agent message is the answer. *)
+let test_muse_code_panelist_reaches_muse_serve () =
+  with_muse_runtime ~muse_cli:(fun ~base_dir:_ -> "/bin/sh") @@ fun ~base_dir ->
+  write_file ~path:(Filename.concat base_dir "muse_host.py") ~perm:0o600
+    muse_panel_host_script;
+  write_file ~path:(Filename.concat base_dir "serve") ~perm:0o600
+    "exec python3 ./muse_host.py\n";
+  let answer =
+    in_eio_context (fun () ->
+      Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:muse_runtime_id
+        ~system_prompt:"LENS-MARKER answer as a reviewer"
+        ~prompt:"QUESTION-MARKER which candidate ships?" ())
+  in
+  (match answer with
+   | Ok text -> check string "the agent message is the answer" "MUSE_PANEL_ANSWER" text
+   | Error failure ->
+     failf "the Muse Code panelist failed: %s" (Fusion_types.show_panel_failure failure));
+  let start =
+    Yojson.Safe.from_file (Filename.concat base_dir "start-params.json")
+  in
+  let member name = Yojson.Safe.Util.member name start in
+  check string "the binding's api-name is the session model" "muse-spark-1.3"
+    (Yojson.Safe.Util.to_string (member "modelId"));
+  check string "built-in tools are held to the host's own rules" "denyUnmatched"
+    (Yojson.Safe.Util.to_string (member "approvalMode"));
+  let prompt =
+    let channel = open_in_bin (Filename.concat base_dir "panel-prompt.txt") in
+    Fun.protect
+      ~finally:(fun () -> close_in channel)
+      (fun () -> really_input_string channel (in_channel_length channel))
+  in
+  let system_label = frame_label (Masc.Antigravity_input_frame.system_instructions_label ()) in
+  let goal_label = frame_label (Masc.Antigravity_input_frame.current_goal_label ()) in
+  let position label needle =
+    match index_of ~needle prompt with
+    | Some at -> at
+    | None -> failf "%s never reached muse serve" label
+  in
+  let order =
+    [ position "the instructions label" system_label
+    ; position "the group prompt" "LENS-MARKER"
+    ; position "the goal label" goal_label
+    ; position "the question" "QUESTION-MARKER"
+    ]
+  in
+  check (list int) "instructions label, group prompt, goal label, question, in that order"
+    (List.sort Int.compare order) order
+;;
+
+(* [muse serve] has no output-schema channel. A caller that needs the client
+   to hold its answer to a schema is refused before the client runs, judged by
+   the stub's marker and not only by the refusal. *)
+let test_muse_code_refuses_an_output_schema_before_spawning () =
+  let marker = ref "" in
+  let muse_cli ~base_dir =
+    marker := Filename.concat base_dir "spawned";
+    let cli = Filename.concat base_dir "muse" in
+    write_file ~path:cli ~perm:0o700 (stub_cli_script ~marker:!marker);
+    cli
+  in
+  with_muse_runtime ~muse_cli @@ fun ~base_dir ->
+  let runtime =
+    match Runtime.get_runtime_by_id muse_runtime_id with
+    | Some runtime -> runtime
+    | None -> fail "the muse-serve fixture runtime did not resolve"
+  in
+  let result =
+    in_eio_context (fun () ->
+      Masc.Fusion_official_client.run_with_images ~images:[] ~base_dir ~runtime
+        ~system_prompt:"" ~output_schema:(`Assoc [ "type", `String "object" ])
+        ~prompt:"ping" ())
+  in
+  (match result with
+   | Error (Masc.Fusion_official_client.Setup_failure _) -> ()
+   | Error failure ->
+     failf "expected a setup refusal, got %s"
+       (Masc.Fusion_official_client.failure_detail ~runtime_id:muse_runtime_id failure)
+   | Ok _ -> fail "a schema-held answer was accepted from muse serve");
+  check bool "the client never ran" false (Sys.file_exists !marker)
+;;
+
 (* Each client's own timeout reaches Fusion as [Timeout], and every other
    client failure stays [Provider_error]. The detail line keeps what the
    projection folds away. *)
@@ -519,6 +712,14 @@ let test_client_timeouts_project_to_timeout () =
   check bool "Antigravity timeout" true
     (is_timeout
        (Masc.Fusion_official_client.Antigravity_failure (Runtime_antigravity.Timeout 3.0)));
+  check bool "Muse Code timeout" true
+    (is_timeout
+       (Masc.Fusion_official_client.Muse_failure
+          (Runtime_muse_serve.Timeout { seconds = 3.0; turn_accepted = true })));
+  check bool "a Muse Code turn failure stays a provider error" false
+    (is_timeout
+       (Masc.Fusion_official_client.Muse_failure
+          (Runtime_muse_serve.Auth_required "no login")));
   let turn_failed =
     Masc.Fusion_official_client.Claude_failure (Runtime_claude_code.Turn_failed "boom")
   in
@@ -847,6 +1048,14 @@ let () =
             "Antigravity judge receives its system prompt"
             `Quick
             test_antigravity_judge_receives_its_system_prompt
+        ; test_case
+            "Muse Code panelist reaches muse serve"
+            `Quick
+            test_muse_code_panelist_reaches_muse_serve
+        ; test_case
+            "Muse Code refuses an output schema before spawning"
+            `Quick
+            test_muse_code_refuses_an_output_schema_before_spawning
         ] )
     ; ( "seat routes"
       , [ test_case

@@ -8,6 +8,9 @@
     Antigravity: claim, active, turn starting, turn identity, settle, and a
     recovery observation when the turn fails. *)
 
+val runtime_label : string
+(** The client's name in the Keeper's errors and logs. *)
+
 type attempt_outcome =
   { result : (Runtime_agent.run_result, Agent_core.Error.t) result
   ; settled_session : Keeper_official_client_session_store.t option

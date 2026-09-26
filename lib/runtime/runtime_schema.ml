@@ -18,16 +18,22 @@ type api_format =
   | Codex_app_server_runtime
   | Antigravity_cli_runtime
   | Claude_code_runtime
+  | Muse_serve_runtime
 [@@deriving show, eq]
 
 (* The runtimes whose admission reads [max-prompt-bytes]: Claude Code cuts the
    history it seeds a start turn with to it, Antigravity refuses to send a
-   prompt above it, and Codex windows its Start and Resume to it from the
-   first attempt when one is declared (#37353). No other runtime reads the
-   field, so a declaration there bounds nothing the provider checks. Every arm
-   is listed so a new format has to be decided here. *)
+   prompt above it, Codex windows its Start and Resume to it from the
+   first attempt when one is declared (#37353), and Muse Code windows the
+   history of a start to it and refuses a turn without it
+   ([Keeper_muse_runtime]). No other runtime reads the field, so a
+   declaration there bounds nothing the provider checks. Every arm is listed
+   so a new format has to be decided here. *)
 let api_format_reads_max_prompt_bytes = function
-  | Claude_code_runtime | Antigravity_cli_runtime | Codex_app_server_runtime -> true
+  | Claude_code_runtime
+  | Antigravity_cli_runtime
+  | Codex_app_server_runtime
+  | Muse_serve_runtime -> true
   | Messages_api
   | Chat_completions_api
   | Ollama_api
@@ -354,7 +360,7 @@ type model_spec =
         bytes-per-token constant with nothing to justify it, and a wrong
         constant either truncates silently or overflows silently.
 
-        Only Claude Code, Antigravity and Codex runtimes read it
+        Only Claude Code, Antigravity, Codex and Muse Code runtimes read it
         ([api_format_reads_max_prompt_bytes]). Declared on a model bound
         through any other provider, it bounds nothing and no reader counts it.
 

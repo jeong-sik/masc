@@ -762,7 +762,8 @@ let dashboard_runtime_probe_target ~(api_format : Runtime_schema.api_format) bas
   match api_format with
   | Runtime_schema.Codex_app_server_runtime
   | Runtime_schema.Claude_code_runtime
-  | Runtime_schema.Antigravity_cli_runtime -> Probe_requires_cli_transport
+  | Runtime_schema.Antigravity_cli_runtime
+  | Runtime_schema.Muse_serve_runtime -> Probe_requires_cli_transport
   | Runtime_schema.Vertex_gemini_api -> Probe_native_auth
   | Runtime_schema.Ollama_api ->
     let base = dashboard_runtime_trim_trailing_slashes base_url in
@@ -889,6 +890,7 @@ let dashboard_runtime_model_count_of_body ~(api_format : Runtime_schema.api_form
     | Runtime_schema.Codex_app_server_runtime
     | Runtime_schema.Claude_code_runtime
     | Runtime_schema.Antigravity_cli_runtime
+    | Runtime_schema.Muse_serve_runtime
     | Runtime_schema.Vertex_gemini_api -> None
     | Runtime_schema.Ollama_api | Runtime_schema.Gemini_api -> dashboard_runtime_list_member_len "models" json
     | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
@@ -995,7 +997,8 @@ let dashboard_runtime_provider_probe_json
     with
      | ( Runtime_execution.Codex_app_server _
        | Runtime_execution.Claude_code _
-       | Runtime_execution.Antigravity_cli _ ), _
+       | Runtime_execution.Antigravity_cli _
+       | Runtime_execution.Muse_serve _ ), _
      | Runtime_execution.Agent_core _, Probe_requires_cli_transport ->
       make
         ~auth_present:false
@@ -1661,6 +1664,14 @@ let runtime_request_config_json (rt : Runtime.t) =
       ; "execution_mode", `String "masc_mcp_only"
       ; "verified", `Bool false
       ]
+  | Runtime_execution.Muse_serve config ->
+    `Assoc
+      [ "source", `String "official-client-runtime"
+      ; "execution", `String (Runtime_execution.label rt.execution)
+      ; "model", `String config.model
+      ; "timeout_s", `Float config.timeout_s
+      ; "verified", `Bool false
+      ]
   | Runtime_execution.Agent_core cfg ->
     `Assoc
     [ "source", `String "agent_core-provider-config"
@@ -1709,6 +1720,7 @@ let runtime_api_format_wire : Runtime_schema.api_format -> string = function
   | Runtime_schema.Codex_app_server_runtime -> "codex-app-server"
   | Runtime_schema.Antigravity_cli_runtime -> "antigravity-cli"
   | Runtime_schema.Claude_code_runtime -> "claude-code"
+  | Runtime_schema.Muse_serve_runtime -> "muse-serve"
 ;;
 
 let runtime_provider_behavior_capabilities_json
@@ -1826,6 +1838,12 @@ let effective_capabilities_json (rt : Runtime.t) =
       ; "execution_mode", `String "masc_mcp_only"
       ; "verified", `Bool false
       ]
+  | Runtime_execution.Muse_serve _ ->
+    `Assoc
+      [ "source", `String "unverified"
+      ; "execution", `String (Runtime_execution.label rt.execution)
+      ; "verified", `Bool false
+      ]
   | Runtime_execution.Agent_core provider_config ->
    (match Llm_provider.Provider_config.capabilities_for_config_model provider_config with
   | None -> `Null
@@ -1910,6 +1928,11 @@ let runtime_parameter_policy_json (rt : Runtime.t) =
       ; "execution", `String "claude_code"
       ; "execution_mode", `String "masc_mcp_only"
       ]
+  | Runtime_execution.Muse_serve _ ->
+    `Assoc
+      [ "source", `String "official-client-owned"
+      ; "execution", `String (Runtime_execution.label rt.execution)
+      ]
   | Runtime_execution.Agent_core provider_config ->
     let dialect = RD.for_provider_config provider_config in
     let sampling_candidates = RD.sampling_params_ignored_when_thinking dialect in
@@ -1939,7 +1962,8 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     match rt.execution with
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Claude_code _
-    | Runtime_execution.Antigravity_cli _ -> true
+    | Runtime_execution.Antigravity_cli _
+    | Runtime_execution.Muse_serve _ -> true
     | Runtime_execution.Agent_core _ -> false
   in
   let runtime_status =

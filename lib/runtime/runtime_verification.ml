@@ -640,7 +640,11 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
          | Error (Runtime_codex_app_server.Timeout _) -> Error Timed_out
          | Error error ->
            Error
-             (Provider_rejected (Runtime_codex_app_server.error_to_string error)))))
+             (Provider_rejected (Runtime_codex_app_server.error_to_string error))))
+      (* The challenge tool reaches Muse Code only through the loopback MCP
+         bridge a keeper turn starts; no readiness run starts one, so the
+         runtime is reported unsupported rather than run without the tool. *)
+      | Runtime_execution.Muse_serve _ -> Error (Unavailable Unsupported_runtime))
   in
   measure
     ~runtime_id:runtime.id

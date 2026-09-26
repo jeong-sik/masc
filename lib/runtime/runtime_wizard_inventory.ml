@@ -70,6 +70,10 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
         | Runtime_schema.Antigravity_cli_runtime | Messages_api | Chat_completions_api | Ollama_api
         | Codex_app_server_runtime | Claude_code_runtime
         | Gemini_api | Vertex_gemini_api -> true
+        (* Setup offers no Muse Code connection and readiness cannot verify
+           one (Runtime_verification), so a declared provider is listed as
+           unsupported for both. *)
+        | Muse_serve_runtime -> false
       in
       let fields =
         match provider.transport with

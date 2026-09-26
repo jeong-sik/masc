@@ -334,7 +334,10 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
   let ( let* ) = Result.bind in
   let* () =
     match provider.api_format, registry_provider_kind registry_entry with
-    | (Codex_app_server_runtime | Claude_code_runtime | Antigravity_cli_runtime), _ ->
+    | ( Codex_app_server_runtime
+      | Claude_code_runtime
+      | Antigravity_cli_runtime
+      | Muse_serve_runtime ), _ ->
       refuse_unread_wire_kind
         provider
         ~reason:"an official client speaks no HTTP dialect"
@@ -350,7 +353,8 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
     | (Chat_completions_api | Messages_api), None -> Ok ()
   in
   match provider.api_format with
-  | Codex_app_server_runtime | Claude_code_runtime | Antigravity_cli_runtime ->
+  | Codex_app_server_runtime | Claude_code_runtime | Antigravity_cli_runtime
+  | Muse_serve_runtime ->
     Error
       (Printf.sprintf
          "provider %S uses official CLI protocol %s and cannot be materialized as an \
@@ -630,7 +634,8 @@ let validate_parallel_tool_policy (provider : Runtime_schema.provider)
     ~(model_id : string) ~disable_parallel_tool_use =
   match provider.api_format, disable_parallel_tool_use with
   | (Runtime_schema.Codex_app_server_runtime | Antigravity_cli_runtime
-    | Claude_code_runtime | Ollama_api | Gemini_api | Vertex_gemini_api), true ->
+    | Claude_code_runtime | Muse_serve_runtime | Ollama_api | Gemini_api
+    | Vertex_gemini_api), true ->
     Error
       (Printf.sprintf
          "binding %s.%s declares disable-parallel-tool-use = true, but \
@@ -650,7 +655,7 @@ let validate_parallel_tool_policy (provider : Runtime_schema.provider)
             provider.id model_id provider.id))
   | (Messages_api | Chat_completions_api), false
   | (Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime
-    | Ollama_api | Gemini_api | Vertex_gemini_api), false -> Ok ()
+    | Muse_serve_runtime | Ollama_api | Gemini_api | Vertex_gemini_api), false -> Ok ()
 ;;
 
 let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
@@ -676,7 +681,8 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
          | Some _ -> Error "vertex-gemini uses Google Application Default Credentials, not a saved API key"
          | None -> Ok (Llm_provider.Provider_config.Bearer_token, Runtime_google_adc.credential_source ()))
       | Messages_api | Chat_completions_api | Ollama_api | Gemini_api
-      | Codex_app_server_runtime | Claude_code_runtime | Antigravity_cli_runtime ->
+      | Codex_app_server_runtime | Claude_code_runtime | Antigravity_cli_runtime
+      | Muse_serve_runtime ->
         Ok (Llm_provider.Provider_config.Provider_default, Llm_provider.Provider_config.Static_credential)
     in
     (match provider_kind_for_http_provider ?registry_entry provider with
@@ -853,7 +859,7 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
          spec)
 ;;
 
-(* The three official-client executions spawn the path
+(* The official-client executions spawn the path
    {!Runtime_official_cli_install.locate} finds for the configured command:
    on PATH as the shell finds it, else in the vendor installer's directory
    when the command is the client's own name. Found here, at materialization,
@@ -1001,6 +1007,43 @@ let claude_code_execution (provider : Runtime_schema.provider)
             }))
 ;;
 
+let muse_serve_execution (provider : Runtime_schema.provider)
+    (spec : Runtime_schema.model_spec) : (Runtime_execution.t, string) result =
+  match provider.transport with
+  | Http _ ->
+    Error
+      (Printf.sprintf
+         "provider %S uses protocol muse-serve but declares an HTTP endpoint; \
+          the official Muse Code CLI command is required"
+         provider.id)
+  | Cli command when String.trim command = "" ->
+    Error
+      (Printf.sprintf
+         "provider %S declares an empty Muse Code CLI command"
+         provider.id)
+  | Cli command ->
+    (match provider.credentials with
+     | Some _ ->
+       Error
+         (Printf.sprintf
+            "provider %S uses muse-serve and must not declare credentials; \
+             Muse Code owns its subscription login"
+            provider.id)
+     | None when not provider.is_non_interactive ->
+       Error
+         (Printf.sprintf
+            "provider %S uses muse-serve and must declare \
+             is-non-interactive = true"
+            provider.id)
+     | None ->
+       Ok
+         (Runtime_execution.Muse_serve
+            { cli_path = Runtime_official_cli_install.spawn_path Muse ~command
+            ; model = spec.api_name
+            ; timeout_s = Runtime_muse_serve.default_timeout_s
+            }))
+;;
+
 let binding_to_execution (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
     : (Runtime_execution.t, string) result =
   match Runtime_schema.model_of_id cfg binding.model_id with
@@ -1019,6 +1062,8 @@ let binding_to_execution (cfg : Runtime_schema.config) (binding : Runtime_schema
           antigravity_cli_execution provider spec
         | Runtime_schema.Claude_code_runtime ->
           claude_code_execution provider spec
+        | Runtime_schema.Muse_serve_runtime ->
+          muse_serve_execution provider spec
         | Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api ->
           Result.map
             (fun provider_config -> Runtime_execution.Agent_core provider_config)

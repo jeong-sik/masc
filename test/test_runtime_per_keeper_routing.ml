@@ -3020,7 +3020,8 @@ let test_agent_core_provider_config_carries_effective_context_window () =
          | Runtime_execution.Agent_core config -> config
          | Runtime_execution.Codex_app_server _
          | Runtime_execution.Claude_code _
-         | Runtime_execution.Antigravity_cli _ ->
+         | Runtime_execution.Antigravity_cli _
+         | Runtime_execution.Muse_serve _ ->
            Alcotest.failf "%s must materialize as an agent_core runtime" runtime_id)
       | None -> Alcotest.failf "expected %s runtime" runtime_id
     in

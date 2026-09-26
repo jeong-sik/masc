@@ -1487,6 +1487,24 @@ let attempt_inference_policy
 
 (* An official-client lane cannot apply a provider config transform, so a
    transform on such a lane is refused before the client is invoked. *)
+(* The client and its bounds as the runtime declares them. Keeper_muse_runtime
+   replaces [native] with the keeper's resolved posture, [timeout_s] with a
+   per-model [turn-timeout-s] and [wall_clock_ceiling_s] with a per-model
+   ceiling on every turn, and passes the model's reasoning effort to the turn
+   itself, so the values set here are the ones a turn keeps when nothing is
+   declared. *)
+let muse_serve_client_config (execution : Runtime_execution.muse_serve)
+  : Runtime_muse_serve.config
+  =
+  { cli_path = execution.cli_path
+  ; model = Some execution.model
+  ; native = Runtime_native_tools.muse_default
+  ; admission_timeout_s = execution.timeout_s
+  ; timeout_s = Some execution.timeout_s
+  ; wall_clock_ceiling_s = None
+  }
+;;
+
 let official_client_dispatch ~provider_config_transform =
   match provider_config_transform with
   | Some _ -> Keeper_attempt_dispatch.Rejected_before_dispatch
@@ -2045,7 +2063,8 @@ let run_named
       let has_tools, surface_enabled = match runtime.Runtime.execution with
         | Runtime_execution.Agent_core _ -> agent_core_tools <> [], true
         | Runtime_execution.Codex_app_server _
-        | Runtime_execution.Antigravity_cli _ -> tools <> [], true
+        | Runtime_execution.Antigravity_cli _
+        | Runtime_execution.Muse_serve _ -> tools <> [], true
         | Runtime_execution.Claude_code _ -> tools <> [], runtime.model.tools_support in
       let verifier_ready = match output_contract with
         | Provider_default -> Ok ()
@@ -2200,14 +2219,15 @@ let run_named
       in
       (match runtime.Runtime.execution with
        | Runtime_execution.Agent_core _ -> ()
-       | Codex_app_server _ | Claude_code _ | Antigravity_cli _ ->
+       | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
          Log.Keeper.info ~keeper_name
            "input policy runtime=%s selected=%s context_owner=official_client applied=false"
            attempt_runtime_id (Keeper_input_policy.to_string input_policy));
       match runtime.Runtime.execution with
       | (Runtime_execution.Codex_app_server _
         | Runtime_execution.Claude_code _
-        | Runtime_execution.Antigravity_cli _) when Option.is_some recovery_view ->
+        | Runtime_execution.Antigravity_cli _
+        | Runtime_execution.Muse_serve _) when Option.is_some recovery_view ->
         (Error (Keeper_recovery_transmission.to_core_error
           (Keeper_recovery_transmission.Client_projection_not_integrated
             {runtime_id=attempt_runtime_id})), None,
@@ -2473,6 +2493,125 @@ let run_named
         ( selected_runtime_result ?official_client_settlement:antigravity_attempt.settled_session runtime ~lane_attempt_index:idx antigravity_result
         , None
         , antigravity_attempt.effect_disposition
+        , official_client_dispatch ~provider_config_transform )
+      | Runtime_execution.Muse_serve execution ->
+        let ( reset_model_input_observation
+            , on_model_input_window_observation
+            , record_transmitted_model_input
+            , hooks ) =
+          official_model_input_observation hooks
+        in
+        let run_muse ~initial_messages () =
+          reset_model_input_observation ();
+          let on_transmitted_model_input transmitted =
+            record_transmitted_model_input transmitted;
+            Option.iter
+              (fun observe ->
+                 observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
+              on_request_attribution
+          in
+          Keeper_muse_runtime.run
+            ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
+            ?required_native_posture
+            ~runtime_id:attempt_runtime_id
+            ~keeper_name
+            ~carried_front_seed:official_client_carried_front_seed
+            ~librarian_front:
+              (official_client_librarian_front ~attempt_messages:initial_messages)
+            ~on_carried_front:(record_official_client_continuity ~runtime_id:attempt_runtime_id)
+            ~turn_start:(Eio.Lazy.force turn_boundary)
+            (* [muse serve] assembles the wire from one rendered prompt, so the
+               shape masc can report is the list it handed over. *)
+            ?on_model_input_window_observation:
+              on_model_input_window_observation
+            ~pre_tool_rejects
+            ~base_path
+            ~goal
+            ~goal_blocks
+            ~system_prompt
+            ~tools
+            ~initial_messages
+            ~model_input_projection
+            ~on_transmitted_model_input
+            ~hooks
+            ~context_injector
+            ~context
+            ~terminal_effect_state
+            ?official_client_continuation
+            ?official_task_reference
+            ?on_official_client_tool_boundary
+            ~on_official_client_result_handoff:
+              (fun ~invocation ~content ->
+                 Option.iter
+                   (fun observe ->
+                      observe ~runtime_id:attempt_runtime_id ~invocation ~content)
+                   on_official_client_result_handoff)
+            ~on_native_action:
+              (fun ~official_turn ~identity ~tool_name ->
+                 Option.iter
+                   (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~identity ~tool_name)
+                   on_official_client_native_action)
+            ?on_usage_report:on_official_client_usage_report
+            ~event_bus
+            ~raw_trace
+            ~on_event
+            ~config:(muse_serve_client_config execution)
+            ()
+        in
+        let muse_attempt =
+          match provider_config_transform, agent_core_checkpoint with
+          | Some _, _ ->
+            { Keeper_muse_runtime.result =
+                Error
+                  (Agent_core.Error.Config
+                     (Agent_core.Error.InvalidConfig
+                        { field = "provider_config_transform"
+                        ; detail =
+                            "provider config transforms cannot target a muse-serve runtime"
+                        }))
+            ; settled_session = None
+            ; effect_disposition =
+                Keeper_provider_attempt_effect.No_effect_observed
+            }
+          | None, Some _ ->
+            Log.Keeper.info
+              "%s: official-client runtime %s resolves start-or-resume from \
+               its durable session store; the Agent Core checkpoint payload is not \
+               replayed"
+              keeper_name
+              attempt_runtime_id;
+            emit_runtime_manifest
+              ~status:"checkpoint_not_replayed"
+              ~decision:
+                (`Assoc
+                  [ ( "routing_action"
+                    , `String "official_client_checkpoint_not_replayed" )
+                  ; ( "routing_reason"
+                    , `String "official_client_session_store_owns_resume" )
+                  ])
+              Keeper_runtime_manifest.Runtime_routed;
+            run_muse ~initial_messages ()
+          | None, None -> run_muse ~initial_messages ()
+        in
+        Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
+        let muse_result =
+          Result.bind muse_attempt.result (fun run_result ->
+            apply_official_client_accept
+              ~runtime_id:attempt_runtime_id
+              ~accept
+              ~terminal_effect_state
+              run_result)
+        in
+        (match muse_result with
+         | Ok run_result ->
+           Option.iter
+             (fun observe ->
+               Option.iter observe run_result.Runtime_agent.runtime_observation)
+             on_runtime_observation
+         | Error _ -> ());
+        ( selected_runtime_result ?official_client_settlement:muse_attempt.settled_session runtime ~lane_attempt_index:idx muse_result
+        , None
+        , muse_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
       | Runtime_execution.Claude_code config ->
         let ( reset_model_input_observation

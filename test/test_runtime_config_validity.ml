@@ -23,7 +23,8 @@ let agent_core_provider_config (runtime : Runtime.t) =
   | Runtime_execution.Agent_core provider_config -> provider_config
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Muse_serve _ ->
     failf "runtime %s is not an agent_core provider" runtime.id
 ;;
 
@@ -694,7 +695,8 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
            | Runtime_execution.Agent_core _ -> true
            | Runtime_execution.Codex_app_server _
            | Runtime_execution.Claude_code _
-           | Runtime_execution.Antigravity_cli _ -> false)
+           | Runtime_execution.Antigravity_cli _
+           | Runtime_execution.Muse_serve _ -> false)
         runtimes
     in
     List.iter
@@ -1694,7 +1696,8 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
        | Runtime_execution.Agent_core _, None
        | ( ( Runtime_execution.Codex_app_server _
            | Runtime_execution.Claude_code _
-           | Runtime_execution.Antigravity_cli _ )
+           | Runtime_execution.Antigravity_cli _
+           | Runtime_execution.Muse_serve _ )
          , _ ) -> ()
        | Runtime_execution.Agent_core config, Some declared ->
          let provider_label =
@@ -5500,7 +5503,9 @@ let test_codex_app_server_materializes_as_turn_runtime () =
            config.cli_path;
          check (option string) "model" (Some "gpt-5.6-sol") config.model
        | Runtime_execution.Antigravity_cli _ ->
-         fail "codex-app-server was incorrectly materialized as antigravity-cli"))
+         fail "codex-app-server was incorrectly materialized as antigravity-cli"
+       | Runtime_execution.Muse_serve _ ->
+         fail "codex-app-server was incorrectly materialized as muse-serve"))
 ;;
 
 let antigravity_cli_runtime_toml ?credential ?(options = "") () =
@@ -5561,7 +5566,8 @@ let test_file_credential_path_expands_home () =
               config.oauth_source
           | Runtime_execution.Agent_core _
           | Runtime_execution.Claude_code _
-          | Runtime_execution.Codex_app_server _ ->
+          | Runtime_execution.Codex_app_server _
+          | Runtime_execution.Muse_serve _ ->
             fail "antigravity-cli runtime expected"))
 ;;
 
@@ -5600,7 +5606,8 @@ let test_antigravity_cli_materializes_typed_process_options () =
             check (float 0.0) "timeout" 45.0 config.timeout_s
           | Runtime_execution.Agent_core _
           | Runtime_execution.Codex_app_server _
-          | Runtime_execution.Claude_code _ ->
+          | Runtime_execution.Claude_code _
+          | Runtime_execution.Muse_serve _ ->
             fail "antigravity-cli was materialized through the wrong execution owner"))
 ;;
 
@@ -5623,7 +5630,8 @@ let test_antigravity_cli_add_dirs_reach_the_execution_config () =
               [ "/srv/repos"; "/srv/shared" ] config.add_dirs
           | Runtime_execution.Agent_core _
           | Runtime_execution.Codex_app_server _
-          | Runtime_execution.Claude_code _ ->
+          | Runtime_execution.Claude_code _
+          | Runtime_execution.Muse_serve _ ->
             fail "antigravity-cli was materialized through the wrong execution owner"))
 ;;
 

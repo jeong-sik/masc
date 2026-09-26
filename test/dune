@@ -2959,6 +2959,7 @@
 (include stanzas/test_runtime_muse_serve.inc)
 (include stanzas/test_runtime_official_client_mcp_http.inc)
 (include stanzas/test_runtime_claude_code_config.inc)
+(include stanzas/test_runtime_muse_serve_config.inc)
 (include stanzas/test_keeper_antigravity_runtime.inc)
 (include stanzas/test_keeper_muse_runtime.inc)
 (include stanzas/test_keeper_claude_code_runtime.inc)

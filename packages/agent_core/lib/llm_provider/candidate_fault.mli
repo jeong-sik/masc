@@ -16,8 +16,16 @@
     credential·account bundle, not to the request it carried. *)
 type binding_fact =
   | Credential
-      (** HTTP 401 or 403. The key is dead, or the account lacks permission.
-          The next candidate carries its own key and permission. *)
+      (** HTTP 401. The key is dead. The next candidate carries its own key. *)
+  | Account_access
+      (** HTTP 403. The provider accepted who is calling and refused the
+          account: a spent subscription window, a missing entitlement, a
+          client the plan does not admit, or a suspended account. The status
+          alone does not say which. The next candidate carries its own
+          account. Kept apart from [Credential] because the Keeper walk reads
+          provider usage after this fact and not after a 401; with one
+          constructor that split had to be re-derived from the raw error,
+          a second table beside this one (#38975, task-1773). *)
   | Account
       (** HTTP 402. This account cannot pay. The next candidate may bill a
           different account; the same quota scope sees this fact together. *)

@@ -12,7 +12,11 @@ let keeper_reaction_ledger_health_json () =
   | Some state ->
     let config = (Mcp_server.workspace_config state) in
     let keeper_names =
-      try Keeper_meta_store.keeper_names config |> sorted_unique_strings with
+      try (match Keeper_meta_store.keeper_names_result config with
+         | Ok names -> names
+         | Error detail ->
+           Log.Keeper.warn "health: keeper names unread: %s" detail;
+           []) |> sorted_unique_strings with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         Log.Keeper.warn
@@ -47,7 +51,11 @@ let keeper_owner_health_json () =
   | Some state ->
     let config = Mcp_server.workspace_config state in
     let keeper_names =
-      try Keeper_meta_store.keeper_names config |> sorted_unique_strings with
+      try (match Keeper_meta_store.keeper_names_result config with
+         | Ok names -> names
+         | Error detail ->
+           Log.Keeper.warn "health: keeper names unread: %s" detail;
+           []) |> sorted_unique_strings with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         Log.Keeper.warn
@@ -154,7 +162,11 @@ let keeper_board_event_collection_health_json () =
   | Some state ->
     let config = Mcp_server.workspace_config state in
     let keeper_names =
-      try Keeper_meta_store.keeper_names config |> sorted_unique_strings with
+      try (match Keeper_meta_store.keeper_names_result config with
+         | Ok names -> names
+         | Error detail ->
+           Log.Keeper.warn "health: keeper names unread: %s" detail;
+           []) |> sorted_unique_strings with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         Log.Keeper.warn

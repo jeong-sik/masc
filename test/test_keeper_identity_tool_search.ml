@@ -101,7 +101,14 @@ let restored_receipts ~source ~target =
   | Error error -> fail (Load_receipts.error_to_string error)
 ;;
 
-let make_receipts ?(trace = "search-test") ?task ?current_task_id ~context offering =
+let make_receipts
+      ?(trace = "search-test")
+      ?task
+      ?(keeper_turn = 1)
+      ?current_task_id
+      ~context
+      offering
+  =
   let current_task_id =
     match current_task_id with Some read -> read | None -> fun () -> Ok task
   in
@@ -109,6 +116,7 @@ let make_receipts ?(trace = "search-test") ?task ?current_task_id ~context offer
     ~restored:(restored_receipts ~source:context ~target:context)
     ~trace_id:(trace_id trace)
     ~task_id:task
+    ~keeper_turn
     ~current_task_id
     ~surface:(receipt_surface offering)
 ;;
@@ -1158,6 +1166,9 @@ let test_load_survives_purge_checkpoint_and_resume () =
         ~restored
         ~trace_id:(trace_id "search-test")
         ~task_id:(Some (task_id "task-901"))
+        (* The turn after the one that loaded it: the boundary a load
+           exists to cross. *)
+        ~keeper_turn:2
         ~current_task_id:(fun () -> Ok (Some (task_id "task-901")))
         ~surface:(receipt_surface offering)
     in
@@ -1247,6 +1258,7 @@ let test_work_and_surface_changes_retire_loads () =
           ~restored:(restored_receipts ~source:initial ~target)
           ~trace_id:(trace_id trace)
           ~task_id:task
+          ~keeper_turn:1
           ~current_task_id:(fun () -> Ok task)
           ~surface
       in
@@ -1256,6 +1268,7 @@ let test_work_and_surface_changes_retire_loads () =
           ~restored:(restored_receipts ~source:target ~target)
           ~trace_id:(trace_id "search-test")
           ~task_id:(Some (task_id "task-901"))
+          ~keeper_turn:1
           ~current_task_id:(fun () -> Ok (Some (task_id "task-901")))
           ~surface:(receipt_surface offering)
       in
@@ -1288,12 +1301,46 @@ let test_work_and_surface_changes_retire_loads () =
     changed "same named service moved endpoints" moved)
 ;;
 
+(* A load crosses one turn boundary and no more. Held until the Task or
+   surface changed instead, a tool a turn loaded and never called rode every
+   request of every later turn of that Task. *)
+let test_an_uncalled_load_retires_after_the_following_turn () =
+  let offering = offered two_offered in
+  with_receipt_fixture offering (fun _env context _receipts _agent p ->
+    execute p.tool (names_input [ "atlassian_jira_search" ]) |> loaded_output |> ignore;
+    let bind keeper_turn =
+      make_receipts ~task:(task_id "task-901") ~keeper_turn ~context offering
+    in
+    check (list string) "a resumed loading turn keeps its own load"
+      [ "atlassian_jira_search" ] (Load_receipts.pending_names (bind 1));
+    let following = bind 2 in
+    check (list string) "the following turn is placed with the load"
+      [ "atlassian_jira_search" ]
+      (placed_names (placement ~receipts:following offering |> require_placement));
+    Load_receipts.loaded
+      following
+      ~invocation:(invocation "load-in-turn-2")
+      ~names:[ "atlassian_confluence_search" ]
+      ~apply:(fun () -> ())
+    |> (function Ok () -> () | Error error -> fail (Load_receipts.error_to_string error));
+    let after = bind 3 in
+    check (list string) "a load the following turn never called is retired"
+      [ "atlassian_confluence_search" ] (Load_receipts.pending_names after);
+    check (list string) "and is no longer placed"
+      [ "atlassian_confluence_search" ]
+      (placed_names (placement ~receipts:after offering |> require_placement));
+    check (list string) "every uncalled load is gone two boundaries on"
+      [] (Load_receipts.pending_names (bind 4));
+    check (list string) "binding an earlier turn again does not revive it"
+      [] (Load_receipts.pending_names (bind 2)))
+;;
+
 let test_invalid_restore_does_not_replace_live_state () =
   let source = Agent_core.Context.create_sync () in
   Agent_core.Context.set_scoped
     source
     Agent_core.Context.Session
-    "keeper_tool_load_receipts"
+    "keeper_outstanding_tool_loads"
     (`Assoc [ "pending", `List [] ]);
   let target = Agent_core.Context.create_sync () in
   let _ = make_receipts ~context:target (offered two_offered) in
@@ -1361,6 +1408,8 @@ let () =
             test_runtime_attempt_keeps_the_expanded_tool_set
         ; test_case "work and surface changes retire loads" `Quick
             test_work_and_surface_changes_retire_loads
+        ; test_case "an uncalled load retires after the following turn" `Quick
+            test_an_uncalled_load_retires_after_the_following_turn
         ; test_case "invalid restore preserves live state" `Quick
             test_invalid_restore_does_not_replace_live_state
         ] )

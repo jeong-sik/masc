@@ -440,6 +440,11 @@ let grapheme_pieces text start_offset end_offset reversed =
           drain `Await
       | `Await | `End -> ()
     in
+    let rec after_ascii offset =
+      if offset < end_offset && printable_ascii text.[offset] then
+        after_ascii (offset + 1)
+      else offset
+    in
     let rec feed offset =
       if offset >= end_offset then begin
         drain `End;
@@ -447,8 +452,30 @@ let grapheme_pieces text start_offset end_offset reversed =
       end
       else
         let decoded = String.get_utf_8_uchar text offset in
+        let next = offset + Uchar.utf_decode_length decoded in
         drain (`Uchar (Uchar.utf_decode_uchar decoded));
-        feed (offset + Uchar.utf_decode_length decoded)
+        if printable_ascii text.[offset] then begin
+          (* GB999 separates adjacent printable ASCII. Feed the first scalar
+             normally for a preceding Prepend and retain the last for a
+             following Extend, SpacingMark, ZWJ or keycap selector.
+
+             Uuseg 17's grapheme update_left resets RI, emoji and Indic
+             context after any printable ASCII (GCB=Other, InCB=None).
+             [drain] has returned it to Await, so skipping more of that same
+             state preserves the boundary before the last scalar. Keep one
+             segmenter for the range, including runs with only one interior
+             byte; no new segmenter is allocated at either boundary. *)
+          let last = after_ascii next - 1 in
+          if next < last then begin
+            close_cluster ();
+            pieces := scalar_pieces text next last !pieces;
+            cluster_start := last;
+            cluster_end := last;
+            feed last
+          end
+          else feed next
+        end
+        else feed next
     in
     feed start_offset;
     !pieces

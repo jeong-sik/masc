@@ -1,4 +1,4 @@
-type source = Browser_lane.Lane_name.t = Live | Automation
+type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
 type request = { route : Browser_lane.route; tab_id : int option }
 type tab = { id : int; title : string; url : string; active : bool }
 type selection = Requested of tab | Active of tab | None_active
@@ -26,7 +26,8 @@ let parse_request = function
     let* route = match source, client_id with
       | Live, selected -> Ok (Browser_lane.Live_route selected)
       | Automation, None -> Ok Browser_lane.Automation_route
-      | Automation, Some _ -> Error "client_id_requires_live" in
+      | Stagehand, None -> Ok Browser_lane.Stagehand_route
+      | (Automation | Stagehand), Some _ -> Error "client_id_requires_live" in
     let* () = if List.for_all (fun (key, _) -> List.mem key ["lane";"tabId";"clientId"]) fields
       then Ok () else Error "unknown browser read argument" in
     Ok {route; tab_id}

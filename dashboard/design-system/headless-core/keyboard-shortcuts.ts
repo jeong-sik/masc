@@ -44,6 +44,10 @@ export interface ShortcutDescriptor {
 
 export interface ShortcutKeyEvent {
   readonly key: string
+  /** The physical key (`KeyboardEvent.code`). A digit chord matches on it,
+   *  because with Shift held `key` is the layout's symbol (`Shift+2` is
+   *  `@` on a US layout), never the digit. Absent, `key` is compared. */
+  readonly code?: string
   readonly metaKey?: boolean
   readonly ctrlKey?: boolean
   readonly shiftKey?: boolean
@@ -91,12 +95,19 @@ function modKeyForPlatform(platform: Platform): 'meta' | 'ctrl' {
   return platform === 'mac' ? 'meta' : 'ctrl'
 }
 
+function keyMatches(chordKey: string, event: ShortcutKeyEvent): boolean {
+  if (/^[0-9]$/.test(chordKey) && event.code !== undefined) {
+    return event.code === `Digit${chordKey}`
+  }
+  return chordKey.toLowerCase() === event.key.toLowerCase()
+}
+
 function chordMatches(
   chord: Chord,
   event: ShortcutKeyEvent,
   platform: Platform,
 ): boolean {
-  if (chord.key.toLowerCase() !== event.key.toLowerCase()) return false
+  if (!keyMatches(chord.key, event)) return false
   const wantsMod = chord.modifiers.includes('Mod')
   const wantsShift = chord.modifiers.includes('Shift')
   const wantsAlt = chord.modifiers.includes('Alt')

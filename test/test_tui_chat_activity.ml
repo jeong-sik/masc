@@ -264,12 +264,39 @@ let test_a_live_turn_elsewhere_covers_nothing_here () =
   check int "a live turn on another keeper hides nothing here" 1
     (List.length (Tui.keeper_message_inflight_drawn state))
 
+let test_one_status_row_per_server_batch () =
+  let state = state () in
+  ignore (live ~request_id:"queued-after-batch" state (Some Live.Queued));
+  let member request_id at =
+    let entry = inflight ~request_id ~at () in
+    Tui.turn_log_add ~now:at entry.log ~seq:None
+      (Live.Batch_bound { operation_id = request_id;
+                          execution_id = "shared-execution" });
+    entry
+  in
+  let first = member "request-1" 2. in
+  let second = member "request-2" 3. in
+  let third = { (member "request-3" 4.) with phase = Tui.Turn_reconciling } in
+  state.msg_inflight <- state.msg_inflight @ [first; second; third];
+  match Tui.keeper_message_inflight_drawn state with
+  | [group] ->
+    check int "one visible row for one execution" 3 group.count;
+    check int "reconciliation is not hidden in the batch" 1
+      group.reconciling_count;
+    check string "the row names the execution" "shared-execution"
+      (Tui.turn_log_execution_id group.representative.log);
+    check (float 0.001) "the age begins with the oldest submission" 2.
+      group.representative.sent_at
+  | groups -> failf "expected one batch row, got %d" (List.length groups)
+
 let () =
   run "TUI chat activity"
     [ "request and lane states",
       [ test_case "Working request stays visible behind newer queued view" `Quick test_working_request_survives_newer_queued_view
       ; test_case "the band does not repeat the admission" `Quick
           test_the_band_does_not_repeat_the_admission
+      ; test_case "one status row per server batch" `Quick
+          test_one_status_row_per_server_batch
       ; test_case "queue does not invent its blocker" `Quick
           test_queue_does_not_invent_a_blocking_turn
       ; test_case "stop keys ride the running row" `Quick
@@ -287,4 +314,3 @@ let () =
       ; test_case "a live turn elsewhere covers nothing here" `Quick
           test_a_live_turn_elsewhere_covers_nothing_here
       ] ]
-

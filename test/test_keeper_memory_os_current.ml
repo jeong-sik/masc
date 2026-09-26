@@ -373,7 +373,6 @@ let test_support_retraction_cascades_to_fixed_point () =
     Masc.Keeper_memory_os_recall.render_context
       ~keepers_dir
       ~keeper_id:"keeper"
-      ~now:240.0
       ()
   in
   check bool "automatic recall distinguishes a derived conclusion" true
@@ -1118,7 +1117,6 @@ let test_recall_preserves_selected_facts_without_local_ranking () =
     Masc.Keeper_memory_os_recall.render_context
       ~keepers_dir
       ~keeper_id:"keeper"
-      ~now:240.0
       ()
   in
   let first_at = Astring.String.find_sub ~sub:"first memory" rendered in
@@ -1156,7 +1154,6 @@ let test_recall_read_failure_injects_no_block () =
     Masc.Keeper_memory_os_recall.render_context
       ~keepers_dir
       ~keeper_id:"keeper"
-      ~now:240.0
       ()
   in
   check string "unreadable snapshot injects no recall block" "" rendered
@@ -1174,7 +1171,6 @@ let test_recall_does_not_hide_current_truth_behind_a_size_threshold () =
     Masc.Keeper_memory_os_recall.render_context
       ~keepers_dir
       ~keeper_id:"keeper"
-      ~now:240.0
       ()
   in
   check bool "large current truth reaches recall" true

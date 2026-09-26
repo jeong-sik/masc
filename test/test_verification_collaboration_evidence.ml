@@ -119,6 +119,22 @@ let test_submission_freezes_sources () = with_fixture (fun config ->
       (read surface "masc_fusion_status" (run_args run_id) = original_fusion)) [task;goal];
   check bool "only original criticism is visible" true
     (Yojson.Safe.Util.member "comments" original = `List [Board.comment_to_yojson comment]);
+  (* The cursor inputs page the submitted thread, not the live one: the later
+     comment is not after the snapshot's newest, and it is not among the
+     newest either. *)
+  let comment_id = Board.Comment_id.to_string comment.Board.id in
+  List.iter (fun surface ->
+    let open Yojson.Safe.Util in
+    let after = read surface "masc_board_post_get"
+      (`Assoc ["post_id", `String id; "after_comment_id", `String comment_id]) in
+    check bool "nothing follows the snapshot's newest comment" true
+      (member "comments" after = `List []);
+    check bool "the empty page starts right after that comment" true
+      (after |> member "pagination" |> member "offset" = `Int 1);
+    let newest = read surface "masc_board_post_get"
+      (`Assoc ["post_id", `String id; "comment_tail", `Int 5]) in
+    check bool "the newest comments are the snapshot's" true
+      (member "comments" newest = `List [Board.comment_to_yojson comment])) [task; goal];
   let empty = VAT.create_goal_proof ~config ~submitted_evidence:[] |> require "other request" in
   denied empty "masc_board_post_get" (post_args p) "verification_source_access_denied")
 
@@ -151,7 +167,12 @@ let test_capture_failures_and_corruption () = with_fixture (fun config ->
      `Assoc ["post_id", `String (Board.Post_id.to_string p.id); "comment_offset", `Int (-1)];
      (* The snapshot has no comments, so offset 1 names nothing; it is refused
         rather than answered with an empty page that reads like lost comments. *)
-     `Assoc ["post_id", `String (Board.Post_id.to_string p.id); "comment_offset", `Int 1]];
+     `Assoc ["post_id", `String (Board.Post_id.to_string p.id); "comment_offset", `Int 1];
+     (* No comment of the empty snapshot has this id. *)
+     `Assoc ["post_id", `String (Board.Post_id.to_string p.id);
+             "after_comment_id", `String ("c-" ^ String.make 32 '0')];
+     `Assoc ["post_id", `String (Board.Post_id.to_string p.id);
+             "comment_tail", `Int 1; "comment_offset", `Int 0]];
   let Board_dispatch.Jsonl store = Board_dispatch.backend () in
   store.Board.posts_load_result <- Error "unreadable persisted source";
   Evidence.capture ~config ~authority:(Evidence.Task_producer "producer") ~references:[board_ref p]

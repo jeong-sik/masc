@@ -496,6 +496,31 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
                 b"synthetic provider HTTP 503",
             ):
                 assert needle in screen, (needle, screen)
+            assert screen.count(b"JUDGE FAILED") == 1, screen
+            assert b"JUDGE CAUSE  synthetic provider HTTP 503" in screen, screen
+            h.resize_and_wait(
+                process,
+                master,
+                output,
+                rows=15,
+                columns=200,
+                needle=b"MASC Measurement",
+                controls=(h.FULL_REDRAW,),
+            )
+            for _ in range(4):
+                h.read_available(master, output)
+                next_frame = len(output)
+                os.write(master, b"\x1b[6~")
+                h.wait_for_output(
+                    process, master, output, h.FRAME_END,
+                    start=next_frame, timeout=3.0,
+                )
+                h.drain_until_quiet(process, master, output)
+                scrolled = h.screen_text(bytes(output))
+                if b"JUDGE CAUSE  synthetic provider HTTP 503" in scrolled and b"JUDGE FAILED" not in scrolled:
+                    break
+            else:
+                raise AssertionError("scrolled cause lost its judge stage or still shows the failure header")
         elif scenario == "malformed":
             assert b"not JSON" in screen and b"must-not-render" not in screen, screen
         elif scenario == "integrity":

@@ -7872,7 +7872,7 @@ def context_inspector_fixtures() -> HttpFixtures:
                         "transmitted_atoms": 7,
                         "total_atoms": 9,
                         "model_input_measurement": "wire_shape",
-                        "front_atom_digest": hashlib.sha256(b"front atom").hexdigest(),
+                        "model_input_front": {"kind": "at_atom", "digest": hashlib.sha256(b"front atom").hexdigest()},
                         # These two keys are a pair. Turn_record.of_json
                         # defaults a missing usage_scope to
                         # Usage_scope_unavailable, and /context then omits

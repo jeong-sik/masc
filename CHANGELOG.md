@@ -178,6 +178,7 @@
   fixture so its Docker search reaches the `via=docker` assertion. #39407
 - Keeper continuation checkpoints now retain their own typed terminal disposition instead of requesting human input. Decision, receipt, Dashboard and composite projections agree while preserving the original yield cause (#39411).
 - Version and documentation checks consume their complete scan output before selecting the first match, preventing an early closed pipe from turning valid release history into SIGPIPE while retaining scan and version validation failures (#39420).
+- The Context Inspector now shows the cause of a connection failure once. It reads `Composition unavailable: turn-records: GET failed: …` instead of adding a second `request failed` in front of the transport message. (#39372)
 
 ### Documentation
 

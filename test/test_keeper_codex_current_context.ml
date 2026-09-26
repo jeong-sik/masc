@@ -175,7 +175,7 @@ let test_operator_interrupt_preserves_previous_native_settlement () =
      Eio.Switch.fail turn_sw Keeper_registry_types.Operator_interrupt
   in
   let env = Option.get (Eio_context.get_env_opt ()) in
-  (match Eio.Time.with_timeout env#clock 30. interrupt_newer with
+  (match Eio.Time.with_timeout_exn env#clock 30. interrupt_newer with
    | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ()
    | exception exn -> fail (Printexc.to_string exn)
    | () -> fail "operator stop did not cancel the admitted Codex turn");

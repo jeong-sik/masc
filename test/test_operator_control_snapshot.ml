@@ -1613,5 +1613,19 @@ let () =
             `Quick
             test_snapshot_rejects_pending_confirm_with_invalid_timestamp
         ] );
+      ( "defined but never registered until task-1768",
+          [ Alcotest.test_case "keeper subop timing log after profile activity" `Quick test_keeper_subop_timing_log_after_profile_activity
+          ; Alcotest.test_case "lightweight snapshot surfaces paused keeper runtime trust" `Quick test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust
+          ; Alcotest.test_case "digest workspace includes keeper runtime attention" `Quick test_digest_workspace_includes_keeper_runtime_attention
+          ; Alcotest.test_case "lightweight snapshot preserves receipt latest causal event" `Quick test_lightweight_snapshot_preserves_receipt_latest_causal_event
+          ; Alcotest.test_case "snapshot has expected sections" `Quick test_snapshot_has_expected_sections
+          ; Alcotest.test_case "snapshot pending confirm summary tracks actor scope" `Quick test_snapshot_pending_confirm_summary_tracks_actor_scope
+          ; Alcotest.test_case "snapshot summary view excludes retired command plane" `Quick test_snapshot_summary_view_excludes_retired_command_plane
+          ; Alcotest.test_case "snapshot lightweight summary omits heavy activity" `Quick test_snapshot_lightweight_summary_omits_heavy_activity
+          ; Alcotest.test_case "snapshot lightweight summary keeps tool audit" `Quick test_snapshot_lightweight_summary_keeps_tool_audit
+          ; Alcotest.test_case "snapshot lightweight summary keeps recent tools distinct from latest" `Quick test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest
+          ; Alcotest.test_case "digest workspace exposes pending confirm attention" `Quick test_digest_workspace_exposes_pending_confirm_attention
+          ; Alcotest.test_case "operator digest severity rank supports critical" `Quick test_operator_digest_severity_rank_supports_critical
+          ] );
     ]
 ;;

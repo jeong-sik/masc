@@ -7013,4 +7013,7 @@ let () =
           test_case "typed Skills patch preserves all, exact and none" `Quick
             test_config_post_round_trips_typed_skills_patch;
         ] );
+      ( "defined but never registered until task-1768",
+          [ Alcotest.test_case "keepers dashboard json fiber batch collects all keepers" `Quick test_keepers_dashboard_json_fiber_batch_collects_all_keepers
+          ] );
     ]

@@ -8,7 +8,7 @@ let fresh () =
 
 let red = "\027[31m"
 let reset = "\027[0m"
-let failure = "Read/action failed: HTTP 503"
+let failure = "Cause: HTTP 503"
 
 let row () = Masc_tui_render_prim.coordinator_status_row (fresh ()) ~style:red failure
 

@@ -4184,10 +4184,8 @@ module Browser_lane_view = struct
 
      Read_failed used to read "Read/action failed", which did two things. It
      left the HTTP family its four siblings belong to, so the badge changed
-     shape rather than value when a read failed. And the status line three
-     rows down already opens "Read/action failed: " and then gives the
-     detail, so the operator read the same phrase twice and only the second
-     one told them anything. *)
+     shape rather than value when a read failed. The status line below now
+     gives the cause without repeating this failed verdict. *)
   let read_status_label = function
     | Unread -> "HTTP unread"
     | Reading -> "HTTP reading"

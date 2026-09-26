@@ -859,6 +859,29 @@ let run_keeper_invocation_turn_admitted_inner
                   | Some admission ->
                     Keeper_direct_gate_continuation.finish_run ~config:ctx.config
                       ~keeper_name:meta.name ~operation_id admission run_result in
+                (* Every exit below except the success path ran under
+                   [keeper_turn_id] and spent what its attempts read. It
+                   counts the turn and commits that spend before the
+                   keepalive can start another turn. A failed commit is
+                   logged and the exit keeps its own outcome: the next turn
+                   then resolves from the same cursor and reuses the id, as
+                   before this commit existed. *)
+                let commit_ended_turn () =
+                  match
+                    Keeper_turn_spend_commit.commit
+                      ~config:ctx.config
+                      ~keeper_turn_id
+                      ~before:meta
+                      ~attempt_spend:settlement.Keeper_agent_run.spend
+                      (Keeper_turn_spend_commit.count_turn meta)
+                  with
+                  | Ok (_ : Keeper_meta_contract.keeper_meta) -> ()
+                  | Error error ->
+                    Log.Keeper.warn ~keeper_name:meta.name
+                      "direct turn %d ended without committing its spend: %s"
+                      keeper_turn_id
+                      (Keeper_turn_spend_commit.error_to_string error)
+                in
                 (* A Gate whose original session is full cannot continue
                    anywhere: suspending it again would resume into the same
                    refusal. The operation fails with that typed cause, and the
@@ -870,6 +893,7 @@ let run_keeper_invocation_turn_admitted_inner
                   | Some _, Ok _ | None, (Ok _ | Error _) -> Ok None in
                 match gate_session_full with
                 | Error detail ->
+                  commit_ended_turn ();
                   Progress.stop_tracking turn_task_id;
                   dispatch_failed
                     ~class_:Tool_result.Runtime_failure
@@ -884,6 +908,7 @@ let run_keeper_invocation_turn_admitted_inner
                      ()
                    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                      ~label:"trajectory finalize (gate session full)" exn);
+                  commit_ended_turn ();
                   restart_keepalive_after_message_turn ctx meta;
                   Progress.stop_tracking turn_task_id;
                   dispatch_failed ~class_:Tool_result.Runtime_failure cause
@@ -909,6 +934,7 @@ let run_keeper_invocation_turn_admitted_inner
                       ~session_dir ~session_id ~approval_ids:!gate_ids () in
                 match gate_wait with
                 | Error detail ->
+                  commit_ended_turn ();
                   dispatch_failed
                     ~class_:Tool_result.Runtime_failure
                     (Keeper_request_failure.Turn_continuation_unpersisted
@@ -917,6 +943,7 @@ let run_keeper_invocation_turn_admitted_inner
                   let () = match Keeper_direct_gate_continuation.reconcile ~config:ctx.config ~meta with
                     | Ok () -> ()
                     | Error detail -> Log.Keeper.warn "direct Gate reconciliation: %s" detail in
+                  commit_ended_turn ();
                   restart_keepalive_after_message_turn ctx meta;
                   Progress.stop_tracking turn_task_id;
                   dispatch_ok
@@ -934,6 +961,7 @@ let run_keeper_invocation_turn_admitted_inner
                 | Some lane -> Keeper_direct_runtime_continuation.defer
                     ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
                     ~session_dir ~session_id lane in
+              commit_ended_turn ();
               Progress.stop_tracking turn_task_id;
               (match deferred with
                | Error detail ->
@@ -962,6 +990,7 @@ let run_keeper_invocation_turn_admitted_inner
                  ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run error)" exn);
+              commit_ended_turn ();
               restart_keepalive_after_message_turn ctx meta;
               Progress.stop_tracking turn_task_id;
               dispatch_failed ~class_:Tool_result.Runtime_failure cause

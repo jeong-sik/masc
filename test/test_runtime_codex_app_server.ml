@@ -326,7 +326,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
-let run_fixture ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
+let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
     ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?wall_clock_ceiling_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
@@ -345,6 +345,7 @@ let run_fixture ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?thr
     let config =
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
+      ; account_home
       ; isolated_home
       ; native
       ; developer_instructions
@@ -1265,7 +1266,7 @@ let test_background_read_outlives_the_turn () =
           let clock = Eio.Stdenv.clock env in
           let cwd = Eio.Path.(Eio.Stdenv.fs env / "/tmp") in
           let codex =
-            ({ cli_path = path; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
+            ({ cli_path = path; account_home = None; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
           in
           let recorded =
             Eio.Switch.run (fun root_sw ->
@@ -3042,9 +3043,75 @@ let test_readiness_home_overrides_inherited_home () =
         output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
         close_out output;
         Unix.chmod wrapper 0o700;
-        match run_fixture ~isolated_home wrapper with
-        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-        | Ok _ -> ()))
+        Masc_test_deps.with_process_env "HOME" (Some "") (fun () ->
+          Masc_test_deps.with_process_env "CODEX_HOME" (Some "") (fun () ->
+            (match run_fixture ~isolated_home wrapper with
+             | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+             | Ok _ -> ());
+            match run_fixture ~isolated_home:"relative-readiness-home" wrapper with
+            | Error (Runtime_codex_app_server.Invalid_config _) -> ()
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok _ -> fail "relative isolated home was accepted"))))
+;;
+
+let test_account_home_does_not_apply_readiness_overrides () =
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+    (fun fixture ->
+      let wrapper = Filename.temp_file "masc-codex-account-wrapper-" ".sh" in
+      Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+        let output = open_out_bin wrapper in
+        output_string output "#!/bin/sh\nset -eu\n";
+        output_string output "[ \"$CODEX_HOME\" = /tmp/codex-account-one ] || exit 75\n";
+        output_string output "[ -z \"${OPENAI_API_KEY:-}\" ] || exit 76\n";
+        output_string output "[ -z \"${AWS_ACCESS_KEY_ID:-}\" ] || exit 80\n";
+        output_string output "case \"$*\" in *'cli_auth_credentials_store'*) exit 77;; esac\n";
+        output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+        close_out output;
+        Unix.chmod wrapper 0o700;
+        Masc_test_deps.with_process_env "OPENAI_API_KEY" (Some "fixture-host-key") (fun () ->
+          Masc_test_deps.with_process_env "AWS_ACCESS_KEY_ID" (Some "fixture-host-aws-key") (fun () ->
+            match run_fixture ~account_home:"/tmp/codex-account-one" wrapper with
+            | Ok _ -> ()
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)))))
+;;
+
+let test_account_home_passes_its_declared_provider_key () =
+  let home = Filename.temp_file "masc-codex-declared-home-" "" in
+  Sys.remove home;
+  Unix.mkdir home 0o700;
+  let config_path = Filename.concat home "config.toml" in
+  let previous = Sys.getenv_opt "OPENAI_API_KEY" in
+  let previous_aws = Sys.getenv_opt "AWS_ACCESS_KEY_ID" in
+  Unix.putenv "OPENAI_API_KEY" "fixture-selected-key";
+  Unix.putenv "AWS_ACCESS_KEY_ID" "fixture-selected-aws-key";
+  Fun.protect ~finally:(fun () ->
+    Unix.putenv "OPENAI_API_KEY" (Option.value previous ~default:"");
+    Unix.putenv "AWS_ACCESS_KEY_ID" (Option.value previous_aws ~default:"");
+    Sys.remove config_path;
+    Unix.rmdir home) (fun () ->
+    let output = open_out_bin config_path in
+    output_string output
+      "[model_providers.selected]\nenv_key = \"OPENAI_API_KEY\"\n\
+       [model_providers.bedrock]\nenv_key = \"AWS_ACCESS_KEY_ID\"\n";
+    close_out output;
+    with_fixture
+      [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+      (fun fixture ->
+        let wrapper = Filename.temp_file "masc-codex-declared-wrapper-" ".sh" in
+        Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+          let output = open_out_bin wrapper in
+          output_string output "#!/bin/sh\nset -eu\n";
+          output_string output ("[ \"$CODEX_HOME\" = " ^ shell_quote home ^ " ] || exit 78\n");
+          output_string output "[ \"$OPENAI_API_KEY\" = fixture-selected-key ] || exit 79\n";
+          output_string output
+            "[ \"$AWS_ACCESS_KEY_ID\" = fixture-selected-aws-key ] || exit 81\n";
+          output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+          close_out output;
+          Unix.chmod wrapper 0o700;
+          match run_fixture ~account_home:home wrapper with
+          | Ok _ -> ()
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error))))
 ;;
 
 let write_fixture_file path content =
@@ -3210,6 +3277,22 @@ let run_production_keeper_turn_with_predecessor ~http_requests ~base_path ~trace
     ~user_message ~cli_path ~model ~turn_instructions =
   run_production_keeper_turn_with_projection ~write_cost_ledger:false ~after_turn:ignore ~dynamic_context_for_tools:None
     ~http_requests ~base_path ~trace_id ~user_message ~cli_path ~model ~turn_instructions
+;;
+
+(* The turn's result and the settlement it came out in, whose readings the
+   Keeper resolves the turn's spend from. *)
+let run_production_keeper_turn_settled ~base_path ~trace_id ~user_message ~cli_path ~model
+    ~turn_instructions =
+  let settled = ref None in
+  let result =
+    run_production_keeper_turn_with_projection ~write_cost_ledger:false
+      ~after_turn:(fun settlement -> settled := Some settlement)
+      ~dynamic_context_for_tools:None ~http_requests:None ~base_path ~trace_id ~user_message
+      ~cli_path ~model ~turn_instructions
+  in
+  match !settled with
+  | Some settlement -> result, settlement
+  | None -> fail "the production turn settled nothing"
 ;;
 
 let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~model
@@ -5095,7 +5178,7 @@ let test_production_keeper_reports_codex_token_usage () =
          ]
          (fun cli_path ->
             match
-              run_production_keeper_turn
+              run_production_keeper_turn_settled
                 ~base_path
                 ~trace_id:"codex-production-usage-1"
                 ~user_message:
@@ -5104,18 +5187,34 @@ let test_production_keeper_reports_codex_token_usage () =
                 ~model:"gpt-fixture"
                 ~turn_instructions:None
             with
-            | Error error -> fail (Agent_core.Error.to_string error)
-            | Ok result ->
+            | Error error, _ -> fail (Agent_core.Error.to_string error)
+            | Ok result, settlement ->
               check bool "usage reported" true result.Keeper_agent_run.usage_reported;
               check int "thread input" 9000 result.usage.input_tokens;
               check int "thread output" 700 result.usage.output_tokens;
               check int "thread cache read" 8000 result.usage.cache_read_input_tokens;
               check string "conversation-cumulative scope" "conversation_cumulative"
                 (Runtime_usage_scope.to_string result.usage_scope);
-              (match result.usage_basis with
-               | Keeper_usage_resolution.Conversation_counter
-                   { conversation_id = "thread-1"; position = Keeper_usage_resolution.Fresh; _ } -> ()
-               | _ -> fail "a Codex spend is not keyed by its thread and position");
+              (match
+                 (Keeper_turn_spend.resolve_turn
+                    ~cursor:None
+                    ~observed_at:0.0
+                    settlement.Keeper_agent_run.spend)
+                   .turn_reading
+               with
+               | Some
+                   { reading =
+                       { basis =
+                           Keeper_usage_resolution.Conversation_counter
+                             { conversation_id = "thread-1"
+                             ; position = Keeper_usage_resolution.Fresh
+                             ; _
+                             }
+                       ; _
+                       }
+                   ; _
+                   } -> ()
+               | Some _ | None -> fail "a Codex spend is not keyed by its thread and position");
               (match result.runtime_observation with
                | Some observation ->
                  check string "observation scope" "conversation_cumulative"
@@ -5532,12 +5631,12 @@ let test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread () =
   let run_turn ~trace_id ~user_message lines =
     with_fixture lines (fun cli_path ->
       match
-        run_production_keeper_turn
+        run_production_keeper_turn_settled
           ~base_path ~trace_id ~user_message ~cli_path ~model:"gpt-fixture"
           ~turn_instructions:None
       with
-      | Error error -> fail (Agent_core.Error.to_string error)
-      | Ok result -> result)
+      | Error error, _ -> fail (Agent_core.Error.to_string error)
+      | Ok _, settlement -> settlement.Keeper_agent_run.spend)
   in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -5552,24 +5651,29 @@ let test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread () =
            [ init_result; account_chatgpt; thread_result; resumed_turn_result
            ; resumed_item_completed; resumed_token_usage_updated; resumed_turn_completed ]
        in
-       (match second.Keeper_agent_run.usage_basis with
-        | Keeper_usage_resolution.Conversation_counter
-            { conversation_id = "thread-1"; position = Keeper_usage_resolution.Resumed; _ } -> ()
-        | _ -> fail "the resumed turn is not keyed to its thread as resumed");
-       let resolve ~cursor (result : Keeper_agent_run.run_result) =
-         Keeper_usage_resolution.resolve
-           ~cursor
-           ~basis:result.usage_basis
-           ~observation:(Some (Keeper_usage_resolution.sample_of_api_usage result.usage))
-           ~observed_at:0.0
+       let first_turn =
+         Keeper_turn_spend.resolve_turn ~cursor:None ~observed_at:0.0 first
        in
-       let _, cursor = resolve ~cursor:None first in
-       let resolution, _ = resolve ~cursor second in
-       match resolution.Keeper_usage_resolution.delta with
-       | Some delta ->
+       let second_turn =
+         Keeper_turn_spend.resolve_turn ~cursor:first_turn.cursor ~observed_at:0.0 second
+       in
+       match second_turn.turn_reading with
+       | Some
+           { reading =
+               { basis =
+                   Keeper_usage_resolution.Conversation_counter
+                     { conversation_id = "thread-1"
+                     ; position = Keeper_usage_resolution.Resumed
+                     ; _
+                     }
+               ; _
+               }
+           ; resolution = { delta = Some delta; _ }
+           ; _
+           } ->
          check int "input the second turn added" 2000 delta.input_tokens;
          check int "output the second turn added" 40 delta.output_tokens
-       | None -> fail "the resumed turn resolved no spend")
+       | Some _ | None -> fail "the resumed turn is not resolved against its thread")
 ;;
 
 let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
@@ -6268,6 +6372,10 @@ let () =
             "readiness private home overrides inherited home"
             `Quick
             test_readiness_home_overrides_inherited_home
+        ; test_case "selected account home keeps normal CLI configuration" `Quick
+            test_account_home_does_not_apply_readiness_overrides
+        ; test_case "selected home admits its declared provider key" `Quick
+            test_account_home_passes_its_declared_provider_key
         ; test_case
             "child environment is allowlisted"
             `Quick

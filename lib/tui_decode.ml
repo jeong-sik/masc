@@ -7294,6 +7294,13 @@ let standalone_lane_answer (lane : standalone_lane) =
          open a run to inspect inputs, dispositions, excerpts, duration, and \
          truncation."
     }
+  | Standalone_lane.Browser_stagehand ->
+    { sla_output_meaning =
+        "Output meaning: structured answer to one Stagehand browser model request."
+    ; sla_evidence =
+        "Evidence: this lane does not yet retain standalone run records; \
+         inspect the browser operation response for its result."
+    }
 
 let standalone_lane_status_of_string = function
   | "running" -> Ok Standalone_running
@@ -7388,7 +7395,8 @@ let decode_standalone_lane json =
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Workspace_curator
-    | Standalone_lane.Verifier -> Ok None
+    | Standalone_lane.Verifier
+    | Standalone_lane.Browser_stagehand -> Ok None
   in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
@@ -9500,7 +9508,7 @@ type preset_manifest =
   ; pm_description : string
   ; pm_created_at : string
   ; pm_override_count : int
-  ; pm_override_keys : string list option
+  ; pm_override_keys : string list
         (** Which prompts the preset overrides. [None] on a manifest written
             before the server named them, which is not the same as [Some []]:
             unknown against none. *)
@@ -9595,17 +9603,7 @@ let decode_preset_manifest json =
   let* pm_description = required_string_field json "description" in
   let* pm_created_at = required_string_field json "created_at" in
   let* pm_override_count = required_int_field json "override_count" in
-  let pm_override_keys =
-    match Yojson.Safe.Util.member "override_keys" json with
-    | `List items ->
-      Some
-        (List.filter_map
-           (function
-             | `String key -> Some key
-             | _ -> None)
-           items)
-    | `Null | _ -> None
-  in
+  let* pm_override_keys = decode_string_list json "override_keys" in
   let* pm_keepers = decode_string_list json "keepers" in
   let* pm_assignment_count = required_int_field json "assignment_count" in
   let* pm_lane_count = required_int_field json "lane_count" in
@@ -9787,7 +9785,8 @@ let decode_librarian_run_page json =
          | Standalone_lane.Hitl_auto_judge
          | Standalone_lane.Board_attention
          | Standalone_lane.Workspace_curator
-         | Standalone_lane.Verifier -> None)
+         | Standalone_lane.Verifier
+         | Standalone_lane.Browser_stagehand -> None)
       rows
   in
   let* lrp_next =
@@ -10037,7 +10036,8 @@ let decode_lane_run_gate_judgment ~(lane : Standalone_lane.t) ~status ~output =
   | Standalone_lane.Librarian
   | Standalone_lane.Board_attention
   | Standalone_lane.Workspace_curator
-  | Standalone_lane.Verifier -> Ok Lane_run_not_gate_judgment
+  | Standalone_lane.Verifier
+  | Standalone_lane.Browser_stagehand -> Ok Lane_run_not_gate_judgment
   | Standalone_lane.Hitl_auto_judge ->
     let decode_advisory output =
       let* judgment = required_string_field output "judgment" in
@@ -10252,7 +10252,8 @@ let decode_lane_run_detail json =
       | Standalone_lane.Librarian
       | Standalone_lane.Hitl_auto_judge
       | Standalone_lane.Workspace_curator
-      | Standalone_lane.Verifier ->
+      | Standalone_lane.Verifier
+      | Standalone_lane.Browser_stagehand ->
         false
     in
     let* answer_succeeded =
@@ -10350,7 +10351,8 @@ let decode_lane_run_detail json =
     | Standalone_lane.Librarian
     | Standalone_lane.Board_attention
     | Standalone_lane.Workspace_curator
-    | Standalone_lane.Verifier -> decode_judgment ()
+    | Standalone_lane.Verifier
+    | Standalone_lane.Browser_stagehand -> decode_judgment ()
   in
   Ok
     { lrd_run_id = summary.lrs_run_id

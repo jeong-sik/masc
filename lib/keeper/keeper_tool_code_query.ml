@@ -182,7 +182,7 @@ let dispatch ~config ~meta ~name ~args : Tool_result.result option =
   if not (String.equal name tool_name)
   then None
   else (
-    let start_time = Time_compat.now () in
+    let start_time = Tool_timing.start () in
     try Some (handle ~config ~meta ~start_time ~args) with
     | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
     | exn ->

@@ -6049,6 +6049,10 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ]
      @ jev)
 
+let stagehand_lane_json () =
+  standalone_lane_json ~status:"no_retained_observation" ~retained:0
+    "browser_stagehand_exact" "Browser Stagehand"
+
 let replace_assoc_field name value = function
   | `Assoc fields ->
     `Assoc ((name, value) :: List.remove_assoc name fields)
@@ -6079,6 +6083,7 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
             ; standalone_lane_json "librarian_exact" "Librarian"
             ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
             ; standalone_lane_json "verifier_exact" "Verifier"
+            ; stagehand_lane_json ()
             ] )
       ]
   in
@@ -6181,14 +6186,14 @@ let test_every_lane_draws_its_own_answer () =
       ]
   in
   match Tui_decode.decode_standalone_lanes_snapshot snapshot with
-  | Error detail -> Alcotest.failf "the five-lane snapshot did not decode: %s" detail
+  | Error detail -> Alcotest.failf "the standalone-lane snapshot did not decode: %s" detail
   | Ok decoded ->
     let lanes = decoded.Tui_decode.sls_lanes in
     let known = List.map Tui_decode.standalone_lane_answer lanes in
     let pair (answer : Tui_decode.standalone_lane_answer) =
       answer.sla_output_meaning, answer.sla_evidence
     in
-    Alcotest.(check int) "five lanes, five different answers"
+    Alcotest.(check int) "every lane has a different answer"
       (List.length Standalone_lane.all)
       (List.length (List.sort_uniq compare (List.map pair known)));
     (* Both lines keep the heads the lane detail is read by. *)
@@ -6252,6 +6257,7 @@ let test_decode_standalone_lane_keeps_the_run_start () =
           ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
           ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
               "verifier_exact" "Verifier"
+          ; stagehand_lane_json ()
           ]
       ]
   in
@@ -6297,6 +6303,7 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
     ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
     ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
         "verifier_exact" "Verifier"
+    ; stagehand_lane_json ()
     ]
   in
   let json =
@@ -6361,6 +6368,7 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
             ; standalone_lane_json "librarian_exact" "Librarian"
             ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
             ; standalone_lane_json "verifier_exact" "Verifier"
+            ; stagehand_lane_json ()
             ] )
       ]
   in
@@ -9168,6 +9176,7 @@ let presets_payload : Yojson.Safe.t =
               ; ("description", `String "before the campaign")
               ; ("created_at", `String "2026-09-03T10:26:08Z")
               ; ("override_count", `Int 1)
+              ; ("override_keys", `List [ `String "keeper" ])
               ; ("keepers", `List [ `String "analyst"; `String "spruce" ])
               ; ("assignment_count", `Int 12)
               ; ("lane_count", `Int 4)
@@ -9207,6 +9216,7 @@ let test_decode_presets_reads_manifests_and_unreadable () =
     Alcotest.(check string) "name" "morning" first.Tui_decode.pm_name;
     Alcotest.(check int) "assignments" 12 first.Tui_decode.pm_assignment_count;
     Alcotest.(check (list string)) "keepers" [ "analyst"; "spruce" ] first.Tui_decode.pm_keepers;
+    Alcotest.(check (list string)) "override keys" [ "keeper" ] first.Tui_decode.pm_override_keys;
     Alcotest.(check (list (pair string string))) "unreadable"
       [ "torn", "manifest.json missing" ] snapshot.Tui_decode.pss_unreadable
 

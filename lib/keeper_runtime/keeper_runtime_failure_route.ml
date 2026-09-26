@@ -221,27 +221,6 @@ let api_error_retry_after (api : Llm_provider.Retry.api_error) =
   | Llm_provider.Retry.Timeout _ -> None
 ;;
 
-(* [Candidate_fault] answers whose affair a failure is, and a 401 and a 403
-   are both this binding's. The route also has to know which one it was: a
-   401 is a dead key, while a 403 refused the account, and the Keeper walk
-   reads the provider's usage after a 403 (keeper_turn_driver.ml). Like the
-   wait hint above, that is the one fact read off the raw constructor. *)
-let api_error_refuses_account (api : Llm_provider.Retry.api_error) =
-  match api with
-  | Llm_provider.Retry.AuthorizationError _ -> true
-  | Llm_provider.Retry.AuthError _
-  | Llm_provider.Retry.RateLimited _
-  | Llm_provider.Retry.Overloaded _
-  | Llm_provider.Retry.ServerError _
-  | Llm_provider.Retry.PaymentRequired _
-  | Llm_provider.Retry.InvalidRequest _
-  | Llm_provider.Retry.NotFound _
-  | Llm_provider.Retry.ContextOverflow _
-  | Llm_provider.Retry.InputCapacity _
-  | Llm_provider.Retry.NetworkError _
-  | Llm_provider.Retry.Timeout _ -> false
-;;
-
 (* [route_of_api_error] derives its rotate / retry / exhaust class from the
    closed [Candidate_fault] judgment ([of_api_error]) rather than matching
    [Retry.api_error] by hand. The two walks (exact and Keeper) therefore read
@@ -265,8 +244,8 @@ let route_of_api_error (api : Llm_provider.Retry.api_error) =
      its arm forwards it without an edit here. *)
   let observe = observe_retry ?retry_after:(api_error_retry_after api) in
   match Llm_provider.Candidate_fault.of_api_error api with
-  | Llm_provider.Candidate_fault.Binding Credential ->
-    if api_error_refuses_account api then rotate Authorization_refused else rotate Auth_failed
+  | Llm_provider.Candidate_fault.Binding Credential -> rotate Auth_failed
+  | Llm_provider.Candidate_fault.Binding Account_access -> rotate Authorization_refused
   | Llm_provider.Candidate_fault.Binding Account -> observe Hard_quota
   | Llm_provider.Candidate_fault.Binding Model_absent ->
     rotate Model_unavailable

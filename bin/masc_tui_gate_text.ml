@@ -181,18 +181,31 @@ type folded_argument =
   }
 
 let fold_argument ~cap text =
+  let cap = Int.max 0 cap in
   let flat =
     String.concat " " (String.split_on_char '\n' (String.trim text))
   in
   let width = Message_layout.display_width flat in
   if width <= cap then { fa_text = flat; fa_held_cells = 0 }
   else
-    (* The tail is reserved inside the cap: the drawn line is text plus the
-       held count, not text to the cap with the count past it. The count
-       still names [width - cap] — what the fold is holding, not the pane. *)
-    let held = width - cap in
-    let tail = Printf.sprintf " \xe2\x8c\x84 %d\xec\x9e\x90" held in
-    let tail_cells = Message_layout.display_width tail in
-    { fa_text = Message_layout.take_cells flat (cap - tail_cells) ^ tail
-    ; fa_held_cells = held
-    }
+    let rec fit held =
+      let tail = Printf.sprintf " \xe2\x8c\x84 %d\xec\x9e\x90" held in
+      let tail_cells = Message_layout.display_width tail in
+      (* Keep whole graphemes. take_cells pads a straddling grapheme, and
+         those padding cells are not retained argument content. *)
+      let prefix, _ =
+        Message_layout.split_at_cells flat (Int.max 0 (cap - tail_cells))
+      in
+      let prefix_cells = Message_layout.display_width prefix in
+      let actual_held = width - prefix_cells in
+      if actual_held = held then
+        { fa_text = prefix ^ Message_layout.take_cells tail (cap - prefix_cells)
+        ; fa_held_cells = held
+        }
+      else
+        (* The count can only grow: a wider digit count reserves more tail
+           cells and retains no more prefix. Once its width stabilizes,
+           the same grapheme boundary gives the same count. *)
+        fit actual_held
+    in
+    fit (width - cap)

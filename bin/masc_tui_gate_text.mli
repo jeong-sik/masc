@@ -45,4 +45,7 @@ val fold_argument : cap:int -> string -> folded_argument
     the layout, at a width this function is not given. A row count named here
     would be a guess printed as a fact. A line already inside [cap] comes back
     with its newlines flattened and nothing else changed. The held-count tail
-    is reserved inside [cap]: the drawn line never runs past it. *)
+    is reserved inside [cap]: the drawn line never runs past it. The count
+    includes every original cell omitted for the tail or for a grapheme that
+    crosses the cut. If [cap] cannot hold the tail, its display is clipped;
+    [fa_held_cells] still reports the full omitted count. *)

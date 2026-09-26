@@ -175,6 +175,33 @@ let test_muse_code_is_found_where_its_installer_writes () =
    run with bash because the script it serves is a bash script. The runner
    stands in for the terminal: it leaves a nonempty file where curl was told
    to write, then refuses the script so nothing is installed. *)
+let test_relative_muse_install_dir_spawns_from_another_workspace () =
+  with_home @@ fun home ->
+  let setup = Filename.concat home "setup" in
+  let workspace = Filename.concat home "workspace" in
+  let target = Filename.concat setup "vendor-bin" in
+  List.iter Fs_compat.mkdir_p [target; workspace];
+  executable (Filename.concat target "muse");
+  let original = Sys.getcwd () in
+  Fun.protect ~finally:(fun () -> Unix.chdir original) (fun () ->
+    Unix.chdir setup;
+    with_path [] @@ fun () ->
+    Masc_test_deps.with_process_env "MUSE_INSTALL_DIR" (Some "vendor-bin") @@ fun () ->
+    let resolved = Install.spawn_path Install.Muse ~command:"muse" in
+    check bool "setup resolves an absolute spawn path" false (Filename.is_relative resolved);
+    Unix.chdir workspace;
+    let input = Unix.openfile "/dev/null" [Unix.O_RDONLY] 0 in
+    let read_end, write_end = Unix.pipe () in
+    let pid = Unix.create_process resolved [|resolved|] input write_end Unix.stderr in
+    Unix.close input; Unix.close write_end;
+    let channel = Unix.in_channel_of_descr read_end in
+    let text = Fun.protect ~finally:(fun () -> close_in_noerr channel)
+      (fun () -> In_channel.input_all channel) in
+    let _, status = Unix.waitpid [] pid in
+    check bool "resolved binary starts from the later workspace" true (status = Unix.WEXITED 0);
+    check string "the actual installer destination ran" "fixture\n" text)
+;;
+
 let test_muse_code_installs_through_its_documented_script () =
   with_home @@ fun _home ->
   let calls = ref [] in
@@ -222,6 +249,8 @@ let () =
             test_codex_install_dir_replaces_the_vendor_directory
         ; test_case "Muse Code is found where its installer writes" `Quick
             test_muse_code_is_found_where_its_installer_writes
+        ; test_case "relative Muse install directory survives workspace changes" `Quick
+            test_relative_muse_install_dir_spawns_from_another_workspace
         ; test_case "Muse Code installs through its documented script" `Quick
             test_muse_code_installs_through_its_documented_script
         ] )

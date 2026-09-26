@@ -14,7 +14,16 @@ val redact_text : string -> string
 
 val is_sensitive_key : string -> bool
 (** Case-insensitive exact match against the sensitive JSON key list
-    (token, api_key, password, ...). *)
+    (token, api_key, password, secret_key, access_key, ...). A key that
+    matches here has its whole value masked, whatever the value's shape. *)
+
+val key_suggests_secret : string -> bool
+(** Case-insensitive fragment match: [true] when the key name contains a
+    secret-bearing fragment (secret, token, passwd, credential, apikey,
+    ...). A fallback for spellings the exact list never enumerated
+    ([session_token], [api_secret], ...). Callers mask only string values
+    under such keys and recurse into the rest, so counts and flags keep
+    their shape while secret-shaped strings never pass in clear. *)
 
 val redact_json_strings : Yojson.Safe.t -> Yojson.Safe.t
 (** Recursively apply {!redact_text} to string leaves and to object keys,

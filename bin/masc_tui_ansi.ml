@@ -330,23 +330,32 @@ let tab_entry_label name = function
   | None -> name
   | Some reading -> Printf.sprintf "%s (%s)" name reading
 
+(* The entry a strip is on: the first one marked current, or the first entry
+   when none is. *)
+let current_tab entries =
+  let n = Array.length entries in
+  let rec find i =
+    if i >= n then 0
+    else
+      let _, current, _ = entries.(i) in
+      if current then i else find (i + 1)
+  in
+  find 0
+
 (* The cells this strip needs to keep its promise: the current entry whole,
    with the cut marks its position calls for. Below this the window cannot
    grow past the current entry and [fit_width] cuts into the entry itself --
    a row would read "@p@" where it means "prompts", which names nothing. A
    row that draws a strip asks for this before it spends the width on
    anything that can give way. *)
-let tab_strip_min_width (tabs : (string * bool) list) =
+let tab_strip_min_width (tabs : (string * bool * 'target) list) =
   let cells text = Masc_tui_message_layout.display_width text in
   let entries = Array.of_list tabs in
   let n = Array.length entries in
   if n = 0 then 0
   else begin
-    let current =
-      let rec find i = if i >= n then 0 else if snd entries.(i) then i else find (i + 1) in
-      find 0
-    in
-    let label, _ = entries.(current) in
+    let current = current_tab entries in
+    let label, _, _ = entries.(current) in
     (* The window a strip cannot shrink past holds the current entry alone,
        so the counts the marks would carry are exactly the entries on either
        side of it. *)
@@ -360,13 +369,19 @@ let tab_strip_min_width (tabs : (string * bool) list) =
        else 0)
   end
 
-let tab_strip ~width (tabs : (string * bool) list) =
-  let draw (label, current) =
-    if current then
-      Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry ^ label
-      ^ Ansi.reset
-    else Ansi.dim ^ label ^ Ansi.reset
+(* Each entry names where a press on it leads, and [press] is how the caller
+   marks drawn text as leading there. A cut mark leads to the nearest entry it
+   hides, the one a step of the strip's own key would bring into the window. *)
+let tab_strip ~width ~(press : 'target -> string -> string)
+    (tabs : (string * bool * 'target) list) =
+  let draw (label, current, target) =
+    press target
+      (if current then
+         Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry ^ label
+         ^ Ansi.reset
+       else Ansi.dim ^ label ^ Ansi.reset)
   in
+  let target_of (_, _, target) = target in
   let cells text = Masc_tui_message_layout.display_width text in
   let entries = Array.of_list tabs in
   let n = Array.length entries in
@@ -374,7 +389,7 @@ let tab_strip ~width (tabs : (string * bool) list) =
   else begin
     let widths =
       Array.map
-        (fun (label, current) ->
+        (fun (label, current, _) ->
           (if current then cells Masc_tui_theme.Glyph.current_entry else 0)
           + cells label)
         entries
@@ -397,12 +412,7 @@ let tab_strip ~width (tabs : (string * bool) list) =
         if hi < n - 1 then gap + cells (hidden_after_mark (n - 1 - hi)) else 0
       in
       let fits lo hi = span lo hi + cut_before lo + cut_after hi <= width in
-      let current =
-        let rec find i =
-          if i >= n then 0 else if snd entries.(i) then i else find (i + 1)
-        in
-        find 0
-      in
+      let current = current_tab entries in
       let lo = ref current and hi = ref current in
       (* Grown a neighbour at a time, the side alternating, so a current
          entry in the middle keeps both its neighbours before either side
@@ -425,11 +435,16 @@ let tab_strip ~width (tabs : (string * bool) list) =
       in
       let mark text = Ansi.dim ^ text ^ Ansi.reset in
       let drawn =
-        (if !lo > 0 then mark (hidden_before_mark !lo) ^ tab_strip_gap else "")
+        (if !lo > 0 then
+           press (target_of entries.(!lo - 1)) (mark (hidden_before_mark !lo))
+           ^ tab_strip_gap
+         else "")
         ^ shown
         ^
         if !hi < n - 1 then
-          tab_strip_gap ^ mark (hidden_after_mark (n - 1 - !hi))
+          tab_strip_gap
+          ^ press (target_of entries.(!hi + 1))
+              (mark (hidden_after_mark (n - 1 - !hi)))
         else ""
       in
       (* The window is seeded with the current entry and only grows under

@@ -1252,11 +1252,14 @@ let render_memory_facts_body ~cols ~budget (state : state)
           Ansi.dim ^ keys ^ Ansi.reset
           ^ tab_strip
               ~width:(tab_strip_width ~cols ~before:keys ~after:"")
+              ~press:(fun filt text ->
+                Masc_tui_press.(pressable (Press_memory_category filt) text))
               (List.map
                  (fun filt ->
                    ( Printf.sprintf "%s %d" (memory_category_filter_label filt)
                        (count_of filt)
-                   , state.memory_facts_category = filt ))
+                   , state.memory_facts_category = filt
+                   , filt ))
                  (Category_all :: all_categories))
         in
         (stats, pills)

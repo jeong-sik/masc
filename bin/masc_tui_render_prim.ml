@@ -7,6 +7,7 @@
 open Masc_tui_types
 open Tui_decode
 open Masc_tui_ansi
+open Masc_tui_press
 
 
 
@@ -83,27 +84,6 @@ let acting_pane_row_targets : Masc_tui_acting_pane.row_target array ref = ref [|
 let acting_pane_scroll_max = ref 0
 
 
-(* What a press on marked text does. Each constructor is a place a key
-   already reaches, so a press never does something the keyboard cannot. *)
-type ring_edge = Ring_before | Ring_after
-
-(* [Press_surface] is a Tab-ring entry, or a title-strip entry that is a
-   surface of its own (Activity's Events and Logs). [Press_ring_edge] is the
-   count of ring entries hidden past one edge of a narrow strip. *)
-type press_target =
-  | Press_surface of surface
-  | Press_ring_edge of ring_edge
-  | Press_keeper_tab of keeper_detail_tab
-  | Press_config_pane of config_pane
-
-(* Marks drawn during the frame being built. [render] resets it before
-   drawing and reads it back once the rows are final (Masc_tui_hit). Helpers
-   that only measure a strip -- [tab_strip_min_width] over [config_pane_tabs]
-   -- add marks too, outside [render]; those wait here until the next
-   [render] clears them and never reach a frame. *)
-let press_marks : press_target Masc_tui_hit.registry = Masc_tui_hit.registry ()
-
-let pressable target text = Masc_tui_hit.mark press_marks target text
 
 (* The value [Masc_tui_types.apply_clamped_scroll] writes, read back from
    [state]; the two are the same table read in opposite directions. A frame
@@ -2318,13 +2298,21 @@ let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(windo
     Render_schedule.planning_strip_plain ~tab ~review_count ~verifying_count
       ~window
   in
-  let stops = [ Planning_goals; Planning_task_review; Planning_verdicts ] in
+  (* Each stop is a surface of its own; [v] walks them in this order. *)
+  let stops =
+    [ (Planning_goals, Planning)
+    ; (Planning_task_review, Verification)
+    ; (Planning_verdicts, Harness) ]
+  in
   screen_title " MASC Planning" ^ "  "
   ^ tab_strip
       ~width:
         (tab_strip_width ~cols
            ~before:(screen_title " MASC Planning" ^ "  ") ~after)
-      (List.map2 (fun stop label -> (label, stop = tab)) stops labels)
+      ~press:(fun surface text -> pressable (Press_surface surface) text)
+      (List.map2
+         (fun (stop, surface) label -> (label, stop = tab, surface))
+         stops labels)
 
 
 (* Where the goal stands with the completion judge, in one column. The phase
@@ -3020,8 +3008,7 @@ let path_from_root ~root path =
 
 let config_pane_tabs (state : state) =
   List.map
-    (fun (pane, label) ->
-      (pressable (Press_config_pane pane) label, state.config_pane = pane))
+    (fun (pane, label) -> (label, state.config_pane = pane, pane))
     config_panes
 
 let config_pane_strip ~cols ~before ~after (state : state) =
@@ -3032,6 +3019,7 @@ let config_pane_strip ~cols ~before ~after (state : state) =
          another gap here reserved two cells the row never draws, which came
          straight out of the strip. *)
       ~width:(tab_strip_width ~cols ~before:(before ^ config_pane_keys) ~after)
+      ~press:(fun pane text -> pressable (Press_config_pane pane) text)
       (config_pane_tabs state)
 
 (* What a Config pane's title row draws in [room] cells: the name the pane is

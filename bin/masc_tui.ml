@@ -2,6 +2,7 @@ open Masc_tui_types
 open Masc_tui_ansi
 open Masc_tui_render
 open Masc_tui_render_prim
+open Masc_tui_press
 open Masc_tui_render_chat
 open Masc_tui_loader
 
@@ -6512,6 +6513,44 @@ let cancel_theme_preview state =
     state.theme_choice <- previous;
     sync_theme_page state
 
+(* Live preview, the way a theme picker is expected to work: moving the
+   cursor draws in that scheme so the reader judges it on the screen they
+   actually use, Enter keeps it, Esc puts back whatever was in force before
+   they walked in.
+
+   The scheme in force is remembered on the first preview rather than on
+   entering the pane: entering and leaving without moving should cost
+   nothing, and there is no "they might" to record. *)
+let filtered_theme_entries state =
+  let all = Masc_tui_theme_choice.entries () in
+  match state.theme_filter with
+  | `All -> all
+  | `Dark ->
+      List.filter (fun (e : Masc_tui_theme_choice.entry) -> not e.light) all
+  | `Light -> List.filter (fun (e : Masc_tui_theme_choice.entry) -> e.light) all
+
+let preview_theme_under_cursor state =
+  if state.theme_before_preview = None
+  then state.theme_before_preview <- Some state.theme_choice;
+  match List.nth_opt (filtered_theme_entries state) state.theme_cursor with
+  | None -> ()
+  | Some entry ->
+    if Masc_tui_theme_choice.apply entry.Masc_tui_theme_choice.name
+    then begin
+      state.theme_choice <- Some entry.Masc_tui_theme_choice.name;
+      sync_theme_page state
+    end
+
+(* The themes pane's filter, by [f] or by a press on its chip. The cursor
+   stays on a row the narrower list still has, and a preview in force moves
+   to the scheme now under it. *)
+let enter_theme_filter state filter =
+  state.theme_filter <- filter;
+  let count = List.length (filtered_theme_entries state) in
+  state.theme_cursor <- min state.theme_cursor (max 0 (count - 1));
+  if Option.is_some state.theme_before_preview then
+    preview_theme_under_cursor state
+
 (* Move to a surface, fetching what that surface shows on arrival. Tab,
    Shift-Tab, and any future jump go through here so no direction can forget
    a load the other performs. Surfaces not listed refresh on the periodic
@@ -10736,6 +10775,53 @@ let enter_config_pane state ~mailbox pane =
   | Config_themes -> ()
 ;;
 
+(* The entries of the in-screen strips. Each is what the strip's key does on
+   arrival, shared with a press on the entry's name. *)
+let enter_metrics_section state section =
+  state.metrics_section <- section;
+  state.metrics_scroll <- 0
+;;
+
+(* The scroll belonged to the list that just went away. Carrying it into a
+   shorter section opens it part-way down for no reason the reader gave. *)
+let enter_tools_pane state pane =
+  state.tools_pane <- pane;
+  state.tools_scroll <- 0
+;;
+
+(* The cursor restarts because the row under it belongs to the listing being
+   replaced. *)
+let enter_memory_category state category =
+  state.memory_facts_category <- category;
+  state.memory_facts_cursor <- 0;
+  state.memory_facts_scroll <- 0
+;;
+
+let enter_context_inspector_tab state tab =
+  state.context_inspector_tab <- tab;
+  state.context_inspector_exact <- None;
+  state.context_inspector_cursor <- 0;
+  state.context_inspector_scroll <- 0;
+  state.context_inspector_detail_scroll <- 0;
+  state.context_inspector_focus <- Left_pane
+;;
+
+(* Lanes and All runtimes are two readings of the Runtime surface, and the
+   Standalone lanes surface names both in its strip. Selection and scroll
+   belong to the list being left. *)
+let enter_runtime_mode state ~mailbox mode =
+  if mode <> state.runtime_mode then begin
+    (match state.runtime_mode with
+     | Masc_tui_types.Runtime_lanes ->
+         Masc_tui_types.dismiss_runtime_lane_notice state
+     | Masc_tui_types.Runtime_all -> ());
+    state.runtime_mode <- mode;
+    state.runtime_cursor <- 0;
+    state.runtime_surface_scroll <- 0
+  end;
+  if state.view <> Runtime then goto_surface state ~mailbox Runtime
+;;
+
 (* What a press on marked text does: the same move the key for that place
    makes. A press on the place already open does nothing -- it is where the
    reader already is, and re-entering would reset its scroll and cursor. A
@@ -10751,6 +10837,21 @@ let press_marked_target state ~mailbox (target : press_target) =
       if tab <> state.detail_tab then enter_keeper_detail_tab state ~mailbox tab
   | Press_config_pane pane ->
       if pane <> state.config_pane then enter_config_pane state ~mailbox pane
+  | Press_metrics_section section ->
+      if section <> state.metrics_section then enter_metrics_section state section
+  | Press_tools_pane pane ->
+      if pane <> state.tools_pane then enter_tools_pane state pane
+  | Press_memory_category category ->
+      if category <> state.memory_facts_category then
+        enter_memory_category state category
+  | Press_theme_filter filter ->
+      if filter <> state.theme_filter then enter_theme_filter state filter
+  | Press_runtime_mode mode ->
+      if mode <> state.runtime_mode || state.view <> Runtime then
+        enter_runtime_mode state ~mailbox mode
+  | Press_context_tab tab ->
+      if tab <> state.context_inspector_tab then
+        enter_context_inspector_tab state tab
 ;;
 
 let refresh_keeper_detail_selection state ~base_path ~mailbox =
@@ -16350,39 +16451,6 @@ let main
              "테마를 runtime.toml 에 저장하지 못했습니다. 이번 세션에만 적용됩니다: %s"
              message)
   in
-  (* Live preview, the way a theme picker is expected to work: moving the
-     cursor draws in that scheme so the reader judges it on the screen they
-     actually use, Enter keeps it, Esc puts back whatever was in force before
-     they walked in.
-
-     The scheme in force is remembered on the first preview rather than on
-     entering the pane: entering and leaving without moving should cost
-     nothing, and there is no "they might" to record. *)
-  let filtered_theme_entries () =
-    let all = Masc_tui_theme_choice.entries () in
-    match state.theme_filter with
-    | `All -> all
-    | `Dark ->
-        List.filter
-          (fun (e : Masc_tui_theme_choice.entry) -> not e.light)
-          all
-    | `Light ->
-        List.filter
-          (fun (e : Masc_tui_theme_choice.entry) -> e.light)
-          all
-  in
-  let preview_theme_under_cursor () =
-    if state.theme_before_preview = None
-    then state.theme_before_preview <- Some state.theme_choice;
-    match List.nth_opt (filtered_theme_entries ()) state.theme_cursor with
-    | None -> ()
-    | Some entry ->
-      if Masc_tui_theme_choice.apply entry.Masc_tui_theme_choice.name
-      then begin
-        state.theme_choice <- Some entry.Masc_tui_theme_choice.name;
-        sync_theme_page state
-      end
-  in
   (* A scheme named in runtime.toml was applied at boot, before this existed.
      Sending it here is what makes a saved choice survive a restart with its
      background rather than only its ink. *)
@@ -19588,42 +19656,23 @@ and is loaded on demand through keeper_skill.
                        ~mailbox:async_messages ~keeper_name)
                   state.context_inspector_keeper
             | "1" ->
-                state.context_inspector_tab <-
-                  Masc_tui_context_inspector.Composition;
-                state.context_inspector_exact <- None;
-                state.context_inspector_cursor <- 0;
-                state.context_inspector_scroll <- 0;
-                state.context_inspector_detail_scroll <- 0;
-                state.context_inspector_focus <- Left_pane
+                enter_context_inspector_tab state
+                  Masc_tui_context_inspector.Composition
             | "2" ->
-                state.context_inspector_tab <-
-                  Masc_tui_context_inspector.Exact_input;
-                state.context_inspector_exact <- None;
-                state.context_inspector_cursor <- 0;
-                state.context_inspector_scroll <- 0;
-                state.context_inspector_detail_scroll <- 0;
-                state.context_inspector_focus <- Left_pane
+                enter_context_inspector_tab state
+                  Masc_tui_context_inspector.Exact_input
             | "3" ->
-                state.context_inspector_tab <-
-                  Masc_tui_context_inspector.Input_map;
-                state.context_inspector_exact <- None;
-                state.context_inspector_cursor <- 0;
-                state.context_inspector_scroll <- 0;
-                state.context_inspector_detail_scroll <- 0;
-                state.context_inspector_focus <- Left_pane
+                enter_context_inspector_tab state
+                  Masc_tui_context_inspector.Input_map
             | "\t" | "left" | "right" when Option.is_none state.context_inspector_exact ->
-                state.context_inspector_tab <-
+                enter_context_inspector_tab state
                   (match state.context_inspector_tab with
                    | Masc_tui_context_inspector.Composition ->
                        Masc_tui_context_inspector.Exact_input
                    | Masc_tui_context_inspector.Exact_input ->
                        Masc_tui_context_inspector.Input_map
                    | Masc_tui_context_inspector.Input_map ->
-                       Masc_tui_context_inspector.Composition);
-                state.context_inspector_cursor <- 0;
-                state.context_inspector_scroll <- 0;
-                state.context_inspector_detail_scroll <- 0;
-                state.context_inspector_focus <- Left_pane
+                       Masc_tui_context_inspector.Composition)
             | "h" | "l"
               when Option.is_none state.context_inspector_exact
                    && terminal_columns >= keeper_split_threshold_cols
@@ -21445,7 +21494,7 @@ and is loaded on demand through keeper_skill.
               All three spellings, because a terminal sends CR, a Kitty-
               protocol one sends the name, and a footer that says "Enter" has
               to mean whichever one arrived. *)
-           let entries = filtered_theme_entries () in
+           let entries = filtered_theme_entries state in
            (match List.nth_opt entries state.theme_cursor with
             | None -> ()
             | Some entry ->
@@ -21467,21 +21516,16 @@ and is loaded on demand through keeper_skill.
          when state.view = Memory
               && Option.is_some state.memory_facts_keeper ->
            (* Cycle the category filter: All, then each category the loaded
-              store holds, in sorted order. The cursor restarts because the
-              row under it belongs to the listing being replaced. *)
-           state.memory_facts_category <-
-             Masc_tui_types.next_memory_category state.memory_facts_category
-               (Masc_tui_types.memory_fact_categories state);
-           state.memory_facts_cursor <- 0;
-           state.memory_facts_scroll <- 0
+              store holds, in sorted order. *)
+           enter_memory_category state
+             (Masc_tui_types.next_memory_category state.memory_facts_category
+                (Masc_tui_types.memory_fact_categories state))
        | Some "C"
          when state.view = Memory
               && Option.is_some state.memory_facts_keeper ->
-           state.memory_facts_category <-
-             Masc_tui_types.prev_memory_category state.memory_facts_category
-               (Masc_tui_types.memory_fact_categories state);
-           state.memory_facts_cursor <- 0;
-           state.memory_facts_scroll <- 0
+           enter_memory_category state
+             (Masc_tui_types.prev_memory_category state.memory_facts_category
+                (Masc_tui_types.memory_fact_categories state))
        | Some ("s" | "S")
          when state.view = Memory
               && Option.is_some state.memory_facts_keeper ->
@@ -21591,17 +21635,14 @@ and is loaded on demand through keeper_skill.
         | Some ("m" | "M") when state.view = Overview ->
             goto_surface state ~mailbox:async_messages Metrics
         | Some "1" when state.view = Metrics ->
-            state.metrics_section <- Section_fleet;
-            state.metrics_scroll <- 0
+            enter_metrics_section state Section_fleet
         | Some "2" when state.view = Metrics ->
-            state.metrics_section <- Section_resources;
-            state.metrics_scroll <- 0
+            enter_metrics_section state Section_resources
         | Some "3" when state.view = Metrics ->
-            state.metrics_section <- Section_tools;
-            state.metrics_scroll <- 0
+            enter_metrics_section state Section_tools
         | Some ("s" | "S") when state.view = Metrics ->
-            state.metrics_section <- Masc_tui_types.next_metrics_section state.metrics_section;
-            state.metrics_scroll <- 0
+            enter_metrics_section state
+              (Masc_tui_types.next_metrics_section state.metrics_section)
        (* In chat, printable keys normally belong to the draft. Keep [?] as
           the documented global Help key when the draft is empty; once a
           sentence has started it remains an ordinary question mark. This
@@ -22343,9 +22384,9 @@ and is loaded on demand through keeper_skill.
             | Config when state.config_pane = Config_themes ->
                 state.theme_cursor <-
                   Masc_tui_scroll.cursor_move
-                    ~count:(List.length (filtered_theme_entries ()))
+                    ~count:(List.length (filtered_theme_entries state))
                     ~delta:(direction * page) state.theme_cursor;
-                preview_theme_under_cursor ()
+                preview_theme_under_cursor state
             (* The models table is read by a cursor [e] acts on, and the
                drawing brings the window to the cursor. *)
             | Config when state.config_pane = Config_models ->
@@ -23221,9 +23262,9 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_calls ->
                 state.keeper_calls_scroll <- Masc_tui_types.scroll_down_from state.keeper_calls_scroll ~by:1
             | Config when state.config_pane = Config_themes ->
-                let last = List.length (filtered_theme_entries ()) - 1 in
+                let last = List.length (filtered_theme_entries state) - 1 in
                 state.theme_cursor <- min (max 0 last) (state.theme_cursor + 1);
-                preview_theme_under_cursor ()
+                preview_theme_under_cursor state
             | Config when state.config_pane = Config_presets ->
                 let count = List.length (preset_rows_for_state state) in
                 if state.presets_cursor < count - 1 then begin
@@ -23590,7 +23631,7 @@ and is loaded on demand through keeper_skill.
                   state.keeper_calls_scroll <- state.keeper_calls_scroll - 1
             | Config when state.config_pane = Config_themes ->
                 state.theme_cursor <- max 0 (state.theme_cursor - 1);
-                preview_theme_under_cursor ()
+                preview_theme_under_cursor state
             | Config when state.config_pane = Config_presets ->
                 let next = max 0 (state.presets_cursor - 1) in
                 if next <> state.presets_cursor then begin
@@ -24201,17 +24242,11 @@ and is loaded on demand through keeper_skill.
            state.acting_unseen <- 0
        | Some "f" | Some "F"
          when state.view = Config && state.config_pane = Config_themes ->
-            let next =
-              match state.theme_filter with
-              | `All -> `Dark
-              | `Dark -> `Light
-              | `Light -> `All
-            in
-            state.theme_filter <- next;
-            let count = List.length (filtered_theme_entries ()) in
-            state.theme_cursor <- min state.theme_cursor (max 0 (count - 1));
-            if Option.is_some state.theme_before_preview then
-              preview_theme_under_cursor ()
+            enter_theme_filter state
+              (match state.theme_filter with
+               | `All -> `Dark
+               | `Dark -> `Light
+               | `Light -> `All)
        | Some "f" | Some "F"
          when state.view = Board && state.board_mode <> Board_compose ->
            (* All, then each hearth the unnarrowed list showed, busiest first,
@@ -24913,11 +24948,8 @@ and is loaded on demand through keeper_skill.
               hangs off Planning; [p] there returns here. *)
            (match state.runtime_mode with
             | Masc_tui_types.Runtime_lanes ->
-                state.runtime_mode <- Masc_tui_types.Runtime_all;
-                (* Selection and scroll belong to the same list. *)
-                Masc_tui_types.dismiss_runtime_lane_notice state;
-                state.runtime_cursor <- 0;
-                state.runtime_surface_scroll <- 0
+                enter_runtime_mode state ~mailbox:async_messages
+                  Masc_tui_types.Runtime_all
             | Masc_tui_types.Runtime_all ->
                 state.runtime_mode <- Masc_tui_types.Runtime_lanes;
                 state.runtime_cursor <- 0;
@@ -24933,17 +24965,13 @@ and is loaded on demand through keeper_skill.
               on this workspace and the terminal draws twenty, so four of
               them sat behind a per-tool list that never ends. [p] is the
               same key that moves between the Config surface's panes. *)
-           state.tools_pane <-
+           enter_tools_pane state
              (match state.tools_pane with
               | Tools_surface -> Tools_async
               | Tools_async -> Tools_activations
               | Tools_activations -> Tools_usage
               | Tools_usage -> Tools_catalog
-              | Tools_catalog -> Tools_surface);
-           (* The scroll belonged to the list that just went away. Carrying it
-              into a shorter section opens it part-way down for no reason the
-              reader gave. *)
-           state.tools_scroll <- 0
+              | Tools_catalog -> Tools_surface)
        | Some "p" | Some "P" when state.view = Config ->
            (* One surface, two files the server reads: runtime.toml and the
               prompt registry. [p] moves between them and loads the list the

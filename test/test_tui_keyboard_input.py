@@ -2526,6 +2526,24 @@ def pressing_a_tab_opens_it(
     press_label_on_screen(
         process, master_fd, output, b"models", row=title_row, needle=b"MASC Models"
     )
+    # A screen's own strip leads to the place its cycle key reaches: Planning's
+    # stops are surfaces of their own, which [v] walks.
+    press_label_on_screen(
+        process, master_fd, output, b"Planning", row=1, needle=b"MASC Planning"
+    )
+    title_row = screen_row_of(screen_rows(bytes(output)), b"Task Review")
+    if title_row < 0:
+        raise AssertionError(
+            f"the Planning strip is not on screen: {screen_text(bytes(output))!r}"
+        )
+    press_label_on_screen(
+        process,
+        master_fd,
+        output,
+        b"Task Review",
+        row=title_row,
+        needle=b"\xe2\x96\xb8Task Review",
+    )
 
 
 def wheel_scrolls_and_clicks_do_not(

@@ -5,7 +5,10 @@
    "runtime.toml |▸models | params". *)
 
 let plain ?(width = 80) tabs =
-  Masc_tui_theme.strip_sgr (Masc_tui_ansi.tab_strip ~width tabs)
+  Masc_tui_theme.strip_sgr
+    (Masc_tui_ansi.tab_strip ~width
+       ~press:(fun () text -> text)
+       (List.map (fun (label, current) -> (label, current, ())) tabs))
 
 let cells = Masc_tui_message_layout.display_width
 
@@ -247,11 +250,30 @@ let test_both_strips_ask_the_same_helper () =
         (Ast_grep.count_exact_string_literals ~module_path:render ~needle))
     [ "All runtimes (%d)"; "Standalone (%d)"; "Lanes (%d)" ]
 
+(* Each drawn entry leads where its name says, and a cut mark leads to the
+   nearest entry it hides: the one a step of the strip's key would bring into
+   the window. Seven names at 24 cells with the fourth current keep it and its
+   right neighbour, so both edges are cut. *)
+let test_a_cut_mark_leads_to_the_nearest_hidden_entry () =
+  let names = [| "Info"; "Chat"; "Config"; "Logs"; "Calls"; "Memory"; "Runs" |] in
+  let registry = Masc_tui_hit.registry () in
+  let drawn =
+    Masc_tui_ansi.tab_strip ~width:24 ~press:(Masc_tui_hit.mark registry)
+      (Array.to_list (Array.map (fun name -> (name, name = "Logs", name)) names))
+  in
+  let _lines, zones = Masc_tui_hit.extract registry [ drawn ] in
+  Alcotest.(check (list string))
+    "the left cut, the drawn entries, the right cut"
+    [ "Config"; "Logs"; "Calls"; "Memory" ]
+    (List.map (fun (_, _, _, target) -> target) (Masc_tui_hit.to_list zones))
+
 let () =
   Alcotest.run "tui_tab_strip"
     [ ( "tab strip"
       , [ Alcotest.test_case "one mark, two cells apart" `Quick
             test_one_mark_two_cells_apart
+        ; Alcotest.test_case "a cut mark leads to the nearest hidden entry" `Quick
+            test_a_cut_mark_leads_to_the_nearest_hidden_entry
         ; Alcotest.test_case "no bar between names" `Quick test_no_bar_between_names
         ; Alcotest.test_case "nothing current marks nothing" `Quick
             test_a_strip_with_nothing_current_marks_nothing

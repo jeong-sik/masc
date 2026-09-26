@@ -11,7 +11,7 @@
     and return structured [Tool_result.result] instead of [(bool * string)]. *)
 
 val handle_start :
-  tool_name:string -> start_time:float ->
+  tool_name:string -> start_time:Tool_timing.started ->
   Mcp_tool_runtime_types.context ->
   Tool_result.result option
 (** [handle_start ~tool_name ~start_time ctx] handles [masc_start] —

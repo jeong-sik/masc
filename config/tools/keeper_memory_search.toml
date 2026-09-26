@@ -6,7 +6,8 @@ fragment to appear as a substring, in any order. Both tiers run across \
 stores; each tier keeps store order. The default reads only current facts; \
 source='all' adds absorbed originals and history. History requires a non-empty \
 query. Fact results name their store and original basis; current facts \
-include exact memory_id and category. Use a memory_id as a derived \
+include exact memory_id, category and origin (authored is yours to \
+supersede). Use a memory_id as a derived \
 conclusion's premise_id only for store='current_memory_snapshot'. \
 source='absorbed' finds facts merged into a newer claim: into is the \
 claim now holding it; into_current=false if not current."""

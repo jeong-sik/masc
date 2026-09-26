@@ -47,7 +47,7 @@ access = "read-write"
 # same ollama_cloud wire (no new credential): GLM-5.3-Flash is the newest flash
 # coding model (Z.AI 2026-08-14, /api/show 2026-08-29), 1M context, tools+vision.
 default = "ollama_cloud.ollama-cloud-glm-5-3-flash"
-# Vision read fleet (RFC-0414). When no runtime in a keeper's lane can take an
+# Vision runtimes (RFC-0414). When no runtime in a keeper's lane can take an
 # image, the eager read and analyze_image read it with these, in order. They
 # never take the keeper's turn. gemma4-31b (Gemma 4,
 # strong OCR/vision) is a cloud runtime fast enough to be usable; a local 27B
@@ -139,6 +139,16 @@ max_output_tokens = 8192
 
 [runtime.exact_output_lanes.verifier_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-flash"]
+max_output_tokens = 8192
+
+# Answers the Stagehand browser extension's llm.generate
+# (RFC-browser-lane-stagehand §3.7). Stagehand's system_prompt goes to the
+# system slot, so a slot whose model takes no system prompt is refused when
+# the lane is resolved. The lane may also declare cli_slots (subscription
+# official clients); they run as one-shots after the HTTP slots and answer
+# without usage, which Stagehand's protocol leaves optional.
+[runtime.exact_output_lanes.browser_stagehand_exact]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
 max_output_tokens = 8192
 
 # SSH remote execution endpoint registry (Phase 1 SSH lane, spec §4.2 in

@@ -77,6 +77,15 @@
   writer cannot commit it. The keeper assignment picker offers declared lanes
   (#38892).
 - List merged pull requests missing changelog entries when preparing a release, and report any failure to generate that list (#39133).
+- The server installs the Stagehand lane's backend at start when
+  `runtime.toml` has `[browser.stagehand]`, after stopping a Chromium a
+  previous server left. No browser starts until `BrowserSession` opens one
+  with `lane=stagehand` (#38739).
+- `BrowserInstruct` (`masc_browser_instruct`): a Keeper tells the Stagehand
+  browser in one sentence what to act on, observe or extract on a tab, and
+  gets Stagehand's data and metadata back. extract takes a JSON Schema as
+  text. A failed act is effect-unknown; a failed observe or extract is
+  before effect (#38747).
 
 ### Changed
 
@@ -100,6 +109,8 @@
   endpoint reads it. `masc setup` builds `base` and promotes it when the
   catalog has none for the store it sets up (#38795).
 - Queueing a person's chat no longer cancels an in-flight Keeper provider attempt before its first response event. AGENT_CORE can hand off at a checkpointed post-tool boundary; official-client tool-result replay needs separate verification (#39309).
+- `Server_browser_configuration.load` reads the `[browser]` table for both
+  the automation and the Stagehand backends (#38739).
 
 ### Removed
 
@@ -192,6 +203,10 @@
   explicit uncertainty, claims that did not hold under review, and five
   operator decisions (#39196).
 - Clarify the Candidate Fault glossary's 401 `Credential` and 403 `Account_access` cases (#39259).
+- The Browser Lane guide (en, ko) describes the stagehand source: installing
+  the pinned extension, `[browser.stagehand]`, the `browser_stagehand_exact`
+  lane that answers `llm.generate`, and which tools serve each lane. The
+  `browser-lanes` skill gains a Stagehand reference (#38752).
 
 ### Internal
 
@@ -214,6 +229,7 @@
 - Check the documented bounded reverse speaker badge in the Memory journal
   PTY scenario while retaining the marker and timeline assertions. #39382
 - Compare verified Linux server probe artifacts with isolated HTTP/model/workspace fixtures, full failure receipts, negotiated-encoding checks, and separate mutation, execution-read and concurrent-liveness measurements. (#39409)
+- Let Linux server comparisons seed explicit synthetic worker fleets and task sizes, and verify worker projection order, ownership counts and persisted records alongside HTTP receipts. #39415
 
 ### Performance
 
@@ -231,6 +247,9 @@
   preserve the validated prefix when repairing invalid UTF-8 or controls.
   Clean strings retain their identity and repair output remains unchanged (#39325).
 - Defer agenda error-text sanitization until its overlay row is rendered, avoiding repeated sanitization during TUI body-height queries (#39374).
+- Keep dashboard JSON cache fills as ASTs until HTTP bytes are requested,
+  preserving prepared response reuse and concurrent cache ownership (#39344).
+- Use integer-specific bounds in TUI text layout and scrolling while preserving width, clipping and cursor behavior (#39381).
 
 ## [0.41.0] - 2026-09-26
 

@@ -9,7 +9,10 @@
     refused with a typed reason before any provider is called.
 
     The schema goes to AGENT_CORE with [Json_syntax]: the schema is written
-    into the prompt and masc checks only that the answer is one JSON value.
+    into the prompt. MASC checks that the answer is one JSON value and that
+    declared required object keys and visited primitive shapes are present;
+    a rejected HTTP answer advances to the next declared slot. This is not a
+    full JSON Schema validator.
     [Provider_schema] is not used because providers accept different schema
     dialects (Gemini's allowlist has no [$schema] or [pattern]; OpenAI strict
     mode refuses [additionalProperties: {}], which Stagehand's extract schema
@@ -19,7 +22,7 @@
     The lane's [cli_slots] (subscription official clients) are walked as
     one-shots ({!Keeper_lane_cli_oneshot}) after every HTTP slot failed, or
     alone when the lane admits no HTTP slot. A one-shot gets the same schema
-    sentence and the same one-JSON-value check. It takes one prompt and a
+    sentence and the same limited required-shape check. It takes one prompt and a
     separate system prompt, so a conversation with an assistant turn is not
     sent to it ({!cli_unfit}). *)
 
@@ -134,9 +137,20 @@ type cli_tail =
   | Cli_tail_exhausted of Keeper_lane_cli_oneshot.failure list
       (** Every CLI slot failed, in walk order. *)
 
+type output_shape_issue =
+  | Missing_required_key of string
+  | Incompatible_required_shape of string
+
+type rejected_http_output =
+  { slot_id : string
+  ; issue : output_shape_issue
+  }
+
 type generation_failure =
   { http_failure : no_callback_error Agent_core.Exact_output.flow_execution_error option
         (** [None] when the lane admitted no HTTP slot. *)
+  ; rejected_http_outputs : rejected_http_output list
+        (** HTTP answers rejected by the limited required-shape guard, in order. *)
   ; cli_tail : cli_tail
   }
 

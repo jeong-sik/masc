@@ -257,7 +257,7 @@ let test_project_root_resolver_ignores_partial_tree () =
           Sys.chdir (Filename.concat source "_build/default");
           Unix.putenv "DUNE_SOURCEROOT" source;
           check string "explicit Dune source root" source
-            (Masc_test_deps.find_project_root ()))
+            (Masc_test_deps.find_project_root ())))
 
 let copy_sources dockerfile =
   String.split_on_char '\n' dockerfile

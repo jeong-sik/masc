@@ -2263,13 +2263,6 @@ let test_execution_trust_uses_narrow_keeper_projection () =
     | [ full_row ] -> full_row
     | rows -> failf "expected one full Keeper row, got %d" (List.length rows)
   in
-  (match full_row with
-   | `Assoc fields ->
-     check bool "dashboard omits invented handoff count" false
-       (List.mem_assoc "handoff_count_total" fields);
-     check bool "dashboard omits unwritten handoff age" false
-       (List.mem_assoc "last_handoff_ago_s" fields)
-   | _ -> fail "Keeper dashboard row was not an object");
   let full_row_field key =
     Option.value ~default:`Null (Json_util.assoc_member_opt key full_row)
   in

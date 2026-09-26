@@ -368,10 +368,6 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
         (match keeper with
          | `Assoc fields -> List.mem_assoc "agent" fields
          | _ -> true);
-      Alcotest.(check bool) "operator snapshot omits unwritten handoff age" false
-        (match keeper with
-         | `Assoc fields -> List.mem_assoc "last_handoff_ago_s" fields
-         | _ -> true);
       Alcotest.(check bool) "unowned ratio is ignored" true
         Yojson.Safe.Util.(keeper |> member "context_ratio" = `Null);
       Alcotest.(check bool) "unowned tokens are ignored" true

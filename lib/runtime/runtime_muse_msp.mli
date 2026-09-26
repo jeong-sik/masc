@@ -164,6 +164,15 @@ type input_part =
       ; base64_data : string  (** Raw base64, no data-URL prefix. *)
       }
 
+val session_set_approval_mode_request
+  :  id:int
+  -> command_id:string
+  -> session_id:string
+  -> approval_mode
+  -> Yojson.Safe.t
+(** [session/resume] carries no approval mode: a resumed session keeps the
+    one it last had. This command selects the mode for the next action. *)
+
 val turn_start_request
   :  id:int
   -> session_id:string
@@ -182,6 +191,12 @@ val turn_interrupt_request
   -> Yojson.Safe.t
 
 val usage_read_request : id:int -> Yojson.Safe.t
+
+val server_request_error : request_id -> code:int -> message:string -> Yojson.Safe.t
+(** A JSON-RPC error answer to a server request this client does not serve. *)
+
+val method_not_found : int
+(** JSON-RPC's [-32601]. *)
 
 val server_request_ack : request_id -> Yojson.Safe.t
 (** The empty result that acknowledges a server request. It only admits the

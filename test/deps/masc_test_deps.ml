@@ -112,8 +112,6 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Name -> `String name
         | Schema.Instructions -> `String ""
         | Schema.Trace_id -> `String trace_id
-        | Schema.Trace_history -> `List []
-        | Schema.Last_handoff_ts -> `Float 0.
         | Schema.Created_at | Schema.Updated_at ->
           `String "1970-01-01T00:00:00Z"
         | Schema.Total_turns

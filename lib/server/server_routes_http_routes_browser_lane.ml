@@ -65,7 +65,7 @@ let client_of_request request =
      command queue, and automation keeps its session inside the server. *)
   let* () = match Browser_lane.Lane_name.of_wire lane with
     | Some Browser_lane.Lane_name.Live -> Ok ()
-    | Some Browser_lane.Lane_name.Automation | None -> Error "unknown_lane" in
+    | Some (Browser_lane.Lane_name.Automation | Browser_lane.Lane_name.Stagehand) | None -> Error "unknown_lane" in
   let* raw_id = required "x-browser-client-id" in
   let* client_id = Browser_lane.client_id_of_string raw_id in
   let* name = required "x-browser-name" in

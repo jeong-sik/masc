@@ -89,12 +89,17 @@ let fixture_script
     ?(line_delays = [])
     ?pipe_holder_s
     ?exit_delay_s
+    ?(stderr_line = "")
     ?(exit_code = 0)
     lines
   =
   let path = Filename.temp_file "masc-antigravity-" ".sh" in
   let output = open_out_bin path in
   output_string output "#!/bin/sh\n";
+  (* A line the fixture shouts on its own stderr, so a test can pin what the
+     runtime's stderr tail carried into an error detail. *)
+  if stderr_line <> "" then
+    output_string output (Printf.sprintf "echo %s >&2\n" (shell_quote stderr_line));
   output_string output
     "test -z \"${GEMINI_API_KEY+x}\" && test -z \"${GEMINI_API_KEY_WORK+x}\" && test -z \"${GOOGLE_API_TOKEN+x}\" && test -z \"${OPENAI_API_KEY+x}\" && test -z \"${OPENAI_API_KEY_MAIN+x}\" && test -z \"${ANTHROPIC_API_KEY+x}\" && test -z \"${ANTHROPIC_API_KEY_WORK+x}\" && test -z \"${AGY_ADC_AUTH+x}\" && test -z \"${MASC_PUBLIC_FIXTURE+x}\" || exit 92\n";
   output_string output "case \" $* \" in *\" --print \"*) exit 98 ;; esac\n";
@@ -161,7 +166,7 @@ let fixture_script
 ;;
 
 let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?stdin ?line_delay_s
-    ?line_delays ?pipe_holder_s ?exit_delay_s ?exit_code lines f =
+    ?line_delays ?pipe_holder_s ?exit_delay_s ?stderr_line ?exit_code lines f =
   let path =
     fixture_script
       ?require_resume
@@ -173,6 +178,7 @@ let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?stdin 
       ?line_delays
       ?pipe_holder_s
       ?exit_delay_s
+      ?stderr_line
       ?exit_code
       lines
   in
@@ -444,6 +450,109 @@ let test_keeper_streams_two_response_steps_apart () =
       in
       check (list string) "pieces with the break" [ "CHECKING"; "\n"; "\nDONE"; "\n" ] texts;
       check string "each step once, apart" "CHECKING\n\nDONE\n" (String.concat "" texts))
+;;
+
+let describe_keeper_event = function
+  | Agent_core.Types.MessageStart { id; model; usage = None } ->
+    Printf.sprintf "start %s %s" id model
+  | Agent_core.Types.MessageStart { usage = Some _; _ } -> "start with usage"
+  | Agent_core.Types.ContentBlockStart { index; content_type; tool_id; tool_name } ->
+    Printf.sprintf
+      "block %d %s %s %s"
+      index
+      content_type
+      (Option.value tool_id ~default:"-")
+      (Option.value tool_name ~default:"-")
+  | Agent_core.Types.ContentBlockDelta
+      { index; delta = Agent_core.Types.InputJsonSnapshot arguments } ->
+    Printf.sprintf "arguments %d %s" index arguments
+  | Agent_core.Types.ContentBlockDelta { index; delta = Agent_core.Types.TextDelta text } ->
+    Printf.sprintf "text %d %S" index text
+  | Agent_core.Types.ContentBlockDelta { index; _ } -> Printf.sprintf "other delta %d" index
+  | Agent_core.Types.ContentBlockStop { index } -> Printf.sprintf "stop %d" index
+  | Agent_core.Types.MessageDelta
+      { stop_reason = Some Agent_core.Types.EndTurn; usage = None } -> "end turn"
+  | Agent_core.Types.MessageDelta _ -> "other message delta"
+  | Agent_core.Types.MessageStop -> "message stop"
+  | _ -> "other"
+;;
+
+let mcp_probe_call call_id =
+  Keeper_antigravity_runtime.For_testing.Mcp_tool_started
+    { call_id; tool_name = "masc_probe"; arguments = `Assoc [ "marker", `String call_id ] }
+;;
+
+let antigravity_turn_started =
+  Keeper_antigravity_runtime.For_testing.Cli_event
+    (Runtime_antigravity.Turn_started
+       { conversation_id = "conversation-1"; model = "gemini-fixture" })
+;;
+
+let antigravity_turn_finished =
+  Keeper_antigravity_runtime.For_testing.Cli_event
+    (Runtime_antigravity.Turn_finished { text = "" })
+;;
+
+(* #37118: agy prints init before it calls a MASC tool, but the MCP server
+   can answer the call while init is still writing the session. The call's
+   blocks come after MessageStart, in the order they were answered. *)
+let test_keeper_mcp_blocks_follow_message_start () =
+  let events =
+    Keeper_antigravity_runtime.For_testing.project_stream_inputs
+      ~during:(fun _ -> [])
+      [ mcp_probe_call "call-1"
+      ; Keeper_antigravity_runtime.For_testing.Mcp_tool_finished { call_id = "call-1" }
+      ; antigravity_turn_started
+      ; mcp_probe_call "call-2"
+      ; Keeper_antigravity_runtime.For_testing.Mcp_tool_finished { call_id = "call-2" }
+      ; antigravity_turn_finished
+      ]
+  in
+  check
+    (list string)
+    "message first, then each call in order"
+    [ "start conversation-1:ordinal:1 gemini-fixture"
+    ; "block 1 tool_use call-1 masc_probe"
+    ; {|arguments 1 {"marker":"call-1"}|}
+    ; "stop 1"
+    ; "block 2 tool_use call-2 masc_probe"
+    ; {|arguments 2 {"marker":"call-2"}|}
+    ; "stop 2"
+    ; "end turn"
+    ; "message stop"
+    ]
+    (List.map describe_keeper_event events)
+;;
+
+(* Emitting can yield to the MCP server's fiber. A call answered while the
+   held blocks go out waits behind them, so no block is emitted before its
+   own start. *)
+let test_keeper_mcp_blocks_answered_while_releasing_wait_their_turn () =
+  let events =
+    Keeper_antigravity_runtime.For_testing.project_stream_inputs
+      ~during:(function
+        | Agent_core.Types.MessageStart _ -> [ mcp_probe_call "call-2" ]
+        | Agent_core.Types.ContentBlockStart { tool_id = Some "call-2"; _ } ->
+          [ Keeper_antigravity_runtime.For_testing.Mcp_tool_finished { call_id = "call-2" } ]
+        | Agent_core.Types.ContentBlockStart { tool_id = Some "call-1"; _ } ->
+          [ Keeper_antigravity_runtime.For_testing.Mcp_tool_finished { call_id = "call-1" } ]
+        | _ -> [])
+      [ mcp_probe_call "call-1"; antigravity_turn_started; antigravity_turn_finished ]
+  in
+  check
+    (list string)
+    "each block after its own start"
+    [ "start conversation-1:ordinal:1 gemini-fixture"
+    ; "block 1 tool_use call-1 masc_probe"
+    ; {|arguments 1 {"marker":"call-1"}|}
+    ; "block 2 tool_use call-2 masc_probe"
+    ; {|arguments 2 {"marker":"call-2"}|}
+    ; "stop 1"
+    ; "stop 2"
+    ; "end turn"
+    ; "message stop"
+    ]
+    (List.map describe_keeper_event events)
 ;;
 
 let test_stream_events_preserve_exact_native_tool_steps () =
@@ -839,12 +948,90 @@ let test_success_with_blank_response_is_not_success () =
     [ init (); result ~response:" \n\t" () ]
     (fun path ->
        match run_fixture path with
-       | Error
-           (Runtime_antigravity.Turn_failed
-              "successful result response has no deliverable content") ->
-         ()
+       | Error (Runtime_antigravity.Turn_failed detail) ->
+         (* The diagnostic fields ride after the fixed rejection sentence, so
+            downstream substring checks (keeper runtime tests) keep working. *)
+         check bool "detail keeps the rejection sentence" true
+           (String.starts_with
+              ~prefix:"successful result response has no deliverable content"
+              detail);
+         check bool "detail names the model" true
+           (String_util.contains_substring detail "model=gemini-fixture");
+         check bool "detail reports zero tool steps" true
+           (String_util.contains_substring detail "tool_steps=0");
+         check bool "detail records an empty stderr" true
+           (String_util.contains_substring detail "stderr=<empty>")
        | Error error -> fail (Runtime_antigravity.error_to_string error)
        | Ok _ -> fail "blank SUCCESS result was admitted as a completed turn")
+;;
+
+(* One tool step and a blank answer: the count, the model, and the fixture's
+   stderr line must all arrive in the failure so an operator can tell a
+   tool-only turn from a vendor-side empty success. *)
+let test_empty_success_after_a_tool_step_carries_diagnostics () =
+  with_fixture
+    ~stderr_line:"antigravity: WARNING model streamed nothing"
+    [ init ()
+    ; step ~index:1 ~state:"ACTIVE" ~step_type:"tool" ()
+    ; step ~index:1 ~state:"DONE" ~step_type:"tool" ()
+    ; result ~response:"" () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Turn_failed detail) ->
+         check bool "rejection sentence kept" true
+           (String.starts_with
+              ~prefix:"successful result response has no deliverable content"
+              detail);
+         check bool "model named" true
+           (String_util.contains_substring detail "model=gemini-fixture");
+         check bool "tool step counted" true
+           (String_util.contains_substring detail "tool_steps=1");
+         check bool "stderr tail carried" true
+           (String_util.contains_substring detail "stderr tail: antigravity: WARNING model streamed nothing")
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "blank SUCCESS after a tool step was admitted")
+;;
+
+(* A Korean stderr line longer than the byte budget must come back cut at a
+   character boundary, never with a torn Hangul character at its head
+   (#39090 made String_util the SSOT for that rule). *)
+let index_of_substring hay needle =
+  let n = String.length hay and m = String.length needle in
+  let rec go i =
+    if i + m > n then None
+    else if String.sub hay i m = needle then Some i
+    else go (i + 1)
+  in
+  go 0
+;;
+
+let test_empty_success_stderr_tail_cuts_at_a_character_boundary () =
+  let korean =
+    "안녕하세요 검증 메시지입니다 " ^ String.concat "" (List.init 40 (fun _ -> "토큰"))
+  in
+  assert (String.length korean > 200);
+  with_fixture
+    ~stderr_line:korean
+    [ init (); result ~response:"" () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Turn_failed detail) ->
+         let rest =
+           match index_of_substring detail "stderr tail: " with
+           | Some i -> String.sub detail (i + String.length "stderr tail: ")
+                        (String.length detail - i - String.length "stderr tail: ")
+           | None -> fail "no stderr tail in the failure detail"
+         in
+         check bool "tail kept the last characters" true
+           (String_util.contains_substring rest "토큰");
+         check bool "tail dropped the line's head" true
+           (not (String_util.contains_substring rest "안녕하세요"));
+         check bool "tail cut at a character boundary" true
+           (String.is_valid_utf_8 rest);
+         check bool "tail stayed within the byte budget" true
+           (String.length rest <= 200 + 1 (* closing paren *))
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "blank SUCCESS with a Korean stderr was admitted")
 ;;
 
 let test_duplicate_keys_fail_closed () =
@@ -1351,6 +1538,14 @@ let () =
             `Quick
             test_keeper_streams_two_response_steps_apart
         ; test_case
+            "Keeper MCP blocks follow MessageStart"
+            `Quick
+            test_keeper_mcp_blocks_follow_message_start
+        ; test_case
+            "Keeper MCP blocks answered while releasing wait their turn"
+            `Quick
+            test_keeper_mcp_blocks_answered_while_releasing_wait_their_turn
+        ; test_case
             "stream preserves exact native tool steps"
             `Quick
             test_stream_events_preserve_exact_native_tool_steps
@@ -1408,6 +1603,10 @@ let () =
             "blank success"
             `Quick
             test_success_with_blank_response_is_not_success
+        ; test_case
+            "blank success after a tool step carries diagnostics"
+            `Quick
+            test_empty_success_after_a_tool_step_carries_diagnostics
         ; test_case "duplicate keys" `Quick test_duplicate_keys_fail_closed
         ; test_case
             "observed permission modes are admitted"
@@ -1498,6 +1697,10 @@ let () =
             "pre-init success result stays a protocol error"
             `Quick
             test_pre_init_success_result_stays_a_protocol_error
+        ; test_case
+            "an empty success stderr tail cuts at a character boundary"
+            `Quick
+            test_empty_success_stderr_tail_cuts_at_a_character_boundary
         ] )
     ; "live official client", [ test_case "official agy start and resume" `Slow test_live_start_and_resume ]
     ]

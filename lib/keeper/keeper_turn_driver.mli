@@ -310,6 +310,8 @@ val run_named :
      unit) ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   ?official_task_reference:Keeper_official_task_reference.t ->
+  ?official_client_composed_context:
+    (unit -> Keeper_official_client_host.composed_context option) ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
   ?on_official_client_result_handoff:
@@ -368,6 +370,11 @@ val run_named :
     [on_runtime_lane_terminal_error] observes the candidate error the walk
     returns as the lane's error, with the candidate that produced it, once per
     walk that ends on a candidate's error.
+
+    [official_client_composed_context] names the typed blocks behind the
+    context carrier this turn's hooks assembled. The Claude Code lane reads it
+    after its hooks run, so a resume sends only the blocks its vendor session
+    does not already hold ({!Keeper_official_client_host.resume_prompt}).
 
     [on_request_attribution] reports what an official-client lane could
     observe of its own model input, together with the tool list that lane

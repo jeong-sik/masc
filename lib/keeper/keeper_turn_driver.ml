@@ -1597,6 +1597,7 @@ let run_named
     ?on_request_attribution
     ?official_client_continuation
     ?official_task_reference
+    ?official_client_composed_context
     ?on_official_client_tool_boundary
     ?on_official_client_result_handoff
     ?on_official_client_native_action
@@ -2521,6 +2522,7 @@ let run_named
               on_request_attribution
           in
           Keeper_claude_code_runtime.run
+            ?composed_context:official_client_composed_context
             ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
             ?required_native_posture
             ~runtime_id:attempt_runtime_id

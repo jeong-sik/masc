@@ -60,7 +60,11 @@ type seed =
   { first_atom : int
   ; front : Model_input_front.t
         (** [At_atom] witnesses [first_atom]; [After_history] witnesses
-            [first_atom - 1], the end of a successfully omitted history. *)
+            [first_atom - 1], the end of a successfully omitted history.
+            [Empty_history] with [first_atom = 0] is an offered-empty
+            history; with [first_atom > 0] it is a floor seed (#39013),
+            whose position stands past every atom, and [for_history]
+            drops it as [Front_atom_missing]. *)
   ; source : source
   }
 
@@ -223,8 +227,9 @@ val read_seed
 (** Why {!for_history} dropped a seed. *)
 type dropped_front =
   | Front_atom_missing
-      (** The history has no atom at [first_atom]: it is shorter than the
-          front. *)
+      (** The history has no atom at [first_atom], or the seed names no front
+          at all: a floor seed (#39013) always drops this way, whatever the
+          history holds. *)
   | Front_message_differs
       (** The atom at [first_atom] opens with another message: atoms before
           the front were removed or replaced. *)
@@ -234,9 +239,11 @@ val for_history
   -> seed
   -> (seed, dropped_front) result
 (** The seed while its opening atom or history-end witness matches the
-    history in hand; otherwise why not. A dropped position names no
-    atom of this history, and carrying the newest atom alone from there
-    would never widen again, so the caller starts over as with no seed. *)
+    history in hand; otherwise why not. A floor seed ([Empty_history] with
+    [first_atom > 0], #39013) names a position past every atom and always
+    drops as [Front_atom_missing]. A dropped position names no atom of this
+    history, and carrying the newest atom alone from there would never widen
+    again, so the caller starts over as with no seed. *)
 
 val dropped_front_to_string : dropped_front -> string
 

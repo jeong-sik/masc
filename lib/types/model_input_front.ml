@@ -39,7 +39,7 @@ let validate ~transmitted_atoms ~total_atoms front =
     | At_atom digest when transmitted_atoms > 0 && valid_digest digest -> Ok ()
     | After_history digest
       when transmitted_atoms = 0 && total_atoms > 0 && valid_digest digest -> Ok ()
-    | Empty_history when total_atoms = 0 -> Ok ()
+    | Empty_history when transmitted_atoms = 0 -> Ok ()
     | At_atom _ | After_history _ | Empty_history ->
       Error "model_input_front: position does not match atom counts"
 ;;

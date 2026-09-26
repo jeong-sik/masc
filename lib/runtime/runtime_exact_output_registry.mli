@@ -26,6 +26,14 @@ type publication_error =
       ; slot_id : string
       ; cause : Agent_core.Exact_output.target_ref_error
       }
+  | Lane_thinking_not_encodable of
+      { lane_id : string
+      ; slot_id : string
+      ; thinking : bool
+      ; rejection : Llm_provider.Complete_common.thinking_control_request_rejection
+      }
+      (** The lane declares [thinking] and this admitted slot's model cannot
+          carry it, so every request on the slot would be refused. *)
   | Required_lane_unavailable of { lane_id : string }
   | Resolver_snapshot_rejected of Agent_core.Exact_output.resolver_snapshot_error
       (** The resolver snapshot for a replacement could not be built from the

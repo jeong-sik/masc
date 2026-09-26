@@ -7,7 +7,10 @@ type t =
       (** No atom was carried. Digest of the last atom of the offered history;
           the next request may start after it while that atom still matches. *)
   | Empty_history
-      (** The offered history itself held no atoms. *)
+      (** No atom was carried: the offered history itself held no atoms,
+          or the response reached the floor (#39013) and carried none of a
+          history it made untenable. A floor seed stands at a past-end
+          position; [Keeper_carried_front.for_history] drops it. *)
 
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result

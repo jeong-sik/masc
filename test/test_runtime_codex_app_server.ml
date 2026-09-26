@@ -71,6 +71,31 @@ let truncated_token_usage_updated =
   {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80}}}}|}
 ;;
 
+(* Ours, each with one breakdown whose counts do not nest, breaking one rule
+   only. The first is an estimate that gained a cached count. *)
+let estimate_with_cached_input_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":0,"cachedInputTokens":500,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":45000},"modelContextWindow":272000}}}|}
+;;
+
+let reasoning_over_output_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":30,"reasoningOutputTokens":80,"totalTokens":1230},"modelContextWindow":272000}}}|}
+;;
+
+let output_without_input_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":0,"cachedInputTokens":0,"outputTokens":80,"reasoningOutputTokens":0,"totalTokens":80},"modelContextWindow":272000}}}|}
+;;
+
+(* Cache reads and writes each fit inside the input, their sum does not: a
+   provider that counts input apart from its cache. *)
+let cache_over_input_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"cacheWriteInputTokens":300,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"modelContextWindow":272000}}}|}
+;;
+
+(* The thread's running count breaks a rule; [last] is a plain request. *)
+let total_reasoning_over_output_token_usage_updated =
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":900,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"modelContextWindow":272000}}}|}
+;;
+
 let resumed_turn_result = {|{"id":4,"result":{"turn":{"id":"turn-2"}}}|}
 
 let resumed_item_completed =
@@ -1038,6 +1063,33 @@ let test_truncated_token_usage_of_this_turn_fails_closed () =
         check string "stage" "thread/tokenUsage/updated" stage
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok _ -> fail "a half-read breakdown was admitted")
+;;
+
+let test_a_breakdown_whose_counts_do_not_nest_fails_closed () =
+  List.iter
+    (fun (label, frame) ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; frame
+         ; turn_completed
+         ]
+         (fun path ->
+            match run_fixture path with
+            | Error (Runtime_codex_app_server.Protocol_error { stage; _ }) ->
+              check string label "thread/tokenUsage/updated" stage
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok _ -> fail (label ^ " was admitted")))
+    [ "an estimate with cached input", estimate_with_cached_input_token_usage_updated
+    ; "more reasoning than output", reasoning_over_output_token_usage_updated
+    ; "output without input", output_without_input_token_usage_updated
+    ; "cache reads and writes above the input", cache_over_input_token_usage_updated
+    ; "a thread total with more reasoning than output"
+    , total_reasoning_over_output_token_usage_updated
+    ]
 ;;
 
 let test_prompt_transmission_boundary ?(worker_pool = false) () =
@@ -5258,6 +5310,85 @@ let test_production_keeper_reports_codex_token_usage () =
                | _ -> fail "production turn did not persist one record")))
 ;;
 
+(* One Codex turn that makes two model requests (a response, then the
+   response after it) reads two thread/tokenUsage/updated frames. The request
+   context is the second request's [last]: 2000 input with 1500 cached, not
+   the first request's 1200/1000 and not the thread's running [total] of
+   11000/9500. The TurnRecord takes that same request's input side, and the
+   output (40) is that request's too, since the scope is per request.
+
+   Without the Codex request context the observation carries none and the
+   TurnRecord falls back to the thread's running total, so these checks pin
+   that the request-context branch keeps the newest request's counts and
+   its output rather than the running total. *)
+let test_production_keeper_records_newest_codex_request_context () =
+  let base_path = temp_workspace "masc-codex-production-two-requests-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; token_usage_updated
+         ; item_completed
+         ; second_token_usage_updated
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn
+                ~base_path
+                ~trace_id:"codex-production-two-requests-1"
+                ~user_message:
+                  "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
+                ~cli_path
+                ~model:"gpt-fixture"
+                ~turn_instructions:None
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok result ->
+              (match result.Keeper_agent_run.runtime_observation with
+               | Some { Runtime_observation.request_context = Some context; _ } ->
+                 check int "second request input, not the first or the thread total"
+                   2000 context.input_tokens;
+                 check (option int) "second request cache read" (Some 1500)
+                   (Option.map
+                      (fun (cache : Runtime_observation.request_cache) ->
+                         cache.cache_read_input_tokens)
+                      context.cache);
+                 check (option int) "second request cache write" (Some 0)
+                   (Option.map
+                      (fun (cache : Runtime_observation.request_cache) ->
+                         cache.cache_creation_input_tokens)
+                      context.cache)
+               | Some { Runtime_observation.request_context = None; _ } ->
+                 fail "a two-request Codex turn recorded no request context"
+               | None -> fail "production turn recorded no runtime observation");
+              let records =
+                Keeper_types_support.keeper_turn_record_store
+                  (Workspace.default_config base_path) "codex-production-fixture"
+                |> fun store -> Dated_jsonl.read_recent store 1
+              in
+              (match records with
+               | [ row ] ->
+                 (match Turn_record.of_json row with
+                  | Ok record ->
+                    check (option int) "TurnRecord second request input" (Some 2000)
+                      record.usage.input_tokens;
+                    check (option int) "TurnRecord second request cache read"
+                      (Some 1500) record.usage.cache_read_input_tokens;
+                    check (option int) "TurnRecord second request output" (Some 40)
+                      record.usage.output_tokens;
+                    check (option int) "no separate turn total output" None
+                      record.turn_output_tokens;
+                    check bool "TurnRecord per-request scope" true
+                      (record.usage.scope = Runtime_usage_scope.Per_request)
+                  | Error detail -> fail detail)
+               | _ -> fail "Codex production turn has no TurnRecord")))
+;;
+
 (* The raw rows the cost ledger holds under [base_path], as (scope, input)
    pairs in ascending order; a row that says its usage is missing has no
    input. *)
@@ -6473,6 +6604,10 @@ let () =
             `Quick
             test_truncated_token_usage_of_this_turn_fails_closed
         ; test_case
+            "a breakdown whose counts do not nest fails closed"
+            `Quick
+            test_a_breakdown_whose_counts_do_not_nest_fails_closed
+        ; test_case
             "native command stays distinct from dynamic tools"
             `Quick
             test_native_command_events_stay_distinct_from_dynamic_tools
@@ -6589,6 +6724,10 @@ let () =
             "production Keeper reports Codex token usage"
             `Quick
             test_production_keeper_reports_codex_token_usage
+        ; test_case
+            "production Keeper records the newest Codex request context"
+            `Quick
+            test_production_keeper_records_newest_codex_request_context
         ; test_case
             "production Keeper takes a compaction estimate as occupancy"
             `Quick

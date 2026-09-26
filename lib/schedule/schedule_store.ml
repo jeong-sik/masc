@@ -826,7 +826,16 @@ let update_request config ~now ~runner_tick_sec (request : Schedule_domain.sched
       else Error (transition_refused state current ~attempted:Modify_schedule))
 ;;
 
-let cancel_request config ~schedule_id =
+(* The queued wake is withdrawn under the ledger lock, before the row turns
+   [Cancelled]. A wake is enqueued only while its row is [Running]
+   ([start_due_candidate] to [accept_running], both under this lock), and a
+   [Running] row is refused below, so while the lock is held no occurrence of
+   this schedule can be enqueued after the withdrawal and survive the cancel.
+   A failed withdrawal writes nothing: the row stays active and the caller can
+   cancel again. A ledger write that fails after the withdrawal also leaves the
+   row active; the withdrawn occurrence stays cancelled in the queue, with the
+   queue's own cancellation receipt, and the next occurrence fires as due. *)
+let cancel_request config ~schedule_id ~cancellation ~withdraw_queued_wakes =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state schedule_id with
@@ -836,8 +845,16 @@ let cancel_request config ~schedule_id =
        | Running | Succeeded | Failed | Cancelled | Expired ->
          Error (transition_refused state request ~attempted:Cancel_schedule)
        | Scheduled | Due ->
+         let* () =
+           withdraw_queued_wakes request cancellation
+           |> Result.map_error (fun detail ->
+             Persistence_failed ("queued wake withdrawal failed: " ^ detail))
+         in
          let updated_request =
-           { request with Schedule_domain.status = Schedule_domain.Cancelled }
+           { request with
+             Schedule_domain.status = Schedule_domain.Cancelled
+           ; cancellation = Some cancellation
+           }
          in
          let schedules = replace_schedule state.schedules updated_request in
          (* Disposition at the cancel boundary: settle this schedule's

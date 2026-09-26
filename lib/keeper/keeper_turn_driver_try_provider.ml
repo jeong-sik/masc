@@ -1895,7 +1895,26 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                                  }
                              })
                         ctx.on_response_observed_model_input
-                    | Keeper_model_input_ledger.No_atom_carried -> ());
+                    | Keeper_model_input_ledger.No_atom_carried ->
+                      (* The floor (#39013) is an answer: the response
+                         carried none of its history, so the scan must meet
+                         this record and drop it, not walk past it and
+                         resurrect an older front the floor made untenable.
+                         [Empty_history] with a past-end position is that
+                         floor seed; [for_history] drops it as
+                         [Front_atom_missing]. *)
+                      Option.iter
+                        (fun observe ->
+                           observe
+                             { Turn_record.runtime_profile = ctx.runtime_id
+                             ; window =
+                                 { transmitted_atoms = 0
+                                 ; total_atoms = request.atom_count
+                                 ; measurement = Turn_record.Wire_shape
+                                 ; model_input_front = Model_input_front.Empty_history
+                                 }
+                             })
+                        ctx.on_response_observed_model_input);
                    let usage =
                      Option.bind response.Agent_core.Types.usage
                        (fun (u : Agent_core.Types.api_usage) ->

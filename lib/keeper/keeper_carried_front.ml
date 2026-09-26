@@ -266,6 +266,12 @@ let for_history ~digest_at (seed : seed) =
   match seed.front with
   | Model_input_front.At_atom digest -> checked seed.first_atom digest
   | Model_input_front.After_history digest -> checked (seed.first_atom - 1) digest
+  (* A floor (#39013) names no front: its position is the history's atom
+     count at the floor turn, past every atom, so it drops whatever the
+     history holds. Only an offered-empty history (first_atom = 0) keeps
+     an Empty_history seed. *)
+  | Model_input_front.Empty_history when seed.first_atom > 0 ->
+    Error Front_atom_missing
   | Model_input_front.Empty_history -> Ok seed
 ;;
 

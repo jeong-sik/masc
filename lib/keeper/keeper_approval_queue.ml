@@ -4564,12 +4564,19 @@ let gate_references_of_operations ~config ~keeper_name =
     Ok (List.concat_map Keeper_semantic_execution.gate_approval_ids semantic_executions)
 ;;
 
+(* Only a missing meta file is a gone Keeper. A file this binary does not
+   decode as the current schema ([Meta_not_current]) still names a Keeper: the
+   boot path re-materialises it from its declaration after this install, and a
+   schema change that makes every live meta not current (a retired key, as in
+   #39025) would otherwise retire every Keeper's deliveries at once. *)
 let keeper_delivery_readers ~base_path ~keeper_name =
   let config = Workspace.default_config base_path in
-  match Keeper_meta_store.read_meta config keeper_name with
+  match Keeper_meta_store.read_meta_presence config keeper_name with
   | Error reason -> Keeper_readers_unknown ("keeper meta: " ^ reason)
-  | Ok None -> Keeper_gone
-  | Ok (Some _) ->
+  | Ok (Keeper_meta_store.Meta_not_current detail) ->
+    Keeper_readers_unknown ("keeper meta not current: " ^ detail)
+  | Ok Keeper_meta_store.Meta_absent -> Keeper_gone
+  | Ok (Keeper_meta_store.Meta_present _) ->
     (match
        ( queued_hitl_wake_ids ~base_path ~keeper_name
        , gate_references_of_operations ~config ~keeper_name )

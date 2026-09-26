@@ -72,7 +72,9 @@ let test_same_instance_replays_disconnected_tool_result () =
       match cursor with
       | None -> fail "same-instance cursor lost"
       | Some event_id ->
-        Sse.get_events_after_for_session ~session_id ~kind:Sse.Observer event_id
+        let replay = Sse.replay_after_for_session ~session_id ~kind:Sse.Observer event_id in
+        check bool "nothing expired past the cursor" true (replay.Sse.continuity = Sse.Continuous);
+        replay.Sse.deliveries
     in
     check (list int) "only the disconnected delivery is replayed" [ missed_id ]
       (List.map (fun (event : Sse.delivery) -> event.event_id) replayed);
@@ -100,6 +102,74 @@ let test_unusable_epoch_cannot_suppress_new_live expected headers =
        = Ok (Some handshake)))
 ;;
 
+let delivery ~event_id ~emitted_at =
+  let payload = tool_result ("event " ^ string_of_int event_id) in
+  { Sse.event_id
+  ; frame = Wire.format_event_yojson ~id:event_id payload
+  ; payload
+  ; emitted_at
+  ; audience = Sse.Broadcast_audience Sse.Observers
+  }
+;;
+
+(* Runs [f] on an empty replay buffer and puts the old one back after. *)
+let with_empty_buffer f =
+  let original_buffer = Sse.event_buffer_events_for_test () in
+  Fun.protect
+    ~finally:(fun () -> Sse.set_event_buffer_for_test original_buffer)
+    (fun () ->
+      Sse.set_event_buffer_for_test [];
+      f ())
+;;
+
+let continuity after =
+  (Sse.replay_after_for_session ~session_id:"gap-observer" ~kind:Sse.Observer after).Sse.continuity
+;;
+
+(* The buffer keeps [MASC_SSE_REPLAY_BUFFER_SIZE] events (1000 at most), so
+   1001 of them push the first one out. A cursor before it has missed it; a
+   cursor at it has not. *)
+let test_count_eviction_is_a_gap () =
+  with_empty_buffer (fun () ->
+    let now = Time_compat.now () in
+    for event_id = 1 to 1001 do
+      Sse.buffer_event (delivery ~event_id ~emitted_at:now)
+    done;
+    check bool "a cursor before the dropped event resumes after a gap" true
+      (continuity 0 = Sse.After_gap { missed_through = 1 });
+    check bool "a cursor at the dropped event missed nothing" true (continuity 1 = Sse.Continuous))
+;;
+
+let test_age_eviction_is_a_gap () =
+  with_empty_buffer (fun () ->
+    let now = Time_compat.now () in
+    Sse.buffer_event (delivery ~event_id:5 ~emitted_at:0.);
+    Sse.buffer_event (delivery ~event_id:6 ~emitted_at:now);
+    check bool "nothing has expired yet" true (continuity 3 = Sse.Continuous);
+    check int "the old event expires" 1 (Sse.cleanup_expired_events ());
+    check bool "a cursor before the expired event resumes after a gap" true
+      (continuity 3 = Sse.After_gap { missed_through = 5 });
+    check bool "a cursor at the expired event missed nothing" true (continuity 5 = Sse.Continuous);
+    check (list int) "the kept event is still replayed" [ 6 ]
+      (List.map
+         (fun (event : Sse.delivery) -> event.event_id)
+         (Sse.replay_after_for_session ~session_id:"gap-observer" ~kind:Sse.Observer 3).Sse.deliveries))
+;;
+
+let test_a_gap_reaches_the_observer_headers () =
+  let resumed = { Wire.instance_id = "instance-a"; replay = Wire.Resumed } in
+  let after_gap = Wire.observer_after_replay resumed ~missed_through:(Some 41) in
+  check bool "a resumed handshake records the gap" true
+    (after_gap.replay = Wire.Resumed_after_gap { missed_through = 41 });
+  check bool "no gap leaves it resumed" true
+    (Wire.observer_after_replay resumed ~missed_through:None = resumed);
+  let fresh = { resumed with replay = Wire.Fresh } in
+  check bool "a fresh handshake read no replay, so it has no gap" true
+    (Wire.observer_after_replay fresh ~missed_through:(Some 41) = fresh);
+  check bool "the gap survives the response headers" true
+    (Wire.decode_observer_response (Wire.observer_response_headers after_gap) = Ok (Some after_gap))
+;;
+
 let test_missing_or_malformed_response () =
   check bool "absent capability is explicitly unavailable" true
     (Wire.decode_observer_response [] = Ok None);
@@ -110,6 +180,11 @@ let test_missing_or_malformed_response () =
     [ [ "x-masc-sse-instance-id", "instance-a" ]
     ; [ "x-masc-sse-instance-id", ""; "x-masc-sse-replay", "resumed" ]
     ; [ "x-masc-sse-instance-id", "instance-a"; "x-masc-sse-replay", "complete" ]
+    ; [ "x-masc-sse-instance-id", "instance-a"; "x-masc-sse-replay", "resumed-after-gap" ]
+    ; [ "x-masc-sse-instance-id", "instance-a"; "x-masc-sse-replay", "resumed-after-gap"
+      ; "x-masc-sse-replay-missed-through", "0" ]
+    ; [ "x-masc-sse-instance-id", "instance-a"; "x-masc-sse-replay", "resumed-after-gap"
+      ; "x-masc-sse-replay-missed-through", "forty" ]
     ]
 ;;
 
@@ -148,6 +223,12 @@ let () =
           (fun () -> test_unusable_epoch_cannot_suppress_new_live Wire.Unscoped_cursor [])
       ; test_case "missing capability differs from invalid metadata" `Quick
           test_missing_or_malformed_response
+      ]
+    ; "replay gap",
+      [ test_case "an event dropped by count is a gap" `Quick test_count_eviction_is_a_gap
+      ; test_case "an event dropped by age is a gap" `Quick test_age_eviction_is_a_gap
+      ; test_case "a gap reaches the observer headers" `Quick
+          test_a_gap_reaches_the_observer_headers
       ]
     ; "wire",
       [ test_case "an encoded frame is the frame of its value" `Quick

@@ -55,7 +55,7 @@ val tool_inventory_json :
 
 val register_dashboard_handler :
   (tool_name:string ->
-   start_time:float ->
+   start_time:Tool_timing.started ->
    context ->
    Yojson.Safe.t ->
    Tool_result.result) ->

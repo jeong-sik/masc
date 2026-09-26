@@ -7192,3 +7192,4 @@
 
 (include stanzas/test_tui_sidebar_index_fold.inc)
 (include stanzas/test_tui_surface_chrome_overflow.inc)
+(include stanzas/test_pty_stall_probe.inc)

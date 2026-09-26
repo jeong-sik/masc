@@ -179,19 +179,28 @@ let anchor_rejection_to_string = function
   | Anchor_contains_nul -> "anchor contains a NUL byte"
 ;;
 
-type notice = Ignored_resource_read_max_bytes
+type notice = Ignored_resource_read_max_bytes of Keeper_toml_loader.toml_value
 
 (* The only Skill resource read bound. A resource is returned as one inline
    tool result, so any other bound either refuses files the wire could carry
    or reads files the wire then refuses. *)
 let derived_resource_read_max_bytes = Common.max_tool_result_wire_bytes
 
+let ignored_value_to_string = function
+  | Keeper_toml_loader.Toml_int value -> string_of_int value
+  | Toml_string value -> Printf.sprintf "%S" value
+  | Toml_float value -> string_of_float value
+  | Toml_bool value -> string_of_bool value
+  | value -> Printf.sprintf "<%s>" (value_kind_to_string (value_kind value))
+;;
+
 let notice_to_string = function
-  | Ignored_resource_read_max_bytes ->
+  | Ignored_resource_read_max_bytes value ->
     Printf.sprintf
-      "[skills] resource-read-max-bytes is ignored: the Skill resource read \
-       bound is the inline tool-result boundary (%d bytes). Delete the line; \
-       the next version refuses it (#39284)"
+      "[skills] resource-read-max-bytes = %s is ignored: the Skill resource \
+       read bound is the inline tool-result boundary (%d bytes). Delete the \
+       line; the next version refuses it (#39284)"
+      (ignored_value_to_string value)
       derived_resource_read_max_bytes
 ;;
 
@@ -389,7 +398,7 @@ let resource_read_max_bytes ~configured doc =
   let bound = if configured then Some derived_resource_read_max_bytes else None in
   match List.assoc_opt resource_read_max_bytes_key doc with
   | None -> bound, []
-  | Some _ -> bound, [ Ignored_resource_read_max_bytes ]
+  | Some value -> bound, [ Ignored_resource_read_max_bytes value ]
 ;;
 
 let source_entries doc =

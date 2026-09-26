@@ -115,9 +115,10 @@ type resolved_source =
   ; resolution : resolution
   }
 
-type notice = Ignored_resource_read_max_bytes
-(** [[skills] resource-read-max-bytes] is present. It is ignored for one
-    version and refused after that (#39284). *)
+type notice = Ignored_resource_read_max_bytes of Keeper_toml_loader.toml_value
+(** [[skills] resource-read-max-bytes] is present. The parsed value is carried
+    into the boot notice. The key is ignored for one version and refused after
+    that (#39284). *)
 
 val parse_text : string -> (t, diagnostic list) result
 val parse_text_with_notices : string -> (t * notice list, diagnostic list) result

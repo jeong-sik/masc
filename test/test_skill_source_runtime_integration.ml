@@ -167,8 +167,10 @@ let test_legacy_bound_saves_and_warns_at_boot () =
    with
    | None -> fail "legacy resource-read-max-bytes produced no boot WARN"
    | Some line ->
-     check bool "WARN names the key" true
-       (String_util.contains_substring line "[skills] resource-read-max-bytes is ignored");
+     check bool "WARN names the ignored value" true
+       (String_util.contains_substring
+          line
+          "[skills] resource-read-max-bytes = 65536 is ignored");
      check bool "WARN names the follow-up" true
        (String_util.contains_substring line "#39284");
      check bool "WARN names the file" true

@@ -108,8 +108,8 @@ let test_missing_and_wrong_fields () =
 ;;
 
 (* task-1779 B: the bound is derived from the inline tool-result boundary.
-   The key is accepted for one version with a notice and its value is never
-   read, whatever it holds (#39284 refuses it next). *)
+   The key is accepted for one version with a notice; its value is reported
+   but never used as the bound (#39284 refuses it next). *)
 let test_resource_read_max_bytes_contract () =
   let sources_block =
     "[[skills.sources]]\nid = \"docs\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n"
@@ -130,28 +130,42 @@ let test_resource_read_max_bytes_contract () =
   check int "absent key: derived bound" Common.max_tool_result_wire_bytes (bound config);
   check int "absent key: no notice" 0 (List.length notices);
   List.iter
-    (fun line ->
+    (fun (line, expected_value) ->
        let config, notices = parse_with_notices (with_bound_line line) in
        check int ("ignored value: " ^ line) Common.max_tool_result_wire_bytes (bound config);
        check bool
-         ("ignored key is noticed: " ^ line)
+         ("ignored key is noticed with its value: " ^ line)
          true
-         (notices = [ Ignored_resource_read_max_bytes ]))
-    [ "resource-read-max-bytes = 12345\n"
-    ; Printf.sprintf "resource-read-max-bytes = %d\n" (Common.max_tool_result_wire_bytes * 4)
-    ; "resource-read-max-bytes = 0\n"
-    ; "resource-read-max-bytes = \"16384\"\n"
+         (notices = [ Ignored_resource_read_max_bytes expected_value ]))
+    [ "resource-read-max-bytes = 12345\n", Keeper_toml_loader.Toml_int 12345
+    ; ( Printf.sprintf "resource-read-max-bytes = %d\n" (Common.max_tool_result_wire_bytes * 4)
+      , Keeper_toml_loader.Toml_int (Common.max_tool_result_wire_bytes * 4) )
+    ; "resource-read-max-bytes = 0\n", Keeper_toml_loader.Toml_int 0
+    ; "resource-read-max-bytes = \"16384\"\n", Keeper_toml_loader.Toml_string "16384"
     ];
-  let message =
-    notice_message ~config_path:"/tmp/live/runtime.toml" [ Ignored_resource_read_max_bytes ]
+  let _, legacy_notices =
+    parse_with_notices (with_bound_line "resource-read-max-bytes = 65536\n")
+  in
+  let message = notice_message ~config_path:"/tmp/live/runtime.toml" legacy_notices in
+  let contains haystack needle =
+    let n = String.length needle and m = String.length haystack in
+    let rec go i = i + n <= m && (String.sub haystack i n = needle || go (i + 1)) in
+    go 0
   in
   List.iter
-    (fun needle ->
-       check bool ("notice names " ^ needle) true
-         (let n = String.length needle and m = String.length message in
-          let rec go i = i + n <= m && (String.sub message i n = needle || go (i + 1)) in
-          go 0))
-    [ "[skills] resource-read-max-bytes is ignored"; "#39284"; "(file: /tmp/live/runtime.toml)" ]
+    (fun needle -> check bool ("notice names " ^ needle) true (contains message needle))
+    [ "[skills] resource-read-max-bytes = 65536 is ignored"
+    ; "#39284"
+    ; "(file: /tmp/live/runtime.toml)"
+    ];
+  let string_notice =
+    notice_to_string
+      (Ignored_resource_read_max_bytes
+         (Keeper_toml_loader.Toml_string "line\nbreak"))
+  in
+  check bool "non-integer value is escaped" true
+    (contains string_notice "\"line\\nbreak\"");
+  check bool "notice remains one line" false (String.contains string_notice '\n')
 ;;
 
 let test_anchor_and_path_rules () =

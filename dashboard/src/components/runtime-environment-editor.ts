@@ -59,6 +59,7 @@ export interface NewRuntimeProviderInput {
   credentialType: RuntimeTomlCredentialType
   credentialValue: string
   isNonInteractive: boolean
+  accountHome: string
   agent: string
   effort: string
   timeoutS: number | null
@@ -108,7 +109,7 @@ interface RuntimeEnvironmentEditorProps {
   ) => void
   onProviderOptionChange: (
     providerId: string,
-    field: 'agent' | 'effort' | 'timeout-s',
+    field: 'agent' | 'effort' | 'timeout-s' | 'account-home',
     value: string | number | null,
   ) => void
 }
@@ -138,6 +139,7 @@ interface NewProviderDraft {
   credentialType: RuntimeTomlCredentialType
   credentialValue: string
   isNonInteractive: boolean
+  accountHome: string
   agent: string
   effort: string
   timeoutS: string
@@ -155,6 +157,7 @@ function newProviderDraft(protocol: RuntimeTomlEditorProtocol): NewProviderDraft
       : protocol.credential_policy === 'file_required' ? 'file' : 'env',
     credentialValue: '',
     isNonInteractive: protocol.requires_non_interactive,
+    accountHome: '',
     agent: '',
     effort: '',
     timeoutS: '',
@@ -430,6 +433,11 @@ export function RuntimeEnvironmentEditor({
       return
     }
     const agent = newProvider.agent.trim()
+    const accountHome = newProvider.accountHome.trim()
+    if (accountHome !== '' && !accountHome.startsWith('/')) {
+      setProviderFormError('계정 홈은 절대 경로여야 합니다')
+      return
+    }
     const effort = newProvider.effort.trim()
     const timeoutRaw = newProvider.timeoutS.trim()
     if (protocol.required_provider_fields.includes('timeout-s') && timeoutRaw === '') {
@@ -452,6 +460,7 @@ export function RuntimeEnvironmentEditor({
       transportValue,
       credentialValue: trimmedCredentialValue,
       agent,
+      accountHome,
       effort,
       timeoutS,
     })
@@ -759,6 +768,24 @@ export function RuntimeEnvironmentEditor({
                   </span>
                   `}
               </div>
+              ${editorProtocol?.provider_fields.includes('account-home') ? html`
+                <div class="rt-field">
+                  <span class="sub-k">계정 홈</span>
+                  <input
+                    class="rt-input mono"
+                    value=${provider.accountHome}
+                    placeholder="절대 경로 · 비우면 기본 로그인"
+                    disabled=${isDisabled}
+                    aria-label=${`${provider.id} 계정 홈`}
+                    data-testid=${`runtime-provider-${provider.id}-account-home`}
+                    onInput=${(event: Event) => onProviderOptionChange(
+                      provider.id,
+                      'account-home',
+                      (event.currentTarget as HTMLInputElement).value || null,
+                    )}
+                  />
+                </div>
+              ` : null}
               ${editorProtocol?.provider_fields.includes('agent') ? html`
                 <div class="rt-field">
                   <span class="sub-k">agent</span>
@@ -939,6 +966,20 @@ export function RuntimeEnvironmentEditor({
                     />
                   ` : null}
                 </div>
+                ${providerProtocols.find(protocol => protocol.protocol === newProvider.protocol)?.provider_fields.includes('account-home') ? html`
+                  <div class="rt-field">
+                    <span class="sub-k">계정 홈</span>
+                    <input
+                      class="rt-input mono"
+                      value=${newProvider.accountHome}
+                      placeholder="절대 경로 · 비우면 기본 로그인"
+                      disabled=${isDisabled}
+                      aria-label="새 provider 계정 홈"
+                      data-testid="runtime-add-provider-account-home"
+                      onInput=${(event: Event) => setNewProvider({ ...newProvider, accountHome: (event.currentTarget as HTMLInputElement).value })}
+                    />
+                  </div>
+                ` : null}
                 ${providerProtocols.find(protocol => protocol.protocol === newProvider.protocol)?.provider_fields.includes('agent') ? html`
                   <div class="rt-field">
                     <span class="sub-k">agent</span>

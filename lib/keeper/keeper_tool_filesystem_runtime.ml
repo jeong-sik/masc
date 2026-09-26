@@ -686,7 +686,8 @@ let read_complete_owned_bytes ~ownership_root ~path ?cwd () =
    the runtime's. *)
 let owned_read_failure_class (error : Fs_compat.owned_regular_file_read_error) =
   match error.failure with
-  | Fs_compat.Ownership_boundary_rejected _ | Fs_compat.Path_is_not_regular_file _ ->
+  | Fs_compat.Ownership_boundary_rejected _ | Fs_compat.Path_is_not_regular_file _
+     | Fs_compat.Owned_path_owner_mismatch _ ->
     Tool_result.Policy_rejection
   | Fs_compat.Filesystem_identity_changed _ | Fs_compat.Owned_file_operation_failed _ ->
     Tool_result.Runtime_failure

@@ -718,6 +718,31 @@ class SelectedNativeAccounts(unittest.TestCase):
         self.assertIsNone(rows[0]['context'])
         self.assertIsNone(rows[0]['existing'])
 
+    def test_select_model_muse_uses_selected_native_account(self):
+        source = dict(choice='muse', command='muse', label='Muse Code', account_home='/selected')
+        receipt = dict(schema='masc.muse_models.v1', source='providerCatalog',
+                       invocation_verified=False, account_availability_verified=False,
+                       models=[dict(id='reported', label='Reported', context=8192)])
+        output = io.StringIO()
+        with patch.object(SETUP, 'select_native_account', return_value=source) as select_account, \
+             patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt), '')) as run, \
+             patch.object(SETUP, 'native_discover_models', side_effect=AssertionError('Muse is not HTTP discovery')), \
+             patch.object(SETUP.sys, 'stdin', io.StringIO('1\n')), contextlib.redirect_stderr(output):
+            self.assertEqual(SETUP.select_model('/masc', 'muse'), dict(model='reported', max_context=8192))
+        select_account.assert_called_once()
+        self.assertEqual(run.call_args.args[0], ['/masc', 'runtime-muse-models', '--cli-path', 'muse', '--account-home', '/selected'])
+        self.assertIn('providerCatalog', output.getvalue())
+        self.assertIn('not yet verified', output.getvalue())
+
+    def test_existing_muse_binding_requires_declared_byte_capacity(self):
+        source = dict(choice='muse')
+        existing = dict(id='muse.selected', tools=True, max_prompt_bytes=45678)
+        with patch.object(SETUP, 'render', side_effect=AssertionError('preserve existing configuration')):
+            self.assertEqual(SETUP.resolve_model_spec(source, dict(existing=existing), 10), ('muse.selected', None))
+            for invalid in [None, 0, -1, True, '45678']:
+                with self.subTest(capacity=invalid), self.assertRaises(SETUP.SetupError):
+                    SETUP.resolve_model_spec(source, dict(existing=dict(existing, max_prompt_bytes=invalid)), 10)
+
     def test_muse_byte_budget_is_operator_input_and_unknown_context_refused(self):
         source = dict(choice='muse', command='muse', account_home='/selected', rows=[])
         with patch.object(SETUP, 'ask_text', return_value='45678') as ask, patch.object(SETUP, 'render', return_value=('runtime', 'toml')):

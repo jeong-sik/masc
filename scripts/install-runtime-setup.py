@@ -399,7 +399,10 @@ def select_model(binary, choice, endpoint='', api_key_env='', timeout=10):
     # CLI clients answer only through the binary's client catalog; an empty
     # catalog offers nothing to guess from. HTTP connections use the native
     # discovery command, which owns the wire formats.
-    if choice in ('codex', 'claude_code'):
+    if choice == 'muse':
+        source = select_native_account(dict(choice='muse', label='Muse Code', command='muse'))
+        models, origin = muse_models(binary, source)
+    elif choice in ('codex', 'claude_code'):
         models = catalog_models(binary, choice)
         origin = ('Installed MASC model catalog (suggestions; model response is not yet verified)' if models
                   else 'Model list unavailable. Check account access, API credit or the running server, then refresh.')
@@ -1431,6 +1434,8 @@ def resolve_model_spec(source, model, timeout, binary=None):
     # Preserve every setting on an operator's existing connection. Its actual
     # model/tool capability is verified before it can become imp's default.
     if existing and existing.get('tools') is True and choice != 'ollama':
+        if choice == 'muse' and not positive_integer(existing.get('max_prompt_bytes')):
+            raise SetupError('The existing Muse model needs a positive max-prompt-bytes in its model settings before reuse')
         return existing['id'], None
     if source.get('credential_kind', 'none') not in ('none', 'env') and not source.get('credential_file'):
         raise SetupError('this connection uses a protected credential reference; select an existing tool-enabled model or add an environment-authenticated connection')

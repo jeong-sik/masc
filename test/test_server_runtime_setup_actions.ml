@@ -136,7 +136,7 @@ let test_selected_native_account () = fixture (fun base runtime binary net ->
     Alcotest.check Alcotest.bool "private home omitted from receipt" true (selection |> member "account_home" = `Null);
     let reference=selection |> member "account_ref" |> to_string in
     let retried=get (Actions.select_account ~base_path:base (`Assoc ["integration_id",`String id])) in
-    Alcotest.check Alcotest.string "repeated selections reuse the pending lease" reference
+    Alcotest.check Alcotest.string "repeated selections reuse the scoped reference" reference
       (retried |> member "account_ref" |> to_string);
     let selected=`Assoc ["integration_id",`String id;"account_ref",`String reference] in
     if protocol="muse-serve" then Eio.Switch.run (fun sw ->
@@ -157,10 +157,19 @@ let test_selected_native_account () = fixture (fun base runtime binary net ->
     Alcotest.check Alcotest.bool "failed transaction leaves account available for retry" true
       (Result.is_error (Actions.save ~binary ~base_path:base rejected) && Result.is_ok (resolve ()));
     ignore (get (Actions.save ~binary ~base_path:base request));
-    Alcotest.check Alcotest.bool "successful transaction consumes the native lease" true
-      (Result.is_error (resolve ()));
+    Alcotest.check Alcotest.bool "successful transaction preserves concurrent account selections" true
+      (Result.is_ok (resolve ()));
+    (match Actions.save ~binary ~base_path:base request with
+     | Error (Actions.Save_failed Runtime_setup_batch.Changed_configuration) -> ()
+     | _ -> Alcotest.fail "lost-response retry must report revision conflict, not missing credentials");
     Alcotest.check Alcotest.bool "successful save retains the actual account" true (Sys.is_directory account_home);
     let parsed=Runtime_toml.parse_file runtime |> Result.get_ok in
+    if protocol="muse-serve" then (
+      let inventory = Runtime_wizard_inventory.to_json parsed in
+      let rows = inventory |> member "runtimes" |> to_list in
+      let selected_row = List.find (fun row -> row |> member "provider_id" = `String id) rows in
+      Alcotest.check Alcotest.int "existing model inventory retains explicit byte capacity"
+        45678 (selected_row |> member "max_prompt_bytes" |> to_int));
     let homes=List.filter_map (fun (p:Runtime_schema.provider) -> p.account_home) parsed.providers in
     Alcotest.check Alcotest.bool "selected native home survives save byte-for-byte" true (List.mem account_home homes))
     ["selected-claude","claude-code","claude";"selected-codex","codex-app-server","codex";

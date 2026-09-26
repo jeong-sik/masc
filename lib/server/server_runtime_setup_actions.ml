@@ -76,7 +76,7 @@ let private_key ~sw pending secret =
     pending := key :: !pending;
     Eio.Switch.on_release sw (fun () -> Runtime_setup_credentials.remove_uncommitted key);
     Ok ["credential_file",`String (Runtime_setup_credentials.reference_path key)]
-let source_template ?native_leases ~sw ~pending ~workspace config request =
+let source_template ~sw ~pending ~workspace config request =
   let* request = fields ["integration_id";"endpoint";"api_key";"account_ref"] ["integration_id"] request in
   let* id = text (value "integration_id" request) in
   let inventory = Runtime_wizard_inventory.to_json config in
@@ -105,10 +105,6 @@ let source_template ?native_leases ~sw ~pending ~workspace config request =
       let* command=text (value "command" selected) in
       let* binding = Runtime_setup_accounts.resolve ~workspace ~integration_id:id ~cli_path:command reference
         |> Result.map_error (fun _ -> Credential_unavailable) in
-      (match binding with
-       | Runtime_setup_accounts.Native_home _ ->
-         Option.iter (fun leases -> leases := (id, command, reference) :: !leases) native_leases
-       | Antigravity_account _ -> ());
       Ok (Some binding)
     | Some _ -> Error Invalid_request in
   let* credentials = match account,List.assoc_opt "api_key" request with
@@ -232,7 +228,7 @@ let select_account ~base_path request =
          | None -> Error Credential_unavailable))
     | Antigravity | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> Error Unsupported_connection in
   let* cli_path=text (value "command" selected) in
-  let* reference=Runtime_setup_accounts.lease_home ~workspace:base_path
+  let* reference=Runtime_setup_accounts.register_home ~workspace:base_path
       ~integration_id ~cli_path ~account_home:home
     |> Result.map_error (fun _ -> Credential_unavailable) in
   Ok (`Assoc ["schema", `String "masc.web_setup_account_selection.v1";
@@ -332,12 +328,11 @@ let save ~binary ~base_path request =
     let* selection=list (value "selection" body) in
     let* config=config ~base_path in
     let pending=ref [] in
-    let native_leases=ref [] in
     let rec prepare = function
       | [] -> Ok []
       | connection::tail ->
         let* row=fields ["source";"models"] ["source";"models"] connection in
-        let* template,_,_=source_template ~native_leases ~sw ~pending ~workspace:base_path config (value "source" row) in
+        let* template,_,_=source_template ~sw ~pending ~workspace:base_path config (value "source" row) in
         let* models=list (value "models" row) in
         let* ()=if models=[] then Error Invalid_request else Ok () in
         let rec specs = function [] -> Ok [] | model::tail ->
@@ -369,16 +364,4 @@ let save ~binary ~base_path request =
         ~expected_revision:revision ~specs ~runtime_ids:ids
         ~default_runtime_id:primary ~verify:true ()
         |> Result.map_error (fun e -> Save_failed e) in
-      List.sort_uniq (fun (_,_,a) (_,_,b) -> String.compare
-        (Runtime_setup_accounts.reference_to_string a)
-        (Runtime_setup_accounts.reference_to_string b)) !native_leases
-      |> List.iter (fun (integration_id,cli_path,reference) ->
-        match Runtime_setup_accounts.release_native_home ~workspace:base_path
-            ~integration_id ~cli_path reference with
-        | Ok () -> ()
-        | Error error ->
-          (* The configuration is already committed; cleanup cannot turn its
-             success receipt into a retry that might duplicate the transaction. *)
-          Log.Server.warn "Saved setup could not release its account reference: %s"
-            (Runtime_setup_accounts.error_message error));
       Ok (Runtime_setup_batch.receipt_json receipt))

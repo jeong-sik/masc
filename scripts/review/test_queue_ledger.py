@@ -177,6 +177,14 @@ raise SystemExit(result.returncode)
         self.assertEqual(self.ledger()["waits_on"],
                          "dependency:.github/actions/install-ocaml-deps/install.sh")
 
+    def test_root_dune_policy_invalidates_ocaml_run(self):
+        self.main_change("dune")
+        self.assertEqual(self.ledger()["waits_on"], "dependency:dune")
+
+    def test_root_dune_workspace_invalidates_ocaml_run(self):
+        self.main_change("dune-workspace")
+        self.assertEqual(self.ledger()["waits_on"], "dependency:dune-workspace")
+
     def test_docs_only_does_not_inherit_ocaml_pin_dependency(self):
         self.make_pr("docs/example.md")
         self.main_change("masc.opam.locked")

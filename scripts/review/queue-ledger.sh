@@ -170,7 +170,7 @@ dune_names_unique() {
 }
 
 # These are inputs consumed by pr-check.yml: the setup action hashes the root
-# opam manifests, lock, dune-project and pin script; pin/install actions execute
+# opam manifests, lock, root Dune inputs and pin script; pin/install actions execute
 # their own scripts, and setup invokes the cache-freshness script. A change to
 # these inputs invalidates earlier OCaml evidence even without a shared .ml file.
 # Keep docs-only PRs separate: this is dependency coverage, not a global gate.
@@ -178,7 +178,7 @@ stale_dependencies() ( # changed-main-paths pr-files
   set -o pipefail
   printf '%s\n' "$2" | tr ',' '\n' | grep -E '\.(ml|mli)$' >/dev/null || return 0
   printf '%s\n' "$1" | awk '
-    /^(masc\.opam\.locked|dune-project|[^\/]+\.opam)$/ ||
+    /^(masc\.opam\.locked|dune|dune-workspace|dune-project|[^\/]+\.opam)$/ ||
     /^scripts\/(opam-pin-external-deps\.sh|ci\/opam-cache-freshness\.sh)$/ ||
     /^\.github\/actions\/(setup-ocaml-toolchain|pin-ocaml-deps|install-ocaml-deps)\// ||
     /^\.github\/workflows\/pr-check\.yml$/ { print }

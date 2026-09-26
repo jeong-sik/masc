@@ -1229,6 +1229,46 @@ let test_unicode_task_title () =
     Alcotest.(check bool) "unicode task" true (contains_check result)
   )
 
+let test_backlog_copies_preserve_pretty_utf8 () =
+  with_test_env (fun config ->
+    ignore (Workspace.add_task config ~title:"공유 JSON" ~priority:1
+      ~description:"initial");
+    let before = Workspace.read_backlog config in
+    let changed =
+      { before with tasks = List.map (fun (task : Masc_domain.task) ->
+          { task with description = "한글\tvalue\x00tail\xff" }) before.tasks }
+    in
+    (match Workspace.write_backlog_result config changed with
+     | Error message -> Alcotest.fail message
+     | Ok outcome ->
+       Alcotest.(check int) "one committed revision" (before.version + 1)
+         outcome.committed_revision;
+       Alcotest.(check bool) "both copies settled" true
+         (outcome.primary_mirror_error = None && outcome.recovery_error = None));
+    let stored = Workspace.read_backlog config in
+    (match stored.tasks with
+     | [ task ] -> Alcotest.(check string) "writer sanitizes the task text"
+         "한글\tvalue tail\xEF\xBF\xBD" task.description
+     | _ -> Alcotest.fail "expected one persisted task");
+    let read_file path = In_channel.with_open_bin path In_channel.input_all in
+    let primary = Workspace.backlog_path config in
+    let recovery = backlog_recovery_path config in
+    let expected = Yojson.Safe.pretty_to_string (Masc_domain.backlog_to_yojson stored) in
+    Alcotest.(check string) "primary retains the existing pretty format"
+      expected (read_file primary);
+    Alcotest.(check string) "recovery contains the same encoded bytes"
+      expected (read_file recovery);
+    Out_channel.with_open_text recovery (fun oc -> output_string oc "{}");
+    (match Workspace_utils.with_file_lock config
+       (Workspace.backlog_lock_path config)
+       (fun () -> Workspace.repair_backlog_copies_result config stored) with
+     | Error message -> Alcotest.fail message
+     | Ok () -> ());
+    Alcotest.(check string) "settlement preserves primary revision and bytes"
+      expected (read_file primary);
+    Alcotest.(check string) "settlement restores the same recovery bytes"
+      expected (read_file recovery))
+
 (* ============================================================ *)
 (* Reset & Cleanup Tests                                        *)
 (* ============================================================ *)
@@ -2755,6 +2795,8 @@ let () =
       Alcotest.test_case "korean agent name" `Quick test_korean_agent_name;
       Alcotest.test_case "emoji in message" `Quick test_emoji_in_message;
       Alcotest.test_case "unicode task title" `Quick test_unicode_task_title;
+      Alcotest.test_case "backlog copies preserve pretty UTF-8" `Quick
+        test_backlog_copies_preserve_pretty_utf8;
     ];
 
     (* === Reset Tests === *)

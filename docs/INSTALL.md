@@ -147,7 +147,7 @@ To install one specific release instead of the latest one, take that tag's
 installer and pin it. Check that the tag is listed on GitHub Releases first:
 
 ```bash
-TAG=v0.39.0
+TAG=v0.41.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -432,6 +432,17 @@ masc sandbox-image --runtime apple_container
 # separate image store for nerdctl/Kata Keepers
 masc sandbox-image --runtime nerdctl_kata
 ```
+
+Each build gets its own tag, `masc-sandbox-base:<UTC minute>-<input hash>`,
+and the command prints it; name that tag in the Keeper TOML's
+`sandbox_image`. A tag already in the store is refused rather than rebuilt,
+so an image a Keeper runs on never changes under the same name. The
+shipped Keepers name `masc-sandbox:general`: `masc setup` builds it when the
+store lacks it and leaves it alone when it is there, and
+`masc sandbox-image --tag masc-sandbox:general` builds it by hand. On Apple
+Container the runtime also builds that one tag on a Keeper's first boot;
+Docker and nerdctl do not. Recipes other than `base` live under
+`sandbox-images/` in a checkout: `masc sandbox-image --recipe ocaml --source .`.
 
 On Linux, create the Keeper with the same base path as the running server.
 First prepare the Kata runtime and image above and the server's model

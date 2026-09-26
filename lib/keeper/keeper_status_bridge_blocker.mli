@@ -16,9 +16,6 @@ type runtime_blocker_surface = {
   summary : string Lazy.t;
 }
 
-val blocker_class_of_core_error :
-  Agent_core.Error.t -> blocker_class option
-
 (** [latest_receipt] is read only for [Turn_consecutive_failures], whose
     count carries no cause; the summary then names the newest receipt's
     terminal reason when that receipt is a failed turn. *)

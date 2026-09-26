@@ -341,6 +341,7 @@ let test_domain_candidate_id_mismatch_advances_to_declared_successor () =
       (match
          Exact_flow.execute
            ~clock
+           ~callback_error_to_string:Fun.id
            ~before_dispatch
            ~before_advance
            prepared
@@ -411,6 +412,7 @@ let test_keeper_preference_reorders_the_board_lane () =
       let result =
         Exact_flow.execute
           ~clock
+          ~callback_error_to_string:Fun.id
           ~before_dispatch:(fun _ -> Ok ())
           ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
           prepared
@@ -625,6 +627,7 @@ let test_mixed_semantic_exhaustion_walks_cli_tail () =
         Exact_flow.execute
           ~cli_runner:(cli_success_runner candidate cli_calls)
           ~clock
+          ~callback_error_to_string:Fun.id
           ~before_dispatch:(fun provenance ->
             dispatches := provenance :: !dispatches;
             Ok ())
@@ -675,12 +678,13 @@ let test_mixed_semantic_rejection_and_cli_failure_keep_both_causes () =
       in
       let before = board_attention_run_ids () in
       let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
-        Error (Masc.Fusion_official_client.Setup_failure (Provider_error "client unavailable"))
+        Error (Masc.Fusion_official_client.Setup_failure "client unavailable")
       in
       (match
          Exact_flow.execute
            ~cli_runner:runner
            ~clock
+           ~callback_error_to_string:Fun.id
            ~before_dispatch:(fun _ -> Ok ())
            ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
            prepared
@@ -743,6 +747,7 @@ let test_mixed_advanceable_final_failure_walks_cli_tail () =
         Exact_flow.execute
           ~cli_runner:(cli_success_runner candidate cli_calls)
           ~clock
+          ~callback_error_to_string:Fun.id
           ~before_dispatch:(fun provenance ->
             dispatches := provenance :: !dispatches;
             Ok ())
@@ -785,6 +790,7 @@ let test_mixed_non_advanceable_terminal_stops_before_cli () =
         Exact_flow.execute
           ~cli_runner:(cli_success_runner candidate cli_calls)
           ~clock
+          ~callback_error_to_string:Fun.id
           ~before_dispatch:(fun _ -> Ok ())
           ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
           prepared
@@ -832,6 +838,7 @@ let test_mixed_before_advance_failure_stops_before_cli () =
         Exact_flow.execute
           ~cli_runner:(cli_success_runner candidate cli_calls)
           ~clock
+          ~callback_error_to_string:Fun.id
           ~before_dispatch:(fun _ -> Ok ())
           ~before_advance:(fun ~failed:_ ~next:_ -> Error "disk")
           prepared
@@ -871,6 +878,7 @@ let test_mixed_before_dispatch_failure_stops_before_cli () =
         Exact_flow.execute
           ~cli_runner:(cli_success_runner candidate cli_calls)
           ~clock
+          ~callback_error_to_string:Fun.id
           ~before_dispatch:(fun _ -> Error "disk")
           ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
           prepared
@@ -906,12 +914,13 @@ let test_mixed_cli_failure_keeps_http_evidence () =
       let cli_calls = ref 0 in
       let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
         incr cli_calls;
-        Error (Masc.Fusion_official_client.Setup_failure (Provider_error "client unavailable"))
+        Error (Masc.Fusion_official_client.Setup_failure "client unavailable")
       in
       match
         Exact_flow.execute
           ~cli_runner:runner
           ~clock
+          ~callback_error_to_string:Fun.id
           ~before_dispatch:(fun _ -> Ok ())
           ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
           prepared
@@ -963,6 +972,7 @@ let test_mixed_cli_cancellation_propagates_once () =
           Exact_flow.execute
             ~cli_runner:runner
             ~clock
+            ~callback_error_to_string:Fun.id
             ~before_dispatch:(fun _ -> Ok ())
             ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
             prepared
@@ -999,6 +1009,7 @@ let test_cli_only_executes_without_http_provenance () =
         Ok (Yojson.Safe.to_string (judgment_output ~candidate_id:candidate.Candidate.candidate_id)) in
       match Exact_flow.execute ~cli_runner:runner
         ~clock
+        ~callback_error_to_string:Fun.id
         ~before_dispatch:(fun _ -> Alcotest.fail "CLI-only must not bind an HTTP receipt")
         ~before_advance:(fun ~failed:_ ~next:_ -> Alcotest.fail "CLI-only must not advance HTTP")
         prepared with
@@ -1033,6 +1044,7 @@ let test_cli_only_failure_keeps_the_walked_slots () =
         Exact_flow.execute
           ~cli_runner:runner
           ~clock
+          ~callback_error_to_string:Fun.id
           ~before_dispatch:(fun _ -> Alcotest.fail "CLI-only must not bind an HTTP receipt")
           ~before_advance:(fun ~failed:_ ~next:_ -> Alcotest.fail "CLI-only must not advance HTTP")
           prepared
@@ -1053,6 +1065,7 @@ let execute_with_tail ~clock ~runner prepared =
   Exact_flow.execute
     ~cli_runner:runner
     ~clock
+    ~callback_error_to_string:Fun.id
     ~before_dispatch:(fun _ -> Ok ())
     ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
     prepared
@@ -1250,6 +1263,7 @@ let test_persistence_failure_does_not_walk_the_cli_tail () =
         Exact_flow.execute
           ~cli_runner:runner
           ~clock
+          ~callback_error_to_string:Fun.id
           ~before_dispatch:(fun _ -> Error "disk")
           ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
           prepared
@@ -1342,15 +1356,17 @@ let test_flow_bookkeeping_failures_are_not_provider_exhaustion () =
           , Some "operation_id_generation_failed detail=\"operation id\"" )
         ; ( Exact_output.Flow_before_measurement_dispatch_callback_failed
               { measurement; cause = "measurement intent"; evidence }
-          , None )
+          , Some "cause=measurement intent" )
         ; ( Exact_output.Flow_measurement_terminal_callback_failed
               { measurement; cause = "measurement terminal"; evidence }
-          , None )
+          , Some "cause=measurement terminal" )
         ]
       in
       List.iter
         (fun (failure, expected_cause) ->
-           match Exact_flow.terminal_of_flow_error failure with
+           match
+             Exact_flow.terminal_of_flow_error ~callback_error_to_string:Fun.id failure
+           with
            | Exact_flow.Flow_bookkeeping_failed { detail; _ } ->
              Option.iter
                (fun expected ->
@@ -1482,6 +1498,7 @@ let execute_behind_jev ~name ~jev_choice =
         let result =
           Exact_flow.execute
             ~clock
+            ~callback_error_to_string:Fun.id
             ~before_dispatch:(fun _ -> Ok ())
             ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
             prepared
@@ -1646,6 +1663,7 @@ let test_jev_not_relevant_cli_fallback_is_in_the_terminal_entry () =
             Exact_flow.execute
               ~cli_runner:(cli_success_runner candidate cli_calls)
               ~clock
+              ~callback_error_to_string:Fun.id
               ~before_dispatch:(fun _ -> Ok ())
               ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
               prepared

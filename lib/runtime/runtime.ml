@@ -4923,6 +4923,21 @@ let exact_slot_list_key = function
   | Cli_slots -> "cli_slots"
 ;;
 
+let exact_slot_list_of_api_format = function
+  | Runtime_schema.Codex_app_server_runtime
+  | Runtime_schema.Antigravity_cli_runtime
+  | Runtime_schema.Claude_code_runtime -> Cli_slots
+  | Runtime_schema.Messages_api
+  | Runtime_schema.Chat_completions_api
+  | Runtime_schema.Ollama_api
+  | Runtime_schema.Gemini_api
+  | Runtime_schema.Vertex_gemini_api -> Catalog_slots
+;;
+
+let exact_slot_list_key_of_api_format api_format =
+  exact_slot_list_key (exact_slot_list_of_api_format api_format)
+;;
+
 let exact_slot_list_of_new_slot (config : Runtime_schema.config) slot =
   match
     List.find_opt (fun (binding : binding) -> String.equal (id_of_binding binding) slot)
@@ -4932,16 +4947,7 @@ let exact_slot_list_of_new_slot (config : Runtime_schema.config) slot =
   | Some binding ->
     (match Runtime_schema.provider_of_id config binding.provider_id with
      | None -> Catalog_slots
-     | Some provider ->
-       (match provider.api_format with
-        | Runtime_schema.Codex_app_server_runtime
-        | Runtime_schema.Antigravity_cli_runtime
-        | Runtime_schema.Claude_code_runtime -> Cli_slots
-        | Runtime_schema.Messages_api
-        | Runtime_schema.Chat_completions_api
-        | Runtime_schema.Ollama_api
-        | Runtime_schema.Gemini_api
-        | Runtime_schema.Vertex_gemini_api -> Catalog_slots))
+     | Some provider -> exact_slot_list_of_api_format provider.api_format)
 ;;
 
 let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =

@@ -180,15 +180,35 @@ let read_http ~fetch ~scope http =
   Ok ()
 ;;
 
+(* One HTTP read, with its failure logged.  A read that raises logs only the
+   exception's constructor: the request carried the key, and nothing bounds
+   what an HTTP client's exception message quotes. *)
+let read_http_logged ~fetch ~scope http =
+  let scope_label = Runtime_quota_window.scope_to_string scope in
+  match read_http ~fetch ~scope http with
+  | Ok () -> ()
+  | Error error ->
+    Log.Runtime_agent.warn
+      "provider usage read failed for %s (shape %s): %s"
+      scope_label
+      (shape_label http)
+      (http_error_to_string error)
+  | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+  | exception exn ->
+    Log.Runtime_agent.warn
+      "provider usage read raised for %s (shape %s): %s"
+      scope_label
+      (shape_label http)
+      (Printexc.exn_slot_name exn)
+;;
+
 (* One scope's read, with its failure logged.  A read that raises is logged
    with its scope too, so it never skips the scopes after it; only a
-   cancellation passes through.  An HTTP read that raises logs only the
-   exception's constructor: the request carried the key, and nothing
-   bounds what an HTTP client's exception message quotes. *)
+   cancellation passes through. *)
 let read_scope ~codex ~fetch { scope; how } =
-  let scope_label = Runtime_quota_window.scope_to_string scope in
   match how with
   | Codex exec ->
+    let scope_label = Runtime_quota_window.scope_to_string scope in
     (match codex ~scope exec with
      | Ok () -> ()
      | Error detail ->
@@ -199,22 +219,7 @@ let read_scope ~codex ~fetch { scope; how } =
          "provider usage read raised for %s: %s"
          scope_label
          (Printexc.to_string exn))
-  | Http http ->
-    (match read_http ~fetch ~scope http with
-     | Ok () -> ()
-     | Error error ->
-       Log.Runtime_agent.warn
-         "provider usage read failed for %s (shape %s): %s"
-         scope_label
-         (shape_label http)
-         (http_error_to_string error)
-     | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
-     | exception exn ->
-       Log.Runtime_agent.warn
-         "provider usage read raised for %s (shape %s): %s"
-         scope_label
-         (shape_label http)
-         (Printexc.exn_slot_name exn))
+  | Http http -> read_http_logged ~fetch ~scope http
 ;;
 
 let read_scopes ~codex ~fetch readables = List.iter (read_scope ~codex ~fetch) readables
@@ -223,6 +228,64 @@ let read_all ~mgr ~net ~clock ~cwd =
   let codex ~scope exec = read_codex ~mgr ~clock ~cwd ~scope exec in
   let fetch ~api_key url = get_usage ~net ~clock ~api_key url in
   read_scopes ~codex ~fetch (readable_scopes ())
+;;
+
+(* A static key that is empty never reaches a request ([usage_report]
+   refuses it first) and stays empty while the runtime lives, so repeating
+   its read would only repeat the warning the start read logged.  A
+   refreshable credential may answer on a later read. *)
+let may_answer (http : http_read) =
+  match http.credential with
+  | Llm_provider.Provider_config.Static_credential, api_key ->
+    not (Llm_provider.Secret.is_empty api_key)
+  | Llm_provider.Provider_config.Refreshable_credential _, _ -> true
+;;
+
+let repeat_period (http : http_read) =
+  if may_answer http then http.usage_read.refresh_s else None
+;;
+
+(* The account's HTTP read as [readables] declares it, while it repeats. *)
+let repeat_of readables scope =
+  List.find_map
+    (fun (readable : readable) ->
+       match readable.how with
+       | Http http when Runtime_quota_window.scope_equal readable.scope scope ->
+         Option.map (fun period -> period, http) (repeat_period http)
+       | Http _ | Codex _ -> None)
+    readables
+;;
+
+let rec refresh_scope ~clock ~fetch ~catalogue scope period =
+  Eio.Time.sleep clock period;
+  match repeat_of (catalogue ()) scope with
+  | None ->
+    Log.Runtime_agent.info
+      "provider usage refresh for %s stopped: the catalogue no longer holds a \
+       usage-read.refresh-s it can answer"
+      (Runtime_quota_window.scope_to_string scope)
+  | Some (period, http) ->
+    read_http_logged ~fetch ~scope http;
+    refresh_scope ~clock ~fetch ~catalogue scope period
+;;
+
+let refresh_readables ~clock ~fetch ~catalogue =
+  let repeating =
+    List.filter_map
+      (fun (readable : readable) ->
+         match readable.how with
+         | Http http -> Option.map (fun period -> readable.scope, period) (repeat_period http)
+         | Codex _ -> None)
+      (catalogue ())
+  in
+  Eio.Fiber.List.iter
+    (fun (scope, period) -> refresh_scope ~clock ~fetch ~catalogue scope period)
+    repeating
+;;
+
+let refresh_declared ~net ~clock =
+  let fetch ~api_key url = get_usage ~net ~clock ~api_key url in
+  refresh_readables ~clock ~fetch ~catalogue:readable_scopes
 ;;
 
 (* Scopes a background read is running for. Keepers sharing one account are

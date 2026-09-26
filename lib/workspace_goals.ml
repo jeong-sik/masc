@@ -251,6 +251,7 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
        never the pre-verification default, which would disguise corruption as
        "not verified yet". *)
     let records = Goal_verification.load_records_authoritative ctx.config in
+    let measurements = Goal_measurement.load ctx.config in
     let goal_json (goal : Goal_store.goal) =
       let verification =
         match records with
@@ -267,7 +268,9 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
           |> Goal_verification.record_to_yojson_for_goal ~goal
       in
       match Goal_store.goal_to_yojson goal with
-      | `Assoc fields -> `Assoc (fields @ [ "verification", verification ])
+      | `Assoc fields ->
+          `Assoc (fields @ [ "verification", verification
+                           ; "measurement", Goal_measurement.projection measurements goal ])
       | json -> json
     in
     ok_result
@@ -381,6 +384,25 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             ; ( "linked_task_title_example"
               , `String (Printf.sprintf "[child] %s" goal.title) )
             ])
+;;
+
+let handle_goal_measure ~tool_name ~start_time (ctx : context) args
+    : Tool_result.result =
+  match Goal_measurement.record_json ctx.config ~actor:ctx.agent_name args with
+  | Ok measurement ->
+      ok_result ~tool_name ~start_time
+        [ "measurement", Goal_measurement.to_yojson measurement
+        ; "verification", `String "reported_only"
+        ]
+  | Error error ->
+      let code =
+        match error with
+        | Goal_measurement.Invalid_request _ -> Validation_error
+        | Goal_measurement.Conflict _ -> Conflict
+        | Goal_measurement.Store_error _ -> Internal_error
+      in
+      error_result_typed ~tool_name ~start_time ~code
+        (Goal_measurement.error_to_string error)
 ;;
 
 (* RFC-0387 stage 2 — the completion gate.

@@ -64,6 +64,21 @@ type settlement =
       ; continuation_wake : Keeper_registry.wakeup_outcome option
       }
 
+type wake_skip_reason =
+  | Keeper_paused
+  | Keeper_meta_absent
+  | Keeper_meta_read_failed of string
+
+type wake_admission =
+  | Wake_admitted
+  | Wake_skipped of wake_skip_reason
+(** Checked once per wake, before any partition I/O, from the Keeper meta the
+    heartbeat reads before dispatch. A paused, absent, or unreadable meta skips
+    the whole drain for that wake and leaves the ledger untouched. A committed
+    resume re-wakes the worker
+    ([Keeper_board_attention_worker_wake.request_after_resume]), so Board work
+    recorded during the pause drains after resume. *)
+
 type fatal_stage =
   | Registration
   | Process_start_recovery
@@ -266,4 +281,8 @@ module For_testing : sig
     base_path:string -> keeper_name:string -> (bool -> 'a) -> 'a
   (** Run one lifecycle with process-recovery ownership when available, releasing
       that ownership on both normal return and exceptions. *)
+
+  val wake_admission_of_meta_read :
+    (Keeper_meta_contract.keeper_meta option, string) result -> wake_admission
+  (** The per-wake pause decision over one meta read result. *)
 end

@@ -271,8 +271,10 @@ let test_memory_cache_mirror_failure_retries_without_rewriting_primary () =
     (match result with
      | Ok (Workspace.Task_delete_cleanup_failed (_::_)) -> ()
      | _ -> Alcotest.fail "Memory mirror failure must remain partial");
-    let primary = match Workspace.read_json_result config path with
-      | Ok json -> json | Error message -> Alcotest.fail message in
+    let primary = match Workspace.read_json_doc config path with
+      | Ok (Some json) -> json
+      | Ok None -> Alcotest.fail "primary agent record is absent"
+      | Error error -> Alcotest.fail (Workspace.json_doc_error_to_string error) in
     (match Masc_domain.agent_of_yojson primary with
      | Ok agent -> Alcotest.(check (option string)) "primary already cleared" None agent.current_task
      | Error message -> Alcotest.fail message);
@@ -285,7 +287,7 @@ let test_memory_cache_mirror_failure_retries_without_rewriting_primary () =
     Unix.rmdir path; Sys.rename (path ^ ".saved") path;
     (match Workspace.delete_task_r config ~task_id:target with
      | Ok Workspace.Task_already_absent -> () | _ -> Alcotest.fail "mirror retry failed");
-    Alcotest.(check bool) "retry leaves primary identical" true (Workspace.read_json_result config path = Ok primary);
+    Alcotest.(check bool) "retry leaves primary identical" true (Workspace.read_json_doc config path = Ok (Some primary));
     Alcotest.(check bool) "mirror now matches current primary" true
       (Yojson.Safe.from_file path = primary))
 ;;

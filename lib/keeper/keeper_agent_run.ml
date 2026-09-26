@@ -2175,6 +2175,7 @@ let run_turn
            ~receipt_runtime_observation_ref
            ~receipt_lane_attempt_index_ref
            ~receipt_response_text_present_ref
+           ~spend:(s.Keeper_run_tools.spend_attempts ())
            ()
        in
        (* RFC-0233 PR-3: TurnRecord — same per-keeper-turn cadence as the
@@ -2200,26 +2201,29 @@ let run_turn
         let usage : Turn_record.usage =
           match turn_result with
           | Ok
-              ({ runtime_observation =
+              { runtime_observation =
                   Some { request_context = Some (context : Runtime_observation.request_context); _ }
               ; _
-              } as result) ->
-            (* A runtime that reports the newest request's occupancy apart from
-               the turn's spend records that request here: this record's
-               readers ask what one request carried. Codex reports the same
-               request's output; Claude Code reports a turn total separately. *)
-            let request_output_tokens =
-              match result.usage_reported, result.usage_scope with
-              | true, Runtime_usage_scope.Per_request -> Some result.usage.output_tokens
-              | false, _
-              | true, (Runtime_usage_scope.Turn_total
-                      | Runtime_usage_scope.Conversation_cumulative
-                      | Runtime_usage_scope.Usage_scope_unavailable) -> None
-            in
+              } ->
+            (* A runtime that reports its newest request apart from the
+               turn's spend records that request here: this record's readers
+               ask what one request carried. Its output is there when the
+               runtime reports that request's final count; the turn's output
+               goes to [turn_output_tokens] below, under its own scope. Its
+               cache split is absent when the runtime reports only an
+               estimate of the whole context, as it does after a compaction. *)
             { input_tokens = Some context.input_tokens
-            ; output_tokens = request_output_tokens
-            ; cache_creation_input_tokens = Some context.cache_creation_input_tokens
-            ; cache_read_input_tokens = Some context.cache_read_input_tokens
+            ; output_tokens = context.output_tokens
+            ; cache_creation_input_tokens =
+                Option.map
+                  (fun (cache : Runtime_observation.request_cache) ->
+                     cache.cache_creation_input_tokens)
+                  context.cache
+            ; cache_read_input_tokens =
+                Option.map
+                  (fun (cache : Runtime_observation.request_cache) ->
+                     cache.cache_read_input_tokens)
+                  context.cache
             ; scope = Runtime_usage_scope.Per_request
             }
           | Ok result when result.usage_reported ->
@@ -2411,6 +2415,11 @@ let run_turn
                  run_ref.worker_run_id detail;
                None)
         in
+        let provider_context =
+          match turn_result with
+          | Ok result -> result.runtime_observation
+          | Error _ -> None
+        in
         (match !request_wire_evidence_ref with
          | Some
              { serialized_observation = Some wire
@@ -2446,6 +2455,9 @@ let run_turn
                Keeper_execution_receipt.stop_reason_to_string
                !receipt_stop_reason_ref)
           ~context_window:settled_context_window
+          ?provider_context_window:
+            (Option.bind provider_context
+               (fun observation -> observation.reported_context_window))
           ~price_input_per_million
           ~price_output_per_million
           ~request_latency_ms

@@ -22,12 +22,19 @@ val tail_bytes : int
 val current : keeper_name:string -> t option
 
 val note_text : keeper_name:string -> now:float -> string -> unit
-(** Record the newest response text's tail. Blank text is ignored — a
-    tool-only turn must not erase the last visible words. *)
+(** Record the newest response text's tail, redacted with the snapshot
+    {!reset} armed. Blank text is ignored — a tool-only turn must not erase
+    the last visible words. Before any {!reset} for this keeper no text is
+    recorded. *)
 
 val note_tool : keeper_name:string -> now:float -> string -> unit
 
-val reset : keeper_name:string -> now:float -> unit
+val reset : keeper_name:string -> now:float -> redaction:Keeper_secret_redaction.t -> unit
+(** Start the turn's preview. Every response text the turn records passes
+    through [redaction] first; streamed deltas pass through one
+    {!Keeper_stream_text_redaction} per provider attempt, so the tail grows a
+    line at a time and a secret split between deltas never reaches it. *)
+
 val note_attempt : keeper_name:string -> now:float -> runtime_id:string -> unit
 val note_failure : keeper_name:string -> now:float -> runtime_id:string -> string -> unit
 val note_stream : keeper_name:string -> now:float -> Agent_core.Types.sse_event -> unit

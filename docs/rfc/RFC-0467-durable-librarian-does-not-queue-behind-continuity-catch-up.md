@@ -1,14 +1,14 @@
 ---
 rfc: "0467"
 title: "durable 회차는 연속성 따라잡기 뒤에 줄 서지 않는다"
-status: Draft
+status: Accepted
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-25
 author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["librarian-lifecycle", "0463-librarian-absorb-rewrite-round"]
-implementation_prs: []
+implementation_prs: ["#39036"]
 ---
 
 # RFC-0467 — durable 회차는 연속성 따라잡기 뒤에 줄 서지 않는다

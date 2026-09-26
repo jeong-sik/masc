@@ -125,22 +125,17 @@ let test_stored_roundtrip () =
   | O.Invalid_marker { detail } ->
       Alcotest.failf "expected Decoded, got Invalid_marker: %s" detail
 
-(* [Scanf.sscanf] stops when the format is satisfied; it does not require the
-   input to be spent. Trailing bytes after the closing bracket are therefore
-   ignored rather than rejected. Same standing as above: pinned, not live. *)
-let test_trailing_bytes_after_the_marker_are_ignored () =
+(* The marker is the whole value. Bytes after the closing bracket are a
+   malformed marker, not a valid one with a tail to drop. *)
+let test_trailing_bytes_after_the_marker_are_rejected () =
   let artifact_ref =
     ref_exn ~sha256:(String.make 64 'c') ~bytes:7 ~preview:"hi"
       ~mime:"text/plain"
   in
   let encoded = O.encode_for_agent_core (O.Stored artifact_ref) in
   match O.decode_from_agent_core (encoded ^ "trailing bytes") with
-  | O.Decoded { bytes; _ } ->
-      Alcotest.(check int) "decoded the marker and dropped the tail" 7 bytes
-  | O.Invalid_marker _ ->
-      (* A codec that grew a full-consumption requirement would land here;
-         that is the better behaviour, and this test should then assert it. *)
-      ()
+  | O.Invalid_marker _ -> ()
+  | O.Decoded _ -> Alcotest.fail "a marker with trailing bytes must not decode"
   | O.Not_marker -> Alcotest.fail "expected a marker"
 
 let test_normalized_artifact_ref_roundtrip () =
@@ -1960,8 +1955,8 @@ let () =
         [
           Alcotest.test_case "inline" `Quick test_inline_roundtrip;
           Alcotest.test_case "stored" `Quick test_stored_roundtrip;
-          Alcotest.test_case "trailing bytes after the marker are ignored"
-            `Quick test_trailing_bytes_after_the_marker_are_ignored;
+          Alcotest.test_case "trailing bytes after the marker are rejected"
+            `Quick test_trailing_bytes_after_the_marker_are_rejected;
           Alcotest.test_case
             "normalized artifact reference"
             `Quick

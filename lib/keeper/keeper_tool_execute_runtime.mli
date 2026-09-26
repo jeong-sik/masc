@@ -25,6 +25,18 @@ val gate_operation : string
 (** The Gate operation name this runtime submits under. Shared with the replay
     path so an approved execute is recognised rather than skipped. *)
 
+val execute_gate_input :
+  input:Yojson.Safe.t ->
+  cwd:string ->
+  sandbox_profile:string ->
+  sandbox_target:string ->
+  Yojson.Safe.t
+(** The Gate input an execute submits: the tool arguments with the resolved
+    [cwd] upserted into them, wrapped with the [cwd], sandbox profile label and
+    sandbox target label the approval is granted under. This is the producer
+    side of the contract {!replay_args_of_gate_input} decodes; tests build
+    their stored-approval fixtures through it so the two cannot drift. *)
+
 val replay_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
 (** Recover the approved tool arguments from the stored Gate input.
 

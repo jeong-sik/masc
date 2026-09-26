@@ -970,6 +970,28 @@ let test_resource_read_keeps_each_part_type () =
       Alcotest.failf "unexpected resource contents (%d parts)"
         (List.length contents)
 
+
+let test_command_menu_keeps_selection_separate_from_draft () =
+  let menu state draft = Command.menu ~keeper_names:["가람"; "가온"] ~state draft |> Option.get in
+  let draft = "/t\nkeep the original body" in
+  let initial = menu Command.Menu_idle draft in
+  let next = menu (Command.menu_step ~direction:Command.Next ~draft initial) draft in
+  check string "arrow selects another command without replacing query" "/thinking \nkeep the original body"
+    (Command.menu_accept next);
+  check int "window contains one selection" 1
+    (Command.menu_window ~max_rows:2 next |> List.filter fst |> List.length);
+  check bool "dismissed exact draft closes" true
+    (Option.is_none (Command.menu ~keeper_names:[] ~state:(Command.Menu_dismissed draft) draft));
+  check bool "changed query opens" true
+    (Option.is_some (Command.menu ~keeper_names:[] ~state:(Command.Menu_dismissed draft) "/d"));
+  check bool "complete command can execute normally" true
+    (Option.is_none (Command.menu ~keeper_names:[] ~state:Command.Menu_idle "/help"));
+  check string "Korean keeper argument remains whole" "/keeper 가온"
+    (let draft = "/keeper 가" in
+     let initial = menu Command.Menu_idle draft in
+     menu (Command.menu_step ~direction:Command.Next ~draft initial) draft |> Command.menu_accept)
+
+
 let () =
   run "tui command"
     [ ( "composer"
@@ -1050,6 +1072,8 @@ let () =
             test_is_slash_navigable
         ; test_case "autocomplete subargument cycling" `Quick
             test_autocomplete_subargument_cycling
+        ; test_case "command menu selection preserves its draft" `Quick
+            test_command_menu_keeps_selection_separate_from_draft
         ] )
     ; ( "tools/call"
       , [ test_case "cancel arguments carry the reason as summary" `Quick

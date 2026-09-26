@@ -254,6 +254,17 @@ val task_message : task_id:string -> title:string -> body:string -> string
     and the operator's own words carry the request. *)
 
 type direction = Next | Prev
+
+type menu_state = Menu_idle | Menu_dismissed of string | Menu_selected of { draft : string; index : int }
+type menu_item = { completion : string; label : string; description : string }
+type menu = private { items : menu_item list; selected : int }
+val menu : keeper_names:string list -> state:menu_state -> string -> menu option
+(** Suggestions describe existing commands. Selection never changes the draft
+    or executes a command. A dismissed menu stays closed until the draft changes. *)
+val menu_step : direction:direction -> draft:string -> menu -> menu_state
+val menu_accept : menu -> string
+val menu_window : max_rows:int -> menu -> (bool * menu_item) list
+(** A contiguous window that always contains the selected row. *)
 (** Direction to step when cycling autocomplete candidates. *)
 
 val autocomplete :

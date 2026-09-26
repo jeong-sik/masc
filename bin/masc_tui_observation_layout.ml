@@ -221,4 +221,10 @@ let context_header_item ~max_cells ~inspect_key observation =
       let with_key text = text ^ " \xc2\xb7 " ^ inspect_key in
       [ with_key measured; measured; with_key figure; figure ]
       |> List.find_opt (fun candidate -> max_cells >= cells candidate)
-  | Context_partial _ | Context_unavailable _ -> None
+  | Context_partial {tokens; _} ->
+      [ Printf.sprintf "Context %d tok · limit —" tokens
+      ; Printf.sprintf "Context %d tok" tokens ]
+      |> List.find_opt (fun candidate -> max_cells >= cells candidate)
+  | Context_unavailable _ ->
+      [ "Context unavailable · " ^ inspect_key; "Context unavailable"; "Context —" ]
+      |> List.find_opt (fun candidate -> max_cells >= cells candidate)

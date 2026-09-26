@@ -9,8 +9,9 @@ matching profile coordinate and the retained original profile link in #39313.
 This is a source investigation clue, not a dominant-bottleneck estimate or a
 before/after speedup. That older profile sustained a modified synthetic Info
 scrolling workload and perturbed execution; its child resource totals included
-the profiler and are not TUI CPU measurements. The current change has no
-candidate performance result yet.
+the profiler and are not TUI CPU measurements. A separate [paired native comparison](comparison/README.md) now records the
+candidate: roster aggregates improve while Info median/p95/max worsen; no
+overall latency improvement is established.
 
 Previously, every ordinary byte passed through Buffer.add_char and even plain
 text allocated a buffer and result. The new scanner locates SGR openers and
@@ -23,5 +24,5 @@ Existing selected-row/theme tests remain. Literal edge cases cover adjacent
 styles, a trailing opener, isolated escape bytes, multiline arbitrary bytes,
 unterminated suffixes and nested openers; plain-text physical reuse is checked.
 Source/interface/test syntax and diff checks passed. Independent review and
-compiled CI are recorded in the PR. No local OCaml build, allocation-volume
+compiled CI are recorded in the PR and comparison/ci.json. No local OCaml build, allocation-volume
 measurement, latency speedup, production change or 0.1ms achievement is claimed.

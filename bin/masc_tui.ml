@@ -7276,9 +7276,9 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
 let handle_slot_edit state ~mailbox edit =
   match Masc_tui_types.plan_slot_edit state edit with
   | Masc_tui_types.Refuse_slot_edit notice -> state.runtime_lane_notice <- Some notice
-  | Masc_tui_types.Send_slot_write { target; slot; request; cursor_after } ->
+  | Masc_tui_types.Send_slot_write { target; slot; request } ->
       Masc_tui_types.dismiss_runtime_lane_notice state;
-      state.runtime_lane_cursor_after_write <- cursor_after;
+      state.runtime_lane_cursor_after_write <- None;
       let written =
         match target with
         | Masc_tui_types.Exact_lane_slots _ -> Masc_tui_types.Standalone_lanes_list
@@ -14928,13 +14928,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            Option.iter
              (fun row ->
                 match written, state.slot_editor with
-                | Masc_tui_types.Standalone_lanes_list, Some editor ->
-                    (* The slot editor's own cursor. A conversation-lane write
-                       moves the Runtime cursor instead, and an append moves
-                       neither. *)
-                    state.slot_editor <-
-                      Some { editor with Masc_tui_types.se_cursor = row }
-                | Masc_tui_types.Standalone_lanes_list, None
+                | Masc_tui_types.Standalone_lanes_list, _ -> ()
                 | Masc_tui_types.Runtime_surface_list, _ ->
                     state.runtime_cursor <- row)
              cursor_after;
@@ -15190,6 +15184,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               with
               | Ok snapshot ->
                   state.runtime_surface <- Some snapshot;
+                  Masc_tui_types.reconcile_slot_editor_selection state;
                   state.runtime_surface_error <- probe_error;
                   Masc_tui_types.runtime_lane_list_reread state
                     ~list:Masc_tui_types.Runtime_surface_list ~generation (Ok ())
@@ -15396,6 +15391,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         match result with
         | Ok snapshot ->
             state.standalone_lanes <- Some snapshot;
+            Masc_tui_types.reconcile_slot_editor_selection state;
             state.standalone_lanes_error <- None;
             (* A refresh may shrink the matrix; the cursor has to stay a valid
                row of the snapshot now in state. The matrix rows never scroll,
@@ -17005,6 +17001,57 @@ let main
                    ^ Masc_tui_http.runtime_config_commit_receipt_summary receipt);
                 launch_runtime_config_load state ~mailbox:async_messages
               | Error detail -> report_action state "error" ("save failed: " ^ detail))))))
+  in
+  let open_selected_slot_config () =
+    match Masc_tui_types.slot_editor_cursor_row state with
+    | None -> show_lanes_action_error state "No slot is selected"
+    | Some { sr_kind = Masc_tui_types.Media_route_slot; _ } ->
+      show_lanes_action_error state "Select an exact lane provider slot"
+    | Some { sr_slot; sr_kind = (Masc_tui_types.Catalog_slot
+                             | Masc_tui_types.Official_client_slot) as kind; _ } ->
+      (* Runtime.toml validates provider ids as dot-free and runtime ids as
+         <provider>.<model>; model ids may contain dots. Read the declared
+         slot itself so a dropped slot can still open the table that needs
+         repair, even before the catalogue's asynchronous read finishes. *)
+      let path =
+        match String.index_opt sr_slot '.' with
+        | Some boundary
+          when boundary > 0 && boundary < String.length sr_slot - 1 ->
+          let provider_id = String.sub sr_slot 0 boundary in
+          let model_id =
+            String.sub sr_slot (boundary + 1)
+              (String.length sr_slot - boundary - 1)
+          in
+          (match kind with
+           | Masc_tui_types.Catalog_slot -> Some [ "providers"; provider_id ]
+           | Masc_tui_types.Official_client_slot -> Some [ provider_id; model_id ]
+           | Masc_tui_types.Media_route_slot -> None)
+        | Some _ | None -> None
+      in
+      (match path with
+       | None ->
+         show_lanes_action_error state
+           (Printf.sprintf "%s has no runtime binding table" sr_slot)
+       | Some path ->
+           let section = runtime_config_path_text path in
+           state.lanes_action_error <- None;
+           state.view <- Config;
+           state.config_pane <- Config_runtime;
+           state.runtime_config_jump_section <- Some path;
+           (match state.runtime_config_view, state.runtime_config_view_error with
+            | (None | Some _), Some _ | None, None ->
+              add_event state "info"
+                (Printf.sprintf "loading runtime.toml for [%s]" section);
+              launch_runtime_config_load state ~mailbox:async_messages
+            | Some _, None ->
+              (match apply_runtime_config_jump state with
+               | Some (_, true) ->
+                 add_event state "info"
+                   (Printf.sprintf "runtime.toml at [%s] - e to edit" section)
+               | Some (_, false) ->
+                 report_action state "error"
+                   (Printf.sprintf "runtime.toml has no [%s] section" section)
+               | None -> ())))
   in
   let selected_runtime_param () =
     List.nth_opt state.runtime_params state.runtime_params_cursor
@@ -20221,11 +20268,7 @@ and is loaded on demand through keeper_skill.
             | Some { se_target = Masc_tui_types.Media_failover_slots; _ } ->
                 state.slot_editor <- None
             | Some _ | None ->
-                state.slot_editor <-
-                  Some
-                    { Masc_tui_types.se_target = Masc_tui_types.Media_failover_slots
-                    ; se_cursor = 0
-                    });
+                Masc_tui_types.open_slot_editor state Masc_tui_types.Media_failover_slots);
            Masc_tui_types.dismiss_runtime_lane_notice state
        | Some "a"
          when state.view = Runtime
@@ -20256,24 +20299,11 @@ and is loaded on demand through keeper_skill.
             | Some _, Some "esc" ->
                 state.slot_editor <- None;
                 Masc_tui_types.dismiss_runtime_lane_notice state
-            | Some editor, Some "j" ->
-                let count =
-                  List.length (Masc_tui_types.slot_editor_rows state)
-                in
-                if editor.Masc_tui_types.se_cursor < count - 1 then
-                  state.slot_editor <-
-                    Some
-                      { editor with
-                        Masc_tui_types.se_cursor = editor.Masc_tui_types.se_cursor + 1
-                      };
+            | Some _, Some "j" ->
+                Masc_tui_types.navigate_slot_editor state Masc_tui_types.Move_down;
                 Masc_tui_types.dismiss_runtime_lane_notice state
-            | Some editor, Some "k" ->
-                if editor.Masc_tui_types.se_cursor > 0 then
-                  state.slot_editor <-
-                    Some
-                      { editor with
-                        Masc_tui_types.se_cursor = editor.Masc_tui_types.se_cursor - 1
-                      };
+            | Some _, Some "k" ->
+                Masc_tui_types.navigate_slot_editor state Masc_tui_types.Move_up;
                 Masc_tui_types.dismiss_runtime_lane_notice state
             | Some _, Some k ->
                 Option.iter
@@ -20290,12 +20320,8 @@ and is loaded on demand through keeper_skill.
            (match Masc_tui_types.selected_standalone_lane state with
             | None -> ()
             | Some lane ->
-                state.slot_editor <-
-                  Some
-                    { Masc_tui_types.se_target =
-                        Masc_tui_types.Exact_lane_slots lane.Masc.Tui_decode.sl_lane
-                    ; se_cursor = 0
-                    };
+                Masc_tui_types.open_slot_editor state
+                  (Masc_tui_types.Exact_lane_slots lane.Masc.Tui_decode.sl_lane);
                 Masc_tui_types.dismiss_runtime_lane_notice state;
                 state.lanes_action_error <- None;
                 (* [d] resolves an HTTP slot's provider table through the
@@ -23795,8 +23821,12 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | Lanes_run_detail _ | Lanes_measurement_detail _ -> ()
                  | Lanes_overview ->
-                     open_lanes_standalone_selection state
-                       ~mailbox:async_messages)
+                     (match state.slot_editor, state.runtime_lane_pick with
+                      | Some _, None -> open_selected_slot_config ()
+                      | Some _, Some _ -> ()
+                      | None, (None | Some _) ->
+                        open_lanes_standalone_selection state
+                          ~mailbox:async_messages))
             | Approvals ->
                 (* The list draws the ask on one row; this is where the whole
                    thing is readable before [y] answers it. *)
@@ -24880,55 +24910,10 @@ and is loaded on demand through keeper_skill.
        | Some "d"
          when state.view = Lanes && state.lanes_mode = Lanes_overview
               && Option.is_some state.slot_editor ->
-           (* Open the selected HTTP slot's [providers.<id>] table, where its
-              request deadline (exact-body-timeout-s) lives. The picker owns
-              focus while it is open, so [d] there does not reach the slot
-              under it. The table key is the catalogue's provider id for that
-              runtime, not a piece of the runtime id. *)
-           (match state.runtime_lane_pick with
-            | Some _ -> ()
-            | None ->
-              (match Masc_tui_types.slot_editor_cursor_row state with
-               | Some { sr_kind = Masc_tui_types.Catalog_slot; sr_slot; _ } ->
-                 (match
-                    List.find_opt
-                      (fun (runtime : Masc.Tui_decode.runtime_option) ->
-                         String.equal runtime.Masc.Tui_decode.ro_id sr_slot)
-                      state.runtime_catalog
-                  with
-                  | Some runtime ->
-                    let path = [ "providers"; runtime.Masc.Tui_decode.ro_provider_id ] in
-                    let section = runtime_config_path_text path in
-                    state.lanes_action_error <- None;
-                    state.view <- Config;
-                    state.config_pane <- Config_runtime;
-                    state.runtime_config_jump_section <- Some path;
-                    (match state.runtime_config_view with
-                     | None ->
-                       add_event state "info"
-                         (Printf.sprintf "loading runtime.toml for [%s]" section);
-                       launch_runtime_config_load state ~mailbox:async_messages
-                     | Some _ ->
-                       (match apply_runtime_config_jump state with
-                        | Some (_, true) ->
-                          add_event state "info"
-                            (Printf.sprintf "runtime.toml at [%s] - e to edit" section)
-                        | Some (_, false) ->
-                          report_action state "error"
-                            (Printf.sprintf "runtime.toml has no [%s] section" section)
-                        | None -> ()))
-                  | None ->
-                    show_lanes_action_error state
-                      (Printf.sprintf "%s is not in the runtime catalogue" sr_slot))
-               | Some
-                   { sr_kind =
-                       (Masc_tui_types.Official_client_slot
-                       | Masc_tui_types.Media_route_slot)
-                   ; _
-                   } ->
-                 show_lanes_action_error state
-                   "Select an HTTP slot to open its provider table"
-               | None -> show_lanes_action_error state "No slot is selected"))
+           (* The picker owns focus while it is open. A selected HTTP slot
+              opens its provider deadline; a CLI slot opens its own binding. *)
+           if Option.is_none state.runtime_lane_pick then
+             open_selected_slot_config ()
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
               inside the keeper-action pipeline: the loop is inside the

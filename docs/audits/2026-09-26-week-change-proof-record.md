@@ -49,7 +49,7 @@
 
 | ID | 무엇이 틀렸나 | 코드 경로 | 라이브 동작 | 영향 | 처리 |
 |---|---|---|---|---|---|
-| B1 | 판정 레인의 provider 가 모두 한도에 걸려 잠시 쉬는 상태를, 다시 해도 안 되는 실패로 보고 Board 판정 후보를 격리한다 | `keeper_board_attention_worker.ml:966-972`(`Providers_exhausted`·`Cli_slots_exhausted` → `Exact_lane_exhausted` → Blocked), drain 이 `Partition_blocked` 뒤에도 계속 돌아 대기 후보를 전부 같은 레인에 던짐(`:1886`) | 후보 원장 마지막 상태: 소비 11,022 · 격리 1,765. 격리 중 `exact_lane_exhausted` 가 09-25 하루 1,459, 09-24 109 | 1,459 개 Board 신호를 Keeper 가 받지 못했다. 되돌리는 길은 운영자가 한 줄씩 `Q` 누르기뿐 | #39186 |
+| B1 | 판정 레인의 provider 가 모두 한도에 걸려 잠시 쉬는 상태를, 다시 해도 안 되는 실패로 보고 Board 판정 후보를 격리한다 | `keeper_board_attention_worker.ml:966-972`(`Providers_exhausted`·`Cli_slots_exhausted` → `Exact_lane_exhausted` → Blocked), drain 이 `Partition_blocked` 뒤에도 계속 돌아 대기 후보를 전부 같은 레인에 던짐(`:1886`) | 후보 원장 마지막 상태: 소비 11,022 · 격리 1,765. 격리 중 `exact_lane_exhausted` 가 09-25 하루 1,459, 09-24 109 | 1,459 개 Board 신호를 Keeper 가 받지 못했다. 되돌리는 길은 운영자가 한 줄씩 `Q` 누르기뿐 | #39186: 모든 slot 이 계정 사정(rate limit·quota·과부하·결제)으로 쉬는 거절일 때만 기다린다. 라이브 행으로 셈하면 1,518 개는 기다리고, Antigravity `RESOURCE_EXHAUSTED`(타입 없음)가 낀 160 개는 여전히 격리된다(#39190) |
 | B2 | HTTP slot 이 모두 보내기 전에 거절되고 CLI 꼬리가 답하면, 그 답을 버리고 후보를 격리한다 | `keeper_board_attention_partition.ml:1629-1630` `Advancing` 에서 완료 거절 | `exact_completion_failed` 126 건 모두 `advancing, execution_anchor:null` | 판정은 나왔는데 전달되지 않은 126 건 | #39188 |
 | R1 | exact lane 의 CLI slot 이 Codex 사용량 한도 거절을 어디에도 적지 않아, 판정마다 다 쓴 계정을 다시 부른다 | `fusion_official_client.ml:233-241` 은 Claude `Quota_blocked` 만 적음, `:298` Codex 는 적지 않음. `keeper_lane_cli_oneshot.ml:104-128` 은 순서만 뒤로 보냄 | 09-25: Board 판정 CLI slot 실패 codex 1,677 · claude 1,459 · antigravity 402, runtime `quota_blocked` 2,448 · Codex 실패 2,443 | 판정 하나마다 다 쓴 계정 서너 곳에 먼저 부딪힌다. Board 격리(B1)의 앞 원인 | #39173 (Codex 만). Antigravity `RESOURCE_EXHAUSTED` 는 타입이 없어 남음 |
 
@@ -86,6 +86,10 @@
 | #38822 Codex 새 thread 범위 | FAIL(코멘트) | 핵심 수정은 맞다. Resume 마다 Librarian working state 를 다시 싣는다(C1 과 같은 모양). 리뷰 뒤 head 가 #38891 을 얹어 파일 37 개가 늘었고 새 head 는 CI 가 없다 |
 
 ### 증명하다 뒤집힌 것
+
+- B1 첫 설계 "AGENT_CORE 가 advanceable 로 끝낸 walk 는 모두 미룬다" — advanceable 에는 창을 넘는 입력, 거절된 요청 본문,
+  401·403·404, 잘못된 출력이 들어 있다. 다시 해도 같은 실패를 미루면 oldest-first drain 이 그 후보에서 멈춰
+  그 Keeper 의 Board 판정이 영원히 막힌다. 적대적 리뷰가 잡았고, #39186 은 "계정 사정으로 쉬는 거절" 만 기다리게 좁혔다.
 
 - "Resume 압축 때문에 Keeper 가 10 턴 전 일을 잊는다" — 압축 요약에 요청·PR 번호·sha 가 남아 있었다.
   잰 것은 압축 빈도와 사본 비율이다. C1 으로 낮췄다.

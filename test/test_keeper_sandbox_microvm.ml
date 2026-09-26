@@ -1813,7 +1813,7 @@ let test_work_volume_trim_argv_grants_one_capability () =
 ;;
 
 let test_work_volume_trim_confirms_cleanup () =
-  let cli = M.command_argv_for Backend.Apple_container in
+  let cli = [ Backend.cli_name Backend.Apple_container ] in
   let volume_name = "masc-keeper-work-x" in
   let name = volume_name ^ "-trim" in
   let image = "masc-sandbox:general" in

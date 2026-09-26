@@ -21,6 +21,7 @@ type probe_result =
 
 type config =
   { cli_path : string
+  ; account_home : string option
   ; isolated_home : string option
   ; model : string option
   ; developer_instructions : string option
@@ -47,6 +48,7 @@ let client_version = Runtime_build_version.current
 
 let default_config () =
   { cli_path = "codex"
+  ; account_home = None
   ; isolated_home = None
   ; model = None
   ; developer_instructions = None
@@ -205,6 +207,7 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
@@ -704,7 +707,7 @@ let send_dynamic_tool_response io ~id (result : dynamic_tool_result) =
        ])
 ;;
 
-let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count
+let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count ~tool_effect_attempted
     ~on_stream_event ~id params =
   let stage = "item/tool/call" in
   let* fields = assoc_at stage params in
@@ -727,6 +730,9 @@ let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count
       emit_stream_event
         on_stream_event
         (Dynamic_tool_started { call_id; tool_name; arguments });
+      (match tool.call_effect arguments with
+       | Agent_core.Tool.Read_only -> ()
+       | Agent_core.Tool.Effect_possible -> tool_effect_attempted := true);
       let result =
         try tool.call ~call_id arguments with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -909,16 +915,19 @@ let agent_message_of_item ~stage item =
   | None -> protocol_error stage "item is missing type"
 ;;
 
-(* The item vocabulary this tree acts on. [Unmodelled_item] is a type the
-   app-server announced that nothing here branches on, an item of the model
-   stream as far as this loop is concerned; rejecting it would end the turn on
-   a protocol addition. *)
+(* Model items and host-owned dynamic calls do not prove a native effect.
+   Every other item remains effect-possible, including protocol additions.
+   The installed 0.156.1 ThreadItem schema also names collabAgentToolCall and
+   imageGeneration: treating an unmodelled type as model text would authorize
+   replay after those actions. Unknown items are observed, not rejected. *)
 type item_kind =
   | Command_execution
   | File_change
   | Mcp_tool_call
   | Sleep
-  | Unmodelled_item
+  | Model_item
+  | Dynamic_tool_item
+  | Unclassified_item of string
 
 let item_kind_of_item ~stage item =
   let* fields = assoc_at stage item in
@@ -927,7 +936,10 @@ let item_kind_of_item ~stage item =
   | Some (`String "fileChange") -> Ok File_change
   | Some (`String "mcpToolCall") -> Ok Mcp_tool_call
   | Some (`String "sleep") -> Ok Sleep
-  | Some (`String _) -> Ok Unmodelled_item
+  | Some (`String ("userMessage" | "agentMessage" | "plan" | "reasoning"
+                  | "contextCompaction")) -> Ok Model_item
+  | Some (`String "dynamicToolCall") -> Ok Dynamic_tool_item
+  | Some (`String kind) -> Ok (Unclassified_item kind)
   | Some _ -> protocol_error stage "item type must be a string"
   | None -> protocol_error stage "item is missing type"
 ;;
@@ -972,7 +984,8 @@ let tool_item_of_item ~stage item =
         ; origin = Runtime_native_tools.Mcp_wrapper
         })
   | Sleep -> tool_item ~observation:(fun _ -> None)
-  | Unmodelled_item -> Ok None
+  | Model_item | Dynamic_tool_item -> Ok None
+  | Unclassified_item kind -> tool_item ~observation:(built_in kind)
 ;;
 
 let active_turn_item ~stage ~thread_id ~turn_id params =
@@ -1113,7 +1126,7 @@ let turn_error ~tool_effect_attempted fields =
 ;;
 
 let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
-    ~tool_effect_attempted params =
+    ~tool_calls_observed ~tool_effect_attempted params =
   let stage = "turn/completed" in
   let* fields = assoc_at stage params in
   let* terminal_thread_id = required_string stage "threadId" fields in
@@ -1151,7 +1164,7 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
         in
         (match text with
          | Some text -> Ok text
-         | None when tool_effect_attempted -> Ok ""
+         | None when tool_calls_observed -> Ok ""
          | None -> protocol_error stage "completed turn has no assistant message")
       | other -> protocol_error stage (Printf.sprintf "unknown turn status %S" other)
 ;;
@@ -1319,7 +1332,7 @@ let cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id par
     Ok ())
 ;;
 
-let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~thread_id ~turn_id ~model ~seen_final
+let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final
     ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event =
   let* message = io.receive () in
   match message with
@@ -1332,7 +1345,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
         ~tools
         ~thread_id
         ~turn_id
-        ~tool_call_count
+        ~tool_call_count ~tool_effect_attempted
         ~on_stream_event
         ~id
         params
@@ -1340,7 +1353,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1351,7 +1364,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
       ~on_stream_event
   | Server_request { id; method_ = "mcpServer/elicitation/request"; params } ->
     let* () = cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params in
-    await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~thread_id ~turn_id ~model
+    await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model
       ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
@@ -1372,7 +1385,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1387,7 +1400,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1407,7 +1420,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1431,6 +1444,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
       | Some { call_id; observation } ->
         Option.iter
           (fun observation ->
+             tool_effect_attempted := true;
              emit_stream_event on_stream_event (Native_tool_started observation))
           observation;
         (* Every receive until this item completes waits under no idle
@@ -1440,7 +1454,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
         :: List.filter (fun open_id -> not (String.equal open_id call_id)) open_tool_call_ids
     in
     await_turn_terminal
-      io ~tools ~tool_call_count ~model_context_window ~thread_id ~turn_id ~model ~seen_final ~seen_fallback
+      io ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final ~seen_fallback
       ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
@@ -1454,6 +1468,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
       | Some { call_id; observation } ->
         Option.iter
           (fun observation ->
+             tool_effect_attempted := true;
              emit_stream_event on_stream_event (Native_tool_finished observation))
           observation;
         let still_open =
@@ -1474,7 +1489,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1499,7 +1514,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
       await_turn_terminal
         io
         ~tools
-        ~tool_call_count ~model_context_window
+        ~tool_call_count ~tool_effect_attempted ~model_context_window
         ~thread_id
         ~turn_id
         ~model
@@ -1514,7 +1529,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
       let* message = required_string stage "message" error_fields in
       Error
         (turn_error_of_fields
-           ~tool_effect_attempted:(!tool_call_count > 0)
+           ~tool_effect_attempted:!tool_effect_attempted
            ~message
            error_fields)
   | Notification { method_ = "turn/completed"; params } ->
@@ -1524,7 +1539,8 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
         ~turn_id
         ~seen_final
         ~seen_fallback
-        ~tool_effect_attempted:(!tool_call_count > 0)
+        ~tool_calls_observed:(!tool_call_count > 0)
+        ~tool_effect_attempted:!tool_effect_attempted
         params
     in
     Ok (text, seen_usage)
@@ -1558,7 +1574,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1580,7 +1596,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1596,7 +1612,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~model_context_window ~th
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1830,12 +1846,13 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
   in
   emit_stream_event on_stream_event (Turn_started { turn_id; model });
   let tool_call_count = ref 0 in
+  let tool_effect_attempted = ref false in
   let model_context_window = ref None in
   let* text, turn_usage =
     await_turn_terminal
       io
       ~tools:dynamic_tools
-      ~tool_call_count ~model_context_window
+      ~tool_call_count ~tool_effect_attempted ~model_context_window
       ~thread_id
       ~turn_id
       ~model
@@ -1888,12 +1905,29 @@ let child_environment_key_allowed = function
   | _ -> false
 ;;
 
+let account_override_environment_key = function
+  | "OPENAI_API_KEY" | "OPENAI_BASE_URL" | "CODEX_API_KEY" | "CODEX_ACCESS_TOKEN"
+  | "AWS_ACCESS_KEY_ID" | "AWS_SECRET_ACCESS_KEY" | "AWS_SESSION_TOKEN"
+  | "AWS_REGION" | "AWS_DEFAULT_REGION" | "AWS_PROFILE"
+  | "AWS_CONFIG_FILE" | "AWS_SHARED_CREDENTIALS_FILE" | "AWS_BEARER_TOKEN_BEDROCK" ->
+    true
+  | _ -> false
+;;
+
 let resolved_codex_home () =
   let home = match Sys.getenv_opt "CODEX_HOME" with
     | Some path when path <> "" -> Some path
-    | _ -> Option.map (fun home -> Filename.concat home ".codex") (Sys.getenv_opt "HOME") in
+    | _ ->
+      (match Sys.getenv_opt "HOME" with
+       | Some home when home <> "" -> Some (Filename.concat home ".codex")
+       | Some _ | None -> None) in
   Option.map (fun path ->
     if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path) home
+;;
+
+let effective_account_home = function
+  | Some path -> Some path
+  | None -> resolved_codex_home ()
 ;;
 
 let configured_auth_environment_keys home =
@@ -1928,16 +1962,21 @@ let configured_auth_environment_keys home =
       Error (Invalid_config "Cannot read declared Codex provider credential environment names from the user config; inspect config.toml")
 ;;
 
-let client_environment () =
+let client_environment account_home =
   (* Resolve before the child changes cwd; admission and execution must read
      the same credential declarations and CLI store. *)
-  let home = resolved_codex_home () in
+  let home = effective_account_home account_home in
   let* configured = configured_auth_environment_keys home in
   Unix.environment ()
   |> Array.to_list
   |> List.filter (fun entry ->
     let name = env_key entry in
-    name <> "CODEX_HOME" && (child_environment_key_allowed name || List.mem name configured))
+    name <> "CODEX_HOME"
+    && (match account_home with
+        | None -> true
+        | Some _ ->
+          not (account_override_environment_key name) || List.mem name configured)
+    && (child_environment_key_allowed name || List.mem name configured))
   |> fun entries ->
     Option.fold ~none:entries ~some:(fun path -> ("CODEX_HOME=" ^ path) :: entries) home
   |> Array.of_list
@@ -2015,7 +2054,10 @@ let client_argv (config : config) =
 ;;
 
 let with_spawned_client ~mgr ~clock ~cwd config run =
-  let* environment = client_environment () in
+  let selected_home = match config.isolated_home with
+    | Some home -> Some home
+    | None -> config.account_home in
+  let* environment = client_environment selected_home in
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -2180,6 +2222,19 @@ let native_cwd cwd =
 let validate_process_config config =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
+  else if Option.is_some config.account_home && Option.is_some config.isolated_home
+  then Error (Invalid_config "account_home and isolated_home cannot both be selected")
+  else if (match config.account_home with
+      | None -> false
+      | Some home -> not (Runtime_account_home.is_valid home))
+  then Error (Invalid_config "account_home must be a non-empty absolute path")
+  else if (match config.isolated_home with
+      | Some home -> not (Runtime_account_home.is_valid home)
+      | None ->
+        (match effective_account_home config.account_home with
+      | Some home -> not (Runtime_account_home.is_valid home)
+      | None -> true))
+  then Error (Invalid_config "Codex needs an absolute isolated_home, account_home, CODEX_HOME, or HOME")
   else if
     not (Float.is_finite config.admission_timeout_s)
     || config.admission_timeout_s <= 0.0

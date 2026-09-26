@@ -1188,6 +1188,7 @@ def row_budget_http_fixtures() -> HttpFixtures:
                 "attention_queue": [],
                 "attention_items": [],
                 "agent_briefs": [],
+                "keepers_listing": {"state": "listed"},
                 "keepers_unread": [],
             },
         ),
@@ -1211,6 +1212,7 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
         "attention_queue": [],
         "attention_items": [],
         "agent_briefs": [],
+        "keepers_listing": {"state": "listed"},
         "keepers_unread": [],
     }
 
@@ -12593,10 +12595,14 @@ def runtime_resolved_runtime(
     runtime_id: str,
     provider: str,
     model: str,
+    *,
+    provider_id: str = "fixture-provider",
 ) -> dict[str, object]:
     return {
         "id": runtime_id,
         "provider": provider,
+        # The [providers.<id>] table key; "provider" is its display name.
+        "provider_id": provider_id,
         "model": model,
         "exact_slot_group": "slots",
         "effective_max_context": 200_000,
@@ -14432,6 +14438,7 @@ def duplicated_attention_briefing() -> HttpResponse:
             "attention_items": [],
             "agent_briefs": [],
             "keeper_briefs": [],
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [],
         },
     )
@@ -14454,6 +14461,7 @@ def unread_keeper_briefing() -> HttpResponse:
             "keeper_briefs": [],
             # The server listed this Keeper but could not build its row
             # (#38090). It has no brief, and the Overview still counts it.
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [
                 {
                     "name": "k-unread",
@@ -14482,6 +14490,7 @@ def pull_requests_briefing() -> HttpResponse:
             "keeper_briefs": [
                 {"name": "k-author", "phase": "running", "last_turn_ago_s": 30}
             ],
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [],
         },
     )
@@ -14866,6 +14875,60 @@ def unread_keeper_counted_interaction() -> Interaction:
     return interact
 
 
+def unlisted_keepers_briefing() -> HttpResponse:
+    # The server could not list the Keeper directory (#38120). There is no
+    # brief and no unread row, and the briefing says why the fleet is empty.
+    return (
+        200,
+        {
+            "summary": {
+                "workspace_health": "ok",
+                "cluster": "cluster-a",
+                "project": "project-a",
+            },
+            "generated_at": "2026-09-25T00:00:00Z",
+            "incidents": [],
+            "attention_queue": [],
+            "attention_items": [],
+            "agent_briefs": [],
+            "keeper_briefs": [],
+            "keepers_listing": {"state": "unreadable", "detail": "EACCES"},
+            "keepers_unread": [],
+        },
+    )
+
+
+def unlisted_keepers_named_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # The count cell names the failure instead of drawing "Keepers: 0".
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"unlisted",
+            start=0,
+            timeout=10.0,
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"(EACCES)",
+            start=0,
+            timeout=10.0,
+        )
+        # The harness confirms the exit that this first press arms.
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def paused_and_stopped_briefing() -> HttpResponse:
     # One Keeper the operator paused (the flag, whatever the phase), one
     # paused by phase, one stopped, one with no phase and one running.
@@ -14889,6 +14952,7 @@ def paused_and_stopped_briefing() -> HttpResponse:
                 {"name": "k-unknown", "phase": None, "paused": False},
                 {"name": "k-running", "phase": "running", "last_turn_ago_s": 30},
             ],
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [],
         },
     )
@@ -15552,6 +15616,14 @@ def run_keyboard_regression(executable: str) -> None:
         interact=unread_keeper_counted_interaction(),
         http_fixtures={
             "/api/v1/dashboard/briefing": unread_keeper_briefing(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Unlisted keepers named",
+        interact=unlisted_keepers_named_interaction(),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": unlisted_keepers_briefing(),
         },
     )
     run_terminal_scenario(
@@ -19282,11 +19354,28 @@ def run_fusion_history_regression(executable: str) -> None:
             process, master_fd, output, b"r",
             b"historical Fusion Board identity does not match the selected run and post",
         )
-        stale = resize_and_wait(
+        retained = b"Previous Board reading retained"
+        resize_and_wait(
             process, master_fd, output, rows=111, columns=170,
-            needle=b"Previous Board reading (refresh failed)", controls=(FULL_REDRAW,),
+            needle=retained, controls=(FULL_REDRAW,),
         )
-        if b"different-run-702" in CSI_RE.sub(b"", stale):
+        retained_at = output.rfind(retained)
+        wait_for_output(
+            process, master_fd, output, FRAME_END,
+            start=retained_at + len(retained), timeout=3,
+        )
+        frame_end = output.find(FRAME_END, retained_at) + len(FRAME_END)
+        stale_visible = screen_text(bytes(output[:frame_end]))
+        mismatch = (
+            b"historical Fusion Board identity does not match the selected run and post"
+        )
+        if stale_visible.count(mismatch) != 1 or stale_visible.count(retained) != 1:
+            raise AssertionError(
+                f"Historical Board lost its error or retained reading: {stale_visible!r}"
+            )
+        if b"refresh failed" in stale_visible:
+            raise AssertionError("Historical Board refresh repeated its error verdict")
+        if b"different-run-702" in stale_visible:
             raise AssertionError("mismatched Board origin replaced selected evidence")
         send_and_wait(process, master_fd, output, b"r", b"Observed tokens: 303 input / 202 output")
         all_failed = send_and_wait(

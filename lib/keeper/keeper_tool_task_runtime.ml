@@ -1034,9 +1034,6 @@ let handle_keeper_task_tool_with_outcome
         keeper_tool_result_json
           ~typed_outcome:
             (match transition_result with
-             (* The task is waiting for a verdict, not cancelled. Reporting
-                progress here would tell the keeper it is finished with a
-                task it still holds. *)
              | Tool_result.Completed _ -> Some Keeper_tool_outcome.Progress
              | Tool_result.Deferred _ -> None
              | Tool_result.Failed _ ->

@@ -48,8 +48,18 @@ val core_error_is_hard_quota : Agent_core.Error.t -> bool
 (** Why a different runtime is tried in the same turn. *)
 type rotate_class =
   | Auth_failed
-      (** this runtime's credential is invalid or lacks authorization;
-          other runtimes may use a different credential scope *)
+      (** HTTP 401: this runtime's credential is invalid; other runtimes may
+          use a different credential scope *)
+  | Authorization_refused
+      (** HTTP 403: the provider accepted who is calling and refused the
+          account. The status alone does not say why: a spent subscription
+          window (Kimi For Coding answers its 5-hour limit this way), a
+          missing entitlement, a client the plan does not admit, or a
+          suspended account. The status rests nothing. When the provider
+          declares [usage-read], the Keeper walk reads it once
+          ({!Runtime_provider_usage_read.read_after_account_refusal}) and a
+          spent window rests the scope until its stated reset; otherwise the
+          refusal leaves no evidence, as for [Auth_failed]. *)
   | Model_unavailable  (** model/endpoint not found on this runtime *)
   | Resumable_cli_session  (** CLI session can resume on a recovery lane *)
   | Candidates_filtered  (** candidate set emptied after cycles *)

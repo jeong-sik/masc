@@ -169,7 +169,7 @@ let official_client_editor protocol =
     ; semantics = Official_client
     ; credential_policy = Credentials_forbidden
     ; requires_non_interactive = true
-    ; provider_fields = []
+    ; provider_fields = [ "account-home" ]
     ; required_provider_fields = []
     }
 ;;
@@ -671,8 +671,10 @@ let usage_read_url_field ~path ~(transport : Runtime_schema.transport) tbl =
 (* The read sends the API key the runtime's HTTP execution was built with,
    and its windows are recorded under the quota scope of that key.  An
    official-client runtime (Codex, Claude Code, Antigravity) logs in with the
-   vendor's subscription and its quota scope names no key, so an API-key
-   read there would file one account's usage under another. *)
+   vendor's subscription, and its quota scope names no API key (Antigravity's
+   names the OAuth file of that login), so an API-key read there would file
+   one account's usage under another.  Codex and Antigravity are read through
+   their own client instead (Runtime_provider_usage_read). *)
 let usage_read_execution_errors ~path (api_format : Runtime_schema.api_format) =
   match api_format with
   | Runtime_schema.Messages_api
@@ -783,6 +785,19 @@ let parse_provider (id : string) (tbl : Otoml.t)
   match display_name_result, protocol_result, transport_result with
   | Error errors, _, _ | _, Error errors, _ | _, _, Error errors -> Error errors
   | Ok display_name, Ok (protocol, api_format), Ok transport ->
+    let account_home_result =
+      match typed_find "a string" path tbl "account-home" Otoml.get_string with
+      | Error errors -> Error errors
+      | Ok None -> Ok None
+      | Ok (Some home) ->
+        (match api_format with
+         | Codex_app_server_runtime | Claude_code_runtime
+           when Runtime_account_home.is_valid home -> Ok (Some home)
+         | Codex_app_server_runtime | Claude_code_runtime ->
+           Error (error (path ^ ".account-home") "account-home must be a non-empty absolute path without surrounding whitespace")
+         | _ ->
+           Error (error (path ^ ".account-home") "account-home is valid only for Claude Code and Codex official clients"))
+    in
     let is_non_interactive_result =
       typed_find_or "a boolean" path tbl "is-non-interactive" Otoml.get_boolean ~default:false
     in
@@ -886,6 +901,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
         let* exact_body_timeout_s = exact_body_timeout_result in
         let* is_non_interactive = is_non_interactive_result in
         let* wire_kind = wire_kind_result in
+        let* account_home = account_home_result in
         let* usage_read = usage_read_result in
           let enabled = match enabled_opt with Some value -> value | None -> true in
           Ok
@@ -898,6 +914,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; transport
             ; is_non_interactive
             ; credentials
+            ; account_home
             ; capabilities
             ; healthcheck_path
             ; headers

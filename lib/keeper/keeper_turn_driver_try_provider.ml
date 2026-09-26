@@ -441,12 +441,6 @@ type try_provider_ctx =
        pre-#28417 elapsed ceiling. That is the conservative direction: it can
        fire early on a healthy turn, never late on a wedged one. *)
     provider_progress_probe : (unit -> provider_progress_sample option) option
-  ; (* Reads whether a person's chat operation is queued behind this turn.
-       Injected (not read from [Keeper_registry] here) so the preemption verdict
-       stays a pure function of its inputs. Present only on the autonomous lane;
-       [None] disables first-token-wait preemption and the attempt keeps the
-       full first-event/idle bounds (RFC-0441 pre-first-token gap). *)
-    person_queued_probe : (unit -> bool) option
   ; temperature : float option
   ; accept : Agent_core.Types.api_response -> bool
   ; hooks : Agent_core.Hooks.hooks option
@@ -804,49 +798,6 @@ let rec await_attempt_stall ~clock ~threshold_sec ~attempt_started_at ~probe
   else await_attempt_stall ~clock ~threshold_sec ~attempt_started_at ~probe
     ~lease_phase ~permit_wait
 ;;
-
-(* First-token-wait preemption (RFC-0441 pre-first-token gap). A person queued
-   behind an autonomous turn whose provider has produced nothing has no tool
-   boundary to be yielded at, so the attempt is abandoned and the slot goes to
-   the person. It must fire only pre-first-token: once any streaming event
-   arrives, the tool-boundary yield ([cooperative_yield_probe]) owns the
-   handover. This is not a forced cancel of a productive turn -- the attempt
-   produced nothing and re-runs fresh. *)
-let preempt_pre_first_token ~first_event_seen ~person_queued =
-  (not first_event_seen) && person_queued
-;;
-
-(* Matches the stall watchdog's cadence family: a person waits O(1s), not the
-   ~600s first-event failsafe floor. *)
-let person_queued_poll_interval_sec = 1.0
-
-(* Blocks until a person is queued while the attempt is still pre-first-token,
-   then returns to win the race. Once the first event lands ([first_event_seen])
-   it never returns, ceding the verdict to the attempt and stall fibers.
-   [person_queued] is contracted not to raise (the injection site maps a failed
-   read to [false]), so a transient read never cancels the attempt it watches.
-
-   [person_queued ()] reads the owner registry, which may schedule (an Eio mutex
-   is a scheduling point), so the attempt fiber can flip [first_event_seen] while
-   it runs. [first_event_seen] is therefore re-read AFTER the probe returns --
-   [let queued] fixes that order -- and the read and the verdict have no
-   scheduling point between them, so a turn that produced its first event during
-   the probe is not preempted. Winning after a first event would only re-run a
-   just-started attempt (a yield, not lost work), but the re-read keeps the
-   "a responding turn is never preempted" property exact. *)
-let rec await_person_queued_preemption ~clock ~first_event_seen ~person_queued =
-  Eio.Time.sleep clock person_queued_poll_interval_sec;
-  if Atomic.get first_event_seen
-  then await_person_queued_preemption ~clock ~first_event_seen ~person_queued
-  else
-    let queued = person_queued () in
-    if preempt_pre_first_token
-         ~first_event_seen:(Atomic.get first_event_seen)
-         ~person_queued:queued
-    then ()
-    else await_person_queued_preemption ~clock ~first_event_seen ~person_queued
-;;
-
 
 (* The memo is keyed by message value ([Agent_core.Types.Message_value]). Each
    request passes its history through [Complete_common.transmitted_history],
@@ -2123,22 +2074,6 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
       observe_provider_lease ~now:Time_compat.now
         ~on_yield:ctx.on_yield ~on_resume:ctx.on_resume
     in
-    (* First-token-wait preemption arming. [first_event_seen] flips on the first
-       streaming event of any kind -- a conservative "the provider has produced
-       something" signal so a turn that is actually responding is never
-       preempted (a post-first-event stall is owned by the stall watchdog and
-       the idle bound). Only wrap [on_event] when the probe is present so the
-       non-autonomous lanes keep their exact callback and 2-way race. *)
-    let first_event_seen = Atomic.make false in
-    let effective_on_event =
-      match ctx.person_queued_probe with
-      | None -> ctx.on_event
-      | Some _ ->
-        Some
-          (fun ev ->
-            Atomic.set first_event_seen true;
-            Option.iter (fun f -> f ev) ctx.on_event)
-    in
     let run_attempt_switch () =
       Eio.Switch.run (fun attempt_sw ->
         let run_fn () =
@@ -2150,7 +2085,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                 ~net:ctx.net
                 ~config
                 ~checkpoint
-                ?on_event:effective_on_event
+                ?on_event:ctx.on_event
                 ~on_yield
                 ~on_resume
                 ~agent_ref:attempt_agent_ref
@@ -2162,7 +2097,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                 ~net:ctx.net
                 ~config
                 ?agent_core_checkpoint:ctx.agent_core_checkpoint
-                ?on_event:effective_on_event
+                ?on_event:ctx.on_event
                 ~on_yield
                 ~on_resume
                 ~agent_ref:attempt_agent_ref
@@ -2175,7 +2110,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                 ~net:ctx.net
                 ~config
                 ?agent_core_checkpoint:ctx.agent_core_checkpoint
-                ?on_event:effective_on_event
+                ?on_event:ctx.on_event
                 ~on_yield
                 ~on_resume
                 ~agent_ref:attempt_agent_ref
@@ -2203,6 +2138,9 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
     let result =
       match Eio_context.get_clock_opt () with
       | Some clock ->
+        (* A queued person's message does not cancel an admitted provider
+           attempt. The turn may yield after a settled tool result; its
+           configured no-progress bounds and explicit shutdown still apply. *)
         (* Same clock as [last_progress_at] (see [await_attempt_stall]): the
            elapsed fallback and the progress comparison must not read two
            different clocks. *)
@@ -2219,56 +2157,17 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           `Attempt_stalled
         in
         (match
-           (let combine_attempt_outcomes a b =
-              (* A finished attempt stands even when it resolved in the same
-                 scheduler pass the watchdog polled it stalled, or a person
-                 queued: a provider answer that arrived must not be discarded
-                 as a stall or a preemption and retried (#36340). *)
-              match a, b with
-              | `Attempt_finished _, _ -> a
-              | _, `Attempt_finished _ -> b
-              | `Attempt_preempted, _ -> a
-              | _, `Attempt_preempted -> b
-              | `Attempt_stalled, `Attempt_stalled -> a
-            in
-            match ctx.person_queued_probe with
-            | None ->
-              Eio.Fiber.first ~combine:combine_attempt_outcomes
-                attempt_fiber stall_fiber
-            | Some person_queued ->
-              (* Third racer, autonomous-only: abandon a pre-first-token
-                 attempt when a person queues (RFC-0441 gap). [Eio.Fiber.any]
-                 cancels the losing siblings, unwinding the attempt's inner
-                 [attempt_sw] and its in-flight request exactly as the stall
-                 racer does; an outer cancellation still propagates because no
-                 branch catches it. The same tie rule as the [None] arm keeps a
-                 finished attempt over a simultaneous stall or preemption. *)
-              Eio.Fiber.any ~combine:combine_attempt_outcomes
-                [ attempt_fiber
-                ; stall_fiber
-                ; (fun () ->
-                    await_person_queued_preemption
-                      ~clock ~first_event_seen ~person_queued;
-                    `Attempt_preempted)
-                ])
+           Eio.Fiber.first
+             ~combine:(fun a b ->
+               (* Keep a completed answer when the stall watchdog and the
+                  provider resolve in the same scheduler pass. *)
+               match a, b with
+               | `Attempt_finished _, _ -> a
+               | _, `Attempt_finished _ -> b
+               | `Attempt_stalled, `Attempt_stalled -> a)
+             attempt_fiber stall_fiber
          with
          | `Attempt_finished attempt_result -> attempt_result
-         | `Attempt_preempted ->
-           (* Nothing was produced and nothing failed, so this is its own
-              typed value rather than a run result (#38094): the lane walk
-              ends on it (Keeper_turn_driver),
-              the failure route notes no rest against the candidate, and the
-              unified turn settles it as skipped, leaving the source
-              pending. *)
-           Log.Keeper.info ~keeper_name:ctx.keeper_name
-             "%s: autonomous turn yielded to a queued person before the \
-              provider's first event runtime=%s"
-             ctx.keeper_name
-             ctx.runtime_id;
-           Error
-             (Keeper_internal_error.core_error_of_masc_internal_error
-                (Keeper_internal_error.Preempted_before_first_token
-                   { runtime_id = ctx.runtime_id }))
          | `Attempt_stalled ->
            Error
              (Agent_core.Error.Api
@@ -3034,7 +2933,6 @@ let max_tokens_truncation_error error =
       | Keeper_internal_error.Provider_attempt_effect_fenced _
       | Keeper_internal_error.Tool_correction_lost _
       | Keeper_internal_error.Host_stopped_turn _
-      | Keeper_internal_error.Preempted_before_first_token _
       | Keeper_internal_error.Runtime_connection_closed _
       | Keeper_internal_error.Receipt_persistence_failed _
       | Keeper_internal_error.Gate_replay_repair_required _ )

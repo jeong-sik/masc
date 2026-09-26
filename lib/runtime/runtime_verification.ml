@@ -589,7 +589,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           cli_path = execution.cli_path;
           effort = execution.effort;
           admission_timeout_s = Float.min timeout_s execution.timeout_s;
-          timeout_s = Some timeout_s; wall_clock_ceiling_s = Some timeout_s } in
+          timeout_s = Some timeout_s } in
         (match Runtime_verification_antigravity.run ~secure_random ~net ~mgr ~clock ~cwd
            ~directory:cwd_path ~oauth_source:execution.oauth_source ~config ~tool ~prompt with
          | Ok result -> Ok {model=result.model; text=result.text}
@@ -697,7 +697,6 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           ; model = execution.model
           ; admission_timeout_s = Float.min timeout_s execution.timeout_s
           ; timeout_s = Some timeout_s
-          ; wall_clock_ceiling_s = Some timeout_s
           }
         in
         (match
@@ -748,7 +747,6 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
           ; model = execution.model
           ; admission_timeout_s = Float.min timeout_s execution.timeout_s
           ; timeout_s = Some timeout_s
-          ; wall_clock_ceiling_s = Some timeout_s
           }
         in
         (match

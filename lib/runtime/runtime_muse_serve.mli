@@ -41,13 +41,10 @@ type config =
   ; timeout_s : float option
     (** Maximum silence between protocol messages while the model turn runs.
         Every message resets it. It is disarmed when the host opens a tool
-        item, because the host may write nothing until that item completes;
-        only [wall_clock_ceiling_s] bounds that wait. Model text arms it
+        item, because the host may write nothing until that item completes.
+        Model text arms it
         again even if a tool item stays open, as a backgrounded task's item
         does while the turn goes on. [None] removes it after dispatch. *)
-  ; wall_clock_ceiling_s : float option
-    (** Whole-turn ceiling measured from spawn. [None] selects
-        {!Runtime_wall_clock.default_ceiling_s}. *)
   }
 
 val default_timeout_s : float

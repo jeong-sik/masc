@@ -135,6 +135,9 @@ let test_selected_native_account () = fixture (fun base runtime binary net ->
     Alcotest.check Alcotest.bool "selection is not invocation proof" false (selection |> member "invocation_verified" |> to_bool);
     Alcotest.check Alcotest.bool "private home omitted from receipt" true (selection |> member "account_home" = `Null);
     let reference=selection |> member "account_ref" |> to_string in
+    let retried=get (Actions.select_account ~base_path:base (`Assoc ["integration_id",`String id])) in
+    Alcotest.check Alcotest.string "repeated selections reuse the pending lease" reference
+      (retried |> member "account_ref" |> to_string);
     let selected=`Assoc ["integration_id",`String id;"account_ref",`String reference] in
     if protocol="muse-serve" then Eio.Switch.run (fun sw ->
       let catalog=get (Actions.discover ~binary ~sw ~net ~base_path:base selected) in
@@ -146,7 +149,17 @@ let test_selected_native_account () = fixture (fun base runtime binary net ->
           "models",`List [`Assoc ["id",`String "selected-muse";"context",`Int 8192;
             "streaming",`Bool true;"max_prompt_bytes",`Int 45678]]]]) root)
        | _ -> assert false) in
+    let account_reference=Runtime_setup_accounts.reference_of_string reference |> Result.get_ok in
+    let resolve ()=Runtime_setup_accounts.resolve ~workspace:base ~integration_id:id ~cli_path:command account_reference in
+    let rejected=match request with
+      | `Assoc fields -> `Assoc (("selection",`List [])::List.remove_assoc "selection" fields)
+      | _ -> Alcotest.fail "fixture request must be an object" in
+    Alcotest.check Alcotest.bool "failed transaction leaves account available for retry" true
+      (Result.is_error (Actions.save ~binary ~base_path:base rejected) && Result.is_ok (resolve ()));
     ignore (get (Actions.save ~binary ~base_path:base request));
+    Alcotest.check Alcotest.bool "successful transaction consumes the native lease" true
+      (Result.is_error (resolve ()));
+    Alcotest.check Alcotest.bool "successful save retains the actual account" true (Sys.is_directory account_home);
     let parsed=Runtime_toml.parse_file runtime |> Result.get_ok in
     let homes=List.filter_map (fun (p:Runtime_schema.provider) -> p.account_home) parsed.providers in
     Alcotest.check Alcotest.bool "selected native home survives save byte-for-byte" true (List.mem account_home homes))

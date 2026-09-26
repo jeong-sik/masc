@@ -76,13 +76,30 @@ let native_home_scope () = fixture (fun directory workspace ->
   Unix.mkdir account_home 0o700;
   let reference = Accounts.lease_home ~workspace ~integration_id:"muse-code"
     ~cli_path:"muse" ~account_home |> get in
+  let retried = Accounts.lease_home ~workspace ~integration_id:"muse-code"
+    ~cli_path:"muse" ~account_home |> get in
+  check string "refresh and abandoned retry reuse one lease"
+    (Accounts.reference_to_string reference) (Accounts.reference_to_string retried);
   (match Accounts.resolve ~workspace ~integration_id:"muse-code" ~cli_path:"muse" reference |> get with
    | Native_home selected -> check string "explicit selected home retained" account_home selected.account_home
    | Antigravity_account _ -> fail "native account changed transport");
   (match Accounts.resolve ~workspace ~integration_id:"codex" ~cli_path:"muse" reference with
    | Error Scope_mismatch -> () | _ -> fail "cross-client home reference accepted");
   check (list string) "lease does not write authentication or settings" []
-    (Sys.readdir account_home |> Array.to_list))
+    (Sys.readdir account_home |> Array.to_list);
+  (match Accounts.release_native_home ~workspace ~integration_id:"codex" ~cli_path:"muse" reference with
+   | Error Scope_mismatch -> () | _ -> fail "cross-client lease release accepted");
+  check bool "wrong scope cannot consume the lease" true
+    (Result.is_ok (Accounts.resolve ~workspace ~integration_id:"muse-code" ~cli_path:"muse" reference));
+  Accounts.release_native_home ~workspace ~integration_id:"muse-code" ~cli_path:"muse" reference |> get;
+  check bool "completed lease is no longer usable" true
+    (Result.is_error (Accounts.resolve ~workspace ~integration_id:"muse-code" ~cli_path:"muse" reference));
+  check bool "release preserves the selected account" true (Sys.is_directory account_home);
+  let imported,_ = create workspace in
+  let credential = resolve workspace imported |> get |> credential_file in
+  check bool "durable imported credentials cannot be consumed as a lease" true
+    (Result.is_error (Accounts.release_native_home ~workspace ~integration_id:"antigravity" ~cli_path:"agy" imported));
+  check string "imported credential is preserved" "fixture-selected-account" (Fs_compat.load_file credential))
 
 let () = run "setup account references" ["private account",[
   test_case "native home scoped reference" `Quick native_home_scope;

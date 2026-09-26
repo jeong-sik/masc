@@ -1154,10 +1154,24 @@ def select_native_account(source):
         default = str(Path.cwd() / default)
     selected = pick(source['label'] + ': select the CLI account',
                     ['Use this server CLI account: ' + (default or '(unavailable)'),
-                     'Select another existing account directory'])[0]
+                     'Select another account directory'])[0]
     account_home = default if selected == 0 else ask_text('Absolute account directory (Claude CLAUDE_CONFIG_DIR, Codex CODEX_HOME, Muse HOME)')
-    if not isinstance(account_home, str) or not account_home or account_home.strip() != account_home or not Path(account_home).is_absolute() or not Path(account_home).is_dir():
-        raise SetupError('Select an existing absolute account directory, sign in with the official CLI, then retry')
+    if (not isinstance(account_home, str) or not account_home or '\0' in account_home
+            or account_home.strip() != account_home or not Path(account_home).is_absolute()):
+        raise SetupError('Select an absolute account directory for the official CLI')
+    path = Path(account_home)
+    try:
+        # First login creates native state in this selected directory. Create
+        # every missing component privately before handing it to the vendor.
+        for directory in [*reversed(path.parents), path]:
+            try:
+                directory.mkdir(mode=0o700)
+            except FileExistsError:
+                pass
+        if not path.is_dir() or path.stat().st_uid != os.geteuid():
+            raise SetupError('The selected account directory must belong to the current user')
+    except OSError as error:
+        raise SetupError('Could not prepare the selected account directory for first login') from error
     source['account_home'] = account_home
     source['credential_replaced'] = True
     return source
@@ -1262,7 +1276,7 @@ def refresh_codex_models(binary, source):
         raise SetupError('Codex online model refresh unavailable; using cached or bundled metadata.')
     try:
         receipt = json.loads(result.stdout)
-        if (receipt.get('schema') != 'masc.codex_model_refresh.v1'
+        if (not isinstance(receipt, dict) or receipt.get('schema') != 'masc.codex_model_refresh.v1'
                 or receipt.get('source') not in ('isolated_cli_cache', 'cli_list_without_context_cache')
                 or not isinstance(receipt.get('models'), list)):
             raise ValueError('invalid refresh')
@@ -1286,7 +1300,7 @@ def muse_models(binary, source):
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         receipt = json.loads(result.stdout)
-        if (result.returncode or receipt.get('schema') != 'masc.muse_models.v1'
+        if (result.returncode or not isinstance(receipt, dict) or receipt.get('schema') != 'masc.muse_models.v1'
                 or receipt.get('source') not in ('providerCatalog', 'bundledCatalog', 'configCatalog')
                 or receipt.get('account_availability_verified') is not False
                 or receipt.get('invocation_verified') is not False

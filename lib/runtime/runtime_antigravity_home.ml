@@ -189,7 +189,13 @@ let verify_private_directory path =
     Error (Unsafe_directory { path; detail = unix_error_detail error fn arg })
 ;;
 
-let ensure_private_child parent leaf =
+let sync_directory path =
+  let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
+;;
+
+let ensure_private_child_with_sync ~sync_parent parent leaf =
+  let ( let* ) = Result.bind in
   let path = Filename.concat parent leaf in
   let created =
     try
@@ -202,7 +208,17 @@ let ensure_private_child parent leaf =
   in
   match created with
   | Error _ as error -> error
-  | Ok () -> Result.map (fun () -> path) (verify_private_directory path)
+  | Ok () ->
+    let* () = verify_private_directory path in
+    (* EEXIST only proves visibility: an earlier mkdir may have been followed
+       by a failed parent fsync. Confirm every accepted hierarchy link. *)
+    (try sync_parent parent; Ok path with
+     | Unix.Unix_error (error, fn, arg) ->
+       Error (Unsafe_directory {path; detail=unix_error_detail error fn arg}))
+;;
+
+let ensure_private_child parent leaf =
+  ensure_private_child_with_sync ~sync_parent:sync_directory parent leaf
 ;;
 
 (* Permissions are the security boundary. Plan mode merely adds an instruction.
@@ -627,11 +643,6 @@ let parse_generation_record ~path body =
   with Yojson.Json_error _ -> invalid ()
 ;;
 
-let sync_directory path =
-  let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
-;;
-
 let existing_generation ~store ~revision =
   let home_dir = Filename.concat store revision in
   let gemini_dir = Filename.concat home_dir ".gemini" in
@@ -825,6 +836,8 @@ let clear_mcp_config t =
 ;;
 
 module For_testing = struct
+  let ensure_private_child_with_sync = ensure_private_child_with_sync
+
   let prepare_account_with_store_sync ~sync_store ~runtime_root ~owner_leaf ~oauth_source =
     with_prepared_account_using_sync ~sync_store ~runtime_root ~owner_leaf ~oauth_source Result.ok
   ;;

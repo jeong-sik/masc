@@ -13,6 +13,7 @@ type event =
   | Reply of reply
 
 type pending =
+  | Prefix
   | Sequence
   | Character
   | Pasting
@@ -285,14 +286,22 @@ let idle t =
   | X10 bytes ->
       t.state <- Ground;
       x10_event bytes
-  (* Still arriving: a reply's tail, a character's tail, a paste's tail. A
-     quiet read is not the end of any of them. *)
-  | Ground | Csi _ | Osc _ | Apc _ | Utf8 _ | In_paste _ | Draining_paste _ -> []
+  (* A terminal sends a reply in one burst. A body with a gap in it is not
+     one we asked for, and holding it open would swallow the keys typed
+     after Alt+] or Alt+_. *)
+  | Osc body | Apc body ->
+      t.state <- Ground;
+      if Buffer.length body.bytes = 0 && not body.overflowed then key "esc"
+      else []
+  (* Still arriving: a CSI's final byte, a character's tail, a paste's tail.
+     A quiet read is not the end of any of them. *)
+  | Ground | Csi _ | Utf8 _ | In_paste _ | Draining_paste _ -> []
 
 let pending t =
   match t.state with
   | Ground -> None
-  | Escape | Csi _ | Ss3 | X10 _ | Osc _ | Apc_prefix | Apc _ -> Some Sequence
+  | Escape | Ss3 | X10 _ | Osc _ | Apc_prefix | Apc _ -> Some Prefix
+  | Csi _ -> Some Sequence
   | Utf8 _ -> Some Character
   | In_paste _ -> Some Pasting
   | Draining_paste _ -> Some Draining

@@ -32,6 +32,7 @@ let check_events label expected actual = check events label expected (List.map s
 
 let show_pending = function
   | None -> "none"
+  | Some D.Prefix -> "prefix"
   | Some D.Sequence -> "sequence"
   | Some D.Character -> "character"
   | Some D.Pasting -> "pasting"
@@ -119,12 +120,24 @@ let test_oversized_graphics_reply_is_dropped () =
   check_events "no truncated answer, and the stream continues" [ "key x" ]
     (decode ("\x1b_" ^ body ^ "\x1b\\x"))
 
-let test_graphics_reply_waits_across_idle () =
+let test_split_graphics_reply_within_a_burst () =
   let decoder = D.create () in
   check_events "head" [] (feed_all decoder "\x1b_Gi=31;");
-  check_events "quiet read holds it" [] (D.idle decoder);
-  check_events "the whole body arrives" [ "reply graphics i=31;OK" ]
+  check string "held as a prefix" "prefix" (show_pending (D.pending decoder));
+  check_events "the rest of the burst closes it" [ "reply graphics i=31;OK" ]
     (feed_all decoder "OK\x1b\\")
+
+let test_body_with_a_gap_is_dropped () =
+  let decoder = D.create () in
+  ignore (feed_all decoder "\x1b]10;rgb:12");
+  check_events "a quiet read drops the body" [] (D.idle decoder);
+  check_events "later typing is keys" [ "key h"; "key i" ] (feed_all decoder "hi")
+
+let test_alt_bracket_is_escape_then_keys () =
+  let decoder = D.create () in
+  ignore (feed_all decoder "\x1b]");
+  check_events "Alt+] with nothing after it" [ "key esc" ] (D.idle decoder);
+  check_events "typing continues" [ "key h" ] (D.feed decoder 'h')
 
 let test_sgr_mouse () =
   check_events "wheel, press, release"
@@ -197,8 +210,11 @@ let () =
           test_case "unasked OSC" `Quick test_unasked_osc_is_swallowed;
           test_case "oversized graphics reply" `Quick
             test_oversized_graphics_reply_is_dropped;
-          test_case "graphics waits across idle" `Quick
-            test_graphics_reply_waits_across_idle ] );
+          test_case "split graphics reply within a burst" `Quick
+            test_split_graphics_reply_within_a_burst;
+          test_case "body with a gap is dropped" `Quick test_body_with_a_gap_is_dropped;
+          test_case "Alt+] is escape then keys" `Quick
+            test_alt_bracket_is_escape_then_keys ] );
       ( "mouse",
         [ test_case "SGR" `Quick test_sgr_mouse;
           test_case "X10" `Quick test_x10_mouse;

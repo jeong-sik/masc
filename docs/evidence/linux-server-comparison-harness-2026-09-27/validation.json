@@ -1,0 +1,123 @@
+{
+  "scope": "Single macOS installed-file smoke for harness plumbing. Not Linux execution, a before/after comparison, or candidate behavior.",
+  "accepted_timed_requests": 10,
+  "summary": {
+    "timings": {
+      "mutation": {
+        "n": 2,
+        "min": 14.87,
+        "median": 14.922125,
+        "p95": 14.97425,
+        "max": 14.97425
+      },
+      "cold": {
+        "n": 2,
+        "min": 12.154083,
+        "median": 12.2073125,
+        "p95": 12.260542,
+        "max": 12.260542
+      },
+      "warm": {
+        "n": 2,
+        "min": 0.419833,
+        "median": 0.464708,
+        "p95": 0.509583,
+        "max": 0.509583
+      },
+      "concurrent_mutation": {
+        "n": 2,
+        "min": 13.865666,
+        "median": 16.802729,
+        "p95": 19.739792,
+        "max": 19.739792
+      },
+      "concurrent_liveness": {
+        "n": 2,
+        "min": 0.527,
+        "median": 0.5656460000000001,
+        "p95": 0.604292,
+        "max": 0.604292
+      }
+    },
+    "client_overlap_pairs": 2
+  },
+  "final_tasks": 254,
+  "success": {
+    "initial_revision": 1,
+    "final_revision": 18,
+    "final_tasks": 254
+  },
+  "cleanup": {
+    "server_returncode": 0,
+    "reaped": true,
+    "model_requests": [
+      {
+        "method": "GET",
+        "path": "/v1/models"
+      }
+    ],
+    "stub_stopped": true
+  },
+  "response_encodings": [
+    {
+      "phase": "mutation",
+      "cycle": 1,
+      "requested_encoding": "identity",
+      "encoding": null
+    },
+    {
+      "phase": "cold",
+      "cycle": 1,
+      "requested_encoding": "gzip",
+      "encoding": null
+    },
+    {
+      "phase": "warm",
+      "cycle": 1,
+      "requested_encoding": "gzip",
+      "encoding": "gzip"
+    },
+    {
+      "phase": "mutation",
+      "cycle": 2,
+      "requested_encoding": "identity",
+      "encoding": null
+    },
+    {
+      "phase": "cold",
+      "cycle": 2,
+      "requested_encoding": "gzip",
+      "encoding": null
+    },
+    {
+      "phase": "warm",
+      "cycle": 2,
+      "requested_encoding": "gzip",
+      "encoding": "gzip"
+    },
+    {
+      "phase": "concurrent_liveness",
+      "cycle": 1,
+      "requested_encoding": "identity",
+      "encoding": null
+    },
+    {
+      "phase": "concurrent_mutation",
+      "cycle": 1,
+      "requested_encoding": "identity",
+      "encoding": null
+    },
+    {
+      "phase": "concurrent_liveness",
+      "cycle": 2,
+      "requested_encoding": "identity",
+      "encoding": null
+    },
+    {
+      "phase": "concurrent_mutation",
+      "cycle": 2,
+      "requested_encoding": "identity",
+      "encoding": null
+    }
+  ]
+}

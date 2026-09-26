@@ -17,15 +17,23 @@ on:
       - 'lib/exec_shim/exec_shim.ml'
       - 'lib/exec_ssh_protocol/exec_ssh_protocol.ml'
       - '.github/workflows/bench-tests.yml'
+      - 'scripts/harness/perf/linux_probe_artifact.py'
+      - 'scripts/harness/perf/server_artifact_session.py'
+      - 'scripts/harness/perf/compare_server_artifacts.py'
+      - 'test/test_server_artifact_comparison.py'
   workflow_dispatch:
     inputs:
       compare_tui:
         description: Compare two existing macOS ARM runtime artifacts
         type: boolean
         default: false
+      compare_server:
+        description: Compare two existing Linux x64 manual probe artifacts
+        type: boolean
+        default: false
       baseline_run:
         type: string
-        description: Baseline Release workflow run ID
+        description: Baseline artifact build workflow run ID
       baseline_artifact:
         type: string
         description: Baseline runtime-probe artifact ID
@@ -34,7 +42,7 @@ on:
         description: Expected full baseline source commit
       candidate_run:
         type: string
-        description: Candidate Release workflow run ID
+        description: Candidate artifact build workflow run ID
       candidate_artifact:
         type: string
         description: Candidate runtime-probe artifact ID
@@ -48,11 +56,11 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: bench-tests-${{ inputs.compare_tui && 'compare-tui' || 'pytest' }}-${{ github.ref }}
+  group: bench-tests-${{ inputs.compare_server && 'compare-server' || inputs.compare_tui && 'compare-tui' || 'pytest' }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   pytest:
-    if: ${{ !inputs.compare_tui }}
+    if: ${{ !inputs.compare_tui && !inputs.compare_server }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -85,7 +93,7 @@ jobs:
           sys.exit(1 if skipped else 0)
           PY
   compare-tui:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_tui && !inputs.compare_server }}
     runs-on: macos-14
     timeout-minutes: 15
     permissions:
@@ -141,5 +149,60 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: tui-artifact-comparison-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: comparison-results/
+          if-no-files-found: warn
+  server-harness-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python3 -m unittest discover -s test -p test_server_artifact_comparison.py -v
+  compare-server:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_server }}
+    needs: server-harness-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Require one comparison mode
+        env:
+          COMPARE_TUI: ${{ inputs.compare_tui }}
+        run: test "$COMPARE_TUI" != true
+      - name: Install the Linux release runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y -qq libffi8 libgmp10 libpq5 libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
+      - name: Verify artifacts and compare isolated servers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASELINE_RUN: ${{ inputs.baseline_run }}
+          BASELINE_ARTIFACT: ${{ inputs.baseline_artifact }}
+          BASELINE_COMMIT: ${{ inputs.baseline_commit }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+          CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          REPETITIONS: ${{ inputs.repetitions }}
+        run: |
+          exec python3 scripts/harness/perf/compare_server_artifacts.py \
+            --repository "$GITHUB_REPOSITORY" --repository-id "$GITHUB_REPOSITORY_ID" \
+            --baseline-run "$BASELINE_RUN" --baseline-artifact "$BASELINE_ARTIFACT" \
+            --baseline-commit "$BASELINE_COMMIT" \
+            --candidate-run "$CANDIDATE_RUN" --candidate-artifact "$CANDIDATE_ARTIFACT" \
+            --candidate-commit "$CANDIDATE_COMMIT" \
+            --repetitions "$REPETITIONS" --output comparison-results
+      - name: Retain complete or partial HTTP receipts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: server-artifact-comparison-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: comparison-results/
           if-no-files-found: warn

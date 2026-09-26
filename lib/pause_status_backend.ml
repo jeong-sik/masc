@@ -1,13 +1,8 @@
 (** Pause-status projection for workspace/tool surfaces. *)
 
 let keeper_pause_status_json config =
-  let names =
-    (match Keeper_meta_store.keeper_names_result config with
-     | Ok names -> names
-     | Error detail ->
-       Log.Keeper.warn "keeper_pause_status_json: keeper names unread: %s" detail;
-       [])
-  in
+  let ( let* ) = Result.bind in
+  let* names = Keeper_meta_store.keeper_names_result config in
   let read_errors_rev, paused_by_meta_rev, paused_by_phase_rev =
     List.fold_left
       (fun (errs, by_meta, by_phase) name ->
@@ -32,7 +27,7 @@ let keeper_pause_status_json config =
     Keeper_types_profile_toml_normalizers.dedupe_keep_order
       (meta_paused_names @ phase_paused_names)
   in
-  `Assoc
+  Ok (`Assoc
     [ "paused", `Bool (paused_names <> [])
     ; "paused_count", `Int (List.length paused_names)
     ; "paused_names", `List (List.map (fun name -> `String name) paused_names)
@@ -42,5 +37,5 @@ let keeper_pause_status_json config =
              (fun (name, error) ->
                 `Assoc [ "name", `String name; "error", `String error ])
              read_errors_rev) )
-    ]
+    ])
 ;;

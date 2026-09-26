@@ -14,6 +14,11 @@ include Keeper_tool_surface_ops
    [Workspace.config] only (no Eio fields), letting Keeper_tool_surface register
    masc_keeper_list with [Keeper_dispatch_ref] at module load. *)
 let keeper_list_body ~(config : Workspace.config) args : tool_result =
+  (* Read before consulting the projection cache: a previously readable
+     roster cannot certify a directory that has since become unreadable. *)
+  match keeper_names_result config with
+  | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail
+  | Ok persisted_names ->
   let limit = max 0 (get_int args "limit" 50) in
   let detailed = get_bool args "detailed" false in
   let cache_key =
@@ -28,11 +33,7 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
         in
         let all_names =
           registry_names
-          @ (match keeper_names_result config with
-             | Ok names -> names
-             | Error detail ->
-               Log.Keeper.warn "keeper_list: keeper names unread: %s" detail;
-               [])
+          @ persisted_names
           |> List.map String.trim
           |> List.filter (fun name -> not (String.equal name ""))
           |> List.sort_uniq String.compare

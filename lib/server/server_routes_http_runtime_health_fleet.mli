@@ -5,10 +5,14 @@
     runtime truth, and contract-verification health JSON renderers. *)
 
 val keeper_reaction_ledger_health_json : unit -> Yojson.Safe.t
+(** An unread Keeper census produces [status=unavailable], an unknown
+    [keeper_count], and [keepers_listing=unreadable] with the read error. *)
 
 val keeper_owner_health_json : unit -> Yojson.Safe.t
+(** Preserves an unread census as unavailable rather than a healthy empty fleet. *)
 
 val keeper_board_event_collection_health_json : unit -> Yojson.Safe.t
+(** Preserves an unread census as unavailable rather than a healthy empty fleet. *)
 
 val paused_keeper_count : Yojson.Safe.t -> int
 

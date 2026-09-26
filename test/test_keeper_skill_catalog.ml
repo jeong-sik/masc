@@ -813,10 +813,10 @@ let test_composition_skill_joins_projection () =
     (List.mem "keeper_compose_status-memory-query" expected);
   check
     bool
-    "proposal async controls do not depend on Skill execution mode"
-    true
+    "an inline-only surface has no async request for the controls to address"
+    false
     (List.mem Catalog.status_tool_name expected
-     && List.mem Catalog.cancel_tool_name expected);
+     || List.mem Catalog.cancel_tool_name expected);
   let expected_async =
     Masc.Keeper_run_tools_setup.expected_model_tool_names
         ~identity_names:[]

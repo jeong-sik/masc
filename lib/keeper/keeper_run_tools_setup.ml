@@ -149,12 +149,15 @@ let expected_model_tool_names
     then [ Keeper_tool_composition_catalog.skill_tool_name ]
     else []
   in
-  (* The shared controls are always present because a Skill-declared
-     composition may select async execution. *)
+  (* The shared controls accompany an async composition and nothing else:
+     the same test the surface builds them under. *)
   let control_names =
-    [ Keeper_tool_composition_catalog.status_tool_name
-    ; Keeper_tool_composition_catalog.cancel_tool_name
-    ]
+    if Keeper_tool_composition_catalog.requires_async_controls entries
+    then
+      [ Keeper_tool_composition_catalog.status_tool_name
+      ; Keeper_tool_composition_catalog.cancel_tool_name
+      ]
+    else []
   in
   List.sort_uniq
     String.compare
@@ -641,6 +644,7 @@ let prepare_agent_setup
         ; agent_cell
         ; history = history_messages
         ; load_receipts
+        ; keeper_turn_id
         }
       ?composition_plan_index
       ~skill_activation_context

@@ -59,7 +59,7 @@ let test_single_and_stale_selection () = with_clients (fun _ connect ->
 let test_expired_resolved_target_is_pre_dispatch () = with_clients (fun _ connect ->
   let info = connect Lane.Firefox in
   let pinned = target info.client_id in
-  let client = match pinned with Lane.Live_client client -> client | Lane.Automation -> fail "expected live target" in
+  let client = match pinned with Lane.Live_client client -> client | Lane.Automation | Lane.Stagehand -> fail "expected live target" in
   (* Expire the captured target between resolution and issue, without sleeps
      or a clock-dependent scheduling race. No command has been dispatched. *)
   client.connected_until <- Monotonic_deadline.after ~seconds:0.;
@@ -106,7 +106,7 @@ let test_optional_document_preserves_existing_work () = with_clients (fun sw con
   let primary = Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_for ~target:selected ~verb:Lane.Tabs_list ~timeout_sec:1.) in
   let primary_command = take info in
-  let client = match selected with Lane.Live_client client -> client | Lane.Automation -> fail "live target expected" in
+  let client = match selected with Lane.Live_client client -> client | Lane.Automation | Lane.Stagehand -> fail "live target expected" in
   check bool "optional observation refuses while primary request waits" true
     (Lane.issue_document_if_idle ~target:selected ~tab_id:1 ~timeout_sec:1.
        = Ok (Lane.Refused "optional_document_observation_busy"));

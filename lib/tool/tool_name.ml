@@ -130,12 +130,14 @@ end
 module Goal_name = struct
   type t =
     | Goal_list
+    | Goal_measure
     | Goal_transition
     | Goal_upsert
   [@@deriving enumerate]
 
   let to_string = function
     | Goal_list -> "masc_goal_list"
+    | Goal_measure -> "masc_goal_measure"
     | Goal_transition -> "masc_goal_transition"
     | Goal_upsert -> "masc_goal_upsert"
   ;;

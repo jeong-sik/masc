@@ -287,7 +287,7 @@ let transaction_lanes lane_id : Runtime_schema.exact_output_lane_decl list =
   [ { id = lane_id
     ; slot_ids = [ replacement_target ]
     ; cli_slot_ids = []
-    ; max_output_tokens = Some 4_096
+    ; max_output_tokens = Some 4_096; thinking = None
     }
   ]
 ;;

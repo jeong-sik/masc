@@ -70,13 +70,13 @@ let test_api_auth_rotates_invalid_request_judges () =
     (KFR.Rotate_now { rotate = KFR.Auth_failed })
     (Agent_core.Error.Api (Llm_provider.Retry.AuthError { message = "401" }));
   check_route
-    "authorization error rotates (credential scopes differ per runtime)"
-    (KFR.Rotate_now { rotate = KFR.Auth_failed })
+    "a 403 refuses the account, a class of its own apart from a 401"
+    (KFR.Rotate_now { rotate = KFR.Authorization_refused })
     (Agent_core.Error.Api
        (Llm_provider.Retry.AuthorizationError { message = "403" }));
   check_route
-    "provider authorization error rotates"
-    (KFR.Rotate_now { rotate = KFR.Auth_failed })
+    "provider authorization error is the same account refusal"
+    (KFR.Rotate_now { rotate = KFR.Authorization_refused })
     (Agent_core.Error.Provider
        (Llm_provider.Error.AuthorizationError
           { provider = "provider"; detail = "403" }));
@@ -475,6 +475,7 @@ let test_response_observed_per_class () =
     ; retry KFR.Network_transient
     ; retry KFR.Provider_timeout
     ; rotate KFR.Auth_failed
+    ; rotate KFR.Authorization_refused
     ; rotate KFR.Model_unavailable
     ; rotate KFR.Resumable_cli_session
     ; rotate KFR.Candidates_filtered
@@ -663,6 +664,7 @@ let test_route_resumes_on_same_path_per_class () =
     ; "with a negative reset", retry ~retry_after:(-5.0) KFR.Hard_quota
     ; "with a NaN reset", retry ~retry_after:Float.nan KFR.Hard_quota
     ; "", rotate KFR.Auth_failed
+    ; "", rotate KFR.Authorization_refused
     ; "", rotate KFR.Model_unavailable
     ; "", rotate KFR.Resumable_cli_session
     ; "", rotate KFR.Candidates_filtered
@@ -755,7 +757,7 @@ let test_candidate_fault_route_agreement () =
     [ "AuthError", Llm_provider.Retry.AuthError { message = "401" }, rotate KFR.Auth_failed
     ; ( "AuthorizationError"
       , Llm_provider.Retry.AuthorizationError { message = "403" }
-      , rotate KFR.Auth_failed )
+      , rotate KFR.Authorization_refused )
     ; ( "PaymentRequired"
       , Llm_provider.Retry.PaymentRequired { message = "402" }
       , retry KFR.Hard_quota )

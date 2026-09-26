@@ -105,7 +105,8 @@ let test_execution_error_cause () =
       , "completion failed (http_status=503, sent)" )
     ; ( EO.Response_body_deadline_exceeded
       , "total request deadline exceeded while reading response body" )
-    ; ( EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited }
+    ; ( EO.Provider_response_refused
+          { http_status = 429; refusal = EO.Rate_limited; retry_after_s = None }
       , "provider refused (http_status=429 refusal=rate_limited)" )
     ; EO.Incomplete_output, "incomplete output"
     ; EO.Missing_output, "missing output"

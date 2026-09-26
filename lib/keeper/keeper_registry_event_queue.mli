@@ -136,6 +136,20 @@ val cancel_scheduled_wakes_result :
     cancelled schedule's enqueued utterances leave the durable queue at the
     cancel boundary instead of riding the wake path. *)
 
+val cancel_untaken_scheduled_wakes_result :
+  base_path:string ->
+  string ->
+  applied_at:float ->
+  schedule_ids:string list ->
+  reason:string ->
+  (int, string) result
+(** [cancel_scheduled_wakes_result], except that an entry a turn has already
+    started (a turn-start reaction for its exact source is on the reaction
+    ledger) is left for that turn to ACK. Used by [masc_schedule_cancel], which
+    may run inside the very turn the schedule woke. A ledger read error fails
+    the call before anything is cancelled. Returns the number of pending
+    entries removed. *)
+
 val drain_owner_absent_pending_result :
   base_path:string ->
   string ->

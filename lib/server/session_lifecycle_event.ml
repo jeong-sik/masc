@@ -23,12 +23,6 @@ type t =
       transport_to : transport ;
       session_id : string ;
     }
-  | Resume of {
-      transport : transport ;
-      session_id : string ;
-      last_event_id : string option ;
-      replayed : int ;
-    }
   | Evict of {
       transport : transport ;
       session_id : string ;
@@ -125,15 +119,6 @@ let to_yojson = function
           ("transport_to", `String (transport_to_string transport_to)) ;
           ("session_id", `String session_id) ;
         ]
-  | Resume { transport ; session_id ; last_event_id ; replayed } ->
-      `Assoc
-        [
-          ("kind", `String "resume") ;
-          ("transport", `String (transport_to_string transport)) ;
-          ("session_id", `String session_id) ;
-          ( "last_event_id", Json_util.string_opt_to_json last_event_id ) ;
-          ("replayed", `Int replayed) ;
-        ]
   | Evict { transport ; session_id ; reason } ->
       `Assoc
         [
@@ -172,18 +157,6 @@ let of_yojson (j : Yojson.Safe.t) : (t, string) result =
                 Ok
                   (Upgrade
                      { transport_from ; transport_to ; session_id = session_id () })))
-    | "resume" ->
-        Result.bind (transport_field "transport") (fun transport ->
-            let last_event_id =
-              match Json_util.assoc_member_opt "last_event_id" j with
-              | None | Some `Null -> None
-              | Some (`String s) -> Some s
-              | Some _ -> None
-            in
-            let replayed = (match Json_util.assoc_member_opt "replayed" j with Some (`Int n) -> n | _ -> 0) in
-            Ok
-              (Resume
-                 { transport ; session_id = session_id () ; last_event_id ; replayed }))
     | "evict" ->
         Result.bind (transport_field "transport") (fun transport ->
             let reason_str = (match Json_util.assoc_member_opt "reason" j with Some (`String s) -> s | _ -> "") in

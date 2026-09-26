@@ -319,6 +319,124 @@ let is_committed_prefix
   && endpoint_is_present committed ~messages lines
 ;;
 
+(* Memory the continuity round saved that reaches past where this round
+   starts. Unlike [is_committed_prefix], the saved range may begin before the
+   start: the continuity round reads in its own units, and its snapshot
+   stands for the whole prefix it covers. *)
+let continuity_saved_reaches_past
+      (saved : Keeper_memory_os_current.durable_range_id)
+      ~trace_id
+      ~(selected : R.range)
+      ~selected_end_boundary_line
+      ~messages
+      lines
+  =
+  String.equal saved.trace_id trace_id
+  && Int.equal saved.history_start_boundary_line selected.history_start_boundary_line
+  && saved.start_atom <= selected.start_atom
+  && selected.start_atom < saved.end_atom
+  && saved.end_atom <= selected.end_atom
+  && saved.end_boundary_line <= selected_end_boundary_line
+  && endpoint_is_present saved ~messages lines
+;;
+
+(* The ranges whose Memory the continuity round has saved. It saves Memory
+   itself for a completed range this round has not committed yet, under the
+   receipt scope [Keeper_librarian_continuity.path] names, in the same Memory
+   WAL this round reads its own receipt from. It publishes its snapshot only
+   after the Memory of every unit it covers is saved
+   ([Keeper_librarian_continuity.commit]), so a published snapshot stands for
+   saved Memory from atom 0 through its end. The WAL keeps one receipt per
+   scope, so after several units only the snapshot still says what the
+   earlier ones saved; the receipt alone covers a stop between the Memory save
+   and the snapshot write. A snapshot that ends inside a turn is not offered:
+   no turn-end line witnesses its end, so this round cannot stand there. *)
+let continuity_saved_ranges ~config ~keeper_name ~memory_keepers_dir =
+  let ( let* ) = Result.bind in
+  let scope = Keeper_librarian_continuity.path ~config ~keeper_name in
+  let* receipt =
+    Keeper_memory_os_current.committed_durable_range
+      ~keepers_dir:memory_keepers_dir
+      ~keeper_id:keeper_name
+      ~receipt_scope:scope
+  in
+  let* snapshot = Keeper_librarian_continuity.read ~config ~keeper_name in
+  let published =
+    match snapshot with
+    | Some (snapshot : Librarian_continuity_snapshot.t)
+      when Int.equal snapshot.end_atom snapshot.covering_end_atom ->
+      Some
+        ({ Keeper_memory_os_current.receipt_scope = scope
+         ; trace_id = snapshot.trace_id
+         ; history_start_boundary_line = snapshot.history_start_boundary_line
+         ; start_atom = 0
+         ; end_atom = snapshot.end_atom
+         ; last_atom_digest = snapshot.last_atom_digest
+         ; end_boundary_line = snapshot.end_boundary_line
+         ; boundary_lines_seen = snapshot.end_boundary_line
+         }
+         : Keeper_memory_os_current.durable_range_id)
+    | Some (_ : Librarian_continuity_snapshot.t) | None -> None
+  in
+  Ok (Option.to_list receipt @ Option.to_list published)
+;;
+
+(* The furthest end the continuity round's saved Memory proves for this
+   range, as the position this round would write had it read that far. On
+   2026-09-25 three keepers' receipts show the same atoms saved twice, the
+   continuity round's first: jazz-developer [6416,6455) at revisions 1444
+   then 1447, code-reviewer [387,397) then [257,397) at 292 then 293,
+   masc-pro-builder [1862,1866) then [1847,1866) at 947 then 948. What cannot
+   be read proves nothing, so the range is then read as before and the cause
+   is logged. *)
+let continuity_saved_position
+      ~config
+      ~keeper_name
+      ~memory_keepers_dir
+      ~trace_id
+      ~(selected : R.range)
+      ~selected_end_boundary_line
+      ~selected_boundary_lines_seen
+      ~messages
+      lines
+  =
+  match continuity_saved_ranges ~config ~keeper_name ~memory_keepers_dir with
+  | Error detail ->
+    Log.Keeper.warn
+      ~keeper_name
+      "durable Librarian cannot read the Memory the continuity round saved; reading the \
+       range itself: %s"
+      detail;
+    None
+  | Ok saved ->
+    List.fold_left
+      (fun furthest (candidate : Keeper_memory_os_current.durable_range_id) ->
+         if not
+              (continuity_saved_reaches_past
+                 candidate
+                 ~trace_id
+                 ~selected
+                 ~selected_end_boundary_line
+                 ~messages
+                 lines)
+         then furthest
+         else (
+           match furthest with
+           | Some (kept : Keeper_memory_os_current.durable_range_id)
+             when kept.end_atom >= candidate.end_atom -> furthest
+           | Some _ | None -> Some candidate))
+      None
+      saved
+    |> Option.map (fun (furthest : Keeper_memory_os_current.durable_range_id) ->
+      { P.position =
+          { P.trace_id
+          ; end_atom = furthest.end_atom
+          ; last_atom_digest = furthest.last_atom_digest
+          }
+      ; boundary_lines_seen = selected_boundary_lines_seen
+      })
+;;
+
 let tool_observations messages =
   let calls_rev, results =
     List.fold_left
@@ -878,13 +996,25 @@ let consume_one_with_extent
                   ~selected_boundary_lines_seen:recovery_boundary_lines_seen
                   ~messages
                   lines -> Ok (Some (progress_of_range_id committed))
-         | Some _ | None -> Ok None)
+         | Some _ | None ->
+           Ok
+             (continuity_saved_position
+                ~config
+                ~keeper_name
+                ~memory_keepers_dir
+                ~trace_id
+                ~selected:recovery_range
+                ~selected_end_boundary_line:recovery_boundary_line
+                ~selected_boundary_lines_seen:recovery_boundary_lines_seen
+                ~messages
+                lines))
     in
     (match committed_prefix_advance with
      | Some next ->
-       (* The Memory commit of this prefix landed and only its progress
-          write did not. Recover the position without a model call; the
-          official lines wait for the next call. *)
+       (* Memory for this prefix is already saved: by this round's commit
+          whose progress write did not land, or by the continuity round.
+          Move the position without a model call; the official lines wait
+          for the next call. *)
        write_atom next (fun progress -> Progress_advanced progress)
      | None ->
     let* after_atom =

@@ -2247,8 +2247,11 @@ status: reference
     독립적으로 읽어 atom 위치를 전진시킨다. atom 쪽에 더 읽을 것이 없을 때 비로소 회차가
     `Official_range_stopped`로 종료된다(#38475).
   - 연속성 회차(`Keeper_librarian_continuity`): 스냅숏이 덮은 앞부분을 다시 쓰는 회차.
-    완료된 대화 구간을 요약해 Continuity Snapshot을 만든다. 커밋은 durable 회차의
-    위치를 바꾸지 않는다.
+    완료된 대화 구간을 요약해 Continuity Snapshot을 만든다. 그 구간의 기억을 durable
+    회차가 아직 저장하지 않았으면 이 회차가 기억을 먼저 저장하고, 저장이 끝난 뒤에만
+    스냅숏을 쓴다. durable 회차의 위치 파일은 고치지 않는다. 대신 durable 회차가 다음에
+    돌 때 연속성 회차가 저장한 구간(그 영수증과 게시된 스냅숏)을 보고, 그 구간은 모델에
+    다시 보내지 않고 위치만 그 끝으로 옮긴다.
   두 회차는 따로 밀리고(Continuity Lag), 실패 뒤 범위를 좁히는 방식도 다르다(RFC
   librarian-lifecycle §4.3). durable 회차는 실패 종류를 보지 않고, 실패 표식(wide-range
   failure marker)을 루프 메모리에 두고 가장 오래된 한 턴으로 좁힌다. 단, 공식 정지

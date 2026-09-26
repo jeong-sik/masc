@@ -154,6 +154,14 @@ val consume_one
     again. Later Memory writers preserve every runtime cluster's receipt until
     a newer durable range in that same cluster replaces it.
 
+    The continuity round saves Memory itself for a completed range this
+    consumer has not committed, under its own receipt scope
+    ({!Keeper_librarian_continuity.path}), and publishes its snapshot only
+    after that save. When its receipt or its published snapshot reaches past
+    the atom position in the same history, a pass advances to the furthest
+    such end the same way, without calling [commit], so those atoms are not
+    sent to the model a second time.
+
     Official-client turns have their own receipt in that same Memory WAL,
     naming the exact ordered boundary rows and turn references. It is recovered
     before checkpoint selection or retry narrowing. A mixed Memory commit

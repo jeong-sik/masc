@@ -310,3 +310,10 @@ let recover_paste t =
   | Ground | Escape | Csi _ | Ss3 | X10 _ | Osc _ | Apc_prefix | Apc _ | Utf8 _
   | Draining_paste _ ->
       None
+
+let abandon_draining t =
+  match t.state with
+  | Draining_paste _ -> t.state <- Ground
+  | Ground | Escape | Csi _ | Ss3 | X10 _ | Osc _ | Apc_prefix | Apc _ | Utf8 _
+  | In_paste _ ->
+      ()

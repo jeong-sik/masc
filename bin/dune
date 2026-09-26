@@ -1701,6 +1701,7 @@
   masc_tui_theme_choice
   masc_tui_terminal_palette
   masc_tui_terminal_probe
+  masc_tui_input_decoder
   masc_tui_code_lexer
   masc_tui_memo
   masc_tui_span

@@ -56,3 +56,9 @@ val cancel_pending : t -> unit
 val recover_paste : t -> Masc_tui_paste.t option
 (** While [Pasting]: return what arrived so far and drop the rest of this
     paste up to its [201~]. [None] in any other state. *)
+
+val abandon_draining : t -> unit
+(** While [Draining]: stop dropping and read what follows as input. Once the
+    end marker is lost there is no way to tell a later pasted byte from a
+    typed one; this is the operator's unlock, not a guess that the tail
+    ended. Nothing else is touched. *)

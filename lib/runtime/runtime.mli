@@ -314,7 +314,9 @@ type exact_lane_cli_slot_unservable =
     dispatches through {!Keeper_lane_cli_oneshot.run} alone, which requires
     {!Runtime_execution.Official_client} and hands the client an output
     schema on every call; an id that resolves to nothing instead is
-    {!Reference_unresolved}, not this. *)
+    {!Reference_unresolved}, not this. An official client with no schema
+    channel is also refused when its runtime id appears in [slots];
+    catalog-only [slots] ids remain catalog-owned. *)
 
 type load_failure =
   | Toml_unparsable of Runtime_toml.parse_error list

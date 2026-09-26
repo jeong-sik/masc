@@ -33,6 +33,7 @@ val prepare_native_workspace :
     is independent of both guest filesystem coordinates and config storage. *)
 
 module For_testing : sig
+  val prepare_with_store_sync : sync_store:(string -> unit) -> account_home:string -> (t, error) result
   val check_directory_stat : private_:bool -> Unix.stats -> (unit, error) result
   val check_file_snapshot : Fs_compat.owned_regular_file_snapshot -> (unit, error) result
   val ensure_directory_with_sync : sync:(string -> unit) -> private_:bool -> string -> (unit, error) result

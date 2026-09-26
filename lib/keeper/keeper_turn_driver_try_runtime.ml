@@ -56,7 +56,7 @@ let api_error_of_error = function
    The predicate now reads the one closed [Candidate_fault] judgment
    (RFC-one-slot-fault-judgment-for-every-walk.md, #38472) instead of
    enumerating constructors: a refusal that is this binding's affair —
-   credential (401/403), account (402), model (404), or admission
+   credential (401), account access (403), account (402), model (404), or admission
    ([InputCapacity], a pre-dispatch refusal of the prepared request that
    another binding may accept) — rotates the walk to the next candidate. The
    two walks (exact and Keeper) therefore agree that [InputCapacity] is a
@@ -69,6 +69,7 @@ let candidate_access_should_try_next error =
     (match Llm_provider.Candidate_fault.of_api_error api with
      | Llm_provider.Candidate_fault.Binding
          ( Credential
+         | Account_access
          | Account
          | Model_absent
          | Admission ) -> true
@@ -124,6 +125,7 @@ let attempt_rejected_should_try_next error =
      | Llm_provider.Candidate_fault.Unattributed -> true
      | Llm_provider.Candidate_fault.Binding
          ( Credential
+         | Account_access
          | Account
          | Model_absent
          | Rate_limit
@@ -151,6 +153,7 @@ let context_overflow_should_try_next error =
      | Llm_provider.Candidate_fault.Binding Window -> true
      | Llm_provider.Candidate_fault.Binding
          ( Credential
+         | Account_access
          | Account
          | Model_absent
          | Rate_limit

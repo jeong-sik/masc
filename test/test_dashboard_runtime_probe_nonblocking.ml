@@ -259,6 +259,7 @@ let fanout_provider ~id ~url =
   ; transport = Http url
   ; is_non_interactive = true
   ; credentials = Some (Inline "probe-test-token")
+  ; account_home = None
   ; capabilities = None
   ; healthcheck_path = None
   ; headers = None

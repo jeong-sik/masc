@@ -1752,7 +1752,7 @@ let candidate_fault_of_provider_refusal : provider_refusal -> Candidate_fault.t 
   | Overloaded -> Binding Capacity
   | Server_error -> Binding Server
   | Auth_failed -> Binding Credential
-  | Authorization_refused -> Binding Credential
+  | Authorization_refused -> Binding Account_access
   | Payment_required -> Binding Account
   | Invalid_request -> Unattributed
   | Not_found -> Binding Model_absent
@@ -1938,6 +1938,13 @@ let execution_failure_may_advance (error : execution_error) =
      | Http_client.Provider_step
      | Http_client.Cli_stdout_idle
      | Http_client.Unknown_timeout -> false)
+  (* The provider answered that this binding's account is out of quota: a
+     quota code the glm codec reads as [Hard_quota], the fact a 402 states.
+     The successor bills its own account, so the lane walks it as it walks a
+     402 or a 429. *)
+  | ( Completion_failed
+        { error = Http_client.ProviderFailure { kind = Http_client.Hard_quota _; _ }; _ }
+    , Response_received ) -> receipt_dispatch_count error.receipt = 1
   | Response_body_deadline_exceeded, Response_received ->
     (* No domain validator ran for this incomplete response. Advance through
        the caller's existing settlement callback, retaining the dispatched
@@ -2078,6 +2085,94 @@ let flow_execution_terminal_kind = function
   | Flow_candidates_exhausted _
   | Flow_exact_execution_failed _ ->
     Non_advanceable_terminal
+;;
+
+type flow_binding_standing =
+  | Every_binding_resting
+  | Not_every_binding_resting
+
+(* Only refusals that name the binding's own standing -- its quota or rate
+   limit spent, its capacity full, its account unable to pay. Every other
+   refusal can be about this input (a size, a request shape, a credential, a
+   route), so it is not read as rest. *)
+let provider_refusal_is_binding_rest = function
+  | Rate_limited | Overloaded | Payment_required -> true
+  | Request_body_refused
+  | Refusal_body_not_received
+  | Server_error
+  | Auth_failed
+  | Authorization_refused
+  | Invalid_request
+  | Not_found
+  | Context_overflow
+  | Input_capacity
+  | Network_error
+  | Timeout -> false
+;;
+
+let provider_failure_is_binding_rest : Http_client.provider_failure_kind -> bool =
+  function
+  | Http_client.Capacity_exhausted _ | Http_client.Hard_quota _ -> true
+  | Http_client.Capability_mismatch _
+  | Http_client.Cli_policy_invalid _
+  | Http_client.Cli_startup_failed _
+  | Http_client.Provider_parse_error _
+  | Http_client.Provider_wire_error _
+  | Http_client.Provider_reported_error _
+  | Http_client.Provider_interrupted
+  | Http_client.Response_body_too_large _
+  | Http_client.Empty_completion _
+  | Http_client.Context_overflow _
+  | Http_client.Repeating_generation _
+  | Http_client.Unknown_provider_failure _ -> false
+;;
+
+let execution_cause_is_binding_rest = function
+  | Provider_response_refused { refusal; http_status = _ } ->
+    provider_refusal_is_binding_rest refusal
+  | Completion_failed { error = Http_client.ProviderFailure { kind; message = _ }; dispatch = _ }
+    -> provider_failure_is_binding_rest kind
+  | Completion_failed
+      { error =
+          ( Http_client.HttpError _
+          | Http_client.NetworkError _
+          | Http_client.TimeoutError _
+          | Http_client.AcceptRejected _
+          | Http_client.ProviderTerminal _ )
+      ; dispatch = _
+      } -> false
+  | Attempt_already_started
+  | Clock_required_for_timeout
+  | Frozen_request_mismatch
+  | Response_body_deadline_exceeded
+  | Incomplete_output
+  | Missing_output
+  | Ambiguous_output _
+  | Unexpected_output_content
+  | Invalid_json_output
+  | Internal_non_json_output -> false
+;;
+
+let flow_execution_binding_standing error =
+  let advance_rests (advance : flow_advance_receipt) =
+    match advance.failed with
+    | Flow_advance_execution_failed { cause; candidate = _; raw_response_sha256 = _ } ->
+      execution_cause_is_binding_rest cause
+    | Flow_advance_candidate_rejected _ -> false
+  in
+  match error with
+  | Flow_exact_execution_failed { cause; evidence; candidate = _ }
+    when execution_cause_is_binding_rest cause.cause
+         && List.for_all advance_rests evidence.advances -> Every_binding_resting
+  | Flow_attempt_already_started _
+  | Flow_attempt_start_failed _
+  | Flow_measurement_start_failed _
+  | Flow_before_measurement_dispatch_callback_failed _
+  | Flow_measurement_terminal_callback_failed _
+  | Flow_before_dispatch_callback_failed _
+  | Flow_before_advance_callback_failed _
+  | Flow_candidates_exhausted _
+  | Flow_exact_execution_failed _ -> Not_every_binding_resting
 ;;
 
 let admitted_flow_candidate visit (plan : ready_plan) =

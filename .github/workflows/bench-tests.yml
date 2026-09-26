@@ -52,6 +52,9 @@ on:
         type: string
         description: Repeated sets of ten individually acknowledged input transitions
         default: '1'
+      keeper_metadata:
+        type: string
+        description: Optional checked-in alpha/beta JSON fixture path for both binaries
 permissions:
   contents: read
 concurrency:
@@ -142,13 +145,19 @@ jobs:
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           REPETITIONS: ${{ inputs.repetitions }}
           INPUT_CYCLES: ${{ inputs.input_cycles }}
+          KEEPER_METADATA: ${{ inputs.keeper_metadata }}
         run: |
+          fixture_args=()
+          if [[ -n "$KEEPER_METADATA" ]]; then
+            fixture_args=(--keeper-metadata "$KEEPER_METADATA")
+          fi
           exec python3 scripts/harness/perf/compare_tui_artifacts.py \
             --baseline runtime-baseline --baseline-run "$BASELINE_RUN" \
             --baseline-artifact "$BASELINE_ARTIFACT" --baseline-commit "$BASELINE_COMMIT" \
             --candidate runtime-candidate --candidate-run "$CANDIDATE_RUN" \
             --candidate-artifact "$CANDIDATE_ARTIFACT" --candidate-commit "$CANDIDATE_COMMIT" \
             --repetitions "$REPETITIONS" --input-cycles "$INPUT_CYCLES" \
+            "${fixture_args[@]}" \
             --output-dir comparison-results
       - name: Retain raw observations and identity receipts
         if: always()

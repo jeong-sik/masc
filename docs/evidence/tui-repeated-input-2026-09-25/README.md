@@ -21,7 +21,7 @@ See [Python resource usage documentation](https://docs.python.org/3/library/reso
 
 ## Verification
 
-- Five Python receipt tests pass. They reject missing/duplicate/changed cycle
+- Six Python receipt tests pass. They reject missing/duplicate/changed cycle
   samples, invalid latency or resource values, inconsistent CPU totals, missing
   gaps, nonfinite/negative gaps, and incorrect phase boundaries.
 - Python syntax and `git diff --check` pass; no local OCaml build.
@@ -53,3 +53,35 @@ against a loaded snapshot; it does not verify automatic startup loading. A
 failure now emits its stage and any partial observations after fixture cleanup,
 without a PASS marker or complete resource receipt. The local smoke receipt
 above predates this setup adjustment and is not proof of the adjusted scenario.
+
+## Source-pinned metadata and preflight
+
+[Run 36233452828](https://github.com/jeong-sik/masc/actions/runs/36233452828)
+on `91d1e037044b86cb3d3b548995d5199e85f5931e` failed before any timed input.
+The screen had `MASC Keepers (0)` and no metadata, unlike the earlier
+`not loaded` failure. The current shared fixture had removed `trace_history`
+and `last_handoff_ts`. Both compared binaries require those fields and silently
+exclude metadata that fails their current-schema parser. Refresh cannot repair
+this fixture mismatch.
+
+The optional `--keeper-metadata` argument (workflow input `keeper_metadata`)
+now supplies an explicit alpha/beta JSON fixture for both binaries. It replaces
+only benchmark metadata before launch. The default still uses the current
+product fixture. `candidate2-and-3-metadata.json` is exactly the output of
+`keeper_metadata` at `8e2224bde96ba4aeddb79bdbea79ff03482ee1e3` for both names;
+use it only for this historical candidate2/candidate3 experiment. Their metadata
+parsers have the same required fields. The shared product fixture is unchanged.
+
+Before timing, the scenario selects beta and then alpha and requires each
+completed selected-row frame. Receipts include both acknowledged names and
+`metadata_sha256`, the SHA-256 of `json.dumps(metadata, sort_keys=True).encode()`.
+This is a normalized JSON content hash, not the raw file hash. The comparator
+retains the supplied JSON and requires identical preflight receipts in all runs.
+The two setup selections affect the first timed input's cadence and whole-session
+CPU. Do not pool these measurements with earlier runs using different setup.
+
+An existing local binary with SHA-256 `514de059bef299d9998c7453bef842318ec0acdcac37d7c334c0abdd59844e11`
+reproduced the empty roster with the default current fixture. With the explicit
+snapshot it passed 20 transitions, draft verification, exit and terminal cleanup.
+`pinned-fixture-smoke.stdout.txt` retains the success receipt. This is fixture
+repair evidence; the binary's source is unverified and it proves no optimization.

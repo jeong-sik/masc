@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import os
+from pathlib import Path
 import resource
 import select
 import sys
@@ -28,11 +29,29 @@ def positive_int(value: str) -> int:
     return parsed
 
 
-def run(executable: str, *, cycles: int = 1) -> None:
+def workspace_metadata(path: Path | None) -> dict:
+    metadata = ({name: h.keeper_metadata(name) for name in ("alpha", "beta")}
+                if path is None else json.loads(path.read_text()))
+    if (not isinstance(metadata, dict) or set(metadata) != {"alpha", "beta"}
+            or any(not isinstance(value, dict) or value.get("name") != name
+                   for name, value in metadata.items())):
+        raise ValueError("metadata fixture must contain alpha and beta with matching names")
+    return metadata
+
+
+def run(executable: str, *, cycles: int = 1, metadata_path: Path | None = None) -> None:
     if cycles <= 0:
         raise ValueError("cycles must be positive")
     samples = []
     stage = "startup"
+    metadata = workspace_metadata(metadata_path)
+    metadata_sha256 = hashlib.sha256(
+        json.dumps(metadata, sort_keys=True).encode()).hexdigest()
+    preflight = {"metadata_sha256": metadata_sha256, "visible_keepers": []}
+
+    def prepare_workspace(base_path):
+        for name, value in metadata.items():
+            (Path(base_path) / ".masc/keepers" / f"{name}.json").write_text(json.dumps(value))
     with open(executable, "rb") as stream:
         binary_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
     with open(__file__, "rb") as stream:
@@ -94,7 +113,9 @@ def run(executable: str, *, cycles: int = 1) -> None:
         # below reconstructs the current completed screen instead of requiring
         # those bytes to be emitted again after refresh.
         h.write_all(master_fd, output, b"r")
+        h.select_keeper_row(process, master_fd, output, b"beta")
         h.select_keeper_row(process, master_fd, output, b"alpha")
+        preflight["visible_keepers"] = ["alpha", "beta"]
         for cycle in range(1, cycles + 1):
             for label, down, up in (
                 ("arrow", b"\x1b[B", b"\x1b[A"),
@@ -151,20 +172,21 @@ def run(executable: str, *, cycles: int = 1) -> None:
     try:
         h.run_terminal_scenario(executable,
             description="Input bursts and scroll keys present their resulting frame",
-            interact=interact, http_fixtures=h.keeper_runtime_http_fixtures())
+            interact=interact, http_fixtures=h.keeper_runtime_http_fixtures(),
+            prepare_workspace=prepare_workspace)
     except BaseException:
         # Print only after the helper unwinds: per-input I/O would perturb the
         # timings. A failed run never emits PASS or a complete resource receipt.
         print(json.dumps({"status": "failed", "stage": stage, "cycles": cycles,
                           "binary_sha256": binary_sha256, "script_sha256": script_sha256,
-                          "samples": samples}), file=sys.stderr, flush=True)
+                          "preflight": preflight, "samples": samples}), file=sys.stderr, flush=True)
         raise
     session_wall_seconds = (time.perf_counter_ns() - session_started) / 1e9
     after = resource.getrusage(resource.RUSAGE_CHILDREN)
     user_seconds = after.ru_utime - before.ru_utime
     system_seconds = after.ru_stime - before.ru_stime
     print(json.dumps({"binary_sha256": binary_sha256, "script_sha256": script_sha256,
-                      "cycles": cycles, "samples": samples,
+                      "cycles": cycles, "samples": samples, "preflight": preflight,
                       "session_resources": {
                           "child_user_seconds": user_seconds,
                           "child_system_seconds": system_seconds,
@@ -181,5 +203,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable")
     parser.add_argument("--cycles", type=positive_int, default=1)
+    parser.add_argument("--keeper-metadata", type=Path,
+                        help="Explicit alpha/beta JSON fixture for a source-pinned comparison")
     args = parser.parse_args()
-    run(os.path.abspath(args.executable), cycles=args.cycles)
+    run(os.path.abspath(args.executable), cycles=args.cycles, metadata_path=args.keeper_metadata)

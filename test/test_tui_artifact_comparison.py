@@ -16,7 +16,9 @@ spec.loader.exec_module(comparison)
 
 
 def receipt():
-    return {"cycles": 2, "samples": [
+    return {"preflight": {"metadata_sha256": "a" * 64,
+                          "visible_keepers": ["alpha", "beta"]},
+            "cycles": 2, "samples": [
         {"cycle": cycle, "action": f"action {action}", "input_hex": f"{action:02x}",
          "preceding_ack_to_input_ms": None if cycle == 1 and action in (0, 6) else 0.2,
          "complete_frame_ms": 0.5}
@@ -28,6 +30,14 @@ def receipt():
 
 
 class ReceiptTests(unittest.TestCase):
+    def test_reject_unacknowledged_workspace(self):
+        for key, value in (("visible_keepers", []), ("visible_keepers", ["alpha"]),
+                           ("metadata_sha256", "a" * 63), ("metadata_sha256", "g" * 64)):
+            malformed = receipt()
+            malformed["preflight"][key] = value
+            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                comparison.validate_observation(malformed, cycles=2)
+
     def test_complete_repetitions_preserve_all_samples(self):
         inputs, actions = comparison.validate_observation(receipt(), cycles=2)
         self.assertEqual(len(inputs), 20)

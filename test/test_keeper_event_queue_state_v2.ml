@@ -298,6 +298,7 @@ let test_turn_attempt_terminal_receipt_preserves_exact_source () =
    | _ -> Alcotest.fail "turn-attempt terminal receipt did not retain one source");
   let projected =
     State.mark_transition_projected
+      ~retain_previous:(fun _ -> true)
       ~transition_id:receipt.transition_id
       staged
     |> require_ok "project turn-attempt terminal receipt"
@@ -323,6 +324,7 @@ let test_turn_attempt_terminal_receipt_preserves_exact_source () =
   in
   let projected =
     State.mark_transition_projected
+      ~retain_previous:(fun _ -> true)
       ~transition_id:later_receipt.transition_id
       later_staged
     |> require_ok "displace turn-attempt receipt into compact history"
@@ -414,7 +416,10 @@ let test_turn_completed_receipt_is_terminal_and_conflict_fenced () =
    | State.Ack_source_terminal _ ->
      Alcotest.fail "completed turn did not commit Turn_completed evidence");
   let projected =
-    State.mark_transition_projected ~transition_id:receipt.transition_id staged
+    State.mark_transition_projected
+      ~retain_previous:(fun _ -> true)
+      ~transition_id:receipt.transition_id
+      staged
     |> require_ok "project completed turn receipt"
   in
   (match
@@ -440,6 +445,307 @@ let test_turn_completed_receipt_is_terminal_and_conflict_fenced () =
    with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "failure replaced an already-completed turn")
+;;
+
+(* #38527: retirement is the moment an un-re-askable receipt is dropped. A
+   completion nobody can re-ask never enters the list, the newest receipt
+   stays answerable through last_transition (its replay resolves without the
+   list), and a second retirement without an asker still leaves the list
+   empty. *)
+let test_projected_dispositions_do_not_accumulate_without_an_asker () =
+  let source = stimulus "unasked-turn-source" 1.0 in
+  let initial = State.with_pending (queue [ source ]) State.empty in
+  let staged, receipt =
+    match
+      State.terminalize_pending_turn_completed
+        ~applied_at:2.0
+        ~selection:(select initial)
+        initial
+      |> require_ok "terminalize first unasked source"
+    with
+    | state, State.Transition_applied receipt -> state, receipt
+    | _, State.Transition_already_applied _ ->
+      Alcotest.fail "first unasked terminalization was replayed"
+  in
+  let projected =
+    State.mark_transition_projected
+      ~retain_previous:(fun _ -> false)
+      ~transition_id:receipt.transition_id
+      staged
+    |> require_ok "project first unasked receipt"
+  in
+  Alcotest.(check int)
+    "no asker means no retained witness"
+    0
+    (List.length
+       (List.filter
+          (function State.Projected_witness _ -> true | _ -> false)
+          (State.projected_dispositions projected)));
+  (match
+     State.terminalize_pending_turn_completed
+       ~applied_at:3.0
+       ~selection:(select initial)
+       projected
+     |> require_ok "replay unasked completion"
+   with
+   | _, State.Transition_already_applied replayed ->
+     Alcotest.(check string)
+       "replay resolves through last_transition without a retained witness"
+       receipt.transition_id
+       replayed.transition_id
+   | _, State.Transition_applied _ ->
+     Alcotest.fail "unasked completion was applied twice");
+  let later_source = stimulus "unasked-later-source" 3.5 in
+  let with_later =
+    projected
+    |> State.with_revision (Int64.succ (State.revision projected))
+    |> State.with_pending (queue [ later_source ])
+  in
+  let later_staged, later_receipt =
+    match
+      State.terminalize_pending_turn_completed
+        ~applied_at:3.75
+        ~selection:(select with_later)
+        with_later
+      |> require_ok "terminalize second unasked source"
+    with
+    | state, State.Transition_applied receipt -> state, receipt
+    | _, State.Transition_already_applied _ ->
+      Alcotest.fail "second unasked terminalization was replayed"
+  in
+  let projected_twice =
+    State.mark_transition_projected
+      ~retain_previous:(fun _ -> false)
+      ~transition_id:later_receipt.transition_id
+      later_staged
+    |> require_ok "project second unasked receipt"
+  in
+  Alcotest.(check int)
+    "a second retirement without an asker still keeps the list empty"
+    0
+    (List.length
+       (List.filter
+          (function State.Projected_witness _ -> true | _ -> false)
+          (State.projected_dispositions projected_twice)));
+  (match
+     List.filter
+       (function State.Current_receipt _ -> true | _ -> false)
+       (State.projected_dispositions projected_twice)
+   with
+   | [ State.Current_receipt newest ] ->
+     Alcotest.(check string)
+       "the newest receipt is the second completion"
+       later_receipt.transition_id
+       newest.transition_id
+   | _ ->
+     Alcotest.fail
+       "projected dispositions must hold exactly the newest receipt");
+  State.to_yojson projected_twice
+  |> State.of_yojson
+  |> require_ok "retention state round trip"
+  |> ignore
+;;
+
+(* #38527: a receipt a standing asker can re-ask stays. Two completions with
+   the first retained hold exactly one witness -- the first receipt, because
+   the newest always lives in last_transition instead. *)
+let test_projected_dispositions_keep_receipts_with_an_asker () =
+  let source = stimulus "asked-turn-source" 1.0 in
+  let initial = State.with_pending (queue [ source ]) State.empty in
+  let staged, receipt =
+    match
+      State.terminalize_pending_turn_completed
+        ~applied_at:2.0
+        ~selection:(select initial)
+        initial
+      |> require_ok "terminalize asked source"
+    with
+    | state, State.Transition_applied receipt -> state, receipt
+    | _, State.Transition_already_applied _ ->
+      Alcotest.fail "asked terminalization was replayed"
+  in
+  let projected =
+    State.mark_transition_projected
+      ~retain_previous:(fun _ -> true)
+      ~transition_id:receipt.transition_id
+      staged
+    |> require_ok "project asked receipt"
+  in
+  let later_source = stimulus "asked-later-source" 3.0 in
+  let with_later =
+    projected
+    |> State.with_revision (Int64.succ (State.revision projected))
+    |> State.with_pending (queue [ later_source ])
+  in
+  let later_staged, later_receipt =
+    match
+      State.terminalize_pending_turn_completed
+        ~applied_at:3.25
+        ~selection:(select with_later)
+        with_later
+      |> require_ok "terminalize later asked source"
+    with
+    | state, State.Transition_applied receipt -> state, receipt
+    | _, State.Transition_already_applied _ ->
+      Alcotest.fail "later asked terminalization was replayed"
+  in
+  let projected_twice =
+    State.mark_transition_projected
+      ~retain_previous:(fun _ -> true)
+      ~transition_id:later_receipt.transition_id
+      later_staged
+    |> require_ok "project later asked receipt"
+  in
+  (match
+     List.filter
+       (function State.Projected_witness _ -> true | _ -> false)
+       (State.projected_dispositions projected_twice)
+   with
+   | [ State.Projected_witness witness ] ->
+     Alcotest.(check string)
+       "the retained witness is the first receipt"
+       receipt.transition_id
+       witness.transition_id
+   | _ ->
+     Alcotest.fail
+       "two completions with one asker must hold exactly one witness")
+;;
+
+let schedule_stimulus occurrence_id arrived_at : Queue.stimulus =
+  { post_id = occurrence_id
+  ; urgency = Queue.Normal
+  ; arrived_at
+  ; payload =
+      Queue.Schedule_due
+        { occurrence_id
+        ; schedule_instance_id = "schedule-instance"
+        ; schedule_id = "schedule"
+        ; due_at = arrived_at
+        ; payload_digest = "schedule-digest"
+        ; title = None
+        ; message = "scheduled wake"
+        ; result_delivery = None
+        }
+  }
+;;
+
+let occurrence_summary (occurrence : State.schedule_occurrence) =
+  let evidence = function
+    | State.Terminal_evidence_recorded -> "recorded"
+    | State.Terminal_evidence_pending _ -> "pending-projection"
+  in
+  let source =
+    match occurrence.occurrence_source with
+    | State.Full_source _ -> "full"
+    | State.Compact_source _ -> "compact"
+  in
+  let state =
+    match occurrence.occurrence_state with
+    | State.Occurrence_pending -> "pending"
+    | State.Occurrence_transfer_projecting_to target -> "transfer-projecting:" ^ target
+    | State.Occurrence_transferred_to target -> "transferred:" ^ target
+    | State.Occurrence_completed e -> "completed:" ^ evidence e
+    | State.Occurrence_failed (reason, e) -> "failed:" ^ reason ^ ":" ^ evidence e
+    | State.Occurrence_cancelled (reason, e) -> "cancelled:" ^ reason ^ ":" ^ evidence e
+  in
+  String.concat "|" [ occurrence.occurrence_id; source; state ]
+;;
+
+let schedule_occurrence_summaries state =
+  State.schedule_occurrences state |> List.map occurrence_summary
+;;
+
+(* The schedule consumer decides whether an earlier occurrence was consumed
+   only from [schedule_occurrences]. It must see every Schedule_due source
+   across pending, outbox and projected history, and no other wake kind. *)
+let test_schedule_occurrences_reports_only_schedule_sources () =
+  let cancelled = schedule_stimulus "occurrence-cancelled" 1.0 in
+  let other_kind = stimulus "occurrence-cancelled-bootstrap" 2.0 in
+  let completed = schedule_stimulus "occurrence-completed" 3.0 in
+  let initial =
+    State.empty |> State.with_pending (queue [ cancelled; other_kind; completed ])
+  in
+  Alcotest.(check (list string))
+    "pending schedule sources only"
+    [ "occurrence-cancelled|full|pending"; "occurrence-completed|full|pending" ]
+    (schedule_occurrence_summaries initial);
+  let cancellation : State.accepted_cancellation =
+    { source = cancelled
+    ; source_incarnation =
+        (State.select_when
+           ~now:(Unix.gettimeofday ())
+           ~ready:(Queue.stimulus_identity_equal cancelled)
+           initial
+         |> require_some "select cancelled occurrence")
+          .admitted_revision
+    ; operator_operation_id = "supersede-occurrence"
+    ; reason = "superseded"
+    }
+  in
+  let staged_cancel, cancel_receipt =
+    match
+      State.cancel_pending_accepted ~applied_at:4.0 ~cancellation initial
+      |> require_ok "stage cancellation"
+    with
+    | state, State.Transition_applied receipt -> state, receipt
+    | _, State.Transition_already_applied _ ->
+      Alcotest.fail "first cancellation was replayed"
+  in
+  Alcotest.(check (list string))
+    "outbox cancellation awaits projection"
+    [ "occurrence-completed|full|pending"
+    ; "occurrence-cancelled|full|cancelled:superseded:pending-projection"
+    ]
+    (schedule_occurrence_summaries staged_cancel);
+  let projected_cancel =
+    State.mark_transition_projected
+      ~retain_previous:(fun _ -> true)
+      ~transition_id:cancel_receipt.transition_id
+      staged_cancel
+    |> require_ok "project cancellation"
+  in
+  Alcotest.(check (list string))
+    "projected current receipt is recorded"
+    [ "occurrence-completed|full|pending"
+    ; "occurrence-cancelled|full|cancelled:superseded:recorded"
+    ]
+    (schedule_occurrence_summaries projected_cancel);
+  let completed_selection =
+    State.select_when
+      ~now:(Unix.gettimeofday ())
+      ~ready:(Queue.stimulus_identity_equal completed)
+      projected_cancel
+    |> require_some "select completed occurrence"
+  in
+  let staged_complete, complete_receipt =
+    match
+      State.terminalize_pending_turn_completed
+        ~applied_at:5.0
+        ~selection:completed_selection
+        projected_cancel
+      |> require_ok "terminalize completed occurrence"
+    with
+    | state, State.Transition_applied receipt -> state, receipt
+    | _, State.Transition_already_applied _ ->
+      Alcotest.fail "completion was replayed"
+  in
+  let projected_complete =
+    State.mark_transition_projected
+      ~retain_previous:(fun _ -> true)
+      ~transition_id:complete_receipt.transition_id
+      staged_complete
+    |> require_ok "project completion"
+  in
+  Alcotest.(check (list string))
+    "displaced receipt becomes a compact witness; other kinds stay invisible"
+    [ "occurrence-completed|full|completed:recorded"
+    ; "occurrence-cancelled|compact|cancelled:projected cancellation:recorded"
+    ]
+    (schedule_occurrence_summaries projected_complete);
+  Alcotest.(check (list string))
+    "other wake kinds stay pending outside the schedule view"
+    [ "occurrence-cancelled-bootstrap" ]
+    (post_ids (State.pending projected_complete))
 ;;
 
 let test_projected_disposition_ledger_replays_older_operation () =
@@ -494,6 +800,7 @@ let test_projected_disposition_ledger_replays_older_operation () =
   in
   let projected_cancel =
     State.mark_transition_projected
+      ~retain_previous:(fun _ -> true)
       ~transition_id:cancel_receipt.transition_id
       staged_cancel
     |> require_ok "project cancellation"
@@ -527,6 +834,7 @@ let test_projected_disposition_ledger_replays_older_operation () =
   in
   let projected_transfer =
     State.mark_transition_projected
+      ~retain_previous:(fun _ -> true)
       ~transition_id:transfer_receipt.transition_id
       staged_transfer
     |> require_ok "project transfer"
@@ -1200,7 +1508,8 @@ let test_durable_turn_attempt_terminal_restart () =
        Alcotest.fail
          "restart did not retain exactly one source-bearing failed turn receipt");
     Persistence.project_transition_outbox_result
-      ~append_before_retire:(fun _ -> Ok ())
+      ~append_before_retire:(fun _ _ -> Ok ())
+      ~retain_previous:(fun _ -> true)
       ~base_path
       ~keeper_name
     |> require_ok "project failed turn terminal receipt";
@@ -1687,6 +1996,10 @@ let () =
         ; Alcotest.test_case "uncertain rename retries durability" `Quick test_scope_uncertain_rename_requires_durability_confirmation ] )
     ; ( "state"
       , [ Alcotest.test_case "peek keeps pending authoritative" `Quick test_peek_keeps_pending_authoritative
+        ; Alcotest.test_case
+            "schedule occurrences report only schedule sources"
+            `Quick
+            test_schedule_occurrences_reports_only_schedule_sources
         ; Alcotest.test_case "exact ack preserves distinct source" `Quick test_exact_ack_removes_only_selected_identity
         ; Alcotest.test_case "an unchanged snapshot is not reparsed" `Quick
             test_unchanged_snapshot_is_not_reparsed
@@ -1792,6 +2105,14 @@ let () =
             "transition WAL observer notifies exactly once"
             `Quick
             test_transition_wal_commit_observer_exactly_once
+        ; Alcotest.test_case
+            "projected dispositions do not accumulate without an asker"
+            `Quick
+            test_projected_dispositions_do_not_accumulate_without_an_asker
+        ; Alcotest.test_case
+            "projected dispositions keep receipts with an asker"
+            `Quick
+            test_projected_dispositions_keep_receipts_with_an_asker
         ] )
       ]
 ;;

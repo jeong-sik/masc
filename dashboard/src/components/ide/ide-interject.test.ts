@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
@@ -87,6 +87,69 @@ describe('IdeInterject', () => {
     })
 
     expect(send.disabled).toBe(false)
+  })
+
+  it('sends on Enter, but not on the Enter that confirms an IME composition', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, data: {} }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const container = document.createElement('div')
+    await act(async () => {
+      render(h(IdeInterject, {}), container)
+    })
+    const input = container.querySelector('input') as HTMLInputElement
+
+    await act(async () => {
+      input.value = '이 변경을 봐 주세요'
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter', isComposing: true })
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.some(call => JSON.stringify(call).includes('nick0cave'))).toBe(true)
+    })
+    vi.unstubAllGlobals()
+  })
+
+  it('collapses the compact chat with Escape or its close button', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    await act(async () => {
+      render(h(IdeInterject, { compact: true }), container)
+    })
+
+    await act(async () => {
+      fireEvent.click(container.querySelector<HTMLButtonElement>('[data-testid="ide-interject-fab"]')!)
+    })
+    const input = container.querySelector('input') as HTMLInputElement
+    expect(document.activeElement).toBe(input)
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Escape' })
+    })
+    expect(container.querySelector('input')).toBeNull()
+
+    await act(async () => {
+      fireEvent.click(container.querySelector<HTMLButtonElement>('[data-testid="ide-interject-fab"]')!)
+    })
+    await act(async () => {
+      fireEvent.click(container.querySelector<HTMLButtonElement>('[data-testid="ide-interject-collapse"]')!)
+    })
+    expect(container.querySelector('[data-testid="ide-interject-fab"]')).not.toBeNull()
+    render(null, container)
+    container.remove()
   })
 
   it('prefers the route keeper over the global active keeper signal', async () => {

@@ -209,6 +209,7 @@ let setup ?sandbox ?always_allow f =
   ensure_dir (Filename.concat base Common.masc_dirname);
   Masc_test_deps.write_sandbox_image_catalog ~base_path:base
     [ "base", Masc_test_deps.live_sandbox_image_tag ];
+
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->

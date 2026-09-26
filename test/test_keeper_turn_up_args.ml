@@ -2593,6 +2593,7 @@ let test_boot_refuses_a_name_its_store_cannot_resolve () =
    | None -> fail "a guest with no runtime to look in booted");
   check bool "remote_ssh is not asked" true
     (Option.is_none (refusal (meta ~profile:Keeper_types_profile_sandbox.Remote_ssh None)))
+
 ;;
 
 (* A tag where a name belongs is refused where the call is read, not looked
@@ -2964,7 +2965,11 @@ let () =
             "an undeclared microvm backend is looked up in the host default"
             `Quick
             test_an_undeclared_microvm_backend_is_looked_up_in_the_host_default
+
         ; test_case
+            "a name the catalog lacks reaches the preflight as its reason"
+            `Quick
+            test_a_name_the_catalog_lacks_reaches_the_preflight_as_its_reason        ; test_case
             "docker preflight receives sandbox_image from profile defaults"
             `Quick
             test_docker_preflight_receives_sandbox_image_from_profile_defaults

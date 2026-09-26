@@ -666,9 +666,10 @@ let test_file_change_evidence_persists_with_execution_identity () =
     | _ -> Alcotest.fail "expected exactly one file change entry")
 ;;
 
-(* A missing typed disposition remains absent, but the closed wire-outcome
-   type uses its explicit [Unknown] case instead of adding field absence as a
-   fourth state for every reader to interpret. *)
+(* A caller that observed no projection says so with [Unknown]; the row
+   keeps that case, and with no typed disposition either it claims no
+   execution verdict anywhere: no [success] shadow and no [action_radius]
+   that would have to pick a side. *)
 let test_row_without_a_typed_outcome_writes_unknown_wire_outcome () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
@@ -676,6 +677,7 @@ let test_row_without_a_typed_outcome_writes_unknown_wire_outcome () =
       ~tool_name:"keeper_fs_read"
       ~input:(`Assoc [])
       ~output_text:"ok"
+      ~wire_outcome:Tool_result.Unknown
       ~duration_ms:1.0
       ();
     match read_recent ~n:1 () with
@@ -693,6 +695,12 @@ let test_row_without_a_typed_outcome_writes_unknown_wire_outcome () =
         false
         (match entry with
          | `Assoc fields -> List.mem_assoc "success" fields
+         | _ -> false);
+      Alcotest.(check bool)
+        "an unobserved call states no action radius"
+        false
+        (match entry with
+         | `Assoc fields -> List.mem_assoc "action_radius" fields
          | _ -> false)
     | _ -> Alcotest.fail "expected exactly one entry")
 
@@ -1051,8 +1059,13 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "action_radius target path"
       (Some "/tmp/k-sandbox/status.json")
       (Safe_ops.json_string_opt "target_path" action_radius);
-    Alcotest.(check bool) "action_radius success" true
-      (Safe_ops.json_bool ~default:false "success" action_radius))
+    Alcotest.(check bool) "action_radius carries no verdict of its own" false
+      (match action_radius with
+       | `Assoc fields -> List.mem_assoc "success" fields
+       | _ -> true);
+    Alcotest.(check (option string)) "the row's wire outcome is the verdict"
+      (Some "ok")
+      (Safe_ops.json_string_opt "wire_outcome" entry))
 
 (* RFC-0225 §3.3 regression: two runs of the SAME keeper each carry their
    own cell — setting one must not disturb the other. Under the previous
@@ -1121,6 +1134,71 @@ let test_turn_context_fields_absent_without_context () =
       (match Yojson.Safe.Util.member "turn" entry with
        | `Null -> true
        | _ -> false))
+
+(* #39035: a completed Execute keeps its route in execution evidence, which
+   the model does not read. The row stores it and route evidence reads it
+   beside the output's status. *)
+let test_execution_evidence_is_recorded_and_routes () =
+  with_tmp_log (fun () ->
+    let execution_evidence =
+      `Assoc
+        [ "shim_execution_evidence"
+        , `Assoc [ "status", `String "recorded"; "receipts", `List [] ]
+        ; "via", `String "docker"
+        ; "sandbox_profile", `String "docker"
+        ]
+    in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"omega"
+      ~tool_name:"tool_execute"
+      ~input:(`Assoc [ "argv", `List [ `String "true" ] ])
+      ~output_text:
+        {|{"ok":true,"status":{"kind":"exit","code":0},"cwd":"/home/keeper/playground/omega","output":""}|}
+      ~execution_evidence
+      ~wire_outcome:Tool_result.Ok
+      ~duration_ms:1.0
+      ();
+    match read_recent ~n:1 () with
+    | [ entry ] ->
+      Alcotest.(check string)
+        "the row keeps the evidence the model did not read"
+        (Yojson.Safe.to_string execution_evidence)
+        (Yojson.Safe.Util.member "execution_evidence" entry |> Yojson.Safe.to_string);
+      let route = Yojson.Safe.Util.member "route_evidence" entry in
+      Alcotest.(check (option string)) "via comes from the evidence"
+        (Some "docker") (Safe_ops.json_string_opt "via" route);
+      Alcotest.(check (option string)) "sandbox_profile comes from the evidence"
+        (Some "docker") (Safe_ops.json_string_opt "sandbox_profile" route);
+      Alcotest.(check (option string)) "status still comes from the output"
+        (Some "exit")
+        (Yojson.Safe.Util.member "status" route |> Safe_ops.json_string_opt "kind")
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+let test_execution_evidence_metadata_round_trip () =
+  Alcotest.(check (option string)) "metadata carries the evidence object"
+    (Some {|{"via":"docker"}|})
+    (Keeper_tool_call_log.execution_evidence_of_metadata
+       (Some (Keeper_tool_call_log.execution_evidence_metadata [ "via", `String "docker" ]))
+     |> Option.map Yojson.Safe.to_string);
+  Alcotest.(check bool) "metadata without the key carries none" true
+    (Option.is_none
+       (Keeper_tool_call_log.execution_evidence_of_metadata
+          (Some (`Assoc [ "masc.artifact_manifest", `Null ]))));
+  Alcotest.(check bool) "no metadata carries none" true
+    (Option.is_none (Keeper_tool_call_log.execution_evidence_of_metadata None));
+  (* A Gate-authorized Execute keeps its producer metadata under "producer"
+     (Keeper_gate.authorization_metadata); the reader must look there. *)
+  Alcotest.(check (option string)) "evidence under a Gate authorization is found"
+    (Some {|{"via":"docker"}|})
+    (Keeper_tool_call_log.execution_evidence_of_metadata
+       (Some
+          (`Assoc
+              [ "gate", `Assoc [ "decision", `String "allow" ]
+              ; ( "producer"
+                , Keeper_tool_call_log.execution_evidence_metadata
+                    [ "via", `String "docker" ] )
+              ]))
+     |> Option.map Yojson.Safe.to_string)
 
 let test_route_evidence_stored_for_git_push () =
   with_tmp_log (fun () ->
@@ -1431,6 +1509,7 @@ let route_evidence_for_tool tool_name =
       ~tool_name
       ~input:(`Assoc [])
       ~output_text:"{}"
+      ~execution_evidence:None
   with
   | Some evidence -> evidence
   | None -> Alcotest.failf "missing route evidence for %s" tool_name
@@ -2762,6 +2841,10 @@ let () =
             test_turn_context_fields_absent_without_context
         ; eio_test "route evidence stored for git push"
             test_route_evidence_stored_for_git_push
+        ; eio_test "execution evidence is recorded and read as route"
+            test_execution_evidence_is_recorded_and_routes
+        ; Alcotest.test_case "execution evidence metadata round trip" `Quick
+            test_execution_evidence_metadata_round_trip
         ; eio_test "route evidence reads blob-backed git push preview"
             test_route_evidence_stored_for_blob_backed_git_push
         ; eio_test "route evidence redacts wrapped git push"

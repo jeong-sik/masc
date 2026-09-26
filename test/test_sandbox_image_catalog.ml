@@ -40,10 +40,10 @@ reference = "%s"
 
 (* [pinned] is private, so expectations are spelt as text. *)
 let describe = function
-  | Resolved p -> Printf.sprintf "Resolved %s" p.reference
-  | Unknown_image { name; known } ->
+  | Ok p -> Printf.sprintf "Resolved %s" p.reference
+  | Error (Unknown_image { name; known }) ->
     Printf.sprintf "Unknown_image %s [%s]" name (String.concat ";" known)
-  | Not_built_on_host { name; store } ->
+  | Error (Not_built_on_host { name; store }) ->
     Printf.sprintf "Not_built_on_host %s %s" name (store_to_string store)
 
 let resolves label expected catalog ~name ~store =
@@ -142,8 +142,8 @@ let changed label = function
 
 let current catalog name store =
   match resolve catalog ~name ~store with
-  | Resolved p -> Some p.reference
-  | Unknown_image _ | Not_built_on_host _ -> None
+  | Ok p -> Some p.reference
+  | Error (Unknown_image _ | Not_built_on_host _) -> None
 
 (* The lines the host file holds besides its comment header. *)
 let body_lines text =
@@ -536,7 +536,8 @@ let test_a_keeper_that_cannot_start_says_why () =
       Resolver.error_to_string (refused_start label ~config_root ~store declared)
     in
     (match refused_start "no catalog" ~config_root ~store:apple (Some "ocaml") with
-     | Resolver.Not_built_on_host _ as e ->
+     | Resolver.Unresolved (Not_built_on_host _) as e ->
+
        mentions "no catalog" (Resolver.error_to_string e) "masc sandbox-image promote"
      | e -> fail ("no catalog: " ^ Resolver.error_to_string e));
     write_catalog config_root host_promoted_ocaml;
@@ -547,7 +548,8 @@ let test_a_keeper_that_cannot_start_says_why () =
      | Resolver.Not_declared -> ()
      | e -> fail ("blank: " ^ Resolver.error_to_string e));
     (match refused_start "rust" ~config_root ~store:apple (Some "rust") with
-     | Resolver.Unknown_image { name = "rust"; known = [ "base"; "ocaml" ] } -> ()
+     | Resolver.Unresolved (Unknown_image { name = "rust"; known = [ "base"; "ocaml" ] }) -> ()
+
      | e -> fail ("rust: " ^ Resolver.error_to_string e));
     let base_on_apple = refusal "base" ~store:apple (Some "base") in
     mentions "base" base_on_apple "masc sandbox-image --recipe base --runtime apple_container`";

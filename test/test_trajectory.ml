@@ -380,7 +380,6 @@ let test_entry_to_json_includes_contract_and_radius () =
     Keeper_runtime_contract.action_radius_json
       ~tool_name:"tool_execute"
       ~input:(`Assoc [("cwd", `String "/tmp/work")])
-      ~success:true
       ~duration_ms:25.0
       ()
   in

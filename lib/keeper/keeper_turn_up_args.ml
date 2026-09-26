@@ -288,6 +288,7 @@ let validate_no_unknown_keys args =
    suite has no daemon and passes its own. *)
 let docker_preflight_default ~image ~timeout_sec () =
   Keeper_sandbox_runtime.docker_preflight ~image:(Ok image) ~timeout_sec ()
+
 ;;
 
 let parse_microvm_backend_patch args =
@@ -501,6 +502,7 @@ let parse
                 ~base_path:ctx.config.base_path
                 ~store:Keeper_sandbox_image_catalog.Docker_daemon
                 profile_defaults.sandbox_image
+
             with
             | Error error ->
               Some (Keeper_turn_sandbox_runtime.image_unresolved_message error)

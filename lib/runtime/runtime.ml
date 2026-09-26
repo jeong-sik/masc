@@ -297,12 +297,27 @@ let quota_scope_of_materialized
         provider.credentials
     | Runtime_execution.Antigravity_cli _ -> provider.credentials
     | Runtime_execution.Codex_app_server _
-    | Runtime_execution.Claude_code _ ->
-      (* Official clients own subscription login. A registry API-key default
-         with the same provider label is a different account authority. *)
-      None
+    | Runtime_execution.Claude_code _ -> None
   in
-  Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential
+  let official_home client selected scope =
+    match selected with
+    | None -> Error (client ^ " needs account-home or an absolute CLI home")
+    | Some home ->
+      (match Runtime_account_home.of_string home with
+       | Ok home -> Ok (scope (Some home))
+       | Error reason -> Error (client ^ ": " ^ reason))
+  in
+  match execution with
+  | Runtime_execution.Claude_code client ->
+    official_home "Claude Code"
+      (Runtime_claude_code.effective_account_home client.account_home)
+      Runtime_quota_window.scope_of_claude_code_home
+  | Runtime_execution.Codex_app_server client ->
+    official_home "Codex"
+      (Runtime_codex_app_server.effective_account_home client.account_home)
+      Runtime_quota_window.scope_of_codex_home
+  | Runtime_execution.Agent_core _ | Runtime_execution.Antigravity_cli _ ->
+    Ok (Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential)
 ;;
 
 (* Why a binding did not become a runtime, as a closed vocabulary rather than a
@@ -342,7 +357,7 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
     else
       (match Runtime_adapter.binding_to_execution cfg b with
        | Ok execution ->
-         Ok
+         Result.map (fun quota_scope ->
            { id = id_of_binding b
            ; provider
            ; model
@@ -360,8 +375,10 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
                  | Runtime_execution.Antigravity_cli _ -> Runtime_candidate_backpressure.Official_client_binding
                in
                Runtime_candidate_backpressure.create_candidate ~binding)
-           ; quota_scope = quota_scope_of_materialized ~provider ~execution
-           }
+           ; quota_scope
+           })
+           (quota_scope_of_materialized ~provider ~execution)
+         |> Result.map_error (fun reason -> Execution_unbuildable reason)
        | Error reason -> Error (Execution_unbuildable reason))
   | None, _ -> Error (Provider_not_declared b.provider_id)
   | Some _, None -> Error (Model_not_declared b.model_id)
@@ -2151,6 +2168,10 @@ let runtime_state () = Atomic.get loaded_state_ref
 
 let get_default_runtime () = (runtime_state ()).default_runtime
 let get_runtimes () = (runtime_state ()).runtimes
+
+let get_default_and_runtimes () =
+  let state = runtime_state () in
+  state.default_runtime, state.runtimes
 let get_runtime_ids () = runtime_ids (runtime_state ()).runtimes
 let startup_degradation () = (runtime_state ()).startup_degradation
 let startup_degraded () = Option.is_some (startup_degradation ())
@@ -3262,10 +3283,7 @@ let parse_and_validate_config_text ~config_path content =
     match Skill_source_config.validate_text content with
     | Ok () -> Ok ()
     | Error diagnostics ->
-      Error
-        (String.concat
-           "; "
-           (List.map Skill_source_config.diagnostic_to_string diagnostics))
+      Error (Skill_source_config.rejection_message ~config_path diagnostics)
   in
   let* parsed = materialize_runtime_config_text ~config_path content in
   prepare_degraded_loaded ~config_path parsed
@@ -4920,6 +4938,21 @@ let exact_slot_list_key = function
   | Cli_slots -> "cli_slots"
 ;;
 
+let exact_slot_list_of_api_format = function
+  | Runtime_schema.Codex_app_server_runtime
+  | Runtime_schema.Antigravity_cli_runtime
+  | Runtime_schema.Claude_code_runtime -> Cli_slots
+  | Runtime_schema.Messages_api
+  | Runtime_schema.Chat_completions_api
+  | Runtime_schema.Ollama_api
+  | Runtime_schema.Gemini_api
+  | Runtime_schema.Vertex_gemini_api -> Catalog_slots
+;;
+
+let exact_slot_list_key_of_api_format api_format =
+  exact_slot_list_key (exact_slot_list_of_api_format api_format)
+;;
+
 let exact_slot_list_of_new_slot (config : Runtime_schema.config) slot =
   match
     List.find_opt (fun (binding : binding) -> String.equal (id_of_binding binding) slot)
@@ -4929,16 +4962,7 @@ let exact_slot_list_of_new_slot (config : Runtime_schema.config) slot =
   | Some binding ->
     (match Runtime_schema.provider_of_id config binding.provider_id with
      | None -> Catalog_slots
-     | Some provider ->
-       (match provider.api_format with
-        | Runtime_schema.Codex_app_server_runtime
-        | Runtime_schema.Antigravity_cli_runtime
-        | Runtime_schema.Claude_code_runtime -> Cli_slots
-        | Runtime_schema.Messages_api
-        | Runtime_schema.Chat_completions_api
-        | Runtime_schema.Ollama_api
-        | Runtime_schema.Gemini_api
-        | Runtime_schema.Vertex_gemini_api -> Catalog_slots))
+     | Some provider -> exact_slot_list_of_api_format provider.api_format)
 ;;
 
 let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =

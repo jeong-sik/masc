@@ -112,8 +112,6 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Name -> `String name
         | Schema.Instructions -> `String ""
         | Schema.Trace_id -> `String trace_id
-        | Schema.Trace_history -> `List []
-        | Schema.Last_handoff_ts -> `Float 0.
         | Schema.Created_at | Schema.Updated_at ->
           `String "1970-01-01T00:00:00Z"
         | Schema.Total_turns
@@ -556,6 +554,7 @@ let declare_fixture_keeper ~base_path ~sandbox_profile name =
    [masc sandbox-image --tag masc-sandbox-test:ci]. *)
 let live_sandbox_image_tag = "masc-sandbox-test:ci"
 
+
 (* A Keeper's container starts from the build its [sandbox_image] name has in
    the host's image catalog, so a fixture that reaches a container start
    promotes one for its workspace, at the config root the runtime resolves
@@ -563,6 +562,8 @@ let live_sandbox_image_tag = "masc-sandbox-test:ci"
    each [(name, reference)] is promoted in the selected store (Docker by
    default). Nothing asks the store whether it holds the reference. Any
    builds the workspace had are replaced. *)
+
+
 let write_sandbox_image_catalog
     ?(store = Masc.Keeper_sandbox_image_catalog.Docker_daemon)
     ~base_path images =

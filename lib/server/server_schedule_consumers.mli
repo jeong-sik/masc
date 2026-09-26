@@ -104,3 +104,31 @@ val accept_keeper_wake_occurrence :
     durable occurrence when the queue already holds it. A new occurrence
     first cancels the schedule's earlier pending occurrences as superseded,
     stamped [now], so the queue holds at most one per schedule. *)
+
+type resolved_occurrence_disposition =
+  | Pending_at of string * Keeper_event_queue_state.schedule_occurrence_source
+  | Transfer_projecting_at of string * string
+  | Terminal_completed_at of
+      string
+      * Keeper_event_queue_state.schedule_occurrence_source
+      * Keeper_event_queue_state.occurrence_terminal_evidence
+  | Terminal_failed_at of
+      string
+      * Keeper_event_queue_state.schedule_occurrence_source
+      * string
+      * Keeper_event_queue_state.occurrence_terminal_evidence
+  | Terminal_cancelled_at of
+      string
+      * Keeper_event_queue_state.schedule_occurrence_source
+      * string
+      * Keeper_event_queue_state.occurrence_terminal_evidence
+  | Absent_at of string
+
+val resolve_keeper_wake_occurrence :
+  base_path:string ->
+  keeper_name:string ->
+  stimulus_id:string ->
+  (resolved_occurrence_disposition, string) result
+(** Resolves where one wake occurrence lives now, following transfers. A
+    retired occurrence is answered from its exact-id receipt; a damaged
+    receipt is an [Error], never absence. *)

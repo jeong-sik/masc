@@ -398,10 +398,11 @@ let image t = t.image
    a keeper whose network config changed must not adopt a container wired to
    the old network. The resolved image reference is also part of the
    coordinate: a newly promoted build must not adopt the old image. This
-   distinguishes references, not mutations behind the same tag. Once a new
-   container runs, the ones it supersedes are removed ([start_container]);
-   teardown lists by label rather than by name and takes any that remain.
-   Existing turn runtimes keep their cached container until that turn ends. *)
+   distinguishes references, not mutations behind the same tag. Existing
+   turn runtimes keep their cached container until that turn ends. Teardown
+   lists by label rather than by name and takes all builds that remain: a new
+   turn cannot know whether another turn still uses an older container. *)
+
 let docker_container_name_for_image (t : t) ~image =
   Keeper_sandbox_container_name.make
     (Keeper_sandbox_container_name.Docker_persistent

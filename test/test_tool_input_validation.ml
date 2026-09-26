@@ -882,6 +882,46 @@ let test_validate_args_masc_board_post_get_accepts_comment_page () =
       "expected masc_board_post_get comment page to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
+(* The post_get schema does not forbid undeclared fields, so a call that
+   passes does not show the cursor inputs are declared. The out-of-range calls
+   do: the validator applies minimum and maximum only to a declared property,
+   so they pass if comment_tail's declaration is lost. The id's shape is
+   checked by the handler's parser, because this validator does not read
+   [pattern]. *)
+let test_validate_args_masc_board_post_get_accepts_comment_cursor () =
+  let validate cursor =
+    Tool_input_validation.validate_args
+      ~schema:keeper_model_board_post_get_schema
+      ~name:"masc_board_post_get"
+      ~args:(`Assoc (("post_id", `String "p-1234") :: cursor))
+      ()
+  in
+  List.iter
+    (fun (label, cursor) ->
+      match validate cursor with
+      | Ok _ -> ()
+      | Error result ->
+        Alcotest.failf
+          "expected masc_board_post_get %s to pass validation, got %s"
+          label
+          (Yojson.Safe.to_string (Tool_result.data result)))
+    [ "comment_tail", [ "comment_tail", `Int 5 ]
+    ; ( "after_comment_id"
+      , [ "after_comment_id", `String ("c-" ^ String.make 32 'a'); "comment_limit", `Int 10 ] )
+    ];
+  List.iter
+    (fun (label, cursor) ->
+      match validate cursor with
+      | Ok _ -> Alcotest.failf "expected masc_board_post_get %s to be refused" label
+      | Error result ->
+        Alcotest.(check bool)
+          (label ^ " is refused as an argument out of range")
+          true
+          (Tool_result.failure_class result = Some Tool_result.Policy_rejection))
+    [ "comment_tail 0", [ "comment_tail", `Int 0 ]
+    ; "comment_tail 101", [ "comment_tail", `Int 101 ]
+    ]
+
 (* Guard the other direction: a genuinely unknown field must still be
    rejected (additionalProperties:false not loosened). *)
 let test_validate_args_masc_board_list_rejects_unknown_field () =
@@ -2551,6 +2591,8 @@ let () =
         test_validate_args_masc_board_search_accepts_compact;
       Alcotest.test_case "masc_board_post_get accepts comment page" `Quick
         test_validate_args_masc_board_post_get_accepts_comment_page;
+      Alcotest.test_case "masc_board_post_get accepts comment cursor" `Quick
+        test_validate_args_masc_board_post_get_accepts_comment_cursor;
       Alcotest.test_case "masc_board_list still rejects unknown field" `Quick
         test_validate_args_masc_board_list_rejects_unknown_field;
       Alcotest.test_case "keeper_memory_search rejects removed kind" `Quick
@@ -2668,4 +2710,7 @@ let () =
       Alcotest.test_case "null const: non-null branch matches" `Quick
         test_oneof_null_const_matches_non_null_branch;
     ]);
+    ( "defined but never registered until task-1768",
+        [ Alcotest.test_case "tool execute empty program not promoted" `Quick test_tool_execute_empty_program_not_promoted
+        ] );
   ]

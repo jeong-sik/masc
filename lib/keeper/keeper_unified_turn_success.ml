@@ -13,7 +13,7 @@ let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime
    turn cost no longer needs a usage-trust classification. *)
 let turn_cost (resolution : Keeper_usage_resolution.t) =
   match resolution.delta with
-  | Some delta -> Option.value ~default:0.0 delta.cost_usd
+  | Some delta -> Keeper_usage_resolution.reported_cost_usd delta
   | None -> 0.0
 ;;
 
@@ -416,7 +416,7 @@ let emit_resolved_cost_event
     ~model:result.model_used
     ~input_tokens:usage.input_tokens
     ~output_tokens:usage.output_tokens
-    ~cost_usd:(Option.value ~default:0.0 usage.cost_usd)
+    ~cost_usd:(Keeper_usage_resolution.reported_cost_usd usage)
     ~cache_creation_input_tokens:usage.cache_creation_input_tokens
     ~cache_read_input_tokens:usage.cache_read_input_tokens
     ~usage_missing
@@ -590,6 +590,7 @@ let handle
       ~(degraded_retry_applied : Keeper_error_classify.degraded_retry option)
       ~(degraded_retry_deferred : Keeper_error_classify.degraded_retry option)
       ~keeper_turn_id
+      ~(spend : Keeper_turn_spend.attempt list)
       execution_outcome
   =
   (* Named so post-turn work (checkpoint, metrics, memory, projections)
@@ -614,40 +615,55 @@ let handle
       ~meta
       result
   in
-  let usage_resolution, usage_cursor =
-    Keeper_usage_resolution.resolve
+  (* Every reading of every attempt is resolved in the order they ran. The
+     one the result reports is the turn's resolution; an earlier thread or
+     response of the winner, and every attempt that lost to it, is spend
+     beside it. *)
+  let observed_at = Time_compat.now () in
+  let turn_spend =
+    Keeper_turn_spend.resolve_turn
       ~cursor:lifecycle.KEC.updated_meta.runtime.usage_cursor
-      ~basis:result.usage_basis
-      ~observation:
-        (if result.usage_reported
-         then Some (Keeper_usage_resolution.sample_of_api_usage result.usage)
-         else None)
-      ~observed_at:(Time_compat.now ())
+      ~observed_at
+      spend
+  in
+  let usage_cursor = turn_spend.cursor in
+  let usage_resolution =
+    match turn_spend.turn_reading with
+    | Some turn_reading -> turn_reading.resolution
+    | None ->
+      (* The attempt the result came from counted nothing. *)
+      fst
+        (Keeper_usage_resolution.resolve
+           ~cursor:usage_cursor
+           ~basis:Keeper_usage_resolution.Unavailable
+           ~observation:None
+           ~observed_at)
   in
   (* #32463: the cursor re-baselines on a regressed counter, so the
-     regression shows as Counter_regressed for this one turn only. The
-     activity event keeps the resolution; this line is the operator-visible
-     record of it. *)
-  (match usage_resolution.Keeper_usage_resolution.status with
-   | Keeper_usage_resolution.Counter_regressed ->
-     Log.Keeper.warn ~keeper_name:meta.name
-       "conversation usage counter went backwards (observed input=%s, \
-        previous input=%s); this turn adds no usage and the cursor \
-        re-baselines on the observed value"
-       (match usage_resolution.Keeper_usage_resolution.observation with
-        | Some sample -> string_of_int sample.Keeper_usage_resolution.input_tokens
-        | None -> "none")
-       (match lifecycle.KEC.updated_meta.runtime.usage_cursor with
-        | Some cursor ->
-          string_of_int cursor.Keeper_usage_resolution.cumulative.input_tokens
-        | None -> "none")
-   | Keeper_usage_resolution.(
-       ( Exact
-       | Usage_missing
-       | Scope_unavailable
-       | Invalid_observation
-       | Exact_cost_unavailable
-       | Baseline_missing )) -> ());
+     regression shows as Counter_regressed for that reading only. The
+     activity event keeps the turn's resolution; this line is the
+     operator-visible record of each. *)
+  List.iter
+    (fun (resolved : Keeper_turn_spend.resolved) ->
+       match resolved.resolution.status with
+       | Keeper_usage_resolution.Counter_regressed ->
+         Log.Keeper.warn ~keeper_name:meta.name
+           "conversation usage counter went backwards (runtime=%s attempt=%d \
+            observed input=%s); this reading adds no usage and the cursor \
+            re-baselines on the observed value"
+           resolved.runtime_id
+           resolved.lane_attempt_index
+           (match resolved.resolution.observation with
+            | Some sample -> string_of_int sample.Keeper_usage_resolution.input_tokens
+            | None -> "none")
+       | Keeper_usage_resolution.(
+           ( Exact
+           | Usage_missing
+           | Scope_unavailable
+           | Invalid_observation
+           | Exact_cost_unavailable
+           | Baseline_missing )) -> ())
+    (Option.to_list turn_spend.turn_reading @ turn_spend.other_readings);
   let turn_cost = turn_cost usage_resolution in
   let updated_meta =
     KUM.update_metrics_from_result
@@ -658,6 +674,12 @@ let handle
       ~usage_cursor
       ~is_autonomous_turn:(Keeper_execution_outcome.is_autonomous execution_outcome)
       result
+  in
+  let updated_meta =
+    KUM.with_attempt_spend
+      updated_meta
+      ~resolved:turn_spend.other_readings
+      ~usage_cursor
   in
   let updated_meta =
     if Keeper_execution_outcome.is_autonomous execution_outcome
@@ -730,14 +752,6 @@ let handle
       ~usage_resolution:(Some usage_resolution)
       ());
   run_projection KTP.Usage_metrics (fun () ->
-    emit_resolved_cost_event
-      ~config
-      ~meta
-      ~keeper_turn_id
-      ~result
-      ~usage_resolution
-      ~usage_trust);
-  run_projection KTP.Usage_metrics (fun () ->
     emit_usage_metrics_and_log
       ~updated_meta
       ~result
@@ -766,6 +780,25 @@ let handle
       ~original_meta:meta
       ~updated_meta
   in
+  (* The spend rows follow the commit that moved the cursor. Written before
+     it, a failed commit left rows whose spend the next turn resolved again
+     from the old cursor. *)
+  run_projection KTP.Usage_metrics (fun () ->
+    emit_resolved_cost_event
+      ~config
+      ~meta
+      ~keeper_turn_id
+      ~result
+      ~usage_resolution
+      ~usage_trust);
+  run_projection KTP.Usage_metrics (fun () ->
+    Keeper_turn_spend_ledger.write
+      ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path)
+      ~agent_name:meta.name
+      ~task_id:(Option.map Keeper_id.Task_id.to_string meta.current_task_id)
+      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~keeper_turn_id
+      turn_spend.other_readings);
   (* Single source of truth for success-path terminal FSM transitions.
      Completion-contract observations never rewrite a successful runtime turn
      into a failed Keeper lifecycle transition. *)

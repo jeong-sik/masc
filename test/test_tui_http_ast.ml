@@ -425,7 +425,8 @@ let test_the_spectator_reads_the_live_route () =
         (Ast_grep.count_string_literals ~module_path ~needle:"/api/v1/msx/frame"
          + Ast_grep.count_string_literals ~module_path ~needle:"/api/v1/dos/frame"))
     [ "bin/masc_tui_http.ml"; "bin/masc_tui.ml"; "bin/masc_tui_msx.ml";
-      "bin/masc_tui_machine_live.ml" ];
+      "bin/masc_tui_machine_live.ml"; "lib/server/server_auth.ml";
+      "lib/server/server_routes_http_routes_msx.ml" ];
   check bool "the live route is the one the reader asks" true
     (Ast_grep.count_string_literals ~module_path:"bin/masc_tui_machine_live.ml"
        ~needle:"/api/v1/lane-addons/live" = 1);
@@ -524,7 +525,7 @@ let test_the_attention_note_starts_where_its_rows_do () =
        ~needle:"(nothing needs attention)")
 ;;
 
-(* A surface whose load failed draws the loader's message. The message names
+(* A surface whose load failed draws the lane-read message. It names
    its own subject and verdict -- "standalone lanes load failed: <reason>" --
    so a sentence in front of it says both a second time and pushes the reason
    right, which on this surface put it past the pane edge. Fourteen error rows
@@ -532,16 +533,21 @@ let test_the_attention_note_starts_where_its_rows_do () =
    message does not carry -- which action was refused, or that the rows on
    screen are the last good ones. *)
 let test_the_lane_failure_row_adds_no_second_verdict () =
-  check int "the load failure draws the loader's message alone" 0
+  check int "the load failure draws its message alone" 0
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_lanes_overview"
        ~needle:"  standalone lane observation unavailable: ");
-  check int "the stale row keeps the word the message has not got" 1
+  check int "the stale row does not repeat the loader's failure verdict" 0
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_lanes_overview"
-       ~needle:"  STALE \xc2\xb7 refresh failed: ")
+       ~needle:"  STALE \xc2\xb7 refresh failed: ");
+  check int "the stale row still identifies the previous reading" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_lanes_overview"
+       ~needle:"  STALE \xc2\xb7 ")
 ;;
 
 let test_keeper_chat_uses_current_async_contract () =
@@ -1029,11 +1035,10 @@ let test_operator_approvals_use_current_contract () =
        ~callee:"Terminal_text.single_line_or"
      >= 3);
   (* A floor for the same reason as its two neighbours, and it is the last of
-     the three to become one. The surface now sanitises two optional errors
-     rather than one -- [gate_error] when the Gate lanes will not read, and
-     [approvals_error] when the list will not -- and both are external text
-     reaching a terminal, so both belong. An exact count called the second one
-     a regression.
+     the three to become one. [gate_error] reaches the Gate lane row through
+     this call; a list that was not read reaches the empty queue as the
+     reading's cause, through [Terminal_text.single_line] (the "cause" check
+     beside [check_fields "render_approvals"]).
 
      The distinction worth keeping: an exact count is right where a new call
      site is a new way to do something, which is why the theme-apply check
@@ -1720,10 +1725,12 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"input_reader_has_pending_bytes"
        ~callee:"Masc_tui_terminal_probe.has_replay");
-  check int "an incomplete scalar does not postpone a frame" 0
-    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:main_path ~binding_name:"input_reader_has_pending_bytes"
-       ~callees:[] ~fields:[ "partial_scalar" ]);
+  (* A character the decoder holds is awaiting bytes that have not arrived;
+     it is not input ready to act on, so it must not postpone a frame. *)
+  check int "an incomplete character does not postpone a frame" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"input_reader_has_pending_bytes"
+       ~callee:"Masc_tui_input_decoder.pending");
   check bool "main loop reads a monotonic clock" true
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Mtime_clock.elapsed_ns"
@@ -2575,12 +2582,16 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     [ "ap_expires_at"; "ap_payload"; "ap_trace_id"; "ap_created_at" ];
   check_fields "render_approvals"
     [ "aps_actor_filter"
-    ; "approvals_error"
     ; "ap_target_id"
     ; "ap_actor"
     ; "ap_action_type"
     ; "ap_target_type"
     ];
+  (* A list that was not read reaches the empty queue as the loader's cause,
+     carried by [Masc_tui_types.approvals_reading] rather than read off
+     [approvals_error] here. *)
+  check_identifiers ~module_path:"bin/masc_tui_render.ml" ~binding:"render_approvals"
+    ~callees:sanitizer_calls [ "cause" ];
   check_fields "render_board_list"
     [ "board_list_error"; "bp_id"; "bp_author"; "bp_title" ];
   (* [String.equal] keeps a post out of its own related list. Comparison never

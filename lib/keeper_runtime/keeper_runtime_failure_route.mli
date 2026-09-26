@@ -48,8 +48,18 @@ val core_error_is_hard_quota : Agent_core.Error.t -> bool
 (** Why a different runtime is tried in the same turn. *)
 type rotate_class =
   | Auth_failed
-      (** this runtime's credential is invalid or lacks authorization;
-          other runtimes may use a different credential scope *)
+      (** HTTP 401: this runtime's credential is invalid; other runtimes may
+          use a different credential scope *)
+  | Authorization_refused
+      (** HTTP 403: the provider accepted who is calling and refused the
+          account. The status alone does not say why: a spent subscription
+          window (Kimi For Coding answers its 5-hour limit this way), a
+          missing entitlement, a client the plan does not admit, or a
+          suspended account. The status rests nothing. When the provider
+          declares [usage-read], the Keeper walk reads it once
+          ({!Runtime_provider_usage_read.read_after_account_refusal}) and a
+          spent window rests the scope until its stated reset; otherwise the
+          refusal leaves no evidence, as for [Auth_failed]. *)
   | Model_unavailable  (** model/endpoint not found on this runtime *)
   | Resumable_cli_session  (** CLI session can resume on a recovery lane *)
   | Candidates_filtered  (** candidate set emptied after cycles *)
@@ -110,6 +120,12 @@ type rotate_class =
   | Server_error_not_transient
       (** a 5xx the provider marked as not transient. The same path answers
           the same way; the walk rotates on every 5xx *)
+  | Context_window_exceeded
+      (** the request did not fit this binding's context window
+          ({!Llm_provider.Candidate_fault.Binding} [Window]). A later
+          candidate with a larger window can serve the same turn, so the
+          walk moves on and the route rotates with it (#38984). Its label
+          stays ["context_overflow"]. *)
 
 (** What the driver had observed of tool effects when it fenced a provider
     attempt. Only the two dispositions that fence an attempt appear here:
@@ -131,7 +147,6 @@ type terminal_class =
   | Deterministic_request
       (** a request body that did not parse, or an input past a declared
           serving bound; no candidate accepts it *)
-  | Context_overflow  (** typed context-window overflow *)
   | Session_claim_refused
       (** an official client refused its durable session claim before provider
           dispatch; the held recovery requires explicit operator resolution *)

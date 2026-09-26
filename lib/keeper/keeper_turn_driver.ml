@@ -591,6 +591,7 @@ let attempt_runtime_candidates
     ?model_of
     ?candidate_backpressure_of
     ?candidate_dispatchable
+    ?read_usage_after_account_refusal
     ~walk_owner
     ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
@@ -615,6 +616,21 @@ let attempt_runtime_candidates
     | None ->
       fun candidate ->
         Runtime.quota_scope_of_runtime_id (runtime_id_of candidate)
+  in
+  let read_usage_after_account_refusal =
+    match read_usage_after_account_refusal with
+    | Some read -> read
+    | None ->
+      fun candidate ->
+        (* The outcome is logged where it is read; the walk reads only the
+           quota window it may have written. *)
+        Option.iter
+          (fun runtime ->
+            let (_ : Runtime_provider_usage_read.account_refusal_outcome) =
+              Runtime_provider_usage_read.read_runtime_after_account_refusal runtime
+            in
+            ())
+          (Runtime.get_runtime_by_id (runtime_id_of candidate))
   in
   let candidate_backpressure_of =
     match candidate_backpressure_of with
@@ -916,6 +932,18 @@ let attempt_runtime_candidates
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Provider_capacity; retry_after = _ } ->
           note_failed_attempt Runtime_candidate_backpressure.Provider_capacity
+        (* A 403 refused the account and does not say why. A provider may
+           answer a spent usage window this way and answer a client its plan
+           does not admit with the same body (2026-09-25: 17 of 17 cycles
+           after a restart walked such a candidate first, the one on its
+           lanes with no mark). The status rests nothing. A provider that declares
+           [usage-read] is asked once, here, before the walk moves on: a
+           spent window rests the scope until its stated reset, so this walk
+           and every later one sees it; a window with headroom, a failed
+           read, or no [usage-read] leaves no evidence, as for a 401. *)
+        | Keeper_runtime_failure_route.Rotate_now
+            { rotate = Keeper_runtime_failure_route.Authorization_refused } ->
+          read_usage_after_account_refusal candidate
         (* These candidates answered, or the failure says nothing durable
            about their ability to answer a later turn (RFC-0458 §3.4, §6).
            A credential denial rotates to the next candidate within this
@@ -937,7 +965,10 @@ let attempt_runtime_candidates
                 | Keeper_runtime_failure_route.Admission
                 | Keeper_runtime_failure_route.Provider_reported_failure
                 | Keeper_runtime_failure_route.Request_refused
-                | Keeper_runtime_failure_route.Provider_wire_defect )
+                | Keeper_runtime_failure_route.Provider_wire_defect
+                (* the input outgrew this window; it says nothing about
+                   the candidate answering a smaller turn (#38984). *)
+                | Keeper_runtime_failure_route.Context_window_exceeded )
             } ->
           ()
         (* A 5xx the provider called permanent failed this candidate without
@@ -1572,6 +1603,7 @@ let run_named
     ?on_request_attribution
     ?official_client_continuation
     ?official_task_reference
+    ?official_client_composed_context
     ?on_official_client_tool_boundary
     ?on_official_client_result_handoff
     ?on_official_client_native_action
@@ -1997,6 +2029,13 @@ let run_named
     ~candidate_backpressure_of:(function
       | Resolved_runtime runtime -> Some runtime.Runtime.candidate_backpressure
       | Missing_runtime _ -> None)
+    ~read_usage_after_account_refusal:(function
+      | Resolved_runtime runtime ->
+        let (_ : Runtime_provider_usage_read.account_refusal_outcome) =
+          Runtime_provider_usage_read.read_runtime_after_account_refusal runtime
+        in
+        ()
+      | Missing_runtime _ -> ())
     ~model_of:(function
       (* The served name comes from the same frozen snapshot as the quota
          scope and backpressure above: a runtime.toml reload mid-walk must not
@@ -2488,6 +2527,7 @@ let run_named
               on_request_attribution
           in
           Keeper_claude_code_runtime.run
+            ?composed_context:official_client_composed_context
             ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
             ?required_native_posture
             ~runtime_id:attempt_runtime_id

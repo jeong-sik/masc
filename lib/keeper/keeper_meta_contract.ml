@@ -60,7 +60,6 @@ let runtime_exhaustion_reason_retryable (reason : runtime_exhaustion_reason) : b
 
 type blocker_class =
   | Runtime_exhausted of runtime_exhaustion_reason
-  | Capacity_backpressure
   | Fiber_unresolved
     (** 2026-05-05: turn fiber finished without invoking [resolve_done]
         (cancelled mid-turn, raised an exception not handled by the
@@ -97,7 +96,6 @@ type blocker_class =
 
 let blocker_class_to_string = function
   | Runtime_exhausted _ -> "runtime_exhausted"
-  | Capacity_backpressure -> "capacity_backpressure"
   | Fiber_unresolved -> "fiber_unresolved"
   | Agent_core_context_window_exceeded -> "agent_core_context_window_exceeded"
   | Agent_core_unrecognized_stop_reason -> "agent_core_unrecognized_stop_reason"
@@ -117,7 +115,6 @@ let blocker_class_to_string = function
 
 let blocker_class_of_serialized_string = function
   | "runtime_exhausted" -> Some (Runtime_exhausted (Other_detail "runtime_exhausted"))
-  | "capacity_backpressure" -> Some Capacity_backpressure
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "agent_core_context_window_exceeded" -> Some Agent_core_context_window_exceeded
   | "agent_core_unrecognized_stop_reason" -> Some Agent_core_unrecognized_stop_reason
@@ -231,8 +228,6 @@ type agent_runtime_state =
   ; last_usage_resolution : Keeper_usage_resolution.t option
   ; proactive_rt : proactive_runtime
   ; trace_id : Keeper_id.Trace_id.t
-  ; trace_history : string list
-  ; last_handoff_ts : float
   ; last_runtime_attempt : runtime_attempt_record option
   ; message_scope_ack_id : string option
     (** Stable chat-row id of the newest message-scope row actually injected
@@ -364,6 +359,7 @@ let microvm_backend_of_profile_defaults
   match defaults.microvm_backend with
   | Some _ as declared -> declared
   | None -> Keeper_microvm_backend.default_for_host ()
+
 ;;
 
 let effective_meta_of_profile_defaults

@@ -82,14 +82,17 @@ val parse_error_to_string : parse_error -> string
 
 val parse : string -> (t, parse_error) result
 
-type resolution =
-  | Resolved of pinned
+type missing =
   | Unknown_image of { name : string; known : string list }
       (** The catalog has no such name. [known] lists the names it has. *)
   | Not_built_on_host of { name : string; store : store }
       (** The name exists, and nothing has been promoted for this store. *)
 
-val resolve : t -> name:string -> store:store -> resolution
+val resolve : t -> name:string -> store:store -> (pinned, missing) result
+
+val shipped_file_name : string
+(** ["sandbox-images.toml"]: the image names, embedded from [config/] and read
+    from the binary. *)
 
 val shipped_file_name : string
 (** ["sandbox-images.toml"]: the image names, embedded from [config/] and read

@@ -272,6 +272,7 @@ let with_exec_fixture
       let config = Masc.Workspace.default_config dir in
       Masc_test_deps.write_sandbox_image_catalog ~base_path:config.base_path
         [ "base", Masc_test_deps.live_sandbox_image_tag ];
+
       (match
          Masc.Keeper_approval_queue.install_persistence
            ~base_path:config.base_path
@@ -5762,7 +5763,7 @@ value = { query = "must-not-queue" }
 let skill_catalog_of_document ~name document =
   let config_text =
     {|[skills]
-resource-read-max-bytes = 65536
+resource-read-max-bytes = 16384
 [[skills.sources]]
 id = "composition-fixture"
 anchor = "base-path"

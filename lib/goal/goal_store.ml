@@ -435,6 +435,7 @@ let write_state_result config state =
   ensure_dirs config;
   let json = state_to_yojson state in
   let* () = Workspace_utils.write_json_result config (goals_path config) json in
+  Goal_projection_generation.advance ();
   (match Workspace_utils.write_json_result config (goals_recovery_path config) json with
    | Ok () -> ()
    | Error msg ->

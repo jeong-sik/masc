@@ -271,7 +271,7 @@ module Response = struct
   let prepare_json ?(status = `OK) ?(compress = true) ?(extra_headers = []) ~(request : Httpun.Request.t) ?etag body =
     let send ~validator_headers =
       let final_body, compression_headers =
-        Http_response_payload.compress_body
+        Http_response_payload.compress_body_on_cpu
           ~compress
           ~accept_encoding:(Httpun.Headers.get request.headers "accept-encoding")
           body
@@ -364,7 +364,7 @@ module Response = struct
         let body = lazy_body () in
         let status = timeout_envelope_status_override_string ~status body in
         let final_body, compression_headers =
-          Http_response_payload.compress_body
+          Http_response_payload.compress_body_on_cpu
             ~compress
             ~accept_encoding:(Httpun.Headers.get request.headers "accept-encoding")
             body
@@ -412,7 +412,7 @@ module Response = struct
     | _ ->
         (* Serve full response, with compression if possible *)
         let final_body, compression_headers =
-          Http_response_payload.compress_body
+          Http_response_payload.compress_body_on_cpu
             ~accept_encoding:(Httpun.Headers.get request.Httpun.Request.headers "accept-encoding")
             body
         in

@@ -18,10 +18,17 @@ type source =
   | Zai_quota_limit_read
   | Kimi_coding_usages_read
   | Ollama_usage_read
+  | Antigravity_usage_read
+
+type window_role =
+  | Gates_model_calls
+  | Counts_other_use
+  | Unclassified_limit
 
 type window =
   { limit_id : string option
   ; kind : window_kind
+  ; role : window_role
   ; utilization : utilization
   ; resets_at : int option
   }
@@ -85,6 +92,7 @@ let source_to_string = function
   | Zai_quota_limit_read -> "zai.quota_limit"
   | Kimi_coding_usages_read -> "kimi_coding.usages"
   | Ollama_usage_read -> "ollama.usage"
+  | Antigravity_usage_read -> "antigravity.usage"
 ;;
 
 let ( let* ) = Result.bind
@@ -147,7 +155,13 @@ let claude_window ~path (key, json) =
       Error (Wrong_type { path = member_path path "utilization"; expected = "a number" })
   in
   let* resets_at = optional_int ~path "resetsAt" fields in
-  Ok { limit_id = None; kind = claude_window_kind key; utilization; resets_at }
+  Ok
+    { limit_id = None
+    ; kind = claude_window_kind key
+    ; role = Gates_model_calls
+    ; utilization
+    ; resets_at
+    }
 ;;
 
 let decode_claude_rate_limit_event json =
@@ -204,6 +218,7 @@ let codex_window ~path ~limit_id ~slot fields =
       (Some
          { limit_id
          ; kind = codex_window_kind ~slot duration
+         ; role = Gates_model_calls
          ; utilization = Percent used_percent
          ; resets_at
          })
@@ -291,9 +306,21 @@ let string_at ~path = function
   | _ -> Error (Wrong_type { path; expected = "a string" })
 ;;
 
+let bool_at ~path = function
+  | `Bool value -> Ok value
+  | _ -> Error (Wrong_type { path; expected = "a boolean" })
+;;
+
 let required_as read ~path name fields =
   let* json = required ~path name fields in
   read ~path:(member_path path name) json
+;;
+
+(* Absent and null both mean the provider stated no such value. *)
+let optional_as read ~path name fields =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some json -> Result.map Option.some (read ~path:(member_path path name) json)
 ;;
 
 (* Absent and null both mean the provider stated no such object. *)
@@ -391,6 +418,7 @@ let openrouter_credit_window ~path fields =
       (Some
          { limit_id = None
          ; kind = Provider_label "credit limit"
+         ; role = Gates_model_calls
          ; utilization = Fraction ((limit -. remaining) /. limit)
          ; resets_at = None
          })
@@ -409,6 +437,8 @@ let openrouter_free_requests_window ~path fields =
       (Some
          { limit_id = None
          ; kind = Provider_label "free model requests, daily"
+         (* Counts requests to the free models only; paid calls go on. *)
+         ; role = Counts_other_use
          ; utilization = fraction_of_counts ~used ~limit
          ; resets_at = None
          })
@@ -441,6 +471,20 @@ let zai_window_kind ~limit_type ~unit ~number =
   else Provider_label (Printf.sprintf "%s, %d x unit %d" limit_type number unit)
 ;;
 
+(* Z.AI states what each row limits in [type]. TOKENS_LIMIT is the model
+   token allowance; TIME_LIMIT counts MCP and tool calls, which a model
+   call does not spend. Any other code is kept but not classified. *)
+let zai_tokens_limit = "TOKENS_LIMIT"
+let zai_time_limit = "TIME_LIMIT"
+
+let zai_window_role limit_type =
+  if String.equal limit_type zai_tokens_limit
+  then Gates_model_calls
+  else if String.equal limit_type zai_time_limit
+  then Counts_other_use
+  else Unclassified_limit
+;;
+
 let zai_limit ~path json =
   let* fields = fields_at ~path json in
   let* limit_type = required_as string_at ~path "type" fields in
@@ -455,6 +499,7 @@ let zai_limit ~path json =
   Ok
     { limit_id = Some limit_type
     ; kind = zai_window_kind ~limit_type ~unit ~number
+    ; role = zai_window_role limit_type
     ; utilization = Percent percentage
     ; resets_at = Option.map (fun ms -> ms / ms_per_second) next_reset_ms
     }
@@ -511,14 +556,42 @@ let optional_rfc3339 ~path name fields =
        Error (Wrong_type { path; expected = "an RFC 3339 timestamp" }))
 ;;
 
-(* One Kimi [detail] object, or the top-level [usage]: [used] of [limit]. *)
-let kimi_count_window ~path ~kind fields =
-  let* used = required_as decimal_string_at ~path "used" fields in
+(* What a Kimi count object has used of its [limit]. The counts are
+   protobuf JSON (int64 as decimal strings, enums by name), which leaves out
+   a field whose value is zero: on 2026-09-25 the answer, like the body in
+   MoonshotAI/kimi-code#3951, carried [limits[].detail] as limit/remaining
+   (nothing used) and the top-level [usage] as limit/used (nothing left).
+   So either count gives the other; both present must add up to [limit],
+   and neither present is refused. *)
+let kimi_used ~path ~limit fields =
+  let* used = optional_as decimal_string_at ~path "used" fields in
+  let* remaining = optional_as decimal_string_at ~path "remaining" fields in
+  let used_path = member_path path "used" in
+  let remaining_path = member_path path "remaining" in
+  match used, remaining with
+  | Some used, None -> count_within_limit ~path:used_path ~limit used
+  | None, Some remaining ->
+    let* remaining = count_within_limit ~path:remaining_path ~limit remaining in
+    Ok (limit - remaining)
+  | Some used, Some remaining ->
+    let* used = count_within_limit ~path:used_path ~limit used in
+    if used + remaining = limit
+    then Ok used
+    else
+      Error
+        (Unexpected_value
+           { path = remaining_path; expected = Printf.sprintf "%d (limit - used)" (limit - used) })
+  | None, None -> Error (Missing_field { path = member_path path "used or remaining" })
+;;
+
+(* One Kimi [detail] object, or the top-level [usage]: what it used of
+   [limit]. *)
+let kimi_count_window ~path ~kind ~role fields =
   let* limit = required_as decimal_string_at ~path "limit" fields in
   let* limit = positive_int ~path:(member_path path "limit") limit in
-  let* used = count_within_limit ~path:(member_path path "used") ~limit used in
+  let* used = kimi_used ~path ~limit fields in
   let* resets_at = optional_rfc3339 ~path "resetTime" fields in
-  Ok { limit_id = None; kind; utilization = fraction_of_counts ~used ~limit; resets_at }
+  Ok { limit_id = None; kind; role; utilization = fraction_of_counts ~used ~limit; resets_at }
 ;;
 
 let kimi_minute_unit = "TIME_UNIT_MINUTE"
@@ -542,12 +615,13 @@ let kimi_limit ~path json =
   let* detail = required ~path "detail" fields in
   let path = member_path path "detail" in
   let* detail_fields = fields_at ~path detail in
-  kimi_count_window ~path ~kind:(kind_of_minutes minutes) detail_fields
+  kimi_count_window ~path ~kind:(kind_of_minutes minutes) ~role:Gates_model_calls detail_fields
 ;;
 
 (* Kimi, GET /coding/v1/usages (undocumented; the vendor's own CLI calls it).
    [usages.*.used_ratio] is not read: on the same response it contradicts
-   [limits[].detail] (used 20 of 100 with ratio 0), an open upstream issue,
+   the top-level [usage] (used 100 of 100 with [limit_7d] ratio 0, while the
+   account was refused for its weekly limit), an open upstream issue,
    MoonshotAI/kimi-code#3951.  The top-level [usage] states no window
    length. Its [resetTime] is preserved without guessing the period. *)
 let decode_kimi_coding_usages json =
@@ -561,7 +635,14 @@ let decode_kimi_coding_usages json =
     | None -> Ok []
     | Some (path, plan_fields) ->
       let* window =
-        kimi_count_window ~path ~kind:(Provider_label "usage (provider resetTime)") plan_fields
+        (* The plan-period count: its resetTime is the weekly reset
+           ([usages.limit_7d.reset_time] on the same response), and Kimi
+           refuses model calls with a 403 when it is spent. *)
+        kimi_count_window
+          ~path
+          ~kind:(Provider_label "usage (provider resetTime)")
+          ~role:Gates_model_calls
+          plan_fields
       in
       Ok [ window ]
   in
@@ -583,7 +664,14 @@ let ollama_window ~path ~kind name fields =
     let* usage =
       within ~path:(member_path path "usage") ~expected:"within 0..1" ~low:0.0 ~high:1.0 usage
     in
-    Ok (Some { limit_id = None; kind; utilization = Fraction usage; resets_at = None })
+    Ok
+      (Some
+         { limit_id = None
+         ; kind
+         ; role = Gates_model_calls
+         ; utilization = Fraction usage
+         ; resets_at = None
+         })
 ;;
 
 let decode_ollama_usage json =
@@ -597,6 +685,100 @@ let decode_ollama_usage json =
   distinct_windows
     ~path
     { source = Ollama_usage_read; windows = List.filter_map Fun.id [ session; weekly ] }
+;;
+
+(* Antigravity, [agy -p "/usage" --output-format json]. agy 1.1.11 answers
+   the read-only slash commands in print mode "without starting an agent
+   turn, spending quota, or leaving a conversation behind" (its bundled
+   changelog); the JSON shape is not documented and is decoded as agy 1.2.11
+   answered it on 2026-09-26. An older agy sends "/usage" to the model as a
+   prompt, and that answer is a turn: [num_turns] must be 0. Each
+   [command.data.groups[].buckets[]] is one window keyed by its [id]. A bucket
+   marked [disabled] does not currently apply ("the 5-hour limit does not
+   currently apply" while the weekly one is spent), so it is no window. *)
+let antigravity_window_kind ~path json =
+  let* window = string_at ~path json in
+  match window with
+  | "5h" -> Ok Five_hour
+  | "weekly" -> Ok Seven_day
+  | _ -> Error (Unexpected_value { path; expected = "\"5h\" or \"weekly\"" })
+;;
+
+let antigravity_reset_time ~path json =
+  let* value = string_at ~path json in
+  match Time_codec.parse_rfc3339_whole_seconds value with
+  | Ok seconds -> Ok (Float.to_int seconds)
+  | Error (_ : Time_codec.parse_error) ->
+    Error (Unexpected_value { path; expected = "an RFC 3339 time" })
+;;
+
+let antigravity_bucket ~path json =
+  let* fields = fields_at ~path json in
+  let* disabled = optional_as bool_at ~path "disabled" fields in
+  match disabled with
+  | Some true -> Ok None
+  | Some false | None ->
+    let* limit_id = required_as string_at ~path "id" fields in
+    let* kind = required_as antigravity_window_kind ~path "window" fields in
+    let* remaining = required_as number_at ~path "remaining_fraction" fields in
+    let* remaining =
+      within
+        ~path:(member_path path "remaining_fraction")
+        ~expected:"within 0..1"
+        ~low:0.0
+        ~high:1.0
+        remaining
+    in
+    let* resets_at = optional_as antigravity_reset_time ~path "reset_time" fields in
+    Ok
+      (Some
+         { limit_id = Some limit_id
+         ; kind
+         ; role = Gates_model_calls
+         ; utilization = Fraction (1.0 -. remaining)
+         ; resets_at
+         })
+;;
+
+let antigravity_group ~path json =
+  let* fields = fields_at ~path json in
+  let* buckets = required_as list_at ~path "buckets" fields in
+  let* windows = map_indexed ~path:(member_path path "buckets") antigravity_bucket buckets in
+  Ok (List.filter_map Fun.id windows)
+;;
+
+let required_word ~path name expected fields =
+  let* value = required_as string_at ~path name fields in
+  if String.equal value expected
+  then Ok ()
+  else Error (Unexpected_value { path = member_path path name; expected })
+;;
+
+let decode_antigravity_usage json =
+  let path = "antigravity-usage" in
+  let* fields = fields_at ~path json in
+  let* () = required_word ~path "status" "SUCCESS" fields in
+  let* num_turns = required_as int_at ~path "num_turns" fields in
+  let* () =
+    if Int.equal num_turns 0
+    then Ok ()
+    else
+      Error
+        (Unexpected_value
+           { path = member_path path "num_turns"
+           ; expected = "0 (a usage answer runs no turn)"
+           })
+  in
+  let* command = required ~path "command" fields in
+  let path = member_path path "command" in
+  let* command_fields = fields_at ~path command in
+  let* () = required_word ~path "name" "usage" command_fields in
+  let* data = required ~path "data" command_fields in
+  let path = member_path path "data" in
+  let* data_fields = fields_at ~path data in
+  let* groups = required_as list_at ~path "groups" data_fields in
+  let* windows = map_indexed ~path:(member_path path "groups") antigravity_group groups in
+  distinct_windows ~path { source = Antigravity_usage_read; windows = List.concat windows }
 ;;
 
 type recorded =

@@ -18,8 +18,7 @@ description = "Keeper handle (stable). Example: 'keeper-helper'"
 name = "instructions"
 type = "string"
 description = """
-Complete Keeper instructions, written to the keeper TOML declaration (kept \
-across handoff)."""
+Complete Keeper instructions, written to the keeper TOML declaration."""
 
 [[params]]
 name = "mention_targets"

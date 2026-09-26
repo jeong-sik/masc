@@ -8,6 +8,9 @@
     the file does not exist. Unknown top-level keys are rejected with a
     reset-required error.
 
+    The keys #39025 retired ([trace_history], [last_handoff_ts]) are dropped
+    for this one release and reported once per file (#39200).
+
     Issue #28844: a non-canonical value in an enumerated field with a
     canonical default (e.g. [last_proactive_outcome]) is auto-repaired in
     place through the normal serializer and the read proceeds; all other
@@ -100,9 +103,10 @@ val persisted_keeper_for_mention_target :
 (** List keeper names declared in TOML config (overlay sources). *)
 val configured_keeper_names : Workspace.config -> string list
 
-(** Primary keeper discovery: persisted JSON names. *)
+(** Primary keeper discovery: persisted JSON names. An [Error] means the
+    Keeper directory did not list; it is not an empty fleet, and each caller
+    decides what an unlisted fleet means where it reads it. *)
 val keeper_names_result : Workspace.config -> (string list, string) result
-val keeper_names : Workspace.config -> string list
 
 (** Default autoboot policy when a keeper has TOML config but no
     persisted JSON yet. *)
@@ -186,6 +190,9 @@ module Problem_report_state : sig
     | Meta_read
     | Meta_read_changed
     | Meta_repair
+    | Meta_retired_fields
+        (** The file still carries keys #39025 retired; the decoder dropped
+            them. Tolerated for one release (#39200). *)
     | Keepalive_scan
     | Persistent_scan
 

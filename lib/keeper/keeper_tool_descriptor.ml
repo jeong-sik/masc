@@ -632,7 +632,10 @@ let execute_output_schema =
           ; "stderr_artifact", normalized_artifact_ref_schema
             (* "complete" means both streams reached EOF and were preserved;
                "capture_only" means the producer supplied retained output
-               without that proof. The values are not declared as an [enum]:
+               without that proof. A completed Execute's output carries only
+               "complete"; "capture_only" is recorded in the tool-call
+               ledger's execution_evidence and is absent here (#39035).
+               The values are not declared as an [enum]:
                the composable schema contract admits only [type] on a string
                (validate_schema_contract), the plan runtime checks nothing an
                enum would add, and the keyword kept every declared schema from
@@ -1093,10 +1096,10 @@ let public_descriptors =
       ~description:Tool_schemas_misc.browser_goto_schema.description
       ~input_schema:Tool_schemas_misc.browser_goto_schema.input_schema
       ~composable_output:(Json_output { schema = browser_goto_output_schema })
-      (* A navigation reaches the web from the automation profile; the live
-         lane refuses navigation verbs at the state layer. Serial: the
-         automation lane is one browser, and Concurrent here demands a
-         statically read-only tool this is not. *)
+      (* A navigation reaches the web from a browser the server owns
+         (automation or stagehand); the live lane refuses navigation verbs at
+         the state layer. Serial: each server lane is one browser, and
+         Concurrent here demands a statically read-only tool this is not. *)
       ~ordinary_execution_mode:Serial
       ~policy:(policy ~readonly:false ())
       ~executor:In_process
@@ -1596,8 +1599,9 @@ let tasks_list_task_item_schema =
    ([matching_count]/[returned_count]/[truncated]) are absent on the
    [unchanged] variant: it carries no rows, so row statistics would
    contradict it. [new_tasks]/[new_tasks_count] name the newest visible
-   rows beside the claim-order page, so a task that sorts behind the page
-   is still reported; they are likewise absent on [unchanged]. *)
+   rows the claim-order page does not already carry, so a task that sorts
+   behind the page is still reported and no row travels twice; they are
+   likewise absent on [unchanged]. *)
 let tasks_list_output_schema =
   object_output_schema
     ~properties:
@@ -2738,10 +2742,9 @@ let internal_descriptors : t list =
       ~capability_identity:Internal_name_identity
       "cancel"
       "keeper_task_cancel"
-      (* The name says cancel; the handler issues the cancel action, which
-         now waits for a verdict rather than ending the task on its own. A
-         keeper that finds the premise gone asks here; one that simply cannot
-         finish uses release beside it. *)
+      (* The handler issues the cancel action, which ends a task the keeper
+         holds. A keeper that finds the premise gone stops it here; one that
+         simply cannot finish uses release beside it. *)
       ~readonly:false
   ; task_descriptor
       ~capability_identity:Internal_name_identity
@@ -2860,6 +2863,8 @@ let internal_descriptors : t list =
      |> with_composable_output (Json_output { schema = goal_list_output_schema }))
   ; masc_workspace_descriptor "goal_upsert" "masc_goal_upsert"
        ~readonly:false
+  ; masc_workspace_descriptor "goal_measure" "masc_goal_measure"
+       ~readonly:false
   ; masc_workspace_descriptor "goal_transition" "masc_goal_transition"
        ~readonly:false
   (* ── RFC-0182 §3.1 — masc_misc_* cluster ─────────── *)
@@ -2958,34 +2963,34 @@ let internal_descriptors : t list =
   @ [ keeper_webmcp_list_descriptor (); keeper_webmcp_call_descriptor () ]
   @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
-    masc_keeper_descriptor ~keeper_model_projection:Operator_only "list" "masc_keeper_list"
+    masc_keeper_descriptor ~keeper_model_projection:Operator_only "list" Keeper_tool_name.(to_string Keeper_list)
       ~readonly:true
-  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_status" "masc_keeper_delegate_status"
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_status" Keeper_tool_name.(to_string Keeper_delegate_status)
       ~readonly:true
       ~polling_read:true
-  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_cancel" "masc_keeper_delegate_cancel"
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_cancel" Keeper_tool_name.(to_string Keeper_delegate_cancel)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "delegate_list" "masc_keeper_delegate_list"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "delegate_list" Keeper_tool_name.(to_string Keeper_delegate_list)
       ~readonly:true
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "clear" "masc_keeper_clear"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "clear" Keeper_tool_name.(to_string Keeper_clear)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "sandbox_start" "masc_keeper_sandbox_start"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "sandbox_start" Keeper_tool_name.(to_string Keeper_sandbox_start)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "sandbox_stop" "masc_keeper_sandbox_stop"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "sandbox_stop" Keeper_tool_name.(to_string Keeper_sandbox_stop)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "reset" "masc_keeper_reset"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "reset" Keeper_tool_name.(to_string Keeper_reset)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "audit" "masc_keeper_audit"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "audit" Keeper_tool_name.(to_string Keeper_audit)
       ~readonly:true
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "status" "masc_keeper_status"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "status" Keeper_tool_name.(to_string Keeper_status)
       ~readonly:true
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "down" "masc_keeper_down"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "down" Keeper_tool_name.(to_string Keeper_down)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate" "masc_keeper_delegate"
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate" Keeper_tool_name.(to_string Keeper_delegate)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "up" "masc_keeper_up"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "up" Keeper_tool_name.(to_string Keeper_up)
       ~readonly:false
-  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "msg" "masc_keeper_msg"
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "msg" Keeper_tool_name.(to_string Keeper_msg)
       ~readonly:false
   ]
   @ masc_board_descriptors

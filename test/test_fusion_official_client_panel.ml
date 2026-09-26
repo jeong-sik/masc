@@ -760,6 +760,33 @@ let test_muse_code_panelist_removes_its_directory_after_a_failure () =
   check bool "the workspace is removed after the failed call" false (Sys.file_exists cwd)
 ;;
 
+(* Cancelling a queued panel before dispatch must not allocate a workspace or
+   start its client. The isolated temp directory makes leaked acquisition
+   observable without depending on the generated filename. *)
+let test_cancelled_muse_panel_does_not_leave_a_workspace () =
+  with_muse_runtime ~muse_cli:muse_panel_launcher @@ fun ~base_dir ->
+  let temporary = Filename.concat base_dir "panel-temp" in
+  Unix.mkdir temporary 0o700;
+  let previous = Filename.get_temp_dir_name () in
+  Fun.protect ~finally:(fun () -> Filename.set_temp_dir_name previous) (fun () ->
+    Filename.set_temp_dir_name temporary;
+    let cancelled = in_eio_context (fun () ->
+      try
+        Eio.Cancel.sub (fun cancellation ->
+          Eio.Cancel.cancel cancellation Exit;
+          let result = Masc.Fusion_official_client.run_panelist
+              ~base_dir ~runtime_id:muse_runtime_id ~system_prompt:"" ~prompt:"ping" () in
+          match result with
+          | Ok _ | Error _ -> fail "a cancelled panel returned a normal result");
+        false
+      with Eio.Cancel.Cancelled _ -> true) in
+    check bool "owner cancellation propagates" true cancelled;
+    check (list string) "cancelled dispatch leaves no temporary workspace" []
+      (Sys.readdir temporary |> Array.to_list);
+    check bool "cancelled dispatch never starts the host" false
+      (Sys.file_exists (Filename.concat base_dir "cwd.json")))
+;;
+
 (* [muse serve] has no output-schema channel. A caller that needs the client
    to hold its answer to a schema is refused before the client runs, judged by
    the stub's marker and not only by the refusal. *)
@@ -1268,6 +1295,8 @@ let () =
             test_muse_code_refuses_an_output_schema_before_spawning
         ; test_case "Antigravity selected account and native refresh" `Quick
             test_antigravity_panel_selected_account_and_refresh
+        ; test_case "cancelled Muse panel leaves no workspace" `Quick
+            test_cancelled_muse_panel_does_not_leave_a_workspace
         ] )
     ; ( "seat routes"
       , [ test_case

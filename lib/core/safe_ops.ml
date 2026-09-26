@@ -455,7 +455,7 @@ let report_persistence_read_drop_counted ~surface ~reason ~path ~detail =
 
 let read_json_eio (path : string) : Yojson.Safe.t =
   let content = Fs_compat.load_file path in
-  match parse_json_safe ~context:path content with
+  match parse_json_off_fiber ~context:path content with
   | Ok json -> json
   | Error msg ->
       Log.Misc.warn "[read_json_eio] %s" msg;

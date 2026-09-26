@@ -7186,6 +7186,8 @@
 
 (include stanzas/test_tui_keeper_current_failure_pty.inc)
 
+(include stanzas/test_safe_ops_read_json_eio.inc)
+
 (rule
  (alias runtest-test_tui_verdict_refresh_pty)
  (deps test_tui_verdict_refresh_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)

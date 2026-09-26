@@ -19,14 +19,8 @@ val requested_view_of_string : string -> (requested_view, string) result
 
 (** What the backlog is waiting on, read by the caller. [Backlog_unreadable]
     is distinct from an empty list: only one of them means there is no work. *)
-(** One task the backlog is waiting on: the request it names and which
-    terminal state its verdict authorises. A cancellation waits on the same
-    queue as a completion and only an operator's verdict clears it, so the
-    row has to say which one it is. *)
-type awaiting_task =
-  { request_id : string
-  ; intent : Masc_domain.verification_intent
-  }
+(** One task the backlog is waiting on: the request it names. *)
+type awaiting_task = { request_id : string }
 
 type awaiting_join =
   | Backlog_read of { live : awaiting_task list }
@@ -47,7 +41,7 @@ type queue_view =
   | All_requests
 
 val awaiting_tasks : Masc_domain.backlog -> awaiting_task list
-(** The request id and intent each [AwaitingVerification] task names. A task
+(** The request id each [AwaitingVerification] task names. A task
     re-submitted N times leaves N records in the store and waits on exactly one
     of them, so the queue joins on this id rather than matching on status. *)
 
@@ -60,9 +54,7 @@ val requests_json :
   unit ->
   Yojson.Safe.t
 (** Defaults to [All_requests] at [offset] 0, which is what callers predating
-    the view parameter asked for. In the awaiting view each row carries
-    [intent] (["complete"] or ["cancel"]) read from the task it waits for;
-    the history view has no backlog join and carries [null] there. Carries [total], [offset], [returned] and
+    the view parameter asked for. Carries [total], [offset], [returned] and
     [truncated] so a reader can page without deriving the boundary.
 
     Paging is by offset into a newest-first list, so a submission that lands

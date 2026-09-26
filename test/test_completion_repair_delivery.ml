@@ -53,7 +53,7 @@ let prepare_submission config verification_id =
   let tasks = List.map (fun (task : D.task) ->
     { task with task_status = D.AwaitingVerification
         { assignee = producer; started_at = "2026-09-09T00:00:00Z"
-        ; submitted_at = D.now_iso (); intent = D.Complete_task; verification_id
+        ; submitted_at = D.now_iso (); verification_id
         } }) backlog.tasks in
   W.write_backlog config { backlog with tasks }
 

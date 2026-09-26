@@ -12,11 +12,8 @@ val create_submit_request :
   claim:Masc_domain.verification_claim ->
   (unit, string) result
 (** [create_submit_request ~config ~task ~assignee ~verification_id ~claim]
-    persists the request record the completion authority reads. For a
-    cancellation the record keeps no copy of the producer's reason: the
-    operator reads it from the Board post
-    {!notify_submit_for_verification} makes. Returns [Error _] when
-    persistence fails. *)
+    persists the request record the completion authority reads. Returns
+    [Error _] when persistence fails. *)
 
 val delete_verification_request :
   config:Workspace.config ->

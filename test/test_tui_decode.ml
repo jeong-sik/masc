@@ -2716,23 +2716,18 @@ let system_log_snapshot_json entries =
 (* Verification requests. The shape is [Dashboard_verification.request_to_json]
    -- fields are asserted against what that writer emits, not against a shape
    invented here. *)
-(* The queue's shape. The writer puts both [intent] and [cancellation_reason]
-   on every row and spells an absent one [`Null], so both keys are here. *)
 let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
-    ?(evidence_error = `Null) ?(intent = `String "complete")
-    ?(cancellation_reason = `Null) () =
+    ?(evidence_error = `Null) () =
   `Assoc
     [ ("request_id", `String "vr-1")
     ; ("task_id", `String "task-470")
     ; ("task_title", `String "wire the approval gate")
     ; ("created_at", `String "2026-08-23T09:00:00Z")
     ; ("submitted_by", `String "keeper.one")
-    ; ("intent", intent)
     ; ("completion_contract", `List [ `String "tests pass" ])
     ; ("required_artifacts", `List [ `String "artifact:reports/proof.json" ])
     ; ("submitted_evidence", `List (List.map (fun s -> `String s) evidence))
     ; ("evidence_projection_error", evidence_error)
-    ; ("cancellation_reason", cancellation_reason)
     ]
 
 let verification_snapshot_json ?(total = 3) ?(view = "awaiting") ?(offset = 0)
@@ -7769,96 +7764,6 @@ let test_decode_verification_separates_a_stale_queue_from_a_failed_one () =
         (Some "read from backlog.json.last-good")
         snapshot.Tui_decode.vs_backlog_recovery
 
-(* The row says which verdict it waits on. A cancellation is cleared only by
-   an operator, so reading it as a completion hid the one row that needed
-   the operator most. [null] is the history view, and a name outside the
-   pair is refused rather than read as either. *)
-(* The row says which question it asks. Nothing read [intent], so the column
-   was blank on every row and the detail pane told every reader the row was
-   "not joined (history view)" -- on a live queue whose eight rows all carried
-   the field, seven of them "cancel".
-
-   [cancellation_reason] answers a different question and its absence answers
-   neither: a stop submitted before the record kept that copy has none, so
-   reading absence as "completion" would put a completion claim on a row that
-   is a stop. That is the shape the last case pins. *)
-let test_decode_verification_reads_which_verdict_the_row_waits_on () =
-  let decode json =
-    match Tui_decode.decode_verification_snapshot json with
-    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r
-    | Ok _ -> Alcotest.fail "expected one request"
-    | Error err -> Alcotest.failf "decode failed: %s" err
-  in
-  let ask json = (decode json).Tui_decode.vr_ask in
-  let one request = verification_snapshot_json [ request ] in
-  Alcotest.(check bool) "a stop carries the case it makes" true
-    (ask
-       (one
-          (verification_request_json ~intent:(`String "cancel")
-             ~cancellation_reason:(`String "the issue it followed was closed")
-             ()))
-     = Tui_decode.Asks_cancellation (Some "the issue it followed was closed"));
-  Alcotest.(check bool) "a completion is the intent that says so" true
-    (ask (one (verification_request_json ())) = Tui_decode.Asks_completion);
-  Alcotest.(check bool) "a stop whose reason the record did not keep" true
-    (ask (one (verification_request_json ~intent:(`String "cancel") ()))
-     = Tui_decode.Asks_cancellation None);
-  (* The writer puts the key on every row, null or not. A row without it is
-     a broken payload, and reading it as "no reason kept" would say something
-     about the record that nobody observed. *)
-  refusal_names "a row without cancellation_reason" ~key:"cancellation_reason"
-    (Tui_decode.decode_verification_snapshot
-       (one
-          (remove_field "cancellation_reason"
-             (verification_request_json ~intent:(`String "cancel") ()))))
-
-(* A row whose intent is null says so. That is the history view, which joins
-   no backlog. Folding it into either verdict is the queue inventing an answer
-   the record does not hold, and on a stop that answer is the one an operator
-   acts on. *)
-let test_decode_verification_leaves_an_unjoined_row_unstated () =
-  let ask json =
-    match Tui_decode.decode_verification_snapshot json with
-    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r.Tui_decode.vr_ask
-    | Ok _ -> Alcotest.fail "expected one request"
-    | Error err -> Alcotest.failf "decode failed: %s" err
-  in
-  Alcotest.(check bool) "a null intent states nothing" true
-    (ask (verification_snapshot_json [ verification_request_json ~intent:`Null () ])
-     = Tui_decode.Ask_unstated);
-  (* The writer puts the key on every row. A row without it is a broken
-     payload, so it is refused rather than drawn as a row that states
-     nothing. *)
-  refusal_names "a row without intent" ~key:"intent"
-    (Tui_decode.decode_verification_snapshot
-       (verification_snapshot_json
-          [ remove_field "intent" (verification_request_json ~intent:`Null ()) ]));
-  (* A null intent beside a reason is still not a stop this build can claim:
-     the field that names the verdict is the one that was empty. *)
-  Alcotest.(check bool) "a reason does not supply the missing verdict" true
-    (ask
-       (verification_snapshot_json
-          [ verification_request_json ~intent:`Null
-              ~cancellation_reason:(`String "the issue it followed was closed")
-              ()
-          ])
-     = Tui_decode.Ask_unstated)
-
-(* A word outside the pair reaches the screen as that word rather than as
-   either verdict, so a vocabulary a newer server adds is visible here. *)
-let test_decode_verification_keeps_a_word_it_does_not_know () =
-  let ask json =
-    match Tui_decode.decode_verification_snapshot json with
-    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r.Tui_decode.vr_ask
-    | Ok _ -> Alcotest.fail "expected one request"
-    | Error err -> Alcotest.failf "decode failed: %s" err
-  in
-  Alcotest.(check bool) "the word itself" true
-    (ask
-       (verification_snapshot_json
-          [ verification_request_json ~intent:(`String "supersede") () ])
-     = Tui_decode.Unrecognised_ask "supersede")
-
 let test_decode_verification_keeps_no_evidence_apart_from_unreadable () =
   (* An empty list means nothing was submitted. Evidence that exists but could
      not be read is the error field, and folding the two together would show a
@@ -9662,7 +9567,6 @@ let test_decode_lane_run_status_is_typed () =
             ; lane_run_summary_json ~status:"completion_durability_unknown"
                 "lib-dubious"
             ; lane_run_summary_json ~status:"exploded" "lib-new"
-            ; lane_run_summary_json ~status:"operator_routed" "lib-routed"
             ] )
       ]
   in
@@ -9670,7 +9574,7 @@ let test_decode_lane_run_status_is_typed () =
   | Error detail -> Alcotest.fail detail
   | Ok page ->
       (match page.Tui_decode.lrpg_runs with
-       | [ ok; dubious; novel; routed ] ->
+       | [ ok; dubious; novel ] ->
            Alcotest.(check string) "known label" "succeeded"
              (Tui_decode.lane_run_status_label ok.Tui_decode.lrs_status);
            Alcotest.(check bool) "durability variant" true
@@ -9679,18 +9583,8 @@ let test_decode_lane_run_status_is_typed () =
            (* A label the producer adds later must survive the decode, not
               vanish into a default. *)
            Alcotest.(check string) "unknown label is preserved" "exploded"
-             (Tui_decode.lane_run_status_label novel.Tui_decode.lrs_status);
-           (* A claim the lane handed to the operator is typed, and it is not
-              a decision this lane failed to reach: the operator's click is
-              the verdict. *)
-           Alcotest.(check bool) "operator-routed variant" true
-             (routed.Tui_decode.lrs_status = Tui_decode.Lane_run_operator_routed);
-           Alcotest.(check bool) "operator-routed is not a decision" true
-             (Tui_decode.lane_run_decision
-                ~run_kind:Tui_decode.Lane_run_task_verification
-                ~status:routed.Tui_decode.lrs_status
-              = Tui_decode.Lane_run_not_a_decision)
-       | _ -> Alcotest.fail "expected four runs")
+             (Tui_decode.lane_run_status_label novel.Tui_decode.lrs_status)
+       | _ -> Alcotest.fail "expected three runs")
 
 let test_decode_verifier_lane_summary_keeps_subject_and_verdict () =
   let listing =
@@ -12268,12 +12162,6 @@ let () =
           test_decode_verification_separates_a_stale_queue_from_a_failed_one;
         Alcotest.test_case "no evidence is not unreadable evidence" `Quick
           test_decode_verification_keeps_no_evidence_apart_from_unreadable;
-        Alcotest.test_case "the row says which verdict it waits on" `Quick
-          test_decode_verification_reads_which_verdict_the_row_waits_on;
-        Alcotest.test_case "an unjoined row states no verdict" `Quick
-          test_decode_verification_leaves_an_unjoined_row_unstated;
-        Alcotest.test_case "a word it does not know is kept" `Quick
-          test_decode_verification_keeps_a_word_it_does_not_know;
       ] );
     ( "decode_system_logs",
       [

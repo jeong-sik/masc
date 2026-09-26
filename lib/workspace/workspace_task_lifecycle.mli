@@ -10,11 +10,6 @@ type invalid =
           the completion-authority entry point owns its verdict. *)
   | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
-  | Verdict_cancel_requires_operator
-      (** RFC-0417 §4.4: the terminal [Cancelled] record of a cancel claim may
-          carry only an operator's signature. A system-lane approval of a
-          cancel claim is refused at the commit funnel, where every verdict
-          caller converges. *)
   | Cancel_reason_required
       (** The holder cancels its own Task without a stated reason. The
           cancellation ends the Task at once, and the reason is the only thing
@@ -71,24 +66,12 @@ type verdict_decision =
   ; verification_id : string
   }
 
-(** Why a verdict does not commit. [Verdict_cancellation_reason_unreadable]
-    is the verdict path's own: an approved stop ends with the producer's
-    stated reason, read from the verification record being approved, and a
-    record that does not give one refuses the approval rather than ending the
-    Task with no reason or with someone else's. *)
-type verdict_refusal =
-  | Verdict_invalid of invalid
-  | Verdict_cancellation_reason_unreadable of string
-
 (** Terminal verdict on an [AwaitingVerification] obligation.
 
     [authority] carries provenance from a caller that authenticated an operator
     or accepted a typed system-LLM judge result. The type separates verdicts
-    from Keeper actions; it does not perform authentication itself.
-
-    An approved stop ends as [Cancelled] under the producer's name with the
-    reason [read_cancellation_reason] returns for the verification being
-    approved; [notes] belong to the verdict and never become that reason. *)
+    from Keeper actions; it does not perform authentication itself. An
+    approval ends the Task as [Done]; a rejection returns it to its producer. *)
 val decide_verdict
   :  authority:Masc_domain.completion_authority
   -> verdict:Masc_domain.completion_verdict
@@ -97,9 +80,7 @@ val decide_verdict
   -> task_status:Masc_domain.task_status
   -> now:string
   -> notes:string
-  -> read_cancellation_reason:
-       (verification_id:string -> Workspace_verification_store.cancellation_reason_read)
-  -> (verdict_decision, verdict_refusal) result
+  -> (verdict_decision, invalid) result
 
 val valid_next_actions
   :  same_agent:bool

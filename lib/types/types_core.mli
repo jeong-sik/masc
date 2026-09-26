@@ -96,29 +96,11 @@ val completion_authority_kind : completion_authority -> string
 val completion_authority_has_identity : completion_authority -> bool
 (** Whether the provenance carries a non-empty authenticated identity. *)
 
-(** Which question a completion authority is being asked. A producer submits
-    work it believes is finished, or a stop it believes is right; both wait in
-    the same place and both end on one verdict, so the verdict needs to know
-    which terminal state it is authorising. *)
-type verification_intent =
-  | Complete_task
-  | Cancel_task
-[@@deriving show]
-
-val verification_intent_to_string : verification_intent -> string
-(** The wire name the backlog and the verification projections carry:
-    ["complete"] or ["cancel"]. *)
-
-val verification_intent_of_string :
-  string -> (verification_intent, string) result
-(** Refuses any other name rather than defaulting to either intent. *)
-
-(** What the producer places before the authority. [verification_intent] is
-    the projection the task status carries; the request record the authority
-    reads carries the claim itself. *)
+(** What the producer places before the authority: the evidence references
+    of work it believes is finished. The request record the authority reads
+    carries it. *)
 type verification_claim =
   | Completion_evidence of { evidence_refs : string list }
-  | Cancellation_reason of { reason : string }
 
 type task_status =
   | Todo
@@ -128,7 +110,6 @@ type task_status =
       { assignee : string
       ; started_at : string
       ; submitted_at : string
-      ; intent : verification_intent
       ; verification_id : string
       }
       (** No verifier binding. [started_at] preserves the producer's original

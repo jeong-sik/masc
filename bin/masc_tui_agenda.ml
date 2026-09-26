@@ -33,19 +33,10 @@ type awaiting =
    [Operator_task_attention] projected it. Flattened to text here: the panel
    draws rows, and three surfaces describing the same row three ways is what
    the projection exists to prevent, so the sentence is made once over there. *)
-(* What ends this wait, as [Operator_task_attention] already knows it: a stop
-   is granted as a verdict in the verify queue, and work nobody holds is read
-   on the task itself. Carried rather than re-derived here from [what], which
-   is a sentence written for a reader. *)
-type ends_at =
-  | Verify_queue
-  | The_task
-
 type stalled =
   { task_id : string
   ; what : string
   ; since_iso : string
-  ; ends_at : ends_at
   }
 
 type 'row reading =
@@ -205,10 +196,7 @@ type destination =
   | Nowhere
   | Keeper_holding of string
       (** the keeper sitting on a tool call only an operator releases *)
-  | Stuck_task of
-      { task_id : string
-      ; ends_at : ends_at
-      }
+  | Stuck_task of string  (** the task, read on its own detail *)
 
 type line =
   { tone : tone
@@ -360,7 +348,7 @@ let overlay ~now ~localtime ~cols t =
         (fun (row : stalled) ->
            { tone = Question
            ; goes_to =
-               Stuck_task { task_id = row.task_id; ends_at = row.ends_at }
+               Stuck_task row.task_id
            ; text = two_column ~cols row.what (waited ~now row.since_iso)
            })
         shown

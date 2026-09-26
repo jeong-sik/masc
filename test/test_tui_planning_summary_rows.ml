@@ -137,7 +137,6 @@ let test_the_backlog_spells_a_state_as_a_task_row_does () =
           { assignee = "a"
           ; started_at = "t"
           ; submitted_at = "t"
-          ; intent = Masc_domain.Complete_task
           ; verification_id = "v-1"
           } )
     ]

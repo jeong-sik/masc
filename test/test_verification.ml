@@ -1208,33 +1208,21 @@ let test_cancelled_retry_does_not_publish_into_a_fresh_runtime () =
     Alcotest.(check bool) "recovery is the fresh whole-backlog scope" true
       (Eio.Promise.await delivered = CA.For_testing.Whole_backlog))
 
-(* RFC-0417 §4.1/§6.3: the system lane's authority ends where a cancellation
-   begins. The routing is pure and read off the status; the runtime path
-   consults it before any review starts, records a cancel claim as
-   [Operator_routed], and leaves the Task pending for the operator's one
-   click — no timer behind it, and no prompt: the question type has no arm a
-   cancel could render through. *)
-let test_cancel_claim_is_routed_to_the_operator () =
+(* The routing is pure and read off the status: a submission is reviewed, and
+   a Task that is not awaiting anything is not an obligation. *)
+let test_admission_reads_the_status () =
   let module For_testing = Masc.Completion_authority_agent.For_testing in
-  let awaiting intent =
-    Masc_domain.AwaitingVerification
-      { assignee = "keeper-a"
-      ; started_at = "2026-09-05T00:00:00Z"
-      ; submitted_at = "2026-09-05T00:01:00Z"
-      ; intent
-      ; verification_id = "vrf-routing"
-      }
-  in
   Alcotest.(check bool)
-    "completion review stays with the system lane"
+    "a submission is reviewed by the system lane"
     true
-    (For_testing.admission_of_status (awaiting Masc_domain.Complete_task)
+    (For_testing.admission_of_status
+       (Masc_domain.AwaitingVerification
+          { assignee = "keeper-a"
+          ; started_at = "2026-09-05T00:00:00Z"
+          ; submitted_at = "2026-09-05T00:01:00Z"
+          ; verification_id = "vrf-routing"
+          })
      = For_testing.Review_completion);
-  Alcotest.(check bool)
-    "a cancel claim is the operator's, and no review starts"
-    true
-    (For_testing.admission_of_status (awaiting Masc_domain.Cancel_task)
-     = For_testing.Operator_routed);
   Alcotest.(check bool)
     "a Task that is not awaiting anything is not an obligation"
     true
@@ -1858,7 +1846,6 @@ let test_system_llm_agent_defers_invalid_contract_without_rejecting_task () =
                        { assignee = "contract-retry-worker"
                        ; started_at = original_started_at
                        ; submitted_at = "2026-08-04T00:01:00Z"
-                       ; intent = Complete_task
                        ; verification_id
                        }
                  })
@@ -2088,7 +2075,6 @@ let test_rejected_verdict_audit_preserves_reason () =
                    { assignee = "audit-producer"
                    ; started_at = "2026-07-27T23:59:00Z"
                    ; submitted_at = Masc_domain.now_iso ()
-                   ; intent = Complete_task
                    ; verification_id = "vrf-audit-rejected"
                    }
              }
@@ -2186,7 +2172,6 @@ let test_verdict_audit_names_the_judging_runtime () =
                    { assignee = "runtime-producer"
                    ; started_at = "2026-08-05T00:00:00Z"
                    ; submitted_at = Masc_domain.now_iso ()
-                   ; intent = Complete_task
                    ; verification_id = "vrf-runtime-named"
                    }
              }
@@ -3587,7 +3572,6 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
                  { assignee = "omega"
                  ; started_at = "2026-07-27T23:59:00Z"
                  ; submitted_at = "2026-07-28T00:00:00Z"
-                 ; intent = Complete_task
                  ; verification_id = request_id
                  }
            })
@@ -4367,8 +4351,7 @@ let completion_output =
   `Assoc [ "required_artifacts", `List [ `String "note:done" ] ]
 ;;
 
-(* An output with no completion material. The operator reads a stop from its
-   Board post, not from this mapping, so nothing in a record stands in for
+(* An output with no completion material: nothing in a record stands in for
    [required_artifacts]. *)
 let output_without_completion_material =
   `Assoc [ "task_title", `String "the upstream schema landed instead" ]
@@ -4386,7 +4369,7 @@ let test_the_request_asks_the_completion_question () =
       ; evidence_posture
       ; few_shot_block
       } ->
-    (* This function maps an intent to a question and reads no store. The
+    (* This function maps a request to a question and reads no store. The
        calibration block and the evidence posture are filled at the review
        site, where the snapshot and the ledger are opened; a value here would
        mean this mapping had grown a disk read. *)
@@ -4465,8 +4448,8 @@ let () =
         test_retry_arrival_during_drain_keeps_its_next_batch;
       Alcotest.test_case "cancelled retries do not publish into a fresh runtime" `Quick
         test_cancelled_retry_does_not_publish_into_a_fresh_runtime;
-      Alcotest.test_case "a cancel claim is routed to the operator" `Quick
-        test_cancel_claim_is_routed_to_the_operator;
+      Alcotest.test_case "admission reads the status" `Quick
+        test_admission_reads_the_status;
       Alcotest.test_case "scan scope limits a submission to its own verification" `Quick
         test_scan_scope_limits_a_submission_to_its_own_verification;
       Alcotest.test_case "system LLM notes keep metadata only" `Quick

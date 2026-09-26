@@ -556,41 +556,31 @@ let observed_exact_run (run : Exact_lane_run_registry.run) =
 (* Success for this lane means A VERDICT WAS PRODUCED. [Not_reviewed] is
    emitted when every evaluator slot was exhausted without a verdict
    (Evaluator_unavailable / Invalid_verdict) — counting it as succeeded made
-   the panel unreadable as a judgement metric (lane audit W5). An
-   operator-routed claim asked no evaluator anything: it is not a run of this
-   lane, so it has no terminal kind here and enters neither the counts nor
-   the latency. *)
+   the panel unreadable as a judgement metric (lane audit W5). *)
 let terminal_of_verification_outcome = function
   | Verification_run_registry.Infrastructure_unavailable _
   | Verification_run_registry.Commit_failed _
   | Verification_run_registry.Raised _
-  | Verification_run_registry.Not_reviewed _ -> Some Failed
+  | Verification_run_registry.Not_reviewed _ -> Failed
   | Verification_run_registry.Approved _
-  | Verification_run_registry.Rejected _ -> Some Succeeded
-  | Verification_run_registry.Review_cancelled _ -> Some Cancelled
-  | Verification_run_registry.Operator_routed -> None
+  | Verification_run_registry.Rejected _ -> Succeeded
+  | Verification_run_registry.Review_cancelled _ -> Cancelled
 ;;
 
 let observed_verification_run (run : Verification_run_registry.run) =
   let status =
     match run.status with
-    | Verification_run_registry.Running -> Some Running
+    | Verification_run_registry.Running -> Running
     | Verification_run_registry.Completed
         { outcome; evaluator_runtime; elapsed_s; _ } ->
-      Option.map
-        (fun kind ->
-           Terminal
-             { kind
-             ; elapsed_s
-             ; elapsed_measured = true
-             ; answered_by = optional_slot evaluator_runtime
-             })
-        (terminal_of_verification_outcome outcome)
+      Terminal
+        { kind = terminal_of_verification_outcome outcome
+        ; elapsed_s
+        ; elapsed_measured = true
+        ; answered_by = optional_slot evaluator_runtime
+        }
   in
-  Option.map
-    (fun status ->
-       { lane = Standalone_lane.Verifier; started_at = run.started_at; status })
-    status
+  { lane = Standalone_lane.Verifier; started_at = run.started_at; status }
 ;;
 
 let terminal_of_goal_verification_outcome ~evaluated_verdict = function
@@ -834,7 +824,7 @@ let snapshot_json_with
   =
   let all_runs =
     List.map observed_exact_run exact_runs
-    @ List.filter_map observed_verification_run verification_runs
+    @ List.map observed_verification_run verification_runs
     @ List.map observed_goal_verification_run goal_verification_runs
   in
   let exact_run_projection_count = List.length exact_runs in

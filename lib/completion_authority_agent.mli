@@ -104,11 +104,9 @@ module For_testing : sig
   (** How one review attempt ended. [Stalled] names why no verdict was
       committed: the run row is recorded, the caller schedules the retry the
       cause asks for, and then writes the WARN and projects the stall to the
-      Board from the scheduler's answer. [Operator_routed] is a cancel claim
-      handed to the operator without a review (RFC-0417 §4.1). *)
+      Board from the scheduler's answer. *)
   type process_outcome =
     | Committed
-    | Operator_routed
     | Stalled of stop_cause
 
   val retry_request_of_evaluator_retryable : bool option -> retry_request
@@ -212,14 +210,11 @@ module For_testing : sig
       key. A whole-backlog request shares the batch and timer with named
       retries. The switch owns the timer and its cancellation. *)
 
-  (** RFC-0417 §4.1: what the system lane does with one Task, read off its
-      status. A completion claim is reviewed; a cancel claim is handed to the
-      operator without a prompt and recorded as
-      [Verification_run_registry.Operator_routed]; any other status is not an
-      obligation. Pure, so the routing is pinned without a runtime. *)
+  (** What the system lane does with one Task, read off its status. A
+      submission is reviewed; any other status is not an obligation. Pure, so
+      the routing is pinned without a runtime. *)
   type admission =
     | Review_completion
-    | Operator_routed
     | Not_awaiting
 
   val admission_of_status : Masc_domain.task_status -> admission

@@ -299,7 +299,6 @@ let test_task_severity_follows_the_status () =
           { assignee = "beta"
           ; started_at = "2026-08-21T02:00:00Z"
           ; submitted_at = "2026-08-21T03:00:00Z"
-          ; intent = Masc_domain.Complete_task
           ; verification_id = "verification-1"
           }));
   check

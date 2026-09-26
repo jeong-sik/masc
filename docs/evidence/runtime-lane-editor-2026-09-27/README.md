@@ -1,6 +1,25 @@
 # Runtime lane editor browser evidence
 
-## Source and scope
+## Latest main integration proof
+
+The main-integration source commit `8ffea1ae2fe3c9be272e72727e599f0932612880`
+was rerun in Chromium `149.0.7827.55` with the same six assertions below.
+All six passed and the browser reported no page errors. This source includes
+#39280's parsed TOML identity and the lane declaration reader adapted to that
+same parser; the prior screenshots alone do not validate this integration.
+
+- [Initial order](main-sync/01-lane-editor.png)
+- [Stale click refused, refreshed order retained](main-sync/02-stale-click-refused.png)
+- [HTTP 409 with unchanged displayed order](main-sync/03-server-conflict.png)
+- [Actual requests and assertions](main-sync/receipt.json)
+- [Source, harness and artifact hashes](main-sync/source-identity.json)
+
+The same source also passed 169 targeted Dashboard tests (113 parser/editor,
+56 SettingsSurface) and `tsc --noEmit`. The Settings test process exited zero
+but logged a localhost:3000 connection refusal after its passing summary.
+These are local source checks, not exact-head repository CI or deployment proof.
+
+## Earlier source and scope
 
 The portable harness ran against source commit `af7a80c4b87b9729a468e62f70f0c033cf1d6d64`.
 Actual Chromium rendered the production `SettingsSurface`, API client and production
@@ -37,15 +56,16 @@ this retained successful run; they were fixture setup, not product changes.
 
 ## Reproduce
 
-Use this source checkout, or a later evidence-only head with the same dashboard source
-and lockfile. Install its locked Dashboard dependencies and the matching Playwright
+Use the source checkout to be measured, with its Dashboard source and lockfile
+committed and clean. Install its locked Dashboard dependencies and the matching Playwright
 Chromium browser. Then, from the repository root:
 
 ```sh
 node docs/evidence/runtime-lane-editor-2026-09-27/harness/run.mjs . /new/output/directory
 ```
 
-The output directory must not exist. The harness checks source identity, selects a
+The output directory must not exist. The harness records the current HEAD and checks that Dashboard source and lockfile
+match it, selects a
 free loopback port, serves a temporary component entry, intercepts all API requests,
 and removes its temporary entry and closes the browser/server in `finally`.
 It never connects to the live MASC API. `fixtures.json` contains synthetic API data

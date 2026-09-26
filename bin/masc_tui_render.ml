@@ -8015,7 +8015,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
          can still truncate, which is why the absence reading stays. *)
       match state.keeper_schedules_error, state.keeper_schedules with
       | Some (keeper_name, err), _ when String.equal keeper_name k.k_name ->
-          [ (Theme.bad ()) ^ "  schedules unavailable: "
+          [ (Theme.bad ()) ^ "  "
             ^ Terminal_text.single_line err ^ Ansi.reset ]
       | _, Some (keeper_name, snapshot) when String.equal keeper_name k.k_name ->
           let rows = snapshot.scs_rows in
@@ -10637,7 +10637,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
         (match state.fusion_historical_detail with
          | Some original when original.fhd_reference.fhe_post_id = reference.fhe_post_id
                               && original.fhd_reference.fhe_run_id = reference.fhe_run_id ->
-             (if Option.is_some state.fusion_detail_error then [ Theme.warn (), "  Previous Board reading (refresh failed)" ] else [])
+             (if Option.is_some state.fusion_detail_error then [ Theme.warn (), "  Previous Board reading retained" ] else [])
              @ fusion_historical_lines ~width:(max 1 (cols - 8)) original
          | Some _ | None -> [ Ansi.dim, "  (waiting for the selected Board original; r retries)" ])
     | Fusion_list | Fusion_detail _ ->

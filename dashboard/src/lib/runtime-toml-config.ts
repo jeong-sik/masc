@@ -9,6 +9,7 @@ export interface RuntimeTomlProvider {
   transportKind: RuntimeTomlTransportKind
   endpoint: string
   command: string
+  accountHome: string
   credentialType: RuntimeTomlCredentialType
   credentialKey: string
   credentialPath: string
@@ -297,6 +298,7 @@ function providerFromDocument(document: TomlDocument, id: string): RuntimeTomlPr
     transportKind: endpoint ? 'endpoint' : command ? 'command' : 'missing',
     endpoint,
     command,
+    accountHome: asString(values['account-home']),
     credentialType: credentialType === 'env' || credentialType === 'file' || credentialType === 'inline'
       ? credentialType
       : 'none',
@@ -667,7 +669,7 @@ export function setRuntimeTomlDefault(sourceText: string, runtimeId: string): st
 export function setRuntimeTomlProviderField(
   sourceText: string,
   providerId: string,
-  field: 'enabled' | 'display-name' | 'protocol' | 'endpoint' | 'command' | 'is-non-interactive' | 'agent' | 'effort' | 'timeout-s',
+  field: 'enabled' | 'display-name' | 'protocol' | 'endpoint' | 'command' | 'is-non-interactive' | 'account-home' | 'agent' | 'effort' | 'timeout-s',
   value: string | number | boolean | null,
 ): string {
   const section = `providers.${providerId}`

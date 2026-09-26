@@ -7,7 +7,9 @@
     operator projection only: routing and admission do not read it.
 
     Codex answers [account/rateLimits/read] after account admission, with no
-    thread or turn. A provider that declares [usage-read] in runtime.toml is
+    thread or turn. The Antigravity CLI answers a print-mode [/usage] in a
+    disposable HOME ({!Runtime_antigravity_usage}), at server start only.
+    A provider that declares [usage-read] in runtime.toml is
     asked with one HTTP GET to that URL, authenticated with the key its HTTP
     runtime was built with, and the answer is decoded by the declared shape.
     A provider that also declares [usage-read.refresh-s] is asked again that
@@ -42,6 +44,7 @@ type http_read =
 
 type how =
   | Codex of Runtime_execution.codex_app_server
+  | Antigravity of Runtime_execution.antigravity_cli
   | Http of http_read
 
 type readable =
@@ -53,11 +56,14 @@ val read_scopes :
   codex:(scope:Runtime_quota_window.scope ->
          Runtime_execution.codex_app_server ->
          (unit, string) result) ->
+  antigravity:(scope:Runtime_quota_window.scope ->
+               Runtime_execution.antigravity_cli ->
+               (unit, string) result) ->
   fetch:(api_key:Llm_provider.Secret.t -> string -> (string, http_error) result) ->
   readable list ->
   unit
-(** Read each scope in order with [codex] or [fetch] (one GET of the
-    declared URL), decode, and record.  A failed or raising read is logged
+(** Read each scope in order with [codex], [antigravity] or [fetch] (one GET
+    of the declared URL), decode, and record.  A failed or raising read is logged
     with its scope (and shape) and does not stop the scopes after it; only
     {!Eio.Cancel.Cancelled} is re-raised.  A read that states no windows logs
     one info line.  An HTTP read with an empty key fails without a request. *)

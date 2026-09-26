@@ -21,7 +21,7 @@ let cache_rows home =
     | _ -> Error invalid
   with Sys_error _ | Unix.Unix_error _ | Yojson.Json_error _ -> Error invalid
 let run ~mgr ~clock ~cwd ~directory ~cli_path ~timeout_s =
-  let* home = Runtime_verification_codex_home.prepare ~directory
+  let* home = Runtime_verification_codex_home.prepare ~directory ()
     |> Result.map_error (fun _ -> "The selected Codex connection could not be isolated for refresh.") in
   let config = { (Runtime_codex_app_server.default_config ()) with
     cli_path; isolated_home = Some home; admission_timeout_s = timeout_s;

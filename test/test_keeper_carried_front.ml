@@ -978,6 +978,8 @@ let () =
             test_a_seed_read_reports_each_failure_once
         ; test_case "a floor seed drops as atom missing on its own history" `Quick
             test_a_floor_seed_drops_as_atom_missing_on_its_own_history
+        ; test_case "read_seed stops at a floor response" `Quick
+            test_read_seed_stops_at_a_floor_response
         ] )
     ; ( "front"
       , [ test_case "of_ledger" `Quick test_of_ledger_reads_the_last_request_front

@@ -216,7 +216,8 @@ status: reference
 
 **Keeper Prompt (Keeper 시스템 프롬프트)**
 : 한 Keeper turn의 모델 호출에 실리는 system prompt. `Keeper_prompt.build_keeper_system_prompt`가
-  `config/prompts/keeper.md`의 슬롯을 정해진 순서로 조립한다. 순서는 공유 접두를 최대로
+  `config/prompts/keeper.md`의 슬롯을 정해진 순서로 조립한다. 이 렌더 결과가
+  Prompt Block의 `keeper_instructions` 칸에 들어간다. 순서는 공유 접두를 최대로
   남기기 위한 것이다(KV 캐시 재사용): `<system>` 공유 본문(keeper.md 첫 마커 앞, 모든
   Keeper가 글자 그대로 공유) → `keeper.worldview` → `keeper.constitution` →
   `keeper.identity` → `keeper.workspace` → `<role>`.
@@ -264,6 +265,22 @@ status: reference
   **Schedule**의 미래 실행 예약과도 다르다.
   → [mcp_tool_runtime_ask](../../lib/mcp_tool_runtime_ask.ml),
   [Keeper_ask](../../lib/keeper/keeper_ask.mli)
+
+**Activation Mode (활성화 모드)**
+: Keeper의 자동 기상과 자발적 착수를 한데 다루는 소유자 정책
+  (`Keeper_activation_mode.t`). 뜻은 두 술어로 읽는다 —
+  `restore_owner`(자동 owner 복원, automatic owner restoration)과
+  `spontaneous`(스스로 새 일을 착수). 닫힌 세 값 가운데 `manual`은 둘 다
+  거짓이고, `on_demand`는 restore_owner만 참이라 자동으로 띄워 요청에
+  답하지만 스스로 새 일을 시작하지 않으며, `autonomous`는 둘 다 참이다.
+  readiness 안내 문구도 이 두 축으로 갈라 나온다. 요청된 작업은 lifecycle
+  pause와 shutdown ownership 아래 이 투영과 따로 수용된다. 전역
+  kill-switch(`MASC_KEEPER_AUTONOMOUS_ENABLED`)와 per-keeper 깃발의 AND 로
+  게이트가 열린다. TUI 설정 편집기(`e`)는 닫힌 집합 밖의 값을
+  서버로 보내기 전에 거절하고 편집기를 다시 열어 허용 값을 보여 준다(#39007).
+  **다른 것**: Gate(`Keeper_gate_mode.t`)는 바깥 효과를 어떻게 판정하는가이고,
+  `Skill Activation`은 Skill 본문 읽기 사건이다. 셋은 서로 다른 축이다.
+  → [Keeper_activation_mode](../../lib/keeper/keeper_activation_mode.mli)
 
 **Latched Reason (durable latch 까닭)**
 : Keeper가 durable pause에 들어간 typed 까닭
@@ -1447,6 +1464,20 @@ status: reference
   답을 기다리며, `Yolo`로 꺼도 Gate로 가는 바깥 작업은 Gate가 따로 판정한다.
   도구 승인의 `Auto`와 Gate의 `Auto_judge`도 다른 값이다.
   → [Keeper_tool_approval_mode](../../lib/keeper/keeper_tool_approval_mode.mli)
+
+**Prompt Block (프롬프트 블록)**
+: 한 Keeper turn의 맥락 조립(per-turn context assembly)에서 생성자 하나가
+  주입 자리(injection site) 하나를 이름하는 닫힌 여섯 슬롯(`Prompt_block_id.t`) —
+  `keeper_instructions`(렌더된 시스템 프롬프트, 곧 Keeper Prompt),
+  `dynamic_context`(연속성 스냅샷·skill route·worktree·telemetry 피드백·turn
+  지시·최근 실패 기억을 한 문자열로 합친 소프트 컨텍스트),
+  `temporal_summary`, `memory_os_recall`, `operator_note`,
+  `skill_compositions`(그 턴의 도구 표면이 실은 composition Skill들).
+  생산자가 없는 값은 닫힌 계약에서 일부러 빠져 있다. block id 하나가
+  대시보드의 turn record 디코더 목록(`TURN_PROMPT_BLOCK_IDS`)에서 빠지면
+  그 Keeper의 전체 turn record가 거부되므로, id 추가·변경은 decode 경로
+  양쪽을 함께 고쳐야 한다(#38923).
+  → [Prompt_block_id](../../lib/types/prompt_block_id.mli)
 
 **HITL Delivery Occasion (HITL 전달 계기)**
 : 승인된 HITL 결정을 Keeper 에게 전달할 때, 그 전달이 왜 일어나는지를 가리키는 닫힌 세 값

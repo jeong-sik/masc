@@ -45,7 +45,11 @@ def run(executable):
         rows = screen(process, fd, output)
         if b"> /keeper" in b"\n".join(rows.values()):
             raise AssertionError("selection changed the draft before acceptance")
-        h.send_and_wait(process, fd, output, b"\x1b", h.composer_showing(b"/"))
+        start = len(output)
+        h.write_all(fd, output, b"\x1b")
+        # Closing an overlay leaves the draft at the same row. The presenter
+        # need not repaint that unchanged row; wait for the changed frame.
+        h.wait_for_output(process, fd, output, h.FRAME_END, start=start, timeout=3.0)
         rows = screen(process, fd, output)
         if h.screen_row_of(rows, b"Commands") != -1 or h.screen_row_of(rows, CHAT) < 0:
             raise AssertionError("Escape did not close only the command menu")

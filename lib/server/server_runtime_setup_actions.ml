@@ -192,7 +192,13 @@ let discover ~binary ~sw:_ ~net ~base_path request =
     match choice with
     | Runtime_setup_spec.Codex ->
       let* command=text (value "command" template) in
-      let* json=native_json ~binary ["runtime-codex-models";"--cli-path";command] in
+      (* The account is private configured state, not browser-supplied data
+         or a public inventory field. An undeclared account keeps the client's
+         existing ambient selection contract. *)
+      let account_args = match declared_provider config id with
+        | Some {Runtime_schema.account_home=Some home; _} -> ["--account-home";home]
+        | Some {Runtime_schema.account_home=None; _} | None -> [] in
+      let* json=native_json ~binary (["runtime-codex-models";"--cli-path";command] @ account_args) in
       project_client_models ~source:"codex_isolated_account_model_list" ~catalog:false json
     | Claude_code ->
       let* json=native_json ~binary ["runtime-model-list";"claude-code"] in

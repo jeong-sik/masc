@@ -56,7 +56,6 @@ let keeper_fixture ?(name = "k-1") ?(status = "active")
       ("status", json_string status);
       ("context_ratio", `Float context_ratio);
       ("last_turn_ago_s", `Float 30.0);
-      ("handoff_count_total", `Int 0);
       ( "diagnostic",
         `Assoc
           [

@@ -30,8 +30,11 @@ def run(executable: str) -> None:
         if screen.count(ERROR) != 1 or screen.count(b"load failed") != 1:
             raise AssertionError(f"Runtime repeated or lost the cause: {screen!r}")
         for field in (b"[runtime].default", b"media_failover"):
-            if field not in screen:
-                raise AssertionError(f"Runtime hid {field!r} on failure: {screen!r}")
+            rows = [row for row in screen.splitlines() if field in row]
+            if len(rows) != 1 or b"\xe2\x80\x94" not in rows[0]:
+                raise AssertionError(
+                    f"Runtime did not mark {field!r} unavailable: {screen!r}"
+                )
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

@@ -62,15 +62,16 @@ let test_error_plain_string () =
 ;;
 
 let test_failure_data_keeps_one_source_and_the_wire_contract () =
+  let start = Tool_timing.start () in
   let opaque =
     [ Tool_result.error
         ~failure_class:Tool_result.Runtime_failure
-        ~tool_name:"fixture" ~start_time:0.0 "rejected"
-    ; Tool_result.of_exn ~tool_name:"fixture" ~start_time:0.0 (Failure "rejected")
-    ; Tool_result.make_err_of_exn ~tool_name:"fixture" ~start_time:0.0
+        ~tool_name:"fixture" ~start_time:start "rejected"
+    ; Tool_result.of_exn ~tool_name:"fixture" ~start_time:start (Failure "rejected")
+    ; Tool_result.make_err_of_exn ~tool_name:"fixture" ~start_time:start
         (Failure "rejected")
     ; Tool_result.make_err ~tool_name:"fixture"
-        ~class_:Tool_result.Runtime_failure ~start_time:0.0
+        ~class_:Tool_result.Runtime_failure ~start_time:start
         ~data:(`String "rejected") "rejected"
     ]
   in
@@ -97,7 +98,7 @@ let test_failure_data_keeps_one_source_and_the_wire_contract () =
   let independent = `Assoc [ "reason", `String "quota" ] in
   let structured =
     Tool_result.make_err ~tool_name:"fixture"
-      ~class_:Tool_result.Dependency_unavailable ~start_time:0.0
+      ~class_:Tool_result.Dependency_unavailable ~start_time:start
       ~data:independent "retry later"
   in
   match structured with

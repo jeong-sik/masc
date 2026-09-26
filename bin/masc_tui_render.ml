@@ -816,7 +816,8 @@ let render_work_tasks (state : state) =
     Overview_tasks.work_selected_index state.tasks
       ~selected:(Overview_tasks.selection state.task_focus)
   in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"work-tasks"
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
+    ~surface_key:"work-tasks"
     ~title:(screen_title " MASC Work / Tasks")
     ~hints:Masc_tui_keys.footer_hints_work_tasks
     ~body:(fun ~budget c ->

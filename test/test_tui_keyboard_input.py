@@ -7996,6 +7996,12 @@ def run_context_inspector_transport_error_regression(executable: str) -> None:
             raise AssertionError(f"Transport failure received two verdicts: {frame!r}")
         if b"NEXT REQUEST" not in plain:
             raise AssertionError(f"Independent forecast was lost after turn read failure: {frame!r}")
+        # The chat view is message mode, where q is a composer key rather
+        # than the quit key, so leaving runs through the keeper detail like
+        # the sibling inspector scenario. Esc closes the inspector itself:
+        # the error view opens no exact item, so one press reaches chat.
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")
 
     run_terminal_scenario(

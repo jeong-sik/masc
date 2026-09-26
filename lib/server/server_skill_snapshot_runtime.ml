@@ -149,17 +149,12 @@ let boot_report ~runtime_config_path snapshot =
         (List.length (Skill_catalog_snapshot.entries snapshot))
         (List.length (Skill_catalog_snapshot.rejections snapshot)) )
   | Config_rejected { diagnostics; _ } ->
-    (* #39269: this used to print only a diagnostic count, so a rejected
-       [skills] table emptied every Keeper's catalog with no reason in the
-       log. The reason and the file are the whole point of the line. *)
+    (* INTENDED RED (#39274 control): the pre-#39269 count-only line. *)
     ( Boot_warn
     , Printf.sprintf
-        "Skill catalog is empty for every Keeper until this is fixed. %s \
-         snapshot_revision=%s"
-        (Skill_source_config.rejection_message
-           ~config_path:runtime_config_path
-           diagnostics)
-        snapshot_revision )
+        "Skill snapshot config rejected at boot: snapshot_revision=%s diagnostics=%d"
+        snapshot_revision
+        (List.length diagnostics) )
   | Config_unreadable { detail } ->
     ( Boot_error
     , Printf.sprintf

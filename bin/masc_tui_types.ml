@@ -6386,6 +6386,9 @@ type state = {
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
   mutable verification_inflight: bool;
+  (* A verdict can commit while an older queue read is still in flight. Its
+     answer is stale even if it arrives later; discard it and read again. *)
+  mutable verification_refresh_after_inflight: bool;
   mutable verification_scroll: int;
   mutable verification_cursor: int;
   (* Which list this surface is reading. The store keeps every submission ever
@@ -6403,11 +6406,11 @@ type state = {
      and verdict keys from silently moving to a different task. *)
   mutable verification_detail_request_id: string option;
   mutable verification_detail_scroll: int;
-  (* An approve armed for a second keypress: which task. The cursor can move
-     between the two presses, so the task id is captured at arm time and a
-     press on a different row re-arms for that row. Reject carries no arm --
-     its $EDITOR reason form is the confirmation step. *)
-  mutable verification_verdict_armed: string option;
+  (* An approve armed for a second keypress: the exact task and submission.
+     A queue reload can replace a submission for the same task between presses;
+     that second press must re-arm, not approve the new request. Reject carries
+     no arm -- its $EDITOR reason form is the confirmation step. *)
+  mutable verification_verdict_armed: (string * string) option;
   mutable verification_verdict_error: string option;
   mutable system_logs: system_log_snapshot option;
   mutable system_logs_error: string option;
@@ -8279,6 +8282,7 @@ let create_state
   verification = None;
   verification_error = None;
   verification_inflight = false;
+  verification_refresh_after_inflight = false;
   verification_scroll = 0;
   verification_cursor = 0;
   verification_view = Tui_decode.Awaiting_queue;
@@ -8865,10 +8869,10 @@ let agenda (state : state) : Masc_tui_agenda.t =
     | Some snapshot, _ when not (String.equal snapshot.scs_status "ok") ->
       Masc_tui_agenda.Read_failed
         (match snapshot.scs_read_error with
-         | Some reason -> Tui_decode.sanitize_terminal_text reason
+         | Some reason -> reason
          | None -> "schedule store unreadable")
     | None, Some error ->
-      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
+      Masc_tui_agenda.Read_failed error
     | None, None -> Masc_tui_agenda.Not_read
     | Some snapshot, _ ->
       Masc_tui_agenda.Read
@@ -8889,7 +8893,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
   let awaiting =
     match state.keeper_tool_approvals_observed, state.keeper_tool_approvals_error with
     | false, Some error ->
-      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
+      Masc_tui_agenda.Read_failed error
     | false, None -> Masc_tui_agenda.Not_read
     | true, _ ->
       Masc_tui_agenda.Read
@@ -8905,7 +8909,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
   let stalled =
     match state.operator_stalled, state.tasks_error with
     | None, Some error ->
-      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
+      Masc_tui_agenda.Read_failed error
     | None, None -> Masc_tui_agenda.Not_read
     | Some rows, _ -> Masc_tui_agenda.Read rows
   in

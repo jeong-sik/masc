@@ -1092,7 +1092,6 @@ let () =
         ?(stop_reason = Runtime_agent.Completed)
         ?(usage = Masc.Inference_utils.zero_usage)
         ?(usage_scope = Runtime_usage_scope.Per_request)
-        ?usage_basis
         ()
     : Masc.Keeper_agent_run.run_result
     =
@@ -1115,17 +1114,6 @@ let () =
       ; runtime_config_path = None
       }
     in
-    let usage_basis =
-      Option.value
-        ~default:
-          (match usage_scope with
-           | Runtime_usage_scope.Per_request -> Masc.Keeper_usage_resolution.Per_request
-           | Runtime_usage_scope.Turn_total -> Masc.Keeper_usage_resolution.Turn_total
-           | Runtime_usage_scope.Conversation_cumulative
-           | Runtime_usage_scope.Usage_scope_unavailable ->
-             Masc.Keeper_usage_resolution.Unavailable)
-        usage_basis
-    in
     { response_text = "completed"
     ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
     ; terminal_effect_receipt = None
@@ -1141,7 +1129,6 @@ let () =
     ; usage
     ; usage_reported = true
     ; usage_scope
-    ; usage_basis
     ; tool_calls = []
     ; completion_contract_result = R.Completion_tool_execution_observed
     ; operator_disposition = None
@@ -1316,11 +1303,22 @@ max-concurrent = 1
       ; own_recent_actions = Ok []
       }
     in
-    let result = run_result ~usage ~usage_scope ?usage_basis () in
+    let result = run_result ~usage ~usage_scope () in
+    let basis =
+      Option.value
+        ~default:
+          (match usage_scope with
+           | Runtime_usage_scope.Per_request -> Masc.Keeper_usage_resolution.Per_request
+           | Runtime_usage_scope.Turn_total -> Masc.Keeper_usage_resolution.Turn_total
+           | Runtime_usage_scope.Conversation_cumulative
+           | Runtime_usage_scope.Usage_scope_unavailable ->
+             Masc.Keeper_usage_resolution.Unavailable)
+        usage_basis
+    in
     let usage_resolution, usage_cursor =
       Masc.Keeper_usage_resolution.resolve
         ~cursor:prior.runtime.usage_cursor
-        ~basis:result.usage_basis
+        ~basis
         ~observation:(Some (Masc.Keeper_usage_resolution.sample_of_api_usage usage))
         ~observed_at:42.0
     in
@@ -2836,7 +2834,6 @@ max-concurrent = 1
     ; usage = Masc.Inference_utils.zero_usage
     ; usage_reported = true
     ; usage_scope = Runtime_usage_scope.Per_request
-    ; usage_basis = Masc.Keeper_usage_resolution.Per_request
     ; tool_calls = []
     ; completion_contract_result = R.Completion_tool_execution_observed
     ; operator_disposition = None

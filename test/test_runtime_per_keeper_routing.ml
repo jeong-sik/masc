@@ -1647,6 +1647,136 @@ max-context = 400000
 |}
 ;;
 
+let test_multiple_official_client_accounts_are_distinct_runtimes () =
+  let source = {|[providers.claude_one]
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+account-home = "/tmp/claude-one"
+
+[providers.claude_two]
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+account-home = "/tmp/claude-two"
+
+[providers.codex_one]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/tmp/codex-one"
+
+[providers.codex_two]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "/tmp/codex-two"
+
+[models.shared]
+api-name = "shared-model"
+max-context = 100000
+tools-support = true
+
+[claude_one.shared]
+[claude_two.shared]
+[codex_one.shared]
+[codex_two.shared]
+|} in
+  let config = match Runtime_toml.parse_string source with
+    | Ok config -> config
+    | Error errors -> Alcotest.failf "multi-account TOML refused: %s"
+        (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors)) in
+  let homes = List.map (fun binding ->
+    match Runtime_adapter.binding_to_execution config binding with
+    | Ok (Runtime_execution.Claude_code execution) -> execution.account_home
+    | Ok (Runtime_execution.Codex_app_server execution) -> execution.account_home
+    | Ok _ -> Alcotest.fail "expected an official client"
+    | Error detail -> Alcotest.fail detail) config.Runtime_schema.bindings in
+  Alcotest.(check (list (option string))) "each binding keeps its login home"
+    [Some "/tmp/claude-one"; Some "/tmp/claude-two";
+     Some "/tmp/codex-one"; Some "/tmp/codex-two"]
+    (List.sort compare homes);
+  (match Runtime_toml.parse_string
+      {|[providers.bad]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+account-home = "relative/codex-two"
+[models.shared]
+api-name = "shared-model"
+max-context = 100000
+tools-support = true
+[bad.shared]
+|} with
+     | Error errors ->
+       Alcotest.(check bool) "the account path is refused" true
+         (List.exists (fun e -> e.Runtime_toml.path = "providers.bad.account-home") errors)
+     | Ok _ -> Alcotest.fail "relative account home was accepted");
+  Masc_test_deps.with_process_env "CLAUDE_CONFIG_DIR" (Some "relative-claude-account") (fun () ->
+    let source = {|[providers.claude]
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+[models.shared]
+api-name = "shared-model"
+max-context = 100000
+tools-support = true
+[claude.shared]
+|} in
+    match Runtime_toml.parse_string source with
+    | Error errors -> Alcotest.failf "inherited CLI home config refused: %s"
+        (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors))
+    | Ok config ->
+      let binding = List.hd config.Runtime_schema.bindings in
+      (match Runtime.of_binding config binding with
+       | Error reason -> Alcotest.failf "relative inherited home dropped runtime: %s"
+           (Runtime.string_of_drop_reason reason)
+       | Ok runtime ->
+         let expected = Filename.concat (Sys.getcwd ()) "relative-claude-account" in
+         Alcotest.(check string) "runtime quota uses the selected child home"
+           ("official:claude-code:home:" ^ expected)
+           (Runtime_quota_window.scope_to_string (Runtime.quota_scope_of_runtime runtime))));
+  Masc_test_deps.with_process_env "HOME" (Some "") (fun () ->
+    Masc_test_deps.with_process_env "CODEX_HOME" (Some "") (fun () ->
+      match Runtime_toml.parse_string
+        {|[providers.codex]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+[providers.http]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.shared]
+api-name = "shared-model"
+max-context = 100000
+tools-support = true
+[codex.shared]
+[http.shared]
+|} with
+      | Error errors ->
+        Alcotest.failf "an unselected provider should still parse: %s"
+          (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors))
+      | Ok config ->
+        let binding id =
+          match List.find_opt
+                  (fun b -> String.equal b.Runtime_schema.provider_id id)
+                  config.Runtime_schema.bindings with
+          | Some b -> b
+          | None -> Alcotest.fail ("missing binding " ^ id)
+        in
+        (match Runtime.of_binding config (binding "codex") with
+            | Error (Runtime.Execution_unbuildable reason) ->
+              Alcotest.(check bool) "selected account needs a real home" true
+                (String_util.contains_substring reason "account-home")
+            | Error _ | Ok _ ->
+              Alcotest.fail "selected official client without HOME gained a shared scope");
+        (match Runtime.of_binding config (binding "http") with
+         | Ok _ -> ()
+         | Error reason ->
+           Alcotest.failf "unrelated HTTP binding was rejected: %s"
+             (Runtime.string_of_drop_reason reason))))
+;;
+
 (* The base file, loaded, with the official clients and [lane] written after
    it, as [test_first_run_fallback_order_and_preservation] extends it: the lane
    writers read the file and validate the whole text they commit. *)
@@ -3832,6 +3962,10 @@ let () =
             "an exact append places an official client in cli_slots"
             `Quick
             test_an_exact_append_places_an_official_client_in_cli_slots
+        ; Alcotest.test_case
+            "multiple official client accounts stay distinct"
+            `Quick
+            test_multiple_official_client_accounts_are_distinct_runtimes
         ; Alcotest.test_case
             "a CLI append to an undeclared lane writes only cli_slots"
             `Quick

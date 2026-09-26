@@ -562,6 +562,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
       | Runtime_execution.Claude_code execution ->
         let config =
           { (Runtime_claude_code.default_config ~cwd:cwd_path) with
+            account_home = execution.account_home;
             cli_path = execution.cli_path
           ; model = execution.model
           ; admission_timeout_s = Float.min timeout_s execution.timeout_s
@@ -595,7 +596,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
          | Error error ->
            Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
       | Runtime_execution.Codex_app_server execution ->
-        (match Runtime_verification_codex_home.prepare ~directory:cwd_path with
+        (match Runtime_verification_codex_home.prepare ?source_home:execution.account_home ~directory:cwd_path () with
         | Error detail -> Error (Unavailable (Invalid_configuration detail))
         | Ok isolated_home ->
         (* Codex rejects Native_none. Native_read is its least supported

@@ -126,6 +126,10 @@ type provider =
   ; transport : transport
   ; is_non_interactive : bool
   ; credentials : credential option
+  ; account_home : string option
+    (** Absolute, operator-owned CLI state directory. Only Claude Code and
+        Codex official-client providers may declare it. [None] uses the
+        current process's vendor default. *)
   ; capabilities : capabilities option
   ; healthcheck_path : string option
   ; headers : (string * string) list option

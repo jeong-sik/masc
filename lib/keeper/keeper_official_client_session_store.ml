@@ -223,7 +223,7 @@ let rec canonical_json = function
     value
 ;;
 
-let tool_surface_sha256 ~native_posture tools =
+let tool_surface_sha256 ?account_home ~native_posture tools =
   let tool_json (tool : Agent_core.Tool.t) =
     let input_schema =
       match tool.schema.input_schema with
@@ -248,12 +248,14 @@ let tool_surface_sha256 ~native_posture tools =
   |> List.map tool_json
   |> fun tools ->
   `Assoc
-    [ ( "context_message_schema"
+    ([ ( "context_message_schema"
       , `String Keeper_official_client_context_codec.schema )
     ; ( "native_posture"
       , `String (Runtime_native_tools.to_string native_posture) )
     ; "tools", `List tools
-    ]
+    ] @ (match account_home with
+         | None -> []
+         | Some home -> ["account_home", `String home]))
   |> canonical_json
   |> Yojson.Safe.to_string
   |> Digestif.SHA256.digest_string

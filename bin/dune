@@ -2024,3 +2024,15 @@
  (libraries masc masc.runtime masc.server masc.config masc.config_dir_resolver
   masc.masc_eio_context masc.http_client masc.masc_tool_blob_store
   masc.agent_core masc.agent_core.llm_provider masc.masc_log masc.fs_compat digestif eio eio_main yojson))
+
+(library
+ (name masc_tui_input_decoder)
+ (wrapped false)
+ (modules masc_tui_input_decoder)
+ (libraries
+  masc
+  masc_tui_csi
+  masc_tui_message_layout
+  masc_tui_paste
+  masc_tui_terminal_palette
+  masc_tui_utf8_input))

@@ -51,8 +51,8 @@ TUI는 터미널에서 받은 바이트를 지금 세 곳에서 따로 해석한
 ### 1.3 이음매 코드
 
 `bin/masc_tui.ml`에서 `has_replay`, `return_replay`, `unread_replay`,
-`holds_incomplete_sequence`, `last_source`를 부르는 곳이 19곳이다(2026-09-26
-`origin/main` 기준, `rg -c`). 대표적인 예는 다음과 같다.
+`holds_incomplete_sequence`, `last_source`가 나오는 줄이 19줄이다(2026-09-26
+`origin/main` 기준, `rg -c`, 주석 줄 포함). 대표적인 예는 다음과 같다.
 
 - `take_input_byte`는 probe가 끝났는지, replay가 남았는지에 따라 세 갈래로 나뉜다.
 - `return_input_byte`는 바이트가 어느 출처에서 왔는지(`Probe_replay` /
@@ -67,47 +67,71 @@ TUI는 터미널에서 받은 바이트를 지금 세 곳에서 따로 해석한
   설계가 나왔다. 하나는 probe에 물어보는 방식(병합됨)이고, 다른 하나는 입력
   읽기로 넘기는 방식(버림)이다. 넘기는 방식은 probe의 `Paste_prefix`와 입력
   읽기의 `csi_parameters`가 같은 바이트를 동시에 들게 만든다.
-- probe는 그래픽 답을 받아야만 끝난다. 그래픽 답을 주지 않는 터미널에서는
-  세션 내내 모든 바이트 앞에 probe가 서 있다(§1.3 주석). 테마 변경 알림
-  (DECSET 2031)도 세션 중간에 오므로, probe는 사실상 "시작 때만" 쓰이는 부품이
-  아니다.
+- probe는 그래픽 답을 받고, 팔레트를 요청했다면 글자색·바탕색 답까지 받아야
+  끝난다. 끝나면 `take_input_byte`가 probe를 떼어 낸다(`terminal_probe <- None`).
+  그 뒤에 오는 테마 변경 알림(DECSET 2031)은 `read_input`이 CSI 키로 읽고
+  `unknown-esc`가 된다. 끝나지 않는 터미널에서는 probe가 세션 내내 모든 바이트
+  앞에 서 있다. 두 경우의 동작이 다르다.
+- probe가 붙잡는 상태에는 조건이 붙어 있다. `Csi_window`는 셀 크기를 아직 모를
+  때만, `Csi_private`와 `Osc_candidate`는 팔레트를 요청했을 때만 들어간다.
+  `Escape`는 입력이 비면 바로 키로 내보낸다.
 
 ## 2. 설계
 
-### 2.1 해석기 하나, 순수 함수
+### 2.1 해석기 하나, 입출력 없는 함수
+
+1단계 구현(`bin/masc_tui_input_decoder.mli`)의 모양이다.
 
 ```ocaml
-(* bin/masc_tui_input_decoder.ml *)
 type reply =
-  | Palette_color of palette_slot * rgb        (* OSC 4 / 10 / 11 *)
-  | Theme_mode of theme_mode                   (* DECSET 996 답, 2031 알림 *)
-  | Cell_pixels of int * int                   (* CSI 6 ; h ; w t *)
-  | Graphics of string                         (* APC G 본문 *)
+  | Palette of slot * rgb option             (* OSC 4 / 10 / 11 *)
+  | Theme_mode of theme_mode                 (* ?997 답, 2031 알림 *)
+  | Cell_pixels of int * int                 (* CSI 6 ; h ; w t *)
+  | Graphics of string                       (* ESC _ G 뒤 본문 원문 *)
 
 type event =
   | Key of string
-  | Paste of paste                             (* 200~ … 201~ 전체. text, dropped *)
-  | Mouse of mouse
+  | Paste of Masc_tui_paste.t                (* 200~ … 201~ 전체 *)
+  | Mouse_wheel of … | Mouse_left_press of … | Mouse_left_release of …
   | Reply of reply
 
-type t   (* 미완성 상태는 전부 여기. 밖에서 볼 수 없다. *)
+type pending = Sequence | Character | Pasting | Draining
 
-val create : unit -> t
-val feed : t -> char -> t * event list
-val idle : t -> elapsed:Mtime.Span.t -> t * event list
-  (* 시간이 지났다는 사실도 입력이다. ESC 단독 키, 끊긴 UTF-8,
-     멈춘 붙여넣기 복구가 여기서 결정된다. *)
+val feed : t -> char -> event list
+val idle : t -> event list                   (* 읽기가 빈손으로 돌아왔다 *)
 val pending : t -> pending option
-  (* 안내 문구와 Ctrl-C 취소가 보는 유일한 상태 *)
-val cancel_pending : t -> t * event list
+val cancel_pending : t -> unit               (* Sequence만 버린다. 아무것도 내보내지 않는다 *)
+val recover_paste : t -> Masc_tui_paste.t option
 ```
 
-- 입출력이 없다. `Unix.read`와 시계는 호출하는 쪽이 들고 있다.
-- 지금 `read_input` 안에 흩어진 `timeout:0.05` 읽기는 `idle ~elapsed`로
-  바뀐다. 그러면 시간에 의존하던 판단을 단위 테스트로 결정적으로 재현할 수 있다.
-- `pending`은 닫힌 합타입이다(`Escape`, `Csi of string`, `Utf8 of string`,
-  `Paste_marker of int`, `Pasting`, `Reply_body of reply_kind`, …).
-  `_ ->` 없이 모든 경우를 처리한다.
+- 입출력과 시계가 없다. `Unix.read`, 대기 시간, 읽기 버퍼 경계는 호출하는 쪽
+  몫이다. 지금 `continue_paste`가 버퍼 하나를 다 읽으면 메인 루프로 돌아가는
+  동작도 호출 쪽 루프가 지킨다.
+- `t`는 내부에서 상태를 바꾼다(붙여넣기 본문이 최대 1MB라 매번 새 값을 만들지
+  않는다). 같은 바이트 순서를 넣으면 같은 이벤트가 나온다.
+- 파싱된 답은 모두 `Reply`로 나간다. 먼저 온 답을 지킬지(지금 probe는 테마·셀
+  크기·그래픽 모두 첫 답만 기록한다), 나중 답으로 바꿀지(2031 알림)는 소비자가
+  정한다.
+
+### 2.1.1 빈 읽기(`idle`)에서 상태별 동작
+
+| 붙잡은 상태 | 지금 | 해석기 |
+|---|---|---|
+| `ESC` 하나 | 0.05초 안에 다음 바이트가 없으면 `esc` | `idle` → `esc` |
+| `ESC O`, `ESC _` | 0.05초 뒤 `esc` | `idle` → `esc` |
+| X10 마우스 3바이트 중 일부 | 바이트마다 0.05초, 버튼 없으면 `unknown-esc` | `idle` → 같은 결과 |
+| CSI 인자 | 끝 바이트까지 기다림, 16바이트 넘으면 `esc` | 같음 |
+| OSC / APC 본문 | probe는 기다림, `read_apc_body`는 0.05초 뒤 잘린 본문 | 기다림. 4096바이트 넘으면 본문을 통째로 버림 |
+| UTF-8 앞부분 | 시간 제한 없이 기다림 | 같음. 거절된 바이트는 다음 입력으로 다시 읽음 |
+| 붙여넣기 | 기다림. Ctrl-C가 0.5초 조용함과 남은 입력 없음을 확인한 뒤 복구 | 기다림. 복구는 호출 쪽이 같은 조건으로 `recover_paste` |
+
+### 2.1.2 일부러 바꾸는 동작
+
+- 팔레트 답이 아닌 OSC(예: OSC 52)는 삼킨다. 지금은 팔레트를 요청하지 않았을 때
+  이런 바이트가 입력칸에 글자로 들어간다.
+- `ESC [6…`은 끝 바이트까지 기다린다. CSI 키는 원래 끝 바이트까지 기다리므로
+  PageDown이 늦어지지 않는다. 셀 크기를 알았는지에 따른 조건이 필요 없다.
+- 그래픽 답은 잘리지 않는다.
 
 ### 2.2 붙여넣기 안의 "답처럼 생긴 바이트"
 
@@ -126,15 +150,18 @@ probe가 따로 지킬 필요가 없다. 지금 probe의 `Paste_prefix`/`Paste` 
 probe는 시작할 때 질의를 쓰고, 정해진 시간 동안 `Reply` 이벤트를 모은다.
 이때 함께 나온 `Key`/`Paste` 이벤트는 순서대로 쌓아 두었다가 메인 루프에 넘긴다.
 그 뒤에 오는 `Reply`(늦은 팔레트, 테마 알림)는 메인 루프가 같은 경로로 받는다.
-그러면 "probe가 끝났는가"라는 상태가 필요 없다.
+그러면 "probe가 끝났는가"라는 상태가 필요 없다. 세션 중 테마 알림을 받는 것은
+지금 probe가 끝난 터미널에서는 없던 동작이다(§1.4).
 
 ### 2.5 바이트 해석은 이 모듈에만 있다 (SSOT)
 
 터미널 바이트를 읽어 의미를 정하는 일은 `Masc_tui_input_decoder` 한 곳에서만 한다.
 
 - `Masc_tui_paste`는 이 모듈 안으로 흡수한다. 끝 표시 찾기, 본문 누적,
-  `max_bytes`/`dropped` 계산이 모두 해석기 상태 `Pasting` 안에 들어간다.
-  모듈 파일은 지운다.
+  `max_bytes`/`dropped` 계산, 줄바꿈 정리(CR·CRLF → LF)가 모두 해석기 상태
+  `Pasting` 안에 들어간다. 1·2단계는 `Masc_tui_paste`를 부르고, 3단계에서
+  옮긴 뒤 모듈 파일을 지운다. `unescaped_path`는 바이트 해석이 아니므로 붙여넣기
+  소비자 쪽으로 옮긴다.
 - X10 마우스(`ESC [M` + 3바이트)도 해석기 상태 하나로 둔다. CSI 끝 바이트
   규칙을 따르지 않는 유일한 형식이므로, `Csi` 상태에서 인자 없이 `M`이 오면(SGR의 `<…M`과 구별)
   `X10_mouse of int`(남은 바이트 수)로 넘어간다. 지원은 끊지 않는다.
@@ -148,9 +175,13 @@ probe는 시작할 때 질의를 쓰고, 정해진 시간 동안 `Reply` 이벤�
 
 | 단계 | PR 내용 | 연결 여부 | 검증 |
 |---|---|---|---|
-| 1 | `Masc_tui_input_decoder`와 단위 테스트. 지금 `test_tui_terminal_probe.ml`과 붙여넣기 테스트의 입력 사례를 모두 옮겨 같은 결과인지 비교한다. | 연결 안 함 | 단위 테스트 |
-| 2 | `read_input`이 새 해석기를 쓴다. `csi_parameters`, `partial_scalar`, `paste_phase`, 안쪽 `timeout:0.05` 읽기, `bin/masc_tui_paste.ml`을 지운다. probe는 그대로 앞에 둔다. | 입력 경로 | PTY 키보드·붙여넣기 시나리오 |
-| 3 | probe를 `Reply` 소비자로 바꾼다. `replay`, `return_replay`, `last_source`, `holds_incomplete_sequence`, `Masc_tui_terminal_probe.next`를 지운다. | 시작 경로 | PTY 시작·팔레트·그래픽 시나리오 |
+| 1 | `Masc_tui_input_decoder`와 단위 테스트. | 연결 안 함 | 단위 테스트 |
+| 2 | `read_input`이 새 해석기를 쓴다. `csi_parameters`, `partial_scalar`, `paste_phase`, 안쪽 `timeout:0.05` 읽기를 지운다. probe는 그대로 앞에 둔다. 이 단계에서는 `input_holds_incomplete_sequence`가 해석기 `pending`과 probe `holds_incomplete_sequence`를 둘 다 본다. `return_input_byte`/`last_source`도 probe replay 때문에 남는다. | 입력 경로 | PTY 키보드·붙여넣기 시나리오 |
+| 3 | probe를 `Reply` 소비자로 바꾼다. `replay`, `return_replay`, `last_source`, `holds_incomplete_sequence`, `Masc_tui_terminal_probe.next`, probe의 `Paste_prefix`/`Paste` 상태를 지운다. `Masc_tui_paste`의 본문 누적 코드를 해석기로 옮기고 파일을 지운다. §2.5 `rg` 검사가 해석기 파일 하나만 가리킨다. | 시작 경로 | PTY 시작·팔레트·그래픽 시나리오 |
+
+2단계와 3단계 사이에는 붙여넣기를 추적하는 곳이 둘(probe, 해석기)이다. probe
+쪽은 붙여넣기 안의 답처럼 생긴 바이트를 지키는 일만 하므로 결과가 겹치지 않는다.
+3단계에서 없어진다.
 
 단계마다 main이 동작하는 상태를 유지한다. 옛 경로와 새 경로를 나란히 두는
 기능 플래그는 만들지 않는다. 2단계와 3단계는 각각 한 번에 바꾼다.

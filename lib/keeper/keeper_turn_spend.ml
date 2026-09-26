@@ -165,3 +165,94 @@ let observe_agent_core_response t ~response_id ~ordinal ~model usage =
       ; count_after = Count_continues
       }))
 ;;
+
+type resolved =
+  { routing_run_id : string
+  ; runtime_id : string
+  ; lane_attempt_index : int
+  ; reading : reading
+  ; resolution : Keeper_usage_resolution.t
+  }
+
+(* Where a replaced count starts again. The cost starts from zero too, so a
+   later exact cost is its own delta. *)
+let zero_count : Keeper_usage_resolution.sample =
+  { input_tokens = 0
+  ; output_tokens = 0
+  ; cache_creation_input_tokens = 0
+  ; cache_read_input_tokens = 0
+  ; cost_usd = Some 0.0
+  }
+;;
+
+let cursor_after (reading : reading) cursor =
+  match reading.count_after, reading.basis with
+  | Count_restarts_from_zero, Keeper_usage_resolution.Conversation_counter { runtime_id; conversation_id; _ } ->
+    Some { Keeper_usage_resolution.runtime_id; conversation_id; cumulative = zero_count }
+  | ( Count_restarts_from_zero
+    , ( Keeper_usage_resolution.Per_request
+      | Keeper_usage_resolution.Turn_total
+      | Keeper_usage_resolution.Unavailable ) )
+  | Count_continues, _ -> cursor
+;;
+
+(* Resolved per attempt, in order: each reading against the cursor the one
+   before it left, across attempts too. *)
+let resolve_by_attempt ~cursor ~observed_at attempts =
+  let by_attempt_rev, cursor =
+    List.fold_left
+      (fun (by_attempt_rev, cursor) (attempt : attempt) ->
+         let resolved_rev, cursor =
+           List.fold_left
+             (fun (resolved_rev, cursor) (reading : reading) ->
+                let resolution, cursor =
+                  Keeper_usage_resolution.resolve
+                    ~cursor
+                    ~basis:reading.basis
+                    ~observation:reading.observation
+                    ~observed_at
+                in
+                let resolved =
+                  { routing_run_id = attempt.routing_run_id
+                  ; runtime_id = attempt.runtime_id
+                  ; lane_attempt_index = attempt.lane_attempt_index
+                  ; reading
+                  ; resolution
+                  }
+                in
+                resolved :: resolved_rev, cursor_after reading cursor)
+             ([], cursor)
+             attempt.readings
+         in
+         resolved_rev :: by_attempt_rev, cursor)
+      ([], cursor)
+      attempts
+  in
+  by_attempt_rev, cursor
+;;
+
+let resolve ~cursor ~observed_at attempts =
+  let by_attempt_rev, cursor = resolve_by_attempt ~cursor ~observed_at attempts in
+  List.concat_map List.rev (List.rev by_attempt_rev), cursor
+;;
+
+type turn_resolution =
+  { turn_reading : resolved option
+  ; other_readings : resolved list
+  ; cursor : Keeper_usage_resolution.cursor option
+  }
+
+let resolve_turn ~cursor ~observed_at attempts =
+  let by_attempt_rev, cursor = resolve_by_attempt ~cursor ~observed_at attempts in
+  let in_order readings_rev = List.concat_map List.rev (List.rev readings_rev) in
+  match by_attempt_rev with
+  | (turn_reading :: last_attempt_earlier_rev) :: earlier_attempts_rev ->
+    { turn_reading = Some turn_reading
+    ; other_readings =
+        in_order earlier_attempts_rev @ List.rev last_attempt_earlier_rev
+    ; cursor
+    }
+  | [] :: earlier_attempts_rev ->
+    { turn_reading = None; other_readings = in_order earlier_attempts_rev; cursor }
+  | [] -> { turn_reading = None; other_readings = []; cursor }
+;;

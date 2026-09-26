@@ -2,8 +2,8 @@
     cache lifecycle helpers.
 
     A {!cached_surface} is a mutable record carrying the most recent
-    successful JSON snapshot for a dashboard endpoint plus three
-    timestamp triples (success / attempt / error) used to render
+    successful JSON snapshot for a dashboard endpoint plus the three
+    event timestamps (success / attempt / error) used to render
     cache-state diagnostics in the response payload.  All accessors
     mutate the record in place — there is no implicit thread-safety;
     callers serialise access through a per-cache mutex when they
@@ -18,16 +18,13 @@
 
 type surface_snapshot = {
   json : Yojson.Safe.t;
-  last_success_at : string option;
   last_success_unix : float option;
-  last_attempt_at : string option;
   last_attempt_unix : float option;
   last_error : string option;
-  last_error_at : string option;
   last_error_unix : float option;
 }
-(** One consistent view of a surface. The three timestamp triples are paired
-    (ISO + Unix) so callers do not have to re-format on every render. *)
+(** One consistent view of a surface. Unix timestamps are the source of truth;
+    the wire projection derives ISO strings from them. *)
 
 type cached_surface_payload = {
   json : Yojson.Safe.t;
@@ -52,26 +49,26 @@ val snapshot : cached_surface -> surface_snapshot
 
 val create_cached_surface : Yojson.Safe.t -> cached_surface
 (** [create_cached_surface json] returns a fresh surface seeded
-    with [json] and all six timestamps set to [None].  Callers
+    with [json] and all three timestamps set to [None].  Callers
     typically seed with a synthetic "initializing" envelope so
     {!cached_surface_json} can render a cache_state of
     ["initializing"] before the first attempt completes. *)
 
 val mark_cached_surface_attempt : cached_surface -> unit
-(** [mark_cached_surface_attempt s] stamps [last_attempt_*] with
-    the current wall-clock + ISO time.  Called at the start of a
+(** [mark_cached_surface_attempt s] stamps [last_attempt_unix] with
+    the current wall-clock time. Called at the start of a
     compute cycle. *)
 
 val mark_cached_surface_success : cached_surface -> Yojson.Safe.t -> unit
-(** [mark_cached_surface_success s json] stamps [last_success_*]
+(** [mark_cached_surface_success s json] stamps [last_success_unix]
     with the current time, replaces [s.json] with [json], and
-    {b clears} the [last_error_*] triple.  The error clear is
+    {b clears} the prior error and its timestamp. The error clear is
     deliberate — a successful refresh resolves the previous
     failure.  A future "let's keep the last error around for
     debugging" change must touch this contract. *)
 
 val mark_cached_surface_error : cached_surface -> exn -> unit
-(** [mark_cached_surface_error s exn] stamps [last_error_*] with
+(** [mark_cached_surface_error s exn] stamps [last_error] and [last_error_unix] with
     [Printexc.to_string exn] and the current time.  Does NOT
     touch [last_success_*] or [s.json] — the previous successful
     snapshot remains served until the next success refreshes it. *)
@@ -81,7 +78,7 @@ val mark_cached_surface_error_message : cached_surface -> string -> unit
     solely to transport its text. *)
 
 val invalidate_cached_surface : cached_surface -> unit
-(** [invalidate_cached_surface s] clears all six timestamps but
+(** [invalidate_cached_surface s] clears all three timestamps but
     leaves [s.json] intact.  Used by tests to reset surface state
     between scenarios while preserving the seeded JSON envelope. *)
 

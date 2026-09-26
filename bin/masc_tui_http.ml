@@ -1350,40 +1350,34 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
     else
       List.nth_opt selection.Masc_tui_context_inspector.rows turn_back
   in
-  let provider_input =
-    match turn with
-    | Error detail -> Error ("provider-input turn unavailable: " ^ detail)
-    | Ok selection -> (
-      match viewing_record selection with
-      | None ->
-          Error "provider-input unavailable: no turn on this page recorded an exact input composition"
-      | Some record ->
-          let turn_ref = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
-          fetch ~label:"provider-input"
-            ~path:
-              (Printf.sprintf
-                 "/api/v1/keepers/%s/provider-input?turn_ref=%s"
-                 encoded
-                 (percent_encode_query_value turn_ref))
-            ~decode:
-              (Masc_tui_context_inspector.decode_provider_input
-                 ~expected_keeper:keeper_name
-                 ~expected_turn_ref:record.Turn_record.turn_ref))
+  let read_provider_input selection =
+    match viewing_record selection with
+    | None ->
+        Error "no turn on this page recorded an exact input composition"
+    | Some record ->
+        let turn_ref = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
+        fetch ~label:"provider-input"
+          ~path:
+            (Printf.sprintf
+               "/api/v1/keepers/%s/provider-input?turn_ref=%s"
+               encoded
+               (percent_encode_query_value turn_ref))
+          ~decode:
+            (Masc_tui_context_inspector.decode_provider_input
+               ~expected_keeper:keeper_name
+               ~expected_turn_ref:record.Turn_record.turn_ref)
   in
   (* The answer that came back: the newest transcript page, joined to the
      row by the turn_ref the chat rows carry. Rows this join cannot reach
      say so; they never borrow another turn's answer. *)
-  let response =
-    match turn with
-    | Error detail -> Error ("response unavailable: " ^ detail)
-    | Ok selection -> (
-      match viewing_record selection with
-      | None -> Error "response unavailable: no row on this page to name"
-      | Some record ->
-          let key = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
-          (match fetch_keeper_chat_history_page ~host ~port ~keeper_name
-                   ~before:(Unix.gettimeofday ()) with
-            | Error detail -> Error ("response unavailable: " ^ detail)
+  let read_response selection =
+    match viewing_record selection with
+    | None -> Error "no row on this page to name"
+    | Some record ->
+        let key = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
+        (match fetch_keeper_chat_history_page ~host ~port ~keeper_name
+                 ~before:(Unix.gettimeofday ()) with
+            | Error detail -> Error detail
             | Ok page ->
                 let parts =
                   List.filter_map
@@ -1418,7 +1412,13 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
                 Ok
                   { Masc_tui_context_inspector.parts
                   ; outside_newest_page = parts = []
-                  }))
+                  })
+  in
+  let dependent =
+    Result.map
+      (fun selection ->
+         selection, read_provider_input selection, read_response selection)
+      turn
   in
   (* Computed now from the turn's own values, without a turn; a server
      that does not serve it yet says so in the band rather than hiding
@@ -1428,7 +1428,11 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
       ~path:(Printf.sprintf "/api/v1/keepers/%s/next-request" encoded)
       ~decode:Masc_tui_context_inspector.decode_forecast
   in
-  { Masc_tui_context_inspector.turn; provider_input; response; forecast }
+  match dependent with
+  | Error detail -> Masc_tui_context_inspector.Turn_read_failed { detail; forecast }
+  | Ok (selection, provider_input, response) ->
+      Masc_tui_context_inspector.Turn_read
+        { selection; provider_input; response; forecast }
 
 (** What the server did with one answer to a held tool call.
 

@@ -34,6 +34,8 @@ concurrency:
 
 jobs:
   macos-stagehand:
+    # This proves extension loading and Chromium control on the operator's
+    # supported macOS host, not only on a portable Linux runner.
     runs-on: macos-14
     timeout-minutes: 60
     steps:

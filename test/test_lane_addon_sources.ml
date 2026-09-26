@@ -218,7 +218,8 @@ let test_dos_capture_retains_the_machines_history () = with_store (fun dir store
   let hello = "\xb4\x09\xba\x11\x01\xcd\x21\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20HI$" in
   let ledger_dir = Filename.concat dir "dos" in
   let load () = ignore (dos (Dos_lane.load ~who:"keeper-A" ~ledger_dir
-    ~saves_dir:(Filename.concat dir "saves") ~program_name:"HELLO.COM" ~program_bytes:hello
+    ~saves_dir:(Filename.concat dir "saves") ~checkpoint_dir:(Filename.concat dir "checkpoints")
+    ~program_name:"HELLO.COM" ~program_bytes:hello
     ~files:[] ~announce:ignore)) in
   load ();
   Fun.protect ~finally:(fun () -> ignore (Dos_lane.eject ~who:"keeper-A" ~announce:ignore ())) (fun () ->

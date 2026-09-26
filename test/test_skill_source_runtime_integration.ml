@@ -3,7 +3,7 @@ open Masc
 
 let runtime_with_skills =
   {|[skills]
-resource-read-max-bytes = 65536
+resource-read-max-bytes = 16384
 
 [[skills.sources]]
 id = "project"

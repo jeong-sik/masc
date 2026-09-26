@@ -8,7 +8,9 @@
     arrives, the session refuses the model requests the extension sends and
     refuses new calls, and a model answer that was still being computed is
     not delivered, so nothing takes effect after the caller was told the
-    outcome is unknown.
+    outcome is unknown. The reply is awaited for [abandoned_answer_s]: the
+    first call after that, with the reply still out, ends the session, so
+    an extension stuck on the abandoned call does not refuse calls forever.
 
     An answer to the extension that cannot be delivered ends the session:
     the extension would wait for it, and the call in flight with it. *)
@@ -39,7 +41,9 @@ and call_failure =
   | Not_attached  (** Refused before any effect. *)
   | Detached  (** The service worker went away. Refused before any effect. *)
   | Connection_gone of string  (** The session ended. Refused before any effect. *)
-  | Abandoned_call_pending  (** Refused before any effect. *)
+  | Abandoned_call_pending
+      (** Refused before any effect. The abandoned call is still inside its
+          [abandoned_answer_s]. *)
   | Not_delivered of string  (** The message never reached the extension. *)
   | Rejected of Wire.rpc_error  (** The extension answered with an error. *)
   | Lost of string
@@ -60,6 +64,9 @@ type event =
   | Unexpected_response of { id : int }
   | Abandoned_call_ended of { method_ : string; rejected : bool }
       (** The reply of a call whose caller had left. *)
+  | Abandoned_call_unanswered of { method_ : string; waited_s : float }
+      (** A call whose caller had left did not answer within
+          [abandoned_answer_s]. The session ends with it. *)
   | Reply_not_delivered of string  (** The session ends with it. *)
   | Malformed_cdp_event of { method_ : string; detail : string }
   | Worker_detached
@@ -71,17 +78,19 @@ type model = Yojson.Safe.t -> (Yojson.Safe.t, Wire.rpc_error) result
 
 type t
 
-(** [create ~sw ~clock ~worker_wait_s ~init_answer_s ~model ~log] is an
-    unattached session. Fibers that answer the extension run on [sw].
-    [worker_wait_s] bounds the wait for the extension's service worker to
-    appear after loading, and then the wait for its runtime to be ready.
-    [init_answer_s] bounds [stagehand.init] from its sending to its answer;
-    no other call has a deadline here. *)
+(** [create ~sw ~clock ~worker_wait_s ~init_answer_s ~abandoned_answer_s
+    ~model ~log] is an unattached session. Fibers that answer the extension
+    run on [sw]. [worker_wait_s] bounds the wait for the extension's service
+    worker to appear after loading, and then the wait for its runtime to be
+    ready. [init_answer_s] bounds [stagehand.init] from its sending to its
+    answer. [abandoned_answer_s] bounds the wait for the reply of a call whose
+    caller left. No other call has a deadline here. *)
 val create :
   sw:Eio.Switch.t
   -> clock:_ Eio.Time.clock
   -> worker_wait_s:float
   -> init_answer_s:float
+  -> abandoned_answer_s:float
   -> model:model
   -> log:(event -> unit)
   -> t

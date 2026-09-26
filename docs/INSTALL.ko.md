@@ -142,7 +142,7 @@ bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
 먼저 GitHub Releases 에 그 태그가 있는지 확인하세요.
 
 ```bash
-TAG=v0.39.0
+TAG=v0.41.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -400,6 +400,17 @@ masc sandbox-image --runtime apple_container
 # nerdctl/Kata Keeper의 별도 이미지 저장소
 masc sandbox-image --runtime nerdctl_kata
 ```
+
+빌드마다 태그가 따로 붙습니다. 형식은 `masc-sandbox-base:<UTC 분>-<입력 해시>`이고,
+명령이 태그를 출력하면 그 태그를 Keeper TOML 의 `sandbox_image` 에 적습니다.
+이미 저장소에 있는 태그는 다시 빌드하지 않고 거절하므로, Keeper 가 쓰는 이미지는
+같은 이름 아래에서 바뀌지 않습니다. 배포에 든 Keeper 는 `masc-sandbox:general` 을
+적습니다. `masc setup` 은 저장소에 그 이미지가 없으면 만들고 있으면 그대로 두며,
+손으로는 `masc sandbox-image --tag masc-sandbox:general` 로 만듭니다. Apple Container
+에서는 Keeper 첫 부팅 때 런타임도 이 태그 하나를 빌드합니다. Docker 와 nerdctl 은
+그러지 않습니다. `base` 가 아닌 레시피는
+checkout 의 `sandbox-images/` 아래에 있고 `masc sandbox-image --recipe ocaml --source .`
+처럼 빌드합니다.
 
 Linux에서 실행 중인 서버와 같은 base path를 지정하여 Keeper를 생성합니다.
 먼저 위 Kata runtime·이미지와 서버의 모델 설정을 준비하고 admin credential로

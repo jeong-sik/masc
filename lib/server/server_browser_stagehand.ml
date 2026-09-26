@@ -11,6 +11,13 @@ let cdp_command_deadline_s = Browser_lane.Stagehand_open_budget.cdp_command_dead
 let service_worker_wait_s = Browser_lane.Stagehand_open_budget.service_worker_wait_s
 let init_answer_s = Browser_lane.Stagehand_open_budget.init_answer_s
 
+(* A call whose caller left (the lane deadline) still holds the session until
+   its reply arrives. The command deadline above already bounds every CDP
+   command that reply waits on, so thirty seconds past the caller leaving
+   means the extension is stuck on the abandoned call: the next call then
+   ends the session instead of refusing calls for good. *)
+let abandoned_answer_s = 30.
+
 (* ws-direct's own default. A screenshot of a long page is the largest
    frame the connection carries. *)
 let max_message_bytes = 64 * 1024 * 1024
@@ -270,7 +277,10 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
     in
     let* port, path = await_devtools_endpoint ~clock ~profile:(Process.profile_path profile) ~process in
     let url = Process.browser_ws_url ~port ~path in
-    let session = Session.create ~sw ~clock ~worker_wait_s:service_worker_wait_s ~init_answer_s ~model ~log in
+    let session =
+      Session.create ~sw ~clock ~worker_wait_s:service_worker_wait_s ~init_answer_s ~abandoned_answer_s
+        ~model ~log
+    in
     let* cdp =
       Browser_cdp.connect ~sw ~net:(Eio.Stdenv.net env) ~clock ~url ~max_message:max_message_bytes
         ~command_deadline_s:cdp_command_deadline_s ~on_event:(Session.on_cdp_event session)
@@ -302,6 +312,8 @@ let log_event = function
   | Session.Unexpected_response { id } -> Log.Server.warn "browser-lane stagehand: response to %d, which no call waits for" id
   | Session.Abandoned_call_ended { method_; rejected } ->
     Log.Server.info "browser-lane stagehand: abandoned %s ended (%s)" method_ (if rejected then "rejected" else "answered")
+  | Session.Abandoned_call_unanswered { method_; waited_s } ->
+    Log.Server.warn "browser-lane stagehand: abandoned %s did not answer within %.0fs, so the session ended" method_ waited_s
   | Session.Reply_not_delivered detail ->
     Log.Server.warn "browser-lane stagehand: an answer to the extension was not delivered, so the session ended: %s" detail
   | Session.Malformed_cdp_event { method_; detail } ->

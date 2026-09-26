@@ -8,8 +8,13 @@ import { promotePinAt, unpinHead } from './multi-keeper-pin-store'
  *
  * Chord choices avoid RFC-0012 §4 default IDE set:
  *   - `Mod+1..9` is reserved for `ide.tab.switch.1..9` → use `Mod+Shift+1..4`
- *   - `Mod+W` is reserved for `ide.tab.close` → use `Mod+Shift+W` for unpin
- *     (chord matcher `wantsShift !== shiftKey` makes the two distinct)
+ *   - unpin is `Mod+Shift+0`, beside the promote slots. `Mod+Shift+W`
+ *     closes the browser window on every platform before the page sees the
+ *     key, and macOS Chrome opens "Clear browsing data" on
+ *     `Cmd+Shift+Delete` (the Backspace key) while focus is in an input,
+ *     where this chord is not preserved.
+ *   - digit chords match on `KeyboardEvent.code`: with Shift held the
+ *     browser reports the layout's symbol as `key`.
  *
  * Defaults follow RFC-0012 §3 conventions:
  *   - `scope: 'global'` — promote/unpin should fire from anywhere in the
@@ -47,7 +52,7 @@ export function useKeeperPinShortcuts(manager: KeyboardShortcutManager): void {
     disposers.push(
       manager.register({
         id: 'ide.pin.unpin-head',
-        chord: { key: 'w', modifiers: ['Mod', 'Shift'] },
+        chord: { key: '0', modifiers: ['Mod', 'Shift'] },
         description: 'Unpin the head pinned keeper',
         scope: 'global',
         preserveInInputs: false,

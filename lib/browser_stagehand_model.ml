@@ -250,6 +250,12 @@ let published_lane () =
 
 type no_callback_error = |
 
+(* The flow's callbacks all answer [Ok ()], so the renderer's callback arms
+   are unreachable by type (the same shape as the Librarian runtime's). *)
+let no_callback_error_to_string : no_callback_error -> string = function
+  | _ -> .
+;;
+
 type flow_not_started =
   | Candidate_refused of Exact.flow_candidate_error
   | Snapshot_refused of Exact.flow_snapshot_error
@@ -266,8 +272,76 @@ type cli_tail =
   | Cli_tail_unfit of cli_unfit
   | Cli_tail_exhausted of Keeper_lane_cli_oneshot.failure list
 
+type output_shape_issue =
+  | Missing_required_key of string
+  | Incompatible_required_shape of string
+
+type rejected_http_output =
+  { slot_id : string
+  ; issue : output_shape_issue
+  }
+
+let output_shape_issue_to_string = function
+  | Missing_required_key at -> "missing required key " ^ at
+  | Incompatible_required_shape at -> "incompatible required shape at " ^ at
+;;
+
+(* A deliberately narrow pre-Zod guard: check JSON Schema's required object
+   keys, the primitive type at each visited property, and anyOf alternatives.
+   This catches missing Stagehand act fields before the HTTP lane decides
+   failover. The extension still owns complete schema validation. *)
+let rec required_shape_issue ~at schema output =
+  match field "anyOf" schema with
+  | Some (`List (_ :: _ as alternatives)) ->
+    let issues = List.map (fun alternative -> required_shape_issue ~at alternative output) alternatives in
+    if List.exists Option.is_none issues then None else List.find_map Fun.id issues
+  | Some _ | None ->
+    let type_matches =
+      match field "type" schema, output with
+      | Some (`String "object"), `Assoc _
+      | Some (`String "array"), `List _
+      | Some (`String "string"), `String _
+      | Some (`String "boolean"), `Bool _
+      | Some (`String "integer"), (`Int _ | `Intlit _)
+      | Some (`String "number"), (`Int _ | `Intlit _ | `Float _)
+      | Some (`String "null"), `Null -> true
+      | Some (`String ("object" | "array" | "string" | "boolean" | "integer" | "number" | "null")), _ -> false
+      | (Some _ | None), _ -> true
+    in
+    if not type_matches
+    then Some (Incompatible_required_shape at)
+    else
+      match output with
+      | `Assoc fields ->
+        let required =
+          match field "required" schema with
+          | Some (`List keys) ->
+            List.filter_map (function `String key -> Some key | _ -> None) keys
+          | Some _ | None -> []
+        in
+        (match List.find_opt (fun key -> not (List.mem_assoc key fields)) required with
+         | Some key -> Some (Missing_required_key (at ^ "." ^ key))
+         | None ->
+           (match field "properties" schema with
+            | Some (`Assoc properties) ->
+              List.find_map
+                (fun (key, property_schema) ->
+                   match List.assoc_opt key fields with
+                   | None -> None
+                   | Some value ->
+                     required_shape_issue ~at:(at ^ "." ^ key) property_schema value)
+                properties
+            | Some _ | None -> None))
+      | _ ->
+        if Option.is_some (field "required" schema)
+           || Option.is_some (field "properties" schema)
+        then Some (Incompatible_required_shape at)
+        else None
+;;
+
 type generation_failure =
   { http_failure : no_callback_error Exact.flow_execution_error option
+  ; rejected_http_outputs : rejected_http_output list
   ; cli_tail : cli_tail
   }
 
@@ -314,9 +388,25 @@ let refusal_to_string = function
     "the lane names a slot twice: " ^ candidate_id
   | Flow_not_started (Start_refused (Exact.Flow_id_generation_failed detail)) ->
     "flow id generation failed: " ^ detail
-  | Generation_failed { http_failure; cli_tail } ->
+  | Generation_failed { http_failure; rejected_http_outputs; cli_tail } ->
     let http =
-      Option.map Keeper_exact_flow_detail.flow_execution_error_detail http_failure
+      Option.map
+        (Exact.flow_execution_error_to_string
+           ~callback_error_to_string:no_callback_error_to_string
+           ~raw_response_to_string:Keeper_exact_flow_detail.raw_response_excerpt)
+        http_failure
+    in
+    let rejected =
+      match rejected_http_outputs with
+      | [] -> None
+      | refusals ->
+        Some
+          ("HTTP slots rejected required JSON shape: "
+           ^ String.concat "; "
+               (List.map
+                  (fun { slot_id; issue } ->
+                     slot_id ^ ": " ^ output_shape_issue_to_string issue)
+                  refusals))
     in
     let cli =
       match cli_tail with
@@ -331,7 +421,7 @@ let refusal_to_string = function
           ("every cli slot failed: "
            ^ String.concat "; " (List.map Keeper_lane_cli_oneshot.failure_to_string failures))
     in
-    String.concat "; " (List.filter_map Fun.id [ http; cli ])
+    String.concat "; " (List.filter_map Fun.id [ http; rejected; cli ])
 ;;
 
 let refusal_to_rpc_error refusal : Wire.rpc_error =
@@ -354,8 +444,8 @@ let refusal_kind = function
 (* ---- Answer --------------------------------------------------------------- *)
 
 let usage_json (usage : Agent_core.Types.api_usage) =
-  (* The parsers write 0 for a cache count the body did not report (#38669),
-     so only a positive count is a reported one. *)
+  (* WORKAROUND(#38669): parsers write 0 for an unreported cache count.
+     Remove this guard once api_usage carries an optional count. *)
   let cached =
     if usage.cache_read_input_tokens > 0
     then [ "cached_input_tokens", `Int usage.cache_read_input_tokens ]
@@ -383,9 +473,10 @@ let answer_of_success (success : Exact.success) =
   let usage =
     match success.usage with
     | None -> []
-    (* Some wire parsers fill an unreported token count with zero (#38669).
+    (* WORKAROUND(#38669): wire parsers fill unreported counts with zero.
        This request has input text and a structured output, so either zero
-       makes the report unsuitable for Stagehand's usage field. *)
+       makes the report unsuitable for Stagehand's usage field. Remove this
+       guard once api_usage carries optional input and output counts. *)
     | Some usage when usage.input_tokens <= 0 || usage.output_tokens <= 0 -> []
     | Some usage -> [ "usage", usage_json usage ]
   in
@@ -489,7 +580,7 @@ let cli_failure_kind = function
     runtime_id, "invalid_domain_output"
 ;;
 
-let walk_cli_tail ?cli_runner ~base_path ~cli_slots ~request ~requirement () =
+let walk_cli_tail ?cli_runner ~base_path ~cli_slots ~request ~schema ~requirement () =
   match cli_slots with
   | [] -> Error Cli_tail_undeclared
   | _ :: _ ->
@@ -502,8 +593,8 @@ let walk_cli_tail ?cli_runner ~base_path ~cli_slots ~request ~requirement () =
          | Some system_prompt -> system_prompt
          | None -> ""
        in
-       (* [Json_syntax], as on the HTTP slots: the extension checks the
-          answer's shape with its own schema. *)
+       (* [Json_syntax], as on the HTTP slots: this lane checks only required
+          structure before the extension's full schema validation. *)
        Keeper_lane_cli_oneshot.walk
          ?runner:cli_runner
          ~base_dir:base_path
@@ -511,7 +602,10 @@ let walk_cli_tail ?cli_runner ~base_path ~cli_slots ~request ~requirement () =
          ~system_prompt
          ~requirement
          ~prompt
-         ~validate:(fun output -> Ok output)
+         ~validate:(fun output ->
+           match required_shape_issue ~at:"$" schema output with
+           | None -> Ok output
+           | Some issue -> Error (output_shape_issue_to_string issue))
          ~on_failure:(fun failure ->
            let runtime_id, kind = cli_failure_kind failure in
            Log.Server.warn "browser_stagehand: cli slot %s failed (%s)" runtime_id kind)
@@ -519,8 +613,6 @@ let walk_cli_tail ?cli_runner ~base_path ~cli_slots ~request ~requirement () =
        |> Result.map (fun (_runtime_id, output) -> output)
        |> Result.map_error (fun failures -> Cli_tail_exhausted failures))
 ;;
-
-type no_rejection = |
 
 let serve ?cli_runner ~net ~clock ~base_path ~resolve_lane params =
   let* request = parse_params params |> Result.map_error (fun detail -> Params_malformed detail) in
@@ -539,22 +631,29 @@ let serve ?cli_runner ~net ~clock ~base_path ~resolve_lane params =
   in
   (* The CLI tail runs after every HTTP slot failed, or alone when the lane
      admitted none. *)
-  let cli_tail ~http_failure =
+  let cli_tail ~http_failure ~rejected_http_outputs =
     match
-      walk_cli_tail ?cli_runner ~base_path ~cli_slots:lane.cli_slots ~request ~requirement ()
+      walk_cli_tail ?cli_runner ~base_path ~cli_slots:lane.cli_slots ~request ~schema ~requirement ()
     with
     | Ok output -> Ok (answer_of_cli_output output)
-    | Error cli_tail -> Error (Generation_failed { http_failure; cli_tail })
+    | Error cli_tail ->
+      Error (Generation_failed { http_failure; rejected_http_outputs; cli_tail })
   in
   match lane.http_slots with
-  | [] -> cli_tail ~http_failure:None
+  | [] -> cli_tail ~http_failure:None ~rejected_http_outputs:[]
   | first_slot :: other_slots ->
     let* attempt =
       start_flow ~first_slot ~other_slots ~messages:(exact_messages request) ~requirement
       |> Result.map_error (fun failure -> Flow_not_started failure)
     in
-    let accept success : (Exact.flow_success, no_rejection) Exact.semantic_verdict =
-      Exact.Accept success
+    let accept success =
+      match required_shape_issue ~at:"$" schema (Exact.flow_success_output success).output with
+      | None -> Exact.Accept success
+      | Some issue -> Exact.Reject_and_advance issue
+    in
+    let rejection_of_receipt (receipt : output_shape_issue Exact.semantic_rejection_receipt) =
+      let visit = Exact.flow_success_candidate receipt.Exact.transport_success in
+      { slot_id = visit.visit.identity.candidate_id; issue = receipt.rejection }
     in
     (match
        Exact.execute_flow_once
@@ -568,9 +667,13 @@ let serve ?cli_runner ~net ~clock ~base_path ~resolve_lane params =
          attempt
      with
      | Ok validated -> Ok (answer_of_success (Exact.flow_success_output validated.accepted))
-     | Error (Exact.Flow_execution_terminal { cause; prior_rejections = _ }) ->
+     | Error (Exact.Flow_execution_terminal { cause; prior_rejections }) ->
        cli_tail ~http_failure:(Some cause)
-     | Error (Exact.Flow_semantic_candidates_exhausted _) -> .)
+         ~rejected_http_outputs:(List.map rejection_of_receipt prior_rejections)
+     | Error (Exact.Flow_semantic_candidates_exhausted { rejections; _ }) ->
+       cli_tail ~http_failure:None
+         ~rejected_http_outputs:(List.map rejection_of_receipt
+           (rejections.first :: rejections.rest)))
 ;;
 
 let create ?cli_runner ~net ~clock ~base_path ~resolve_lane params

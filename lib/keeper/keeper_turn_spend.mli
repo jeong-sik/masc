@@ -69,3 +69,42 @@ val observe_agent_core_response
   -> (t, unplaced) result
 
 val attempts : t -> attempt list
+
+(** One reading, resolved, with the attempt it belongs to. *)
+type resolved =
+  { routing_run_id : string
+  ; runtime_id : string
+  ; lane_attempt_index : int
+  ; reading : reading
+  ; resolution : Keeper_usage_resolution.t
+  }
+
+(** Resolves every reading in the order the attempts started and the
+    readings were seen, each against the cursor the one before it left, so a
+    conversation's deltas add up to its last count minus the cursor the turn
+    started from. A reading whose count was replaced leaves its conversation's
+    cursor at zero, where the next count starts. *)
+val resolve
+  :  cursor:Keeper_usage_resolution.cursor option
+  -> observed_at:float
+  -> attempt list
+  -> resolved list * Keeper_usage_resolution.cursor option
+
+(** A successful turn's readings, resolved in order: the one its result
+    reports, every other, and the cursor they leave. *)
+type turn_resolution =
+  { turn_reading : resolved option
+        (** The last attempt's last reading: the thread, client turn or
+            response the result ended on. [None] when that attempt read
+            nothing. *)
+  ; other_readings : resolved list
+        (** Every earlier conversation or response of that attempt, and
+            every attempt that lost to it: spend beside the turn's. *)
+  ; cursor : Keeper_usage_resolution.cursor option
+  }
+
+val resolve_turn
+  :  cursor:Keeper_usage_resolution.cursor option
+  -> observed_at:float
+  -> attempt list
+  -> turn_resolution

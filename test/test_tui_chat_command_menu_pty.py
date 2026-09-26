@@ -83,7 +83,7 @@ def run(executable):
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable, description="Hidden command menu does not consume keys",
-                            interact=compact, http_fixtures=h.keeper_runtime_http_fixtures())
+                            interact=compact, http_fixtures=h.context_inspector_fixtures())
 
 
 if __name__ == "__main__":

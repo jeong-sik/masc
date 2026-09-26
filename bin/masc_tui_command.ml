@@ -677,15 +677,16 @@ let menu ~keeper_names ~state text =
                   label = "/" ^ entry.word; description = entry.summary}
           else None) spelled_catalog
       else if not (String.equal argument "") && String.ends_with ~suffix:" " line then []
-      else
+      else match List.find_opt (fun entry -> String.equal entry.word word) spelled_catalog with
+      | None -> []
+      | Some entry ->
         let options = known_sub_arguments ~keeper_names word in
         if List.exists (String.equal argument) options then []
         else List.filter_map (fun option ->
           if String.starts_with ~prefix:argument option then
             let label = "/" ^ word ^ " " ^ option in
             Some {completion = with_body body label; label;
-                  description = (match List.find_opt (fun entry -> String.equal entry.word word) spelled_catalog with
-                    | Some entry -> entry.summary | None -> "")}
+                  description = entry.summary}
           else None) options in
     match items with
     | [] -> None

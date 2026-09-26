@@ -70,13 +70,13 @@ let test_api_auth_rotates_invalid_request_judges () =
     (KFR.Rotate_now { rotate = KFR.Auth_failed })
     (Agent_core.Error.Api (Llm_provider.Retry.AuthError { message = "401" }));
   check_route
-    "authorization error rotates (credential scopes differ per runtime)"
-    (KFR.Rotate_now { rotate = KFR.Auth_failed })
+    "a 403 refuses the account, a class of its own apart from a 401"
+    (KFR.Rotate_now { rotate = KFR.Authorization_refused })
     (Agent_core.Error.Api
        (Llm_provider.Retry.AuthorizationError { message = "403" }));
   check_route
-    "provider authorization error rotates"
-    (KFR.Rotate_now { rotate = KFR.Auth_failed })
+    "provider authorization error is the same account refusal"
+    (KFR.Rotate_now { rotate = KFR.Authorization_refused })
     (Agent_core.Error.Provider
        (Llm_provider.Error.AuthorizationError
           { provider = "provider"; detail = "403" }));
@@ -475,6 +475,7 @@ let test_response_observed_per_class () =
     ; retry KFR.Network_transient
     ; retry KFR.Provider_timeout
     ; rotate KFR.Auth_failed
+    ; rotate KFR.Authorization_refused
     ; rotate KFR.Model_unavailable
     ; rotate KFR.Resumable_cli_session
     ; rotate KFR.Candidates_filtered
@@ -663,6 +664,7 @@ let test_route_resumes_on_same_path_per_class () =
     ; "with a negative reset", retry ~retry_after:(-5.0) KFR.Hard_quota
     ; "with a NaN reset", retry ~retry_after:Float.nan KFR.Hard_quota
     ; "", rotate KFR.Auth_failed
+    ; "", rotate KFR.Authorization_refused
     ; "", rotate KFR.Model_unavailable
     ; "", rotate KFR.Resumable_cli_session
     ; "", rotate KFR.Candidates_filtered
@@ -755,7 +757,7 @@ let test_candidate_fault_route_agreement () =
     [ "AuthError", Llm_provider.Retry.AuthError { message = "401" }, rotate KFR.Auth_failed
     ; ( "AuthorizationError"
       , Llm_provider.Retry.AuthorizationError { message = "403" }
-      , rotate KFR.Auth_failed )
+      , rotate KFR.Authorization_refused )
     ; ( "PaymentRequired"
       , Llm_provider.Retry.PaymentRequired { message = "402" }
       , retry KFR.Hard_quota )
@@ -822,6 +824,81 @@ let test_candidate_fault_route_agreement () =
     []
     disagreements
 
+(* The route must factor through [Candidate_fault]: [route_of_api_error]
+   is [class_of_fault (Candidate_fault.of_api_error api)] for some function
+   [class_of_fault], with only the wait hint read off the raw constructor.
+   So two errors with the same judgment must get the same route kind and
+   class. If they do not, the route is reading a second table next to
+   [Candidate_fault], and the walk, which reads only the judgment, cannot
+   see that split (#38975: a 401 and a 403 were both [Binding Credential],
+   while the route told them apart from the raw constructor; task-1773).
+   [fault_key] is wildcard-free, so a new judgment has to be named here. *)
+let test_route_factors_through_candidate_fault () =
+  let fault_key (fault : Llm_provider.Candidate_fault.t) =
+    match fault with
+    | Llm_provider.Candidate_fault.Binding b ->
+      "binding:"
+      ^ (match b with
+         | Llm_provider.Candidate_fault.Credential -> "credential"
+         | Llm_provider.Candidate_fault.Account_access -> "account_access"
+         | Llm_provider.Candidate_fault.Account -> "account"
+         | Llm_provider.Candidate_fault.Model_absent -> "model_absent"
+         | Llm_provider.Candidate_fault.Rate_limit -> "rate_limit"
+         | Llm_provider.Candidate_fault.Capacity -> "capacity"
+         | Llm_provider.Candidate_fault.Server -> "server"
+         | Llm_provider.Candidate_fault.Window -> "window"
+         | Llm_provider.Candidate_fault.Body_limit -> "body_limit"
+         | Llm_provider.Candidate_fault.Admission -> "admission"
+         | Llm_provider.Candidate_fault.Deadline -> "deadline"
+         | Llm_provider.Candidate_fault.Output_dialect -> "output_dialect"
+         | Llm_provider.Candidate_fault.Refusal_unread -> "refusal_unread")
+    | Llm_provider.Candidate_fault.Unattributed -> "unattributed"
+    | Llm_provider.Candidate_fault.Unknown_after_dispatch -> "unknown_after_dispatch"
+  in
+  let label_of route = KFR.route_kind_label route ^ ":" ^ KFR.route_class_label route in
+  let invalid_request reason = Llm_provider.Retry.InvalidRequest { message = "refused"; reason } in
+  let errors =
+    [ Llm_provider.Retry.AuthError { message = "401" }
+    ; Llm_provider.Retry.AuthorizationError { message = "403" }
+    ; Llm_provider.Retry.PaymentRequired { message = "402" }
+    ; Llm_provider.Retry.NotFound { message = "404" }
+    ; Llm_provider.Retry.RateLimited { retry_after = Some 30.0; message = "slow down" }
+    ; Llm_provider.Retry.RateLimited { retry_after = None; message = "slow down" }
+    ; Llm_provider.Retry.Overloaded { message = "529" }
+    ; Llm_provider.Retry.ServerError { status = 500; message = "5xx" }
+    ; Llm_provider.Retry.ServerError { status = 503; message = "5xx" }
+    ; Llm_provider.Retry.ContextOverflow { message = "too large"; limit = None }
+    ; invalid_request (Llm_provider.Retry.Request_body_refused_by_provider { status = 413 })
+    ; invalid_request Llm_provider.Retry.Json_parse_error
+    ; invalid_request Llm_provider.Retry.Attempt_rejected
+    ; invalid_request Llm_provider.Retry.Refusal_body_not_received
+    ; invalid_request Llm_provider.Retry.Unknown_invalid_request
+    ; Llm_provider.Retry.Timeout { message = "deadline"; phase = None }
+    ; Llm_provider.Retry.NetworkError
+        { message = "connection reset"; kind = Llm_provider.Http_client.Connection_reset }
+    ]
+  in
+  (* For each judgment, the first route label seen; every later error with the
+     same judgment must match it. *)
+  let seen = Hashtbl.create 16 in
+  let splits =
+    List.filter_map
+      (fun api ->
+         let key = fault_key (Llm_provider.Candidate_fault.of_api_error api) in
+         let label = label_of (route_of_agent_core_error (Agent_core.Error.Api api)) in
+         match Hashtbl.find_opt seen key with
+         | None ->
+           Hashtbl.add seen key label;
+           None
+         | Some first when String.equal first label -> None
+         | Some first -> Some (Printf.sprintf "%s: %s vs %s" key first label))
+      errors
+  in
+  Alcotest.(check (list string))
+    "one judgment, one route class (no second table beside Candidate_fault)"
+    []
+    splits
+
 let () =
   Alcotest.run
     "keeper_runtime_failure_route"
@@ -851,6 +928,10 @@ let () =
             "route class agrees with the walk predicates"
             `Quick
             test_candidate_fault_route_agreement
+        ; Alcotest.test_case
+            "route factors through Candidate_fault"
+            `Quick
+            test_route_factors_through_candidate_fault
         ] )
     ; ( "provider"
       , [ Alcotest.test_case "quota family hints" `Quick test_provider_quota_family_threads_hint

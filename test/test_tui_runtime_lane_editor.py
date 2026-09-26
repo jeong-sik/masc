@@ -701,6 +701,75 @@ def run_curator_cli_refused(executable: str) -> None:
     )
 
 
+def run_provider_jump(executable: str) -> None:
+    """[d] on an HTTP slot opens its [providers.<id>] table in Config. The
+    table key is the catalogue's provider_id, and the header is found by the
+    key path the TOML grammar reads, so a quoted key with a trailing comment
+    is the same table. While the picker is open, [d] stays with it."""
+    store = LaneStore()
+    slot = "glm-coding.glm-5-turbo"
+    store.body["runtimes"].append(
+        h.runtime_resolved_runtime(slot, "GLM Coding", "glm-5-turbo",
+                                   provider_id="glm-coding")
+    )
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    status, config = h.standalone_lane_runtime_config_response()
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (
+        status,
+        {
+            **config,
+            "source_text": config["source_text"]
+            + '\n\n[providers."glm-coding"] # request window\n'
+            + "exact-body-timeout-s = 1200\n",
+        },
+    )
+    requests: h.HttpRequests = []
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        h.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, b"j", b"HITL")
+        h.send_and_wait(process, fd, output, b"j", b"Librarian")
+        h.send_and_wait(process, fd, output, b"s", b"MASC Lanes / Providers")
+        h.wait_for_output(process, fd, output,
+                          b"> 1/1  [HTTP] glm-coding.glm-5-turbo", start=0, timeout=5.0)
+        h.send_and_wait(process, fd, output, b"a", b"add provider")
+        # The picker owns focus: [d] neither jumps nor closes it, so the
+        # [e] after it lands on the picker and returns to the slot rows.
+        os.write(fd, b"d")
+        h.send_and_wait(process, fd, output, b"e",
+                        b"> 1/1  [HTTP] glm-coding.glm-5-turbo")
+        os.write(fd, b"d")
+        # Config colours a header's pieces apart, so the drawn screen, not
+        # the byte stream, is what names the table.
+        wanted = (b'[providers."glm-coding"] # request window',
+                  b"exact-body-timeout-s = 1200")
+        deadline = time.monotonic() + 5.0
+        while True:
+            h.read_available(fd, output)
+            screen = h.screen_text(bytes(output))
+            if all(needle in screen for needle in wanted):
+                break
+            if time.monotonic() > deadline:
+                raise AssertionError("[d] did not open the provider table")
+            time.sleep(0.05)
+        if any(path == ROUTING_PATH for path, _body in requests):
+            raise AssertionError("the provider jump posted a routing write")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="Slot editor opens an HTTP slot's provider table",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
 # SGR mouse wheel notches at column 5, row 5, clear of the Activity pane.
 WHEEL_UP = b"\x1b[<64;5;5M"
 WHEEL_DOWN = b"\x1b[<65;5;5M"
@@ -801,4 +870,5 @@ if __name__ == "__main__":
     run_cli_editor(os.path.abspath(sys.argv[1]))
     run_curator_cli_refused(os.path.abspath(sys.argv[1]))
     run_filter(os.path.abspath(sys.argv[1]))
+    run_provider_jump(os.path.abspath(sys.argv[1]))
     print("runtime lane editor: PASS")

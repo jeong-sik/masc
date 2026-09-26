@@ -52,6 +52,14 @@ type failure =
 
 val failure_to_string : failure -> string
 
+val refused_for_binding_rest : failure -> bool
+(** [true] only when the client refused for its account's standing, read from
+    its typed failure: Claude [Quota_blocked], or a Codex turn tagged
+    [Usage_limit_exceeded], [Rate_limit_exceeded] or [Server_overloaded]. Such
+    a refusal says nothing about the prompt, so the same prompt can be served
+    once the account frees. Every other failure, including an Antigravity
+    refusal (its quota arrives only as turn text), is [false]. *)
+
 type runner =
   runtime_id:string
   -> system_prompt:string

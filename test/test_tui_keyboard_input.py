@@ -502,6 +502,80 @@ def _needle_before_start(
     )
 
 
+def _child_cpu_ticks(pid: int) -> tuple[int, int] | None:
+    """(utime, stime) of a still-running child, in clock ticks, from /proc.
+
+    None where /proc does not exist (macOS) or the child is already reaped:
+    both make the delta unmeasurable, and the diagnostic line says so instead
+    of guessing a zero.
+    """
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as stat:
+            fields = stat.read().rsplit(b")", 1)[-1].split()
+    except OSError:
+        return None
+    try:
+        # fields[0] is state (field 3); utime and stime are fields 14 and 15.
+        return int(fields[11]), int(fields[12])
+    except (IndexError, ValueError):
+        return None
+
+
+def _stall_line(
+    process: subprocess.Popen[bytes],
+    output: bytearray,
+    *,
+    started_at: float,
+    started_len: int,
+    last_byte_at: float,
+    last_byte_ticks: tuple[int, int] | None,
+) -> str:
+    """One bracketed line for a wait that timed out, task-1776.
+
+    The three readings separate the ways a PTY wait dies: silence counts from
+    the last byte the PTY delivered, so a screen that froze mid-draw reads
+    differently from one that never drew; loadavg is sampled at the timeout;
+    the child CPU delta is measured from the last byte, so CPU spent before a
+    later freeze is excluded. Reads /proc and getloadavg only --
+    no timeout, needle or wait behaviour changes because of it.
+    """
+    now = time.monotonic()
+    try:
+        with open("/proc/loadavg", "rt", encoding="ascii") as loadavg:
+            load = tuple(float(value) for value in loadavg.read().split()[:3])
+    except (OSError, ValueError):
+        try:
+            load = os.getloadavg()
+        except (AttributeError, OSError):
+            load = None
+    parts = [
+        f"silence {now - last_byte_at:.2f}s"
+        f" (wait ran {now - started_at:.2f}s,"
+        f" bytes {started_len} -> {len(output)})",
+        (
+            f"loadavg(at timeout) {load[0]:.2f}/{load[1]:.2f}/{load[2]:.2f}"
+            if load is not None and len(load) == 3
+            else "loadavg(at timeout) n/a"
+        ),
+    ]
+    ended = (
+        _child_cpu_ticks(process.pid) if process.pid is not None else None
+    )
+    if last_byte_ticks is None or ended is None:
+        parts.append("child utime/stime since last byte n/a")
+    else:
+        try:
+            hz = os.sysconf("SC_CLK_TCK")
+            user = (ended[0] - last_byte_ticks[0]) / hz
+            system = (ended[1] - last_byte_ticks[1]) / hz
+            parts.append(
+                f"child utime/stime since last byte +{user:.2f}s/+{system:.2f}s"
+            )
+        except (OSError, ValueError):
+            parts.append("child utime/stime since last byte n/a")
+    return " [stall: " + "; ".join(parts) + "]"
+
+
 def poll_for_output(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -510,16 +584,27 @@ def poll_for_output(
     *,
     start: int,
     timeout: float,
+    on_byte: Callable[[float, tuple[int, int] | None], None] | None = None,
 ) -> bool:
     """True once ``needle`` lands at or after ``start``, False once ``timeout`` passes.
 
     A caller that has something to do when it does not arrive -- press the key
     again, say -- needs the answer rather than the exception. An exited TUI
-    still raises: no amount of waiting brings it back.
+    still raises: no amount of waiting brings it back. ``on_byte``, when
+    given, is called once per loop iteration in which new bytes landed, with
+    the time and child CPU ticks sampled at that point; wait_for_output uses
+    both to date the last byte it ever saw.
     """
     deadline = time.monotonic() + timeout
+    seen_len = len(output)
     while find_needle(output, needle, start) < 0:
         read_available(master_fd, output)
+        if on_byte is not None and len(output) != seen_len:
+            seen_len = len(output)
+            on_byte(
+                time.monotonic(),
+                _child_cpu_ticks(process.pid) if process.pid is not None else None,
+            )
         if process.poll() is not None:
             raise AssertionError(f"TUI exited before {needle!r}: {bytes(output)!r}")
         remaining = deadline - time.monotonic()
@@ -538,13 +623,40 @@ def wait_for_output(
     start: int,
     timeout: float,
 ) -> None:
+    started_at = time.monotonic()
+    started_len = len(output)
+    started_ticks = (
+        _child_cpu_ticks(process.pid) if process.pid is not None else None
+    )
+    last_byte_at = [started_at]
+    last_byte_ticks = [started_ticks]
+
+    def note_byte(at: float, ticks: tuple[int, int] | None) -> None:
+        last_byte_at[0] = at
+        last_byte_ticks[0] = ticks
+
     if poll_for_output(
-        process, master_fd, output, needle, start=start, timeout=timeout
+        process,
+        master_fd,
+        output,
+        needle,
+        start=start,
+        timeout=timeout,
+        on_byte=note_byte,
     ):
         return
+    stall = _stall_line(
+        process,
+        output,
+        started_at=started_at,
+        started_len=started_len,
+        last_byte_at=last_byte_at[0],
+        last_byte_ticks=last_byte_ticks[0],
+    )
     raise AssertionError(
         f"timed out waiting for {needle!r}"
-        f"{_needle_before_start(output, needle, start)}: {bytes(output)!r}"
+        f"{_needle_before_start(output, needle, start)}"
+        f"{stall}: {bytes(output)!r}"
     )
 
 
@@ -1188,6 +1300,7 @@ def row_budget_http_fixtures() -> HttpFixtures:
                 "attention_queue": [],
                 "attention_items": [],
                 "agent_briefs": [],
+                "keepers_listing": {"state": "listed"},
                 "keepers_unread": [],
             },
         ),
@@ -1211,6 +1324,7 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
         "attention_queue": [],
         "attention_items": [],
         "agent_briefs": [],
+        "keepers_listing": {"state": "listed"},
         "keepers_unread": [],
     }
 
@@ -12574,10 +12688,14 @@ def runtime_resolved_runtime(
     runtime_id: str,
     provider: str,
     model: str,
+    *,
+    provider_id: str = "fixture-provider",
 ) -> dict[str, object]:
     return {
         "id": runtime_id,
         "provider": provider,
+        # The [providers.<id>] table key; "provider" is its display name.
+        "provider_id": provider_id,
         "model": model,
         "exact_slot_group": "slots",
         "effective_max_context": 200_000,
@@ -14413,6 +14531,7 @@ def duplicated_attention_briefing() -> HttpResponse:
             "attention_items": [],
             "agent_briefs": [],
             "keeper_briefs": [],
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [],
         },
     )
@@ -14435,6 +14554,7 @@ def unread_keeper_briefing() -> HttpResponse:
             "keeper_briefs": [],
             # The server listed this Keeper but could not build its row
             # (#38090). It has no brief, and the Overview still counts it.
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [
                 {
                     "name": "k-unread",
@@ -14463,6 +14583,7 @@ def pull_requests_briefing() -> HttpResponse:
             "keeper_briefs": [
                 {"name": "k-author", "phase": "running", "last_turn_ago_s": 30}
             ],
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [],
         },
     )
@@ -14847,6 +14968,60 @@ def unread_keeper_counted_interaction() -> Interaction:
     return interact
 
 
+def unlisted_keepers_briefing() -> HttpResponse:
+    # The server could not list the Keeper directory (#38120). There is no
+    # brief and no unread row, and the briefing says why the fleet is empty.
+    return (
+        200,
+        {
+            "summary": {
+                "workspace_health": "ok",
+                "cluster": "cluster-a",
+                "project": "project-a",
+            },
+            "generated_at": "2026-09-25T00:00:00Z",
+            "incidents": [],
+            "attention_queue": [],
+            "attention_items": [],
+            "agent_briefs": [],
+            "keeper_briefs": [],
+            "keepers_listing": {"state": "unreadable", "detail": "EACCES"},
+            "keepers_unread": [],
+        },
+    )
+
+
+def unlisted_keepers_named_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # The count cell names the failure instead of drawing "Keepers: 0".
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"unlisted",
+            start=0,
+            timeout=10.0,
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"(EACCES)",
+            start=0,
+            timeout=10.0,
+        )
+        # The harness confirms the exit that this first press arms.
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def paused_and_stopped_briefing() -> HttpResponse:
     # One Keeper the operator paused (the flag, whatever the phase), one
     # paused by phase, one stopped, one with no phase and one running.
@@ -14870,6 +15045,7 @@ def paused_and_stopped_briefing() -> HttpResponse:
                 {"name": "k-unknown", "phase": None, "paused": False},
                 {"name": "k-running", "phase": "running", "last_turn_ago_s": 30},
             ],
+            "keepers_listing": {"state": "listed"},
             "keepers_unread": [],
         },
     )
@@ -15533,6 +15709,14 @@ def run_keyboard_regression(executable: str) -> None:
         interact=unread_keeper_counted_interaction(),
         http_fixtures={
             "/api/v1/dashboard/briefing": unread_keeper_briefing(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Unlisted keepers named",
+        interact=unlisted_keepers_named_interaction(),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": unlisted_keepers_briefing(),
         },
     )
     run_terminal_scenario(

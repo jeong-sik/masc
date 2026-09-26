@@ -53,7 +53,7 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
       let args = `Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "scene"] in
       let execution = Runtime.handle_browser_read_with_outcome ~config ~meta ~args in
       check bool "actual Keeper producer completed" true (execution.disposition=Tool_result.Completed ());
-      let result = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:0.
+      let result = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:(Tool_timing.start ())
           ?data:execution.data ?metadata:execution.metadata ()
           |> Tool_result.with_retained_artifacts execution.retained_artifacts in
       let reference = retained_reference result in
@@ -96,7 +96,7 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
         | Some entry -> entry | None -> fail "registered Keeper missing" in
       let retain tool_name mode result = Masc.Mcp_server_eio_call_tool.retain_runtime_mcp_observation
           ~keeper_entry:(Some entry) ~tool_name ~arguments:(`Assoc ["mode",`String mode])
-          ~start_time:0. result in
+          ~start_time:(Tool_timing.start ()) result in
       check int "unknown tool remains ordinary" 0
         (List.length (Tool_result.retained_artifacts (retain "unknown" "scene" generic_scene)));
       let bound_scene = retain "masc_browser_read" "scene" generic_scene in
@@ -142,7 +142,7 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
 
 let test_invalid_or_unpersisted_scene_has_no_reference () = with_base (fun base ->
   let scene = routed (data "alpha" "visible") in
-  let result = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:0. ~data:scene () in
+  let result = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:(Tool_timing.start ()) ~data:scene () in
   let bad = match scene with `Assoc fields -> `Assoc (("clientId",`String "bad")::List.remove_assoc "clientId" fields) | _ -> assert false in
   check bool "unresolved automation identity is rejected" true (Result.is_error (Observation.of_json bad));
   check bool "view mismatch is rejected" true
@@ -163,7 +163,7 @@ let test_duplicate_fields_never_enter_blobstore () = with_base (fun base ->
       "height", `Int 600; "scrollX", `Int 0; "scrollY", `Int 0])
       :: List.remove_assoc "viewport" fields) in
   List.iter (fun json ->
-    let result = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:0. ~data:json () in
+    let result = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:(Tool_timing.start ()) ~data:json () in
     check bool "ambiguous durable identity is rejected" true
       (Result.is_error (Observation.of_json json));
     check bool "ambiguity cannot publish a retained reference" true
@@ -193,7 +193,7 @@ let test_generic_retention_failure_preserves_read_receipt () = with_base (fun ba
         | Some result -> result | None -> fail "generic dispatch missing" in
       check bool "external read needs no blob storage" true (Tool_result.is_success result);
       let result = Masc.Tool_misc_browser_lane.retain_read_result ~base_path:base
-          ~tool_name:"masc_browser_read" ~start_time:0.
+          ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ())
           (`Assoc ["mode",`String "scene"]) result in
       (match result with
        | Tool_result.Failed failure ->
@@ -222,7 +222,7 @@ let test_external_read_creates_no_hidden_blob () = with_base (fun base ->
           ~name:"masc_browser_read" ~args with
         | Some result -> result | None -> fail "browser read not dispatched" in
       let result = Masc.Mcp_server_eio_call_tool.retain_runtime_mcp_observation
-          ~keeper_entry:None ~tool_name:"masc_browser_read" ~arguments:args ~start_time:0. result in
+          ~keeper_entry:None ~tool_name:"masc_browser_read" ~arguments:args ~start_time:(Tool_timing.start ()) result in
       check bool "external observation succeeds" true (Tool_result.is_success result);
       check int "no hidden reference" 0 (List.length (Tool_result.retained_artifacts result));
       let blobs = Tool_blob_store.list_all_result (Tool_blob_store.create ~base_path:base)

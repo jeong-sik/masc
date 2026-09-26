@@ -2138,6 +2138,10 @@ type overview_keeper = {
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
+  ov_keeper_listing: Masc.Keeper_snapshot_unread.listing;
+      (** The briefing's [keepers_listing]. [Unreadable] means the server
+          could not list the Keeper directory, so [ov_keepers] counts nothing
+          it read rather than an empty fleet (#38120). *)
   ov_keeper_liveness: keeper_liveness_counts;
   ov_keeper_rows: overview_keeper list;
       (** Every [keeper_briefs] row with a name, in the briefing's order. *)
@@ -5478,6 +5482,11 @@ type state = {
   mutable msx_live: Masc_tui_machine_live.view;
   mutable dos_live: Masc_tui_machine_live.view;
   mutable dos_live_in_flight: machine_live_request option;
+  (* Recent Keeper activity on the DOS machine, newest first, from the same
+     live route [dos_live] reads. MSX has no such feed yet (its Lane takes no
+     [~who] on several calls), so there is no [msx_activity] here -- adding
+     one before the server ever fills it would be a field nothing draws. *)
+  mutable dos_activity: Masc_tui_machine_live.activity_entry list;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
@@ -5596,7 +5605,8 @@ type state = {
   (* A source section requested by another surface while runtime.toml is
      loading. The jump is consumed only after the same server-owned source
      lands, so Lanes never needs a second config writer or a guessed path. *)
-  mutable runtime_config_jump_section: string option;
+  mutable runtime_config_jump_section: string list option;
+      (* The table's key path, as the TOML grammar reads a header. *)
   (* The models pane's rows, parsed once when the source lands. The pane and
      the scroll bound have to agree on how many rows exist; deriving the
      count from the source instead made the keys move over 2,317 file lines
@@ -7826,6 +7836,7 @@ let create_state
   msx_live = Masc_tui_machine_live.Unread;
   dos_live = Masc_tui_machine_live.Unread;
   dos_live_in_flight = None;
+  dos_activity = [];
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;
@@ -8744,6 +8755,11 @@ type clamped_scroll =
      it -- later endpoints, the probe's last rows, the footer -- could not be
      reached. *)
   | Voice_scroll of int
+  (* The context inspector's plain shapes are lines the frame lays out of the
+     reading it holds, and the frame windows them. The keypress bounds the
+     scroll against the same window, but a reading that lands shorter leaves
+     the stored value past it until the frame says where it drew from. *)
+  | Context_inspector_scroll of int
 
 (* What End names on a surface whose rows the drawing counts: a row past any
    real end, so the frame's own clamp reports the last one back. The keypress
@@ -8801,6 +8817,7 @@ let apply_clamped_scroll (state : state) = function
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
   | Voice_scroll value -> state.config_scroll <- value
+  | Context_inspector_scroll value -> state.context_inspector_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
    fewer than the chrome alone says. The number of rows the list keeps lives

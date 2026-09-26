@@ -36,7 +36,7 @@ val completion_state_error :
 
 val result_to_response :
   tool_name:string ->
-  start_time:float ->
+  start_time:Tool_timing.started ->
   (string, Masc_domain.masc_error) result ->
   Tool_result.result
 
@@ -48,7 +48,7 @@ val sync_owner_current_task_binding : context -> unit
 val handle_add_task :
   ?created_by:string ->
   tool_name:string ->
-  start_time:float ->
+  start_time:Tool_timing.started ->
   context ->
   Yojson.Safe.t ->
   Tool_result.result
@@ -56,19 +56,19 @@ val handle_add_task :
 (** RFC-0267 Phase 2: [masc_task_set_goal] — assign an existing goalless task to
     a goal. Thin adapter over {!Task_goal_assignment.set_task_goal}. *)
 val handle_set_goal :
-  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+  tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
 
 val handle_batch_add_tasks :
   ?created_by:string ->
   tool_name:string ->
-  start_time:float ->
+  start_time:Tool_timing.started ->
   context ->
   Yojson.Safe.t ->
   Tool_result.result
 
 val handle_claim :
-  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+  tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
 
 val handle_claim_next :
-  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+  tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
 

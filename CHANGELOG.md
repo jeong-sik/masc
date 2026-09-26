@@ -378,6 +378,9 @@
   key, the fix, and the file at the front of its error
   (`[skills] resource-read-max-bytes = 65536 is over 16384 ...; set it to 16384
   or less (file: ...)`) (#39274).
+- Normal Keeper chat batching preserves FIFO order across incompatible
+  messages and protected continuations, so a later compatible chat cannot
+  jump over an earlier queued message (#39268).
 
 ### Documentation
 

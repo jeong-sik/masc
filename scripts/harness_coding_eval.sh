@@ -190,6 +190,17 @@ prepare_live_environment() {
   SERVER_LOG="${LIVE_RUN_DIR}/server.log"
   mkdir -p "${TARGET_DIR}" "${CONFIG_DIR}"
   cp -R "${ROOT_DIR}/config/." "${CONFIG_DIR}"
+  # The eval Keeper names `base`, which the copied catalog lists with no build.
+  # Promote the general image this host already has, the one the harness ran on
+  # before Keepers named catalog images. The host file holds builds only: the
+  # binary ships the names, `ocaml` included.
+  local base_image="masc-sandbox:general"
+  if ! docker image inspect "${base_image}" > /dev/null; then
+    echo "coding eval failed: ${base_image} is not in Docker's image store; build it with \`masc sandbox-image --tag ${base_image}\`" >&2
+    exit 1
+  fi
+  printf '[images.base.docker]\nreference = "%s"\n' \
+    "${base_image}" > "${CONFIG_DIR}/sandbox-image-builds.toml"
   declare_requested_runtimes
   if [[ -z "${PORT}" ]]; then
     PORT="$(harness_pick_free_port)"
@@ -734,7 +745,7 @@ run_one() {
   local profile_dir="${CONFIG_DIR}/keepers"
   mkdir -p "${profile_dir}"
   {
-    printf '[keeper]\nalways_allow = true\nsandbox_profile = "docker"\nsandbox_image = "masc-sandbox:general"\ninstructions = """\n'
+    printf '[keeper]\nalways_allow = true\nsandbox_profile = "docker"\nsandbox_image = "base"\ninstructions = """\n'
     coding_keeper_instructions
     printf '"""\n'
   } > "${profile_dir}/${keeper_name}.toml"

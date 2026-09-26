@@ -1181,13 +1181,14 @@ type exact_lane = Standalone_lane.t =
   | Board_attention
   | Workspace_curator
   | Verifier
+  | Browser_stagehand
 
 (* [Server_workspace_memory_curator.execute] refuses a run whose lane declares
    any CLI slot, so [false] here is that refusal read in advance. The two are
    tied by these comments alone; making a CLI slot on such a lane unloadable
    would leave one rule and let that refusal go. *)
 let exact_lane_supports_cli_tail = function
-  | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true
+  | Librarian | Hitl_auto_judge | Board_attention | Verifier | Browser_stagehand -> true
   | Workspace_curator -> false
 ;;
 
@@ -2485,7 +2486,7 @@ let verifier_exact_lane_readiness () =
     | _ :: _, _ | _, _ :: _ -> Ok lane.slot_rejections)
 ;;
 
-(* [runtime].media_failover: the vision read fleet. Reads the Atomic ref set
+(* [runtime].media_failover: the vision runtimes. Reads the Atomic ref set
    by [init_default]. *)
 let media_failover () = (runtime_state ()).media_failover
 let declared_media_failover () = (runtime_state ()).declared_media_failover
@@ -3759,7 +3760,8 @@ let report_exact_output_registry registry =
   warn_rejected_exact_output_slots registry;
   report_verifier_exact_lane_admission ();
   warn_optional_exact_output_lane registry ~lane:Librarian ~feature:"librarian";
-  warn_optional_exact_output_lane registry ~lane:Verifier ~feature:"completion authority"
+  warn_optional_exact_output_lane registry ~lane:Verifier ~feature:"completion authority";
+  warn_optional_exact_output_lane registry ~lane:Browser_stagehand ~feature:"the Stagehand browser lane"
 ;;
 
 (* How a config commit meets the exact-output registry. *)
@@ -4609,7 +4611,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           | Verifier, Ok () -> slots, cli_slots
           | Verifier, Error _ ->
             judgeable_declared_verifier_slots, judgeable_declared_verifier_cli_slots
-          | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator), _ ->
+          | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator | Browser_stagehand), _ ->
             slots, (if exact_lane_supports_cli_tail lane then cli_slots else [])
         in
         let next =
@@ -4626,11 +4628,12 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
                 in
                 Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:lane_cli_slots)
             next
-            (* Shared-memory curation is explicitly configured, not enabled by
-               provisioning a general-purpose runtime. *)
+            (* Shared-memory curation and the browser-specific Stagehand model
+               are explicitly configured, not enabled by provisioning a
+               general-purpose runtime. *)
             (List.filter
                (function
-                 | Workspace_curator -> false
+                 | Workspace_curator | Browser_stagehand -> false
                  | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true)
                Standalone_lane.all)
         in

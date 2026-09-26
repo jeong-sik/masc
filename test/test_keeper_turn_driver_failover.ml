@@ -509,7 +509,7 @@ max-concurrent = 1
 max-concurrent = 1
 |}
 
-(* A lane that holds two image-capable candidates, with the vision fleet
+(* A lane that holds two image-capable candidates, with the vision runtimes
    ([runtime].media_failover) outside it. *)
 let runtime_toml_media_lane_with_two_vision_candidates =
   {|

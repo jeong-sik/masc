@@ -440,7 +440,7 @@ let test_dynamic_tool_callback ?(worker_pool = false) () =
          let open Runtime_codex_app_server in
          (match List.rev !stream_events with
           | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
-            ; Text_delta "MASC_"
+            ; Text_delta { item_id = Some "message-1"; delta = "MASC_" }
             ; Dynamic_tool_started
                 { call_id = "call-1"; tool_name = "masc_probe"; arguments }
             ; Dynamic_tool_finished { call_id = "call-1" }
@@ -488,7 +488,7 @@ let test_native_command_events_stay_distinct_from_dynamic_tools () =
                ; tool_name = Some "commandExecution"
                ; origin = Runtime_native_tools.Built_in
                }
-           ; Text_delta "MASC_"
+           ; Text_delta { item_id = Some "message-1"; delta = "MASC_" }
            ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
            ] -> ()
          | _ -> fail "Codex native command activity was projected as a MASC tool")
@@ -705,6 +705,11 @@ let test_developer_context_preserves_authority_and_history () =
                 | Resume _ -> "thread/resume" in
               check string "stable policy remains separate" "stable policy"
                 (request thread_method |> member "developerInstructions" |> to_string);
+              check string "only a resume asks Codex to leave the past turns out"
+                (match thread_mode with
+                 | Runtime_codex_app_server.Start -> "null"
+                 | Resume _ -> "true")
+                (Yojson.Safe.to_string (request thread_method |> member "excludeTurns"));
               let items = request "thread/inject_items" |> member "items" |> to_list in
               check (list string) "context retains developer authority; resume omits history"
                 expected_roles (List.map (fun j -> member "role" j |> to_string) items);
@@ -895,6 +900,8 @@ let test_token_usage_of_this_turn_reaches_the_result () =
          | Some (Runtime_codex_app_server.Thread_count { last = Runtime_codex_app_server.Context_estimate _; _ })
          | Some Runtime_codex_app_server.Thread_count_replaced
          | None -> fail "the turn's request frame was not kept as its count");
+        check (option int) "the frame's model window" (Some 272000)
+          result.model_context_window;
         check string "text still lands" "MASC_SUBSCRIPTION_OK" result.text)
 ;;
 
@@ -3319,8 +3326,9 @@ supports_native_streaming = false
             { transmitted_atoms = atoms; total_atoms = atoms
             ; measurement = if reject_codex then Wire_shape else Durable_shape
             ; front_atom_digest =
-                Runtime_model_input_tail_window.atom_opening_digest history 0
-                |> Option.get } in
+                Some
+                  (Runtime_model_input_tail_window.atom_opening_digest history 0
+                  |> Option.get) } in
           check bool "last projection retains the exact observed range and digest"
             true (window = expected)
         | None when not http_predecessor && reject_codex -> ()
@@ -3798,6 +3806,113 @@ let test_keeper_projects_codex_live_stream () =
               {|{"marker":"from-codex"}|}
               arguments
           | _ -> fail "Keeper did not preserve the Codex live event sequence"))
+;;
+
+(* A commentary item and the final answer after it: two agentMessage items,
+   each under its own itemId. The final answer streams "완" and completes as
+   "완료", so the end of the turn still owes "료". *)
+let commentary_delta =
+  {|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"commentary-1","delta":"확인할게요."}}|}
+;;
+
+let commentary_completed =
+  {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":1,"item":{"type":"agentMessage","id":"commentary-1","text":"확인할게요.","phase":"commentary"}}}|}
+;;
+
+let final_answer_delta =
+  {|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"message-1","delta":"완"}}|}
+;;
+
+let final_answer_completed =
+  {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":2,"item":{"type":"agentMessage","id":"message-1","text":"완료","phase":"final_answer"}}}|}
+;;
+
+let two_message_turn_completed =
+  {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[{"type":"agentMessage","id":"commentary-1","text":"확인할게요.","phase":"commentary"},{"type":"agentMessage","id":"message-1","text":"완료","phase":"final_answer"}],"status":"completed"}}}|}
+;;
+
+let streamed_text events =
+  List.filter_map
+    (function
+      | Agent_core.Types.ContentBlockDelta { delta = Agent_core.Types.TextDelta text; _ } ->
+        Some text
+      | _ -> None)
+    events
+  |> String.concat ""
+;;
+
+(* Every chat surface appends the stream's text deltas, so the two items
+   read "확인할게요.완료" until a break went between them. The recorded
+   reply is the final answer alone, and the suffix it adds continues the
+   last item, not the whole stream. *)
+let test_keeper_separates_codex_agent_messages () =
+  let stream_events = ref [] in
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; commentary_delta
+    ; commentary_completed
+    ; final_answer_delta
+    ; final_answer_completed
+    ; two_message_turn_completed
+    ]
+    (fun cli_path ->
+       match
+         run_keeper_turn
+           ~on_event:(fun event -> stream_events := event :: !stream_events)
+           ~cli_path
+           ~model:"gpt-fixture"
+           ()
+       with
+       | Error error -> fail (Agent_core.Error.to_string error)
+       | Ok result ->
+         let events = List.rev !stream_events in
+         let open Agent_core.Types in
+         (match events with
+          | [ MessageStart { id = "turn-1"; model = "gpt-fixture"; usage = None }
+            ; ContentBlockDelta { index = 0; delta = TextDelta "확인할게요." }
+            ; ContentBlockDelta { index = 0; delta = TextDelta "\n\n완" }
+            ; ContentBlockDelta { index = 0; delta = TextDelta "료" }
+            ; MessageDelta { stop_reason = Some EndTurn; usage = None }
+            ; MessageStop
+            ] -> ()
+          | _ -> fail "Keeper did not stream the two Codex items apart");
+         check string "each item once, apart" "확인할게요.\n\n완료" (streamed_text events);
+         check string "Keeper response" "완료" (keeper_response_text result))
+;;
+
+(* [itemId] stays optional on an agentMessage delta (#28010): a frame that
+   omits it or sends it blank still streams, and names no item. *)
+let test_agent_message_delta_without_item_id_streams () =
+  let stream_events = ref [] in
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; {|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"","delta":"MASC_"}}|}
+    ; {|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","delta":"SUBSCRIPTION_OK"}}|}
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+       match
+         run_fixture
+           ~on_stream_event:(fun event -> stream_events := event :: !stream_events)
+           path
+       with
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ ->
+         let open Runtime_codex_app_server in
+         (match List.rev !stream_events with
+          | [ Turn_started _
+            ; Text_delta { item_id = None; delta = "MASC_" }
+            ; Text_delta { item_id = None; delta = "SUBSCRIPTION_OK" }
+            ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
+            ] -> ()
+          | _ -> fail "an agentMessage delta without an itemId did not stream unnamed"))
 ;;
 
 let test_keeper_preserves_typed_history_on_codex_wire () =
@@ -4963,8 +5078,30 @@ let test_production_keeper_reports_codex_token_usage () =
                             cache.cache_read_input_tokens)
                          context.cache);
                     check (option int) "its final output" (Some 80) context.output_tokens
-                  | None -> fail "the newest request's occupancy was dropped")
-               | None -> fail "production turn recorded no runtime observation")))
+                  | None -> fail "the newest request's occupancy was dropped");
+                 check (option int) "the client's model window" (Some 272000)
+                   observation.Runtime_observation.reported_context_window
+               | None -> fail "production turn recorded no runtime observation");
+              let rows =
+                Keeper_types_support.keeper_turn_record_store
+                  (Workspace.default_config base_path) "codex-production-fixture"
+                |> fun store -> Dated_jsonl.read_recent store 1
+              in
+              (match rows with
+               | [json] ->
+                 (match Turn_record.of_json json with
+                  | Ok record ->
+                    check (option int) "record keeps MASC's shaping ceiling"
+                      (Some result.max_context) record.context_window;
+                    check (option int) "recorded provider model window"
+                      (Some 272000) record.provider_context_window;
+                    (* The window's occupancy is the newest request's count
+                       (1200 in + 80 out), never the thread total (9000). *)
+                    check (option int) "the record's input is the request's" (Some 1200)
+                      record.usage.input_tokens;
+                    check (option int) "and its output" (Some 80) record.usage.output_tokens
+                  | Error detail -> fail detail)
+               | _ -> fail "production turn did not persist one record")))
 ;;
 
 (* The raw rows the cost ledger holds under [base_path], as (scope, input)
@@ -4985,7 +5122,11 @@ let raw_cost_rows ~base_path =
         | Cost_ledger.Usage_missing -> None
       in
       Some (Runtime_usage_scope.to_string scope, input)
-    | Ok { Cost_ledger.usage_projection = Cost_ledger.Resolved_delta; _ } -> None
+    | Ok
+        { Cost_ledger.usage_projection =
+            Cost_ledger.Resolved_delta | Cost_ledger.Resolved_attempt_delta _
+        ; _
+        } -> None
     | Error error -> failf "cost row: %s" (Cost_ledger.decode_error_to_string error))
   |> List.sort compare
 ;;
@@ -6240,6 +6381,14 @@ let () =
             "Keeper projects Codex live stream"
             `Quick
             test_keeper_projects_codex_live_stream
+        ; test_case
+            "Keeper streams two Codex agentMessage items apart"
+            `Quick
+            test_keeper_separates_codex_agent_messages
+        ; test_case
+            "agentMessage delta without itemId still streams"
+            `Quick
+            test_agent_message_delta_without_item_id_streams
         ; test_case
             "Keeper preserves typed history on Codex wire"
             `Quick

@@ -334,6 +334,10 @@ let install () =
       | None ->
         (match Task.Anti_rationalization.parse_review_verdict_from_json args with
          | Ok verdict ->
+           (* A verdict the evaluator corrected after a parse refusal is the
+              verdict: the refusal told it the format and it answered again.
+              Only a second call after a recorded verdict is a violation. *)
+           protocol_error_ref := None;
            verdict_ref := Some verdict;
            Tool_result.ok
              ~tool_name:name

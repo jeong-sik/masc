@@ -425,7 +425,8 @@ let test_the_spectator_reads_the_live_route () =
         (Ast_grep.count_string_literals ~module_path ~needle:"/api/v1/msx/frame"
          + Ast_grep.count_string_literals ~module_path ~needle:"/api/v1/dos/frame"))
     [ "bin/masc_tui_http.ml"; "bin/masc_tui.ml"; "bin/masc_tui_msx.ml";
-      "bin/masc_tui_machine_live.ml" ];
+      "bin/masc_tui_machine_live.ml"; "lib/server/server_auth.ml";
+      "lib/server/server_routes_http_routes_msx.ml" ];
   check bool "the live route is the one the reader asks" true
     (Ast_grep.count_string_literals ~module_path:"bin/masc_tui_machine_live.ml"
        ~needle:"/api/v1/lane-addons/live" = 1);
@@ -2207,6 +2208,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
          [ "Sys.set_signal"
          ; "apply_raw_mode"
          ; "Frame_presenter.setup"
+         ; "enable_bracketed_paste"
          ; "request_full_repaint"
          ]);
   (* Signal-driven quit and the armed q shortcut are separate exits. Pin

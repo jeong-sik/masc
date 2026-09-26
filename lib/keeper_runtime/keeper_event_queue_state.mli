@@ -109,6 +109,12 @@ type durable_disposition =
   | Current_receipt of transition_receipt
   | Projected_witness of projected_disposition_witness
 
+val durable_of_projected_receipt : transition_receipt -> durable_disposition
+val durable_disposition_to_yojson : durable_disposition -> Yojson.Safe.t
+val durable_disposition_of_yojson : Yojson.Safe.t -> (durable_disposition, string) result
+(** The existing compact witness wire shape, also used by the exact-id
+    receipt when a consumed scheduled occurrence leaves the queue snapshot. *)
+
 type outbox_entry =
   { receipt : transition_receipt
   ; stimuli : Keeper_event_queue.stimulus list
@@ -338,7 +344,18 @@ val source_terminal_receipt_of_stimulus :
 (** Accept only [Fusion_completed] or [Hitl_resolved] and retain their exact
     typed terminal payload. *)
 
-val mark_transition_projected : transition_id:string -> t -> (t, string) result
+val mark_transition_projected
+  :  transition_id:string
+  -> retain_previous:(transition_receipt -> bool)
+  -> t
+  -> (t, string) result
+(** Retire the sole outbox transition. The prior [last_transition] receipt
+    enters [projected_dispositions] only when [retain_previous] says a
+    standing asker can still re-ask it (#38527: un-re-askable receipts --
+    every turn-completion ack, every superseded-occurrence cancellation --
+    are dropped rather than accumulated; a delivered occurrence stays
+    answerable through the reaction ledger, not this list). The predicate
+    runs once, at this projection; the state stays pure and IO-free. *)
 (** Atomically retire a durable outbox entry after an external projector has
     materialized its stable [event_id]. The latest receipt remains visible and
     every older operator disposition remains in the replay ledger; ordinary

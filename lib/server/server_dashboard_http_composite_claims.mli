@@ -7,10 +7,8 @@ val compact_receipt_error_json : Yojson.Safe.t -> Yojson.Safe.t
 val compact_receipt_runtime_json : Yojson.Safe.t -> Yojson.Safe.t
 val json_number : string -> Yojson.Safe.t -> float option
 val json_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t option
-val string_has_prefix : prefix:string -> string -> bool
 val tool_call_output_text : Yojson.Safe.t -> string option
 val parse_tool_call_output : Yojson.Safe.t -> Yojson.Safe.t option
-val claim_status_of_output : Yojson.Safe.t -> string
 val composite_claim_attempt_absent :
   [> `Assoc of
        (string *

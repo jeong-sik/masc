@@ -70,12 +70,31 @@ val serve :
     identify which listener emitted the line when a process runs
     multiple HTTP servers. *)
 
+val serve_h2_connection :
+  ?streams:Server_h2_stream_registry.t ->
+  sw:Eio.Switch.t ->
+  h2_request_handler:(request_sw:Eio.Switch.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
+  h2_error_handler:
+    (Eio.Net.Sockaddr.stream -> ?request:H2.Request.t -> H2.Server_connection.error -> (H2.Headers.t -> H2.Body.Writer.t) -> unit) ->
+  Eio.Net.Sockaddr.stream ->
+  _ Eio.Net.stream_socket ->
+  unit
+(** Run H2 connection I/O and a separate request scope. I/O completion or
+    failure cancels pending requests and their children, including response
+    producers, without waiting for an occupied CPU pool.
+
+    Each request stream runs under its own switch in [streams] (a fresh
+    registry when omitted), and [h2_request_handler] receives that stream
+    switch as [request_sw]. A peer RST_STREAM releases the stream's entry and
+    cancels its work and children at once; a finished response releases the
+    entry when its work returns. Siblings and the connection keep running. *)
+
 val serve_h2 :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   socket:[> [> `Generic | `Unix ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
   addr_label:string ->
-  h2_request_handler:(Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
+  h2_request_handler:(request_sw:Eio.Switch.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
   h2_error_handler:
     (Eio.Net.Sockaddr.stream -> ?request:H2.Request.t -> H2.Server_connection.error -> (H2.Headers.t -> H2.Body.Writer.t) -> unit) ->
   unit
@@ -89,7 +108,7 @@ val serve_auto :
   socket:[> [> `Generic | `Unix ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
   addr_label:string ->
   request_handler:(Eio.Net.Sockaddr.stream -> Httpun.Reqd.t Gluten.Reqd.t -> unit) ->
-  h2_request_handler:(Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
+  h2_request_handler:(request_sw:Eio.Switch.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
   h2_error_handler:
     (Eio.Net.Sockaddr.stream -> ?request:H2.Request.t -> H2.Server_connection.error -> (H2.Headers.t -> H2.Body.Writer.t) -> unit) ->
   unit

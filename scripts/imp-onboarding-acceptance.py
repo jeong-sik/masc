@@ -74,7 +74,34 @@ def snapshot_evidence(base, output):
     return traces
 
 
-def directory_execution(traces):
+def ledger_execution_evidence(base, output):
+    """Execute audit fields the model does not read, keyed by tool_use_id.
+
+    A completed Execute records its route (via, sandbox_profile) in the
+    tool-call ledger's execution_evidence, not in the text the model reads
+    (masc#39035). The row is committed before the tool result reaches the
+    model, so a finished chat has all of them.
+    """
+    evidence = {}
+    for path in sorted((base / '.masc/tool_calls').rglob('*.jsonl')):
+        for line in path.read_text().splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if (row.get('keeper') != 'imp' or row.get('tool') != 'Execute'
+                    or 'execution_evidence' not in row):
+                continue
+            tool_use_id = row.get('tool_use_id')
+            if not tool_use_id:
+                continue
+            if tool_use_id in evidence:
+                raise RuntimeError(f'two ledger rows claim Execute {tool_use_id}')
+            evidence[tool_use_id] = row['execution_evidence']
+    (output / 'execution-evidence.json').write_text(json.dumps(evidence, indent=2, ensure_ascii=False))
+    return evidence
+
+
+def directory_execution(traces, execution_evidence):
     # Join the actual dispatched input to its completion, never infer a listing
     # from a successful exit or an assistant's description. The final form is
     # also present in the recorded macOS baseline.
@@ -145,8 +172,11 @@ def directory_execution(traces):
             continue
         if not isinstance(result, dict):
             continue
-        if not (result.get('ok') is True and result.get('via') == 'docker'
-                and result.get('sandbox_profile') == 'docker'
+        evidence = execution_evidence.get(event['tool_use_id'])
+        if not (isinstance(evidence, dict) and evidence.get('via') == 'docker'
+                and evidence.get('sandbox_profile') == 'docker'):
+            continue
+        if not (result.get('ok') is True
                 and result.get('status') == {'kind': 'exit', 'code': 0}
                 and result.get('cwd') == '/home/keeper/playground/imp'
                 and result.get('output_completeness') == 'complete'):
@@ -397,7 +427,8 @@ def measure(args):
                     except json.JSONDecodeError:
                         continue
                     results.setdefault(event['tool_name'], []).append(value)
-                directory_proof = directory_execution(traces)
+                directory_proof = directory_execution(
+                    traces, ledger_execution_evidence(base, output))
                 (output / 'directory-execution.json').write_text(json.dumps(directory_proof, indent=2))
                 if not any(value.get('status') == 'ok' and value.get('http_status') == 200
                            and value.get('final_url') == 'https://example.com/'

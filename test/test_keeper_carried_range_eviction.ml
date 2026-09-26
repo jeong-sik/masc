@@ -721,7 +721,8 @@ let test_boundary_moves_and_cancellation_preserve_the_observed_ledger () =
         let moved =
           Try_provider.For_testing.move_ledger_front working
             ~first_atom:12
-            ~front_digest:(match digest_at 12 with Some digest -> digest | None -> fail "fixture atom missing")
+            ~front_digest:
+              (match digest_at 12 with Some digest -> digest | None -> fail "fixture atom missing")
         in
         check bool "the candidate can narrow again" true moved;
         Eio.Cancel.cancel cancellation Exit;

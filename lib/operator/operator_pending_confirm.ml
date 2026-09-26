@@ -100,7 +100,7 @@ let available_actions : available_action list =
     make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
       ~target_type:Operator_action_constants.workspace_target_type
       ~description:"Inject a backlog task into the namespace.";
-    make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_delegate"
+    make_available_action ~action_type:"keeper_message" ~tool_name:Keeper_tool_name.(to_string Keeper_delegate)
       ~target_type:Operator_action_constants.keeper_target_type
       ~description:"Send a direct operator message to a keeper.";
     make_available_action ~action_type:"keeper_probe" ~tool_name:"masc_keeper_status"
@@ -294,14 +294,14 @@ let decode_pending_confirm_entries entries =
   loop 0 Confirm_token_set.empty [] entries
 
 let raw_pending_confirms_result config : (pending_confirm list, string) result =
-  let path = pending_confirms_path config in
-  if not (Workspace_utils.path_exists config path)
-  then Ok []
-  else
-    match Workspace_utils.read_json_result config path with
-    | Error msg -> Error (Printf.sprintf "pending confirms read failed: %s" msg)
-    | Ok (`List entries) -> decode_pending_confirm_entries entries
-    | Ok _ -> Error "pending confirms decode failed: expected JSON list"
+  match Workspace_utils.read_json_doc config (pending_confirms_path config) with
+  | Error error ->
+    Error
+      (Printf.sprintf "pending confirms read failed: %s"
+         (Workspace_utils.json_doc_error_to_string error))
+  | Ok None -> Ok []
+  | Ok (Some (`List entries)) -> decode_pending_confirm_entries entries
+  | Ok (Some _) -> Error "pending confirms decode failed: expected JSON list"
 
 let raw_pending_confirms config : pending_confirm list =
   match raw_pending_confirms_result config with

@@ -7627,7 +7627,7 @@ let launch_waiting_keeper_input state ~mailbox ~keeper_name =
     if not admission_pending then
       let generation = keeper_chat_control_generation state keeper_name in
       let ready = Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name
-        |> List.find_map (fun item ->
+        |> List.find_map (fun (item : Chat_queue.item) ->
           List.find_map (fun (name, id, intervention) ->
             match intervention with
             | Awaiting_control held

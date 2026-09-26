@@ -700,6 +700,37 @@ let phase_name : Session_store.phase -> string = function
   | Session_store.Settled _ -> "Settled"
 ;;
 
+(* MSP's one path setting is the session's [workspaceRoot], and the host's
+   file tools stay inside it even with its sandbox off (Muse Code SDK
+   CHANGELOG). The base path holds [.masc], auth tokens included, so the
+   session works in the Keeper's playground instead: the host root MASC's own
+   file tools confine the Keeper to. For a Micro_vm or Remote_ssh Keeper that
+   root is the host bookkeeping bundle, because its working tree lives on the
+   endpoint; MASC's file tools read the endpoint and do not see what this
+   host writes in the bundle. The Keeper's turn creates the root before the
+   runtime runs ([Keeper_alerting_path.ensure_sandbox_bundle]), so a missing
+   one is refused, not made here. *)
+let playground_root ~base_path ~keeper_name =
+  let config = Workspace.default_config base_path in
+  let refused detail = Error (config_error ~field:"playground_root" detail) in
+  match Keeper_meta_store.read_effective_meta_presence config keeper_name with
+  | Error detail -> refused ("the Keeper meta is unreadable: " ^ detail)
+  | Ok Keeper_meta_store.Meta_absent ->
+    refused "the Keeper has no meta, so it has no playground"
+  | Ok (Keeper_meta_store.Meta_not_current detail) ->
+    refused ("the Keeper meta is not current: " ^ detail)
+  | Ok (Keeper_meta_store.Meta_present meta) ->
+    let root =
+      Env_config_core.strip_path_trailing_slashes
+        (Keeper_sandbox.host_root_abs_of_meta ~config meta)
+    in
+    (match Sys.is_directory root with
+     | true -> Ok root
+     | false -> refused (Printf.sprintf "playground %s is not a directory" root)
+     | exception Sys_error detail ->
+       refused (Printf.sprintf "playground %s is unreadable: %s" root detail))
+;;
+
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
@@ -770,14 +801,17 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         |> Result.map_error (config_error ~field:"official_client_session.gate_continuation")
     in
     let claim_plan = Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256 in
+    let* workspace_root = playground_root ~base_path ~keeper_name in
     (* MSP offers no replaceable configuration channel, and this client
-       names the model only when it starts a session. A host session that
-       settled against another canonical history, system prompt or
-       configured model is superseded by a fresh one seeded from the
-       canonical source; ephemeral world context stays on the per-turn prompt
-       path. Without the model here a changed model resumed the old session,
-       and the serve client refused it as [Session_model_mismatch]: the turn
-       failed before the next claim started fresh. *)
+       names the model and the workspace root only when it starts a session.
+       A host session that settled against another canonical history, system
+       prompt, configured model or root is superseded by a fresh one seeded
+       from the canonical source; ephemeral world context stays on the
+       per-turn prompt path. Without the model here a changed model resumed
+       the old session, and the serve client refused it as
+       [Session_model_mismatch]: the turn failed before the next claim started
+       fresh. Without the root a resumed session kept working where it
+       started. *)
     let snapshot =
       `Assoc
         [ "system_prompt", `String system_prompt
@@ -787,6 +821,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           , match config.model with
             | Some model -> `String model
             | None -> `Null )
+        ; "workspace_root", `String workspace_root
         ]
     in
     let snapshot_sha256 =
@@ -981,7 +1016,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         goal_images
     in
     let* () =
-      Serve.validate_turn ~session_mode client_config ~workspace_root:base_path ~prompt ~images
+      Serve.validate_turn ~session_mode client_config ~workspace_root ~prompt ~images
       |> Result.map_error runtime_error_to_core_error
     in
     let raw_trace_run =
@@ -1082,7 +1117,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       | Session_store.Ambiguous | Session_store.Fatal -> require_recovery detail
     in
     let process_mgr = Posix_spawn_process_mgr.mgr in
-    let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
+    let process_cwd = Eio.Path.(Eio.Stdenv.fs env / workspace_root) in
     let started_at = Time_compat.now () in
     let observed_turn = ref None in
     let admission = ref Not_dispatched in
@@ -1312,7 +1347,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                     ~clock
                     ~cwd:process_cwd
                     client_config
-                    ~workspace_root:base_path
+                    ~workspace_root
                     ~prompt
                     ~images))
             ~watcher:(fun () ->

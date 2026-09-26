@@ -1,0 +1,6 @@
+{
+  "source": "[providers . \"p\"]\nprotocol = \"openai-compatible-http\"\nendpoint = \"https://example.invalid/v1\"\nexact-body-timeout-s = 15 # operator note\n",
+  "initialDeadline": 10,
+  "editedDeadline": 15,
+  "errors": []
+}

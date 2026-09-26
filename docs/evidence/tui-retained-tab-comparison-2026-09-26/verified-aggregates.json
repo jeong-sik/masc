@@ -1,0 +1,65 @@
+{
+  "run": 36238470111,
+  "verified_receipts": 6,
+  "verified_transitions": 600,
+  "roles": {
+    "baseline": {
+      "all": {
+        "samples": 300,
+        "median_ms": 0.8500624999999999,
+        "p95_ms": 1.622375,
+        "min_ms": 0.279917,
+        "max_ms": 3.354459
+      },
+      "detail": {
+        "samples": 120,
+        "median_ms": 1.1155835,
+        "p95_ms": 2.202167,
+        "min_ms": 0.988541,
+        "max_ms": 3.354459
+      },
+      "roster": {
+        "samples": 180,
+        "median_ms": 0.533417,
+        "p95_ms": 1.142917,
+        "min_ms": 0.279917,
+        "max_ms": 2.029583
+      },
+      "session_cpu_median_s": 0.22524299999999997,
+      "detail_median_each_repetition_ms": [
+        1.1120835,
+        1.0536465,
+        1.182896
+      ]
+    },
+    "candidate": {
+      "all": {
+        "samples": 300,
+        "median_ms": 0.471479,
+        "p95_ms": 1.156666,
+        "min_ms": 0.284125,
+        "max_ms": 22.606334
+      },
+      "detail": {
+        "samples": 120,
+        "median_ms": 0.4615625,
+        "p95_ms": 1.374,
+        "min_ms": 0.331875,
+        "max_ms": 2.957
+      },
+      "roster": {
+        "samples": 180,
+        "median_ms": 0.4833955,
+        "p95_ms": 1.01525,
+        "min_ms": 0.284125,
+        "max_ms": 22.606334
+      },
+      "session_cpu_median_s": 0.195714,
+      "detail_median_each_repetition_ms": [
+        0.4537285,
+        0.5223955,
+        0.45331299999999997
+      ]
+    }
+  }
+}

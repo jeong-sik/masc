@@ -144,5 +144,7 @@ Candidate `9c244cd88c147811a8534ee7df4c0ffb160f5000` is built by
 [Release 36237885748](https://github.com/jeong-sik/masc/actions/runs/36237885748).
 Their bin/lib diff contains only the four deferred Keeper detail builders in
 `bin/masc_tui_render.ml`; the additional diff is a changelog fragment. These
-integration builds are not installed runtime binaries. Comparison results are
-pending; the older 600-transition scheduler comparison is a separate experiment.
+integration builds are not installed runtime binaries. The completed
+[600-transition comparison](../tui-retained-tab-comparison-2026-09-26/README.md)
+retains the measured Info improvement and the remaining outliers. The older
+600-transition scheduler comparison is a separate experiment.

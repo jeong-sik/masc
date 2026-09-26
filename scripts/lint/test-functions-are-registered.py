@@ -22,7 +22,16 @@ definition:
     let test_fixture () = ...
 
 The reason after the colon is required. Renaming the helper so it does not
-start with `test_` is the other way out. There is no silent skip.
+start with `test_` is the other way out.
+
+A real test that fails once registered, and whose fix is tracked, names the
+issue and the reason on the line above:
+
+    (* test-broken: #39204 fixture never installs the owner inventory *)
+    let test_x () = ...
+
+The issue number is required; the marker is the exemption's receipt, and it
+is deleted with the fix. There is no silent skip.
 
 The baseline is 0, so the guard is strict.
 """
@@ -38,6 +47,8 @@ MIN_FILES = 500
 
 DEF = re.compile(r"^(?:let(?:\s+rec)?|and)\s+(test_[A-Za-z0-9_']*)\b")
 HELPER = re.compile(r"^\s*\(\*\s*test-helper:\s*\S.*\*\)\s*$")
+# A test that fails when registered and is tracked by an open issue.
+BROKEN = re.compile(r"^\s*\(\*\s*test-broken:\s*#[1-9][0-9]*\s+\S.*\*\)\s*$")
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_']*")
 CHAR_LITERAL = re.compile(
     r"'(?:\\(?:[\\'\"ntbr ]|[0-9]{3}|x[0-9a-fA-F]{2}|o[0-7]{3})|[^\\'\n])'"
@@ -177,7 +188,7 @@ def findings(root: pathlib.Path) -> tuple[list[str], int]:
             if used_elsewhere(p, name):
                 continue
             for ln in lns:
-                if ln >= 2 and HELPER.match(lines_raw[ln - 2]):
+                if ln >= 2 and (HELPER.match(lines_raw[ln - 2]) or BROKEN.match(lines_raw[ln - 2])):
                     continue
                 out.append(f"{p.relative_to(root)}:{ln}: {name} is defined but never named by a test list or caller")
     return out, len(files)
@@ -195,6 +206,9 @@ def self_test() -> int:
         "and binding": ("let rec test_a () = test_b ()\nand test_b () = ()\n", ["test_a"]),
         "helper marker": ("(* test-helper: shared fixture *)\nlet test_fix () = ()\n", []),
         "helper marker needs reason": ("(* test-helper: *)\nlet test_fix () = ()\n", ["test_fix"]),
+        "broken marker with issue": ("(* test-broken: #39204 fixture lacks owner inventory *)\nlet test_b () = ()\n", []),
+        "broken marker needs issue": ("(* test-broken: fixture rot *)\nlet test_b () = ()\n", ["test_b"]),
+        "broken marker needs reason": ("(* test-broken: #39204 *)\nlet test_b () = ()\n", ["test_b"]),
         "quote char inside a comment": ("(* a '\"' char *)\nlet test_a () = ()\nlet () = run [ tc test_a ]\n", []),
         "char literal quote": ("let q = '\"'\nlet test_a () = ()\nlet () = run [ tc test_a ]\n", []),
         "shadowed and unused": ("let test_a () = ()\nlet test_a () = ()\n", ["test_a", "test_a"]),
@@ -260,7 +274,8 @@ def main(argv: list[str]) -> int:
         print(
             f"{len(out)} test_* value(s) are never run. Register each in a test_case list, "
             "delete it, rename it so it does not start with test_, or mark a helper with "
-            "`(* test-helper: <reason> *)` on the line above.",
+            "`(* test-helper: <reason> *)` on the line above; a test that fails once "
+            "registered takes `(* test-broken: #<issue> <reason> *)` instead.",
             file=sys.stderr,
         )
         return 1

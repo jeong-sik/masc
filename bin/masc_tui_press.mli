@@ -20,6 +20,7 @@ type press_target =
   | Press_theme_filter of [ `All | `Dark | `Light ]
   | Press_runtime_mode of Masc_tui_types.runtime_mode
   | Press_context_tab of Masc_tui_context_inspector.tab
+  | Press_keeper_row of string  (** a Keepers list row, by Keeper name *)
 
 val press_changes_the_surface : press_target -> bool
 (** Whether a press changes what the surface shows. Only the Context

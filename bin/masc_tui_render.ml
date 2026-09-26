@@ -5356,9 +5356,15 @@ let render_keeper_list (state : state) =
               ~next_action:(Keeper_control.next_action reading)
               ~keeper ~runtime
           in
+          (* Fitted before it is marked: a cut that fell after the mark
+             would drop its close, and the row's press would run on into
+             the Activity pane drawn beside it. *)
+          let press text =
+            pressable (Press_keeper_row keeper.k_name) (fit_width text inner)
+          in
           if position = state.keeper_cursor then
-            box_line_selected buf cols (Masc_tui_theme.strip_sgr row)
-          else box_line buf cols row
+            box_line_selected buf cols (press (Masc_tui_theme.strip_sgr row))
+          else box_line buf cols (press row)
       | Some _, None | None, Some _ | None, None -> box_empty buf cols
     done;
 

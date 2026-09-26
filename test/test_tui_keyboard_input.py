@@ -2455,7 +2455,7 @@ def press_label_on_screen(
     label: bytes,
     *,
     row: int,
-    needle: bytes,
+    needle: Needle,
 ) -> None:
     """Press the first cell of [label] where the screen draws it on [row].
 
@@ -2547,6 +2547,35 @@ def pressing_a_tab_opens_it(
     os.write(master_fd, b"q")
 
 
+def pressing_a_row_chooses_then_opens_it(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """A press on a Keepers row chooses that Keeper; a press on the chosen
+    row opens it, as Enter does. The row is named by the Keeper, so the
+    press lands on the name the reader pointed at."""
+    wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    beta_row = screen_row_of(screen_rows(bytes(output)), b"beta")
+    if beta_row < 0:
+        raise AssertionError(
+            f"beta is not on the Keepers list: {screen_text(bytes(output))!r}"
+        )
+    press_label_on_screen(
+        process, master_fd, output, b"beta", row=beta_row,
+        needle=keeper_row_selected(b"beta"),
+    )
+    press_label_on_screen(
+        process, master_fd, output, b"beta", row=beta_row,
+        needle=re.compile(rb"Keepers \xe2\x96\xb8 (?:\x1b\[[0-9;]*m)*beta"),
+    )
+    os.write(master_fd, b"q")
+
+
 def wheel_scrolls_and_clicks_do_not(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -2582,10 +2611,16 @@ def wheel_scrolls_and_clicks_do_not(
         keeper_row_selected(b"alpha"),
     )
     # Click press and release must not leak into a key: after both, the next
-    # wheel-down still starts from alpha and lands on beta.
+    # wheel-down still starts from alpha and lands on beta. The click goes to
+    # the title, which names no place to go; a press on a row is the row's.
     read_available(master_fd, output)
-    os.write(master_fd, b"\x1b[<0;5;5M")
-    os.write(master_fd, b"\x1b[<0;5;5m")
+    title_row = screen_row_of(screen_rows(bytes(output)), b"MASC Keepers")
+    if title_row < 0:
+        raise AssertionError(
+            f"the Keepers title is not on screen: {screen_text(bytes(output))!r}"
+        )
+    os.write(master_fd, b"\x1b[<0;3;%dM" % title_row)
+    os.write(master_fd, b"\x1b[<0;3;%dm" % title_row)
     time.sleep(0.3)
     send_and_wait(
         process,
@@ -15877,6 +15912,12 @@ def run_keyboard_regression(executable: str) -> None:
         executable,
         description="pressing a tab opens it",
         interact=pressing_a_tab_opens_it,
+    )
+    run_terminal_scenario(
+        executable,
+        description="pressing a row chooses, then opens it",
+        interact=pressing_a_row_chooses_then_opens_it,
+        http_fixtures=compact_input_gate_http_fixtures(),
     )
     run_terminal_scenario(
         executable,

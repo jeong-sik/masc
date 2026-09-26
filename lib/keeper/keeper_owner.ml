@@ -1127,11 +1127,9 @@ let start
      to recheck live dispatch/rest dependencies while a retry is cooling.
      This observes evidence only; the store still enforces not_before unless
      an exact witness authorizes a durable release. *)
-  let rearm_cooling_retry_wake () =
-    match !cooling_wake_armed,
-      (Atomic.get t.operation_projection).next_runtime_retry_wake with
-    | true, _ | false, None -> ()
-    | false, Some not_before ->
+  let schedule_cooling_retry_wake ~delay =
+    if !cooling_wake_armed then ()
+    else
       (match Eio_context.get_clock_opt () with
        | None ->
          Log.Keeper.warn "keeper_owner: no clock to re-arm cooling retry wake keeper=%s" keeper_name
@@ -1140,9 +1138,7 @@ let start
          (try
             Eio.Fiber.fork_daemon ~sw (fun () ->
               (try
-                 Eio.Time.sleep clock
-                   (Float.min Env_config_keeper.KeeperKeepalive.sleep_chunk_sec
-                      (Float.max 0.0 (not_before -. t.now ())));
+                 Eio.Time.sleep clock delay;
                  cooling_wake_armed := false;
                  notify t Observe_runtime_retry_waits
                with
@@ -1158,6 +1154,20 @@ let start
             cooling_wake_armed := false;
             Log.Keeper.warn "keeper_owner: cooling retry wake not scheduled keeper=%s error=%s"
               keeper_name (Printexc.to_string exn)))
+  in
+  let rearm_cooling_retry_wake () =
+    match (Atomic.get t.operation_projection).next_runtime_retry_wake with
+    | None -> ()
+    | Some not_before ->
+      schedule_cooling_retry_wake
+        ~delay:(Float.min Env_config_keeper.KeeperKeepalive.sleep_chunk_sec
+          (Float.max 0.0 (not_before -. t.now ())))
+  in
+  let retry_cooling_observation () =
+    (* The cached deadline may already have passed, or a failed projection
+       may have lost it. A failed observation retains a positive retry wake
+       without interpreting either condition as dispatch permission. *)
+    schedule_cooling_retry_wake ~delay:Env_config_keeper.KeeperKeepalive.sleep_chunk_sec
   in
   (* A transient (non-throttle) failure defers with no cooling time: the
      continuation is immediately claimable again, but the Owner never polls
@@ -1847,14 +1857,20 @@ let start
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
         | Command (Observe_runtime_retry_waits, resolve) ->
-          let response = revalidate_retry_waits () in
+          let response =
+            let ( let* ) = Result.bind in
+            let* () = recover_operation_availability t in
+            revalidate_retry_waits () in
           (match response with
-           | Error _ -> ()
+           | Error _ -> retry_cooling_observation ()
            | Ok changed ->
-             let due = match (Atomic.get t.operation_projection).next_runtime_retry_wake with
+             let projection = Atomic.get t.operation_projection in
+             let due = match projection.next_runtime_retry_wake with
                | Some deadline -> deadline <= t.now ()
                | None -> false in
-             if changed || due then notify t Wake_operation_drain
+             (* Recovery can publish an already-claimable retry and remove its
+                expired deadline from the next-wake projection. *)
+             if changed || due || projection.has_claimable_queued then notify t Wake_operation_drain
              else rearm_cooling_retry_wake ());
           Eio.Promise.resolve resolve (Result.map (fun _ -> ()) response);
           loop state shutdown_operation_id
@@ -1877,7 +1893,7 @@ let start
              A failed refresh must not re-arm an expired cached deadline. *)
           (match response with
            | Ok () -> rearm_cooling_retry_wake ()
-           | Error _ -> ());
+           | Error _ -> retry_cooling_observation ());
           loop state shutdown_operation_id
         | Command (Begin_shutdown { operation_id }, resolve) ->
           (match shutdown_operation_id with

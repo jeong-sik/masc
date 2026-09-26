@@ -175,6 +175,8 @@ module For_testing : sig
 
   val fail_next_commit : commit_fault -> unit
   val clear_commit_fault : unit -> unit
+  val fail_next_runtime_retry_read : unit -> unit
+  val clear_runtime_retry_read_fault : unit -> unit
   val database_file : string
   val database_application_id : int64
   val table_column_counts : (string * int) list

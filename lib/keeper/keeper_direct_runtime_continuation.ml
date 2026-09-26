@@ -69,7 +69,7 @@ let restored_lane (retry : Semantic.runtime_retry) =
     ~next_runtime_id:retry.next_runtime_id ~later_runtime_ids:retry.later_runtime_ids
     ~failure:(Agent_core.Error.Internal "restored checkpointed direct runtime continuation")
 
-let rec retry_wait ~keeper_name ~dispatch_snapshot ~lane ~observed ~now =
+let rec retry_wait ~keeper_name ~dispatch_snapshot ~lane ~now ~observed =
   let current_snapshot = Runtime.keeper_dispatch_snapshot ~keeper_name in
   let dispatch_changed = not (Runtime.same_keeper_dispatch dispatch_snapshot current_snapshot)
     || not (String.equal (current_assignment keeper_name) lane.Keeper_turn_driver.assignment_id) in

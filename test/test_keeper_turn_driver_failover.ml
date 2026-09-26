@@ -3815,8 +3815,8 @@ let test_rate_limit_candidate_survives_unchanged_reload_only () =
 
 let test_direct_retry_owner_revalidates_recovery_and_reassignment () =
   let module Owner = Masc.Keeper_owner in
-  let module Operation = Masc.Keeper_chat_operation in
-  let module Semantic = Masc.Keeper_semantic_execution in
+  let module Operation = Keeper_chat_operation in
+  let module Semantic = Keeper_semantic_execution in
   let module Continuation = Masc.Keeper_direct_runtime_continuation in
   let ok = function Ok value -> value | Error error -> Alcotest.fail (Owner.error_to_string error) in
   let string_ok = function Ok value -> value | Error error -> Alcotest.fail error in
@@ -3828,15 +3828,15 @@ let test_direct_retry_owner_revalidates_recovery_and_reassignment () =
       reset_quota_lane_rests ();
       Fun.protect ~finally:reset_quota_lane_rests (fun () ->
       Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
-      Masc.Eio_context.with_test_env ~sw ~net:env#net ~clock:env#clock
+      Eio_context.with_test_env ~sw ~net:env#net ~clock:env#clock
         ~mono_clock:env#mono_clock @@ fun () ->
       let now () = Unix.gettimeofday () in
       let ready = ref false in
       let resumed, resolve_resumed = Eio.Promise.create () in
       let owner_p, resolve_owner = Eio.Promise.create () in
       let operation_id = Operation.Operation_id.of_string "direct-wait-owned-operation" |> string_ok in
-      let checkpoint = Masc.Keeper_checkpoint_ref.create
-        ~trace_id:(Masc.Keeper_id.Trace_id.of_string "direct-wait-trace" |> string_ok)
+      let checkpoint = Keeper_checkpoint_ref.create
+        ~trace_id:(Keeper_id.Trace_id.of_string "direct-wait-trace" |> string_ok)
         ~turn_count:3 ~canonical_checkpoint_bytes:"original input and completed effects"
         |> Result.get_ok in
       let runner : Owner.operation_runner =
@@ -3846,7 +3846,7 @@ let test_direct_retry_owner_revalidates_recovery_and_reassignment () =
             let operation = claim () |> ok |> Option.get in
             let observed = Owner.direct_runtime_retry owner ~operation_id |> ok |> Option.get in
             Alcotest.(check bool) "checkpoint and completed effects retained" true
-              (Masc.Keeper_checkpoint_ref.equal checkpoint observed.checkpoint);
+              (Keeper_checkpoint_ref.equal checkpoint observed.checkpoint);
             Alcotest.(check string) "current candidate dispatch"
               (if reassign then "other.test_model" else "shared_a.test_model") observed.next_runtime_id;
             Owner.resume_direct_runtime_retry owner ~operation_id ~observed |> ok;
@@ -3905,7 +3905,7 @@ let test_direct_retry_owner_revalidates_recovery_and_reassignment () =
 
 let test_direct_retry_retains_turn_entry_dispatch_witness () =
   let module Owner = Masc.Keeper_owner in
-  let module Semantic = Masc.Keeper_semantic_execution in
+  let module Semantic = Keeper_semantic_execution in
   let keeper_name = "direct-wait-inflight" in
   let config candidates = runtime_toml_quota_lane_with_shared_credential
     ~candidate_ids:candidates "SHARED_QUOTA_TEST_KEY"
@@ -3914,8 +3914,8 @@ let test_direct_retry_retains_turn_entry_dispatch_witness () =
     reset_quota_lane_rests ();
     Fun.protect ~finally:reset_quota_lane_rests (fun () ->
       let snapshot = Runtime.keeper_dispatch_snapshot ~keeper_name in
-      let checkpoint = Masc.Keeper_checkpoint_ref.create
-        ~trace_id:(Masc.Keeper_id.Trace_id.of_string "inflight-retry-trace" |> Result.get_ok)
+      let checkpoint = Keeper_checkpoint_ref.create
+        ~trace_id:(Keeper_id.Trace_id.of_string "inflight-retry-trace" |> Result.get_ok)
         ~turn_count:1 ~canonical_checkpoint_bytes:"owned effects" |> Result.get_ok in
       let lane = Driver.restore_deferred_runtime_lane ~assignment_id:"quota_lane"
         ~failed_runtime_id:"shared_a.test_model" ~next_runtime_id:"shared_a.test_model"
@@ -3941,8 +3941,8 @@ let test_direct_retry_retains_turn_entry_dispatch_witness () =
          | Ok (Owner.Update_retry_wait _) | Error _ -> Alcotest.fail "unchanged replacement must not extend its deadline")
       | Ok Owner.Keep_retry_wait | Error _ -> Alcotest.fail "turn-entry witness lost same-name lane change"));
   with_runtime_config (config ["shared_a.test_model"; "other.test_model"]) (fun () ->
-    let checkpoint = Masc.Keeper_checkpoint_ref.create
-      ~trace_id:(Masc.Keeper_id.Trace_id.of_string "restart-retry-trace" |> Result.get_ok)
+    let checkpoint = Keeper_checkpoint_ref.create
+      ~trace_id:(Keeper_id.Trace_id.of_string "restart-retry-trace" |> Result.get_ok)
       ~turn_count:1 ~canonical_checkpoint_bytes:"owned effects" |> Result.get_ok in
     let retry = Semantic.runtime_retry ~not_before:(Some 100.) ~checkpoint
       ~assignment_id:"quota_lane" ~failed_runtime_id:"shared_a.test_model"

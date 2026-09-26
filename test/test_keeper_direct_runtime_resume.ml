@@ -165,6 +165,7 @@ is-default = true
         check bool "reloading before consume does not duplicate continuation input" true
           ((Continuation.checkpoint again).messages =
            (Continuation.checkpoint (Option.get admission)).messages));
+      let dispatch_snapshot = Runtime.keeper_dispatch_snapshot ~keeper_name in
       let context = Agent_core.Context.create_sync () in
       let scope = Keeper_execution_scope_id.direct_operation operation_id in
       let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
@@ -192,7 +193,7 @@ is-default = true
       match result, !deferred with
       | Error _, Some lane ->
         check bool "only the original attempt may defer" false resume;
-        Continuation.defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id lane
+        Continuation.defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~dispatch_snapshot lane
           |> require "durable direct deferral";
         ready := false;
         Server_routes_http_keeper_stream.For_testing.operation_execution_of_outcome
@@ -419,6 +420,7 @@ is-default = true
       let admission = Continuation.load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id
         |> require "load continuation" in
       check bool "restart restores the pending continuation" resume (Option.is_some admission);
+      let dispatch_snapshot = Runtime.keeper_dispatch_snapshot ~keeper_name in
       let context = Agent_core.Context.create_sync () in
       let scope = Keeper_execution_scope_id.direct_operation operation_id in
       let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
@@ -464,7 +466,7 @@ is-default = true
       | Error _, Some lane ->
         check bool "only the original attempt defers" false resume;
         deferred_lanes := lane :: !deferred_lanes;
-        Continuation.defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id lane
+        Continuation.defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~dispatch_snapshot lane
           |> require "durable same-path deferral";
         ready := false;
         outcome_execution (Server_routes_http_keeper_stream.Delivered {outcome_ref="same-path-retry"}) (Ok ())

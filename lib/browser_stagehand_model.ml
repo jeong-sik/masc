@@ -306,7 +306,7 @@ let rec required_shape_issue ~at schema output =
       | Some (`String "number"), (`Int _ | `Intlit _ | `Float _)
       | Some (`String "null"), `Null -> true
       | Some (`String ("object" | "array" | "string" | "boolean" | "integer" | "number" | "null")), _ -> false
-      | Some _ | None -> true
+      | (Some _ | None), _ -> true
     in
     if not type_matches
     then Some (Incompatible_required_shape at)

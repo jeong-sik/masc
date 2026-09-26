@@ -1,0 +1,108 @@
+Original sample lines 1-24:
+Analysis of sampling masc (pid 71857) every 1 millisecond
+Process:         masc [71857]
+Path:            /Users/USER/*/masc
+Load Address:    0x104c70000
+Identifier:      masc
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  zsh [31960]
+Target Type:     live task
+
+Date/Time:       2026-09-26 19:53:20.067 +0900
+Launch Time:     2026-09-26 19:25:37.517 +0900
+OS Version:      macOS 26.6.1 (25G76)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         4.0G
+Physical footprint (peak):  5.5G
+Idle exit:                  untracked
+----
+
+Call graph:
+    2051 Thread_208805224   DispatchQueue_1: com.apple.main-thread  (serial)
+
+Original sample lines 25-61:
+    + 1983 start  (in dyld) + 6992  [0x184d184e4]
+    + ! 1983 main  (in masc) + 16  [0x1065f4054]
+    + !   1983 caml_main  (in masc) + 16  [0x10660bf84]
+    + !     1983 caml_startup_common  (in masc) + 280  [0x10660bf20]
+    + !       1177 camlIomux__Poll$poll_689  (in masc) + 56  [0x10627d6b8]
+    + !       : 1177 caml_c_call  (in masc) + 52  [0x10660ca98]
+    + !       :   1171 caml_iomux_poll  (in masc) + 136  [0x1065bcac8]
+    + !       :   | 1171 poll  (in libsystem_kernel.dylib) + 8  [0x1850a86f8]
+    + !       :   5 caml_iomux_poll  (in masc) + 144  [0x1065bcad0]
+    + !       :   | 4 caml_leave_blocking_section  (in masc) + 32  [0x106604640]
+    + !       :   | + 4 caml_thread_leave_blocking_section  (in masc) + 144  [0x1065cd9e8]
+    + !       :   | +   4 caml_acquire_domain_lock  (in masc) + 40  [0x1065e17ac]
+    + !       :   | +     4 _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib) + 216  [0x1850de8e0]
+    + !       :   | +       4 _pthread_mutex_firstfit_lock_wait  (in libsystem_pthread.dylib) + 84  [0x1850e0e9c]
+    + !       :   | +         4 __psynch_mutexwait  (in libsystem_kernel.dylib) + 8  [0x1850a29dc]
+    + !       :   | 1 caml_leave_blocking_section  (in masc) + 16  [0x106604630]
+    + !       :   |   1 DYLD-STUB$$__error  (in masc) + 0  [0x10660e824]
+    + !       :   1 caml_iomux_poll  (in masc) + 120  [0x1065bcab8]
+    + !       :     1 caml_enter_blocking_section  (in masc) + 96  [0x1066045e4]
+    + !       :       1 caml_thread_enter_blocking_section  (in masc) + 92  [0x1065cd948]
+    + !       :         1 pthread_cond_signal  (in libsystem_pthread.dylib) + 708  [0x1850e2f88]
+    + !       :           1 __psynch_cvsignal  (in libsystem_kernel.dylib) + 8  [0x1850a4a64]
+    + !       794 camlStdlib__Fun$protect_332  (in masc) + 108  [0x1065336ac]
+    + !       : 309 camlYojson__Safe$__ocaml_lex_finish_string_rec_1798  (in masc) + 76  [0x1064b5704]
+    + !       : | 304 caml_c_call  (in masc) + 52  [0x10660ca98]
+    + !       : | + 304 caml_lex_engine  (in masc) + 196,240,...  [0x1065f33b0,0x1065f33dc,...]
+    + !       : | 3 caml_c_call  (in masc) + 44,8  [0x10660ca90,0x10660ca6c]
+    + !       : | 2 ???  (in <unknown binary>)  [0xc6524fcb0]
+    + !       : |   2 ???  (in <unknown binary>)  [0xc6524faf0]
+    + !       : |     2 caml_c_call  (in masc) + 52  [0x10660ca98]
+    + !       : |       2 caml_lex_engine  (in masc) + 0  [0x1065f32ec]
+    + !       : 174 camlSafe_ops$loop_1340  (in masc) + 96  [0x106340498]
+    + !       : | 99 camlStdlib__Bytes$get_utf_8_uchar_1071  (in masc) + 32,1536,...  [0x1064f4bc8,0x1064f51a8,...]
+    + !       : | 75 camlSafe_ops$loop_1340  (in masc) + 28,116,...  [0x106340454,0x1063404ac,...]
+    + !       : 68 camlStdlib__Hashtbl$key_index_1431  (in masc) + 80  [0x1065400b0]
+    + !       : | 68 caml_hash  (in masc) + 1088,1060,...  [0x1065ec0fc,0x1065ec0e0,...]
+    + !       : 57 camlYojson__Safe$__ocaml_lex_finish_string_rec_1798  (in masc) + 300  [0x1064b57e4]
+
+Original sample lines 291-302:
+    + !       : | 2 camlMasc__Verification$load_request_2520  (in masc) + 108  [0x1053f7f1c]
+    + !       : | + 2 camlMasc__Verification$request_of_yojson_1749  (in masc) + 184  [0x1053f7040]
+    + !       : | +   1 camlWorkspace_verification_store$fun_3905  (in masc) + 116  [0x105e69e94]
+    + !       : | +   ! 1 camlWorkspace_verification_store$fun_3905  (in masc) + 116  [0x105e69e94]
+    + !       : | +   !   1 camlWorkspace_verification_store$required_string_1568  (in masc) + 24  [0x105e69b40]
+    + !       : | +   1 camlWorkspace_verification_store$fun_3942  (in masc) + 116  [0x105e69f54]
+    + !       : | +     1 camlWorkspace_verification_store$required_field_1564  (in masc) + 40  [0x105e69a38]
+    + !       : | +       1 camlWorkspace_verification_store$required_field_1564  (in masc) + 172  [0x105e69abc]
+    + !       : | 1 camlMasc__Verification$load_request_2520  (in masc) + 104  [0x1053f7f18]
+    + !       : |   1 camlSafe_ops$read_json_eio_1790  (in masc) + 60  [0x10634122c]
+    + !       : |     1 camlSafe_ops$parse_json_safe_1367  (in masc) + 0  [0x106340808]
+    + !       : 3 camlStdlib__Hashtbl$mem_in_bucket_1542  (in masc) + 80  [0x106540ef8]
+
+Original sample lines 6031-6057:
+Sort by top of stack, same collapsed (when >= 5):
+        __psynch_cvwait  (in libsystem_kernel.dylib)        33923
+        __semwait_signal  (in libsystem_kernel.dylib)        30726
+        poll  (in libsystem_kernel.dylib)        27789
+        __psynch_mutexwait  (in libsystem_kernel.dylib)        1260
+        caml_lex_engine  (in masc)        857
+        camlYojson__Safe$write_string_body_712  (in masc)        389
+        caml_try_run_on_all_domains_with_spin_work  (in masc)        145
+        major_collection_slice  (in masc)        139
+        do_some_marking  (in masc)        137
+        _platform_memmove  (in libsystem_platform.dylib)        124
+        sha256_do_chunk  (in masc)        119
+        camlStdlib__Bytes$get_utf_8_uchar_1071  (in masc)        113
+        pool_sweep  (in masc)        100
+        read  (in libsystem_kernel.dylib)        95
+        caml_hash  (in masc)        93
+        camlSafe_ops$loop_1340  (in masc)        84
+        md5_do_chunk  (in masc)        73
+        __open  (in libsystem_kernel.dylib)        66
+        caml_sweep  (in masc)        64
+        _tlv_get_addr  (in libdyld.dylib)        63
+        __getdirentries64  (in libsystem_kernel.dylib)        61
+        caml_gc_log  (in masc)        59
+        caml_c_call  (in masc)        58
+        camlStdlib__Buffer$add_char_510  (in masc)        46
+        camlDated_jsonl$loop_1898  (in masc)        44
+        nanosleep  (in libsystem_c.dylib)        39
+

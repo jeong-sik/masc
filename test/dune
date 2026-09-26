@@ -7142,6 +7142,8 @@
 
 (include stanzas/test_tui_keeper_current_failure_pty.inc)
 
+(include stanzas/test_safe_ops_read_json_eio.inc)
+
 (include stanzas/test_exact_output_runtime_reasoning.inc)
 (include stanzas/test_runtime_exact_lane_backpressure.inc)
 

@@ -137,7 +137,10 @@ val report_persistence_read_drop_counted :
 
 val read_json_eio : string -> Yojson.Safe.t
 (** Read JSON file via Eio-native I/O (Fs_compat).
-    Drop-in replacement for [Yojson.Safe.from_file] in Eio fiber contexts. *)
+    Large documents use {!parse_json_off_fiber}, as {!read_json_file_safe} does,
+    so parsing leaves the calling scheduler available. Invalid UTF-8 repair and
+    the logged empty-object result on malformed JSON are unchanged; file I/O
+    errors and cancellation propagate. *)
 
 val list_dir_safe : string -> (string list, string) result
 (** List files in directory safely. *)

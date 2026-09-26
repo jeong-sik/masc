@@ -114,6 +114,7 @@ type reader =
   | Preflight_only of scan
 
 val reader : Id.t -> reader            (* exhaustive, 표는 여기 하나 *)
+val preflight_scan : Id.t -> scan option  (* Degrade_typed 는 None *)
 val name : Id.t -> string
 val run : scan -> base_path:string -> (report, string) result
 ```
@@ -162,7 +163,7 @@ preflight 의 `scan` 과 `on_refusal` 문구는 `Keeper_durable_store` 로 옮�
 
 ## 4. 단계
 
-- **PR-1 목록**: `Keeper_durable_store`(`Id`, `Refusing`, `Reported`, `reader`, `name`, `run`, `on_refusal`)와 `Keeper_durable_store_scan`(store 별 읽는 법, preflight 에서 옮김, 라이브러리 private). preflight 와 부팅 reconcile 이 이 목록을 쓴다. 부팅과 preflight 의 동작은 바뀌지 않는다. 판정 1·2·3.
+- **PR-1 목록**: `Keeper_durable_store`(`Id`, `Refusing`, `Reported`, `reader`, `preflight_scan`, `name`, `run`, `on_refusal`). store 별 읽는 법은 preflight 에서 이 모듈로 옮기고 내보내지 않는다. `reader` 가 더는 가리키지 않는 읽는 법은 unused 경고로 빌드가 멈춘다. preflight 와 부팅 reconcile 이 이 목록을 쓴다. 부팅과 preflight 의 동작은 바뀌지 않는다. 판정 1·2·3.
 - **PR-2 세션**: official-client session 을 `Refuse_boot` 로 올리고, 잠금을 잡고 옮기는 방법을 더한다. 판정 4.
 - **PR-3 턴을 멈추는 나머지**: 체크포인트, event queue(스냅숏+WAL), World constitution 을 목록에 넣고 `Refuse_boot` 로 둔다. 판정 5.
 - **PR-4 읽는 함수가 없는 store**: board comments, memory-journal(#38596). (c) 부터 조사한다.

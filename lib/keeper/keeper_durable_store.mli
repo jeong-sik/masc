@@ -1,18 +1,21 @@
-(** Every durable store this build decodes, in one list, with the boot policy
-    each one gets.
+(** The durable stores the deploy preflight's [validate-stores] and boot
+    reconcile read, in one list, with the boot policy each one gets.
 
-    The deploy preflight ([deployment_preflight_helper validate-stores]) and
-    boot ({!Keeper_store_boot_reconcile}) both read this list; neither keeps
-    its own. {!Id.all} is derived, so a store cannot be in the list for one
-    reader and missing for the other.
+    Both readers take their stores from {!Id.all}, which is derived, so a
+    store cannot be in the list for one and missing for the other. The
+    helper's other subcommands ([validate-current-meta], the event queue,
+    schedule ledger and signals) still find their own files; RFC
+    every-durable-store-has-one-boot-policy moves them here in later steps.
 
     {!reader} is the one table. It sends each store to one of three policies
     (RFC every-durable-store-has-one-boot-policy, RFC-0420, RFC-0444 §2.4):
     - [Refuse_boot]: boot decodes every file before any keeper loop starts
       and refuses to start while one is undecodable, unless the operator
-      passes [--accept-store-quarantine]. A store is here when a writer would
-      overwrite what it could not read, or when its keeper cannot take a turn
-      while the file is unreadable. The deploy preflight reads it too.
+      passes [--accept-store-quarantine]. Keeper meta and memory current are
+      here: without them a keeper starts as another keeper or with empty
+      memory, and overwrites what it lost. The official-client session
+      binding is here too: while it does not decode, every turn of its
+      keeper fails. The deploy preflight reads them too.
     - [Degrade_typed]: boot decodes it once and logs one INFO line when it is
       unavailable. Keepers run without it and nothing overwrites it, so the
       deploy preflight does not read it (the goal store).
@@ -29,10 +32,10 @@
 module Id : sig
   type t =
     | Keeper_meta
-    | Memory_current
-    | Goal_store
     | Gate_pending
     | Official_client_session
+    | Memory_current
+    | Goal_store
     | Librarian_range_receipts
     | Memory_source_current
     | Disposition_receipts
@@ -45,7 +48,6 @@ module Id : sig
     | Turn_fragments
     | Memory_absorbed
     | Memory_os_events
-
   val all : t list
   (** Every constructor in declaration order, derived by
       [\[@@deriving enumerate\]]. *)
@@ -85,6 +87,10 @@ val reader : Id.t -> reader
 
 val name : Id.t -> string
 (** The name the preflight prints, e.g. ["board posts"]. *)
+
+val preflight_scan : Id.t -> scan option
+(** What the deploy preflight reads: the scan of every [Refuse_boot] and
+    [Preflight_only] store, and [None] for a [Degrade_typed] one. *)
 
 val run : scan -> base_path:string -> (report, string) result
 (** Decode every file or row of the store under [base_path] with this

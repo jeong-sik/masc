@@ -683,19 +683,16 @@ let tool_blob_maintenance_cmd =
          $ delete_previous_candidates))
 ;;
 
-(* Every store boot refuses on and every store only the preflight reads: a
-   deploy is where the operator watches, so any file or row this build cannot
-   read stops it. A [Degrade_typed] store has no scan (RFC-0444: keepers run
-   without it), so it never stops a deploy. *)
+(* Every store [Keeper_durable_store.preflight_scan] names: a deploy is where
+   the operator watches, so any file or row this build cannot read stops it. *)
 let validate_stores base_path =
   let module D = Masc.Keeper_durable_store in
   let reports =
     List.filter_map
       (fun id ->
-         match D.reader id with
-         | D.Refuse_boot (_, scan) | D.Preflight_only scan ->
-           Some (D.name id, D.on_refusal scan, D.run scan ~base_path)
-         | D.Degrade_typed _ -> None)
+         Option.map
+           (fun scan -> D.name id, D.on_refusal scan, D.run scan ~base_path)
+           (D.preflight_scan id))
       D.Id.all
   in
   List.iter

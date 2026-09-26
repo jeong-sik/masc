@@ -4,7 +4,6 @@
  (flags :standard)
  (public_name masc)
  (private_modules
-  keeper_durable_store_scan
   keeper_fs_durable_directory
   keeper_runtime_trust_snapshot_core)
  (libraries

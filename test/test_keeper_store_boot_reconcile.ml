@@ -435,7 +435,17 @@ let test_every_boot_store_has_exactly_one_id () =
     (List.sort compare reported = List.sort compare D.Reported.all);
   let names = List.map D.name D.Id.all in
   check int "names are distinct" (List.length names)
-    (List.length (List.sort_uniq String.compare names))
+    (List.length (List.sort_uniq String.compare names));
+  List.iter
+    (fun id ->
+       let read_by_preflight = Option.is_some (D.preflight_scan id) in
+       match D.reader id with
+       | D.Refuse_boot _ | D.Preflight_only _ ->
+         check bool (D.name id ^ ": the deploy preflight reads it") true read_by_preflight
+       | D.Degrade_typed _ ->
+         check bool (D.name id ^ ": the deploy preflight leaves it to boot") false
+           read_by_preflight)
+    D.Id.all
 ;;
 
 (* 2026-09-26: a binding written before the official-client session schema

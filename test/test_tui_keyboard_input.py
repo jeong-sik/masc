@@ -2064,6 +2064,7 @@ def run_terminal_scenario(
     confirm_exit: bytes = b"q",
     refresh: float = 60.0,
     terminal_cols: int = 100,
+    workspace: str = WORKSPACE_PAYLOAD,
     http_fixtures: HttpFixtures | None = None,
     http_requests: HttpRequests | None = None,
     prepare_workspace: WorkspaceSetup | None = None,
@@ -2164,7 +2165,7 @@ def run_terminal_scenario(
                         "--base-path",
                         base_path,
                         "--workspace",
-                        WORKSPACE_PAYLOAD,
+                        workspace,
                         "--port",
                         str(server_port),
                         "--refresh",
@@ -14188,10 +14189,11 @@ def run_http_badge_refresh_regression(executable: str) -> None:
         os.write(master_fd, b"q")
 
     try:
+        # The shared injection workspace pushes the badge out of this header.
         run_terminal_scenario(
             executable, description="HTTP badge refresh timing",
             interact=interact, refresh=0.5, terminal_cols=140,
-            http_fixtures=fixtures,
+            workspace="badge-fixture", http_fixtures=fixtures,
         )
     finally:
         release_slow.set()

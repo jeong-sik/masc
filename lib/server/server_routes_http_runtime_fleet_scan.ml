@@ -120,7 +120,11 @@ let running_keeper_names ?base_path () =
 let durable_paused_keeper_scan config =
   (* NDT-OK: HTTP health snapshots report wall-clock pause age; state transitions remain ledger-driven. *)
   let now = Unix.gettimeofday () in
-  Keeper_meta_store.keeper_names config
+  (match Keeper_meta_store.keeper_names_result config with
+   | Ok names -> names
+   | Error detail ->
+     Log.Keeper.warn "durable_paused_keeper_scan: keeper names unread: %s" detail;
+     [])
   |> List.fold_left
        (fun acc name ->
          match Keeper_meta_store.read_meta config name with
@@ -238,7 +242,13 @@ let keeper_fleet_meta_scan ?profile_snapshot ?(include_paused_details = true) co
   let now = Unix.gettimeofday () in
   let configured_names = configured_keeper_names ?profile_snapshot config in
   let all_names =
-    sorted_unique_strings (configured_names @ Keeper_meta_store.keeper_names config)
+    sorted_unique_strings
+      (configured_names
+       @ (match Keeper_meta_store.keeper_names_result config with
+          | Ok names -> names
+          | Error detail ->
+            Log.Keeper.warn "keeper_fleet_meta_scan: keeper names unread: %s" detail;
+            []))
   in
   let is_configured name = List.exists (String.equal name) configured_names in
   let should_count_autoboot_target name = is_configured name in
@@ -1037,7 +1047,10 @@ let keeper_names_for_agent admitted_keeper_names assignee =
   List.filter (String.equal assignee) admitted_keeper_names
 
 let is_credentialed_external_client config assignee =
-  (not (List.mem assignee (Keeper_meta_store.keeper_names config)))
+  (* With no Keeper list, "not a Keeper" is not a fact this scan has. *)
+  (match Keeper_meta_store.keeper_names_result config with
+   | Ok names -> not (List.mem assignee names)
+   | Error _ -> false)
   &&
   match Auth.load_credential config.Workspace_utils_backend_setup.base_path assignee with
   | Some _ -> true

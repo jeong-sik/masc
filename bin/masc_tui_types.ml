@@ -2138,6 +2138,10 @@ type overview_keeper = {
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
+  ov_keeper_listing: Masc.Keeper_snapshot_unread.listing;
+      (** The briefing's [keepers_listing]. [Unreadable] means the server
+          could not list the Keeper directory, so [ov_keepers] counts nothing
+          it read rather than an empty fleet (#38120). *)
   ov_keeper_liveness: keeper_liveness_counts;
   ov_keeper_rows: overview_keeper list;
       (** Every [keeper_briefs] row with a name, in the briefing's order. *)

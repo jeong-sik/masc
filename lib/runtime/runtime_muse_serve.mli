@@ -13,12 +13,20 @@
 
 type config =
   { cli_path : string
+  ; account_home : string option
+    (** [Some absolute_path] selects this process's HOME and XDG config,
+        data, cache, state and runtime roots. Ambient XDG roots are discarded.
+        [None] uses the caller's home environment. No settings or credentials
+        are copied or changed. This selects file-backed state, not a separate
+        macOS Keychain identity, and does not confine filesystem access. *)
   ; model : string option
     (** [session/start]'s [modelId]. [None] takes the host's default. *)
   ; native : Runtime_native_tools.posture
     (** Built-in tool posture (RFC-0390), sent as the session's approval
         mode. [Native_full] selects [allowAll]. [Native_read] selects
-        [denyUnmatched]: the host's own configured rules decide what runs,
+        [denyUnmatched] and passes [--disable-write --disable-shell] to the
+        host: native writes and shell execution are disabled independently
+        of the selected home's rules. For the remaining tools those rules decide what runs,
         and anything they do not allow is denied instead of waiting for an
         answer. MSP has no switch that removes the built-in tools, so
         [Native_none] fails as config. *)
@@ -80,6 +88,9 @@ type error =
   | Capability_not_granted of Runtime_muse_msp.capability
       (** The session needed a capability the host did not grant, such as
           [sessionMcp] for MASC's tool bridge. *)
+  | Session_not_durable
+      (** The host declared ephemeral sessions. Refused at initialization,
+          before starting or resuming a session or sending a model turn. *)
   | Session_model_mismatch of
       { requested : string
       ; resumed : string option

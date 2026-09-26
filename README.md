@@ -423,6 +423,8 @@ What a Keeper needs before its first turn runs:
   in. On the TUI path, export it before launching, because the server the TUI
   starts inherits the TUI's environment. CLI providers require their CLI installation
   and login instead; local model servers follow their configured authentication.
+  Claude Code, Codex, Antigravity and Muse Code account selection and the Muse
+  runtime template are documented in [Configuration](docs/spec/14-configuration.md#official-client-accounts-and-muse-code).
 
 Two approval lanes gate what a Keeper does. The workspace lane starts in
 `auto_judge`: a model reads each gated call and decides. That judgement runs

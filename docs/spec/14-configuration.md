@@ -52,6 +52,80 @@ Runtime declarations describe capabilities reported by agent core, including tex
 tool use, reasoning/thinking, multi-turn, image/audio/voice, streaming, and
 structured output. MASC must not guess these features from model-name strings.
 
+### Official-client accounts and Muse Code
+
+Claude Code, Codex, Antigravity and Muse Code own their model/tool loops. MASC
+owns Keeper routing, durable session bindings, attached MASC tools and process
+lifetime. Select the account used by the server process; a browser login on a
+separate machine does not select that account.
+
+| Client | Provider protocol | Account selection |
+|---|---|---|
+| Claude Code | `claude-code` | `account-home` selects `CLAUDE_CONFIG_DIR` |
+| Codex | `codex-app-server` | `account-home` selects `CODEX_HOME` |
+| Antigravity | `antigravity-cli` | A file credential selects the OAuth source; MASC seeds a separate managed HOME |
+| Muse Code | `muse-serve` | Required `account-home` selects the process HOME and native session/data roots; MASC supplies a managed configuration directory |
+
+For Muse, inspect the installation actions with
+`masc prerequisite-actions muse-code`, and install with
+`masc prerequisite-actions muse-code --execute muse_native_install`. Then sign in to the chosen account HOME using the vendor's sign-in flow. The
+selected HOME must contain the file-backed `.config/muse/auth.json` produced by
+that flow. MASC imports authentication into a managed generation and preserves
+vendor refreshes there; a changed source authentication file creates a new
+session generation. This does not establish a separate macOS Keychain identity.
+Source hooks, plugins and permission settings are not imported into the managed
+configuration.
+
+This template belongs in the selected base path's `.masc/config/runtime.toml`.
+Replace both uppercase placeholders with the selected vendor model's actual ID
+and documented context window before loading it. `max-prompt-bytes` is an
+operator input budget, not a measured model token limit. No runtime is assigned
+merely by adding a provider and binding.
+
+```toml
+[providers.muse_personal]
+protocol = "muse-serve"
+command = "muse"
+account-home = "/absolute/path/to/muse-account"
+is-non-interactive = true
+
+[models.muse_selected]
+api-name = "VENDOR_MODEL_ID"
+max-context = CONTEXT_WINDOW_TOKENS
+max-prompt-bytes = 1048576
+tools-support = true
+streaming = true
+
+[muse_personal.muse_selected]
+
+# Add this entry to the existing assignments table after validating the account.
+# [runtime.assignments]
+# my_keeper = "muse_personal.muse_selected"
+```
+
+Muse native posture is declared under `[keeper.tools]` in the Keeper TOML:
+`native = "read"` uses managed read policy and disables native writes and shell;
+`native = "full"` requires the Keeper's `yolo` tool-approval mode and enables
+native effects under the managed vendor policy. `native = "none"` is refused:
+MSP cannot remove all built-in tools. Native effects do not pass through MASC's
+tool approval gate. A native working directory is not a filesystem confinement
+boundary; read posture does not establish that files outside it are unreadable.
+
+For a Docker Keeper, native tools use the host directory mounted as its Keeper
+workspace. They still run in the official client's host execution environment.
+For an endpoint-owned microVM or SSH workspace, Muse uses a separate persistent
+host directory and receives an explicit context note; use MASC tools for the
+endpoint's actual files. This is not a claim that native execution moved into
+the Keeper's guest.
+
+Muse can carry text and declared image inputs, stream replies, call attached MASC
+tools and resume a settled Keeper session. MSP has no output-schema channel:
+Muse entries in exact-output lanes are rejected, and schema-constrained Fusion
+calls are refused before spawn. Login probes remain unsupported. A successful
+CLI start or metadata response is not evidence of an authenticated model turn;
+actual completion and tool-call evidence must come from a run using the selected
+account.
+
 ## 4. Gate modes
 
 Gate configuration is deliberately small:

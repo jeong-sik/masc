@@ -27,7 +27,7 @@ let configured_runtime_ids (config : Runtime_schema.config) provider_id =
     then Some (`String (Runtime_schema.binding_key binding)) else None)
 ;;
 
-let integration_json config ~id ~display_name ~protocol ~origin ~supported fields =
+let integration_json config ~id ~display_name ~protocol ~origin ~supported ~verification_supported fields =
   let configured = configured_runtime_ids config id in
   let setup_support =
     if not supported then Unsupported
@@ -40,7 +40,7 @@ let integration_json config ~id ~display_name ~protocol ~origin ~supported field
      ; "origin", `String origin
      ; "configured_runtime_ids", `List configured
      ; "setup_support", setup_support_json setup_support
-     ; "verification_support", `String (if supported then "response_tool" else "unsupported")
+     ; "verification_support", `String (if verification_supported then "response_tool" else "unsupported")
      ; "account_availability_verified", `Bool false
      ] @ fields)
 ;;
@@ -85,6 +85,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
       let credential = credential_fields ~include_credential_references provider.credentials in
       integration_json config ~id:provider.id ~display_name:provider.display_name
         ~protocol:(Some provider.protocol) ~origin:"runtime_config" ~supported
+        ~verification_supported:true
         (fields @ credential @ account_fields ~include_credential_references provider.account_home @ http_fields provider @ [ "enabled", `Bool provider.enabled ])) config.providers
   in
   let declared id =
@@ -107,7 +108,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
       in
       let supported = protocol <> None && task = None in
       Some (integration_json config ~id:entry.id ~display_name:entry.id ~protocol
-        ~origin:"agent_core_catalog" ~supported
+        ~origin:"agent_core_catalog" ~supported ~verification_supported:supported
         (endpoint_fields entry.base_url
          @ [ "request_path", `String entry.request_path
            ; "api_key_env", `String entry.api_key_env
@@ -130,7 +131,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
       if declared id || List.exists (fun (entry : Catalog_binding.t) -> entry.id = id) catalog
       then None else
       Some (integration_json config ~id ~display_name ~protocol:(Some protocol)
-        ~origin:"masc_integration" ~supported
+        ~origin:"masc_integration" ~supported ~verification_supported:supported
         (match command with None -> [] | Some command -> [ "command", `String command ])))
   in
   `List (configured @ prototypes @ clients)

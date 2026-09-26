@@ -37,6 +37,8 @@ if args[0]=='runtime-muse-models':
       'models':[{'id':'reported-muse','label':'Reported Muse','context':8192}]}))
     sys.exit(0)
 if args[0]=='runtime-codex-models':
+    with open(os.path.join(os.path.dirname(__file__),'codex-args.json'),'w') as f:
+        json.dump(args,f)
     print(json.dumps({'schema':'masc.codex_model_refresh.v1','models':[{'id':'fresh-model','label':'Fresh model','context':272000}], 'credential_file':'/private/not-for-browser'}))
     sys.exit(0)
 assert args[1]=='--base-path'
@@ -89,6 +91,57 @@ let test_native_client_metadata () = fixture (fun base _runtime binary net ->
     let model=json |> member "models" |> to_list |> List.hd in
     Alcotest.check Alcotest.int "fresh client context retained" 272000 (model |> member "context" |> to_int);
     Alcotest.check Alcotest.bool "child private field not projected" true (json |> member "credential_file" = `Null)))
+let test_configured_codex_account_discovery () = fixture (fun base runtime binary net ->
+  let account_home = Filename.concat base "private-selected-codex" in
+  Unix.mkdir account_home 0o700;
+  Out_channel.with_open_gen [Open_append;Open_binary] 0o600 runtime (fun channel ->
+    output_string channel (Printf.sprintf
+      "\n[providers.private_codex]\nprotocol = \"codex-app-server\"\ncommand = \"selected-codex\"\naccount-home = %S\n"
+      account_home));
+  let public = Runtime_toml.parse_file runtime |> Result.get_ok |> Runtime_wizard_inventory.to_json in
+  Alcotest.check Alcotest.bool "public inventory keeps the account path private" false
+    (String_util.contains_substring (Yojson.Safe.to_string public) account_home);
+  Eio.Switch.run (fun sw ->
+    let request = `Assoc ["integration_id",`String "private_codex"] in
+    let result = get (Actions.discover ~binary ~sw ~net ~base_path:base request) in
+    let args = Yojson.Safe.from_file (Filename.concat base "codex-args.json")
+      |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string in
+    Alcotest.check (Alcotest.list Alcotest.string) "configured selected account reaches native discovery"
+      ["runtime-codex-models";"--cli-path";"selected-codex";"--account-home";account_home] args;
+    Alcotest.check Alcotest.bool "discovery response does not leak the selected path" false
+      (String_util.contains_substring (Yojson.Safe.to_string result) account_home);
+    Alcotest.check Alcotest.bool "browser cannot override the configured home" true
+      (Actions.discover ~binary ~sw ~net ~base_path:base
+        (`Assoc ["integration_id",`String "private_codex";"account_home",`String "/untrusted"])
+       = Error Actions.Invalid_request)))
+let test_configured_muse_readiness_inventory () = fixture (fun _base runtime _binary _net ->
+  Out_channel.with_open_gen [Open_append;Open_binary] 0o600 runtime (fun channel ->
+    output_string channel {|
+[providers.ready_muse]
+protocol = "muse-serve"
+command = "muse"
+account-home = "/synthetic-selected-muse"
+is-non-interactive = true
+[models.ready_muse]
+api-name = "fixture-muse"
+max-context = 4096
+max-prompt-bytes = 8192
+tools-support = true
+[ready_muse.ready_muse]
+|});
+  let config = Runtime_toml.parse_file runtime |> Result.get_ok in
+  let open Yojson.Safe.Util in
+  let integration = Runtime_wizard_inventory.to_json config |> member "integrations" |> to_list
+    |> List.find (fun row -> row |> member "id" = `String "ready_muse") in
+  Alcotest.check Alcotest.string "configured Muse can verify response and tool"
+    "response_tool" (integration |> member "verification_support" |> to_string);
+  Alcotest.check Alcotest.string "configured Muse supports setup as well as readiness"
+    "existing_binding" (integration |> member "setup_support" |> to_string);
+  Alcotest.check (Alcotest.list Alcotest.string) "readiness names the configured binding"
+    ["ready_muse.ready_muse"]
+    (integration |> member "configured_runtime_ids" |> to_list |> List.map to_string);
+  Alcotest.check Alcotest.bool "inventory does not claim authenticated availability" false
+    (integration |> member "account_availability_verified" |> to_bool))
 let test_account_reference () = fixture (fun base _runtime binary _net ->
   let receipt=get (Actions.import_account ~binary ~base_path:base (`Assoc ["integration_id",`String "antigravity"])) in
   let open Yojson.Safe.Util in
@@ -193,6 +246,8 @@ let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "private key joins verified native save" `Quick test_private_key;
   Alcotest.test_case "no browser credential paths or executable override" `Quick test_forbidden_reference;
   Alcotest.test_case "native client metadata without private fields" `Quick test_native_client_metadata;
+  Alcotest.test_case "configured Codex account stays private during discovery" `Quick test_configured_codex_account_discovery;
+  Alcotest.test_case "configured Muse advertises readiness independently" `Quick test_configured_muse_readiness_inventory;
   Alcotest.test_case "imported opaque account joins native save" `Quick test_account_reference;
   Alcotest.test_case "declared provider variants refuse before discovery" `Quick test_declared_provider_variants;
   Alcotest.test_case "selected native accounts survive verified save" `Quick test_selected_native_account;

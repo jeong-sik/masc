@@ -1229,6 +1229,15 @@ let short_timestamp_of_unix_for_terminal ~localtime unix_seconds =
     tm.Unix.tm_sec
 ;;
 
+(* {!clock_timestamp_for_terminal}'s [HH:MM:SS] shape, for a time the wire
+   carries as a number rather than an RFC 3339 string -- the same pairing
+   {!short_timestamp_of_unix_for_terminal} already is for
+   {!short_timestamp_for_terminal}. *)
+let clock_timestamp_of_unix_for_terminal ~localtime unix_seconds =
+  let tm = localtime unix_seconds in
+  Printf.sprintf "%02d:%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+;;
+
 (* The date and time beside a record, in the zone the operator's terminal is
    in. It sliced the first nineteen bytes of the server's RFC 3339 string, which
    kept a UTC reading and dropped the [Z] that said so -- "2026-08-22T00:03:00"
@@ -2758,6 +2767,7 @@ type exact_slot_group = Exact_http_slots | Exact_cli_slots
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
+  ro_provider_id : string;
   ro_model : string;
   ro_exact_slot_group : exact_slot_group;
   ro_effective_max_context : int;
@@ -4904,6 +4914,7 @@ let runtime_probe_for_id snapshot ~runtime_id =
 let decode_runtime_option ~default_id json =
   let* ro_id = required_string_field json "id" in
   let* ro_provider = required_string_field json "provider" in
+  let* ro_provider_id = required_string_field json "provider_id" in
   let* ro_model = required_string_field json "model" in
   let* ro_exact_slot_group =
     let* group = required_string_field json "exact_slot_group" in
@@ -4950,6 +4961,7 @@ let decode_runtime_option ~default_id json =
   Ok
     { ro_id
     ; ro_provider
+    ; ro_provider_id
     ; ro_model
     ; ro_exact_slot_group
     ; ro_effective_max_context
@@ -5068,6 +5080,7 @@ let decode_runtime_resolved_snapshot json =
          | None -> Error "default_runtime is absent from the resolved runtime list"
          | Some listed
            when String.equal default.ro_provider listed.ro_provider
+                && String.equal default.ro_provider_id listed.ro_provider_id
                 && String.equal default.ro_model listed.ro_model
                 && default.ro_exact_slot_group = listed.ro_exact_slot_group
                 && Int.equal default.ro_effective_max_context listed.ro_effective_max_context
@@ -7248,6 +7261,13 @@ let standalone_lane_answer (lane : standalone_lane) =
          open a run to inspect inputs, dispositions, excerpts, duration, and \
          truncation."
     }
+  | Standalone_lane.Browser_stagehand ->
+    { sla_output_meaning =
+        "Output meaning: structured answer to one Stagehand browser model request."
+    ; sla_evidence =
+        "Evidence: this lane does not yet retain standalone run records; \
+         inspect the browser operation response for its result."
+    }
 
 let standalone_lane_status_of_string = function
   | "running" -> Ok Standalone_running
@@ -7342,7 +7362,8 @@ let decode_standalone_lane json =
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Workspace_curator
-    | Standalone_lane.Verifier -> Ok None
+    | Standalone_lane.Verifier
+    | Standalone_lane.Browser_stagehand -> Ok None
   in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
@@ -9454,7 +9475,7 @@ type preset_manifest =
   ; pm_description : string
   ; pm_created_at : string
   ; pm_override_count : int
-  ; pm_override_keys : string list option
+  ; pm_override_keys : string list
         (** Which prompts the preset overrides. [None] on a manifest written
             before the server named them, which is not the same as [Some []]:
             unknown against none. *)
@@ -9549,17 +9570,7 @@ let decode_preset_manifest json =
   let* pm_description = required_string_field json "description" in
   let* pm_created_at = required_string_field json "created_at" in
   let* pm_override_count = required_int_field json "override_count" in
-  let pm_override_keys =
-    match Yojson.Safe.Util.member "override_keys" json with
-    | `List items ->
-      Some
-        (List.filter_map
-           (function
-             | `String key -> Some key
-             | _ -> None)
-           items)
-    | `Null | _ -> None
-  in
+  let* pm_override_keys = decode_string_list json "override_keys" in
   let* pm_keepers = decode_string_list json "keepers" in
   let* pm_assignment_count = required_int_field json "assignment_count" in
   let* pm_lane_count = required_int_field json "lane_count" in
@@ -9741,7 +9752,8 @@ let decode_librarian_run_page json =
          | Standalone_lane.Hitl_auto_judge
          | Standalone_lane.Board_attention
          | Standalone_lane.Workspace_curator
-         | Standalone_lane.Verifier -> None)
+         | Standalone_lane.Verifier
+         | Standalone_lane.Browser_stagehand -> None)
       rows
   in
   let* lrp_next =
@@ -9991,7 +10003,8 @@ let decode_lane_run_gate_judgment ~(lane : Standalone_lane.t) ~status ~output =
   | Standalone_lane.Librarian
   | Standalone_lane.Board_attention
   | Standalone_lane.Workspace_curator
-  | Standalone_lane.Verifier -> Ok Lane_run_not_gate_judgment
+  | Standalone_lane.Verifier
+  | Standalone_lane.Browser_stagehand -> Ok Lane_run_not_gate_judgment
   | Standalone_lane.Hitl_auto_judge ->
     let decode_advisory output =
       let* judgment = required_string_field output "judgment" in
@@ -10206,7 +10219,8 @@ let decode_lane_run_detail json =
       | Standalone_lane.Librarian
       | Standalone_lane.Hitl_auto_judge
       | Standalone_lane.Workspace_curator
-      | Standalone_lane.Verifier ->
+      | Standalone_lane.Verifier
+      | Standalone_lane.Browser_stagehand ->
         false
     in
     let* answer_succeeded =
@@ -10304,7 +10318,8 @@ let decode_lane_run_detail json =
     | Standalone_lane.Librarian
     | Standalone_lane.Board_attention
     | Standalone_lane.Workspace_curator
-    | Standalone_lane.Verifier -> decode_judgment ()
+    | Standalone_lane.Verifier
+    | Standalone_lane.Browser_stagehand -> decode_judgment ()
   in
   Ok
     { lrd_run_id = summary.lrs_run_id

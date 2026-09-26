@@ -206,11 +206,14 @@ let execute_once_with_evidence ~net ?clock ?on_phase plan =
                try Backend_glm.check_glm_error body with
                | Yojson.Safe.Util.Type_error _ -> None
              in
-             (match envelope with
-              | Some { Backend_glm.error_class = Backend_glm.Glm_context_overflow; message; _ } ->
-                Http_client.ProviderFailure
-                  { kind = Http_client.Context_overflow { limit = None }; message }
-              | Some _ | None -> refusal)
+             (* The rule the sync and stream seams read a GLM envelope by: a
+                window refusal becomes [Context_overflow] and a quota code
+                (1113, 1304, 1308-1311, 1313) becomes [Hard_quota]. Reading only
+                the window here left a spent quota, which GLM sends as a 429,
+                classified as a rate limit on this path alone. *)
+             (match Option.bind envelope Backend_glm.provider_failure_of_glm_error with
+              | Some failure -> failure
+              | None -> refusal)
            | _ -> refusal
          in
          error ?raw_response (response_received_receipt raw.status)

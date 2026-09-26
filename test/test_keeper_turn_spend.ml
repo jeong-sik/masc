@@ -511,6 +511,120 @@ let test_attempt_rows_decode_under_distinct_keys () =
       jsons)
 ;;
 
+let with_owned_keeper f =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_temp_dir (fun dir ->
+    Eio.Switch.run
+    @@ fun sw ->
+    let config = Workspace_core.default_config dir in
+    ignore (Workspace_core.init config ~agent_name:(Some "test"));
+    (match
+       Keeper_owner_registry.install_from_store
+         ~sw
+         ~operation_runner:None
+         ~on_turn_slot_released:None
+         config
+     with
+     | Ok _ -> ()
+     | Error error ->
+       fail
+         ("owner inventory install failed: "
+          ^ Keeper_owner_registry.install_error_to_string error));
+    let meta =
+      match
+        Keeper_owner_registry.create_meta ~base_path:config.Workspace.base_path (meta_fixture ())
+      with
+      | Ok (Some meta) -> meta
+      | Ok None -> fail "owner create did not persist keeper meta"
+      | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
+    in
+    f config meta)
+;;
+
+let spend_rows config =
+  Dated_jsonl.read_recent
+    (Cost_ledger.store_of_masc_root
+       (Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path))
+    10
+  |> List.map (fun json ->
+    match Cost_ledger.of_json json with
+    | Ok row -> row
+    | Error error -> failf "cost row: %s" (Cost_ledger.decode_error_to_string error))
+;;
+
+let row_turn (row : Cost_ledger.t) =
+  match row.source with
+  | Cost_ledger.Auto_trajectory identity -> Some identity.keeper_turn_id
+  | Cost_ledger.Manual_cli -> None
+;;
+
+(* A turn that ends outside the success path counts itself and its spend in
+   one commit, and its rows carry the id the next turn will not reuse. *)
+let test_an_ended_turn_counts_itself_and_its_spend () =
+  with_owned_keeper (fun config meta ->
+    let t = observe started (report (counted ~input:100 ~output:10)) in
+    let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
+    match
+      Keeper_turn_spend_commit.commit
+        ~config
+        ~keeper_turn_id
+        ~before:meta
+        ~attempt_spend:(Keeper_turn_spend.attempts t)
+        (Keeper_turn_spend_commit.count_turn meta)
+    with
+    | Error error -> fail (Keeper_turn_spend_commit.error_to_string error)
+    | Ok committed ->
+      let stored =
+        match Keeper_meta_store.read_meta config meta.name with
+        | Ok (Some stored) -> stored
+        | Ok None -> fail "the committed meta is gone"
+        | Error detail -> fail detail
+      in
+      List.iter
+        (fun (label, (after : Keeper_meta_contract.keeper_meta)) ->
+           check int (label ^ ": the turn is counted") keeper_turn_id
+             after.runtime.usage.total_turns;
+           check int (label ^ ": input")
+             (meta.runtime.usage.total_input_tokens + 100)
+             after.runtime.usage.total_input_tokens;
+           check (option (pair string int)) (label ^ ": the cursor")
+             (Some ("thread-1", 100))
+             (cursor_input after.runtime.usage_cursor))
+        [ "returned", committed; "stored", stored ];
+      check (list (option int)) "one row under the turn's id" [ Some keeper_turn_id ]
+        (List.map row_turn (spend_rows config)))
+;;
+
+(* A commit the Owner refuses leaves the cursor where it was, so the rows
+   stay unwritten: the next turn resolves the same readings again. *)
+let test_a_refused_commit_writes_no_rows () =
+  with_owned_keeper (fun config _meta ->
+    let unowned =
+      match
+        Masc_test_deps.meta_of_json_fixture
+          (`Assoc [ "name", `String "unowned-keeper"; "trace_id", `String "trace-unowned" ])
+      with
+      | Ok meta -> meta
+      | Error err -> failf "meta fixture: %s" err
+    in
+    let t = observe started (report (counted ~input:100 ~output:10)) in
+    (match
+       Keeper_turn_spend_commit.commit
+         ~config
+         ~keeper_turn_id:1
+         ~before:unowned
+         ~attempt_spend:(Keeper_turn_spend.attempts t)
+         (Keeper_turn_spend_commit.count_turn unowned)
+     with
+     | Ok _ -> fail "a Keeper without an Owner committed"
+     | Error (Keeper_turn_spend_commit.Commit_rejected _) -> ()
+     | Error Keeper_turn_spend_commit.Keeper_removed ->
+       fail "an unknown Keeper read as removed");
+    check int "no rows" 0 (List.length (spend_rows config)))
+;;
+
 let resolve_turn t =
   Keeper_turn_spend.resolve_turn ~cursor:None ~observed_at:0.0 (Keeper_turn_spend.attempts t)
 ;;
@@ -625,6 +739,10 @@ let () =
             test_a_failed_turns_spend_joins_the_totals
         ; test_case "attempt rows decode under distinct keys" `Quick
             test_attempt_rows_decode_under_distinct_keys
+        ; test_case "an ended turn counts itself and its spend" `Quick
+            test_an_ended_turn_counts_itself_and_its_spend
+        ; test_case "a refused commit writes no rows" `Quick
+            test_a_refused_commit_writes_no_rows
         ] )
     ]
 ;;

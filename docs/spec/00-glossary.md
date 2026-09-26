@@ -106,8 +106,18 @@ status: reference
     표시 예산(`rows`)을 초과하면 하단부터 생략하고 헤드라인에 그려진 목표 수를 남긴다.
   → [Masc_tui_overview_goals](../../bin/masc_tui_overview_goals.mli)
 
+**Fleet (Keeper fleet)**
+: 한 워크스페이스에 등록된 Keeper 묶음. 화면과 코드에서 "fleet" 은 이 뜻 하나로만 쓴다 —
+  `fleet ok` 상태 줄과 fleet scan, Keeper Fleet Blocker, "held outside the fleet" 가 모두
+  이 묶음을 말한다. 상태 줄의 `running N/M` 에서 M 은 부팅할 Keeper 수라서 일시정지된
+  Keeper 는 들어가지 않는다. Overview 의 Team 블록은 이 묶음을 Keeper 한 명당 한 줄로
+  보여 준다. Activity 패널의 `Recent` 탭(`Tab_fleet`, 명령 `/activity fleet`)은 이 중
+  오프라인이 아닌 Keeper 를 최근에 움직인 순서로 한 줄씩 싣고, 커서가 놓인 Keeper 의 최근
+  도구 호출을 그 아래에 붙인다. 이미지를 대신 읽는 런타임 목록(`[runtime].media_failover`)은
+  Keeper 가 아니므로 fleet 이라 부르지 않고 vision runtimes 라고 부른다.
+
 **Team 블록 (Overview Team)**
-: TUI Overview 에서 Keeper 한 명당 한 줄로 "누가 무엇을 하고 누가 막혔나" 를 보여주는
+: TUI Overview 에서 fleet 을 Keeper 한 명당 한 줄로 보여 주며 "누가 무엇을 하고 누가 막혔나" 에 답하는
   자리. briefing 의 `keeper_briefs` 와 backlog 를 합쳐 그린다. 줄은 네 무리로 나뉜다 —
   막힘(Failing·Crashed, 또는 phase 없이 info 가 아닌 Attention 이 가리키는 Keeper),
   일하는 중(Running·Draining·Restarting 이고 Claimed·InProgress Task 를 잡음), 쉬는 중,
@@ -216,7 +226,8 @@ status: reference
 
 **Keeper Prompt (Keeper 시스템 프롬프트)**
 : 한 Keeper turn의 모델 호출에 실리는 system prompt. `Keeper_prompt.build_keeper_system_prompt`가
-  `config/prompts/keeper.md`의 슬롯을 정해진 순서로 조립한다. 순서는 공유 접두를 최대로
+  `config/prompts/keeper.md`의 슬롯을 정해진 순서로 조립한다. 이 렌더 결과가
+  Prompt Block의 `keeper_instructions` 칸에 들어간다. 순서는 공유 접두를 최대로
   남기기 위한 것이다(KV 캐시 재사용): `<system>` 공유 본문(keeper.md 첫 마커 앞, 모든
   Keeper가 글자 그대로 공유) → `keeper.worldview` → `keeper.constitution` →
   `keeper.identity` → `keeper.workspace` → `<role>`.
@@ -265,6 +276,22 @@ status: reference
   → [mcp_tool_runtime_ask](../../lib/mcp_tool_runtime_ask.ml),
   [Keeper_ask](../../lib/keeper/keeper_ask.mli)
 
+**Activation Mode (활성화 모드)**
+: Keeper의 자동 기상과 자발적 착수를 한데 다루는 소유자 정책
+  (`Keeper_activation_mode.t`). 뜻은 두 술어로 읽는다 —
+  `restore_owner`(자동 owner 복원, automatic owner restoration)과
+  `spontaneous`(스스로 새 일을 착수). 닫힌 세 값 가운데 `manual`은 둘 다
+  거짓이고, `on_demand`는 restore_owner만 참이라 자동으로 띄워 요청에
+  답하지만 스스로 새 일을 시작하지 않으며, `autonomous`는 둘 다 참이다.
+  readiness 안내 문구도 이 두 축으로 갈라 나온다. 요청된 작업은 lifecycle
+  pause와 shutdown ownership 아래 이 투영과 따로 수용된다. 전역
+  kill-switch(`MASC_KEEPER_AUTONOMOUS_ENABLED`)와 per-keeper 깃발의 AND 로
+  게이트가 열린다. TUI 설정 편집기(`e`)는 닫힌 집합 밖의 값을
+  서버로 보내기 전에 거절하고 편집기를 다시 열어 허용 값을 보여 준다(#39007).
+  **다른 것**: Gate(`Keeper_gate_mode.t`)는 바깥 효과를 어떻게 판정하는가이고,
+  `Skill Activation`은 Skill 본문 읽기 사건이다. 셋은 서로 다른 축이다.
+  → [Keeper_activation_mode](../../lib/keeper/keeper_activation_mode.mli)
+
 **Latched Reason (durable latch 까닭)**
 : Keeper가 durable pause에 들어간 typed 까닭
   (`Keeper_latched_reason.t`). 현재는 `Operator_paused of { operator_actor }` 하나뿐이고,
@@ -288,9 +315,11 @@ status: reference
 
 **Board Attention Candidate (Board 판정 후보)**
 : Board_attention lane이 판정할 게시물 하나. 어떤 모델 호출보다 먼저 durable하게
-  저장되고, 생애가 `Pending → Judged → Consumed`다. exact-flow 실패가 확정되면 먼저
-  격리(`Quarantine`, 상태값 `Quarantined`) 상태가 되고, 운영자 소유의 복구가 이전 도메인 상태를 잃지
-  않고 `Requeue_requested`를 거쳐 `Requeued`로 올린다. 판정은 소유 lane이 그 후보
+  저장되고, 생애가 `Pending → Judged → Consumed`다. 다시 해도 같은 결과가 나올 실패일
+  때만 격리(`Quarantine`, 상태값 `Quarantined`) 상태가 되고, 운영자 소유의 복구가 이전 도메인 상태를 잃지
+  않고 `Requeue_requested`를 거쳐 `Requeued`로 올린다. 레인이 거친 모든 슬롯이 계정 사정(쿼터
+  소진, 속도 제한, 과부하, 결제 거절)으로 거절했으면 후보는 `Pending`으로 남아 다음 판정을
+  기다린다. 판정은 소유 lane이 그 후보
   판정을 durable하게 적용·소비할 때만 넘어가고, 전달 실패는 마지막 실패 증거를 남길
   뿐 후보를 소비하지 않는다. 대기 작업에는 벽시계 만료가 없다. **`Runtime` 항목과
   다른 뜻이다** — 코드가 `candidate`라는 한 단어를 두 곳에 쓴다. 여기서는 판정 대상
@@ -313,20 +342,29 @@ status: reference
     일치하는 후보가 아직 `Resumable_pending`이면 `ensure_roots`가 같은 결정론적 식별자의
     다음 `generation`으로 `Ready`를 다시 연다. 후보가 `Resumable_judged`나
     `Requeued_resumable`이면 `ensure_roots`는 이 루트를 건드리지 않는다.
+  - `Running`에서 `Ready`로 돌아가는 길은 둘이다. 재시작 복구는 진행 정도와 상관없이
+    끊긴 실행을 모두 돌려보낸다. 레인이 거친 모든 슬롯이 계정 사정으로 거절하면 워커가
+    `defer`로 돌려보낸다. 판정은 읽기만 하는 모델 호출이라 다시 보내도 토큰만 더 쓴다.
+  - 워커는 `Ready` 루트 가운데 모델 호출이 필요 없는 루트(이미 판정·소비·격리됐거나
+    원장에 없는 후보)를 먼저 처리한다. 그다음 가장 오래된 `Pending` 후보의 루트를 잡는다.
   - 경계: 이 상태 머신은 Candidate 생애주기(`Pending → Judged → Consumed`,
     `Quarantined`)와 다른 층위다.
   → [Keeper_board_attention_partition](../../lib/keeper/keeper_board_attention_partition.mli)
 
 **Board Attention Quarantine (Board 판정 격리)**
-: Board attention 판정 워커가 정상적으로 완료할 수 없는 후보(`candidate`)와 파티션을
-  격리 보관하는 상태 및 그 인벤토리. 워커는 격리된 항목을 스스로 재시도하지 않으며,
-  오직 운영자의 재투입(`requeue`) 요청으로만 풀려난다(#38260·#38262).
+: 다시 시도해도 고칠 수 없는 실패로 판정을 끝내지 못한 후보(`candidate`)와 파티션을
+  따로 보관하는 상태와 그 목록이다. 워커는 격리된 항목을 스스로 다시 시도하지 않고,
+  운영자가 재투입(`requeue`)해야만 풀린다(#38260·#38262). 슬롯이 전부 쉬는 중이라
+  못 한 판정은 격리하지 않는다. 파티션이 `Ready`로 돌아가고, 그 Keeper에 다음 Board
+  신호가 오거나 재개·재시작하면 다시 판정한다.
   - 격리 원인 카테고리(`quarantine_failure_category`): 닫힌 12개 값이다.
-    `Candidate_membership_conflict`·`Durable_partition_invariant`·`Exact_setup_unavailable`·`Exact_flow_replayed`·`Exact_lane_exhausted`(모든
-    HTTP 슬롯 및 CLI tail 거부로 모델 슬롯 소진)·`Exact_flow_bookkeeping_failed`(장부
+    `Candidate_membership_conflict`·`Durable_partition_invariant`·`Exact_setup_unavailable`·`Exact_flow_replayed`·`Exact_lane_exhausted`(슬롯이
+    모두 실패했지만 전부 계정 사정으로 거절한 것은 아님. 입력 크기·형식 거절, 결과를 알 수 없는
+    요청, 쓸 수 없는 답, 타입으로 읽을 수 없는 CLI 거절이 여기에 든다)·`Exact_flow_bookkeeping_failed`(장부
     기록 실패)·`Exact_completion_failed`(완료 단계 실패)·`Domain_output_invalid`·`Execution_provenance_mismatch`·`Unexpected_worker_failure`·`Exact_execution_quarantined`(호출
-    단계 미기록)·`Exact_execution_interrupted`(프로세스 재시작으로 바인딩된 실행이
-    끊김. 읽기 전용 모델 호출이라 토큰 외 부작용 없이 재투입 가능).
+    단계 미기록)·`Exact_execution_interrupted`(프로세스 재시작으로 끊긴 실행. 재시작
+    복구가 끊긴 실행을 `Ready`로 돌려보내므로 새 행은 이 값을 받지 않는다. 원장에 남은
+    행은 재투입으로 푼다).
   - TUI 표시 및 복구:
     - Keeper Info 탭에 원인 카테고리별로 집계(건수, 최장 경과 시간, 파티션 ID, 재투입
       대기 수)되어 표시된다. 수백 건의 슬롯 소진 행이 화면을 덮지 않도록 카테고리당 한 줄로 묶는다.
@@ -540,12 +578,15 @@ status: reference
   판정·Board attention)과 Keeper 걸음이 같은 오류에 같은 답을 하도록 둘 다 이 판정 하나를
   읽는다(#38913). 값은 셋이다.
   - `Binding of binding_fact`: 이 바인딩의 사정이라, 다음 후보가 같은 입력을 받아도 된다.
-    사정은 열둘이다 — `Credential`(401·403), `Account`(402), `Model_absent`(404), `Rate_limit`(429), `Capacity`(529),
+    사정은 열셋이다 — `Credential`(401, 죽은 키), `Account_access`(403, 계정이 거절됨: 다 쓴
+    구독 창·없는 권한·플랜이 받지 않는 클라이언트·정지된 계정), `Account`(402), `Model_absent`(404), `Rate_limit`(429), `Capacity`(529),
     `Server`(5xx), `Window`(창 초과, 또는 창에서 멈춘 빈 답), `Body_limit`(413),
     `Admission`(보내기 전에 이 바인딩이 준비된 요청을 받지 않음: 선언된 입력 용량 초과,
     입력을 잴 수 없음, 준비된 요청 거절), `Deadline`(보낸 뒤 헤더·전체 기한 초과),
     `Output_dialect`(답이 content 밖 필드에 옴), `Refusal_unread`(거절 상태는 왔지만 거절
     본문이 기한 안에 오지 않음).
+    401과 403을 두 사정으로 나눈 것은 Keeper 걸음이 403 뒤에만 provider 사용량을 읽기 때문이다.
+    한 사정으로 두면 route 가 원래 오류에서 둘을 다시 가르는 두 번째 표가 생긴다(#38975, #39254).
   - `Unattributed`: 거절은 왔지만, 누구의 사정인지 응답이 기계가 읽는 꼴로 말하지 않는다.
     기록에도 모른다고 남긴다.
   - `Unknown_after_dispatch`: 결과를 모르거나 이 바인딩의 사정으로 가를 수 없다. 이름과 달리
@@ -777,7 +818,7 @@ status: reference
 
 **media_failover**
 : vision 도구가 이미지를 읽을 때 호출하는 runtime의 순서(`[runtime].media_failover`,
-  "vision read fleet"). 이미지를 받지 못하는 runtime을 대신해 읽는 경우까지 포함한다.
+  "vision runtimes"). 이미지를 받지 못하는 runtime을 대신해 읽는 경우까지 포함한다.
   Keeper turn은 여기로 파견하지 않고, turn의 이미지 재라우팅은 자기 lane 안에 머문다.
   Keeper turn이 실패했을 때 다음 runtime을 고르는 **Runtime Candidate Order**와는 다른
   장치다.
@@ -809,7 +850,7 @@ status: reference
   `[runtime.lanes.<이름>]` 표가 이름을 붙이고 `Runtime_lane.t`(`{id; candidates}`)가
   그 값이다. TUI 화면은 "runtime candidate order"로 읽는다. RFC-0457부터 Keeper를
   특정 lane에 배정할 수 있고, 배정된 Keeper는 그 lane의 후보 순서를 따른다.
-  `[runtime].media_failover`(vision fleet)와
+  `[runtime].media_failover`(vision runtimes, 이미지를 읽는 런타임 목록)와
   exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
   런타임 후보 순서와 별개 축이다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
@@ -1014,6 +1055,25 @@ status: reference
   [Msx_lane](../../lib/msx_lane/msx_lane.mli), [Dos_lane](../../lib/dos_lane/dos_lane.mli),
   [lane-addons 라우트](../../lib/server/server_routes_http_routes_lane_addons.mli)
 
+**Lane 활동 피드 (Lane Activity)**
+: DOS Lane 에서 Keeper 가 한 일을 한 줄씩 담는 짧은 목록. load·step·press·click·type·save·
+  restore·pass·eject 마다 `who`(누가)와 `action`(무엇을, 예: `"press a,b"`·`"pass -> cao-cao"`)
+  한 줄이 쌓인다. 최근 `Lane_activity.cap`(20)개만 남고 그 앞은 떨어진다.
+  위 변경 표식(`count`)과는 다른 것을 센다. `pass`는 화면을 안 바꿔서 `count`를 안 올리지만,
+  이 피드에는 "누가 넘겼는지"가 그대로 남는다. `GET /api/v1/lane-addons/live?source_kind=dos_capture`
+  의 모든 답 — `unchanged`(표식이 그대로인 빠른 답)까지 포함 — 에 `activity` 필드로 실린다.
+  기계 하나에 매인 재생 원장(`Dos_lane.entry`, 체크포인트가 되살리는 그것)과는 다른 것이다.
+  eject 뒤에도 남고(누가 껐는지가 유용한 답이라서), load·restore 로도 지워지지 않고 이어진다 —
+  서버가 켜 있는 동안 이 Lane 에서 있었던 일 하나의 흐름이다.
+  DOS 만 있다. MSX 는 `load`·`eject`·`step`·`save`·`restore`가 아직 호출자를 받지 않아서
+  (`~who` 가 없다) 누가 했는지를 붙일 수 없다.
+  masc-tui 의 DOS 관전 화면이 이 필드를 오른쪽 고정폭 목록으로 그린다 — 터미널이
+  충분히 넓고 목록이 비어 있지 않을 때만, 그림은 그만큼 좁아진다.
+  → [Lane_activity](../../lib/lane_activity/lane_activity.mli),
+  [Dos_lane.recent_activity](../../lib/dos_lane/dos_lane.mli),
+  [Masc_tui_machine_live.activity_of](../../bin/masc_tui_machine_live.mli),
+  [Masc_tui_msx.shows_sidebar](../../bin/masc_tui_msx.mli)
+
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
   DOS Lane의 머신, Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러
@@ -1060,8 +1120,8 @@ status: reference
 : Librarian, Workspace memory curator, HITL auto judge, Board attention 같은 단독
   모델 작업의 목적별 실행 경로(`Agent_core.Exact_output`). 설정은 API slot과 후속 CLI
   후보 순서를 선언한다(`exact_output_lane_decl`). 대부분의 exact route는 도구를 쓰지
-  않고 단일 완결 응답을 받아 도메인 검증기가 유효성을 판정하며, 일반 턴 failover인
-  Runtime Candidate Order와 구분된다. 단 **verifier_exact은 예외로 도구를 호출한다** —
+  않고 단일 완결 응답을 받아 도메인 검증기가 유효성을 판정하며, Keeper turn의
+  Runtime Candidate Order와는 다른 층이다. 단 **verifier_exact은 예외로 도구를 호출한다** —
   판정(verdict)을 `report_review_verdict` 도구 호출 한 번으로 낸다
   (`lib/task/anti_rationalization.ml`: "The verdict channel is the
   report_review_verdict tool call, so every slot needs a tool-calling model"). 이 lane의
@@ -1081,6 +1141,16 @@ status: reference
     `Stream_idle`·`Provider_step`·`Cli_stdout_idle`·`Unknown_timeout`)와 보낸 뒤 결과를
     모르는 실패가 그렇다. 바인딩의 기한·창·키·quota·출력 방언은 그 슬롯의 성질이라, 다음
     후보는 자기 것을 들고 같은 입력을 받을 수 있다(예: 더 큰 창의 Claude CLI).
+  - **공유 rate-limit 휴식**: 한 Exact-output slot의 runtime이 `Rate_limited` 응답으로
+    쉬는 동안 그 slot을 쉬지 않는 형제 뒤로 보낸다. Keeper turn walk와 Exact-output
+    route는 같은 runtime의 후보별 휴식 근거를 읽고 쓴다. 제공자의 `Retry-After`를 쓰고,
+    없으면 설정한 바닥 시간을 쓰며, 설정한 상한을 넘기지 않는다. 선언 순서 또는 운영자
+    선호 순서는 각 무리 안에서 유지한다. 이후 응답을 받으면 수락된 답과 의미 검증 거절
+    모두 휴식 근거를 지운다. CLI slot에는 적용하지 않는다(#39077).
+  - **도메인 검증 결말**: `Invalid_json_output`은 응답을 JSON으로 읽지 못한 경우다.
+    JSON 응답을 도메인 소비자가 거절하면 Board Attention exact flow는
+    `Domain_output_invalid` 오류와 종단 결말 `Invalid_domain_output`을 기록한다. 이 결말은
+    `execution_failure_may_advance` 슬롯 전진 조건이 아니다(#38786).
   - **생성 발송 관측 권위 (`flow_evidence_generation_dispatch`)**: 걸음(walk)에 속한 어느
     후보라도 외부 완료 생성 요청(`generation dispatch`)을 시작했는지 여부를 불변
     증거(`Started`·`Not_started`)로 기록한다. 앞선 슬롯이 생성 요청을 보낸 뒤(예: 5xx
@@ -1114,7 +1184,9 @@ status: reference
     빈칸은 막지 않는다. `cli_slots`와 `Replacement_catalog_targets`에는 해당하지 않는다
     (#38849).
   → [Exact_output](../../packages/agent_core/lib/llm_provider/exact_output.mli),
-  [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
+  [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli),
+  [Runtime_exact_lane_backpressure](../../lib/runtime/runtime_exact_lane_backpressure.mli),
+  [Keeper_board_attention_exact_flow](../../lib/keeper/keeper_board_attention_exact_flow.mli)
 
 **Memory queue**
 : Keeper별 Librarian 작업을 직렬화하는 제출 경로. 현재 실행 하나와 교체 가능한
@@ -1414,6 +1486,20 @@ status: reference
   답을 기다리며, `Yolo`로 꺼도 Gate로 가는 바깥 작업은 Gate가 따로 판정한다.
   도구 승인의 `Auto`와 Gate의 `Auto_judge`도 다른 값이다.
   → [Keeper_tool_approval_mode](../../lib/keeper/keeper_tool_approval_mode.mli)
+
+**Prompt Block (프롬프트 블록)**
+: 한 Keeper turn의 맥락 조립(per-turn context assembly)에서 생성자 하나가
+  주입 자리(injection site) 하나를 이름하는 닫힌 여섯 슬롯(`Prompt_block_id.t`) —
+  `keeper_instructions`(렌더된 시스템 프롬프트, 곧 Keeper Prompt),
+  `dynamic_context`(연속성 스냅샷·skill route·worktree·telemetry 피드백·turn
+  지시·최근 실패 기억을 한 문자열로 합친 소프트 컨텍스트),
+  `temporal_summary`, `memory_os_recall`, `operator_note`,
+  `skill_compositions`(그 턴의 도구 표면이 실은 composition Skill들).
+  생산자가 없는 값은 닫힌 계약에서 일부러 빠져 있다. block id 하나가
+  대시보드의 turn record 디코더 목록(`TURN_PROMPT_BLOCK_IDS`)에서 빠지면
+  그 Keeper의 전체 turn record가 거부되므로, id 추가·변경은 decode 경로
+  양쪽을 함께 고쳐야 한다(#38923).
+  → [Prompt_block_id](../../lib/types/prompt_block_id.mli)
 
 **HITL Delivery Occasion (HITL 전달 계기)**
 : 승인된 HITL 결정을 Keeper 에게 전달할 때, 그 전달이 왜 일어나는지를 가리키는 닫힌 세 값
@@ -1824,21 +1910,29 @@ status: reference
   항목)가 LLM 없이 재작성한다.
 
 **Store Boot Policy (영속 store 부팅 정책)**
-: durable per-keeper store가 이번 빌드로 디코딩되지 않을 때 부팅이 어떻게
-  행동할지를 store 타입이 짊어지는 닫힌 분류
-  (`Keeper_store_boot_reconcile`의 `refuse_boot`·`degrade_typed`,
-  RFC-0420·RFC-0444 §2.4). `Refuse_boot`(keeper meta·current Memory OS snapshot):
-  없으면 Keeper가 다른 Keeper로, 또는 빈 기억으로 뜨고 잃은 것을 덮어쓰므로
-  부팅을 거절한다. `Degrade_typed`(goal store): 모든 쓰는 쪽이 못 읽는 store를
-  거절하고 어떤 읽는 쪽도 빈 목록으로 바꾸지 않으므로, Keeper는 task·board·
-  schedule로 돌고 파일은 아무것도 덮어쓰지 않는다 — `examine`이 읽고 못 읽으면
-  INFO 한 줄만 남긴다. 절차는 `examine`(읽기만, 파일 생성·이름변경 없음) →
+: 이번 빌드로 디코딩되지 않는 영속 store 를 만났을 때 부팅과 배포 preflight 가
+  어떻게 행동할지를 정하는 닫힌 분류
+  (`Keeper_durable_store.reader`의 `Refuse_boot`·`Degrade_typed`·`Preflight_only`,
+  RFC every-durable-store-has-one-boot-policy, RFC-0420, RFC-0444 §2.4).
+  store 목록은 `Keeper_durable_store.Id.all` 하나이고, 배포 preflight
+  (`deployment_preflight_helper validate-stores`)와 부팅 reconcile 이 같은 목록을
+  읽는다. `Refuse_boot`(keeper meta·current Memory OS snapshot): 없으면 Keeper가
+  다른 Keeper로, 또는 빈 기억으로 뜨고 잃은 것을 덮어쓰므로 부팅을 거절한다.
+  preflight 도 읽고 거절한다. `Degrade_typed`(goal store): 모든 쓰는 쪽이 못 읽는
+  store를 거절하고 어떤 읽는 쪽도 빈 목록으로 바꾸지 않으므로, Keeper는
+  task·board·schedule로 돌고 파일은 아무것도 덮어쓰지 않는다 — `examine`이 읽고
+  못 읽으면 INFO 한 줄만 남긴다. preflight 는 읽지 않는다. `Preflight_only`(나머지):
+  부팅은 읽지 않고 preflight 만 미리 읽는다. 실행 중에는 그 store 를 읽는 쪽이
+  처음 만난다. 부팅 절차는 `examine`(읽기만, 파일 생성·이름변경 없음) →
   `admit`(부팅 진행 여부) → `quarantine`(운영자가
-  `--accept-store-quarantine`로 받아들인 뒤에만 옆으로 옮김) 순서다.
-  새 store 생성자는 컴파일러가 정책을 묻게 한다. **경계**: Board 판정의
-  `Quarantined`(Board Attention Quarantine)와 이름이 겹치지만 다른 층위다 —
-  여기서 격리는 부팅 단계에서 store 파일을 옆으로 옮기는 운영자 결정이다.
-  → [Keeper_store_boot_reconcile](../../lib/keeper/keeper_store_boot_reconcile.mli)
+  `--accept-store-quarantine`로 받아들인 뒤에만 옆으로 옮김) 순서다. store 를
+  `Refuse_boot` 로 보내려면 `Keeper_durable_store.Refusing.t` 에 생성자를 더해야
+  하고, 부팅의 이름·검사·옮기는 법이 그 타입을 exhaustive 로 match 하므로 셋을 다
+  채워야 컴파일된다. **경계**: Board 판정의 `Quarantined`(Board Attention
+  Quarantine)와 이름이 겹치지만 다른 층위다 — 여기서 격리는 부팅 단계에서 store
+  파일을 옆으로 옮기는 운영자 결정이다.
+  → [Keeper_durable_store](../../lib/keeper/keeper_durable_store.mli),
+  [Keeper_store_boot_reconcile](../../lib/keeper/keeper_store_boot_reconcile.mli)
 
 **Checkpoint Purge (체크포인트 청소)**
 : 멈춘 Keeper의 canonical AGENT_CORE checkpoint를 LLM 없이 두 닫힌 규칙으로 줄이는
@@ -2265,8 +2359,13 @@ status: reference
     독립적으로 읽어 atom 위치를 전진시킨다. atom 쪽에 더 읽을 것이 없을 때 비로소 회차가
     `Official_range_stopped`로 종료된다(#38475).
   - 연속성 회차(`Keeper_librarian_continuity`): 스냅숏이 덮은 앞부분을 다시 쓰는 회차.
-    완료된 대화 구간을 요약해 Continuity Snapshot을 만든다. 커밋은 durable 회차의
-    위치를 바꾸지 않는다.
+    완료된 대화 구간을 요약해 Continuity Snapshot을 만든다. 그 구간의 기억을 durable
+    회차가 아직 저장하지 않았으면 이 회차가 기억을 먼저 저장하고, 저장이 끝난 뒤에만
+    스냅숏을 쓴다. 이렇게 기억을 저장할 때는 durable 회차가 같은 구간에 싣는 것을 그대로
+    싣는다. 그 메시지의 도구 호출과, 그 턴 동안 들어온 상대방 발화다. durable 회차의
+    위치 파일은 고치지 않는다. 대신 durable 회차가 다음에
+    돌 때 연속성 회차가 저장한 구간(그 영수증과 게시된 스냅숏)을 보고, 그 구간은 모델에
+    다시 보내지 않고 위치만 그 끝으로 옮긴다.
   두 회차는 따로 밀리고(Continuity Lag), 실패 뒤 범위를 좁히는 방식도 다르다(RFC
   librarian-lifecycle §4.3). durable 회차는 실패 종류를 보지 않고, 실패 표식(wide-range
   failure marker)을 루프 메모리에 두고 가장 오래된 한 턴으로 좁힌다. 단, 공식 정지
@@ -2330,8 +2429,9 @@ status: reference
 **Origin**
 : Fact를 누가 적었나. `authored`는 Keeper가 `keeper_memory_write`로 직접 적은 것,
   `injected`는 Librarian이 대화에서 뽑아 넣은 것이다. Keeper는 자신이 직접 적은
-  현재 Fact만 `supersedes`로 대체할 수 있고, Librarian이 넣은 `injected` Fact는
-  대체할 수 없다(#38122).
+  Fact만 `supersedes`로 대체할 수 있고, Librarian이 넣은 `injected` Fact는 current든
+  이미 지워졌든 대체할 수 없다(#38122). `keeper_memory_search`의 현재 Fact 결과는
+  memory_id와 함께 `origin`을 보여 준다.
 
 **Basis**
 : Fact가 무엇에 근거하나. `observed`는 읽은 곳(자기 대화 또는 Board 글)을 갖고,
@@ -2372,8 +2472,15 @@ status: reference
     원장에 `Revised` 이벤트를 기록한다. 철회와 마찬가지로 대체된 Fact를 전제로 삼던 유도
     Fact들도 함께 무효화되며 영수증의 `removed_memory_ids`와 `support_invalidations`로
     보고된다. 기억 저장소는 Keeper마다 따로라서, 이 Keeper의 현재 Fact가 아닌 id는
-    알 수 없는 id든 이미 지난 id든 모두 non-current로 거절된다. 그 밖에 `injected` id,
-    대체할 Fact와 글자까지 똑같은 claim(`supersedes_self`), `source_path`와의 동시 지정,
+    대체할 대상이 없다. 그때는 이 Keeper의 저널에서 그 id를 지운 줄을 찾아 셋으로
+    나눈다. (1) 이 Keeper가 직접 적었고 Librarian이 이미 지운 Fact면, 새 claim을 보통
+    쓰기로 적고 영수증 `supersedes_already_removed`에 지운 커밋(revision·시각·이유)을
+    적는다. 이 쓰기가 대체한 것이 아니므로 `Revised` 이벤트는 남기지 않는다. (2) Keeper
+    자신이나 운영자가 명시적으로 지운(`explicit_write`·`explicit_retract`) id는
+    `supersedes_not_current`로 거절하되 `supersedes_removed`로 그 커밋을 알려 준다.
+    사유가 `superseded_by <id>`면 그 id가 대신 대체할 후계다. (3) 지운 기록이 없는 id
+    (알 수 없는 id, 다른 Keeper의 id)는 `supersedes_not_current`로 거절된다. 그 밖에
+    `injected` id, 대체할 Fact와 글자까지 똑같은 claim(`supersedes_self`), `source_path`와의 동시 지정,
     대체될 Fact를 전제로 삼는 유도 claim(`supersedes_premise_of_successor`), 근거 경로가
     없는 유도 claim(`unsupported_derivation`)도 거절되며 아무것도 적지 않는다.
   → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.ml) · [Keeper_librarian_absorb_gate](../../lib/keeper/keeper_librarian_absorb_gate.mli) · [librarian.md](../../config/prompts/librarian.md)

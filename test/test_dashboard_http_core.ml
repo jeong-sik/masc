@@ -2822,7 +2822,7 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
   in
   ignore (check_surfaces ~phase:"verifying" ~proof_state:"proof_pending");
   let committed = Lib.Workspace_goals.commit_verifier_decision
-    ~tool_name:"goal_verifier_commit" ~start_time:0. config ~goal_id
+    ~tool_name:"goal_verifier_commit" ~start_time:(Tool_timing.start ()) config ~goal_id
     ~request_id ~criterion ~verification_run_id:"dashboard-proof-run"
     ~decision:Lib.Workspace_goals.Proof_proven ~evidence:"10 passing cases observed" in
   check bool "internal verifier committed" true (Tool_result.is_success committed);
@@ -5265,7 +5265,9 @@ let test_config_patch_remote_endpoint_shape () =
   check_error "the empty string is not a name" [ "remote_endpoint", `String "" ];
   check_error "a non-string, non-null value is refused"
     [ "remote_endpoint", `Int 1 ];
-  check_ok "sandbox image override" ["sandbox_image", `String "example/documents:v1"];
+  check_ok "sandbox image override" ["sandbox_image", `String "documents"];
+  check_error "an image tag is not a catalog name"
+    ["sandbox_image", `String "example/documents:v1"];
   check_ok "sandbox image clear" ["sandbox_image", `Null];
   check_error "blank image" ["sandbox_image", `String " "];
   check_error "numeric image" ["sandbox_image", `Int 42]
@@ -5322,7 +5324,7 @@ let write_config_sync_toml config name =
   let path = Filename.concat dir (name ^ ".toml") in
   write_file path
     (Printf.sprintf
-       "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\ninstructions = \"%s config-sync fixture instructions\"\nactivation_mode = \"manual\"\n"
+       "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\ninstructions = \"%s config-sync fixture instructions\"\nactivation_mode = \"manual\"\n"
        name);
   path
 
@@ -5690,7 +5692,8 @@ let test_runtime_routing_creates_and_removes_a_lane () =
     (refusal (post "append a declared slot" 400 append));
   check string "an exact lane the server does not run is refused"
     "unknown exact-output lane: verifer_exact (expected one of librarian_exact, \
-     hitl_auto_judge, board_attention_exact, workspace_curator_exact, verifier_exact)"
+     hitl_auto_judge, board_attention_exact, workspace_curator_exact, verifier_exact, \
+     browser_stagehand_exact)"
     (refusal
        (post "append to a misspelled exact lane" 400
           {|{"lane":"exact/verifer_exact","action":"append","runtime_id":"test_provider.test_model"}|}));
@@ -6070,7 +6073,7 @@ let test_config_post_materializes_missing_toml () =
         post_config ~sw ~clock:(Eio.Stdenv.clock env)
           ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
           ~name
-          {|{"activation_mode":"autonomous","sandbox_profile":"docker","sandbox_image":"masc-sandbox:general"}|}
+          {|{"activation_mode":"autonomous","sandbox_profile":"docker","sandbox_image":"base"}|}
       in
       expect_http_status "HTTP 200" 200 raw;
       let open Yojson.Safe.Util in
@@ -6093,7 +6096,7 @@ let test_config_post_materializes_missing_toml () =
         check (option string) "materialized sandbox profile" (Some "docker")
           (Keeper_toml_loader.toml_string_opt doc "keeper.sandbox_profile");
         check (option string) "materialized sandbox image"
-          (Some "masc-sandbox:general")
+          (Some "base")
           (Keeper_toml_loader.toml_string_opt doc "keeper.sandbox_image");
         check (option string) "materialized activation mode" (Some "autonomous")
           (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"))
@@ -7006,4 +7009,7 @@ let () =
           test_case "typed Skills patch preserves all, exact and none" `Quick
             test_config_post_round_trips_typed_skills_patch;
         ] );
+      ( "defined but never registered until task-1768",
+          [ Alcotest.test_case "keepers dashboard json fiber batch collects all keepers" `Quick test_keepers_dashboard_json_fiber_batch_collects_all_keepers
+          ] );
     ]

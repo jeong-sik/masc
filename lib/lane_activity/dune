@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name lane_activity)
+ (public_name masc.lane_activity)
+ (wrapped false)
+ (modules lane_activity)
+ (libraries yojson))

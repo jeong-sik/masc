@@ -699,12 +699,12 @@ supports-multimodal-inputs = true
     let claude =
       runtime "claude.vision"
         (Runtime_execution.Claude_code
-           { cli_path = "claude"; model = Some "vision"; timeout_s = 30. })
+           { cli_path = "claude"; account_home = None; model = Some "vision"; timeout_s = 30. })
     in
     let codex =
       runtime "codex.vision"
         (Runtime_execution.Codex_app_server
-           { cli_path = "codex"; model = Some "vision"; timeout_s = 30. })
+           { cli_path = "codex"; account_home = None; model = Some "vision"; timeout_s = 30. })
     in
     let image = Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" () in
     (match Runtime_agent.decide_modality_reroute_for_runtime_candidates
@@ -740,11 +740,11 @@ supports-multimodal-inputs = true
     check bool "native image declaration remains effective" true native_caps.supports_image_input;
     check bool "native audio declaration remains effective" true native_caps.supports_audio_input)
 
-(* The vision read fleet is [runtime.media_failover] resolved in declared
+(* The vision runtimes are [runtime.media_failover] resolved in declared
    order: ids that resolve to nothing are skipped and a repeated id counts
    once. [fixture.b] is declared and image-capable but not listed, so it is not
-   in the fleet. *)
-let test_media_candidates_are_the_vision_fleet () =
+   among them. *)
+let test_media_candidates_are_the_vision_runtimes () =
   let fixture =
     {|[runtime]
 default = "fixture.vision"
@@ -780,7 +780,7 @@ supports-image-input = true
             ~media_failover:
               [ "fixture.c"; "fixture.missing"; "fixture.a"; "fixture.c" ]));
     check (list string)
-      "no media_failover: no vision fleet"
+      "no media_failover: no vision runtimes"
       []
       (ids (Runtime_agent.media_candidates_of ~runtimes ~media_failover:[])))
 
@@ -848,8 +848,8 @@ let () =
       , [ test_case "text turn no reroute" `Quick test_text_turn_no_reroute
         ; test_case "official transport constrains advertised model media" `Quick
             test_official_transport_caps_override_model_media_declarations
-        ; test_case "media candidates are the vision fleet" `Quick
-            test_media_candidates_are_the_vision_fleet
+        ; test_case "media candidates are the vision runtimes" `Quick
+            test_media_candidates_are_the_vision_runtimes
         ; test_case "media walk: capable candidates only, none for text" `Quick
             test_media_walk_holds_only_capable_candidates
         ; test_case "image on capable no reroute" `Quick

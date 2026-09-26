@@ -153,6 +153,97 @@ let test_the_runtime_picker_names_its_paging () =
    [b / u] are the least guessable keys in the product, and the three Keeper
    drill-downs. On those screens [?] opened on Global and named no section for
    where the reader was. *)
+(* A footer row is read left to right, and a key that appears in two items on
+   it promises two things at once. The chat drew [Right / Esc:chat] beside
+   [Esc:back] -- Esc leaves the screen from the composer and returns to it from
+   the roster, and the row said both without saying when. Code's history
+   overlay drew [Right / Enter:open] beside [Enter (history):open], the same
+   word twice, one of them naming a branch the overlay had already taken away.
+   The table's own answer to a key with two meanings is one row whose label
+   names both, the way [Up / Down] on the chat does.
+
+   Rows are taken from the builders that draw them, not from [for_surface]:
+   Config names [e] and [Enter] twice there, and its panes each draw one. *)
+let atoms_of_key key =
+  String.split_on_char '/' key
+  |> List.concat_map (String.split_on_char ' ')
+  |> List.map String.trim
+  |> List.filter (fun atom -> not (String.equal atom ""))
+
+let split_on_double_space row =
+  let rec walk start index acc =
+    if index + 1 >= String.length row then
+      List.rev (String.sub row start (String.length row - start) :: acc)
+    else if row.[index] = ' ' && row.[index + 1] = ' ' then
+      walk (index + 2) (index + 2) (String.sub row start (index - start) :: acc)
+    else walk start (index + 1) acc
+  in
+  walk 0 0 []
+
+let drawn_rows () =
+  let open Masc_tui_keys in
+  (* Code and Config never draw [for_surface]: every pane of theirs draws a
+     filtered row, and those rows are listed below. The sheet still shows the
+     whole table for both, which is where [Enter (history)] and the params
+     pane's [e / Enter] are told apart. *)
+  List.concat_map
+    (fun (name, surface) ->
+      match surface with
+      | Masc_tui_types.Code | Masc_tui_types.Config -> []
+      | _ ->
+          [ (name ^ " (list)", footer_hints ~detail_open:false surface)
+          ; (name ^ " (detail)", footer_hints ~detail_open:true surface)
+          ])
+    help_surfaces
+  @ List.map
+      (fun (name, pane) -> (name, footer_hints_config ~pane))
+      [ ("Config / runtime", Masc_tui_types.Config_runtime)
+      ; ("Config / models", Masc_tui_types.Config_models)
+      ; ("Config / params", Masc_tui_types.Config_params)
+      ; ("Config / prompts", Masc_tui_types.Config_prompts)
+      ; ("Config / presets", Masc_tui_types.Config_presets)
+      ; ("Config / themes", Masc_tui_types.Config_themes)
+      ; ("Config / voice", Masc_tui_types.Config_voice)
+      ]
+  @ List.map
+      (fun (name, pane) -> (name, footer_hints_code ~pane))
+      [ ("Code / tree", Code_tree); ("Code / file", Code_file)
+      ; ("Code / history", Code_overlay)
+      ]
+
+let test_no_drawn_row_names_one_key_twice () =
+  let clashes =
+    List.concat_map
+      (fun (name, hints) ->
+        let seen = Hashtbl.create 32 in
+        List.iter
+          (fun item ->
+            match String.index_opt item ':' with
+            | None -> ()
+            | Some i ->
+                List.iter
+                  (fun atom ->
+                    Hashtbl.replace seen atom
+                      (item :: (try Hashtbl.find seen atom with Not_found -> [])))
+                  (atoms_of_key (String.sub item 0 i)))
+          (List.filter
+             (fun item -> not (String.equal (String.trim item) ""))
+             (split_on_double_space hints));
+        Hashtbl.fold
+          (fun atom items acc ->
+            if List.length items > 1 then
+              (Printf.sprintf "%s names %s in %s" name atom
+                 (String.concat " and " (List.rev items)))
+              :: acc
+            else acc)
+          seen [])
+      (drawn_rows ())
+  in
+  Alcotest.(check int)
+    (Printf.sprintf "no drawn footer row names one key twice (%s)"
+       (String.concat " | " clashes))
+    0 (List.length clashes)
+
 let test_every_surface_with_keys_has_a_sheet_section () =
   let missing =
     List.filter
@@ -2148,7 +2239,7 @@ let test_the_verdict_pair_is_pinned_by_the_spelling_the_table_uses () =
   Alcotest.(check bool) "the table spells the two as one key" true
     (List.mem "a / x" keys);
   Alcotest.(check bool) "and the pin names that spelling" true
-    (List.mem "a / x" Masc_tui_footer.never_dropped_keys);
+    (Masc_tui_footer.item_is_pinned "a / x:approve / reject");
   let hints = Masc_tui_keys.footer_hints Verification in
   let cut = fitted_footer ~cols:120 hints in
   Alcotest.(check bool) "the row had to drop something" true
@@ -3132,6 +3223,8 @@ let () =
             test_the_runtime_picker_names_its_paging
         ; Alcotest.test_case "every surface with keys has a sheet section"
             `Quick test_every_surface_with_keys_has_a_sheet_section
+        ; Alcotest.test_case "no drawn row names one key twice" `Quick
+            test_no_drawn_row_names_one_key_twice
         ; Alcotest.test_case "no surface repeats a key" `Quick
             test_no_surface_repeats_a_key
         ; Alcotest.test_case "one spelling per key" `Quick

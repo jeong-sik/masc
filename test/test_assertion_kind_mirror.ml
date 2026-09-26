@@ -125,7 +125,7 @@ let check_with args =
     let result =
       Masc.Workspace_assertions.handle_check
         ~inspect_state:(fun _ -> state_all_true)
-        ~tool_name:"masc_check" ~start_time:0.0 ctx args
+        ~tool_name:"masc_check" ~start_time:(Tool_timing.start ()) ctx args
     in
     Yojson.Safe.from_string (Tool_result.message result))
 

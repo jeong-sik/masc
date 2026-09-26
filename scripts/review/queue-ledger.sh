@@ -136,8 +136,15 @@ printf '%s\n' "$rows" | while IFS=$'\t' read -r num author base head _branch che
   elif ! cr=$(open_crs "$num"); then waits="unknown:reviews"
   elif [ -n "$cr" ]; then waits="cr:$cr"
   elif [ "$checks" != ok ]; then waits="ci:$checks"
-  elif ! v=$(verdict_for "$num" "$head"); then waits="unknown:verdict"
   else
+    # Diagnose obsolete CI before requesting review. The final PASS below
+    # still validates its own cited run, never substitutes this selected one.
+    freshness=$(GUARD_GH="$GH" python3 "$(dirname "$0")/ci-freshness.py" \
+      --repo "$repo" --pr "$num" --head "$head" --git-dir "$gitdir" --format ledger) || freshness=$'unknown:freshness\t?'
+    IFS=$'\t' read -r waits stale <<<"$freshness"
+    if [ "$waits" != fresh ]; then :
+    elif ! v=$(verdict_for "$num" "$head"); then waits="unknown:verdict"
+    else
     read -r vstate vrun vby <<<"$v"
     verdict="${vstate:--}"
     [ -z "${vby:-}" ] || [ "$vby" = - ] || verdict="$verdict by $vby"
@@ -149,6 +156,7 @@ printf '%s\n' "$rows" | while IFS=$'\t' read -r num author base head _branch che
         --repo "$repo" --pr "$num" --head "$head" --run "$vrun" --git-dir "$gitdir" --format ledger) || freshness=$'unknown:freshness\t?'
       IFS=$'\t' read -r waits stale <<<"$freshness"
       [ "$waits" != fresh ] || waits="merge"
+    fi
     fi
   fi
   if [ "$fmt" = md ]; then printf '| #%s | %s | %s | %s | %s | %s | %s |\n' "$num" "$author" "$waits" "$age" "$checks" "$stale" "$verdict"

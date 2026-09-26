@@ -58,17 +58,31 @@ def sha(value):
     return value
 
 
+def shared_check_input(path):
+    # pr-check.yml runs lint for every PR and uses these selectors to choose
+    # OCaml/Python/Node suites. Review entry points also own the evidence policy
+    # under which any language's PASS was admitted. None is OCaml-only.
+    return path in {
+        ".github/workflows/pr-check.yml",
+        "scripts/check-pr-sync.sh", "scripts/check-doc-truth.sh",
+        "scripts/check-version-truth.sh", "scripts/changelog-fragments.py",
+        "scripts/ci/run-lint-suite.sh", "scripts/ci/run-edited-tests.sh",
+        "scripts/ci/dune_suite_scope.py", "scripts/ci/stanza_env.py",
+        "scripts/ci/referencing_suites.py", "scripts/ci/list-node-alias-targets.py",
+        "scripts/ci/list-dashboard-backend-coupled-tests.py",
+        "scripts/review/ci-freshness.py", "scripts/review/review-verdict.sh",
+        "scripts/review/approve-guard.sh", "scripts/review/merge-guard.sh",
+        "scripts/review/queue-ledger.sh",
+    }
+
+
 def ocaml_input(path):
     # Inputs consumed by pr-check.yml's build/install steps and local actions.
     # Dune itself consumes root and included build stanzas; opam resolves the
     # manifests/lock and pin scripts. This extends the existing ledger policy.
     p = PurePosixPath(path)
     return (path in {"masc.opam.locked", "dune", "dune-workspace", "dune-project",
-                     "scripts/opam-pin-external-deps.sh", "scripts/ci/opam-cache-freshness.sh",
-                     # pr-check's selected-test runner and its imported readers.
-                     "scripts/ci/run-edited-tests.sh", "scripts/ci/dune_suite_scope.py",
-                     "scripts/ci/stanza_env.py", "scripts/ci/referencing_suites.py",
-                     ".github/workflows/pr-check.yml"}
+                     "scripts/opam-pin-external-deps.sh", "scripts/ci/opam-cache-freshness.sh"}
             or (len(p.parts) == 1 and p.suffix == ".opam")
             or any(path.startswith(".github/actions/" + name + "/") for name in
                    ("setup-ocaml-toolchain", "pin-ocaml-deps", "install-ocaml-deps")))
@@ -80,17 +94,38 @@ def needs_ocaml(paths):
                or p.endswith(".inc") or ocaml_input(p) for p in paths)
 
 
+def check_dependency(path, candidate_paths):
+    return shared_check_input(path) or (needs_ocaml(candidate_paths) and ocaml_input(path))
+
+
+def current_pr_check(gh, prefix, head):
+    runs = [run for page in api_pages(
+        gh, f"{prefix}/actions/runs?head_sha={head}&event=pull_request&per_page=100")
+        for run in page["workflow_runs"]
+        if run["head_sha"] == head and run["event"] == "pull_request"
+        and run["path"] == ".github/workflows/pr-check.yml"
+        and run["conclusion"] != "cancelled"]
+    if not runs:
+        raise Unavailable("pr_check_run_unavailable")
+    # Same-head cancelled concurrency twins do not replace a real observation.
+    # A newer queued/failed/skipped run DOES replace an older success; evaluate
+    # below refuses it instead of asking a reviewer to certify stale evidence.
+    return max(runs, key=lambda run: (run["run_number"], run["id"]))["id"]
+
+
 def evaluate(*, repo, pr, head, run, git_dir, gh):
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
         raise Unavailable("invalid_repository")
     sha(head)
-    if pr <= 0 or run <= 0:
+    if pr <= 0 or (run is not None and run <= 0):
         raise Unavailable("invalid_pr_or_run")
     prefix = "repos/" + repo
     current = api(gh, f"{prefix}/pulls/{pr}")
     if (current["state"] != "open" or current["draft"] or current.get("merged")
             or current["base"]["ref"] != "main" or current["head"]["sha"] != head):
         raise Unavailable("pr_state_or_head_changed")
+    if run is None:
+        run = current_pr_check(gh, prefix, head)
     evidence = api(gh, f"{prefix}/actions/runs/{run}")
     if (evidence["id"] != run or evidence["head_sha"] != head
             or evidence["event"] != "pull_request"
@@ -148,7 +183,7 @@ def evaluate(*, repo, pr, head, run, git_dir, gh):
         touched = set(command(git + ["diff", "--name-only", "--no-renames", "-z",
                                       parents[0], commit]).split("\0")) - {""}
         overlap = sorted(touched & paths)
-        dependencies = sorted(p for p in touched if needs_ocaml(paths) and ocaml_input(p))
+        dependencies = sorted(p for p in touched if check_dependency(p, paths))
         changed.update(touched)
         if overlap or dependencies:
             commits.append({"sha": commit, "committed_at": datetime.fromtimestamp(
@@ -164,7 +199,7 @@ def evaluate(*, repo, pr, head, run, git_dir, gh):
             or end["base"]["ref"] != "main" or end["draft"] or end_main != main):
         raise Unavailable("pr_or_main_moved_during_check")
     overlap = sorted(paths & changed)
-    dependencies = sorted(p for p in changed if needs_ocaml(paths) and ocaml_input(p))
+    dependencies = sorted(p for p in changed if check_dependency(p, paths))
     return {"status": "stale" if commits else "fresh", "head": head, "main": main,
             "comparison_ancestor": comparison_ancestor,
             "run": run, "created_at": evidence["created_at"], "overlap": overlap,
@@ -175,8 +210,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("repo", "head", "git-dir"):
         parser.add_argument("--" + name, required=True)
-    for name in ("pr", "run"):
-        parser.add_argument("--" + name, required=True, type=int)
+    parser.add_argument("--pr", required=True, type=int)
+    parser.add_argument("--run", type=int,
+                        help="Cited run; omitted only for pre-review queue inspection")
     parser.add_argument("--format", choices=("json", "ledger"), default="json")
     args = parser.parse_args()
     try:

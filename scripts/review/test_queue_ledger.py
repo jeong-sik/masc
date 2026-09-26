@@ -125,7 +125,9 @@ raise SystemExit(result.returncode)
                                             "conclusion": "SUCCESS", "startedAt": RUN_TIME}]}],
             "comments": comments if comments is not None else [self.message(self.verdict())],
             "reviews": reviews or [],
-            "runs": {"workflow_runs": [{"created_at": RUN_TIME, "conclusion": "success"}]},
+            "runs": {"workflow_runs": [{"id":900,"run_number":10,"head_sha":self.head,
+                      "event":"pull_request","path":".github/workflows/pr-check.yml",
+                      "created_at": RUN_TIME, "conclusion": "success"}]},
             "run": {"id": 900, "head_sha": self.head, "status": "completed", "conclusion": "success",
                     "created_at": RUN_TIME, "event": "pull_request", "path": ".github/workflows/pr-check.yml", "pull_requests": [{"number": 1}]},
             "pull": {"state": "open", "draft": False, "merged": False,
@@ -219,6 +221,36 @@ raise SystemExit(result.returncode)
 
     def test_docs_only_does_not_inherit_ocaml_pin_dependency(self):
         self.make_pr("docs/example.md")
+        self.main_change("masc.opam.locked")
+        self.assertEqual(self.ledger()["waits_on"], "merge")
+
+    def test_stale_queue_reports_refresh_before_any_verdict(self):
+        self.main_change(self.path)
+        row = self.ledger(comments=[], reviews=[])
+        self.assertEqual(row["waits_on"], "stale:1")
+
+    def test_contained_main_commit_at_run_second_is_not_stale(self):
+        self.main_change(self.path, RUN_TIME)
+        self.git("checkout", "-q", "fixture-pr")
+        self.git("merge", "--no-edit", "-s", "ours", "main")
+        self.head = self.git("rev-parse", "HEAD")
+        self.assertEqual(self.ledger()["waits_on"], "merge")
+
+    def test_dashboard_only_shared_workflow_and_lint_driver_changes_refuse(self):
+        self.make_pr("dashboard/src/fixture.ts")
+        for path in [".github/workflows/pr-check.yml", "scripts/ci/run-lint-suite.sh",
+                     "scripts/ci/run-edited-tests.sh", "scripts/review/ci-freshness.py"]:
+            with self.subTest(path=path):
+                self.git("checkout", "-q", "-B", "main", self.base)
+                self.git("push", "-q", "--force", "origin", "main")
+                self.main_change(path)
+                code, receipt = self.freshness()
+                self.assertEqual(code, 2)
+                self.assertEqual(receipt["dependencies"], [path])
+                self.assertEqual(receipt["commits"][0]["reason"], "post_run_overlap")
+
+    def test_dashboard_only_keeps_proven_ocaml_dependency_scope(self):
+        self.make_pr("dashboard/src/fixture.ts")
         self.main_change("masc.opam.locked")
         self.assertEqual(self.ledger()["waits_on"], "merge")
 

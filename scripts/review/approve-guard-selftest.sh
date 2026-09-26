@@ -85,6 +85,9 @@ esac
 [ -f "$d/$f.json" ] || { echo "fake gh: missing $f.json" >&2; exit 1; }
 if [ "$f" = actions ]; then
   "$FAKE_JQ" '.workflow_runs |= map(. + {event:(.event//"pull_request"),path:(.path//".github/workflows/pr-check.yml")})' "$d/$f.json" | "$FAKE_JQ" -r "$jqf"
+elif [ "$f" = reviews ] && [ -f "$d/reviews-page-2.json" ]; then
+  "$FAKE_JQ" -r "$jqf" "$d/reviews.json"
+  "$FAKE_JQ" -r "$jqf" "$d/reviews-page-2.json"
 else
   "$FAKE_JQ" -r "$jqf" "$d/$f.json"
 fi
@@ -347,6 +350,10 @@ merge_setup() {
 }
 d="$work/merge-fresh"; merge_setup "$d"
 merge_case merge-fresh 0 1 "$d"
+d="$work/merge-paginated"; merge_setup "$d"
+cp "$d/reviews.json" "$d/reviews-page-2.json"
+"$JQ" -n --arg h "$H" '[range(1;101) | {id:.,state:"COMMENTED",commit_id:$h,user:{login:"reviewer"},body:"earlier review",submitted_at:"2026-01-01T00:20:00Z"}]' > "$d/reviews.json"
+merge_case merge-paginated-latest-approval 0 1 "$d"
 d="$work/merge-late-hold"; merge_setup "$d"; touch "$d/late_hold"
 merge_case merge-hold-arrives-during-freshness 2 0 "$d"
 d="$work/merge-hold"; merge_setup "$d"

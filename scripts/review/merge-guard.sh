@@ -46,12 +46,19 @@ python3 "$here/ci-freshness.py" --repo "$repo" --pr "$pr" --head "$head" \
 # A verdict/CR can arrive while the graph is being read. Refresh these at the
 # finishing boundary too; separate reads cannot provide a server-side CAS.
 check_verdict
-review_state=$("$GH" api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100" \
-  --jq "[.[] | select(.state == \"APPROVED\" or .state == \"CHANGES_REQUESTED\" or .state == \"DISMISSED\")] |
-    group_by(.user.login) | map(max_by(.id)) |
-    if any(.[]; .state == \"CHANGES_REQUESTED\") then \"blocked\"
-    elif any(.[]; .state == \"APPROVED\" and .commit_id == \"$head\") then \"approved\"
-    else \"unapproved\" end")
+review_rows=$("$GH" api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100" \
+  --jq '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") |
+    [.user.login, (.id|tostring), .state, (.commit_id//"")] | @tsv')
+# gh applies --jq per page. Aggregate rows once after every page has arrived.
+review_state=$(printf '%s\n' "$review_rows" | awk -F '\t' -v head="$head" '
+  NF && (!( $1 in id) || $2+0 > id[$1]) { id[$1]=$2+0; state[$1]=$3; commit[$1]=$4 }
+  END {
+    for (user in state) {
+      if (state[user]=="CHANGES_REQUESTED") blocked=1
+      if (state[user]=="APPROVED" && commit[user]==head) approved=1
+    }
+    print blocked ? "blocked" : (approved ? "approved" : "unapproved")
+  }')
 if [ "$review_state" != approved ]; then
   echo "merge-guard: current review state is $review_state" >&2
   exit 2

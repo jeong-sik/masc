@@ -10,6 +10,7 @@
 #   cr:<logins>               an account's newest decision review is CHANGES_REQUESTED (4)
 #   ci:<state>                the head's checks are not green (1)
 #   stale:<files>             main changed PR files after the head's checks started (3)
+#   dependency:<files>        OCaml check inputs changed after the run started
 #   review                    no PASS verdict line on the current head (2)
 #   merge                     all five hold
 #   unknown:<step>            a read failed; never treated as green (fail-closed)
@@ -17,7 +18,9 @@
 # Condition 2 reads only the verdict line the leader fixed in R1 §1, as the first
 # line of a PR comment or review body:
 #   verdict: PASS|FAIL head: <40-hex sha> run: <PR check run id> by: <name>
-# The newest line naming the current head decides. A PASS counts only if its run
+# The newest structured verdict naming the current head decides. HOLD, COMMENT,
+# unknown states and incomplete PASS lines cannot leave an older PASS in force.
+# Free-text comments are not parsed as decisions. A PASS counts only if its run
 # is a completed+success run on that head that was not a pull_request run while
 # the PR was a Draft (R1 §3): all-skipped Draft runs conclude "success" too, so a
 # run whose jobs were all skipped does not count.
@@ -113,16 +116,32 @@ open_crs() {
   return "${PIPESTATUS[0]}"
 }
 
-# Newest verdict line for this head -> "PASS <run> <by>" / "FAIL ..." / "".
+# Newest structured verdict for this head; malformed evidence never grants PASS.
 verdict_for() { # pr head
   local lines
-  lines=$( { "$GH" api --paginate "repos/$repo/issues/$1/comments" --jq '.[] | [.created_at, .body] | @tsv' &&
+  lines=$( { "$GH" api --paginate "repos/$repo/issues/$1/comments" --jq '.[] | [(.updated_at // .created_at), .body] | @tsv' &&
              "$GH" api --paginate "repos/$repo/pulls/$1/reviews" --jq '.[] | [.submitted_at, .body] | @tsv'; } ) || return 1
   printf '%s\n' "$lines" | awk -F'\t' -v head="$2" '
-    { body=$2; sub(/\\n.*/, "", body)
-      if (match(body, /^verdict: (PASS|FAIL) head: [0-9a-f]+ run: [0-9]+ by: [^ ]+/)) {
-        n=split(substr(body,RSTART,RLENGTH), w, " ")
-        if (w[4]==head && $1 > t) { t=$1; v=w[2]" "w[6]" "w[8] } } }
+    { body=$2; sub(/\\n.*/, "", body); sub(/\\r$/, "", body)
+      n=split(body, w, " ")
+      names_head=0; head_fields=0
+      for (i=3; i<n; i++) if (w[i]=="head:") {
+        head_fields++; if (w[i+1]==head) names_head=1
+      }
+      if (w[1]=="verdict:" && names_head) {
+        state=w[2]; run="-"; by="-"
+        if (state=="PASS" || state=="FAIL") {
+          if (body ~ /^verdict: (PASS|FAIL) head: [0-9a-f]+ run: [1-9][0-9]* by: [A-Za-z0-9._-]+$/ &&
+              n==8 && head_fields==1 && w[3]=="head:" && w[4]==head &&
+              w[5]=="run:" && w[6] ~ /^[1-9][0-9]*$/ &&
+              w[7]=="by:" && w[8] ~ /^[A-Za-z0-9._-]+$/) { run=w[6]; by=w[8] }
+          else state="INVALID"
+        } else if (state!="HOLD" && state!="COMMENT") state="UNKNOWN"
+        # Conflicting decisions in the same API timestamp cannot grant PASS.
+        if ($1 > t || ($1==t && state!="PASS")) {
+          t=$1; v=state" "run" "by
+        }
+      } }
     END { print v }'
 }
 
@@ -150,10 +169,26 @@ dune_names_unique() {
   [ -z "$(sort <<<"$names" | uniq -d)" ]
 }
 
+# These are inputs consumed by pr-check.yml: the setup action hashes the root
+# opam manifests, lock, dune-project and pin script; pin/install actions execute
+# their own scripts, and setup invokes the cache-freshness script. A change to
+# these inputs invalidates earlier OCaml evidence even without a shared .ml file.
+# Keep docs-only PRs separate: this is dependency coverage, not a global gate.
+stale_dependencies() ( # changed-main-paths pr-files
+  set -o pipefail
+  printf '%s\n' "$2" | tr ',' '\n' | grep -E '\.(ml|mli)$' >/dev/null || return 0
+  printf '%s\n' "$1" | awk '
+    /^(masc\.opam\.locked|dune-project|[^\/]+\.opam)$/ ||
+    /^scripts\/(opam-pin-external-deps\.sh|ci\/opam-cache-freshness\.sh)$/ ||
+    /^\.github\/actions\/(setup-ocaml-toolchain|pin-ocaml-deps|install-ocaml-deps)\// ||
+    /^\.github\/workflows\/pr-check\.yml$/ { print }
+  ' | sort -u | paste -sd, -
+)
+
 # Files the PR touches that main changed after <since>; test/dune dropped per R1 §5.
-stale_files() { # since files head
+stale_files() { # since files head changed-main-paths
   local changed hit
-  changed=$(git -C "$gitdir" log origin/main --since="$1" --name-only --format=) || return 1
+  changed="$4"
   hit=$(printf '%s\n' "$changed" | sort -u | grep -Fx -f <(tr ',' '\n' <<<"$2") || true)
   if printf '%s\n' "$hit" | grep -qx 'test/dune'; then
     # Every git read must succeed and be non-empty: an empty revision would make
@@ -206,7 +241,7 @@ refspecs=$(printf '%s\n' "$rows" | awk -F'\t' '$3=="main"{printf "+refs/pull/%s/
 printf '%s\n' "$rows" | while IFS=$'\t' read -r num author base head _branch checks started created files; do
   [ -n "$num" ] || continue
   age=$(( (now - $(epoch "$created")) / 3600 ))
-  stale="-"; verdict="-"
+  stale="-"; verdict="-"; dependencies=""
   if [ "$base" != main ]; then
     parent=$(awk -F'\t' -v b="$base" '$1==b{print $2}' <<<"$heads")
     waits="parent ${parent:+#$parent}${parent:-$base}"
@@ -215,12 +250,16 @@ printf '%s\n' "$rows" | while IFS=$'\t' read -r num author base head _branch che
   elif [ "$checks" != ok ]; then waits="ci:$checks"
   elif ! since=$(window_start "$head" "$started"); then stale="?"; waits="unknown:run"
   elif ! files=$(full_files "$num" "$files"); then stale="?"; waits="unknown:files"
-  elif ! stale=$(stale_files "$since" "$files" "$head"); then stale="?"; waits="unknown:stale"
+  elif ! changed=$(git -C "$gitdir" log origin/main --since="$since" --name-only --format=); then stale="?"; waits="unknown:stale"
+  elif ! stale=$(stale_files "$since" "$files" "$head" "$changed"); then stale="?"; waits="unknown:stale"
   elif [ "$stale" -gt 0 ]; then waits="stale:$stale"
+  elif ! dependencies=$(stale_dependencies "$changed" "$files"); then waits="unknown:dependencies"
+  elif [ -n "$dependencies" ]; then waits="dependency:$dependencies"
   elif ! v=$(verdict_for "$num" "$head"); then waits="unknown:verdict"
   else
     read -r vstate vrun vby <<<"$v"
-    verdict="${vstate:--}${vby:+ by $vby}"
+    verdict="${vstate:--}"
+    [ -z "${vby:-}" ] || [ "$vby" = - ] || verdict="$verdict by $vby"
     if [ "${vstate:-}" != PASS ]; then waits="review"
     elif ! ok=$(run_counts "$vrun" "$head"); then waits="unknown:run"
     elif [ "$ok" != yes ]; then waits="review"; verdict="PASS run $vrun not countable"

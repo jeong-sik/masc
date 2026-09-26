@@ -22,3 +22,8 @@ caused the measured regression. A new artifact must be disassembled to verify
 that the compiler removed the call, and measured separately for performance.
 The earlier paired experiment remains evidence for `8c23cd5`, not for this
 attribute change. No local OCaml build, speedup or deployment is claimed.
+
+The subsequent [inline artifact and paired measurement](../inline-comparison/README.md)
+now verify call removal in `first_repair` and retain all mixed performance
+results. The disassembly files in this directory remain the original pre-inline
+comparison, not the new candidate.

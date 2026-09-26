@@ -93,6 +93,8 @@ a separate, incomplete-workload observation.
 The measured candidate has a per-ASCII-byte predicate call that the earlier
 ASCII scan did not have. [Exact artifact disassembly](ascii-call/README.md)
 records that operation without attributing the timing regression to it.
-A later source change requests inlining of the existing pure predicate. It is
-not part of the paired result above; its emitted code and performance need a
-new artifact and comparison.
+The [separate inline comparison](inline-comparison/README.md) now verifies that
+new binary `c60d967b19a9` contains direct ASCII comparisons instead of that call.
+Its 24-session measurement retains lower mutation medians together with mixed
+GET results and worse multilingual/gzip mutation tails. The earlier comparison
+above still describes `8c23cd5`; the two experiments are not pooled.

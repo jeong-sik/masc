@@ -1620,11 +1620,26 @@ let test_decode_fleet_safety_carries_the_scan_shortfall () =
   Alcotest.(check int) "sources the scan could not read" 2
     fleet.Tui_decode.fs_active_task_owner_scan_error_count
 
+(* The scan's three words and nothing else: the dashboard refuses any other
+   spelling, so a reader that took "OK" or "healthy" as ok would draw green
+   what the dashboard throws away. *)
+let test_fleet_grade_reads_only_its_own_words () =
+  List.iter
+    (fun grade ->
+      let word = Keeper_fleet_grade.wire_name grade in
+      Alcotest.(check bool) word true (Keeper_fleet_grade.of_wire_name word = Some grade))
+    Keeper_fleet_grade.all;
+  List.iter
+    (fun word ->
+      Alcotest.(check bool) word true (Keeper_fleet_grade.of_wire_name word = None))
+    [ "OK"; "healthy"; " ok"; "warning" ]
+
 let test_decode_fleet_safety_carries_both_name_lists () =
   let fleet =
     measured (Tui_decode.decode_fleet_safety (fleet_safety_json ()))
   in
-  Alcotest.(check string) "status" "degraded" fleet.fs_status;
+  Alcotest.(check bool) "status is read as a grade" true
+    (fleet.fs_status = Tui_decode.Fleet_grade Keeper_fleet_grade.Fleet_degraded);
   Alcotest.(check bool) "the blocker is read as the reason it names" true
     (fleet.fs_blocker
      = Some
@@ -12414,6 +12429,8 @@ let () =
       [
         Alcotest.test_case "carries both name lists" `Quick
           test_decode_fleet_safety_carries_both_name_lists;
+        Alcotest.test_case "the fleet grade reads only its own words" `Quick
+          test_fleet_grade_reads_only_its_own_words;
         Alcotest.test_case "fleet safety carries the scan shortfall" `Quick
           test_decode_fleet_safety_carries_the_scan_shortfall;
         Alcotest.test_case "every field is required" `Quick

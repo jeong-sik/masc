@@ -608,8 +608,14 @@ type fleet_blocker =
   | Blocker of Keeper_fleet_blocker.t
   | Unrecognised_blocker of string
 
+(* The scan's own grade. A word this build does not know is kept as written,
+   not read as a grade. *)
+type fleet_status =
+  | Fleet_grade of Keeper_fleet_grade.t
+  | Unrecognised_fleet_status of string
+
 type fleet_safety = {
-  fs_status : string;
+  fs_status : fleet_status;
   fs_blocker : fleet_blocker option;
   fs_operator_action_required : bool;
   fs_bootable_count : int;
@@ -10380,7 +10386,12 @@ let decode_lane_run_detail json =
 (* Every field is read as required: the full reading writes all of them, so a
    missing count is a broken payload, not an idle fleet. *)
 let decode_fleet_safety_reading section =
-  let* fs_status = required_string_field section "status" in
+  let* status = required_string_field section "status" in
+  let fs_status =
+    match Keeper_fleet_grade.of_wire_name status with
+    | Some grade -> Fleet_grade grade
+    | None -> Unrecognised_fleet_status status
+  in
   let* fs_blocker =
     Result.map
       (Option.map (fun name ->

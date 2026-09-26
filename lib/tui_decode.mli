@@ -2321,8 +2321,15 @@ type fleet_blocker =
   | Blocker of Keeper_fleet_blocker.t
   | Unrecognised_blocker of string
 
+(** How the fleet scan graded the fleet ({!Keeper_fleet_grade}).
+    [Unrecognised_fleet_status] keeps a word this build does not know as the
+    server wrote it. *)
+type fleet_status =
+  | Fleet_grade of Keeper_fleet_grade.t
+  | Unrecognised_fleet_status of string
+
 type fleet_safety = {
-  fs_status : string;
+  fs_status : fleet_status;
   fs_blocker : fleet_blocker option;
   fs_operator_action_required : bool;
   fs_bootable_count : int;

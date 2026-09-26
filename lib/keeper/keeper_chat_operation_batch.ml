@@ -32,23 +32,41 @@ let blocks (input : Payload.decoded_input) =
     then blocks
     else Keeper_multimodal_input.User_text input.message :: blocks
 
-let select head candidates =
+let select_with ~preserve_fifo head candidates =
   match decode head with
   | Error _ -> Ok None
   | Ok (source, first) ->
-    let members, inputs, attachments = List.fold_left
-      (fun (members, inputs, attachments) (operation : Operation.t) ->
+    let candidates =
+      if preserve_fifo then
+        let rec from_head = function
+          | [] -> []
+          | (operation : Operation.t) :: rest as candidates ->
+            if Operation.Operation_id.equal operation.operation_id head.operation_id
+            then candidates else from_head rest
+        in
+        from_head candidates
+      else candidates
+    in
+    let rec collect members inputs attachments = function
+      | [] -> members, inputs, attachments
+      | (operation : Operation.t) :: rest ->
         match decode operation with
-        | Error _ -> members, inputs, attachments
+        | Error _ when preserve_fifo -> members, inputs, attachments
+        | Error _ -> collect members inputs attachments rest
         | Ok (candidate_source, input)
           when same_context source candidate_source
             && input.turn_instructions = first.turn_instructions
             && input.surface_context = first.surface_context ->
           (match merge_attachments attachments input.attachments with
-           | None -> members, inputs, attachments
-           | Some attachments -> operation.operation_id :: members, input :: inputs, attachments)
-        | Ok _ -> members, inputs, attachments)
-      ([], [], first.attachments) candidates in
+           | None when preserve_fifo -> members, inputs, attachments
+           | None -> collect members inputs attachments rest
+           | Some attachments ->
+             collect (operation.operation_id :: members) (input :: inputs)
+               attachments rest)
+        | Ok _ when preserve_fifo -> members, inputs, attachments
+        | Ok _ -> collect members inputs attachments rest
+    in
+    let members, inputs, attachments = collect [] [] first.attachments candidates in
     match members with
     | [] | [_] -> Ok None
     | _ ->
@@ -58,6 +76,9 @@ let select head candidates =
       let input = Payload.input_to_json ~message ~user_blocks ~attachments
         ~turn_instructions:first.turn_instructions ~surface_context:first.surface_context in
       Ok (Some { Keeper_chat_operation_store.members = List.rev members; input })
+
+let select = select_with ~preserve_fifo:true
+let select_priority = select_with ~preserve_fifo:false
 
 let event_for_member ~operation_id event =
   let id = Operation.Operation_id.to_string operation_id in

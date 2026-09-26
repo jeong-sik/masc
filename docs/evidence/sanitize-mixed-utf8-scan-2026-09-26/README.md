@@ -78,6 +78,12 @@ isolated runtime directory are not published. No real user data is used.
 - Independent adversarial review found no semantic or ownership defect. The
   response review and CI results are recorded in the PR body when available.
 
-Performance after this change is **not measured yet**, including the all-ASCII
-case. No allocation-volume result, first-response speedup, deployment, TUI
-improvement or 0.1ms achievement is claimed from this profile.
+A separate [paired comparison](comparison/README.md) now measures 480 Task
+acknowledgements and 960 GETs across ASCII and multilingual descriptions.
+Multilingual mutation medians were lower in all three repetitions for each GET
+encoding, while ASCII/identity mutation median and multilingual/identity first
+GET median worsened. All observations, actual persisted backlogs and mixed
+results are retained. These are whole HTTP round trips, not isolated sanitizer
+CPU time. No general speedup, allocation-volume result, deployment, TUI
+improvement or 0.1ms achievement is claimed. The original native profile remains
+a separate, incomplete-workload observation.

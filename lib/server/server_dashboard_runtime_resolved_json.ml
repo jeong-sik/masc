@@ -44,6 +44,10 @@ let runtime_resolution_json ~scope_label (rt : Runtime.t) : Yojson.Safe.t =
   `Assoc
     [ "id", `String rt.id
     ; "provider", `String rt.provider.display_name
+      (* The [providers.<id>] table this binding belongs to. The display name
+         above is prose; an editor that opens the provider's table needs the
+         key. *)
+    ; "provider_id", `String rt.provider.id
     ; "model", `String rt.model.api_name
     ; "exact_slot_group", `String exact_slot_group
     ; "effective_max_context", `Int effective_max_context

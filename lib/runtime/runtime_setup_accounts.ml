@@ -66,14 +66,18 @@ let lease_home ~workspace ~integration_id ~cli_path ~account_home = filesystem (
   if info.st_kind <> Unix.S_DIR || info.st_uid <> Unix.geteuid () then Error Invalid_reference else
   let workspace = Unix.realpath workspace in
   let* root = root ~create:true () in
-  let reference = Reference (Auth.generate_token ()) in
-  let directory_path = Filename.concat root (reference_to_string reference) in
-  Unix.mkdir directory_path 0o700;
-  let data = `Assoc ["schema", `String "masc.setup_native_home_reference.v1";
-    "workspace", `String workspace; "integration_id", `String integration_id;
-    "cli_path", `String cli_path; "account_home", `String account_home] in
-  Auth.save_private_text_file (manifest directory_path) (Yojson.Safe.to_string data);
-  Ok reference)
+  Eio.Switch.run (fun sw ->
+    let reference = Reference (Auth.generate_token ()) in
+    let directory_path = Filename.concat root (reference_to_string reference) in
+    Unix.mkdir directory_path 0o700;
+    let retained = ref false in
+    Eio.Switch.on_release sw (fun () -> if not !retained then Fs_compat.remove_tree directory_path);
+    let data = `Assoc ["schema", `String "masc.setup_native_home_reference.v1";
+      "workspace", `String workspace; "integration_id", `String integration_id;
+      "cli_path", `String cli_path; "account_home", `String account_home] in
+    Auth.save_private_text_file (manifest directory_path) (Yojson.Safe.to_string data);
+    retained := true;
+    Ok reference))
 
 let resolve ~workspace ~integration_id ~cli_path (Reference reference) = filesystem (fun () ->
   let workspace=Unix.realpath workspace in

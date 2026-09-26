@@ -251,16 +251,15 @@ let discover ~binary ~sw:_ ~net ~base_path request =
     | Muse ->
       let* command=text (value "command" template) in
       let* json=native_json ~binary (["runtime-muse-models";"--cli-path";command] @ selected_home_args template) in
-      (match json with
-       | `Assoc fields when value "schema" fields=`String "masc.muse_models.v1"
-           && value "invocation_verified" fields=`Bool false
-           && value "account_availability_verified" fields=`Bool false
-           && List.mem (value "source" fields) (List.map (fun s -> `String s)
-                ["providerCatalog";"bundledCatalog";"configCatalog"]) ->
-         let* projected=project_client_models ~source:("muse_" ^ (match value "source" fields with `String s -> s | _ -> ""))
-             ~catalog:false json in
-         Ok projected
-       | _ -> Error Unsupported_connection)
+      let* fields = match json with
+        | `Assoc fields when value "schema" fields=`String "masc.muse_models.v1"
+            && value "invocation_verified" fields=`Bool false
+            && value "account_availability_verified" fields=`Bool false -> Ok fields
+        | _ -> Error Unsupported_connection in
+      let* source = match value "source" fields with
+        | `String (("providerCatalog" | "bundledCatalog" | "configCatalog") as source) -> Ok source
+        | _ -> Error Unsupported_connection in
+      project_client_models ~source:("muse_" ^ source) ~catalog:false json
     | Claude_code ->
       let* json=native_json ~binary ["runtime-model-list";"claude-code"] in
       project_client_models ~source:"installed_claude_catalog_not_account_verification" ~catalog:true json

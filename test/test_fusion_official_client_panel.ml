@@ -785,8 +785,7 @@ let test_cancelled_muse_panel_does_not_leave_a_workspace () =
           let result = Masc.Fusion_official_client.run_panelist
               ~base_dir ~runtime_id:muse_runtime_id ~system_prompt:"" ~prompt:"ping" () in
           match result with
-          | Ok _ | Error _ -> fail "a cancelled panel returned a normal result");
-        false
+          | Ok _ | Error _ -> false)
       with Eio.Cancel.Cancelled _ -> true) in
     check bool "owner cancellation propagates" true cancelled;
     check (list string) "cancelled dispatch leaves no temporary workspace" []

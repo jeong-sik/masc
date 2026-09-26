@@ -1518,7 +1518,7 @@ let planning_strip_plain ~tab ~review_count ~verifying_count ~window =
     ]
   in
   List.map
-    (fun (stop, label) -> if stop = tab then label ^ window else label)
+    (fun (stop, label) -> (stop, if stop = tab then label ^ window else label))
     stops
 
 (* Why a Keeper's Automation tab is empty. The projection caps its page and

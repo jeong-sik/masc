@@ -616,7 +616,7 @@ val planning_strip_plain :
   review_count:int option ->
   verifying_count:int option ->
   window:string ->
-  string list
+  (planning_tab * string) list
 (** The Planning strip's stop labels, in order, without styling. Exactly three:
     Schedules and Fusion are tabs of the selected Keeper, not stops here.
 

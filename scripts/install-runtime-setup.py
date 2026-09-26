@@ -416,7 +416,11 @@ def select_model(binary, choice, endpoint='', api_key_env='', timeout=10):
     print('\n' + origin, file=sys.stderr)
     for index, item in enumerate(models, 1):
         print('  {}) {} — ID: {}'.format(index, item['label'] if model_text(item['label']) else item['id'], item['id']), file=sys.stderr)
-    print('Choose a listed number or paste an exact model ID. Enter q to cancel; do not guess a model name.', file=sys.stderr)
+    if choice == 'muse' and not models:
+        raise SetupError('Muse reported no models; check the selected account and refresh discovery')
+    print(('Choose a listed number or a reported model ID.' if choice == 'muse' else
+           'Choose a listed number or paste an exact model ID.') +
+          ' Enter q to cancel; do not guess a model name.', file=sys.stderr)
     selected = None
     while True:
         answer = ask('Model number or exact ID' if models else 'Exact model ID from your runtime')
@@ -430,10 +434,15 @@ def select_model(binary, choice, endpoint='', api_key_env='', timeout=10):
         elif model_text(answer):
             model = answer
             selected = next((item for item in models if item['id'] == model), None)
+            if choice == 'muse' and selected is None:
+                print('Choose a model reported by the selected Muse account.', file=sys.stderr)
+                continue
             break
         else:
             print('Enter a model ID or a listed number; blank input cannot choose a model.', file=sys.stderr)
     context = selected['context'] if selected else None
+    if choice == 'muse' and not positive_integer(context):
+        raise SetupError('Muse must report a positive context window for the selected model; refresh discovery')
     context_source = origin if context else None
     if context is None and choice == 'claude_code':
         result = subprocess.run([binary, 'runtime-model-info', model, '--client', {'codex':'codex','claude_code':'claude-code'}[choice]], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -1146,17 +1155,17 @@ def execute_prerequisite(binary, dependency, action_id, workspace_args=(), base_
 
 def select_native_account(source):
     source = dict(source)
-    if source.get('account_home'):
-        return source
+    configured_home = source.get('account_home')
     choice = source['choice']
     home = os.environ.get('HOME', '')
-    default = ({'claude_code': os.environ.get('CLAUDE_CONFIG_DIR') or str(Path(home) / '.claude'),
+    default = configured_home or ({'claude_code': os.environ.get('CLAUDE_CONFIG_DIR') or str(Path(home) / '.claude'),
                 'codex': os.environ.get('CODEX_HOME') or str(Path(home) / '.codex'),
                 'muse': home}).get(choice)
     if default and not Path(default).is_absolute():
         default = str(Path.cwd() / default)
     selected = pick(source['label'] + ': select the CLI account',
-                    ['Use this server CLI account: ' + (default or '(unavailable)'),
+                    [('Use the configured CLI account: ' if configured_home else 'Use this server CLI account: ') +
+                     (default or '(unavailable)'),
                      'Select another account directory'])[0]
     account_home = default if selected == 0 else ask_text('Absolute account directory (Claude CLAUDE_CONFIG_DIR, Codex CODEX_HOME, Muse HOME)')
     if (not isinstance(account_home, str) or not account_home or '\0' in account_home
@@ -1176,7 +1185,8 @@ def select_native_account(source):
     except OSError as error:
         raise SetupError('Could not prepare the selected account directory for first login') from error
     source['account_home'] = account_home
-    source['credential_replaced'] = True
+    if account_home != configured_home:
+        source['credential_replaced'] = True
     return source
 
 

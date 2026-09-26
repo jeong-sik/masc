@@ -95,7 +95,27 @@ let native_home_scope () = fixture (fun directory workspace ->
     (Result.is_ok (Accounts.resolve ~workspace ~integration_id:"muse-code" ~cli_path:"muse" reference));
   check bool "registration preserves the selected account" true (Sys.is_directory account_home))
 
+let native_home_revalidated () = fixture (fun directory workspace ->
+  let account_home = Filename.concat directory "selected-home" in
+  Unix.mkdir account_home 0o700;
+  let reference = Accounts.register_home ~workspace ~integration_id:"muse-code"
+    ~cli_path:"muse" ~account_home |> get in
+  let resolve () = Accounts.resolve ~workspace ~integration_id:"muse-code"
+    ~cli_path:"muse" reference in
+  Unix.rmdir account_home;
+  check bool "deleted account cannot resolve" true (Result.is_error (resolve ()));
+  write account_home "replacement file";
+  check bool "file replacement cannot resolve" true (Result.is_error (resolve ()));
+  Unix.unlink account_home;
+  Unix.symlink "/" account_home;
+  if (Unix.stat "/").st_uid <> Unix.geteuid () then
+    check bool "foreign-owned symlink target cannot resolve" true (Result.is_error (resolve ()));
+  Unix.unlink account_home;
+  Unix.mkdir account_home 0o700;
+  check bool "owned directory remains usable" true (Result.is_ok (resolve ())))
+
 let () = run "setup account references" ["private account",[
+  test_case "native home revalidated on resolution" `Quick native_home_revalidated;
   test_case "native home scoped reference" `Quick native_home_scope;
   test_case "persistent scoped reference" `Quick persisted_scope;
   test_case "private manifest and credential required" `Quick private_manifest;

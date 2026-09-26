@@ -105,13 +105,18 @@ let script_text ~capture steps =
           (fun (key, expected) ->
              line (Printf.sprintf "[ \"$%s\" = %s ] || exit 97" key (shell_quote expected)))
           [ "HOME", home
-          ; "XDG_CONFIG_HOME", Filename.concat home ".config"
           ; "XDG_DATA_HOME", Filename.concat home ".local/share"
           ; "XDG_CACHE_HOME", Filename.concat home ".cache"
           ; "XDG_STATE_HOME", Filename.concat home ".local/state"
           ; "XDG_RUNTIME_DIR", Filename.concat home ".local/run"
           ];
         line "[ -z \"${META_API_KEY+x}\" ] || exit 96";
+        line (Printf.sprintf "case \"$XDG_CONFIG_HOME\" in %s/*) ;; *) exit 94 ;; esac"
+          (shell_quote (Filename.concat home ".local/state/masc/muse-config")));
+        line "[ -r \"$XDG_CONFIG_HOME/muse/auth.json\" ] || exit 94";
+        line "[ -r \"$XDG_CONFIG_HOME/muse/settings.json\" ] || exit 94";
+        line "[ \"$TMPDIR\" = \"$XDG_CONFIG_HOME/tmp\" ] || exit 94";
+        line "[ -d \"$TMPDIR\" ] || exit 94";
         if native_read then (
           line "[ \"$#\" = 2 ] || exit 95";
           line "[ \"$1\" = --disable-write ] || exit 95";
@@ -199,7 +204,7 @@ let test_turn_with_tool_and_approval () =
       session_ready := Some session_id;
       Ok ())
     ~on_stream_event:(function
-      | Serve.Text_delta text -> Buffer.add_string deltas text
+      | Serve.Text_delta {text; _} -> Buffer.add_string deltas text
       | Serve.Approval_decided { decision; _ } -> decisions := decision :: !decisions
       | Serve.Native_tool_finished _ -> incr tools
       | _ -> ())
@@ -242,9 +247,9 @@ let test_turn_with_tool_and_approval () =
          let start = request_with_method "session/start" requests in
          check
            bool
-           "read posture selects denyUnmatched"
+           "read posture selects promptUnmatched"
            true
-           (params_member "approvalMode" start = `String "denyUnmatched");
+           (params_member "approvalMode" start = `String "promptUnmatched");
          check bool "no bridge, no config" true (params_member "config" start = `Null);
          check
            bool
@@ -284,9 +289,9 @@ let test_exit_code_is_typed () =
 let test_bridge_needs_session_mcp () =
   run_scripted
     ~mcp_servers:
-      [ ( "masc_keeper"
-        , Msp.Streamable_http
-            { url = "http://127.0.0.1:1/mcp"; headers = []; required = true } )
+      [ { Serve.name = "masc_keeper"
+        ; server = Msp.Streamable_http
+            { url = "http://127.0.0.1:1/mcp"; headers = []; required = true }; tool_names = [] }
       ]
     [ Read; Write (init_frame ~granted:[]) ]
     (fun result requests ->
@@ -343,17 +348,25 @@ let test_selected_homes_do_not_inherit_other_account_roots () =
     (fun () ->
       List.iter (fun (key, value) -> Unix.putenv key value) injected;
       List.iter
-        (fun (home, native, native_read) ->
-           run_scripted ~account_home:home ~native
-             (Expect_launch { home; native_read }
-              :: handshake_and_session ~granted:[]
-              @ [ Write agent_completed; Write turn_completed ])
-             (fun result _ ->
-                match result with
-                | Ok turn -> check string "selected account turn completed" "MASC_MUSE_OK" turn.text
-                | Error error -> fail (Serve.error_to_string error)))
-        [ "/synthetic/account-one", Runtime_native_tools.Native_read, true
-        ; "/synthetic/account-two", Runtime_native_tools.Native_full, false
+        (fun (native, native_read) ->
+           let home = Filename.temp_dir "masc-muse-selected-account-" "" in
+           Fun.protect ~finally:(fun () -> Fs_compat.remove_tree home) (fun () ->
+             Fs_compat.mkdir_p (Filename.concat home ".config/muse");
+             let auth = Filename.concat home ".config/muse/auth.json" in
+             let channel = open_out_gen [Open_wronly; Open_creat; Open_excl] 0o600 auth in
+             Fun.protect ~finally:(fun () -> close_out_noerr channel) (fun () ->
+               output_string channel
+                 {|{"schema_version":1,"providers":{"meta":{"api_key":"SYNTHETIC-LOCAL-ONLY"}}}|});
+             run_scripted ~account_home:home ~native
+               (Expect_launch { home; native_read }
+                :: handshake_and_session ~granted:[]
+                @ [ Write agent_completed; Write turn_completed ])
+               (fun result _ ->
+                  match result with
+                  | Ok turn -> check string "selected account turn completed" "MASC_MUSE_OK" turn.text
+                  | Error error -> fail (Serve.error_to_string error))))
+        [ Runtime_native_tools.Native_read, true
+        ; Runtime_native_tools.Native_full, false
         ])
 ;;
 

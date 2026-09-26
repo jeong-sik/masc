@@ -532,6 +532,19 @@ let turn_error_kind_of_string = function
   | other -> Unrecognized_error_kind other
 ;;
 
+let turn_error_kind_to_string = function
+  | Step_limit -> "stepLimit"
+  | Config_error -> "configError"
+  | Projection_error -> "projectionError"
+  | Log_error -> "logError"
+  | Workflow_launch_error -> "workflowLaunchError"
+  | Environment_error -> "environmentError"
+  | Model_error -> "modelError"
+  | Launch_error -> "launchError"
+  | Auth_required -> "authRequired"
+  | Unrecognized_error_kind other -> other
+;;
+
 let parse_turn_error stage fields =
   let* kind = required_string stage "kind" fields in
   let* message = required_text stage "message" fields in
@@ -832,9 +845,16 @@ let approval_subject_kind_of_string = function
   | other -> Unrecognized_subject other
 ;;
 
+type approval_choice_scope =
+  | Once
+  | Session
+  | Local_persistent
+  | Unrecognized_scope of string
+
 type approval_choice =
   { choice_id : string
   ; decision : approval_decision
+  ; scope : approval_choice_scope
   }
 
 type approval_requirement =
@@ -849,6 +869,7 @@ type approval_request =
   ; turn_id : string
   ; tool_name : string
   ; subject_kind : approval_subject_kind
+  ; subject_tool_name : string option
   ; choices : approval_choice list
   }
 
@@ -865,7 +886,14 @@ let parse_approval_choice stage json =
   let* fields = assoc_at stage json in
   let* choice_id = required_string stage "choiceId" fields in
   let* decision = required_string stage "decision" fields in
-  Ok ({ choice_id; decision = approval_decision_of_string decision } : approval_choice)
+  let* scope = required_string stage "scope" fields in
+  let scope = match scope with
+    | "once" -> Once
+    | "session" -> Session
+    | "localPersistent" -> Local_persistent
+    | other -> Unrecognized_scope other
+  in
+  Ok ({ choice_id; decision = approval_decision_of_string decision; scope } : approval_choice)
 ;;
 
 let parse_approval_request stage fields =
@@ -880,6 +908,7 @@ let parse_approval_request stage fields =
   let* subject = required_member stage "subject" fields in
   let* subject = assoc_at stage subject in
   let* subject_kind = required_string stage "kind" subject in
+  let* subject_tool_name = optional_string stage "toolName" subject in
   let* choices =
     match List.assoc_opt "availableChoices" fields with
     | Some (`List choices) -> map_result (parse_approval_choice stage) choices
@@ -893,6 +922,7 @@ let parse_approval_request stage fields =
     ; turn_id
     ; tool_name
     ; subject_kind = approval_subject_kind_of_string subject_kind
+    ; subject_tool_name
     ; choices
     }
       : approval_request)

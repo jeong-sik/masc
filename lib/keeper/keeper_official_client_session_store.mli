@@ -227,17 +227,19 @@ type stored_binding =
 
 val stored_bindings : base_path:string -> (stored_binding list, string) result
 (** Every binding file under the keepers directory {!path} writes to, decoded
-    with {!load}'s decoder, in keeper-name order. A keeper without the file
-    is left out, and so is a directory entry whose name {!path} refuses,
-    because this store never writes under such a name. [Error] when the
-    keepers directory exists but cannot be listed. Reads only. The deploy
-    preflight and boot reconcile both read the store through this. *)
+    with {!load}'s decoder, in keeper-name order. Only real directories are
+    read; a keeper without the file is left out, and so is an entry whose
+    name {!path} refuses, because this store never writes there. [Ok []]
+    when the keepers directory does not exist; [Error] when it exists but
+    cannot be inspected or listed. Reads only. The deploy preflight and boot
+    reconcile both read the store through this. *)
 
-val move_aside : path:string -> rejected_path:string -> (unit, string) result
-(** Rename the binding at [path] (a [path] from {!stored_bindings}) to
-    [rejected_path] while holding the store lock every claim takes, so no
-    claim reads or replaces it halfway. The keeper's next claim finds no
-    binding and starts a new vendor session. *)
+val move_aside :
+  base_path:string -> keeper_name:string -> rejected_path:string -> (unit, string) result
+(** Rename the keeper's binding to [rejected_path] while holding the store
+    lock every claim and transition takes. The keeper's next claim finds no
+    binding and starts a new vendor session. A rename that completed stays
+    [Ok] even when releasing the lock fails; that failure is logged. *)
 
 val clear_then :
   base_path:string -> keeper_name:string -> (unit -> 'a) -> ('a, string) result

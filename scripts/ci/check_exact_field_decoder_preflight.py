@@ -11,8 +11,8 @@ What decides the risk is not which directory a store lives in. It is whether
 the decoder refuses a row for carrying a field the new binary does not know.
 So this walks the decoders, not the directories: a module that calls
 `exact_object_fields` or `fields_are_unique_known` must appear in the
-preflight's `durable_stores`, or be listed below with the reason it holds no
-files. A new one that is neither fails here rather than in production.
+preflight's store readers (lib/keeper/keeper_durable_store_scan.ml), or be
+listed below with the reason it holds no files. A new one that is neither fails here rather than in production.
 """
 
 from __future__ import annotations
@@ -22,7 +22,14 @@ import re
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-PREFLIGHT = REPO / "bin" / "deployment_preflight_helper.ml"
+# The deploy preflight reads the durable-store list through the records in
+# keeper_durable_store_scan.ml (Keeper_durable_store routes each store to
+# one); the helper still validates the event queue through its own
+# subcommands. A decoder named in either file is one the preflight runs.
+PREFLIGHTS = (
+    REPO / "lib" / "keeper" / "keeper_durable_store_scan.ml",
+    REPO / "bin" / "deployment_preflight_helper.ml",
+)
 # Three spellings of the same contract. Some modules call one of the shared
 # helpers; others enforce it with a closed match whose fallback says so.
 # Scanning only the first helper name found 3 of the 7 modules that actually
@@ -54,7 +61,7 @@ NO_DURABLE_STORE = {
 # preflight then exercises it without naming it, and a scan of the helper's
 # text alone calls it unregistered -- which is what it called
 # keeper_usage_resolution: keeper meta carries usage_cursor and
-# last_usage_resolution, and keeper_meta_store is in durable_stores.
+# last_usage_resolution, and the preflight reads keeper meta.
 #
 # Each entry names the module in the middle, and that is checked rather than
 # taken on trust: the middle module must still mention the decoder, and the
@@ -77,19 +84,22 @@ def modules_with_exact_field_decoders() -> dict[str, list[str]]:
 
 
 def preflight_decoder_calls() -> str:
-    """The preflight file with comments stripped.
+    """The preflight files with comments stripped.
 
     Matching a module name anywhere in the file passes on a mention in a
-    comment, which is how a store removed from `durable_stores` still read as
-    covered. Matching only inside the `durable_stores` records goes too far
+    comment, which is how a store removed from the list still read as
+    covered. Matching only inside the store records goes too far
     the other way: the event queue is validated through a `~load:` argument
-    above that list, and it is genuinely covered. What both get wrong is
+    in the helper, outside the list, and it is genuinely covered. What both get wrong is
     counting prose as code, so the prose is removed and every remaining
     reference is a real call.
     """
-    if not PREFLIGHT.exists():
-        sys.exit(f"FAIL: {PREFLIGHT.relative_to(REPO)} is missing")
-    text = PREFLIGHT.read_text(encoding="utf-8", errors="replace")
+    for path in PREFLIGHTS:
+        if not path.exists():
+            sys.exit(f"FAIL: {path.relative_to(REPO)} is missing")
+    text = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace") for path in PREFLIGHTS
+    )
     stripped: list[str] = []
     depth = 0
     index = 0
@@ -160,8 +170,8 @@ def main() -> int:
         for module in unregistered:
             print(f"        {module}")
         print()
-        print("      Add a store to durable_stores in")
-        print("      bin/deployment_preflight_helper.ml that reads it with this")
+        print("      Add a store to Keeper_durable_store.Id and a reader to")
+        print("      lib/keeper/keeper_durable_store_scan.ml that reads it with this")
         print("      same decoder, or add it to NO_DURABLE_STORE in this script")
         print("      with the reason it holds no files.")
         return 1

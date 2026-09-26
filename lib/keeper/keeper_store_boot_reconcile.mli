@@ -18,30 +18,28 @@
     preflight would have refused those files.
 
     Which stores boot reads, and what it does when one does not decode, is
-    the policy {!Keeper_durable_store} carries on each store's type. The
-    deploy preflight reads the same list, so a store cannot be known to one
-    and missing from the other. Keeper meta ([<masc>/keepers/<name>.json])
-    and the current Memory OS snapshot
-    ([config/keepers/<name>.memory-current.json]) are [refuse_boot]: without
+    {!Keeper_durable_store.reader}. The deploy preflight reads the same list,
+    so a store cannot be known to one and missing from the other. Keeper
+    meta ([<masc>/keepers/<name>.json]) and the current Memory OS snapshot
+    ([config/keepers/<name>.memory-current.json]) are [Refuse_boot]: without
     them a keeper starts as another keeper or with empty memory, and
     overwrites what it lost. The official-client session binding
     ([<masc>/keepers/<name>/official-client-runtime/session.json]) is
-    [refuse_boot] too: while it does not decode, every turn of its keeper
+    [Refuse_boot] too: while it does not decode, every turn of its keeper
     fails (2026-09-26, #38986); moved aside under its store lock, the
     keeper's next claim starts a new vendor session. The goal store ([goals.json]) is
-    [degrade_typed]: every goal writer refuses an unreadable store and no
+    [Degrade_typed]: every goal writer refuses an unreadable store and no
     reader turns it into an empty goal list, so keepers run on tasks, board
     and schedules and nothing overwrites the file. [examine] reads it and
     logs one INFO line when it is unreadable. Boot does not read a
-    [preflight_only] store. {!undecodable} holds only a [refuse_boot] store,
-    so the goal store is never refused, never moved aside, and
-    [--accept-store-quarantine] does not reach it. *)
+    [Preflight_only] store. {!undecodable} holds only a
+    {!Keeper_durable_store.Refusing.t}, so the goal store is never refused,
+    never moved aside, and [--accept-store-quarantine] does not reach it. *)
 
-val store_to_string :
-  Keeper_durable_store.refuse_boot Keeper_durable_store.t -> string
+val store_to_string : Keeper_durable_store.Refusing.t -> string
 
 type undecodable =
-  { store : Keeper_durable_store.refuse_boot Keeper_durable_store.t
+  { store : Keeper_durable_store.Refusing.t
   ; keeper : string
   ; path : string
   ; rejection : string
@@ -53,8 +51,10 @@ type examination =
   }
 
 val examine : Workspace.config -> examination
-(** Decode every store file with this build. No file is created, renamed or
-    written, so calling it twice gives the same answer. A snapshot the
+(** Decode every file of each [Refuse_boot] store with this build, and read
+    the [Degrade_typed] store once. [Preflight_only] stores are not read.
+    No file is created, renamed or written, so calling it twice gives the
+    same answer. A snapshot the
     process cannot read at all counts as undecodable; its [rejection] says
     so. [readable] and [undecodable] count the per-keeper files only.
 
@@ -77,7 +77,7 @@ val refusal_to_string : undecodable list -> string
     the two ways forward. *)
 
 type quarantined =
-  { store : Keeper_durable_store.refuse_boot Keeper_durable_store.t
+  { store : Keeper_durable_store.Refusing.t
   ; keeper : string
   ; path : string
   ; rejected_path : string
@@ -85,7 +85,7 @@ type quarantined =
   }
 
 type failure =
-  { store : Keeper_durable_store.refuse_boot Keeper_durable_store.t
+  { store : Keeper_durable_store.Refusing.t
   ; keeper : string
   ; path : string
   ; error : string

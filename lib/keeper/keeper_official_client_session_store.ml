@@ -889,32 +889,68 @@ type stored_binding =
   ; decoded : (t, string) result
   }
 
+(* Not [Workspace.keepers_runtime_dir_for_base_path]: [state_dir] writes under
+   [Common.keepers_runtime_dir_of_base], the default cluster's keepers
+   directory, on every cluster, so that is the directory listed here. Only
+   real directories are read: [state_dir] refuses a name it cannot use and
+   [prepare_state_dir] refuses a linked chain, so this store never wrote
+   under a symlink or a name [path] refuses. *)
 let stored_bindings ~base_path =
   let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
-  match Sys.readdir keepers_dir with
-  | exception Sys_error detail ->
-    if Sys.file_exists keepers_dir then Error detail else Ok []
-  | entries ->
-    Ok
-      (Array.to_list entries
-       |> List.sort String.compare
-       |> List.filter_map (fun keeper_name ->
-         match path ~base_path ~keeper_name with
-         (* [state_dir] refuses the name, so no binding was written there. *)
-         | Error _ -> None
-         | Ok path ->
-           (match load_path path with
-            | Ok None -> None
-            | Ok (Some binding) -> Some { keeper_name; path; decoded = Ok binding }
-            | Error rejection -> Some { keeper_name; path; decoded = Error rejection })))
+  match Unix.lstat keepers_dir with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+  | exception Unix.Unix_error (error, _, _) ->
+    Error (Printf.sprintf "%s: %s" keepers_dir (Unix.error_message error))
+  | _ ->
+    (match Sys.readdir keepers_dir with
+     | exception Sys_error detail -> Error detail
+     | entries ->
+       Ok
+         (Array.to_list entries
+          |> List.sort String.compare
+          |> List.filter_map (fun keeper_name ->
+            match
+              ( (Unix.lstat (Filename.concat keepers_dir keeper_name)).Unix.st_kind
+              , path ~base_path ~keeper_name )
+            with
+            | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None
+            | Unix.S_DIR, Ok path ->
+              (match load_path path with
+               | Ok None -> None
+               | Ok (Some binding) -> Some { keeper_name; path; decoded = Ok binding }
+               | Error rejection ->
+                 Some { keeper_name; path; decoded = Error rejection })
+            | Unix.S_DIR, Error _ -> None
+            | (Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK), _
+              -> None)))
 ;;
 
-let move_aside ~path ~rejected_path =
-  with_store_lock_in (Filename.dirname path) (fun _directory ->
-    match Sys.rename path rejected_path with
-    | () -> Ok ()
-    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-    | exception Sys_error detail -> Error detail)
+(* The lock is [store_lock_path] of [state_dir], the one [with_store_lock]
+   takes for every claim and transition. The observed form keeps a completed
+   rename when only the release fails, as [clear_then_with_lock] does. *)
+let move_aside ~base_path ~keeper_name ~rejected_path =
+  let* directory = state_dir ~base_path ~keeper_name in
+  let state_path = Filename.concat directory filename in
+  match
+    File_lock_eio.with_durable_lock_observed
+      ~lock_path:(store_lock_path directory)
+      (fun () ->
+         match Fs_compat.rename state_path rejected_path with
+         | () -> Ok ()
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exception exn -> Error (Printexc.to_string exn))
+  with
+  | File_lock_eio.Lock_not_acquired error ->
+    Error (File_lock_eio.durable_lock_error_to_string error)
+  | File_lock_eio.Body_completed { value; release_error } ->
+    Option.iter
+      (fun error ->
+         Log.Keeper.error
+           ~keeper_name
+           "official-client session moved aside before claim-lock release failed: %s"
+           (File_lock_eio.durable_lock_error_to_string error))
+      release_error;
+    value
 ;;
 
 let clear_then_with_lock ~with_lock ~base_path ~keeper_name after_clear =

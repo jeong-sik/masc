@@ -683,23 +683,26 @@ let tool_blob_maintenance_cmd =
          $ delete_previous_candidates))
 ;;
 
-(* Every store in [Keeper_durable_store.all], whatever its boot policy: a
+(* Every store boot refuses on and every store only the preflight reads: a
    deploy is where the operator watches, so any file or row this build cannot
-   read stops it. *)
+   read stops it. A [Degrade_typed] store has no scan (RFC-0444: keepers run
+   without it), so it never stops a deploy. *)
 let validate_stores base_path =
+  let module D = Masc.Keeper_durable_store in
   let reports =
-    List.map
-      (fun (Masc.Keeper_durable_store.Any store) ->
-         ( Masc.Keeper_durable_store.name store
-         , Masc.Keeper_durable_store.on_refusal store
-         , Masc.Keeper_durable_store.scan store ~base_path ))
-      Masc.Keeper_durable_store.all
+    List.filter_map
+      (fun id ->
+         match D.reader id with
+         | D.Refuse_boot (_, scan) | D.Preflight_only scan ->
+           Some (D.name id, D.on_refusal scan, D.run scan ~base_path)
+         | D.Degrade_typed _ -> None)
+      D.Id.all
   in
   List.iter
     (fun (name, on_refusal, result) ->
        match result with
        | Error detail -> Printf.printf "%s scan_failed=%s\n%!" name detail
-       | Ok (report : Masc.Keeper_durable_store.report) ->
+       | Ok (report : D.report) ->
          Printf.printf "%s rows=%d refused=%d\n%!" name report.rows report.refused;
          (match report.first_refusal with
           | None -> ()
@@ -711,7 +714,7 @@ let validate_stores base_path =
     List.fold_left
       (fun total (_, _, result) ->
          match result with
-         | Ok (report : Masc.Keeper_durable_store.report) -> total + report.refused
+         | Ok (report : D.report) -> total + report.refused
          | Error _ -> total)
       0
       reports

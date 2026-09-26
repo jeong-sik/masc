@@ -89,9 +89,6 @@ val compute_rollup : goal list -> rollup
 
 (** {1 Persistence paths} *)
 
-val goals_filename : string
-(** ["goals.json"], the file under the workspace's [.masc] directory. *)
-
 val goals_path : Workspace_utils.config -> string
 (** [{!Workspace_utils.masc_dir} / "goals.json"]. The mirror is this path
     with [".last-good"] appended. *)

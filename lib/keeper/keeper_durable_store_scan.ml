@@ -9,7 +9,7 @@ let ( let* ) = Result.bind
    configured id, a disposition receipt sits under a sha256 of the keeper
    name), so the enumeration belongs where the convention is.
 
-   Adding a store is adding a constructor to [Keeper_durable_store.t] and a
+   Adding a store is adding a constructor to [Keeper_durable_store.Id.t] and a
    row here.
 
    [on_refusal] says what the runtime does with a row it cannot read. That is
@@ -51,6 +51,7 @@ let scan_files ~paths ~decode =
   List.fold_left
     (fun report path ->
        match Fs_compat.load_file path with
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
        | exception exn ->
          count_row report (Error (path ^ ": " ^ Printexc.to_string exn))
        | contents ->
@@ -368,7 +369,7 @@ let turn_record_store =
                            count_row
                              !acc
                              (match Yojson.Safe.from_string line with
-                              | exception _ ->
+                              | exception Yojson.Json_error _ ->
                                 Error (Filename.basename path ^ ": not JSON")
                               | json ->
                                 (match Turn_record.of_json json with
@@ -669,39 +670,5 @@ let gate_pending_store =
                 match Yojson.Safe.from_string contents with
                 | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
                 | json -> Keeper_approval_queue.validate_pending_snapshot ~base_path json)))
-  }
-;;
-
-
-(* RFC-0444: boot reads the goal store once and logs one INFO line when it is
-   unavailable, and keepers run on tasks, board and schedules without it. A
-   deploy is where an operator watches, so the preflight refuses a goals.json
-   this build cannot decode, as it does every other store. Only the primary
-   is decoded here; a primary missing beside a present mirror is what boot's
-   [Goal_store.load_source] reports. The path is resolved from [base_path] and
-   the cluster the way [Workspace_utils.masc_dir] resolves it for boot, so the
-   scan creates no workspace config and no directory. *)
-let goal_store_store =
-  { store = "goal store"
-  ; on_refusal =
-      "every goal writer refuses the store and no reader turns it into an \
-       empty goal list, so keepers run on tasks, board and schedules while \
-       goal tools report the store unavailable"
-  ; scan =
-      (fun ~base_path ->
-         let path =
-           Filename.concat
-             (Workspace_utils.masc_root_dir_from
-                ~base_path
-                ~cluster_name:(Env_config_core.cluster_name ()))
-             Goal_store.goals_filename
-         in
-         Ok
-           (scan_files
-              ~paths:(if Fs_compat.file_exists path then [ path ] else [])
-              ~decode:(fun ~path:_ contents ->
-                match Yojson.Safe.from_string contents with
-                | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
-                | json -> Goal_store.validate_state_json json)))
   }
 ;;

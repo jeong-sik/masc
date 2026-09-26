@@ -1,6 +1,6 @@
 (** How each durable store is read, one record per store.
-    {!Keeper_durable_store} routes its typed list to these records; read a
-    store through [Keeper_durable_store.scan], not here. *)
+    {!Keeper_durable_store.reader} routes each store to its record. The
+    module is private to the library. *)
 
 type report =
   { rows : int
@@ -16,7 +16,6 @@ type store_scan =
 
 val keeper_meta_store : store_scan
 val memory_os_current_store : store_scan
-val goal_store_store : store_scan
 val gate_pending_store : store_scan
 val official_client_session_store : store_scan
 val librarian_range_receipt_store : store_scan

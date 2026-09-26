@@ -271,10 +271,8 @@ let parse_goal_phase = function
   | Some s -> Goal_phase.parse s
   | None -> None
 
-let goals_filename = "goals.json"
-
 let goals_path config =
-  Filename.concat (Workspace_utils.masc_dir config) goals_filename
+  Filename.concat (Workspace_utils.masc_dir config) "goals.json"
 
 let goals_recovery_path config =
   goals_path config ^ ".last-good"

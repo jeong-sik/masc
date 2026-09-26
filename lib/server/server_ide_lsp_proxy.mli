@@ -10,6 +10,36 @@ val add_routes :
 module For_testing : sig
   val resolve_relative : base:string -> string -> string option
   val workspace_root_for_initialize : base_path:string -> string -> string
+
+  (** Who fixes a connection's document root: its URL ([Anchor_declared],
+      from [codebase], [repo_id] or [keeper]) or the client's [rootUri]. *)
+  type anchor_authority =
+    | Anchor_declared
+    | Anchor_from_root_uri
+
+  (** The anchor authority for a connection's resolved workspace source. A
+      workspace the URL named that does not resolve is an [Error] naming the
+      reason, never a silent fallback to the project root. *)
+  val anchor_authority_of_source :
+    scope:Server_ide_scope.ide_scope option ->
+    [ `Project
+    | `Repository of string
+    | `RepositoryMissing of string
+    | `RepositoryUnknown of string
+    | `Playground of string
+    | `PlaygroundMissing of string
+    | `KeeperUnknown of string ] ->
+    (anchor_authority, Server_ide_scope.ide_error) result
+
+  (** The document root after [initialize] with these params. A declared
+      anchor stands; otherwise a non-empty [rootUri] inside the base path
+      decides, and a missing, null or empty one keeps [anchor]. *)
+  val workspace_root_after_initialize :
+    authority:anchor_authority ->
+    base_path:string ->
+    anchor:string ->
+    Yojson.Safe.t ->
+    string
   val initialize_result_json : workspace_root:string -> unit -> Yojson.Safe.t
   (** Fixed size of the inbound LSP dispatch worker pool
       ([Lsp_proxy_limits.inbound_dispatch_worker_count]); >1 keeps slow LSP

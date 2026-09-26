@@ -163,6 +163,7 @@ let test_agent_type_create_merges_mcp_tools () =
   @@ fun env ->
   let managed : Mcp.managed =
     { tools = [ echo_tool ]
+    ; skipped_tools = []
     ; name = "coverage-mcp"
     ; transport =
         Mcp.Http

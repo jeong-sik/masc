@@ -69,12 +69,28 @@ function outputLineFromExecuteLine(line: ExecuteOutputLine): OutputLine {
   return { text: line.text, stream: 'meta' }
 }
 
+// The server sends `gap` only when this viewer fell further behind than the
+// output log it retains; the missed entries cannot be fetched again, so the
+// terminal says how many are missing at the place they would have been.
+function gapLineText(event: ExecuteOutputStreamEvent): string {
+  const count = event.missing_count
+  const entries = count === undefined ? 'output entries' : `${count} output ${count === 1 ? 'entry' : 'entries'}`
+  const range =
+    event.missing_from_seq !== undefined && event.missing_to_seq !== undefined
+      ? ` (seq ${event.missing_from_seq}-${event.missing_to_seq})`
+      : ''
+  return `missed ${entries} the server no longer keeps${range}`
+}
+
 export function linesFromExecuteOutputEvent(event: ExecuteOutputStreamEvent): OutputLine[] {
   if (event.type === 'error') {
     return [{ text: event.message ?? 'Execute output stream error', stream: 'stderr' }]
   }
   if (event.type === 'no_task') {
     return [{ text: 'no active Execute output task', stream: 'meta' }]
+  }
+  if (event.type === 'gap') {
+    return [{ text: gapLineText(event), stream: 'meta' }]
   }
 
   const lines: OutputLine[] = []
@@ -288,15 +304,19 @@ export function ExecuteOutputDrawer({
     setLines([])
     setStatus('streaming')
     setTaskId(null)
-    // Whether the last event already said how the task ended.
+    // Whether any event already said how the task ended.
     let settled = false
 
     void streamExecuteOutput(keeper, {
       signal: controller.signal,
       onEvent: event => {
-        setTaskId(typeof event.task_id === 'string' ? event.task_id : null)
         setLines(current => appendLines(current, linesFromExecuteOutputEvent(event)))
-        settled = event.type === 'error' || event.closed === true
+        // A gap names missed log entries only; it says nothing about which
+        // task is running or whether it closed.
+        if (event.type === 'gap') return
+        // Sticky: once the task said how it ended, a later event cannot unsay it.
+        if (event.type === 'error' || event.closed === true) settled = true
+        setTaskId(typeof event.task_id === 'string' ? event.task_id : null)
         if (event.type === 'error') setStatus('error')
         else if (event.closed) setStatus('closed')
         else setStatus('streaming')

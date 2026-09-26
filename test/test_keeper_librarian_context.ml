@@ -427,6 +427,42 @@ let test_exact_source_retraction_preserves_and_reconsiders () =
   check bool "failed source plans leave the snapshot intact" true
     (ok (Context.read ~keepers_dir ~keeper_id) = Some second)
 
+(* A capture that could not read the chat store leaves history the pass
+   cannot confirm settled, so the stored references stay different from the
+   pending ones. The queue pass compares against what it was shown instead,
+   so the same capture makes no second model call. *)
+let test_unchanged_capture_needs_no_second_queue_pass () = with_store @@ fun keepers_dir ->
+  let module Queue = Keeper_librarian_queue_refresh.For_testing in
+  let keeper_name = "unchanged-capture" in
+  let settled = source "event:settled" "an event the Keeper already handled" in
+  let a = source "event:a" "campaign" in
+  let first = ok (Context.commit ~keepers_dir ~keeper_id:keeper_name ~expected_version:None
+      ~sources:[settled] [pocket [settled.reference] "Handled event" []]) in
+  let captured : Context.input =
+    {sources = [a]; previous = Some first; unavailable = ["chat store not yet available"];
+     execution_basis = None} in
+  let needed inp = Queue.context_pass_needed ~keepers_dir ~keeper_name inp in
+  check bool "a new pending input needs a pass" true (needed captured);
+  let committed = ok (Context.commit ~keepers_dir ~keeper_id:keeper_name
+      ~expected_version:(Some (Context.version first)) ~sources:[a]
+      [pocket [a.reference] "Campaign" ["Continue"]]) in
+  check (list string) "the snapshot keeps history it could not confirm settled"
+    ["event:a"; "event:settled"]
+    (List.map (fun (s : Context.source) -> s.reference) committed.sources |> List.sort String.compare);
+  let recaptured = {captured with previous = Some committed} in
+  check bool "stored references alone make the same capture look changed" true (needed recaptured);
+  Queue.remember_context_pass ~keepers_dir ~keeper_name captured (Context.version committed);
+  check bool "the same capture makes no second model call" false (needed recaptured);
+  check bool "a new pending input still needs a pass" true
+    (needed {recaptured with sources = [a; question]});
+  check bool "a store readable again needs a pass to settle history" true
+    (needed {recaptured with unavailable = []});
+  let other = ok (Context.commit ~keepers_dir ~keeper_id:keeper_name
+      ~expected_version:(Some (Context.version committed)) ~sources:[a]
+      [pocket [a.reference] "Campaign" ["Continue"]]) in
+  check bool "another writer's version falls back to the stored references" true
+    (needed {recaptured with previous = Some other})
+
 let () = run "Librarian working contexts"
   ["scenarios", [
     test_case "exact source retraction is atomic and preserves unaffected pockets" `Quick test_exact_source_retraction_preserves_and_reconsiders;
@@ -441,4 +477,5 @@ let () = run "Librarian working contexts"
     test_case "repeated events and direct question" `Quick test_repeated_events_and_chat;
     test_case "partial observation, source settlement and stale CAS" `Quick test_partial_observation_and_cas;
     test_case "partial groups preserve coverage without oscillation" `Quick test_partial_group_keeps_coverage;
-    test_case "ambiguous or missing references rejected" `Quick test_duplicate_and_missing_source_rejected]]
+    test_case "ambiguous or missing references rejected" `Quick test_duplicate_and_missing_source_rejected;
+    test_case "unchanged capture needs no second queue pass" `Quick test_unchanged_capture_needs_no_second_queue_pass]]

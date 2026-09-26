@@ -15,7 +15,7 @@
 
 (** [panel_meta o] — 패널 결과 한 건을 board meta_json의 [panel] 배열 원소로 직렬화.
     [Answered] → {model; status="answered"; answer; input_tokens; output_tokens},
-    [Failed] → {model; status="failed"; reason_code; reason_detail; reason}.
+    [Failed] → {model; status="failed"; reason_code; reason_detail}.
     스키마는 프론트(board/fusion-evidence, fusion/fusion-surface)가 소비하는 공개 계약. *)
 val panel_meta : Fusion_types.panel_outcome -> Yojson.Safe.t
 

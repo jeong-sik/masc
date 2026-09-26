@@ -14,6 +14,7 @@ let of_handler (handler : Keeper_tool_descriptor.runtime_handler) =
      is the same shape of loss Execute has. *)
   | Keeper_tool_descriptor.Tool_execute
   | Keeper_tool_descriptor.Tool_browser_act
+  | Keeper_tool_descriptor.Tool_browser_instruct
   | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
   (* A failed webmcp call may have already executed the page's
      tool — the bridge cannot prove otherwise — which is the

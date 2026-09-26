@@ -1068,13 +1068,14 @@ let librarian_point_end_atom = function
    boundary bounds nothing, and the projection still carries the newest
    atom ({!Keeper_carried_front.clamp}). *)
 let within_turn_boundary ~history_digest_at ~turn_boundary (seed : Keeper_carried_front.seed) =
-  match turn_boundary with
-  | Keeper_carried_front.Turn_boundary { end_atom } when seed.first_atom > end_atom ->
+  match seed.front, turn_boundary with
+  | Model_input_front.At_atom _, Keeper_carried_front.Turn_boundary { end_atom }
+    when seed.first_atom > end_atom ->
     Option.map
-      (fun front_digest ->
-         { seed with first_atom = end_atom; front_digest = Some front_digest })
+      (fun front_digest -> { seed with first_atom = end_atom; front = Model_input_front.At_atom front_digest })
       (history_digest_at end_atom)
-  | Keeper_carried_front.Turn_boundary _ | Keeper_carried_front.Turn_boundary_unknown _ ->
+  | (Model_input_front.At_atom _ | Model_input_front.After_history _ | Model_input_front.Empty_history),
+    (Keeper_carried_front.Turn_boundary _ | Keeper_carried_front.Turn_boundary_unknown _) ->
     Some seed
 ;;
 
@@ -1168,17 +1169,20 @@ let project_range_start ~measure_message_bytes ~atom_count start messages =
        point, and the range opens at the accepted start after it. *)
     Runtime_model_input_tail_window.project_from_atom
       ~history_already_announced:true ~measure_message_bytes
-      ~first_atom:(Keeper_carried_front.clamp ~atom_count accepted.first_atom)
+      ~allow_empty_history:(Model_input_front.permits_empty accepted.front)
+      ~first_atom:(Keeper_carried_front.clamp_seed ~atom_count accepted)
       (working_state_message snapshot :: messages)
   | Past_librarian_point { point = At_read_position _; accepted } ->
     Runtime_model_input_tail_window.project_from_atom
       ~measure_message_bytes
-      ~first_atom:(Keeper_carried_front.clamp ~atom_count accepted.first_atom)
+      ~allow_empty_history:(Model_input_front.permits_empty accepted.front)
+      ~first_atom:(Keeper_carried_front.clamp_seed ~atom_count accepted)
       messages
   | From_seed (seed : Keeper_carried_front.seed) ->
     Runtime_model_input_tail_window.project_from_atom
       ~measure_message_bytes
-      ~first_atom:(Keeper_carried_front.clamp ~atom_count seed.first_atom)
+      ~allow_empty_history:(Model_input_front.permits_empty seed.front)
+      ~first_atom:(Keeper_carried_front.clamp_seed ~atom_count seed)
       messages
   | From_turn_boundary (Keeper_carried_front.Turn_boundary { end_atom }) ->
     Runtime_model_input_tail_window.project_from_atom
@@ -1887,11 +1891,30 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                                      request.atom_count - request.first_atom
                                  ; total_atoms = request.atom_count
                                  ; measurement = Turn_record.Wire_shape
-                                 ; front_atom_digest = Some front_digest
+                                 ; model_input_front = Model_input_front.At_atom front_digest
                                  }
                              })
                         ctx.on_response_observed_model_input
-                    | Keeper_model_input_ledger.No_atom_carried -> ());
+                    | Keeper_model_input_ledger.No_atom_carried ->
+                      (* The floor (#39013) is an answer: the response
+                         carried none of its history, so the scan must meet
+                         this record and drop it, not walk past it and
+                         resurrect an older front the floor made untenable.
+                         [Empty_history] with a past-end position is that
+                         floor seed; [for_history] drops it as
+                         [Front_atom_missing]. *)
+                      Option.iter
+                        (fun observe ->
+                           observe
+                             { Turn_record.runtime_profile = ctx.runtime_id
+                             ; window =
+                                 { transmitted_atoms = 0
+                                 ; total_atoms = request.atom_count
+                                 ; measurement = Turn_record.Wire_shape
+                                 ; model_input_front = Model_input_front.Empty_history
+                                 }
+                             })
+                        ctx.on_response_observed_model_input);
                    let usage =
                      Option.bind response.Agent_core.Types.usage
                        (fun (u : Agent_core.Types.api_usage) ->
@@ -2706,7 +2729,7 @@ let carried_range_eviction_sequence
              then (
                hold_front
                  { Keeper_carried_front.first_atom
-                 ; front_digest = Some front_digest
+                 ; front = Model_input_front.At_atom front_digest
                  ; source = Keeper_carried_front.Evicted_after_refusal { retry }
                  };
                on_retry ~retry (Evicted_blocks step);
@@ -2735,7 +2758,7 @@ let halve_front ~digest_at ~move_ledger ~hold ~first_atom ~retry =
     let (_ : bool) = move_ledger ~first_atom ~front_digest in
     hold
       { Keeper_carried_front.first_atom
-      ; front_digest = Some front_digest
+      ; front = Model_input_front.At_atom front_digest
       ; source = Keeper_carried_front.Halved_after_refusal { retry }
       };
     true
@@ -2849,10 +2872,7 @@ let run_try_provider_with_carried_range_eviction
           in
           Option.map
             (fun front_digest ->
-               { Keeper_carried_front.first_atom
-               ; front_digest = Some front_digest
-               ; source
-               })
+               { Keeper_carried_front.first_atom; front = Model_input_front.At_atom front_digest; source })
             (sent.digest_at first_atom)))
       ~held_front:ctx.carried_front_after_refusal
       ~restore_front:ctx.restore_carried_front

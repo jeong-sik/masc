@@ -160,6 +160,7 @@ let run_direct_attempt ~system_prompt ~base_path ~cli_path ~on_transmitted_model
                       ~runtime:(Runtime.get_runtime_by_id "codex.codex" |> Option.get))
                   ~runtime_id:"codex.codex"
                   ~keeper_name:"codex-blank-prompt"
+                  ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                   ~pre_tool_rejects:(ref [])
                   ~base_path
                   ~goal:"Return the fixture marker"

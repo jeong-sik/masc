@@ -576,7 +576,7 @@ let test_binary_lookup_failures_survive_observation_replay () =
       (String.length Yojson.Safe.Util.(json |> member "output_sha256" |> to_string));
     Registry.observe_tool_result ~input ~finished_at:2.0
       (Tool_result.error ~failure_class:Tool_result.Runtime_failure
-         ~tool_name:"tool_read_file" ~start_time:(Time_compat.now ()) detail)
+         ~tool_name:"tool_read_file" ~start_time:(Tool_timing.start ()) detail)
   ) fixtures in
   Registry.mark_completed registry ~verification_id
     ~outcome:(Registry.Rejected { reason = "lookup text unavailable" })

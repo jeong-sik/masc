@@ -2822,7 +2822,7 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
   in
   ignore (check_surfaces ~phase:"verifying" ~proof_state:"proof_pending");
   let committed = Lib.Workspace_goals.commit_verifier_decision
-    ~tool_name:"goal_verifier_commit" ~start_time:0. config ~goal_id
+    ~tool_name:"goal_verifier_commit" ~start_time:(Tool_timing.start ()) config ~goal_id
     ~request_id ~criterion ~verification_run_id:"dashboard-proof-run"
     ~decision:Lib.Workspace_goals.Proof_proven ~evidence:"10 passing cases observed" in
   check bool "internal verifier committed" true (Tool_result.is_success committed);
@@ -5690,7 +5690,8 @@ let test_runtime_routing_creates_and_removes_a_lane () =
     (refusal (post "append a declared slot" 400 append));
   check string "an exact lane the server does not run is refused"
     "unknown exact-output lane: verifer_exact (expected one of librarian_exact, \
-     hitl_auto_judge, board_attention_exact, workspace_curator_exact, verifier_exact)"
+     hitl_auto_judge, board_attention_exact, workspace_curator_exact, verifier_exact, \
+     browser_stagehand_exact)"
     (refusal
        (post "append to a misspelled exact lane" 400
           {|{"lane":"exact/verifer_exact","action":"append","runtime_id":"test_provider.test_model"}|}));

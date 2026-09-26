@@ -127,6 +127,19 @@ max-context = 131072
     })
   })
 
+  it('keeps account homes separate while reusing a model for official clients', () => {
+    let next = setRuntimeTomlProviderField(sourceText, 'codex_second', 'display-name', 'Codex second')
+    next = setRuntimeTomlProviderField(next, 'codex_second', 'protocol', 'codex-app-server')
+    next = setRuntimeTomlProviderField(next, 'codex_second', 'command', 'codex')
+    next = setRuntimeTomlProviderField(next, 'codex_second', 'is-non-interactive', true)
+    next = setRuntimeTomlProviderField(next, 'codex_second', 'account-home', '/tmp/codex-second')
+    const provider = parseRuntimeTomlEnvironment(next).providers.find(item => item.id === 'codex_second')
+    expect(provider?.accountHome).toBe('/tmp/codex-second')
+    expect(next).toContain('account-home = "/tmp/codex-second"')
+    next = setRuntimeTomlProviderField(next, 'codex_second', 'account-home', null)
+    expect(parseRuntimeTomlEnvironment(next).providers.find(item => item.id === 'codex_second')?.accountHome).toBe('')
+  })
+
   it('projects runtime routing lanes and keeper assignments from runtime.toml source', () => {
     const withRouting = `${sourceText.replace(
       'default = "runpod_mtp.qwen"',

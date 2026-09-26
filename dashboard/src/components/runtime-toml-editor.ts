@@ -395,6 +395,9 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
       if (input.agent !== '') {
         next = setRuntimeTomlProviderField(next, input.id, 'agent', input.agent)
       }
+      if (input.accountHome !== '') {
+        next = setRuntimeTomlProviderField(next, input.id, 'account-home', input.accountHome)
+      }
       if (input.effort !== '') {
         next = setRuntimeTomlProviderField(next, input.id, 'effort', input.effort)
       }
@@ -409,7 +412,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
 
   function handleProviderOptionChange(
     providerId: string,
-    field: 'agent' | 'effort' | 'timeout-s',
+    field: 'agent' | 'effort' | 'timeout-s' | 'account-home',
     value: string | number | null,
   ) {
     if (saving || loadState !== 'loaded') return

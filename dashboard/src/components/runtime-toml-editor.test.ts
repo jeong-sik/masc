@@ -74,7 +74,7 @@ const providerProtocols = [
     semantics: 'official_client',
     credential_policy: 'forbidden',
     requires_non_interactive: true,
-    provider_fields: [],
+    provider_fields: ['account-home'],
     required_provider_fields: [],
   },
   {
@@ -83,7 +83,7 @@ const providerProtocols = [
     semantics: 'official_client',
     credential_policy: 'forbidden',
     requires_non_interactive: true,
-    provider_fields: [],
+    provider_fields: ['account-home'],
     required_provider_fields: [],
   },
   {
@@ -1110,6 +1110,9 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.input(container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement, {
       target: { value: '/Users/dancer/.local/bin/codex' },
     })
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-account-home"]') as HTMLInputElement, {
+      target: { value: '/tmp/codex-second' },
+    })
     fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
 
     await waitFor(() => {
@@ -1117,6 +1120,7 @@ describe('RuntimeTomlEditor', () => {
       expect(source).toContain('[providers.codex_subscription]')
       expect(source).toContain('protocol = "codex-app-server"')
       expect(source).toContain('command = "/Users/dancer/.local/bin/codex"')
+      expect(source).toContain('account-home = "/tmp/codex-second"')
       expect(source).toContain('is-non-interactive = true')
       expect(source).not.toContain('[providers.codex_subscription.credentials]')
     })

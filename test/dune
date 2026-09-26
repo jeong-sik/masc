@@ -2956,6 +2956,7 @@
 (include stanzas/test_runtime_antigravity_home.inc)
 (include stanzas/test_runtime_antigravity_context.inc)
 (include stanzas/test_runtime_muse_msp.inc)
+(include stanzas/test_runtime_muse_serve.inc)
 (include stanzas/test_runtime_official_client_mcp_http.inc)
 (include stanzas/test_runtime_claude_code_config.inc)
 (include stanzas/test_keeper_antigravity_runtime.inc)
@@ -5694,6 +5695,7 @@
 (include stanzas/test_tui_layout.inc)
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_schedules_hold_says_when_it_was_checked.inc)
+(include stanzas/test_tui_keeper_schedule_error_once.inc)
 (include stanzas/test_tui_rows.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
 (include stanzas/test_tui_title_counts.inc)
@@ -6702,6 +6704,7 @@
  (libraries alcotest masc.dashboard masc.masc_types yojson digestif))
 
 (include stanzas/test_h2_json_worker.inc)
+(include stanzas/test_tui_input_readiness_pty.inc)
 (include stanzas/test_h2_request_fibers.inc)
 (include stanzas/test_h2_oauth_request_fibers.inc)
 
@@ -7120,7 +7123,7 @@
 (test
  (name test_tui_async_read)
  (modules test_tui_async_read)
- (libraries alcotest masc_tui_async_read eio eio_main))
+ (libraries alcotest masc_tui_async_read masc_eio_context eio eio_main))
 
 (include stanzas/test_official_client_claim_cause.inc)
 

@@ -32,7 +32,8 @@ type config =
         ([--append-system-prompt]), which this client does not send.
         On a [Resume] the client sends the system prompt it recorded at the
         session's first launch until the conversation is compacted
-        ([--system-prompt-snapshot], default on), so text placed here on a
+        ([--system-prompt-snapshot on], which [command] always passes), so
+        text placed here on a
         resume does not reach the model before then. *)
   ; admission_timeout_s : float
     (** Finite bound for the post-spawn initialize exchange and callbacks
@@ -202,6 +203,10 @@ type stream_event =
   | Usage_windows_reported of Runtime_provider_usage_window.report
       (** The windows a [rate_limit_event] reported, for the operator
           projection only; nothing that routes or retries reads it. *)
+  | Conversation_compacted
+      (** The client reported a [compact_boundary]: it summarised the
+          conversation during this turn, so the copies the session held of
+          earlier prompts are no longer there as sent. *)
   | Usage_reported of
       { session_id : string
       ; turn_id : string

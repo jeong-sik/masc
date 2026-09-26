@@ -24,11 +24,15 @@ val keeper_memory_search_json
   -> string
 
 val keeper_memory_search_with_outcome
-  :  config:Workspace.config
+  :  ?turn_ref:Ids.Turn_ref.t
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> ctx_work:Keeper_types.working_context
   -> args:Yojson.Safe.t
+  -> unit
   -> Keeper_tool_execution.t
+(** [turn_ref] names the Keeper turn that searched, for the decision log;
+    a call outside a Keeper turn leaves it out. *)
 
 val keeper_context_status_json
   :  config:Workspace.config

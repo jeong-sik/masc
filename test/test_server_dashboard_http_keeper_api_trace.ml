@@ -80,7 +80,7 @@ let with_temp_dir f =
   Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
 ;;
 
-let test_chat_trace_block_by_turn_ref_reads_allowed_trace_history () =
+let test_chat_trace_block_by_turn_ref_reads_allowed_trace_ids () =
   with_temp_dir (fun dir ->
     let config = Workspace.default_config dir in
     let masc_root = Workspace.masc_root_dir config in
@@ -121,7 +121,7 @@ let test_chat_trace_block_by_turn_ref_reads_allowed_trace_history () =
            { trace = [ Keeper_chat_blocks.Trace_think { text = ""; content_withheld = true; _ } ] })
        -> ()
      | Some _ -> fail "old trace_id returned unexpected trace block"
-     | None -> fail "old trace_id from trace_history should enrich");
+     | None -> fail "allowed older trace_id should enrich");
     let disallowed_ref =
       Ids.Turn_ref.make ~trace_id:"trace-unlisted" ~absolute_turn:42
     in
@@ -957,9 +957,9 @@ let () =
         ] )
     ; ( "chat_trace_block_by_turn_ref"
        , [ test_case
-             "reads allowed trace_history trace ids"
+             "reads allowed trace ids"
              `Quick
-             test_chat_trace_block_by_turn_ref_reads_allowed_trace_history
+             test_chat_trace_block_by_turn_ref_reads_allowed_trace_ids
          ] )
     ; ( "runtime_lens_swimlane"
       , [ test_case

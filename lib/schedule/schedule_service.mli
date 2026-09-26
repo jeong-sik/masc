@@ -63,7 +63,18 @@ val update :
 val cancel :
   Workspace_utils.config ->
   schedule_id:string ->
+  cancelled_by:Schedule_domain.actor ->
+  reason:string ->
+  withdraw_queued_wakes:
+    (Schedule_domain.schedule_request ->
+     Schedule_domain.cancellation ->
+     (unit, string) result) ->
   (Schedule_domain.schedule_request, service_error) result
+(** Cancels one active schedule and stores who cancelled it and why
+    ({!Schedule_domain.make_cancellation}; a blank actor id or reason is
+    [Invalid_request]). [withdraw_queued_wakes] removes the wakes of that
+    schedule already queued for its consumer, under the ledger lock
+    ({!Schedule_store.cancel_request}). *)
 
 val prune :
   Workspace_utils.config ->

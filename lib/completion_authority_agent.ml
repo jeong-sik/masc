@@ -498,7 +498,7 @@ let prepare_review
            checkout-relative path and to establish the tree's shape before
            calling a path absent. A REJECT from there reaches the producer. *)
         let completion_notes =
-          Yojson.Safe.pretty_to_string
+          Yojson.Safe.to_string
             (`Assoc
                [ "verification_request", Verification.request_to_yojson request
                ; ( "submitted_evidence_access"

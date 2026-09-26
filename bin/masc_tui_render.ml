@@ -10867,8 +10867,13 @@ let render_repository_list (state : state) =
   let title =
     match state.repositories with
     | None ->
+        let reading_note =
+          match state.repositories_error with
+          | None -> title_missing_reading ~error:None
+          | Some _ -> ""
+        in
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Workspace") (title_missing_reading ~error:state.repositories_error) timestamp
+          (screen_title " MASC Workspace") reading_note timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s (%d)  %s  %s"

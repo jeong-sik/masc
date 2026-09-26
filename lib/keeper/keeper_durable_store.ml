@@ -418,15 +418,16 @@ let official_client_session_store =
 
 (* Each keeper's queue is a snapshot and a transition WAL that carry one
    state. [Keeper_event_queue_persistence] keeps an undecodable snapshot and
-   its WAL as they are and returns an error, so the keeper's heartbeat selects
-   no stimulus and takes no turn until the files are readable (#37900). The
-   read is the persistence's own read-only validation, under its owner lock. *)
+   its WAL as they are and returns an error, so registration refuses the
+   keeper, and a running keeper's heartbeat selects no stimulus; it takes no
+   turn until the files are readable (#37900). The read is the persistence's
+   own read-only validation, under its owner lock. *)
 let event_queue_store =
   { store = "keeper event queue"
   ; on_refusal =
-      "the keeper selects no pending stimulus while its queue snapshot or \
-       transition WAL does not decode, so it takes no turn; the files are kept \
-       as they are"
+      "the keeper is not registered while its queue snapshot or transition \
+       WAL does not decode, and a running one selects no stimulus, so it takes \
+       no turn; the files are kept as they are"
   ; scan =
       (fun ~base_path ->
          let discovery =

@@ -289,23 +289,57 @@ val validate_existing_state_read_only_result :
     absence of both artifacts is an explicit error, matching
     {!load_state_result}. *)
 
-val durable_state_path_result :
-  base_path:string -> keeper_name:string -> (string, string) result
-(** The file that names this Keeper's queue in a boot refusal: the snapshot,
-    or the transition WAL when only the WAL exists. *)
+type durable_file =
+  | Snapshot
+  | Transition_wal
+
+type file_failure =
+  { file : durable_file
+  ; path : string  (** The file the read failed on. *)
+  ; detail : string
+  }
+
+type state_failure =
+  | State_missing of string  (** Neither file exists. *)
+  | File_rejected of file_failure
+      (** The snapshot, or the transition WAL replayed on top of it (or
+          alone), did not read or decode. *)
+
+type read_only_failure =
+  | Owner_unresolved of string
+  | Read_raised of string
+  | State_failed of state_failure
+
+val read_only_failure_to_string : read_only_failure -> string
+
+val validate_existing_state_read_only_classified_result :
+  base_path:string ->
+  keeper_name:string ->
+  (Keeper_event_queue_state.t, read_only_failure) result
+(** {!validate_existing_state_read_only_result} with the failure kept typed,
+    so a boot refusal names the file that failed. The string form is
+    [read_only_failure_to_string] of this one. *)
+
+type moved_aside =
+  { rejected_path : string  (** Where the rejected file went. *)
+  ; moved_with : (string * string) option
+      (** The other file of the pair and where it went, when it existed. *)
+  }
 
 val move_aside_undecodable_result :
   base_path:string ->
   keeper_name:string ->
   rejected_path_of:(string -> string) ->
-  (string list, string) result
+  (moved_aside, string) result
 (** Boot quarantine. Under the owner lock, read the durable state again as
-    {!validate_existing_state_read_only_result} does. When it still does not
-    decode, rename the snapshot and the transition WAL that exist to
-    [rejected_path_of path] and return the new paths, snapshot first; the
-    next load finds no durable state and starts the empty queue. State that
-    decodes now, or has no files, is left where it is and the result is
-    [Error]. *)
+    {!validate_existing_state_read_only_classified_result} does. When a file
+    is still rejected, rename the other file of the pair (when it exists) and
+    then the rejected one to [rejected_path_of path]; the next load finds no
+    durable state and starts the empty queue. The rejected file moves last,
+    so a move that stops between the two renames leaves it in place and the
+    next boot refuses again; the [Error] then names the file already moved.
+    State that decodes now, or has no files, is left where it is and the
+    result is [Error]. *)
 
 val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->

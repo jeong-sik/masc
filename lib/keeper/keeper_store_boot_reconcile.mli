@@ -29,9 +29,10 @@
     fails (2026-09-26, #38986); moved aside under its store lock, the
     keeper's next claim starts a new vendor session. The event queue
     ([<masc>/keepers/<name>/event-queue-v*.json] and its transition WAL) is
-    [Refuse_boot] as well: while it does not decode, the keeper selects no
-    stimulus; the snapshot and the WAL move aside together, under the queue
-    owner lock. The goal store ([goals.json]) is
+    [Refuse_boot] as well: while it does not decode, the keeper does not
+    register and takes no turn; the row names the file that failed, and the
+    snapshot and the WAL move aside together under the queue owner lock,
+    the failed file last. The goal store ([goals.json]) is
     [Degrade_typed]: every goal writer refuses an unreadable store and no
     reader turns it into an empty goal list, so keepers run on tasks, board
     and schedules and nothing overwrites the file. [examine] reads it and
@@ -84,9 +85,11 @@ type quarantined =
   { store : Keeper_durable_store.Refusing.t
   ; keeper : string
   ; path : string
-  ; rejected_paths : string list
-      (** Where each moved file went. One path for every store but the
-          event queue, whose snapshot and WAL move together. *)
+  ; rejected_path : string  (** Where [path] went. *)
+  ; moved_with : (string * string) list
+      (** Files moved together with [path] and where each went: the other
+          file of an event queue's snapshot and WAL pair, when it existed.
+          Empty for every other store. *)
   ; rejection : string
   }
 
@@ -107,7 +110,9 @@ type report =
           memory current meet it again on their lazy paths (meta
           re-materialisation, writer quarantine); an official-client session
           binding and an event queue have none, so their keeper takes no
-          turn until the files move. *)
+          turn until the files move. An event queue whose move stopped
+          halfway keeps the failed file and names the moved one in
+          [error]. *)
   }
 
 val quarantine : now:float -> Workspace.config -> examination -> report

@@ -315,10 +315,8 @@ let test_undecodable_stores_are_moved_aside_once () =
     (Sys.file_exists fixture.broken_snapshot);
   List.iter
     (fun (q : R.quarantined) ->
-       List.iter
-         (fun rejected_path ->
-            check bool (q.R.path ^ " kept as bytes") true (Sys.file_exists rejected_path))
-         q.R.rejected_paths;
+       check bool (q.R.path ^ " kept as bytes") true (Sys.file_exists q.R.rejected_path);
+       check int (q.R.path ^ " moved alone") 0 (List.length q.R.moved_with);
        check bool (q.R.path ^ " says why") true (String.length q.R.rejection > 0))
     report.R.quarantined;
   check (list string) "both stores are named"
@@ -493,7 +491,7 @@ let test_an_unreadable_session_binding_refuses_boot () =
    | D.Degrade_typed _ | D.Preflight_only _ -> fail "the session store refuses boot");
   let report = R.quarantine ~now:1_700_000_002.0 config examination in
   (match report.R.quarantined, report.R.failed with
-   | [ { R.rejected_paths = [ rejected_path ]; _ } ], [] ->
+   | [ { R.rejected_path; moved_with = []; _ } ], [] ->
      check bool "the binding is gone" false (Sys.file_exists path);
      check string "the rejected copy keeps the bytes" digest (file_digest rejected_path)
    | _ -> fail "exactly one binding is moved aside");
@@ -547,30 +545,41 @@ let test_a_binding_behind_a_linked_keeper_directory_refuses_boot () =
     (List.map (fun (u : R.undecodable) -> u.R.keeper) examination.R.undecodable)
 ;;
 
-(* The keeper's queue directory. [durable_state_path_result] answers the WAL
-   while no snapshot exists, so only its directory is taken before the files
-   are written. *)
-let queue_dir ~base_path =
-  match
-    Keeper_event_queue_persistence.durable_state_path_result ~base_path ~keeper_name:"sound"
-  with
-  | Ok path -> Filename.dirname path
-  | Error detail -> fail detail
+let queue_dir ~base_path = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "sound"
+
+(* A snapshot the v19 reader accepts: no pending stimulus, nothing in flight. *)
+let current_snapshot_bytes =
+  {|{"schema":"keeper.event_queue.state.v19","revision":1,"pending":[],"last_transition":null,"projected_dispositions":[],"transition_outbox":[],"accepted_transfer_projections":[]}|}
 ;;
 
-(* A queue snapshot this build cannot decode keeps its keeper from selecting
-   any stimulus (#37900), and until this step only the deploy preflight read
-   it. Boot now refuses it, the preflight refuses the same keeper, and the
-   accepted quarantine moves the snapshot and its WAL together, so the next
-   load starts the empty queue. *)
+let queue_files ~base_path =
+  let dir = queue_dir ~base_path in
+  ( Filename.concat dir Keeper_event_queue_persistence.snapshot_filename
+  , Filename.concat dir Keeper_event_queue_persistence.transition_wal_filename )
+;;
+
+let check_queue_starts_empty ~base_path =
+  let module Q = Keeper_event_queue_persistence in
+  (match Q.durable_state_exists_result ~base_path ~keeper_name:"sound" with
+   | Ok false -> ()
+   | Ok true -> fail "durable queue state survived the quarantine"
+   | Error detail -> fail detail);
+  match Q.load_result ~base_path ~keeper_name:"sound" with
+  | Ok queue ->
+    check int "the next load starts the empty queue" 0 (Keeper_event_queue.length queue)
+  | Error detail -> failf "the queue still refuses after the quarantine: %s" detail
+;;
+
+(* A queue this build cannot decode keeps its keeper from registering
+   (#37900), and until this step only the deploy preflight read it. Boot now
+   refuses it, the preflight refuses the same keeper, and the accepted
+   quarantine moves the snapshot and its WAL together, the rejected snapshot
+   last, so the next load starts the empty queue. *)
 let test_an_unreadable_event_queue_refuses_boot () =
   with_workspace
   @@ fun config ->
   let base_path = config.Workspace.base_path in
-  let module Q = Keeper_event_queue_persistence in
-  let keeper_dir = queue_dir ~base_path in
-  let snapshot = Filename.concat keeper_dir Q.snapshot_filename in
-  let wal = Filename.concat keeper_dir Q.transition_wal_filename in
+  let snapshot, wal = queue_files ~base_path in
   write_bytes snapshot "{\"schema\":\"keeper.event_queue.state.v18\"}";
   write_bytes wal "{not-json\n";
   let snapshot_digest = file_digest snapshot in
@@ -600,22 +609,16 @@ let test_an_unreadable_event_queue_refuses_boot () =
    | D.Degrade_typed _ | D.Preflight_only _ -> fail "the event queue refuses boot");
   let report = R.quarantine ~now:1_700_000_004.0 config examination in
   (match report.R.quarantined, report.R.failed with
-   | [ { R.rejected_paths = [ rejected_snapshot; rejected_wal ]; _ } ], [] ->
+   | [ { R.rejected_path; moved_with = [ (moved, rejected_wal) ]; _ } ], [] ->
+     check string "the WAL moved with it" wal moved;
      check bool "the snapshot is gone" false (Sys.file_exists snapshot);
      check bool "the WAL is gone" false (Sys.file_exists wal);
      check string "the rejected snapshot keeps the bytes" snapshot_digest
-       (file_digest rejected_snapshot);
+       (file_digest rejected_path);
      check string "the rejected WAL keeps the bytes" wal_digest (file_digest rejected_wal)
-   | [ _ ], [] -> fail "the snapshot and the WAL move together, snapshot first"
+   | [ _ ], [] -> fail "the snapshot and the WAL move together"
    | _ -> fail "exactly one queue is moved aside");
-  (match Q.durable_state_exists_result ~base_path ~keeper_name:"sound" with
-   | Ok false -> ()
-   | Ok true -> fail "durable queue state survived the quarantine"
-   | Error detail -> fail detail);
-  match Q.load_result ~base_path ~keeper_name:"sound" with
-  | Ok queue ->
-    check int "the next load starts the empty queue" 0 (Keeper_event_queue.length queue)
-  | Error detail -> failf "the queue still refuses after the quarantine: %s" detail
+  check_queue_starts_empty ~base_path
 ;;
 
 (* With no snapshot the WAL is the queue, so the refusal names the WAL: a
@@ -625,17 +628,90 @@ let test_a_wal_only_queue_is_named_by_its_wal () =
   with_workspace
   @@ fun config ->
   let base_path = config.Workspace.base_path in
-  let module Q = Keeper_event_queue_persistence in
-  let wal = Filename.concat (queue_dir ~base_path) Q.transition_wal_filename in
+  let _, wal = queue_files ~base_path in
+  write_bytes wal "{not-json\n";
+  let wal_digest = file_digest wal in
+  let examination = R.examine config in
+  check (list string) "boot names the queue at its WAL" [ wal ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+  let report = R.quarantine ~now:1_700_000_005.0 config examination in
+  (match report.R.quarantined, report.R.failed with
+   | [ { R.rejected_path; moved_with = []; _ } ], [] ->
+     check bool "the WAL is gone" false (Sys.file_exists wal);
+     check string "the rejected WAL keeps the bytes" wal_digest (file_digest rejected_path)
+   | _ -> fail "exactly the WAL is moved aside");
+  check_queue_starts_empty ~base_path
+;;
+
+(* The snapshot decodes and the WAL on top of it does not. The row names the
+   WAL, the file the operator has to look at, and the WAL moves last. *)
+let test_a_bad_wal_over_a_good_snapshot_is_named_by_its_wal () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot current_snapshot_bytes;
   write_bytes wal "{not-json\n";
   let examination = R.examine config in
   check (list string) "boot names the queue at its WAL" [ wal ]
     (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
-  match (R.quarantine ~now:1_700_000_005.0 config examination).R.quarantined with
-  | [ { R.rejected_paths = [ rejected_wal ]; _ } ] ->
-    check bool "the WAL is gone" false (Sys.file_exists wal);
-    check bool "and kept aside" true (Sys.file_exists rejected_wal)
-  | _ -> fail "exactly the WAL is moved aside"
+  let report = R.quarantine ~now:1_700_000_006.0 config examination in
+  (match report.R.quarantined, report.R.failed with
+   | [ { R.rejected_path; moved_with = [ (moved, rejected_snapshot) ]; _ } ], [] ->
+     check string "the snapshot moved with it" snapshot moved;
+     check bool "the rejected WAL is kept" true (Sys.file_exists rejected_path);
+     check bool "the snapshot is kept" true (Sys.file_exists rejected_snapshot)
+   | _ -> fail "the WAL and its snapshot move together");
+  check_queue_starts_empty ~base_path
+;;
+
+(* A move that stops between the two renames must not leave a pair the next
+   boot reads as a queue. The rejected file moves last, so it is the one that
+   stays, and boot refuses again at it; the error names the file already
+   moved. *)
+let test_a_half_finished_move_leaves_the_rejected_file_and_boot_refuses_again () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, wal = queue_files ~base_path in
+  write_bytes snapshot "{\"schema\":\"keeper.event_queue.state.v18\"}";
+  write_bytes wal "";
+  let unreachable = Filename.concat base_path "no-such-directory/rejected" in
+  let rejected_wal = wal ^ ".rejected-test" in
+  (match
+     Keeper_event_queue_persistence.move_aside_undecodable_result
+       ~base_path
+       ~keeper_name:"sound"
+       ~rejected_path_of:(fun path -> if path = snapshot then unreachable else rejected_wal)
+   with
+   | Ok _ -> fail "the snapshot cannot be renamed into a missing directory"
+   | Error detail ->
+     check bool "the error names the WAL already moved" true
+       (String_util.contains_substring detail rejected_wal));
+  check bool "the WAL moved first" true (Sys.file_exists rejected_wal);
+  check bool "the rejected snapshot stays" true (Sys.file_exists snapshot);
+  check (list string) "the next boot refuses again at the snapshot" [ snapshot ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) (R.examine config).R.undecodable)
+;;
+
+(* State that reads by the time the lock is held is left where it is. *)
+let test_a_queue_that_decodes_is_not_moved () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let snapshot, _ = queue_files ~base_path in
+  write_bytes snapshot current_snapshot_bytes;
+  let digest = file_digest snapshot in
+  check int "boot names nothing" 0 (List.length (R.examine config).R.undecodable);
+  (match
+     Keeper_event_queue_persistence.move_aside_undecodable_result
+       ~base_path
+       ~keeper_name:"sound"
+       ~rejected_path_of:(fun path -> path ^ ".rejected-test")
+   with
+   | Ok _ -> fail "a queue that decodes must not move"
+   | Error (_ : string) -> ());
+  check string "the snapshot is untouched" digest (file_digest snapshot)
 ;;
 
 let () =
@@ -678,6 +754,12 @@ let () =
             test_an_unreadable_event_queue_refuses_boot
         ; test_case "a WAL-only queue is named by its WAL" `Quick
             test_a_wal_only_queue_is_named_by_its_wal
+        ; test_case "a bad WAL over a good snapshot is named by its WAL" `Quick
+            test_a_bad_wal_over_a_good_snapshot_is_named_by_its_wal
+        ; test_case "a half-finished move leaves the rejected file" `Quick
+            test_a_half_finished_move_leaves_the_rejected_file_and_boot_refuses_again
+        ; test_case "a queue that decodes is not moved" `Quick
+            test_a_queue_that_decodes_is_not_moved
         ] )
     ]
 ;;

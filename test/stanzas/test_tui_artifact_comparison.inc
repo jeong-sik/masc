@@ -3,7 +3,8 @@
  (deps test_tui_artifact_comparison.py test_tui_input_frame_pty.py
        test_tui_keyboard_input.py
        (glob_files test_tui_keyboard_*_pty.py)
-       ../scripts/harness/perf/compare_tui_artifacts.py)
+       ../scripts/harness/perf/compare_tui_artifacts.py
+       ../scripts/harness/perf/linux_probe_artifact.py)
  (action (run python3 %{dep:test_tui_artifact_comparison.py})))
 
 (alias

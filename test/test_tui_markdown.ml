@@ -478,6 +478,36 @@ let test_diff_fence_leaves_file_headers_plain () =
        ])
     (render "```diff\n--- a/one.ml\n+++ b/one.ml\n+added\n```")
 
+let test_diff_with_a_grammar_keeps_tokens_on_the_band () =
+  check_rows "token colours over the added band"
+    (tagged_fence "diff:ocaml"
+       [ "<+>\xe2\x94\x82 <+>+<+><k>let<+><c> x = <+><n>1<+>"
+         ^ String.make 29 ' ' ^ "</+>"
+       ])
+    (render "```diff:ocaml\n+let x = 1\n```")
+
+(* A mixed row wraps as pieces, and every chunk refills the same band —
+   the tail that no longer carries [+] is still a changed line. *)
+let test_mixed_diff_tail_keeps_the_band_after_a_hard_split () =
+  let width = 12 in
+  check_rows "split mixed band"
+    (tagged_fence ~width "diff:ocaml"
+       [ "<+>\xe2\x94\x82 <+>+<+><c>abcdefghi<+></+>"
+       ; "<+>\xe2\x94\x82 <c>jk<+>" ^ String.make 8 ' ' ^ "</+>"
+       ])
+    (render ~width "```diff:ocaml\n+abcdefghijk\n```")
+
+(* Without any styling the marker is still the signal and the band is
+   still full-width padding: colourlessness changes the palette, not
+   the layout. *)
+let test_plain_mixed_diff_keeps_layout_without_colour () =
+  check_rows "colourless mixed diff"
+    [ "\xe2\x94\x8c\xe2\x94\x80 diff:ocaml " ^ horizontal 26
+    ; "| +let x = 1" ^ String.make 29 ' '
+    ; "\xe2\x94\x94" ^ horizontal 39
+    ]
+    (render ~palette:Markdown.plain_palette "```diff:ocaml\n+let x = 1\n```")
+
 let test_untagged_fence_stays_single_span () =
   check_rows "no tag, no colour" [ "<c>\xe2\x94\x82 let x = 1</c>" ]
     (render "```\nlet x = 1\n```")
@@ -798,6 +828,12 @@ let () =
             test_bare_link_closer_keeps_the_diff_band_open
         ; Alcotest.test_case "a diff leaves file headers plain" `Quick
             test_diff_fence_leaves_file_headers_plain
+        ; Alcotest.test_case "a diff with a grammar keeps tokens on the band"
+            `Quick test_diff_with_a_grammar_keeps_tokens_on_the_band
+        ; Alcotest.test_case "a mixed diff tail keeps its band" `Quick
+            test_mixed_diff_tail_keeps_the_band_after_a_hard_split
+        ; Alcotest.test_case "a colourless mixed diff keeps its layout" `Quick
+            test_plain_mixed_diff_keeps_layout_without_colour
         ; Alcotest.test_case "an unknown language means no colour" `Quick
             test_unknown_language_stays_single_span
         ; Alcotest.test_case "ocaml strings and constructors" `Quick

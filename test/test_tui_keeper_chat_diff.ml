@@ -320,7 +320,7 @@ let test_full_projection_weaves_recorded_replacement () =
     [ "✓ Edit lib/example.ml · 12ms"
     ; "↳ masc:lib/example.ml (+1 -1)"
     ; "  recorded replacement"
-    ; "```diff"
+    ; "```diff:ocaml"
     ; "-let answer = 41"
     ; "+let answer = 42"
     ; "```"
@@ -333,7 +333,7 @@ let test_full_projection_weaves_recorded_replacement () =
     [ "✓ Edit lib/example.ml · 12ms"
     ; "↳ masc:lib/example.ml (+1 -1)"
     ; "recorded replacement"
-    ; "```diff"
+    ; "```diff:ocaml"
     ; "-let answer = 41"
     ; "+let answer = 42"
     ];
@@ -400,7 +400,7 @@ let test_full_projection_numbers_single_occurrence () =
     ; "↳ masc:lib/example.ml (+3 -2)"
     ; "  recorded replacement"
     ; "  old L42-43 -> new L42-44"
-    ; "```diff"
+    ; "```diff:ocaml"
     ; "   42     - - old a"
     ; "   43     - - old b"
     ; "    -    42 + new a"
@@ -441,7 +441,7 @@ let test_full_projection_skips_numbers_for_many_matches () =
   let body = body rows in
   check bool "every template row has four true addresses, so none is printed"
     true
-    (contains ~needle:"```diff\n-old\n+new\n+extra\n```" body);
+    (contains ~needle:"```diff:ocaml\n-old\n+new\n+extra\n```" body);
   check bool "no gutter cell is emitted" false (contains ~needle:"    - " body)
 ;;
 
@@ -467,7 +467,7 @@ let test_full_projection_skips_numbers_on_narrow_pane () =
       [ activity ~execution_id:"exec-edit-1" () ]
   in
   check bool "fourteen cells cannot spare a gutter" true
-    (contains ~needle:"```diff\n-old\n+new\n```" (body rows))
+    (contains ~needle:"```diff:ocaml\n-old\n+new\n```" (body rows))
 ;;
 
 let test_full_projection_needs_room_for_gutter_and_source () =
@@ -492,7 +492,7 @@ let test_full_projection_needs_room_for_gutter_and_source () =
       [ activity ~execution_id:"exec-edit-1" () ]
   in
   check bool "fifteen cells hold the gutter but no source" true
-    (contains ~needle:"```diff\n-old\n+new\n```" (body (at 15)));
+    (contains ~needle:"```diff:ocaml\n-old\n+new\n```" (body (at 15)));
   let sixteen = at 16 in
   let body16 = body sixteen in
   check bool "sixteen cells number the rows" true
@@ -543,12 +543,27 @@ let test_full_projection_numbers_a_lone_replace_all_match () =
     ; "↳ masc:lib/example.ml (+1 -1 per match)"
     ; "  1 match · replace-all template"
     ; "  old L1 -> new L1"
-    ; "```diff"
+    ; "```diff:ocaml"
     ; "    1     - - old"
     ; "    -     1 + new"
     ; "```"
     ]
     rows
+;;
+
+let test_preview_fence_names_the_file_grammar () =
+  let fence_of path =
+    projected_rows Transcript.Full
+      (index [ change_json ~path () ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+    |> List.find_opt (fun row -> String.starts_with ~prefix:"```diff" row)
+  in
+  check (option string) "a TypeScript file names its lexer"
+    (Some "```diff:c_like") (fence_of "app/main.ts");
+  check (option string) "a patch file stays a plain diff" (Some "```diff")
+    (fence_of "fix.patch");
+  check (option string) "an unlexed file stays a plain diff" (Some "```diff")
+    (fence_of "lib/data.xyz")
 ;;
 
 let test_replace_all_shows_bounded_actual_ranges () =
@@ -940,6 +955,8 @@ let () =
             test_full_projection_needs_room_for_gutter_and_source
         ; test_case "a lone replace-all match is numbered" `Quick
             test_full_projection_numbers_a_lone_replace_all_match
+        ; test_case "the fence names the file grammar" `Quick
+            test_preview_fence_names_the_file_grammar
         ; test_case "replace-all range annotations are bounded" `Quick
             test_replace_all_shows_bounded_actual_ranges
         ; test_case "omitted ranges keep count only" `Quick

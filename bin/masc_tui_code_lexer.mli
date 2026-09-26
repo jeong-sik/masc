@@ -32,9 +32,12 @@ val c_like_lexer : string -> segment list
 val python_lexer : string -> segment list
 
 val lexer_of_language : string -> (string -> segment list) option
-(** ["ocaml"|"ml"|"mli"], ["bash"|"sh"|"shell"|"zsh"], ["json"]. An unknown
-    tag answers [None] and the caller keeps the plain span — a guess at the
-    grammar is colouring as pretence. *)
+(** ["ocaml"|"ml"|"mli"], ["bash"|"sh"|"shell"|"zsh"], ["json"], and the
+    other tags the implementation names. A ["diff"] fence reads whole
+    lines; ["diff:<lang>"] additionally lexes added and removed rows'
+    content with [<lang>]'s lexer. An unknown tag answers [None] and the
+    caller keeps the plain span — a guess at the grammar is colouring
+    as pretence. *)
 
 val language_of_path : string -> string option
 (** The language a file's extension names, for extensions whose language has

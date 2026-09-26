@@ -339,7 +339,7 @@ let repeated_tool_call_input ~threshold tool_calls =
    scope contributes only its latched observation failure; it is not what
    makes the boundary exist (#34083). *)
 let official_client_tool_boundary
-      ~repetition_execution ?yield_requested ~tool_calls () =
+      ~repetition_execution ~tool_calls () =
   match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
   | Some error ->
     Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
@@ -356,20 +356,10 @@ let official_client_tool_boundary
       Ok (Option.map (fun (tool_name, repeated_count) ->
         Keeper_official_client_host.Repeated_tool_call { tool_name; repeated_count }) repeated)
     in
-    (match yield_requested with
-     | None -> repetition_stop ()
-     | Some requested ->
-       (match requested () with
-        | Ok (Some { reason = Operation_queued }) ->
-          (* Official clients own their conversation history. A returned tool
-             result is not yet a durable resume checkpoint, so a queued chat
-             waits until this provider turn completes. *)
-          repetition_stop ()
-        | Ok (Some { reason = Durable_stimulus_waiting _ }) | Ok None ->
-          repetition_stop ()
-        | Error detail ->
-          Error (Agent_core.Error.Internal
-            ("keeper cooperative-yield snapshot failed: " ^ detail))))
+    (* Official clients own their conversation history. A returned tool
+       result is not yet a durable resume checkpoint, so queued chats wait
+       until normal turn completion. No queue snapshot is needed here. *)
+    repetition_stop ()
 ;;
 
 let assistant_text_is_blank text =
@@ -1519,7 +1509,6 @@ let run_turn
          let on_official_client_tool_boundary () =
            match
              official_client_tool_boundary ~repetition_execution
-               ?yield_requested
                ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
                ()
            with

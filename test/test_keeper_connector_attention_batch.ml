@@ -1279,9 +1279,6 @@ let test_debt_cap_official_turn_keeps_tool_result_until_completion () =
                 !handed_off;
               Keeper_agent_run.For_testing.official_client_tool_boundary
                 ~repetition_execution:None
-                ~yield_requested:(fun () ->
-                  Keeper_unified_turn.autonomous_yield_request
-                    ~base_path ~keeper_name)
                 ~tool_calls:[] ())
             ~raw_trace_run:None ()
         in

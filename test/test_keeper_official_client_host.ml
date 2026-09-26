@@ -713,9 +713,8 @@ let test_repeated_tool_host_stop_is_a_checkpoint_yield () =
   | _ -> fail "host stop was not projected as a repeated-tool checkpoint yield"
 ;;
 
-let test_queued_chat_yields_after_settled_official_tool () =
+let test_settled_official_tool_keeps_turn_running () =
   with_active_raw_trace (fun ~path:_ ~active ->
-    let queued = ref false in
     let handed_off = ref false in
     let boundary_calls = ref 0 in
     let tool, terminal_error =
@@ -723,40 +722,21 @@ let test_queued_chat_yields_after_settled_official_tool () =
         ~on_result_handoff:(fun ~invocation:_ ~content:_ -> handed_off := true)
         ~on_tool_boundary:(fun () ->
           incr boundary_calls;
-          check bool "tool result handed off before queue decision" true !handed_off;
+          check bool "tool result handed off before boundary decision" true !handed_off;
           Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:None
-            ~yield_requested:(fun () ->
-              if !queued
-              then Ok (Some Keeper_agent_run.{ reason = Operation_queued })
-              else Ok None)
-            ~tool_calls:[] ())
+            ~repetition_execution:None ~tool_calls:[] ())
         (fun _ ->
-          queued := true;
           Ok { Agent_core.Types.content = "settled result"; content_blocks = None; _meta = None })
     in
     let result = tool.call ~call_id:"queued-after-tool" (`Assoc []) in
     check bool "tool succeeded" true result.success;
     check string "settled content remains intact" "settled result" result.content;
     check int "one boundary decision" 1 !boundary_calls;
-    check (option string) "queue stop is not terminal failure" None !terminal_error;
+    check (option string) "no terminal failure" None !terminal_error;
     match result.abort_turn with
-    | Some Queued_chat_operation ->
-      (match
-         Host.host_stop_result
-           ~runtime_id:"official-client-runtime"
-           ~model:"official-client-model"
-           ~session_id:"session-queued"
-           ~turn_id:"turn-queued"
-           ~turns_used:1
-           ~latency_ms:None
-           ~request_context:None
-           Queued_chat_operation
-       with
-       | Ok { stop_reason = Runtime_agent.Yielded_to_operation_queued _; _ } -> ()
-       | Ok _ | Error _ -> fail "queued chat lost its typed continuation stop")
-    | Some (Repeated_tool_call _ | Terminal_tool_boundary _) | None ->
-      fail "queued chat did not stop the official-client turn after its tool")
+    | None -> ()
+    | Some (Queued_chat_operation | Repeated_tool_call _ | Terminal_tool_boundary _) ->
+      fail "the official-client turn stopped after its tool result")
 ;;
 
 let test_terminal_post_effect_failure_aborts_the_official_client_turn () =
@@ -2703,9 +2683,9 @@ let () =
             `Quick
             test_repeated_tool_host_stop_is_a_checkpoint_yield
         ; test_case
-            "queued chat yields after a settled official tool"
+            "settled official tool keeps turn running"
             `Quick
-            test_queued_chat_yields_after_settled_official_tool
+            test_settled_official_tool_keeps_turn_running
         ; test_case
             "host stop carries request context, not spend"
             `Quick

@@ -24,6 +24,7 @@ export interface RuntimeTomlModel {
   id: string
   apiName: string
   maxContext: number | null
+  maxPromptBytes: number | null
   toolsSupport: boolean
   thinkingSupport: boolean
   // Capability fields below mirror [models.<id>.capabilities] (SSOT:
@@ -363,6 +364,7 @@ function modelFromDocument(document: TomlDocument, id: string): RuntimeTomlModel
     id,
     apiName: asString(values['api-name'], asString(values['model-name'], id)),
     maxContext: asNumber(values['max-context']),
+    maxPromptBytes: asNumber(values['max-prompt-bytes']),
     toolsSupport: asBoolean(values['tools-support']),
     thinkingSupport: asBoolean(values['thinking-support']),
     jsonSupport: capBoolean(caps['supports-response-format-json']),
@@ -740,7 +742,7 @@ export function setRuntimeTomlProviderCredential(
 export function setRuntimeTomlModelField(
   sourceText: string,
   modelId: string,
-  field: 'api-name' | 'max-context' | 'tools-support' | 'thinking-support' | 'json-support' | 'streaming',
+  field: 'api-name' | 'max-context' | 'max-prompt-bytes' | 'tools-support' | 'thinking-support' | 'json-support' | 'streaming',
   value: string | number | boolean | null,
 ): string {
   // The JSON capability is stored in the nested [models.<id>.capabilities]

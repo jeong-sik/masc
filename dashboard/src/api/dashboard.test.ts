@@ -5371,6 +5371,22 @@ describe('official-client session API', () => {
     },
   }
 
+  it.each(['codex', 'claude_code', 'antigravity', 'muse'])(
+    'decodes %s recovery and settled session evidence', async (client_kind) => {
+      for (const phase of [recoveryPayload.session.phase, {
+        kind: 'settled', session_id: 'session-1', turn_id: 'turn-1',
+      }]) {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+          ...recoveryPayload,
+          session: { ...recoveryPayload.session, client_kind, runtime_id: `${client_kind}.fixture`, phase },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+        const result = await fetchOfficialClientSession('sangsu')
+        expect(result.session?.client_kind).toBe(client_kind)
+        expect(result.session?.phase.kind).toBe(phase.kind)
+      }
+    },
+  )
+
   it('reads exact measured recovery evidence for one Keeper', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify(recoveryPayload), {

@@ -7619,23 +7619,46 @@ let launch_waiting_interactive state ~mailbox ~keeper_name =
   match List.assoc_opt keeper_name state.keeper_chat_control_tokens with
   | None -> ()
   | Some control_token ->
-    let ready = List.filter_map (fun (name, id, intervention) ->
-      match intervention with
-      | Awaiting_control {generation;target}
-        when String.equal name keeper_name
-          && generation = keeper_chat_control_generation state keeper_name -> Some (id, target)
-      | Awaiting_control _ | Retained_after_stop -> None)
-      state.keeper_interactive_waiting in
-    List.iter (fun (request_id, target) ->
-      state.keeper_interactive_waiting <- List.filter (fun (_, id, _) -> id <> request_id)
-        state.keeper_interactive_waiting;
-      match Chat_queue.take state.msg_queued ~request_id with
+    (* A control token can release several locally staged Enter sends. Admit
+       the oldest one first and wait for its durable acceptance before sending
+       the next: parallel HTTP fibers need not reach the server in launch order. *)
+    let admission_pending = List.exists (fun (entry : inflight) ->
+      String.equal entry.sent_request.keeper_name keeper_name
+      && Option.is_none (Keeper_chat_transcript.admission entry.log.tl_transcript))
+      state.msg_inflight in
+    if not admission_pending then
+      let generation = keeper_chat_control_generation state keeper_name in
+      let ready = Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name
+        |> List.find_map (fun item ->
+          List.find_map (fun (name, id, intervention) ->
+            match intervention with
+            | Awaiting_control held
+              when String.equal name keeper_name
+                && String.equal id item.request.request_id
+                && held.generation = generation -> Some (item, held.target)
+            | Awaiting_control _ | Retained_after_stop -> None)
+            state.keeper_interactive_waiting) in
+      match ready with
       | None -> ()
-      | Some (item, rest) ->
-        state.msg_queued <- rest;
-        launch_keeper_request ~promoted:item
-          ~admission_intent:(Keeper_chat.Interactive {control_token;target})
-          state ~mailbox item.request) ready
+      | Some (item, target) ->
+        let request_id = item.Chat_queue.request.request_id in
+        state.keeper_interactive_waiting <- List.filter (fun (_, id, _) -> id <> request_id)
+          state.keeper_interactive_waiting;
+        (match Chat_queue.take state.msg_queued ~request_id with
+         | None -> ()
+         | Some (_, rest) ->
+           state.msg_queued <- rest;
+           launch_keeper_request ~promoted:item
+             ~admission_intent:(Keeper_chat.Interactive {control_token;target})
+             state ~mailbox item.request;
+           let next_generation = keeper_chat_control_generation state keeper_name in
+           state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
+             let intervention = match intervention with
+               | Awaiting_control held
+                 when String.equal name keeper_name && held.generation = generation ->
+                 Awaiting_control {held with generation = next_generation}
+               | Awaiting_control _ | Retained_after_stop -> intervention in
+             name, id, intervention) state.keeper_interactive_waiting)
 ;;
 
 let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
@@ -7792,9 +7815,9 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
           let attachments, references = take_pending_attachments state in
           Keeper_chat.create_request ~attachments ~references ~keeper_name:target
             ~message:text () in
-        (* Enter admits the line to run next and interrupts nothing: the
-           server's interactive admission moves it to the front of the queue
-           and signals only the target it is given, and the target is none.
+        (* Enter admits the line in queue order and interrupts nothing: the
+           server's interactive admission signals only the target it is given,
+           and the target is none.
            Until 2026-09-14 this derived the running chat operation or the
            observed autonomous turn as the target, so every line typed while
            the Keeper worked cancelled that work -- the footer promised "Enter
@@ -12606,7 +12629,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             ("Queue snapshot (refresh with /queue)" :: lines @
              ["/queue pause · /queue resume · /queue cancel ID · /queue edit ID message · /queue last ID";
               "Events: /queue cancel-event REF INCARNATION reason · /queue priority-event REF INCARNATION immediate|normal|low";
-              "Enter queues your line to run next; Esc stops the current turn and pauses queue consumption."])
+              "Enter queues your line in arrival order; Esc stops the current turn and pauses queue consumption."])
       in
       chat_notice state ~keeper_name:(Some keeper_name) ~kind (String.concat "\n" lines);
       drain_queued_message state ~base_path ~mailbox
@@ -14164,6 +14187,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               ~keeper_name:request.Keeper_chat.keeper_name
         end;
         load_local_workspace_if_safe state base_path;
+        launch_waiting_interactive state ~mailbox
+          ~keeper_name:request.Keeper_chat.keeper_name;
         drain_queued_message state ~base_path ~mailbox
       end
   | Keeper_chat_stream_deltas (request, deltas) ->
@@ -14211,6 +14236,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  append_chat_history state request Message_status "Submitted message already started or settled; no other turn was interrupted"
                | None -> ())
             | Some _ | None -> ());
+           if List.exists (fun (_, delta) -> match delta with
+             | Keeper_chat_live.Accepted _ -> true | _ -> false) deltas then
+             launch_waiting_interactive state ~mailbox
+               ~keeper_name:request.Keeper_chat.keeper_name;
            if Keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript
            then drain_queued_message state ~base_path ~mailbox
        | Some _ | None -> ())
@@ -15975,11 +16004,11 @@ let main
   state.coalesce_queued_input <-
     Option.value
       (tui_settings.coalesce_queued_input)
-      ~default:true;
+      ~default:false;
   state.user_input_priority_next <-
     Option.value
       (tui_settings.user_input_priority_next)
-      ~default:true;
+      ~default:false;
   (* Default false, unlike its neighbours: this one sends without the operator
      confirming, so absence is not consent. *)
   state.voice_send_on_stop <-

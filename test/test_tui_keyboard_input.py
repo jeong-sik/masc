@@ -6257,13 +6257,13 @@ class AtomicChatFixture:
             raise AssertionError(f"ordinary Enter lost interactive admission: {request!r}")
         if intent.get("control_token") != self.token:
             raise AssertionError(f"Enter used stale control authority: {request!r}")
-        # Enter admits the line to run next and names nothing to stop. Until
+        # Enter admits the line in queue order and names nothing to stop. Until
         # 2026-09-14 it bound the working direct execution, else the observed
         # autonomous turn, as the interrupt target, so every line typed while
         # the Keeper worked cancelled that work. Esc still targets the exact
         # turn (see [interrupt] below); Enter must not.
         if intent.get("interrupt_token") is not None or intent.get("operation_id") is not None:
-            raise AssertionError(f"Enter named a turn to stop; it must only admit to run next: {request!r}")
+            raise AssertionError(f"Enter named a turn to stop; it must only admit to the queue: {request!r}")
         with self.admitted:
             self.submitted.append(request)
             sequence = len(self.submitted)
@@ -6415,7 +6415,7 @@ def chat_queue_interaction(fixture: AtomicChatFixture) -> Interaction:
 
 
 def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -> Interaction:
-    """Enter during Esc waits for its receipt, not for the previous model turn."""
+    """Separate Enter sends during Esc retain order and wait for its receipt."""
     def interact(process, master_fd, _slave_fd, output, _base_path):
         try:
             open_atomic_chat(process, master_fd, output)
@@ -6427,21 +6427,28 @@ def chat_steer_interaction(fixture: AtomicChatFixture, requests: HttpRequests) -
                 raise AssertionError("Esc never reached its exact observed turn")
             send_and_wait(process, master_fd, output, b"new-course", composer_showing(b"new-course"))
             send_and_wait(process, master_fd, output, b"\r", b"Queue (1 waiting")
+            send_and_wait(process, master_fd, output, b"one-more", composer_showing(b"one-more"))
+            send_and_wait(process, master_fd, output, b"\r", b"Queue (2 waiting")
             if not wait_for_fixture_event(process, master_fd, output, fixture.old_poll_seen, timeout=10):
                 raise AssertionError("no stale observation arrived during pending Esc")
             read_available(master_fd, output)
             if len(fixture.submitted) != 1:
                 raise AssertionError("a stale observer token released input before Esc acknowledgement")
             fixture.release_interrupt.set()
-            wait_for_atomic_admissions(process, master_fd, output, fixture, 2)
+            wait_for_atomic_admissions(process, master_fd, output, fixture, 3)
             if fixture.submitted[1]["admission_intent"]["control_token"] != "control-after-stop":
                 raise AssertionError("retained Enter did not use the exact stop receipt authority")
+            if [item["message"] for item in fixture.submitted] != ["original", "new-course", "one-more"]:
+                raise AssertionError(f"separate Enter sends changed order or merged: {fixture.submitted!r}")
+            if len({item["request_id"] for item in fixture.submitted}) != 3:
+                raise AssertionError("separate Enter sends lost their request identities")
             if fixture.release.is_set():
                 raise AssertionError("retained Enter waited for old model completion")
             if fixture.run_next_calls or any(path == "/api/v1/keepers/turn/run-next" for path, _ in requests):
                 raise AssertionError("plain Enter used a second run-next control request")
             fixture.release.set()
             wait_for_output(process, master_fd, output, b"reply-new-course", start=0, timeout=10)
+            wait_for_output(process, master_fd, output, b"reply-one-more", start=0, timeout=10)
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")

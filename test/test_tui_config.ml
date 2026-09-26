@@ -160,8 +160,8 @@ let hints_cases =
 
 
 (* Whether a queued line absorbs the next one, [tui].coalesce_queued_input.
-   Absence must read as "yes" so a reader who never touched the key gets the
-   joining behaviour, and an explicit false must survive as false. *)
+   Absence leaves the caller's default (off) in place, and an explicit true
+   opts into joining locally waiting lines. *)
 let coalesce_of s = Config.coalesce_queued_input_of_doc (doc_of s)
 
 let check_coalesce label expected actual =
@@ -174,7 +174,7 @@ let coalesce_cases =
   ; Alcotest.test_case "true stays true" `Quick (fun () ->
         check_coalesce "true" (Some true)
           (coalesce_of "[tui]\ncoalesce_queued_input = true\n"))
-  ; Alcotest.test_case "absent key -> None (caller joins by default)" `Quick
+  ; Alcotest.test_case "absent key -> None (caller keeps sends separate)" `Quick
       (fun () -> check_coalesce "none" None (coalesce_of "[tui]\ntheme = \"x\"\n"))
   ; Alcotest.test_case "wrong type -> None, not a crash" `Quick (fun () ->
         check_coalesce "string" None

@@ -76,7 +76,7 @@ val send_on_stop_of_text : string -> bool option
 val coalesce_queued_input_of_doc : Keeper_toml_loader.toml_doc -> bool option
 (** [tui].coalesce_queued_input: whether a new line joins the line already
     waiting for the same Keeper instead of queueing behind it. [None] where
-    the file, the table or the key is absent -- reads as "yes".
+    the file, the table or the key is absent -- reads as "no".
 
     Only a next-turn line waiting for that same Keeper is joined. A steer
     keeps its own entry: it was created to replace one exact operation, and
@@ -85,6 +85,6 @@ val coalesce_queued_input_of_doc : Keeper_toml_loader.toml_doc -> bool option
 val user_input_priority_next_of_doc : Keeper_toml_loader.toml_doc -> bool option
 (** [tui].user_input_priority_next: whether user chat messages submitted
     while a turn is running are automatically prioritized to run next.
-    [None] where absent -- defaults to [true]. *)
+    [None] where absent -- defaults to [false]. *)
 
 val set_board_sort : base_path:string -> string -> (unit, string) result

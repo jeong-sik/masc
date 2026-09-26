@@ -3186,7 +3186,7 @@ let test_a_queued_line_takes_its_attachments_when_it_is_typed () =
       n
 ;;
 
-(* Enter admits the line to run next; it does not stop what the Keeper is
+(* Enter admits the line in queue order; it does not stop what the Keeper is
    doing. Until 2026-09-14 the send derived an interrupt target from whatever
    was running -- the chat operation in progress or the observed autonomous
    turn -- and handed it to the interactive admission, so every line typed

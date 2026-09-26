@@ -7776,8 +7776,8 @@ let create_state
   agenda_scroll = 0;
   agenda_cursor = 0;
   hints_visible = true;
-  coalesce_queued_input = true;
-  user_input_priority_next = true;
+  coalesce_queued_input = false;
+  user_input_priority_next = false;
   keeper_chat_control_generations = [];
   keeper_chat_control_tokens = [];
   keeper_chat_control_pending = [];

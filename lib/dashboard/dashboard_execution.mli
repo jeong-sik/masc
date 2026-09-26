@@ -73,6 +73,9 @@ val record_render_phase_timings : render_phase_timings_ms -> unit
     even when the render stays below the warning threshold. *)
 
 module For_test : sig
+  val terminal_reason_requires_attention : Yojson.Safe.t -> bool
+  (** Exact terminal-reason projection used by the execution attention queue. *)
+
   val agents_json :
     keepers:Yojson.Safe.t list ->
     agents:Masc_domain.agent list ->

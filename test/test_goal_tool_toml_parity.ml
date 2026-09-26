@@ -1,6 +1,6 @@
-(** The Goal tool definitions live in config/tools/masc_goal_*.toml. This
-    pins what they emit. The loader publishes every masc_goal_*.toml, so a new
-    file adds a tool here too: #38784 added masc_goal_measure.
+(** The Goal tool definitions live in config/tools/masc_goal_*.toml. Goal
+    schemas are loaded for the closed Goal_name variant, so both the embedded
+    TOML file set and the per-tool output pins must stay in sync with it.
 
     The first three (list, transition, upsert) moved out of an OCaml literal.
 
@@ -40,14 +40,48 @@ Creation requires a measurable success condition: metric and target_value (RFC-0
   ]
 ;;
 
+(* Names are derived from the closed variant; descriptions and schemas stay pinned. *)
+let published_names =
+  List.map (fun (name, _, _) -> name) published
+;;
+
+let declared_names =
+  Tool_name.Goal_name.all |> List.map Tool_name.Goal_name.to_string
+;;
+
 let test_schemas_match_their_declarations () =
   let emitted =
     Tool_schemas_workspace_extra.schemas
     |> List.map (fun (schema : Masc_domain.tool_schema) ->
       schema.name, schema.description, Yojson.Safe.to_string schema.input_schema)
   in
-  check int "every declared Goal tool is published" (List.length published)
-    (List.length emitted);
+  let emitted_names = List.map (fun (name, _, _) -> name) emitted in
+  let embedded_goal_names =
+    Embedded_config.file_list
+    |> List.filter (fun path ->
+      Filename.dirname path = "tools"
+      && Filename.check_suffix path ".toml"
+      && String.starts_with ~prefix:"masc_goal_" (Filename.basename path))
+    |> List.map (fun path -> Filename.remove_extension (Filename.basename path))
+    |> List.sort String.compare
+  in
+  check (list string) "embedded Goal TOMLs match Goal_name variants"
+    (List.sort String.compare declared_names)
+    embedded_goal_names;
+  List.iter
+    (fun name ->
+      check bool (name ^ ": declared Goal tool has a schema pin") true
+        (List.mem name published_names))
+    declared_names;
+  List.iter
+    (fun name ->
+      check bool (name ^ ": TOML declaration names a Goal tool") true
+        (List.mem name declared_names))
+    emitted_names;
+  check (list string) "schema pins follow Goal tool declaration order" declared_names
+    published_names;
+  check (list string) "TOML Goal tools match the pinned names" published_names
+    emitted_names;
   List.iter2
     (fun (name, description, input_schema) (name', description', input_schema') ->
       check string "tool name" name name';

@@ -241,7 +241,7 @@ let test_add_task_tool_projects_unavailable_envelope () =
     let before_links = file_bytes links_path in
     corrupt primary;
     let ctx = { Task.Tool.config; agent_name = "claude"; sw = None } in
-    let result = Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
+    let result = Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:(Tool_timing.start ()) ctx
         (`Assoc [ "title", `String "bound"; "goal_id", `String "goal-a" ]) in
     (match result with
      | Tool_result.Failed { class_ = Tool_result.Dependency_unavailable; data; message; _ } ->

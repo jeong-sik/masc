@@ -551,12 +551,15 @@ status: reference
   판정·Board attention)과 Keeper 걸음이 같은 오류에 같은 답을 하도록 둘 다 이 판정 하나를
   읽는다(#38913). 값은 셋이다.
   - `Binding of binding_fact`: 이 바인딩의 사정이라, 다음 후보가 같은 입력을 받아도 된다.
-    사정은 열둘이다 — `Credential`(401·403), `Account`(402), `Model_absent`(404), `Rate_limit`(429), `Capacity`(529),
+    사정은 열셋이다 — `Credential`(401, 죽은 키), `Account_access`(403, 계정이 거절됨: 다 쓴
+    구독 창·없는 권한·플랜이 받지 않는 클라이언트·정지된 계정), `Account`(402), `Model_absent`(404), `Rate_limit`(429), `Capacity`(529),
     `Server`(5xx), `Window`(창 초과, 또는 창에서 멈춘 빈 답), `Body_limit`(413),
     `Admission`(보내기 전에 이 바인딩이 준비된 요청을 받지 않음: 선언된 입력 용량 초과,
     입력을 잴 수 없음, 준비된 요청 거절), `Deadline`(보낸 뒤 헤더·전체 기한 초과),
     `Output_dialect`(답이 content 밖 필드에 옴), `Refusal_unread`(거절 상태는 왔지만 거절
     본문이 기한 안에 오지 않음).
+    401과 403을 두 사정으로 나눈 것은 Keeper 걸음이 403 뒤에만 provider 사용량을 읽기 때문이다.
+    한 사정으로 두면 route 가 원래 오류에서 둘을 다시 가르는 두 번째 표가 생긴다(#38975, #39254).
   - `Unattributed`: 거절은 왔지만, 누구의 사정인지 응답이 기계가 읽는 꼴로 말하지 않는다.
     기록에도 모른다고 남긴다.
   - `Unknown_after_dispatch`: 결과를 모르거나 이 바인딩의 사정으로 가를 수 없다. 이름과 달리

@@ -499,7 +499,7 @@ let test_antigravity_judge_receives_its_system_prompt () =
     (List.sort Int.compare order) order
 ;;
 
-let muse_fixture ~muse_cli ~account_home =
+let muse_fixture ~muse_cli ~account_home ~max_prompt_bytes =
   Printf.sprintf
     {|
 [runtime]
@@ -514,13 +514,14 @@ is-non-interactive = true
 [models.muse-spark]
 api-name = "muse-spark-1.3"
 max-context = 1007997
-max-prompt-bytes = 1048576
+max-prompt-bytes = %d
 reasoning-effort = "high"
 
 [muse_code.muse-spark]
 |}
     muse_cli
     account_home
+    max_prompt_bytes
 ;;
 
 let muse_runtime_id = "muse_code.muse-spark"
@@ -591,7 +592,7 @@ for _ in sys.stdin:
 |}
 ;;
 
-let with_muse_runtime ~muse_cli f =
+let with_muse_runtime ?(max_prompt_bytes=1048576) ~muse_cli f =
   let snapshot = Runtime.For_testing.snapshot () in
   let base_dir = Filename.temp_dir "fusion-muse" "" in
   Fun.protect
@@ -607,7 +608,7 @@ let with_muse_runtime ~muse_cli f =
   write_file ~path:(Filename.concat account_config "auth.json") ~perm:0o600
     {|{"schema_version":1,"providers":{"meta":{"api_key":"SYNTHETIC-LOCAL-ONLY"}}}|};
   write_file ~path:config_path ~perm:0o600
-    (muse_fixture ~muse_cli:(muse_cli ~base_dir) ~account_home);
+    (muse_fixture ~muse_cli:(muse_cli ~base_dir) ~account_home ~max_prompt_bytes);
   (match Runtime.init_default ~config_path with
    | Ok () -> ()
    | Error detail -> failf "muse-serve fixture must initialize: %s" detail);
@@ -824,6 +825,44 @@ let test_muse_code_refuses_an_output_schema_before_spawning () =
        (Masc.Fusion_official_client.failure_detail ~runtime_id:muse_runtime_id failure)
    | Ok _ -> fail "a schema-held answer was accepted from muse serve");
   check bool "the client never ran" false (Sys.file_exists !marker)
+;;
+
+let test_muse_framed_prompt_capacity_before_spawning () =
+  let system_prompt = "LENS" and prompt = "QUESTION" in
+  let framed = String.concat Masc.Antigravity_input_frame.section_separator
+    [frame_label (Masc.Antigravity_input_frame.system_instructions_label ()) ^ system_prompt;
+     frame_label (Masc.Antigravity_input_frame.current_goal_label ()) ^ prompt] in
+  let framed_bytes = String.length framed in
+  let marker = ref "" in
+  let muse_cli ~base_dir =
+    marker := Filename.concat base_dir "spawned";
+    let cli = Filename.concat base_dir "muse" in
+    write_file ~path:cli ~perm:0o700 (stub_cli_script ~marker:!marker);
+    cli in
+  with_muse_runtime ~max_prompt_bytes:(framed_bytes - 1) ~muse_cli (fun ~base_dir ->
+    let runtime = match Runtime.get_runtime_by_id muse_runtime_id with
+      | Some runtime -> runtime | None -> fail "Muse fixture missing" in
+    let refused runtime =
+      match in_eio_context (fun () ->
+        Masc.Fusion_official_client.run_with_images ~images:[] ~base_dir ~runtime
+          ~system_prompt ~prompt ()) with
+      | Error (Masc.Fusion_official_client.Muse_failure
+          (Runtime_muse_serve.Invalid_config _)) -> ()
+      | Error failure -> fail (Masc.Fusion_official_client.failure_detail
+          ~runtime_id:runtime.Runtime.id failure)
+      | Ok _ -> fail "undeclared or oversized Muse input reached host" in
+    refused runtime;
+    refused {runtime with id="unregistered-muse-binding"};
+    check bool "over-budget and missing-budget inputs never spawn" false
+      (Sys.file_exists !marker));
+  with_muse_runtime ~max_prompt_bytes:framed_bytes ~muse_cli:muse_panel_launcher
+    (fun ~base_dir ->
+      match in_eio_context (fun () ->
+        Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:muse_runtime_id
+          ~system_prompt ~prompt ()) with
+      | Ok (text, _) -> check string "exact framed byte capacity admitted"
+          "MUSE_PANEL_ANSWER" text
+      | Error failure -> fail (Fusion_types.show_panel_failure failure))
 ;;
 
 (* Each client's own timeout reaches Fusion as [Timeout], and every other
@@ -1236,6 +1275,8 @@ let () =
             "Muse Code refuses an output schema before spawning"
             `Quick
             test_muse_code_refuses_an_output_schema_before_spawning
+        ; test_case "Muse final framed input respects declared capacity" `Quick
+            test_muse_framed_prompt_capacity_before_spawning
         ; test_case "cancelled Muse panel leaves no workspace" `Quick
             test_cancelled_muse_panel_does_not_leave_a_workspace
         ] )

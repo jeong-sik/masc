@@ -29,11 +29,11 @@
     "provenance_source": "self_observed",
     "executable_sha256": "732abb40ac65f8df793481bcf92260dd48fb1e0ebad1f1edef155946110df5fb",
     "binary_commit_unix_ts": 1790441567.0,
-    "binary_commit_age_seconds": 4225,
+    "binary_commit_age_seconds": 4610,
     "executable_path": "<INSTALLED_FILE_SNAPSHOT>/main_eio.exe",
     "executable_dir": "<INSTALLED_FILE_SNAPSHOT>",
-    "runtime_instance_id": "01a0dee2-a93f-7000-9ab4-fa1ffc9ebdd4",
-    "started_at": "2026-09-26T18:03:11Z",
+    "runtime_instance_id": "01a0dee8-8ace-7000-ad21-47cee0dfb3c1",
+    "started_at": "2026-09-26T18:09:36Z",
     "uptime_seconds": 0
   },
   "keeper_fibers": 0,
@@ -81,7 +81,7 @@
         "source": "env"
       }
     },
-    "elapsed_sec": 0.6124169826507568,
+    "elapsed_sec": 0.6774559020996094,
     "watchdog_timeout_sec": 240.0,
     "product": {
       "lifecycle": "serving",

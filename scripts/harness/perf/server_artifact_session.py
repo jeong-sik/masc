@@ -1,5 +1,6 @@
 """One owned server: mutation/cold/warm HTTP and concurrent liveness receipts."""
 import argparse
+import base64
 from concurrent.futures import ThreadPoolExecutor
 import gzip
 import hashlib
@@ -95,6 +96,7 @@ def run(args):
                     body = None if payload is None else json.dumps(payload).encode()
                     hs = dict(headers if path == "/mcp" else {"Accept": "application/json"})
                     hs.update(extra or {})
+                    hs.setdefault("Accept-Encoding", "identity")
                     if body is not None:
                         hs["Content-Type"] = "application/json"
                     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
@@ -106,6 +108,20 @@ def run(args):
                         wire = response.read()
                         end = time.perf_counter_ns()
                         rh = {k.lower(): v for k, v in response.getheaders()}
+                        actual_encoding = rh.get("content-encoding") or "identity"
+                        accepted = actual_encoding == "identity" or (
+                            hs["Accept-Encoding"] == "gzip" and actual_encoding == "gzip")
+                        if not accepted:
+                            if phase is not None:
+                                with lock:
+                                    receipts.write(json.dumps({"phase": phase, "cycle": cycle,
+                                        "method": method, "path": path, "status": response.status,
+                                        "requested_encoding": hs["Accept-Encoding"], "encoding": actual_encoding,
+                                        "start_ns": start, "end_ns": end, "wire_bytes": len(wire),
+                                        "wire_base64": base64.b64encode(wire).decode(),
+                                        "error": "unaccepted response encoding"}) + "\n")
+                                    receipts.flush()
+                            require(False, "unaccepted response encoding; see requests.jsonl")
                         raw = gzip.decompress(wire) if rh.get("content-encoding") == "gzip" else wire
                         row = {"method": method, "path": path, "phase": phase, "cycle": cycle,
                                "status": response.status, "start_ns": start, "end_ns": end,
@@ -114,6 +130,7 @@ def run(args):
                                "wire_bytes": len(wire), "json_bytes": len(raw),
                                "body_sha256": hashlib.sha256(raw).hexdigest(), "body_utf8": raw.decode(),
                                "encoding": rh.get("content-encoding"), "etag": rh.get("etag"),
+                               "requested_encoding": hs["Accept-Encoding"],
                                "server_timing": rh.get("server-timing")}
                         if payload is not None:
                             row["request_sha256"] = hashlib.sha256(body).hexdigest()
@@ -197,10 +214,6 @@ def run(args):
                                 and body["execution_invalidated"] is False
                                 and body["query"]["actor"] is None
                                 and body["query"]["default_light_request"] is True, "execution response mismatch")
-                        actual_encoding = row["encoding"] or "identity"
-                        require(actual_encoding == "identity"
-                                or (args.encoding == "gzip" and actual_encoding == "gzip"),
-                                "unaccepted response encoding")
                         metrics = {part.strip().split(";", 1)[0] for part in (row["server_timing"] or "").split(",")}
                         require(("cache_compute" in metrics) == (phase == "cold"), "cold/warm cache mismatch")
                         if phase == "cold":

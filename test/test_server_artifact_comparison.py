@@ -138,6 +138,7 @@ class ReceiptTest(unittest.TestCase):
             "mutation", "cold", "warm", "concurrent_mutation", "concurrent_liveness") else None,
             status=200, start_ns=0, end_ns=1000000, wire_ms=1., body_utf8=raw,
             body_sha256=hashlib.sha256(raw.encode()).hexdigest(), json_bytes=len(raw.encode()), encoding=None,
+            requested_encoding="identity",
             method="POST" if is_rpc else "GET",
             path="/mcp" if is_rpc else ("/health/live" if phase == "concurrent_liveness" else "/api/v1/dashboard/execution"),
             arguments_sha256="inputs", **extra))
@@ -162,14 +163,29 @@ class ReceiptTest(unittest.TestCase):
         identity = json.loads((self.root / "identity.json").read_text())
         identity["encoding"] = "gzip"
         put(self.root / "identity.json", identity)
+        for row in self.rows:
+            if row["phase"] in ("prime", "cold", "warm"):
+                row["requested_encoding"] = "gzip"
         rows, _, _ = self.check()
         self.assertTrue(all(row["encoding"] is None for row in rows))
         self.entry["encoding"] = "identity"
         identity["encoding"] = "identity"
         put(self.root / "identity.json", identity)
+        for row in self.rows:
+            row["requested_encoding"] = "identity"
         next(row for row in self.rows if row["phase"] == "cold")["encoding"] = "gzip"
-        with self.assertRaisesRegex(ValueError, "cache/encoding"):
+        with self.assertRaisesRegex(ValueError, "response encoding"):
             self.check()
+
+    def test_every_identity_request_rejects_gzip(self):
+        for phase in ("initialize", "registry", "seed", "prime", "mutation",
+                      "concurrent_mutation", "concurrent_liveness"):
+            with self.subTest(phase=phase):
+                row = next(r for r in self.rows if r["phase"] == phase)
+                row["encoding"] = "gzip"
+                with self.assertRaisesRegex(ValueError, "response encoding"):
+                    self.check()
+                row["encoding"] = None
 
     def test_http_success_does_not_hide_tool_failure(self):
         row = next(r for r in self.rows if r["phase"] == "mutation")

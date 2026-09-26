@@ -5,38 +5,38 @@
     "timings": {
       "mutation": {
         "n": 2,
-        "min": 13.970375,
-        "median": 14.02725,
-        "p95": 14.084125,
-        "max": 14.084125
+        "min": 14.87,
+        "median": 14.922125,
+        "p95": 14.97425,
+        "max": 14.97425
       },
       "cold": {
         "n": 2,
-        "min": 11.9945,
-        "median": 12.217375,
-        "p95": 12.44025,
-        "max": 12.44025
+        "min": 12.154083,
+        "median": 12.2073125,
+        "p95": 12.260542,
+        "max": 12.260542
       },
       "warm": {
         "n": 2,
-        "min": 0.431416,
-        "median": 0.4721455,
-        "p95": 0.512875,
-        "max": 0.512875
+        "min": 0.419833,
+        "median": 0.464708,
+        "p95": 0.509583,
+        "max": 0.509583
       },
       "concurrent_mutation": {
         "n": 2,
-        "min": 18.304375,
-        "median": 19.384812500000002,
-        "p95": 20.46525,
-        "max": 20.46525
+        "min": 13.865666,
+        "median": 16.802729,
+        "p95": 19.739792,
+        "max": 19.739792
       },
       "concurrent_liveness": {
         "n": 2,
-        "min": 0.586292,
-        "median": 0.6675420000000001,
-        "p95": 0.748792,
-        "max": 0.748792
+        "min": 0.527,
+        "median": 0.5656460000000001,
+        "p95": 0.604292,
+        "max": 0.604292
       }
     },
     "client_overlap_pairs": 2
@@ -60,24 +60,64 @@
   },
   "response_encodings": [
     {
+      "phase": "mutation",
+      "cycle": 1,
+      "requested_encoding": "identity",
+      "encoding": null
+    },
+    {
       "phase": "cold",
       "cycle": 1,
+      "requested_encoding": "gzip",
       "encoding": null
     },
     {
       "phase": "warm",
       "cycle": 1,
+      "requested_encoding": "gzip",
       "encoding": "gzip"
+    },
+    {
+      "phase": "mutation",
+      "cycle": 2,
+      "requested_encoding": "identity",
+      "encoding": null
     },
     {
       "phase": "cold",
       "cycle": 2,
+      "requested_encoding": "gzip",
       "encoding": null
     },
     {
       "phase": "warm",
       "cycle": 2,
+      "requested_encoding": "gzip",
       "encoding": "gzip"
+    },
+    {
+      "phase": "concurrent_liveness",
+      "cycle": 1,
+      "requested_encoding": "identity",
+      "encoding": null
+    },
+    {
+      "phase": "concurrent_mutation",
+      "cycle": 1,
+      "requested_encoding": "identity",
+      "encoding": null
+    },
+    {
+      "phase": "concurrent_liveness",
+      "cycle": 2,
+      "requested_encoding": "identity",
+      "encoding": null
+    },
+    {
+      "phase": "concurrent_mutation",
+      "cycle": 2,
+      "requested_encoding": "identity",
+      "encoding": null
     }
   ]
 }

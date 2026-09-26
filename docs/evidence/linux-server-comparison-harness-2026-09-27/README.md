@@ -40,7 +40,7 @@ Earlier local attempts found a canonical temporary-path mismatch and the
 incorrect assumption that every gzip-accepting request returns gzip. They
 failed and cleaned up; no failed attempt contributes to this smoke. Resolving
 the temporary path and recording accepted versus actual encoding fixed those
-harness issues. The eleven synthetic validator tests, Python syntax parsing,
+harness issues. The twelve synthetic validator tests, Python syntax parsing,
 `actionlint`, and diff whitespace check pass. Linux workflow execution and a
 full paired server measurement remain pending. The measured times here are
 not an optimization result or evidence of the 0.1 ms goal.

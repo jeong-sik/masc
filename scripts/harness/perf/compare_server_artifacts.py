@@ -65,6 +65,12 @@ def validate_session(directory, entry, expected, *, tasks, cycles, runner_hash, 
             "/health/live" if row["phase"] == "concurrent_liveness" else "/api/v1/dashboard/execution")
         require((row["method"], row["path"]) == ("POST" if is_rpc else "GET", expected_path),
                 "receipt endpoint differs from phase")
+        requested_encoding = entry["encoding"] if row["phase"] in ("prime", "cold", "warm") else "identity"
+        actual_encoding = row["encoding"] or "identity"
+        require(row["requested_encoding"] == requested_encoding
+                and (actual_encoding == "identity"
+                     or (requested_encoding == "gzip" and actual_encoding == "gzip")),
+                "unaccepted or misreported response encoding")
         raw = row["body_utf8"].encode()
         require(row["status"] == 200 and hashlib.sha256(raw).hexdigest() == row["body_sha256"]
                 and len(raw) == row["json_bytes"], "failed/tampered response receipt")
@@ -98,11 +104,7 @@ def validate_session(directory, entry, expected, *, tasks, cycles, runner_hash, 
         previous_generation = generation
         for row, phase in ((cold, "cold"), (warm, "warm")):
             names = {part.strip().split(";", 1)[0] for part in (row["server_timing"] or "").split(",")}
-            actual_encoding = row["encoding"] or "identity"
-            require(("cache_compute" in names) == (phase == "cold")
-                    and (actual_encoding == "identity"
-                         or (entry["encoding"] == "gzip" and actual_encoding == "gzip")),
-                    "cache/encoding mismatch")
+            require(("cache_compute" in names) == (phase == "cold"), "cache timing mismatch")
         task_snapshots.append(normalized_tasks(body["tasks"]))
         for phase, offset in (("mutation", 0), ("concurrent_mutation", cycles)):
             row, result = indexed[phase, cycle]

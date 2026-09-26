@@ -545,9 +545,10 @@ type io =
   ; receive : unit -> (Msp.wire_message, error) result
   ; set_receive_phase : receive_phase -> unit
   ; next_id : unit -> int
+  ; on_subscription_usage : Msp.subscription_usage -> unit
   }
 
-let with_spawned_client ~mgr ~clock ~cwd config run =
+let with_spawned_client ?(on_subscription_usage = fun _ -> ()) ~mgr ~clock ~cwd config run =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -649,6 +650,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
         (fun () ->
            run
              { send
+             ; on_subscription_usage
              ; receive
              ; set_receive_phase = (fun phase -> receive_phase := phase)
              ; next_id =
@@ -672,9 +674,9 @@ let send_best_effort io ~what json =
     Log.Runtime_agent.debug "Muse Code %s write failed: %s" what (Printexc.to_string exn)
 ;;
 
-(* A reply to request [id]. Notifications that arrive first are session
-   projections this client does not read before the turn; a server request
-   before the turn exists is not one MASC answers. *)
+(* Subscription observations apply even before an acknowledgement or a
+   rejected turn. Other session projections are not consumed before the
+   turn; a server request before the turn exists is not one MASC answers. *)
 let rec await_response io ~id ~method_ =
   let* message = io.receive () in
   match message with
@@ -685,7 +687,13 @@ let rec await_response io ~id ~method_ =
     Error (Rpc_error { method_; code; message })
   | Msp.Response _ | Msp.Response_error _ ->
     protocol_error method_ "received a response to another request"
-  | Msp.Notification _ -> await_response io ~id ~method_
+  | Msp.Notification {method_=notification_method; params} ->
+    let* notification = lift (Msp.parse_notification ~method_:notification_method params) in
+    (match notification with
+     | Msp.Usage_changed usage -> io.on_subscription_usage usage
+     | Msp.Turn_started _ | Turn_completed _ | Item_started _ | Item_updated _
+     | Item_completed _ | Item_delta _ | Unhandled_notification _ -> ());
+    await_response io ~id ~method_
   | Msp.Server_request { id = request_id; method_ = requested; _ } ->
     send_best_effort
       io
@@ -1133,7 +1141,10 @@ let run_turn
   let* config = prepare_account_config config in
   let* approval_mode = approval_mode_of_posture config.native in
   guard_idle_timeout (fun () ->
-    with_spawned_client ~mgr ~clock ~cwd config (fun io ->
+    with_spawned_client
+      ~on_subscription_usage:(fun usage ->
+        emit_stream_event on_stream_event (Subscription_usage_observed usage))
+      ~mgr ~clock ~cwd config (fun io ->
       run_protocol
         io
         config

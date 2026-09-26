@@ -545,6 +545,8 @@ def ask(tool, subject):
                                      "feedback" if decide["params"].get("feedback") else "-"))
 
 if SCENARIO == "refuse_turn":
+    if "subscription_usage" in FIXTURE:
+        notify("usage/changed", FIXTURE["subscription_usage"])
     send({"jsonrpc": "2.0", "id": turn["id"],
           "error": {"code": -32602, "message": "fixture refusal"}})
     drain()
@@ -1081,7 +1083,18 @@ let test_subscription_exhaustion_is_account_scoped () =
         ["first";"other";"second"]);
     check bool "provider reset expires exactly" false
       (Runtime_quota_window.is_exhausted ~scope ~now:900.);
-    Runtime_quota_window.reset_for_testing ())
+    Runtime_quota_window.reset_for_testing ());
+  with_scripted_host ~fixture:["scenario", `String "refuse_turn";
+    "subscription_usage", `Assoc ["observedAtMs", `Int 100000; "tier", `String "fixture";
+      "window", `Assoc ["usedPercent", `Int 100; "resetsAtMs", `Int 500000; "windowDurationMins", `Int 5];
+      "weekly", `Assoc ["usedPercent", `Int 1; "resetsAtMs", `Int 900000]]]
+    (fun ~base_path ->
+      let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+      check bool "host refusal has no successful completion" true (Result.is_error run.outcome.result);
+      let scope = Runtime_quota_window.scope_of_muse_home (Filename.concat base_path "account-home") in
+      check (option (float 0.)) "pre-ack quota survives the rejected turn" (Some 500.)
+        (Runtime_quota_window.active_until ~scope ~now:100.);
+      Runtime_quota_window.reset_for_testing ())
 ;;
 
 let scenario name = [ "scenario", `String name ]

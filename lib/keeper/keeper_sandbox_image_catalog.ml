@@ -175,18 +175,17 @@ let parse_entries text =
 let parse text =
   Result.map (fun active -> { active; orphaned_builds = [] }) (parse_entries text)
 
-type resolution =
-  | Resolved of pinned
+type missing =
   | Unknown_image of { name : string; known : string list }
   | Not_built_on_host of { name : string; store : store }
 
 let resolve t ~name ~store =
   match List.find_opt (fun entry -> String.equal entry.name name) t.active with
-  | None -> Unknown_image { name; known = List.map (fun entry -> entry.name) t.active }
+  | None -> Error (Unknown_image { name; known = List.map (fun entry -> entry.name) t.active })
   | Some entry ->
     (match List.assoc_opt store entry.promoted with
-     | Some pin -> Resolved pin
-     | None -> Not_built_on_host { name; store })
+     | Some pin -> Ok pin
+     | None -> Error (Not_built_on_host { name; store }))
 
 let file_name = "sandbox-images.toml"
 

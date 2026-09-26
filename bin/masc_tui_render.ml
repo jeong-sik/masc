@@ -14302,7 +14302,7 @@ let resource_document (resource : Masc_tui_mcp.resource)
   in
   let body =
     match (error, contents) with
-    | Some detail, _ -> "**Read failed:** " ^ detail
+    | Some detail, _ -> detail
     | None, None when requested -> "(reading resource…)"
     | None, None -> "(Enter reads the selected resource.)"
     | None, Some parts ->

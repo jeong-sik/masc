@@ -3840,6 +3840,7 @@ let test_glm_quota_code_is_a_hard_quota_that_advances_once () =
           ; _
           } -> ()
       | _ -> fail "a GLM quota code lost its typed hard-quota cause")
+    ()
 ;;
 
 (* A GLM rate-limit code at the same status stays a rate limit: only the
@@ -3855,6 +3856,7 @@ let test_glm_rate_limit_code_stays_a_rate_limit () =
       | EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited; _ } ->
         ()
       | _ -> fail "a GLM rate-limit code lost its typed rate-limit cause")
+    ()
 ;;
 
 (* The same window refusal as an empty answer the provider stopped at its

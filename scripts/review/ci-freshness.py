@@ -128,22 +128,23 @@ def evaluate(*, repo, pr, head, run, git_dir, gh):
         present = subprocess.run(git + ["cat-file", "-e", identity + "^{commit}"], capture_output=True)
         if present.returncode:
             command(git + ["fetch", "--quiet", "--no-tags", "origin", identity])
-    if command(git + ["rev-parse", "--is-shallow-repository"]).strip() != "false":
-        raise Unavailable("incomplete_main_history")
     changed, commits = set(), []
-    uncontained = set(command(git + ["rev-list", "--first-parent", main, "^" + head]).splitlines())
+    candidate_ancestors = set(command(git + ["rev-list", head]).splitlines())
     # Commit dates are not guaranteed integration dates (fast-forward/rebase).
     # Without an immutable tested-base receipt, an overlapping main commit
     # absent from the candidate also refuses, even if its date predates the run.
-    # Disjoint main changes remain admissible. Plain git log hides merge paths,
-    # so explicitly diff each relevant entry against its first parent.
-    for row in command(git + ["log", "--first-parent", "--format=%H %ct %P", main]).splitlines():
+    # Disjoint main changes remain admissible. The required history is only
+    # main's first-parent suffix down to an ancestor proven in the candidate.
+    # A shallow boundary below that intersection is irrelevant; one before it
+    # cannot prove coverage and refuses. Plain git log hides merge paths, so
+    # explicitly diff each entry against its first parent.
+    commit = main
+    while commit not in candidate_ancestors:
+        row = command(git + ["show", "--no-patch", "--format=%H %ct %P", commit])
         commit, epoch, *parents = row.split()
         after_run = int(epoch) >= since
-        if not after_run and commit not in uncontained:
-            continue
         if not parents:
-            raise Unavailable("run_predates_main_history")
+            raise Unavailable("required_main_history_unavailable")
         touched = set(command(git + ["diff", "--name-only", "--no-renames", "-z",
                                       parents[0], commit]).split("\0")) - {""}
         overlap = sorted(touched & paths)
@@ -154,6 +155,8 @@ def evaluate(*, repo, pr, head, run, git_dir, gh):
                 int(epoch), timezone.utc).isoformat(), "overlap": overlap,
                 "dependencies": dependencies,
                 "reason": "post_run_overlap" if after_run else "graph_overlap_unverified_tested_base"})
+        commit = parents[0]
+    comparison_ancestor = commit
     # Observations are pinned to one main/head pair; moving targets refuse.
     end = api(gh, f"{prefix}/pulls/{pr}")
     end_main = sha(api(gh, f"{prefix}/commits/main")["sha"])
@@ -163,6 +166,7 @@ def evaluate(*, repo, pr, head, run, git_dir, gh):
     overlap = sorted(paths & changed)
     dependencies = sorted(p for p in changed if needs_ocaml(paths) and ocaml_input(p))
     return {"status": "stale" if commits else "fresh", "head": head, "main": main,
+            "comparison_ancestor": comparison_ancestor,
             "run": run, "created_at": evidence["created_at"], "overlap": overlap,
             "dependencies": dependencies, "commits": commits}
 

@@ -327,6 +327,43 @@ raise SystemExit(result.returncode)
         self.assertEqual(code, 1)
         self.assertEqual(receipt["reason"], "pr_or_main_moved_during_check")
 
+    def mark_shallow(self, identity):
+        # This is Git's real shallow boundary file, not a mocked graph answer.
+        path = Path(self.git("rev-parse", "--git-path", "shallow"))
+        if not path.is_absolute():
+            path = self.repo / path
+        path.write_text(identity + "\n")
+        self.assertEqual(self.git("rev-parse", "--is-shallow-repository"), "true")
+
+    def test_old_shallow_boundary_below_known_common_ancestor_is_allowed(self):
+        old_root = self.base
+        self.write("docs/common.md", "shared ancestor\n")
+        self.commit("recent common ancestor", "2026-01-01T00:05:00Z")
+        self.base = self.git("rev-parse", "HEAD")
+        self.make_pr("lib/example.ml")
+        self.main_change("docs/unrelated.md")
+        self.mark_shallow(old_root)
+        code, receipt = self.freshness()
+        self.assertEqual((code, receipt["status"]), (0, "fresh"))
+        self.assertEqual(receipt["comparison_ancestor"], self.base)
+
+    def test_shallow_boundary_inside_required_main_suffix_refuses(self):
+        self.main_change("docs/unrelated.md")
+        missing_boundary = self.git("rev-parse", "main")
+        self.main_change("docs/another.md", "2026-01-01T01:10:00Z")
+        self.mark_shallow(missing_boundary)
+        code, receipt = self.freshness()
+        self.assertEqual((code, receipt["status"]), (1, "unavailable"))
+        self.assertEqual(receipt["reason"], "required_main_history_unavailable")
+
+    def test_common_ancestor_at_shallow_boundary_is_sufficient(self):
+        self.main_change("lib/example.ml")
+        self.mark_shallow(self.base)
+        code, receipt = self.freshness()
+        self.assertEqual((code, receipt["status"]), (2, "stale"))
+        self.assertEqual(receipt["comparison_ancestor"], self.base)
+        self.assertEqual(receipt["overlap"], ["lib/example.ml"])
+
     def test_all_api_file_pages_are_read(self):
         self.main_change("second.ml")
         def pages(d):

@@ -168,7 +168,9 @@ type stream_event =
           answered from the posture: [Native_full] approves once,
           [Native_read] denies. *)
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
-      (** A [usage/changed] notification, for the operator view only. *)
+      (** Provider subscription observation, including notifications received
+          before request acknowledgement. Consumers may record its reported
+          exhaustion/reset in the selected account's quota scope. *)
   | Usage_reported of
       { session_id : string
       ; turn_id : string

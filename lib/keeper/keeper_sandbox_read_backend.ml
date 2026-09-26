@@ -324,12 +324,12 @@ let run_command_with_capture ?turn_sandbox_factory
                Error "Frozen runtime binary command failed or did not produce complete stdout")
           | Ok (_, _, _, None) -> Error "Frozen runtime has no authoritative binary output capture"))
     | Ok Docker_fallback ->
-      let image =
-        (Env_config_sandbox.Runtime.resolve_image meta.sandbox_image).tag
-      in
-      if String.trim image = "" then
-        Error "keeper sandbox docker image is not configured"
-      else
+      match
+        Keeper_sandbox_image_resolver.for_keeper ~base_path:config.Workspace.base_path meta
+      with
+      | Error error -> Error (Keeper_turn_sandbox_runtime.image_unresolved_message error)
+      | Ok pinned ->
+        let image = pinned.Keeper_sandbox_image_catalog.reference in
         let head_program =
           match command_argv with prog :: _ -> prog | [] -> "?"
         in

@@ -1783,9 +1783,9 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
           | None, None -> []
           | sandbox, cwd ->
             [ Printf.sprintf "sandbox=%s"
-                (Terminal_text.single_line_or ~default:"?" sandbox)
+                (Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value sandbox)
             ; Printf.sprintf "at=%s"
-                (Terminal_text.single_line_or ~default:"?" cwd) ]
+                (Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value cwd) ]
         in
         (* The operation is already the right-hand side of the line above
            whenever the two agree, which is every operation but an identity
@@ -1857,7 +1857,8 @@ let render_approvals (state : state) =
     match state.approval_snapshot with
     | Some snapshot when snapshot.aps_hidden_count > 0 ->
         Printf.sprintf ", %d hidden from %s" snapshot.aps_hidden_count
-          (Terminal_text.single_line_or ~default:"?" snapshot.aps_actor_filter)
+          (Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
+             snapshot.aps_actor_filter)
     | Some _ | None -> ""
   in
   (* Which list the count cannot stand behind, one clause per list, from the
@@ -2122,7 +2123,7 @@ let render_approvals (state : state) =
                 match pending.Tui_decode.gp_waiting_s with
                 | Some seconds ->
                   Masc_tui_answering.duration_text seconds
-                | None -> "?"
+                | None -> Masc_tui_theme.Glyph.no_value
               in
               let phase, tone =
                 match pending.Tui_decode.gp_phase with
@@ -4175,7 +4176,7 @@ let render_schedule_list (state : state) =
                  (List.length snapshot.scs_rows)
            | Some total ->
                Printf.sprintf "  Requests: %d" total
-           | None -> "  Requests: ?"
+           | None -> "  Requests: " ^ Masc_tui_theme.Glyph.no_value
          in
          (* One row, not two. The count and the next wake are a phrase each,
             and with nothing due the second row was drawn blank -- a row of
@@ -12816,7 +12817,7 @@ let render_keeper_calls (state : state) =
   let keeper_name =
     match List.nth_opt state.keepers state.keeper_cursor with
     | Some keeper -> keeper.k_name
-    | None -> "?"
+    | None -> Masc_tui_theme.Glyph.no_value
   in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
@@ -13424,7 +13425,8 @@ let render_metrics (state : state) =
 let render_runtime_pick (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let keeper_name =
-    Terminal_text.single_line_or ~default:"?" state.runtime_pick_keeper
+    Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
+      state.runtime_pick_keeper
   in
   let current =
     match
@@ -15599,7 +15601,7 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
     in
     match index 1 steps with
     | Some n -> Printf.sprintf "%d/%d" n (List.length steps)
-    | None -> "?"
+    | None -> Masc_tui_theme.Glyph.no_value
   in
   box_top head cols;
   box_line head cols
@@ -15834,7 +15836,9 @@ let render_voice (state : state) =
    | None, None ->
        box_line buf cols (Printf.sprintf "  %sreading…%s" Ansi.dim Ansi.reset)
    | Some json, None ->
-       field "status" (Option.value (string_of [ "status" ] json) ~default:"?"));
+       field "status"
+         (Option.value (string_of [ "status" ] json)
+            ~default:Masc_tui_theme.Glyph.no_value));
   box_line buf cols "";
   box_line buf cols (Printf.sprintf "  %sTTS%s" Ansi.bold Ansi.reset);
   from_config (fun json ->

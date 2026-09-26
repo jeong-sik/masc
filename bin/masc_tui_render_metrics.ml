@@ -223,7 +223,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   in
   let domains = match sched_opt with
     | Some { ssch_pool_domains = Some count; _ } -> string_of_int count
-    | _ -> "?"
+    | Some { ssch_pool_domains = None; _ } | None -> Masc_tui_theme.Glyph.no_value
   in
   let c1_l1, c1_l2 = match gc_opt with
     | Some gc ->

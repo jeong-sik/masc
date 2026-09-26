@@ -477,6 +477,8 @@ let cli_prompt messages =
 ;;
 
 let cli_failure_kind = function
+  | Keeper_lane_cli_oneshot.Unknown_runtime { runtime_id } ->
+    runtime_id, "unknown_runtime"
   | Keeper_lane_cli_oneshot.Not_an_official_client { runtime_id } ->
     runtime_id, "not_an_official_client"
   | Keeper_lane_cli_oneshot.Execution_failed { runtime_id; cause = _ } ->

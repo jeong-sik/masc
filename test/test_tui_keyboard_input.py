@@ -2526,6 +2526,7 @@ def pressing_a_tab_opens_it(
     press_label_on_screen(
         process, master_fd, output, b"models", row=title_row, needle=b"MASC Models"
     )
+    os.write(master_fd, b"q")
 
 
 def wheel_scrolls_and_clicks_do_not(

@@ -22,7 +22,7 @@ let document body = "---\nname: evidence-guide\ndescription: Inspect execution e
    catalog comes back with no skills at all. The value is the one
    config/runtime.toml ships. *)
 let config_text =
-  "[skills]\nresource-read-max-bytes = 65536\n\n"
+  "[skills]\nresource-read-max-bytes = 16384\n\n"
   ^ "[[skills.sources]]\nid = \"local\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n"
 
 let with_workspace f =

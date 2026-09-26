@@ -249,9 +249,9 @@ let format_current_selection_for_prompt
       (current : current_selection option)
   =
   match current with
-  | None -> Yojson.Safe.pretty_to_string `Null
+  | None -> Yojson.Safe.to_string `Null
   | Some current ->
-    current_selection_json current |> Yojson.Safe.pretty_to_string
+    current_selection_json current |> Yojson.Safe.to_string
 ;;
 
 let format_keeper_instructions_for_prompt instructions =
@@ -277,7 +277,7 @@ let format_tool_observations_for_prompt observations =
                   (tool_observation_outcome_to_string observation.outcome) )
             ])
        observations)
-  |> Yojson.Safe.pretty_to_string
+  |> Yojson.Safe.to_string
 ;;
 
 let goal_context_to_json = function

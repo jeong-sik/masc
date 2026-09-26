@@ -1,0 +1,49 @@
+Source SHA256: 0199ba47b13b9a6c4a6e4c2024ffd5c4165c6722346e4ef44e171cf22838f68e
+Analysis of sampling masc (pid 87078) every 1 millisecond
+Process:         masc [87078]
+Date/Time:       2026-09-25 01:43:09.522 +0900
+Launch Time:     2026-09-25 00:30:49.631 +0900
+OS Version:      macOS 26.6.1 (25G76)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+    3515 Thread_146125581   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 3093 start  (in dyld) + 6992  [0x184d184e4]
+    + !       : |                       1 pool_sweep  (in masc) + 648  [0x103b27330]
+    + !       : 116 camlDe$state_inner_6418  (in masc) + 396  [0x103414ec4]
+    + !       : | 116 caml_c_call  (in masc) + 52  [0x103b31188]
+    + !       : |   112 caml_uniform_array_make  (in masc) + 320  [0x103afcb08]
+    + !       : |   + 112 caml_process_pending_actions  (in masc) + 12  [0x103b291a0]
+    + !       : |   +   112 caml_process_pending_actions_res  (in masc) + 76  [0x103b29148]
+    + !       : |   +     112 caml_handle_gc_interrupt  (in masc) + 52  [0x103b06038]
+    + !       : |   +       111 caml_poll_gc_work  (in masc) + 396  [0x103b05f54]
+    + !       : |   +       ! 111 caml_major_collection_slice  (in masc) + 76  [0x103b1a30c]
+    + !       : |   +       !   111 major_collection_slice  (in masc) + 432  [0x103b198d0]
+    + !       : |   +       !     111 caml_sweep  (in masc) + 128  [0x103b26dfc]
+    + !       : |   +       !       111 pool_sweep  (in masc) + 648,480,...  [0x103b27330,0x103b27288,...]
+    + !       : |   +       1 caml_handle_incoming_interrupts  (in masc) + 116  [0x103b0430c]
+    + !       : |   +         1 stw_cycle_all_domains  (in masc) + 100  [0x103b1b4cc]
+    + !       : |   +           1 caml_stw_empty_minor_heap_no_major_slice  (in masc) + 1376  [0x103b21ad4]
+    + !       : |   +             1 caml_plat_latch_wait  (in masc) + 68  [0x103b242d0]
+    + !       : |   +               1 caml_plat_wait  (in masc) + 12  [0x103b2d83c]
+    + !       : |   +                 1 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x1850e4128]
+    + !       : |   +                   1 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x1850a350c]
+    + !       : |   4 caml_uniform_array_make  (in masc) + 300  [0x103afcaf4]
+    + !       : 44 camlYojson__Safe$__ocaml_lex_finish_string_rec_1798  (in masc) + 76  [0x1039da584]
+    + !       : | 44 caml_c_call  (in masc) + 52  [0x103b31188]
+    + !       : |   44 caml_lex_engine  (in masc) + 168,240,...  [0x103b17b1c,0x103b17b64,...]
+    + !       : 43 camlEio__core__Cancel$with_vars_1276  (in masc) + 152  [0x1039583b8]
+    + !       : | 39 camlDune__exe__Main_eio$fun_11300  (in masc) + 276  [0x10221c3cc]
+    + !       : | + 28 camlMasc__Http_server_eio$json_1969  (in masc) + 96  [0x102bffc28]
+    + !       : | + ! 28 camlMasc__Http_server_eio$prepare_json_inner_2921  (in masc) + 676  [0x102bffa7c]
+    + !       : | + !   28 camlMasc__Http_response_payload$compress_body_inner_1411  (in masc) + 372  [0x102bfe544]
+    + !       : | + !     28 camlCompression_gzip$compress_inner_894  (in masc) + 528  [0x1033f0b60]
+    + !       : | + !       28 camlGz$go_2093  (in masc) + 52  [0x1033fdb3c]
+    + !       : | + !         28 camlGz$compress_2004  (in masc) + 60  [0x1033fcd7c]
+    + !       : | + !           28 camlDe$fill_window_3710  (in masc) + 1036  [0x103414274]
+    + !       : | + !             14 camlDe$deflate_slow_3713  (in masc) + 188  [0x1034147b4]
+    + !       : | + !             : 13 camlDe$deflate_slow_3713  (in masc) + 188  [0x1034147b4]
+    + !       : | + !             : | 13 camlDe$longest_match_3618  (in masc) + 356,508,...  [0x103412fa4,0x10341303c,...]
+    + !       : | + !             : 1 camlDe$deflate_slow_3713  (in masc) + 276  [0x10341480c]
+    + !       : | + !             11 camlDe$deflate_slow_3713  (in masc) + 416  [0x103414898]
+    + !       : | + !             : 6 camlDe$insert_string_3675  (in masc) + 0,32,...  [0x1034137f8,0x103413818,...]

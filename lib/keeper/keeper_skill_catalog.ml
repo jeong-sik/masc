@@ -57,6 +57,11 @@ type error =
       ; info : string
       }
   | Duplicate_skill of { name : string }
+  | Body_too_large_to_read of
+      { skill : string
+      ; bytes : int
+      ; max_bytes : int
+      }
 
 type rejected_document =
   { directory : string
@@ -175,6 +180,25 @@ let composition_of_block ~skill block =
        Error (Not_exactly_one_composition { skill; count = List.length entries }))
 ;;
 
+(* [keeper_skill] returns an instruction body as one inline tool result, and a
+   body over that boundary is refused on every read. A composition body is not
+   read that way: its block becomes a tool. *)
+let readable_instruction (skill : skill) =
+  match skill.surface with
+  | Composition _ -> Ok skill
+  | Instruction ->
+    let bytes = String.length skill.body in
+    if bytes > Common.max_tool_result_wire_bytes
+    then
+      Error
+        (Body_too_large_to_read
+           { skill = skill.name
+           ; bytes
+           ; max_bytes = Common.max_tool_result_wire_bytes
+           })
+    else Ok skill
+;;
+
 let parse_document (document : Agent_core.Skill_document.t) =
   let { Agent_core.Skill_document.name
       ; description
@@ -187,7 +211,7 @@ let parse_document (document : Agent_core.Skill_document.t) =
      | Error `Unterminated ->
        Error (Unterminated_composition_block { skill = name })
      | Ok [] ->
-       Ok
+       readable_instruction
          { name
          ; description
          ; body
@@ -307,7 +331,8 @@ let composition_projection_failed = function
     true
   | Definition_rejected _
   | Composition_info_near_miss _
-  | Duplicate_skill _ ->
+  | Duplicate_skill _
+  | Body_too_large_to_read _ ->
     false
 ;;
 
@@ -324,8 +349,11 @@ let project_entry_or_fallback snapshot (entry : Skill_catalog_snapshot.entry) =
   match project_entry snapshot entry with
   | Ok skill -> Projected skill
   | Error diagnostic when composition_projection_failed diagnostic ->
-    Frozen_instruction
-      { skill = fallback_instruction_of_entry snapshot entry; diagnostic }
+    (* The fallback is served through [keeper_skill], so it meets the same
+       readable-body boundary as any instruction. *)
+    (match readable_instruction (fallback_instruction_of_entry snapshot entry) with
+     | Ok skill -> Frozen_instruction { skill; diagnostic }
+     | Error error -> Entry_unavailable error)
   | Error error -> Entry_unavailable error
 ;;
 
@@ -662,6 +690,7 @@ let error_code = function
   | Composition_name_mismatch _ -> "composition_name_mismatch"
   | Composition_info_near_miss _ -> "composition_info_near_miss"
   | Duplicate_skill _ -> "duplicate_skill"
+  | Body_too_large_to_read _ -> "body_too_large_to_read"
 ;;
 
 let error_to_string = function
@@ -708,4 +737,11 @@ let error_to_string = function
       composition_fence_info
       composition_fence_info
   | Duplicate_skill { name } -> "duplicate skill name: " ^ name
+  | Body_too_large_to_read { skill; bytes; max_bytes } ->
+    Printf.sprintf
+      "skill %S: body is %d bytes; keeper_skill reads at most %d bytes as one \
+       inline tool result"
+      skill
+      bytes
+      max_bytes
 ;;

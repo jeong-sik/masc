@@ -76,13 +76,13 @@ masc setup --base-path "$HOME/masc-workspace"
 
 ### 공개 바이너리
 
-[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.39.0)에
+[GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.41.0)에
 첨부된 설치 스크립트를 받습니다. 선택한 릴리스의 자산을 검증하고 설치합니다.
 
-> Installation target: v0.39.0 (check tag availability on GitHub Releases).
+> Installation target: v0.41.0 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.39.0
+TAG=v0.41.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
@@ -186,8 +186,9 @@ Firefox browser-lane host도 새 빌드로 다시 설치하고, 그 작업 공�
 나머지 하위 명령: bearer 관련 `login`, `mcp-config`, `token`. Keeper 관련
 `keeper-create`, `keeper-github`. 기본 샌드박스 이미지 `sandbox-image`. 모델
 런타임 관련 `runtime-default-set`, `runtime-probe`, `runtime-wizard-catalog`.
-그리고 `schedule-prune`, `build-commit`. 각각 `masc <command> --help`에
-설명이 있습니다.
+모델도 띄우지 않고 파일도 바꾸지 않은 채 작업 공간과 `imp` 준비 상태를 보는
+`doctor`. 그리고 `schedule-prune`, `build-commit`. 전체 명령은 `masc --help`에,
+각각의 설명은 `masc <command> --help`에 있습니다.
 
 서버가 떠 있으면 `curl http://127.0.0.1:8935/health`가 답합니다. 상태 파일을
 손으로 만지기 전에 서버가 실제로 어느 루트를 쓰는지 확인합니다.
@@ -207,7 +208,9 @@ TUI는 입력 가능한 TTY와 `dumb`이 아닌 터미널이 필요합니다. �
 없으면 옆에 있는 `masc` 바이너리를 자식 프로세스로 띄우고 `/health`를 기다린
 뒤, 자기가 끝날 때 그 자식도 끝냅니다. 이미 떠 있던 서버는 건드리지 않습니다.
 
-`Tab`과 `Shift-Tab`으로 화면 열 개를 돌아다닙니다. 맨 윗줄에 띠로 그려집니다.
+`Tab`과 `Shift-Tab`으로 화면 열한 개를 돌아다닙니다. 맨 윗줄에 띠로 그려집니다.
+Approvals는 지금 읽은 대기열이 비어 있고 그 화면에 있지 않을 때만 띠에서 빠집니다.
+서버에 닿지 못하거나 아직 대기열을 읽지 못했으면 남아 있습니다.
 자식 화면은 전부 `:` 팔레트의 `go <name>` 항목이기도 합니다.
 
 | 화면 | 보여 주는 것 |
@@ -215,6 +218,7 @@ TUI는 입력 가능한 TTY와 `dumb`이 아닌 터미널이 필요합니다. �
 | Overview | 작업 공간 요약, 작업 백로그, 지금 봐야 할 것 |
 | Activity | 모든 Keeper의 도구 호출, 턴 경계, 정산이 도착하는 대로. `l`로 서버 자체 로그를 엽니다 |
 | Keepers | Keeper 목록. Keeper마다 대화, 로그, 도구 호출, 런타임, 샌드박스 상태, 기록된 파일 쓰기, 채널, 스케줄, 상세 탭 |
+| Lanes | 독립 exact-output 실행 레인, 그 실행 목록과 상세. `/addons`로 Lane Add-on을 엽니다 |
 | Memory | Keeper별 메모리 상태와 두 저장소를 아우르는 사실 탐색기 |
 | Approvals | Gate 대기열, 항상 허용 규칙, Keeper가 답을 기다리는 질문 |
 | Board | 사람, 에이전트, 자동화, 시스템이 올린 글 |
@@ -369,9 +373,9 @@ reviewer = "<provider>.<model>"
   Keeper는 거부됩니다. `remote_ssh` Keeper는 `runtime.toml`의
   `[exec.ssh.endpoints]`에 선언한 `remote_endpoint`를 이름으로 댑니다.
 - **이미지.** `docker`와 `microvm` 턴은 이미지 안에서 돌고, 이미지가 없으면
-  턴마다 `docker_preflight_failed`에서 멈춥니다. `masc sandbox-image`가
-  바이너리에 든 레시피로 `masc-sandbox:general`(Debian 위 bash, ripgrep, git)을
-  만듭니다. `docker`와 `microvm` Keeper는 모두 `sandbox_image`에 이미지를
+  턴마다 `docker_preflight_failed`에서 멈춥니다. 저장소에 없으면 `masc setup`이
+  바이너리에 든 레시피(`sandbox-images/base/Dockerfile`)로 `masc-sandbox:general`을
+  만듭니다. `masc sandbox-image`는 다시 쓰지 않는 새 태그로 손수 빌드합니다. `docker`와 `microvm` Keeper는 모두 `sandbox_image`에 이미지를
   적어야 하고, 적지 않으면 기본값을 받는 대신 거부됩니다. 범용 이미지로
   충분한 Keeper는 `sandbox_image = "masc-sandbox:general"`을, 프로젝트를
   빌드해야 하는 Keeper는 그 프로젝트 툴체인 이미지를 적습니다. 컨테이너는 읽기 전용 rootfs, `--cap-drop=ALL`,
@@ -470,7 +474,8 @@ CLI가 없는 백엔드는 공유 커널로 바꿔치기하지 않고 부팅에�
 - 인증 기본값은 루프백용입니다. 원격에서 안전하게 쓰기, 클러스터 배포, 서비스
   수준 보장은 약속하지 않습니다.
 - 프로세스 하나가 작업 공간을 들고 있습니다. 대체 인스턴스는 없습니다.
-- microVM Keeper는 `apple_container`에서만 부팅이 확인됐습니다. `auto_judge`는
+- macOS에서 잰 microVM 백엔드는 `apple_container`뿐입니다. `nerdctl_kata`는
+  Linux x64에서 한 번 확인했고(위 표), `microsandbox`는 부팅하지 못합니다. `auto_judge`는
   자기 레인에 모델이 있어야 하는데, 프로바이더 키 하나로 설치한 환경에는 대개
   없습니다. 그 호출은 사람을 기다립니다.
 - TUI 화면과 키는 `main`에서 바뀝니다. 설치한 태그의 문서를 사용하세요.

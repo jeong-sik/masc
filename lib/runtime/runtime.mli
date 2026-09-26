@@ -23,6 +23,11 @@ type t =
         dispatch never used (PR #28219 review). *)
   }
 
+val exact_slot_list_key_of_api_format : api_format -> string
+(** The declaration key used when an exact-output lane appends a binding with
+    this provider format: [slots] or [cli_slots]. The runtime writer and the
+    resolved picker projection use the same decision. *)
+
 type dispatch_credential_error =
   | Required_env_credential_missing of
       { provider_id : string

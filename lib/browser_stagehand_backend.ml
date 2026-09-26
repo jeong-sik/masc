@@ -70,6 +70,9 @@ let note_end ended event =
     | Session.Connection_ended reason -> Some ("the connection ended: " ^ reason)
     (* The session ends with an answer it could not deliver. *)
     | Session.Reply_not_delivered detail -> Some ("an answer to the extension was not delivered: " ^ detail)
+    (* The session ends when a call whose caller left never answers. *)
+    | Session.Abandoned_call_unanswered { method_; waited_s } ->
+      Some (Printf.sprintf "an abandoned %s call did not answer within %.0fs" method_ waited_s)
     | Session.Runtime_ready _ | Session.Model_request_refused _ | Session.Model_failed _ | Session.Unsupported_request _
     | Session.Unsupported_notification _ | Session.Extension_log _ | Session.Malformed_message _
     | Session.Unexpected_response _ | Session.Abandoned_call_ended _ | Session.Malformed_cdp_event _ -> None
@@ -98,6 +101,9 @@ let run_session t ~headless ~opened ~resolve_opened =
      | Session.Abandoned_call_ended _ ->
        incr abandoned_answers;
        Eio.Condition.broadcast abandoned_answered
+     (* Not an answer. The session ends with it, and [note_end] lets it go;
+        a waiter that then times out finds the session already replaced. *)
+     | Session.Abandoned_call_unanswered _
      | Session.Runtime_ready _ | Session.Model_request_refused _ | Session.Model_failed _
      | Session.Unsupported_request _ | Session.Unsupported_notification _ | Session.Extension_log _
      | Session.Malformed_message _ | Session.Unexpected_response _ | Session.Reply_not_delivered _

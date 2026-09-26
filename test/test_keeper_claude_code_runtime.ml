@@ -2445,7 +2445,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
         messages
         (total_atoms - transmitted)
     with
-    | Some digest -> Some digest
+    | Some digest -> digest
     | None -> fail "the record's own history has that atom"
   in
   { execution_ids = []

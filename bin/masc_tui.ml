@@ -18323,6 +18323,15 @@ and is loaded on demand through keeper_skill.
               render_spectator state
           (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)
           | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name)));
+      (* Async agenda state can change the usable row budget after the last
+         paint. Read the compact marker from that paint, not from the newer
+         state. An invalidated or not-yet-painted frame stays compact until
+         presentation succeeds, so its hidden surface cannot consume input.
+         Read once here: the wheel below and the keys after it judge the same
+         paint. *)
+      let compact_viewport =
+        Frame_presenter.last_frame_is_compact frame_presenter
+      in
       (* Where a notch leaves the reader on screen, when it is the reader's:
          not over the Activity pane, which keeps the wheel it had. The frame
          names the reader; the notch moves it from where it is now. *)
@@ -18332,7 +18341,7 @@ and is loaded on demand through keeper_skill.
           when (not dismissed_image)
                && (not state.image_open) && (not state.msx_open)
                && Option.is_none msx_key
-               && (not (Frame_presenter.last_frame_is_compact frame_presenter))
+               && (not compact_viewport)
                && acting_pane_hit state ~row ~column = Pane_miss ->
             Option.bind !presented_reader (fun reader ->
                 reader_after_wheel (clamped_scroll_now state reader) direction)
@@ -18354,13 +18363,6 @@ and is loaded on demand through keeper_skill.
                   else Some (Masc.Tui_decode.wheel_key direction))
           | Some (Pasted _) | Some (Graphics_reply _)
           | Some (Mouse_left_press _) | Some (Mouse_left_release _) | None -> None
-      in
-      (* Async agenda state can change the usable row budget after the last
-         paint. Read the compact marker from that paint, not from the newer
-         state. An invalidated or not-yet-painted frame stays compact until
-         presentation succeeds, so its hidden surface cannot consume input. *)
-      let compact_viewport =
-        Frame_presenter.last_frame_is_compact frame_presenter
       in
       (* The field a typed character would land in, read once for the paste
          below. A paste is the characters the operator would have typed, so

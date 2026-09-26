@@ -1080,6 +1080,29 @@ let test_process_exit_detail_masks_the_stderr_line () =
        | Ok _ -> fail "a blank result after a nonzero exit was admitted")
 ;;
 
+(* The same redaction point owns the empty-success path (#39164): a blank
+   result with a credential-bearing stderr must produce a Turn_failed
+   detail the operator can paste without leaking. *)
+let test_empty_success_detail_masks_the_stderr_line () =
+  with_fixture
+    ~stderr_line:"Authorization: Bearer ya29.aBcDeFgHi"
+    [ init (); result ~response:"" () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Turn_failed detail) ->
+         check bool
+           "detail carries the empty-success prefix" true
+           (String.starts_with
+              ~prefix:"successful result response has no deliverable content"
+              detail);
+         check bool "detail masks the credential" true
+           (String_util.contains_substring detail "[redacted]");
+         check bool "detail never carries the token" true
+           (not (String_util.contains_substring detail "ya29"))
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "a blank result was admitted")
+;;
+
 let test_duplicate_keys_fail_closed () =
   let duplicate =
     {|{"event":"init","event":"init","conversation_id":"conversation-1","init":{"model":"gemini-fixture","cwd":"/tmp","permission_mode":"always-proceed"}}|}
@@ -1755,6 +1778,10 @@ let () =
             "a process exit detail masks the stderr line"
             `Quick
             test_process_exit_detail_masks_the_stderr_line
+        ; test_case
+            "an empty success detail masks the stderr line"
+            `Quick
+            test_empty_success_detail_masks_the_stderr_line
         ] )
     ; "live official client", [ test_case "official agy start and resume" `Slow test_live_start_and_resume ]
     ]

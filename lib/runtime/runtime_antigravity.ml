@@ -57,12 +57,43 @@ let empty_success_detail_prefix = "successful result response has no deliverable
 
 let empty_success_stderr_bytes = 200
 
+(* The stderr tail rides into error details that reach the session log and
+   the dashboard — both the 8KB Process_exited detail and the empty-success
+   Turn_failed detail are assembled from it. A CLI failure can echo its
+   caller's environment: an Authorization header from a proxy config, an
+   API key on a command line, a token in a config dump. Lines carrying such
+   markers are replaced wholesale before any detail is assembled; every
+   other line is kept byte-identical so real diagnostics survive. *)
+let stderr_sensitive_markers =
+  [ "authorization:"
+  ; "bearer "
+  ; "api_key"
+  ; "apikey"
+  ; "token="
+  ; "/users/"
+  ; "/home/" ]
+;;
+
+let redact_stderr_tail tail =
+  String.concat "\n"
+    (List.map
+       (fun line ->
+          if
+            List.exists
+              (fun marker -> String_util.contains_substring_ci line marker)
+              stderr_sensitive_markers
+          then "[redacted]"
+          else line)
+       (String.split_on_char '\n' tail))
+;;
+
 let empty_success_detail ~model ~tool_steps stderr =
   let trimmed = String.trim stderr in
   (* Cut at a UTF-8 character boundary — String_util is the SSOT for that
      rule (#39090), so a Korean stderr line never breaks mid-character. *)
   let stderr_tail =
-    String_util.utf8_suffix ~max_bytes:empty_success_stderr_bytes trimmed
+    String_util.utf8_suffix ~max_bytes:empty_success_stderr_bytes
+      (redact_stderr_tail trimmed)
   in
   if stderr_tail = "" then
     Printf.sprintf "%s (model=%s, tool_steps=%d, stderr=<empty>)"
@@ -627,35 +658,6 @@ let drain_stderr flow tail =
     Log.Runtime_agent.debug
       "Antigravity CLI stderr drain failed: %s"
       (Printexc.to_string exn)
-;;
-
-(* The stderr tail rides into error details that reach the session log and
-   the dashboard. A CLI failure can echo its caller's environment: an
-   Authorization header from a proxy config, an API key on a command line,
-   a token in a config dump. Lines carrying such markers are replaced
-   wholesale before any detail is assembled; every other line is kept
-   byte-identical so real diagnostics survive. *)
-let stderr_sensitive_markers =
-  [ "authorization:"
-  ; "bearer "
-  ; "api_key"
-  ; "apikey"
-  ; "token="
-  ; "/users/"
-  ; "/home/" ]
-;;
-
-let redact_stderr_tail tail =
-  String.concat "\n"
-    (List.map
-       (fun line ->
-          if
-            List.exists
-              (fun marker -> String_util.contains_substring_ci line marker)
-              stderr_sensitive_markers
-          then "[redacted]"
-          else line)
-       (String.split_on_char '\n' tail))
 ;;
 
 let signal_spawned_process proc stdin_w =

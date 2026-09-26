@@ -38,7 +38,7 @@ let test_success_span_uses_mcp_tool_call_semconv () =
   let result =
     Tool_result.make_ok
       ~tool_name:"get-weather"
-      ~start_time:(Unix.gettimeofday ())
+      ~start_time:(Tool_timing.start ())
       ~data:(`Assoc [ "ok", `Bool true ])
       ()
   in
@@ -83,7 +83,7 @@ let test_request_context_span_records_mcp_server_attrs () =
   let result =
     Tool_result.make_ok
       ~tool_name:"get-weather"
-      ~start_time:(Unix.gettimeofday ())
+      ~start_time:(Tool_timing.start ())
       ~data:(`Assoc [ "ok", `Bool true ])
       ()
   in
@@ -135,7 +135,7 @@ let test_failure_span_records_typed_error_status () =
     Tool_result.make_err
       ~tool_name:"masc_board_post"
       ~class_:Tool_result.Policy_rejection
-      ~start_time:(Unix.gettimeofday ())
+      ~start_time:(Tool_timing.start ())
       "blocked by policy"
   in
   let span =

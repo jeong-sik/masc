@@ -212,14 +212,22 @@ unmeasured, as RFC-0399 left it.
 the name's old guest is force-deleted, so no guest holds the work volume
 there. On `Apple_container` it runs
 `Keeper_sandbox_microvm.apple_work_volume_trim_argv` before `container run`:
-the keeper's own image, `--rm`, `--user 0`, `--cap-add CAP_SYS_ADMIN` and no
+the keeper's own image, `--rm`, the volume's stable `-trim` container name,
+`--user 0`, `--cap-add CAP_SYS_ADMIN` and no
 other capability, the volume at `/masc-trim`, `fstrim -v /masc-trim`. Both
 fleet images carry `/usr/sbin/fstrim` (checked 2026-09-26).
 
-A failed trim costs host disk, not the keeper's tree, so the boot goes on and
-the keeper log names the failure. A running guest is never trimmed: a second
+The trim container is force-removed and its absence confirmed by the JSON
+container inventory before and after trimming, including a CLI timeout.
+An unreadable inventory or a remaining trim container refuses the guest
+boot. Only confirmed cleanup makes a failed trim harmless: then boot goes
+on and the keeper log names the trim failure. A running guest is never trimmed: a second
 ext4 mount of the volume would corrupt it. A keeper whose guest stays up
 reclaims on its next boot.
+
+The disk reclamation above was measured with a manual trim command, not
+through this boot path. CI exercises the cleanup and refusal protocol with
+an injected container CLI; it does not measure host disk reclamation.
 
 With the work volume trimmed at boot, `_build` on the work volume is
 reclaimed the same way, which leaves the build volume below an open question

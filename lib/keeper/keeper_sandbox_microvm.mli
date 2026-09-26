@@ -316,6 +316,18 @@ val apple_work_volume_trim_argv : volume_name:string -> image:string -> string l
     guest freed. Run only while no guest has the volume attached: a second
     ext4 mount of the same volume corrupts it. *)
 
+val reclaim_apple_work_volume :
+  run:(string list -> Unix.process_status * string * string)
+  -> volume_name:string
+  -> image:string
+  -> (Unix.process_status * string, string) result
+(** Removes a previous named trim container and proves its absence before
+    starting a trim. After the CLI returns, even after failure or timeout,
+    removes that container and confirms absence again. [Error] refuses the
+    subsequent guest mount when the inventory cannot prove cleanup. The
+    returned status describes the trim itself; a failed trim is harmless
+    only after cleanup has been confirmed. *)
+
 val keeper_work_root : keeper_name:string -> string
 (** [<work root>/<sanitized keeper>]: what the shim jails requests under. *)
 

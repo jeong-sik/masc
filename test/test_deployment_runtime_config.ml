@@ -14,7 +14,7 @@ let absolute path =
 
 (* [cwd] is where the helper starts, for a relative BasePath. The output files
    go under [root]. *)
-let run ?cwd exe root args =
+let run_exe ?cwd exe root args =
   let stdout_path = Filename.concat root "stdout" in
   let stderr_path = Filename.concat root "stderr" in
   let output = Unix.openfile stdout_path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600 in
@@ -30,7 +30,7 @@ let run ?cwd exe root args =
   status, read stdout_path ^ read stderr_path
 
 let invoke ?cwd exe root argument extra =
-  run ?cwd exe root ("validate-runtime-config" :: "--base-path" :: argument :: extra)
+  run_exe ?cwd exe root ("validate-runtime-config" :: "--base-path" :: argument :: extra)
 
 let run_helper exe root extra = invoke exe root root extra
 
@@ -217,7 +217,7 @@ let test_resolve_workspace_follows_masc exe () = with_workspace (fun root ->
   let canonical = Unix.realpath workspace in
   let xdg = Filename.concat root "xdg" in
   Fs_compat.mkdir_p (Filename.concat xdg "masc");
-  let resolve extra = run ~cwd:root exe root ("resolve-workspace" :: extra) in
+  let resolve extra = run_exe ~cwd:root exe root ("resolve-workspace" :: extra) in
   with_env [ "MASC_BASE_PATH", None; "XDG_CONFIG_HOME", Some xdg ] (fun () ->
     let output = passes "no workspace is an answer" (resolve []) in
     reports output "workspace=none";

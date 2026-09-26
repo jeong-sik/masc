@@ -1,8 +1,8 @@
 open Alcotest
 
 (* The [muse-serve] protocol in runtime.toml: what a declaration becomes, and
-   which declarations are refused. Assertions on refusals read the error's
-   path, not its wording. *)
+   which declarations are refused. Assertions on refusals read the typed
+   failure or the parse error's path, not its wording. *)
 
 let runtime_id = "muse_code.muse-spark"
 
@@ -73,6 +73,24 @@ let load content =
       |> Result.map_error (Runtime.to_diagnostic_text ~config_path)))
 ;;
 
+(* A binding the adapter cannot build is dropped, not fatal, so the default
+   that names it is what the load refuses. The drop keeps the adapter's reason
+   as text; which of the three refusals below it was is not typed. *)
+let check_binding_dropped label content =
+  without_an_installed_client (fun () ->
+    with_runtime_toml content (fun config_path ->
+      match Runtime.load_list ~config_path with
+      | Ok _ -> failf "%s: muse-serve admitted it" label
+      | Error
+          (Runtime.Default_runtime_unresolved
+            { unresolved_id; declared_drop = Some (Runtime.Execution_unbuildable _); _ }) ->
+        check string (label ^ ": the default names the dropped binding") runtime_id
+          unresolved_id
+      | Error failure ->
+        failf "%s: refused for another reason: %s" label
+          (Runtime.to_diagnostic_text ~config_path failure)))
+;;
+
 let parse_error_paths content =
   match Runtime_toml.parse_string content with
   | Ok _ -> []
@@ -131,21 +149,17 @@ let test_declared_credentials_are_refused () =
   let provider_extra =
     "[providers.muse_code.credentials]\ntype = \"env\"\nkey = \"META_API_KEY\"\n"
   in
-  match load (runtime_toml ~provider_extra ()) with
-  | Ok _ -> fail "muse-serve admitted a declared credential"
-  | Error _ -> ()
+  check_binding_dropped "a declared credential" (runtime_toml ~provider_extra ())
 ;;
 
 let test_an_http_endpoint_is_refused () =
-  match load (runtime_toml ~transport:"endpoint = \"https://api.meta.ai/v1\"" ()) with
-  | Ok _ -> fail "muse-serve admitted an HTTP endpoint"
-  | Error _ -> ()
+  check_binding_dropped
+    "an HTTP endpoint"
+    (runtime_toml ~transport:"endpoint = \"https://api.meta.ai/v1\"" ())
 ;;
 
 let test_an_interactive_provider_is_refused () =
-  match load (runtime_toml ~non_interactive:false ()) with
-  | Ok _ -> fail "muse-serve admitted an interactive provider"
-  | Error _ -> ()
+  check_binding_dropped "an interactive provider" (runtime_toml ~non_interactive:false ())
 ;;
 
 let test_provider_fields_of_other_clients_are_refused () =

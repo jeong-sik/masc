@@ -381,9 +381,43 @@ let test_resume_reads_a_null_model_as_unnamed () =
        (match result with
         | Error
             (Serve.Session_model_mismatch
-              { requested = "muse-spark-1.3"; resumed = "muse-other" }) -> ()
+              { requested = "muse-spark-1.3"; reported = "muse-other" }) -> ()
         | Error error -> fail (Serve.error_to_string error)
         | Ok _ -> fail "a session on another model must not resume");
+       check
+         bool
+         "no turn written"
+         false
+         (List.exists
+            (fun json -> Yojson.Safe.Util.member "method" json = `String "turn/start")
+            requests))
+;;
+
+(* [session/start] names the model it asked for, and the host answers with
+   the model the session runs. A session on another model is refused before
+   the turn is written, as a resumed one is. *)
+let test_a_started_session_on_another_model_is_refused () =
+  run_scripted
+    ~model:"muse-other"
+    [ Read
+    ; Write (init_frame ~granted:[])
+    ; Read (* initialized *)
+    ; Read (* session/start *)
+    ; Write session_result
+    ]
+    (fun result requests ->
+       (match result with
+        | Error
+            (Serve.Session_model_mismatch
+              { requested = "muse-other"; reported = "muse-spark-1.3" }) -> ()
+        | Error error -> fail (Serve.error_to_string error)
+        | Ok _ -> fail "a session on another model must not run the turn");
+       check
+         bool
+         "the start asked for the configured model"
+         true
+         (params_member "modelId" (request_with_method "session/start" requests)
+          = `String "muse-other");
        check
          bool
          "no turn written"
@@ -419,6 +453,8 @@ let () =
             test_a_blocked_approval_answer_leaves_the_turn_accepted
         ; test_case "resume reads a null model as unnamed" `Quick
             test_resume_reads_a_null_model_as_unnamed
+        ; test_case "a started session on another model is refused" `Quick
+            test_a_started_session_on_another_model_is_refused
         ] )
     ]
 ;;

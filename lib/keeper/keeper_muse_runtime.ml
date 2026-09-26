@@ -22,10 +22,6 @@ let provider_name = "muse_serve"
    MASC's tools under it. *)
 let mcp_server_name = "masc"
 
-(* MSP has no switch that removes the built-in tools
-   ({!Runtime_muse_serve.config}), so a declared [none] degrades to [read]. *)
-let native_none_supported = false
-
 let undeclared_capacity_detail =
   "Muse Code requires max-prompt-bytes because MSP has no typed oversized-input refusal"
 ;;
@@ -754,7 +750,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~keeper_name
         ~client_label:runtime_label
         ~default:Runtime_native_tools.muse_default
-        ~none_supported:native_none_supported
+        ~none_supported:Runtime_native_tools.muse_none_supported
     in
     let tool_surface_sha256 = Session_store.tool_surface_sha256 ~native_posture tools in
     let* () =

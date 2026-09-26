@@ -376,8 +376,11 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
               images)
      with
      | Ok (result : Runtime_muse_serve.turn_result) ->
-       (* The session starts with [modelId] set to the configured model, so a
-          host that reports none ran that one. *)
+       (* The session starts with [modelId] set to the configured model, and
+          the serve client refuses a session the host names another model
+          for. A host that names none left the model its record omits, so the
+          panel records the model MASC asked for: the one the host did not
+          contradict, not one it confirmed. *)
        let model =
          match result.model with
          | Some reported -> reported

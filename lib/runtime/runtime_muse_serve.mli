@@ -86,12 +86,13 @@ type error =
           [sessionMcp] for MASC's tool bridge. *)
   | Session_model_mismatch of
       { requested : string
-      ; resumed : string
+      ; reported : string
       }
-      (** [session/resume] cannot select a model, so a resumed session that
-          names another model is refused. One whose [modelId] is [null] is
-          not: the schema reads [null] as a record that omits the model, not
-          as another model. The caller starts a new session when its model
+      (** The host named another model for the session than [config.model],
+          on [session/start] or on [session/resume] (which cannot select a
+          model). A session whose [modelId] is [null] is not refused: the
+          schema reads [null] as a record that omits the model, not as
+          another model. The caller starts a new session when its model
           changes. *)
   | Auth_required of string
       (** The host has no usable login ([authRequired]). *)

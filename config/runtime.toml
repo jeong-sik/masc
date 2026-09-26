@@ -1509,6 +1509,10 @@ is-non-interactive = true
 # 10 MiB MSP frame cap (meta-models.github.io/muse-code-sdk, "Framing and
 # caps"), not a measured host limit: JSON escaping grows a prompt at most six
 # times, so a 1 MiB prompt fits one turn/start frame with room to spare.
+# It counts the prompt text only. An image would ride the same frame
+# uncounted, and none is sent here: the model declares no image input, so the
+# Keeper adapter refuses a goal image, and the one path that sends images
+# (image analysis) asks for an output schema, which Muse Code refuses first.
 [models.muse-code-spark-1-3]
 api-name = "muse-spark-1.3"
 max-context = 1007997

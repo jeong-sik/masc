@@ -1513,8 +1513,6 @@ let attempt_inference_policy
   in
   { attempt_enable_thinking; attempt_preserve_thinking = runtime_seed.preserve_thinking }
 
-(* An official-client lane cannot apply a provider config transform, so a
-   transform on such a lane is refused before the client is invoked. *)
 (* The client and its bounds as the runtime declares them. Keeper_muse_runtime
    replaces [native] with the keeper's resolved posture, [timeout_s] with a
    per-model [turn-timeout-s] and [wall_clock_ceiling_s] with a per-model
@@ -1533,6 +1531,8 @@ let muse_serve_client_config (execution : Runtime_execution.muse_serve)
   }
 ;;
 
+(* An official-client lane cannot apply a provider config transform, so a
+   transform on such a lane is refused before the client is invoked. *)
 let official_client_dispatch ~provider_config_transform =
   match provider_config_transform with
   | Some _ -> Keeper_attempt_dispatch.Rejected_before_dispatch

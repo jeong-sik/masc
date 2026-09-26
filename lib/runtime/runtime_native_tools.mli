@@ -85,6 +85,11 @@ val muse_default : posture
     all. The Keeper adapter therefore counts a turn the host took in as a
     possible effect. *)
 
+val muse_none_supported : bool
+(** [false]: MSP has no switch that removes Muse Code's built-in tools, so a
+    declared [none] degrades to [read]. The one source for
+    {!Runtime_execution.supports_native_none} and the Keeper adapter. *)
+
 val claude_code_read_tool_names : string list
 (** Built-in Claude Code tools that observe without effect. *)
 

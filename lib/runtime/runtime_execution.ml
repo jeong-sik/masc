@@ -45,8 +45,8 @@ type usage_report =
 
 let supports_native_none = function
   | Agent_core _ | Claude_code _ -> true
-  (* MSP has no switch that removes Muse Code's built-in tools. *)
-  | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ -> false
+  | Codex_app_server _ | Antigravity_cli _ -> false
+  | Muse_serve _ -> Runtime_native_tools.muse_none_supported
 
 let model_id = function
   | Agent_core config -> Some config.Llm_provider.Provider_config.model_id

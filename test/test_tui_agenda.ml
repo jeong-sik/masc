@@ -492,6 +492,68 @@ let test_a_held_call_says_how_long_is_left () =
   check bool "and how long is left" true (contains ~needle:"4m 00s left" text)
 ;;
 
+let test_failed_reads_are_safe_before_the_panel_fits_them () =
+  let state =
+    Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let raw = "오류\027[31m\n\xFF\xE2\x80\x8B literal \\x1B" in
+  let expected = "오류\\x1B[31m\\x0A\\xFF\\u200B literal \\x1B" in
+  let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows:24 in
+  state.schedules_error <- Some raw;
+  state.keeper_tool_approvals_error <- Some raw;
+  state.tasks_error <- Some raw;
+  check int "failed reads do not take a strip row" 0
+    (Masc_tui_types.agenda_chrome_rows state);
+  check int "failed reads preserve the body budget" body_rows
+    (Masc_tui_types.surface_body_rows state ~terminal_rows:24);
+  List.iter
+    (fun cols ->
+       let failures =
+         overlay_of ~cols (Masc_tui_types.agenda state)
+         |> fun lines -> tones_of lines Agenda.Failed
+       in
+       check int "all three failed reads have a row" 3 (List.length failures);
+       List.iter
+         (fun (line : Agenda.line) ->
+            check bool "controls and invalid bytes cannot reach the terminal" false
+              (String.exists
+                 (fun c -> Char.code c < 0x20 || c = '\127' || c = '\xFF')
+                 line.text);
+            check bool "invisible codepoint is shown as text" false
+              (contains ~needle:"\xE2\x80\x8B" line.text);
+            check bool "escaped text is fitted to the row width" true
+              (Masc_tui_message_layout.display_width line.text <= cols);
+            if cols = 120 then
+              check string "readable reason and literal escape are preserved"
+                expected (String.trim line.text))
+         failures)
+    [ 16; 32; 120 ]
+;;
+
+let test_failed_schedule_snapshot_uses_the_same_display_boundary () =
+  List.iter
+    (fun (reason, expected) ->
+       let state =
+         Masc_tui_types.create_state ~workspace:"test" ~port:8935
+           ~refresh_interval:2.0 ()
+       in
+       state.schedules <- Some
+         { scs_status = "unknown"; scs_read_error = reason
+         ; scs_request_count = None; scs_truncated = false
+         ; scs_next_due_iso = None; scs_counts = None; scs_rows = []
+         ; scs_runner_status = Masc.Tui_decode.Runner_unrecognised "unknown"
+         };
+       state.schedules_error <- Some "older transport failure";
+       let projection = Masc_tui_types.agenda state in
+       check int "a failed store snapshot has no strip" 0 (Agenda.rows_taken projection);
+       let failures = tones_of (overlay_of ~cols:120 projection) Agenda.Failed in
+       check (list string) "the store reason wins and is safe to draw"
+         [ expected ] (List.map (fun (line : Agenda.line) -> String.trim line.text) failures))
+    [ Some "store\027[2Jfailed", "store\\x1B[2Jfailed"
+    ; None, "schedule store unreadable"
+    ]
+;;
+
 (* A call whose wait has run out is denied, so the row says that rather than
    counting past zero. *)
 let test_an_expired_call_says_so () =
@@ -732,6 +794,10 @@ let () =
             test_an_unread_agenda_keeps_the_strip_down
         ; test_case "the state says which lists were read" `Quick
             test_the_state_says_which_lists_were_read
+        ; test_case "failed reads are safe before the panel fits them" `Quick
+            test_failed_reads_are_safe_before_the_panel_fits_them
+        ; test_case "failed schedule snapshots share the display boundary" `Quick
+            test_failed_schedule_snapshot_uses_the_same_display_boundary
         ; test_case "a held call says how long is left" `Quick
             test_a_held_call_says_how_long_is_left
         ; test_case "an expired call says so" `Quick test_an_expired_call_says_so

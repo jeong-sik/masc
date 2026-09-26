@@ -15,6 +15,7 @@ type step =
   | Write of string  (** Write one frame. *)
   | Stderr of string
   | Exit_with of int
+  | Expect_launch of { home : string; native_read : bool }
 
 let init_frame ~granted =
   Printf.sprintf
@@ -98,7 +99,24 @@ let script_text ~capture steps =
         line (Printf.sprintf "printf '%%s\\n' \"$request\" >> %s" (shell_quote capture))
       | Write frame -> line (Printf.sprintf "printf '%%s\\n' %s" (shell_quote frame))
       | Stderr text -> line (Printf.sprintf "printf '%%s\\n' %s >&2" (shell_quote text))
-      | Exit_with code -> line (Printf.sprintf "exit %d" code))
+      | Exit_with code -> line (Printf.sprintf "exit %d" code)
+      | Expect_launch { home; native_read } ->
+        List.iter
+          (fun (key, expected) ->
+             line (Printf.sprintf "[ \"$%s\" = %s ] || exit 97" key (shell_quote expected)))
+          [ "HOME", home
+          ; "XDG_CONFIG_HOME", Filename.concat home ".config"
+          ; "XDG_DATA_HOME", Filename.concat home ".local/share"
+          ; "XDG_CACHE_HOME", Filename.concat home ".cache"
+          ; "XDG_STATE_HOME", Filename.concat home ".local/state"
+          ; "XDG_RUNTIME_DIR", Filename.concat home ".local/run"
+          ];
+        line "[ -z \"${META_API_KEY+x}\" ] || exit 96";
+        if native_read then (
+          line "[ \"$#\" = 2 ] || exit 95";
+          line "[ \"$1\" = --disable-write ] || exit 95";
+          line "[ \"$2\" = --disable-shell ] || exit 95")
+        else line "[ \"$#\" = 0 ] || exit 95")
     steps;
   line "while IFS= read -r ignored; do :; done";
   Buffer.contents buffer
@@ -125,27 +143,29 @@ let with_script steps f =
     (fun () -> f ~dir ~requests)
 ;;
 
-let config ?(native = Runtime_native_tools.Native_read) () =
+let config ?account_home ?(native = Runtime_native_tools.Native_read) () =
   { (Serve.default_config ()) with
     cli_path = "/bin/sh"
+  ; account_home
   ; native
   ; admission_timeout_s = 10.
   ; timeout_s = Some 10.
   }
 ;;
 
-let run_scripted ?mcp_servers ?on_session_ready ?on_stream_event ?native steps check_result =
+let run_scripted ?session_mode ?account_home ?mcp_servers ?on_session_ready ?on_stream_event ?native steps check_result =
   with_script steps (fun ~dir ~requests ->
     Eio_main.run (fun env ->
       let result =
         Serve.run_turn
+          ?session_mode
           ?mcp_servers
           ?on_session_ready
           ?on_stream_event
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
-          (config ?native ())
+          (config ?account_home ?native ())
           ~workspace_root:dir
           ~prompt:"say MASC_MUSE_OK"
           ~images:[]
@@ -300,6 +320,104 @@ let test_native_none_is_config_error () =
   | Ok () -> fail "native posture none must be refused"
 ;;
 
+let test_selected_homes_do_not_inherit_other_account_roots () =
+  let injected =
+    [ "HOME", "/synthetic/ambient"
+    ; "XDG_CONFIG_HOME", "/synthetic/ambient-config"
+    ; "XDG_DATA_HOME", "/synthetic/ambient-data"
+    ; "XDG_CACHE_HOME", "/synthetic/ambient-cache"
+    ; "XDG_STATE_HOME", "/synthetic/ambient-state"
+    ; "XDG_RUNTIME_DIR", "/synthetic/ambient-run"
+    ; "META_API_KEY", "synthetic-payg-key"
+    ]
+  in
+  let previous = List.map (fun (key, _) -> key, Sys.getenv_opt key) injected in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun (key, value) ->
+           match value with
+           | Some value -> Unix.putenv key value
+           | None -> Unix.unsetenv key)
+        previous)
+    (fun () ->
+      List.iter (fun (key, value) -> Unix.putenv key value) injected;
+      List.iter
+        (fun (home, native, native_read) ->
+           run_scripted ~account_home:home ~native
+             (Expect_launch { home; native_read }
+              :: handshake_and_session ~granted:[]
+              @ [ Write agent_completed; Write turn_completed ])
+             (fun result _ ->
+                match result with
+                | Ok turn -> check string "selected account turn completed" "MASC_MUSE_OK" turn.text
+                | Error error -> fail (Serve.error_to_string error)))
+        [ "/synthetic/account-one", Runtime_native_tools.Native_read, true
+        ; "/synthetic/account-two", Runtime_native_tools.Native_full, false
+        ])
+;;
+
+let test_invalid_account_home_is_refused () =
+  List.iter (fun account_home -> run_scripted ~account_home []
+    (fun result requests ->
+       (match result with
+        | Error (Serve.Invalid_config _) -> ()
+        | Error error -> fail (Serve.error_to_string error)
+        | Ok _ -> fail "invalid account home reached the client");
+       check int "nothing dispatched" 0 (List.length requests)))
+    [ "relative-account"; "/absolute/account "; " /absolute/account" ]
+;;
+
+let test_nondurable_handshake_never_begins_a_session () =
+  let frame = Yojson.Safe.from_string (init_frame ~granted:[]) in
+  let frame_fields = Yojson.Safe.Util.to_assoc frame in
+  let result_fields = Yojson.Safe.Util.(frame |> member "result" |> to_assoc) in
+  List.iter
+    (fun session_mode ->
+       List.iter
+         (fun durability ->
+            let fields = List.remove_assoc "sessionDurability" result_fields in
+            let fields = match durability with
+              | None -> fields
+              | Some value -> ("sessionDurability", value) :: fields in
+            let response =
+              `Assoc (("result", `Assoc fields) :: List.remove_assoc "result" frame_fields)
+              |> Yojson.Safe.to_string in
+            let session_ready = ref false in
+            run_scripted ~session_mode
+              ~on_session_ready:(fun ~session_id:_ -> session_ready := true; Ok ())
+              [ Read; Write response ]
+              (fun result requests ->
+                 (match durability, result with
+                  | Some (`String "ephemeral"), Error Serve.Session_not_durable -> ()
+                  | (Some `Null | Some (`String "future")),
+                    Error (Serve.Protocol_error { stage = "initialize"; _ }) -> ()
+                  | _, Error error -> fail (Serve.error_to_string error)
+                  | _, Ok _ -> fail "non-durable host started a session");
+                 check bool "session callback not reached" false !session_ready;
+                 check int "initialize is the only dispatched request" 1 (List.length requests)))
+         [ Some (`String "ephemeral"); Some `Null; Some (`String "future") ])
+    [ Serve.Start; Serve.Resume { session_id = "retained-session" } ]
+;;
+
+let test_absent_durability_admits_the_v1_durable_host () =
+  let frame = Yojson.Safe.from_string (init_frame ~granted:[]) in
+  let fields = Yojson.Safe.Util.to_assoc frame in
+  let result = Yojson.Safe.Util.(frame |> member "result" |> to_assoc) in
+  let response =
+    `Assoc (("result", `Assoc (List.remove_assoc "sessionDurability" result))
+            :: List.remove_assoc "result" fields)
+    |> Yojson.Safe.to_string in
+  run_scripted
+    ([ Read; Write response ]
+     @ List.drop 2 (handshake_and_session ~granted:[])
+     @ [ Write agent_completed; Write turn_completed ])
+    (fun result _ ->
+       match result with
+       | Ok turn -> check string "v1 durable turn completed" "MASC_MUSE_OK" turn.text
+       | Error error -> fail (Serve.error_to_string error))
+;;
+
 let () =
   run
     "runtime_muse_serve"
@@ -309,6 +427,13 @@ let () =
         ; test_case "exit code is typed" `Quick test_exit_code_is_typed
         ; test_case "bridge needs sessionMcp" `Quick test_bridge_needs_session_mcp
         ; test_case "native none is config error" `Quick test_native_none_is_config_error
+        ; test_case "selected account home isolates child roots and posture" `Quick
+            test_selected_homes_do_not_inherit_other_account_roots
+        ; test_case "invalid account home is refused" `Quick test_invalid_account_home_is_refused
+        ; test_case "non-durable host is refused before session admission" `Quick
+            test_nondurable_handshake_never_begins_a_session
+        ; test_case "absent durability admits the v1 durable host" `Quick
+            test_absent_durability_admits_the_v1_durable_host
         ] )
     ]
 ;;

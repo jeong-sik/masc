@@ -191,8 +191,8 @@ let fold_argument ~cap text =
     let rec fit held =
       let tail = Printf.sprintf " \xe2\x8c\x84 %d\xec\x9e\x90" held in
       let tail_cells = Message_layout.display_width tail in
-      (* Keep whole graphemes. take_cells pads a straddling grapheme, and
-         those padding cells are not retained argument content. *)
+      (* Keep whole graphemes and count only the argument cells retained
+         in the prefix, including when a wide grapheme does not fit. *)
       let prefix, _ =
         Message_layout.split_at_cells flat (Int.max 0 (cap - tail_cells))
       in

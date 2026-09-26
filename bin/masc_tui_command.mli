@@ -27,15 +27,15 @@ type t =
       (** [/about] or [/splash] — display MASC Horned Reaper ASCII emblem and system telemetry. *)
   | Lane_addons of string
   | Open_metrics
-      (** [/metrics] or [/telemetry] — display multicore engine telemetry, scheduler latency, and fleet metrics. *)
+      (** [/metrics] or [/telemetry] — open Usage with quotas, Keeper reports, and telemetry. *)
   | Open_settings
       (** [/settings] — open the type-aware Runtime parameters pane. *)
   | Open_diff
       (** [/diff] — open Git working-tree changes and diff for the workspace. *)
   | Open_patch_modal
       (** [/patch] or [/review] — open the patch review overlay. *)
-  | Toggle_cost
-      (** [/cost] — show or hide each Keeper's cost and tokens and the fleet total on the Overview Team block. *)
+  | Open_usage
+      (** [/cost] — open Usage for provider quotas and Keeper usage. *)
   | Open_link_preview of string option
       (** [/preview [url]] — open the OpenGraph preview overlay for a web link. *)
   | Open_links_list

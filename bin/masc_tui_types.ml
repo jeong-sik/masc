@@ -2018,57 +2018,6 @@ type provider_history_reading =
   | Provider_history_read of Masc_tui_usage_trend.t
   | Provider_history_error of string
 
-(** A sum over a Keeper's turns of a value its runtime may not report
-    (GET /api/v1/dashboard/keeper-costs). [Spend_sum] adds the turns that
-    reported one; [floor] is whether something may be left out of it --
-    turns that gave no value or an unreadable one, rows that were not JSON,
-    or, in a team total, a Keeper whose sum is unknown -- so the sum is then
-    at least this much. [Spend_unknown] is turns that all left the value
-    out: never a zero. *)
-type 'a spend_sum =
-  | Spend_sum of { sum : 'a; floor : bool }
-  | Spend_unknown
-
-type keeper_spend =
-  | Spend_no_turns
-  | Spend_turns of { cost_usd : float spend_sum; tokens : int spend_sum }
-  | Spend_unread of string
-      (** The server could not read this Keeper's metrics store. *)
-  | Spend_rows_unread of { rows : int }
-      (** No turn read, but [rows] rows that may have been turns did not:
-          rows that were not JSON, or turn rows whose time, latency or kind
-          the server could not read. What it spent is unknown. *)
-
-(** How old the server's cached answer is. [Spend_stale] is an answer past
-    its refresh time; [last_error] is why the last refresh failed, if it
-    did. *)
-type spend_freshness =
-  | Spend_fresh
-  | Spend_stale of { age_s : float; last_error : string option }
-
-type overview_spend_reading =
-  | Overview_spend_unread
-  | Overview_spend_warming
-      (** The server answered its placeholder: nothing computed yet. *)
-  | Overview_spend_read of {
-      window_minutes : int;
-      keepers : (string * keeper_spend) list;
-      undecodable : int;
-          (** Rows this build could not read; their Keepers draw unknown. *)
-      freshness : spend_freshness;
-    }
-  | Overview_spend_failed of string
-
-let cost_reply_is_current ~visible ~current_generation ~reply_generation =
-  visible && current_generation = reply_generation
-
-let toggle_cost_visibility ~visible ~generation =
-  (not visible, generation + 1)
-
-let cost_refresh_needed ~visible = function
-  | Overview_spend_unread -> visible
-  | Overview_spend_warming | Overview_spend_read _ | Overview_spend_failed _ -> false
-
 (** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
     briefing writes [null] for a Keeper with no registry entry (an offline
     Keeper that never booted this process), which is a different fact from a
@@ -2078,7 +2027,7 @@ type overview_keeper_phase =
   | Keeper_phase_absent
   | Keeper_phase_unreadable of string
 
-(** One [keeper_briefs] row, as the Overview Team block reads it. *)
+(** One [keeper_briefs] row from the operator snapshot. *)
 type overview_keeper = {
   okp_name: string;
   okp_phase: overview_keeper_phase;
@@ -2888,7 +2837,6 @@ type surface_needs = {
   needs_runtime_quota : bool;
   needs_keeper_usage : bool;
   needs_provider_history : bool;
-  needs_keeper_spend : bool;
   needs_overview_goals : bool;
 }
 
@@ -2905,7 +2853,6 @@ let nothing =
     needs_runtime_quota = false;
     needs_keeper_usage = false;
     needs_provider_history = false;
-    needs_keeper_spend = false;
     needs_overview_goals = false;
   }
 
@@ -2921,26 +2868,22 @@ let nothing =
    screen but Keepers and Metrics, under a count taken from the event feed
    instead of the roster. The roster is 8.4 KB and answers in about a
    millisecond, which is what makes this affordable where planning is not.
-
-   [cost_shown] is the other one: the Team block draws spend only after
-   [/cost], so the Overview asks for keeper-costs only while it is shown. *)
-let rec surface_needs ~keeper_pane_drawn ~cost_shown surface =
+ *)
+let rec surface_needs ~keeper_pane_drawn surface =
   let needs = surface_needs_of_surface surface in
   let needs =
     if keeper_pane_drawn then { needs with needs_keeper_roster = true }
     else needs
   in
-  { needs with needs_keeper_spend = needs.needs_keeper_spend && cost_shown }
+  needs
 
 and surface_needs_of_surface : surface -> surface_needs = function
-  (* The Providers section draws each account's usage windows from the
-     runtime catalogue. Only this surface draws them. The goal tree is read
-     only here too: the GOALS section is its reader. *)
+  (* Dashboard summarizes quota coverage and reads the Goal tree. Usage reads
+     the same quota response for per-scope detail and recorded history. *)
   | Overview ->
       { nothing with
         needs_transport = true
       ; needs_runtime_quota = true
-      ; needs_keeper_spend = true
       ; needs_overview_goals = true
       }
   (* Its rows come from the acting store and the keeper list, neither of which
@@ -3010,18 +2953,15 @@ let surface_needs_delta ~previous ~next =
       next.needs_keeper_usage && not previous.needs_keeper_usage
   ; needs_provider_history =
       next.needs_provider_history && not previous.needs_provider_history
-  ; needs_keeper_spend =
-      next.needs_keeper_spend && not previous.needs_keeper_spend
   ; needs_overview_goals =
       next.needs_overview_goals && not previous.needs_overview_goals
   }
 
 let surface_needs_any needs = needs <> nothing
 
-let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn ~cost_shown
-    surface =
+let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn surface =
   if scoped_refresh_inflight then nothing
-  else surface_needs ~keeper_pane_drawn ~cost_shown surface
+  else surface_needs ~keeper_pane_drawn surface
 
 type full_refresh_intent = Cadence | Revalidate
 
@@ -5728,7 +5668,6 @@ type state = {
   mutable keeper_usage: keeper_usage_reading;
   mutable provider_history: provider_history_reading;
   mutable provider_history_days: int;
-  mutable overview_spend: overview_spend_reading;
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
@@ -6152,12 +6091,6 @@ type state = {
   mutable link_modal_links: string list;
   mutable link_modal_cursor: int;
   mutable link_previews_mode: [ `Rich | `Compact | `Off ];
-  (* [/cost]: whether the Team block draws each Keeper's spend and the
-     fleet total. Off until the operator asks, and process-only: keeper-costs
-     rereads every day file of every Keeper's metrics whenever its server
-     cache expires, so a hidden spend is not fetched at all. *)
-  mutable cost_visible: bool;
-  mutable cost_generation: int;
   (* Code surface: one directory level at a time through the lazy /children
      route; the file arrives whole and is lexed once at load. *)
   mutable code_dir: string;
@@ -7909,7 +7842,6 @@ let create_state
   keeper_usage = Keeper_usage_unread;
   provider_history = Provider_history_unread;
   provider_history_days = 14;
-  overview_spend = Overview_spend_unread;
   overview_goals = Goals_unread;
   runtime_lanes = [];
   runtime_assignments = [];
@@ -8155,8 +8087,6 @@ let create_state
   link_modal_links = [];
   link_modal_cursor = 0;
   link_previews_mode = `Rich;
-  cost_visible = false;
-  cost_generation = 0;
   code_dir = "";
   code_listing = Masc_tui_fetched.initial;
   code_cursor = 0;

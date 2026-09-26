@@ -4274,31 +4274,6 @@
  (modules test_tui_chart)
  (libraries alcotest masc_tui_chart masc_tui_message_layout masc_tui_theme))
 
-; RFC-0464: the Overview Team block's projection.
-; The Team block's per-Keeper spend decoder against the server's own encoder.
-(test
- (name test_tui_keeper_spend)
- (modules test_tui_keeper_spend)
- (libraries
-  alcotest
-  masc_test_deps
-  masc.jsonl_writer
-  masc.dashboard_utils
-  masc.server
-  masc_tui_types
-  masc_tui_message_layout
-  masc_tui_keeper_spend))
-
-(test
- (name test_tui_overview_team)
- (modules test_tui_overview_team)
- (libraries
-  alcotest
-  masc
-  masc_types
-  masc_tui_types
-  masc_tui_overview_team))
-
 (test
  (name test_tui_overview_goals)
  (modules test_tui_overview_goals)

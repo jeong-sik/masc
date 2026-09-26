@@ -1593,14 +1593,6 @@
   masc_tui_types
   unix))
 
-;; The Overview Team block's projection (RFC-0464): pure, so a test can read
-;; it without the renderer.
-(library
- (name masc_tui_overview_team)
- (wrapped false)
- (modules masc_tui_overview_team)
- (libraries masc masc_types masc_tui_types))
-
 ;; The Overview's GOALS section: whether the fleet's work moves any goal. A
 ;; library so a test can draw it from a fixture of the server's goal tree.
 (library
@@ -1627,22 +1619,6 @@
  (modules masc_tui_overview_providers)
  (libraries masc masc_tui_types masc_tui_ansi masc_tui_message_layout unix))
 
-;; The Overview's spend reading (GET /api/v1/dashboard/keeper-costs),
-;; decoder and Team row tags. A library so a test can decode the server's
-;; own encoder output.
-(library
- (name masc_tui_keeper_spend)
- (wrapped false)
- (modules masc_tui_keeper_spend)
- (libraries
-  masc
-  masc.dashboard_utils
-  masc_tui_types
-  masc_tui_ansi
-  masc_tui_message_layout
-  yojson))
-
-
 (executable
  (name masc_tui)
  (modules
@@ -1655,7 +1631,6 @@
  (libraries
   masc_tui_pick_list
   masc_tui_usage_trend
-  masc_tui_keeper_spend
   digestif
   masc.string_util
   masc.keeper_runtime
@@ -1681,7 +1656,6 @@
   masc.build_commit
   masc.sse_wire
   masc_tui_task_flow
-  masc_tui_overview_team
   masc_tui_overview_goals
   masc_tui_overview_providers
   masc.masc_tool_blob_store

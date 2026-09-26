@@ -12,7 +12,7 @@ let describe = function
   | Command.Open_settings -> "open-settings"
   | Command.Open_diff -> "open-diff"
   | Command.Open_patch_modal -> "open-patch-modal"
-  | Command.Toggle_cost -> "toggle-cost"
+  | Command.Open_usage -> "open-usage"
   | Command.Open_link_preview None -> "open-link-preview"
   | Command.Open_link_preview (Some u) -> "open-link-preview:" ^ u
   | Command.Open_links_list -> "open-links-list"
@@ -138,7 +138,7 @@ let test_pane_commands_parse_by_word () =
     ; "open-diff"
     ; "open-patch-modal"
     ; "open-patch-modal"
-    ; "toggle-cost"
+    ; "open-usage"
     ; "open-link-preview"
     ; "open-link-preview:https://github.com/jeong-sik/masc"
     ; "open-links-list"

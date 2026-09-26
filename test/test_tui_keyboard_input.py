@@ -19005,6 +19005,10 @@ def dashboard_usage_interaction(
     if b"MASC System" not in system:
         raise AssertionError(f"System is not on the main ring: {system!r}")
     send_and_wait(process, master_fd, output, b"A", b"MASC Activity")
+    tab_until(process, master_fd, output, b"MASC Dashboard")
+    send_and_wait(process, master_fd, output, b"i", b"\xe2\x80\xba to alpha")
+    send_and_wait(process, master_fd, output, b"/cost", b"/cost")
+    send_and_wait(process, master_fd, output, b"\r", b"MASC Usage")
     os.write(master_fd, b"q")
 
 

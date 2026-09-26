@@ -86,6 +86,103 @@ let test_prepares_private_home_with_oauth_seed () =
     (Sys.file_exists paths.mcp_config_path)
 ;;
 
+let test_keeper_account_switch_preserves_each_refreshed_home () =
+  with_temp_root @@ fun runtime_root ->
+  let source_a = Filename.concat runtime_root "account-a" in
+  let source_b = Filename.concat runtime_root "account-b" in
+  write_file ~mode:0o600 source_a "synthetic-a";
+  write_file ~mode:0o600 source_b "synthetic-b";
+  let prepare oauth_source =
+    let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
+        ~keeper_name:"keeper-alpha" ~oauth_source in
+    let home = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf ~oauth_source
+      |> require_ok in
+    check string "session path matches prepared HOME"
+      (Runtime_antigravity_home.home_path ~runtime_root ~owner_leaf)
+      (Runtime_antigravity_home.home_dir home);
+    home in
+  let first = prepare source_a in
+  write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path first) "refreshed-a";
+  let second = prepare source_b in
+  check bool "source selection changes managed HOME" false
+    (String.equal (Runtime_antigravity_home.home_dir first)
+       (Runtime_antigravity_home.home_dir second));
+  check string "new source seeds its own account" "synthetic-b"
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path second));
+  let surface home = Keeper_official_client_session_store.tool_surface_sha256
+      ~account_home:(Runtime_antigravity_home.home_dir home)
+      ~native_posture:Runtime_native_tools.Native_read [] in
+  check bool "old vendor session cannot retain its account surface" false
+    (String.equal (surface first) (surface second));
+  write_file ~mode:0o600 source_a "changed-seed-a";
+  let returned = prepare source_a in
+  check string "return selects previous account HOME"
+    (Runtime_antigravity_home.home_dir first) (Runtime_antigravity_home.home_dir returned);
+  check string "refresh survives source rotation" "refreshed-a"
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path returned));
+  check string "refresh is not session identity" (surface first) (surface returned)
+;;
+
+let test_native_permissions_match_posture_and_workspace () =
+  with_temp_root @@ fun runtime_root ->
+  let source = Filename.concat runtime_root "source" in
+  write_file ~mode:0o600 source "synthetic";
+  let home = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:"native-policy"
+      ~oauth_source:source |> require_ok in
+  let workspace = Filename.concat runtime_root "workspace" in
+  Unix.mkdir workspace 0o700;
+  let check_policy posture expected_allow expected_deny =
+    let cwd = Runtime_antigravity_home.prepare_native_tools home ~additional_workspaces:[] ~posture
+        ~workspace:(Runtime_antigravity_home.Shared_workspace workspace) |> require_ok in
+    check string "native cwd is the actual granted directory" workspace cwd;
+    let paths = Runtime_antigravity_home.For_testing.paths home in
+    let open Yojson.Safe.Util in
+    let settings = Yojson.Safe.from_file paths.settings_path |> member "permissions" in
+    let rules field = settings |> member field |> to_list |> List.map to_string in
+    check (list string) "exact positive grants" expected_allow (rules "allow");
+    check (list string) "effect/network boundaries" expected_deny (rules "deny");
+    check bool "no workspace-wide root read" false
+      (List.mem ("read_file(" ^ runtime_root ^ ")") (rules "allow"));
+    check bool "no all-files read" false (List.mem "read_file(*)" (rules "allow")) in
+  let network_denies = ["read_url(*)"; "execute_url(*)"; "unsandboxed(*)"] in
+  check_policy Runtime_native_tools.Native_read
+    ["mcp(masc/*)"; "read_file(" ^ workspace ^ ")"]
+    (["write_file(*)"; "command(*)"] @ network_denies);
+  check_policy Runtime_native_tools.Native_full
+    ["mcp(masc/*)"; "read_file(" ^ workspace ^ ")";
+     "write_file(" ^ workspace ^ ")"; "command(*)"] network_denies;
+  let extra = Filename.concat runtime_root "operator-extra" in
+  Unix.mkdir extra 0o700;
+  ignore (Runtime_antigravity_home.prepare_native_tools home
+    ~additional_workspaces:[extra] ~posture:Runtime_native_tools.Native_full
+    ~workspace:(Runtime_antigravity_home.Shared_workspace workspace) |> require_ok);
+  let paths = Runtime_antigravity_home.For_testing.paths home in
+  let open Yojson.Safe.Util in
+  let extra_grants = Yojson.Safe.from_file paths.settings_path
+    |> member "permissions" |> member "allow" |> to_list |> List.map to_string in
+  check bool "explicit operator extra root remains readable" true
+    (List.mem ("read_file(" ^ extra ^ ")") extra_grants);
+  check bool "explicit operator extra root remains writable" true
+    (List.mem ("write_file(" ^ extra ^ ")") extra_grants);
+  let private_cwd = Runtime_antigravity_home.prepare_native_tools home ~additional_workspaces:[]
+      ~posture:Runtime_native_tools.Native_read
+      ~workspace:Runtime_antigravity_home.Private_workspace |> require_ok in
+  check int "private endpoint host cwd" 0o700 (permission private_cwd);
+  check (list string) "endpoint workspace starts empty" [] (Array.to_list (Sys.readdir private_cwd));
+  let indirect = Filename.concat runtime_root "workspace-link" in
+  Unix.symlink workspace indirect;
+  check bool "workspace symlink refused" true
+    (Result.is_error (Runtime_antigravity_home.prepare_native_tools home ~additional_workspaces:[]
+      ~posture:Runtime_native_tools.Native_full
+      ~workspace:(Runtime_antigravity_home.Shared_workspace indirect)));
+  let wildcard = Filename.concat runtime_root "wild*workspace" in
+  Unix.mkdir wildcard 0o700;
+  check bool "filesystem name cannot inject permission glob" true
+    (Result.is_error (Runtime_antigravity_home.prepare_native_tools home ~additional_workspaces:[]
+      ~posture:Runtime_native_tools.Native_full
+      ~workspace:(Runtime_antigravity_home.Shared_workspace wildcard)))
+;;
+
 let test_rejects_non_private_or_indirect_oauth_source () =
   with_temp_root
   @@ fun runtime_root ->
@@ -570,6 +667,10 @@ let () =
             "private HOME and OAuth seed"
             `Quick
             test_prepares_private_home_with_oauth_seed
+        ; test_case "native permission and workspace boundaries" `Quick
+            test_native_permissions_match_posture_and_workspace
+        ; test_case "Keeper account selection and refresh" `Quick
+            test_keeper_account_switch_preserves_each_refreshed_home
         ; test_case
             "private direct OAuth source"
             `Quick

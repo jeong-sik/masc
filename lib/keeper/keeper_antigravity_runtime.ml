@@ -505,8 +505,52 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~default:Runtime_native_tools.antigravity_default
         ~none_supported:(Runtime_execution.supports_native_none (Antigravity_cli config))
     in
+    let runtime_root = Common.masc_dir_from_base_path ~base_path in
+    let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
+        ~keeper_name ~oauth_source:config.oauth_source in
+    let account_home = Runtime_antigravity_home.home_path ~runtime_root ~owner_leaf in
+    let* sandbox_profile = match required_native_posture with
+      | Some _ -> Ok None
+      | None ->
+        let* defaults =
+          Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+            ~base_path keeper_name
+          |> Result.map_error (fun error -> config_error ~field:"keeper.sandbox_profile"
+            (Keeper_types_profile.keeper_toml_load_error_to_string error)) in
+        (match defaults.sandbox_profile with
+         | Some profile -> Ok (Some profile)
+         | None -> Error (config_error ~field:"keeper.sandbox_profile"
+             "Antigravity requires an explicit Keeper sandbox profile")) in
+    let* add_dirs =
+      let rec canonicalize = function
+        | [] -> Ok []
+        | path :: rest ->
+          let* actual = Runtime_antigravity_home.canonical_workspace path
+            |> Result.map_error home_error_to_core_error in
+          let* rest = canonicalize rest in Ok (actual :: rest) in
+      canonicalize config.add_dirs in
+    let native_workspace, native_workspace_note =
+      match sandbox_profile with
+      | Some profile when Keeper_types_profile_sandbox.tree_location_of_profile profile
+          = Keeper_types_profile_sandbox.Shared_mount ->
+        let path = Filename.concat base_path
+            (Keeper_sandbox.host_root_rel_of_profile profile keeper_name) in
+        Runtime_antigravity_home.Shared_workspace path,
+        Printf.sprintf
+          "Antigravity native tools use the host workspace %s, the same files mounted at %s for MASC tools. Native commands run in the official client's host sandbox, not inside the Keeper container."
+          path (Keeper_sandbox.container_root keeper_name)
+      | None | Some _ ->
+        Runtime_antigravity_home.Private_workspace,
+        "Antigravity native tools use a separate private host workspace. They cannot access the Keeper's endpoint-owned working tree. Use MASC tools for that tree; native commands run in the official client's host sandbox." in
+    let* () = if String.trim system_prompt = ""
+      then Error (config_error ~field:"system_prompt" "system prompt must not be blank")
+      else Ok () in
+    let native_workspace_note = native_workspace_note ^
+      " Explicit operator-granted additional native directories: " ^
+      Yojson.Safe.to_string (`List (List.map (fun path -> `String path) add_dirs)) in
+    let system_prompt = system_prompt ^ "\n\n" ^ native_workspace_note in
     let tool_surface_sha256 =
-      Session_store.tool_surface_sha256 ~native_posture tools
+      Session_store.tool_surface_sha256 ~account_home ~native_posture tools
     in
     let* () = match official_client_continuation with
       | None -> Ok ()
@@ -699,14 +743,29 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
-    let runtime_root = Common.masc_dir_from_base_path ~base_path in
     let* home =
       Runtime_antigravity_home.prepare
         ~runtime_root
-        ~owner_leaf:keeper_name
+        ~owner_leaf
         ~oauth_source:config.oauth_source
       |> Result.map_error home_error_to_core_error
     in
+    let* () =
+      match native_workspace, sandbox_profile with
+      | Runtime_antigravity_home.Shared_workspace _, Some profile ->
+        (try
+           ignore (Keeper_alerting_path.ensure_sandbox_bundle_for_profile
+             ~config:(Workspace.default_config base_path) ~name:keeper_name
+             ~sandbox_profile:profile : string list);
+           Ok ()
+         with
+         | Sys_error detail -> Error (config_error ~field:"native_workspace" detail)
+         | Unix.Unix_error (error, _, _) ->
+           Error (config_error ~field:"native_workspace" (Unix.error_message error)))
+      | _ -> Ok () in
+    let* native_cwd = Runtime_antigravity_home.prepare_native_tools home
+        ~posture:native_posture ~workspace:native_workspace ~additional_workspaces:add_dirs
+      |> Result.map_error home_error_to_core_error in
     (* Only the states that changed something or explain a later stall are
        worth a line; [Present] is every turn after the first. *)
     (match Runtime_antigravity_home.keychain_state home with
@@ -725,15 +784,14 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
          (Runtime_antigravity_home.keychain_state_to_string state));
     let client_config : Runtime_antigravity.config =
       { cli_path = config.cli_path
-      ; cwd = base_path
-      ; add_dirs = config.add_dirs
+      ; cwd = native_cwd
+      ; add_dirs
       ; model = config.model
       ; agent = config.agent
       ; effort = config.effort
-      ; (* [Plan] holds the built-in tools to observation; [Accept_edits]
-           opens their effects and is admitted only for Yolo keepers
-           (RFC-0390). The sandbox stays on in both postures — it is a
-           separate safety floor, not a tool-availability knob. *)
+      ; (* Permission rules enforce read/full. Plan is an instruction mode;
+           Accept_edits suppresses diff review only for admitted Yolo turns.
+           The official client's host sandbox remains enabled in both. *)
         execution_mode =
           (match native_posture with
            | Runtime_native_tools.Native_full -> Runtime_antigravity.Accept_edits
@@ -869,7 +927,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       | Ambiguous | Fatal -> require_recovery detail
     in
     let process_mgr = Posix_spawn_process_mgr.mgr in
-    let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
+    let process_cwd = Eio.Path.(Eio.Stdenv.fs env / native_cwd) in
     let started_at = Time_compat.now () in
       let stream =
         stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action

@@ -6725,9 +6725,11 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
 
         ascii_frame = send_and_wait(process, master_fd, output, b"A", composer_showing(b"A"))
+        # Thirty terminal rows: composer, frame bottom, runtime/context,
+        # and key footer occupy the last four rows.
         assert_message_input_frame(
             ascii_frame,
-            row=28,
+            row=27,
             columns=100,
             input_text="A",
             cursor_column=8,
@@ -6744,7 +6746,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         )
         assert_message_input_frame(
             combining_frame,
-            row=28,
+            row=27,
             columns=100,
             input_text=combining_text,
             cursor_column=8,
@@ -6757,7 +6759,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         typed_frame.decode("utf-8")
         assert_message_input_frame(
             typed_frame,
-            row=28,
+            row=27,
             columns=100,
             input_text=expected_text,
             cursor_column=13,
@@ -6785,7 +6787,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         )
         assert_message_input_frame(
             narrow_frame,
-            row=28,
+            row=27,
             columns=41,
             input_text=expected_text,
             cursor_column=13,
@@ -8324,10 +8326,12 @@ def chat_visibility_modes_interaction(
             observed_rows, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
         )
         identity_row = screen_row_of(observed_rows, b"gate: Auto Judge")
-        if title_row < 0 or identity_row != title_row + 1:
+        composer_row = screen_row_of(observed_rows, b"> ")
+        footer_row = screen_row_of(observed_rows, b"Enter:send")
+        if not (0 < title_row < composer_row < identity_row < footer_row):
             raise AssertionError(
-                "chat navigation and operational identity did not occupy "
-                f"adjacent dedicated rows: {observed_rows!r}"
+                "chat navigation, composer, operational identity and key footer "
+                f"did not occupy separate ordered rows: {observed_rows!r}"
             )
         if b"2 reasoning steps \xc2\xb7 text not recorded" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")

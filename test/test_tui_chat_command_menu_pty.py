@@ -71,7 +71,7 @@ def run(executable):
 
     def compact(process, fd, _slave, output, _base):
         open_chat(process, fd, output)
-        h.resize_and_wait(process, fd, output, rows=14, columns=100, needle=CHAT)
+        h.resize_and_wait(process, fd, output, rows=15, columns=100, needle=CHAT)
         h.send_and_wait(process, fd, output, b"/", h.composer_showing(b"/"))
         rows = screen(process, fd, output)
         if h.screen_row_of(rows, b"Commands") != -1:

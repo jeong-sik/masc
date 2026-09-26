@@ -559,7 +559,9 @@ def _stall_line(
             else "loadavg n/a"
         ),
     ]
-    ended = _child_cpu_ticks(process.pid)
+    ended = (
+        _child_cpu_ticks(process.pid) if process.pid is not None else None
+    )
     if started_ticks is None or ended is None:
         parts.append("child utime/stime n/a")
     else:
@@ -618,7 +620,9 @@ def wait_for_output(
 ) -> None:
     started_at = time.monotonic()
     started_len = len(output)
-    started_ticks = _child_cpu_ticks(process.pid)
+    started_ticks = (
+        _child_cpu_ticks(process.pid) if process.pid is not None else None
+    )
     last_byte_at = [started_at]
 
     def note_byte(at: float) -> None:

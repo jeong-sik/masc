@@ -679,7 +679,7 @@ let declare_unbooted_keeper (config : Workspace_utils.config) name =
     (Filename.concat declarations (name ^ ".toml"))
     (fun out ->
       output_string out
-        "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n\
+        "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n\
          instructions = \"Help the operator.\"\n")
 
 let row_named name rows =
@@ -751,6 +751,16 @@ let test_a_keeper_whose_row_raises_is_reported_unread () =
       check bool "the keeper has no brief -- its row was never built" true
         (Option.is_none (row_named "k-unread" (briefing |> member "keeper_briefs" |> to_list)));
       unread_named "the briefing" briefing;
+      (* The list itself read, so empty lists beside it are a reading. *)
+      (match
+         Lib.Keeper_snapshot_unread.listing_of_json (briefing |> member "keepers_listing")
+       with
+       | Ok Lib.Keeper_snapshot_unread.Listed -> ()
+       | Ok (Lib.Keeper_snapshot_unread.Unreadable detail) ->
+         failf "the briefing reports a listed directory as unreadable: %s" detail
+       | Ok Lib.Keeper_snapshot_unread.Not_listed ->
+         fail "the briefing says it did not ask for Keepers"
+       | Error error -> failf "the briefing keepers_listing does not decode: %s" error);
       let execution =
         Dashboard_execution.json
           ~actor:"test-execution-unread-keeper"
@@ -762,6 +772,37 @@ let test_a_keeper_whose_row_raises_is_reported_unread () =
           ()
       in
       unread_named "the execution render" execution)
+
+(* #38120: a Keeper directory that does not list leaves no row and no unread
+   name, so the snapshot's [keepers] section is empty either way. The
+   section's [listing] is what tells an unlisted fleet from an empty one, and
+   a section without it is a producer defect, not "listed". *)
+let test_an_unlisted_keeper_directory_is_not_an_empty_fleet () =
+  let module U = Lib.Keeper_snapshot_unread in
+  let snapshot listing =
+    `Assoc
+      [ ( "keepers"
+        , `Assoc
+            ([ "count", `Int 0; "items", `List []; U.section_field, `List [] ]
+             @ Option.to_list (Option.map (fun l -> U.listing_field, U.listing_to_json l) listing))
+        )
+      ]
+  in
+  (match U.listing_of_snapshot (snapshot (Some (U.Unreadable "EACCES"))) with
+   | Ok (U.Unreadable "EACCES") -> ()
+   | Ok (U.Unreadable other) -> failf "unreadable detail changed: %s" other
+   | Ok (U.Listed | U.Not_listed) -> fail "an unlisted directory read as a listing"
+   | Error error -> failf "unreadable listing does not decode: %s" error);
+  (match U.listing_of_snapshot (snapshot None) with
+   | Error _ -> ()
+   | Ok _ -> fail "a keepers section without listing decoded");
+  (match U.listing_of_snapshot `Null with
+   | Ok U.Not_listed -> ()
+   | Ok (U.Listed | U.Unreadable _) | Error _ ->
+     fail "a snapshot with no keepers section is not Not_listed");
+  match U.listing_of_json (`Assoc [ "state", `String "unknown" ]) with
+  | Error _ -> ()
+  | Ok _ -> fail "an unknown listing state decoded"
 
 (* The execution render that answered 500 on 2026-09-19: the snapshot's
    declaration row for [imp] had no health, and the continuity briefs raised
@@ -1027,6 +1068,8 @@ let () =
             test_informational_severity_ranks_below_warn_and_above_nothing;
           Alcotest.test_case "a keeper whose row raises is reported unread" `Quick
             test_a_keeper_whose_row_raises_is_reported_unread;
+          Alcotest.test_case "an unlisted keeper directory is not an empty fleet" `Quick
+            test_an_unlisted_keeper_directory_is_not_an_empty_fleet;
           Alcotest.test_case "pressure rank orders by health" `Quick
             test_pressure_rank_orders_by_surface_status;
           Alcotest.test_case "keeper brief publishes health and phase" `Quick

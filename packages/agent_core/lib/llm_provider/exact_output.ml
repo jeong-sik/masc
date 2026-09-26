@@ -1752,7 +1752,7 @@ let candidate_fault_of_provider_refusal : provider_refusal -> Candidate_fault.t 
   | Overloaded -> Binding Capacity
   | Server_error -> Binding Server
   | Auth_failed -> Binding Credential
-  | Authorization_refused -> Binding Credential
+  | Authorization_refused -> Binding Account_access
   | Payment_required -> Binding Account
   | Invalid_request -> Unattributed
   | Not_found -> Binding Model_absent

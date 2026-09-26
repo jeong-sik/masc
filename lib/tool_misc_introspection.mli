@@ -33,6 +33,6 @@ val tool_inventory_json :
     Handlers take [args : Yojson.Safe.t] (the JSON-RPC [params] object)
     and return {!tool_result}. *)
 
-val handle_config : tool_name:string -> start_time:float -> Yojson.Safe.t -> tool_result
+val handle_config : tool_name:string -> start_time:Tool_timing.started -> Yojson.Safe.t -> tool_result
 (** [handle_config ~tool_name ~start_time args] returns the auth-config
     snapshot filtered by [args.category] (optional string).  Read-only. *)

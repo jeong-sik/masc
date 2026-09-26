@@ -1149,9 +1149,9 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
      the way an editor's side bar stops above the command line. *)
   let pane_cols = !acting_pane_reserved_cols in
   let full_cols = cols + pane_cols in
-  let framed = Buffer.create (String.length (Buffer.contents buf) + 256) in
+  let framed = Buffer.create (Buffer.length buf + 256) in
   (if pane_cols > 0 then begin
-     let left = Buffer.create (String.length (Buffer.contents buf) + 256) in
+     let left = Buffer.create (Buffer.length buf + 256) in
      List.iter
        (fun line ->
           Buffer.add_string left (Message_layout.fit_width line cols);
@@ -1231,7 +1231,26 @@ let surface_chrome_budget state ~terminal_rows =
    same. *)
 type chrome_frame = Chrome_screen | Chrome_overlay
 
-let surface_chrome ?clamped ?(frame = Chrome_screen) (state : state)
+(* What a body does with rows past its budget, said at the call rather than
+   left to a default. An optional clamp cost nothing to leave out, so a body
+   that fits, a body the keypress windows and a body that was silently losing
+   its tail all read the same at the call (#35716). *)
+type overflow =
+  | Fits
+  | Paged_by_cursor
+  | Scrolled of { scroll : int; report : int -> clamped_scroll }
+  | Self_scrolled of (unit -> clamped_scroll)
+
+(* The window a [Scrolled] body gets out of [count] rows: the budget, less the
+   position row when they overflow. The key handler that bounds the scroll and
+   the frame that draws it both ask this. *)
+let surface_window_height state ~terminal_rows ~count =
+  Masc_tui_scroll.content_height
+    ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
+    ~chrome:surface_chrome_rows ~count ~preview_keep:None
+    ~overflow_takes_row:true
+
+let surface_chrome ~overflow ?(frame = Chrome_screen) (state : state)
     ~terminal_rows ~cols ~surface_key ~title ~hints
     ~(body : budget:int -> chrome_body -> unit) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -1255,38 +1274,71 @@ let surface_chrome ?clamped ?(frame = Chrome_screen) (state : state)
   line buf cols title;
   divider buf cols;
   let budget = max 1 (rows - surface_chrome_rows) in
-  let used = ref 0 in
-  (* A push past the budget draws nothing. The alternative — drawing it —
-     shoves the bottom gap and the footer off screen, which breaks every
-     row below the surface for the whole frame. Rows a body offers past
-     its budget read as cut at the bottom edge, the same truncation a
-     scrolled list already means; bodies that need them all paginate
-     against ~budget, as the migrated surfaces do. *)
-  let counted draw arg =
-    if !used < budget then begin incr used; draw arg end
-  in
+  (* The body's rows are held until it has finished, because only then is
+     their count known: which of them the budget shows, and what the row that
+     says so reads, are the contract's to work out, not the body's. *)
+  let pushed = ref [] in
+  let hold draw = pushed := draw :: !pushed in
   let body_pushers =
-    { push = counted (fun text -> line buf cols text)
+    { push = (fun text -> hold (fun () -> line buf cols text))
     ; push_styled =
-        (fun ~style text ->
-          counted (fun text -> line_styled buf cols ~style text) text)
-    ; push_selected = counted (fun text -> line_selected buf cols text)
-    ; push_divider = counted (fun () -> divider buf cols)
-    ; push_empty = counted (fun () -> empty buf cols)
+        (fun ~style text -> hold (fun () -> line_styled buf cols ~style text))
+    ; push_selected = (fun text -> hold (fun () -> line_selected buf cols text))
+    ; push_divider = (fun () -> hold (fun () -> divider buf cols))
+    ; push_empty = (fun () -> hold (fun () -> empty buf cols))
     }
   in
   body ~budget body_pushers;
+  let held = List.rev !pushed in
+  let count = List.length held in
+  (* No row is drawn past the budget: one more shoves the bottom rule and the
+     footer off the screen. *)
+  let used = ref 0 in
+  let draw_row draw =
+    if !used < budget then begin incr used; draw () end
+  in
+  let draw_note text =
+    draw_row (fun () -> line_styled buf cols ~style:(Theme.recede ()) text)
+  in
+  (* A body that came out taller than its budget keeps its head and says how
+     much of its tail the screen could not hold. Cut without the note, the
+     missing rows did not exist for the reader. *)
+  let draw_cut () =
+    if count <= budget then List.iter draw_row held
+    else begin
+      List.iteri (fun index draw -> if index < budget - 1 then draw_row draw) held;
+      let hidden = count - (budget - 1) in
+      draw_note
+        (Printf.sprintf "  +%d %s not shown" hidden
+           (if hidden = 1 then "row" else "rows"))
+    end
+  in
+  let clamped =
+    match overflow with
+    | Fits | Paged_by_cursor -> draw_cut (); None
+    | Self_scrolled read ->
+        draw_cut ();
+        (* Read after the body, because that is the only moment the value
+           exists: a body that windows part of itself cannot say what it
+           clamped to before it has drawn. *)
+        Some (read ())
+    | Scrolled { scroll; report } ->
+        let height = surface_window_height state ~terminal_rows ~count in
+        let scroll = Masc_tui_scroll.normalize ~count ~height scroll in
+        List.iteri
+          (fun index draw ->
+            if index >= scroll && index < scroll + height then draw_row draw)
+          held;
+        Option.iter draw_note
+          (Masc_tui_scroll.position_row ~scroll ~height count);
+        Some (report scroll)
+  in
   for _ = !used + 1 to budget do
     empty buf cols
   done;
   bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
-  (* Read after the body, because that is the only moment the value exists:
-     a surface whose rows the drawing counts cannot say what it clamped to
-     before it has drawn. A thunk rather than a value for the same reason. *)
-  finish_surface state
-    ?clamped:(match clamped with None -> None | Some read -> read ())
-    ~surface_key ~rows:terminal_rows ~cols buf
+  finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols buf
 
 
 let connection_status_badge (status : Masc_tui_types.connection_status) =

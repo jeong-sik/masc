@@ -77,7 +77,7 @@ def write_ready_keeper(root: Path, name: str) -> None:
             [
                 "[keeper]",
                 'sandbox_profile = "docker"',
-                'sandbox_image = "masc-sandbox:general"',
+                'sandbox_image = "base"',
                 'network_mode = "inherit"',
                 "",
             ]
@@ -840,7 +840,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             "tool": "WebSearch",
             "input": {"query": "latest MASC MCP keeper proof"},
             "output": json.dumps({"ok": True}),
-            "success": True,
+            "wire_outcome": "ok",
         }
 
         evidence = audit.web_search_evidence_from_tool_call(row, "06.jsonl")
@@ -855,6 +855,21 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             },
         )
 
+    def test_web_search_evidence_rejects_unobserved_or_failed_global_tool_call(self):
+        for wire_outcome in ("unknown", "error"):
+            row = {
+                "ts": 110.0,
+                "keeper": "alpha",
+                "tool": "WebSearch",
+                "input": {"query": "latest MASC MCP keeper proof"},
+                "output": json.dumps({"ok": True}),
+                "wire_outcome": wire_outcome,
+            }
+
+            evidence = audit.web_search_evidence_from_tool_call(row, "06.jsonl")
+
+            self.assertEqual(evidence, set(), wire_outcome)
+
     def test_scan_keeper_web_search_evidence_filters_keeper_not_run_id(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -867,7 +882,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     "tool": "masc_web_search",
                     "input": {"query": "keeper proof old-run"},
                     "output": json.dumps({"ok": True}),
-                    "success": True,
+                    "wire_outcome": "ok",
                 },
                 {
                     "ts": 90.0,
@@ -875,7 +890,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     "tool": "masc_web_search",
                     "input": {"query": "keeper proof current-run"},
                     "output": json.dumps({"ok": True}),
-                    "success": True,
+                    "wire_outcome": "ok",
                 },
                 {
                     "ts": 95.0,
@@ -883,7 +898,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     "tool": "masc_web_search",
                     "input": {"query": "keeper proof current-run"},
                     "output": json.dumps({"ok": True}),
-                    "success": True,
+                    "wire_outcome": "ok",
                 },
             ]
             (calls_dir / "06.jsonl").write_text(

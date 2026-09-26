@@ -471,6 +471,54 @@ let test_librarian_dropped_target_still_writes_the_claim () =
     (revised_events (events_for ~keepers_dir:env.keepers_dir ~keeper_id))
 ;;
 
+(* A Librarian copy stays the Librarian's to revise after the Librarian drops
+   it: naming it is refused as not authored, exactly as while it was current,
+   and nothing is written. *)
+let test_dropped_librarian_copy_is_still_not_authored () =
+  with_env
+  @@ fun env ->
+  let meta = make_meta "supersede-dropped-copy" in
+  let keeper_id = meta.name in
+  let injected : Types.fact =
+    Types.observed
+      ~claim:"librarian summary of the session"
+      ~category:Types.Fact
+      ~now:100.
+      ~origin:{ kind = Types.Injected; trace_id = "pass" }
+  in
+  let librarian_pass ?dropped_statements ~expected_revision facts =
+    match
+      Current.replace
+        ?dropped_statements
+        ~keepers_dir:env.keepers_dir
+        ~keeper_id
+        ~expected_revision
+        ~now:(Unix.gettimeofday ())
+        ~source:{ Current.kind = Current.Librarian; trace_id = "pass" }
+        ~facts
+        ()
+    with
+    | Ok (committed : Current.t) -> committed.revision
+    | Error detail -> Alcotest.fail detail
+  in
+  let added = librarian_pass ~expected_revision:None [ injected ] in
+  let _dropped =
+    librarian_pass
+      ~dropped_statements:
+        [ { Types.memory_id = Types.memory_id injected; reason = "stale summary" } ]
+      ~expected_revision:(Some added)
+      []
+  in
+  let before_ids = current_ids ~keepers_dir:env.keepers_dir ~keeper_id in
+  let before_revision = revision ~keepers_dir:env.keepers_dir ~keeper_id in
+  let label = "dropped librarian copy" in
+  check_refused
+    ~error_kind:"supersedes_not_authored"
+    label
+    (write env meta ~supersedes:(Types.memory_id injected) "my own summary");
+  check_nothing_written env ~keeper_id ~before_ids ~before_revision ~before_events:0 label
+;;
+
 (* A target the keeper replaced itself may already have a current successor;
    writing again would put a second copy beside it. That stays refused, and
    the refusal names the commit and its "superseded_by" reason. *)
@@ -607,6 +655,10 @@ let () =
             "a target the Librarian dropped still writes the claim"
             `Quick
             test_librarian_dropped_target_still_writes_the_claim
+        ; Alcotest.test_case
+            "a dropped librarian copy is still not authored"
+            `Quick
+            test_dropped_librarian_copy_is_still_not_authored
         ; Alcotest.test_case
             "an own superseded target is refused with its removal"
             `Quick

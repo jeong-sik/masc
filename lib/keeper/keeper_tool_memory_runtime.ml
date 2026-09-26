@@ -1299,9 +1299,9 @@ let memory_write_rejection_fields error_kind =
     at
       "supersedes"
       "No current fact of yours has this memory_id. When supersedes_removed is \
-       present it names the commit that removed it, and a superseded_by reason \
-       names the fact now current. Otherwise search memory for the fact you \
-       mean to replace and pass the memory_id it returns."
+       present it names the commit that removed it; a superseded_by reason \
+       names the fact that replaced it. Otherwise search memory for the fact \
+       you mean to replace and pass the memory_id it returns."
   | Supersedes_premise_of_successor ->
     at
       "premise_ids"
@@ -1494,11 +1494,19 @@ let memory_write_basis_receipt = function
 
    With [supersedes] the named fact leaves in the same commit the new one
    arrives; the store refuses a target that is not this keeper's own current
-   authored fact. A target the Librarian already dropped is the one exception:
-   what the keeper asked for (the target gone, the claim current) is reached
-   by writing the claim, so it is written and the receipt names the removal.
-   A target this keeper removed itself stays refused, with the removal named:
-   its successor may already be current, and writing again would copy it. *)
+   authored fact. One exception: an authored fact of this keeper that the
+   Librarian already dropped. What the keeper asked for (the target gone, the
+   claim current) is reached by writing the claim, so it is written and the
+   receipt names the removal.
+
+   A refusal is kept only where the keeper has a better move. An explicit
+   write or retraction (the keeper's own, or the operator's dashboard
+   cleanup) stays refused with the removal named: a superseded_by reason
+   points at an authored successor the keeper can supersede instead. A
+   Librarian revision also leaves a current successor, but an injected one the
+   keeper cannot supersede; refusing there only leads to the same claim being
+   written beside it one call later. A dropped Librarian copy is refused as
+   not authored, as it was while current. *)
 type explicit_write_error =
   | Write_unsupported_derivation of Keeper_memory_os_current.support_invalidation
   | Write_successor_rests_on_target of Keeper_memory_os_current.support_invalidation
@@ -1562,13 +1570,16 @@ let upsert_explicit_fact
        | Error (Keeper_memory_os_current.Supersede_target_not_current target) ->
          (match Keeper_memory_os_current.find_removal ~keepers_dir ~keeper_id target with
           | Keeper_memory_os_current.Removed removal ->
-            (match removal.removed_by.kind with
-             | Keeper_memory_os_current.Librarian ->
+            (match removal.removed_by.kind, removal.removed_origin with
+             | Keeper_memory_os_current.Librarian, Keeper_memory_os_types.Authored ->
                upsert ()
                |> Result.map (fun snapshot ->
                  snapshot, Target_already_dropped { memory_id = target; removal })
-             | Keeper_memory_os_current.Explicit_write
-             | Keeper_memory_os_current.Explicit_retract ->
+             | Keeper_memory_os_current.Librarian, Keeper_memory_os_types.Injected ->
+               Error (Write_supersede_refused Supersedes_not_authored)
+             | ( ( Keeper_memory_os_current.Explicit_write
+                 | Keeper_memory_os_current.Explicit_retract )
+               , ( Keeper_memory_os_types.Authored | Keeper_memory_os_types.Injected ) ) ->
                Error (Write_supersede_target_removed removal))
           | Keeper_memory_os_current.No_removal_recorded ->
             Error (Write_supersede_refused Supersedes_not_current)
@@ -1861,7 +1872,7 @@ let keeper_memory_write_with_outcome
             supersedes)
      | Error (Write_supersede_target_removed removal) ->
        (* Still [Supersedes_not_current]; the removal is shown so the keeper
-          can see what already replaced or retracted it. *)
+          can see which explicit write or retraction removed it. *)
        respond
          ~ok:false
          ~error_kind:Supersedes_not_current

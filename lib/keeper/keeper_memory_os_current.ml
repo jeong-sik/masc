@@ -1845,6 +1845,7 @@ type removal =
   { removed_in_revision : int
   ; removed_at : float
   ; removed_by : source
+  ; removed_origin : Keeper_memory_os_types.origin_kind
   ; drop_reason : string option
   }
 
@@ -1861,14 +1862,12 @@ type journal_mention =
    decides. A line that adds it (a re-observation lists it on both sides)
    leaves it current after that line, so no removal is reported. A line this
    build cannot decode is passed over, which can only turn a removal into
-   [No_removal_recorded]. *)
+   [No_removal_recorded]. An identity no line names is scanned to the start
+   of the file, decoding every line, so the scan runs as one pool job, as the
+   tail reader above does. *)
 let find_removal ~keepers_dir ~keeper_id target =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let names_target facts =
-    List.exists
-      (fun fact -> String.equal (Keeper_memory_os_types.memory_id fact) target)
-      facts
-  in
+  let is_target fact = String.equal (Keeper_memory_os_types.memory_id fact) target in
   let reason_for dropped =
     Option.bind dropped (fun statements ->
       List.find_map
@@ -1881,24 +1880,29 @@ let find_removal ~keepers_dir ~keeper_id target =
     | Dated_jsonl.Parsed json ->
       (match journal_entry_of_json json with
        | Ok (Journal_committed { recorded_at; revision; source; change; dropped }) ->
-         if names_target change.added
+         if List.exists is_target change.added
          then Some Mentioned_as_current
-         else if names_target change.removed
-         then
-           Some
-             (Mentioned_as_removed
-                { removed_in_revision = revision
-                ; removed_at = recorded_at
-                ; removed_by = source
-                ; drop_reason = reason_for dropped
-                })
-         else None
+         else (
+           match List.find_opt is_target change.removed with
+           | Some (removed : Keeper_memory_os_types.fact) ->
+             Some
+               (Mentioned_as_removed
+                  { removed_in_revision = revision
+                  ; removed_at = recorded_at
+                  ; removed_by = source
+                  ; removed_origin = removed.origin.kind
+                  ; drop_reason = reason_for dropped
+                  })
+           | None -> None)
        | Ok (Journal_failed _ | Journal_quarantined _) | Error _ -> None)
   in
   if not (Sys.file_exists path)
   then No_removal_recorded
   else (
-    match Dated_jsonl.find_latest_entry_in_file_result path mention with
+    match
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        Dated_jsonl.find_latest_entry_in_file_result path mention)
+    with
     | Ok (Some (Mentioned_as_removed removal)) -> Removed removal
     | Ok (Some Mentioned_as_current | None) -> No_removal_recorded
     | Error error -> Journal_unreadable (Dated_jsonl.read_error_to_string error))

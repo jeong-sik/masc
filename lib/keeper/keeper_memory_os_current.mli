@@ -194,8 +194,9 @@ val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
     [recorded_at]/[revision]/[source]/[change] plus [dropped] when the writer
     supplied drop-reason statements; the resulting fact count is derivable as
     [change.retained + length change.added] and is deliberately not duplicated.
-    On the turn path only {!find_removal} reads it, and only after a
-    [keeper_memory_write] supersedes target was found not current. *)
+    Writes read it only to reconcile a pending retraction plan receipt, and
+    [keeper_memory_write] reads it through {!find_removal} only after a
+    supersedes target was found not current. *)
 val journal_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
 (** WAL sidecar joining each runtime cluster's typed durable completed-turn
@@ -246,11 +247,14 @@ val read_journal_tail :
 
 (** How one memory identity left this keeper's current snapshot, from the
     journal line that removed it: the revision, its commit time, the writer
-    ([removed_by]) and the drop statement's reason when the writer gave one. *)
+    ([removed_by]), the removed fact's origin, and the drop statement's reason
+    when the writer gave one. [removed_by.kind = Explicit_retract] covers the
+    keeper's own retraction and the operator's dashboard cleanup alike. *)
 type removal =
   { removed_in_revision : int
   ; removed_at : float
   ; removed_by : source
+  ; removed_origin : Keeper_memory_os_types.origin_kind
   ; drop_reason : string option
   }
 
@@ -264,9 +268,9 @@ type removal_lookup =
   | Journal_unreadable of string
 
 (** Scan this keeper's journal newest first for the line that removed
-    [memory_id], stopping at the first line that names it. A line this build
-    cannot decode is passed over, so an undecodable removal line reads as
-    [No_removal_recorded]. *)
+    [memory_id], stopping at the first line that names it, as one IO pool job.
+    A line this build cannot decode is passed over, so an undecodable removal
+    line reads as [No_removal_recorded]. *)
 val find_removal :
   keepers_dir:string -> keeper_id:string -> string -> removal_lookup
 

@@ -419,6 +419,17 @@ let test_task_status_to_yojson_cancelled_with_reason () =
    task_status_of_yojson Tests
    ============================================================ *)
 
+let test_awaiting_submission_rejects_intent () =
+  List.iter (fun intent ->
+    let json = match awaiting_status_json with
+      | `Assoc fields -> `Assoc (("intent", intent) :: fields)
+      | _ -> fail "awaiting fixture is not an object"
+    in
+    match Masc_domain.task_status_of_yojson json with
+    | Error _ -> ()
+    | Ok _ -> fail "an intent-bearing submission was reinterpreted as completion")
+    [ `String "cancel"; `String "complete"; `String "unknown"; `Null ]
+
 let test_task_status_of_yojson_todo () =
   let json = `Assoc [("status", `String "todo")] in
   match Masc_domain.task_status_of_yojson json with
@@ -1767,6 +1778,7 @@ let () =
       test_case "cancelled with reason" `Quick test_task_status_to_yojson_cancelled_with_reason;
     ];
     "task_status_of_yojson", [
+      test_case "awaiting submissions reject intent" `Quick test_awaiting_submission_rejects_intent;
       test_case "todo" `Quick test_task_status_of_yojson_todo;
       test_case "claimed" `Quick test_task_status_of_yojson_claimed;
       test_case "in_progress" `Quick test_task_status_of_yojson_in_progress;

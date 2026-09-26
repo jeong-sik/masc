@@ -254,8 +254,13 @@ let guest_target
          ~expected:meta.sandbox_profile
          ~actual:sandbox_profile)
   else
+    match binding.image with
+    | Error error ->
+      Error
+        (target_error ~class_:Tool_result.Dependency_unavailable
+           (Keeper_turn_sandbox_runtime.image_unresolved_message error))
+    | Ok image ->
     let runtime = binding.runtime in
-    let image = binding.image in
     let target, observe_route =
       match guest_profile with
       | Docker_guest ->

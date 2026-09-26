@@ -462,6 +462,14 @@ def selected_row(post_id: bytes) -> re.Pattern[bytes]:
     )
 
 
+class PtyOutput(bytearray):
+    """Output and its last observed byte belong to the same terminal session."""
+
+    pid: int | None = None
+    last_byte_at: float | None = None
+    last_byte_ticks: tuple[int, int] | None = None
+
+
 def read_available(master_fd: int, output: bytearray) -> None:
     while True:
         try:
@@ -475,6 +483,11 @@ def read_available(master_fd: int, output: bytearray) -> None:
         if not chunk:
             return
         output.extend(chunk)
+        if isinstance(output, PtyOutput):
+            output.last_byte_at = time.monotonic()
+            output.last_byte_ticks = (
+                _child_cpu_ticks(output.pid) if output.pid is not None else None
+            )
 
 
 # A needle the screen already drew before the keypress is a different failure
@@ -527,52 +540,53 @@ def _stall_line(
     *,
     started_at: float,
     started_len: int,
-    last_byte_at: float,
+    last_byte_at: float | None,
     last_byte_ticks: tuple[int, int] | None,
 ) -> str:
     """One bracketed line for a wait that timed out, task-1776.
 
     The three readings separate the ways a PTY wait dies: silence counts from
     the last byte the PTY delivered, so a screen that froze mid-draw reads
-    differently from one that never drew; loadavg is sampled at the timeout;
-    the child CPU delta is measured from the last byte, so CPU spent before a
-    later freeze is excluded. Reads /proc and getloadavg only --
-    no timeout, needle or wait behaviour changes because of it.
+    differently from one that never drew; loadavg is copied from /proc at the
+    timeout; the child CPU snapshot and delta use the last byte as their
+    baseline. No timeout, needle or wait behaviour changes because of it.
     """
     now = time.monotonic()
     try:
         with open("/proc/loadavg", "rt", encoding="ascii") as loadavg:
-            load = tuple(float(value) for value in loadavg.read().split()[:3])
-    except (OSError, ValueError):
-        try:
-            load = os.getloadavg()
-        except (AttributeError, OSError):
-            load = None
-    parts = [
+            load = loadavg.read().rstrip("\n")
+    except OSError:
+        load = "unavailable"
+    silence = (
         f"silence {now - last_byte_at:.2f}s"
-        f" (wait ran {now - started_at:.2f}s,"
+        if last_byte_at is not None else "last byte unavailable"
+    )
+    parts = [
+        silence
+        + f" (wait ran {now - started_at:.2f}s,"
         f" bytes {started_len} -> {len(output)})",
-        (
-            f"loadavg(at timeout) {load[0]:.2f}/{load[1]:.2f}/{load[2]:.2f}"
-            if load is not None and len(load) == 3
-            else "loadavg(at timeout) n/a"
-        ),
+        f"loadavg(at timeout) {load}",
     ]
     ended = (
         _child_cpu_ticks(process.pid) if process.pid is not None else None
     )
     if last_byte_ticks is None or ended is None:
-        parts.append("child utime/stime since last byte n/a")
+        parts.append("child utime/stime unavailable")
     else:
         try:
             hz = os.sysconf("SC_CLK_TCK")
-            user = (ended[0] - last_byte_ticks[0]) / hz
-            system = (ended[1] - last_byte_ticks[1]) / hz
+            last_user, last_system = (value / hz for value in last_byte_ticks)
+            end_user, end_system = (value / hz for value in ended)
+            user_delta = end_user - last_user
+            system_delta = end_system - last_system
             parts.append(
-                f"child utime/stime since last byte +{user:.2f}s/+{system:.2f}s"
+                "child utime/stime "
+                f"at last byte {last_user:.2f}s/{last_system:.2f}s; "
+                f"at timeout {end_user:.2f}s/{end_system:.2f}s; "
+                f"delta +{user_delta:.2f}s/+{system_delta:.2f}s"
             )
         except (OSError, ValueError):
-            parts.append("child utime/stime since last byte n/a")
+            parts.append("child utime/stime unavailable")
     return " [stall: " + "; ".join(parts) + "]"
 
 
@@ -584,27 +598,17 @@ def poll_for_output(
     *,
     start: int,
     timeout: float,
-    on_byte: Callable[[float, tuple[int, int] | None], None] | None = None,
 ) -> bool:
     """True once ``needle`` lands at or after ``start``, False once ``timeout`` passes.
 
     A caller that has something to do when it does not arrive -- press the key
     again, say -- needs the answer rather than the exception. An exited TUI
-    still raises: no amount of waiting brings it back. ``on_byte``, when
-    given, is called once per loop iteration in which new bytes landed, with
-    the time and child CPU ticks sampled at that point; wait_for_output uses
-    both to date the last byte it ever saw.
+    still raises: no amount of waiting brings it back. ``read_available``
+    records byte observations across all waits in the terminal session.
     """
     deadline = time.monotonic() + timeout
-    seen_len = len(output)
     while find_needle(output, needle, start) < 0:
         read_available(master_fd, output)
-        if on_byte is not None and len(output) != seen_len:
-            seen_len = len(output)
-            on_byte(
-                time.monotonic(),
-                _child_cpu_ticks(process.pid) if process.pid is not None else None,
-            )
         if process.poll() is not None:
             raise AssertionError(f"TUI exited before {needle!r}: {bytes(output)!r}")
         remaining = deadline - time.monotonic()
@@ -625,16 +629,6 @@ def wait_for_output(
 ) -> None:
     started_at = time.monotonic()
     started_len = len(output)
-    started_ticks = (
-        _child_cpu_ticks(process.pid) if process.pid is not None else None
-    )
-    last_byte_at = [started_at]
-    last_byte_ticks = [started_ticks]
-
-    def note_byte(at: float, ticks: tuple[int, int] | None) -> None:
-        last_byte_at[0] = at
-        last_byte_ticks[0] = ticks
-
     if poll_for_output(
         process,
         master_fd,
@@ -642,7 +636,6 @@ def wait_for_output(
         needle,
         start=start,
         timeout=timeout,
-        on_byte=note_byte,
     ):
         return
     stall = _stall_line(
@@ -650,8 +643,8 @@ def wait_for_output(
         output,
         started_at=started_at,
         started_len=started_len,
-        last_byte_at=last_byte_at[0],
-        last_byte_ticks=last_byte_ticks[0],
+        last_byte_at=output.last_byte_at if isinstance(output, PtyOutput) else None,
+        last_byte_ticks=output.last_byte_ticks if isinstance(output, PtyOutput) else None,
     )
     raise AssertionError(
         f"timed out waiting for {needle!r}"
@@ -2076,7 +2069,7 @@ def run_terminal_scenario(
         return
     executable = tui_executable(executable)
     master_fd, slave_fd = os.openpty()
-    output = bytearray()
+    output = PtyOutput()
     process: subprocess.Popen[bytes] | None = None
     try:
         fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
@@ -2177,6 +2170,7 @@ def run_terminal_scenario(
                     preexec_fn=configure_child_terminal,
                     close_fds=True,
                 )
+                output.pid = process.pid
                 wait_for_stop(
                     process,
                     master_fd,

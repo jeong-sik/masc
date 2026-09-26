@@ -1,6 +1,6 @@
-(** The Goal tool definitions live in config/tools/masc_goal_*.toml. This
-    pins what they emit. The loader publishes every masc_goal_*.toml, so a new
-    file adds a tool here too: #38784 added masc_goal_measure.
+(** The Goal tool definitions live in config/tools/masc_goal_*.toml. Goal
+    schemas are loaded for the closed Goal_name variant, so both the embedded
+    TOML file set and the per-tool output pins must stay in sync with it.
 
     The first three (list, transition, upsert) moved out of an OCaml literal.
 
@@ -56,6 +56,18 @@ let test_schemas_match_their_declarations () =
       schema.name, schema.description, Yojson.Safe.to_string schema.input_schema)
   in
   let emitted_names = List.map (fun (name, _, _) -> name) emitted in
+  let embedded_goal_names =
+    Embedded_config.file_list
+    |> List.filter (fun path ->
+      Filename.dirname path = "tools"
+      && Filename.check_suffix path ".toml"
+      && String.starts_with ~prefix:"masc_goal_" (Filename.basename path))
+    |> List.map (fun path -> Filename.remove_extension (Filename.basename path))
+    |> List.sort String.compare
+  in
+  check (list string) "embedded Goal TOMLs match Goal_name variants"
+    (List.sort String.compare declared_names)
+    embedded_goal_names;
   List.iter
     (fun name ->
       check bool (name ^ ": declared Goal tool has a schema pin") true

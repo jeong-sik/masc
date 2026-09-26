@@ -5288,6 +5288,10 @@ type state = {
      the first load answers: an empty list is a fact about the workspace and
      "not looked yet" is not. *)
   mutable operator_stalled: Masc_tui_agenda.stalled list option;
+  (* Goals the verifier proved and only the operator's confirmation closes,
+     read from the goal store on the same load as the tasks, so the agenda
+     names them on every surface rather than only on Planning. *)
+  mutable goals_to_confirm: Masc_tui_agenda.goal_to_confirm Masc_tui_agenda.reading;
   (* Whether the Overview task list owns j/k and which task it has chosen,
      by id. An index into the rows would name another task after a poll
      drops a finished one. *)
@@ -5311,10 +5315,11 @@ type state = {
      the scroll survives only while it is open. *)
   mutable agenda_open: bool;
   mutable agenda_scroll: int;
-  (* The row Enter acts on. Held apart from the scroll because the two move
-     for different reasons: the scroll follows the cursor, and a panel whose
-     rows are mostly prose has a cursor that skips most of them. *)
-  mutable agenda_cursor: int;
+  (* The identity Enter opens, retained across refreshes. Its row is derived
+     from the current projection, so an inserted/reordered Goal cannot take
+     the selection of another Goal or a Task. A removed identity opens nothing
+     until an explicit navigation key selects another target. *)
+  mutable agenda_selected: Masc_tui_agenda.destination;
   (* The [@] answering overlay: the footer badge says that keepers are
      mid-turn, and this says which ones, on which lane, for how long. Modal
      like the agenda sheet, and like it the scroll survives only while it
@@ -7760,6 +7765,7 @@ let create_state
   tasks_domain = [];
   task_flow = None;
   operator_stalled = None;
+  goals_to_confirm = Masc_tui_agenda.Not_read;
   task_focus = Masc_tui_overview_tasks.No_task_focus;
   task_reading = Masc_tui_overview_tasks.Rows_unread;
   help_open = false;
@@ -7771,7 +7777,7 @@ let create_state
   keeper_deletions = None;
   agenda_open = false;
   agenda_scroll = 0;
-  agenda_cursor = 0;
+  agenda_selected = Masc_tui_agenda.Nowhere;
   hints_visible = true;
   coalesce_queued_input = true;
   user_input_priority_next = true;
@@ -8894,6 +8900,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
         (List.map
            (fun (held : Tui_decode.keeper_tool_approval) ->
               { Masc_tui_agenda.asked_by = held.kta_keeper
+              ; tool_call_id = held.kta_tool_call_id
               ; question = held.kta_tool
               ; asked_at = held.kta_asked_at
               ; timeout_sec = held.kta_timeout_sec
@@ -8907,7 +8914,8 @@ let agenda (state : state) : Masc_tui_agenda.t =
     | None, None -> Masc_tui_agenda.Not_read
     | Some rows, _ -> Masc_tui_agenda.Read rows
   in
-  Masc_tui_agenda.project ~scheduled ~awaiting ~stalled
+  Masc_tui_agenda.project ~scheduled ~awaiting
+    ~confirming:state.goals_to_confirm ~stalled
 ;;
 
 (* Rows the agenda strip takes from every surface. Added once, here, rather

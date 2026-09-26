@@ -229,6 +229,32 @@ let load_active_tasks (base_path : string) :
                 ; since_iso = Masc.Operator_task_attention.waiting_since item
                 })) )
 
+(* The Goals the verifier proved, each waiting on the operator's confirmation.
+   Read from the goal store the way the tasks above are read from the backlog,
+   so the agenda has the answer on every surface and not only on Planning. A
+   store that does not read is said as such rather than as an empty list.
+   Titles and the failure are made one printable row here, as every other
+   goal title on the screen is. *)
+let load_goals_to_confirm (base_path : string) :
+    Masc_tui_agenda.goal_to_confirm Masc_tui_agenda.reading =
+  let config = Workspace_core.default_config base_path in
+  match
+    Goal_store.list_goals_result config ~phase:Goal_phase.Awaiting_confirmation ()
+  with
+  | Error unavailable ->
+      Masc_tui_agenda.Read_failed
+        (Masc_tui_ansi.Terminal_text.single_line
+           ("goals load failed: " ^ Goal_store.unavailable_to_string unavailable))
+  | Ok goals ->
+      Masc_tui_agenda.Read
+        (List.map
+           (fun (goal : Goal_store.goal) ->
+             { Masc_tui_agenda.goal_id = goal.id
+             ; title = Masc_tui_ansi.Terminal_text.single_line goal.title
+             ; since_iso = goal.updated_at
+             })
+           goals)
+
 (** Apply one strict bounded metrics snapshot to the mutable screen state. *)
 let apply_keeper_log_snapshot (state : state)
     (snapshot : Metrics_tail.snapshot) =
@@ -349,6 +375,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
      left);
   state.task_flow <- task_flow;
   state.operator_stalled <- operator_stalled;
+  state.goals_to_confirm <- load_goals_to_confirm base_path;
 
   (* Capture navigation before replacing the roster. Detail and logs are bound
      to the selected row; message mode is bound to its explicit target. *)
@@ -480,6 +507,7 @@ let clear_local_workspace (state : state) =
   state.task_reading <- Masc_tui_overview_tasks.Rows_unread;
   state.task_flow <- None;
   state.operator_stalled <- None;
+  state.goals_to_confirm <- Masc_tui_agenda.Not_read;
   state.tasks_error <- None;
   state.keepers <- [];
   state.keepers_error <- None;

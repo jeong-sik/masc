@@ -19558,7 +19558,7 @@ and is loaded on demand through keeper_skill.
            let close () =
              state.agenda_open <- false;
              state.agenda_scroll <- 0;
-             state.agenda_cursor <- 0
+             state.agenda_selected <- Masc_tui_agenda.Nowhere
            in
            (match k with
             | ";" | "esc" -> close ()
@@ -19578,34 +19578,27 @@ and is loaded on demand through keeper_skill.
                      in
                      state.agenda_scroll <-
                        move ~count ~height state.agenda_scroll
-                 | targets ->
-                     let position =
-                       let rec find i = function
-                         | [] -> 0
-                         | index :: rest ->
-                             if index = state.agenda_cursor then i
-                             else find (i + 1) rest
-                       in
-                       find 0 targets
-                     in
-                     let next_position =
+                 | _ :: _ ->
+                     let direction =
                        match k with
-                       | "j" | "down" ->
-                           min (List.length targets - 1) (position + 1)
-                       | _ -> max 0 (position - 1)
+                       | "j" | "down" -> Masc_tui_agenda.Next
+                       | _ -> Masc_tui_agenda.Previous
                      in
-                     let cursor = List.nth targets next_position in
-                     state.agenda_cursor <- cursor;
+                     state.agenda_selected <-
+                       Masc_tui_agenda.step lines
+                         ~selected:state.agenda_selected direction;
                      let _, height = Masc_tui_render.agenda_viewport state in
-                     (* Keep the cursor row on screen, scrolling only as far
-                        as it takes, in either direction. *)
-                     if cursor < state.agenda_scroll then
-                       state.agenda_scroll <- cursor
-                     else if cursor >= state.agenda_scroll + height then
-                       state.agenda_scroll <- cursor - height + 1)
+                     Option.iter
+                       (fun cursor ->
+                          state.agenda_scroll <-
+                            Masc_tui_scroll.ensure_visible ~cursor ~height
+                              state.agenda_scroll)
+                       (Masc_tui_agenda.selected_index lines
+                          ~selected:state.agenda_selected))
             | "\r" ->
                 let lines = Masc_tui_render.agenda_lines state in
-                (match List.nth_opt lines state.agenda_cursor with
+                (match Masc_tui_agenda.selected_line lines
+                         ~selected:state.agenda_selected with
                  | Some { Masc_tui_agenda.goes_to = Masc_tui_agenda.Nowhere; _ }
                  | None -> ()
                  | Some
@@ -19616,6 +19609,29 @@ and is loaded on demand through keeper_skill.
                         which is where every held call is answered. *)
                      close ();
                      goto_surface state ~mailbox:async_messages Approvals
+                 | Some
+                     { Masc_tui_agenda.goes_to =
+                         Masc_tui_agenda.Goal_to_confirm goal_id
+                     ; _
+                     } ->
+                     (* The Goal's detail is where its proof is read and
+                        confirmed, the same landing a followed goal link
+                        gives. *)
+                     close ();
+                     (* The detail is reconciled against the filtered list on
+                        the next planning load, so a filter that hides Goals
+                        awaiting confirmation would send the operator back to
+                        the list. Only such a filter is widened. *)
+                     (match state.planning_filter with
+                      | Planning_filter_all | Planning_filter_active -> ()
+                      | Planning_filter_completed | Planning_filter_dropped ->
+                          state.planning_filter <- Planning_filter_active);
+                     goto_surface state ~mailbox:async_messages Planning;
+                     state.planning_mode <- Planning_detail goal_id;
+                     state.planning_scroll <- 0;
+                     state.goal_timeline <- None;
+                     launch_goal_timeline_load state ~mailbox:async_messages
+                       goal_id
                  | Some
                      { Masc_tui_agenda.goes_to =
                          Masc_tui_agenda.Stuck_task task_id
@@ -21567,13 +21583,9 @@ and is loaded on demand through keeper_skill.
            state.agenda_scroll <- 0;
            (* Open on the first row that leads somewhere rather than on the
               heading above it, so the first Enter answers something. *)
-           state.agenda_cursor <-
-             (match
-                Masc_tui_agenda.target_indexes
-                  (Masc_tui_render.agenda_lines state)
-              with
-              | first :: _ -> first
-              | [] -> 0)
+           state.agenda_selected <-
+             Masc_tui_agenda.step (Masc_tui_render.agenda_lines state)
+               ~selected:Masc_tui_agenda.Nowhere Masc_tui_agenda.Next
        | Some "i"
          when (not message_mode)
               && (match state.msg_target_keeper_name with

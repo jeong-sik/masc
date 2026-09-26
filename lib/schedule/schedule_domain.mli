@@ -68,8 +68,10 @@ type payload
 
 (** Who cancelled a schedule through [masc_schedule_cancel], and why, as the
     caller gave it. The actor is the caller the dispatch boundary resolved,
-    never an argument. *)
-type cancellation =
+    never an argument. Private so that only {!make_cancellation} builds one:
+    a blank reason written to the ledger would fail the next load of every
+    row. *)
+type cancellation = private
   { cancelled_by : actor
   ; reason : string
   }

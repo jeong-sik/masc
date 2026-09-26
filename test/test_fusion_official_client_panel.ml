@@ -348,7 +348,7 @@ let judge_synthesis_json ~answer =
     ]
 ;;
 
-let recording_agy_script ~input_path ~cwd ~response =
+let recording_agy_script ~input_path ~response =
   let init =
     `Assoc
       [ "event", `String "init"
@@ -356,7 +356,6 @@ let recording_agy_script ~input_path ~cwd ~response =
       ; ( "init"
         , `Assoc
             [ "model", `String "gemini-fixture"
-            ; "cwd", `String cwd
             ; "tools", `List []
             ; "permission_mode", `String "always-proceed"
             ] )
@@ -382,8 +381,9 @@ let recording_agy_script ~input_path ~cwd ~response =
             ] )
       ]
   in
-  Printf.sprintf "#!/bin/sh\nset -eu\ncat > %s\nprintf '%%s\\n' %s\nprintf '%%s\\n' %s\n"
+  Printf.sprintf "#!/bin/sh\nset -eu\ncat > %s\npython3 -c %s %s\nprintf '%%s\\n' %s\n"
     (shell_quote input_path)
+    (shell_quote "import json,os,sys; frame=json.loads(sys.argv[1]); frame['init']['cwd']=os.getcwd(); print(json.dumps(frame))")
     (shell_quote (Yojson.Safe.to_string init))
     (shell_quote (Yojson.Safe.to_string result))
 ;;
@@ -419,7 +419,7 @@ let frame_label = function
 
 let test_antigravity_judge_receives_its_system_prompt () =
   let snapshot = Runtime.For_testing.snapshot () in
-  let base_dir = Filename.temp_dir "fusion-agy-judge" "" in
+  let base_dir = Filename.temp_dir "fusion-agy-judge" "" |> Unix.realpath in
   Fun.protect
     ~finally:(fun () ->
       Runtime.For_testing.restore snapshot;
@@ -433,7 +433,7 @@ let test_antigravity_judge_receives_its_system_prompt () =
   let question = "QUESTION-MARKER which candidate ships?" in
   write_file ~path:oauth_source ~perm:0o600 "{}";
   write_file ~path:agy_cli ~perm:0o700
-    (recording_agy_script ~input_path ~cwd:base_dir
+    (recording_agy_script ~input_path
        ~response:(Yojson.Safe.to_string (judge_synthesis_json ~answer:"ship B")));
   write_file ~path:config_path ~perm:0o600 (agy_fixture ~agy_cli ~oauth_source);
   (match Runtime.init_default ~config_path with
@@ -791,6 +791,95 @@ let test_each_absent_handle_is_named () =
     (mentions neither "env" && mentions neither "clock")
 ;;
 
+let selected_account_agy_script = {|#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import sys
+
+root = Path(__file__).parent
+account_dir = Path(os.environ["HOME"])
+assert account_dir.is_relative_to(root / ".masc/official-clients/antigravity")
+assert account_dir.name.startswith("fusion-")
+assert account_dir.stat().st_mode & 0o777 == 0o700
+workspace = Path.cwd()
+assert workspace == account_dir / "native-workspace"
+assert workspace.stat().st_mode & 0o777 == 0o700
+assert "--sandbox" in sys.argv and "--disable-slash-commands" in sys.argv
+assert sys.argv[sys.argv.index("--mode") + 1] == "plan"
+assert [sys.argv[i + 1] for i, value in enumerate(sys.argv) if value == "--add-dir"] == [str(workspace)]
+assert not (account_dir / ".gemini/config/mcp_config.json").exists()
+policy = json.loads((account_dir / ".gemini/antigravity-cli/settings.json").read_text())["permissions"]
+assert policy["allow"] == ["mcp(masc/*)", "read_file(" + str(workspace) + ")"]
+assert policy["deny"] == ["write_file(*)", "command(*)", "read_url(*)", "execute_url(*)"]
+assert "XDG_CONFIG_HOME" not in os.environ
+credential = account_dir / ".gemini/antigravity-cli/antigravity-oauth-token"
+assert credential.stat().st_mode & 0o777 == 0o600
+before = credential.read_text()
+assert before in ["SELECTED_A", "SELECTED_A_REFRESHED", "SELECTED_B"]
+credential.write_text(before if before.endswith("_REFRESHED") else before + "_REFRESHED")
+with (root / "selected-accounts.jsonl").open("a") as log:
+    log.write(json.dumps({"home": str(account_dir), "cwd": str(workspace)}) + "\n")
+assert sys.stdin.read()
+model = sys.argv[sys.argv.index("--model") + 1]
+print(json.dumps({"event": "init", "conversation_id": "panel-fixture", "init": {
+    "model": model, "cwd": str(workspace), "tools": [], "permission_mode": "request-review"}}), flush=True)
+print(json.dumps({"event": "result", "result": {"conversation_id": "panel-fixture", "status": "SUCCESS",
+    "response": before, "num_turns": 1, "usage": {"input_tokens": 1, "output_tokens": 1,
+    "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 2}}}), flush=True)
+|}
+
+let test_antigravity_panel_selected_account_and_refresh () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let base_dir = Filename.temp_dir "fusion-agy-account" "" |> Unix.realpath in
+  let saved_env = List.map (fun key -> key, Sys.getenv_opt key) ["HOME"; "XDG_CONFIG_HOME"] in
+  Fun.protect ~finally:(fun () ->
+    List.iter (fun (key, value) -> Unix.putenv key (match value with Some value -> value | None -> "")) saved_env;
+    Runtime.For_testing.restore snapshot;
+    remove_tree base_dir) (fun () ->
+    let ambient = Filename.concat base_dir "ambient" in
+    Fs_compat.mkdir_p (Filename.concat ambient ".gemini/antigravity-cli");
+    let ambient_oauth = Filename.concat ambient ".gemini/antigravity-cli/antigravity-oauth-token" in
+    write_file ~path:ambient_oauth ~perm:0o600 "AMBIENT_MUST_NOT_BE_USED";
+    Unix.putenv "HOME" ambient;
+    Unix.putenv "XDG_CONFIG_HOME" (Filename.concat ambient ".config");
+    let agy_cli = Filename.concat base_dir "agy" in
+    write_file ~path:agy_cli ~perm:0o700 selected_account_agy_script;
+    let account_a = Filename.concat base_dir "account-a.oauth" in
+    let account_b = Filename.concat base_dir "account-b.oauth" in
+    write_file ~path:account_a ~perm:0o600 "SELECTED_A";
+    write_file ~path:account_b ~perm:0o600 "SELECTED_B";
+    let config_path = Filename.concat base_dir "runtime.toml" in
+    let select oauth_source =
+      write_file ~path:config_path ~perm:0o600 (agy_fixture ~agy_cli ~oauth_source);
+      match Runtime.init_default ~config_path with
+      | Ok () -> () | Error detail -> fail detail in
+    with_eio (fun ~sw:_ ~net:_ ->
+      List.iter (fun (source, expected) ->
+        select source;
+        match Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:agy_runtime
+            ~system_prompt:"Return the fixture answer." ~prompt:"Selected account." () with
+        | Ok text -> check string "selected account and native refresh observed" expected text
+        | Error error -> fail (Fusion_agent_core.panel_failure_text error))
+        [account_a, "SELECTED_A"; account_b, "SELECTED_B"; account_a, "SELECTED_A_REFRESHED"];
+      check string "selected source A untouched" "SELECTED_A" (Fs_compat.load_file account_a);
+      Unix.unlink account_a;
+      check bool "missing selected source refuses instead of ambient fallback" true
+        (Result.is_error (Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:agy_runtime
+           ~system_prompt:"" ~prompt:"Must refuse." ())));
+    check string "ambient account untouched" "AMBIENT_MUST_NOT_BE_USED" (Fs_compat.load_file ambient_oauth);
+    check string "selected source B untouched" "SELECTED_B" (Fs_compat.load_file account_b);
+    let rows = Fs_compat.load_file (Filename.concat base_dir "selected-accounts.jsonl")
+      |> String.split_on_char '\n' |> List.filter (fun row -> row <> "")
+      |> List.map Yojson.Safe.from_string in
+    let homes = List.map (fun row -> Yojson.Safe.Util.(row |> member "home" |> to_string)) rows in
+    match homes with
+    | [first; second; third] ->
+      check bool "different selected accounts have distinct state" true (first <> second);
+      check string "same account reuses refreshed state" first third
+    | _ -> fail "only three admitted model turns should spawn")
+;;
+
 let () =
   run
     "fusion official-client panel"
@@ -847,6 +936,8 @@ let () =
             "Antigravity judge receives its system prompt"
             `Quick
             test_antigravity_judge_receives_its_system_prompt
+        ; test_case "Antigravity selected account and native refresh" `Quick
+            test_antigravity_panel_selected_account_and_refresh
         ] )
     ; ( "seat routes"
       , [ test_case

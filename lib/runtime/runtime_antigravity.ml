@@ -57,35 +57,10 @@ let empty_success_detail_prefix = "successful result response has no deliverable
 
 let empty_success_stderr_bytes = 200
 
-(* The stderr tail rides into error details that reach the session log and
-   the dashboard — both the 8KB Process_exited detail and the empty-success
-   Turn_failed detail are assembled from it. A CLI failure can echo its
-   caller's environment: an Authorization header from a proxy config, an
-   API key on a command line, a token in a config dump. Lines carrying such
-   markers are replaced wholesale before any detail is assembled; every
-   other line is kept byte-identical so real diagnostics survive. *)
-let stderr_sensitive_markers =
-  [ "authorization:"
-  ; "bearer "
-  ; "api_key"
-  ; "apikey"
-  ; "token="
-  ; "/users/"
-  ; "/home/" ]
-;;
-
-let redact_stderr_tail tail =
-  String.concat "\n"
-    (List.map
-       (fun line ->
-          if
-            List.exists
-              (fun marker -> String_util.contains_substring_ci line marker)
-              stderr_sensitive_markers
-          then "[redacted]"
-          else line)
-       (String.split_on_char '\n' tail))
-;;
+(* Both process-exit and empty-success details pass through the same masking
+   boundary before projection. The shared structural patterns preserve useful
+   diagnostics while masking credentials, including standalone token values. *)
+let redact_stderr_tail = Secret_patterns.redact_text
 
 let empty_success_detail ~model ~tool_steps stderr =
   let trimmed = String.trim stderr in

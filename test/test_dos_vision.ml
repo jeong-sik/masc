@@ -56,7 +56,8 @@ let test_keeper_screen_carries_the_frame () =
         (match (screen ()).disposition with Tool_result.Failed _ -> true | _ -> false);
       (match
          Dos_lane.load ~who:"dos-player" ~ledger_dir:(Filename.concat base "dos")
-           ~saves_dir:(Filename.concat base "saves") ~program_name:"HELLO.COM"
+           ~saves_dir:(Filename.concat base "saves")
+           ~checkpoint_dir:(Filename.concat base "checkpoints") ~program_name:"HELLO.COM"
            ~program_bytes:hello_com ~files:[] ~announce:ignore
        with
        | Ok _ -> ()
@@ -73,7 +74,7 @@ let test_keeper_screen_carries_the_frame () =
       check int "height is the frame's" frame.height (json |> member "height" |> to_int);
       check bool "the text still rides along" true
         (String.length (json |> member "screen_text" |> to_string) > 0);
-      let dir = Keeper_vision_tool.vision_store_dir ~keeper_name:meta.name in
+      let dir = Keeper_vision_tool.frames_dir ~keeper_name:meta.name in
       let png =
         match
           Multimodal.Vision_artifact_store.load ~dir
@@ -90,7 +91,7 @@ let test_keeper_screen_carries_the_frame () =
        | Ok after -> check int "reading moved no time" before.steps after.steps
        | Error _ -> fail "machine gone");
       check int "reading pressed nothing" 0 (List.length (Dos_lane.ledger ()));
-      let other = Keeper_vision_tool.vision_store_dir ~keeper_name:"another-player" in
+      let other = Keeper_vision_tool.frames_dir ~keeper_name:"another-player" in
       check bool "not stored for another Keeper" false
         (Sys.file_exists (Filename.concat other handle)))
 ;;

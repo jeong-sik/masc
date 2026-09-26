@@ -475,6 +475,7 @@ let test_cli_size_verdict_table () =
     [ "an answer that is not JSON", L.Invalid_json_output { runtime_id; detail = "truncated" }, true
     ; "an answer the domain refused", L.Invalid_domain_output { runtime_id; detail = "schema" }, true
     ; "an id this module cannot run", L.Not_an_official_client { runtime_id }, false
+    ; "an id this module cannot find", L.Unknown_runtime { runtime_id }, false
     ; "a client that failed without saying why",
       L.Execution_failed
         { runtime_id; cause = Fusion_official_client.Setup_failure "quota" },

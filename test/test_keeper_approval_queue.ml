@@ -1270,12 +1270,26 @@ let test_workspace_drain_isolates_owner_failures () =
       Ok
         ({ started_ids = [ "approval-b" ]
          ; failures = []
+         ; blocker = None
          }
           : Gate.For_testing.owner_drain_outcome)
     | "owner-c" ->
       Ok
         ({ started_ids = []
          ; failures = [ "approval-c", "owner-c worker unavailable" ]
+         ; blocker =
+             Some
+               (Gate.Drain_start_failed
+                  ("approval-c", "owner-c worker unavailable"))
+         }
+          : Gate.For_testing.owner_drain_outcome)
+    | "owner-d" ->
+      (* Starts nothing and fails nothing: only the typed blocker explains
+         why this owner's queue did not move (#25979). *)
+      Ok
+        ({ started_ids = []
+         ; failures = []
+         ; blocker = Some (Gate.Drain_owner_at_capacity [ "approval-d-active" ])
          }
           : Gate.For_testing.owner_drain_outcome)
     | unexpected -> Alcotest.failf "unexpected owner %s" unexpected
@@ -1284,6 +1298,7 @@ let test_workspace_drain_isolates_owner_failures () =
     [ "/workspace", "owner-a"
     ; "/workspace", "owner-b"
     ; "/workspace", "owner-c"
+    ; "/workspace", "owner-d"
     ]
   in
   let report =
@@ -1316,7 +1331,19 @@ let test_workspace_drain_isolates_owner_failures () =
        (Some "approval-c")
        worker_failure.approval_id
    | failures ->
-     Alcotest.failf "expected two owner-local failures, got %d" (List.length failures))
+     Alcotest.failf "expected two owner-local failures, got %d" (List.length failures));
+  match report.blockers with
+  | [ { Gate.keeper_name = "owner-c"
+      ; blocker = Gate.Drain_start_failed ("approval-c", _)
+      }
+    ; { Gate.keeper_name = "owner-d"
+      ; blocker = Gate.Drain_owner_at_capacity [ "approval-d-active" ]
+      }
+    ] -> ()
+  | blockers ->
+    Alcotest.failf
+      "expected owner-c start failure and owner-d capacity blockers, got %d"
+      (List.length blockers)
 ;;
 
 let test_each_owner_claims_bounded_parallel_workers () =
@@ -5930,7 +5957,9 @@ let test_cancelled_audit_observation_preserves_committed_allow () =
         | [ receipt ] -> check_append_failure Keeper_approval.Audit.Gate_allowed receipt
         | _ -> Alcotest.fail "Always Allow did not retain its exact audit receipt");
        let execution =
-         Masc.Keeper_tool_execution.failure "effect failed after authorization"
+         Masc.Keeper_tool_execution.failure
+           ~class_:Tool_result.Runtime_failure
+           "effect failed after authorization"
          |> Masc.Keeper_tool_execution.with_gate_authorization authorization
        in
        let metadata =

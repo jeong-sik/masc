@@ -40,6 +40,7 @@ let masc_tool_fallthrough
   match find_registry_meta ~keeper_name ~source_layer:"registered_tool_runtime" with
   | None ->
     Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
       (error_json (Printf.sprintf "keeper not found in registry: %s" keeper_name))
   | Some meta ->
     if
@@ -77,7 +78,11 @@ let masc_tool_fallthrough
         (match result with
          | Some tr -> Keeper_tool_execution.of_tool_result tr
          | None ->
+           (* The tag dispatch cannot say whether the name is unsupported or
+              its mapping is broken (the hint names both), so it is not
+              claimed as the caller's to correct. *)
            Keeper_tool_execution.failure
+             ~class_:Tool_result.Runtime_failure
              (Yojson.Safe.to_string
                 (`Assoc
                     [ "error", `String "tool_not_supported_in_keeper"
@@ -97,6 +102,7 @@ let masc_tool_mint_rejected ~(keeper_name : string) ~(name : string) ~reason =
   match find_registry_meta ~keeper_name ~source_layer:"registered_tool_runtime" with
   | None ->
     Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
       (error_json (Printf.sprintf "keeper not found in registry: %s" keeper_name))
   | Some _meta -> unregistered_failure ~reason ~name ()
 ;;

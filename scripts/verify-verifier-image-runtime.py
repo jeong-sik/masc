@@ -131,7 +131,7 @@ def main():
     fixtures = Path(__file__).parent / 'fixtures/release-evidence'
     runtime = (fixtures / 'runtime.toml').read_text()
     runtime += '\n[runtime.exact_output_lanes.verifier_exact]\nslots = ["image_fixture.vision"]\n'
-    runtime += f'\n[providers.image_fixture]\nprotocol = "openai-compatible-http"\nendpoint = "http://127.0.0.1:{provider.server_port}/v1"\n'
+    runtime += f'\n[providers.image_fixture]\nprotocol = "openai-compatible-http"\nendpoint = "http://127.0.0.1:{provider.server_port}/v1"\nexact-body-timeout-s = 120.0\n'
     for slot, model, vision in [('producer', 'image-producer', False), ('vision', 'image-verifier', True)]:
         runtime += f'\n[models.{slot}]\napi-name = "{model}"\nmax-context = 131072\ntools-support = true\nstreaming = true\n[models.{slot}.capabilities]\nsupports-image-input = {str(vision).lower()}\n[image_fixture.{slot}]\n'
     (config / 'runtime.toml').write_text(runtime)

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """A local install brings every registered browser lane host to the new build."""
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -80,6 +82,49 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("unknown option: --bogus", result.stderr)
             self.assertFalse(prefix.exists())
+
+    def test_the_build_goes_through_dune_local_and_a_refusal_installs_nothing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            checkout = root / "checkout"
+            (checkout / "scripts").mkdir(parents=True)
+            shutil.copy2(SCRIPT, checkout / "scripts/install-local-build.sh")
+            # Stands in for dune-local.sh refusing the switch: records where and
+            # how it was called, then fails the way its guards do.
+            record = root / "dune-local call"
+            guard = checkout / "scripts/dune-local.sh"
+            guard.write_text("#!/bin/sh\npwd > \"$RECORD\"\nprintf '%s\\n' \"$@\" >> \"$RECORD\"\n"
+                             "echo '[dune-local] OCaml 5.5.0 detected; this repo requires exactly 5.5.1' >&2\n"
+                             "exit 1\n")
+            guard.chmod(0o755)
+            prefix = root / "prefix"
+            result = subprocess.run(["bash", str(checkout / "scripts/install-local-build.sh"), "--prefix", str(prefix),
+                                     "--manifest-dir", str(root / "absent")],
+                                    env=dict(os.environ, RECORD=str(record)), capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("this repo requires exactly 5.5.1", result.stderr)
+            self.assertFalse(prefix.exists(), "a build dune-local.sh refused was installed")
+            cwd, *arguments = record.read_text().splitlines()
+            self.assertEqual(Path(cwd).resolve(), checkout)
+            self.assertEqual(arguments, ["build", "--root", str(checkout), "./bin/main_eio.exe",
+                                         "./bin/masc_tui.exe", "./bin/masc_browser_host.exe"])
+
+    def test_dune_local_takes_the_install_build_line(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe"):
+                executable(build / exe, exe)
+            # A dry run prints the Dune command and runs nothing, so the real
+            # script is checked for taking these arguments without a switch.
+            result = subprocess.run(["bash", str(SCRIPT), "--build-dir", str(build), "--prefix", str(root / "prefix"),
+                                     "--manifest-dir", str(root / "absent")],
+                                    env=dict(os.environ, MASC_DUNE_DRY_RUN="1"),
+                                    check=True, capture_output=True, text=True)
+            self.assertIn("[dune-local] command: dune build --root", result.stderr)
+            self.assertIn("./bin/masc_browser_host.exe", result.stderr)
+            self.assertTrue((root / "prefix/masc").is_file())
 
 
 if __name__ == "__main__":

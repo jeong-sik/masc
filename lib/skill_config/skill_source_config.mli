@@ -61,6 +61,9 @@ type diagnostic =
   | Missing_resource_read_max_bytes
   | Invalid_resource_read_max_bytes_type of value_kind
   | Non_positive_resource_read_max_bytes of int
+  | Resource_read_max_bytes_over_inline_boundary of int
+      (** Above {!Common.max_tool_result_wire_bytes}: a resource that size is
+          read and then refused on the inline tool-result boundary. *)
   | Unexpected_skill_field of string
   | Invalid_sources_type of value_kind
   | Invalid_source_entry_type of

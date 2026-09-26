@@ -38,12 +38,14 @@ val default_limit : int
 type connector_bindings = { slack : string list; discord : string list }
 
 (** [respond] filters [messages] to
-    rows whose [source] label equals [surface] (trimmed, exact),
+    rows whose typed [surface] ([Surface_ref.lane_label]) equals
+    [surface] (trimmed, exact),
     returning a JSON object string: [{surface, messages, participants,
     lane_row_count, returned, has_more, oldest_ts?}].
 
     - [messages]: the last [limit] lane rows (chronological), each with
-      role/content/ts/source and speaker fields when present — the
+      role/content/ts and speaker fields when present, plus a [source]
+      response field holding the row's [Surface_ref.lane_label] — the
       same field vocabulary as the REST history endpoint.
     - [participants]: roster folded over ALL loaded lane rows (not just
       the returned slice), sorted by [last_seen] descending.
@@ -52,13 +54,18 @@ type connector_bindings = { slack : string list; discord : string list }
       passing it as the next call's [before] always makes progress,
       even through pages with no rows for this lane. Omitted when the
       page carries no stamped rows.
-    - Rows without a [source] label (written before source labelling)
-      never match; the description of the tool says so.
+    - Rows without a typed surface never match. A row whose persisted
+      surface does not decode never reaches [messages]: the chat store
+      drops it on read (counted as a persistence read drop) rather than
+      reading it as unscoped.
     - [before]: the cursor the page was loaded with; [None] for the
       newest page.
-    - Blank [surface] is an error JSON, not a default lane.
-    - With [~bindings] (task-1596) a provably wrong label is refused
-      with [{"error": …}] — see [connector_bindings]. *)
+    - A blank [surface] is refused ([Error]), not read as a default lane.
+    - With [~bindings] (task-1596) a provably wrong label is refused — see
+      [connector_bindings].
+
+    [Error] carries the refusal sentence. Every refusal is a label the
+    caller named and can correct. *)
 val respond :
   ?bindings:connector_bindings ->
   surface:string ->
@@ -67,7 +74,7 @@ val respond :
   has_more:bool ->
   notes:(string * string) list ->
   Keeper_chat_store.chat_message list ->
-  string
+  (string, string) result
 (** [notes] (RFC-0229 P1) are keeper-scoped (not lane-scoped): they
     annotate matching roster entries, and a noted speaker absent from
     the loaded rows still appears as a note-only participant (zero

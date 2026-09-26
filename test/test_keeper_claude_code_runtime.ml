@@ -297,6 +297,7 @@ let content_of_wire_message raw =
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
     ?event_capture ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
+    ?on_official_client_usage_report
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?on_request_attribution ?official_client_continuation ~base_path ~cli_path ~goal () =
   Masc_test_deps.declare_fixture_keeper
@@ -326,7 +327,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                     let run () =
                       Result.map
                         (fun selected -> selected.Keeper_turn_driver.run_result)
-                        (Keeper_turn_driver.run_named
+                        (Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                            ~runtime_id:"claude.claude"
                            ~keeper_name:"claude-fixture"
                            ~base_path
@@ -343,6 +344,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ?runtime_manifest_append
                            ?raw_trace
                            ?on_official_client_native_action
+                           ?on_official_client_usage_report
                            ?on_request_attribution
                            ?official_client_continuation
                            ~sw
@@ -410,6 +412,50 @@ let test_result_only_usage_keeps_client_turn_scope () =
     ~input_tokens:123498 ~output_tokens:789 ~cache_read_input_tokens:42 ()
 ;;
 
+(* A quota refusal after the model already answered once still carries the
+   turn's spend on its result frame. The turn driver hands it to the Keeper's
+   usage observer although the turn fails, with the inclusive input the
+   ledger reads (5000 exclusive + 4000 cache read). *)
+let test_refused_turn_reports_its_spend_to_the_keeper () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let reports = ref [] in
+       let on_official_client_usage_report (report : Keeper_client_usage_report.t) =
+         let usage =
+           match report.count with
+           | Keeper_client_usage_report.Running_count usage -> usage
+           | Keeper_client_usage_report.Count_replaced ->
+             Alcotest.fail "a Claude Code count was reported as replaced"
+         in
+         reports :=
+           ( report.response_id
+           , report.model
+           , Runtime_usage_scope.to_string report.usage_scope
+           , (usage.input_tokens, usage.output_tokens) )
+           :: !reports
+       in
+       with_fixture
+         [ Emit (assistant ~turn_id:"quota-usage" "partial answer")
+         ; Emit rate_limit_rejected
+         ; Emit
+             {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-quota-usage","result":"not inspected","api_error_status":429,"terminal_reason":"api_error","usage":{"input_tokens":5000,"output_tokens":30,"cache_read_input_tokens":4000}}|}
+         ]
+         (fun cli_path ->
+            (match
+               run_keeper_turn ~on_official_client_usage_report ~base_path ~cli_path
+                 ~goal:"QUOTA_USAGE" ()
+             with
+             | Error _ -> ()
+             | Ok _ -> fail "quota refusal completed the turn");
+            match List.rev !reports with
+            | [ ("turn-quota-usage", "claude-fixture", "turn_total", (9000, 30)) ] -> ()
+            | reports ->
+              failf "expected the refused turn's total reported once, got %d reports"
+                (List.length reports)))
+;;
+
 (* Claude Code 2.1.280, 2026-09-23: one client turn of two provider requests.
    The assistant frames' output counts (3, 2) are streaming snapshots; the
    result frame's 270 is what the turn spent. The spend goes to the response
@@ -450,9 +496,12 @@ let test_real_two_request_turn_routes_spend_and_occupancy_apart () =
                | Some context ->
                  check int "occupancy is the second request's inclusive input"
                    (8 + 2747 + 22834) context.input_tokens;
-                 check int "occupancy cache read" 22834 context.cache_read_input_tokens;
-                 check int "occupancy cache creation" 2747
-                   context.cache_creation_input_tokens))))
+                 (match context.cache with
+                  | None -> fail "the request's cache split was dropped"
+                  | Some cache ->
+                    check int "occupancy cache read" 22834 cache.cache_read_input_tokens;
+                    check int "occupancy cache creation" 2747
+                      cache.cache_creation_input_tokens)))))
 ;;
 
 (* An assistant frame reported usage but the result frame carried none: the
@@ -1000,6 +1049,160 @@ let test_keeper_streams_text_and_tool_events () =
                  {|{"marker":"from-claude"}|}
                  arguments
              | _ -> fail "Keeper did not project the exact Claude stream") )
+;;
+
+(* Claude Code writes each content block of a model response as its own
+   assistant frame, and the blocks of one response share [message.id]
+   (measured 2026-09-25, Claude Code 2.1.282: text and tool_use under one
+   id, the text after the tool result under the next id, and a result
+   carrying that last text). The text goes through Yojson so a Korean
+   answer stays JSON; [%S] would write OCaml byte escapes. *)
+let response_frame ~turn_id ~message_id block =
+  Printf.sprintf
+    {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-%s","message":{"id":"%s","role":"assistant","model":"claude-fixture","content":[%s]}}|}
+    turn_id
+    message_id
+    (Yojson.Safe.to_string block)
+;;
+
+let response_text ~turn_id ~message_id text =
+  response_frame ~turn_id ~message_id
+    (`Assoc [ "type", `String "text"; "text", `String text ])
+;;
+
+let response_native_tool ~turn_id ~message_id ~call_id ~tool_name =
+  response_frame ~turn_id ~message_id
+    (`Assoc
+        [ "type", `String "tool_use"; "id", `String call_id; "name", `String tool_name ])
+;;
+
+let result_text ~turn_id text =
+  Printf.sprintf
+    {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"%s","result":%s,"api_error_status":null}|}
+    turn_id
+    (Yojson.Safe.to_string (`String text))
+;;
+
+let streamed_text events =
+  List.filter_map
+    (function
+      | Agent_core.Types.ContentBlockDelta { delta = Agent_core.Types.TextDelta text; _ } ->
+        Some text
+      | _ -> None)
+    events
+  |> String.concat ""
+;;
+
+(* Two responses around a built-in tool call. The native tool block is not a
+   row on any chat surface, so without a break the viewer read
+   "확인할게요.완료". The result repeats the last response, which already
+   streamed, so the end of the turn adds nothing. *)
+let test_keeper_streams_two_claude_responses_apart () =
+  let base_path = temp_workspace () in
+  let events = ref [] in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit (response_text ~turn_id:"turn-apart-1" ~message_id:"msg-1" "확인할게요.")
+         ; Emit
+             (response_native_tool
+                ~turn_id:"turn-apart-1"
+                ~message_id:"msg-1"
+                ~call_id:"native-call-1"
+                ~tool_name:"Bash")
+         ; Emit (native_tool_result ~call_id:"native-call-1" ~content:"native tool output")
+         ; Emit (response_text ~turn_id:"turn-apart-1" ~message_id:"msg-2" "완료")
+         ; Emit (result_text ~turn_id:"turn-apart-1" "완료")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~on_event:(fun event -> events := event :: !events)
+               ~base_path
+               ~cli_path
+               ~goal:"TWO_RESPONSES"
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn ->
+             let events = List.rev !events in
+             (match events with
+              | [ Agent_core.Types.MessageStart { id = "assistant-turn-apart-1"; _ }
+                ; ContentBlockDelta { index = 0; delta = TextDelta "확인할게요." }
+                ; ContentBlockStart
+                    { index = 1
+                    ; content_type = "native_tool_use"
+                    ; tool_id = Some "native-call-1"
+                    ; tool_name = Some "Bash"
+                    }
+                ; ContentBlockStop { index = 1 }
+                ; ContentBlockDelta { index = 0; delta = TextDelta "\n\n완료" }
+                ; MessageDelta { stop_reason = Some EndTurn; usage = None }
+                ; MessageStop
+                ] -> ()
+              | _ -> fail "Keeper did not stream the two Claude responses apart");
+             check string "each response once, apart" "확인할게요.\n\n완료"
+               (streamed_text events);
+             check string "Keeper response" "완료" (keeper_response_text turn)))
+;;
+
+(* A MASC tool call is a tool row on the chat surfaces, which already shows
+   the responses before and after it apart, so no break goes in: one would
+   start the later stretch with blank lines. *)
+let test_keeper_adds_no_break_across_a_masc_tool_row () =
+  let base_path = temp_workspace () in
+  let events = ref [] in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Return a deterministic fixture marker"
+      ~parameters:
+        [ { Agent_core.Types.name = "marker"
+          ; description = "Fixture marker"
+          ; param_type = String
+          ; required = true
+          }
+        ]
+      (fun _ ->
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit (response_text ~turn_id:"turn-row-1" ~message_id:"msg-1" "확인할게요.")
+         ; Emit_and_read mcp_call
+         ; Emit (response_text ~turn_id:"turn-row-1" ~message_id:"msg-2" "완료")
+         ; Emit (result_text ~turn_id:"turn-row-1" "완료")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[ tool ]
+               ~on_event:(fun event -> events := event :: !events)
+               ~base_path
+               ~cli_path
+               ~goal:"USE_TOOL"
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn ->
+             let texts =
+               List.filter_map
+                 (function
+                   | Agent_core.Types.ContentBlockDelta
+                       { index = 0; delta = Agent_core.Types.TextDelta text } ->
+                     Some text
+                   | _ -> None)
+                 (List.rev !events)
+             in
+             check (list string) "text on each side of the tool row, unbroken"
+               [ "확인할게요."; "완료" ] texts;
+             check string "Keeper response" "완료" (keeper_response_text turn)))
 ;;
 
 let test_tools_support_false_omits_mcp_bridge () =
@@ -2228,7 +2431,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
         messages
         (total_atoms - transmitted)
     with
-    | Some digest -> digest
+    | Some digest -> Some digest
     | None -> fail "the record's own history has that atom"
   in
   { execution_ids = []
@@ -2245,6 +2448,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
   ; selected_model = None
   ; finish_reason = Some "completed"
   ; context_window = None
+  ; provider_context_window = None
   ; price_input_per_million = None
   ; price_output_per_million = None
   ; request_latency_ms = None
@@ -2744,7 +2948,7 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
         observation.transmitted_atoms;
       check (option string) (label ^ ": and names atom 60 as its front")
         (Runtime_model_input_tail_window.atom_opening_digest messages 60)
-        (Some observation.front_atom_digest)
+        observation.front_atom_digest
   in
   (match project () with
    | Error error -> fail (Agent_core.Error.to_string error)
@@ -2831,6 +3035,8 @@ let () =
     ; ( "usage scope"
       , [ test_case "result-only usage keeps client-turn scope" `Quick
             test_result_only_usage_keeps_client_turn_scope
+        ; test_case "refused turn reports its spend to the Keeper" `Quick
+            test_refused_turn_reports_its_spend_to_the_keeper
         ; test_case "real two-request turn routes spend and occupancy apart" `Quick
             test_real_two_request_turn_routes_spend_and_occupancy_apart
         ; test_case "assistant usage without result usage keeps spend unavailable" `Quick
@@ -2871,6 +3077,14 @@ let () =
             "streams text and tool events"
             `Quick
             test_keeper_streams_text_and_tool_events
+        ; test_case
+            "two Claude responses stream apart"
+            `Quick
+            test_keeper_streams_two_claude_responses_apart
+        ; test_case
+            "no break across a MASC tool row"
+            `Quick
+            test_keeper_adds_no_break_across_a_masc_tool_row
         ; test_case
             "tools-support false omits MCP bridge"
             `Quick

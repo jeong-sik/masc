@@ -420,6 +420,14 @@ let parse_field raw field =
 let parse_string_field raw field =
   parse_field raw field |> Json.to_string_option
 
+(* A completed Execute records its route ([via], [requested_sandbox],
+   [sandbox_profile]) in the ledger's execution evidence, not in the text the
+   model reads (#39035). *)
+let evidence_string_field (outcome : Masc.Keeper_tool_execution.t) field =
+  Option.bind
+    (Masc.Keeper_tool_call_log.execution_evidence_of_metadata outcome.metadata)
+    (fun evidence -> Json.member field evidence |> Json.to_string_option)
+
 let response_mentions raw field needle =
   match parse_string_field raw field with
   | None -> false
@@ -652,10 +660,10 @@ let tool_execute_typed_exec_args ?(argv = []) ~cwd program =
     ]
 
 
-let tool_execute_script_args ~cwd script =
+let tool_execute_command_args ~cwd script =
   `Assoc
     [
-      ("script", `String script);
+      ("command", `String script);
       ("cwd", `String cwd);
       ("timeout_sec", `Float 5.0);
     ]
@@ -1220,18 +1228,19 @@ let test_execute_git_push_routes_docker () =
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
-  let raw =
-    Keeper_tool_execute_runtime.handle_tool_execute ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
+  let outcome =
+    Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:repo "git"
            ~argv:[ "push"; "origin"; "feature/proof" ])
       ()
   in
+  let raw = outcome.raw_output in
   Alcotest.(check (option bool)) "git push succeeds even without write access"
     (Some true)
     (parse_bool_field raw "ok");
   Alcotest.(check (option string)) "git push routes through docker" (Some "docker")
-    (parse_string_field raw "via");
+    (evidence_string_field outcome "via");
   let log = if Sys.file_exists log_path then read_file log_path else "" in
   Alcotest.(check bool) "docker container was invoked" true
     (docker_log_has_container_execution log)
@@ -1245,17 +1254,18 @@ let test_execute_git_push_routes_through_docker () =
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
-  let raw =
-    Keeper_tool_execute_runtime.handle_tool_execute ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
+  let outcome =
+    Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:repo "git"
            ~argv:[ "push"; "origin"; "feature/proof" ])
       ()
   in
+  let raw = outcome.raw_output in
   Alcotest.(check (option bool)) "push succeeds via fake docker" (Some true)
     (parse_bool_field raw "ok");
   Alcotest.(check (option string)) "push via docker" (Some "docker")
-    (parse_string_field raw "via");
+    (evidence_string_field outcome "via");
   let log = read_file log_path in
   Alcotest.(check bool) "git push started docker session" true
     (String_util.contains_substring log "run -d");
@@ -1375,7 +1385,7 @@ let test_execute_missing_image_without_factory_fails_closed () =
       ~turn_sandbox_factory:None
       ~config
       ~meta
-      ~args:(tool_execute_script_args ~cwd:playground "ls lib/ | head -20")
+      ~args:(tool_execute_command_args ~cwd:playground "ls lib/ | head -20")
       ()
   in
   Alcotest.(check (option bool)) "Docker request did not run on Host" None
@@ -1410,7 +1420,7 @@ let test_execute_outside_playground_rejects_before_image_preflight () =
       ~turn_sandbox_factory:(Some factory)
       ~config
       ~meta
-      ~args:(tool_execute_script_args ~cwd "ls lib/ | head -20")
+      ~args:(tool_execute_command_args ~cwd "ls lib/ | head -20")
       ()
   in
   Alcotest.(check (option bool)) "legacy ok omitted" None
@@ -1813,15 +1823,16 @@ let test_execute_fake_docker_executes () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
-  let raw =
-    Keeper_tool_execute_runtime.handle_tool_execute ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
+  let outcome =
+    Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
       ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
       ()
   in
+  let raw = outcome.raw_output in
   Alcotest.(check (option bool)) "bash via fake docker is ok" (Some true)
     (parse_bool_field raw "ok");
   Alcotest.(check (option string)) "bash via=docker" (Some "docker")
-    (parse_string_field raw "via");
+    (evidence_string_field outcome "via");
   Alcotest.(check bool) "bash output includes fake docker stdout" true
     (response_mentions raw "output" "stdout:")
 
@@ -2177,18 +2188,19 @@ let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
-  let raw =
-    Keeper_tool_execute_runtime.handle_tool_execute ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
+  let outcome =
+    Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
       ~args:
-        (tool_execute_script_args ~cwd:playground "ls lib/ | head -20")
+        (tool_execute_command_args ~cwd:playground "ls lib/ | head -20")
       ()
   in
+  let raw = outcome.raw_output in
   Alcotest.(check (option bool)) "safe pipeline is allowed" (Some true)
     (parse_bool_field raw "ok");
   Alcotest.(check (option string))
     "safe pipeline routes through docker"
     (Some "docker")
-    (parse_string_field raw "via");
+    (evidence_string_field outcome "via");
   Alcotest.(check bool) "bash output includes fake docker stdout" true
     (response_mentions raw "output" "stdout:")
 
@@ -2241,7 +2253,9 @@ let test_execute_blocks_file_redirect_before_docker () =
    | Some false | None -> ());
   Alcotest.(check (option string))
     "typed boundary error"
-    (Some "cmd is not a field of this tool; the shell form is named script")
+    (Some
+       "$.cmd is not a supported typed Execute field; accepted: argv, command, \
+        shell, cwd, timeout_sec, intent")
     (parse_string_field raw "error");
   Alcotest.(check bool) "docker was not invoked" false
     (Sys.file_exists log_path)
@@ -2253,19 +2267,20 @@ let test_execute_repo_checks_routes_through_docker () =
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
-  let raw =
-    Keeper_tool_execute_runtime.handle_tool_execute ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
+  let outcome =
+    Keeper_tool_execute_runtime.handle_tool_execute_with_outcome ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "gh"
            ~argv:[ "pr"; "checks"; "15659"; "--repo"; "jeong-sik/masc" ])
       ()
   in
+  let raw = outcome.raw_output in
   Alcotest.(check (option bool)) "typed gh succeeds" (Some true)
     (parse_bool_field raw "ok");
   Alcotest.(check (option string))
     "typed gh routes through docker"
     (Some "docker")
-    (parse_string_field raw "via");
+    (evidence_string_field outcome "via");
   Alcotest.(check (option string))
     "no legacy shell next-tool bridge"
     None

@@ -77,7 +77,7 @@ let read_cost_entries_dated ~base_path ~since_unix
       (function
         | Dated_jsonl.Parsed json ->
           (match Cost_ledger.of_json json with
-           | Ok { usage_projection = Cost_ledger.Raw_observation; _ } -> ()
+           | Ok { usage_projection = Cost_ledger.Raw_observation _; _ } -> ()
            | Ok _ | Error _ ->
              (match parse_cost_entry json ~since_unix with
               | Ok entry -> entries := entry :: !entries
@@ -114,10 +114,10 @@ let read_cost_entries ~base_path ~since_unix =
   read_cost_entries_dated ~base_path ~since_unix
 ;;
 
-module Inference_identity_map = Map.Make (struct
-    type t = Cost_ledger.inference_identity
+module Inference_key_map = Map.Make (struct
+    type t = Cost_ledger.inference_key
 
-    let compare = Cost_ledger.compare_inference_identity
+    let compare = Cost_ledger.compare_inference_key
   end)
 
 type identity_bucket =
@@ -135,7 +135,7 @@ let value_or ~preferred ~fallback =
 
 let merge_exact_inference decision cost =
   { model = cost.model
-  ; inference_identity = cost.inference_identity
+  ; inference_key = cost.inference_key
   ; ts_unix = cost.ts_unix
   ; outcome = decision.outcome
   ; stop_reason = decision.stop_reason
@@ -188,11 +188,11 @@ let merge_exact_inference decision cost =
 ;;
 
 let add_identity_entry ~is_decision (buckets, unkeyed) entry =
-  match entry.inference_identity with
+  match entry.inference_key with
   | None -> buckets, entry :: unkeyed
   | Some identity ->
     let bucket =
-      match Inference_identity_map.find_opt identity buckets with
+      match Inference_key_map.find_opt identity buckets with
       | Some bucket -> bucket
       | None -> empty_identity_bucket
     in
@@ -201,14 +201,14 @@ let add_identity_entry ~is_decision (buckets, unkeyed) entry =
       then { bucket with decisions = entry :: bucket.decisions }
       else { bucket with costs = entry :: bucket.costs }
     in
-    Inference_identity_map.add identity bucket buckets, unkeyed
+    Inference_key_map.add identity bucket buckets, unkeyed
 ;;
 
 let merge_decision_and_cost_entries decisions costs =
   let buckets, unkeyed =
     List.fold_left
       (add_identity_entry ~is_decision:true)
-      (Inference_identity_map.empty, [])
+      (Inference_key_map.empty, [])
       decisions
   in
   let buckets, unkeyed =
@@ -217,7 +217,7 @@ let merge_decision_and_cost_entries decisions costs =
       (buckets, unkeyed)
       costs
   in
-  Inference_identity_map.fold
+  Inference_key_map.fold
     (fun _identity bucket (entries, identity_conflict_rows) ->
        let decisions = List.rev bucket.decisions in
        let costs = List.rev bucket.costs in

@@ -536,13 +536,11 @@ let write_registered_masc_catalog base_path =
 ;;
 
 let execute_gate_input ~cwd argv =
-  `Assoc
-    [ "schema", `String "masc.keeper_gate.request.v1"
-    ; "input", `Assoc [ "cwd", `String cwd; "argv", `List (List.map (fun value -> `String value) argv) ]
-    ; "cwd", `String cwd
-    ; "sandbox_profile", `String "docker"
-    ; "sandbox_target", `String "docker:masc-keeper-sandbox:local"
-    ]
+  Masc.Keeper_tool_execute_runtime.execute_gate_input
+    ~input:(`Assoc [ "argv", `List (List.map (fun value -> `String value) argv) ])
+    ~cwd
+    ~sandbox_profile:"docker"
+    ~sandbox_target:"docker:masc-keeper-sandbox:local"
 ;;
 
 let test_host_context_identifies_registered_clone_and_destination_state () =

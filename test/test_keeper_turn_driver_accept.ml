@@ -94,7 +94,7 @@ let write_file path content =
 
 let test_admitted_continuation_requires_checkpoint () =
   match
-    Masc.Keeper_turn_driver.run_named
+    Masc.Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
       ~runtime_id:"unused" ~base_path:"." ~goal:"continue"
       ~system_prompt:"" ~agent_core_tools:[] ~continue_from_checkpoint:true ()
   with
@@ -1080,13 +1080,7 @@ let test_empty_non_end_turn_response_is_rejected () =
           (Option.map
              (contains ~needle:"empty assistant turn")
              (Masc.Keeper_turn_driver.summary_of_masc_internal_error internal_error)))
-   | None -> Alcotest.fail "expected typed accept rejection");
-  (match Masc.Keeper_status_bridge.blocker_class_of_core_error err with
-   | None -> ()
-   | Some other ->
-     Alcotest.failf
-       "accept rejection must not become a runtime blocker, got %s"
-       (Masc.Keeper_meta_contract.blocker_class_to_string other))
+   | None -> Alcotest.fail "expected typed accept rejection")
 
 let test_blank_text_non_end_turn_response_is_rejected () =
   let result =

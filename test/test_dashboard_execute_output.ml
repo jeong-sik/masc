@@ -80,6 +80,56 @@ let test_snapshot_line_ring_shape () =
   check string "json line text" "ok" (List.hd json_lines |> member "text" |> to_string);
   check int "json line ts" 1000000 (List.hd json_lines |> member "ts_ms" |> to_int)
 
+let hangul_line count = String.concat "" (List.init count (fun _ -> "\xea\xb0\x80"))
+
+(* A 9,000-byte line of Hangul is longer than one row (4,096 bytes), and
+   4,096 is not a multiple of 3. The old row kept a character-safe prefix and
+   dropped the other 4,904 bytes without a mark. *)
+let test_long_line_continues_in_next_rows () =
+  let line = hangul_line 3_000 in
+  EO.inject_for_testing
+    ~keeper_name:"alpha"
+    ~stdout:(line ^ "\n")
+    ~stderr:""
+    ~status:status_ok
+    ();
+  let rows = EO.output_lines_for_testing ~keeper_name:"alpha" in
+  check int "the line takes three rows" 3 (List.length rows);
+  List.iteri
+    (fun index (row : EO.output_line) ->
+       check bool
+         (Printf.sprintf "row %d decodes as UTF-8" index)
+         true
+         (String_util.is_valid_utf8 row.text);
+       check bool
+         (Printf.sprintf "row %d fits one row" index)
+         true
+         (String.length row.text <= 4096))
+    rows;
+  check string "the rows spell the whole line" line
+    (String.concat "" (List.map (fun (row : EO.output_line) -> row.text) rows))
+
+(* 270,000 bytes of Hangul, and the snapshot keeps the last 262,144: the ring
+   starts on the third byte of a syllable. That byte is skipped and counted as
+   dropped, so the text decodes and dropped + shown still covers the total. *)
+let test_snapshot_tail_starts_on_a_character () =
+  EO.inject_for_testing
+    ~keeper_name:"alpha"
+    ~stdout:(hangul_line 90_000)
+    ~stderr:""
+    ~status:status_ok
+    ();
+  match EO.snapshot ~keeper_name:"alpha" with
+  | None -> fail "expected snapshot"
+  | Some snapshot ->
+    check bool "stdout_since decodes as UTF-8" true
+      (String_util.is_valid_utf8 snapshot.stdout_since);
+    check int "total bytes" 270_000 snapshot.since_stdout;
+    check int "the partial character counts as dropped" 7_857
+      snapshot.bytes_dropped_stdout;
+    check int "dropped + shown = total" snapshot.since_stdout
+      (snapshot.bytes_dropped_stdout + String.length snapshot.stdout_since)
+
 let test_live_tail_subscriber_receives_line_and_close () =
   Eio_main.run (fun env ->
     match EO.subscribe ~keeper_name:"alpha" with
@@ -267,6 +317,13 @@ let test_stream_completed_does_not_duplicate_events () =
              "type"
              "task_closed"
              (closed_json |> member "type" |> to_string);
+           (* The streamed line is retained once: record_completed with
+              [~streamed:true] does not log it again. *)
+           check
+             int
+             "retained lines"
+             1
+             (List.length (EO.output_lines_for_testing ~keeper_name:"alpha"));
            (* Subscriber queue should now be empty because record_completed
               with [~streamed:true] does not emit line events. *)
            try
@@ -277,6 +334,135 @@ let test_stream_completed_does_not_duplicate_events () =
              fail "unexpected extra event after streamed completion"
            with
            | Eio.Time.Timeout -> ()))
+
+let numbered_lines ~count =
+  List.init count (fun i -> Printf.sprintf "row-%05d\n" (i + 1)) |> String.concat ""
+
+let take_events env subscriber ~count =
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+    List.init count (fun _ -> EO.take_event subscriber |> EO.stream_event_json))
+
+let json_type json = Yojson.Safe.Util.(json |> member "type" |> to_string)
+
+let json_seq json = Yojson.Safe.Util.(json |> member "seq" |> to_int)
+
+let line_text json =
+  Yojson.Safe.Util.(json |> member "line" |> member "text" |> to_string)
+
+(* One captured stdout arrives as a single chunk. Every row of it must reach
+   a subscriber that has not read anything yet, in order. *)
+let test_large_chunk_reaches_undrained_subscriber_whole () =
+  Eio_main.run (fun env ->
+    match EO.subscribe ~keeper_name:"alpha" with
+    | None -> fail "expected subscriber"
+    | Some subscriber ->
+      Fun.protect
+        ~finally:(fun () -> EO.unsubscribe subscriber)
+        (fun () ->
+           let row_count = 1000 in
+           EO.record_stream_start ~keeper_name:"alpha" ~task_id:(Some "task-big");
+           EO.append_stream_chunk
+             ~keeper_name:"alpha"
+             ~stream:`Stdout
+             (numbered_lines ~count:row_count);
+           EO.record_stream_end
+             ~keeper_name:"alpha"
+             ~task_id:(Some "task-big")
+             ~status:status_ok;
+           let events = take_events env subscriber ~count:(row_count + 2) in
+           let types = List.map json_type events in
+           check string "first event" "task_opened" (List.hd types);
+           check string "last event" "task_closed" (List.nth types (row_count + 1));
+           check
+             int
+             "no gap"
+             0
+             (List.length (List.filter (String.equal "gap") types));
+           let lines = List.filter (fun json -> json_type json = "line") events in
+           check int "every row" row_count (List.length lines);
+           check
+             (list string)
+             "rows in order"
+             (List.init row_count (fun i -> Printf.sprintf "row-%05d" (i + 1)))
+             (List.map line_text lines);
+           check
+             (list int)
+             "consecutive numbers"
+             (List.init (row_count + 2) (fun i -> i + 1))
+             (List.map json_seq events)))
+
+(* A subscriber further behind than the retained log is told which numbers
+   it missed, then receives every retained row. *)
+let test_subscriber_behind_retained_log_receives_gap () =
+  Eio_main.run (fun env ->
+    match EO.subscribe ~keeper_name:"alpha" with
+    | None -> fail "expected subscriber"
+    | Some subscriber ->
+      Fun.protect
+        ~finally:(fun () -> EO.unsubscribe subscriber)
+        (fun () ->
+           let evicted = 10 in
+           let row_count = EO.event_log_capacity + evicted in
+           EO.append_stream_chunk
+             ~keeper_name:"alpha"
+             ~stream:`Stdout
+             (numbered_lines ~count:row_count);
+           let events =
+             take_events env subscriber ~count:(EO.event_log_capacity + 1)
+           in
+           let open Yojson.Safe.Util in
+           let gap = List.hd events in
+           check string "gap first" "gap" (json_type gap);
+           check int "missing from" 1 (gap |> member "missing_from_seq" |> to_int);
+           check int "missing to" evicted (gap |> member "missing_to_seq" |> to_int);
+           check int "missing count" evicted (gap |> member "missing_count" |> to_int);
+           let lines = List.tl events in
+           check
+             (list string)
+             "retained rows in order"
+             (List.init EO.event_log_capacity (fun i ->
+                Printf.sprintf "row-%05d" (evicted + i + 1)))
+             (List.map line_text lines);
+           check
+             int
+             "snapshot rows"
+             EO.event_log_capacity
+             (List.length (EO.output_lines_for_testing ~keeper_name:"alpha"))))
+
+(* A line logged between subscribe and the first payload is in the snapshot,
+   so the live tail must not deliver it again. *)
+let test_initial_snapshot_starts_live_tail_after_it () =
+  Eio_main.run (fun env ->
+    match EO.subscribe ~keeper_name:"alpha" with
+    | None -> fail "expected subscriber"
+    | Some subscriber ->
+      Fun.protect
+        ~finally:(fun () -> EO.unsubscribe subscriber)
+        (fun () ->
+           EO.inject_for_testing
+             ~keeper_name:"alpha"
+             ~task_id:"task-1"
+             ~stdout:"before snapshot\n"
+             ~stderr:""
+             ~status:status_ok
+             ();
+           let initial = EO.initial_event_json subscriber in
+           let open Yojson.Safe.Util in
+           check string "snapshot" "snapshot" (json_type initial);
+           check int "last seq" 2 (initial |> member "last_seq" |> to_int);
+           check
+             (list int)
+             "line numbers"
+             [ 1 ]
+             (initial |> member "lines" |> to_list
+              |> List.map (fun line -> line |> member "seq" |> to_int));
+           EO.append_stream_chunk ~keeper_name:"alpha" ~stream:`Stdout "after snapshot\n";
+           let next =
+             Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 1.0 (fun () ->
+               EO.take_event subscriber |> EO.stream_event_json)
+           in
+           check string "next is new line" "after snapshot" (line_text next);
+           check int "next number" 3 (json_seq next)))
 
 let test_sse_frame () =
   let frame = EO.sse_frame (`Assoc [ "type", `String "snapshot" ]) in
@@ -321,6 +507,14 @@ let () =
         ; test_case "snapshot json shape" `Quick (with_fresh test_snapshot_json_shape)
         ; test_case "snapshot line ring shape" `Quick (with_fresh test_snapshot_line_ring_shape)
         ; test_case
+            "long line continues in next rows"
+            `Quick
+            (with_fresh test_long_line_continues_in_next_rows)
+        ; test_case
+            "snapshot tail starts on a character"
+            `Quick
+            (with_fresh test_snapshot_tail_starts_on_a_character)
+        ; test_case
             "live tail subscriber receives line and close"
             `Quick
             (with_fresh test_live_tail_subscriber_receives_line_and_close)
@@ -330,6 +524,18 @@ let () =
         ; test_case "stream completed does not duplicate events"
             `Quick
             (with_fresh test_stream_completed_does_not_duplicate_events)
+        ; test_case
+            "large chunk reaches undrained subscriber whole"
+            `Quick
+            (with_fresh test_large_chunk_reaches_undrained_subscriber_whole)
+        ; test_case
+            "subscriber behind retained log receives gap"
+            `Quick
+            (with_fresh test_subscriber_behind_retained_log_receives_gap)
+        ; test_case
+            "initial snapshot starts live tail after it"
+            `Quick
+            (with_fresh test_initial_snapshot_starts_live_tail_after_it)
         ; test_case "sse frame" `Quick test_sse_frame
         ; test_case "routes match keeper path" `Quick test_dashboard_routes_match_keeper_path
         ] )

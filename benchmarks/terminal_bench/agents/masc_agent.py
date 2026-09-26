@@ -49,6 +49,23 @@ REMOTE = "/opt/masc-bench"
 # This is not time given to the agent: the keepers are stopped first, and what
 # remains is counting the tool-call store and the trace dumps.
 RESULT_RECOVERY_TIMEOUT_SEC = 600
+# Recovery has two dependent phases after a Harbor cancellation: finish the
+# interrupted report, then read its result. The result read and the independent
+# record copies can run together. One deadline bounds both phases.
+RECOVERY_TOTAL_TIMEOUT_SEC = 2 * RESULT_RECOVERY_TIMEOUT_SEC
+
+# What the episode leaves in the container that result.json only counts: the
+# tool-call ledger (every call's input and output, in order) and the
+# agent-core trace dumps (the conversation, the keeper's replies included;
+# result.json's `final` names one only by outcome_ref). The container is
+# removed with the trial, so without a copy a failed episode cannot say what
+# the keeper read, changed or ran, or what it said when it stopped. These are
+# the stores collect_result.sh counts under $MASC_BASE_PATH/.masc. Each is
+# copied to agent/masc/<name>/.
+EPISODE_RECORDS = (
+    ("tool_calls", f"{REMOTE}/base/.masc/tool_calls"),
+    ("traces", f"{REMOTE}/base/.masc/traces"),
+)
 
 
 def _runtime_id_of_model(model: str) -> str:
@@ -194,28 +211,67 @@ class MascAgent(BaseInstalledAgent):
             # episode failure this block exists to preserve — a truncated
             # result.json would surface as a JSONDecodeError from the
             # recovery path instead of as the run error.
-            if interrupted:
-                # Its own try: a report that fails to finish must not stop the
-                # read below, which may still find one written by the episode.
-                try:
-                    await self.exec_as_root(
-                        environment,
-                        f"bash {REMOTE}/driver/collect_result.sh "
-                        f"{REMOTE}/result.json --interrupted",
-                        env=self._container_env(),
-                        timeout_sec=RESULT_RECOVERY_TIMEOUT_SEC,
-                    )
-                except Exception:  # noqa: BLE001 - see above
-                    self.logger.exception("reporting the interrupted episode failed")
+            deadline = asyncio.get_running_loop().time() + RECOVERY_TOTAL_TIMEOUT_SEC
             try:
-                result = await self.exec_as_root(
-                    environment, f"cat {REMOTE}/result.json 2>/dev/null || true",
-                    timeout_sec=RESULT_RECOVERY_TIMEOUT_SEC)
-                if result.stdout and result.stdout.strip():
-                    (Path(self.logs_dir) / "result.json").write_text(result.stdout)
-                self.populate_context_post_run(context)
-            except Exception:  # noqa: BLE001 - see above
-                self.logger.exception("recovering the episode result failed")
+                async with asyncio.timeout_at(deadline):
+                    if interrupted:
+                        # A failed report may still have written result.json.
+                        try:
+                            await self.exec_as_root(
+                                environment,
+                                f"bash {REMOTE}/driver/collect_result.sh "
+                                f"{REMOTE}/result.json --interrupted",
+                                env=self._container_env(),
+                                timeout_sec=RESULT_RECOVERY_TIMEOUT_SEC,
+                            )
+                        except Exception:  # noqa: BLE001 - see above
+                            self.logger.exception("reporting the interrupted episode failed")
+                    # Harbor 0.23's Docker environment runs exec and each
+                    # download_dir through independent subprocesses. Starting
+                    # these together lets a stuck ledger copy leave the trace
+                    # and result available within the same recovery window.
+                    await asyncio.wait_for(
+                        asyncio.gather(
+                            self._recover_episode_result(environment, context),
+                            *(self._copy_episode_record(environment, name, remote)
+                              for name, remote in EPISODE_RECORDS),
+                        ),
+                        RESULT_RECOVERY_TIMEOUT_SEC,
+                    )
+            except TimeoutError:
+                self.logger.exception("the episode recovery deadline expired")
+
+    async def _recover_episode_result(self, environment: BaseEnvironment,
+                                      context: AgentContext) -> None:
+        try:
+            result = await self.exec_as_root(
+                environment, f"cat {REMOTE}/result.json 2>/dev/null || true",
+                timeout_sec=RESULT_RECOVERY_TIMEOUT_SEC)
+            if result.stdout and result.stdout.strip():
+                (Path(self.logs_dir) / "result.json").write_text(result.stdout)
+            self.populate_context_post_run(context)
+        except Exception:  # noqa: BLE001 - recovery cannot replace the run error
+            self.logger.exception("recovering the episode result failed")
+
+    async def _copy_episode_record(self, environment: BaseEnvironment,
+                                   name: str, remote: str) -> None:
+        try:
+            await self._keep_episode_record(environment, name, remote)
+        except Exception:  # noqa: BLE001 - one record cannot prevent another
+            self.logger.exception("copying the episode's %s failed", name)
+
+    async def _keep_episode_record(self, environment: BaseEnvironment,
+                                   name: str, remote: str) -> None:
+        """Publish a complete copy; no remote record leaves no local record."""
+        if await environment.is_dir(remote):
+            parent = Path(self.logs_dir) / "masc"
+            parent.mkdir(parents=True, exist_ok=True)
+            # A cancelled or failed docker cp can leave a partial tree. Keep
+            # that tree hidden until the download has finished successfully.
+            with tempfile.TemporaryDirectory(prefix=f".{name}-", dir=parent) as staging:
+                copied = Path(staging) / name
+                await environment.download_dir(remote, copied)
+                copied.rename(parent / name)
 
     def _cost_usd(self, usage) -> float | None:
         """What this episode cost, from the four token counts and litellm.

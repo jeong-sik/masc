@@ -97,7 +97,9 @@ module For_testing : sig
       report stands, and the latest detail is kept. *)
 
   val run_continuity : ?cli_runner:Keeper_lane_cli_oneshot.runner ->
+    ?has_waiting:(unit -> bool) ->
     base_path:string -> keeper_name:string -> unit -> unit
+  (** [has_waiting] replaces the lane's "a unit waits" read (RFC-0467). *)
   val run_durable_with_commit
     :  config:Workspace.config
     -> keeper_name:string
@@ -119,4 +121,19 @@ module For_testing : sig
     -> Keeper_librarian.input
   (** The input the queue pass hands the Librarian. Reads the Goal store and
       goal-task links for [meta.current_task_id] through the IO pool. *)
+
+  val context_pass_needed
+    :  keepers_dir:string
+    -> keeper_name:string
+    -> Keeper_librarian_context.input
+    -> bool
+  (** Whether the queue pass calls the model for this capture. *)
+
+  val remember_context_pass
+    :  keepers_dir:string
+    -> keeper_name:string
+    -> Keeper_librarian_context.input
+    -> Keeper_librarian_context.version
+    -> unit
+  (** Record that a queue pass shown this capture wrote that version. *)
 end

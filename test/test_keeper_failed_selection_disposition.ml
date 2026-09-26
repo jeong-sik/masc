@@ -221,7 +221,7 @@ let test_every_failure_route_preserves_batch () =
     , KFR.Retry_after_observed
         { retry_class = KFR.Network_transient; retry_after = None } )
   ; "rotate now", KFR.Rotate_now { rotate = KFR.Model_unavailable }
-  ; "context overflow", exhausted "context overflow" KFR.Context_overflow
+  ; "context overflow", KFR.Rotate_now { rotate = KFR.Context_window_exceeded }
   ; "deterministic request", exhausted "deterministic request" KFR.Deterministic_request
   ; "configuration mismatch", exhausted "configuration mismatch" KFR.Config_mismatch
   ; "provider integration", exhausted "provider integration" KFR.Provider_integration
@@ -292,10 +292,10 @@ let unobserved_failure_routes =
     , KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None } )
   ; "auth failed", KFR.Rotate_now { rotate = KFR.Auth_failed }
   ; "model unavailable", KFR.Rotate_now { rotate = KFR.Model_unavailable }
-  ; "attempt rejected", KFR.Rotate_now { rotate = KFR.Attempt_rejected }
+  ; "admission", KFR.Rotate_now { rotate = KFR.Admission }
   ; ( "refusal body not received"
     , KFR.Rotate_now { rotate = KFR.Refusal_body_not_received } )
-  ; "context overflow", exhausted_route "context overflow" KFR.Context_overflow
+  ; "context overflow", KFR.Rotate_now { rotate = KFR.Context_window_exceeded }
   ; "configuration mismatch", exhausted_route "configuration mismatch" KFR.Config_mismatch
   ; "provider integration", exhausted_route "provider integration" KFR.Provider_integration
   ; "internal opaque", exhausted_route "internal opaque" KFR.Internal_opaque

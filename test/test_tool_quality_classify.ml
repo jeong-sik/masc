@@ -46,12 +46,31 @@ let test_sandbox_path_error_is_preserved () =
   check string "sandbox path boundary error preserved exactly"
     "path_outside_sandbox: lib/foo.ml (sandbox roots: [/tmp/demo])" (classify output)
 
+(* A failed output carrying the status as the Execute producer writes it.
+   Built with the producer's codec, so these tests follow the wire shape
+   instead of strings chosen to match the classifier: the old fixtures used
+   "signaled" and "timeout", which no tool output writes. *)
+let output_with_status status =
+  Yojson.Safe.to_string
+    (`Assoc
+        [ "ok", `Bool false
+        ; "op", `String "bash"
+        ; "status", Masc.Exec_core.process_status_to_json status
+        ; "output", `String ""
+        ])
+
 let test_signaled_status_is_classified () =
-  let output =
-    {|{"ok":false,"op":"bash","status":{"kind":"signaled","signal":-11},"output":""}|}
-  in
   check string "signaled process classified"
-    "bash_signaled_-11" (classify output)
+    "bash_signaled_-11" (classify (output_with_status (Unix.WSIGNALED (-11))))
+
+let test_nonzero_exit_is_classified () =
+  check string "non-zero exit classified"
+    "bash_exit_2" (classify (output_with_status (Unix.WEXITED 2)))
+
+let test_unreadable_status_is_named () =
+  let output = {|{"ok":false,"op":"bash","status":{"kind":"sideways"},"output":""}|} in
+  check string "a status the codec cannot read is named, not unknown"
+    "bash_status_unreadable" (classify output)
 
 let test_timeout_error_is_preserved () =
   let output =
@@ -61,11 +80,8 @@ let test_timeout_error_is_preserved () =
     "command_timed_out" (classify output)
 
 let test_timeout_status_is_classified () =
-  let output =
-    {|{"ok":false,"op":"bash","status":{"kind":"timeout"},"output":""}|}
-  in
   check string "timeout process classified"
-    "bash_timeout" (classify output)
+    "bash_timeout" (classify (output_with_status Process_eio.timed_out_status))
 
 let () =
   run "tool_quality_classify"
@@ -83,5 +99,7 @@ let () =
            test_case "signaled status classified" `Quick test_signaled_status_is_classified;
            test_case "timeout error preserved" `Quick test_timeout_error_is_preserved;
            test_case "timeout status classified" `Quick test_timeout_status_is_classified;
+           test_case "non-zero exit classified" `Quick test_nonzero_exit_is_classified;
+           test_case "unreadable status named" `Quick test_unreadable_status_is_named;
          ]);
     ]

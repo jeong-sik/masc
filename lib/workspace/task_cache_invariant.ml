@@ -99,9 +99,10 @@ let agent_current_task_match config ~agent_name ~task_id =
   then Missing
   else
     with_file_lock config path (fun () ->
-      match read_json_result config path with
-      | Error detail -> Unreadable detail
-      | Ok json ->
+      match read_json_doc config path with
+      | Error error -> Unreadable (json_doc_error_to_string error)
+      | Ok None -> Missing
+      | Ok (Some json) ->
         (match agent_of_yojson json with
          | Ok agent -> if agent.current_task = Some task_id then Matches else Mismatch
          | Error detail -> Unreadable detail))

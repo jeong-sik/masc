@@ -431,7 +431,8 @@ let read_source ~config ~meta ~source_path =
       ~meta
       ~raw_path:source_path
   with
-  | Error reason -> Error (Source_path_rejected reason)
+  | Error (refusal : Keeper_alerting_path.path_refusal) ->
+    Error (Source_path_rejected refusal.message)
   | Ok resolved ->
   match
     Keeper_types_profile_sandbox.tree_location_of_profile

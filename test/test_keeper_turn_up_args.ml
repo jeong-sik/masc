@@ -366,14 +366,39 @@ remote_root = "/srv/masc/playground"
 let test_microvm_backend_persistence_round_trip () =
   with_persisting_context @@ fun ctx ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
-  (* keeper up resolves a microvm keeper's image in its runtime's own store,
-     so that store has the build for each backend this round trip names. *)
-  Masc_test_deps.write_sandbox_image_catalog
-    ~store:(Keeper_sandbox_image_catalog.Microvm Keeper_microvm_backend.Nerdctl_kata)
-    ~base_path:ctx.config.base_path catalog_images;
-  Masc_test_deps.write_sandbox_image_catalog
-    ~store:(Keeper_sandbox_image_catalog.Microvm Keeper_microvm_backend.Apple_container)
-    ~base_path:ctx.config.base_path catalog_images;
+  (* The fixture starts with Docker's promoted builds. Add both microVM
+     stores to that same catalog: the test writer replaces the file on each
+     call, which would erase the first backend before [parse] sees it. *)
+  let module Catalog = Keeper_sandbox_image_catalog in
+  let config_root =
+    (Config_dir_resolver.resolve_for_base_path ~base_path:ctx.config.base_path)
+      .config_root.path
+  in
+  let shipped =
+    match Embedded_config.read Catalog.shipped_file_name with
+    | Some text -> text
+    | None -> fail "shipped sandbox image catalog missing"
+  in
+  let catalog, expected =
+    match Catalog.load_for_change ~config_root ~shipped with
+    | Ok value -> value
+    | Error error -> fail (Catalog.load_error_to_string error)
+  in
+  let catalog =
+    List.fold_left
+      (fun catalog backend ->
+         match
+           Catalog.promote catalog ~name:"base" ~reference:"masc-sandbox-base:test"
+             ~store:(Catalog.Microvm backend)
+         with
+         | Ok catalog -> catalog
+         | Error error -> fail (Catalog.change_error_to_string error))
+      catalog
+      [ Keeper_microvm_backend.Nerdctl_kata; Keeper_microvm_backend.Apple_container ]
+  in
+  (match Catalog.save ~config_root ~expected catalog with
+   | Ok () -> ()
+   | Error error -> fail (Catalog.save_error_to_string error));
   let masc_dir = Filename.concat ctx.config.base_path ".masc" in
   if not (Sys.file_exists masc_dir) then Unix.mkdir masc_dir 0o700;
   (* RFC-0121: the resolver reads .masc/config/runtime.toml. *)

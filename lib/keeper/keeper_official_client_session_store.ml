@@ -24,6 +24,7 @@ type vendor_session_activity = Keeper_internal_error.vendor_session_activity =
   | Activity_observed
 
 type recovery_failure =
+  | Pre_dispatch_failed
   | Transient_spawn_failed
   | Owner_stopped_turn
   | Transport_interrupted
@@ -47,7 +48,7 @@ type failure_disposition =
    adjudicate, and routing it to Recovery_required blocked every later turn for
    that keeper until someone resolved it by hand (#28012). *)
 let failure_disposition = function
-  | Transient_spawn_failed | Owner_stopped_turn -> Transient
+  | Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn -> Transient
   | Transport_interrupted
   | Protocol_failed
   | Host_hook_failed
@@ -435,6 +436,7 @@ let settlement_opt_of_yojson = function
 ;;
 
 let recovery_failure_to_string = function
+  | Pre_dispatch_failed -> "pre_dispatch_failed"
   | Transient_spawn_failed -> "transient_spawn_failed"
   | Owner_stopped_turn -> "owner_stopped_turn"
   | Transport_interrupted -> "transport_interrupted"
@@ -451,6 +453,7 @@ let recovery_failure_to_string = function
 ;;
 
 let recovery_failure_of_string = function
+  | "pre_dispatch_failed" -> Ok Pre_dispatch_failed
   | "transient_spawn_failed" -> Ok Transient_spawn_failed
   | "owner_stopped_turn" -> Ok Owner_stopped_turn
   | "transport_interrupted" -> Ok Transport_interrupted
@@ -1463,11 +1466,11 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
            no previous settlement worth returning to. *)
         (match recovery.failure, recovery.previous_settlement with
          | Vendor_session_full _, (Some _ | None) -> Error Retry_previous_unavailable
-         | ( ( Transient_spawn_failed | Owner_stopped_turn | Transport_interrupted
+         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Transport_interrupted
              | Protocol_failed | Provider_rejected | Input_rejected _ | Host_hook_failed
              | State_persistence_failed | Process_restarted )
            , None ) -> Error Retry_previous_unavailable
-         | ( ( Transient_spawn_failed | Owner_stopped_turn | Transport_interrupted
+         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Transport_interrupted
              | Protocol_failed | Provider_rejected | Input_rejected _ | Host_hook_failed
              | State_persistence_failed | Process_restarted )
            , Some settlement ) -> Ok (Some settlement, current.turn_count - 1))

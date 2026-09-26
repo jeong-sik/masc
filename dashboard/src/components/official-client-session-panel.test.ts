@@ -13,7 +13,7 @@ const apiMocks = vi.hoisted(() => ({
 vi.mock('../api/dashboard', () => apiMocks)
 
 const recoveryResponse = {
-  schema: 'masc.dashboard.official-client-session.v1' as const,
+  schema: 'masc.dashboard.official-client-session.v2' as const,
   ok: true as const,
   keeper_name: 'sangsu',
   session: {

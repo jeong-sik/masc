@@ -657,18 +657,41 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         (Fs_compat.load_file (Runtime_antigravity_home.oauth_path old_home));
                       let unchanged = ("pre-dispatch fixture system prompt",
                         large_history @ [Agent_core.Types.user_msg "new native correction"]) in
+                      let hook_ordinals = ref [] in
+                      let observe_hook name turn = hook_ordinals := (name, turn) :: !hook_ordinals in
                       let composed_hooks ?nudge ?(world = dynamic_context) instruction =
                         { Agent_core.Hooks.empty with
-                          before_turn = Option.map (fun text -> fun _ ->
-                            Agent_core.Hooks.Nudge text) nudge;
-                          before_turn_params = Some (fun _ -> Agent_core.Hooks.AdjustParams
-                            { Agent_core.Hooks.default_turn_params with
-                              system_prompt_override = Some instruction;
-                              extra_system_context = Some world }) } in
-                      let effective instruction ?nudge ?world expected =
+                          before_turn = Some (fun event ->
+                            (match event with Agent_core.Hooks.BeforeTurn {turn; _} ->
+                              observe_hook "before" turn | _ -> fail "unexpected before hook event");
+                            match nudge with None -> Agent_core.Hooks.Continue
+                            | Some text -> Agent_core.Hooks.Nudge text);
+                          before_turn_params = Some (fun event ->
+                            (match event with Agent_core.Hooks.BeforeTurnParams {turn; _} ->
+                              observe_hook "params" turn | _ -> fail "unexpected params hook event");
+                            Agent_core.Hooks.AdjustParams
+                              { Agent_core.Hooks.default_turn_params with
+                                system_prompt_override = Some instruction;
+                                extra_system_context = Some world });
+                          pre_tool_use = Some (fun event ->
+                            (match event with Agent_core.Hooks.PreToolUse {invocation; _} ->
+                              observe_hook "tool" (Agent_core.Tool_contract.Invocation.turn invocation)
+                             | _ -> fail "unexpected tool hook event"); Agent_core.Hooks.Continue);
+                          after_turn = Some (fun event ->
+                            (match event with Agent_core.Hooks.AfterTurn {turn; _} ->
+                              observe_hook "after" turn | _ -> fail "unexpected completion hook event");
+                            Agent_core.Hooks.Continue) } in
+                      let effective instruction ?nudge ?world ?hook_turn expected =
+                        hook_ordinals := [];
                         let hooks = composed_hooks ?nudge ?world instruction in
                         check int "hook composition controls fresh versus resume" expected
-                          (run_context ~hooks ~goal:"Call masc_probe once" unchanged) in
+                          (run_context ~hooks ~goal:"Call masc_probe once" unchanged);
+                        let observations = List.rev !hook_ordinals in
+                        check (list string) "hooks run once per attempt"
+                          ["before"; "params"; "tool"; "after"] (List.map fst observations);
+                        let ordinal = snd (List.hd observations) in
+                        List.iter (fun (_, turn) -> check int "one host hook ordinal" ordinal turn) observations;
+                        Option.iter (fun expected -> check int "host ordinal survives vendor reset" expected ordinal) hook_turn in
                       let supplied_hooks = composed_hooks "SUPPLIED_EFFECTIVE_INSTRUCTION" in
                       check int "a hook can supply the final system for a blank raw input" 1
                         (run_context ~hooks:supplied_hooks ~goal:"Call masc_probe once"
@@ -701,7 +724,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                           "the same files mounted at");
                       effective "SECOND_EFFECTIVE_INSTRUCTION" 1;
                       effective "SECOND_EFFECTIVE_INSTRUCTION" 73;
-                      effective "SECOND_EFFECTIVE_INSTRUCTION" ~nudge:"first correction" 1;
+                      effective "SECOND_EFFECTIVE_INSTRUCTION" ~nudge:"first correction" ~hook_turn:74 1;
                       effective "SECOND_EFFECTIVE_INSTRUCTION" ~nudge:"changed correction" 1;
                       effective "SECOND_EFFECTIVE_INSTRUCTION" ~nudge:"changed correction" 73;
                       effective "SECOND_EFFECTIVE_INSTRUCTION" 1;
@@ -2066,11 +2089,70 @@ let test_losing_claim_cannot_publish_native_policy () =
           winner_policy (Fs_compat.load_file settings)))))
 ;;
 
+let test_native_policy_failure_releases_claim () =
+  let base_path = temp_workspace () |> Unix.realpath in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot; cleanup_tree base_path) (fun () ->
+    let runtime_root = Common.masc_dir_from_base_path ~base_path in
+    Unix.mkdir runtime_root 0o700;
+    let keeper_name = "antigravity-policy-failure" in
+    Masc_test_deps.declare_fixture_keeper ~base_path
+      ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) keeper_name;
+    let oauth_source = Filename.concat base_path "operator-oauth-token" in
+    write_file ~mode:0o600 oauth_source "synthetic-policy-account";
+    let marker = Filename.concat base_path "unexpected-spawn" in
+    let cli_path = Filename.concat base_path "agy-never-spawn" in
+    write_file ~mode:0o700 cli_path ("#!/bin/sh\ntouch " ^ shell_quote marker ^ "\nexit 0\n");
+    let runtime_path = Filename.concat base_path "runtime.toml" in
+    write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw (fun () ->
+        Eio_context.set_env env;
+        Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+        let config = match Runtime.get_runtime_by_id "antigravity.gemini" with
+          | Some {Runtime.execution=Runtime_execution.Antigravity_cli config; _} -> config
+          | _ -> fail "Antigravity binding missing" in
+        let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf ~keeper_name ~oauth_source in
+        let home = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf ~oauth_source
+          |> Result.get_ok in
+        let _ = Runtime_antigravity_home.prepare_native_tools home
+            ~posture:Runtime_native_tools.Native_full
+            ~workspace:Runtime_antigravity_home.Private_workspace ~additional_workspaces:[]
+          |> Result.get_ok in
+        let settings = (Runtime_antigravity_home.For_testing.paths home).settings_path in
+        let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (fun _ ->
+          Unix.unlink settings;
+          Unix.mkdir settings 0o700;
+          Agent_core.Hooks.Continue)} in
+        let attempt = Keeper_antigravity_runtime.run
+          ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0})
+          ~accepts_image_input:false ~required_native_posture:Runtime_native_tools.Native_read
+          ~runtime_id:"antigravity.gemini" ~keeper_name ~pre_tool_rejects:(ref []) ~base_path
+          ~goal:"Losing candidate" ~goal_blocks:None ~system_prompt:"Policy race fixture."
+          ~tools:[] ~initial_messages:[] ~model_input_projection:None
+          ~on_transmitted_model_input:(fun _ -> ()) ~hooks:(Some hooks)
+          ~context_injector:None ~context:None ~event_bus:None ~raw_trace:None ~on_event:None
+          ~config () in
+        (match attempt.result with
+         | Error (Agent_core.Error.Config (InvalidConfig {field; _})) ->
+           check string "native policy publication failure" "antigravity_home" field
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> fail "invalid policy destination unexpectedly launched a turn");
+        check bool "policy refusal precedes CLI launch" false (Sys.file_exists marker);
+        let module Store = Keeper_official_client_session_store in
+        (match Store.load ~base_path ~keeper_name with
+         | Ok (Some {phase=Ready; last_transient_release=Some {failure=Pre_dispatch_failed; _}; _}) -> ()
+         | Ok _ -> fail "pre-dispatch failure retained a recovery fence"
+         | Error detail -> fail detail)))))
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
     [ ( "lifecycle"
-        , [ test_case
+        , [ test_case "native policy failure releases its claim" `Quick
+            test_native_policy_failure_releases_claim
+          ; test_case
             "projects MCP tool and settles"
             `Quick
             test_keeper_projects_mcp_tool_and_settles

@@ -200,7 +200,7 @@ let reset_persistence_utf8_repair_stats_for_tests () =
       utf8_repair_path_samples := [];
       Hashtbl.clear utf8_repair_log_seen)
 
-let is_disallowed_control_char (c : char) : bool =
+let[@inline] is_disallowed_control_char (c : char) : bool =
   let code = Char.code c in
   (code < 32 && c <> '\n' && c <> '\r' && c <> '\t') || code = 127
 

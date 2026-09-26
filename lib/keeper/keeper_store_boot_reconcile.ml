@@ -100,15 +100,18 @@ let examine_official_client_session (config : Workspace.config) examination =
    from registering (#37900), so it refuses boot. The row names the file the
    read failed on; the move takes the snapshot and the WAL together. *)
 let examine_event_queue (config : Workspace.config) examination =
-  let module Q = Keeper_event_queue_persistence in
   let base_path = config.Workspace.base_path in
-  let discovery = Q.discover_keeper_names_with_durable_state ~base_path in
+  let discovery = Keeper_event_queue_persistence.discover_keeper_names_with_durable_state ~base_path in
   (match discovery.read_error with
    | None -> ()
    | Some error -> Log.Keeper.warn "boot reconcile: event queue directory unreadable: %s" error);
   List.fold_left
     (fun examination keeper ->
-       match Q.validate_existing_state_read_only_classified_result ~base_path ~keeper_name:keeper with
+       match
+         Keeper_event_queue_persistence.validate_existing_state_read_only_classified_result
+           ~base_path
+           ~keeper_name:keeper
+       with
        | Ok (_ : Keeper_event_queue_state.t) ->
          { examination with readable = examination.readable + 1 }
        | Error failure ->
@@ -117,17 +120,17 @@ let examine_event_queue (config : Workspace.config) examination =
             does; the row then shows the keeper name. *)
          let path =
            match failure with
-           | Q.State_failed (Q.File_rejected { path; _ }) -> path
-           | Q.State_failed (Q.State_missing (_ : string))
-           | Q.Owner_unresolved (_ : string)
-           | Q.Read_raised (_ : string) -> keeper
+           | Keeper_event_queue_persistence.State_failed (File_rejected { path; _ }) -> path
+           | Keeper_event_queue_persistence.State_failed (State_missing (_ : string))
+           | Keeper_event_queue_persistence.Owner_unresolved (_ : string)
+           | Keeper_event_queue_persistence.Read_raised (_ : string) -> keeper
          in
          { examination with
            undecodable =
              { store = D.Refusing.Event_queue
              ; keeper
              ; path
-             ; rejection = Q.read_only_failure_to_string failure
+             ; rejection = Keeper_event_queue_persistence.read_only_failure_to_string failure
              }
              :: examination.undecodable
          })

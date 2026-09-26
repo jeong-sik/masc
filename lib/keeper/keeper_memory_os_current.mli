@@ -194,7 +194,8 @@ val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
     [recorded_at]/[revision]/[source]/[change] plus [dropped] when the writer
     supplied drop-reason statements; the resulting fact count is derivable as
     [change.retained + length change.added] and is deliberately not duplicated.
-    Never read on the turn path. *)
+    On the turn path only {!find_removal} reads it, and only after a
+    [keeper_memory_write] supersedes target was found not current. *)
 val journal_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
 (** WAL sidecar joining each runtime cluster's typed durable completed-turn
@@ -242,6 +243,34 @@ val read_journal_tail :
   -> keeper_id:string
   -> limit:int
   -> (journal_entry, string) result list
+
+(** How one memory identity left this keeper's current snapshot, from the
+    journal line that removed it: the revision, its commit time, the writer
+    ([removed_by]) and the drop statement's reason when the writer gave one. *)
+type removal =
+  { removed_in_revision : int
+  ; removed_at : float
+  ; removed_by : source
+  ; drop_reason : string option
+  }
+
+(** [Removed]: the latest journal line naming the identity removed it.
+    [No_removal_recorded]: no line removed it, or the latest line naming it
+    added it; this covers an identity the keeper never had and a missing
+    journal. [Journal_unreadable]: the journal could not be read. *)
+type removal_lookup =
+  | Removed of removal
+  | No_removal_recorded
+  | Journal_unreadable of string
+
+(** Scan this keeper's journal newest first for the line that removed
+    [memory_id], stopping at the first line that names it. A line this build
+    cannot decode is passed over, so an undecodable removal line reads as
+    [No_removal_recorded]. *)
+val find_removal :
+  keepers_dir:string -> keeper_id:string -> string -> removal_lookup
+
+val source_kind_to_string : source_kind -> string
 
 (** Dashboard projection of the last [limit] lines. Every row carries a
     producer-stable [structural_id] derived from the keeper and the byte offset

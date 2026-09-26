@@ -1841,6 +1841,69 @@ let read_journal_tail ~keepers_dir ~keeper_id ~limit =
   read_journal_tail_indexed ~keepers_dir ~keeper_id ~limit |> List.map snd
 ;;
 
+type removal =
+  { removed_in_revision : int
+  ; removed_at : float
+  ; removed_by : source
+  ; drop_reason : string option
+  }
+
+type removal_lookup =
+  | Removed of removal
+  | No_removal_recorded
+  | Journal_unreadable of string
+
+type journal_mention =
+  | Mentioned_as_current
+  | Mentioned_as_removed of removal
+
+(* Newest line first: the latest committed line that names the identity
+   decides. A line that adds it (a re-observation lists it on both sides)
+   leaves it current after that line, so no removal is reported. A line this
+   build cannot decode is passed over, which can only turn a removal into
+   [No_removal_recorded]. *)
+let find_removal ~keepers_dir ~keeper_id target =
+  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let names_target facts =
+    List.exists
+      (fun fact -> String.equal (Keeper_memory_os_types.memory_id fact) target)
+      facts
+  in
+  let reason_for dropped =
+    Option.bind dropped (fun statements ->
+      List.find_map
+        (fun (statement : Keeper_memory_os_types.dropped_statement) ->
+           if String.equal statement.memory_id target then Some statement.reason else None)
+        statements)
+  in
+  let mention = function
+    | Dated_jsonl.Malformed_json _ -> None
+    | Dated_jsonl.Parsed json ->
+      (match journal_entry_of_json json with
+       | Ok (Journal_committed { recorded_at; revision; source; change; dropped }) ->
+         if names_target change.added
+         then Some Mentioned_as_current
+         else if names_target change.removed
+         then
+           Some
+             (Mentioned_as_removed
+                { removed_in_revision = revision
+                ; removed_at = recorded_at
+                ; removed_by = source
+                ; drop_reason = reason_for dropped
+                })
+         else None
+       | Ok (Journal_failed _ | Journal_quarantined _) | Error _ -> None)
+  in
+  if not (Sys.file_exists path)
+  then No_removal_recorded
+  else (
+    match Dated_jsonl.find_latest_entry_in_file_result path mention with
+    | Ok (Some (Mentioned_as_removed removal)) -> Removed removal
+    | Ok (Some Mentioned_as_current | None) -> No_removal_recorded
+    | Error error -> Journal_unreadable (Dated_jsonl.read_error_to_string error))
+;;
+
 let update_locked_with_error
       ?on_committed
       ?clock

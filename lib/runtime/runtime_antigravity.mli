@@ -148,7 +148,10 @@ type error =
 val error_to_string : error -> string
 
 val redact_stderr_tail : string -> string
-(** Shared structural secret masking, applied before diagnostic truncation. *)
+(** Shared structural secret masking. The shared stderr capture masks complete
+    retained input before display truncation. Once the raw byte bound is
+    exceeded the entire diagnostic is omitted, including later lines, so a
+    multiline credential cannot survive a dropped identifying prefix. *)
 
 val validate_turn :
   ?conversation_mode:conversation_mode ->

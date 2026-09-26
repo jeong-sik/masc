@@ -16,8 +16,9 @@ or causal performance experiment. All observed acknowledgements exceed 0.1 ms.
 
 Each session completed two cycles of ten individually acknowledged input
 transitions: 40 total cursor, page, wheel and Info-scroll frames, plus the draft
-preservation assertion in each session. Alpha/beta metadata and 250 retained
-Channels were acknowledged before measurement; both returned to Info. Root
+preservation assertion in each session. Alpha/beta metadata was acknowledged
+before roster measurement; 250 Channels were loaded before Info measurement.
+Both sessions returned to Info. Root
 revalidated every receipt, preflight/input identity, source hashes, binary
 hashes, stdout JSON and all ten per-action summary rows. Both stderr files
 are empty and internal frame-timing logs are present. Successful scenario

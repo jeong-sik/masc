@@ -40,6 +40,21 @@ let credential ~directory path =
   let* contents=owned_read directory path in
   if contents="" then Error Import_failed else Ok canonical
 let manifest directory = Filename.concat directory "reference.json"
+let with_native_lease_lock root action =
+  match File_lock_eio.with_durable_lock
+      ~lock_path:(Filename.concat root ".native-home-leases.lock") action with
+  | Ok result -> result
+  | Error _ -> Error Private_storage_unavailable
+let existing_native_lease root contents =
+  Sys.readdir root |> Array.to_list |> List.find_map (fun leaf ->
+    if not (Auth.is_generated_token_shape leaf) then None else
+    let path = Filename.concat root leaf in
+    match directory ~create:false path with
+    | Error _ -> None
+    | Ok () ->
+      match owned_read path (manifest path) with
+      | Ok existing when String.equal existing contents -> Some (Reference leaf)
+      | Ok _ | Error _ -> None)
 let create ~workspace ~integration_id ~cli_path ~import = filesystem (fun () ->
   let workspace=Unix.realpath workspace in
   let* root=root ~create:true () in
@@ -66,18 +81,24 @@ let lease_home ~workspace ~integration_id ~cli_path ~account_home = filesystem (
   if info.st_kind <> Unix.S_DIR || info.st_uid <> Unix.geteuid () then Error Invalid_reference else
   let workspace = Unix.realpath workspace in
   let* root = root ~create:true () in
+  let data = `Assoc ["schema", `String "masc.setup_native_home_reference.v1";
+    "workspace", `String workspace; "integration_id", `String integration_id;
+    "cli_path", `String cli_path; "account_home", `String account_home]
+    |> Yojson.Safe.to_string in
+  with_native_lease_lock root (fun () ->
+  match existing_native_lease root data with
+  | Some reference -> Ok reference
+  | None ->
   Eio.Switch.run (fun sw ->
     let reference = Reference (Auth.generate_token ()) in
     let directory_path = Filename.concat root (reference_to_string reference) in
-    Unix.mkdir directory_path 0o700;
     let retained = ref false in
-    Eio.Switch.on_release sw (fun () -> if not !retained then Fs_compat.remove_tree directory_path);
-    let data = `Assoc ["schema", `String "masc.setup_native_home_reference.v1";
-      "workspace", `String workspace; "integration_id", `String integration_id;
-      "cli_path", `String cli_path; "account_home", `String account_home] in
-    Auth.save_private_text_file (manifest directory_path) (Yojson.Safe.to_string data);
+    Eio.Cancel.protect (fun () ->
+      Unix.mkdir directory_path 0o700;
+      Eio.Switch.on_release sw (fun () -> if not !retained then Fs_compat.remove_tree directory_path));
+    Auth.save_private_text_file (manifest directory_path) data;
     retained := true;
-    Ok reference))
+    Ok reference)))
 
 let resolve ~workspace ~integration_id ~cli_path (Reference reference) = filesystem (fun () ->
   let workspace=Unix.realpath workspace in
@@ -107,3 +128,17 @@ let resolve ~workspace ~integration_id ~cli_path (Reference reference) = filesys
       | `String account_home when Runtime_account_home.is_valid account_home -> Ok (Native_home {account_home})
       | _ -> Error Invalid_reference)
   | _ -> Error Invalid_reference)
+
+let release_native_home ~workspace ~integration_id ~cli_path reference = filesystem (fun () ->
+  let* root = root ~create:false () in
+  with_native_lease_lock root (fun () ->
+    let* binding = resolve ~workspace ~integration_id ~cli_path reference in
+    match binding with
+    | Antigravity_account _ -> Error Invalid_reference
+    | Native_home _ ->
+      let path = Filename.concat root (reference_to_string reference) in
+      (* A native lease owns only this reference, never the selected HOME.
+         Imported Antigravity credentials have a different durable lifecycle. *)
+      Unix.unlink (manifest path);
+      Unix.rmdir path;
+      Ok ()))

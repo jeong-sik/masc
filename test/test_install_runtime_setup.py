@@ -663,6 +663,26 @@ class SelectedNativeAccounts(unittest.TestCase):
             self.assertEqual(selected['account_home'], home)
             self.assertTrue(selected['credential_replaced'])
 
+    def test_first_login_prepares_private_selected_account_directories(self):
+        for choice, variable, leaf in [('claude_code', 'CLAUDE_CONFIG_DIR', '.claude'),
+                                       ('codex', 'CODEX_HOME', '.codex')]:
+            with self.subTest(choice=choice), tempfile.TemporaryDirectory() as home:
+                with patch.dict(os.environ, {'HOME': home, variable: ''}), patch.object(SETUP, 'pick', return_value=[0]):
+                    selected = SETUP.select_native_account(dict(choice=choice, label=choice))
+                account = Path(home) / leaf
+                self.assertEqual(selected['account_home'], str(account))
+                self.assertEqual(account.stat().st_mode & 0o777, 0o700)
+                self.assertEqual(list(account.iterdir()), [])
+
+    def test_account_selection_refuses_an_existing_file(self):
+        with tempfile.TemporaryDirectory() as home:
+            path = Path(home) / 'account'
+            path.write_text('keep this file')
+            with patch.object(SETUP, 'pick', return_value=[1]), patch.object(SETUP, 'ask_text', return_value=str(path)):
+                with self.assertRaises(SETUP.SetupError):
+                    SETUP.select_native_account(dict(choice='codex', label='Codex'))
+            self.assertEqual(path.read_text(), 'keep this file')
+
     def test_muse_catalog_source_is_not_account_verification(self):
         source = dict(choice='muse', command='/owned/muse', account_home='/selected', rows=[])
         receipt = dict(schema='masc.muse_models.v1', source='providerCatalog',
@@ -678,6 +698,15 @@ class SelectedNativeAccounts(unittest.TestCase):
             with self.subTest(source=catalog_source), patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(dict(receipt, source=catalog_source)), '')):
                 with self.assertRaises(SETUP.SetupError):
                     SETUP.muse_models('/owned/masc', source)
+
+    def test_non_object_native_catalogs_report_retryable_setup_errors(self):
+        source = dict(command='/owned/client', account_home='/selected')
+        for payload in [None, [], True, 3, 'invalid']:
+            for discover in [SETUP.muse_models, SETUP.refresh_codex_models]:
+                with self.subTest(payload=payload, discover=discover.__name__), patch.object(
+                        SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(payload), '')):
+                    with self.assertRaises(SETUP.SetupError):
+                        discover('/masc', source)
 
     def test_reselected_account_does_not_inherit_prior_membership_or_context(self):
         source = dict(choice='codex', command='codex', account_home='/selected', credential_replaced=True,

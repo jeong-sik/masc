@@ -136,7 +136,10 @@ let header_of_string s =
 
 type contents = { header : header; meta : Yojson.Safe.t; machine_bytes : string }
 
-let decode ~machine ~format s =
+(* The header check, the checksum and the decompression: everything a reader
+   needs regardless of whether it goes on to split the body into [meta] and
+   the machine bytes, or stops at [meta] alone. *)
+let decode_body ~machine ~format s =
   let c = { s; at = 0 } in
   match decode_header c with
   | exception Bad message -> Error (Corrupt message)
@@ -159,12 +162,38 @@ let decode ~machine ~format s =
        in
        if String.length body <> size || not (String.equal (Digest.string body) sum) then
          raise (Bad "checksum mismatch");
+       body
+     with
+     | body -> Ok (h, body)
+     | exception Bad message -> Error (Corrupt message))
+;;
+
+let decode ~machine ~format s =
+  match decode_body ~machine ~format s with
+  | Error e -> Error e
+  | Ok (header, body) ->
+    (match
        let b = { s = body; at = 0 } in
        let meta = Yojson.Safe.from_string (string b) in
        let machine_bytes = take b (String.length body - b.at) in
-       { header = h; meta; machine_bytes }
+       { header; meta; machine_bytes }
      with
      | contents -> Ok contents
+     | exception Bad message -> Error (Corrupt message)
+     | exception Yojson.Json_error message -> Error (Corrupt message))
+;;
+
+type meta_contents = { header : header; meta : Yojson.Safe.t; modified : float }
+
+(* Same body, but the machine bytes are never sliced out: [take] on the tail
+   is a [String.sub] the size of the whole guest memory, and a caller asking
+   only what a checkpoint is should not pay for a copy of it. *)
+let decode_meta ~machine ~format s =
+  match decode_body ~machine ~format s with
+  | Error e -> Error e
+  | Ok (header, body) ->
+    (match Yojson.Safe.from_string (string { s = body; at = 0 }) with
+     | meta -> Ok (header, meta)
      | exception Bad message -> Error (Corrupt message)
      | exception Yojson.Json_error message -> Error (Corrupt message))
 ;;
@@ -198,13 +227,31 @@ let write ~dir slot header ~meta ~machine_bytes =
 
 let read_file file = In_channel.with_open_bin file In_channel.input_all
 
-let read ~dir slot ~machine ~format =
+let load_file ~dir slot =
   let file = path ~dir slot in
   if not (Sys.file_exists file) then Error (No_slot slot)
   else
     match read_file file with
     | exception Sys_error message -> Error (Unreadable message)
-    | s -> decode ~machine ~format s
+    | s -> Ok (file, s)
+;;
+
+let read ~dir slot ~machine ~format =
+  match load_file ~dir slot with
+  | Error e -> Error e
+  | Ok (_file, s) -> decode ~machine ~format s
+;;
+
+let read_meta ~dir slot ~machine ~format =
+  match load_file ~dir slot with
+  | Error e -> Error e
+  | Ok (file, s) ->
+    (match decode_meta ~machine ~format s with
+     | Error e -> Error e
+     | Ok (header, meta) ->
+       (match Unix.stat file with
+        | st -> Ok { header; meta; modified = st.Unix.st_mtime }
+        | exception Unix.Unix_error (e, _, _) -> Error (Unreadable (Unix.error_message e))))
 ;;
 
 type listed = {

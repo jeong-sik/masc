@@ -161,14 +161,17 @@ let test_pop_blocks_then_receives ~auth () =
       Sse.broadcast (`Assoc [("wakeup", `Bool true)]));
   Sse.unregister "s-block"
 
-let test_broadcast_skips_already_seen ~auth () =
+(* After a restart the counter starts again at 0 while the MCP session is
+   restored, so a reconnecting client can carry a cursor far above it. A new
+   event always gets an id above any cursor this process handed out, so such
+   a cursor cannot mean "already seen"; the client still receives it. *)
+let test_a_cursor_from_an_earlier_process_does_not_hold_back_events ~auth () =
   reset ();
-  (* Register with a high last_event_id so events are skipped *)
-  ignore (register_exn ~auth ~kind:Observer "s-skip" ~last_event_id:999_999_999);
-  Sse.broadcast (`Assoc [("skip", `Bool true)]);
-  let ev = Sse.try_pop "s-skip" in
-  Alcotest.(check bool) "skipped (already seen)" true (ev = None);
-  Sse.unregister "s-skip"
+  ignore (register_exn ~auth ~kind:Observer "s-earlier-process" ~last_event_id:999_999_999);
+  Sse.broadcast (`Assoc [("after_restart", `Bool true)]);
+  let ev = Sse.try_pop "s-earlier-process" in
+  Alcotest.(check bool) "the new event arrives" true (ev <> None);
+  Sse.unregister "s-earlier-process"
 
 let test_broadcast_event_contains_data ~auth () =
   reset ();
@@ -397,7 +400,8 @@ let () =
             [
               Alcotest.test_case "broadcast popable" `Quick (test_broadcast_popable ~auth);
               Alcotest.test_case "multiple clients" `Quick (test_broadcast_multiple_clients_streams ~auth);
-              Alcotest.test_case "skips already seen" `Quick (test_broadcast_skips_already_seen ~auth);
+              Alcotest.test_case "a cursor from an earlier process does not hold back events" `Quick
+                (test_a_cursor_from_an_earlier_process_does_not_hold_back_events ~auth);
               Alcotest.test_case "event contains data" `Quick (test_broadcast_event_contains_data ~auth);
             ] );
           ( "send_to_stream",

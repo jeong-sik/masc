@@ -30,7 +30,7 @@ type runtime_retry = private
   ; not_before : float option
       (** Earliest wall-clock time at which the retry becomes claimable again.
           [Some] is set when the deferring failure was the provider throttling
-          (rate limit, hard quota, capacity backpressure); [None] keeps the
+          (rate limit, hard quota, provider capacity); [None] keeps the
           retry immediately claimable. Scheduling metadata only: it is not
           part of the continuation identity compared by
           {!equal_runtime_retry}. *)

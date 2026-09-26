@@ -607,7 +607,12 @@ let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) s
   | Error e -> Error e
   | Ok _credential ->
   let client_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
-  let last_event_id = Atomic.make last_event_id in
+  (* Ids only grow within one process, so a cursor above the last id handed
+     out came from an earlier one: MCP sessions outlive a restart, the counter
+     does not. As a floor it would hold back every event until the new counter
+     passed it, so it counts as no cursor. *)
+  let floor = if last_event_id > current_id () then 0 else last_event_id in
+  let last_event_id = Atomic.make floor in
   let event_stream = Eio.Stream.create stream_capacity in
   Option.iter (fun hook -> set_disconnect_hook session_id hook) on_disconnect;
   let base_client = {

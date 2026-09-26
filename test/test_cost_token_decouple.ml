@@ -441,7 +441,9 @@ let test_raw_rows_carry_their_scope () =
          check string "scope survives the wire"
            (Runtime_usage_scope.to_string scope)
            (Runtime_usage_scope.to_string decoded)
-       | Cost_ledger.Resolved_delta -> fail "a raw row decoded as a resolved delta")
+       | Cost_ledger.Resolved_delta -> fail "a raw row decoded as a resolved delta"
+       | Cost_ledger.Resolved_attempt_delta _ ->
+         fail "a raw row decoded as an attempt's resolved delta")
     Runtime_usage_scope.all
 ;;
 
@@ -470,6 +472,56 @@ let test_a_resolved_row_with_a_scope_is_rejected () =
   match Cost_ledger.of_json resolved with
   | Error _ -> ()
   | Ok _ -> fail "a resolved row carrying a scope was accepted"
+;;
+
+let attempt_row =
+  { (raw_row Runtime_usage_scope.Per_request) with
+    usage_projection =
+      Cost_ledger.Resolved_attempt_delta { lane_attempt_index = 2; reading_index = 1 }
+  }
+;;
+
+(* An attempt's resolved reading names its attempt and position, and a
+   caller's field of the same name cannot rename it. *)
+let test_an_attempt_row_round_trips_its_reading () =
+  let json =
+    Cost_ledger.to_json ~extra_fields:[ "lane_attempt_index", `Int 9 ] attempt_row
+  in
+  check int "the row's own attempt" 2 (int_field json "lane_attempt_index");
+  check int "its reading" 1 (int_field json "reading_index");
+  check_null_field json "usage_scope";
+  match decoded_projection json with
+  | Cost_ledger.Resolved_attempt_delta { lane_attempt_index; reading_index } ->
+    check (pair int int) "the reading survives the wire" (2, 1)
+      (lane_attempt_index, reading_index)
+  | Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_delta ->
+    fail "an attempt row decoded as another projection"
+;;
+
+let test_an_attempt_row_without_its_reading_is_rejected () =
+  match Cost_ledger.of_json (without_field "reading_index" (Cost_ledger.to_json attempt_row)) with
+  | Error _ -> ()
+  | Ok _ -> fail "an attempt row without its reading was accepted"
+;;
+
+let test_a_manual_attempt_row_is_rejected () =
+  match
+    Cost_ledger.of_json
+      (Cost_ledger.to_json { attempt_row with source = Cost_ledger.Manual_cli })
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "a manual row claimed an attempt reading"
+;;
+
+(* The turn's settlement pairs with its decision by turn and ordinal. An
+   attempt reading of the same turn and ordinal is a different spend and
+   must not land in that pair. *)
+let test_an_attempt_reading_keys_apart_from_the_turn () =
+  let turn_row = { attempt_row with usage_projection = Cost_ledger.Resolved_delta } in
+  match Cost_ledger.inference_key turn_row, Cost_ledger.inference_key attempt_row with
+  | Some turn_key, Some attempt_key ->
+    check bool "two keys" true (Cost_ledger.compare_inference_key turn_key attempt_key <> 0)
+  | None, _ | _, None -> fail "an auto row has no key"
 ;;
 
 let () =
@@ -515,5 +567,16 @@ let () =
             test_a_raw_row_without_a_scope_is_rejected;
           test_case "a resolved row with a scope is rejected" `Quick
             test_a_resolved_row_with_a_scope_is_rejected;
+        ] );
+      ( "attempt-reading",
+        [
+          test_case "an attempt row round-trips its reading" `Quick
+            test_an_attempt_row_round_trips_its_reading;
+          test_case "an attempt row without its reading is rejected" `Quick
+            test_an_attempt_row_without_its_reading_is_rejected;
+          test_case "a manual attempt row is rejected" `Quick
+            test_a_manual_attempt_row_is_rejected;
+          test_case "an attempt reading keys apart from the turn" `Quick
+            test_an_attempt_reading_keys_apart_from_the_turn;
         ] );
     ]

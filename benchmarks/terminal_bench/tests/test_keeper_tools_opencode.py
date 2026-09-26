@@ -293,6 +293,9 @@ def test_the_run_adds_keeper_spend_to_the_episode(tmp_path, monkeypatch):
         ' "cache_read_tokens": 7, "cache_creation_tokens": 3}',
         '{"usage_projection": "resolved_delta", "input_tokens": 50,'
         ' "output_tokens": 5, "cost_usd": 0.75, "usage_missing": true}',
+        # An attempt of a failed turn spent this; it is spend like the rest.
+        '{"usage_projection": "resolved_attempt_delta", "input_tokens": 20,'
+        ' "output_tokens": 2, "cost_usd": 0.5}',
         # The same request MASC also writes as a raw observation. Counting it
         # beside the settlement doubles a single-request turn.
         '{"usage_projection": "raw_observation", "input_tokens": 100,'
@@ -334,12 +337,12 @@ def test_the_run_adds_keeper_spend_to_the_episode(tmp_path, monkeypatch):
     assert "2>/dev/null" not in ledger_command
     assert "|| true" not in ledger_command
     # Added to what the agent reported, not replacing it.
-    assert context.n_input_tokens == 1_150
-    assert context.n_output_tokens == 15
+    assert context.n_input_tokens == 1_170
+    assert context.n_output_tokens == 17
     assert context.n_cache_tokens == 10
-    assert context.cost_usd == pytest.approx(2.0)
+    assert context.cost_usd == pytest.approx(2.5)
     keeper = context.metadata["keeper_usage"]
-    assert keeper["rows"] == 2
+    assert keeper["rows"] == 3
     # A turn the provider never reported usage for is counted, not folded in as
     # zero: a total that quietly omits turns is worse than one that says so.
     assert keeper["rows_without_reported_usage"] == 1

@@ -43,7 +43,7 @@ cwd = os.getcwd()
 assert permissions["allow"] == ["mcp(masc/*)", "read_file(" + cwd + ")"]
 assert "write_file(*)" in permissions["deny"]
 assert "command(*)" in permissions["deny"]
-assert "unsandboxed(*)" in permissions["deny"]
+assert "unsandboxed(*)" not in permissions["deny"]
 POLICY
 conversation=conversation-antigravity-fixture
 turns=1

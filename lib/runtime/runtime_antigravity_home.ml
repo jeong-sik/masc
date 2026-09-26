@@ -208,17 +208,21 @@ let ensure_private_child parent leaf =
 (* Permissions are the security boundary. Plan mode merely adds an instruction.
    Directory arguments (without glob suffixes) are recursive CLI grants:
    https://antigravity.google/docs/permissions?tab=cli . *)
+(* Do not emit a wildcard command grant: agy 1.2.11 uses it for both sandboxed and
+   unsandboxed execution, and rejects the former [unsandboxed] action. With
+   --sandbox, the vendor's implicit grant covers sandboxed commands; an escape
+   remains Ask, which print mode cannot approve. Read posture denies both. *)
 let native_settings_json ~posture ~workspaces =
   let read = List.map (fun path -> "read_file(" ^ path ^ ")") workspaces in
   let write = List.map (fun path -> "write_file(" ^ path ^ ")") workspaces in
   let allow, deny = match (posture : Runtime_native_tools.posture) with
     | Native_none -> [], ["read_file(*)"; "write_file(*)"; "command(*)"]
     | Native_read -> read, ["write_file(*)"; "command(*)"]
-    | Native_full -> read @ write @ ["command(*)"], [] in
+    | Native_full -> read @ write, [] in
   let strings values = `List (List.map (fun value -> `String value) values) in
   `Assoc ["permissions", `Assoc
     ["allow", strings ("mcp(masc/*)" :: allow);
-     "deny", strings (deny @ ["read_url(*)"; "execute_url(*)"; "unsandboxed(*)"])]]
+     "deny", strings (deny @ ["read_url(*)"; "execute_url(*)"])]]
 ;;
 
 let settings_json () =
@@ -617,7 +621,7 @@ let write_context_observation_settings t ~command =
     "statusLine", `Assoc ["type", `String "command"; "command", `String command; "enabled", `Bool true];
     "altScreenMode", `String "never";
     "permissions", `Assoc ["allow", `List []; "deny", `List (List.map (fun name -> `String name)
-      ["read_file(*)"; "write_file(*)"; "read_url(*)"; "execute_url(*)"; "command(*)"; "unsandboxed(*)"])]] in
+      ["read_file(*)"; "write_file(*)"; "read_url(*)"; "execute_url(*)"; "command(*)"])]] in
   write_private_file ~make_error:(fun path detail -> Settings_write_failed {path;detail})
     t.settings_path (Yojson.Safe.to_string settings)
 

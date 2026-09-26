@@ -143,14 +143,18 @@ let test_native_permissions_match_posture_and_workspace () =
     check (list string) "effect/network boundaries" expected_deny (rules "deny");
     check bool "no workspace-wide root read" false
       (List.mem ("read_file(" ^ runtime_root ^ ")") (rules "allow"));
-    check bool "no all-files read" false (List.mem "read_file(*)" (rules "allow")) in
-  let network_denies = ["read_url(*)"; "execute_url(*)"; "unsandboxed(*)"] in
+    check bool "no all-files read" false (List.mem "read_file(*)" (rules "allow"));
+    check bool "no command grant can authorize sandbox escape" false
+      (List.mem "command(*)" (rules "allow"));
+    check bool "no unsupported unsandboxed rule" false
+      (List.mem "unsandboxed(*)" (rules "deny")) in
+  let network_denies = ["read_url(*)"; "execute_url(*)"] in
   check_policy Runtime_native_tools.Native_read
     ["mcp(masc/*)"; "read_file(" ^ workspace ^ ")"]
     (["write_file(*)"; "command(*)"] @ network_denies);
   check_policy Runtime_native_tools.Native_full
     ["mcp(masc/*)"; "read_file(" ^ workspace ^ ")";
-     "write_file(" ^ workspace ^ ")"; "command(*)"] network_denies;
+     "write_file(" ^ workspace ^ ")"] network_denies;
   let extra = Filename.concat runtime_root "operator-extra" in
   Unix.mkdir extra 0o700;
   ignore (Runtime_antigravity_home.prepare_native_tools home

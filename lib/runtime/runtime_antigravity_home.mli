@@ -83,7 +83,9 @@ val prepare_native_tools
     Endpoint-owned trees use [Private_workspace], an isolated host directory;
     this does not claim native access to the endpoint's actual files.
     Read posture denies commands and writes; full permits sandboxed effects.
-    Both forbid unsandboxed execution and native network tools. *)
+    Both deny native network tools. The caller must enable the CLI sandbox;
+    no command allow rule is emitted because it would grant sandbox escapes
+    too. Unsandboxed requests retain the vendor's interactive approval gate. *)
 
 val write_context_observation_settings : t -> command:string -> (unit, error) result
 (** Metadata-only setup for a fresh disposable HOME: no MCP allowance and no

@@ -52,17 +52,24 @@ with and without a worker pool, and concurrent native-domain reads after a
 default Eio clock is installed. Existing HTTP preparation, seed, stale-value,
 replacement-token and timeout coverage remains.
 
-Only OCaml syntax parsing and whitespace checks have run locally. Compiled CI
-and a candidate binary comparison are still required; no latency or allocation
-improvement, production deployment or 0.1ms achievement is claimed.
+OCaml syntax parsing and whitespace checks ran locally. Source-head PR CI passed
+all five gates and its selected tests, including all 58 Dashboard_cache cases.
+The [isolated native comparison](comparison/README.md) retains a separate
+24-session before/after measurement. It shows lower aggregate first-response
+medians with mixed tails and mutation/warm results; no general speedup, allocation
+measurement, production deployment or 0.1ms achievement is claimed.
 
 ## Diagnostic receipts
 
 This directory retains the exact diagnostic runner, runtime fixture, startup
-identity, ten observations, selected phase lines with original log byte offsets,
+identity with host paths redacted, ten observations, selected phase lines with original log byte offsets,
 and cleanup. The original full DEBUG log and window captures remain local;
 their hash/offset checks were verified by root and two independent reviewers.
 Raw server logs are not published. Retained selected lines do not independently
 reconstruct that original log. No operator runtime data or credentials were used.
 The separately retained ordinary-level paired measurements for #39325 are not
 pooled with this diagnostic or attributed to this new source change.
+
+The PR review request to remove host-specific paths is addressed in identity
+and diagnostic-summary; comparison/redaction.json records original and published
+hashes. Numeric observations and source/binary identities are unchanged.

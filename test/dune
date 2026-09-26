@@ -4467,6 +4467,8 @@
  (modules test_tui_planning_order)
  (libraries alcotest masc.masc_goal masc_tui_types))
 
+(include stanzas/test_tui_stall_observation.inc)
+
 (rule
  (alias runtest-test_tui_keeper_row_selection)
  (deps test_tui_keeper_row_selection.py test_tui_keyboard_input.py)

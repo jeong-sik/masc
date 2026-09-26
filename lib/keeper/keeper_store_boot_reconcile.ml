@@ -210,6 +210,11 @@ let admit ~accept_quarantine examination =
 ;;
 
 let refusal_to_string undecodable =
+  let guidance =
+    if List.exists (function Discovery_failed _ -> true | Undecodable _ -> false) undecodable
+    then "repair directory access and run `deployment_preflight_helper validate-stores` against this base path before restarting; quarantine cannot bypass an unread inventory"
+    else "strip or repair the files and run `deployment_preflight_helper validate-stores` against this base path, or start with --accept-store-quarantine to move them aside and start those keepers with empty stores"
+  in
   String.concat
     "\n"
     ((Printf.sprintf
@@ -224,11 +229,7 @@ let refusal_to_string undecodable =
               Printf.sprintf "  %s inventory path=%s: %s (repair directory access; quarantine cannot recover an unread inventory)"
                 (store_to_string failure.store) failure.path failure.rejection)
            undecodable)
-     @ [ "strip or repair the files and run `deployment_preflight_helper validate-stores` \
-          against this base path; once all inventories are readable, start with \
-          --accept-store-quarantine to move rejected files \
-          aside and start those keepers with empty stores"
-       ])
+     @ [ guidance ])
 ;;
 
 type quarantined =

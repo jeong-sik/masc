@@ -374,7 +374,7 @@ let tab_strip_min_width (tabs : (string * bool * 'target) list) =
    hides, the one a step of the strip's own key would bring into the window. *)
 let tab_strip ~width ~(press : 'target -> string -> string)
     (tabs : (string * bool * 'target) list) =
-  let draw (label, current, target) =
+  let draw press (label, current, target) =
     press target
       (if current then
          Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry ^ label
@@ -402,7 +402,8 @@ let tab_strip ~width ~(press : 'target -> string -> string)
       done;
       !sum + (gap * (hi - lo))
     in
-    if span 0 (n - 1) <= width then String.concat tab_strip_gap (List.map draw tabs)
+    if span 0 (n - 1) <= width then
+      String.concat tab_strip_gap (List.map (draw press) tabs)
     else begin
       (* Each mark is measured with the count it would draw. Growing the
          window on one side lowers that side's count, so a window that fits
@@ -429,12 +430,12 @@ let tab_strip ~width ~(press : 'target -> string -> string)
         let grew = if !prefer_right then right () || left () else left () || right () in
         if grew then prefer_right := not !prefer_right else growing := false
       done;
-      let shown =
-        List.init (!hi - !lo + 1) (fun i -> draw entries.(!lo + i))
-        |> String.concat tab_strip_gap
-      in
       let mark text = Ansi.dim ^ text ^ Ansi.reset in
-      let drawn =
+      let compose press =
+        let shown =
+          List.init (!hi - !lo + 1) (fun i -> draw press entries.(!lo + i))
+          |> String.concat tab_strip_gap
+        in
         (if !lo > 0 then
            press (target_of entries.(!lo - 1)) (mark (hidden_before_mark !lo))
            ^ tab_strip_gap
@@ -447,6 +448,7 @@ let tab_strip ~width ~(press : 'target -> string -> string)
               (mark (hidden_after_mark (n - 1 - !hi)))
         else ""
       in
+      let drawn = compose press in
       (* The window is seeded with the current entry and only grows under
          [fits], so an entry wider than the whole budget is drawn anyway. At a
          hundred columns the Config row had two cells left for its strip and
@@ -460,9 +462,16 @@ let tab_strip ~width ~(press : 'target -> string -> string)
          So the strip keeps its promise here rather than leaving the frame to
          enforce it on whatever sits furthest right. [fit_width] pads a short
          string, which would push that tail out by hand, so it is asked only
-         when the strip is actually over. *)
+         when the strip is actually over.
+
+         Cut there, the strip is drawn without marks. [fit_width] drops what
+         follows its cut, a mark's close included, and an unclosed mark runs
+         to the end of the row (#39238): a cut count's press would cover the
+         clock, the badge and the Activity pane beside it. Over its width the
+         window holds the current entry alone, which a press would not move,
+         so nothing a reader could press is lost. *)
       if Masc_tui_message_layout.display_width drawn > width then
-        Masc_tui_message_layout.fit_width drawn width
+        Masc_tui_message_layout.fit_width (compose (fun _ text -> text)) width
       else drawn
     end
   end

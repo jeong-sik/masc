@@ -1839,7 +1839,7 @@ let test_fusion_pipeline_diagram_stages () =
 let test_planning_strip_names_only_its_own_stops () =
   check (list string) "three stops, and Schedules and Fusion are not among them"
     [ "Goals"; "Task Review"; "Task Verdicts" ]
-    (Schedule.planning_strip_plain ~tab:Schedule.Planning_goals
+    (List.map snd @@ Schedule.planning_strip_plain ~tab:Schedule.Planning_goals
        ~review_count:None ~verifying_count:None ~window:"")
 
 (* The numbers promised an order the surfaces do not have, and the key sheet
@@ -1849,7 +1849,7 @@ let test_planning_strip_names_only_its_own_stops () =
    axis they belong to is what the strip says. *)
 let test_planning_strip_does_not_number_its_stops () =
   let labels =
-    Schedule.planning_strip_plain ~tab:Schedule.Planning_goals
+    List.map snd @@ Schedule.planning_strip_plain ~tab:Schedule.Planning_goals
       ~review_count:(Some 7) ~verifying_count:(Some 2) ~window:""
   in
   check (list string) "counts, no ordinals"
@@ -1862,11 +1862,11 @@ let test_planning_strip_does_not_number_its_stops () =
 let test_planning_window_rides_the_active_stop () =
   check (list string) "the window sits on Verdicts"
     [ "Goals"; "Task Review\xc2\xb7979"; "Task Verdicts (8 of 4223)" ]
-    (Schedule.planning_strip_plain ~tab:Schedule.Planning_verdicts
+    (List.map snd @@ Schedule.planning_strip_plain ~tab:Schedule.Planning_verdicts
        ~review_count:(Some 979) ~verifying_count:None ~window:" (8 of 4223)");
   check (list string) "and moves with the reader"
     [ "Goals"; "Task Review\xc2\xb7979 (20 of 979)"; "Task Verdicts" ]
-    (Schedule.planning_strip_plain ~tab:Schedule.Planning_task_review
+    (List.map snd @@ Schedule.planning_strip_plain ~tab:Schedule.Planning_task_review
        ~review_count:(Some 979) ~verifying_count:None ~window:" (20 of 979)")
 
 (* A Keeper whose schedules sit past the projection's page has none the tab can

@@ -5836,7 +5836,7 @@ let render_lanes_overview (state : state) =
                    (Some
                       (Masc_tui_message_layout.count_noun standalone_count "lane"))
                , true
-               , Press_surface Lanes )
+               , Press_standalone_lanes )
              ])
           timestamp (connection_badge state)
   in
@@ -12392,7 +12392,7 @@ let render_runtime (state : state) =
                , Press_runtime_mode Masc_tui_types.Runtime_all )
              ; ( tab_entry_label "Standalone" standalone_reading
                , false
-               , Press_surface Lanes )
+               , Press_standalone_lanes )
              ])
           probe_status probe_read timestamp (connection_badge state)
   in

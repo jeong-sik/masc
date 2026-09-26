@@ -2294,15 +2294,15 @@ let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(windo
       (fun (p : planning_snapshot) -> p.pl_rollup.pr_verifying)
       state.planning
   in
-  let labels =
+  let stops =
     Render_schedule.planning_strip_plain ~tab ~review_count ~verifying_count
       ~window
   in
   (* Each stop is a surface of its own; [v] walks them in this order. *)
-  let stops =
-    [ (Planning_goals, Planning)
-    ; (Planning_task_review, Verification)
-    ; (Planning_verdicts, Harness) ]
+  let surface_of_stop = function
+    | Planning_goals -> Planning
+    | Planning_task_review -> Verification
+    | Planning_verdicts -> Harness
   in
   screen_title " MASC Planning" ^ "  "
   ^ tab_strip
@@ -2310,9 +2310,9 @@ let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(windo
         (tab_strip_width ~cols
            ~before:(screen_title " MASC Planning" ^ "  ") ~after)
       ~press:(fun surface text -> pressable (Press_surface surface) text)
-      (List.map2
-         (fun (stop, surface) label -> (label, stop = tab, surface))
-         stops labels)
+      (List.map
+         (fun (stop, label) -> (label, stop = tab, surface_of_stop stop))
+         stops)
 
 
 (* Where the goal stands with the completion judge, in one column. The phase

@@ -1074,6 +1074,32 @@ let prepare_microvm_shim_dir (t : t) =
         | Error message -> Error ("microvm_shim_config_unwritable: " ^ message)))
 ;;
 
+(** Return the host blocks the work volume's guest freed, before a fresh boot
+    attaches it. Only [Boot] reaches here, after the name's old guest was
+    deleted, so no guest holds the volume. A failed trim permits boot only
+    after the named trim container is confirmed absent. *)
+let reclaim_work_volume_space ~backend ~image ~volume_name ~timeout_sec =
+  match (backend : Keeper_microvm_backend.t) with
+  | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok ()
+  | Keeper_microvm_backend.Apple_container ->
+    (match
+       Keeper_sandbox_microvm.reclaim_apple_work_volume
+         ~run:(fun argv -> run_argv_with_status_split ~timeout_sec argv)
+         ~volume_name ~image
+     with
+     | Error _ as error -> error
+     | Ok (Unix.WEXITED 0, out) ->
+       Log.Keeper.info "microvm work volume %s trimmed: %s" volume_name (String.trim out);
+       Ok ()
+     | Ok (status, out) ->
+       Log.Keeper.warn
+         "microvm work volume %s not trimmed, booting without reclaim: %s (%s)"
+         volume_name
+         (Keeper_sandbox_exec_failure.status_label status)
+         (Keeper_sandbox_runtime.docker_failure_output_for_log out);
+       Ok ())
+;;
+
 type microvm_guest_provisions =
   { work_volume_name : string
   ; build_volume_name : string option
@@ -1498,7 +1524,12 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
               backend
               ~image
               ~timeout_sec:image_timeout)
-           (fun () -> microvm_guest_provisions t ~backend ~timeout_sec:image_timeout)
+           (fun () ->
+             Result.bind (microvm_guest_provisions t ~backend ~timeout_sec:image_timeout)
+               (fun provisions ->
+                 Result.map (fun () -> provisions)
+                   (reclaim_work_volume_space ~backend ~image
+                      ~volume_name:provisions.work_volume_name ~timeout_sec:image_timeout)))
        with
        | Error detail -> Error (Guest_provisions_unavailable detail)
        | Ok provisions ->

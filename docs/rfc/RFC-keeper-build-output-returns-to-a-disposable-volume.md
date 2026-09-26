@@ -3,7 +3,7 @@ rfc: "keeper-build-output-returns-to-a-disposable-volume"
 title: "Keeper build output returns to a disposable volume"
 status: Draft
 created: 2026-09-24
-updated: 2026-09-24
+updated: 2026-09-26
 author: vincent
 related: ["0399", "0400", "0122"]
 ---
@@ -55,10 +55,16 @@ after:  polisher/volume.img  225G   (host, du -sh — unchanged)
 fstrim: /: FITRIM ioctl failed: Operation not permitted
 ```
 
-Apple's container 1.3.1 virtio-blk backend does not advertise discard/unmap
-to the guest, so there is no ioctl the guest can issue — root or not — that
-returns freed blocks to the host's sparse `volume.img`. This was checked
-against a real guest, not assumed from documentation gaps.
+The refusal is the guest's capabilities, not the disk. Measured 2026-09-26
+(container 1.3.1): the virtio disk accepts discard
+(`/sys/block/vdc/queue/discard_max_bytes` = 274877906944), and a keeper
+guest's capability set is empty (`CapBnd: 0000000000000000`), so `FITRIM`,
+which needs `CAP_SYS_ADMIN`, is refused even to uid 0. A one-shot container
+given that capability alone trims the same volume and the host image
+shrinks: `masc-keeper-work-pr-updater`, 39 GB used inside, `volume.img`
+116 GB → 39 GB, `fstrim` reported 213.3 GiB trimmed. Apple's `--mount`
+takes `type, source, target, readonly` only, so a `discard` mount option has
+no spelling; the trim runs at boot instead (§ Work volume trim at boot).
 
 `container volume prune` (no-container-reference volumes only, by design —
 verified in the CLI's own `--help`) did reclaim real host space: 6 orphaned
@@ -66,10 +72,8 @@ volumes, 759 GB → 612 GB, host free 42 GiB → 112 GiB. It could not touch the
 five volumes above 50 GB because every one of them belongs to a keeper that
 is still running.
 
-So the only host-reclaim path that exists today for a *live* keeper's bloat
-is: stop the guest, delete `masc-keeper-work-<name>`, recreate it empty. That
-throws away the keeper's git checkouts, task files and docs along with
-`_build` — there is no volume boundary between them to delete selectively.
+So a guest delete returns host disk only once something with
+`CAP_SYS_ADMIN` trims the volume while no guest has it attached.
 
 ## What the codebase already says
 
@@ -201,6 +205,33 @@ on every install rather than respecting a symlink (measured there,
 `node_modules` would silently leak back onto the share/tree volume), so
 `node_modules` is not part of this RFC either. `cargo`/`target` stays
 unmeasured, as RFC-0399 left it.
+
+## Work volume trim at boot
+
+`Keeper_turn_sandbox_runtime` boots a guest only on its `Boot` branch, after
+the name's old guest is force-deleted, so no guest holds the work volume
+there. On `Apple_container` it runs
+`Keeper_sandbox_microvm.apple_work_volume_trim_argv` before `container run`:
+the keeper's own image, `--rm`, the volume's stable `-trim` container name,
+`--user 0`, `--cap-add CAP_SYS_ADMIN` and no
+other capability, the volume at `/masc-trim`, `fstrim -v /masc-trim`. Both
+fleet images carry `/usr/sbin/fstrim` (checked 2026-09-26).
+
+The trim container is force-removed and its absence confirmed by the JSON
+container inventory before and after trimming, including a CLI timeout.
+An unreadable inventory or a remaining trim container refuses the guest
+boot. Only confirmed cleanup makes a failed trim harmless: then boot goes
+on and the keeper log names the trim failure. A running guest is never trimmed: a second
+ext4 mount of the volume would corrupt it. A keeper whose guest stays up
+reclaims on its next boot.
+
+The disk reclamation above was measured with a manual trim command, not
+through this boot path. CI exercises the cleanup and refusal protocol with
+an injected container CLI; it does not measure host disk reclamation.
+
+With the work volume trimmed at boot, `_build` on the work volume is
+reclaimed the same way, which leaves the build volume below an open question
+rather than the only path (see Open questions).
 
 ## Scope, as a stack
 
@@ -378,6 +409,10 @@ already exists instead of inventing a detection mechanism to justify one
 that doesn't.
 
 ## Open questions
+
+- The work volume trim at boot reclaims `_build` too. Whether a separate
+  build volume still earns its extra mount and its boot-time recreate is
+  undecided; measure one fleet boot cycle with the trim first.
 
 1. ~~Ceiling and probe interval defaults~~ — moot. There is no probe, no
    ceiling check, and no percentage: recreation is tied to the fresh-boot

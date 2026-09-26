@@ -1800,6 +1800,75 @@ let test_volume_create_argv_carries_a_size () =
   Alcotest.(check bool) "size is passed" true (adjacent ~flag:"-s" ~value:"64g" argv)
 ;;
 
+let test_work_volume_trim_argv_grants_one_capability () =
+  let argv =
+    M.apple_work_volume_trim_argv ~volume_name:"masc-keeper-work-x" ~image:"masc-sandbox:general"
+  in
+  Alcotest.(check bool) "goes through container" true (contains "container" argv);
+  Alcotest.(check bool) "a one-shot container" true (contains "--rm" argv);
+  Alcotest.(check bool) "cleanup can address this exact trim" true
+    (adjacent ~flag:"--name" ~value:"masc-keeper-work-x-trim" argv);
+  Alcotest.(check bool) "runs as root" true (adjacent ~flag:"--user" ~value:"0" argv);
+  (* FITRIM needs this one capability; nothing broader is granted. *)
+  Alcotest.(check bool) "only CAP_SYS_ADMIN is added" true
+    (adjacent ~flag:"--cap-add" ~value:"CAP_SYS_ADMIN" argv
+     && List.length (List.filter (String.equal "--cap-add") argv) = 1);
+  Alcotest.(check bool) "mounts the work volume at the trim root" true
+    (adjacent ~flag:"--volume" ~value:("masc-keeper-work-x:" ^ M.trim_guest_root) argv);
+  Alcotest.(check (list string)) "the image runs fstrim on that root"
+    [ "masc-sandbox:general"; "fstrim"; "-v"; M.trim_guest_root ]
+    (let n = List.length argv in
+     List.filteri (fun i _ -> i >= n - 4) argv)
+;;
+
+let test_work_volume_trim_confirms_cleanup () =
+  let cli = [ Backend.cli_name Backend.Apple_container ] in
+  let volume_name = "masc-keeper-work-x" in
+  let name = volume_name ^ "-trim" in
+  let image = "masc-sandbox:general" in
+  let rm = M.delete_force_argv_for Backend.Apple_container ~container_name:name in
+  let list = cli @ [ "list"; "--all"; "--format"; "json" ] in
+  let trim = M.apple_work_volume_trim_argv ~volume_name ~image in
+  let execute ~before ~after ~trim_status =
+    let remaining = ref
+      [ rm, (Unix.WEXITED 0, "", ""); list, before;
+        trim, (trim_status, "", "trim interrupted");
+        rm, (Unix.WEXITED 0, "", ""); list, after ]
+    in
+    let run argv =
+      match !remaining with
+      | (expected, result) :: rest ->
+        Alcotest.(check (list string)) "cleanup brackets the trim" expected argv;
+        remaining := rest;
+        result
+      | [] -> Alcotest.fail "unexpected container command"
+    in
+    M.reclaim_apple_work_volume ~run ~volume_name ~image, remaining
+  in
+  let absent = Unix.WEXITED 0, "[]", "" in
+  let result, remaining = execute ~before:absent ~after:absent ~trim_status:(Unix.WSIGNALED 9) in
+  (match result with
+   | Ok (Unix.WSIGNALED 9, _) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "a confirmed cleanup preserves the trim failure");
+  Alcotest.(check int) "both cleanup inventories were read" 0 (List.length !remaining);
+  List.iter
+    (fun after ->
+       let result, _ = execute ~before:absent ~after ~trim_status:(Unix.WEXITED 0) in
+       match result with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "unproven cleanup permits a second volume mount")
+    [ Unix.WEXITED 0, {|[{"configuration":{"id":"masc-keeper-work-x-trim"}}]|}, ""
+    ; Unix.WEXITED 0, "[{}]", ""
+    ; Unix.WEXITED 0, {|[{"id":""}]|}, ""
+    ; Unix.WEXITED 0, {|[{"configuration":{"id":""}}}]|}, ""
+    ; Unix.WEXITED 0, "not JSON", ""
+    ; Unix.WEXITED 1, "", "container service unavailable"
+    ];
+  let result, remaining = execute ~before:(Unix.WEXITED 0, "[{}]", "") ~after:absent ~trim_status:(Unix.WEXITED 0) in
+  (match result with Error _ -> () | Ok _ -> Alcotest.fail "unknown inventory starts a trim");
+  Alcotest.(check int) "no trim starts without proving prior cleanup" 3 (List.length !remaining)
+;;
+
 let test_nerdctl_volume_ensure_confirms_persistent_identity () =
   with_eio_fs @@ fun () ->
   let context = Eio_context.snapshot_state () in
@@ -2736,6 +2805,10 @@ let () =
             test_work_volume_is_named_and_mounted_at_its_root
         ; Alcotest.test_case "create argv carries a size" `Quick
             test_volume_create_argv_carries_a_size
+        ; Alcotest.test_case "work volume trim grants one capability" `Quick
+            test_work_volume_trim_argv_grants_one_capability
+        ; Alcotest.test_case "work volume trim proves cleanup before boot" `Quick
+            test_work_volume_trim_confirms_cleanup
         ; Alcotest.test_case "shim travels read-only with its config" `Quick
             test_shim_travels_read_only_with_its_config
         ; Alcotest.test_case "the shim sidecar decides the boot" `Quick

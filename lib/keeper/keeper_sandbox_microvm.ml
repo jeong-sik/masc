@@ -1025,6 +1025,77 @@ let work_volume_mount_args ~volume_name =
   [ "--volume"; volume_name ^ ":" ^ work_volume_guest_root ]
 ;;
 
+let trim_guest_root = "/masc-trim"
+let trim_capability = "CAP_SYS_ADMIN"
+let work_volume_trim_name volume_name = volume_name ^ "-trim"
+
+(** Apple's work volume is a sparse ext4 image, and a guest delete leaves its
+    blocks allocated on the host until something discards them. The virtio
+    disk does accept discard ([discard_max_bytes] 274877906944 on
+    [/dev/vdc], measured 2026-09-26); a keeper guest cannot issue it, since
+    its capability set is empty and [FITRIM] needs [CAP_SYS_ADMIN]. So a
+    one-shot container with only that capability, and only [fstrim] to run,
+    does it while no guest has the volume attached. Measured on
+    [masc-keeper-work-pr-updater]: 39 GB used inside, host image 116 GB ->
+    39 GB, 213.3 GiB trimmed. *)
+let apple_work_volume_trim_argv ~volume_name ~image =
+  command_argv_for Backend.Apple_container
+  @ [ "run"; "--rm"; "--name"; work_volume_trim_name volume_name
+    ; "--user"; "0"; "--cap-add"; trim_capability
+    ; "--volume"; volume_name ^ ":" ^ trim_guest_root
+    ; image; "fstrim"; "-v"; trim_guest_root ]
+;;
+
+let reclaim_apple_work_volume ~run ~volume_name ~image =
+  let name = work_volume_trim_name volume_name in
+  let cli = command_argv_for Backend.Apple_container in
+  let cleanup () =
+    (* Removal's exit code alone cannot prove absence: --rm may already have
+       removed the container, or a timed-out CLI may have left it running. *)
+    let removal_status, removal_out, removal_err =
+      run (delete_force_argv_for Backend.Apple_container ~container_name:name)
+    in
+    match run (cli @ [ "list"; "--all"; "--format"; "json" ]) with
+    | Unix.WEXITED 0, listing, _ ->
+      let rec absent = function
+        | [] -> Ok ()
+        | `Assoc fields :: rest ->
+          let id =
+            match List.assoc_opt "id" fields with
+            | Some (`String id) when String.trim id <> "" -> Some id
+            | Some _ -> None
+            | None ->
+              (match List.assoc_opt "configuration" fields with
+               | Some (`Assoc config) ->
+                 (match List.assoc_opt "id" config with
+                  | Some (`String id) when String.trim id <> "" -> Some id
+                  | Some _ | None -> None)
+               | Some _ | None -> None)
+          in
+          (match id with
+           | Some id when String.equal id name ->
+             Error (Printf.sprintf "trim container %s remains after removal (%s): %s"
+               name (Keeper_sandbox_exec_failure.status_label removal_status)
+               (output_for_log ~stdout:removal_out ~stderr:removal_err))
+           | Some _ -> absent rest
+           | None -> Error "trim cleanup inventory contains a container without an id")
+        | _ :: _ -> Error "trim cleanup inventory contains a non-object container"
+      in
+      (match Yojson.Safe.from_string listing with
+       | `List entries -> absent entries
+       | _ -> Error "trim cleanup inventory is not a JSON array"
+       | exception Yojson.Json_error detail -> Error ("trim cleanup inventory is invalid JSON: " ^ detail))
+    | status, stdout, stderr ->
+      Error (Printf.sprintf "cannot verify trim container %s was removed (%s): %s"
+        name (Keeper_sandbox_exec_failure.status_label status) (output_for_log ~stdout ~stderr))
+  in
+  let ( let* ) = Result.bind in
+  let* () = cleanup () in
+  let status, stdout, stderr = run (apple_work_volume_trim_argv ~volume_name ~image) in
+  let* () = cleanup () in
+  Ok (status, output_for_log ~stdout ~stderr)
+;;
+
 (** The keeper's root on the work volume: [<work root>/<keeper>], the
     directory the shim jails every request under. *)
 let keeper_work_root ~keeper_name =
@@ -1403,8 +1474,8 @@ let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
    virtio-blk image (`volume.img`), and only Apple's image was measured
    (2026-09-24) to keep its allocated size after the guest deletes
    everything inside it -- `fstrim` inside the guest, run as root, answers
-   "Operation not permitted": container 1.3.1's virtio-blk backend
-   advertises no discard/unmap. A keeper's `_build` on its own disposable
+   "Operation not permitted", because the guest's capability set is empty
+   (the disk itself accepts discard, measured 2026-09-26). A keeper's `_build` on its own disposable
    volume, apart from the work volume that holds the checkout, is what
    makes "delete the volume, make a new one" a host-disk reclaim path on
    Apple. *)
@@ -1485,9 +1556,8 @@ let apple_build_volume_delete_argv ~volume_name =
 (** Recreate the build volume fresh on every boot rather than reusing one
     across a guest's restarts: [_build] is entirely derived, so starting
     empty costs one cold build and reclaims whatever host disk the previous
-    life's volume had grown to -- the only reclaim path that exists, since
-    Apple's virtio-blk exposes no discard the guest could use to shrink it
-    in place (measured), and `container volume` has no attach/detach to
+    life's volume had grown to, since a keeper guest cannot discard its own
+    blocks (its capability set is empty), and `container volume` has no attach/detach to
     swap it mid-session (checked: `create, delete/rm, list/ls, inspect,
     prune` only). A probe failure refuses the boot rather than guess --
     deleting on an ambiguous answer risks a volume this call did not create

@@ -103,7 +103,11 @@ type mandatory_exact_output_lane_violation =
   | Mandatory_lane_without_slots of { lane_id : string }
 
 module For_testing : sig
-  val configure_exact_output_registry : ?config_root:string -> unit -> unit
+  val configure_exact_output_registry :
+    ?config_path:string -> ?config_root:string -> unit -> unit
+  (** An explicit file is the publication authority, including noncanonical
+      filenames. Otherwise resolve [runtime.toml] from [config_root] or the
+      ambient configuration root. *)
 
   val mandatory_exact_output_lane_violations :
     Runtime_schema.exact_output_lane_decl list ->

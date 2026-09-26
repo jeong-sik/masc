@@ -93,15 +93,16 @@ let config_load_failure_diagnostic ~detail =
      Fix the configuration above or move the file aside. Run masc runtime-verify <RUNTIME_ID> to re-check a model connection afterwards."
     detail
 
-let load_exact_output_lane_declarations ?config_root () =
+let load_exact_output_lane_declarations ?config_path ?config_root () =
   let runtime_config_path =
-    match config_root with
-    | Some config_root ->
+    match config_path, config_root with
+    | Some path, _ -> Some path
+    | None, Some config_root ->
       let path =
         Filename.concat config_root Config_dir_resolver.runtime_toml_filename
       in
       if Sys.file_exists path then Some path else None
-    | None -> Runtime.config_path ()
+    | None, None -> Runtime.config_path ()
   in
   match runtime_config_path with
   | None ->
@@ -228,9 +229,9 @@ let warn_browser_stagehand_slots registry =
          (Browser_stagehand_model.refusal_to_string (Browser_stagehand_model.Lane_refused refusal)))
 ;;
 
-let configure_exact_output_registry ?config_root () =
+let configure_exact_output_registry ?config_path ?config_root () =
   let config_path, lanes =
-    load_exact_output_lane_declarations ?config_root ()
+    load_exact_output_lane_declarations ?config_path ?config_root ()
   in
   require_explicit_mandatory_exact_output_lanes ~config_path lanes;
   let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in

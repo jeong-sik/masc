@@ -75,13 +75,23 @@ jobs:
         run: |
           scripts/opam-pin-external-deps.sh --with-bisect
           opam install ./masc.opam --deps-only --locked --with-test --yes
-      - name: Build probe and exercise offline setup and validator controls
+      - name: Build probe
+        id: build
         run: |
+          python3 scripts/test_stagehand_probe_controls.py
           opam exec -- dune build --profile release bin/stagehand_model_probe.exe
-          _build/default/bin/stagehand_model_probe.exe --self-test --fixtures test/fixtures/stagehand/llm-generate-params.json > "$RUNNER_TEMP/stagehand-validator-controls.txt"
+      - name: Exercise offline setup and validator controls
+        id: controls
+        run: |
           # Synthetic local config: no provider credentials or model callbacks.
-          _build/default/bin/stagehand_model_probe.exe --config-publication-self-test --config test/fixtures/stagehand/runtime-publication.toml >> "$RUNNER_TEMP/stagehand-validator-controls.txt" 2> "$RUNNER_TEMP/stagehand-publication-private.log"
+          python3 scripts/stagehand-probe-controls.py \
+            --binary _build/default/bin/stagehand_model_probe.exe \
+            --fixtures test/fixtures/stagehand/llm-generate-params.json \
+            --config test/fixtures/stagehand/runtime-publication.toml \
+            --output "$RUNNER_TEMP/stagehand-offline-controls.json"
       - name: Package executable and source evidence
+        id: package
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           PROBE_OUT: ${{ runner.temp }}/stagehand-model-probe
           SOURCE_SHA: ${{ github.sha }}
@@ -91,10 +101,11 @@ jobs:
           cp test/fixtures/stagehand/llm-generate-params.json "$PROBE_OUT/"
           cp test/fixtures/stagehand/runtime-publication.toml "$PROBE_OUT/"
           cp docs/runbooks/stagehand-real-model-probe.md "$PROBE_OUT/README.md"
-          cp "$RUNNER_TEMP/stagehand-validator-controls.txt" "$PROBE_OUT/offline-validator-controls.txt"
+          cp "$RUNNER_TEMP/stagehand-offline-controls.json" "$PROBE_OUT/offline-controls.json"
           otool -L "$PROBE_OUT/stagehand_model_probe.exe" > "$PROBE_OUT/native-dependencies.txt"
           python3 scripts/stagehand-probe-manifest.py --directory "$PROBE_OUT" --source-sha "$SOURCE_SHA"
       - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         with:
           name: stagehand-model-probe-macos-arm64-${{ github.sha }}
           path: ${{ runner.temp }}/stagehand-model-probe/

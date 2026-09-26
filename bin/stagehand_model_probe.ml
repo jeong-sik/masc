@@ -175,7 +175,8 @@ let initialize_runtime ~env ~config =
    | Error (Runtime.Runtime_config_error _) -> reject "runtime_config_rejected"
    | Error (Runtime.Missing_catalog_models _) -> reject "runtime_catalog_models_missing");
   (try
-     Server_runtime_bootstrap.For_testing.configure_exact_output_registry ()
+     Server_runtime_bootstrap.For_testing.configure_exact_output_registry
+       ~config_path:config ()
    with Env_config_core.Config_error _ -> reject "registry_publication_rejected");
   lane_pair ()
 

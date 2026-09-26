@@ -22,7 +22,11 @@ controls. The latter uses a committed loopback config with a public synthetic
 credential sentinel and exercises the same runtime initialization and registry
 publication as the real probe, without invoking any model callback. It never calls a
 provider and receives no provider credentials. The artifact includes its source
-commit, fixture, native dependency inventory and SHA-256 checksums. Native
+commit, fixture, native dependency inventory and SHA-256 checksums.
+If an offline control fails, CI remains failed and still packages the built binary
+with `offline-controls.json`: exit codes and fixed failure categories only. The
+manifest repeats those results; a retained diagnostic artifact is not a passed
+setup control. Raw process output is never uploaded. Native
 Homebrew dependencies listed in `native-dependencies.txt` must exist on the host;
 this is a probe for the operator's development host, not a relocatable release.
 

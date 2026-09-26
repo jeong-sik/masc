@@ -5752,6 +5752,7 @@ type state = {
   mutable fleet_safety: Tui_decode.fleet_safety_reading option;
   mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
+  mutable http_refresh_started_ns: int64 option;
   mutable local_workspace: local_workspace_reading;
   mutable view: surface;
   (* Where Esc goes back to after following a reference, and what was open
@@ -7946,6 +7947,7 @@ let create_state
   fleet_safety = None;
   fleet_safety_error = None;
   connection_status = Disconnected;
+  http_refresh_started_ns = None;
   local_workspace = Local_workspace_unread;
   view = Overview;
   followed_from = None;

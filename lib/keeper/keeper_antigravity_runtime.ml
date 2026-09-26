@@ -542,9 +542,6 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       | None | Some _ ->
         Runtime_antigravity_home.Private_workspace,
         "Antigravity native tools use a separate private host workspace. They cannot access the Keeper's endpoint-owned working tree. Use MASC tools for that tree; native commands run in the official client's host sandbox." in
-    let* () = if String.trim system_prompt = ""
-      then Error (config_error ~field:"system_prompt" "system prompt must not be blank")
-      else Ok () in
     let native_workspace_note = native_workspace_note ^
       " Explicit operator-granted additional native directories: " ^
       Yojson.Safe.to_string (`List (List.map (fun path -> `String path) add_dirs)) in

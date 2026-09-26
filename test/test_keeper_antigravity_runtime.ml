@@ -629,6 +629,28 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         let hooks = composed_hooks ?nudge ?world instruction in
                         check int "hook composition controls fresh versus resume" expected
                           (run_context ~hooks ~goal:"Call masc_probe once" unchanged) in
+                      let supplied_hooks = composed_hooks "SUPPLIED_EFFECTIVE_INSTRUCTION" in
+                      check int "a hook can supply the final system for a blank raw input" 1
+                        (run_context ~hooks:supplied_hooks ~goal:"Call masc_probe once"
+                          ("", snd unchanged));
+                      let before_blank = In_channel.with_open_bin
+                        (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
+                      let blank_hooks = composed_hooks "   " in
+                      (match Keeper_turn_driver.run_named
+                          ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                          ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
+                          ~base_path ~goal:"A blank effective prompt must not run"
+                          ~system_prompt:"nonblank raw system" ~tools:[tool] ~agent_core_tools:[tool]
+                          ~initial_messages:(snd unchanged) ~hooks:blank_hooks
+                          ~context:(Agent_core.Context.create ()) ~sw ~net:(Eio.Stdenv.net env) () with
+                       | Error (Agent_core.Error.Config (InvalidConfig {field; _})) ->
+                         check string "blank final system is refused by the shared host"
+                           "system_prompt" field
+                       | Error error -> fail (Agent_core.Error.to_string error)
+                       | Ok _ -> fail "mandatory workspace note concealed a blank effective system");
+                      check string "blank effective system never reaches the CLI" before_blank
+                        (In_channel.with_open_bin
+                          (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all);
                       effective "FIRST_EFFECTIVE_INSTRUCTION" 1;
                       let final_prompt = In_channel.with_open_bin
                         (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in

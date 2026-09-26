@@ -80,12 +80,20 @@ type init = { client_version : string; browser_cdp_url : string }
 val init_method : string
 val encode_init : id:int -> init -> string
 
+(** A positive timeout for one Stagehand sentence, in protocol milliseconds.
+    The one product policy is [sentence_timeout]; the Browser Lane transport
+    wait is derived from it. *)
+type sentence_timeout_ms = private Sentence_timeout_ms of int
+
+val sentence_timeout : sentence_timeout_ms
+val timeout_ms : sentence_timeout_ms -> int
+
 (** The calls an attached session sends. *)
 type call =
   | Close
-  | Act of { page_id : string; instruction : string }
-  | Observe of { page_id : string; instruction : string option }
-  | Extract of { page_id : string; instruction : string; schema : Yojson.Safe.t option }
+  | Act of { page_id : string; instruction : string; timeout : sentence_timeout_ms }
+  | Observe of { page_id : string; instruction : string option; timeout : sentence_timeout_ms }
+  | Extract of { page_id : string; instruction : string; schema : Yojson.Safe.t option; timeout : sentence_timeout_ms }
   | Context_pages
   | Context_active_page
   | Page_goto of { page_id : string; url : string }
@@ -94,6 +102,7 @@ type call =
 
 val method_name : call -> string
 val call_params : call -> Yojson.Safe.t
+val sentence_timeout_of_call : call -> sentence_timeout_ms option
 
 (** [true] for the calls during which the extension asks the host for a
     model answer ([llm.generate]). *)

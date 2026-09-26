@@ -1,0 +1,16 @@
+{
+  "pid": 43696,
+  "launcher_pid": 43695,
+  "phase": "after acknowledged 16-row Info resize, before timed detail scrolling",
+  "requested_duration_s": 5,
+  "requested_interval_ms": 1,
+  "started_monotonic_ns": 764091188749791,
+  "binary_source": "f69b7b40a379f3b3ff7fd8060b041d0315b15851",
+  "runner_sha256": "85fd41a1263502af94e491fd8bc2b8ad2875316d0ada3ea38c796e56ea3bf8ba",
+  "scenario_sha256": "edbff282f963c645e808982ca11fab4e7841b4b45cf6b3208c25f2df6b84dcc8",
+  "helper_sha256": "4841c61f45457db49dac8afb8a6714a8a9f109671a33e5e9b96b7cf8d4bd39d8",
+  "transitions": 24006,
+  "sample_exit": 0,
+  "scope": "Native profile only: one roster cycle followed by 6000 alternating detail cycles; first detail precondition reconstructed, later opposite-window acknowledgements replace whole-history precondition reconstruction. Each new input still awaits its new expected window and FRAME_END. Sampling perturbs timings; not comparative latency evidence. No physical display/live runtime/deployment proof.",
+  "interpretation_correction": "See INTERPRETATION.md: session_resources includes sampler/pgrep/ps CPU; inherited TUI-only scope is invalid for this profile. Raw receipt retained unchanged."
+}

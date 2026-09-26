@@ -283,6 +283,18 @@ let api_usage_of_antigravity_usage (usage : Runtime_antigravity.usage) =
     ~cache_read_input_tokens:usage.cache_read_tokens
 ;;
 
+(* The CLI's stdout and MASC's MCP server are two channels into one stream.
+   agy prints init before it calls a tool, but MessageStart is emitted only
+   after [on_conversation_ready] has written the session, and a tool call
+   the MCP server answers during that write would open its blocks before
+   the message. *)
+type mcp_blocks =
+  | Held of Agent_core.Types.sse_event list
+      (** Blocks of tool calls answered before MessageStart, newest first. A
+          turn that fails before init opens no message, and they are not
+          streamed. *)
+  | Streaming
+
 let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action ~on_usage_report
     ~position on_event =
     let emit event = Option.iter (fun callback -> callback event) on_event in
@@ -297,6 +309,23 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
           "Antigravity Keeper stream callback raised (error=%s)"
           (Printexc.to_string exn)
     in
+    let mcp_blocks = ref (Held []) in
+    let emit_mcp_block event =
+      match !mcp_blocks with
+      | Streaming -> emit event
+      | Held held -> mcp_blocks := Held (event :: held)
+    in
+    (* Emitting can yield to the MCP server's fiber, which then holds more
+       blocks; they go out in the next pass, and streaming starts only when
+       a pass finds nothing held. *)
+    let rec release_mcp_blocks () =
+      match !mcp_blocks with
+      | Streaming | Held [] -> mcp_blocks := Streaming
+      | Held held ->
+        mcp_blocks := Held [];
+        List.iter emit (List.rev held);
+        release_mcp_blocks ()
+    in
     (* Each response step is one assistant message; agy names it by its
        [step_index]. *)
     let text_stream = Keeper_official_client_text_stream.create ~equal:Int.equal () in
@@ -308,7 +337,8 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
                  { id = provider_turn_identity ~conversation_id ~num_turns:turn_count
                  ; model
                  ; usage = None
-                 })
+                 });
+            release_mcp_blocks ()
           | Runtime_antigravity.Text_delta { step_index; text } ->
             emit
               (Agent_core.Types.ContentBlockDelta
@@ -384,14 +414,14 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
           let index = !next_tool_index in
           incr next_tool_index;
           Hashtbl.replace tool_indexes call_id index;
-          emit
+          emit_mcp_block
             (Agent_core.Types.ContentBlockStart
                { index
                ; content_type = "tool_use"
                ; tool_id = Some call_id
                ; tool_name = Some tool_name
                });
-          emit
+          emit_mcp_block
             (Agent_core.Types.ContentBlockDelta
                { index
                ; delta =
@@ -403,7 +433,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
           Option.iter
             (fun index ->
                Hashtbl.remove tool_indexes call_id;
-               emit (Agent_core.Types.ContentBlockStop { index }))
+               emit_mcp_block (Agent_core.Types.ContentBlockStop { index }))
             (Hashtbl.find_opt tool_indexes call_id))
     }
 ;;
@@ -1285,6 +1315,41 @@ module For_testing = struct
         (Some (fun event -> emitted := event :: !emitted))
     in
     List.iter projection.on_runtime_event events;
+    List.rev !emitted
+  ;;
+
+  type stream_input =
+    | Cli_event of Runtime_antigravity.stream_event
+    | Mcp_tool_started of
+        { call_id : string
+        ; tool_name : string
+        ; arguments : Yojson.Safe.t
+        }
+    | Mcp_tool_finished of { call_id : string }
+
+  let project_stream_inputs ~during inputs =
+    let emitted = ref [] in
+    let feed = ref (fun (_ : stream_input) -> ()) in
+    let projection =
+      stream_projection
+        ~keeper_name:"test"
+        ~raw_trace_run:None
+        ~turn_count:1
+        ~on_native_action:None
+        ~on_usage_report:None
+        ~position:Keeper_usage_resolution.Fresh
+        (Some
+           (fun event ->
+              emitted := event :: !emitted;
+              List.iter !feed (during event)))
+    in
+    (feed
+     := function
+     | Cli_event event -> projection.on_runtime_event event
+     | Mcp_tool_started { call_id; tool_name; arguments } ->
+       projection.on_tool_started ~call_id ~tool_name ~arguments
+     | Mcp_tool_finished { call_id } -> projection.on_tool_finished ~call_id);
+    List.iter !feed inputs;
     List.rev !emitted
   ;;
 

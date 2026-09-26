@@ -717,6 +717,9 @@ module Terminal_text = struct
      the whole screen. *)
   let clock_timestamp text =
     Masc.Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.localtime text
+  let clock_timestamp_of_unix unix_seconds =
+    Masc.Tui_decode.clock_timestamp_of_unix_for_terminal ~localtime:Unix.localtime
+      unix_seconds
 end
 
 (** Task status icon *)

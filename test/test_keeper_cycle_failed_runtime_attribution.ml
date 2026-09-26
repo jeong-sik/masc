@@ -42,12 +42,14 @@ let rejected ~runtime_id ~error =
 let dispatched ~runtime_id ~error = attempt ~runtime_id ~error ()
 
 let attribution
+      ?entry_deferred_runtime_lane
       ?deferred_runtime_lane
       ?lane_terminal_error
       ~lane_runtime_id
       runtime_attempt_errors
   =
   Types.keeper_cycle_failed_runtime_attribution
+    ~entry_deferred_runtime_lane
     ~deferred_runtime_lane
     ~lane_runtime_id
     ~runtime_attempt_errors
@@ -279,10 +281,52 @@ let test_terminal_error_origin_can_differ_from_the_last_dispatched () =
     (Types.keeper_cycle_failed_terminal_origin_to_string attribution.Types.terminal_error_origin)
 ;;
 
+(** 2026-09-25 09:06:46, keeper wkbl-growth: lane glm-5-3-first failed on
+    glm and deferred its input to kimi_coding.kimi-for-coding. The next cycle
+    ran on that suffix, so its execution was keyed by the kimi runtime, and
+    the report said [lane=kimi_coding.kimi-for-coding] for a cycle budgeted
+    under glm-5-3-first. *)
+let test_a_deferred_cycle_reports_the_deferring_assignment () =
+  let entry =
+    Driver.For_testing.make_deferred_runtime_lane
+      ~assignment_id:"glm-5-3-first"
+      ~failed_runtime_id:"glm-coding.glm-5-3"
+      ~next_runtime_id:"kimi_coding.kimi-for-coding"
+      ~later_runtime_ids:
+        [ "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+        ; "codex_subscription.gpt-5.6-luna"
+        ]
+      ~failure:malformed_payload_error
+  in
+  let attempts =
+    [ dispatched ~runtime_id:"kimi_coding.kimi-for-coding" ~error:malformed_payload_error
+    ; dispatched ~runtime_id:"codex_subscription.gpt-5.6-luna" ~error:malformed_payload_error
+    ]
+  in
+  let reported =
+    attribution
+      ~entry_deferred_runtime_lane:entry
+      ~lane_runtime_id:"kimi_coding.kimi-for-coding"
+      attempts
+  in
+  check string "lane= names the assignment that deferred the input"
+    "glm-5-3-first" reported.Types.lane_runtime_id;
+  check reported_runtime "runtime= still names the last dispatched candidate"
+    (Types.Dispatched_candidate "codex_subscription.gpt-5.6-luna")
+    reported.Types.reported_runtime;
+  check string "without an entry suffix lane= is the execution's key"
+    "glm-5-3-first"
+    (attribution ~lane_runtime_id:"glm-5-3-first" attempts).Types.lane_runtime_id
+;;
+
 let () =
   run "keeper_cycle_failed_runtime_attribution"
     [ ( "attribution"
       , [ test_case
+            "a deferred cycle reports the deferring assignment as its lane"
+            `Quick
+            test_a_deferred_cycle_reports_the_deferring_assignment
+        ; test_case
             "same-turn deferral reports the dispatched candidate, not the \
              lane assignment"
             `Quick

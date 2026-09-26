@@ -153,6 +153,97 @@ let test_the_runtime_picker_names_its_paging () =
    [b / u] are the least guessable keys in the product, and the three Keeper
    drill-downs. On those screens [?] opened on Global and named no section for
    where the reader was. *)
+(* A footer row is read left to right, and a key that appears in two items on
+   it promises two things at once. The chat drew [Right / Esc:chat] beside
+   [Esc:back] -- Esc leaves the screen from the composer and returns to it from
+   the roster, and the row said both without saying when. Code's history
+   overlay drew [Right / Enter:open] beside [Enter (history):open], the same
+   word twice, one of them naming a branch the overlay had already taken away.
+   The table's own answer to a key with two meanings is one row whose label
+   names both, the way [Up / Down] on the chat does.
+
+   Rows are taken from the builders that draw them, not from [for_surface]:
+   Config names [e] and [Enter] twice there, and its panes each draw one. *)
+let atoms_of_key key =
+  String.split_on_char '/' key
+  |> List.concat_map (String.split_on_char ' ')
+  |> List.map String.trim
+  |> List.filter (fun atom -> not (String.equal atom ""))
+
+let split_on_double_space row =
+  let rec walk start index acc =
+    if index + 1 >= String.length row then
+      List.rev (String.sub row start (String.length row - start) :: acc)
+    else if row.[index] = ' ' && row.[index + 1] = ' ' then
+      walk (index + 2) (index + 2) (String.sub row start (index - start) :: acc)
+    else walk start (index + 1) acc
+  in
+  walk 0 0 []
+
+let drawn_rows () =
+  let open Masc_tui_keys in
+  (* Code and Config never draw [for_surface]: every pane of theirs draws a
+     filtered row, and those rows are listed below. The sheet still shows the
+     whole table for both, which is where [Enter (history)] and the params
+     pane's [e / Enter] are told apart. *)
+  List.concat_map
+    (fun (name, surface) ->
+      match surface with
+      | Masc_tui_types.Code | Masc_tui_types.Config -> []
+      | _ ->
+          [ (name ^ " (list)", footer_hints ~detail_open:false surface)
+          ; (name ^ " (detail)", footer_hints ~detail_open:true surface)
+          ])
+    help_surfaces
+  @ List.map
+      (fun (name, pane) -> (name, footer_hints_config ~pane))
+      [ ("Config / runtime", Masc_tui_types.Config_runtime)
+      ; ("Config / models", Masc_tui_types.Config_models)
+      ; ("Config / params", Masc_tui_types.Config_params)
+      ; ("Config / prompts", Masc_tui_types.Config_prompts)
+      ; ("Config / presets", Masc_tui_types.Config_presets)
+      ; ("Config / themes", Masc_tui_types.Config_themes)
+      ; ("Config / voice", Masc_tui_types.Config_voice)
+      ]
+  @ List.map
+      (fun (name, pane) -> (name, footer_hints_code ~pane))
+      [ ("Code / tree", Code_tree); ("Code / file", Code_file)
+      ; ("Code / history", Code_overlay)
+      ]
+
+let test_no_drawn_row_names_one_key_twice () =
+  let clashes =
+    List.concat_map
+      (fun (name, hints) ->
+        let seen = Hashtbl.create 32 in
+        List.iter
+          (fun item ->
+            match String.index_opt item ':' with
+            | None -> ()
+            | Some i ->
+                List.iter
+                  (fun atom ->
+                    Hashtbl.replace seen atom
+                      (item :: (try Hashtbl.find seen atom with Not_found -> [])))
+                  (atoms_of_key (String.sub item 0 i)))
+          (List.filter
+             (fun item -> not (String.equal (String.trim item) ""))
+             (split_on_double_space hints));
+        Hashtbl.fold
+          (fun atom items acc ->
+            if List.length items > 1 then
+              (Printf.sprintf "%s names %s in %s" name atom
+                 (String.concat " and " (List.rev items)))
+              :: acc
+            else acc)
+          seen [])
+      (drawn_rows ())
+  in
+  Alcotest.(check int)
+    (Printf.sprintf "no drawn footer row names one key twice (%s)"
+       (String.concat " | " clashes))
+    0 (List.length clashes)
+
 let test_every_surface_with_keys_has_a_sheet_section () =
   let missing =
     List.filter
@@ -313,7 +404,7 @@ let test_lanes_footer_opens_standalone_runs () =
        One item for Lane Add-ons, not two. The row carried "o:Lane Add-ons"
        and "A:add-ons" as separate items reading as separate destinations,
        and the dispatch had always been one arm. *)
-    "j/k:move  o / A:Lane Add-ons  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  s:slots  Esc:overview  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  o / A:Lane Add-ons  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  s:providers  Esc:overview  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =
@@ -1504,7 +1595,11 @@ let approvals_reading_is_current state =
       ; aps_total_count = 0
       ; aps_hidden_count = 0
       };
+  state.keeper_tool_approvals_observed <- true;
   state.keeper_tool_approvals_error <- None;
+  state.gate_snapshot_observed <- true;
+  state.gate_error <- None;
+  state.gate_queue_unavailable <- None;
   state.asks_snapshot <-
     Some { Masc.Tui_decode.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
   state.asks_error <- None
@@ -1530,7 +1625,69 @@ let test_the_ring_keeps_approvals_until_a_reading_empties_it () =
   state.asks_error <- None;
   state.approval_snapshot <- None;
   Alcotest.(check bool) "an unread confirm queue keeps it" true
+    (approvals_in_ring state);
+  (* The durable Gate queue is the fourth list the count walks. Its rows are
+     the ones that keep while nobody watches, so an unreadable Gate store is
+     the case where a missing entry misleads the most. *)
+  approvals_reading_is_current state;
+  state.gate_error <- Some "gate poll failed";
+  Alcotest.(check bool) "a failed Gate poll keeps it" true
+    (approvals_in_ring state);
+  state.gate_error <- None;
+  state.gate_queue_unavailable <- Some "approval queue store unreadable";
+  Alcotest.(check bool) "a Gate queue the server could not read keeps it" true
+    (approvals_in_ring state);
+  state.gate_queue_unavailable <- None;
+  state.gate_snapshot_observed <- false;
+  Alcotest.(check bool) "a Gate queue not read yet keeps it" true
+    (approvals_in_ring state);
+  state.gate_snapshot_observed <- true;
+  state.keeper_tool_approvals_observed <- false;
+  Alcotest.(check bool) "held calls not read yet keep it" true
+    (approvals_in_ring state);
+  state.keeper_tool_approvals_observed <- true;
+  Alcotest.(check bool) "every list read and empty drops it again" false
     (approvals_in_ring state)
+
+(* The Gate poll answered once, with an empty queue, and every poll since
+   has failed. The rows it keeps are that first answer's, so the queue is
+   empty on screen while the server may be holding Gate approvals. The strip
+   kept its entry, but the screen it opened said "(no pending approvals)"
+   under "MASC Approvals (0)" (#39172 review, 2026-09-26). Every place that
+   says whether the lists were read now reads the same per-list readings. *)
+let test_a_gate_poll_that_fails_after_one_answered_is_not_an_empty_queue () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Overview;
+  approvals_reading_is_current state;
+  Alcotest.(check bool) "every list read and empty: nothing pending" true
+    (approvals_empty_queue (approvals_reading state) = Nothing_pending);
+  Alcotest.(check string) "and the Overview count stands" "0"
+    (approvals_count_label state);
+  let cause = "gate load failed: HTTP 503" in
+  state.gate_error <- Some cause;
+  let reading = approvals_reading state in
+  Alcotest.(check bool) "the empty queue names the Gate queue as stale" true
+    (approvals_empty_queue reading
+     = Lists_not_read [ ("Gate queue", Approval_stale cause) ]);
+  Alcotest.(check string) "the title says the Gate queue is stale"
+    ", Gate queue stale" (approvals_title_notes reading);
+  Alcotest.(check string) "the Overview count carries the ?" "0?"
+    (approvals_count_label state);
+  Alcotest.(check bool) "and the strip keeps the entry" true
+    (approvals_in_ring state);
+  state.gate_error <- None;
+  state.gate_queue_unavailable <- Some "approval queue store is unreadable";
+  let reading = approvals_reading state in
+  Alcotest.(check bool) "an unreadable Gate store is named, not emptied" true
+    (approvals_empty_queue reading
+     = Lists_not_read
+         [ ("Gate queue", Approval_unavailable "approval queue store is unreadable") ]);
+  Alcotest.(check string) "and the title says so"
+    ", Gate queue unavailable" (approvals_title_notes reading);
+  state.gate_queue_unavailable <- None;
+  Alcotest.(check bool) "the next answered poll empties it again" true
+    (approvals_empty_queue (approvals_reading state) = Nothing_pending);
+  Alcotest.(check string) "with no note" "" (approvals_title_notes (approvals_reading state))
 
 let test_browser_lanes_highlight_config () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
@@ -1641,13 +1798,18 @@ let test_the_questions_reading_tells_unread_from_none_open () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   let reading () =
     match approvals_questions_reading state with
-    | Questions_current -> "current"
-    | Questions_unread -> "unread"
-    | Questions_stale -> "stale"
+    | List_read -> "current"
+    | List_not_read Approval_unread -> "unread"
+    | List_not_read (Approval_failed _) -> "failed"
+    | List_not_read (Approval_stale _) -> "stale"
+    | List_not_read (Approval_unavailable _) -> "unavailable"
   in
   Alcotest.(check string) "before the first poll answers" "unread" (reading ());
   state.asks_error <- Some "connection refused";
-  Alcotest.(check string) "a first poll that failed" "unread" (reading ());
+  Alcotest.(check string) "a first poll that failed" "failed" (reading ());
+  Alcotest.(check string) "which the title calls unread: nothing was read"
+    ", questions unread"
+    (approval_list_note ~name:"questions" (approvals_questions_reading state));
   state.asks_snapshot <-
     Some { Tui_decode.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
   Alcotest.(check string) "rows kept from before a failed poll" "stale"
@@ -2238,6 +2400,8 @@ let standalone_lane ~(lane : Standalone_lane.t) ~label : Tui_decode.standalone_l
   ; sl_cli_slots = []
   ; sl_dropped_slots = []
   ; sl_declared_slots = []
+  ; sl_declared_cli_slots = []
+  ; sl_supports_cli_tail = true
   ; sl_admission_error = None
   ; sl_retained_run_count = 0
   ; sl_running_count = 0
@@ -3059,6 +3223,8 @@ let () =
             test_the_runtime_picker_names_its_paging
         ; Alcotest.test_case "every surface with keys has a sheet section"
             `Quick test_every_surface_with_keys_has_a_sheet_section
+        ; Alcotest.test_case "no drawn row names one key twice" `Quick
+            test_no_drawn_row_names_one_key_twice
         ; Alcotest.test_case "no surface repeats a key" `Quick
             test_no_surface_repeats_a_key
         ; Alcotest.test_case "one spelling per key" `Quick
@@ -3072,6 +3238,10 @@ let () =
         ; Alcotest.test_case
             "the ring keeps Approvals until a reading empties it" `Quick
             test_the_ring_keeps_approvals_until_a_reading_empties_it
+        ; Alcotest.test_case
+            "a Gate poll failing after one answered is not an empty queue"
+            `Quick
+            test_a_gate_poll_that_fails_after_one_answered_is_not_an_empty_queue
         ; Alcotest.test_case "chat help names the voice keys" `Quick
             test_chat_help_names_the_voice_keys
         ; Alcotest.test_case "a searchable surface does not also bind n" `Quick

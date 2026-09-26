@@ -112,7 +112,7 @@ let test_the_newest_completed_record_on_the_trace_seeds_the_front () =
   check int "total minus transmitted of turn 12" 85 first_atom;
   check source "names its turn" (Front.Turn_record { turn = 12 }) src;
   check string "and the message that record says opened it" (recorded_digest 85)
-    (Option.get (of_records records)).front_digest
+    (Option.get (Option.get (of_records records)).front_digest)
 ;;
 
 let test_another_sessions_record_is_another_history () =
@@ -277,10 +277,10 @@ let test_the_composer_is_read_from_the_execution_kind () =
     (Front.composer_of_execution agent_core);
   check composer_t "claude code hands over its own list" Front.Hands_over_its_own_list
     (Front.composer_of_execution
-       (Runtime_execution.Claude_code { cli_path = "claude"; model = None; timeout_s = 1. }));
+       (Runtime_execution.Claude_code { cli_path = "claude"; account_home = None; model = None; timeout_s = 1. }));
   check composer_t "codex hands over its own list" Front.Hands_over_its_own_list
     (Front.composer_of_execution
-       (Runtime_execution.Codex_app_server { cli_path = "codex"; model = None; timeout_s = 1. }));
+       (Runtime_execution.Codex_app_server { cli_path = "codex"; account_home = None; model = None; timeout_s = 1. }));
   check composer_t "antigravity hands over its own list" Front.Hands_over_its_own_list
     (Front.composer_of_execution
        (Runtime_execution.Antigravity_cli
@@ -325,7 +325,7 @@ let test_of_ledger_reads_the_last_request_front () =
   check int "the ledger's front" 7 first_atom;
   check source "ledger" Front.Ledger src;
   check string "named by the digest the ledger recorded for it" "seven"
-    (Option.get (Front.of_ledger ledger)).front_digest;
+    (Option.get (Option.get (Front.of_ledger ledger)).front_digest);
   check bool "a ledger whose last request carried no atom names no front" true
     (Option.is_none
        (Front.of_ledger (ledger_with ~first_atom:0 ~atom_count:0 Ledger.No_atom_carried)))
@@ -347,7 +347,8 @@ let exchanges n =
 
 let seed_at history first_atom : Front.seed =
   match Window.atom_opening_digest history first_atom with
-  | Some front_digest -> { first_atom; front_digest; source = Front.Ledger }
+  | Some front_digest ->
+    { first_atom; front_digest = Some front_digest; source = Front.Ledger }
   | None -> fail "the seed's own history has the atom"
 ;;
 
@@ -489,7 +490,7 @@ let test_read_seed_keeps_a_response_beyond_unobserved_rows () =
     { transmitted_atoms = total_atoms - 8
     ; total_atoms
     ; measurement = Turn_record.Wire_shape
-    ; front_atom_digest = Some ((seed_at persisted 8).front_digest)
+    ; front_atom_digest = (seed_at persisted 8).front_digest
     }
   in
   let observed =
@@ -522,7 +523,7 @@ let test_read_seed_keeps_a_response_beyond_unobserved_rows () =
     (match window.front_atom_digest with
      | Some digest -> digest
      | None -> fail "the fixture window names its front")
-    front.front_digest;
+    (Option.get front.front_digest);
   check source "the observed turn supplies the seed" (Front.Turn_record { turn = 1 })
     front.source;
   let next_tick = persisted @ [ text_message Types.User "next tick" ] in
@@ -555,7 +556,7 @@ let test_a_restarted_turn_starts_at_the_recorded_accepted_start () =
     { transmitted_atoms = total_atoms - 8
     ; total_atoms
     ; measurement = Turn_record.Wire_shape
-    ; front_atom_digest = Some ((seed_at persisted 8).front_digest)
+    ; front_atom_digest = (seed_at persisted 8).front_digest
     }
   in
   Dated_jsonl.append store
@@ -736,6 +737,63 @@ let test_read_seed_stops_at_a_floor_response () =
     (Front.for_history ~digest_at:(Window.atom_opening_digest (exchanges 5)) front)
 ;;
 
+(* The drop is not an accident of the reading history's length: [None] names
+   no front, so the floor seed falls as [Front_atom_missing] on the very
+   history it was measured on — every atom of which the floor had skipped.
+   Under the #39166 sentinel (an empty-string digest) the same seed fell as
+   [Front_message_differs] there, a reason that reads as corrupted history. *)
+let test_a_floor_seed_drops_as_atom_missing_on_its_own_history () =
+  let history = exchanges 100 in
+  let floor =
+    { Front.first_atom = List.length history
+    ; front_digest = None
+    ; source = Front.Turn_record { turn = 2 }
+    }
+  in
+  check kept_or_dropped "a floor seed names no atom of its own history"
+    (Error Front.Front_atom_missing)
+    (Front.for_history ~digest_at:(Window.atom_opening_digest history) floor)
+;;
+
+(* [first_atom] of a floor seed is the floor turn's total: a length, not an
+   index. The next turn's history is at least one atom longer than that
+   total, and the position even names an atom that exists there — yet
+   [for_history] answers "no atom" rather than "another message": a [None]
+   digest reads no messages at all. This is the reason the #39166 sentinel
+   got wrong, which read as a corrupted history. *)
+let test_history_after_a_floor_is_at_least_the_floor_total_plus_one () =
+  with_turn_record_store @@ fun config store ->
+  Dated_jsonl.append store
+    (Turn_record.to_json (record ~turn:1 (Some (30, 100))));
+  let strip window = { window with Turn_record.front_atom_digest = None } in
+  let base = record ~turn:2 (Some (0, 100)) in
+  let floor =
+    { base with
+      Turn_record.model_input_window = Option.map strip base.Turn_record.model_input_window;
+      Turn_record.response_observed_model_input =
+        Option.map
+          (fun observed ->
+             { observed with Turn_record.window = strip observed.Turn_record.window })
+          base.Turn_record.response_observed_model_input
+    }
+  in
+  Dated_jsonl.append store (Turn_record.to_json floor);
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  let front =
+    match read.Front.seed with
+    | Some front -> front
+    | None -> Alcotest.fail "the floor response is itself an answer"
+  in
+  check bool "the floor seed names no front" true
+    (Option.is_none front.Front.front_digest);
+  let history = exchanges (front.Front.first_atom + 1) in
+  check bool "the next turn's history is at least the floor total plus one"
+    true (List.length history >= front.Front.first_atom + 1);
+  check kept_or_dropped "and the position itself is why it drops, not the messages"
+    (Error Front.Front_atom_missing)
+    (Front.for_history ~digest_at:(Window.atom_opening_digest history) front)
+;;
+
 let test_read_seed_keeps_boundary_errors_out_of_the_record_count () =
   with_turn_record_store @@ fun config store ->
   Dated_jsonl.append store
@@ -790,7 +848,7 @@ let test_a_seed_read_reports_each_failure_once () =
             Front.seed =
               Some
                 { Front.first_atom = 3
-                ; front_digest = recorded_digest 3
+                ; front_digest = Some (recorded_digest 3)
                 ; source = Front.Ledger
                 }
           }));
@@ -918,6 +976,10 @@ let () =
             test_read_seed_keeps_boundary_errors_out_of_the_record_count
         ; test_case "a seed read reports each failure once" `Quick
             test_a_seed_read_reports_each_failure_once
+        ; test_case "a floor seed drops as atom missing on its own history" `Quick
+            test_a_floor_seed_drops_as_atom_missing_on_its_own_history
+        ; test_case "read_seed stops at a floor response" `Quick
+            test_read_seed_stops_at_a_floor_response
         ] )
     ; ( "front"
       , [ test_case "of_ledger" `Quick test_of_ledger_reads_the_last_request_front
@@ -934,6 +996,8 @@ let () =
         ; test_case "origin json" `Quick test_origin_json_names_its_kind
         ; test_case "only an unknown start origin warns" `Quick
             test_only_an_unknown_start_origin_warns
+        ; test_case "history after a floor is at least the floor total plus one" `Quick
+            test_history_after_a_floor_is_at_least_the_floor_total_plus_one
         ] )
     ]
 ;;

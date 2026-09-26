@@ -194,8 +194,6 @@ let create_keeper ~expected_config_revision (ctx : _ context)
             last_preview = "";
           };
           trace_id = trace_id_t;
-          trace_history = [];
-          last_handoff_ts = 0.0;
           message_scope_ack_id = None;
 	          last_runtime_attempt = None;
 	        };

@@ -6818,6 +6818,7 @@
  (deps
   test_install_local_build.py
   ../scripts/install-local-build.sh
+  ../scripts/check-runtime-deployment-preflight.sh
   ../scripts/dune-local.sh
   ../connectors/browser/install-host.sh)
  (action

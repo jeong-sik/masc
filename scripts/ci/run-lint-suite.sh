@@ -69,6 +69,11 @@ blocking_lints() {
   run_self_test_when_changed "Stagehand extension installer" \
     "connectors/browser/install-stagehand-extension.sh test/test_install_stagehand_extension.sh" \
     bash test/test_install_stagehand_extension.sh
+  # Runs deploy.sh and install-local-build.sh against a fixture with a fake
+  # helper: each must refuse before it stops or replaces anything.
+  run_self_test_when_changed "Deployment scripts refuse before touching prod" \
+    "scripts/deploy.sh scripts/install-local-build.sh scripts/check-runtime-deployment-preflight.sh test/test_deploy_preflight.sh" \
+    bash test/test_deploy_preflight.sh
   run_lint "Issue taxonomy truth" bash scripts/check-issue-taxonomy-truth.sh
   # The release page body is cut from this section by
   # scripts/ci/changelog-section.py. Checking it on every PR means a version

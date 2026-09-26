@@ -178,6 +178,22 @@ let test_absent_without_seeding_needs_empty_workspace exe () =
       in
       reports output "empty_workspace=allowed"))
 
+(* MASC_CONFIG_BOOTSTRAP=empty starts a new config root without runtime.toml,
+   but boot still refills one that already exists. The helper reads that from
+   boot's own decision. *)
+let test_empty_bootstrap_follows_boot exe () = with_workspace (fun root ->
+  Fs_compat.mkdir_p (Filename.concat root ".masc");
+  with_env [ "MASC_CONFIG_BOOTSTRAP", Some "empty" ] (fun () ->
+    let output =
+      refuses "empty bootstrap of a new config root is refused" (run_helper exe root [])
+    in
+    reports output "MASC_CONFIG_BOOTSTRAP=empty";
+    Fs_compat.mkdir_p (Filename.concat root ".masc/config/keepers");
+    let output =
+      passes "empty bootstrap refills an existing config root" (run_helper exe root [])
+    in
+    reports output "boot_writes_seed=yes"))
+
 (* scripts/deploy.sh names MASC_CONFIG_DIR itself, and boot creates it. *)
 let test_missing_config_dir_needs_empty_workspace exe () =
   with_workspace (fun root ->
@@ -208,5 +224,7 @@ let () =
         (test_absent_is_seeded_by_boot exe);
       test_case "an unseeded absent runtime.toml needs an empty workspace" `Quick
         (test_absent_without_seeding_needs_empty_workspace exe);
+      test_case "empty bootstrap follows boot's config-root decision" `Quick
+        (test_empty_bootstrap_follows_boot exe);
       test_case "a missing MASC_CONFIG_DIR needs an empty workspace" `Quick
         (test_missing_config_dir_needs_empty_workspace exe)]]

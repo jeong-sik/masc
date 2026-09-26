@@ -859,31 +859,6 @@ let judge_runtime_config ~base_path ~config_root path =
     Ok ()
 ;;
 
-type runtime_toml_seeding =
-  | Seeded_at_boot
-  | Not_seeded of string
-
-(* Whether boot writes this build's runtime.toml where it is missing
-   ([Server_runtime_config_root_bootstrap.bootstrap_initial_config_root]).
-   It does not under an explicit MASC_CONFIG_DIR, under
-   MASC_CONFIG_BOOTSTRAP=skip, or over a config root that is not a directory.
-   MASC_CONFIG_BOOTSTRAP=empty leaves a new config root without one; boot
-   would still refill an existing root, which this counts as not seeded, so
-   the gate asks for --allow-empty-workspace there instead of trusting a file
-   boot may not write. *)
-let runtime_toml_seeding ~config_root =
-  match Config_dir_resolver.current_env_config_dir_opt () with
-  | Some config_dir -> Not_seeded (Printf.sprintf "MASC_CONFIG_DIR=%s is set" config_dir)
-  | None ->
-    (match Server_runtime_bootstrap.config_bootstrap_mode () with
-     | `Skip -> Not_seeded "MASC_CONFIG_BOOTSTRAP=skip"
-     | `Empty -> Not_seeded "MASC_CONFIG_BOOTSTRAP=empty"
-     | `Auto ->
-       if Sys.file_exists config_root && not (Sys.is_directory config_root)
-       then Not_seeded (Printf.sprintf "%s is not a directory" config_root)
-       else Seeded_at_boot)
-;;
-
 (* The path is the one boot locks for this BasePath, read by
    [Runtime.config_path]'s rules. A relative BasePath is made absolute first:
    the resolver anchors a relative one at itself. *)
@@ -902,13 +877,15 @@ let validate_runtime_config base_path allow_empty_workspace =
       Printf.printf "runtime.toml absent path=%s empty_workspace=allowed\n%!" path;
       Ok ()
     in
+    (* Boot's own config-root decision says whether it writes the file. *)
     let absent () =
-      match runtime_toml_seeding ~config_root with
-      | Seeded_at_boot ->
+      match Server_runtime_config_root_bootstrap.missing_runtime_toml_at_boot ~base_path with
+      | Server_runtime_config_root_bootstrap.Written_at_boot ->
         Printf.printf "runtime.toml absent path=%s boot_writes_seed=yes\n%!" path;
         Ok ()
-      | Not_seeded (_ : string) when allow_empty_workspace -> empty_workspace ()
-      | Not_seeded reason ->
+      | Server_runtime_config_root_bootstrap.Left_missing (_ : string)
+        when allow_empty_workspace -> empty_workspace ()
+      | Server_runtime_config_root_bootstrap.Left_missing reason ->
         errorf
           "runtime.toml is absent path=%s and boot does not write one (%s), so \
            the server would start with no model; wrong --base-path or \

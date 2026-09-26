@@ -12,19 +12,26 @@
 # processes started from that workspace are stopped; the extension reconnects
 # after five seconds and starts the new copy.
 #
+# Before anything is replaced, the new build judges the runtime.toml of the
+# workspace its server runs on (#39311). A refusal leaves every binary and
+# process as it was.
+#
 # Usage: scripts/install-local-build.sh [--prefix DIR] [--manifest-dir DIR]
-#                                       [--skip-build] [--build-dir DIR]
+#                                       [--skip-build] [--build-dir DIR] [--base-path DIR]
 #   --prefix        where masc, masc-tui and masc-browser-host go (default ~/.local/bin)
 #   --manifest-dir  Firefox native messaging manifests (default: the per-user directory)
 #   --skip-build    install what --build-dir already holds
 #   --build-dir     directory holding main_eio.exe, masc_tui.exe, masc_browser_host.exe
-#                   (default <repo>/_build/default/bin)
+#                   and deployment_preflight_helper.exe (default <repo>/_build/default/bin)
+#   --base-path     workspace whose runtime.toml the new build must accept
+#                   (default $MASC_BASE_PATH)
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 prefix="$HOME/.local/bin"
 build_dir="$repo/_build/default/bin"
 skip_build=false
+base_path="${MASC_BASE_PATH:-}"
 case "$(uname -s)" in
   Darwin) manifest_dir="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts" ;;
   Linux) manifest_dir="$HOME/.mozilla/native-messaging-hosts" ;;
@@ -37,7 +44,8 @@ while [ $# -gt 0 ]; do
     --manifest-dir) manifest_dir=${2:?--manifest-dir needs a directory}; shift 2 ;;
     --build-dir) build_dir=${2:?--build-dir needs a directory}; shift 2 ;;
     --skip-build) skip_build=true; shift ;;
-    -h|--help) sed -n '15,21p' "$0"; exit 0 ;;
+    --base-path) base_path=${2:?--base-path needs a directory}; shift 2 ;;
+    -h|--help) sed -n '19,27p' "$0"; exit 0 ;;
     *) echo "install-local-build: unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -51,8 +59,20 @@ if [ "$skip_build" = false ]; then
   # older than the pin. --root: a worktree under .worktrees sits inside the
   # parent checkout's dune project, which excludes that directory.
   (cd "$repo" && scripts/dune-local.sh build --root "$repo" \
-    ./bin/main_eio.exe ./bin/masc_tui.exe ./bin/masc_browser_host.exe)
+    ./bin/main_eio.exe ./bin/masc_tui.exe ./bin/masc_browser_host.exe \
+    ./bin/deployment_preflight_helper.exe)
 fi
+
+# Nothing is replaced or restarted yet, so the running server's editor can
+# still change a value this build refuses.
+if [ -z "$base_path" ]; then
+  echo "install-local-build: name the workspace whose runtime.toml this build must accept (--base-path DIR or MASC_BASE_PATH)" >&2
+  exit 2
+fi
+MASC_DEPLOYMENT_PREFLIGHT_HELPER="$build_dir/deployment_preflight_helper.exe" \
+  "$repo/scripts/check-runtime-deployment-preflight.sh" \
+  --base-path "$base_path" \
+  --runtime-config-only
 
 mkdir -p "$prefix"
 install -m 755 "$build_dir/main_eio.exe" "$prefix/masc"

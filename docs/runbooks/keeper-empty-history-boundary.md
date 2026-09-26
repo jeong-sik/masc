@@ -13,6 +13,13 @@ The surrounding atom counts must agree with the variant. This replaces the
 `front_atom_digest` wire field in both the attempted range and the
 response-observed range. The OCaml and dashboard readers use this same schema.
 
+An Agent Core floor response can also use `empty_history` with a positive
+`total_atoms` count and zero `transmitted_atoms`. That observation carries no
+history witness: it stops the seed scan from reusing an older response, but
+cannot seed a position in a nonempty history. A witnessed `after_history`
+boundary remains distinct and can preserve its position on a later fresh Start.
+Codex Resume sends no history and records no new model-input window.
+
 This is an intentional internal schema break, rolled out on fresh
 TurnRecord state. Rows written with `front_atom_digest` are not read: there is
 no reader, compat decoder or migration for that field. The strict decoder

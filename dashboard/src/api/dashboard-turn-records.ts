@@ -147,6 +147,9 @@ export type TurnRecordEntry = {
   // runtime is unknown or the operator left runtime.toml unset; the inspector
   // renders "미상" (unknown) rather than a fabricated 200K / Claude $3·$15.
   context_window?: number
+  // The provider-reported model limit, separate from MASC's shaping ceiling.
+  // Absent when the provider has not reported a positive token window.
+  provider_context_window?: number
   // How much of the keeper's own history the dispatched request carried, in
   // atoms (one user message, or one assistant message plus the tool messages
   // answering it). Reported beside request_body_bytes, which counts the bytes
@@ -352,6 +355,11 @@ function decodeNonNegativeSafeInteger(raw: unknown): number | null {
   return value != null && Number.isSafeInteger(value) && value >= 0 ? value : null
 }
 
+function decodePositiveSafeInteger(raw: unknown): number | null {
+  const value = decodeNonNegativeSafeInteger(raw)
+  return value !== null && value > 0 ? value : null
+}
+
 function decodeFiniteNumber(raw: unknown): number | null {
   return asNumber(raw) ?? null
 }
@@ -504,7 +512,10 @@ function decodeTurnModelInputWindow(raw: Record<string, unknown>): TurnModelInpu
     || model_input_front === null
     || (model_input_front.kind === 'at_atom' && transmitted_atoms === 0)
     || (model_input_front.kind === 'after_history' && (transmitted_atoms !== 0 || total_atoms === 0))
-    || (model_input_front.kind === 'empty_history' && total_atoms !== 0)
+    // Empty_history can also record a floor response that carried no atoms
+    // from a nonempty history. The carried-front reader decides whether its
+    // unwitnessed position can seed another request.
+    || (model_input_front.kind === 'empty_history' && transmitted_atoms !== 0)
   ) return null
   return { transmitted_atoms, total_atoms, model_input_measurement, model_input_front }
 }
@@ -545,6 +556,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'selected_model',
     'finish_reason',
     'context_window',
+    'provider_context_window',
     'price_input_per_million',
     'price_output_per_million',
     'request_latency_ms',
@@ -596,6 +608,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   const selected_model = decodeOptionalField(raw, 'selected_model', decodeExactNonEmptyString)
   const finish_reason = decodeOptionalField(raw, 'finish_reason', decodeExactNonEmptyString)
   const context_window = decodeOptionalField(raw, 'context_window', decodeNonNegativeSafeInteger)
+  const provider_context_window = decodeOptionalField(raw, 'provider_context_window', decodePositiveSafeInteger)
   // The producer writes all four null when no projection was observed.
   // Missing fields or a partially populated window are malformed evidence.
   const model_input_window = [
@@ -654,6 +667,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     || selected_model === null
     || finish_reason === null
     || context_window === null
+    || provider_context_window === null
     || model_input_window === null
     || price_input_per_million === null
     || price_output_per_million === null
@@ -700,6 +714,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     cache_creation_input_tokens,
     cache_read_input_tokens,
     context_window,
+    provider_context_window,
     // Absent observation remains distinct from a measured zero-atom range.
     transmitted_atoms: model_input_window?.transmitted_atoms,
     total_atoms: model_input_window?.total_atoms,

@@ -653,25 +653,32 @@ let test_codec_rejects_invalid_response_observed_model_input () =
    of what was cut. *)
 let test_empty_model_input_boundaries_roundtrip_and_reject_invalid_shapes () =
   let sample = sample_record () in
-  let row ~total_atoms model_input_front =
+  let row ?(transmitted_atoms = 0) ~total_atoms model_input_front =
     let window : Turn_record.model_input_window =
-      { transmitted_atoms = 0; total_atoms; measurement = Durable_shape; model_input_front } in
+      { transmitted_atoms; total_atoms; measurement = Durable_shape; model_input_front } in
     { sample with model_input_window = Some window
     ; response_observed_model_input = Some { runtime_profile = "codex"; window }
     } in
   List.iter (fun (total_atoms, front) ->
     let record = row ~total_atoms front in
     match Turn_record.of_json (Turn_record.to_json record) with
-    | Ok decoded -> check bool "empty observation survives the strict codec" true
+    | Ok decoded ->
+      check bool "empty attempted window survives the strict codec" true
+        (decoded.model_input_window = record.model_input_window);
+      check bool "empty observation survives the strict codec" true
         (decoded.response_observed_model_input = record.response_observed_model_input)
     | Error detail -> fail detail)
     [ 8, Model_input_front.After_history (String.make 64 'a')
-    ; 0, Model_input_front.Empty_history ];
+    ; 0, Model_input_front.Empty_history
+    (* A successful floor response can carry no atoms from a nonempty history.
+       The codec preserves it; Keeper_carried_front.for_history separately
+       rejects this unwitnessed seed instead of reviving an older front. *)
+    ; 8, Model_input_front.Empty_history ];
   List.iter (fun record ->
     check bool "inconsistent position cannot decode" true
       (Result.is_error (Turn_record.of_json (Turn_record.to_json record))))
     [ row ~total_atoms:0 (Model_input_front.After_history (String.make 64 'a'))
-    ; row ~total_atoms:8 Model_input_front.Empty_history
+    ; row ~transmitted_atoms:1 ~total_atoms:8 Model_input_front.Empty_history
     ; row ~total_atoms:8 (Model_input_front.At_atom (String.make 64 'a')) ];
   List.iter (fun json ->
     check bool "unknown or ambiguous front cannot decode" true

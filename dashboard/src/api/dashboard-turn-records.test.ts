@@ -160,6 +160,7 @@ describe('keeper turn record cache token counts', () => {
   it.each([
     [8, { kind: 'after_history', digest: 'a'.repeat(64) }],
     [0, { kind: 'empty_history' }],
+    [8, { kind: 'empty_history' }],
   ])('decodes accepted empty-history boundary %s', async (total_atoms, model_input_front) => {
     const observed = {
       runtime_profile: 'codex', transmitted_atoms: 0, total_atoms,
@@ -303,6 +304,7 @@ describe('keeper turn record cache token counts', () => {
     { transmitted_atoms: 0, total_atoms: 8, model_input_measurement: 'durable_shape', model_input_front: { kind: 'at_atom', digest: 'a'.repeat(64) } },
     { transmitted_atoms: 0, total_atoms: 0, model_input_measurement: 'durable_shape', model_input_front: { kind: 'after_history', digest: 'a'.repeat(64) } },
     { transmitted_atoms: 1, total_atoms: 0, model_input_measurement: 'wire_shape', model_input_front: { kind: 'at_atom', digest: 'a'.repeat(64) } },
+    { transmitted_atoms: 1, total_atoms: 8, model_input_measurement: 'wire_shape', model_input_front: { kind: 'empty_history' } },
   ])('rejects an inconsistent attempted window %j', async window => {
     getMock.mockResolvedValue(payload(entry(window)))
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow('유효하지 않은 keeper turn record payload')
@@ -311,6 +313,7 @@ describe('keeper turn record cache token counts', () => {
   it.each([
     [8, { kind: 'after_history', digest: 'a'.repeat(64) }],
     [0, { kind: 'empty_history' }],
+    [8, { kind: 'empty_history' }],
   ])('preserves an attempted empty window %s', async (total_atoms, model_input_front) => {
     getMock.mockResolvedValue(payload(entry({
       transmitted_atoms: 0, total_atoms, model_input_measurement: 'durable_shape', model_input_front,
@@ -318,6 +321,42 @@ describe('keeper turn record cache token counts', () => {
     const response = await fetchKeeperTurnRecords('sangsu')
     expect(response.entries[0]?.record).toMatchObject({ transmitted_atoms: 0, total_atoms, model_input_front })
   })
+
+  it('preserves an unwitnessed wire floor as evidence without inventing a front digest', async () => {
+    const window = {
+      transmitted_atoms: 0,
+      total_atoms: 8,
+      model_input_measurement: 'wire_shape',
+      model_input_front: { kind: 'empty_history' },
+    }
+    const observed = { runtime_profile: 'anthropic.claude', ...window }
+    getMock.mockResolvedValue(payload(entry({ ...window, response_observed_model_input: observed })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+    expect(response.entries[0]?.record).toMatchObject(window)
+    expect(response.entries[0]?.record.response_observed_model_input).toEqual(observed)
+  })
+
+  it.each([1, 272_000])('keeps provider context window %s separate from the MASC turn budget', async provider_context_window => {
+    getMock.mockResolvedValue(payload(entry({ context_window: 128_000, provider_context_window })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+    expect(response.entries[0]?.record).toMatchObject({ context_window: 128_000, provider_context_window })
+  })
+
+  it('leaves an unreported provider context window absent', async () => {
+    getMock.mockResolvedValue(payload(entry({ context_window: 128_000 })))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+    expect(response.entries[0]?.record.provider_context_window).toBeUndefined()
+  })
+
+  it.each([null, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, Infinity, '272000', true, {}])(
+    'rejects invalid provider context window %s', async provider_context_window => {
+      getMock.mockResolvedValue(payload(entry({ provider_context_window })))
+      await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow('유효하지 않은 keeper turn record payload')
+    },
+  )
 
   it('accepts a fractional producer timestamp with its exact whole-second ISO projection', async () => {
     const fractionalTs = 1_700_000_000.123456

@@ -114,7 +114,7 @@ let test_menu_watch_row_when_loaded () =
   (* A machine is loaded, so row 0 is "watch" and enter spectates it. *)
   check bool "row 0 is watch" true
     (match Masc_tui_msx.menu_consume ~write state "\r" with
-     | Masc_tui_msx.Watch Masc_tui_machine_live.Msx -> true
+     | Masc_tui_msx.Watch Masc.Machine_lane.Msx -> true
      | _ -> false);
   (* Row 1 is the one cartridge. *)
   ignore (Masc_tui_msx.menu_consume ~write state "down");
@@ -206,7 +206,7 @@ let test_dos_watch_row () =
     (contains out "watch DOS machine");
   check bool "picking it names DOS" true
     (match Masc_tui_msx.menu_consume ~write state "\r" with
-     | Masc_tui_msx.Watch Masc_tui_machine_live.Dos -> true
+     | Masc_tui_msx.Watch Masc.Machine_lane.Dos -> true
      | _ -> false);
   let disk_menu = captured (fun write ->
       Masc_tui_msx.open_menu ~write ~mode:Masc_tui_types.Change_disk state) in
@@ -224,7 +224,7 @@ let test_dos_row_leaving_does_not_retarget_enter () =
   let write _ = () in
   Masc_tui_msx.open_menu ~write state;
   check bool "the DOS row is highlighted first" true
-    (state.msx_menu_selected = Some (Menu_watch Masc_tui_machine_live.Dos));
+    (state.msx_menu_selected = Some (Menu_watch Masc.Machine_lane.Dos));
   List.iter
     (fun (why, view) ->
       state.dos_live <- view;
@@ -262,13 +262,13 @@ let test_empty_menu_takes_the_first_arriving_row () =
   Masc_tui_msx.render_menu ~write state;
   check bool "the first row that appears is highlighted and picked" true
     (match Masc_tui_msx.menu_consume ~write state "\r" with
-     | Masc_tui_msx.Watch Masc_tui_machine_live.Dos -> true
+     | Masc_tui_msx.Watch Masc.Machine_lane.Dos -> true
      | _ -> false)
 
 let test_dos_render () =
   let draw view = captured (fun write ->
       Masc_tui_msx.render_live ~write ~connection:Masc_tui_types.Connected
-        Masc_tui_machine_live.Dos view) in
+        Masc.Machine_lane.Dos view) in
   let shown = draw (Masc_tui_machine_live.Showing a_dos_picture) in
   check bool "a DOS picture is titled by its change count" true
     (contains shown "DOS \xe2\x80\x94 change 4096");

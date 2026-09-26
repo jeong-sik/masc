@@ -1469,7 +1469,9 @@
  (name masc_tui_machine_live)
  (wrapped false)
  (modules masc_tui_machine_live)
- (libraries yojson base64))
+ ;; Machine_lane names the machine; Lane_addon_sources and Lane_manifest spell
+ ;; its source kind and label, so neither is written a second time here.
+ (libraries yojson base64 masc))
 
 ; The primitives every surface draws through. Its own library so the
 ; direction is enforced rather than agreed to: nothing here may reach back
@@ -1976,6 +1978,7 @@
 ;; pin: opam pin add ocaml-msx --kind=path <core repo>
  (modules masc_tui_msx)
  (libraries
+  masc
   masc_tui_types
   masc_tui_machine_live
   masc_tui_interactive

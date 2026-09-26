@@ -151,6 +151,15 @@ blocking_lints() {
   run_lint "Test modules are wired" \
     python3 scripts/lint/test-modules-are-wired.py
 
+  # A test executable has no .mli, so warning 32 never flags a `let test_x`
+  # that no test_case list names: the run is green and the test never runs
+  # (#39166 shipped #39013's fix that way; #39185 repeated it). Baseline 0.
+  run_self_test_when_changed "Test functions are registered self-test" \
+    scripts/lint/test-functions-are-registered.py \
+    python3 scripts/lint/test-functions-are-registered.py --self-test
+  run_lint "Test functions are registered" \
+    python3 scripts/lint/test-functions-are-registered.py
+
   # The report-only step that runs a pull request's edited suites trusts this
   # tool to say which of them can be run by executing the binary. A wrong
   # "run" reports a failure the change did not cause, which is how a report

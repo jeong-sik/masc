@@ -5,7 +5,9 @@ A test/*.ml must be named by a dune stanza, or dune silently skips it; and a
 script a stanza names must exist, or root `dune build @runtest` fails with
 "No rule found". A script is any atom ending in .py, .sh, .cjs or .mjs --
 whether it sits in `%{dep:...}`, a `(deps ...)` field or a bare `(run ...)`
-argument -- read after `;` comments are removed. No rule in the test tree
+argument -- read as a complete atom, with quoted atoms and `;` comments
+respected. Glob patterns are dependencies, not literal filenames; their
+suffixes must not be interpreted as missing scripts. No rule in the test tree
 produces a file with those extensions, so every such atom names a source file.
 
 `test/dune` has no top-level `(modules)` field, so a `test/*.ml` that no stanza
@@ -38,6 +40,7 @@ from __future__ import annotations
 import os
 import pathlib
 import re
+import shlex
 import sys
 import tempfile
 
@@ -47,9 +50,21 @@ MIN_MODULES = 1000
 MODULE_TOKEN = re.compile(r"[A-Za-z0-9_]+")
 INCLUDE = re.compile(r"\(include\s+([^)\s]+)\)")
 SCRIPT_ATOM = re.compile(
-    r"(?<![\w./-])(%\{workspace_root\}/)?((?:\.\.?/)?[\w./-]*\w\.(?:py|sh|cjs|mjs))(?![\w.])"
+    r"(%\{workspace_root\}/)?((?:\.\.?/)?[\w./-]*\w\.(?:py|sh|cjs|mjs))"
 )
-LINE_COMMENT = re.compile(r";.*$", re.MULTILINE)
+
+
+def script_atoms(text: str):
+    """Literal script references only; never a suffix inside a glob atom."""
+    atoms = shlex.shlex(text, posix=True, punctuation_chars="()")
+    atoms.whitespace_split = True
+    atoms.commenters = ";"
+    for atom in atoms:
+        if atom.startswith("%{dep:") and atom.endswith("}"):
+            atom = atom[len("%{dep:"):-1]
+        match = SCRIPT_ATOM.fullmatch(atom)
+        if match is not None:
+            yield match.groups()
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -94,9 +109,8 @@ def missing_scripts(
     a %{workspace_root}/ prefix resolves against the repository root."""
     if not dune.is_file():
         return []
-    text = LINE_COMMENT.sub("", wiring_text(dune))
     missing = set()
-    for root_prefix, name in SCRIPT_ATOM.findall(text):
+    for root_prefix, name in script_atoms(wiring_text(dune)):
         base, shown = (repo_root, name) if root_prefix else (directory, f"{label}/{name}")
         shown = os.path.normpath(shown)
         if not (base / name).is_file():
@@ -121,6 +135,24 @@ def scan(repo_root: pathlib.Path) -> tuple[int, list[str], list[str]]:
 
 def self_test() -> int:
     rc = 0
+    # This is valid Dune dependency syntax. The old substring scan invented
+    # [_pty.py] from the wildcard, blocking #39263 although Dune built it.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        dune = root / "dune"
+        dune.write_text(
+            '(rule (deps (glob_files test_tui_keyboard_*_pty.py)\n'
+            ' (glob_files "test_tui_keyboard_?_pty.py")\n'
+            ' (glob_files test_tui_keyboard_[ab]_pty.py)\n'
+            ' "missing.py" %{dep:also_missing.sh}))\n'
+            '; ignored.py is a comment\n'
+        )
+        missing = missing_scripts(root, root, dune, "test")
+        if missing == ["test/also_missing.sh", "test/missing.py"]:
+            print("[PASS] glob suffixes are not scripts; adjacent quoted and dep literals still fail")
+        else:
+            print(f"[FAIL] glob/literal distinction: {missing}", file=sys.stderr)
+            rc = 1
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         test = root / "test"

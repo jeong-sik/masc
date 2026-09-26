@@ -19,6 +19,27 @@ def executable(path, text):
     return path
 
 
+# Stands in for the new build's deployment preflight helper: the gate asks it
+# for its identity and filenames, then for the runtime.toml verdict.
+def preflight_helper(build, verdict_exit=0):
+    path = build / "deployment_preflight_helper.exe"
+    path.write_text("#!/bin/sh\n"
+                    "case \"$1\" in\n"
+                    "  build-commit) echo fixture-commit ;;\n"
+                    "  durable-filenames) printf 'snapshot=fixture-snapshot.json\\nwal=fixture-wal.jsonl\\n' ;;\n"
+                    f"  validate-runtime-config) echo 'runtime.toml fixture verdict'; exit {verdict_exit} ;;\n"
+                    "  *) echo \"unexpected helper call: $*\" >&2; exit 2 ;;\n"
+                    "esac\n")
+    path.chmod(0o755)
+    return path
+
+
+def workspace(root):
+    base = root / "live workspace"
+    base.mkdir()
+    return base
+
+
 class LocalBuildInstall(unittest.TestCase):
     def test_every_registered_host_gets_the_new_copy_under_its_own_name(self):
         with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
@@ -42,10 +63,12 @@ class LocalBuildInstall(unittest.TestCase):
             executable(build / "main_eio.exe", "masc")
             executable(build / "masc_tui.exe", "tui")
             executable(build / "masc_browser_host.exe", "new")
+            preflight_helper(build)
             prefix = root / "prefix"
 
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(manifests)],
+                                     "--prefix", str(prefix), "--manifest-dir", str(manifests),
+                                     "--base-path", str(workspace(root))],
                                     check=True, capture_output=True, text=True)
 
             for name, marker in (("masc", "masc"), ("masc-tui", "tui"), ("masc-browser-host", "new")):
@@ -68,11 +91,50 @@ class LocalBuildInstall(unittest.TestCase):
             build.mkdir()
             for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe"):
                 executable(build / exe, exe)
+            preflight_helper(build)
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(root / "prefix"), "--manifest-dir", str(root / "absent")],
+                                     "--prefix", str(root / "prefix"), "--manifest-dir", str(root / "absent"),
+                                     "--base-path", str(workspace(root))],
                                     check=True, capture_output=True, text=True)
             self.assertTrue((root / "prefix/masc-browser-host").is_file())
             self.assertIn("no browser lane host is registered", result.stdout)
+
+    # #39311: the new build refuses the live runtime.toml before any binary is
+    # replaced, so the running server and its editor are left as they were.
+    def test_a_refused_runtime_toml_installs_nothing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe"):
+                executable(build / exe, exe)
+            preflight_helper(build, verdict_exit=1)
+            prefix = root / "prefix"
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--base-path", str(workspace(root))],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("runtime.toml is not one this build accepts", result.stderr)
+            self.assertIn("nothing was stopped or installed", result.stderr)
+            self.assertFalse(prefix.exists(), "a build that refused the live runtime.toml was installed")
+
+    def test_no_workspace_to_check_installs_nothing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe"):
+                executable(build / exe, exe)
+            preflight_helper(build)
+            prefix = root / "prefix"
+            env = {key: value for key, value in os.environ.items() if key != "MASC_BASE_PATH"}
+            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent")],
+                                    env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("--base-path DIR or MASC_BASE_PATH", result.stderr)
+            self.assertFalse(prefix.exists())
 
     def test_unknown_option_is_refused_before_anything_is_installed(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -107,7 +169,8 @@ class LocalBuildInstall(unittest.TestCase):
             cwd, *arguments = record.read_text().splitlines()
             self.assertEqual(Path(cwd).resolve(), checkout)
             self.assertEqual(arguments, ["build", "--root", str(checkout), "./bin/main_eio.exe",
-                                         "./bin/masc_tui.exe", "./bin/masc_browser_host.exe"])
+                                         "./bin/masc_tui.exe", "./bin/masc_browser_host.exe",
+                                         "./bin/deployment_preflight_helper.exe"])
 
     def test_dune_local_takes_the_install_build_line(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -116,10 +179,11 @@ class LocalBuildInstall(unittest.TestCase):
             build.mkdir()
             for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe"):
                 executable(build / exe, exe)
+            preflight_helper(build)
             # A dry run prints the Dune command and runs nothing, so the real
             # script is checked for taking these arguments without a switch.
             result = subprocess.run(["bash", str(SCRIPT), "--build-dir", str(build), "--prefix", str(root / "prefix"),
-                                     "--manifest-dir", str(root / "absent")],
+                                     "--manifest-dir", str(root / "absent"), "--base-path", str(workspace(root))],
                                     env=dict(os.environ, MASC_DUNE_DRY_RUN="1"),
                                     check=True, capture_output=True, text=True)
             self.assertIn("[dune-local] command: dune build --root", result.stderr)

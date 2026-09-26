@@ -95,6 +95,14 @@ val mandatory_exact_output_lane_ids : string list
     checked against it — a lane added here without a matching fixture update is
     the failure mode this value exists to make detectable. *)
 
+val check_exact_output_registry : ?config_root:string -> unit -> unit
+(** What boot's exact-output registry step refuses for the runtime.toml under
+    [config_root] and the runtimes {!Runtime} has loaded: an unusable
+    mandatory lane, a resolver snapshot that does not build, or a registry
+    {!Runtime_exact_output_registry.publish} would refuse. Publishes nothing.
+    Raises [Env_config_core.Config_error] with the same text boot raises. The
+    deployment preflight runs it after {!Runtime.init_default_degraded_observation}. *)
+
 (** Why one of {!mandatory_exact_output_lane_ids} is unusable in the resolved
     [runtime.toml]: it has no [\[runtime.exact_output_lanes.<id>\]] table, or
     the table declares neither [slots] nor [cli_slots]. *)

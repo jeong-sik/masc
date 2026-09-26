@@ -744,6 +744,196 @@ let validate_stores_cmd =
     Term.(ret (const (fun base_path -> cmdliner_result (validate_stores base_path)) $ base_path))
 ;;
 
+(* The runtime.toml this BasePath's server reads, judged the way the raw save
+   ([POST /api/v1/runtime/config/raw]) judges text before it writes and the way
+   boot loads it. #39040 narrowed [\[skills\] resource-read-max-bytes] while the
+   live file kept the old value, and the restarted server refused the whole
+   Skill table: every Keeper ran without Skills for about five hours (#39311).
+
+   The model catalog is installed first, as boot does, because an
+   [AGENT_CORE_MODEL_CATALOG] replacement changes which runtimes load. Then, in
+   order, the first refusal wins:
+   - the Keeper setting schema, which the save checks and which boot refuses to
+     start on ([Server_runtime_bootstrap.apply_runtime_toml]);
+   - [Runtime.validate_config_text], the rest of the save check. Its checks
+     that compare the text with the file a save replaces find nothing here,
+     because that file is this text;
+   - the [\[fusion\]] table as every Fusion run loads it;
+   - boot's runtime initialisation, refused when it would disable a runtime
+     the catalog does not carry, leave a Keeper without its runtime, or leave
+     an exact-output slot out for a missing body deadline, the states /health
+     reports as degraded;
+   - boot's exact-output registry step, without publishing.
+   Initialisation fills this process's runtime state. The helper exits after
+   its verdict, so nothing else reads that state. *)
+let keeper_setting_errors (report : Keeper_runtime_config.validation_report) =
+  List.filter_map
+    (fun (issue : Keeper_runtime_config.validation_issue) ->
+       match issue.severity with
+       | Keeper_runtime_config.Error ->
+         Some (Printf.sprintf "%s: %s" issue.key issue.detail)
+       | Keeper_runtime_config.Warning -> None)
+    report.issues
+;;
+
+let catalog_degradation_to_string (degradation : Runtime.startup_degradation) =
+  let keepers =
+    List.map
+      (fun (assignment : Runtime.unavailable_runtime_assignment) ->
+         Printf.sprintf
+           "Keeper %s assigned to %s"
+           assignment.Runtime.keeper_name
+           assignment.runtime_id)
+      degradation.Runtime.unavailable_assignments
+  in
+  Printf.sprintf
+    "boot would disable %d runtime(s) the model catalog does not carry: %s; \
+     Keepers left without their runtime: %s"
+    (List.length degradation.disabled_runtime_ids)
+    (String.concat
+       ", "
+       (List.map
+          Runtime.missing_catalog_model_to_string
+          degradation.report.Runtime.missing_models))
+    (match keepers with
+     | [] -> "none"
+     | _ :: _ -> String.concat ", " keepers)
+;;
+
+let exact_slot_degradation_to_string (degradation : Runtime.exact_slot_degradation) =
+  Printf.sprintf
+    "boot would leave these exact-output slots out: %s%s"
+    (String.concat
+       "; "
+       (List.map Runtime.exact_slot_body_deadline_gap_to_string degradation.Runtime.gaps))
+    (match degradation.emptied_lane_ids with
+     | [] -> ""
+     | lane_ids -> "; lanes left with no slot: " ^ String.concat ", " lane_ids)
+;;
+
+let judge_runtime_config ~base_path ~config_root path =
+  let judged =
+    try
+      let (_ : string option) =
+        Server_runtime_bootstrap.configure_agent_core_model_catalog_env ()
+      in
+      let* observation = Runtime.load_config_observation ~runtime_config_path:path () in
+      let source_text = observation.Runtime.source_text in
+      let* report =
+        Keeper_runtime_config.validate_source_text source_text
+        |> Result.map_error (fun detail -> "runtime config parse failed: " ^ detail)
+      in
+      let* () =
+        if Keeper_runtime_config.validation_report_is_valid report
+        then Ok ()
+        else
+          Error
+            ("Keeper setting refused: " ^ String.concat "; " (keeper_setting_errors report))
+      in
+      let* () = Runtime.validate_config_text ~runtime_config_path:path source_text in
+      let* (_ : Fusion_policy.t) = Masc.Fusion_config_loader.load ~base_path in
+      let* () =
+        match Runtime.init_default_degraded_observation observation with
+        | Error error -> Error (Runtime.strict_init_error_to_string error)
+        | Ok (Runtime.Initialized_degraded degradation) ->
+          Error (catalog_degradation_to_string degradation)
+        | Ok Runtime.Initialized -> Ok ()
+      in
+      let* () =
+        let degradation = Runtime.exact_slot_degradation () in
+        match degradation.Runtime.gaps with
+        | [] -> Ok ()
+        | _ :: _ -> Error (exact_slot_degradation_to_string degradation)
+      in
+      Server_runtime_bootstrap.check_exact_output_registry ~config_root ();
+      Ok ()
+    with
+    | Env_config_core.Config_error detail -> Error detail
+  in
+  match judged with
+  | Error detail ->
+    Printf.printf "runtime.toml refused path=%s: %s\n%!" path detail;
+    errorf "runtime.toml is one this build refuses path=%s" path
+  | Ok () ->
+    Printf.printf "runtime.toml accepted path=%s\n%!" path;
+    Ok ()
+;;
+
+(* The path is the one boot locks for this BasePath, read by
+   [Runtime.config_path]'s rules. A relative BasePath is made absolute first:
+   the resolver anchors a relative one at itself. *)
+let validate_runtime_config base_path allow_empty_workspace =
+  match Unix.realpath base_path with
+  | exception Unix.Unix_error (error, _, _) ->
+    errorf
+      "workspace BasePath cannot be resolved base_path=%s: %s"
+      base_path
+      (Unix.error_message error)
+  | base_path ->
+    let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
+    let config_root = resolution.config_root.path in
+    let path = Filename.concat config_root Config_dir_resolver.runtime_toml_filename in
+    let empty_workspace () =
+      Printf.printf "runtime.toml absent path=%s empty_workspace=allowed\n%!" path;
+      Ok ()
+    in
+    (* Boot's own config-root decision says whether it writes the file. *)
+    let absent () =
+      match Server_runtime_config_root_bootstrap.missing_runtime_toml_at_boot ~base_path with
+      | Server_runtime_config_root_bootstrap.Written_at_boot ->
+        Printf.printf "runtime.toml absent path=%s boot_writes_seed=yes\n%!" path;
+        Ok ()
+      | Server_runtime_config_root_bootstrap.Left_missing (_ : string)
+        when allow_empty_workspace -> empty_workspace ()
+      | Server_runtime_config_root_bootstrap.Left_missing reason ->
+        errorf
+          "runtime.toml is absent path=%s and boot does not write one (%s), so \
+           the server would start with no model; wrong --base-path or \
+           MASC_CONFIG_DIR? pass --allow-empty-workspace only for an \
+           intentional new workspace"
+          path
+          reason
+    in
+    (match resolution.config_root.source with
+     | Config_dir_resolver.Invalid_env
+       when allow_empty_workspace && not (Sys.file_exists config_root) ->
+       (* Boot creates the MASC_CONFIG_DIR it is given and writes nothing in it. *)
+       empty_workspace ()
+     | Config_dir_resolver.Invalid_env ->
+       errorf
+         "runtime config root is invalid base_path=%s: %s"
+         base_path
+         (String.concat "; " resolution.warnings)
+     | Config_dir_resolver.Missing -> absent ()
+     | Config_dir_resolver.Env | Config_dir_resolver.Local_masc ->
+       if Sys.file_exists path
+       then judge_runtime_config ~base_path ~config_root path
+       else absent ())
+;;
+
+let allow_empty_workspace =
+  let doc =
+    "The workspace is intentionally new, so a runtime.toml that is absent, and \
+     that boot would not write, passes instead of being refused."
+  in
+  Arg.(value & flag & info [ "allow-empty-workspace" ] ~doc)
+;;
+
+let validate_runtime_config_cmd =
+  let doc =
+    "judge the runtime.toml this BasePath's server reads with the raw save \
+     check and with what boot does with it"
+  in
+  Cmd.v
+    (Cmd.info "validate-runtime-config" ~doc)
+    Term.(
+      ret
+        (const (fun base_path allow_empty_workspace ->
+           cmdliner_result (validate_runtime_config base_path allow_empty_workspace))
+         $ base_path
+         $ allow_empty_workspace))
+;;
+
 (* A hard-cut field leaves rows no current decoder can read. [replay] refuses
    to compact while such a row is on disk and the row only leaves through
    compaction, so the store keeps it and its retention bound stops applying —
@@ -952,5 +1142,6 @@ let () =
           ; validate_signals_cmd
           ; cut_run_registries_cmd
           ; validate_stores_cmd
+          ; validate_runtime_config_cmd
           ]))
 ;;

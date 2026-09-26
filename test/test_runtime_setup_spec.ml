@@ -97,6 +97,15 @@ let test_official_client_account_selection_is_identity () =
         (Some "/synthetic/account-a") provider.account_home)
     ["claude_code"; "codex"]
 
+let test_empty_selected_account_never_becomes_ambient () =
+  List.iter (fun choice ->
+    let fields = ["choice", `String choice; "model", `String "fixture-model";
+      "max_context", `Int 8192; "tools", `Bool true; "streaming", `Bool true;
+      "account_home", `String ""] in
+    Alcotest.(check bool) "explicit empty account is refused" true
+      (Result.is_error (Runtime_setup_spec.of_json (`Assoc fields))))
+    ["claude_code"; "codex"]
+
 let test_muse_requires_explicit_account_and_prompt_budget () =
   let fields = ["choice", `String "muse"; "model", `String "fixture-model";
     "max_context", `Int 8192; "tools", `Bool true; "streaming", `Bool true;
@@ -127,4 +136,5 @@ let () = Alcotest.run "native runtime setup spec" ["contract",[
   Alcotest.test_case "typed input rejects incompatible declarations" `Quick test_rejects_invalid_transport_claims;
   Alcotest.test_case "one answer is one connection" `Quick test_one_answer_is_one_connection;
   Alcotest.test_case "selected official accounts remain distinct" `Quick test_official_client_account_selection_is_identity;
+  Alcotest.test_case "empty selected account does not inherit" `Quick test_empty_selected_account_never_becomes_ambient;
   Alcotest.test_case "Muse account and byte budget are explicit" `Quick test_muse_requires_explicit_account_and_prompt_budget]]

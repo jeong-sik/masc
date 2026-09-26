@@ -133,7 +133,10 @@ let of_json ?home_dir = function
     else (
       let* command = if List.mem_assoc "command" fields then required fields "command"
         else Ok (match choice with Claude_code -> "claude" | Codex -> "codex" | Muse -> "muse" | _ -> "agy") in
-      let* account_home = optional fields "account_home" in
+      let* account_home =
+        if List.mem_assoc "account_home" fields
+        then required fields "account_home" |> Result.map Option.some
+        else Ok None in
       let* account_home = match account_home,choice with
         | None,Muse -> invalid "account_home"
         | None,_ -> Ok None

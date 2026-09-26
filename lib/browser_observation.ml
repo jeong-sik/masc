@@ -44,11 +44,11 @@ let of_json json =
       | Some _ | None -> None in
     let* source, client_id =
       match source, List.assoc_opt "clientId" fields with
-      | Some Browser_surface.Automation, Some `Null -> Ok (Browser_surface.Automation, None)
+      | Some ((Browser_surface.Automation | Browser_surface.Stagehand) as lane), Some `Null -> Ok (lane, None)
       | Some Browser_surface.Live, Some (`String raw) ->
         let* client_id = Browser_lane.client_id_of_string raw in
         Ok (Browser_surface.Live, Some client_id)
-      | (Some (Browser_surface.Automation | Browser_surface.Live) | None), _ ->
+      | (Some (Browser_surface.Automation | Browser_surface.Live | Browser_surface.Stagehand) | None), _ ->
         Error "observation requires explicit source and resolved client identity" in
     Ok {scene;source;client_id;tab_id}
   | _ -> Error "observation must be an object"

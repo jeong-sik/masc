@@ -630,35 +630,10 @@ let render_overview (state : state) =
         let health_label = workspace_health_label o.ov_workspace_health in
         (* The tab strip's badge counts held keeper tool calls, pending gate
            rows, and confirm-queue entries together, and so does the Approvals
-           screen's own header. This row counted only the third of those, off
-           the confirm queue's own visible count, so a runtime holding one
-           keeper tool call drew "Approvals: 0" beside a tab reading
-           "Approvals·1" -- one name over two populations. All three now walk
-           [approval_items].
-
-           The "?" tail marks a count no source will stand behind, and it does
-           not say which way the number is wrong, because the failures do not
-           agree on that. A dropped confirm queue empties its list, leaving the
-           count short. A failed held-calls or gate poll replaces nothing --
-           the previous rows stay on screen, which the Approvals header calls
-           "held calls stale" -- so that count can just as easily be long,
-           describing rows the server no longer holds. Which list failed is a
-           question that header answers; at this width the row says only that
-           one did. *)
-        let approval_count =
-          let on_screen = Masc_tui_types.approvals_surface_pending state in
-          let source_unread =
-            Option.is_none state.approval_snapshot
-            || Option.is_some state.approvals_error
-            || Option.is_some state.keeper_tool_approvals_error
-            || Option.is_none state.asks_snapshot
-            || Option.is_some state.asks_error
-            || Option.is_some state.gate_error
-            || Option.is_some state.gate_queue_unavailable
-          in
-          if source_unread then Printf.sprintf "%d?" on_screen
-          else string_of_int on_screen
-        in
+           screen's own header. This row counts the same population through
+           [approvals_count_label], which also decides the "?" tail from the
+           same per-list readings the strip and the Approvals title use. *)
+        let approval_count = Masc_tui_types.approvals_count_label state in
         (* Keepers and MCP clients are counted apart: a row reading
            "Agents: 2" over a runtime with ten keepers named the wrong
            population.
@@ -1867,34 +1842,19 @@ let render_approvals (state : state) =
      entries, and [visible_entries]/[hidden_entries] partition the same list,
      so the hidden count is the whole of what the old total said. It now
      reads as a note about that queue rather than as the screen's count. *)
-  let queue_note =
+  let hidden_note =
     match state.approval_snapshot with
-    | None -> ", confirm queue unread"
-    | Some snapshot ->
-      if snapshot.aps_hidden_count = 0 then ""
-      else
+    | Some snapshot when snapshot.aps_hidden_count > 0 ->
         Printf.sprintf ", %d hidden from %s" snapshot.aps_hidden_count
           (Terminal_text.single_line_or ~default:"?" snapshot.aps_actor_filter)
+    | Some _ | None -> ""
   in
-  (* A failed held-calls poll keeps the previous rows on screen: the handler
-     in [masc_tui.ml] replaces [keeper_tool_approvals] only on [Ok], so the
-     count beside the title can describe a list the server no longer holds.
-     The empty branch below already refuses to let an unreadable queue wear
-     the face of an empty one; a stale list is the same lie with rows on it,
-     and it is the one an operator decides against. *)
-  let held_note =
-    match state.keeper_tool_approvals_error with
-    | Some _ -> ", held calls stale"
-    | None -> ""
-  in
-  (* The questions have the same two ways to be wrong. A failed questions
-     poll reached the event log once and nothing on this screen. *)
-  let question_note =
-    match Masc_tui_types.approvals_questions_reading state with
-    | Masc_tui_types.Questions_unread -> ", questions unread"
-    | Masc_tui_types.Questions_stale -> ", questions stale"
-    | Masc_tui_types.Questions_current -> ""
-  in
+  (* Which list the count cannot stand behind, one clause per list, from the
+     same readings that keep the strip entry and put "?" on the Overview
+     count. A stale list still draws its earlier rows, and those are the rows
+     an operator decides against. *)
+  let reading = Masc_tui_types.approvals_reading state in
+  let reading_notes = Masc_tui_types.approvals_title_notes reading in
   let action_badge = if action_inflight then "  [submitting]" else "" in
   (* The count and where it came from, naming only the lists that have a row
      on the screen. It read "3 [0 held · 0 gate · 3 op]": two zeros for lists
@@ -1934,9 +1894,9 @@ let render_approvals (state : state) =
   in
   let header =
     Printf.sprintf
-      "%s (%s%s%s%s)  %s  %s%s"
+      "%s (%s%s%s)  %s  %s%s"
       (screen_title " MASC Approvals")
-      count_text queue_note held_note question_note timestamp
+      count_text hidden_note reading_notes timestamp
       (connection_badge state) action_badge
   in
 
@@ -2033,48 +1993,45 @@ let render_approvals (state : state) =
   let ask_rows = count_frame_lines ask_buf in
   let approval_body_rows = max 1 (rows - around_rows - ask_rows) in
 
-  let approvals_error =
-    Terminal_text.optional_single_line state.approvals_error
-  in
   (* The queue's own population, not the surface's. [count] above is the
      approval rows plus the open questions -- the right reading for the title
-     and the badge, which name the screen -- and this block is about one of
-     the three lists the screen draws. With the queue empty and a question
+     and the badge, which name the screen -- and this block is about the three
+     lists that hold approval rows. With the queue empty and a question
      waiting, [count] was three, so the list drew its empty self: a cursor
      mark on a blank row and nothing to say the queue was empty, where the
-     same screen with no question at all said "(no pending approvals)". *)
+     same screen with no question at all said "(no pending approvals)".
+
+     "(no pending approvals)" is itself a reading of all three lists. A Gate
+     poll that failed after one that answered keeps its empty rows, so the
+     queue is empty on screen while the server may hold Gate approvals; each
+     list that was not read says so here instead. *)
   if approvals = [] then begin
-    (match state.approval_snapshot, approvals_error with
-     | _, Some err ->
-         box_line buf cols (data_unreliable_row ~cols err);
-         for _ = 1 to max 0 (approval_body_rows - 1) do
-           box_empty buf cols
-         done
-     | None, None ->
-         box_line buf cols
-           (Ansi.dim ^ "  (no approval data — press 'r' to refresh)"
-           ^ Ansi.reset);
-         for _ = 1 to max 0 (approval_body_rows - 1) do
-           box_empty buf cols
-         done
-     | Some _, None ->
-         (* An unreadable approval-queue store and an empty queue must not
-            share a face: the server says which one it was, and "no pending
-            approvals" over a store nobody could read is the lie an operator
-            acts on. *)
-         (match state.gate_queue_unavailable with
-          | Some detail ->
-              box_line buf cols
-                (data_unreliable_row ~cols ("approval queue unavailable: " ^ detail));
-              for _ = 1 to max 0 (approval_body_rows - 1) do
-                box_empty buf cols
-              done
-          | None ->
-              box_line buf cols
-                (Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset);
-              for _ = 1 to max 0 (approval_body_rows - 1) do
-                box_empty buf cols
-              done));
+    let lines =
+      match Masc_tui_types.approvals_empty_queue reading with
+      | Masc_tui_types.Nothing_pending ->
+          [ Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset ]
+      | Masc_tui_types.Lists_not_read not_read ->
+          List.map
+            (fun (name, (not_read : Masc_tui_types.approval_not_read)) ->
+              match not_read with
+              | Masc_tui_types.Approval_unread ->
+                  Printf.sprintf "%s  (%s not read yet \xe2\x80\x94 press 'r' to refresh)%s"
+                    Ansi.dim name Ansi.reset
+              (* The loader's message already names what failed ("... load
+                 failed: ..."), so the row carries it as it came. *)
+              | Masc_tui_types.Approval_failed cause
+              | Masc_tui_types.Approval_stale cause ->
+                  data_unreliable_row ~cols (Terminal_text.single_line cause)
+              | Masc_tui_types.Approval_unavailable detail ->
+                  data_unreliable_row ~cols
+                    (Printf.sprintf "%s unavailable: %s" name
+                       (Terminal_text.single_line detail)))
+            not_read
+    in
+    List.iter (fun line -> box_line buf cols line) lines;
+    for _ = 1 to max 0 (approval_body_rows - List.length lines) do
+      box_empty buf cols
+    done
   end else begin
     let content_height = approval_body_rows in
     let scroll_offset =
@@ -11809,7 +11766,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                (match browser_label view with
                 | Some browser -> "  Live " ^ browser ^ " • b:choose browser • a:automation"
                 | None -> "  Live • b:choose browser • a:automation")
-             | Automation -> "  Automation browser • g:URL • o:open / x:close • l:live");
+             | Automation -> "  Automation browser • g:URL • o:open / x:close • l:live"
+             | Stagehand -> "  Stagehand browser • a:automation • l:live");
       let tabs, page = match view.reading with
         | None -> [], None
         | Some reading -> reading.tabs, reading.page

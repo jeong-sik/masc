@@ -356,14 +356,15 @@ let test_selected_homes_do_not_inherit_other_account_roots () =
         ])
 ;;
 
-let test_relative_account_home_is_refused () =
-  run_scripted ~account_home:"relative-account" []
+let test_invalid_account_home_is_refused () =
+  List.iter (fun account_home -> run_scripted ~account_home []
     (fun result requests ->
        (match result with
         | Error (Serve.Invalid_config _) -> ()
         | Error error -> fail (Serve.error_to_string error)
-        | Ok _ -> fail "relative account home reached the client");
-       check int "nothing dispatched" 0 (List.length requests))
+        | Ok _ -> fail "invalid account home reached the client");
+       check int "nothing dispatched" 0 (List.length requests)))
+    [ "relative-account"; "/absolute/account "; " /absolute/account" ]
 ;;
 
 let () =
@@ -377,7 +378,7 @@ let () =
         ; test_case "native none is config error" `Quick test_native_none_is_config_error
         ; test_case "selected account home isolates child roots and posture" `Quick
             test_selected_homes_do_not_inherit_other_account_roots
-        ; test_case "relative account home is refused" `Quick test_relative_account_home_is_refused
+        ; test_case "invalid account home is refused" `Quick test_invalid_account_home_is_refused
         ] )
     ]
 ;;

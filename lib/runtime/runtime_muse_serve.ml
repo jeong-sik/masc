@@ -279,11 +279,14 @@ let validate_process_config config =
   let* () =
     match config.account_home with
     | None -> Ok ()
-    | Some home when String.trim home = "" || Filename.is_relative home ->
-      Error (Invalid_config "account_home must be an absolute path")
-    | Some home when String.contains home '\000' ->
-      Error (Invalid_config "account_home contains a NUL byte")
-    | Some home -> valid_utf8 "account_home" home
+    | Some home ->
+      let* home =
+        Runtime_account_home.of_string home
+        |> Result.map_error (fun detail -> Invalid_config ("account_home: " ^ detail))
+      in
+      if String.contains home '\000'
+      then Error (Invalid_config "account_home contains a NUL byte")
+      else valid_utf8 "account_home" home
   in
   let* () =
     if String.trim config.cli_path = ""

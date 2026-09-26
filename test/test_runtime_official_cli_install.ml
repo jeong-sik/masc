@@ -16,10 +16,11 @@ let with_home f =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree home) (fun () ->
     Masc_test_deps.with_process_env "HOME" (Some home) (fun () ->
       Masc_test_deps.with_process_env "CODEX_INSTALL_DIR" None (fun () ->
-        (* Each case builds the installer's layout under this throwaway HOME,
-           so the fs_compat test-home guard must let these writes through. *)
-        Masc_test_deps.with_process_env "MASC_TEST_ALLOW_HOME_BASE_PATH" (Some "1") (fun () ->
-          f home))))
+        Masc_test_deps.with_process_env "MUSE_INSTALL_DIR" None (fun () ->
+          (* Each case builds the installer's layout under this throwaway HOME,
+             so the fs_compat test-home guard must let these writes through. *)
+          Masc_test_deps.with_process_env "MASC_TEST_ALLOW_HOME_BASE_PATH" (Some "1") (fun () ->
+            f home)))))
 ;;
 
 let with_path directories f =
@@ -143,6 +144,65 @@ let test_codex_install_dir_replaces_the_vendor_directory () =
     (Install.locate Install.Claude ~command:"claude")
 ;;
 
+(* Muse Code's install.sh writes [${MUSE_INSTALL_DIR:-$HOME/.local/bin}/muse],
+   so the lookup reads the same variable, and each client reads only its own. *)
+let test_muse_code_is_found_where_its_installer_writes () =
+  with_home @@ fun home ->
+  Fs_compat.mkdir_p (Filename.concat home ".local/bin");
+  let default_path = Filename.concat home ".local/bin/muse" in
+  executable default_path;
+  let custom = Filename.concat home "muse-home" in
+  Fs_compat.mkdir_p custom;
+  with_path [] @@ fun () ->
+  check string "the client's own name" "muse" (Install.name Install.Muse);
+  check (option string) "without MUSE_INSTALL_DIR, ~/.local/bin" (Some default_path)
+    (Install.locate Install.Muse ~command:"muse");
+  check string "and that is what the runtime spawns" default_path
+    (Install.spawn_path Install.Muse ~command:"muse");
+  Masc_test_deps.with_process_env "CODEX_INSTALL_DIR" (Some custom) (fun () ->
+    check (option string) "Codex's variable does not move Muse Code" (Some default_path)
+      (Install.locate Install.Muse ~command:"muse"));
+  Masc_test_deps.with_process_env "MUSE_INSTALL_DIR" (Some custom) @@ fun () ->
+  check (option string) "with it, only that directory" None
+    (Install.locate Install.Muse ~command:"muse");
+  let custom_path = Filename.concat custom "muse" in
+  executable custom_path;
+  check (option string) "where the Muse Code installer was told to write" (Some custom_path)
+    (Install.locate Install.Muse ~command:"muse")
+;;
+
+(* The download is the script dev.meta.ai/docs/muse-code documents, and it is
+   run with bash because the script it serves is a bash script. The runner
+   stands in for the terminal: it leaves a nonempty file where curl was told
+   to write, then refuses the script so nothing is installed. *)
+let test_muse_code_installs_through_its_documented_script () =
+  with_home @@ fun _home ->
+  let calls = ref [] in
+  let rec output_of = function
+    | "--output" :: path :: _ -> path
+    | _ :: rest -> output_of rest
+    | [] -> fail "the download names no --output"
+  in
+  let run argv =
+    calls := argv :: !calls;
+    match argv with
+    | "curl" :: _ ->
+      Out_channel.with_open_text (output_of argv) (fun oc ->
+        output_string oc "#!/usr/bin/env bash\n");
+      Ok ()
+    | _ -> Error "the stub refuses the script"
+  in
+  (match Install.install ~run Install.Muse with
+   | Ok () -> fail "a refused script was reported as an installed client"
+   | Error _ -> ());
+  match List.rev !calls with
+  | [ download; script ] ->
+    check string "the documented script" "https://dev.meta.ai/install.sh"
+      (List.nth download (List.length download - 1));
+    check string "run with bash" "bash" (List.hd script)
+  | calls -> failf "expected a download and the script, got %d calls" (List.length calls)
+;;
+
 let () =
   run
     "runtime_official_cli_install"
@@ -160,6 +220,10 @@ let () =
             test_a_file_nobody_can_run_is_not_found
         ; test_case "CODEX_INSTALL_DIR replaces the vendor directory" `Quick
             test_codex_install_dir_replaces_the_vendor_directory
+        ; test_case "Muse Code is found where its installer writes" `Quick
+            test_muse_code_is_found_where_its_installer_writes
+        ; test_case "Muse Code installs through its documented script" `Quick
+            test_muse_code_installs_through_its_documented_script
         ] )
     ]
 ;;

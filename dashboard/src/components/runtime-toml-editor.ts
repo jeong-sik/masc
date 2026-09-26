@@ -433,6 +433,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     editDraft(current => {
       let next = setRuntimeTomlModelField(current, input.id, 'api-name', input.apiName || input.id)
       next = setRuntimeTomlModelField(next, input.id, 'max-context', input.maxContext)
+      if (input.maxPromptBytes !== undefined) next = setRuntimeTomlModelField(next, input.id, 'max-prompt-bytes', input.maxPromptBytes)
       next = setRuntimeTomlModelField(next, input.id, 'tools-support', input.toolsSupport)
       next = setRuntimeTomlModelField(next, input.id, 'thinking-support', input.thinkingSupport)
       next = setRuntimeTomlModelField(next, input.id, 'streaming', input.streaming)

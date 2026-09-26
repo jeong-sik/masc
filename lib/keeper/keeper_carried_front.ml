@@ -47,7 +47,8 @@ let composer_of_execution = function
   | Runtime_execution.Agent_core _ -> Composes_from_the_history
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _ -> Hands_over_its_own_list
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Muse_serve _ -> Hands_over_its_own_list
 ;;
 
 let composer_of_runtime = function

@@ -282,6 +282,30 @@ let test_an_empty_walk_is_an_empty_error () =
     | Ok _ | Error _ -> fail "no declared slots means an empty exhaustion")
 ;;
 
+(* MSP names no quota kind, so even a failure the host calls retryable is not
+   the account resting: the board-attention worker must not wait on it. *)
+let test_a_muse_failure_is_never_a_binding_rest () =
+  let failed cause =
+    Cli_oneshot.Execution_failed
+      { runtime_id = "muse_code.muse-code-spark-1-3"
+      ; cause = Masc.Fusion_official_client.Muse_failure cause
+      }
+  in
+  List.iter
+    (fun (label, cause) ->
+       check bool label false (Cli_oneshot.refused_for_binding_rest (failed cause)))
+    [ ( "retryable model error"
+      , Runtime_muse_serve.Turn_failed
+          { Runtime_muse_msp.kind = Runtime_muse_msp.Model_error
+          ; message = "overloaded"
+          ; retryable = true
+          } )
+    ; "auth required", Runtime_muse_serve.Auth_required "login expired"
+    ; ( "turn timeout"
+      , Runtime_muse_serve.Timeout { seconds = 30.0; turn_accepted = true } )
+    ]
+;;
+
 (* These fixtures drive the actual Claude stream adapter and Antigravity
    result adapter through the default runner. A string-only runner cannot
    prove that a typed provider rejection reaches the shared quota table. *)
@@ -688,6 +712,10 @@ let () =
             "an empty walk is an empty error"
             `Quick
             test_an_empty_walk_is_an_empty_error
+        ; test_case
+            "a Muse Code failure is never a binding rest"
+            `Quick
+            test_a_muse_failure_is_never_a_binding_rest
         ] )
     ]
 ;;

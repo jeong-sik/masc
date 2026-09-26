@@ -95,6 +95,15 @@ const providerProtocols = [
     provider_fields: ['agent', 'effort', 'timeout-s'],
     required_provider_fields: ['timeout-s'],
   },
+  {
+    protocol: 'muse-serve',
+    transport: 'command',
+    semantics: 'official_client',
+    credential_policy: 'forbidden',
+    requires_non_interactive: true,
+    provider_fields: ['account-home'],
+    required_provider_fields: ['account-home'],
+  },
 ] as const
 
 const baseConfig = {
@@ -1099,6 +1108,7 @@ describe('RuntimeTomlEditor', () => {
       'codex-app-server',
       'claude-code',
       'antigravity-cli',
+      'muse-serve',
     ])
     expect(protocolOptions).not.toContain('messages-cli')
     expect(protocolOptions).not.toContain('openai-compatible-cli')
@@ -1158,6 +1168,37 @@ describe('RuntimeTomlEditor', () => {
       const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
       expect(source).toContain('[codex_subscription.qwen]')
       expect(container.querySelector('[data-testid="runtime-add-binding-error"]')).toBeNull()
+    })
+  })
+
+  it('requires and persists an explicit Muse account home without an API key', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-toggle"]') as HTMLButtonElement)
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-id"]') as HTMLInputElement,
+      { target: { value: 'selected_muse' } })
+    fireEvent.change(container.querySelector('[aria-label="새 provider protocol"]') as HTMLSelectElement,
+      { target: { value: 'muse-serve' } })
+    fireEvent.input(container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement,
+      { target: { value: '/synthetic/bin/muse' } })
+    const credential = container.querySelector('[aria-label="새 provider credential 종류"]') as HTMLSelectElement
+    expect(credential.value).toBe('none')
+    expect(credential.disabled).toBe(true)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
+    expect(container.textContent).toContain('사용할 계정 홈을 선택하세요')
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-account-home"]') as HTMLInputElement,
+      { target: { value: '/synthetic/accounts/muse-one' } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('[providers.selected_muse]')
+      expect(source).toContain('protocol = "muse-serve"')
+      expect(source).toContain('account-home = "/synthetic/accounts/muse-one"')
+      expect(source).not.toContain('[providers.selected_muse.credentials]')
     })
   })
 
@@ -1227,12 +1268,14 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.input(container.querySelector('[data-testid="runtime-add-model-max-context"]') as HTMLInputElement, {
       target: { value: '50000' },
     })
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-model-max-prompt-bytes"]') as HTMLInputElement, { target: { value: '45678' } })
     fireEvent.click(container.querySelector('[data-testid="runtime-add-model-submit"]') as HTMLButtonElement)
 
     await waitFor(() => {
       const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
       expect(source).toContain('[models.brandnewmodel]')
       expect(source).toContain('max-context = 50000')
+      expect(source).toContain('max-prompt-bytes = 45678')
     })
   })
 
@@ -1278,6 +1321,35 @@ describe('RuntimeTomlEditor', () => {
     await waitFor(() => {
       const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
       expect(source).toContain('[runpod_mtp.gpt]')
+    })
+  })
+
+  it.each([false, true])('requires an explicit Muse model byte budget before adding a binding (declared=%s)', async declared => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({ ...richConfig,
+      source_text: `${richConfig.source_text}
+[providers.muse_fixture]
+protocol = "muse-serve"
+command = "muse"
+account-home = "/synthetic/muse"
+is-non-interactive = true
+[models.muse_fixture]
+api-name = "synthetic-model"
+max-context = 8192
+${declared ? 'max-prompt-bytes = 45678' : ''}
+` })
+    render(html`<${RuntimeTomlEditor} />`, container)
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-toml-nav-bindings"]')).not.toBeNull())
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-bindings"]') as HTMLButtonElement)
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-provider"]') as HTMLSelectElement, { target: { value: 'muse_fixture' } })
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-model"]') as HTMLSelectElement, { target: { value: 'muse_fixture' } })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-binding-submit"]') as HTMLButtonElement)
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      if (declared) expect(source).toContain('[muse_fixture.muse_fixture]')
+      else {
+        expect(source).not.toContain('[muse_fixture.muse_fixture]')
+        expect(container.querySelector('[data-testid="runtime-add-binding-error"]')?.textContent).toContain('max-prompt-bytes')
+      }
     })
   })
 

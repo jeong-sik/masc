@@ -583,6 +583,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
     then Error (Unavailable Tools_not_declared)
     else (
       match runtime.execution with
+      | Runtime_execution.Muse_serve _ -> Error (Unavailable Unsupported_runtime)
       | Runtime_execution.Antigravity_cli execution ->
         let config = { (Runtime_antigravity.default_config ~cwd:cwd_path ~model:execution.model) with
           cli_path = execution.cli_path;

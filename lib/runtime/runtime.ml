@@ -69,7 +69,8 @@ let validate_dispatch_credential
   match runtime.execution with
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Muse_serve _ ->
     Ok ()
   | Runtime_execution.Agent_core _ ->
     let requirement =
@@ -297,7 +298,8 @@ let quota_scope_of_materialized
         provider.credentials
     | Runtime_execution.Antigravity_cli _ -> provider.credentials
     | Runtime_execution.Codex_app_server _
-    | Runtime_execution.Claude_code _ -> None
+    | Runtime_execution.Claude_code _
+    | Runtime_execution.Muse_serve _ -> None
   in
   let official_home client selected scope =
     match selected with
@@ -316,7 +318,11 @@ let quota_scope_of_materialized
     official_home "Codex"
       (Runtime_codex_app_server.effective_account_home client.account_home)
       Runtime_quota_window.scope_of_codex_home
-  | Runtime_execution.Agent_core _ | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Muse_serve client ->
+    Runtime_account_home.of_string client.account_home
+    |> Result.map Runtime_quota_window.scope_of_muse_home
+  | Runtime_execution.Agent_core _
+  | Runtime_execution.Antigravity_cli _ ->
     Ok (Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential)
 ;;
 
@@ -372,7 +378,8 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
                       | Error reason -> Runtime_candidate_backpressure.Http_binding_unavailable reason)
                  | Runtime_execution.Codex_app_server _
                  | Runtime_execution.Claude_code _
-                 | Runtime_execution.Antigravity_cli _ -> Runtime_candidate_backpressure.Official_client_binding
+                 | Runtime_execution.Antigravity_cli _
+                 | Runtime_execution.Muse_serve _ -> Runtime_candidate_backpressure.Official_client_binding
                in
                Runtime_candidate_backpressure.create_candidate ~binding)
            ; quota_scope
@@ -494,17 +501,24 @@ type exact_slot_degradation =
   ; emptied_lane_ids : string list
   }
 
-(* One declared [cli_slots] entry that resolves to a configured runtime, but a
-   provider-dispatched (HTTP / [Agent_core]) one rather than an official
-   client. [Keeper_lane_cli_oneshot.run] (the sole consumer of every lane's
-   [cli_slots]) requires an official client, so this is a load-time gap of
-   the same shape as [exact_slot_body_deadline_gap] but a different rule:
-   that one is about a missing timeout key, this one is about the runtime
-   kind. See [exact_lane_cli_slot_official_client_gaps]. *)
-type exact_lane_cli_slot_not_official_client =
+(* One declared [cli_slots] entry that resolves to a configured runtime the
+   CLI tail cannot call: a provider-dispatched (HTTP / [Agent_core]) one, or
+   an official client with no output-schema channel.
+   [Keeper_lane_cli_oneshot.run] (the sole consumer of every lane's
+   [cli_slots]) requires an official client and hands it an output schema on
+   every call, so this is a load-time gap of the same shape as
+   [exact_slot_body_deadline_gap] but a different rule: that one is about a
+   missing timeout key, this one is about the runtime kind. See
+   [exact_lane_cli_slot_gaps]. *)
+type exact_lane_cli_slot_unservable_reason =
+  | Not_an_official_client
+  | Client_without_output_schema
+
+type exact_lane_cli_slot_unservable =
   { lane_id : string
   ; slot_id : string
   ; provider_id : string
+  ; reason : exact_lane_cli_slot_unservable_reason
   }
 
 (* The ways loading runtime.toml fails, closed so a consumer decides per case
@@ -537,7 +551,7 @@ type load_failure =
       ; high_water_tokens : int
       ; max_context : int
       }
-  | Exact_lane_cli_slot_not_official_client of exact_lane_cli_slot_not_official_client
+  | Exact_lane_cli_slot_unservable of exact_lane_cli_slot_unservable
 
 (* A dangling reference is an operator typo, and unlike every other drop reason
    it is not survivable by ignoring the binding: the runtime the operator
@@ -685,7 +699,8 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       (gaps
        |> List.map (fun gap -> "  " ^ exact_slot_body_deadline_gap_to_string gap)
        |> String.concat "\n")
-  | Exact_lane_cli_slot_not_official_client { lane_id; slot_id; provider_id } ->
+  | Exact_lane_cli_slot_unservable
+      { lane_id; slot_id; provider_id; reason = Not_an_official_client } ->
     Printf.sprintf
       "%s: [runtime.exact_output_lanes.%s].cli_slots entry %S is provider %S, \
        dispatched over HTTP rather than an official-client CLI; cli_slots \
@@ -693,6 +708,18 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
        (Keeper_lane_cli_oneshot), so move this id to slots or replace it with \
        an official-client runtime (protocol = \"claude-code\" / \
        \"codex-app-server\" / \"antigravity-cli\")"
+      config_path
+      lane_id
+      slot_id
+      provider_id
+  | Exact_lane_cli_slot_unservable
+      { lane_id; slot_id; provider_id; reason = Client_without_output_schema } ->
+    Printf.sprintf
+      "%s: [runtime.exact_output_lanes.%s].cli_slots entry %S is provider %S, \
+       whose client has no output-schema channel; every cli_slots call hands \
+       the client a JSON Schema to answer to (Keeper_lane_cli_oneshot), so \
+       remove this id or replace it with protocol = \"claude-code\" / \
+       \"codex-app-server\" / \"antigravity-cli\""
       config_path
       lane_id
       slot_id
@@ -721,7 +748,7 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Max_context_absent _
   | Context_marks_exceed_max_context _
   | Exact_slot_body_deadlines_absent _
-  | Exact_lane_cli_slot_not_official_client _ -> to_diagnostic_text ~config_path failure
+  | Exact_lane_cli_slot_unservable _ -> to_diagnostic_text ~config_path failure
 ;;
 
 (* The list is carried out whole rather than counted here: the caller decides
@@ -1088,7 +1115,8 @@ let capabilities_for_runtime (rt : t) =
     Llm_provider.Provider_config.capabilities_for_config_model provider_config
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _ -> None
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Muse_serve _ -> None
 ;;
 
 type max_context_source =
@@ -1267,23 +1295,24 @@ let exact_lane_cli_slot_references
     decls
 ;;
 
-(* One declared [cli_slots] entry that resolves to a configured runtime, but a
-   provider-dispatched (HTTP / [Agent_core]) one rather than an official
-   client ([exact_lane_cli_slot_not_official_client], declared with
+(* One declared [cli_slots] entry that resolves to a configured runtime the
+   CLI tail cannot call ([exact_lane_cli_slot_unservable], declared with
    [load_failure] above since the failure type needs it).
    [exact_lane_cli_slot_references] above already refuses an id that resolves
    to nothing; this is the other half of what [Keeper_lane_cli_oneshot.run]
-   requires before it will dispatch a cli_slots id
+   requires before it will dispatch a cli_slots id: an official client
    ([Fusion_official_client.is_official_client] /
-   [Runtime_execution.checkpoint_owner]), reported as its own case rather
-   than folded into [Reference_unresolved]: the id is not missing, so "not
-   found among N runtimes" would misdescribe it the same way the run-time
-   message this closes ("is not an official-client runtime", conflating
-   unknown and wrong-kind) misdescribed an unknown id. *)
-let exact_lane_cli_slot_official_client_gaps
+   [Runtime_execution.checkpoint_owner]) that can hold its answer to the
+   output schema every call hands it
+   ([Runtime_schema.api_format_output_schema_channel]). It is reported as its
+   own case rather than folded into [Reference_unresolved]: the id is not
+   missing, so "not found among N runtimes" would misdescribe it the same way
+   the run-time message this closes ("is not an official-client runtime",
+   conflating unknown and wrong-kind) misdescribed an unknown id. *)
+let exact_lane_cli_slot_gaps
       ~(runtimes : t list)
       (decls : Runtime_schema.exact_output_lane_decl list)
-  : exact_lane_cli_slot_not_official_client list
+  : exact_lane_cli_slot_unservable list
   =
   List.concat_map
     (fun (lane : Runtime_schema.exact_output_lane_decl) ->
@@ -1292,24 +1321,33 @@ let exact_lane_cli_slot_official_client_gaps
             match List.find_opt (fun (r : t) -> String.equal r.id slot_id) runtimes with
             | None -> None (* named by [exact_lane_cli_slot_references] instead *)
             | Some r ->
-              (match Runtime_execution.checkpoint_owner r.execution with
-               | Runtime_execution.Official_client -> None
-               | Runtime_execution.Masc_agent_core ->
-                 Some
-                   { lane_id = lane.id
-                   ; slot_id
-                   ; provider_id = r.provider.Runtime_schema.id
-                   }))
+              let gap reason =
+                Some
+                  { lane_id = lane.id
+                  ; slot_id
+                  ; provider_id = r.provider.Runtime_schema.id
+                  ; reason
+                  }
+              in
+              (match
+                 ( Runtime_execution.checkpoint_owner r.execution
+                 , Runtime_schema.api_format_output_schema_channel
+                     r.provider.Runtime_schema.api_format )
+               with
+               | Runtime_execution.Official_client, Runtime_schema.Holds_output_schema -> None
+               | Runtime_execution.Official_client, Runtime_schema.No_output_schema_channel ->
+                 gap Client_without_output_schema
+               | ( Runtime_execution.Masc_agent_core
+                 , (Runtime_schema.Holds_output_schema | Runtime_schema.No_output_schema_channel) )
+                 -> gap Not_an_official_client))
          lane.cli_slot_ids)
     decls
 ;;
 
-let validate_exact_lane_cli_slot_official_clients ~runtimes decls
-  : (unit, load_failure) result
-  =
-  match exact_lane_cli_slot_official_client_gaps ~runtimes decls with
+let validate_exact_lane_cli_slots ~runtimes decls : (unit, load_failure) result =
+  match exact_lane_cli_slot_gaps ~runtimes decls with
   | [] -> Ok ()
-  | gap :: _ -> Error (Exact_lane_cli_slot_not_official_client gap)
+  | gap :: _ -> Error (Exact_lane_cli_slot_unservable gap)
 ;;
 
 let agent_core_model_catalog_env_var_name = "AGENT_CORE_MODEL_CATALOG"
@@ -1360,7 +1398,8 @@ let exact_slot_body_deadline_gaps_of
        | Runtime_execution.Agent_core _, Some (_ : float) -> None
        | ( Runtime_execution.Codex_app_server _
          | Runtime_execution.Claude_code _
-         | Runtime_execution.Antigravity_cli _ ), (Some _ | None) -> None)
+         | Runtime_execution.Antigravity_cli _
+         | Runtime_execution.Muse_serve _ ), (Some _ | None) -> None)
   in
   match target_source with
   | Replacement_catalog_targets { path = _ } -> []
@@ -1426,7 +1465,8 @@ let missing_runtime_model_capabilities ~(config_path : string) (runtimes : t lis
          match r.execution, capabilities_for_runtime r with
          | ( Runtime_execution.Codex_app_server _
            | Runtime_execution.Claude_code _
-           | Runtime_execution.Antigravity_cli _ ), _ -> None
+           | Runtime_execution.Antigravity_cli _
+           | Runtime_execution.Muse_serve _ ), _ -> None
          | Runtime_execution.Agent_core _, Some _ -> None
          | Runtime_execution.Agent_core provider_config, None ->
            let provider_label =
@@ -1754,7 +1794,7 @@ let materialize_config
       (exact_lane_cli_slot_references cfg.exact_output_lane_decls)
   in
   let* () =
-    validate_exact_lane_cli_slot_official_clients ~runtimes cfg.exact_output_lane_decls
+    validate_exact_lane_cli_slots ~runtimes cfg.exact_output_lane_decls
   in
   let* () =
     if validate_max_context then validate_runtime_max_context runtimes else Ok ()
@@ -1993,7 +2033,8 @@ let exact_output_targets runtimes =
             } : Agent_core.Exact_output.declared_target)
        | Runtime_execution.Codex_app_server _
        | Runtime_execution.Claude_code _
-       | Runtime_execution.Antigravity_cli _ -> None)
+       | Runtime_execution.Antigravity_cli _
+       | Runtime_execution.Muse_serve _ -> None)
     runtimes
 ;;
 
@@ -2269,7 +2310,9 @@ let verifier_runtime_admission (runtime : t) =
   | Runtime_execution.Claude_code _ when runtime.model.tools_support -> Ok ()
   | Runtime_execution.Claude_code _ ->
     Error (runtime.id ^ ": completion verifier requires model tools-support")
-  | Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Muse_serve _ ->
     Error (runtime.id ^ ": completion verifier requires native-tool suppression, which this client does not support")
 ;;
 
@@ -2290,7 +2333,8 @@ let verifier_cli_slot_admission_in ~runtimes ~lane_ids ~runtime_id =
      | Runtime_execution.Agent_core _ ->
        Error (runtime_id ^ ": verifier CLI slot must name an official client")
      | Runtime_execution.Claude_code _ | Runtime_execution.Codex_app_server _
-     | Runtime_execution.Antigravity_cli _ -> verifier_runtime_admission runtime)
+     | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ ->
+       verifier_runtime_admission runtime)
 ;;
 
 let verifier_cli_slot_admission ~runtime_id =
@@ -4445,6 +4489,48 @@ let table_path_under prefix id =
 
 let lane_table_path lane_id = table_path_under "runtime.lanes" lane_id
 
+(* The two declared lists of an exact lane. An official client answers
+   through its own CLI, so it can only be a CLI slot; every other id -- an
+   Agent Core runtime, a catalog id, or a binding whose provider is not
+   declared -- is a slot the registry admits or reports when it publishes the
+   lane. *)
+type exact_slot_list =
+  | Catalog_slots
+  | Cli_slots
+
+let exact_slot_list_key = function
+  | Catalog_slots -> "slots"
+  | Cli_slots -> "cli_slots"
+;;
+
+let exact_slot_list_of_api_format = function
+  | Runtime_schema.Codex_app_server_runtime
+  | Runtime_schema.Antigravity_cli_runtime
+  | Runtime_schema.Claude_code_runtime
+  | Runtime_schema.Muse_serve_runtime -> Cli_slots
+  | Runtime_schema.Messages_api
+  | Runtime_schema.Chat_completions_api
+  | Runtime_schema.Ollama_api
+  | Runtime_schema.Gemini_api
+  | Runtime_schema.Vertex_gemini_api -> Catalog_slots
+;;
+
+(* The list of an exact lane a runtime of this format may be written into,
+   if any. Every exact-output call hands the client an output schema, so a
+   format without the channel for one goes into neither list
+   ({!Runtime_schema.api_format_output_schema_channel}). The lane writers and
+   first-run setup read this; the load check of [cli_slots] reads the same
+   channel ([exact_lane_cli_slot_gaps]). *)
+let exact_slot_list_admitting api_format =
+  match Runtime_schema.api_format_output_schema_channel api_format with
+  | Runtime_schema.No_output_schema_channel -> None
+  | Runtime_schema.Holds_output_schema -> Some (exact_slot_list_of_api_format api_format)
+;;
+
+let exact_slot_list_key_of_api_format api_format =
+  Option.map exact_slot_list_key (exact_slot_list_admitting api_format)
+;;
+
 let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bind_imp = false) ~runtime_id () =
   let runtime_id = String.trim runtime_id in
   let candidate_ids = runtime_id :: List.map String.trim fallback_runtime_ids in
@@ -4479,11 +4565,12 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
             (Ok ()) candidate_ids
         in
         let slots, cli_slots =
-          match runtime.execution with
-          | Runtime_execution.Agent_core _ -> [ runtime_id ], []
-          | Runtime_execution.Codex_app_server _
-          | Runtime_execution.Claude_code _
-          | Runtime_execution.Antigravity_cli _ -> [], [ runtime_id ]
+          match exact_slot_list_admitting runtime.provider.api_format with
+          | Some Catalog_slots -> [ runtime_id ], []
+          | Some Cli_slots -> [], [ runtime_id ]
+          (* A client with no output-schema channel (Muse Code) becomes the
+             default and its lane without being written into any slot. *)
+          | None -> [], []
         in
         let next = update_runtime_scalar_text content ~key:"default" ~runtime_id:(Some runtime_id) in
         (* The HTTP runtime chosen here becomes an exact-output slot below, and
@@ -4507,7 +4594,8 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           | Runtime_execution.Agent_core _, None, Replacement_catalog_targets _
           | ( Runtime_execution.Codex_app_server _
             | Runtime_execution.Claude_code _
-            | Runtime_execution.Antigravity_cli _ ), (Some _ | None), (Runtime_binding_targets | Replacement_catalog_targets _) -> next
+            | Runtime_execution.Antigravity_cli _
+            | Runtime_execution.Muse_serve _ ), (Some _ | None), (Runtime_binding_targets | Replacement_catalog_targets _) -> next
         in
         let next =
           Toml_line_editor.edit_table_multiline_array next
@@ -4926,45 +5014,26 @@ let exact_lane_editable ~content (config : Runtime_schema.config) lane =
          path)
 ;;
 
-(* The two declared lists of an exact lane. An official client answers
-   through its own CLI, so it can only be a CLI slot; every other id -- an
-   Agent Core runtime, a catalog id, or a binding whose provider is not
-   declared -- is a slot the registry admits or reports when it publishes the
-   lane. *)
-type exact_slot_list =
-  | Catalog_slots
-  | Cli_slots
-
-let exact_slot_list_key = function
-  | Catalog_slots -> "slots"
-  | Cli_slots -> "cli_slots"
-;;
-
-let exact_slot_list_of_api_format = function
-  | Runtime_schema.Codex_app_server_runtime
-  | Runtime_schema.Antigravity_cli_runtime
-  | Runtime_schema.Claude_code_runtime -> Cli_slots
-  | Runtime_schema.Messages_api
-  | Runtime_schema.Chat_completions_api
-  | Runtime_schema.Ollama_api
-  | Runtime_schema.Gemini_api
-  | Runtime_schema.Vertex_gemini_api -> Catalog_slots
-;;
-
-let exact_slot_list_key_of_api_format api_format =
-  exact_slot_list_key (exact_slot_list_of_api_format api_format)
-;;
-
+(* [None] when the id's client has no output-schema channel, so no list of
+   an exact lane may name it ([exact_slot_list_admitting]). *)
 let exact_slot_list_of_new_slot (config : Runtime_schema.config) slot =
   match
     List.find_opt (fun (binding : binding) -> String.equal (id_of_binding binding) slot)
       config.bindings
   with
-  | None -> Catalog_slots
+  | None -> Some Catalog_slots
   | Some binding ->
     (match Runtime_schema.provider_of_id config binding.provider_id with
-     | None -> Catalog_slots
-     | Some provider -> exact_slot_list_of_api_format provider.api_format)
+     | None -> Some Catalog_slots
+     | Some provider -> exact_slot_list_admitting provider.api_format)
+;;
+
+let no_output_schema_channel_refusal ~slot ~lane_id =
+  Printf.sprintf
+    "%s has no output-schema channel, and every exact-output call hands its client \
+     a JSON Schema to answer to, so %s cannot list it"
+    slot
+    lane_id
 ;;
 
 let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
@@ -4994,24 +5063,26 @@ let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
       | Some slot ->
         Error (Printf.sprintf "%s is already a CLI slot of %s" slot (Standalone_lane.to_id lane))
       | None ->
+        let lane_id = Standalone_lane.to_id lane in
         (match
-           List.find_opt
+           List.find_map
              (fun slot ->
                 match exact_slot_list_of_new_slot config slot with
-                | Cli_slots -> true
-                | Catalog_slots -> false)
+                | Some Catalog_slots -> None
+                | Some Cli_slots ->
+                  Some
+                    (Printf.sprintf
+                       (if exact_lane_supports_cli_tail lane
+                        then "%s is an official client, so it can only be a CLI slot of %s"
+                        else
+                          "%s is an official client and %s does not walk a CLI tail, so \
+                           it has no list to go in")
+                       slot
+                       lane_id)
+                | None -> Some (no_output_schema_channel_refusal ~slot ~lane_id))
              slots
          with
-         | Some slot ->
-           Error
-             (Printf.sprintf
-                (if exact_lane_supports_cli_tail lane
-                 then "%s is an official client, so it can only be a CLI slot of %s"
-                 else
-                   "%s is an official client and %s does not walk a CLI tail, so it \
-                    has no list to go in")
-                slot
-                (Standalone_lane.to_id lane))
+         | Some refusal -> Error refusal
          | None ->
            Ok
              (Toml_line_editor.edit_table_multiline_array
@@ -5051,11 +5122,12 @@ let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
       else
         let path = exact_lane_table_path lane in
         match exact_slot_list_of_new_slot config slot with
-        | Catalog_slots ->
+        | None -> Error (no_output_schema_channel_refusal ~slot ~lane_id)
+        | Some Catalog_slots ->
           Ok
             (Toml_line_editor.edit_table_multiline_array
                content ~path ~key:"slots" ~values:(slots @ [ slot ]))
-        | Cli_slots when not (exact_lane_supports_cli_tail lane) ->
+        | Some Cli_slots when not (exact_lane_supports_cli_tail lane) ->
           (* [Server_workspace_memory_curator.execute] refuses a run whose lane
              declares any CLI slot, so writing one here would stop the lane
              instead of extending it. [set_first_run_runtime] drops CLI slots
@@ -5066,7 +5138,7 @@ let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
                 no list to go in"
                slot
                lane_id)
-        | Cli_slots ->
+        | Some Cli_slots ->
           Ok
             (Toml_line_editor.edit_table_multiline_array
                content ~path ~key:"cli_slots" ~values:(cli_slots @ [ slot ])))

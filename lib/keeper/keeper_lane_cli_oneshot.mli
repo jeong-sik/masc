@@ -71,9 +71,11 @@ type runner =
 
     [output_schema] is the caller's own domain schema, handed to whatever
     channel the transport has so the client holds its own answer to the shape
-    instead of only being asked for it in prose. All three official clients
-    have one, by three different routes: [--json-schema] on Claude and
-    Antigravity, [outputSchema] on the Codex v2 [turn/start] request. *)
+    instead of only being asked for it in prose. Claude, Antigravity and
+    Codex have one, by three different routes: [--json-schema] on Claude and
+    Antigravity, [outputSchema] on the Codex v2 [turn/start] request. Muse
+    Code has none, so the default runner fails a Muse Code slot with
+    {!Fusion_official_client.Setup_failure} before any process starts. *)
 
 val run
   :  ?runner:runner

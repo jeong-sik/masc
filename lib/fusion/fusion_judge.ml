@@ -173,8 +173,7 @@ let judge_failure_of_route_failure
    파서. 클라이언트의 schema 채널(--json-schema, outputSchema)은 쓰지 않는다 —
    HTTP 쪽이 wire response format 을 싣지 않는 것과 같은 한 가지 계약을 유지한다.
 
-   공식 클라이언트는 토큰 회계를 돌려주지 않으므로 usage 는 [zero_usage] 다(패널과
-   같은 규약). [max_tokens] 와 masc web 도구는 이 경로에 실을 곳이 없다. *)
+   공식 클라이언트가 보고한 사용량은 빈 응답과 파싱 실패에서도 유지한다. [max_tokens] 와 masc web 도구는 이 경로에 실을 곳이 없다. *)
 let attempt_official ~base_dir ?timeout_s ~judge_system_prompt ~runtime_id ~prompt () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
@@ -185,12 +184,12 @@ let attempt_official ~base_dir ?timeout_s ~judge_system_prompt ~runtime_id ~prom
   with
   | Error failure ->
     Error (judge_failure_of_official_failure failure, Fusion_types.zero_usage)
-  | Ok text when String.length (String.trim text) = 0 ->
+  | Ok (text, usage) when String.length (String.trim text) = 0 ->
     Error
       ( Fusion_types.Empty_response
           (Printf.sprintf "judge: %s: official client returned no text" runtime_id)
-      , Fusion_types.zero_usage )
-  | Ok text -> attach_usage (Fusion_judge_parse.of_string text) Fusion_types.zero_usage
+      , usage )
+  | Ok (text, usage) -> attach_usage (Fusion_judge_parse.of_string text) usage
 
 (* Agent_core 후보 한 번. 에러도 usage를 동반한다: 토큰을 태운 뒤 실패(빈 응답/파싱
    실패)는 소비분을, 토큰 소비 전 실패(빌드/실행/빈 결과/provider 에러)는

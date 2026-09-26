@@ -1,13 +1,19 @@
-type client = Codex | Claude | Antigravity
-let name = function Codex -> "codex" | Claude -> "claude" | Antigravity -> "agy"
+type client = Codex | Claude | Antigravity | Muse
+let name = function
+  | Codex -> "codex" | Claude -> "claude" | Antigravity -> "agy" | Muse -> "muse"
 let source_url = function
   | Codex -> "https://developers.openai.com/codex/cli/"
   | Claude -> "https://code.claude.com/docs/en/installation"
   | Antigravity -> "https://antigravity.google/docs/cli/install/"
+  | Muse -> "https://dev.meta.ai/docs/muse-code"
+(* Muse Code's page gives [curl -fsSL https://dev.meta.ai/install.sh | sh];
+   the script it serves starts with [#!/usr/bin/env bash] and uses bash
+   syntax ([[ ]], pipefail), so it is run with bash. *)
 let script = function
   | Codex -> "https://chatgpt.com/codex/install.sh", "sh"
   | Claude -> "https://claude.ai/install.sh", "bash"
   | Antigravity -> "https://antigravity.google/cli/install.sh", "bash"
+  | Muse -> "https://dev.meta.ai/install.sh", "bash"
 (* An executable regular file at [path], as the path was given. [stat] follows
    a link, so a link to such a file passes; the path returned is the link,
    not its target. The Claude Code installer keeps ~/.local/bin/claude as a
@@ -36,12 +42,20 @@ let path_directories () =
   | None -> []
 ;;
 
-(* Where the vendor installer writes the client: CODEX_INSTALL_DIR for Codex
-   when set, else ~/.local/bin for each of the three. *)
+(* The variable a client's installer reads its target directory from, for the
+   installers that read one. Muse Code's install.sh writes to
+   [${MUSE_INSTALL_DIR:-$HOME/.local/bin}]. *)
+let install_dir_variable = function
+  | Codex -> Some "CODEX_INSTALL_DIR"
+  | Muse -> Some "MUSE_INSTALL_DIR"
+  | Claude | Antigravity -> None
+
+(* Where the vendor installer writes the client: the client's install
+   directory variable when it is set, else ~/.local/bin for each client. *)
 let vendor_directories client =
-  match client, Env_config_core.raw_value_opt "CODEX_INSTALL_DIR" with
-  | Codex, Some path when String.trim path <> "" -> [ path ]
-  | (Codex | Claude | Antigravity), _ ->
+  match Option.bind (install_dir_variable client) Env_config_core.raw_value_opt with
+  | Some path when String.trim path <> "" -> [ path ]
+  | Some _ | None ->
     (match Env_config_core.raw_value_opt "HOME" with
      | Some home -> [ Filename.concat home ".local/bin" ]
      | None -> [])

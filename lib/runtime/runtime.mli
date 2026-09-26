@@ -23,9 +23,11 @@ type t =
         dispatch never used (PR #28219 review). *)
   }
 
-val exact_slot_list_key_of_api_format : api_format -> string
+val exact_slot_list_key_of_api_format : api_format -> string option
 (** The declaration key used when an exact-output lane appends a binding with
-    this provider format: [slots] or [cli_slots]. The runtime writer and the
+    this provider format: [Some slots] or [Some cli_slots]. [None] means the
+    protocol has no output-schema channel and cannot enter an exact lane.
+    The runtime writer and the
     resolved picker projection use the same decision. *)
 
 type dispatch_credential_error =
@@ -294,17 +296,25 @@ type exact_slot_degradation =
 val exact_slot_body_deadline_gap_to_string : exact_slot_body_deadline_gap -> string
 (** One line naming the lane table, the slot, the provider and the key to add. *)
 
-type exact_lane_cli_slot_not_official_client =
+type exact_lane_cli_slot_unservable_reason =
+  | Not_an_official_client
+      (** The runtime is dispatched over HTTP ([Agent_core]). *)
+  | Client_without_output_schema
+      (** An official client that cannot hold an answer to a JSON Schema
+          ({!Runtime_schema.api_format_output_schema_channel}). *)
+
+type exact_lane_cli_slot_unservable =
   { lane_id : string
   ; slot_id : string
   ; provider_id : string
+  ; reason : exact_lane_cli_slot_unservable_reason
   }
 (** One [\[runtime.exact_output_lanes.<lane>\]] [cli_slots] entry that names a
-    configured runtime dispatched over HTTP ([Agent_core]) rather than an
-    official client. Every lane's [cli_slots] dispatches through
-    {!Keeper_lane_cli_oneshot.run} alone, which requires
-    {!Runtime_execution.Official_client}; an id that resolves to nothing
-    instead is {!Reference_unresolved}, not this. *)
+    configured runtime the CLI tail cannot call. Every lane's [cli_slots]
+    dispatches through {!Keeper_lane_cli_oneshot.run} alone, which requires
+    {!Runtime_execution.Official_client} and hands the client an output
+    schema on every call; an id that resolves to nothing instead is
+    {!Reference_unresolved}, not this. *)
 
 type load_failure =
   | Toml_unparsable of Runtime_toml.parse_error list
@@ -336,7 +346,7 @@ type load_failure =
       ; high_water_tokens : int
       ; max_context : int
       }
-  | Exact_lane_cli_slot_not_official_client of exact_lane_cli_slot_not_official_client
+  | Exact_lane_cli_slot_unservable of exact_lane_cli_slot_unservable
       (** Why {!load_list} refused a configuration. Closed, so a consumer
           decides per case instead of matching rendered text — the contract
           {!drop_reason} keeps one level down. [Toml_unparsable] is the one case

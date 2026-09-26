@@ -16,12 +16,24 @@ type api_format =
   | Codex_app_server_runtime
   | Antigravity_cli_runtime
   | Claude_code_runtime
+  | Muse_serve_runtime
 [@@deriving show, eq]
 
 val api_format_reads_max_prompt_bytes : api_format -> bool
 (** Whether a runtime of this format reads [max-prompt-bytes]: Claude Code,
-    Antigravity and Codex do; no other format does, so a declaration on any
-    other runtime bounds nothing the provider checks. *)
+    Antigravity, Codex and Muse Code do; no other format does, so a
+    declaration on any other runtime bounds nothing the provider checks. *)
+
+type output_schema_channel =
+  | Holds_output_schema
+  | No_output_schema_channel
+
+val api_format_output_schema_channel : api_format -> output_schema_channel
+(** Whether a runtime of this format can be handed a JSON Schema to hold its
+    answer to. Every exact-output call hands one over, so a format without
+    the channel (Muse Code: MSP's [turn/start] has no field for it) stands in
+    no exact-output list. The lane writers, the load check of [cli_slots] and
+    first-run setup all read this one answer. *)
 
 type transport =
   | Http of string
@@ -127,9 +139,9 @@ type provider =
   ; is_non_interactive : bool
   ; credentials : credential option
   ; account_home : string option
-    (** Absolute, operator-owned CLI state directory. Only Claude Code and
-        Codex official-client providers may declare it. [None] uses the
-        current process's vendor default. *)
+    (** Absolute, operator-owned CLI state directory for Claude Code, Codex
+        or Muse Code. Muse requires an explicit value at materialization;
+        the other two may resolve their native account environment. *)
   ; capabilities : capabilities option
   ; healthcheck_path : string option
   ; headers : (string * string) list option

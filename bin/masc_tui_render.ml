@@ -5715,6 +5715,7 @@ let render_exact_lane_provider_editor (state : state) editor =
               match runtime.ro_exact_slot_group with
               | Tui_decode.Exact_http_slots -> "HTTP tail"
               | Tui_decode.Exact_cli_slots -> "CLI tail"
+              | Tui_decode.Exact_output_unsupported -> "no output schema"
             in
             let line note =
               Printf.sprintf "  %s [%s] %s · %s / %s%s"
@@ -5730,9 +5731,9 @@ let render_exact_lane_provider_editor (state : state) editor =
               Masc_tui_types.runtime_pick_availability state
                 picker.Masc_tui_types.rlp_pick runtime
             with
-            | Masc_tui_types.Pick_refused _ ->
+            | Masc_tui_types.Pick_refused reason ->
               box_line_styled buf cols ~style:(Theme.recede ())
-                (line "  (unavailable: this lane has no CLI tail)")
+                (line ("  (unavailable: " ^ Keeper_chat.terminal_safe_text reason ^ ")"))
             | Masc_tui_types.Pick_available ->
               box_line buf cols
                 (line
@@ -6011,8 +6012,8 @@ let render_lanes_overview (state : state) =
                   Masc_tui_types.runtime_pick_availability state
                     picker.Masc_tui_types.rlp_pick runtime
                 with
-                | Masc_tui_types.Pick_refused _ ->
-                  "  (unavailable: this lane has no CLI tail)"
+                | Masc_tui_types.Pick_refused reason ->
+                  "  (unavailable: " ^ Keeper_chat.terminal_safe_text reason ^ ")"
                 | Masc_tui_types.Pick_available ->
                 if List.exists (String.equal runtime.ro_id) picker.rlp_already
                 then "  (already a slot)"

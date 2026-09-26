@@ -9591,6 +9591,8 @@ type runtime_pick_availability =
 
 let runtime_pick_availability (state : state) pick (runtime : Tui_decode.runtime_option) =
   match pick, runtime.Tui_decode.ro_exact_slot_group with
+  | Pick_exact_lane _, Tui_decode.Exact_output_unsupported ->
+    Pick_refused (runtime.Tui_decode.ro_id ^ " has no output-schema channel")
   | Pick_exact_lane lane, Tui_decode.Exact_cli_slots ->
     let row =
       Option.bind state.standalone_lanes (fun snapshot ->
@@ -9609,7 +9611,8 @@ let runtime_pick_availability (state : state) pick (runtime : Tui_decode.runtime
   | Pick_exact_lane _, Tui_decode.Exact_http_slots
   | ( ( Pick_conversation_lane _ | Pick_new_lane _ | Pick_media_failover
       | Pick_route_default )
-    , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots) ) -> Pick_available
+    , (Tui_decode.Exact_http_slots | Tui_decode.Exact_cli_slots
+      | Tui_decode.Exact_output_unsupported) ) -> Pick_available
 
 (* The one-line prompt the lane editor puts above the Runtime rows: a name
    being typed for a new lane or for a rename, or the lane a second [D] would

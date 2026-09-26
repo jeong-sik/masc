@@ -174,6 +174,12 @@ let official_client_editor protocol =
     }
 ;;
 
+let muse_serve_protocol = "muse-serve"
+let muse_serve_editor =
+  Option.map (fun (editor : editor_protocol) ->
+    { editor with required_provider_fields = ["account-home"] })
+    (official_client_editor muse_serve_protocol)
+
 let antigravity_editor =
   Some
     { protocol = "antigravity-cli"
@@ -215,6 +221,10 @@ let protocol_declarations =
   ; { protocol = "antigravity-cli"
     ; api_format = Runtime_schema.Antigravity_cli_runtime
     ; editor = antigravity_editor
+    }
+  ; { protocol = muse_serve_protocol
+    ; api_format = Runtime_schema.Muse_serve_runtime
+    ; editor = muse_serve_editor
     }
   ]
 ;;
@@ -573,7 +583,8 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
   | Gemini_api
   | Vertex_gemini_api
   | Codex_app_server_runtime
-  | Claude_code_runtime ->
+  | Claude_code_runtime
+  | Muse_serve_runtime ->
     (match
        List.find_opt
          (fun key -> Option.is_some (Otoml.find_opt tbl Fun.id [ key ]))
@@ -670,11 +681,12 @@ let usage_read_url_field ~path ~(transport : Runtime_schema.transport) tbl =
 
 (* The read sends the API key the runtime's HTTP execution was built with,
    and its windows are recorded under the quota scope of that key.  An
-   official-client runtime (Codex, Claude Code, Antigravity) logs in with the
-   vendor's subscription, and its quota scope names no API key (Antigravity's
-   names the OAuth file of that login), so an API-key read there would file
-   one account's usage under another.  Codex and Antigravity are read through
-   their own client instead (Runtime_provider_usage_read). *)
+   official-client runtime (Codex, Claude Code, Antigravity, Muse Code) logs
+   in with the vendor's subscription, and its quota scope names no API key
+   (Antigravity's names the OAuth file of that login), so an API-key read
+   there would file one account's usage under another.  Codex and
+   Antigravity are read through their own client instead
+   (Runtime_provider_usage_read). *)
 let usage_read_execution_errors ~path (api_format : Runtime_schema.api_format) =
   match api_format with
   | Runtime_schema.Messages_api
@@ -684,7 +696,8 @@ let usage_read_execution_errors ~path (api_format : Runtime_schema.api_format) =
   | Runtime_schema.Vertex_gemini_api -> []
   | Runtime_schema.Codex_app_server_runtime
   | Runtime_schema.Antigravity_cli_runtime
-  | Runtime_schema.Claude_code_runtime ->
+  | Runtime_schema.Claude_code_runtime
+  | Runtime_schema.Muse_serve_runtime ->
     error
       path
       "usage-read is only for an API-key HTTP provider; this protocol runs an \
@@ -791,12 +804,12 @@ let parse_provider (id : string) (tbl : Otoml.t)
       | Ok None -> Ok None
       | Ok (Some home) ->
         (match api_format with
-         | Codex_app_server_runtime | Claude_code_runtime
+         | Codex_app_server_runtime | Claude_code_runtime | Muse_serve_runtime
            when Runtime_account_home.is_valid home -> Ok (Some home)
-         | Codex_app_server_runtime | Claude_code_runtime ->
+         | Codex_app_server_runtime | Claude_code_runtime | Muse_serve_runtime ->
            Error (error (path ^ ".account-home") "account-home must be a non-empty absolute path without surrounding whitespace")
          | _ ->
-           Error (error (path ^ ".account-home") "account-home is valid only for Claude Code and Codex official clients"))
+           Error (error (path ^ ".account-home") "account-home is valid only for Claude Code, Codex and Muse Code official clients"))
     in
     let is_non_interactive_result =
       typed_find_or "a boolean" path tbl "is-non-interactive" Otoml.get_boolean ~default:false
@@ -2832,6 +2845,20 @@ let parse_exact_output_lanes (toml : Otoml.t)
    A binding whose provider is not declared is not judged here: those are
    dropped downstream by design, and naming them at this Gate would report the
    wrong defect. *)
+let validate_muse_prompt_budgets
+    (providers : Runtime_schema.provider list) (models : Runtime_schema.model_spec list)
+    (bindings : Runtime_schema.binding list) =
+  List.concat_map (fun (binding : Runtime_schema.binding) ->
+    let provider = List.find_opt (fun (p : Runtime_schema.provider) -> p.id = binding.provider_id) providers in
+    let model = List.find_opt (fun (m : Runtime_schema.model_spec) -> m.id = binding.model_id) models in
+    match provider,model with
+    | Some {api_format = Runtime_schema.Muse_serve_runtime; _},Some model
+      when binding.enabled && Option.is_none model.max_prompt_bytes ->
+      error ("models." ^ model.id ^ ".max-prompt-bytes")
+        "Muse bindings require an explicit positive input byte budget (max-prompt-bytes)"
+    | _ -> []) bindings
+;;
+
 let validate_ollama_only_binding_fields
       (providers : Runtime_schema.provider list)
       (bindings : Runtime_schema.binding list)
@@ -2856,7 +2883,8 @@ let validate_ollama_only_binding_fields
             | Runtime_schema.Vertex_gemini_api
             | Runtime_schema.Codex_app_server_runtime
             | Runtime_schema.Antigravity_cli_runtime
-            | Runtime_schema.Claude_code_runtime ) as api_format) ->
+            | Runtime_schema.Claude_code_runtime
+            | Runtime_schema.Muse_serve_runtime ) as api_format) ->
          let path = binding.provider_id ^ "." ^ binding.model_id in
          let refuse key =
            error
@@ -3148,7 +3176,8 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     (* Cross-table Gate: a binding field only reaches the wire through its
        provider's request builder, so whether it is carriable is a fact about
        the provider, not about the binding table it was written in. *)
-    match validate_ollama_only_binding_fields providers bindings with
+    match validate_ollama_only_binding_fields providers bindings
+      @ validate_muse_prompt_budgets providers models bindings with
     | _ :: _ as errors -> Error errors
     | [] ->
       Ok

@@ -50,6 +50,17 @@ let press state keys =
       in
       state.runtime_lane_pick <- Some (pick, moved)
 
+let test_schema_less_client_is_refused_only_for_exact_lane () =
+  let state = state () in
+  let muse = { (runtime "muse.fixture") with
+    ro_exact_slot_group = Masc.Tui_decode.Exact_output_unsupported } in
+  (match runtime_pick_availability state (Pick_exact_lane Standalone_lane.Verifier) muse with
+   | Pick_refused _ -> ()
+   | Pick_available -> Alcotest.fail "schema-less Muse client was offered to an exact lane");
+  (match runtime_pick_availability state (Pick_conversation_lane "primary") muse with
+   | Pick_available -> ()
+   | Pick_refused _ -> Alcotest.fail "normal Keeper routing must remain available")
+
 let test_picker_and_refusal_keep_footer_space () =
   let state = state () in
   state.runtime_catalog <- [runtime "a"; runtime "b"; runtime "c"];
@@ -1224,5 +1235,7 @@ let () = Alcotest.run "runtime list geometry"
         test_the_keeper_picker_cursor_clamps_to_a_shorter_list;
       Alcotest.test_case "keeper picker window follows the cursor" `Quick
         test_the_keeper_picker_window_follows_the_cursor;
+      Alcotest.test_case "schema-less client only refuses exact lanes" `Quick
+        test_schema_less_client_is_refused_only_for_exact_lane;
       Alcotest.test_case "keeper picker goes through the shared list" `Quick
         test_the_keeper_picker_goes_through_the_shared_list]]

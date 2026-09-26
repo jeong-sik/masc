@@ -508,7 +508,10 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let runtime_root = Common.masc_dir_from_base_path ~base_path in
     let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
         ~keeper_name ~oauth_source:config.oauth_source in
-    let account_home = Runtime_antigravity_home.home_path ~runtime_root ~owner_leaf in
+    let* home = Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf
+        ~oauth_source:config.oauth_source
+      |> Result.map_error home_error_to_core_error in
+    let account_home = Runtime_antigravity_home.home_dir home in
     let* sandbox_profile = match required_native_posture with
       | Some _ -> Ok None
       | None ->
@@ -742,13 +745,6 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ?on_tool_boundary:on_official_client_tool_boundary
         ~on_result_handoff:on_official_client_result_handoff
         ()
-    in
-    let* home =
-      Runtime_antigravity_home.prepare
-        ~runtime_root
-        ~owner_leaf
-        ~oauth_source:config.oauth_source
-      |> Result.map_error home_error_to_core_error
     in
     let* () =
       match native_workspace, sandbox_profile with

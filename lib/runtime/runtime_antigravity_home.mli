@@ -1,8 +1,9 @@
 (** Persistent, operator-owned HOME layout for the official Antigravity CLI.
 
-    The operator credential seeds the isolated HOME once. The resulting 0600
-    regular file is then persistent runtime state so an OAuth refresh written by
-    the CLI survives later turns. Turn-scoped MCP configuration is deliberately
+    Unchanged operator source bytes reuse a private account generation, keeping
+    native OAuth refreshes. Changed source bytes publish a fresh opaque generation
+    so an external re-login cannot reuse the prior account's HOME or session.
+    Old in-flight generations remain intact. Turn-scoped MCP configuration is
     owned by the caller. *)
 
 type error =
@@ -47,21 +48,27 @@ val keeper_owner_leaf : keeper_name:string -> oauth_source:string -> string
 (** Stable account boundary for a Keeper. Identity uses the configured source
     path, never token bytes, so refresh preserves the account's managed state. *)
 
-val home_path : runtime_root:string -> owner_leaf:string -> string
-(** Pure managed HOME spelling, also used to bind session identity before IO. *)
-
 val prepare
   :  runtime_root:string
   -> owner_leaf:string
   -> oauth_source:string
   -> (t, error) result
 (** Create or verify the private Antigravity HOME below
-    [<runtime_root>/official-clients/antigravity/<owner_leaf>]. Every managed
-    directory is an exact 0700 real directory owned by the effective user.
+    [<runtime_root>/official-clients/antigravity/<owner_leaf>/<generation>]. Every
+    managed directory is an exact 0700 real directory owned by the effective user.
     [oauth_source] must be an effective-user-owned regular 0600 file reached
-    without symbolic links. It is copied only when the managed OAuth file does
-    not exist; an existing managed file must itself be an effective-user-owned
-    regular 0600 file and is never overwritten by preparation. *)
+    without symbolic links. Exact source revision is read under the preparation
+    lock. A changed source is copied to a fresh generation; unchanged source
+    preserves the effective-user-owned regular 0600 managed credential. Missing
+    or corrupt current generation state refuses instead of recreating it. The
+    returned actual HOME is the opaque account identity for session binding. *)
+
+val prepare_account
+  : runtime_root:string -> owner_leaf:string -> oauth_source:string -> (t, error) result
+(** Validate and select the account generation without changing its permissions.
+    Keeper uses this before comparing session identity: a losing concurrent
+    planner must not reset an active client's policy. Before launching a client,
+    its admitted owner must publish the intended policy with [prepare_native_tools]. *)
 
 val prepare_for_login : runtime_root:string -> owner_leaf:string -> (t, error) result
 (** Prepare the private official-client HOME without fabricating an OAuth seed.

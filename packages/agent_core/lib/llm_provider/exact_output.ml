@@ -133,6 +133,7 @@ type execution_error_cause =
   | Provider_response_refused of
       { http_status : int
       ; refusal : provider_refusal
+      ; retry_after_s : float option
       }
   | Incomplete_output
   | Missing_output
@@ -1207,7 +1208,7 @@ let evidence_transport_failure ~ordinal = function
       { cause = Response_body_deadline_exceeded; raw_response_sha256; _ } ->
     Ok (Validated_flow_evidence.Response_body_deadline_exceeded, raw_response_sha256)
   | Flow_advance_execution_failed
-      { cause = Provider_response_refused { http_status; refusal = Request_body_refused }
+      { cause = Provider_response_refused { http_status; refusal = Request_body_refused; _ }
       ; raw_response_sha256
       ; _
       } ->
@@ -1215,17 +1216,17 @@ let evidence_transport_failure ~ordinal = function
       ( Validated_flow_evidence.Serialized_request_refused { http_status }
       , raw_response_sha256 )
   | Flow_advance_execution_failed
-      { cause = Provider_response_refused { http_status; refusal = Rate_limited }
+      { cause = Provider_response_refused { http_status; refusal = Rate_limited; _ }
       ; raw_response_sha256
       ; _
       } ->
     Ok (Validated_flow_evidence.Rate_limited { http_status }, raw_response_sha256)
   | Flow_advance_execution_failed
-      { cause = Provider_response_refused { http_status; refusal = Overloaded }
+      { cause = Provider_response_refused { http_status; refusal = Overloaded; _ }
       ; raw_response_sha256; _ } ->
     Ok (Validated_flow_evidence.Overloaded { http_status }, raw_response_sha256)
   | Flow_advance_execution_failed
-      { cause = Provider_response_refused { http_status; refusal = Server_error }
+      { cause = Provider_response_refused { http_status; refusal = Server_error; _ }
       ; raw_response_sha256; _ } ->
     Ok (Validated_flow_evidence.Server_error { http_status }, raw_response_sha256)
   | Flow_advance_execution_failed { cause = Invalid_json_output; raw_response_sha256; _ }
@@ -1238,7 +1239,7 @@ let evidence_transport_failure ~ordinal = function
       | Frozen_request_mismatch -> "frozen_request_mismatch"
       | Completion_failed _ -> "completion_failed"
       | Response_body_deadline_exceeded -> "response_body_deadline_exceeded"
-      | Provider_response_refused { http_status; refusal } ->
+      | Provider_response_refused { http_status; refusal; _ } ->
         Printf.sprintf
           "provider_response_refused:%s:%d"
           (provider_refusal_to_string refusal)
@@ -1720,6 +1721,24 @@ let provider_refusal_of_api_error : Retry.api_error -> provider_refusal = functi
   | Retry.Timeout _ -> Timeout
 ;;
 
+(* The one wait a refusal names, kept beside the collapsed refusal so a caller
+   that holds per-binding rate-limit evidence can honour the provider's own
+   Retry-After instead of guessing one. Only a rate limit carries it. *)
+let retry_after_of_api_error : Retry.api_error -> float option = function
+  | Retry.RateLimited { retry_after; _ } -> retry_after
+  | Retry.Overloaded _
+  | Retry.ServerError _
+  | Retry.AuthError _
+  | Retry.AuthorizationError _
+  | Retry.PaymentRequired _
+  | Retry.InvalidRequest _
+  | Retry.NotFound _
+  | Retry.ContextOverflow _
+  | Retry.InputCapacity _
+  | Retry.NetworkError _
+  | Retry.Timeout _ -> None
+;;
+
 (* The candidate-fault judgment projects onto the flow's collapsed refusal
    vocabulary. [provider_refusal] folds [Retry.InvalidRequest]'s five reasons
    to one [Invalid_request]; that collapsed refusal is the un-attributed one,
@@ -1748,16 +1767,18 @@ let execution_error_cause ~http_status ~dispatch = function
   | Exec.Frozen_request_mismatch -> Frozen_request_mismatch
   | Exec.Response_body_deadline_exceeded -> Response_body_deadline_exceeded
   | Exec.Provider_error (Http_client.HttpError { code; body; retry_after_header }) ->
+    let api_error = Retry.classify_refusal ~retry_after_header ~status:code ~body in
     Provider_response_refused
       { http_status = code
-      ; refusal =
-          provider_refusal_of_api_error
-            (Retry.classify_refusal ~retry_after_header ~status:code ~body)
+      ; refusal = provider_refusal_of_api_error api_error
+      ; retry_after_s = retry_after_of_api_error api_error
       }
   | Exec.Provider_error
       (Http_client.ProviderFailure { kind = Http_client.Context_overflow _; _ } as error) ->
     (match http_status with
-     | Some http_status -> Provider_response_refused { http_status; refusal = Context_overflow }
+     | Some http_status ->
+       Provider_response_refused
+         { http_status; refusal = Context_overflow; retry_after_s = None }
      | None -> Completion_failed { error; dispatch })
   (* An empty answer the provider stopped at its window is the same refusal in
      another shape. [Retry.overflow_of_empty_completion] is the one rule for
@@ -1768,7 +1789,10 @@ let execution_error_cause ~http_status ~dispatch = function
     (match Retry.overflow_of_empty_completion ~stop_reason ~message, http_status with
      | Some overflow, Some http_status ->
        Provider_response_refused
-         { http_status; refusal = provider_refusal_of_api_error overflow }
+         { http_status
+         ; refusal = provider_refusal_of_api_error overflow
+         ; retry_after_s = None
+         }
      | Some _, None | None, (Some _ | None) -> Completion_failed { error; dispatch })
   (* Other transport, provider parsing or observer failures remain distinct
      from an owned body deadline, even when their receipt has headers. The
@@ -2442,7 +2466,7 @@ let execution_error_cause_to_string : execution_error_cause -> string = function
       (generation_dispatch_fact_to_string dispatch)
   | Response_body_deadline_exceeded ->
     "total request deadline exceeded while reading response body"
-  | Provider_response_refused { http_status; refusal } ->
+  | Provider_response_refused { http_status; refusal; _ } ->
     Printf.sprintf
       "provider refused (http_status=%d refusal=%s)"
       http_status

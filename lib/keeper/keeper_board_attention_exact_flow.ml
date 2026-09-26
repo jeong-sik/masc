@@ -175,6 +175,7 @@ let prepare ~base_path ~keeper_name ~net candidate =
          ~lane_id
          resolved)
       |> Result.map_error (fun detail -> Lane_preference_unavailable detail)
+      |> Result.map Runtime_exact_lane_backpressure.order
     in
     let* candidates = flow_candidates resolved.selected_slots in
     let requirement =
@@ -815,17 +816,19 @@ let execute_current
                ; judged_at
                }
            | Jev_off | Jev_cli_only | Jev_not_pending | Jev_not_relevant _ | Jev_failed _ ->
-             (match
-                Exact_output.execute_flow_once
-                  ~net:prepared.net
-                  ~clock
-                  ~before_measurement_dispatch:(fun _ -> Ok ())
-                  ~on_measurement_terminal:(fun _ -> Ok ())
-                  ~before_dispatch:agent_core_before_dispatch
-                  ~before_advance:agent_core_before_advance
-                  ~validate
-                  attempt
-              with
+             let flow =
+               Exact_output.execute_flow_once
+                 ~net:prepared.net
+                 ~clock
+                 ~before_measurement_dispatch:(fun _ -> Ok ())
+                 ~on_measurement_terminal:(fun _ -> Ok ())
+                 ~before_dispatch:agent_core_before_dispatch
+                 ~before_advance:agent_core_before_advance
+                 ~validate
+                 attempt
+             in
+             Runtime_exact_lane_backpressure.observe flow;
+             (match flow with
               | Ok success -> Ok success.accepted
               | Error (Exact_output.Flow_execution_terminal { cause; prior_rejections }) ->
                 let terminal = terminal_of_flow_error ~callback_error_to_string cause in

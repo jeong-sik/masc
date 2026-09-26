@@ -1,5 +1,6 @@
 """Exercise input ownership across waits, terminal resize, paste and exit."""
 import os
+import json
 import signal
 import sys
 
@@ -47,6 +48,32 @@ def terminate_incomplete_scalar(process, fd, slave, output, _base):
     os.killpg(process.pid, signal.SIGTERM)
 
 
+def large_paste(requests):
+    # More than two 8192-byte reader buffers. Confirm the exact HTTP payload,
+    # since the collapsed draft only shows its line count.
+    lines = [f"buffer boundary {index:04d}" for index in range(1000)]
+    payload = "\r".join(lines).encode()
+    assert len(payload) > 2 * 8192
+
+    def interact(process, fd, _slave, output, _base):
+        open_chat(process, fd, output)
+        frame = h.send_and_wait(process, fd, output,
+            h.PASTE_START + payload + h.PASTE_END, b"1000 line(s)")
+        if b"[pasted " not in h.CSI_RE.sub(b"", frame):
+            raise AssertionError("large paste did not finish as one draft")
+        if any(path.endswith("/chat/stream") for path, _ in requests):
+            raise AssertionError("paste submitted before Enter")
+        h.write_all(fd, output, b"\r")
+        body = h.wait_for_http_request(process, fd, output, requests,
+            path="/api/v1/keepers/chat/stream")
+        if json.loads(body).get("message") != "\n".join(lines):
+            raise AssertionError("paste lost bytes across terminal read boundaries")
+        h.escape_to_keeper_detail(process, fd, output, name=b"alpha")
+        os.write(fd, b"q")
+
+    return interact
+
+
 def run(executable):
     captured = []
     h.run_terminal_scenario(executable,
@@ -68,6 +95,13 @@ def run(executable):
     h.run_terminal_scenario(executable,
         description="Eio input exits during an incomplete scalar",
         interact=terminate_incomplete_scalar, confirm_exit=b"")
+    large_requests = []
+    h.run_terminal_scenario(executable,
+        description="Input retains a complete paste across multiple terminal reads",
+        interact=large_paste(large_requests),
+        http_fixtures={"/api/v1/keepers/chat/stream":
+                       (503, {"error": "stop after large paste request capture"})},
+        http_requests=large_requests)
     print("input readiness ownership: PASS")
 
 

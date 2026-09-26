@@ -204,7 +204,7 @@ let test_refusals_of_the_session_start_fresh_next () =
     Serve.Rpc_error { method_ = "session/resume"; code = -32004; message = "unknown session" }
   in
   let model_mismatch =
-    Serve.Session_model_mismatch { requested = "muse-a"; resumed = "muse-b" }
+    Serve.Session_model_mismatch { requested = "muse-a"; resumed = Some "muse-b" }
   in
   List.iter
     (fun (label, error) -> check bool label true (starts_fresh_next error))

@@ -175,7 +175,7 @@ let find_rearm_entry (scheduler : rearm_scheduler) contention =
     scheduler.entries
 ;;
 
-let prepare_rearm_ticket_locked (scheduler : rearm_scheduler) entry =
+let prepare_rearm_ticket_locked (scheduler : rearm_scheduler) (entry : rearm_entry) =
   let ticket =
     { ticket_id = scheduler.next_ticket_id
     ; delay_s = entry.next_delay_s
@@ -188,7 +188,7 @@ let prepare_rearm_ticket_locked (scheduler : rearm_scheduler) entry =
   ticket
 ;;
 
-let cancel_rearm_ticket (scheduler : rearm_scheduler) contention ticket outcome =
+let cancel_rearm_ticket (scheduler : rearm_scheduler) contention (ticket : rearm_ticket) outcome =
   let cancelled =
     Stdlib.Mutex.protect scheduler.mutex (fun () ->
       match find_rearm_entry scheduler contention with
@@ -210,7 +210,8 @@ let wake_result_outcome = function
   | Wake.Not_registered -> Outcome_not_registered
 ;;
 
-let fire_rearm_ticket (scheduler : rearm_scheduler) contention ticket ~launch_delivery_retry =
+let fire_rearm_ticket (scheduler : rearm_scheduler) contention (ticket : rearm_ticket)
+    ~launch_delivery_retry =
   let consumed =
     Stdlib.Mutex.protect scheduler.mutex (fun () ->
       match find_rearm_entry scheduler contention with
@@ -269,7 +270,7 @@ let fire_rearm_ticket (scheduler : rearm_scheduler) contention ticket ~launch_de
         ~outcome:Outcome_delivery_reset
 ;;
 
-let make_contention_rearm_scheduler ~fork ~sleep ~request () =
+let make_contention_rearm_scheduler ~fork ~sleep ~request () : rearm_scheduler =
   { mutex = Stdlib.Mutex.create ()
   ; fork
   ; sleep
@@ -328,7 +329,7 @@ let schedule_contention_rearm (scheduler : rearm_scheduler) contention =
              scheduler
              contention
              ticket
-             ~launch_delivery_retry:(fun next_ticket ->
+             ~launch_delivery_retry:(fun (next_ticket : rearm_ticket) ->
                launch next_ticket;
                log_contention_rearm
                  "scheduled"
@@ -382,7 +383,8 @@ let reset_contention_rearms (scheduler : rearm_scheduler) ~keep =
     removed
 ;;
 
-let make_deferred_rearm_scheduler ~fork ~sleep ~request ~delay_s =
+let make_deferred_rearm_scheduler ~fork ~sleep ~request ~delay_s :
+    deferred_rearm_scheduler =
   { mutex = Stdlib.Mutex.create ()
   ; fork
   ; sleep

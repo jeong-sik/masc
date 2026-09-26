@@ -96,43 +96,34 @@ store 마다 세 가지를 묻는다.
 
 `lib/keeper/keeper_durable_store.ml` 에 모든 store 를 둔다. 부팅 reconcile 과 배포 preflight 는 이 목록을 읽기만 하고, 자기 목록을 따로 갖지 않는다.
 
-정책은 GADT 의 타입 인덱스다. store 마다 읽는 법(`reader`)을 인덱스가 붙은 생성자로 돌려주고, 정책은 거기서 나온다. `Degrade_typed` 인덱스에는 preflight 가 쓸 읽는 법이 없는 생성자 하나만 있다. 그래서 goal store 를 preflight 가 읽는 코드는 컴파일되지 않는다.
+열거하는 타입은 `Id.t` 하나다. `[@@deriving enumerate]` 가 `Id.all` 을 만든다. 표도 하나다. `reader` 가 store 마다 정책과 읽는 법을 돌려준다.
 
 ```ocaml
-type refuse_boot = [ `Refuse_boot ]
-type degrade_typed = [ `Degrade_typed ]
-type preflight_only = [ `Preflight_only ]
+module Id : sig
+  type t = Keeper_meta | Memory_current | Goal_store | Official_client_session (* ... 17개 *)
+  val all : t list   (* [@@deriving enumerate] *)
+end
 
-type _ t =
-  | Keeper_meta : refuse_boot t
-  | Memory_current : refuse_boot t
-  | Goal_store : degrade_typed t
-  | Official_client_session : preflight_only t   (* PR-2 에서 refuse_boot *)
-  (* ... *)
+module Refusing : sig type t = Keeper_meta | Memory_current (* PR-2: | Official_client_session *) end
+module Reported : sig type t = Goal_store end
 
-type _ reader =
-  | Refusing_reader : store_scan -> refuse_boot reader
-  | Preflight_reader : store_scan -> preflight_only reader
-  | Reported_at_boot : degrade_typed reader
+type scan   (* store 하나를 읽는 법 *)
+type reader =
+  | Refuse_boot of Refusing.t * scan
+  | Degrade_typed of Reported.t
+  | Preflight_only of scan
 
-type _ boot_policy =
-  | Refuse_boot : refuse_boot boot_policy
-  | Degrade_typed : degrade_typed boot_policy
-  | Preflight_only : preflight_only boot_policy
-
-val policy : 'a t -> 'a boot_policy          (* reader 에서 나온다 *)
-val preflight_scan : _ t -> base_path:string -> (report, string) result option
-
-module Id : sig type t = Keeper_meta | Memory_current | Goal_store (* ... *) val all : t list end
-type any = Any : _ t -> any
-val all : any list                            (* List.map of_id Id.all *)
+val reader : Id.t -> reader            (* exhaustive, 표는 여기 하나 *)
+val name : Id.t -> string
+val run : scan -> base_path:string -> (report, string) result
 ```
 
-`[@@deriving enumerate]` 는 GADT 에 붙지 않으므로 목록용 평평한 `Id.t` 를 따로 두고, 두 방향 exhaustive match(`id`, `of_id`)로 둘을 묶는다. 손으로 쓴 목록이 없으므로 "preflight 에는 넣고 부팅에는 빠뜨리는" 일이 생기지 않는다.
+손으로 쓴 목록이 없으므로 "preflight 에는 넣고 부팅에는 빠뜨리는" 일이 생기지 않는다.
 
-컴파일러가 막는 것:
-- `t` 에 생성자를 더하면 `id`·`reader`·`name` 이 채워질 때까지 컴파일되지 않는다.
-- store 의 인덱스를 `refuse_boot` 로 바꾸면 `reader` 가 `Refusing_reader` 를 요구한다. 부팅 reconcile 의 `refuse_boot` 전용 match 세 곳(이름, 검사, 옮기는 법)도 새 store 를 요구한다.
+- `Id.t` 에 생성자를 더하면 `reader` 가 채워질 때까지 컴파일되지 않는다.
+- `Degrade_typed` 에는 `scan` 이 없다. 그래서 preflight 가 goal store 를 읽는 코드는 쓸 수 없다.
+- store 를 `Refuse_boot` 로 보내려면 `Refusing.t` 에 생성자를 더해야 한다. 부팅의 이름·검사·옮기는 법이 `Refusing.t` 를 exhaustive 로 match 하므로, 셋을 다 채워야 컴파일된다.
+- `Refusing.t` 값 하나가 두 `Id` 에서 오거나 어느 `Id` 에서도 오지 않는 실수는 컴파일러가 못 잡는다. 테스트가 `Id.all` 을 돌며 `Refusing.all`·`Reported.all` 과 하나씩 맞는지 본다.
 
 ### 2.2 부팅은 `Refuse_boot` 만 읽는다
 
@@ -162,8 +153,8 @@ preflight 의 `scan` 과 `on_refusal` 문구는 `Keeper_durable_store` 로 옮�
 
 ## 3. 판정 기준
 
-1. `rg -n 'durable_stores =' bin/deployment_preflight_helper.ml` 0줄. preflight 는 `Keeper_durable_store.all` 을 쓴다.
-2. `Keeper_durable_store.all` 의 모든 store 가 `id` 로 `Id.all` 과 같은 순서의 같은 값을 돌려주고, 이름이 서로 다르다는 테스트.
+1. `rg -n 'durable_stores =' bin/deployment_preflight_helper.ml` 0줄. preflight 는 `Keeper_durable_store.Id.all` 과 `reader` 를 쓴다.
+2. `Id.all` 을 돌며 모은 `Refuse_boot`·`Degrade_typed` 값이 `Refusing.all`·`Reported.all` 과 하나씩 맞고, 이름이 서로 다르다는 테스트.
 3. 같은 fixture 에서 부팅이 지목한 `Refuse_boot` 파일을 preflight 도 거절하고, 부팅이 INFO 만 남기는 goal store 는 preflight 가 읽지 않는다는 테스트.
 4. PR-2: v1 `session.json` 을 둔 base path 로 `Keeper_store_boot_reconcile.examine`·`admit` 을 돌리면 플래그 없이는 거절하고, 거절 문구에 Keeper 와 경로가 있다. 파일 digest 는 그대로다. `quarantine` 뒤에는 파일이 없고, 옮긴 사본이 같은 바이트를 가지며, `load` 는 `None` 이다.
 5. PR-3: 체크포인트·event queue·World constitution 을 못 읽는 fixture 로 부팅이 거절하고, preflight 의 `validate-current-queue`·`validate-current-wal` 이 사라진다.
@@ -171,7 +162,7 @@ preflight 의 `scan` 과 `on_refusal` 문구는 `Keeper_durable_store` 로 옮�
 
 ## 4. 단계
 
-- **PR-1 목록**: `Keeper_durable_store`(`t`, `reader`, `policy`, `Id`, `all`, `name`, `on_refusal`, `preflight_scan`)와 `Keeper_durable_store_scan`(store 별 읽는 법, preflight 에서 옮김). preflight 와 부팅 reconcile 이 이 목록을 쓴다. 부팅과 preflight 의 동작은 바뀌지 않는다. 판정 1·2·3.
+- **PR-1 목록**: `Keeper_durable_store`(`Id`, `Refusing`, `Reported`, `reader`, `name`, `run`, `on_refusal`)와 `Keeper_durable_store_scan`(store 별 읽는 법, preflight 에서 옮김, 라이브러리 private). preflight 와 부팅 reconcile 이 이 목록을 쓴다. 부팅과 preflight 의 동작은 바뀌지 않는다. 판정 1·2·3.
 - **PR-2 세션**: official-client session 을 `Refuse_boot` 로 올리고, 잠금을 잡고 옮기는 방법을 더한다. 판정 4.
 - **PR-3 턴을 멈추는 나머지**: 체크포인트, event queue(스냅숏+WAL), World constitution 을 목록에 넣고 `Refuse_boot` 로 둔다. 판정 5.
 - **PR-4 읽는 함수가 없는 store**: board comments, memory-journal(#38596). (c) 부터 조사한다.

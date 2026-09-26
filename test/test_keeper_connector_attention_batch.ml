@@ -1116,14 +1116,11 @@ let test_batch_with_a_channel_less_member_routes_nowhere () =
   | Some _ -> fail "a channel-less member must take the route from the batch"
 ;;
 
-(* RFC-0373 gives an autonomous turn the slot after repeated chat-lane
-   deferrals. The turn must actually enter that slot, while a claimable chat
-   remains queued. Once a tool result is settled and the turn reaches its
-   cooperative boundary, the queued chat can take the next slot. Keeping the
-   entire autonomous turn would make each later tool result another unbounded
-   wait for the person. This fixture drives real Owner admission and an
-   official-client tool result through its post-handoff boundary. *)
-let test_debt_cap_turn_yields_at_tool_boundary () =
+(* RFC-0373 admits an autonomous turn after chat-lane deferrals. Official
+   clients own their resume history, so a settled host tool result alone does
+   not permit terminating that provider turn. The waiting chat claims after
+   the admitted turn completes. *)
+let test_debt_cap_official_turn_keeps_tool_result_until_completion () =
   Eio_main.run
   @@ fun env ->
   Masc_test_deps.ensure_rng_initialized ();
@@ -1142,8 +1139,8 @@ let test_debt_cap_turn_yields_at_tool_boundary () =
      plain ref's write may never become visible to this domain's spin. *)
   let chat_turns = Atomic.make 0 in
   let fed = Atomic.make 0 in
-  let watch_after_yield = Atomic.make false in
-  let post_yield_chat, mark_post_yield_chat = Eio.Promise.create () in
+  let watch_after_turn = Atomic.make false in
+  let post_turn_chat, mark_post_turn_chat = Eio.Promise.create () in
   let holder = ref None in
   (* Deterministic handshake: the runner resolves [held] once its claim
      succeeded, and parks on [release_gate] until the test opens it --
@@ -1172,8 +1169,8 @@ let test_debt_cap_turn_yields_at_tool_boundary () =
     match claim () with
     | Ok (Some _) ->
       let claimed = Atomic.fetch_and_add chat_turns 1 + 1 in
-      if Atomic.get watch_after_yield
-      then ignore (Eio.Promise.try_resolve mark_post_yield_chat ());
+      if Atomic.get watch_after_turn
+      then ignore (Eio.Promise.try_resolve mark_post_turn_chat ());
       (* The claim is durable and the slot is ours: tell the test. *)
       Eio.Promise.resolve hold ();
       let owner =
@@ -1242,9 +1239,8 @@ let test_debt_cap_turn_yields_at_tool_boundary () =
   let rec poll () =
     match
       Owner_registry.run_autonomous_if_idle ~base_path ~keeper_name (fun () ->
-        (* The cap admitted this autonomous turn even though the feeder kept
-           a claimable chat queued. The first safe tool boundary now offers
-           that chat the following slot. *)
+        (* The cap admitted this autonomous turn while a chat waits. Its
+           official-client result has no proven durable resume boundary. *)
         let projection =
           match Owner_registry.operation_projection ~base_path ~keeper_name with
           | Ok projection -> projection
@@ -1279,7 +1275,7 @@ let test_debt_cap_turn_yields_at_tool_boundary () =
             ~terminal_error ~pre_tool_rejects:(ref [])
             ~on_result_handoff:(fun ~invocation:_ ~content:_ -> handed_off := true)
             ~on_tool_boundary:(fun () ->
-              check bool "tool result handed off before debt-cap yield" true
+              check bool "tool result handed off before boundary advice" true
                 !handed_off;
               Keeper_agent_run.For_testing.official_client_tool_boundary
                 ~repetition_execution:None
@@ -1298,14 +1294,27 @@ let test_debt_cap_turn_yields_at_tool_boundary () =
         let result = tool.call ~call_id:"debt-cap-settled-tool" (`Assoc []) in
         check bool "autonomous tool completed" true result.success;
         check string "settled tool result preserved" "settled result" result.content;
-        check (option string) "yield was not a tool error" None !terminal_error;
+        check (option string) "boundary was not a tool error" None !terminal_error;
+        (match
+           Keeper_agent_run.For_testing.native_tool_boundary
+             ~keeper_name ~repetition_execution:None
+             ~terminal_effect_state:Keeper_tools_agent_core.Terminal_effect_open
+             ~tool_calls:[] ~assistant_turn_texts:[]
+             ~yield_requested:(Some (fun () ->
+               Keeper_unified_turn.autonomous_yield_request
+                 ~base_path ~keeper_name))
+         with
+         | Ok (Runtime_agent.Yield Runtime_agent.Operation_queued) -> ()
+         | Ok (Runtime_agent.Yield _ | Runtime_agent.Continue) | Error _ ->
+           fail "the AGENT_CORE boundary ignored the queued chat after debt-cap admission");
         match result.abort_turn with
-        | Some Keeper_official_client_host.Queued_chat_operation ->
-          Atomic.set watch_after_yield true;
+        | None ->
+          Atomic.set watch_after_turn true;
           true
-        | Some (Keeper_official_client_host.Repeated_tool_call _
-                | Keeper_official_client_host.Terminal_tool_boundary _) | None ->
-          fail "the settled tool did not yield to the waiting chat")
+        | Some (Keeper_official_client_host.Queued_chat_operation
+                | Keeper_official_client_host.Repeated_tool_call _
+                | Keeper_official_client_host.Terminal_tool_boundary _) ->
+          fail "the official client stopped before its turn completed")
     with
     | Ok (`Ran answer) -> answer
     | Ok (`Busy _) ->
@@ -1327,9 +1336,9 @@ let test_debt_cap_turn_yields_at_tool_boundary () =
   check bool "the chat lane held the slot before the cap"
     (Atomic.get chat_turns > 0)
     true;
-  check bool "debt-cap turn yielded at the settled official tool" true (poll ());
+  check bool "debt-cap turn retained its official tool result" true (poll ());
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 3.0 (fun () ->
-    Eio.Promise.await post_yield_chat)
+    Eio.Promise.await post_turn_chat)
 ;;
 
 let () =
@@ -1372,9 +1381,9 @@ let () =
             `Quick
             test_batch_completion_acks_every_member
         ; test_case
-            "the debt-cap turn yields to chat after a settled tool"
+            "the debt-cap official turn keeps a settled tool until completion"
             `Quick
-            test_debt_cap_turn_yields_at_tool_boundary
+            test_debt_cap_official_turn_keeps_tool_result_until_completion
         ] )
     ; ( "batch_disposition_of_cycle_outcome (P1-2)"
       , [ test_case

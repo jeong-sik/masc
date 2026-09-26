@@ -361,7 +361,10 @@ let official_client_tool_boundary
      | Some requested ->
        (match requested () with
         | Ok (Some { reason = Operation_queued }) ->
-          Ok (Some Keeper_official_client_host.Queued_chat_operation)
+          (* Official clients own their conversation history. A returned tool
+             result is not yet a durable resume checkpoint, so a queued chat
+             waits until this provider turn completes. *)
+          repetition_stop ()
         | Ok (Some { reason = Durable_stimulus_waiting _ }) | Ok None ->
           repetition_stop ()
         | Error detail ->

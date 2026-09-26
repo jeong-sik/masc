@@ -165,6 +165,8 @@ let reader_after_wheel (reader : clamped_scroll)
   | Patch_modal_scroll value -> Some (Patch_modal_scroll (step value))
   | Link_modal_scroll value -> Some (Link_modal_scroll (step value))
   | Voice_scroll value -> Some (Voice_scroll (step value))
+  | Context_inspector_scroll value ->
+      Some (Context_inspector_scroll (step value))
   (* The chat reads its own wheel, three rows a notch, and its scroll counts
      rows up from the newest message rather than down from the top. *)
   | Message_scroll _ -> None
@@ -178,9 +180,6 @@ let reader_after_wheel (reader : clamped_scroll)
   | Acting _ | Acting_selection _ -> None
   (* Resources has panes of its own that [h] and [l] move between. *)
   | Resource_scroll _ -> None
-  (* The inspector chooses a cursor or a focused pane; its modal input path
-     owns that choice, rather than a generic reader scroll. *)
-  | Context_inspector_scroll _ -> None
 
 
 let navigation_rows = 1

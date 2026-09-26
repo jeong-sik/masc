@@ -718,6 +718,16 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Masc.Workspace.default_config dir in
        let meta = make_meta "fallback-keeper" in
+       (* This fixture reads through Docker, whose image CI builds before the
+          suite. Declare and promote that image just as a real Keeper does. *)
+       let meta =
+         { meta with
+           sandbox_profile = Keeper_types_profile_sandbox.Docker
+         ; sandbox_image = Some "base"
+         }
+       in
+       Masc_test_deps.write_sandbox_image_catalog ~base_path:config.base_path
+         [ "base", Keeper_sandbox_image.default_tag ];
        let evidence = "exact-turn-meta-evidence" in
        (* Inside the keeper sandbox: the sandbox root is the whole read
           boundary, so the evidence file lives in the keeper playground. *)

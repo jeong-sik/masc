@@ -589,7 +589,7 @@ def skills_block_with_task_source(*, include_seed_sources: bool) -> str:
                     path=TASK_SKILLS_RUNTIME_PATH, access="read-only")]
     if include_seed_sources:
         sources.extend(seed["sources"])
-    lines = ["[skills]", f'resource-read-max-bytes = {seed["resource-read-max-bytes"]}']
+    lines = ["[skills]"]
     for source in sources:
         lines += [
             "", "[[skills.sources]]",

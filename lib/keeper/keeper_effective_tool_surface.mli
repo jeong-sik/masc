@@ -67,6 +67,8 @@ type t =
             with no reason beside it reads as a skill nobody wrote. *)
   ; tools : tool list
   ; tool_surface_sha256 : string option
+        (** Pure descriptor/posture projection. The session endpoint exposes
+            its account-bound digest separately as [session_binding_sha256]. *)
   }
 
 type unavailable =

@@ -233,13 +233,31 @@ let test_write_context_places_inputs () =
       (In_channel.with_open_bin (Filename.concat dir "scripts/x.sh") In_channel.input_all))
 
 (* The repository's own recipes: every COPY source is a listed input, so the
-   build context carries it and its bytes are in the tag. *)
-let rec find_source_root dir hops =
-  if Sys.file_exists (Filename.concat dir "sandbox-images/ocaml/Dockerfile") then Some dir
-  else if hops = 0 then None
-  else
-    let parent = Filename.dirname dir in
-    if String.equal parent dir then None else find_source_root parent (hops - 1)
+   build context carries it and its bytes are in the tag. Use the shared test
+   dependency's project-root resolver, which honors DUNE_SOURCEROOT and
+   otherwise finds dune-project from the process directory. *)
+let test_project_root_resolver_ignores_partial_tree () =
+  with_source
+    [ "dune-project", "(lang dune 3.0)\n"
+    ; "sandbox-images/ocaml/Dockerfile", "dockerfile"
+    ; "sandbox-images/ocaml/inputs", "masc.opam"
+    ; "masc.opam", "opam metadata"
+    ; "_build/default/sandbox-images/ocaml/Dockerfile", "partial dockerfile"
+    ]
+    (fun source ->
+      let cwd = Sys.getcwd () in
+      let previous_source_root = Sys.getenv_opt "DUNE_SOURCEROOT" in
+      Fun.protect
+        ~finally:(fun () ->
+          Sys.chdir cwd;
+          match previous_source_root with
+          | Some value -> Unix.putenv "DUNE_SOURCEROOT" value
+          | None -> Unix.putenv "DUNE_SOURCEROOT" "")
+        (fun () ->
+          Sys.chdir (Filename.concat source "_build/default");
+          Unix.putenv "DUNE_SOURCEROOT" source;
+          check string "explicit Dune source root" source
+            (Masc_test_deps.find_project_root ())))
 
 let copy_sources dockerfile =
   String.split_on_char '\n' dockerfile
@@ -254,9 +272,10 @@ let copy_sources dockerfile =
   |> List.concat
 
 let test_repository_recipes_list_their_copy_sources () =
-  match find_source_root (Sys.getcwd ()) 8 with
-  | None -> fail ("sandbox-images/ not found above " ^ Sys.getcwd ())
-  | Some source ->
+  let source = Masc_test_deps.find_project_root () in
+  if not (Sys.file_exists (Filename.concat source "sandbox-images")) then
+    fail ("sandbox-images/ not found under " ^ source)
+  else
     List.iter
       (fun name ->
          match V.load ~source ~name with
@@ -292,6 +311,8 @@ let () =
         ; test_case "links to files inside the checkout still load" `Quick
             test_load_keeps_links_to_files_inside_checkout
         ; test_case "write_context places nested inputs" `Quick test_write_context_places_inputs
+        ; test_case "standard project root ignores partial trees" `Quick
+            test_project_root_resolver_ignores_partial_tree
         ; test_case "repository recipes list their COPY sources" `Quick
             test_repository_recipes_list_their_copy_sources
         ] )

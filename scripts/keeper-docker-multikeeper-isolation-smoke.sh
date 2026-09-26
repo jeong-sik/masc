@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-image_tag="${MASC_KEEPER_SANDBOX_DOCKER_IMAGE:-masc-keeper-sandbox:local}"
+image_tag="${1:-masc-keeper-sandbox:local}"
 
 if ! docker image inspect "$image_tag" >/dev/null 2>&1; then
   "$repo_root/scripts/build-keeper-sandbox-image.sh" "$image_tag"

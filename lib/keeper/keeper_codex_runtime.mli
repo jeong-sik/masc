@@ -21,7 +21,6 @@ val run :
   accepts_image_input:bool ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
-  ?official_client_original_turn:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
@@ -46,6 +45,7 @@ val run :
     (invocation:Agent_core.Tool_contract.Invocation.t -> content:string -> unit) ->
   ?on_native_action:(official_turn:int ->
     identity:Runtime_native_tools.action_identity -> tool_name:string -> unit) ->
+  ?on_usage_report:(Keeper_client_usage_report.t -> unit) ->
   event_bus:Agent_core.Event_bus.t option ->
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->
@@ -61,11 +61,17 @@ val run :
     rather than optional: a lane that reports nothing is what wrote every
     turn's input attribution on this lane as zero (masc#32995).
 
+    [on_usage_report] receives the thread's running count from every
+    [thread/tokenUsage/updated] frame of the turn, with the thread it counts,
+    while the turn is still running, so a turn that ends in an error still
+    reports it. A frame is not one response: repeats carry the same count.
+
     It reports [Whole_input_transmitted] only on a [Start], the one branch
     that injects the history into the thread. A [Resume] reports
-    [Held_by_client_session]: MASC injects the current Keeper instructions and
-    developer context before the new turn, but the app-server holds the prior
-    conversation, so its full model input cannot be measured here. *)
+    [Held_by_client_session]: the thread holds the conversation, and MASC sends
+    only the per-turn context in front of the goal
+    ({!Keeper_official_client_host.resume_prompt}), so its full model input
+    cannot be measured here. *)
 
 module For_testing : sig
   val note_transport_uncertainty : Keeper_provider_attempt_effect.t Atomic.t -> unit
@@ -95,18 +101,11 @@ module For_testing : sig
   val recovery_failure_of_client_error :
     Runtime_codex_app_server.error -> Keeper_official_client_session_store.recovery_failure
 
-  (** A Gate continuation's resume that overflowed after a tool effect is
-      [Vendor_session_full Activity_observed]; everything else is
+  (** A Gate continuation's resume that overflowed is [Vendor_session_full],
+      [Activity_observed] when a tool effect came first and
+      [No_activity_observed] otherwise; everything else is
       {!recovery_failure_of_client_error}. *)
   val recovery_failure_of_attempt :
     thread_mode:Runtime_codex_app_server.thread_mode -> gate_continuation:bool ->
     Runtime_codex_app_server.error -> Keeper_official_client_session_store.recovery_failure
-
-  (** Once the shrink sequence has returned an error, a Gate continuation's
-      [Input_rejected Bootstrap_floor_exceeded] recovery on a resumed session is
-      re-recorded [Vendor_session_full No_activity_observed]; anything else is
-      left as it is. *)
-  val conclude_exhausted_gate_resume :
-    gate_continuation:bool -> base_path:string -> keeper_name:string -> runtime_id:string ->
-    unit -> unit
 end

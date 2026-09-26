@@ -75,6 +75,7 @@ type runtime_attempt =
   ; runtime_id : string
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
+  ; usage_report : Runtime_execution.usage_report
   }
 
 type runtime_attempt_candidate =
@@ -961,11 +962,13 @@ let attempt_runtime_candidates
                 | Keeper_runtime_failure_route.No_progress_truncated
                 | Keeper_runtime_failure_route.Refusal_body_not_received
                 | Keeper_runtime_failure_route.Generation_repeated
-                | Keeper_runtime_failure_route.Attempt_rejected
                 | Keeper_runtime_failure_route.Admission
                 | Keeper_runtime_failure_route.Provider_reported_failure
                 | Keeper_runtime_failure_route.Request_refused
-                | Keeper_runtime_failure_route.Provider_wire_defect )
+                | Keeper_runtime_failure_route.Provider_wire_defect
+                (* the input outgrew this window; it says nothing about
+                   the candidate answering a smaller turn (#38984). *)
+                | Keeper_runtime_failure_route.Context_window_exceeded )
             } ->
           ()
         (* A 5xx the provider called permanent failed this candidate without
@@ -1599,11 +1602,11 @@ let run_named
     ?on_request_wire_observation
     ?on_request_attribution
     ?official_client_continuation
-    ?official_client_original_turn
     ?official_task_reference
     ?on_official_client_tool_boundary
     ?on_official_client_result_handoff
     ?on_official_client_native_action
+    ?on_official_client_usage_report
     ?on_model_input_window_observation
     ?on_response_observed_model_input
     ?carried_front_seed
@@ -2138,6 +2141,7 @@ let run_named
              ; lane_attempt_index = idx
              ; checkpoint_owner =
                  Runtime_execution.checkpoint_owner runtime.Runtime.execution
+             ; usage_report = Runtime_execution.usage_report runtime.Runtime.execution
              })
         on_runtime_attempt;
       let error_runtime_id = attempt_runtime_id in
@@ -2284,7 +2288,6 @@ let run_named
             ~terminal_effect_state
             ?official_client_continuation
             ?official_task_reference
-            ?official_client_original_turn
             ?on_official_client_tool_boundary
             ~on_official_client_result_handoff:
               (fun ~invocation ~content ->
@@ -2297,6 +2300,7 @@ let run_named
                  Option.iter
                    (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~identity ~tool_name)
                    on_official_client_native_action)
+            ?on_usage_report:on_official_client_usage_report
             ~event_bus
             ~raw_trace
             ~on_event
@@ -2439,6 +2443,7 @@ let run_named
                  Option.iter
                    (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~identity ~tool_name)
                    on_official_client_native_action)
+            ?on_usage_report:on_official_client_usage_report
             ~event_bus
             ~raw_trace
             ~on_event
@@ -2564,6 +2569,7 @@ let run_named
                  Option.iter
                    (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~identity ~tool_name)
                    on_official_client_native_action)
+            ?on_usage_report:on_official_client_usage_report
             ~event_bus
             ~raw_trace
             ~on_event
@@ -2911,5 +2917,7 @@ module For_testing = struct
 
   let accept_no_progress_should_try_next =
     Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next
+
+  let lane_should_retry = lane_should_retry
 
 end

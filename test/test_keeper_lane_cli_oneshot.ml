@@ -98,10 +98,17 @@ let unreachable_runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
 
 let test_non_official_ids_are_refused_before_the_runner () =
   with_runtime (fun () ->
+    (* An id no runtime.toml binding declares at all: [Runtime.get_runtime_by_id]
+       answers [None], so this is a distinct, correctly-labeled case from a
+       binding that resolves but is not an official client (below). Before
+       runtime.ml validated every exact-output lane's cli_slots at load
+       (#38983-class defect), both cases answered the same
+       "is not an official-client runtime" message, which sent an operator
+       chasing a client-configuration problem that was actually a typo. *)
     (match run ~runner:unreachable_runner ~runtime_id:"nope.not-configured" () with
-     | Error (Cli_oneshot.Not_an_official_client { runtime_id }) ->
+     | Error (Cli_oneshot.Unknown_runtime { runtime_id }) ->
        check string "unknown id is named" "nope.not-configured" runtime_id
-     | Ok _ | Error _ -> fail "an unknown id must be refused as non-official");
+     | Ok _ | Error _ -> fail "an unknown id must be refused as unconfigured");
     match run ~runner:unreachable_runner ~runtime_id:agent_core_runtime () with
     | Error (Cli_oneshot.Not_an_official_client { runtime_id }) ->
       check string "http binding is named" agent_core_runtime runtime_id
@@ -226,7 +233,7 @@ let test_walk_advances_and_keeps_every_failure_in_order () =
         (String.concat "; " (List.map Cli_oneshot.failure_to_string failures))
     | Ok (runtime_id, value) ->
       (match !observed with
-       | [Cli_oneshot.Not_an_official_client { runtime_id = rejected_id }] ->
+       | [Cli_oneshot.Unknown_runtime { runtime_id = rejected_id }] ->
          check string "prior rejection is observed before success" "nope.not-configured" rejected_id
        | _ -> fail "success must retain one prior refusal observation");
       check string "second slot answered" official_client_runtime runtime_id;
@@ -250,7 +257,7 @@ let test_walk_exhaustion_returns_every_failure () =
     | Error [ first; second ] ->
       (match first, second with
        | ( Cli_oneshot.Execution_failed { runtime_id = first_id; cause }
-         , Cli_oneshot.Not_an_official_client { runtime_id = second_id } ) ->
+         , Cli_oneshot.Unknown_runtime { runtime_id = second_id } ) ->
          check string "first failure is the runner's" official_client_runtime first_id;
          check bool "runner cause is kept" true
            (cause = Masc.Fusion_official_client.Setup_failure (Provider_error "quota"));

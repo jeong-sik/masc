@@ -43,6 +43,17 @@ let enter_atom_count_exceptions =
     "Config / Runtime / Clients", 0
   ; (* A scrolling reading, not a row list. *)
     "Config / Tools", 0
+  ; (* Two readings a Keeper detail drills into: [j/k] scrolls the text and
+       there is no row under a cursor for Enter to open. *)
+    "Keepers / Logs", 0
+  ; (* Its rows are calls, read by scrolling; Home and End reach the ends.
+       Nothing opens one further. *)
+    "Keepers / Calls", 0
+  ; (* A cursor with no Enter, the way Clients has one: [b / u] bind and
+       unbind the transport under it, and binding is not opening. It joined
+       this list when the sheet started naming the screen (#39055); until
+       then the screen had no section and this check never asked. *)
+    "Connectors", 0
   ; (* The second is the history overlay's, which [footer_hints_code] drops
        from the panes that have no commits. *)
     "Workspace / Code", 2
@@ -92,6 +103,76 @@ let test_every_surface_answers () =
         "a surface with no bindings has no footer and no help row" true
         (Masc_tui_keys.for_surface surface <> []))
     every_surface
+
+(* Keeper logs reads a tail window and has arms of its own for the keys that
+   move it: [home] and [end] set [log_scroll] and the page dispatcher walks
+   the window. The table named only [j/k], so three keys that answer on this
+   screen were on no footer and in no sheet section. The labels say what the
+   keys do here rather than what they do on a row list: rows are newest
+   first, so Home is now and End the oldest row held. *)
+let test_keeper_logs_names_the_keys_that_move_its_reading () =
+  let hints = Masc_tui_keys.footer_hints (Keepers Keeper_logs) in
+  List.iter
+    (fun needle ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the Keeper logs footer names %S" needle)
+        true
+        (let n = String.length needle and h = String.length hints in
+         let rec scan i =
+           i + n <= h
+           && (String.equal (String.sub hints i n) needle || scan (i + 1))
+         in
+         scan 0))
+    [ "j/k:scroll"; "PgUp/PgDn:page"; "Home/End:now / oldest"; "Left / Esc:back" ]
+
+(* The runtime picker claims its own keys through [Masc_tui_pick_list], and
+   the page and edge pairs were carried inside [j/k]'s help rather than
+   declared. Help prose reaches the sheet and never the footer, so on this
+   screen the two pairs were on no footer at all. *)
+let test_the_runtime_picker_names_its_paging () =
+  let hints = Masc_tui_keys.footer_hints (Keepers Keeper_runtime_pick) in
+  let holds needle =
+    let n = String.length needle and h = String.length hints in
+    let rec scan i =
+      i + n <= h && (String.equal (String.sub hints i n) needle || scan (i + 1))
+    in
+    scan 0
+  in
+  List.iter
+    (fun needle ->
+      Alcotest.(check bool)
+        (Printf.sprintf "the runtime picker footer names %S" needle)
+        true (holds needle))
+    [ "j/k:move"; "PgUp/PgDn:page"; "Enter:choose"; "d:default"; "Esc:back" ]
+
+(* Every screen the ring or a drill-down can put up has keys, and the sheet is
+   where an operator looks them up: [?] opens on the section for the screen
+   they are standing on. The sheet's list of screens was written beside the
+   table's and nothing tied the two together, so four screens had bindings the
+   sheet never built a section for -- Connectors, whose [B], [Ctrl-O] and
+   [b / u] are the least guessable keys in the product, and the three Keeper
+   drill-downs. On those screens [?] opened on Global and named no section for
+   where the reader was. *)
+let test_every_surface_with_keys_has_a_sheet_section () =
+  let missing =
+    List.filter
+      (fun surface ->
+        not
+          (List.exists
+             (fun (_, listed) -> listed = surface)
+             Masc_tui_keys.help_surfaces))
+      every_surface
+  in
+  let name surface =
+    match Masc_tui_keys.for_surface surface with
+    | binding :: _ -> binding.Masc_tui_keys.key
+    | [] -> "(no keys)"
+  in
+  Alcotest.(check int)
+    (Printf.sprintf
+       "every screen with keys has a sheet section (missing, by first key: %s)"
+       (String.concat " | " (List.map name missing)))
+    0 (List.length missing)
 
 let test_no_surface_repeats_a_key () =
   List.iter
@@ -462,20 +543,34 @@ let test_tools_footer_carries_the_keeper_axis () =
     (Masc_tui_keys.footer_hints Tools)
 
 let test_resources_footer_steps_through_detail () =
-  let tail =
-    "  h/l:pane  Ctrl-W:focus  J/K:scroll text  [ / ]:previous / next"
-    ^ "  PgUp/PgDn:page  Home/End:top/bottom  Enter:read  Esc:back"
-  in
+  let panes = "  h/l:pane  Ctrl-W:focus  J/K:scroll text" in
+  (* [[ / ]] reads the resource before or after the open one, and the
+     dispatcher answers it only with the text focused, so the list footer
+     does not offer it. *)
+  let step = "  [ / ]:previous / next" in
+  let tail = "  PgUp/PgDn:page  Home/End:top/bottom  Enter:read  Esc:back" in
   let meta = "  r:reload  Tab:next  q:quit" in
-  check str "list names its search and adjacent detail navigation"
-    ("j/k:move" ^ tail ^ "  /:find  n / N:next / previous match" ^ meta)
+  check str "list names its search and not the adjacent-detail step"
+    ("j/k:move" ^ panes ^ tail ^ "  /:find  n / N:next / previous match" ^ meta)
     (Masc_tui_keys.footer_hints_resources ~detail_focus:false);
   (* The text has no cursor for a match to land on, so it says no [/] --
      the same answer [surface_row_texts] gives for that focus. Both ends
      still answer Home and End, which move the reading. *)
-  check str "the text names scrolling without a row search"
-    ("j/k:scroll text" ^ tail ^ meta)
+  check str "the text names scrolling and the step it answers"
+    ("j/k:scroll text" ^ panes ^ step ^ tail ^ meta)
     (Masc_tui_keys.footer_hints_resources ~detail_focus:true)
+
+(* Changes drew a literal in the renderer, and a literal names a fixed set at
+   every width. It named eight of the fourteen keys this surface answers and
+   left out [Left / Esc] -- the way back to the keeper the surface was opened
+   from -- so the only exit an operator could read was [q], which leaves the
+   terminal. The row search went with it, on a surface that has rows for it. *)
+let test_changes_footer_names_the_way_back_and_the_search () =
+  check str "the Changes footer is the table's"
+    "j/k:move  [ / ]:keeper  PgUp/PgDn:page  Home/End:top/bottom  \
+     Right / Enter:written diff  Left / Esc:back  d:tree diff  v:view code  \
+     o:editor  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Changes)
 
 let test_repositories_footer_offers_code_and_git_changes () =
   check str "repositories names the Code and Git changes paths"
@@ -664,8 +759,11 @@ let test_board_read_footer_carries_the_post_keys () =
   in
   let list = Masc_tui_keys.footer_hints Board in
   List.iter
-    (fun split ->
-      let read = Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~split in
+    (fun (layout : Masc_tui_types.board_read_layout) ->
+      let split = layout = Masc_tui_types.Board_read_split in
+      let read =
+        Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~layout
+      in
       List.iter
         (fun key ->
           Alcotest.(check bool) (Printf.sprintf "read footer (split=%b) names %s" split key) true
@@ -675,10 +773,45 @@ let test_board_read_footer_carries_the_post_keys () =
         [ "v / V:vote"; "c:reply"; "Y:copy link" ];
       Alcotest.(check bool) (Printf.sprintf "the pane keys follow the split (%b)" split) split
         (holds "Ctrl-W:switch" read))
-    [ false; true ];
+    [ Masc_tui_types.Board_read_wide
+    ; Masc_tui_types.Board_read_split
+    ; Masc_tui_types.Board_read_one_pane
+    ];
   Alcotest.(check bool) "j/k names what it moves" true
     (holds "j/k:posts"
-       (Masc_tui_keys.footer_hints_board_read ~focus_posts:true ~split:true))
+       (Masc_tui_keys.footer_hints_board_read ~focus_posts:true
+          ~layout:Masc_tui_types.Board_read_split))
+
+(* [z] goes both ways, so its label is where it goes. Drawn as "wide" in either
+   state it named the screen the operator was already on: live at two hundred
+   columns, a wide detail's footer offered to widen it. Below the split width
+   both layouts draw one pane, so the key crosses to nothing and is not
+   offered at all. *)
+let test_the_wide_key_names_where_it_goes () =
+  let holds needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec scan i = i + n <= h && (String.equal (String.sub haystack i n) needle || scan (i + 1)) in
+    scan 0
+  in
+  let hints layout =
+    Masc_tui_keys.footer_hints_board_read ~focus_posts:false ~layout
+  in
+  let split = hints Masc_tui_types.Board_read_split in
+  let wide = hints Masc_tui_types.Board_read_wide in
+  let one_pane = hints Masc_tui_types.Board_read_one_pane in
+  Alcotest.(check bool) "a split detail offers the wide one" true
+    (holds "z:wide" split);
+  Alcotest.(check bool) "and does not offer the list it already draws" false
+    (holds "z:list" split);
+  Alcotest.(check bool) "a wide detail offers the list back" true
+    (holds "z:list" wide);
+  Alcotest.(check bool) "and does not offer the width it already has" false
+    (holds "z:wide" wide);
+  (* One pane draws the same screen either way, so the key has nowhere to
+     go and the footer keeps the row for a key that does something. *)
+  Alcotest.(check bool) "one pane offers no width key" false (holds "z:" one_pane);
+  Alcotest.(check bool) "one pane offers no pane keys" false (holds "Ctrl-W" one_pane);
+  Alcotest.(check bool) "one pane still reads the post" true (holds "[/]:post" one_pane)
 
 let test_fusion_historical_evidence_is_a_selectable_board_reference () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
@@ -1637,17 +1770,6 @@ let test_the_sheet_says_the_listing_tail_once () =
          | None -> false
          | Some config -> List.mem ("r", "reload") config)
 
-let test_braille_sparkline () =
-  Alcotest.(check string) "empty list gives base line" "⣀⡠⠤⠶"
-    (braille_sparkline []);
-  let spark = braille_sparkline [ 0.0; 0.5; 1.0 ] in
-  Alcotest.(check bool) "sparkline non-empty" true (String.length spark > 0)
-
-let test_fleet_total_cost () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
-  Alcotest.(check (float 0.001)) "fleet cost initially 0" 0.0
-    (fleet_total_cost_usd state)
-
 (* The golden below holds every label, so a deliberate relabelling fails it and
    asks to be looked at -- which is what it is for. The three hops are asserted
    on their own underneath, because losing one of those is not a relabelling: it
@@ -2104,8 +2226,8 @@ let test_without_a_surface_the_order_is_the_strips () =
 (* --- Lanes drill-down: the lane notice, the combined "/" search list, and
    the click geometry of the overview frame. --- *)
 
-let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
-  { Tui_decode.sl_lane_id = lane_id
+let standalone_lane ~(lane : Standalone_lane.t) ~label : Tui_decode.standalone_lane =
+  { Tui_decode.sl_lane = lane
   ; sl_label = label
   ; sl_purpose = None
   ; sl_required = false
@@ -2134,10 +2256,10 @@ let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
 (* The four lanes the projection fixes, in its order
    (server_standalone_lane_projection.ml). *)
 let four_standalone_lanes =
-  [ standalone_lane ~lane_id:"board_attention_exact" ~label:"Board Attention"
-  ; standalone_lane ~lane_id:"hitl_auto_judge" ~label:"HITL Auto Judge"
-  ; standalone_lane ~lane_id:"librarian_exact" ~label:"Librarian"
-  ; standalone_lane ~lane_id:"verifier_exact" ~label:"Verifier"
+  [ standalone_lane ~lane:Standalone_lane.Board_attention ~label:"Board Attention"
+  ; standalone_lane ~lane:Standalone_lane.Hitl_auto_judge ~label:"HITL Auto Judge"
+  ; standalone_lane ~lane:Standalone_lane.Librarian ~label:"Librarian"
+  ; standalone_lane ~lane:Standalone_lane.Verifier ~label:"Verifier"
   ]
 
 let standalone_snapshot lanes : Tui_decode.standalone_lanes_snapshot =
@@ -2235,10 +2357,10 @@ let test_resources_without_a_list_answers_nothing () =
 
 let test_lanes_sub_modes_stay_unsearchable () =
   let state = lanes_state () in
-  state.lanes_mode <- Lanes_run_list "librarian_exact";
+  state.lanes_mode <- Lanes_run_list Standalone_lane.Librarian;
   Alcotest.(check (option (list string))) "run list keeps / closed" None
     (surface_row_texts state Lanes);
-  state.lanes_mode <- Lanes_run_detail ("verifier_exact", "vrf-1");
+  state.lanes_mode <- Lanes_run_detail (Standalone_lane.Verifier, "vrf-1");
   Alcotest.(check (option (list string))) "run detail keeps / closed" None
     (surface_row_texts state Lanes)
 
@@ -2714,6 +2836,13 @@ let test_every_searchable_surface_names_its_search () =
          (List.mem "n / N" keys))
     surfaces_that_answer_the_row_search
 
+(* The Keeper runtime picker's [/] narrows its own list, so its footer says
+   so; it has no [n / N], which is the row search's. *)
+let test_the_runtime_picker_names_its_own_filter () =
+  let keys = surface_keys (Keepers Keeper_runtime_pick) in
+  check Alcotest.bool "Runtime pick names /" true (List.mem "/" keys);
+  check Alcotest.bool "and not the row search's n / N" false (List.mem "n / N" keys)
+
 let test_a_surface_without_rows_offers_no_row_search () =
   (* The other direction: [/] on these reaches the same arm and finds no row
      list, so listing it would advertise a key that does nothing. Board's
@@ -2728,7 +2857,8 @@ let test_a_surface_without_rows_offers_no_row_search () =
     ; "Keeper logs", Keepers Keeper_logs
     ; "Keeper calls", Keepers Keeper_calls
     ; "Chat", Keepers Keeper_message
-    ; "Runtime pick", Keepers Keeper_runtime_pick
+      (* Runtime pick is not here: its [/] is the picker's own filter, not
+         the row search, and its footer names it as that. *)
       (* Both have rows worth searching and still say no "/", for the same
          reason and it is [n]. The key that steps to the next match is the
          key these two give to something else: on Approvals it denies the
@@ -2909,6 +3039,8 @@ let () =
             test_detail_tab_bindings_cover_the_live_keys
         ; Alcotest.test_case "board compose footers are projected" `Quick
             test_board_compose_footers_are_projected
+        ; Alcotest.test_case "the wide key names where it goes" `Quick
+            test_the_wide_key_names_where_it_goes
         ; Alcotest.test_case "key atoms read the table notation" `Quick
             test_key_atoms_read_the_table_notation
         ; Alcotest.test_case "detail tab strip projects the table" `Quick
@@ -2921,6 +3053,12 @@ let () =
             `Quick test_every_enter_atom_exception_names_a_sheet_surface
         ; Alcotest.test_case "every surface answers" `Quick
             test_every_surface_answers
+        ; Alcotest.test_case "Keeper logs names the keys that move it" `Quick
+            test_keeper_logs_names_the_keys_that_move_its_reading
+        ; Alcotest.test_case "the runtime picker names its paging" `Quick
+            test_the_runtime_picker_names_its_paging
+        ; Alcotest.test_case "every surface with keys has a sheet section"
+            `Quick test_every_surface_with_keys_has_a_sheet_section
         ; Alcotest.test_case "no surface repeats a key" `Quick
             test_no_surface_repeats_a_key
         ; Alcotest.test_case "one spelling per key" `Quick
@@ -2958,6 +3096,8 @@ let () =
             `Quick test_workspace_activity_offers_no_row_search
         ; Alcotest.test_case "a surface without rows offers no row search"
             `Quick test_a_surface_without_rows_offers_no_row_search
+        ; Alcotest.test_case "the runtime picker names its own filter"
+            `Quick test_the_runtime_picker_names_its_own_filter
         ] )
     ; ( "two-press arms"
       , [ Alcotest.test_case "a loop turn without input keeps an arm" `Quick
@@ -2972,6 +3112,8 @@ let () =
             test_system_logs_footer_names_browser_controls
         ; Alcotest.test_case "Tools carries the Keeper axis" `Quick
             test_tools_footer_carries_the_keeper_axis
+        ; Alcotest.test_case "Changes names the way back and the search" `Quick
+            test_changes_footer_names_the_way_back_and_the_search
         ; Alcotest.test_case "Resources steps through detail" `Quick
             test_resources_footer_steps_through_detail
         ; Alcotest.test_case "Lanes opens standalone runs" `Quick
@@ -3102,10 +3244,6 @@ let () =
             test_the_question_count_counts_questions
         ; Alcotest.test_case "the questions reading tells unread from none open"
             `Quick test_the_questions_reading_tells_unread_from_none_open
-        ; Alcotest.test_case "braille sparkline renders levels" `Quick
-            test_braille_sparkline
-        ; Alcotest.test_case "fleet total cost sums correctly" `Quick
-            test_fleet_total_cost
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
         ; Alcotest.test_case "the sheet files the fact detail keys" `Quick

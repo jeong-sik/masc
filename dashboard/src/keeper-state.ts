@@ -44,6 +44,19 @@ export const activeKeeperName = signal('')
 export const keeperStatusDetails = signal<Record<string, KeeperStatusDetail>>({})
 export const keeperThreads = signal<Record<string, KeeperConversationEntry[]>>({})
 export const keeperHydrating = signal<Record<string, boolean>>({})
+// First chat-history hydration outcome per keeper. Absent means the first
+// hydration has not settled yet (including the hard-refresh render before the
+// panel's mount effect starts it), so an empty thread is not yet authoritative.
+export type KeeperChatHistoryHydration = 'hydrated' | 'failed'
+export const keeperChatHistoryHydration = signal<Record<string, KeeperChatHistoryHydration>>({})
+
+/** True while no first chat-history hydration has settled for `keeperName`. */
+export function isKeeperChatHistoryPending(keeperName: string): boolean {
+  const name = keeperName.trim()
+  // No keeper selected means no hydration will ever start for it.
+  if (!name) return false
+  return keeperChatHistoryHydration.value[name] === undefined
+}
 export const keeperSending = signal<Record<string, boolean>>({})
 export const keeperProbing = signal<Record<string, boolean>>({})
 export const keeperRecovering = signal<Record<string, boolean>>({})
@@ -95,7 +108,7 @@ export function _resetActiveKeeperStreamsForTests(): void {
 
 // --- Helpers ---
 
-export function setRecordValue<T>(state: typeof keeperThreads | typeof keeperHydrating | typeof keeperSending | typeof keeperProbing | typeof keeperRecovering | typeof keeperActionErrors | typeof keeperStreamStartedAt, key: string, value: T): void {
+export function setRecordValue<T>(state: typeof keeperThreads | typeof keeperHydrating | typeof keeperChatHistoryHydration | typeof keeperSending | typeof keeperProbing | typeof keeperRecovering | typeof keeperActionErrors | typeof keeperStreamStartedAt, key: string, value: T): void {
   state.value = {
     ...state.value,
     [key]: value,

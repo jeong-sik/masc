@@ -213,6 +213,45 @@ describe('resolveActiveIdeRepositoryId', () => {
   })
 })
 
+describe('route-driven workspace fetches', () => {
+  // Opening find, toggling a layer or the rails is a route change. The store
+  // read the whole route, so each of those refetched the tree and file.
+  it('refetches for a view change only, and not off the code tab', async () => {
+    workspaceApiMocks.fetchWorkspaceFile.mockResolvedValue(workspaceFile('let a = 1\n'))
+    focusIdeFile({
+      path: 'lib/a.ml',
+      origin: 'operator',
+      workspace_identity: { kind: 'project' },
+      availability: 'available',
+    })
+    const store = createIdeDataWorkspaceStore()
+    try {
+      await vi.waitFor(() => expect(workspaceApiMocks.fetchWorkspaceFile).toHaveBeenCalled())
+      const fileFetches = () => workspaceApiMocks.fetchWorkspaceFile.mock.calls.length
+      const settled = fileFetches()
+
+      route.value = { tab: 'code', params: { view: 'source', find: 'open' }, postId: null }
+      route.value = { tab: 'code', params: { view: 'source', find: 'open', rails: 'hidden' }, postId: null }
+      await Promise.resolve()
+      expect(fileFetches()).toBe(settled)
+
+      route.value = { tab: 'code', params: { view: 'blame' }, postId: null }
+      await vi.waitFor(() => expect(fileFetches()).toBe(settled + 1))
+
+      // Off the code tab the view resolves back to source, which would be a
+      // refetch on the code tab.
+      route.value = { tab: 'overview', params: {}, postId: null }
+      await Promise.resolve()
+      expect(fileFetches()).toBe(settled + 1)
+
+      route.value = { tab: 'code', params: { view: 'blame' }, postId: null }
+      await vi.waitFor(() => expect(fileFetches()).toBe(settled + 2))
+    } finally {
+      store.dispose()
+    }
+  })
+})
+
 describe('IDE focus workspace provenance', () => {
   it('refreshes workspace and file identity when the selected repo codebase changes', async () => {
     window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')

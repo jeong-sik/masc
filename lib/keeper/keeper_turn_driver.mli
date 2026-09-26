@@ -231,6 +231,7 @@ type runtime_attempt =
   ; runtime_id : string
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
+  ; usage_report : Runtime_execution.usage_report
   }
 (** Exact materialized candidate selected immediately before dispatch.
     [routing_run_id] identifies one lane walk, including reentry into the same
@@ -308,7 +309,6 @@ val run_named :
      transmitted:Keeper_official_client_host.transmitted_model_input ->
      unit) ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
-  ?official_client_original_turn:Keeper_semantic_execution.official_client_checkpoint ->
   ?official_task_reference:Keeper_official_task_reference.t ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
@@ -320,6 +320,8 @@ val run_named :
   ?on_official_client_native_action:
     (runtime_id:string -> official_turn:int ->
      identity:Runtime_native_tools.action_identity -> tool_name:string -> unit) ->
+  ?on_official_client_usage_report:
+    (Keeper_client_usage_report.t -> unit) ->
   ?on_model_input_window_observation:
     (measurement:Turn_record.model_input_measurement
      -> Runtime_model_input_tail_window.window_observation
@@ -599,5 +601,17 @@ module For_testing : sig
     Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t -> bool
 
   val accept_no_progress_should_try_next : Agent_core.Error.t -> bool
+
+  val lane_should_retry :
+    is_last:bool ->
+    allow_retry:bool ->
+    allow_accept_no_progress_retry:bool ->
+    Agent_core.Error.t ->
+    bool
+  (** The lane walk's whole advance decision after an attempt error: every
+      [should_try_next] predicate in its order, then the HTTP fallback through
+      [Runtime_attempt_fsm.should_try_next]. The route/walk agreement test
+      calls this instead of re-typing the predicate chain, so a predicate
+      added to the chain is part of the comparison without a test edit. *)
 
 end

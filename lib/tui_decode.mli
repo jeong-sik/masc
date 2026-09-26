@@ -1583,7 +1583,7 @@ type standalone_lane_jev =
   | Jev_lane_unavailable
 
 type standalone_lane = {
-  sl_lane_id : string;
+  sl_lane : Standalone_lane.t;
   sl_label : string;
   sl_purpose : string option;
       (** Human-readable consumer purpose. Optional so a newer TUI can still
@@ -1640,9 +1640,7 @@ type standalone_lane_answer = {
 }
 
 val standalone_lane_answer : standalone_lane -> standalone_lane_answer
-(** Reads [sl_lane_id] as a {!Standalone_lane.t} once, and every lane has its
-    own pair. An id no lane has gets a pair that names the id, escaped for the
-    terminal. *)
+(** Every lane has its own pair. *)
 val decode_standalone_lanes_snapshot :
   Yojson.Safe.t -> (standalone_lanes_snapshot, string) result
 
@@ -2035,10 +2033,23 @@ type keeper_tool_approval = {
   kta_timeout_sec : float;
 }
 
+(** The slot one Keeper reaches first in one exact-output lane. *)
+type keeper_exact_lane_first = {
+  kel_keeper : string;
+  kel_lane_id : string;
+  kel_slot_id : string;
+  kel_offered : bool;
+      (** [false]: the published lane no longer offers [kel_slot_id], so the
+          lane walks its declared order and this row has no effect. *)
+}
+
 val decode_keeper_gate_settings :
-  Yojson.Safe.t -> ((string * string) list * (string * string) list, string) result
-(** [(keeper, mode) list, (keeper, slot_id) list] from
-    [/api/v1/dashboard/gate/keeper-settings].
+  Yojson.Safe.t ->
+  ((string * string) list * keeper_exact_lane_first list, string) result
+(** [(keeper, mode) list, exact-lane firsts] from
+    [/api/v1/dashboard/gate/keeper-settings] ([modes] and [exact_lanes]). A
+    list whose [*_state] says [unavailable] is an [Error], never an empty
+    list.
 
     Distinct from {!decode_tool_approval_mode_overrides}: that one is the
     in-memory YOLO stance a restart clears, this is what the Gate decides an
@@ -2583,7 +2594,9 @@ type librarian_run_page =
 val decode_librarian_run_page : Yojson.Safe.t -> (librarian_run_page, string) result
 (** One cursor page of exact-lane summaries. [lrp_next] is present only when
     the server says older rows exist, so a client can search through the full
-    retained registry without assuming the newest page contains a Librarian. *)
+    retained registry without assuming the newest page contains a Librarian.
+    Every row is read before the first Librarian is picked, so an unknown lane
+    or a missing [run_id] in any row refuses the whole page. *)
 
 val decode_librarian_actual_input :
   run_id:string -> Yojson.Safe.t -> (string list, string) result
@@ -2685,7 +2698,7 @@ type lane_run_failure =
 type lane_run_summary =
   { lrs_run_id : string
   ; lrs_run_kind : lane_run_kind
-  ; lrs_lane : string
+  ; lrs_lane : Standalone_lane.t
   ; lrs_subject_id : string option
   ; lrs_actor : string
   ; lrs_started_at : float
@@ -2715,7 +2728,7 @@ type lane_run_answer_source =
 type lane_run_detail =
   { lrd_run_id : string
   ; lrd_run_kind : lane_run_kind
-  ; lrd_lane : string
+  ; lrd_lane : Standalone_lane.t
   ; lrd_subject_id : string option
   ; lrd_actor : string
   ; lrd_started_at : float
@@ -2735,7 +2748,7 @@ type lane_run_detail =
   }
 
 val decode_lane_run_page :
-  lane:string -> Yojson.Safe.t -> (lane_run_page, string) result
+  lane:Standalone_lane.t -> Yojson.Safe.t -> (lane_run_page, string) result
 (** One cursor page of standalone-lane summaries. The server filters before
     pagination; the decoder still checks [lane] so a mismatched response
     cannot move the cursor onto another lane. *)
@@ -2948,6 +2961,17 @@ val decode_memory_fact_snapshot :
     its rows -- and any other shape is a decode error, not an empty store.
     [mfs_events_read_error] keeps a sidecar read failure distinct from an empty
     event history. *)
+
+val merge_keeper_memory_facts :
+  now:float ->
+  (string * (memory_fact_snapshot, string) result) list ->
+  memory_fact_snapshot * string option
+(** Merge per-keeper fact listings into the "all keepers" view ([mfs_keeper =
+    "*"]). Each fact is tagged with its keeper. The second value names every
+    keeper that could not be read -- a failed load, or a store answering
+    [Memory_store_read_error] -- as ["N of M keepers not read: ..."]; [None]
+    when all were read. [Memory_store_absent] is a keeper with no memory yet,
+    not a failure. *)
 
 val decode_harness_snapshot :
   Yojson.Safe.t -> (harness_snapshot, string) result

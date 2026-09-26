@@ -51,6 +51,29 @@ let commit_turn_runtime_or_raise ~config ~before ~after =
          (Keeper_owner_registry.command_error_to_string error))
 ;;
 
+(* A turn that ends outside the success path still spent what its attempts
+   read. The readings are resolved against the cursor the turn started from
+   and ride the turn's own commit; the rows follow once that commit holds, so
+   a commit that fails leaves none for the next turn to count again. *)
+let commit_turn_with_attempt_spend ~config ~keeper_turn_id ~before ~attempt_spend after =
+  let resolved, usage_cursor =
+    Keeper_turn_spend.resolve
+      ~cursor:before.Keeper_meta_contract.runtime.usage_cursor
+      ~observed_at:(Time_compat.now ())
+      attempt_spend
+  in
+  let after = Keeper_unified_metrics.with_attempt_spend after ~resolved ~usage_cursor in
+  let committed = commit_turn_runtime_or_raise ~config ~before ~after in
+  Keeper_turn_spend_ledger.write
+    ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path)
+    ~agent_name:before.name
+    ~task_id:(Option.map Keeper_id.Task_id.to_string before.current_task_id)
+    ~trace_id:(Keeper_id.Trace_id.to_string before.runtime.trace_id)
+    ~keeper_turn_id
+    resolved;
+  committed
+;;
+
 let turn_failure_of_error
       ~runtime_id
       ~fallback_boundary
@@ -78,10 +101,12 @@ let execution_boundary_of_turn_failure error =
   | Some
       ( Keeper_internal_error.Incomplete_tool_transcript _
       | Keeper_internal_error.Official_client_recovery_required _
-      | Keeper_internal_error.Gate_replay_repair_required _ ) ->
-    (* These failures are produced by MASC before provider dispatch: transcript
-       validation, a durable session claim, or host replay. The shared carrier
-       must not attribute these local boundaries to AGENT_CORE. *)
+      | Keeper_internal_error.Gate_replay_repair_required _
+      | Keeper_internal_error.Receipt_persistence_failed _ ) ->
+    (* These failures are produced by MASC, not by the provider turn:
+       transcript validation, a durable session claim, host replay, or the
+       execution-receipt write after the turn body succeeded. The shared
+       carrier must not attribute these local boundaries to AGENT_CORE. *)
     Keeper_runtime_failure_route.Masc_execution
   | Some
       ( Keeper_internal_error.Runtime_exhausted _
@@ -97,8 +122,7 @@ let execution_boundary_of_turn_failure error =
          side of this boundary. *)
       | Keeper_internal_error.Host_stopped_turn _
       | Keeper_internal_error.Preempted_before_first_token _
-      | Keeper_internal_error.Runtime_connection_closed _
-      | Keeper_internal_error.Receipt_persistence_failed _ )
+      | Keeper_internal_error.Runtime_connection_closed _ )
   | None ->
     Keeper_runtime_failure_route.Agent_core_execution
 ;;
@@ -154,25 +178,9 @@ let turn_success_of_stop_reason ~meta ~continuation_route = function
   | Runtime_agent.InputRequired _ -> Turn_input_required meta
 ;;
 
-let chat_yield_request ~base_path ~keeper_name =
-  match Keeper_registry.get ~base_path keeper_name with
-  | None -> Error (Printf.sprintf "keeper not registered: %s" keeper_name)
-  | Some _ ->
-    (match Keeper_owner_registry.operation_projection ~base_path ~keeper_name with
-     | Error error -> Error (Keeper_owner_registry.lookup_error_to_string error)
-     | Ok operations ->
-       if operations.Keeper_owner.store_unavailable
-       then (
-         Log.Keeper.warn ~keeper_name
-           "chat readiness unavailable; retaining current autonomous progress";
-         Ok None)
-       else if operations.has_claimable_queued
-       then Ok (Some Keeper_agent_run.{ reason = Operation_queued })
-       else Ok None)
-;;
-
 let autonomous_yield_request ~base_path ~keeper_name =
-  match chat_yield_request ~base_path ~keeper_name with
+  match Keeper_chat_yield_request.request
+          ~turn:Keeper_chat_yield_request.Autonomous ~base_path ~keeper_name with
   | Error _ as error -> error
   | Ok (Some _) as request -> request
   | Ok None ->
@@ -287,7 +295,7 @@ let hitl_replay_yield_request ~base_path ~keeper_name =
         pending
     in
     Option.iter
-      (fun (request : Keeper_agent_run.autonomous_yield_request) ->
+      (fun (request : Keeper_agent_run.yield_request) ->
          match request.reason with
          | Keeper_agent_run.Operation_queued -> ()
          | Keeper_agent_run.Durable_stimulus_waiting summary ->
@@ -358,7 +366,7 @@ let connector_attention_waiting ~base_path ~keeper_name =
       connector_attention_preemption_request ~now:(Time_compat.now ()) pending
     in
     Option.iter
-      (fun (request : Keeper_agent_run.autonomous_yield_request) ->
+      (fun (request : Keeper_agent_run.yield_request) ->
          match request.reason with
          | Keeper_agent_run.Operation_queued -> ()
          | Keeper_agent_run.Durable_stimulus_waiting summary ->
@@ -381,7 +389,8 @@ let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
      terminal. *)
   | Keeper_registry.Woken (_ :: _) ->
     fun () ->
-      (match chat_yield_request ~base_path ~keeper_name with
+      (match Keeper_chat_yield_request.request
+               ~turn:Keeper_chat_yield_request.Autonomous ~base_path ~keeper_name with
        | Error _ as error -> error
        | Ok (Some _) as request -> request
        | Ok None ->
@@ -1098,7 +1107,7 @@ let run_keeper_cycle
                            ; deferred_runtime_lane
                            ; on_deferred_runtime_consumed
                            }
-                           ~autonomous_yield_requested:
+                           ~yield_requested:
                              (autonomous_yield_request_for_wake
                                 ~wake
                                 ~base_path:config.base_path
@@ -1161,11 +1170,13 @@ let run_keeper_cycle
                   [Keeper_agent_run_receipt.finalize] -- a phase-gate or
                   pre-dispatch end -- and then no lane was run or left behind
                   either. *)
-               let degraded_retry_applied, degraded_retry_deferred =
+               let degraded_retry_applied, degraded_retry_deferred, attempt_spend =
                  match turn_state.degraded_retry_settled with
                  | Some (settled : Keeper_agent_run.turn_settlement) ->
-                   settled.degraded_retry_applied, settled.degraded_retry_deferred
-                 | None -> None, None
+                   ( settled.degraded_retry_applied
+                   , settled.degraded_retry_deferred
+                   , settled.spend )
+                 | None -> None, None, []
                in
                (match run_result with
                 | Error err when EC.is_input_required_error err ->
@@ -1182,11 +1193,32 @@ let run_keeper_cycle
                     Keeper_metrics.(to_string Turns)
                     ~labels:[ "keeper", meta.name; "outcome", "input_required" ]
                     ();
+                  (* The attempt wrote under [keeper_turn_id] and may have
+                     run the provider before it asked, so the turn id is
+                     spent and so is what its attempts read. *)
+                  let committed =
+                    commit_turn_with_attempt_spend
+                      ~config
+                      ~keeper_turn_id
+                      ~before:meta
+                      ~attempt_spend
+                      { meta with
+                        updated_at = now_iso ()
+                      ; runtime =
+                          { meta.runtime with
+                            usage =
+                              { meta.runtime.usage with
+                                total_turns = meta.runtime.usage.total_turns + 1
+                              ; last_turn_ts = Time_compat.now ()
+                              }
+                          }
+                      }
+                  in
                   let turn_state =
                     { turn_state with cycle_completed = true }
                   in
                   post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
-                  Ok (Turn_input_required meta), turn_state
+                  Ok (Turn_input_required committed), turn_state
                 | Error err when EC.is_preempted_before_first_token err ->
                   (* The turn yielded to a queued person before its provider
                      produced anything (RFC-0441, #38094). It did no work and
@@ -1223,7 +1255,12 @@ let run_keeper_cycle
                     }
                   in
                   let committed =
-                    commit_turn_runtime_or_raise ~config ~before:meta ~after:updated_meta
+                    commit_turn_with_attempt_spend
+                      ~config
+                      ~keeper_turn_id
+                      ~before:meta
+                      ~attempt_spend
+                      updated_meta
                   in
                   Ok (Turn_skipped committed), turn_state
                 | Error err ->
@@ -1448,10 +1485,12 @@ let run_keeper_cycle
                        | Dispatched_candidate runtime_id -> Some runtime_id
                        | No_candidate_dispatched -> None)
                     ();
-                  commit_turn_runtime_or_raise
+                  commit_turn_with_attempt_spend
                     ~config
+                    ~keeper_turn_id
                     ~before:meta
-                    ~after:updated_meta
+                    ~attempt_spend
+                    updated_meta
                   |> ignore;
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string WriteMetaCycleFailures)

@@ -415,6 +415,37 @@ let test_is_success_http_status_called () =
       n
 ;;
 
+(* RFC machine-spectating-goes-through-lanes stage 3: the spectator reads every
+   machine's screen through the one live route, asked with the counter of the
+   picture it drew. The per-machine frame route is no longer read by the TUI. *)
+let test_the_spectator_reads_the_live_route () =
+  List.iter
+    (fun module_path ->
+      check int (module_path ^ " names no per-machine frame route") 0
+        (Ast_grep.count_string_literals ~module_path ~needle:"/api/v1/msx/frame"
+         + Ast_grep.count_string_literals ~module_path ~needle:"/api/v1/dos/frame"))
+    [ "bin/masc_tui_http.ml"; "bin/masc_tui.ml"; "bin/masc_tui_msx.ml";
+      "bin/masc_tui_machine_live.ml"; "lib/server/server_auth.ml";
+      "lib/server/server_routes_http_routes_msx.ml" ];
+  check bool "the live route is the one the reader asks" true
+    (Ast_grep.count_string_literals ~module_path:"bin/masc_tui_machine_live.ml"
+       ~needle:"/api/v1/lane-addons/live" = 1);
+  check bool "the HTTP read builds its path from the counter it is given" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_http.ml"
+       ~binding_name:"fetch_machine_live" ~callee:"Masc_tui_machine_live.path" = 1
+     && Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_http.ml"
+          ~binding_name:"fetch_machine_live" ~callee:"Masc_tui_machine_live.decode" = 1);
+  List.iter
+    (fun binding_name ->
+      check int (binding_name ^ " reads the live route") 1
+        (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+           ~binding_name ~callee:"Masc_tui_http.fetch_machine_live");
+      check bool (binding_name ^ " asks with the drawn counter") true
+        (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+           ~binding_name ~callee:"Masc_tui_machine_live.since" >= 1))
+    [ "observe_msx_frame"; "launch_dos_live_poll" ]
+;;
+
 let test_http_get_uses_auth_headers () =
   let n =
     Ast_grep.count_calls
@@ -2177,6 +2208,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
          [ "Sys.set_signal"
          ; "apply_raw_mode"
          ; "Frame_presenter.setup"
+         ; "enable_bracketed_paste"
          ; "request_full_repaint"
          ]);
   (* Signal-driven quit and the armed q shortcut are separate exits. Pin
@@ -2495,9 +2527,17 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
     "render_section_fleet" [ "content" ];
   (* The Team block prints Keeper names and task text that producers wrote. *)
-  (* pr_tag_of_keeper looks the name up; it does not draw it. *)
-  check_fields ~non_rendering_calls:[ "pr_tag_of_keeper" ] "overview_team_lines"
+  (* pr_tag_of_keeper and spend_tag_of_keeper look the name up, and
+     spend_tags and spend_total take the names as lookup keys; none of them
+     draws it. *)
+  check_fields
+    ~non_rendering_calls:
+      [ "pr_tag_of_keeper"; "spend_tag_of_keeper"; "spend_tags"; "spend_total" ]
+    "overview_team_lines"
     [ "okp_name"; "id"; "title" ];
+  (* The spend line prints the transport or decode failure it was given. *)
+  check_identifiers ~module_path:"bin/masc_tui_keeper_spend.ml" ~binding:"lines"
+    ~callees:sanitizer_calls [ "err" ];
   (* The pull request lines print repository ids and failure text the server
      relayed from GitHub. *)
   check_fields ~module_path:"bin/masc_tui_repository_pulls.ml" "lines"
@@ -3073,6 +3113,8 @@ let () =
           `Quick
           test_chat_roles_draw_through_the_readable_path;
         test_case "check success status" `Quick test_is_success_http_status_called;
+        test_case "the spectator reads the live route" `Quick
+          test_the_spectator_reads_the_live_route;
         test_case "the attention note starts where its rows do" `Quick
           test_the_attention_note_starts_where_its_rows_do;
         test_case "the lane failure row adds no second verdict" `Quick

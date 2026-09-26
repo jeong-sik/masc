@@ -21,12 +21,12 @@ type rotate_class =
   | No_progress_truncated
   | Refusal_body_not_received
   | Generation_repeated
-  | Attempt_rejected
   | Admission
   | Provider_reported_failure
   | Request_refused
   | Provider_wire_defect
   | Server_error_not_transient
+  | Context_window_exceeded
 
 type fence_disposition =
   | Fenced_effect_attempted
@@ -34,7 +34,6 @@ type fence_disposition =
 
 type terminal_class =
   | Deterministic_request
-  | Context_overflow
   | Session_claim_refused
   | Transcript_refused
   | Contract_violation
@@ -255,29 +254,35 @@ let api_error_refuses_account (api : Llm_provider.Retry.api_error) =
    well. The rich per-class comments from the previous hand-written match
    live on the [rotate_class] / [retry_class] / [terminal_class] type
    declarations and the .mli docstrings. *)
-let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
-  let exhaust_failure = exhaust ~err ~provenance:Agent_core_api_error in
-  let retry_after = api_error_retry_after api in
+let route_of_api_error (api : Llm_provider.Retry.api_error) =
+  (* Intended, not a pass-through: the wait hint belongs to the source
+     constructor and the class belongs to [Candidate_fault], so every
+     [observe_retry] arm forwards whatever hint the constructor carried
+     through this one binding, and no arm picks the hint by class. Today
+     only [RateLimited] carries one; Account ([PaymentRequired]), Capacity,
+     Server, Deadline and Unknown_after_dispatch ([NetworkError]) receive
+     [None]. When a constructor gains a hint in [api_error_retry_after],
+     its arm forwards it without an edit here. *)
+  let observe = observe_retry ?retry_after:(api_error_retry_after api) in
   match Llm_provider.Candidate_fault.of_api_error api with
   | Llm_provider.Candidate_fault.Binding Credential ->
     if api_error_refuses_account api then rotate Authorization_refused else rotate Auth_failed
-  | Llm_provider.Candidate_fault.Binding Account ->
-    observe_retry ?retry_after Hard_quota
+  | Llm_provider.Candidate_fault.Binding Account -> observe Hard_quota
   | Llm_provider.Candidate_fault.Binding Model_absent ->
     rotate Model_unavailable
-  | Llm_provider.Candidate_fault.Binding Rate_limit ->
-    observe_retry ?retry_after Rate_limited
-  | Llm_provider.Candidate_fault.Binding Capacity ->
-    observe_retry Provider_capacity
-  | Llm_provider.Candidate_fault.Binding Server ->
-    observe_retry Server_error
+  | Llm_provider.Candidate_fault.Binding Rate_limit -> observe Rate_limited
+  | Llm_provider.Candidate_fault.Binding Capacity -> observe Provider_capacity
+  | Llm_provider.Candidate_fault.Binding Server -> observe Server_error
   | Llm_provider.Candidate_fault.Binding Window ->
-    exhaust_failure Context_overflow
+    (* The request did not fit this binding's window. A later candidate with
+       a larger window can serve the same turn, and the walk moves on
+       ([Keeper_turn_driver_try_runtime.context_overflow_should_try_next]),
+       so the route rotates with it (#38984). *)
+    rotate Context_window_exceeded
   | Llm_provider.Candidate_fault.Binding Body_limit ->
     rotate Request_refused
   | Llm_provider.Candidate_fault.Binding Admission -> rotate Admission
-  | Llm_provider.Candidate_fault.Binding Deadline ->
-    observe_retry Provider_timeout
+  | Llm_provider.Candidate_fault.Binding Deadline -> observe Provider_timeout
   | Llm_provider.Candidate_fault.Binding Output_dialect ->
     (* No [Retry.api_error] constructor currently maps here. If one is
        added, this arm names the route action for a binding whose declared
@@ -302,7 +307,7 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
        candidate shares. The walk still rotates on it through
        [Runtime_attempt_fsm.should_try_next]; the route answers the same
        observation it did when the match was hand-written. *)
-    observe_retry ?retry_after Network_transient
+    observe Network_transient
 
 let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   let exhaust_failure = exhaust ~err ~provenance:Agent_core_provider_error in
@@ -390,7 +395,7 @@ let route_of_error_family ~boundary (err : Agent_core.Error.t) : route =
     exhaust ~err ~provenance:(provenance_for_boundary boundary provenance) terminal
   in
   match err with
-  | Agent_core.Error.Api api -> route_of_api_error ~err api
+  | Agent_core.Error.Api api -> route_of_api_error api
   | Agent_core.Error.Provider p -> route_of_provider_error ~err p
   | Agent_core.Error.Mcp _ ->
     exhaust_failure Agent_core_mcp_error Protocol_error
@@ -490,7 +495,6 @@ let rotate_class_label = function
   | No_progress_empty -> "no_progress_empty"
   | No_progress_thinking_only -> "no_progress_thinking_only"
   | No_progress_truncated -> "no_progress_truncated"
-  | Attempt_rejected -> "attempt_rejected"
   | Admission -> "admission"
   | Refusal_body_not_received -> "refusal_body_not_received"
   | Generation_repeated -> "generation_repeated"
@@ -498,10 +502,10 @@ let rotate_class_label = function
   | Request_refused -> "request_refused"
   | Provider_wire_defect -> "provider_wire_defect"
   | Server_error_not_transient -> "server_error_not_transient"
+  | Context_window_exceeded -> "context_overflow"
 
 let terminal_class_label = function
   | Deterministic_request -> "deterministic_request"
-  | Context_overflow -> "context_overflow"
   | Session_claim_refused -> "session_claim_refused"
   | Transcript_refused -> "transcript_refused"
   | Contract_violation -> "contract_violation"
@@ -567,13 +571,11 @@ let response_observed = function
      (* the CLI session ended without an answer; a recovery lane resumes it. *)
      | Candidates_filtered
      (* the candidate set emptied before any answer. *)
-     | Attempt_rejected
-     (* the candidate's own policy refused the request before the wire
-        (#34475): no generation. *)
      | Admission
      (* this binding's pre-dispatch admission refused the prepared request
         (RFC-one-slot-fault-judgment-for-every-walk.md §3.2:
-        [InputCapacity]/[Json_parse_error]): no generation. *)
+        [InputCapacity]/[Json_parse_error], or the candidate's own policy
+        refusing it before the wire, #34475): no generation. *)
      | Refusal_body_not_received
      (* the provider refused the request; the body naming why never
         arrived, and a refusal is not an answer. *)
@@ -588,6 +590,8 @@ let response_observed = function
         record. *)
      | Server_error_not_transient
      (* a 5xx: nothing the model said is on record. *)
+     | Context_window_exceeded
+     (* the request did not fit the window: no generation. *)
      | Runtime_exhausted ->
        (* a whole-runtime exhaustion wrapper: it carries no answer. *)
        false
@@ -608,8 +612,6 @@ let response_observed = function
     (match terminal with
      | Deterministic_request
      (* invalid request or input capacity: refused before any generation. *)
-     | Context_overflow
-     (* the request did not fit the window: no generation. *)
      | Session_claim_refused
      (* the durable local session claim was refused before dispatch; the
         model did not see the turn input or its replay evidence. *)
@@ -723,20 +725,20 @@ let route_resumes_on_same_path = function
      | No_progress_truncated
      | Refusal_body_not_received
      | Generation_repeated
-     | Attempt_rejected
      | Admission
      | Provider_reported_failure
      | Request_refused
      | Provider_wire_defect
-     | Server_error_not_transient ->
-       (* the credential, the model, the client session, the request body,
+     | Server_error_not_transient
+     | Context_window_exceeded ->
+       (* the credential, the model, the client session, the request body
+          or its size against this window,
           the provider's wire or its own non-transient answer: the same path
           answers the same way after any wait. *)
        false)
   | Exhausted_visible_alive { terminal; provenance = _; detail = _ } ->
     (match terminal with
      | Deterministic_request
-     | Context_overflow
      | Session_claim_refused
      | Transcript_refused
      | Contract_violation

@@ -115,14 +115,6 @@ let test_api_attempt_rejected_routes_as_rotation () =
           { message = "reasoning effort 'xhigh' is outside the ladder for this model"
           ; reason = Llm_provider.Retry.Attempt_rejected
           }));
-  check_route
-    "attempt rejected is an admission refusal"
-    (KFR.Rotate_now { rotate = KFR.Admission })
-    (Agent_core.Error.Api
-       (Llm_provider.Retry.InvalidRequest
-          { message = "attempt rejected"
-          ; reason = Llm_provider.Retry.Attempt_rejected
-          }));
   List.iter
     (fun (label, reason) ->
       check_route
@@ -487,14 +479,14 @@ let test_response_observed_per_class () =
     ; rotate KFR.Model_unavailable
     ; rotate KFR.Resumable_cli_session
     ; rotate KFR.Candidates_filtered
-    ; rotate KFR.Attempt_rejected
+    ; rotate KFR.Admission
     ; rotate KFR.Refusal_body_not_received
     ; rotate KFR.Runtime_exhausted
     ; rotate KFR.Request_refused
     ; rotate KFR.Provider_wire_defect
     ; rotate KFR.Server_error_not_transient
+    ; rotate KFR.Context_window_exceeded
     ; terminal KFR.Deterministic_request
-    ; terminal KFR.Context_overflow
     ; terminal KFR.Session_claim_refused
     ; terminal KFR.Transcript_refused
     ; terminal KFR.Protocol_error
@@ -682,13 +674,13 @@ let test_route_resumes_on_same_path_per_class () =
     ; "", rotate KFR.No_progress_truncated
     ; "", rotate KFR.Refusal_body_not_received
     ; "", rotate KFR.Generation_repeated
-    ; "", rotate KFR.Attempt_rejected
+    ; "", rotate KFR.Admission
     ; "", rotate KFR.Provider_reported_failure
     ; "", rotate KFR.Request_refused
     ; "", rotate KFR.Provider_wire_defect
     ; "", rotate KFR.Server_error_not_transient
+    ; "", rotate KFR.Context_window_exceeded
     ; "", terminal KFR.Deterministic_request
-    ; "", terminal KFR.Context_overflow
     ; "", terminal KFR.Session_claim_refused
     ; "", terminal KFR.Transcript_refused
     ; "", terminal KFR.Contract_violation
@@ -708,162 +700,129 @@ let test_route_resumes_on_same_path_per_class () =
     ]
 
 (* RFC-one-slot-fault-judgment-for-every-walk.md §4 step 4: the route's
-   Api-error rotate/retry/exhaust classes derive from the closed
-   [Candidate_fault] judgment. One case per [Retry.api_error] constructor:
-   the route class must be the action the walk predicates
-   ([candidate_access_should_try_next], [attempt_rejected_should_try_next],
-   [context_overflow_should_try_next]) read from the same [Candidate_fault]
-   fact. [Rotate_now] agrees with a walk that advances, [Retry_after_observed]
-   with one that rests or rotates through [Runtime_attempt_fsm], and
-   [Exhausted_visible_alive] with one that stops. A new [Retry.api_error]
-   constructor stops [Candidate_fault.of_api_error] from compiling, so this
-   table is forced to grow with it. *)
+   Api-error classes derive from the closed [Candidate_fault] judgment, and
+   the Keeper walk predicates read the same judgment. This test calls both on
+   one fixture per [Retry.api_error] constructor, so a change on either side
+   shows up here instead of in a second hand-typed table. The walk side is the
+   lane's own decision, [Keeper_turn_driver.lane_should_retry] with every
+   gate open (not the last candidate, retry allowed): every predicate in its
+   chain plus the HTTP fallback, so a predicate added to the chain is compared
+   without editing this test.
+   - [Rotate_now] must meet a walk that advances;
+   - [Exhausted_visible_alive] must meet a walk that stops;
+   - [Retry_after_observed] is exempt: the route reports a wait hint, and
+     whether the walk rests on the same candidate or rotates is decided by
+     [Runtime_attempt_fsm.should_try_next], not by the route.
+   No row may disagree. The last one, a typed [ContextOverflow]
+   ([Binding Window]) that advanced the walk while the route stayed terminal,
+   closed with #38984, so the expected list is [[]] and any disagreement fails. Each row also pins its route class so a class
+   cannot move silently. A new [Retry.api_error] constructor stops
+   [Candidate_fault.of_api_error] from compiling, which is where this table
+   has to grow. *)
 let test_candidate_fault_route_agreement () =
+  let walk_advances api =
+    Masc.Keeper_turn_driver.For_testing.lane_should_retry
+      ~is_last:false
+      ~allow_retry:true
+      ~allow_accept_no_progress_retry:true
+      (Agent_core.Error.Api api)
+  in
+  let label_of route = KFR.route_kind_label route ^ ":" ^ KFR.route_class_label route in
   let retry ?retry_after retry_class =
     KFR.Retry_after_observed { retry_class; retry_after }
   in
   let rotate rotate = KFR.Rotate_now { rotate } in
-  let terminal terminal =
-    KFR.Exhausted_visible_alive
-      { terminal; provenance = KFR.Agent_core_api_error; detail = "" }
+  let invalid_request reason = Llm_provider.Retry.InvalidRequest { message = "refused"; reason } in
+  let input_capacity =
+    Llm_provider.Retry.InputCapacity
+      { message = "too large"
+      ; constraint_ =
+          Llm_provider.Serving_constraint.make
+            ~source_kind:Llm_provider.Serving_constraint.Probe
+            ~source_ref:"probe://test"
+            ~checked_at_unix_s:0
+            ~confidence:Llm_provider.Serving_constraint.High
+            ~expires_at_unix_s:200
+            ~accepted_through:100
+            ~rejected_from:101
+            ()
+          |> Result.get_ok
+      ; reason =
+          Llm_provider.Retry.Serving_constraint_rejected
+            (Llm_provider.Serving_constraint.Input_rejected
+               { input_tokens = 101; accepted_through = 100; rejected_from = 101 })
+      }
   in
-  let check label api expected =
-    let actual = route_of_agent_core_error (Agent_core.Error.Api api) in
-    (* Compare only kind and class, not detail: [detail] is display-only and
-       carries the raw error string, which the test does not pin. *)
-    Alcotest.(check string)
-      label
-      (KFR.route_kind_label expected ^ ":" ^ KFR.route_class_label expected)
-      (KFR.route_kind_label actual ^ ":" ^ KFR.route_class_label actual)
+  let rows =
+    [ "AuthError", Llm_provider.Retry.AuthError { message = "401" }, rotate KFR.Auth_failed
+    ; ( "AuthorizationError"
+      , Llm_provider.Retry.AuthorizationError { message = "403" }
+      , rotate KFR.Authorization_refused )
+    ; ( "PaymentRequired"
+      , Llm_provider.Retry.PaymentRequired { message = "402" }
+      , retry KFR.Hard_quota )
+    ; "NotFound", Llm_provider.Retry.NotFound { message = "404" }, rotate KFR.Model_unavailable
+    ; ( "RateLimited with hint"
+      , Llm_provider.Retry.RateLimited { retry_after = Some 30.0; message = "slow down" }
+      , retry ~retry_after:30.0 KFR.Rate_limited )
+    ; ( "RateLimited without hint"
+      , Llm_provider.Retry.RateLimited { retry_after = None; message = "slow down" }
+      , retry KFR.Rate_limited )
+    ; ( "Overloaded"
+      , Llm_provider.Retry.Overloaded { message = "529" }
+      , retry KFR.Provider_capacity )
+    ; ( "ServerError"
+      , Llm_provider.Retry.ServerError { status = 500; message = "5xx" }
+      , retry KFR.Server_error )
+    ; ( "ContextOverflow"
+      , Llm_provider.Retry.ContextOverflow { message = "too large"; limit = None }
+      , rotate KFR.Context_window_exceeded )
+    ; ( "Request_body_refused_by_provider"
+      , invalid_request
+          (Llm_provider.Retry.Request_body_refused_by_provider { status = 413 })
+      , rotate KFR.Request_refused )
+    ; ( "Json_parse_error"
+      , invalid_request Llm_provider.Retry.Json_parse_error
+      , rotate KFR.Admission )
+    ; "InputCapacity", input_capacity, rotate KFR.Admission
+    ; ( "Attempt_rejected"
+      , invalid_request Llm_provider.Retry.Attempt_rejected
+      , rotate KFR.Admission )
+    ; ( "Refusal_body_not_received"
+      , invalid_request Llm_provider.Retry.Refusal_body_not_received
+      , rotate KFR.Refusal_body_not_received )
+    ; ( "Unknown_invalid_request"
+      , invalid_request Llm_provider.Retry.Unknown_invalid_request
+      , rotate KFR.Request_refused )
+    ; ( "Timeout"
+      , Llm_provider.Retry.Timeout { message = "deadline"; phase = None }
+      , retry KFR.Provider_timeout )
+    ; ( "NetworkError"
+      , Llm_provider.Retry.NetworkError
+          { message = "connection reset"; kind = Llm_provider.Http_client.Connection_reset }
+      , retry KFR.Network_transient )
+    ]
   in
-  (* Credential: both walk predicates rotate. The route names a 403 apart,
-     because the Keeper walk reads the provider usage after it. *)
-  check
-    "AuthError rotates as auth_failed"
-    (Llm_provider.Retry.AuthError { message = "401" })
-    (rotate KFR.Auth_failed);
-  check
-    "AuthorizationError rotates as authorization_refused"
-    (Llm_provider.Retry.AuthorizationError { message = "403" })
-    (rotate KFR.Authorization_refused);
-  (* Account: candidate_access rotates, the route rests as a quota. *)
-  check
-    "PaymentRequired rests as hard_quota"
-    (Llm_provider.Retry.PaymentRequired { message = "402" })
-    (retry KFR.Hard_quota);
-  (* Model_absent: candidate_access rotates, the route rotates. *)
-  check
-    "NotFound rotates as model_unavailable"
-    (Llm_provider.Retry.NotFound { message = "404" })
-    (rotate KFR.Model_unavailable);
-  (* Rate_limit: the walk rests; the route observes the throttle. *)
-  check
-    "RateLimited with hint preserves retry_after"
-    (Llm_provider.Retry.RateLimited
-       { retry_after = Some 30.0; message = "slow down" })
-    (retry ~retry_after:30.0 KFR.Rate_limited);
-  check
-    "RateLimited without hint observes rate_limited"
-    (Llm_provider.Retry.RateLimited
-       { retry_after = None; message = "slow down" })
-    (retry KFR.Rate_limited);
-  (* Capacity: the walk rests; the route observes the capacity refusal. *)
-  check
-    "Overloaded observes provider_capacity"
-    (Llm_provider.Retry.Overloaded { message = "529" })
-    (retry KFR.Provider_capacity);
-  (* Server: the walk rests; the route observes the server failure. *)
-  check
-    "ServerError observes server_error"
-    (Llm_provider.Retry.ServerError { status = 500; message = "5xx" })
-    (retry KFR.Server_error);
-  (* Window: context_overflow_should_try_next rotates, but the route's typed
-     terminal [Context_overflow] predates the RFC walk and stays — the walk
-     and the route disagree here, which is an explicit typed-boundary
-     mismatch, not scheduling authority. *)
-  check
-    "ContextOverflow exhausts as context_overflow"
-    (Llm_provider.Retry.ContextOverflow { message = "too large"; limit = None })
-    (terminal KFR.Context_overflow);
-  (* Body_limit: attempt_rejected_should_try_next rotates; the route names
-     that rotation [Request_refused]. *)
-  check
-    "Request_body_refused_by_provider rotates as request_refused"
-    (Llm_provider.Retry.InvalidRequest
-       { message = "too large"
-       ; reason = Llm_provider.Retry.Request_body_refused_by_provider { status = 413 }
-       })
-    (rotate KFR.Request_refused);
-  (* Admission: attempt_rejected_should_try_next rotates; the route rotates.
-     [Json_parse_error] and [InputCapacity] are both [Binding Admission]
-     (RFC §3.2). [Attempt_rejected] is also [Binding Admission] in
-     [Candidate_fault], so the route names it [Admission]. *)
-  check
-    "Json_parse_error rotates as admission"
-    (Llm_provider.Retry.InvalidRequest
-       { message = "bad json"; reason = Llm_provider.Retry.Json_parse_error })
-    (rotate KFR.Admission);
-  check
-    "InputCapacity rotates as admission"
-    (Llm_provider.Retry.InputCapacity
-       { message = "too large"
-       ; constraint_ =
-           Llm_provider.Serving_constraint.make
-             ~source_kind:Llm_provider.Serving_constraint.Probe
-             ~source_ref:"probe://test"
-             ~checked_at_unix_s:0
-             ~confidence:Llm_provider.Serving_constraint.High
-             ~expires_at_unix_s:200
-             ~accepted_through:100
-             ~rejected_from:101
-             ()
-           |> Result.get_ok
-       ; reason =
-           Llm_provider.Retry.Serving_constraint_rejected
-             (Llm_provider.Serving_constraint.Input_rejected
-                { input_tokens = 101
-                ; accepted_through = 100
-                ; rejected_from = 101
-                })
-       })
-    (rotate KFR.Admission);
-  check
-    "Attempt_rejected rotates as admission"
-    (Llm_provider.Retry.InvalidRequest
-       { message = "rejected"; reason = Llm_provider.Retry.Attempt_rejected })
-    (rotate KFR.Admission);
-  (* Refusal_unread: attempt_rejected_should_try_next rotates; the route
-     rotates as [Refusal_body_not_received]. *)
-  check
-    "Refusal_body_not_received rotates as refusal_body_not_received"
-    (Llm_provider.Retry.InvalidRequest
-       { message = "refused"
-       ; reason = Llm_provider.Retry.Refusal_body_not_received
-       })
-    (rotate KFR.Refusal_body_not_received);
-  (* Unattributed: attempt_rejected_should_try_next rotates; the route
-     rotates as [Request_refused]. *)
-  check
-    "Unknown_invalid_request rotates as request_refused"
-    (Llm_provider.Retry.InvalidRequest
-       { message = "bad request"; reason = Llm_provider.Retry.Unknown_invalid_request })
-    (rotate KFR.Request_refused);
-  (* Deadline: candidate_access rests; the route observes the timeout. *)
-  check
-    "Timeout observes provider_timeout"
-    (Llm_provider.Retry.Timeout
-       { message = "deadline"; phase = None })
-    (retry KFR.Provider_timeout);
-  (* Unknown_after_dispatch: the walk rotates through
-     [Runtime_attempt_fsm.should_try_next]; the route observes a transient
-     network failure. *)
-  check
-    "NetworkError observes network_transient"
-    (Llm_provider.Retry.NetworkError
-       { message = "connection reset"
-       ; kind = Llm_provider.Http_client.Connection_reset
-       })
-    (retry KFR.Network_transient)
+  let disagreements =
+    List.filter_map
+      (fun (label, api, expected) ->
+         let actual = route_of_agent_core_error (Agent_core.Error.Api api) in
+         (* Kind and class only: [detail] is display-only and carries the raw
+            error string, which the test does not pin. *)
+         Alcotest.(check string) (label ^ " route class") (label_of expected) (label_of actual);
+         let agrees =
+           match actual with
+           | KFR.Retry_after_observed _ -> true
+           | KFR.Rotate_now _ -> walk_advances api
+           | KFR.Exhausted_visible_alive _ -> not (walk_advances api)
+         in
+         if agrees then None else Some label)
+      rows
+  in
+  Alcotest.(check (list string))
+    "route and walk agree on every row"
+    []
+    disagreements
 
 let () =
   Alcotest.run
@@ -891,7 +850,7 @@ let () =
         ] )
     ; ( "candidate_fault_agreement"
       , [ Alcotest.test_case
-            "route class agrees with Candidate_fault walk"
+            "route class agrees with the walk predicates"
             `Quick
             test_candidate_fault_route_agreement
         ] )

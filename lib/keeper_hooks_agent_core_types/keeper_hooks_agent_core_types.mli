@@ -46,6 +46,7 @@ val key_name : string
 val key_active : string
 val key_tool_call_count : string
 val key_cache_read_tokens : string
+val key_cache_creation_tokens : string
 val key_cache_n : string
 val key_prompt_n : string
 

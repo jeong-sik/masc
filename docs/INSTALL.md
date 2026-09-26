@@ -147,7 +147,7 @@ To install one specific release instead of the latest one, take that tag's
 installer and pin it. Check that the tag is listed on GitHub Releases first:
 
 ```bash
-TAG=v0.38.0
+TAG=v0.40.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -482,7 +482,7 @@ and is not offered as a verified alternative.
 git, less, procps, Python 3, and ripgrep. **Node, pnpm, OCaml, compilers, an
 SSH client, and model CLIs are not included.** To build and test a project,
 prepare an image with the toolchain it needs and name it in the Keeper's
-`sandbox_image`. The repository's `Dockerfile.keeper-sandbox` is a separate
+`sandbox_image`. The repository's `sandbox-images/ocaml/Dockerfile` is a separate
 image for MASC development, not part of a regular install.
 
 ## Initial prompts, skills, and Keepers

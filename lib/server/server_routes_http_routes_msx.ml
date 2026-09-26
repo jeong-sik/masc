@@ -1,15 +1,8 @@
-(** HTTP route for the workspace MSX machine's frame (RFC-0439 §3.7).
+(** HTTP routes for the workspace MSX machine (RFC-0439 §3.7, RFC #38695).
 
-    [GET /api/v1/msx/frame] returns the current native-resolution screen of
-    the one machine [Msx_lane] holds, so the TUI can draw what a keeper is
-    playing. Read-only and public-read like the dashboard reads the TUI polls;
-    it exposes a game screen, not workspace state. When no machine is loaded
-    the answer is [{loaded:false}] — an explicit "nothing to watch", never a
-    silent blank.
-
-    The frame is 256x192x3 raw RGB, base64 in the JSON and gzip-compressed on
-    the wire by [json_value ~compress]. The spectator polls a few times a
-    second; the machine itself only advances when a tool call steps it.
+    Spectating the machine goes through
+    [GET /api/v1/lane-addons/live?source_kind=msx_capture] (RFC #38695);
+    the legacy per-machine frame route has been removed.
 
     [POST /api/v1/msx/press] lets the human at the TUI press keys on the same
     machine a keeper is playing (RFC-0439 §3.3): [{keys:[..], hold_frames?,
@@ -231,8 +224,6 @@ let recent_players_of ~now entries =
   |> List.sort (fun (_, a) (_, b) -> compare b a)
 ;;
 
-let recent_players ~now = recent_players_of ~now (Msx_lane.ledger ())
-
 (* The lane owns immutable RGB snapshots and reuses their identity until a
    machine mutation. Cache only pixel encoding: clock and player metadata must
    remain live. One entry bounds retained memory across load/restore/eject.
@@ -250,32 +241,6 @@ let frame_rgb_base64 rgb =
         let encoded = Base64.encode_string rgb in
         encoded_pixels := Some (rgb, encoded);
         encoded)
-
-let frame_json () : Yojson.Safe.t =
-  match Msx_lane.frame () with
-  | None -> `Assoc [ ("loaded", `Bool false) ]
-  | Some f ->
-    `Assoc
-      [ ("loaded", `Bool true)
-      ; ("number", `Int f.Msx_lane.number)
-      ; ("width", `Int f.Msx_lane.width)
-      ; ("height", `Int f.Msx_lane.height)
-      ; ("mode", `String f.Msx_lane.mode)
-      ; ( "cartridge"
-        , match f.Msx_lane.cartridge with Some c -> `String c | None -> `Null )
-      ; ("disk", match f.Msx_lane.disk with Some d -> `String d | None -> `Null)
-      ; ("rgb_base64", `String (frame_rgb_base64 f.Msx_lane.rgb))
-      ; ( "players"
-        , `List
-            (List.map
-               (fun (who, last) ->
-                 `Assoc
-                   [ ("who", `String who)
-                   ; ("last_frame", `Int last)
-                   ; ("frames_ago", `Int (f.Msx_lane.number - last))
-                   ])
-               (recent_players ~now:f.Msx_lane.number)) )
-      ]
 ;;
 
 (* Frames per poll-cadence tick (RFC-0439 §3.2). At the TUI's ~3 Hz spectator
@@ -343,7 +308,8 @@ let prepare_tick_pixels (frame : Msx_lane.frame) =
       Mutex.protect tick_pixels_mutex (fun () -> tick_pixels := Some pixels);
       pixels
 
-let tick_frame_json pixel_response (frame : Msx_lane.frame) entries =
+let tick_frame_json pixel_response (frame : Msx_lane.frame) entries
+    (mark : Msx_lane.change_mark) =
   let pixel_fields = match pixel_response with
     | Full_frame -> ["rgb_base64", `String (frame_rgb_base64 frame.rgb)]
     | Retained_pixels known ->
@@ -357,6 +323,7 @@ let tick_frame_json pixel_response (frame : Msx_lane.frame) entries =
            else fields @ ["rgb_base64", `String pixels.encoded])] in
   `Assoc
     (["loaded", `Bool true; "number", `Int frame.number;
+      "change_count", `Int mark.count; "incarnation", `String mark.incarnation;
       "width", `Int frame.width; "height", `Int frame.height;
       "mode", `String frame.mode;
       "cartridge", (match frame.cartridge with Some s -> `String s | None -> `Null);
@@ -378,7 +345,8 @@ let tick_response ~body =
        domain. The worker owns both emulation and the frame's serialization. *)
     match Executor_pool_ref.submit_strict (fun () ->
       match Msx_lane.step_frame ~frames with
-      | Ok (frame, entries) -> `OK, tick_frame_json pixel_response frame entries
+      | Ok (frame, entries, mark) ->
+        `OK, tick_frame_json pixel_response frame entries mark
       | Error Msx_lane.No_machine -> `OK, `Assoc ["loaded", `Bool false]
       | Error (Msx_lane.Invalid_request _ as e) ->
         error `Bad_request (Msx_lane.error_to_string e)
@@ -477,11 +445,6 @@ let handle_checkpoint ~config ~restore request reqd =
 
 let add_routes router =
   router
-  |> Http.Router.get "/api/v1/msx/frame" (fun request reqd ->
-       with_public_read
-         (fun _state req reqd ->
-           Http.Response.json_value_on_cpu ~compress:true ~request:req (frame_json ()) reqd)
-         request reqd)
   |> Http.Router.get "/api/v1/msx/carts" (fun request reqd ->
        with_public_read
          (fun state req reqd ->

@@ -64,7 +64,6 @@ vi.mock('../../api/board', () => ({
       emoji: '🚀',
       count: 1,
       reacted: true,
-      has_reacted: true,
       recent_user_ids: ['dashboard-reviewer'],
     }],
   }),
@@ -631,7 +630,7 @@ describe('PostDetail', () => {
           {
             model: 'ollama_cloud.minimax-m3',
             status: 'failed',
-            reason: "Provider 'unknown' timeout phase=http_operation: HTTP operation exceeded wall-clock timeout",
+            reason_detail: "Provider 'unknown' timeout phase=http_operation: HTTP operation exceeded wall-clock timeout",
           },
         ],
         judge: {

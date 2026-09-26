@@ -21,7 +21,7 @@ let with_executor answer f =
 
 let served = Lane.Answered (`Assoc [ "ok", `Bool true; "data", `Assoc [ "tabId", `Int 3 ] ])
 let args fields = `Assoc fields
-let instruct fields = Tools.handle_instruct_with_phase ~tool_name:"masc_browser_instruct" ~start_time:0.0 (args fields)
+let instruct fields = Tools.handle_instruct_with_phase ~tool_name:"masc_browser_instruct" ~start_time:(Tool_timing.start ()) (args fields)
 let verb_name = function [ verb ] -> Lane.verb_to_string verb | verbs -> Printf.sprintf "%d verbs" (List.length verbs)
 
 let test_extension_deadline_precedes_lane_deadline () =

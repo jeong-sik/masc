@@ -1742,12 +1742,19 @@ let test_health_json_surfaces_rejected_skill_config () =
              ~base_path:dir
              (Runtime.config_observation
                 ~path:(Filename.concat config_root "runtime.toml")
-                "[skills]\nresource-read-max-bytes = 65536\n")
+                (* A source that leaves its anchor is rejected whatever the
+                   read bound is; #39285 made an over-bound
+                   resource-read-max-bytes an ignored key. *)
+                "[skills]\n[[skills.sources]]\nid = \"rejected-source\"\n\
+                 anchor = \"base-path\"\npath = \"../escape\"\naccess = \"read-only\"\n")
          with
          | Ok _ -> ()
          | Error error ->
            Alcotest.fail (Server_skill_snapshot_runtime.error_to_string error));
         let rejected = Server_routes_http_runtime.make_health_json request in
+        Alcotest.(check string) "the fixture is a rejected [skills] table"
+          "rejected"
+          (skill_catalog rejected |> member "config_state" |> to_string);
         Alcotest.(check string) "a rejected [skills] table degrades the section"
           "degraded"
           (skill_catalog rejected |> member "status" |> to_string);

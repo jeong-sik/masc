@@ -238,10 +238,12 @@ let write_backlog_result ?after_commit config backlog =
   let backlog =
     { backlog with version = backlog.version + 1; last_updated = now_iso () }
   in
-  let json = backlog_to_yojson backlog in
   let primary_path = backlog_path config in
   let recovery_path = backlog_recovery_path config in
-  let encoded = encode_json_pretty json in
+  let encoded =
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      encode_json_pretty (backlog_to_yojson backlog))
+  in
   match write_encoded_json_commit_result config primary_path encoded with
   | Error msg -> Error msg
   | Ok primary_commit ->
@@ -328,10 +330,12 @@ let write_backlog_result ?after_commit config backlog =
     primary read. This repairs copies after a committed deletion's failed
     settlement, including on an already-absent Task retry. *)
 let repair_backlog_copies_result config backlog =
-  let json = backlog_to_yojson backlog in
   let primary_path = backlog_path config in
   let recovery_path = backlog_recovery_path config in
-  let encoded = encode_json_pretty json in
+  let encoded =
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      encode_json_pretty (backlog_to_yojson backlog))
+  in
   let write path = match write_encoded_json_commit_result config path encoded with
     | Error message -> Error message
     | Ok {mirror_error=Some message} -> Error message

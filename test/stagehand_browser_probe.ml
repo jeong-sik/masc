@@ -155,10 +155,15 @@ let () =
   Eio.Switch.run
   @@ fun sw ->
   let config = { Masc.Browser_configuration.chrome; extension; profile = None } in
+  let opened_session = ref None in
   let backend =
     Backend.create ~sw ~clock
       ~open_session:(fun ~sw ~headless ~log ->
-        Server_browser_stagehand.open_ ~sw ~env ~masc_root ~config ~headless ~model:scripted_model ~log)
+        Server_browser_stagehand.open_ ~sw ~env ~masc_root ~config ~headless ~model:scripted_model ~log
+        |> Result.map (fun (opened, init) ->
+          opened_session := Some (Server_browser_stagehand.session opened);
+          Eio.Switch.on_release sw (fun () -> opened_session := None);
+          opened, init))
       ~call:(fun stagehand -> Session.call (Server_browser_stagehand.session stagehand))
       ~pid:Server_browser_stagehand.pid ~log:Server_browser_stagehand.log_event
   in
@@ -183,6 +188,28 @@ let () =
     | Some title when String.equal title expected -> Ok observed
     | Some title -> Error (Printf.sprintf "tab %d has title %s, expected %s" tab_id title expected)
     | None -> Error "the tab has no title"
+  in
+  (* Wheel dispatch acknowledges native input before the asynchronous scroll
+     event necessarily runs. Observe the fixture's document-owned promise via
+     Stagehand's existing awaitPromise evaluation, without generating another
+     event or moving the page. The script's existing PROBE_TIMEOUT_S bounds a
+     missing event; no polling interval or additional deadline is introduced. *)
+  let await_fixture_scroll () =
+    let* opened = Option.to_result ~none:"the fixture session is not open" !opened_session in
+    let call request =
+      Session.call opened request
+      |> Result.map_error Masc.Browser_stagehand_executor.failure_message
+    in
+    let* active = call Wire.Context_active_page in
+    let* page_id = Option.to_result ~none:"the fixture has no active page"
+        (string_at [ "page_id" ] active) in
+    let expression = Printf.sprintf
+      "(() => { if (location.href !== %s || !(window.stagehandProbeScrollObserved instanceof Promise)) throw new Error('scroll fixture changed'); return window.stagehandProbeScrollObserved; })()"
+      (Yojson.Safe.to_string (`String fixture_url)) in
+    let* reply = call (Wire.Page_evaluate { page_id; expression }) in
+    match Yojson.Safe.Util.member "value" reply with
+    | `Bool true -> Ok ()
+    | _ -> Error "the fixture scroll event did not acknowledge its observation"
   in
   record "open" (session "open");
   let pid =
@@ -288,6 +315,7 @@ let () =
           ; "x", `Int 0; "y", `Int 240
           ]
         in
+        let* () = await_fixture_scroll () in
         let* _ = title_at tab_id "scrolled" in
         let* data = read "text" in
         match string_at [ "text" ] data with

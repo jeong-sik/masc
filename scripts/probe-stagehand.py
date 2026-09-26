@@ -56,7 +56,19 @@ FIXTURE = b"""<!doctype html><html><head><meta charset="utf-8"><title>Stagehand 
   onpointerup="if(document.body.dataset.dragStarted==='yes'){document.title='dragged';document.getElementById('drag-result').textContent='Drag completed'}">Drop target</div>
 <p id="scroll-result">Scroll not observed</p><p id="drag-result">Drag not observed</p>
 <div style="height:220vh" aria-hidden="true"></div>
-<script>addEventListener('scroll',()=>{if(scrollY>30){document.title='scrolled';document.getElementById('scroll-result').textContent='Scroll confirmed'}})</script>
+<script>
+// Registered before input: the probe observes this promise without producing
+// a wheel event or changing scroll position. Resolve only after the page saw it.
+window.stagehandProbeScrollObserved = new Promise(resolve => {
+  addEventListener('scroll', () => {
+    if (scrollY > 30) {
+      document.title = 'scrolled';
+      document.getElementById('scroll-result').textContent = 'Scroll confirmed';
+      resolve(true);
+    }
+  });
+});
+</script>
 </body></html>"""
 
 

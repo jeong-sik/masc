@@ -565,9 +565,10 @@ let test_reply_read_before_the_cancelled_caller_resumes () =
 ;;
 
 (* Compose the real Session cancellation handler with the backend's retirement
-   policy. Queue the departing caller before the reader: the caller wakes the
-   watcher, then the reader wakes Session, so the watcher cancels the waiting
-   Session before Session resumes with its already-readable reply. *)
+   policy. The backend watcher must cancel Session's still-suspended await
+   before the reader resolves it; resolving first wins Promise.await outright
+   and never enters its cancellation handler. Then the reader must run before
+   the cancelled Session resumes, so that handler finds the settled reply. *)
 let test_backend_keeps_a_reply_settled_during_cancellation ~answered =
   with_session ~configure:(fun fake -> fake.act <- Hold)
   @@ fun h -> h.with_backend @@ fun backend stopped ->
@@ -589,8 +590,15 @@ let test_backend_keeps_a_reply_settled_during_cancellation ~answered =
        h.settle ();
        check bool "actual Session is awaiting the act reply" true (Option.is_some h.fake.held_act);
        Eio.Switch.fail caller Exit;
-       if answered then to_host h.fake
-         (rpc_result (Option.get h.fake.held_act) (obj ["success", `Bool true])))
+       if answered then (
+         (* On the mock scheduler's FIFO queue the departing caller runs once
+            and queues the backend watcher behind this test's continuation.
+            Protect only this scheduling step: [caller] is already cancelled.
+            Enqueueing the reader next leaves watcher -> reader -> cancelled
+            Session, rather than letting the reader win the await normally. *)
+         Eio.Cancel.protect Eio.Fiber.yield;
+         to_host h.fake
+           (rpc_result (Option.get h.fake.held_act) (obj ["success", `Bool true]))))
    with Exit -> ());
   h.settle ();
   if answered then (

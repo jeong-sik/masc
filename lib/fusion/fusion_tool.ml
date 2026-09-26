@@ -1,9 +1,9 @@
-let status_result ~tool_name ~class_ ~ok fields =
+let status_result ~tool_name ~start_time ~class_ ~ok fields =
   let data = `Assoc (("ok", `Bool ok) :: fields) in
   if ok
-  then Tool_result.make_ok ~tool_name ~start_time:0.0 ~data ()
+  then Tool_result.make_ok ~tool_name ~start_time ~data ()
   else
-    Tool_result.make_err ~tool_name ~class_ ~start_time:0.0 ~data
+    Tool_result.make_err ~tool_name ~class_ ~start_time ~data
       (Yojson.Safe.to_string data)
 ;;
 
@@ -118,8 +118,8 @@ let route_failure_fields route = function
     ]
 ;;
 
-let denied_result ~tool_name reason =
-  status_result ~tool_name ~class_:Tool_result.Workflow_rejection ~ok:false
+let denied_result ~tool_name ~start_time reason =
+  status_result ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection ~ok:false
     ([ "status", `String "denied"
      ; "reason", `String (Fusion_types.deny_reason_label reason)
      ]
@@ -128,19 +128,20 @@ let denied_result ~tool_name reason =
         | Some detail -> [ "error", `String detail ]))
 ;;
 
-let submit_error_result ~tool_name error =
+let submit_error_result ~tool_name ~start_time error =
   let data =
     match Keeper_msg_async.submit_error_to_json error with
     | `Assoc fields -> `Assoc (("ok", `Bool false) :: fields)
     | data -> `Assoc [ "ok", `Bool false; "error", data ]
   in
   Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure
-    ~start_time:0.0 ~data (Yojson.Safe.to_string data)
+    ~start_time ~data (Yojson.Safe.to_string data)
 ;;
 
 let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
       ~policy ?source_context ?continuation_channel ?(registry = Fusion_run_registry.global ()) ~args () =
   let tool_name = "masc_fusion" in
+  let start_time = Tool_timing.start () in
   let prompt = match source_context with
     | Some context -> Fusion_request_context.render context
     | None -> Tool_args.get_string args "prompt" "" in
@@ -155,15 +156,15 @@ let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
     | Some context -> Fusion_request_context.keeper context = keeper
         && Fusion_request_context.question context = Tool_args.get_string args "prompt" "" in
   if not context_matches then
-    status_result ~tool_name ~class_:Tool_result.Workflow_rejection ~ok:false
+    status_result ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection ~ok:false
       ["error", `String "source context differs from the calling Keeper or question"]
   else
   match String.equal (String.trim prompt) "", Fusion_types.fusion_topology_of_string topology_wire with
   | true, _ ->
-    status_result ~tool_name ~class_:Tool_result.Workflow_rejection ~ok:false
+    status_result ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection ~ok:false
       [ "error", `String "prompt is required" ]
   | false, None ->
-    status_result ~tool_name ~class_:Tool_result.Workflow_rejection ~ok:false
+    status_result ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection ~ok:false
       [ ( "error"
         , `String
             (Printf.sprintf "topology must be one of: %s"
@@ -172,19 +173,19 @@ let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
   | false, Some topology ->
     (match roster_of_args args with
      | Error message ->
-       status_result ~tool_name ~class_:Tool_result.Workflow_rejection ~ok:false
+       status_result ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection ~ok:false
          [ "error", `String message ]
      | Ok roster ->
     match Fusion_policy.decide_top_level ~policy ~preset with
-     | Error reason -> denied_result ~tool_name reason
+     | Error reason -> denied_result ~tool_name ~start_time reason
      | Ok () ->
     match first_unresolved_route roster with
      | Some (route, failure) ->
-       status_result ~tool_name ~class_:Tool_result.Workflow_rejection ~ok:false
+       status_result ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection ~ok:false
          (route_failure_fields route failure)
      | None ->
     match Fusion_policy.effective_preset ~policy ~preset ~roster with
-     | Error reason -> denied_result ~tool_name reason
+     | Error reason -> denied_result ~tool_name ~start_time reason
      | Ok _ ->
        let channel =
          Option.value continuation_channel
@@ -231,11 +232,11 @@ let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
                ~prompt ~preset ~web_tools ~roster request_sw)
            ()
        with
-       | Error error -> submit_error_result ~tool_name error
+       | Error error -> submit_error_result ~tool_name ~start_time error
        | Ok { Keeper_msg_async.request_id; acceptance = Durably_accepted } ->
          Log.Keeper.info ~keeper_name:keeper
            "fusion run %s durably accepted (async delivery)" request_id;
-         status_result ~tool_name ~class_:Tool_result.Runtime_failure ~ok:true
+         status_result ~tool_name ~start_time ~class_:Tool_result.Runtime_failure ~ok:true
            [ "status", `String "fusion_started"
            ; "run_id", `String request_id
            ; ( "delivery"
@@ -249,7 +250,7 @@ let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
          Log.Keeper.warn ~keeper_name:keeper
            "fusion run %s acceptance uncertain, reconciliation required: %s"
            request_id reason;
-         status_result ~tool_name ~class_:Tool_result.Runtime_failure ~ok:false
+         status_result ~tool_name ~start_time ~class_:Tool_result.Runtime_failure ~ok:false
            [ "error", `String "fusion_acceptance_uncertain"
            ; "run_id", `String request_id
            ; "reconciliation_required", `Bool true

@@ -106,7 +106,7 @@ let test_the_projection_is_asked_on_every_call () =
       (fun _execution_env _input ->
          Tool_result.make_ok
            ~tool_name:"lane_probe"
-           ~start_time:0.0
+           ~start_time:(Tool_timing.start ())
            ~data:(`String "ok")
            ())
   in

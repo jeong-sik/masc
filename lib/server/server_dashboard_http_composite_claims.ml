@@ -459,9 +459,8 @@ let composite_execution_blocked execution =
   || (match json_string "terminal_reason_code" execution with
       | Some terminal ->
         not (String.equal terminal "")
-        && not
-             (Keeper_turn_disposition.is_success
-                (Keeper_turn_disposition.of_wire terminal))
+        && Keeper_turn_disposition.requires_attention
+             (Keeper_turn_disposition.of_wire terminal)
       | None -> false)
   ||
   match json_member "error" execution with

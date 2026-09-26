@@ -67,6 +67,27 @@ let () =
     (match D.of_wire input_required_terminal with
      | D.Input_required -> true
      | _ -> false);
+  List.iter (fun stop ->
+    let disposition = Receipt.disposition_of_stop_reason stop in
+    check "yield is a typed continuation checkpoint" (D.equal disposition D.Checkpoint);
+    check "yield never asks for human input" (D.next_action disposition = None);
+    check "yield does not require operator attention" (not (D.requires_attention disposition));
+    check "checkpoint is not completed success" (not (D.is_success disposition));
+    check "receipt serializes canonical checkpoint"
+      (Receipt.receipt_terminal_reason_code_of_stop_reason stop = "checkpoint");
+    check "original detailed stop reason remains independent"
+      (Receipt.stop_reason_to_string stop <> "checkpoint"))
+    [ Runtime_agent.Yielded_to_operation_queued { turns_used = 53 }
+    ; Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 }
+    ; Runtime_agent.Yielded_after_repeated_tool_call
+        { turns_used = 3; tool_name = "fixture"; repeated_count = 3 }
+    ; Runtime_agent.Yielded_after_repeated_assistant_text { turns_used = 4; repeated_count = 4 }
+    ];
+  check "real input retains attention"
+    (D.requires_attention (Receipt.disposition_of_stop_reason input_required_stop));
+  check "only real input retains human action"
+    (D.next_action (Receipt.disposition_of_stop_reason input_required_stop)
+     = Some "provide_input_or_decline");
   match !failures with
   | [] -> print_endline "test_keeper_execution_receipt_observation_wire: OK"
   | xs ->

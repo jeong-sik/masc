@@ -427,7 +427,8 @@ let for_surface = function
       @ listing_meta
   | Keepers Keeper_message ->
       [ b Navigate "Left" "roster" ~help:"focus the visible Keeper roster"
-      ; b Navigate "Right / Esc" "chat" ~help:"return focus to the chat composer"
+      ; b Navigate "Right" "chat"
+          ~help:"roster focused: return focus to the chat composer"
       ; (* One key, two focuses: the roster when it holds focus, the history
            when the chat is scrolled back. Listed once so the table keeps the
            one-key-one-row contract (#33236). *)
@@ -464,7 +465,15 @@ let for_surface = function
       ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
       ; b Act "Ctrl-Q" "leave"
           ~help:"leave with a turn running, without interrupting it"
-      ; b Act "Esc" "back" ~help:"back; during a turn, interrupt it"
+      ; (* One key, two focuses, listed once for the reason [Up / Down] above
+           is: the dispatcher reads Esc from the roster as the way back to the
+           composer and from the chat as the way off the screen. Spelled as two
+           bindings, both reached the same row and the footer drew
+           [Right / Esc:chat] and [Esc:back] side by side. *)
+        b Act "Esc" "chat / back"
+          ~help:
+            "roster focused: return to the composer; chat focused: back, and \
+             during a turn interrupt it"
       ]
   | Keepers Keeper_runtime_pick ->
       (* The picker claims its own keys through [Masc_tui_pick_list], page and
@@ -506,7 +515,9 @@ let for_surface = function
           ~help:"add a candidate to this lane's walk order"
       ; b Act "s" "providers"
           ~help:"edit declared HTTP and CLI provider slots: a adds, x drops, \
-                 J/K reorders within each group, Esc closes; HTTP runs before CLI"
+                 J/K reorders within each group, d opens the selected HTTP \
+                 slot's provider table where exact-body-timeout-s lives, Esc \
+                 closes; HTTP runs before CLI"
         (* The lane detail spent four rows on the file's shape and on this
            key, the same two sentences under every lane. They are here, where
            the key is. *)
@@ -1119,7 +1130,12 @@ let footer_hints_code ~pane =
     match pane with
     | Code_tree -> overlay_keys @ file_keys
     | Code_file -> overlay_keys
-    | Code_overlay -> file_keys
+    | Code_overlay ->
+        (* [Right / Enter] names the tree and file panes' open. With the
+           history overlay up, the one arm behind Right and Enter takes the
+           overlay's branch instead, so the row drew two items holding the
+           Enter atom and called both of them "open". *)
+        "Right / Enter" :: file_keys
   in
   for_surface Code
   |> List.filter (fun b -> not (List.mem b.key dead))

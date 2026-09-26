@@ -92,8 +92,15 @@ def run(executable: str) -> None:
             raise AssertionError(f"Connector list lost the failure cause: {frame!r}")
         if frame.count(b"load failed") != 1:
             raise AssertionError(f"Connector title repeated the body verdict: {frame!r}")
-        # A palette visit to Connectors returns to the Keeper list.
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        # Connectors Esc returns to the selected Keeper detail, so a Keeper
+        # has to be selected before Esc. The roster read is asynchronous and
+        # nothing above waits for it: pressed before it lands, Esc opens a
+        # detail that says "No keeper selected.", and the roster that lands
+        # next sends the view back to the Keeper list. The composer row reads
+        # "› to <keeper>" only once the roster is read and its cursor names a
+        # Keeper; until then it reads "› no keeper selected".
+        h.wait_for_output(process, fd, output, b"\xe2\x80\xba to alpha", start=0, timeout=5)
+        h.send_and_wait(process, fd, output, b"\x1b", b"Current Work")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

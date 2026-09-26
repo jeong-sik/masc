@@ -5316,6 +5316,11 @@ let render_exact_lane_provider_editor (state : state) editor =
   box_line_styled buf cols ~style:(Theme.info ())
     (Printf.sprintf "  %s · HTTP first, then CLI after HTTP exhaustion"
        (Terminal_text.single_line lane));
+  (match state.lanes_action_error with
+   | None -> ()
+   | Some detail ->
+     box_line_styled buf cols ~style:(Theme.warn ())
+       ("  " ^ Keeper_chat.terminal_safe_text detail));
   (match state.runtime_lane_notice with
    | None -> ()
    | Some notice ->
@@ -5400,7 +5405,7 @@ let render_exact_lane_provider_editor (state : state) editor =
               then box_line_selected buf cols line
               else box_line buf cols line));
      box_line_styled buf cols ~style:(Theme.recede ())
-       "  j/k select · a add · x drop · J/K reorder within group · Esc close");
+       "  j/k select · a add · x drop · J/K reorder within group · d HTTP provider · Esc close");
   for _ = 1 to max 0 (rows - count_frame_lines buf - 2) do
     box_empty buf cols
   done;
@@ -7658,7 +7663,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
          can still truncate, which is why the absence reading stays. *)
       match state.keeper_schedules_error, state.keeper_schedules with
       | Some (keeper_name, err), _ when String.equal keeper_name k.k_name ->
-          [ (Theme.bad ()) ^ "  schedules unavailable: "
+          [ (Theme.bad ()) ^ "  "
             ^ Terminal_text.single_line err ^ Ansi.reset ]
       | _, Some (keeper_name, snapshot) when String.equal keeper_name k.k_name ->
           let rows = snapshot.scs_rows in
@@ -8890,7 +8895,10 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
     verification_detail_lines ~width request
     @ verification_evidence_lines state ~width request.Masc.Tui_decode.vr_task_id
   in
-  let content_height = max 1 (rows - 6) in
+  (* Top, title, divider, bottom and footer: the five rows the Task Review
+     sidebar beside this pane also subtracts. Six left this pane one body row
+     short of the sidebar it is drawn next to. *)
+  let content_height = max 1 (rows - framed_chrome_rows) in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.verification_detail_scroll max_scroll) in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
@@ -8900,7 +8908,12 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
     | None -> box_empty buf cols
   done;
   box_bottom buf cols;
-  scroll, Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)
+  (* A position, not a key: handed to the footer's position slot as the
+     Verdicts detail does, so narrow widths drop key items before it. *)
+  ( scroll
+  , Some
+      (Masc_tui_scroll.window_text ~scroll ~height:content_height
+         (List.length lines)) )
 ;;
 
 (* The queue stays beside the request under review. Opening one used to hide the others, and the others
@@ -8951,11 +8964,8 @@ let render_verification_detail (state : state) request =
     end
   in
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Printf.sprintf "%s  %s"
-            (Masc_tui_keys.footer_hints ~detail_open:true state.view)
-            position));
+    (footer_line state ~max_cells:cols ?position
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:true state.view));
   finish_surface state
     ~clamped:(Verification_detail_scroll scroll)
     ~surface_key:"verification-detail" ~rows:terminal_rows ~cols buf
@@ -14912,7 +14922,17 @@ let render_presets (state : state) =
   let combined_height = max 2 (rows - 9 - error_rows - entry_rows) in
   let list_height = min 8 (max 1 (combined_height / 3)) in
   let detail_height = max 1 (combined_height - list_height) in
-  let first = if cursor < list_height then 0 else cursor - list_height + 1 in
+  (* A failed refresh keeps the last snapshot on screen under its failed
+     note, and that note is a row of the list block. Presets filled the
+     whole block beside it, one row past [list_height]: everything below
+     moved down a row, and on a short terminal the footer was the row the
+     frame cut. *)
+  let preset_rows =
+    match state.presets_error with
+    | Some _ -> max 0 (list_height - 1)
+    | None -> list_height
+  in
+  let first = if cursor < preset_rows then 0 else cursor - preset_rows + 1 in
   (match state.presets_error with
    | Some detail ->
      box_line buf cols
@@ -14937,7 +14957,7 @@ let render_presets (state : state) =
          (Masc_tui_preset_text.pane_empty_line snapshot));
   List.iteri
     (fun index (manifest : Tui_decode.preset_manifest) ->
-      if index >= first && index < first + list_height then begin
+      if index >= first && index < first + preset_rows then begin
         incr drawn;
         let armed =
           state.preset_restore_armed = Some manifest.Tui_decode.pm_name

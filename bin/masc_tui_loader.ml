@@ -1095,9 +1095,9 @@ let load_schedule_wake_history ~(host : string) ~(port : int)
     decoder reads it and the pane keeps its truncation reading. *)
 let load_schedules_for_target ~(host : string) ~(port : int)
     ~(payload_target : string) : (schedule_snapshot, string) result =
-  match fetch_schedules_for_target ~host ~port ~payload_target with
-  | Error err -> Error ("keeper schedule load failed: " ^ err)
-  | Ok json -> decode_schedule_snapshot json
+  Result.bind
+    (fetch_schedules_for_target ~host ~port ~payload_target)
+    decode_schedule_snapshot
 
 (** Load board post list from /api/v1/board *)
 let load_board_list ~(host : string) ~(port : int)

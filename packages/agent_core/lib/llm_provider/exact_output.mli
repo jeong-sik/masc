@@ -921,6 +921,24 @@ val flow_execution_terminal_kind
     typed advancement rule used between candidates; callers never recover the
     distinction from an error string or receipt phase. *)
 
+type flow_binding_standing =
+  | Every_binding_resting
+  | Not_every_binding_resting
+
+val flow_execution_binding_standing
+  :  'callback_error flow_execution_error
+  -> flow_binding_standing
+(** [Every_binding_resting] only when the flow ended on an execution failure
+    and every candidate it visited failed on a refusal of its binding's
+    standing: a rate limit or quota spent ([Rate_limited], [Hard_quota]), a
+    full capacity ([Overloaded], [Capacity_exhausted]), or an account that
+    cannot pay ([Payment_required]). Such a refusal says nothing about the
+    input, so the same input can be served once a binding frees. A visit
+    rejected before dispatch, an input-sized or input-shaped refusal, an
+    unusable answer or an unknown effect makes it [Not_every_binding_resting].
+    This is narrower than {!flow_execution_terminal_kind}, which admits any
+    failure a successor might serve. *)
+
 (** {2 Error renderers}
 
     One-line text renderings of the exact-output error family, for logs and

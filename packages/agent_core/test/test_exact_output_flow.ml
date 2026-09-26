@@ -3716,8 +3716,50 @@ let test_context_window_400_prose_advances_to_successor () =
       "HTTP 400 prose is an advanceable terminal"
       true
       (EO.flow_execution_terminal_kind (EO.Flow_exact_execution_failed failure)
-       = EO.Advanceable_candidates_exhausted)
+       = EO.Advanceable_candidates_exhausted);
+    (* A successor may take it, but the refusal may be about this input, so
+       it is not a binding at rest. *)
+    check
+      bool
+      "HTTP 400 prose is not a binding at rest"
+      true
+      (EO.flow_execution_binding_standing (EO.Flow_exact_execution_failed failure)
+       = EO.Not_every_binding_resting)
   | Error _ -> fail "HTTP 400 prose did not advance"
+;;
+
+(* Every candidate refused with 429: each binding's quota is spent and none
+   refused the input, so the same input can be served once one frees. *)
+let test_every_candidate_rate_limited_is_every_binding_resting () =
+  let response = {|{"error":{"code":"1302","message":"Rate limit reached for requests"}}|} in
+  let result, posts =
+    with_server ~status:(Cohttp.Code.status_of_code 429) ~response
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"resting-a" ~base_url ~native:true ~json:true ()
+      ; catalog_entry ~id:"resting-b" ~base_url ~native:true ~json:true ()
+      ]
+    @@ fun snapshot ->
+    execute_with_accepting_test_validator
+      ~clock
+      ~net
+      ~on_measurement_terminal:(fun _ -> Ok ())
+      ~before_measurement_dispatch:(fun _ -> Ok ())
+      ~before_dispatch:(fun _ -> Ok ())
+      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      (start_flow (frozen_flow snapshot [ "resting-a"; "resting-b" ]))
+  in
+  check int "both rate-limited candidates were dispatched" 2 posts;
+  match result with
+  | Error (EO.Flow_exact_execution_failed failure) ->
+    check
+      bool
+      "every visited binding is at rest"
+      true
+      (EO.flow_execution_binding_standing (EO.Flow_exact_execution_failed failure)
+       = EO.Every_binding_resting)
+  | Ok _ -> fail "a rate-limited lane produced an answer"
+  | Error _ -> fail "a rate-limited lane did not end on its last candidate's refusal"
 ;;
 
 let test_serialized_request_413_refusal_advances_once_to_successor () =
@@ -3816,6 +3858,46 @@ let test_context_overflow_refusal_advances_once_to_successor () =
       | EO.Provider_response_refused
           { http_status = 400; refusal = EO.Context_overflow; _ } -> ()
       | _ -> fail "a GLM window refusal lost its typed context-overflow cause")
+    ()
+;;
+
+(* GLM sends a spent quota as a 429 whose body names the quota code (1308:
+   the 5-hour usage limit). The sync and stream seams read it as [Hard_quota]
+   (#38742); this path read only the window code, so the same body was a rate
+   limit here. On main the cause is [Provider_response_refused {429;
+   Rate_limited}] and the assertion below fails. *)
+let test_glm_quota_code_is_a_hard_quota_that_advances_once () =
+  assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"glm"
+    ~label:"glm-quota"
+    ~first_response:
+      ( Cohttp.Code.status_of_code 429
+      , {|{"error":{"code":"1308","message":"Usage limit reached for 5 hour. Your limit will reset at 2026-09-26 18:00:00"}}|}
+      )
+    ~assert_cause:(function
+      | EO.Completion_failed
+          { error =
+              Http_client.ProviderFailure
+                { kind = Http_client.Hard_quota { retry_after = None }; _ }
+          ; _
+          } -> ()
+      | _ -> fail "a GLM quota code lost its typed hard-quota cause")
+    ()
+;;
+
+(* A GLM rate-limit code at the same status stays a rate limit: only the
+   quota and window codes are promoted. *)
+let test_glm_rate_limit_code_stays_a_rate_limit () =
+  assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"glm"
+    ~label:"glm-rate-limit"
+    ~first_response:
+      ( Cohttp.Code.status_of_code 429
+      , {|{"error":{"code":"1302","message":"Rate limit reached for requests"}}|} )
+    ~assert_cause:(function
+      | EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited; _ } ->
+        ()
+      | _ -> fail "a GLM rate-limit code lost its typed rate-limit cause")
     ()
 ;;
 
@@ -4914,6 +4996,10 @@ let () =
             `Quick
             test_serialized_request_413_refusal_advances_once_to_successor
         ; test_case
+            "every candidate rate limited is every binding resting"
+            `Quick
+            test_every_candidate_rate_limited_is_every_binding_resting
+        ; test_case
             "HTTP 429 rate limit advances with one dispatch per candidate"
             `Quick
             test_rate_limited_429_refusal_advances_once_to_successor
@@ -4927,6 +5013,10 @@ let () =
             test_payment_required_402_refusal_advances_once_to_successor
         ; test_case "a window refusal advances once to the declared successor" `Quick
             test_context_overflow_refusal_advances_once_to_successor
+        ; test_case "a GLM quota code is a hard quota that advances once" `Quick
+            test_glm_quota_code_is_a_hard_quota_that_advances_once
+        ; test_case "a GLM rate-limit code stays a rate limit" `Quick
+            test_glm_rate_limit_code_stays_a_rate_limit
         ; test_case "an empty answer stopped at the window advances once" `Quick
             test_window_stopped_empty_answer_advances_once_to_successor
         ; test_case "HTTP 500 advances once to the declared successor" `Quick

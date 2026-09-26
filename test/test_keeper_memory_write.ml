@@ -738,16 +738,17 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     |> fun execution -> execution.Masc.Keeper_tool_execution.raw_output
     |> Yojson.Safe.from_string
   in
-  let render () =
+  let render_at ~now =
     Masc.Keeper_memory_os_recall.render_if_enabled
       ~config
       ~meta
       ~keepers_dir
       ~keeper_id:meta.name
-      ~now:(Time_compat.now ())
+      ~now
       ()
     |> Option.value ~default:""
   in
+  let render () = render_at ~now:(Time_compat.now ()) in
   write_source "region=us-west-1\n";
   let first_write = write_claim "The deployment region is us-west-1." in
   Alcotest.(check string)
@@ -791,6 +792,10 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     "source digest is visible"
     true
     (contains ~needle:"source_sha256=sha256:" first_prompt);
+  Alcotest.(check string)
+    "unchanged memory renders the same block at a later clock"
+    first_prompt
+    (render_at ~now:(Time_compat.now () +. 3600.0));
   write_source "region=eu-west-1\n";
   let invalidated_prompt = render () in
   Alcotest.(check bool)
@@ -801,6 +806,10 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     "typed invalidation persists in recall"
     true
     (contains ~needle:"reason=source_changed" invalidated_prompt);
+  Alcotest.(check string)
+    "a retained invalidation renders the same block at a later clock"
+    invalidated_prompt
+    (render_at ~now:(Time_compat.now () +. 3600.0));
   let stale_search =
     Runtime.keeper_memory_search_json
       ~config
@@ -1637,6 +1646,7 @@ let test_corrupt_snapshot_is_a_dependency_failure () =
       ~meta
       ~ctx_work:(empty_ctx ())
       ~args:(`Assoc [ "query", `String "anything"; "source", `String "current" ])
+      ()
   in
   check_failure_class "corrupt store" Tool_result.Dependency_unavailable execution;
   let response =
@@ -2549,6 +2559,7 @@ let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
       ~meta
       ~ctx_work:(empty_ctx ())
       ~args:(`Assoc [ "query", `String "deploy"; "source", `String source ])
+      ()
   in
   let absorbed = search "absorbed" in
   check_failure_class "absorbed alone" Tool_result.Dependency_unavailable absorbed;
@@ -2718,7 +2729,8 @@ let string_list_field key json =
 
 (* RFC-0418: every ordinary fact a search returns is a retrieval of that fact,
    recorded with the query and the turn. A miss records nothing. The
-   decision-log line names the same ids, so the two records agree. *)
+   decision-log line names the same ids, so the two records agree, and counts
+   the facts searched, so a miss can be told from an empty store. *)
 let test_search_records_a_retrieval_per_ordinary_match () =
   with_temp_dir
   @@ fun base_path ->
@@ -2779,7 +2791,17 @@ let test_search_records_a_retrieval_per_ordinary_match () =
     Alcotest.(check (list string))
       "the miss line names none"
       []
-      (string_list_field "matched_memory_ids" miss_line)
+      (string_list_field "matched_memory_ids" miss_line);
+    Alcotest.(check int) "the miss line counts no match" 0
+      (int_field "match_count" miss_line);
+    Alcotest.(check (list int))
+      "both lines count the current facts searched"
+      [ 3; 3 ]
+      [ int_field "durable_candidates" hit_line; int_field "durable_candidates" miss_line ];
+    Alcotest.(check bool) "the miss read every store" false
+      (match json_field "read_errors" miss_line with
+       | `Bool value -> value
+       | _ -> Alcotest.fail "expected bool field: read_errors")
   | _ -> Alcotest.fail "expected one decision-log line per search"
 ;;
 

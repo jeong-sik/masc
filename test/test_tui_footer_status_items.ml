@@ -49,7 +49,8 @@ let test_action_text_is_not_dropped_as_a_key () =
     List.iter (fun key ->
       check_bool ("the diagnosis preserves " ^ key) true
         (contains ~needle:(Masc_tui_theme.strip_sgr key) row))
-      (Masc_tui_footer.undroppable_keys (Masc_tui_keys.footer_hints view));
+      (Masc_tui_footer.undroppable_keys
+         (Masc_tui_footer.prepare_hints (Masc_tui_keys.footer_hints view)));
     check_bool "a clipped diagnosis is explicit" true (contains ~needle:"…" row);
     check_string "rendering keeps the complete outcome in state" action_message
       (Option.get state.last_action |> fst);
@@ -61,7 +62,8 @@ let test_action_text_is_not_dropped_as_a_key () =
     List.iter (fun key ->
       check_bool ("the narrow diagnosis preserves " ^ key) true
         (contains ~needle:(Masc_tui_theme.strip_sgr key) narrow))
-      (Masc_tui_footer.undroppable_keys (Masc_tui_keys.footer_hints view));
+      (Masc_tui_footer.undroppable_keys
+         (Masc_tui_footer.prepare_hints (Masc_tui_keys.footer_hints view)));
     check_bool "a narrower row marks the cut" true (contains ~needle:"…" narrow);
     check_at_most_cells "narrow action footer remains bounded" 60 (String.trim narrow))
     [ Masc_tui_types.Tools; Masc_tui_types.Repositories ]
@@ -150,7 +152,8 @@ let test_long_action_without_conflicts_keeps_pinned_keys () =
       List.iter (fun key ->
         check_bool ("long action preserves " ^ key) true
           (contains ~needle:(Masc_tui_theme.strip_sgr key) rendered))
-        (Masc_tui_footer.undroppable_keys (Masc_tui_keys.footer_hints view));
+        (Masc_tui_footer.undroppable_keys
+         (Masc_tui_footer.prepare_hints (Masc_tui_keys.footer_hints view)));
       check_bool "action is visibly clipped" true (contains ~needle:"…" rendered);
       check_bool "the outcome is still shown" true (contains ~needle:"xxxx" rendered);
       check_at_most_cells "pinned keys and action stay bounded" width (String.trim rendered))

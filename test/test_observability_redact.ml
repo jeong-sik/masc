@@ -34,6 +34,19 @@ let test_ordered_passes_cover_a_bearer_value_holding_a_url_credential () =
   Alcotest.(check string) "text with no secret is returned as is" plain
     (Observability_redact.redact_text plain)
 
+let test_raw_named_credentials_are_masked () =
+  List.iter (fun (input, expected) ->
+    Alcotest.(check string) "shared named credential masking" expected
+      (Observability_redact.redact_text input))
+    [ "Authorization: bearer ya29.synthetic", "Authorization: [REDACTED]"
+    ; "authorization: Basic opaque-value", "authorization: [REDACTED]"
+    ; "token=opaque-fixture-value", "token=[REDACTED]"
+    ; "VENDOR_API_KEY=opaque-fixture-value", "VENDOR_API_KEY=[REDACTED]"
+    ; "password=\"value with spaces\" status=failed", "password=[REDACTED] status=failed"
+    ; "token=\"unfinished value", "token=[REDACTED]"
+    ; "token count unavailable", "token count unavailable"
+    ]
+
 let test_max_length_enforced () =
   let long_input = String.make 500 'x' in
   let preview = Observability_redact.redact_preview long_input in
@@ -443,6 +456,8 @@ let () =
           Alcotest.test_case "preview_json_strings keeps utf8 valid" `Quick
             test_preview_json_strings_keeps_utf8_valid;
           Alcotest.test_case "short input unchanged" `Quick test_short_input_unchanged;
+          Alcotest.test_case "raw named credentials are masked" `Quick
+            test_raw_named_credentials_are_masked;
           Alcotest.test_case "redact_text does not truncate" `Quick
             test_redact_text_does_not_truncate;
           Alcotest.test_case "redact_json_strings redacts sensitive keys"

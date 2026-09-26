@@ -1065,6 +1065,12 @@ let test_stderr_tail_redacts_sensitive_lines () =
   check string "empty diagnostic" "" (redacted "");
   check string "Authorization keeps context and masks its value"
     "Authorization: [REDACTED]" (redacted "Authorization: Bearer ya29.aBcDeFgHi");
+  check string "lowercase bearer is masked"
+    "Authorization: [REDACTED]" (redacted "Authorization: bearer ya29.synthetic");
+  check string "opaque token assignment is masked"
+    "token=[REDACTED]" (redacted "token=opaque-fixture-value");
+  check string "opaque environment API key is masked"
+    "VENDOR_API_KEY=[REDACTED]" (redacted "VENDOR_API_KEY=opaque-fixture-value");
   check string "standalone GitHub token is masked"
     "failure: [REDACTED]" (redacted "failure: ghp_syntheticfixture");
   check string "standalone API key is masked"

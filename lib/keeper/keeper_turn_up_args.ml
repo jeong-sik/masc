@@ -287,7 +287,7 @@ let validate_no_unknown_keys args =
    real one shells out to [docker info] and inspects the image; the test
    suite has no daemon and passes its own. *)
 let docker_preflight_default ~image ~timeout_sec () =
-  Keeper_sandbox_runtime.docker_preflight ~image ~timeout_sec ()
+  Keeper_sandbox_runtime.docker_preflight ~image:(Ok image) ~timeout_sec ()
 ;;
 
 let parse_microvm_backend_patch args =
@@ -491,32 +491,58 @@ let parse
               docker_container_probe_failed, purged eleven minutes later.
               [None] from the preflight is the master switch being off, which
               keeps the operator's opt-out. *)
-           (* The preflight checks the build the host catalog has for the
-              name; a name with none fails its image check with the
-              catalog's reason. *)
-           let image =
-             Keeper_sandbox_image_resolver.resolve_in_workspace
-               ~base_path:ctx.config.base_path
-               ~store:Keeper_sandbox_image_catalog.Docker_daemon
-               profile_defaults.sandbox_image
-             |> Result.map (fun pinned -> pinned.Keeper_sandbox_image_catalog.reference)
-             |> Result.map_error Keeper_sandbox_image_resolver.error_to_string
-           in
+           (* The name is resolved before the preflight and whatever its
+              switch says: a name this host cannot resolve is refused where
+              the keeper boots ([Keeper_sandbox_image_admission]), and keeper
+              up starts the keeper it creates. The preflight then probes the
+              build the name resolved to. *)
            (match
-              docker_preflight
-                ~image
-                ~timeout_sec:
-                  (Env_config_sandbox.Shell_timeout.timeout_sec
-                     ~bucket:Env_config_sandbox.Shell_timeout.Io
-                     ())
-                ()
+              Keeper_sandbox_image_resolver.resolve_in_workspace
+                ~base_path:ctx.config.base_path
+                ~store:Keeper_sandbox_image_catalog.Docker_daemon
+                profile_defaults.sandbox_image
             with
-            | None -> None
-            | Some preflight ->
-              Keeper_sandbox_runtime.docker_preflight_rejection preflight)
+            | Error error ->
+              Some (Keeper_turn_sandbox_runtime.image_unresolved_message error)
+            | Ok pinned ->
+              (match
+                 docker_preflight
+                   ~image:pinned.Keeper_sandbox_image_catalog.reference
+                   ~timeout_sec:
+                     (Env_config_sandbox.Shell_timeout.timeout_sec
+                        ~bucket:Env_config_sandbox.Shell_timeout.Io
+                        ())
+                   ()
+               with
+               | None -> None
+               | Some preflight ->
+                 Keeper_sandbox_runtime.docker_preflight_rejection preflight))
          (* No microvm preflight exists yet; the guest is created on the first
-            sandboxed call (RFC-0406). *)
-         | Some Micro_vm, None -> None)
+            sandboxed call (RFC-0406). Its image is still judged here, in the
+            store of the runtime the guest would boot on, for the same reason
+            as Docker's above. *)
+         | Some Micro_vm, None ->
+           let resolution =
+             match
+               Keeper_meta_contract.microvm_backend_of_profile_defaults
+                 profile_defaults
+             with
+             | None ->
+               Error
+                 (Keeper_sandbox_image_resolver.No_image_store
+                    { keeper = name
+                    ; sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
+                    })
+             | Some backend ->
+               Keeper_sandbox_image_resolver.resolve_in_workspace
+                 ~base_path:ctx.config.base_path
+                 ~store:(Keeper_sandbox_image_catalog.Microvm backend)
+                 profile_defaults.sandbox_image
+           in
+           (match resolution with
+            | Ok (_ : Keeper_sandbox_image_catalog.pinned) -> None
+            | Error error ->
+              Some (Keeper_turn_sandbox_runtime.image_unresolved_message error)))
     in
     match
       sandbox_profile_error, sandbox_dispatch_error, max_context_override_res

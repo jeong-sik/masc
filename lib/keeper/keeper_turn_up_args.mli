@@ -62,15 +62,22 @@ val parse_max_context_override :
     runs [docker_preflight] (daemon, image, hardening) and is refused under
     {!Keeper_sandbox_runtime.docker_preflight_failed_label} when it fails.
     [docker_preflight] defaults to {!Keeper_sandbox_runtime.docker_preflight}
-    with the [Io] shell-timeout bucket, and is handed the Keeper's
-    [sandbox_image] as the host catalog resolves it, or the catalog's reason
-    when it does not; [None] from it means the preflight master switch is off
-    and admission proceeds. Both preflights run on
-    every call, creation and update alike: a redeclared keeper whose sandbox
-    is unreachable is refused the same way a new one is. The test suite has
-    no daemon and passes its own probe. *)
+    with the [Io] shell-timeout bucket, and is handed the build the host
+    catalog resolves the Keeper's [sandbox_image] to; [None] from it means the
+    preflight master switch is off and admission proceeds. Both preflights run
+    on every call, creation and update alike: a redeclared keeper whose
+    sandbox is unreachable is refused the same way a new one is. The test
+    suite has no daemon and passes its own probe.
+
+    A [docker] or [microvm] profile whose [sandbox_image] does not resolve in
+    the image store its container would start from is refused before any
+    preflight, whether or not the switch is on, with
+    {!Keeper_turn_sandbox_runtime.image_unresolved_message}: keeper up starts
+    the keeper it creates, and boot refuses the same name
+    ({!Keeper_sandbox_image_admission}). A [microvm] Keeper's store is its
+    runtime's, from {!Keeper_meta_contract.microvm_backend_of_profile_defaults}. *)
 val parse :
-  ?docker_preflight:(image:(string, string) result -> timeout_sec:float -> unit -> Keeper_sandbox_runtime.docker_preflight option) ->
+  ?docker_preflight:(image:string -> timeout_sec:float -> unit -> Keeper_sandbox_runtime.docker_preflight option) ->
   _ context ->
   Yojson.Safe.t ->
   (parsed_args, tool_result) result

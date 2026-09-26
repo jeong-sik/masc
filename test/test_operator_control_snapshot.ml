@@ -279,6 +279,10 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
       let config = Workspace.default_config base_dir in
       init_runtime_default_for_snapshot base_dir;
       ignore (Workspace.init config ~agent_name:(Some "owner"));
+      (* masc_keeper_up refuses a sandbox_image with nothing promoted on this
+         host; the keeper below names "base". *)
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:base_dir
+        [ "base", Masc_test_deps.live_sandbox_image_tag ];
       ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
        | Ok _ -> ()
@@ -660,6 +664,10 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
     (fun () ->
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "operator")); (* See: fixture init. *)
+      (* masc_keeper_up refuses a sandbox_image with nothing promoted on this
+         host; the keeper below names "base". *)
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:base_dir
+        [ "base", Masc_test_deps.live_sandbox_image_tag ];
       Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
@@ -763,6 +771,10 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
     (fun () ->
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "operator"));
+      (* masc_keeper_up refuses a sandbox_image with nothing promoted on this
+         host; the keeper below names "base". *)
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:base_dir
+        [ "base", Masc_test_deps.live_sandbox_image_tag ];
       Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
@@ -1037,6 +1049,10 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
     (fun () ->
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "owner"));
+      (* masc_keeper_up refuses a sandbox_image with nothing promoted on this
+         host; the keeper below names "base". *)
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:base_dir
+        [ "base", Masc_test_deps.live_sandbox_image_tag ];
       ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       let keeper_ctx : _ Keeper_tool_surface.context =
@@ -1178,6 +1194,10 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
     (fun () ->
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "owner"));
+      (* masc_keeper_up refuses a sandbox_image with nothing promoted on this
+         host; the keeper below names "base". *)
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:base_dir
+        [ "base", Masc_test_deps.live_sandbox_image_tag ];
       ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       let keeper_ctx : _ Keeper_tool_surface.context =

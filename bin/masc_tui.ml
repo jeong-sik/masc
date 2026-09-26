@@ -589,6 +589,15 @@ let terminal_has_bytes ~remaining =
            thread does not stop the domain. *)
         kernel_wait remaining
 
+(* A read buffer can end while the next chunk already waits in the kernel.
+   Include readiness without consuming input, so a long burst is coalesced
+   across buffer boundaries too. EINTR means readiness was not observed;
+   defer at most to the existing frame deadline and let the reader retry. *)
+let input_reader_has_ready_input reader =
+  input_reader_has_pending_bytes reader
+  || try terminal_has_bytes ~remaining:0.0 with
+     | Unix.Unix_error (Unix.EINTR, _, _) -> true
+
 let refill_input_reader reader ~timeout =
   let timeout_ns =
     Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)
@@ -1951,7 +1960,7 @@ type async_msg =
   | Msx_frame_loaded of msx_poll_request
       * (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result
   | Dos_live_loaded of machine_live_request
-      * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity_entry list, string) result
+      * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
      on every one of these rather than read from the state at delivery: the
      roster cursor moves under a refresh, and a transcript that took several
@@ -8276,10 +8285,8 @@ let msx_frame_of_live ~previous_live ~previous_frame
    frame alone. *)
 let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
   let result =
-    (* MSX has no activity feed yet ([lib/msx_lane/msx_lane.ml] takes no
-       [~who] on several of its calls, so the server never fills one in) --
-       [fst] drops the always-empty second half rather than storing a field
-       nothing draws. *)
+    (* The decoder has checked that MSX has no activity feed. Only its
+       picture answer is needed by the MSX view. *)
     Result.map fst
       (Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
          Masc_tui_machine_live.Msx ~since:(Masc_tui_machine_live.since state.msx_live))
@@ -14356,6 +14363,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            in
            if request.live_view == !msx_poll_view && request.live_port = state.port
               && state.msx_open && (state.msx_menu_open || watching_dos) then begin
+             let result =
+               match result with
+               | Ok (answer, Masc_tui_machine_live.Activity activity) -> Ok (answer, activity)
+               | Ok (_, Masc_tui_machine_live.No_activity_feed) ->
+                   Error "live: a DOS read answered without an activity feed"
+               | Error _ as error -> error
+             in
              (* A failed read leaves [dos_activity] as it was -- the sidebar
                 keeps showing the last activity it had rather than flashing
                 empty on a read that did not answer at all. *)
@@ -25389,7 +25403,7 @@ and is loaded on demand through keeper_skill.
 
       (match
          Render_schedule.take
-           ~input_pending:(input_reader_has_pending_bytes input_reader)
+           ~input_pending:(input_reader_has_ready_input input_reader)
            render_schedule
            ~now_ns:(Mtime_clock.elapsed_ns ())
        with

@@ -1048,9 +1048,9 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
      the way an editor's side bar stops above the command line. *)
   let pane_cols = !acting_pane_reserved_cols in
   let full_cols = cols + pane_cols in
-  let framed = Buffer.create (String.length (Buffer.contents buf) + 256) in
+  let framed = Buffer.create (Buffer.length buf + 256) in
   (if pane_cols > 0 then begin
-     let left = Buffer.create (String.length (Buffer.contents buf) + 256) in
+     let left = Buffer.create (Buffer.length buf + 256) in
      List.iter
        (fun line ->
           Buffer.add_string left (Message_layout.fit_width line cols);

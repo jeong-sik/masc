@@ -1333,7 +1333,7 @@ let load_repository_pulls ~(host : string) ~(port : int) :
 let load_keeper_spend ~(host : string) ~(port : int) :
     (overview_spend_reading, string) result =
   match Masc_tui_http.fetch_keeper_costs ~host ~port with
-  | Error err -> Error ("keeper spend load failed: " ^ err)
+  | Error err -> Error err
   | Ok json -> Masc_tui_keeper_spend.decode_reading json
 
 (* The Overview's GOALS section. A phase this build does not know refuses the

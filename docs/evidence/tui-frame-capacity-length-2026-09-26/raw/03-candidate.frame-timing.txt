@@ -1,0 +1,20 @@
+build frames=128 mean=0.25ms p50=0.18 p95=0.57 p99=1.50 max=1.54
+  build[keeper-list] frames=67 mean=0.23ms p50=0.16 p95=0.52 p99=0.74 max=1.54
+  build[keeper-detail] frames=54 mean=0.29ms p50=0.19 p95=0.57 p99=1.36 max=1.50
+  build[keeper-message] frames=5 mean=0.15ms p50=0.14 p95=0.19 p99=0.19 max=0.19
+  build[overview] frames=2 mean=0.21ms p50=0.24 p95=0.24 p99=0.24 max=0.24
+  worst[0] frame=25 1.54ms tag=keeper-list
+  worst[1] frame=84 1.50ms tag=keeper-detail
+  worst[2] frame=86 1.36ms tag=keeper-detail
+  worst[3] frame=78 1.05ms tag=keeper-detail
+  worst[4] frame=34 0.74ms tag=keeper-list
+present frames=128 mean=0.03ms p50=0.01 p95=0.11 p99=0.17 max=0.53
+  present[keeper-list] frames=67 mean=0.01ms p50=0.00 p95=0.03 p99=0.08 max=0.14
+  present[keeper-detail] frames=54 mean=0.05ms p50=0.03 p95=0.12 p99=0.15 max=0.53
+  present[keeper-message] frames=5 mean=0.02ms p50=0.01 p95=0.07 p99=0.07 max=0.07
+  present[overview] frames=2 mean=0.10ms p50=0.17 p95=0.17 p99=0.17 max=0.17
+  worst[0] frame=84 0.53ms tag=keeper-detail write=0.002ms flush=0.517ms other=0.006ms bytes=2589 writes=1 flushes=1
+  worst[1] frame=1 0.17ms tag=overview write=0.001ms flush=0.164ms other=0.007ms bytes=4535 writes=1 flushes=1
+  worst[2] frame=86 0.15ms tag=keeper-detail write=0.001ms flush=0.123ms other=0.023ms bytes=2619 writes=1 flushes=1
+  worst[3] frame=3 0.14ms tag=keeper-list write=0.001ms flush=0.131ms other=0.004ms bytes=4337 writes=1 flushes=1
+  worst[4] frame=70 0.13ms tag=keeper-detail write=0.001ms flush=0.120ms other=0.006ms bytes=4036 writes=1 flushes=1

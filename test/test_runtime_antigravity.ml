@@ -1697,6 +1697,10 @@ let () =
             "pre-init success result stays a protocol error"
             `Quick
             test_pre_init_success_result_stays_a_protocol_error
+        ; test_case
+            "an empty success stderr tail cuts at a character boundary"
+            `Quick
+            test_empty_success_stderr_tail_cuts_at_a_character_boundary
         ] )
     ; "live official client", [ test_case "official agy start and resume" `Slow test_live_start_and_resume ]
     ]

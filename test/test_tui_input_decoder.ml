@@ -68,6 +68,15 @@ let test_lone_escape_resolves_on_idle () =
 let test_alt_backspace () =
   check_events "ESC DEL" [ "key alt-backspace" ] (decode "\x1b\x7f")
 
+(* ESC followed by an ordinary byte is ESC plus that byte, not ESC alone:
+   a keystroke landing in the escape window must survive it. *)
+let test_escape_keeps_following_byte () =
+  check_events "ESC then x" [ "key esc"; "key x" ] (decode "\x1bx");
+  check_events "ESC then ESC" [ "key esc" ] (decode "\x1b\x1b");
+  let decoder = D.create () in
+  ignore (feed_all decoder "\x1b\x1b");
+  check_events "the second ESC resolves on idle" [ "key esc" ] (D.idle decoder)
+
 let test_csi_keys_use_the_key_table () =
   check_events "arrow and PageDown" [ csi_name "" 'A'; csi_name "6" '~' ]
     (decode "\x1b[A\x1b[6~")
@@ -201,6 +210,7 @@ let () =
             test_malformed_character_keeps_next_byte;
           test_case "lone escape on idle" `Quick test_lone_escape_resolves_on_idle;
           test_case "alt-backspace" `Quick test_alt_backspace;
+          test_case "escape keeps following byte" `Quick test_escape_keeps_following_byte;
           test_case "CSI keys" `Quick test_csi_keys_use_the_key_table;
           test_case "SS3 arrow" `Quick test_ss3_arrow;
           test_case "CSI overflow" `Quick test_csi_overflow_is_escape ] );
